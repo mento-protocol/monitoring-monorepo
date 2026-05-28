@@ -108,17 +108,6 @@ after skipping blanks and comments. Refresh before starting a split.
 | 627 |   330 | `ui-dashboard/src/lib/leaderboard-hero.ts`      | Watch; split if hero KPI fallback or overlap logic grows again.                          |
 | 628 |   478 | `ui-dashboard/src/lib/queries/leaderboard.ts`   | Watch; split leaderboard GraphQL fragments/queries if another leaderboard surface lands. |
 
-## Intel marathon follow-ups (deferred from PR #488)
-
-One item deferred from the May 2026 marathon PR review.
-
-1. **URL-state for paginated UI surfaces** — `IntelTransfers` and
-   `EntitySearch` keep `page` (and `EntitySearch`'s `query`) in
-   `useState` only. Refresh / back-forward / bookmark-share all lose the
-   current view. Internal-only tool so low priority, but the existing
-   stateful-data UI checklist (`docs/pr-checklists/stateful-data-ui.md`)
-   already covers the URL-as-state idiom.
-
 ## Slack alert cleanup follow-up
 
 Slack is now the active delivery path for protocol, Aegis service-health,
