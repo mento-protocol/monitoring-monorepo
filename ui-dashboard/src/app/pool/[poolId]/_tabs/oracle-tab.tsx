@@ -144,7 +144,11 @@ export function OracleTab(props: OracleTabProps) {
   // with `<BreakerPanel />` and `<MarketHoursPill />` so the page issues a
   // single Hasura round-trip for breaker state; the picker below filters out
   // MARKET_HOURS so the chart sees the same trip-able config the panel does.
-  const rateFeedID = pool?.referenceRateFeedID?.toLowerCase();
+  // Keep the raw `referenceRateFeedID` (no `.toLowerCase()`) so the SWR cache
+  // key matches the two sibling consumers — they pass `pool.referenceRateFeedID
+  // ?? ""` verbatim. The indexer stores feed IDs lowercase today, but aligning
+  // on the raw value avoids a silent dedup miss if that ever changes.
+  const rateFeedID = pool?.referenceRateFeedID ?? "";
   const chainId = pool?.chainId;
   const {
     data: breakerData,

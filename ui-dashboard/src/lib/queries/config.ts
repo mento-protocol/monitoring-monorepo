@@ -136,6 +136,10 @@ export const POOL_BREAKER_CONFIG = `
         chainId: { _eq: $chainId }
         rateFeedID: { _eq: $rateFeedID }
       }
+      # Deterministic pick when a feed somehow ends up with multiple
+      # trip-able breakers — pickTrippableConfig() returns the first
+      # enabled non-MARKET_HOURS row, so the order matters.
+      order_by: { id: asc }
     ) {
       id
       enabled

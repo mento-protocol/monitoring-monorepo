@@ -7,14 +7,21 @@
 
 import type { BreakerConfig } from "@/lib/types";
 
-/** Returns the trip-able BreakerConfig (filters out MARKET_HOURS, which has
- * no per-feed config and is rendered as the title-row pill instead). Prefers
- * enabled configs; production has ≤1 trip-able config per feed today. */
+/** Returns the trip-able BreakerConfig — enabled, non-MARKET_HOURS, and
+ * deterministic when more than one exists (`POOL_BREAKER_CONFIG` orders by
+ * `id asc`, so `.find` returns the lowest-id match). MARKET_HOURS has no
+ * per-feed config and is rendered as the title-row pill instead.
+ *
+ * Returns `null` when no enabled trip-able config exists so consumers don't
+ * surface a disabled breaker as live (the chart would draw a band the
+ * contract wouldn't evaluate; `<BreakerPanel />` would render a stale strip).
+ * Production has ≤1 trip-able config per feed today. */
 export function pickTrippableConfig(
   configs: BreakerConfig[],
 ): BreakerConfig | null {
-  const candidates = configs.filter((c) => c.breaker.kind !== "MARKET_HOURS");
-  return candidates.find((c) => c.enabled) ?? candidates[0] ?? null;
+  return (
+    configs.find((c) => c.enabled && c.breaker.kind !== "MARKET_HOURS") ?? null
+  );
 }
 
 /** Effective breaker threshold (Fixidity). Per-feed override else breaker
