@@ -36,6 +36,16 @@
 #   because `org-terraform` self-administers in seed, and adding cross-
 #   project SA-create permission to this stack would broaden the blast
 #   radius beyond what this hardening PR aims to gain.
+#
+# WORKFLOW-PR NOTE (`storage.objectViewer` + state locking):
+#   `roles/storage.objectViewer` lets the plan SA read state but NOT
+#   create/delete the lock object that the GCS backend acquires by
+#   default. The follow-up workflow PR must therefore pass `-lock=false`
+#   to plan jobs (already documented in BACKLOG.md). Apply jobs stay on
+#   the write-capable deployer SA which keeps locking on. This trade-off
+#   intentionally chooses strict-least-privilege for plan over speculative
+#   lock contention — plan jobs are short and re-run on each push, so a
+#   skipped lock can't drop work the way a missed apply could.
 
 resource "google_iam_workload_identity_pool" "github_actions" {
   project                   = google_project.monitoring.project_id
@@ -211,11 +221,20 @@ resource "google_service_account" "metrics_bridge_plan_readonly" {
 }
 
 # Same WIF binding shape as `deployer_wif_binding` above — the GitHub repo
-# is the upstream gate.
+# is the upstream gate. Same "tighten later by swapping principalSet → principal
+# with a workflow-ref attribute mapping" note applies here; revisit alongside
+# the deployer-binding tightening.
 resource "google_service_account_iam_member" "plan_readonly_wif_binding" {
   service_account_id = google_service_account.metrics_bridge_plan_readonly.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.repository/mento-protocol/monitoring-monorepo"
+}
+
+# Email of the seed-project SA that the plan-readonly CI SA impersonates.
+# Extracted to a local so this address appears once (the prerequisite
+# instructions in the file header reference the same identity).
+locals {
+  org_terraform_plan_readonly_email = "org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
 }
 
 # Grants the plan-readonly CI SA the ability to mint tokens for the
@@ -223,7 +242,7 @@ resource "google_service_account_iam_member" "plan_readonly_wif_binding" {
 # That seed SA must already exist with state-bucket `objectViewer` — see the
 # PREREQUISITE block in the file header.
 resource "google_service_account_iam_member" "ci_plan_readonly_org_terraform_plan_readonly_token_creator" {
-  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/${local.org_terraform_plan_readonly_email}"
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.metrics_bridge_plan_readonly.email}"
 }
