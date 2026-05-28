@@ -3,7 +3,7 @@ title: Monitoring Monorepo Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-05-28
 ---
 
 # AGENTS.md — Monitoring Monorepo
@@ -42,6 +42,41 @@ then you are expected to run the dedicated PR checklist before opening or updati
 - **Checklist:** `docs/pr-checklists/stateful-data-ui.md`
 
 Do not rely on PR review to finish the design. Reviews should catch misses, not define the invariants for the first time.
+
+## Issue-Driven Backlog
+
+GitHub Issues are the canonical active-work queue for agent-addressable work.
+Use this query for the next ready item:
+
+```text
+is:issue is:open label:agent-ready -label:agent-active -label:in-pr
+```
+
+`BACKLOG.md` is transition storage only: when a backlog item is migrated, keep
+the active task in Issues and leave durable context in `AGENTS.md`,
+`docs/pr-checklists/`, `docs/notes/`, or tests. Do not keep the same active
+task duplicated in both places.
+
+Queue state labels are mutually exclusive:
+
+- `needs-grooming` — scope, acceptance criteria, dependencies, or human decision
+  are missing.
+- `agent-ready` — an agent can claim and implement the issue from the issue body.
+- `agent-active` — an agent has claimed the issue and is working before or while
+  opening a PR.
+- `in-pr` — implementation is open in a PR; do not pick up as new work.
+
+When starting issue work, remove `agent-ready` and add `agent-active` before
+substantive edits. When opening the PR, remove `agent-active` and add `in-pr`.
+Use `Closes #123` only for issues whose "Done means" is fully satisfied by the
+PR; otherwise use `Refs #123`. If a PR closes unmerged or only partially ships,
+remove `in-pr` and restore `agent-ready` only when the remaining acceptance
+criteria are still clear; otherwise use `needs-grooming`.
+
+New agent-ready issues should use `.github/ISSUE_TEMPLATE/agent-task.yml` and
+carry routing/risk labels such as `source:backlog`, `pkg:*`, `kind:*`, and
+`risk:*`. Detailed lifecycle rules live in
+`docs/notes/agent-issue-workflow.md`.
 
 ## Agent Quality Gate
 
@@ -240,7 +275,7 @@ pnpm infra:apply              # Apply infrastructure changes
 pnpm alerts:infra:init / alerts:infra:plan
 # Grafana metric alert rules (v3 Slack rules):
 pnpm alerts:rules:init / alerts:rules:plan
-# Apply happens via CI on merge to main (alerts-rules.yml / alerts-infra.yml).
+# Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
 # Production gate enforces required-reviewer approval.
 ```
 
@@ -255,7 +290,7 @@ terraform init -reconfigure   # GCS backend needs reinit in a fresh worktree
 terraform plan  -var-file=<main-checkout>/terraform/terraform.tfvars
 ```
 
-Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead. (CI-driven apply via `.github/workflows/alerts-infra.yml` is gated by the `Production` GitHub Environment manual approval, which counts as explicit human approval.)
+Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead. For stacks whose registry entry has `ci.apply == "push-main-production-environment"`, local `pnpm tf apply <stack>` is guarded: it only runs from a clean `main` checkout at `origin/main` or with the deliberate `--force-local-apply` override. CI-driven applies for those stacks are gated by the `production` GitHub Environment manual approval, which counts as explicit human approval.
 
 ## Package routing index
 
