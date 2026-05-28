@@ -18,6 +18,8 @@ const repoRoot = path.resolve(
   "..",
 );
 const script = path.join(repoRoot, "scripts/tf-stacks.mjs");
+const originMainFetchCommand =
+  "fetch --quiet origin refs/heads/main:refs/remotes/origin/main";
 
 function runRaw(args, options = {}) {
   return spawnSync(process.execPath, [script, ...args], {
@@ -111,6 +113,11 @@ if (command === "rev-parse --abbrev-ref HEAD") {
   process.stdout.write(process.env.TF_STACKS_TEST_STATUS ?? "");
 } else if (command === "rev-parse HEAD") {
   process.stdout.write((process.env.TF_STACKS_TEST_HEAD ?? "abc123") + "\\n");
+} else if (command === "${originMainFetchCommand}") {
+  if (process.env.TF_STACKS_TEST_FETCH_FAIL === "1") {
+    process.stderr.write("fatal: could not fetch origin main\\n");
+    process.exit(128);
+  }
 } else if (command === "rev-parse origin/main") {
   if (process.env.TF_STACKS_TEST_ORIGIN_MAIN_MISSING === "1") {
     process.stderr.write("fatal: ambiguous argument 'origin/main'\\n");
@@ -153,6 +160,10 @@ function assertNoTerraformCalls(logFile, message) {
 
 function assertNoGitCalls(logFile, message) {
   assert(gitCalls(logFile).length === 0, message);
+}
+
+function assertGitCallsInclude(logFile, expected, message) {
+  assert(gitCalls(logFile).includes(expected), message);
 }
 
 function assertApplyRefused(result) {
@@ -242,6 +253,11 @@ function runApplyGuardTests(tempDir) {
     "HEAD==origin/main=no",
     "refusal should explain stale local main",
   );
+  assertGitCallsInclude(
+    fakeTools.gitLog,
+    originMainFetchCommand,
+    "guarded main apply should refresh origin/main before comparing",
+  );
   assertNoTerraformCalls(
     fakeTools.terraformLog,
     "stale guarded apply must not run terraform",
@@ -263,6 +279,24 @@ function runApplyGuardTests(tempDir) {
   assertNoTerraformCalls(
     fakeTools.terraformLog,
     "unverifiable guarded apply must not run terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["apply", "alerts-rules"], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_FETCH_FAIL: "1",
+    },
+  });
+  assertApplyRefused(result);
+  assertIncludes(
+    result.stderr,
+    "Could not verify checkout safety",
+    "refusal should surface origin/main freshness errors",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "unfresh guarded apply must not run terraform",
   );
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
@@ -288,6 +322,11 @@ function runApplyGuardTests(tempDir) {
   run(["apply", "alerts-rules", "-auto-approve"], {
     env: baseEnv,
   });
+  assertGitCallsInclude(
+    fakeTools.gitLog,
+    originMainFetchCommand,
+    "safe main apply should refresh origin/main before comparing",
+  );
   assertTerraformCommands(
     fakeTools.terraformLog,
     ["init", "apply"],

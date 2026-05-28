@@ -11,6 +11,7 @@ const repoRoot = path.resolve(
 const registryPath = path.join(repoRoot, "terraform.stacks.json");
 const AUTO_APPLY_CI_POLICY = "push-main-production-environment";
 const FORCE_LOCAL_APPLY_ARG = "--force-local-apply";
+const ORIGIN_MAIN_FETCH_REFSPEC = "refs/heads/main:refs/remotes/origin/main";
 
 function usage(exitCode = 0) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
@@ -311,8 +312,18 @@ function localApplySafetyStatus() {
     const branch = gitOutput(["rev-parse", "--abbrev-ref", "HEAD"]);
     const status = gitOutput(["status", "--porcelain"]);
     const head = gitOutput(["rev-parse", "HEAD"]);
-    const originMain = gitOutput(["rev-parse", "origin/main"]);
     const clean = status.length === 0;
+
+    if (branch !== "main" || !clean) {
+      return {
+        branch,
+        clean,
+        safe: false,
+      };
+    }
+
+    gitOutput(["fetch", "--quiet", "origin", ORIGIN_MAIN_FETCH_REFSPEC]);
+    const originMain = gitOutput(["rev-parse", "origin/main"]);
     const headMatchesOriginMain = head === originMain;
 
     return {
@@ -344,7 +355,13 @@ function assertLocalApplyAllowed(stack, forceLocalApply) {
     : [
         `Current checkout: branch=${status.branch}`,
         `clean=${status.clean ? "yes" : "no"}`,
-        `HEAD==origin/main=${status.headMatchesOriginMain ? "yes" : "no"}`,
+        ...(status.headMatchesOriginMain === undefined
+          ? []
+          : [
+              `HEAD==origin/main=${
+                status.headMatchesOriginMain ? "yes" : "no"
+              }`,
+            ]),
       ].join(", ");
 
   throw new Error(
