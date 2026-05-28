@@ -64,6 +64,16 @@ YAML.
 `main`, gated by the `production` GitHub Environment. The platform stack remains
 manual-plan/manual-apply only.
 
+When one of those CI-applied stacks plans real changes on `main`, the plan job
+posts a Slack apply-pending summary before the environment-gated apply job
+waits for approval. The summary links back to the merged PR when GitHub can
+associate the main commit with a PR, and lists Terraform resource actions by
+resource type plus exact resource address. Attribute values are intentionally
+omitted from Slack; use the workflow run for the full sanitized plan. The
+default destination is `#ci-failures`; set the repository variable
+`TERRAFORM_APPLY_SLACK_CHANNEL` to route these summaries to another public
+channel.
+
 ## Grafana Alert Ownership Migration
 
 The one-time Aegis-to-alerts Grafana state migration was completed on

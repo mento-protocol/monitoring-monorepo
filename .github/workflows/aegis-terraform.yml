@@ -40,11 +40,13 @@ on:
     branches: [main]
     paths:
       - aegis/terraform/**
+      - scripts/notify-terraform-apply.mjs
       - .github/workflows/aegis-terraform.yml
   push:
     branches: [main]
     paths:
       - aegis/terraform/**
+      - scripts/notify-terraform-apply.mjs
       - .github/workflows/aegis-terraform.yml
 
 # PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR
@@ -165,6 +167,22 @@ jobs:
           else
             echo "has-changes=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Notify Slack that Terraform apply is pending
+        if: >-
+          success()
+          && github.ref == 'refs/heads/main'
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && steps.detect.outputs.has-changes == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: "${{ vars.TERRAFORM_APPLY_SLACK_CHANNEL || '#ci-failures' }}"
+          TERRAFORM_PLAN_FILE: /tmp/tf-plan.txt
+          TERRAFORM_STACK_LABEL: aegis/terraform
+          TERRAFORM_TARGET_ENVIRONMENT: production
+        run: node "$GITHUB_WORKSPACE/scripts/notify-terraform-apply.mjs"
 
       - name: Post plan as sticky PR comment
         if: always() && github.event_name == 'pull_request'
