@@ -131,7 +131,7 @@ describe("buildVolumeUsdSeries", () => {
     const floored = mid - (mid % DAY);
     const snaps = [mk({ date: String(mid), sentUsdValue: "42" })];
     const [point] = buildVolumeUsdSeries(snaps, emptyRates);
-    expect(point.timestamp).toBe(floored);
+    expect(point!.timestamp).toBe(floored);
   });
 });
 

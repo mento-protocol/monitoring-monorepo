@@ -128,7 +128,7 @@ function routeByChain(handlers: Record<number, QueryHandler>) {
     if (chainId == null || !handlers[chainId]) {
       throw new Error(`no mock handler for chainId ${chainId}`);
     }
-    return handlers[chainId](doc);
+    return handlers[chainId]!(doc);
   });
 }
 
@@ -256,9 +256,9 @@ describe("fetchHomepageOgDataUncached", () => {
     expect(result!.healthBuckets.CRITICAL).toBe(1);
     expect(result!.healthBuckets.WARN).toBe(1);
     expect(result!.attentionPools).toHaveLength(2);
-    expect(result!.attentionPools[0].health).toBe("CRITICAL");
-    expect(result!.attentionPools[0].chainLabel).toBe("Celo");
-    expect(result!.attentionPools[1].health).toBe("WARN");
+    expect(result!.attentionPools[0]!.health).toBe("CRITICAL");
+    expect(result!.attentionPools[0]!.chainLabel).toBe("Celo");
+    expect(result!.attentionPools[1]!.health).toBe("WARN");
   });
 
   it("flags partial when ALL_POOLS_WITH_HEALTH succeeds but the trust-flag EXT query fails (cursor #3215044221)", async () => {

@@ -113,8 +113,8 @@ describe("computeRouteAvgDeliverTimes", () => {
       delivered(CELO, MONAD, "2000", "2300"), // 300s
     ]);
     expect(r).toHaveLength(1);
-    expect(r[0].avgSec).toBe(200);
-    expect(r[0].count).toBe(2);
+    expect(r[0]!.avgSec).toBe(200);
+    expect(r[0]!.count).toBe(2);
   });
 
   it("groups distinct routes separately and sorts fastest-first", () => {
@@ -143,6 +143,6 @@ describe("computeRouteAvgDeliverTimes", () => {
       delivered(CELO, MONAD, "2000", "1000"), // delivered < sent → clamped to 0
     ]);
     expect(r).toHaveLength(1);
-    expect(r[0].avgSec).toBe(0);
+    expect(r[0]!.avgSec).toBe(0);
   });
 });
