@@ -6,6 +6,7 @@ import { useNetwork } from "@/components/network-provider";
 import { POOL_BREAKER_CONFIG } from "@/lib/queries";
 import type { BreakerConfig, BreakerTripEvent, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
+import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
 import { InfoPopover } from "@/components/info-popover";
 import { explorerTxUrl } from "@/lib/tokens";
 import { formatTimestamp, relativeTime } from "@/lib/format";
@@ -66,26 +67,11 @@ function fixidityOrNull(raw: string | null | undefined): bigint | null {
   return value === BigInt(0) ? null : value;
 }
 
-/** Returns the trip-able BreakerConfig (filters out MARKET_HOURS, which has
- * no per-feed config and is rendered as the title-row pill instead). Prefers
- * enabled configs; production has ≤1 trip-able config per feed today. */
-function pickTrippableConfig(configs: BreakerConfig[]): BreakerConfig | null {
-  const candidates = configs.filter((c) => c.breaker.kind !== "MARKET_HOURS");
-  return candidates.find((c) => c.enabled) ?? candidates[0] ?? null;
-}
-
 function breakerConfigQuery(
   isVirtual: boolean,
   rateFeedID: string,
 ): string | null {
   return !isVirtual && rateFeedID ? POOL_BREAKER_CONFIG : null;
-}
-
-/** Effective threshold (Fixidity). Per-feed override else breaker default. */
-function effectiveThreshold(cfg: BreakerConfig): bigint {
-  const override = BigInt(cfg.rateChangeThreshold);
-  if (override > BigInt(0)) return override;
-  return BigInt(cfg.breaker.defaultRateChangeThreshold);
 }
 
 /** Effective cooldown in seconds. Per-feed override else breaker default. */
@@ -515,7 +501,7 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
   if (isVirtual || !rateFeedID || !cfg) return null;
   // No trip-able breaker (e.g. feed not registered with BreakerBox) → no panel.
 
-  const threshold = effectiveThreshold(cfg);
+  const threshold = effectiveBreakerThreshold(cfg);
   const cooldown = effectiveCooldown(cfg);
   const cooldownEndsAt = Number(cfg.cooldownEndsAt);
   const cooldownRemainingSec = Math.max(0, cooldownEndsAt - now);
