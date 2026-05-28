@@ -106,9 +106,15 @@ jobs:
         run: pnpm dashboard:mutation
 
   indexer-logic-baseline:
-    # Always runs (required-status safe — same shape as the dashboard +
-    # bridge jobs). `indexer-envio/stryker.config.mjs` sets `break: 92`,
-    # so when the mutation step does run, a score below 92% fails the job.
+    # Always runs (required-status safe — no `paths:` filter at workflow
+    # level). The `filter` step is `continue-on-error: true`, and the
+    # `decide` step computes whether to invoke `pnpm indexer:mutation`:
+    #   - cron / workflow_dispatch    → always run the mutation step
+    #   - PR + filter succeeded + indexer=true   → run
+    #   - PR + filter succeeded + indexer=false  → no-op skip
+    #   - PR + filter failed (any cause)         → run (fail-closed)
+    # `indexer-envio/stryker.config.mjs` sets `break: 92`, so when the
+    # mutation step does run, a score below 92% fails the job.
     name: Indexer logic baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
