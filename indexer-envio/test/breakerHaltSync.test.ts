@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import type { Breaker, BreakerConfig, Pool } from "envio";
-import { syncPoolsBreakerHalt } from "../src/breakers.ts";
+import {
+  breakerTrippedOnFeedAssign,
+  syncPoolsBreakerHalt,
+} from "../src/breakers.ts";
 
 // syncPoolsBreakerHalt recomputes Pool.breakerTripped = "the feed has >=1
 // enabled, non-MARKET_HOURS BreakerConfig in TRIPPED state" and writes the
@@ -31,12 +34,17 @@ function makeConfig(over: Partial<BreakerConfig>): BreakerConfig {
   } as unknown as BreakerConfig;
 }
 
-function makePool(id: string, breakerTripped: boolean): Pool {
+function makePool(
+  id: string,
+  breakerTripped: boolean,
+  source = "fpmm_factory",
+): Pool {
   return {
     id,
     chainId: CHAIN,
     referenceRateFeedID: FEED,
     breakerTripped,
+    source,
   } as unknown as Pool;
 }
 
@@ -186,5 +194,77 @@ describe("syncPoolsBreakerHalt", () => {
     await syncPoolsBreakerHalt(ctx, CHAIN, FEED);
     assert.equal(pools.get(POOL_A)?.breakerTripped, false);
     assert.equal(sets.length, 0);
+  });
+
+  it("skips VirtualPools (v2) — they stay N/A, never marked halted", async () => {
+    const { ctx, pools, sets } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      configs: [makeConfig({ status: "TRIPPED", breaker_id: "breaker-md" })],
+      pools: [makePool(POOL_A, false, "virtual_pool_factory")],
+    });
+    await syncPoolsBreakerHalt(ctx, CHAIN, FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, false);
+    assert.equal(sets.length, 0, "VP must not be written");
+  });
+});
+
+describe("breakerTrippedOnFeedAssign", () => {
+  const trippedCtx = () =>
+    makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      configs: [makeConfig({ status: "TRIPPED", breaker_id: "breaker-md" })],
+      pools: [],
+    }).ctx;
+  type ExistingArg = Parameters<typeof breakerTrippedOnFeedAssign>[2];
+  const existing = (over: Partial<ExistingArg>): ExistingArg =>
+    ({
+      referenceRateFeedID: "",
+      breakerTripped: false,
+      source: "fpmm_factory",
+      wrappedExchangeId: "",
+      ...over,
+    }) as ExistingArg;
+
+  it("marks halted on the ''→assigned transition when the feed is tripped", async () => {
+    assert.equal(
+      await breakerTrippedOnFeedAssign(trippedCtx(), CHAIN, existing({}), FEED),
+      true,
+    );
+  });
+
+  it("preserves the flag when the feed was already assigned (no recompute)", async () => {
+    assert.equal(
+      await breakerTrippedOnFeedAssign(
+        trippedCtx(),
+        CHAIN,
+        existing({ referenceRateFeedID: FEED, breakerTripped: false }),
+        FEED,
+      ),
+      false,
+    );
+  });
+
+  it("preserves the flag when no feed is assigned (next is '')", async () => {
+    assert.equal(
+      await breakerTrippedOnFeedAssign(
+        trippedCtx(),
+        CHAIN,
+        existing({ breakerTripped: true }),
+        "",
+      ),
+      true,
+    );
+  });
+
+  it("skips VirtualPools — never recomputes (stays N/A)", async () => {
+    assert.equal(
+      await breakerTrippedOnFeedAssign(
+        trippedCtx(),
+        CHAIN,
+        existing({ source: "virtual_pool_factory" }),
+        FEED,
+      ),
+      false,
+    );
   });
 });

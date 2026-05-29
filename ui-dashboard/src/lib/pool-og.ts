@@ -235,8 +235,9 @@ export async function fetchPoolOgDataUncached(
     ? computeVolumeSeries(dailyRows, sym0, sym1, pool, rates)
     : [];
   // `oracle` inlined (vs a `const`) to keep this OG builder within its
-  // max-lines budget after adding the breakerTripped merge above; the
-  // freshness calc is pure + cheap, so the second call is free.
+  // max-lines budget after adding the breakerTripped merge above. The freshness
+  // calc reads Date.now() but is side-effect-free and cheap, and both calls run
+  // in the same synchronous return, so the second call is harmless.
   return {
     name: poolName(network, t0, t1),
     chainLabel: network.label,

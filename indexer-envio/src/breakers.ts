@@ -10,7 +10,7 @@
 
 import type { Breaker, BreakerConfig, Pool } from "envio";
 import type { EvmOnEventContext } from "envio";
-import { asAddress } from "./helpers.js";
+import { asAddress, isVirtualPool } from "./helpers.js";
 import { getPoolsByFeed, type BreakerKindRpc } from "./rpc.js";
 import {
   breakerDefaultsEffect,
@@ -705,6 +705,9 @@ export async function syncPoolsBreakerHalt(
   for (const poolId of poolIds) {
     const pool = await context.Pool.get(poolId);
     if (!pool || pool.breakerTripped === halted) continue;
+    // VirtualPools (v2) stay N/A regardless of breaker state — don't mark them
+    // halted (the dashboard never surfaces it for them anyway).
+    if (isVirtualPool(pool)) continue;
     context.Pool.set({ ...pool, breakerTripped: halted });
   }
 }
@@ -718,9 +721,16 @@ export async function syncPoolsBreakerHalt(
 export async function breakerTrippedOnFeedAssign(
   context: Pick<EvmOnEventContext, "BreakerConfig" | "Breaker">,
   chainId: number,
-  existing: Pick<Pool, "referenceRateFeedID" | "breakerTripped">,
+  existing: Pick<
+    Pool,
+    "referenceRateFeedID" | "breakerTripped" | "source" | "wrappedExchangeId"
+  >,
   nextReferenceRateFeedID: string,
 ): Promise<boolean> {
+  // VirtualPools (v2) render N/A regardless of breaker state — they aren't
+  // health-tracked — so never mark them halted (mirrors the skip in
+  // syncPoolsBreakerHalt).
+  if (isVirtualPool(existing)) return existing.breakerTripped;
   if (existing.referenceRateFeedID !== "" || nextReferenceRateFeedID === "") {
     return existing.breakerTripped;
   }

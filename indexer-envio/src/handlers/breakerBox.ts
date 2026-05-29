@@ -122,9 +122,11 @@ indexer.onEvent(
 
     if (cfg.enabled !== enabled) {
       context.BreakerConfig.set({ ...cfg, enabled });
-      // Enabling/disabling a breaker can flip the feed's halt OR.
-      await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
     }
+    // Always re-sync (not just on an enabled flip): `ensureBreakerConfig` may
+    // have just bootstrapped an already-TRIPPED config from RPC with `enabled`
+    // unchanged, which the enabled-only gate would otherwise miss.
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );
 
