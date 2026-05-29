@@ -83,6 +83,28 @@ export function relayoutAction(
 }
 
 /**
+ * Apply a Plotly relayout to the chart's decimation window + look-ahead. The
+ * trigger only ever READS data (never calls relayout), and `uirevision` pins
+ * the viewport across the resulting data change — so there's no feedback loop
+ * with the wheel handler. Extracted from the JSX to keep `OracleChart` within
+ * the max-lines budget.
+ */
+function applyOracleRelayout(
+  e: unknown,
+  setVisibleRange: (range: [number, number] | null) => void,
+  onVisibleXRangeChange?: (range: [number, number]) => void,
+): void {
+  const action = relayoutAction(e as Readonly<Record<string, unknown>>);
+  if (action === "reset") {
+    setVisibleRange(null); // re-scope decimation to the full series; no fetch
+    return;
+  }
+  if (!action) return; // Y-only / unrelated relayout → ignore
+  setVisibleRange(action);
+  onVisibleXRangeChange?.(action);
+}
+
+/**
  * Look-ahead gate: given the requested visible X range (unix seconds) and the
  * oldest loaded timestamp, return the timestamp to load back to — or `null`
  * when the left edge still has comfortable headroom and no fetch is needed.
@@ -360,25 +382,9 @@ export function OracleChart({
         config={ORACLE_CHART_CONFIG}
         style={{ width: "100%", height: 420 }}
         useResizeHandler
-        onRelayout={(e) => {
-          // The trigger only ever READS data; it never calls relayout, and
-          // `uirevision` pins the viewport across the resulting data change —
-          // so there's no feedback loop with the wheel handler.
-          const action = relayoutAction(
-            e as unknown as Readonly<Record<string, unknown>>,
-          );
-          // "All"/double-click autorange: clear the zoom window so decimation
-          // re-scopes to the full loaded series (otherwise the axis looks reset
-          // while the trace stays clipped to the old zoom). Nothing new to load.
-          if (action === "reset") {
-            setVisibleRange(null);
-            return;
-          }
-          // Y-only zooms / unrelated relayouts carry no X change → ignore.
-          if (!action) return;
-          setVisibleRange(action);
-          onVisibleXRangeChange?.(action);
-        }}
+        onRelayout={(e) =>
+          applyOracleRelayout(e, setVisibleRange, onVisibleXRangeChange)
+        }
         onInitialized={(_figure, graphDiv) => {
           cleanupWheelRef.current?.();
           cleanupWheelRef.current = attachOracleWheelHandler(
