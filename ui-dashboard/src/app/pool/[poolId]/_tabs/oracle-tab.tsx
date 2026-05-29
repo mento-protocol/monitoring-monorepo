@@ -3,12 +3,12 @@
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
 import type { Network } from "@/lib/networks";
+import { OracleChart, lookAheadTarget } from "@/components/oracle-chart";
 import {
-  DAILY_MODE_SPAN_SECONDS,
-  OracleChart,
   type OracleDailyCandle,
-  lookAheadTarget,
-} from "@/components/oracle-chart";
+  chronological,
+  shouldSkipLookAhead,
+} from "@/components/oracle-daily";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -88,7 +88,8 @@ function useOracleDailyCandles(
     variables,
   );
   const rows = data?.OraclePriceDailySnapshot;
-  return useMemo(() => (rows ? [...rows].reverse() : undefined), [rows]);
+  // DESC query → chronological ASC for the chart line (see `chronological`).
+  return useMemo(() => (rows ? chronological(rows) : undefined), [rows]);
 }
 
 // Debounced look-ahead: when the user pans/zooms so the left edge approaches the
@@ -114,7 +115,7 @@ function useOracleLookAhead({
   const handleVisibleXRangeChange = useCallback(
     (range: [number, number]) => {
       if (lookAheadTimer.current) clearTimeout(lookAheadTimer.current);
-      if (range[1] - range[0] > DAILY_MODE_SPAN_SECONDS) return;
+      if (shouldSkipLookAhead(range)) return;
       lookAheadTimer.current = setTimeout(() => {
         const target = lookAheadTarget(
           range,

@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
+import { useOracleViewport } from "./oracle-chart-viewport";
 import type { OracleSnapshot } from "@/lib/types";
 import { decimateSeries } from "@/lib/oracle-decimation";
 import {
@@ -13,16 +14,16 @@ import {
   makeDateXAxis,
 } from "@/lib/plot";
 import { attachOracleWheelHandler } from "./oracle-chart-wheel";
-import {
-  formatBaseline,
-  formatOracleChartHoverText,
-} from "./oracle-chart-hover";
+import { formatOracleChartHoverText } from "./oracle-chart-hover";
+import { OracleChartLegend } from "./oracle-chart-legend";
 import {
   DAILY_MODE_SPAN_SECONDS,
   SPARSE_SERIES_THRESHOLD,
   buildDailyPlotData,
   computeOracleYRange,
+  resolveDailyView,
   type OracleDailyCandle,
+  type OraclePlotData,
 } from "./oracle-daily";
 
 export { DAILY_MODE_SPAN_SECONDS };
@@ -102,15 +103,20 @@ export function relayoutAction(
 function applyOracleRelayout(
   e: unknown,
   setVisibleRange: (range: [number, number] | null) => void,
+  setShowAll: (showAll: boolean) => void,
   onVisibleXRangeChange?: (range: [number, number]) => void,
 ): void {
   const action = relayoutAction(e as Readonly<Record<string, unknown>>);
   if (action === "reset") {
-    setVisibleRange(null); // re-scope decimation to the full series; no fetch
+    // "All" / double-click autorange: full-extent intent → select daily
+    // candles (if available) rather than the loaded raw head. No fetch.
+    setVisibleRange(null);
+    setShowAll(true);
     return;
   }
   if (!action) return; // Y-only / unrelated relayout → ignore
   setVisibleRange(action);
+  setShowAll(false);
   onVisibleXRangeChange?.(action);
 }
 
@@ -133,7 +139,7 @@ export function lookAheadTarget(
   return null;
 }
 
-interface BreakerConfigForChart {
+export interface BreakerConfigForChart {
   breakerKind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
   // All numeric fields are Fixidity 1e24 strings — divide by FIXIDITY_ONE.
   rateChangeThreshold: string;
@@ -241,7 +247,7 @@ function snapshotIsRed(
   return priceOutOfBand(price, band.baseline, band.thresholdRatio) === true;
 }
 
-type BreakerConfigStatus = "loading" | "ready" | "missing";
+export type BreakerConfigStatus = "loading" | "ready" | "missing";
 
 interface OracleChartProps {
   snapshots: OracleSnapshot[];
@@ -299,6 +305,28 @@ function useDecimatedSnapshots(
   );
 }
 
+// Resolve the CURRENT breaker band (baseline + threshold, floats) for the chart.
+// Gated on `ready` only: SWR keeps the previous `breakerConfig` during a
+// revalidation failure, so a non-ready status nulls the band rather than drawing
+// a stale one while the markers correctly show neutral. VALUE_DELTA bases on the
+// reference value, MEDIAN_DELTA on the median EMA.
+function resolveCurrentBand(
+  breakerConfig: BreakerConfigForChart | null | undefined,
+  breakerConfigStatus: BreakerConfigStatus,
+): { baseline: number | null; thresholdRatio: number | null } {
+  if (breakerConfigStatus !== "ready" || !breakerConfig) {
+    return { baseline: null, thresholdRatio: null };
+  }
+  const baseline =
+    breakerConfig.breakerKind === "VALUE_DELTA"
+      ? fixidityToFloat(breakerConfig.referenceValue)
+      : fixidityToFloat(breakerConfig.medianRatesEMA);
+  return {
+    baseline,
+    thresholdRatio: fixidityToFloat(breakerConfig.rateChangeThreshold),
+  };
+}
+
 // Resolution switch: a wide viewport (> ~60d) renders daily candles — full
 // history in one page — while a tight one keeps the raw keyset path. The same
 // span threshold gates oracle-tab's look-ahead, so zooming out never pages raw
@@ -306,6 +334,7 @@ function useDecimatedSnapshots(
 // across the raw↔daily swap (the daily close equals the day's last raw point).
 function selectOraclePlotData({
   visibleRange,
+  showAll,
   dailyCandles,
   visibleSnapshots,
   token0Symbol,
@@ -315,6 +344,7 @@ function selectOraclePlotData({
   breakerConfigStatus,
 }: {
   visibleRange: [number, number] | null;
+  showAll: boolean;
   dailyCandles: readonly OracleDailyCandle[] | undefined;
   visibleSnapshots: OracleSnapshot[];
   token0Symbol: string;
@@ -323,12 +353,10 @@ function selectOraclePlotData({
   thresholdRatio: number | null;
   breakerConfigStatus: BreakerConfigStatus;
 }): OraclePlotData {
-  const span = visibleRange ? visibleRange[1] - visibleRange[0] : null;
-  const useDaily =
-    span !== null && span > DAILY_MODE_SPAN_SECONDS && !!dailyCandles?.length;
-  if (useDaily && dailyCandles) {
+  const daily = resolveDailyView({ visibleRange, showAll, dailyCandles });
+  if (daily.active) {
     return buildDailyPlotData({
-      candles: dailyCandles,
+      candles: daily.candles,
       baseline,
       thresholdRatio,
     });
@@ -359,39 +387,15 @@ export function OracleChart({
   // on re-init would amplify scroll deltas. MUST be declared before the
   // `snapshots.length === 0` early-return so hook order is stable.
   const cleanupWheelRef = useRef<(() => void) | null>(null);
-  // Latest requested visible X range (unix seconds) from onRelayout — scopes
-  // decimation so a zoomed-in window shows exact raw points. Also a hook, so
-  // it lives above the early-return.
-  const [visibleRange, setVisibleRange] = useState<[number, number] | null>(
-    null,
-  );
-  // Reset the zoom window when the chart identity changes (pool/network switch).
-  // Plotly's own viewport reset fires onRelayout only AFTER the first render of
-  // the new pool, so without this the first render would scope decimation to the
-  // OLD pool's X window (and seed buildOracleXaxis's 7d anchor from a cropped
-  // subset). The previous-value tracker is a ref (compared, never rendered);
-  // only `visibleRange` is state.
-  const prevUirevisionRef = useRef(uirevision);
-  if (prevUirevisionRef.current !== uirevision) {
-    prevUirevisionRef.current = uirevision;
-    setVisibleRange(null);
-  }
+  // Viewport: zoom window (scopes decimation + daily Y) + full-extent ("All")
+  // intent, reset on pool switch. See useOracleViewport / resolveDailyView.
+  const { visibleRange, setVisibleRange, showAll, setShowAll } =
+    useOracleViewport(uirevision);
 
-  // Gate band geometry on `ready` only. SWR keeps the previous `breakerConfig`
-  // payload during a revalidation failure, so without this null-out a stale
-  // band could keep drawing while the legend / markers correctly show the
-  // neutral state. Treat any non-ready status as "no band". (Pure — safe to
-  // compute above the early-return; the decimation memo below depends on it.)
-  const baseline =
-    breakerConfigStatus === "ready" && breakerConfig
-      ? breakerConfig.breakerKind === "VALUE_DELTA"
-        ? fixidityToFloat(breakerConfig.referenceValue)
-        : fixidityToFloat(breakerConfig.medianRatesEMA)
-      : null;
-  const thresholdRatio =
-    breakerConfigStatus === "ready" && breakerConfig
-      ? fixidityToFloat(breakerConfig.rateChangeThreshold)
-      : null;
+  const { baseline, thresholdRatio } = resolveCurrentBand(
+    breakerConfig,
+    breakerConfigStatus,
+  );
 
   // Decimate to a bounded render count within the visible window, preserving
   // every anomalous point and the window endpoints.
@@ -413,6 +417,7 @@ export function OracleChart({
 
   const plotData = selectOraclePlotData({
     visibleRange,
+    showAll,
     dailyCandles,
     visibleSnapshots,
     token0Symbol,
@@ -455,6 +460,11 @@ export function OracleChart({
         breakerConfig={breakerConfig}
         breakerConfigStatus={breakerConfigStatus}
         hasPersistedBands={hasPersistedBands}
+        baseline={baseline}
+        thresholdRatio={thresholdRatio}
+        baselineLabel={
+          breakerConfig?.breakerKind === "MEDIAN_DELTA" ? "median EMA" : "peg"
+        }
       />
       <Plot
         data={[plotData.deviationTrace]}
@@ -463,7 +473,12 @@ export function OracleChart({
         style={{ width: "100%", height: 420 }}
         useResizeHandler
         onRelayout={(e) =>
-          applyOracleRelayout(e, setVisibleRange, onVisibleXRangeChange)
+          applyOracleRelayout(
+            e,
+            setVisibleRange,
+            setShowAll,
+            onVisibleXRangeChange,
+          )
         }
         onInitialized={(_figure, graphDiv) => {
           cleanupWheelRef.current?.();
@@ -478,14 +493,6 @@ export function OracleChart({
       />
     </div>
   );
-}
-
-interface OraclePlotData {
-  deviationTrace: Record<string, unknown>;
-  timestamps: string[];
-  isSparse: boolean;
-  yMin: number;
-  yMax: number;
 }
 
 function buildOraclePlotData({
@@ -879,101 +886,6 @@ function buildOracleLayout({
     autosize: true,
     dragmode: "pan" as const,
   };
-}
-
-function OracleChartLegend({
-  breachStartedAt,
-  breakerConfig,
-  breakerConfigStatus,
-  hasPersistedBands,
-}: {
-  breachStartedAt: string | null | undefined;
-  breakerConfig: BreakerConfigForChart | null | undefined;
-  breakerConfigStatus: BreakerConfigStatus;
-  hasPersistedBands: boolean;
-}) {
-  // When the current breaker isn't ready, the markers can be one of two
-  // things: persisted per-snapshot verdicts (if any snapshot carries an
-  // at-the-time band) OR genuinely-neutral (no current AND no persisted).
-  // The legend copy must match what the markers actually display so an
-  // operator never sees red/green markers next to "band check unavailable."
-  if (breakerConfigStatus !== "ready" || !breakerConfig) {
-    const loading = breakerConfigStatus === "loading";
-    const msg = hasPersistedBands
-      ? loading
-        ? "Verdicts use each snapshot's at-the-time band; current breaker still loading"
-        : "No active current breaker — verdicts use each snapshot's at-the-time persisted band only"
-      : loading
-        ? "Loading current breaker config…"
-        : "No active breaker for this rate feed — band check unavailable";
-    return (
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
-        {hasPersistedBands && (
-          <>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-              Within band when evaluated
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-              Outside band — breaker would trip
-            </span>
-          </>
-        )}
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2 h-2 rounded-full bg-slate-500" />
-          {msg}
-        </span>
-        {breachStartedAt && Number(breachStartedAt) > 0 && (
-          <span className="flex items-center gap-1">
-            <span className="inline-block w-4 border-t-2 border-dotted border-red-500" />
-            Rebalance breach start
-          </span>
-        )}
-      </div>
-    );
-  }
-  const thresholdPct = fixidityToFloat(breakerConfig.rateChangeThreshold);
-  const baseline =
-    breakerConfig.breakerKind === "VALUE_DELTA"
-      ? fixidityToFloat(breakerConfig.referenceValue)
-      : fixidityToFloat(breakerConfig.medianRatesEMA);
-  const baselineLabel =
-    breakerConfig.breakerKind === "MEDIAN_DELTA" ? "median EMA" : "peg";
-  return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
-      <span className="flex items-center gap-1">
-        <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-        {/* Marker verdicts use each snapshot's at-the-time band when
-            persisted (oracle_median_updated rows from PR #631 onward),
-            falling back to the current band for older rows. The drawn
-            band shape (dashed lines / shaded zones) below always reflects
-            the CURRENT breaker config — historical bands aren't drawn
-            because they'd produce a noisy stack of rectangles. */}
-        Within band when evaluated
-      </span>
-      <span className="flex items-center gap-1">
-        <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-        Outside band — breaker would trip
-      </span>
-      <span className="flex items-center gap-1">
-        <span className="inline-block w-4 border-t-2 border-dashed border-red-500" />
-        Current threshold
-        {thresholdPct != null ? ` (±${(thresholdPct * 100).toFixed(2)}%)` : ""}
-      </span>
-      <span className="flex items-center gap-1">
-        <span className="inline-block w-4 border-t-2 border-dotted border-slate-400" />
-        Current baseline ({baselineLabel}
-        {baseline != null ? ` = ${formatBaseline(baseline)}` : ""})
-      </span>
-      {breachStartedAt && Number(breachStartedAt) > 0 && (
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-4 border-t-2 border-dotted border-red-500" />
-          Rebalance breach start
-        </span>
-      )}
-    </div>
-  );
 }
 
 // Test-only surface — keeps these helpers out of the module's public API

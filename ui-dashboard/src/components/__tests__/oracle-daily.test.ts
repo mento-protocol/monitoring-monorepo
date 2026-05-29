@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   DAILY_MODE_SPAN_SECONDS,
   buildDailyPlotData,
+  chronological,
   computeOracleYRange,
+  resolveDailyView,
+  shouldSkipLookAhead,
   type OracleDailyCandle,
 } from "../oracle-daily";
 
@@ -134,5 +137,123 @@ describe("computeOracleYRange", () => {
     const { yMin, yMax } = computeOracleYRange([Number.NaN, 2, 3], null, null);
     expect(yMin).toBeLessThan(2);
     expect(yMax).toBeGreaterThan(3);
+  });
+});
+
+describe("buildDailyPlotData tri-state color", () => {
+  it("colors null-band days neutral (not green), red still wins", () => {
+    const { deviationTrace } = buildDailyPlotData({
+      candles: [
+        candle({ anyOutOfBand: false, endBreakerBaselineAtSnapshot: null }), // unknown band → neutral
+        candle({ anyOutOfBand: false, endBreakerBaselineAtSnapshot: fix(1) }), // band, in-band → green
+        candle({ anyOutOfBand: true, endBreakerBaselineAtSnapshot: null }), // red regardless
+      ],
+      baseline: 1,
+      thresholdRatio: 0.01,
+    });
+    const colors = (deviationTrace.marker as { color: string[] }).color;
+    expect(colors[0]).toBe("#64748b");
+    expect(colors[1]).toBe("#22c55e");
+    expect(colors[2]).toBe("#ef4444");
+  });
+});
+
+describe("resolveDailyView", () => {
+  const DAY = 86400;
+  const T0 = 1772496000;
+  const candles = Array.from({ length: 90 }, (_, i) =>
+    candle({ bucketStart: String(T0 + i * DAY) }),
+  ); // 90 chronological days
+
+  it("is inactive on initial load (null range, not showAll) — raw default", () => {
+    const v = resolveDailyView({
+      visibleRange: null,
+      showAll: false,
+      dailyCandles: candles,
+    });
+    expect(v.active).toBe(false);
+  });
+
+  it("is active + full extent on showAll (Plotly 'All' / autorange)", () => {
+    const v = resolveDailyView({
+      visibleRange: null,
+      showAll: true,
+      dailyCandles: candles,
+    });
+    expect(v.active).toBe(true);
+    expect(v.candles.length).toBe(90);
+  });
+
+  it("is active on a wide (>60d) zoom and scopes candles to the window", () => {
+    const lo = T0 + 5 * DAY;
+    const hi = T0 + 75 * DAY; // 70-day window > 60d threshold
+    const v = resolveDailyView({
+      visibleRange: [lo, hi],
+      showAll: false,
+      dailyCandles: candles,
+    });
+    expect(v.active).toBe(true);
+    expect(v.candles.length).toBeLessThan(90); // scoped, not the full extent
+    expect(v.candles.length).toBeGreaterThan(60); // but covers the window
+    // one candle past each edge for line continuity
+    expect(Number(v.candles[0]!.bucketStart)).toBeLessThanOrEqual(lo);
+    expect(
+      Number(v.candles[v.candles.length - 1]!.bucketStart),
+    ).toBeGreaterThanOrEqual(hi);
+  });
+
+  it("is inactive on a narrow (<60d) zoom — raw path", () => {
+    const v = resolveDailyView({
+      visibleRange: [T0, T0 + 30 * DAY],
+      showAll: false,
+      dailyCandles: candles,
+    });
+    expect(v.active).toBe(false);
+  });
+
+  it("is inactive when no daily candles exist", () => {
+    expect(
+      resolveDailyView({
+        visibleRange: null,
+        showAll: true,
+        dailyCandles: undefined,
+      }).active,
+    ).toBe(false);
+    expect(
+      resolveDailyView({ visibleRange: null, showAll: true, dailyCandles: [] })
+        .active,
+    ).toBe(false);
+  });
+});
+
+describe("chronological", () => {
+  it("reverses DESC-ordered rows to chronological ASC", () => {
+    const desc = [
+      candle({ bucketStart: "300" }),
+      candle({ bucketStart: "200" }),
+      candle({ bucketStart: "100" }),
+    ];
+    expect(chronological(desc).map((c) => c.bucketStart)).toEqual([
+      "100",
+      "200",
+      "300",
+    ]);
+  });
+
+  it("does not mutate the input array", () => {
+    const desc = [candle({ bucketStart: "2" }), candle({ bucketStart: "1" })];
+    chronological(desc);
+    expect(desc.map((c) => c.bucketStart)).toEqual(["2", "1"]);
+  });
+});
+
+describe("shouldSkipLookAhead", () => {
+  it("skips raw paging when the span exceeds the daily threshold", () => {
+    expect(shouldSkipLookAhead([0, DAILY_MODE_SPAN_SECONDS + 1])).toBe(true);
+  });
+
+  it("allows raw look-ahead at or below the threshold", () => {
+    expect(shouldSkipLookAhead([0, DAILY_MODE_SPAN_SECONDS])).toBe(false);
+    expect(shouldSkipLookAhead([0, 7 * 86400])).toBe(false);
   });
 });

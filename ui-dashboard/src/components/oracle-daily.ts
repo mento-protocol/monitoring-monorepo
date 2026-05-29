@@ -104,12 +104,35 @@ function buildDailyHover(c: OracleDailyCandle): string {
   return `${date}<br>${ohlc}<br>${c.sampleCount} medians${verdict}${dev}`;
 }
 
-interface OracleDailyPlotData {
+// The plot payload shared by the raw (`buildOraclePlotData`) and daily
+// (`buildDailyPlotData`) paths. Defined in this leaf and imported by
+// oracle-chart.tsx so `selectOraclePlotData`'s return type is ONE named type,
+// not two structurally-identical interfaces coupled only by structural typing.
+export interface OraclePlotData {
   deviationTrace: Record<string, unknown>;
   timestamps: string[];
   isSparse: boolean;
   yMin: number;
   yMax: number;
+}
+
+// DESC rows (the ORACLE_PRICE_DAILY ordering — see config.ts) reversed to
+// chronological ASC for the chart's left-to-right line. Pure spread + reverse
+// (not `toReversed`) for the ES2017 target. Exported so the reversal is unit-
+// tested directly (it's load-bearing: a missed reversal renders the chart
+// backwards / breaks the daily↔raw seam).
+export function chronological(
+  rows: readonly OracleDailyCandle[],
+): readonly OracleDailyCandle[] {
+  return [...rows].reverse();
+}
+
+// The look-ahead paging gate: a visible X span (unix seconds) wider than the
+// daily threshold is served by daily candles, so raw keyset scroll-back must NOT
+// fire (it would page many pages into the Hasura 429 wall). Exported so the gate
+// is unit-tested directly.
+export function shouldSkipLookAhead(range: readonly [number, number]): boolean {
+  return range[1] - range[0] > DAILY_MODE_SPAN_SECONDS;
 }
 
 /**
@@ -129,16 +152,26 @@ export function buildDailyPlotData({
   candles: readonly OracleDailyCandle[];
   baseline: number | null;
   thresholdRatio: number | null;
-}): OracleDailyPlotData {
+}): OraclePlotData {
   const isSparse = candles.length < SPARSE_SERIES_THRESHOLD;
   const timestamps = candles.map((c) =>
     new Date(Number(c.bucketStart) * 1000).toISOString(),
   );
   const prices = candles.map((c) => fixToFloat(c.closePrice));
-  // Direct from the precomputed verdict — never recompute from close + band
-  // (an intraday trip that recovered by close must still read red).
+  // Tri-state, direct from the precomputed verdict — never recompute from
+  // close + band (an intraday trip that recovered by close must still read red):
+  //   red    = a median that day was out of band (or rejected),
+  //   neutral= no breaker band existed that day (unseeded EMA / pre-backfill,
+  //            so `anyOutOfBand: false` means "unknown", not "in band"),
+  //   green  = a band existed and nothing tripped.
+  // (Neutral is more honest than green here; it still differs from the raw
+  // chart, which falls back to the *current* breaker config for null-band rows.)
   const markerColors = candles.map((c) =>
-    c.anyOutOfBand ? "#ef4444" : "#22c55e",
+    c.anyOutOfBand
+      ? "#ef4444"
+      : c.endBreakerBaselineAtSnapshot == null
+        ? "#64748b"
+        : "#22c55e",
   );
   const markerSizes = candles.map(() => (isSparse ? 9 : 5));
   const hoverText = candles.map(buildDailyHover);
@@ -158,4 +191,58 @@ export function buildDailyPlotData({
 
   const { yMin, yMax } = computeOracleYRange(prices, baseline, thresholdRatio);
   return { deviationTrace, timestamps, isSparse, yMin, yMax };
+}
+
+// Scope daily candles to the visible X window (unix seconds), keeping one candle
+// just past each edge so the line reaches the viewport. Candles are chronological
+// ASC by bucketStart. Pure filter (NOT decimation — daily is already ≤1000 pts);
+// the point is to bound the Y-range to the selected period so a far-off historical
+// outlier can't flatten it. Falls back to all candles if the window has none.
+function scopeToWindow(
+  candles: readonly OracleDailyCandle[],
+  [lo, hi]: readonly [number, number],
+): readonly OracleDailyCandle[] {
+  const first = candles.findIndex((c) => Number(c.bucketStart) >= lo);
+  if (first === -1) return candles.slice(-1); // window entirely after data
+  let last = first;
+  for (let i = first; i < candles.length; i++) {
+    if (Number(candles[i]!.bucketStart) <= hi) last = i;
+    else break;
+  }
+  const scoped = candles.slice(
+    Math.max(0, first - 1),
+    Math.min(candles.length, last + 2),
+  );
+  return scoped.length > 0 ? scoped : candles;
+}
+
+/**
+ * Decide whether the chart renders daily candles, and if so which ones.
+ *
+ * `active` is true when daily data exists AND either the user asked to see
+ * everything (`showAll` — Plotly "All"/double-click autorange) or the visible
+ * span exceeds the daily threshold. A null `visibleRange` with `showAll=false`
+ * is the initial 7-day view → raw (active stays false). When active and a
+ * `visibleRange` is set, candles are scoped to that window (so the Y-range
+ * reflects the selected period); `showAll` (null range) keeps the full extent.
+ */
+export function resolveDailyView({
+  visibleRange,
+  showAll,
+  dailyCandles,
+}: {
+  visibleRange: readonly [number, number] | null;
+  showAll: boolean;
+  dailyCandles: readonly OracleDailyCandle[] | undefined;
+}): { active: boolean; candles: readonly OracleDailyCandle[] } {
+  if (!dailyCandles?.length) return { active: false, candles: [] };
+  const span = visibleRange ? visibleRange[1] - visibleRange[0] : null;
+  const active = showAll || (span !== null && span > DAILY_MODE_SPAN_SECONDS);
+  if (!active) return { active: false, candles: [] };
+  return {
+    active: true,
+    candles: visibleRange
+      ? scopeToWindow(dailyCandles, visibleRange)
+      : dailyCandles,
+  };
 }
