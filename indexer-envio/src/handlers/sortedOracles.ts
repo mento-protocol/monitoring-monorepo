@@ -22,6 +22,7 @@ import {
   selfHealInvertRateFeed,
   selfHealTokenDecimals,
   upsertDailySnapshot,
+  upsertOraclePriceDaily,
 } from "../pool.js";
 import { recordBreachTransition } from "../deviationBreach.js";
 import { recordHealthSample } from "../healthScore.js";
@@ -671,6 +672,23 @@ indexer.onEvent(
           pool: persistedPool,
           blockTimestamp,
           blockNumber,
+        });
+
+        // Daily OHLC rollup of the oracle median price — backs the chart's
+        // zoomed-out multi-year view (>1000-row Hasura cap on raw medians).
+        // Reads from the materialized `snapshot` so any field added upstream is
+        // already resolved into it.
+        await upsertOraclePriceDaily({
+          context,
+          chainId: event.chainId,
+          poolId,
+          blockTimestamp,
+          blockNumber,
+          oraclePrice: snapshot.oraclePrice,
+          oracleOk: snapshot.oracleOk,
+          deviationRatio: snapshot.deviationRatio,
+          breakerBaselineAtSnapshot: snapshot.breakerBaselineAtSnapshot,
+          breakerThresholdAtSnapshot: snapshot.breakerThresholdAtSnapshot,
         });
       }),
     );
