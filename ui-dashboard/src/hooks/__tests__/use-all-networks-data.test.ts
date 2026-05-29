@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   fetchNetworkData,
   fetchAllNetworks,
+  showInitialSkeleton,
   warnedCapKeys,
   partialPageLastCapturedAt,
 } from "../use-all-networks-data";
@@ -968,7 +969,9 @@ describe("fetchAllNetworks — orchestration", () => {
     const second = results.find((r) => r.network.id === "monad-mainnet")!;
 
     expect(second.network.id).toBe("monad-mainnet");
-    expect(second.error).toBe(err);
+    // fetchAllNetworks flattens the Error to a plain { message } at the RSC
+    // boundary (#661), so it's no longer the same instance.
+    expect(second.error).toEqual({ message: err.message });
     expect(second.pools).toHaveLength(0);
   });
 
@@ -1004,7 +1007,7 @@ describe("fetchAllNetworks — orchestration", () => {
     expect(callCount).toBeGreaterThan(0);
   });
 
-  it("wraps non-Error rejections in Error objects", async () => {
+  it("flattens non-Error rejections to plain { message } objects", async () => {
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockRejectedValue("string rejection");
@@ -1012,7 +1015,28 @@ describe("fetchAllNetworks — orchestration", () => {
     const results = await fetchAllNetworks();
 
     for (const result of results) {
-      expect(result.error).toBeInstanceOf(Error);
+      // fetchAllNetworks flattens error channels to RSC-serializable
+      // { message } objects (#661) — never raw Error instances.
+      expect(result.error).toEqual({ message: "string rejection" });
+      expect(result.error).not.toBeInstanceOf(Error);
     }
+  });
+});
+
+describe("showInitialSkeleton", () => {
+  it("shows the skeleton only on a genuine cold load (loading + no rows)", () => {
+    expect(showInitialSkeleton(true, 0)).toBe(true);
+  });
+
+  it("does NOT show the skeleton when rows exist, even while revalidating", () => {
+    // The degraded-SSR fix (#661): fallbackData populated rows and the hook
+    // flipped revalidateOnMount, so isLoading is true on the first render — but
+    // the table must stay visible (no layout-shift skeleton swap).
+    expect(showInitialSkeleton(true, 3)).toBe(false);
+  });
+
+  it("does not show the skeleton once loading settles", () => {
+    expect(showInitialSkeleton(false, 0)).toBe(false);
+    expect(showInitialSkeleton(false, 5)).toBe(false);
   });
 });
