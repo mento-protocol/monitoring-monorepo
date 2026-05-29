@@ -90,16 +90,16 @@ export function useAllNetworksData(
 
 /**
  * Whether a page should render its initial-load skeleton. Only true on a
- * genuine cold load (no rows yet). When a degraded SSR payload populated
+ * genuine cold load (no data yet). When a degraded SSR payload populated
  * `networkData` via `fallbackData`, this hook flips `revalidateOnMount: true`,
- * so SWR reports `isLoading` on the first render even though rows already
- * exist — gating on row count keeps the populated table visible and avoids a
- * layout-shift skeleton swap during the background retry. Shared by the
- * homepage and `/pools` so both pages stay consistent.
+ * so SWR reports `isLoading` on the first render even though data already
+ * exists — gating on `networkData.length` keeps the populated table visible
+ * and avoids a layout-shift skeleton swap during the background retry. Shared
+ * by the homepage and `/pools` so both pages stay consistent.
  */
 export function showInitialSkeleton(
   isLoading: boolean,
-  rowCount: number,
+  networkCount: number,
 ): boolean {
-  return isLoading && rowCount === 0;
+  return isLoading && networkCount === 0;
 }
