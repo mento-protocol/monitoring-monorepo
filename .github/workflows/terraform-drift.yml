@@ -13,10 +13,17 @@ name: Terraform Drift Detection
 # alerts/rules rollout surfaced ~25 template renames worth of accumulated
 # drift; a daily plan job would have caught it days earlier.
 #
-# Auth note: today this uses the existing `GCP_SERVICE_ACCOUNT` (write-capable
-# deployer SA), same as the plan jobs in alerts-{rules,infra}.yml. After the
-# read-only plan SA prep (PR #630) is applied + the per-stack workflows
-# swap to `GCP_SERVICE_ACCOUNT_PLAN`, this workflow should make the same swap.
+# Auth note: each drift leg authenticates with the least-privileged SA that can
+# still run a full-refresh plan, picked from `matrix.planSa` (derived in the
+# discover step from each stack's registry `providers[]`). Grafana-only stacks
+# (`alerts-rules`, `aegis`) plan under the read-only plan SA
+# (`GCP_SERVICE_ACCOUNT_PLAN` → `org-terraform-plan-readonly@…seed`,
+# `objectViewer` on the state bucket). `alerts/infra` keeps the write-capable
+# deployer (`GCP_SERVICE_ACCOUNT`): its google provider must refresh GCP
+# resources the read-only seed SA has no project roles to read. Making that leg
+# read-only too would need a `roles/viewer` grant for the seed SA on the
+# `project_factory`-managed project (operator/seed creds) — deferred by design;
+# see BACKLOG "Terraform CI/CD audit follow-ups".
 
 on:
   schedule:
@@ -65,7 +72,23 @@ jobs:
               const { stacks } = JSON.parse(stdin);
               const filtered = stacks
                 .filter(s => s.ci.apply === "push-main-production-environment")
-                .map(s => ({ id: s.id, name: s.name, path: s.path }));
+                // `planSa` routes each leg to the least-privileged SA that can
+                // still run a full-refresh drift plan. A stack whose only GCP
+                // touch is the GCS backend (no google* provider) refreshes fine
+                // under the read-only seed SA (`objectViewer` on the state
+                // bucket is enough). A stack with a google* provider needs the
+                // write-capable deployer because the read-only seed SA has no
+                // project roles, so refreshing its GCP resources would 403.
+                // Registry-driven so new stacks route correctly without editing
+                // this workflow.
+                .map(s => ({
+                  id: s.id,
+                  name: s.name,
+                  path: s.path,
+                  planSa: (s.providers || []).some(p => p.startsWith("google"))
+                    ? "write"
+                    : "readonly",
+                }));
               const matrix = JSON.stringify({ include: filtered });
               const hasStacks = filtered.length > 0 ? "true" : "false";
               require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${matrix}\n`);
@@ -111,11 +134,15 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          # TODO: swap to `GCP_SERVICE_ACCOUNT_PLAN` once PR #630 lands and is
-          # applied. This workflow is read-only so the over-privileged SA
-          # doesn't cause harm, but using the plan-readonly SA tightens the
-          # blast-radius story.
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          # Per-leg least privilege: grafana-only stacks (`planSa == readonly`)
+          # plan under the read-only plan SA; google-provider stacks
+          # (`alerts/infra`) stay on the write-capable deployer because a
+          # full-refresh drift plan reads GCP resources the read-only seed SA
+          # has no project roles to see. `==` yields a real boolean, so the
+          # ternary can't misfire on a stringified matrix value. The
+          # repo-scoped WIF binding (terraform/ci-wif.tf) lets any workflow in
+          # this repo mint either token — no IAM change was needed to swap.
+          service_account: ${{ matrix.planSa == 'readonly' && secrets.GCP_SERVICE_ACCOUNT_PLAN || secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -126,7 +153,27 @@ jobs:
           terraform_wrapper: false
 
       - name: Init
-        run: terraform init -input=false
+        # Read-only legs override the GCS backend impersonation to the
+        # read-only seed SA (the CLI value beats the write SA hardcoded in
+        # versions.tf). Write legs init plain against the deployer.
+        env:
+          PLAN_SA: ${{ matrix.planSa }}
+          GCP_SA_PLAN: ${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}
+        run: |
+          if [ "$PLAN_SA" = "readonly" ]; then
+            # Fail loud rather than silently elevate: the auth ternary
+            # (`matrix.planSa == 'readonly' && PLAN || WRITE`) falls through to
+            # the write SA if `GCP_SERVICE_ACCOUNT_PLAN` is empty (`true && ''`
+            # is falsy in GHA), which would defeat least privilege without an
+            # error signal. A missing secret should stop the readonly leg here.
+            if [ -z "$GCP_SA_PLAN" ]; then
+              echo "::error::GCP_SERVICE_ACCOUNT_PLAN is not set — readonly leg would silently fall back to the write SA"
+              exit 1
+            fi
+            terraform init -input=false -backend-config="impersonate_service_account=org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+          else
+            terraform init -input=false
+          fi
 
       - name: Plan
         id: plan
@@ -145,9 +192,18 @@ jobs:
         # established convention.
         env:
           STACK_ID: ${{ matrix.id }}
+          PLAN_SA: ${{ matrix.planSa }}
         run: |
           set +e
-          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
+          # Read-only legs must pass `-lock=false`: the read-only seed SA holds
+          # `objectViewer` on the state bucket and can't write the GCS lock
+          # object. Write legs keep advisory locking. Both run a full refresh —
+          # the point of drift detection is to read live resource state.
+          if [ "$PLAN_SA" = "readonly" ]; then
+            terraform plan -detailed-exitcode -no-color -input=false -lock=false > /tmp/tf-plan.raw 2>&1
+          else
+            terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
+          fi
           EXITCODE=$?
           set -e
           "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-plan.raw /tmp/tf-plan.txt

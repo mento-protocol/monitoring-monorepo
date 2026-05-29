@@ -239,7 +239,8 @@ jobs:
         # push / workflow_dispatch (the apply-gating path, incl. drift reconcile)
         # keep full refresh + locking on the write SA, so they detect out-of-band
         # drift and set `has-changes` correctly. Drift detection also runs in
-        # `terraform-drift.yml` (full refresh, write SA); apply re-plans fully.
+        # `terraform-drift.yml` — the `alerts/infra` leg there keeps full refresh
+        # on the write SA (its grafana-only legs are read-only); apply re-plans fully.
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
