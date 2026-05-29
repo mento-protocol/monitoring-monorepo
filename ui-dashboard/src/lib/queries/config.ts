@@ -74,8 +74,17 @@ export const ORACLE_SNAPSHOTS = `
 // `useWindowedHistory`). The newest window passes a far-future sentinel
 // cursor; older pages pass the oldest-loaded timestamp. `order_by` carries
 // an `id` tiebreaker so the ordering is deterministic when two medians share
-// a timestamp; the page-merge dedups by `id`, so a co-timestamped boundary
-// row is harmless.
+// a timestamp.
+//
+// Known limitation (accepted): the cursor is timestamp-only (`_lt`), so if a
+// 1000-row page boundary falls EXACTLY between two medians that share a unix
+// second, the remaining same-second rows are skipped on the next page (a
+// silent one-point gap, not a double-load — the id-dedup only prevents
+// double-loads). A compound `(timestamp, id)` cursor would close it, but at
+// oracle_median_updated cadence (~12/hr/pool) two medians in the same second
+// AND straddling the page boundary is vanishingly unlikely, and the impact is
+// one missing point on a read-only context chart. Revisit if the chart ever
+// pages a higher-cadence source.
 //
 // `breakerBaselineAtSnapshot` / `breakerThresholdAtSnapshot` are now selected
 // here directly (folded in from the former `ORACLE_SNAPSHOTS_CHART_BANDS_EXT`
