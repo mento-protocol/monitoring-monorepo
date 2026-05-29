@@ -871,6 +871,20 @@ describe("computeEffectiveStatus", () => {
     ).toBe("WARN");
   });
 
+  it("passes degenerate reserve state through the effective status type", () => {
+    expect(
+      computeEffectiveStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "73000000000",
+        rebalanceThreshold: 5000,
+        degenerateReserves: true,
+        limitPressure0: "0",
+        limitPressure1: "0",
+      }),
+    ).toBe("OK");
+  });
+
   it("returns N/A for VirtualPools regardless of limit pressure", () => {
     expect(
       computeEffectiveStatus({

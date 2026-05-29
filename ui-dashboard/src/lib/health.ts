@@ -548,6 +548,7 @@ export function computeEffectiveStatus(
     // Untrusted-deviation flag — propagated through `computeHealthStatus`.
     // See `PoolHealthState.hasHealthData` for the gating semantics.
     hasHealthData?: boolean | undefined;
+    degenerateReserves?: boolean | undefined;
     deviationBreachStartedAt?: string | null | undefined;
     lastRebalancedAt?: string | null | undefined;
     limitStatus?: string | undefined;

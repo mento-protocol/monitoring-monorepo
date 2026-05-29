@@ -414,6 +414,37 @@ describe("upsertPool degenerate reserves", () => {
     assert.equal(result.priceDifference, existing.priceDifference);
   });
 
+  it("classifies exact one-sided reserves even when token decimals are unknown", async () => {
+    const oneUnit = 10n ** 18n;
+    const existing = makePool({
+      id: "42220-0x0000000000000000000000000000000000000003",
+      oraclePrice: 0n,
+      invertRateFeedKnown: true,
+      tokenDecimalsKnown: false,
+      reserves0: 1_000n * oneUnit,
+      reserves1: 1_000n * oneUnit,
+      degenerateReserves: false,
+      priceDifference: 123n,
+    });
+    const { context, written } = makeUpsertCtx();
+
+    const result = await upsertPool({
+      context,
+      chainId: existing.chainId,
+      poolId: existing.id,
+      source: "fpmm_update_reserves",
+      blockNumber: 2n,
+      blockTimestamp: 1_700_000_001n,
+      txHash: "0xabc",
+      reservesDelta: { reserve0: 0n, reserve1: 1_000n * oneUnit },
+      existing: { pool: existing },
+    });
+
+    assert.isTrue(result.degenerateReserves);
+    assert.isTrue(written.at(-1)?.degenerateReserves);
+    assert.equal(result.priceDifference, existing.priceDifference);
+  });
+
   it("closes an open breach when a frozen sample turns degenerate", async () => {
     const oneUnit = 10n ** 18n;
     const startedAt = 1_704_672_000n;

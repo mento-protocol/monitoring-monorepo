@@ -87,6 +87,17 @@ type ReserveInputs = Pick<
   "reserves0" | "reserves1" | "token0Decimals" | "token1Decimals"
 >;
 
+type RawReserveInputs = Pick<RatioInputs, "reserves0" | "reserves1">;
+
+export function classifyExactZeroReserves(
+  pool: RawReserveInputs,
+): boolean | undefined {
+  const reserve0Zero = pool.reserves0 === 0n;
+  const reserve1Zero = pool.reserves1 === 0n;
+  if (!reserve0Zero && !reserve1Zero) return undefined;
+  return reserve0Zero !== reserve1Zero;
+}
+
 function normalizedReserves(pool: ReserveInputs): {
   norm0: bigint;
   norm1: bigint;
@@ -98,8 +109,9 @@ function normalizedReserves(pool: ReserveInputs): {
 }
 
 export function hasDegenerateReserves(pool: ReserveInputs): boolean {
+  const exactZeroState = classifyExactZeroReserves(pool);
+  if (exactZeroState !== undefined) return exactZeroState;
   const { norm0, norm1 } = normalizedReserves(pool);
-  if (norm0 === 0n && norm1 === 0n) return false;
   const min = norm0 < norm1 ? norm0 : norm1;
   const max = norm0 < norm1 ? norm1 : norm0;
   return min * DEGENERATE_RESERVE_RATIO_LIMIT < max;

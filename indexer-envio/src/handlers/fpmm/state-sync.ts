@@ -37,6 +37,7 @@ import { indexer } from "../../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../../helpers.js";
 import {
   buildRebalanceOutcome,
+  classifyExactZeroReserves,
   hasDegenerateReserves,
   scaleRpcRebalanceState,
   tryDeriveRebalanceState,
@@ -77,6 +78,13 @@ function degenerateReservesForPool(
   pool: DegenerateReservePool | undefined,
   reserves?: { reserve0: bigint; reserve1: bigint },
 ): boolean {
+  if (reserves) {
+    const exactZeroState = classifyExactZeroReserves({
+      reserves0: reserves.reserve0,
+      reserves1: reserves.reserve1,
+    });
+    if (exactZeroState !== undefined) return exactZeroState;
+  }
   if (!pool || pool.tokenDecimalsKnown !== true)
     return pool?.degenerateReserves ?? false;
   return hasDegenerateReserves({
@@ -164,7 +172,8 @@ indexer.onEvent(
       reserve1: event.params.reserve1,
     });
     // If state resolution fails, `oracleDelta` stays empty and `upsertPool`
-    // recomputes degenerateReserves from the just-applied reservesDelta.
+    // recomputes degenerateReserves from the just-applied reservesDelta,
+    // including the decimals-independent exact-zero reserve case.
     // Only persist the scaled oraclePrice + timestamp when we know the
     // orientation. On the RPC-fallback path with `invertRateFeedKnown=false`
     // (deploy blip + self-heal failure), `scaleRpcRebalanceState` would

@@ -2,6 +2,7 @@ import { strict as assert } from "assert";
 import { computePriceDifference } from "../src/EventHandlers";
 import {
   buildRebalanceOutcome,
+  classifyExactZeroReserves,
   computeEffectivenessRatio,
   hasDegenerateReserves,
   tryDeriveRebalanceState,
@@ -350,6 +351,42 @@ describe("computePriceDifference", () => {
         }),
       ),
       true,
+    );
+  });
+});
+
+describe("classifyExactZeroReserves", () => {
+  it("flags one zero reserve side without requiring token decimals", () => {
+    assert.equal(
+      classifyExactZeroReserves({
+        reserves0: 0n,
+        reserves1: 1_000n,
+      }),
+      true,
+    );
+    assert.equal(
+      classifyExactZeroReserves({
+        reserves0: 1_000n,
+        reserves1: 0n,
+      }),
+      true,
+    );
+  });
+
+  it("classifies both-zero reserves as non-degenerate and both-nonzero as unknown", () => {
+    assert.equal(
+      classifyExactZeroReserves({
+        reserves0: 0n,
+        reserves1: 0n,
+      }),
+      false,
+    );
+    assert.equal(
+      classifyExactZeroReserves({
+        reserves0: 1n,
+        reserves1: 1n,
+      }),
+      undefined,
     );
   });
 });

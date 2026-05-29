@@ -5,6 +5,7 @@
 import type { Pool } from "envio";
 import { extractAddressFromPoolId, isVirtualPool } from "./helpers.js";
 import {
+  classifyExactZeroReserves,
   computePriceDifference,
   hasDegenerateReserves,
 } from "./priceDifference.js";
@@ -197,6 +198,8 @@ function nextDegenerateReserveState(
 ): boolean {
   if (oracleDelta?.degenerateReserves !== undefined)
     return oracleDelta.degenerateReserves;
+  const exactZeroState = classifyExactZeroReserves(next);
+  if (exactZeroState !== undefined) return exactZeroState;
   return canClassifyDegenerateReserves
     ? hasDegenerateReserves(next)
     : next.degenerateReserves;
