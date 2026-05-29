@@ -219,6 +219,9 @@ export function computeHealthStatus(
   // priceDifference magnitude. Short-circuit explicitly so extreme reserve
   // skew can't trip the predicate via the `effectiveThreshold` 1e12 cushion.
   if (isNeverRebalance(pool)) return "OK";
+  // Drained/effectively one-sided pools keep their faithful priceDifference,
+  // but the degenerate flag takes them out of deviation health accounting.
+  if (pool.degenerateReserves) return "OK";
   const threshold = effectiveThreshold(pool);
   const diff = pool.priceDifference;
   const aboveTolerance =
@@ -236,10 +239,13 @@ export function computeHealthStatus(
 // Strict `>` at the tolerance line matches `computeHealthStatus`. Oracle
 // staleness is intentionally NOT counted — this tracks price action only.
 // Never-rebalance pools always short-circuit to false (mirrors
-// `computeHealthStatus`); see `isNeverRebalance` for why.
+// `computeHealthStatus`); see `isNeverRebalance` for why. Degenerate
+// reserves also short-circuit because the enormous priceDifference is a
+// faithful reserve-skew signal, not a deviation breach.
 export function isInDeviationBreach(pool: Pool): boolean {
   if (isVirtualPool(pool)) return false;
   if (isNeverRebalance(pool)) return false;
+  if (pool.degenerateReserves) return false;
   return (
     pool.priceDifference * DEVIATION_TOLERANCE_DEN >
     effectiveThreshold(pool) * DEVIATION_TOLERANCE_NUM
@@ -257,7 +263,9 @@ export function nextDeviationBreachStartedAt(
   // A drained/effectively one-sided pool can produce a faithful but enormous
   // priceDifference. Keep the value, but do not open or continue breach
   // accounting from that sample; otherwise drained-pool windows dominate the
-  // lifetime uptime counters.
+  // lifetime uptime counters. This must stay before the UpdateReserves
+  // deferral below so a drain-to-degenerate UR closes immediately instead of
+  // holding the previous breach anchor for the semantic handler.
   if (next.degenerateReserves) return 0n;
   const isBreached = isInDeviationBreach(next);
   if (!isBreached) {

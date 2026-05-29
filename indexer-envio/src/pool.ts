@@ -517,9 +517,22 @@ export const upsertPool = async ({
   // limits-and-fees known-zero fallback's `upsertPool` routing would
   // never close the breach (it relied on the breach pipeline to close it
   // via the falling-edge logic).
+  //
+  // EXCEPTION: when reserves become degenerate while an anchor is already
+  // open, run the pipeline even with a frozen priceDifference. The degenerate
+  // early-exit in `nextDeviationBreachStartedAt` is the evidence needed to
+  // close the breach immediately.
   const priceDifferenceTrustworthy = hasContractPriceDiff || canRecompute;
   const becameNeverRebalance = isNeverRebalance(next);
-  if (!priceDifferenceTrustworthy && !becameNeverRebalance) {
+  const shouldCloseDegenerateBreach =
+    degenerateReserves && existing.deviationBreachStartedAt > 0n;
+  if (
+    shouldSkipFrozenPriceBreachPipeline({
+      priceDifferenceTrustworthy,
+      becameNeverRebalance,
+      shouldCloseDegenerateBreach,
+    })
+  ) {
     const persistedNoBreach: Pool = {
       ...next,
       priceDifference,
@@ -571,3 +584,19 @@ export const upsertPool = async ({
   context.Pool.set(final);
   return final;
 };
+
+function shouldSkipFrozenPriceBreachPipeline({
+  priceDifferenceTrustworthy,
+  becameNeverRebalance,
+  shouldCloseDegenerateBreach,
+}: {
+  priceDifferenceTrustworthy: boolean;
+  becameNeverRebalance: boolean;
+  shouldCloseDegenerateBreach: boolean;
+}): boolean {
+  return (
+    !priceDifferenceTrustworthy &&
+    !becameNeverRebalance &&
+    !shouldCloseDegenerateBreach
+  );
+}

@@ -49,6 +49,7 @@ interface PoolHealthState {
   oracleTimestamp?: string | undefined;
   oracleExpiry?: string | undefined;
   priceDifference?: string | undefined;
+  degenerateReserves?: boolean | undefined;
   rebalanceThreshold?: number | undefined;
   // Direction-split thresholds — populated by the isolated
   // `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN` / `POOL_THRESHOLDS_KNOWN_EXT`
@@ -204,7 +205,9 @@ export function isOracleFresh(
  *    sustained past `DEVIATION_BREACH_GRACE_SECONDS`
  *  - "WARN" when devRatio is above tolerance but either below the critical
  *    magnitude or still within the grace window
- *  - "OK" otherwise
+ *  - "OK" otherwise, including degenerate-reserve windows where priceDifference
+ *    remains a faithful reserve-skew signal but is excluded from deviation
+ *    health accounting
  *
  * Staleness uses wall-clock + indexed `oracleExpiry` (per-feed) with a
  * `ORACLE_STALE_SECONDS` fallback for pools that pre-date the field. The
@@ -243,6 +246,7 @@ export function computeHealthStatus(
   // Governance-configured "never rebalance" pools stay OK regardless of
   // priceDifference magnitude. Mirrors indexer `computeHealthStatus`.
   if (isNeverRebalance(pool)) return "OK";
+  if (pool.degenerateReserves === true) return "OK";
   const diff = Number(pool.priceDifference ?? "0");
   const devRatio = diff / effectiveThreshold(pool);
   if (devRatio <= DEVIATION_TOLERANCE_RATIO) return "OK";

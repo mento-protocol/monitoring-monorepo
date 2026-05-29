@@ -1,5 +1,5 @@
 import { assert } from "vitest";
-import type { Pool } from "envio";
+import type { DeviationThresholdBreach, Pool } from "envio";
 import {
   breachEntryThreshold,
   isInDeviationBreach,
@@ -9,6 +9,7 @@ import {
   preloadPoolCache,
   upsertPool,
 } from "../src/pool";
+import { openBreachId } from "../src/deviationBreach";
 import type { PoolContext } from "../src/pool/types";
 import { makePool } from "./helpers/makePool";
 
@@ -57,6 +58,18 @@ describe("isInDeviationBreach", () => {
     assert.isTrue(
       isInDeviationBreach(
         makePool({ priceDifference: 7500n, rebalanceThreshold: 5000 }),
+      ),
+    );
+  });
+
+  it("false for degenerate reserves regardless of deviation", () => {
+    assert.isFalse(
+      isInDeviationBreach(
+        makePool({
+          priceDifference: 73_000_000_000n,
+          rebalanceThreshold: 5000,
+          degenerateReserves: true,
+        }),
       ),
     );
   });
@@ -399,6 +412,90 @@ describe("upsertPool degenerate reserves", () => {
     assert.isTrue(result.degenerateReserves);
     assert.isTrue(written.at(-1)?.degenerateReserves);
     assert.equal(result.priceDifference, existing.priceDifference);
+  });
+
+  it("closes an open breach when a frozen sample turns degenerate", async () => {
+    const oneUnit = 10n ** 18n;
+    const startedAt = 1_704_672_000n;
+    const poolId = "42220-0x0000000000000000000000000000000000000002";
+    const existing = makePool({
+      id: poolId,
+      oraclePrice: 0n,
+      invertRateFeedKnown: true,
+      tokenDecimalsKnown: true,
+      reserves0: 1_000n * oneUnit,
+      reserves1: 1_000n * oneUnit,
+      degenerateReserves: false,
+      priceDifference: 7500n,
+      rebalanceThreshold: 5000,
+      deviationBreachStartedAt: startedAt,
+      cumulativeBreachSeconds: 0n,
+      cumulativeCriticalSeconds: 0n,
+      breachCount: 0,
+    });
+    const open: DeviationThresholdBreach = {
+      id: openBreachId(poolId, startedAt),
+      chainId: 42220,
+      poolId,
+      startedAt,
+      startedAtBlock: 1n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 7500n,
+      entryRebalanceThreshold: 5000,
+      peakPriceDifference: 7500n,
+      peakAt: startedAt,
+      peakAtBlock: 1n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xopen",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    const breaches = new Map([[open.id, open]]);
+    const written: Pool[] = [];
+    const context: PoolContext = {
+      effect: (async () => null) as PoolContext["effect"],
+      Pool: {
+        get: async () => existing,
+        set: (entity) => written.push(entity),
+      },
+      DeviationThresholdBreach: {
+        get: async (id: string) => breaches.get(id),
+        set: (entity) => breaches.set(entity.id, entity),
+      },
+      BiPoolExchange: {
+        get: async () => undefined,
+        set: () => undefined,
+      } as unknown as PoolContext["BiPoolExchange"],
+    };
+
+    const result = await upsertPool({
+      context,
+      chainId: existing.chainId,
+      poolId,
+      source: "fpmm_update_reserves",
+      blockNumber: 2n,
+      blockTimestamp: startedAt + 7200n,
+      txHash: "0xdegenerate-close",
+      reservesDelta: { reserve0: 0n, reserve1: 1_000n * oneUnit },
+      existing: { pool: existing },
+    });
+
+    const closed = breaches.get(open.id)!;
+    assert.isTrue(result.degenerateReserves);
+    assert.equal(result.deviationBreachStartedAt, 0n);
+    assert.equal(result.breachCount, 1);
+    assert.equal(result.cumulativeBreachSeconds, 7200n);
+    assert.equal(result.cumulativeCriticalSeconds, 3600n);
+    assert.equal(result.priceDifference, existing.priceDifference);
+    assert.equal(written.at(-1)?.deviationBreachStartedAt, 0n);
+    assert.equal(closed.endedAt, startedAt + 7200n);
+    assert.equal(closed.endedByEvent, "unknown");
+    assert.equal(closed.endedByTxHash, "0xdegenerate-close");
   });
 });
 

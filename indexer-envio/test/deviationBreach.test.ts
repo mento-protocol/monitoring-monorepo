@@ -41,6 +41,16 @@ function getOnlyOpenBreach(
   return rows[0]!;
 }
 
+function getOnlyClosedBreach(
+  store: Map<string, DeviationThresholdBreach>,
+): DeviationThresholdBreach {
+  const rows = Array.from(store.values()).filter(
+    (row) => row.endedAt !== undefined,
+  );
+  assert.equal(rows.length, 1);
+  return rows[0]!;
+}
+
 // Pick an "out-of-weekend" epoch second so tradingSecondsInRange == wall-clock
 // for the intervals we test. Monday 2024-01-08 00:00:00 UTC.
 const MON_NOON = 1_704_672_000n;
@@ -484,6 +494,65 @@ describe("recordBreachTransition — continuing breach", () => {
 });
 
 describe("recordBreachTransition — falling edge", () => {
+  it("closes an open row when the next sample becomes degenerate", async () => {
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 7500n,
+      entryRebalanceThreshold: 5000,
+      peakPriceDifference: 7500n,
+      peakAt: MON_NOON,
+      peakAtBlock: 100n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xabc",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+
+    const prev = makePool({
+      priceDifference: 7500n,
+      rebalanceThreshold: 5000,
+      deviationBreachStartedAt: MON_NOON,
+      cumulativeBreachSeconds: 0n,
+      cumulativeCriticalSeconds: 0n,
+      breachCount: 0,
+    });
+    const breachEndedAt = MON_NOON + DEVIATION_BREACH_GRACE_SECONDS;
+    const next = makePool({
+      priceDifference: 73_000_000_000n,
+      rebalanceThreshold: 5000,
+      degenerateReserves: true,
+      deviationBreachStartedAt: 0n,
+      cumulativeBreachSeconds: 0n,
+      cumulativeCriticalSeconds: 0n,
+      breachCount: 0,
+    });
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: breachEndedAt,
+      blockNumber: 200n,
+      txHash: "0xdegenerate-close",
+      source: "fpmm_swap",
+    });
+
+    const closed = getOnlyClosedBreach(store);
+    assert.equal(closed.endedAt, breachEndedAt);
+    assert.equal(closed.endedByEvent, "swap");
+    assert.equal(closed.endedByTxHash, "0xdegenerate-close");
+    assert.equal(poolUpdate.cumulativeBreachSeconds, 3600n);
+    assert.equal(poolUpdate.breachCount, 1);
+  });
+
   it("closes the open row, fills durations, and rolls cumulative counters", async () => {
     const { store, context } = makeMockContext();
     const open: DeviationThresholdBreach = {

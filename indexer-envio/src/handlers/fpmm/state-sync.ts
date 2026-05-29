@@ -163,6 +163,8 @@ indexer.onEvent(
       reserve0: event.params.reserve0,
       reserve1: event.params.reserve1,
     });
+    // If state resolution fails, `oracleDelta` stays empty and `upsertPool`
+    // recomputes degenerateReserves from the just-applied reservesDelta.
     // Only persist the scaled oraclePrice + timestamp when we know the
     // orientation. On the RPC-fallback path with `invertRateFeedKnown=false`
     // (deploy blip + self-heal failure), `scaleRpcRebalanceState` would

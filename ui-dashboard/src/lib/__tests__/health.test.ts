@@ -214,6 +214,19 @@ describe("computeHealthStatus", () => {
     ).toBe("WARN");
   });
 
+  it('returns "OK" for degenerate reserves despite an enormous priceDifference', () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "73000000000",
+        rebalanceThreshold: 5000,
+        degenerateReserves: true,
+      }),
+    ).toBe("OK");
+  });
+
   it('returns "WARN" while the breach is within the 1h grace window', () => {
     const now = Math.floor(Date.now() / 1000);
     expect(
