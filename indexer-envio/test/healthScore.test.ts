@@ -355,6 +355,35 @@ describe("recordHealthSample", () => {
     assert.equal(poolUpdate.lastOracleSnapshotTimestamp, 1100n);
     assert.equal(poolUpdate.lastDeviationRatio, "0.500000");
   });
+
+  it("records degenerate samples as healthy for the following interval", () => {
+    const pool = makePool({
+      lastOracleSnapshotTimestamp: 1000n,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      oracleExpiry: 300n,
+      degenerateReserves: true,
+    });
+
+    const first = recordHealthSample(pool, 100000n, 5000, 1100n);
+
+    assert.equal(first.snapshotFields.deviationRatio, "0.000000");
+    assert.equal(first.snapshotFields.healthBinaryValue, "1.000000");
+    assert.equal(first.poolUpdate.healthTotalSeconds, 100n);
+    assert.equal(first.poolUpdate.healthBinarySeconds, 100n);
+    assert.equal(first.poolUpdate.lastDeviationRatio, "0.000000");
+
+    const nextPool = makePool({
+      ...first.poolUpdate,
+      oracleExpiry: 300n,
+      degenerateReserves: false,
+    });
+    const second = recordHealthSample(nextPool, 2500n, 5000, 1200n);
+
+    assert.equal(second.poolUpdate.healthTotalSeconds, 200n);
+    assert.equal(second.poolUpdate.healthBinarySeconds, 200n);
+  });
 });
 
 // ---------------------------------------------------------------------------

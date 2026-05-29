@@ -5,6 +5,9 @@
 /** SortedOracles stores prices at 24 decimal precision. */
 export const SORTED_ORACLES_DECIMALS = 24;
 
+/** Reserve side is considered effectively one-sided below 0.01% of the other. */
+export const DEGENERATE_RESERVE_RATIO_LIMIT = 10_000n;
+
 /** OracleAdapter divides both numerator and denominator by 1e6, converting
  * SortedOracles' 24dp precision to 18dp. Multiply by this factor to restore
  * the original 24dp scale when reading from getRebalancingState(). */
@@ -79,6 +82,41 @@ type RatioInputs = {
 
 const SCALE_24DP = 10n ** 24n;
 
+type ReserveInputs = Pick<
+  RatioInputs,
+  "reserves0" | "reserves1" | "token0Decimals" | "token1Decimals"
+>;
+
+type RawReserveInputs = Pick<RatioInputs, "reserves0" | "reserves1">;
+
+export function classifyExactZeroReserves(
+  pool: RawReserveInputs,
+): boolean | undefined {
+  const reserve0Zero = pool.reserves0 === 0n;
+  const reserve1Zero = pool.reserves1 === 0n;
+  if (!reserve0Zero && !reserve1Zero) return undefined;
+  return reserve0Zero !== reserve1Zero;
+}
+
+function normalizedReserves(pool: ReserveInputs): {
+  norm0: bigint;
+  norm1: bigint;
+} {
+  return {
+    norm0: normalizeTo18(pool.reserves0, pool.token0Decimals),
+    norm1: normalizeTo18(pool.reserves1, pool.token1Decimals),
+  };
+}
+
+export function hasDegenerateReserves(pool: ReserveInputs): boolean {
+  const exactZeroState = classifyExactZeroReserves(pool);
+  if (exactZeroState !== undefined) return exactZeroState;
+  const { norm0, norm1 } = normalizedReserves(pool);
+  const min = norm0 < norm1 ? norm0 : norm1;
+  const max = norm0 < norm1 ? norm1 : norm0;
+  return min * DEGENERATE_RESERVE_RATIO_LIMIT < max;
+}
+
 /** Compute the (reserveRatio, oracleRef) pair both `computePriceDifference`
  * and `pickActiveThreshold` need. Returns `null` for any zero-reserve or
  * zero-oracle input — caller decides what the absent value means. The FPMM
@@ -90,8 +128,7 @@ function reservePriceVsOracleRef(
 ): { reserveRatio: bigint; oracleRef: bigint } | null {
   if (pool.oraclePrice === 0n || pool.reserves0 === 0n || pool.reserves1 === 0n)
     return null;
-  const norm0 = normalizeTo18(pool.reserves0, pool.token0Decimals);
-  const norm1 = normalizeTo18(pool.reserves1, pool.token1Decimals);
+  const { norm0, norm1 } = normalizedReserves(pool);
   // Normalization can floor to zero when decimals > 18.
   if (norm0 === 0n || norm1 === 0n) return null;
   const reserveRatio = (norm1 * SCALE_24DP) / norm0;

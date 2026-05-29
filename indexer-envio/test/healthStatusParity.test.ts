@@ -148,6 +148,15 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     assert.equal(computeHealthStatus(pool, NOW), "WARN");
   });
 
+  it("returns 'OK' for degenerate reserves despite an enormous priceDifference", () => {
+    const pool = makePool({
+      priceDifference: 73_000_000_000n,
+      rebalanceThreshold: 5000,
+      degenerateReserves: true,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
   it("falls back to 10000 bps threshold when rebalanceThreshold is 0 and unknown", () => {
     // 9000/10000 = 0.9 → still OK. `rebalanceThresholdsKnown=false` (default)
     // means the indexer hasn't read the on-chain value yet, so we under-bound

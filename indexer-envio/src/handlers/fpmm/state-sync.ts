@@ -37,6 +37,8 @@ import { indexer } from "../../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../../helpers.js";
 import {
   buildRebalanceOutcome,
+  classifyExactZeroReserves,
+  hasDegenerateReserves,
   scaleRpcRebalanceState,
   tryDeriveRebalanceState,
   type ResolvedRebalanceState,
@@ -61,6 +63,37 @@ import {
   upsertSnapshot,
 } from "../../pool.js";
 import { recordHealthSample } from "../../healthScore.js";
+
+type DegenerateReservePool = Pick<
+  Pool,
+  | "tokenDecimalsKnown"
+  | "token0Decimals"
+  | "token1Decimals"
+  | "reserves0"
+  | "reserves1"
+  | "degenerateReserves"
+>;
+
+function degenerateReservesForPool(
+  pool: DegenerateReservePool | undefined,
+  reserves?: { reserve0: bigint; reserve1: bigint },
+): boolean {
+  if (reserves) {
+    const exactZeroState = classifyExactZeroReserves({
+      reserves0: reserves.reserve0,
+      reserves1: reserves.reserve1,
+    });
+    if (exactZeroState !== undefined) return exactZeroState;
+  }
+  if (!pool || pool.tokenDecimalsKnown !== true)
+    return pool?.degenerateReserves ?? false;
+  return hasDegenerateReserves({
+    reserves0: reserves?.reserve0 ?? pool.reserves0,
+    reserves1: reserves?.reserve1 ?? pool.reserves1,
+    token0Decimals: pool.token0Decimals,
+    token1Decimals: pool.token1Decimals,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // FPMM.UpdateReserves
@@ -134,6 +167,13 @@ indexer.onEvent(
     }
 
     let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
+    const updateReservesDegenerate = degenerateReservesForPool(existing, {
+      reserve0: event.params.reserve0,
+      reserve1: event.params.reserve1,
+    });
+    // If state resolution fails, `oracleDelta` stays empty and `upsertPool`
+    // recomputes degenerateReserves from the just-applied reservesDelta,
+    // including the decimals-independent exact-zero reserve case.
     // Only persist the scaled oraclePrice + timestamp when we know the
     // orientation. On the RPC-fallback path with `invertRateFeedKnown=false`
     // (deploy blip + self-heal failure), `scaleRpcRebalanceState` would
@@ -154,6 +194,7 @@ indexer.onEvent(
       oracleDelta = {
         rebalanceThreshold: resolved.rebalanceThreshold,
         priceDifference: resolved.priceDifference,
+        degenerateReserves: updateReservesDegenerate,
         ...(orientationKnown
           ? {
               oraclePrice: updateReservesOraclePrice,
@@ -182,13 +223,22 @@ indexer.onEvent(
       existing: { pool: existing },
     });
 
-    if (resolved) {
+    const recordDegenerateHealthBoundary =
+      !resolved && updateReservesDegenerate && pool.degenerateReserves;
+    if (resolved || recordDegenerateHealthBoundary) {
       // Health score: compute snapshot fields + update pool accumulators.
       // Note: upsertPool above calls context.Pool.set(pool) internally with
       // default health fields. We immediately overwrite with the correct
       // health accumulators here. Safe because Envio is single-threaded, but
       // the double-write is intentional — health update must come after upsertPool
       // so we have the final pool state to accumulate against.
+      //
+      // Exact one-sided reserve updates can be trusted even when
+      // getRebalancingState reverts. In that case upsertPool has already
+      // closed the breach and persisted degenerateReserves=true; recording a
+      // health sample here advances the cursor with a zero health ratio so the
+      // drained interval does not keep accruing against the previous unhealthy
+      // lastDeviationRatio.
       const effectiveBps = Number(effectiveThreshold(pool));
       const { snapshotFields, poolUpdate } = recordHealthSample(
         pool,
@@ -216,7 +266,7 @@ indexer.onEvent(
       // doesn't match the deviation is worse than no row — the chart
       // history would show a fake sample. Pool entity still gets updated;
       // the next event with known orientation will write the snapshot.
-      if (orientationKnown) {
+      if (resolved && orientationKnown) {
         const snapshot: OracleSnapshot = {
           id,
           chainId: event.chainId,
@@ -226,6 +276,7 @@ indexer.onEvent(
           oracleOk: pool.oracleOk,
           numReporters: pool.oracleNumReporters,
           priceDifference: pool.priceDifference,
+          degenerateReserves: pool.degenerateReserves,
           // See sortedOracles.OracleReported — `persistableThreshold` gates the
           // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
           rebalanceThreshold: persistableThreshold(pool),
@@ -386,12 +437,14 @@ indexer.onEvent(
         priceDifferenceAfter,
         rebalanceThreshold: rebalanceThresholdForEvent,
       });
+    const rebalancedDegenerate = degenerateReservesForPool(existing);
 
     let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {
       lastRebalancedAt: blockTimestamp,
       rebalancerAddress,
       rebalanceLivenessStatus: "ACTIVE",
       priceDifference: event.params.priceDifferenceAfter,
+      degenerateReserves: rebalancedDegenerate,
       lastEffectivenessRatio,
     };
 
@@ -479,6 +532,7 @@ indexer.onEvent(
           oracleOk: pool.oracleOk,
           numReporters: pool.oracleNumReporters,
           priceDifference: pool.priceDifference,
+          degenerateReserves: pool.degenerateReserves,
           // See sortedOracles.OracleReported — `persistableThreshold` gates the
           // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
           rebalanceThreshold: persistableThreshold(pool),

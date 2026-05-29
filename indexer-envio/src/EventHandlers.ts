@@ -103,6 +103,7 @@ export {
 // Price math (used by priceDifference.test.ts, decimals.test.ts)
 export {
   computePriceDifference,
+  hasDegenerateReserves,
   normalizeTo18,
   scalingFactorToDecimals,
 } from "./priceDifference.js";

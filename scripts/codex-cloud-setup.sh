@@ -105,6 +105,12 @@ ensure_origin_remote() {
       local https_origin="https://github.com/${repo_path}.git"
       echo "==> Rewriting SSH origin for token-backed cloud auth: ${https_origin}"
       git remote set-url origin "$https_origin"
+    elif [[ "$existing_origin" =~ ^ssh://git@github\.com/(.+)$ ]]; then
+      local repo_path
+      repo_path="${BASH_REMATCH[1]%.git}"
+      local https_origin="https://github.com/${repo_path}.git"
+      echo "==> Rewriting SSH origin for token-backed cloud auth: ${https_origin}"
+      git remote set-url origin "$https_origin"
     else
       echo "==> Using existing origin remote: ${existing_origin}"
     fi
@@ -115,12 +121,7 @@ ensure_origin_remote() {
 }
 
 ensure_origin_main_ref() {
-  if git rev-parse --verify --quiet origin/main >/dev/null; then
-    echo "==> origin/main already available"
-    return 0
-  fi
-
-  echo "==> Fetching origin/main for path-aware agent gates"
+  echo "==> Refreshing origin/main for path-aware agent gates"
   if git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"; then
     return 0
   fi
@@ -266,8 +267,8 @@ trunk_version() {
 verify_trunk_tarball_checksum() {
   local download_path="$1"
   if [[ -z "${CODEX_CLOUD_TRUNK_TARBALL_SHA256:-}" ]]; then
-    echo "warning: CODEX_CLOUD_TRUNK_TARBALL_SHA256 is not set; mirror tarball checksum verification is skipped." >&2
-    return 0
+    echo "error: CODEX_CLOUD_TRUNK_TARBALL_SHA256 is required when CODEX_CLOUD_TRUNK_TARBALL_URL is set." >&2
+    return 1
   fi
 
   echo "==> Verifying mirrored Trunk tarball sha256"
@@ -320,7 +321,15 @@ prewarm_trunk() {
   echo "==> Prewarming Trunk CLI"
   configure_trunk_download_allowlist
   if [[ -n "${CODEX_CLOUD_TRUNK_TARBALL_URL:-}" ]]; then
-    install_trunk_from_mirror
+    if [[ -z "${CODEX_CLOUD_TRUNK_TARBALL_SHA256:-}" ]]; then
+      echo "error: CODEX_CLOUD_TRUNK_TARBALL_SHA256 is required when CODEX_CLOUD_TRUNK_TARBALL_URL is set." >&2
+      return 1
+    fi
+    if install_trunk_from_mirror; then
+      :
+    else
+      echo "warning: mirrored Trunk install failed; falling back to ./tools/trunk direct download." >&2
+    fi
   fi
   if ./tools/trunk --version >/dev/null 2>&1; then
     ./tools/trunk --version

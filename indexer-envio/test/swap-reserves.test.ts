@@ -9,6 +9,10 @@ import {
   _clearMockReserves,
   _setMockERC20Decimals,
   _clearMockERC20Decimals,
+  _setMockRebalancingState,
+  _clearMockRebalancingStates,
+  _setMockRebalanceThresholds,
+  _clearMockRebalanceThresholds,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 
@@ -37,6 +41,101 @@ describe("Swap handler — reserve syncing", () => {
   afterEach(() => {
     _clearMockReserves();
     _clearMockERC20Decimals();
+    _clearMockRebalancingStates();
+    _clearMockRebalanceThresholds();
+  });
+
+  it("UpdateReserves advances health with a zero ratio on unresolved exact-zero drains", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000ee";
+    const poolId = pid(POOL_ADDR);
+    const previousSampleAt = 1_700_000_000n;
+    const updateTimestamp = 1_700_000_600n;
+
+    const token0 = "0x00000000000000000000000000000000000003e0";
+    const token1 = "0x00000000000000000000000000000000000003e1";
+    _setMockERC20Decimals(42220, token0, 18);
+    _setMockERC20Decimals(42220, token1, 18);
+    _setMockRebalanceThresholds(42220, POOL_ADDR, {
+      above: 5000,
+      below: 5000,
+    });
+    _setMockRebalancingState(42220, POOL_ADDR, null);
+
+    let mockDb = MockDb.createMockDb();
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0,
+      token1,
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 41,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 1_499, timestamp: Number(previousSampleAt) },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+    const seeded = mockDb.entities.Pool.get(poolId) as
+      | Record<string, unknown>
+      | undefined;
+    assert.ok(seeded, "Pool must exist after FPMMDeployed");
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      id: poolId,
+      token0,
+      token1,
+      source: "fpmm_factory",
+      reserves0: 1_000n * 10n ** 18n,
+      reserves1: 1_000n * 10n ** 18n,
+      tokenDecimalsKnown: true,
+      invertRateFeedKnown: true,
+      rebalanceThresholdsKnown: true,
+      rebalanceThreshold: 5000,
+      rebalanceThresholdAbove: 5000,
+      rebalanceThresholdBelow: 5000,
+      oracleOk: true,
+      oraclePrice: 10n ** 24n,
+      lastMedianPrice: 10n ** 24n,
+      medianLive: true,
+      oracleExpiry: 3_600n,
+      lastOracleReportAt: previousSampleAt,
+      priceDifference: 7_500n,
+      hasHealthData: true,
+      lastOracleSnapshotTimestamp: previousSampleAt,
+      lastDeviationRatio: "1.500000",
+    });
+
+    const updateEvent = FPMM.UpdateReserves.createMockEvent({
+      reserve0: 0n,
+      reserve1: 1_000n * 10n ** 18n,
+      blockTimestamp: updateTimestamp,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 42,
+        srcAddress: POOL_ADDR,
+        block: { number: 1_500, timestamp: Number(updateTimestamp) },
+      },
+    });
+
+    mockDb = await FPMM.UpdateReserves.processEvent({
+      event: updateEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId) as
+      | (PoolEntity & {
+          degenerateReserves: boolean;
+          lastDeviationRatio: string;
+          lastOracleSnapshotTimestamp: bigint;
+        })
+      | undefined;
+    assert.ok(pool, "Pool must exist after UpdateReserves");
+    assert.equal(pool.degenerateReserves, true);
+    assert.equal(pool.lastDeviationRatio, "0.000000");
+    assert.equal(pool.lastOracleSnapshotTimestamp, updateTimestamp);
   });
 
   it("updates reserves via UpdateReserves preceding FPMM.Swap (matching contract behavior)", async () => {

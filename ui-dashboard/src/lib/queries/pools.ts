@@ -50,15 +50,17 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
-// Per-pool data-trust flags — `rebalanceThresholdsKnown` triple
-// (above/below/known) plus `tokenDecimalsKnown`. Kept OFF
+// Per-pool data-trust/deviation-classification flags —
+// `rebalanceThresholdsKnown` triple (above/below/known),
+// `tokenDecimalsKnown`, and `degenerateReserves`. Kept OFF
 // `ALL_POOLS_WITH_HEALTH` for the same schema-lag reason as
 // `ALL_POOLS_BREACH_ROLLUP`: a deploy-window in which the dashboard ships
 // the new fields before the prod indexer has them would otherwise reject
 // the entire pools query. Isolating means consumers (`isNeverRebalance`,
-// `effectiveThreshold` in `health.ts`, `getSnapshotVolumeInUsd` in
-// `volume.ts`) degrade safely (10000-bps under-bound for thresholds, null
-// USD volume for unknown decimals) until the merge lands.
+// `effectiveThreshold` / degenerate health gating in `health.ts`,
+// `getSnapshotVolumeInUsd` in `volume.ts`) degrade safely (10000-bps
+// under-bound for thresholds, null USD volume for unknown decimals,
+// WARN under-bound for degenerate rows) until the merge lands.
 //
 // `rebalanceThresholdAbove` / `rebalanceThresholdBelow` ride alongside
 // the Known flag because `isNeverRebalance` requires BOTH split sides to
@@ -78,6 +80,7 @@ export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
       rebalanceThresholdBelow
       rebalanceThresholdsKnown
       tokenDecimalsKnown
+      degenerateReserves
     }
   }
 `;

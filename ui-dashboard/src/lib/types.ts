@@ -51,6 +51,7 @@ export type Pool = {
   oracleNumReporters?: number | undefined;
   referenceRateFeedID?: string | undefined;
   priceDifference?: string | undefined;
+  degenerateReserves?: boolean | undefined;
   rebalanceThreshold?: number | undefined;
   rebalanceThresholdAbove?: number | undefined;
   rebalanceThresholdBelow?: number | undefined;
@@ -145,6 +146,7 @@ export type OracleSnapshot = {
   oracleOk: boolean;
   numReporters: number;
   priceDifference: string;
+  degenerateReserves?: boolean;
   rebalanceThreshold: number;
   source: string;
   blockNumber: string;

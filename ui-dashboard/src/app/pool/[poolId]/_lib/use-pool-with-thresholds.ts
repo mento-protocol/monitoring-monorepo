@@ -1,8 +1,9 @@
 // Pool detail page fetches POOL_DETAIL_WITH_HEALTH for the bulk of the
-// pool entity, but data-trust flags (`rebalanceThresholdsKnown` triple +
-// `tokenDecimalsKnown`) are isolated in `POOL_THRESHOLDS_KNOWN_EXT` for
+// pool entity, but data-trust / degenerate-classification flags
+// (`rebalanceThresholdsKnown` triple + `tokenDecimalsKnown` +
+// `degenerateReserves`) are isolated in `POOL_THRESHOLDS_KNOWN_EXT` for
 // schema-lag resilience (see queries.ts). This hook merges the two so
-// consumers get a single `Pool` object with the trust flags merged in,
+// consumers get a single `Pool` object with those flags merged in,
 // plus loading/error state so the page can disambiguate "trust flags
 // not yet known" (transient) from "decimals are confirmed unknown"
 // (persistent). PR 1.7 tightened the USD gate to strict `!== true`, so
@@ -21,6 +22,7 @@ type ThresholdsExtRow = {
   rebalanceThresholdBelow?: number;
   rebalanceThresholdsKnown?: boolean;
   tokenDecimalsKnown?: boolean;
+  degenerateReserves?: boolean;
 };
 
 export type PoolWithThresholdsResult = {
@@ -67,6 +69,7 @@ export function usePoolWithThresholds(
       rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
       rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
       tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
+      degenerateReserves: thresholdsExt.degenerateReserves,
     };
   }, [rawPool, thresholdsExt]);
   return { pool, thresholdsLoading, thresholdsError };

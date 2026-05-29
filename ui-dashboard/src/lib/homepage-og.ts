@@ -134,6 +134,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     rebalanceThresholdBelow?: number;
     rebalanceThresholdsKnown?: boolean;
     tokenDecimalsKnown?: boolean;
+    degenerateReserves?: boolean;
   };
   // Parallelizing both saves ~200ms p50 on the success path; serializing
   // would only help if `poolsResult` failed, which is < 1% of calls.
@@ -161,7 +162,8 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   // Merge trust flags fail-open — on miss/schema-lag, the fields stay
   // undefined and `isNeverRebalance` returns false (under-bound).
   // Without this merge, a 0/0 never-rebalance pool would appear in
-  // WARN/CRITICAL attention lists on the homepage OG card.
+  // WARN/CRITICAL attention lists on the homepage OG card; degenerate
+  // reserve rows also stay conservatively visible until the ext field lands.
   if (thresholdsResult.status === "fulfilled") {
     const thresholdsById = new Map(
       (thresholdsResult.value.Pool ?? []).map((r) => [r.id, r]),
@@ -176,6 +178,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
             rebalanceThresholdBelow: t.rebalanceThresholdBelow,
             rebalanceThresholdsKnown: t.rebalanceThresholdsKnown,
             tokenDecimalsKnown: t.tokenDecimalsKnown,
+            degenerateReserves: t.degenerateReserves,
           };
     });
   }

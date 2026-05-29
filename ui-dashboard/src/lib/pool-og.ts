@@ -102,17 +102,14 @@ export async function fetchPoolOgDataUncached(
   if (!resolved) return null;
   const { poolId, chainId } = resolved;
 
-  const networkId = networkIdForChainId(chainId);
-  if (!networkId) return null;
-  const network = NETWORKS[networkId];
+  const network = NETWORKS[networkIdForChainId(chainId)!];
+  if (!network) return null;
   if (!network.hasuraUrl) return null;
 
   const client = makeOgGraphQLClient(network);
 
-  // Per-request timeout. Without this, a hung upstream prevents allSettled
-  // from resolving and the OG route blocks until Vercel's function timeout.
-  // 5s is generous for a public Hasura lookup and short enough that crawler
-  // unfurls fall back to the generic card promptly on indexer issues.
+  // Per-request timeout. Without this, a hung upstream blocks allSettled until
+  // Vercel's function timeout; 5s keeps crawler unfurls prompt on indexer issues.
   const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
 
   // Fail-open: only the detail query is load-bearing. If daily snapshots or
@@ -141,12 +138,8 @@ export async function fetchPoolOgDataUncached(
         variables: { chainId },
         signal,
       }),
-      // Threshold-known triple — isolated for the same schema-lag
-      // resilience as `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN`. Fail-open:
-      // on transient miss the fields stay undefined and `isNeverRebalance`
-      // returns false (safe under-bound) — card renders WARN/CRITICAL
-      // instead of OK/never-rebalance until the next refresh, but
-      // doesn't fail the unfurl.
+      // Isolated trust / degenerate flags keep schema-lag from failing the
+      // unfurl; health uses conservative WARN/CRITICAL under-bounds.
       client.request<{
         Pool: {
           id: string;
@@ -154,6 +147,7 @@ export async function fetchPoolOgDataUncached(
           rebalanceThresholdBelow?: number;
           rebalanceThresholdsKnown?: boolean;
           tokenDecimalsKnown?: boolean;
+          degenerateReserves?: boolean;
         }[];
       }>({
         document: POOL_THRESHOLDS_KNOWN_EXT,
@@ -165,17 +159,17 @@ export async function fetchPoolOgDataUncached(
   if (detailResult.status !== "fulfilled") return null;
   const rawPool = detailResult.value.Pool[0];
   if (!rawPool) return null;
-  const thresholdsExt =
-    thresholdsResult.status === "fulfilled"
-      ? (thresholdsResult.value.Pool[0] ?? null)
-      : null;
-  const pool: Pool = thresholdsExt
+  let ext: PoolOgThresholdsExtRow | null = null;
+  if (thresholdsResult.status === "fulfilled")
+    ext = thresholdsResult.value.Pool[0] ?? null;
+  const pool: Pool = ext
     ? {
         ...rawPool,
-        rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
-        rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
-        rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
-        tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
+        rebalanceThresholdAbove: ext.rebalanceThresholdAbove,
+        rebalanceThresholdBelow: ext.rebalanceThresholdBelow,
+        rebalanceThresholdsKnown: ext.rebalanceThresholdsKnown,
+        tokenDecimalsKnown: ext.tokenDecimalsKnown,
+        degenerateReserves: ext.degenerateReserves,
       }
     : rawPool;
 
@@ -443,6 +437,15 @@ function computeOracleFreshness(
     fresh: isOracleFresh(pool, now, chainId),
   };
 }
+
+type PoolOgThresholdsExtRow = {
+  id: string;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+  tokenDecimalsKnown?: boolean;
+  degenerateReserves?: boolean;
+};
 
 // 60s TTL — pool health can flip during an incident; a 1h cache meant a
 // link re-shared during rebalance showed stale "Critical" for an hour.

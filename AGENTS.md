@@ -364,7 +364,7 @@ Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
 Codex Cloud setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for GitHub
 CLI-backed PR workflows, installs GitHub CLI from the official apt repository if
 the base image lacks it, configures git to use `gh` credentials for fetch/push,
-and verifies that `origin/main` is reachable before agent work starts. It also
+and refreshes `origin/main` before agent work starts. It also
 prewarms the pinned Trunk CLI and runs `./tools/trunk install` so
 Trunk-managed linters/runtimes are available before a task starts. If the cloud
 proxy blocks Trunk, allowlist
