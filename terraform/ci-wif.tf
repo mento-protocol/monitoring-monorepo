@@ -34,7 +34,8 @@
 #   `roles/storage.objectViewer` lets the plan SA read state but NOT
 #   create/delete the lock object that the GCS backend acquires by
 #   default. The follow-up workflow PR must therefore pass `-lock=false`
-#   to plan jobs (already documented in BACKLOG.md). Apply jobs stay on
+#   to plan jobs (see docs/notes/terraform-cicd-hardening-decisions-2026-05.md).
+#   Apply jobs stay on
 #   the write-capable deployer SA which keeps locking on. This trade-off
 #   intentionally chooses strict-least-privilege for plan over speculative
 #   lock contention — plan jobs are short and re-run on each push, so a

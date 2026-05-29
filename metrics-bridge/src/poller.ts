@@ -22,7 +22,7 @@ import type { PoolRow } from "./types.js";
 // `pollCycle % 1` is always 0, so `=== 1` silently disabled the probe
 // entirely whenever an operator set `REBALANCE_PROBE_EVERY_N_POLLS=1`
 // intending "probe every poll". The 0-indexed predicate is well-defined
-// for all N >= 1 — see BACKLOG `Rebalance probe: handle EVERY_N=1`.
+// for all N >= 1.
 let pollCycle = 0;
 
 /** @internal Test-only: reset the pollCycle counter. */
