@@ -43,6 +43,7 @@ const EXPECTED_EXPORT_NAMES = [
   "TRADING_LIMITS",
   "ORACLE_SNAPSHOTS",
   "ORACLE_SNAPSHOTS_CHART",
+  "ORACLE_PRICE_DAILY",
   "ORACLE_SNAPSHOTS_COUNT_PAGE",
   "POOL_DEPLOYMENT",
   "POOL_LP_POSITIONS",
@@ -409,6 +410,18 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ORACLE_SNAPSHOTS_CHART).toContain(
       "order_by: [{ timestamp: desc }, { id: desc }]",
     );
+  });
+
+  it("ORACLE_PRICE_DAILY selects OHLC + the precomputed anyOutOfBand verdict", () => {
+    expect(queries.ORACLE_PRICE_DAILY).toContain("OraclePriceDailySnapshot");
+    expect(queries.ORACLE_PRICE_DAILY).toContain("closePrice");
+    expect(queries.ORACLE_PRICE_DAILY).toContain("anyOutOfBand");
+    // Chronological for the chart; no `limit` so the 1000-row cap (≈2.7yr daily)
+    // applies rather than a smaller silent truncation.
+    expect(queries.ORACLE_PRICE_DAILY).toContain(
+      "order_by: [{ bucketStart: asc }]",
+    );
+    expect(queries.ORACLE_PRICE_DAILY).not.toContain("limit:");
   });
 
   it("POOL_DEPLOYMENT looks up FactoryDeployment.txHash", () => {

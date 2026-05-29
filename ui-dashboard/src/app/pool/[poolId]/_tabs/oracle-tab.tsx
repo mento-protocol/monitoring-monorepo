@@ -3,7 +3,12 @@
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
 import type { Network } from "@/lib/networks";
-import { OracleChart, lookAheadTarget } from "@/components/oracle-chart";
+import {
+  DAILY_MODE_SPAN_SECONDS,
+  OracleChart,
+  type OracleDailyCandle,
+  lookAheadTarget,
+} from "@/components/oracle-chart";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -21,6 +26,7 @@ import {
 import { useGQL } from "@/lib/graphql";
 import { useWindowedHistory } from "@/lib/use-windowed-history";
 import {
+  ORACLE_PRICE_DAILY,
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
@@ -62,6 +68,62 @@ const selectOracleSnapshots = (data: unknown): OracleSnapshot[] =>
 // left edge gets within this fraction of a span of the oldest loaded point.
 const LOOKAHEAD_DEBOUNCE_MS = 150;
 const LOOKAHEAD_FRACTION = 0.2;
+
+// Daily OHLC rollup — the chart's zoomed-out resolution. One ≤1000-row page
+// spans the full history (vs ~3.5 days of raw medians), so no look-ahead paging
+// is needed. Pass the already virtual-pool-guarded `chartQuery` (null on a
+// virtual pool → no fetch); inherits the useGQL revalidation gates. Undefined
+// while loading → the chart stays on the raw path.
+function useOracleDailyCandles(
+  chartQuery: string | null,
+  variables: { poolId: string },
+): readonly OracleDailyCandle[] | undefined {
+  const { data } = useGQL<{ OraclePriceDailySnapshot: OracleDailyCandle[] }>(
+    chartQuery ? ORACLE_PRICE_DAILY : null,
+    variables,
+  );
+  return data?.OraclePriceDailySnapshot;
+}
+
+// Debounced look-ahead: when the user pans/zooms so the left edge approaches the
+// oldest loaded point, page in the next older raw window. Gated on data-need
+// (not event-firing), so the wheel handler's relayouts can't spuriously fetch —
+// AND skipped once the viewport widens past DAILY_MODE_SPAN_SECONDS, where the
+// chart renders daily candles instead (paging raw history there would walk many
+// pages into the Tier-Quota 429 wall for data daily mode never shows). The
+// cleanup clears a pending timer on unmount AND on pool/network switch
+// (`resetKey`) — the tab doesn't remount across a poolId param change, so
+// without that dep a timer armed for the old pool would fire ~150ms later and
+// page the freshly-reset new pool.
+function useOracleLookAhead({
+  oldestLoadedTs,
+  ensureLoadedBefore,
+  resetKey,
+}: {
+  oldestLoadedTs: number;
+  ensureLoadedBefore: (targetTs: number) => void;
+  resetKey: string;
+}): (range: [number, number]) => void {
+  const lookAheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleVisibleXRangeChange = useCallback(
+    (range: [number, number]) => {
+      if (lookAheadTimer.current) clearTimeout(lookAheadTimer.current);
+      if (range[1] - range[0] > DAILY_MODE_SPAN_SECONDS) return;
+      lookAheadTimer.current = setTimeout(() => {
+        const target = lookAheadTarget(range, oldestLoadedTs, LOOKAHEAD_FRACTION);
+        if (target !== null) ensureLoadedBefore(target);
+      }, LOOKAHEAD_DEBOUNCE_MS);
+    },
+    [oldestLoadedTs, ensureLoadedBefore],
+  );
+  useEffect(
+    () => () => {
+      if (lookAheadTimer.current) clearTimeout(lookAheadTimer.current);
+    },
+    [resetKey],
+  );
+  return handleVisibleXRangeChange;
+}
 
 // eslint-disable-next-line complexity, sonarjs/cognitive-complexity, max-lines-per-function -- Existing tab keeps oracle filtering, pagination, and degraded count state co-located.
 export function OracleTab(props: OracleTabProps) {
@@ -155,35 +217,16 @@ export function OracleTab(props: OracleTabProps) {
     resetKey: `${network.id}:${poolId}`,
   });
 
-  // Debounced look-ahead: when the user pans/zooms the X axis such that the
-  // left edge approaches the oldest loaded point, page in the next older
-  // window. Gated on data-need (not on the event firing), so the wheel
-  // handler's own relayouts can't spuriously fetch.
-  const lookAheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleVisibleXRangeChange = useCallback(
-    (range: [number, number]) => {
-      if (lookAheadTimer.current) clearTimeout(lookAheadTimer.current);
-      lookAheadTimer.current = setTimeout(() => {
-        const target = lookAheadTarget(
-          range,
-          oldestLoadedTs,
-          LOOKAHEAD_FRACTION,
-        );
-        if (target !== null) ensureLoadedBefore(target);
-      }, LOOKAHEAD_DEBOUNCE_MS);
-    },
-    [oldestLoadedTs, ensureLoadedBefore],
-  );
-  // Clear a pending look-ahead on unmount AND on pool/network switch — the tab
-  // doesn't remount across a poolId param change, so without the identity dep a
-  // debounce timer armed for the old pool would fire ~150ms later and call
-  // ensureLoadedBefore on the freshly-reset new pool.
-  useEffect(
-    () => () => {
-      if (lookAheadTimer.current) clearTimeout(lookAheadTimer.current);
-    },
-    [network.id, poolId],
-  );
+  // Daily OHLC rollup — the chart's zoomed-out resolution (see hook below).
+  const dailyCandles = useOracleDailyCandles(chartQuery, chartVariables);
+
+  // Debounced look-ahead paging (raw mode) + cleanup on pool switch; the chart
+  // calls this with the visible X range. See the hook for the daily-mode gate.
+  const handleVisibleXRangeChange = useOracleLookAhead({
+    oldestLoadedTs,
+    ensureLoadedBefore,
+    resetKey: `${network.id}:${poolId}`,
+  });
 
   // Fetch the active deviation breaker (VALUE_DELTA or MEDIAN_DELTA) for this
   // pool's rate feed. The chart needs `referenceValue` / `medianRatesEMA` as
@@ -321,6 +364,7 @@ export function OracleTab(props: OracleTabProps) {
         breakerConfigStatus={breakerConfigStatus}
         uirevision={`${network.id}:${poolId}`}
         onVisibleXRangeChange={handleVisibleXRangeChange}
+        dailyCandles={dailyCandles}
       />
       <OracleChartScrollbackStatus
         isFetchingOlder={isFetchingOlder}

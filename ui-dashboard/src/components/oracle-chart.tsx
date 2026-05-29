@@ -17,6 +17,15 @@ import {
   formatBaseline,
   formatOracleChartHoverText,
 } from "./oracle-chart-hover";
+import {
+  DAILY_MODE_SPAN_SECONDS,
+  buildDailyPlotData,
+  computeOracleYRange,
+  type OracleDailyCandle,
+} from "./oracle-daily";
+
+export { DAILY_MODE_SPAN_SECONDS };
+export type { OracleDailyCandle };
 
 export { formatOracleChartHoverText };
 
@@ -252,6 +261,12 @@ interface OracleChartProps {
   // user pans/zooms the X axis. The pool tab debounces this into the
   // windowed-history hook's `ensureLoadedBefore` to page in older data.
   onVisibleXRangeChange?: ((range: [number, number]) => void) | undefined;
+  // Daily OHLC rollup (full history, fetched once by the pool tab). When the
+  // visible X span exceeds DAILY_MODE_SPAN_SECONDS, the chart renders these
+  // instead of the raw keyset `snapshots` — a single sub-1000-row page spans
+  // years where raw medians would need many keyset pages. Undefined/empty →
+  // the chart stays on the raw path at every zoom.
+  dailyCandles?: readonly OracleDailyCandle[] | undefined;
 }
 
 /**
@@ -283,6 +298,46 @@ function useDecimatedSnapshots(
   );
 }
 
+// Resolution switch: a wide viewport (> ~60d) renders daily candles — full
+// history in one page — while a tight one keeps the raw keyset path. The same
+// span threshold gates oracle-tab's look-ahead, so zooming out never pages raw
+// history that daily mode renders instead. `uirevision` pins the viewport
+// across the raw↔daily swap (the daily close equals the day's last raw point).
+function selectOraclePlotData({
+  visibleRange,
+  dailyCandles,
+  visibleSnapshots,
+  token0Symbol,
+  token1Symbol,
+  baseline,
+  thresholdRatio,
+  breakerConfigStatus,
+}: {
+  visibleRange: [number, number] | null;
+  dailyCandles: readonly OracleDailyCandle[] | undefined;
+  visibleSnapshots: OracleSnapshot[];
+  token0Symbol: string;
+  token1Symbol: string;
+  baseline: number | null;
+  thresholdRatio: number | null;
+  breakerConfigStatus: BreakerConfigStatus;
+}): OraclePlotData {
+  const span = visibleRange ? visibleRange[1] - visibleRange[0] : null;
+  const useDaily =
+    span !== null && span > DAILY_MODE_SPAN_SECONDS && !!dailyCandles?.length;
+  if (useDaily && dailyCandles) {
+    return buildDailyPlotData({ candles: dailyCandles, baseline, thresholdRatio });
+  }
+  return buildOraclePlotData({
+    snapshots: visibleSnapshots,
+    token0Symbol,
+    token1Symbol,
+    baseline,
+    thresholdRatio,
+    breakerConfigStatus,
+  });
+}
+
 export function OracleChart({
   snapshots,
   token0Symbol = "Token 0",
@@ -292,6 +347,7 @@ export function OracleChart({
   breakerConfigStatus = "ready",
   uirevision,
   onVisibleXRangeChange,
+  dailyCandles,
 }: OracleChartProps) {
   // Stash the wheel-listener cleanup so we can detach when react-plotly tears
   // the chart down (onPurge) or remounts it. Without this, stacked listeners
@@ -344,8 +400,10 @@ export function OracleChart({
 
   if (snapshots.length === 0) return null;
 
-  const plotData = buildOraclePlotData({
-    snapshots: visibleSnapshots,
+  const plotData = selectOraclePlotData({
+    visibleRange,
+    dailyCandles,
+    visibleSnapshots,
     token0Symbol,
     token1Symbol,
     baseline,
@@ -496,47 +554,7 @@ function buildOraclePlotData({
   // on the actual price; a band edge sitting far outside that range stays
   // off-screen until the data drifts toward it. The shapes use 0 / +∞ for
   // their outer extents so Plotly clips them to whatever range we choose.
-  const finitePrices = prices.filter((p) => Number.isFinite(p));
-  const fallback = baseline ?? 1;
-  const dataMin =
-    finitePrices.length > 0 ? Math.min(...finitePrices) : fallback;
-  const dataMax =
-    finitePrices.length > 0 ? Math.max(...finitePrices) : fallback;
-  // Floor the data span so a perfectly flat dataset still gets a visible
-  // window — otherwise yMin === yMax and Plotly draws an empty axis.
-  const rawSpan = dataMax - dataMin;
-  const dataSpan = Math.max(
-    rawSpan,
-    baseline ? baseline * 5e-5 : Math.abs(fallback) * 5e-5 || 1e-6,
-  );
-
-  let lo = dataMin;
-  let hi = dataMax;
-  if (baseline && thresholdRatio) {
-    const bandLo = baseline * (1 - thresholdRatio);
-    const bandHi = baseline * (1 + thresholdRatio);
-    // Include a band edge when it's "near" the data. The inclusion margin
-    // is the larger of half a data span and the breaker's own half-width
-    // (`baseline × thresholdRatio`). That second term is what makes the
-    // bands visible on MEDIAN_DELTA pools, where data sits on the EMA and
-    // the band edges are intrinsically `threshold` away from it — without
-    // this term, the bands would never qualify as "near" and would stay
-    // off-screen. For tight VALUE_DELTA stablecoin pools, data clustered
-    // at one band still hides the far band (its distance is ~2 × half-
-    // width, so it doesn't qualify).
-    const margin = Math.max(dataSpan * 0.5, baseline * thresholdRatio);
-    if (bandLo >= dataMin - margin && bandLo <= dataMax + margin) {
-      lo = Math.min(lo, bandLo);
-    }
-    if (bandHi >= dataMin - margin && bandHi <= dataMax + margin) {
-      hi = Math.max(hi, bandHi);
-    }
-  }
-  const visibleSpan = Math.max(hi - lo, dataSpan);
-  const padding = visibleSpan * 0.15;
-  const yMin = lo - padding;
-  const yMax = hi + padding;
-
+  const { yMin, yMax } = computeOracleYRange(prices, baseline, thresholdRatio);
   return { deviationTrace, timestamps, isSparse, yMin, yMax };
 }
 
