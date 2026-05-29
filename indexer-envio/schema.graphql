@@ -32,6 +32,14 @@ type Pool {
   oracleNumReporters: Int!
   referenceRateFeedID: String! @index
 
+  # True while any ENABLED, non-MARKET_HOURS breaker on this pool's rate feed
+  # is TRIPPED — i.e. trading is halted by a price circuit breaker. Drives the
+  # dashboard's amber "Halted" health badge. MARKET_HOURS (weekend FX closure)
+  # is deliberately excluded — those render via the existing weekend / market-
+  # hours path, not as a fault. Maintained by `syncPoolsBreakerHalt` on every
+  # BreakerBox trip / reset / enable / remove transition.
+  breakerTripped: Boolean!
+
   # Oracle median-jump detection (FPMM pools only). Tracks the delta between
   # consecutive `MedianUpdated` prices — the signal consumed by the "Oracle
   # Jump Exceeds Swap Fee" alert.

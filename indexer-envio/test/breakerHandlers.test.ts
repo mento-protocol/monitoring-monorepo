@@ -14,11 +14,14 @@ import {
   _clearBootstrapCaches,
 } from "../src/EventHandlers.ts";
 import { makeBreakerConfigId, makeBreakerId } from "../src/breakers.ts";
+import { makePoolId } from "../src/helpers.ts";
+import { makePool } from "./helpers/makePool.js";
 
 type MockDb = MockDbWith<{
   Breaker: WritableEntity;
   BreakerConfig: WritableEntity;
   BreakerTripEvent: EntityReader;
+  Pool: WritableEntity;
 }>;
 
 const TestHelpers = indexerTestHelpers<MockDb>();
@@ -195,6 +198,81 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     assert.equal(tripRow!.thresholdAtTrip, THRESHOLD);
     // referenceAtTrip = the EMA snapshot we mirrored at bootstrap time.
     assert.equal(tripRow!.referenceAtTrip, 1_171_560_280_196_965_000_000_000n);
+  });
+
+  it("BreakerTripped sets Pool.breakerTripped=true; ResetSuccessful clears it", async () => {
+    let mockDb = MockDb.createMockDb();
+    const poolId = makePoolId(
+      CHAIN_ID,
+      "0xabc0000000000000000000000000000000000001",
+    );
+    // Seed a pool wired to this feed, untripped.
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CHAIN_ID,
+        referenceRateFeedID: FEED,
+        breakerTripped: false,
+      }),
+    );
+
+    // Bootstrap the (MEDIAN_DELTA) breaker config for the feed.
+    mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+      event: BreakerBox.BreakerStatusUpdated.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: FEED,
+        status: true,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 0,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 100, timestamp: 1_700_000_500 },
+        },
+      }),
+      mockDb,
+    });
+
+    // Trip → pool halted.
+    mockDb = await BreakerBox.BreakerTripped.processEvent({
+      event: BreakerBox.BreakerTripped.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: FEED,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 7,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 200, timestamp: 1_700_001_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      true,
+      "pool should be halted after the price breaker trips",
+    );
+
+    // Reset → pool tradeable again.
+    mockDb = await BreakerBox.ResetSuccessful.processEvent({
+      event: BreakerBox.ResetSuccessful.createMockEvent({
+        rateFeedID: FEED,
+        breaker: MD_BREAKER,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 9,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 300, timestamp: 1_700_002_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      false,
+      "pool halt should clear after reset",
+    );
   });
 
   it("ResetSuccessful transitions BreakerConfig back to OK and refreshes cooldownEndsAt", async () => {

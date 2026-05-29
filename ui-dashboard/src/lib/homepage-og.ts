@@ -380,6 +380,7 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     WARN: 0,
     CRITICAL: 0,
     WEEKEND: 0,
+    HALTED: 0,
     "N/A": 0,
   };
   const attentionPools: AttentionPool[] = [];
@@ -406,8 +407,6 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     return a.name.localeCompare(b.name);
   });
 
-  const poolCount = slices.reduce((n, s) => n + s.pools.length, 0);
-
   return {
     totalTvlUsd,
     tvlWoWPct,
@@ -415,7 +414,7 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     volume7dWoWPct,
     volumeSeries,
     tvlSeries,
-    poolCount,
+    poolCount: slices.reduce((n, s) => n + s.pools.length, 0),
     chainCount: slices.length,
     chains: slices.map((s) => s.network.label),
     healthBuckets,

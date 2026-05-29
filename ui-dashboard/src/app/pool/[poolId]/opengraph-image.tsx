@@ -38,6 +38,8 @@ function describeHealth(status: PoolOgData["health"]): HealthView {
       return { label: "Critical", tone: "critical" };
     case "WEEKEND":
       return { label: "Markets closed", tone: "neutral" };
+    case "HALTED":
+      return { label: "Trading halted", tone: "warn" };
     case "N/A":
       return { label: "N/A", tone: "neutral" };
   }

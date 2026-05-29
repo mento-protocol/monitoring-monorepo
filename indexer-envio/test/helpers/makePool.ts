@@ -42,6 +42,9 @@ export function makePool(overrides: Partial<Pool> = {}): Pool {
     // every parity/health test. Tests exercising the no-data gate must
     // override `hasHealthData: false` explicitly.
     hasHealthData: true,
+    // Excluded from DEFAULT_ORACLE_FIELDS (set directly in defaultPool), so the
+    // shared fixture must carry it too. Override to true for halt tests.
+    breakerTripped: false,
     wrappedExchangeId: "",
     createdAtBlock: 0n,
     createdAtTimestamp: 0n,

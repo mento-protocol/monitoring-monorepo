@@ -11,7 +11,7 @@
 import type { Breaker, BreakerConfig } from "envio";
 import type { EvmOnEventContext } from "envio";
 import { asAddress } from "./helpers.js";
-import { type BreakerKindRpc } from "./rpc.js";
+import { getPoolsByFeed, type BreakerKindRpc } from "./rpc.js";
 import {
   breakerDefaultsEffect,
   breakerFeedStateEffect,
@@ -655,4 +655,47 @@ export async function handleRateChangeThresholdUpdated({
   const newThreshold = event.params.rateChangeThreshold;
   if (cfg.rateChangeThreshold === newThreshold) return;
   context.BreakerConfig.set({ ...cfg, rateChangeThreshold: newThreshold });
+}
+
+/** Recompute `Pool.breakerTripped` for every pool on `rateFeedID` and persist
+ * any change. A feed is "halted" when it has at least one ENABLED, non-
+ * MARKET_HOURS BreakerConfig in the TRIPPED state — the same predicate the
+ * dashboard's `pickTrippableConfig` uses. MARKET_HOURS is excluded on purpose:
+ * a weekend FX closure is a scheduled, expected unavailability that already
+ * renders via the dashboard's WEEKEND path, not a price-breaker fault.
+ *
+ * Idempotent and self-correcting: it reads the feed's full BreakerConfig set
+ * each call, so it stays correct regardless of which BreakerBox transition
+ * triggered it. Call it after any trip / reset / enable / remove that can move
+ * the OR. Pools that don't exist yet (feed indexed before the FPMM) are simply
+ * skipped — `getPoolsByFeed` returns only existing rows — and the next
+ * transition for the feed heals them.
+ *
+ * (Defined here at file end so its insertion doesn't shift the line-keyed
+ * ESLint baseline entry for `bootstrapFeedBreakerConfigs` above.) */
+export async function syncPoolsBreakerHalt(
+  context: EvmOnEventContext,
+  chainId: number,
+  rateFeedID: string,
+): Promise<void> {
+  const feed = asAddress(rateFeedID);
+  const configs = await context.BreakerConfig.getWhere({
+    rateFeedID: { _eq: feed },
+  });
+  let halted = false;
+  for (const cfg of configs) {
+    if (cfg.chainId !== chainId) continue;
+    if (!cfg.enabled) continue;
+    if (cfg.status !== "TRIPPED") continue;
+    const breaker = await context.Breaker.get(cfg.breaker_id);
+    if (!breaker || breaker.kind === "MARKET_HOURS") continue;
+    halted = true;
+    break;
+  }
+  const poolIds = await getPoolsByFeed(context, chainId, feed);
+  for (const poolId of poolIds) {
+    const pool = await context.Pool.get(poolId);
+    if (!pool || pool.breakerTripped === halted) continue;
+    context.Pool.set({ ...pool, breakerTripped: halted });
+  }
 }

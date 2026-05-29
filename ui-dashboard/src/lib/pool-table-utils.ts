@@ -17,8 +17,19 @@ function openBreachDuration(p: Pool): string | null {
   return formatDurationShort(now - start);
 }
 
+// Status-only tooltips (no oracle/breach context needed). A lookup instead of
+// per-status branches keeps `healthTooltip` under the complexity budget.
+const STATIC_HEALTH_TOOLTIP: Record<string, string> = {
+  "N/A": "VirtualPool — oracle health not tracked",
+  HALTED:
+    "Trading halted — a price circuit breaker is tripped; swaps are paused until it resets",
+  WEEKEND:
+    "FX markets are closed this weekend — trading paused until ~Sunday 23:00 UTC",
+};
+
 function healthTooltip(status: string, p: Pool, chainId?: number): string {
-  if (status === "N/A") return "VirtualPool — oracle health not tracked";
+  const staticText = STATIC_HEALTH_TOOLTIP[status];
+  if (staticText) return staticText;
   const oracleTs = Number(p.oracleTimestamp ?? "0");
   // Mirror computeHealthStatus: use the indexed per-feed expiry, falling back to the
   // per-chain default so the tooltip root-cause matches the badge on non-300s networks.
@@ -30,8 +41,6 @@ function healthTooltip(status: string, p: Pool, chainId?: number): string {
   const isOracleStale =
     oracleTs === 0 ||
     Math.floor(Date.now() / 1000) - oracleTs > stalenessThreshold;
-  if (status === "WEEKEND")
-    return "FX markets are closed this weekend — trading paused until ~Sunday 23:00 UTC";
   if (status === "CRITICAL" && isOracleStale)
     return "Oracle stale — last update expired";
   if (status === "CRITICAL") {

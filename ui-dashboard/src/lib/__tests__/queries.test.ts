@@ -123,6 +123,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             oracleExpiry
             lastRebalancedAt
             deviationBreachStartedAt
+            breakerTripped
             lpFee
             protocolFee
             limitStatus

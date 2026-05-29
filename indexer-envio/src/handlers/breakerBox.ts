@@ -27,6 +27,7 @@ import {
   ensureBreakerConfig,
   makeBreakerId,
   maybePreloadBreaker,
+  syncPoolsBreakerHalt,
 } from "../breakers.js";
 
 // ---------------------------------------------------------------------------
@@ -69,10 +70,17 @@ indexer.onEvent(
     const configs = await context.BreakerConfig.getWhere({
       breakerAddress: { _eq: breakerAddress },
     });
+    // A breaker can serve multiple feeds; disabling it may clear the halt OR
+    // on any of them, so collect the touched feeds and re-sync each.
+    const affectedFeeds = new Set<string>();
     for (const cfg of configs) {
       if (cfg.chainId === event.chainId && cfg.enabled) {
         context.BreakerConfig.set({ ...cfg, enabled: false });
+        affectedFeeds.add(cfg.rateFeedID);
       }
+    }
+    for (const feed of affectedFeeds) {
+      await syncPoolsBreakerHalt(context, event.chainId, feed);
     }
   },
 );
@@ -114,6 +122,8 @@ indexer.onEvent(
 
     if (cfg.enabled !== enabled) {
       context.BreakerConfig.set({ ...cfg, enabled });
+      // Enabling/disabling a breaker can flip the feed's halt OR.
+      await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
     }
   },
 );
@@ -207,6 +217,10 @@ indexer.onEvent(
       tripCountLifetime: cfg.tripCountLifetime + 1,
     };
     context.BreakerConfig.set(updated);
+
+    // Reflect the halt onto every pool on this feed (price breakers only;
+    // MARKET_HOURS is excluded inside the helper).
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );
 
@@ -253,6 +267,9 @@ indexer.onEvent(
       cooldownEndsAt: computeCooldownEndsAt(blockTimestamp, cooldown),
       lastResetAt: blockTimestamp,
     });
+
+    // Clearing the trip may lift the feed's halt — re-sync the pools.
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );
 
@@ -312,5 +329,8 @@ indexer.onEvent(
         cooldownEndsAt: computeCooldownEndsAt(blockTimestamp, cooldown),
       });
     }
+
+    // Manual override touched every enabled config on the feed — re-sync once.
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );

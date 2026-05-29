@@ -240,6 +240,10 @@ const defaultPool = (
   // the spread-clobber bug — callers' `oracleDelta` must NOT carry the
   // power to overwrite these on every event.
   referenceRateFeedID: "",
+  // Excluded from DEFAULT_ORACLE_FIELDS for the same spread-clobber reason:
+  // `syncPoolsBreakerHalt` writes this directly off BreakerBox events, so an
+  // `oracleDelta` spread must never reset it.
+  breakerTripped: false,
   // Populated by `selfHealWrappedExchangeId` on first VP-event upsert
   // (factory-direct value or bytecode read). Empty for FPMMs.
   wrappedExchangeId: "",

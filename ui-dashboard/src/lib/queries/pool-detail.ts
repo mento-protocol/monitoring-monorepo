@@ -21,6 +21,7 @@ export const POOL_DETAIL_WITH_HEALTH = `
       rebalanceThreshold
       lastRebalancedAt
       deviationBreachStartedAt
+      breakerTripped
       lpFee
       protocolFee
       limitStatus
