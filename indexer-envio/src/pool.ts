@@ -16,6 +16,7 @@ import {
   reportExpiryEffect,
 } from "./rpc/effects.js";
 import { recordBreachTransition } from "./deviationBreach.js";
+import { breakerTrippedOnFeedAssign } from "./breakers.js";
 import {
   computeHealthStatus,
   isNeverRebalance,
@@ -424,6 +425,21 @@ export const upsertPool = async ({
     }
   }
 
+  // When a pool's rate feed is assigned for the first time (factory param or
+  // self-heal), recompute `breakerTripped` from the feed's current breaker
+  // configs — otherwise a pool that first appears while the feed is already
+  // halted would read `false` until the next BreakerBox transition. The gate
+  // (only the "" -> set transition) lives in the helper to keep upsertPool's
+  // cognitive complexity flat.
+  const finalReferenceRateFeedID =
+    referenceRateFeedID ?? healedFeedId ?? existing.referenceRateFeedID;
+  const breakerTripped = await breakerTrippedOnFeedAssign(
+    context,
+    chainId,
+    existing,
+    finalReferenceRateFeedID,
+  );
+
   const next: Pool = {
     ...existing,
     chainId,
@@ -445,8 +461,8 @@ export const upsertPool = async ({
     // is no longer in DEFAULT_ORACLE_FIELDS — callers can't include it
     // in the spread). Priority: caller-supplied param (FPMM factory) >
     // self-heal > existing.
-    referenceRateFeedID:
-      referenceRateFeedID ?? healedFeedId ?? existing.referenceRateFeedID,
+    referenceRateFeedID: finalReferenceRateFeedID,
+    breakerTripped,
     // OR-merge `tokenDecimalsKnown` so a self-healed `true` survives a
     // later caller passing `false` (e.g. a factory replay that blipped).
     // Symmetrically, gate the decimal field writes: when the incoming pair

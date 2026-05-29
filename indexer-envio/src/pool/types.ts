@@ -21,6 +21,10 @@ export type PoolContext = {
   // Used by `selfHealWrappedExchangeId` to patch the back-reference on the
   // matching exchange row when a VP heals its `wrappedExchangeId`.
   BiPoolExchange: EvmOnEventContext["BiPoolExchange"];
+  // Used by `computeFeedHalted` to recompute `breakerTripped` when a pool's
+  // rate feed is first assigned (so a pool appearing mid-halt isn't stuck false).
+  BreakerConfig: EvmOnEventContext["BreakerConfig"];
+  Breaker: EvmOnEventContext["Breaker"];
 };
 
 export type SnapshotContext = {

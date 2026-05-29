@@ -8,7 +8,7 @@
 // hydrate from RPC via `fetchBreakerDefaults` / `fetchBreakerFeedState`.
 // ---------------------------------------------------------------------------
 
-import type { Breaker, BreakerConfig } from "envio";
+import type { Breaker, BreakerConfig, Pool } from "envio";
 import type { EvmOnEventContext } from "envio";
 import { asAddress } from "./helpers.js";
 import { getPoolsByFeed, type BreakerKindRpc } from "./rpc.js";
@@ -657,45 +657,72 @@ export async function handleRateChangeThresholdUpdated({
   context.BreakerConfig.set({ ...cfg, rateChangeThreshold: newThreshold });
 }
 
-/** Recompute `Pool.breakerTripped` for every pool on `rateFeedID` and persist
- * any change. A feed is "halted" when it has at least one ENABLED, non-
+/** Is `rateFeedID` halted? True when it has at least one ENABLED, non-
  * MARKET_HOURS BreakerConfig in the TRIPPED state — the same predicate the
  * dashboard's `pickTrippableConfig` uses. MARKET_HOURS is excluded on purpose:
  * a weekend FX closure is a scheduled, expected unavailability that already
  * renders via the dashboard's WEEKEND path, not a price-breaker fault.
  *
- * Idempotent and self-correcting: it reads the feed's full BreakerConfig set
- * each call, so it stays correct regardless of which BreakerBox transition
- * triggered it. Call it after any trip / reset / enable / remove that can move
- * the OR. Pools that don't exist yet (feed indexed before the FPMM) are simply
- * skipped — `getPoolsByFeed` returns only existing rows — and the next
- * transition for the feed heals them.
+ * Shared by `syncPoolsBreakerHalt` (breaker-event fan-out) and `upsertPool`
+ * (recompute when a pool's feed is first assigned, so a pool that appears
+ * mid-halt isn't stuck reading false until the next transition).
  *
  * (Defined here at file end so its insertion doesn't shift the line-keyed
  * ESLint baseline entry for `bootstrapFeedBreakerConfigs` above.) */
-export async function syncPoolsBreakerHalt(
-  context: EvmOnEventContext,
+export async function computeFeedHalted(
+  // Only needs the breaker entities — narrowed so `upsertPool` (PoolContext)
+  // can call it without the full EvmOnEventContext surface.
+  context: Pick<EvmOnEventContext, "BreakerConfig" | "Breaker">,
   chainId: number,
   rateFeedID: string,
-): Promise<void> {
-  const feed = asAddress(rateFeedID);
+): Promise<boolean> {
   const configs = await context.BreakerConfig.getWhere({
-    rateFeedID: { _eq: feed },
+    rateFeedID: { _eq: asAddress(rateFeedID) },
   });
-  let halted = false;
   for (const cfg of configs) {
     if (cfg.chainId !== chainId) continue;
     if (!cfg.enabled) continue;
     if (cfg.status !== "TRIPPED") continue;
     const breaker = await context.Breaker.get(cfg.breaker_id);
     if (!breaker || breaker.kind === "MARKET_HOURS") continue;
-    halted = true;
-    break;
+    return true;
   }
-  const poolIds = await getPoolsByFeed(context, chainId, feed);
+  return false;
+}
+
+/** Recompute `Pool.breakerTripped` for every pool on `rateFeedID` and persist
+ * any change. Idempotent and self-correcting: reads the feed's full
+ * BreakerConfig set each call, so it stays correct regardless of which
+ * BreakerBox transition triggered it. Call it after any trip / reset / enable /
+ * remove that can move the OR. */
+export async function syncPoolsBreakerHalt(
+  context: EvmOnEventContext,
+  chainId: number,
+  rateFeedID: string,
+): Promise<void> {
+  const halted = await computeFeedHalted(context, chainId, rateFeedID);
+  const poolIds = await getPoolsByFeed(context, chainId, asAddress(rateFeedID));
   for (const poolId of poolIds) {
     const pool = await context.Pool.get(poolId);
     if (!pool || pool.breakerTripped === halted) continue;
     context.Pool.set({ ...pool, breakerTripped: halted });
   }
+}
+
+/** Resolve `breakerTripped` for a pool whose rate feed is being (re)assigned in
+ * `upsertPool`. Recomputes from the feed's breaker configs only on the
+ * unassigned -> assigned transition — so a pool that first appears (or heals
+ * its feed) while the feed is already halted isn't stuck `false` until the next
+ * BreakerBox event — and otherwise preserves the existing flag. Extracted so
+ * `upsertPool` doesn't take on the gate's cognitive complexity. */
+export async function breakerTrippedOnFeedAssign(
+  context: Pick<EvmOnEventContext, "BreakerConfig" | "Breaker">,
+  chainId: number,
+  existing: Pick<Pool, "referenceRateFeedID" | "breakerTripped">,
+  nextReferenceRateFeedID: string,
+): Promise<boolean> {
+  if (existing.referenceRateFeedID !== "" || nextReferenceRateFeedID === "") {
+    return existing.breakerTripped;
+  }
+  return computeFeedHalted(context, chainId, nextReferenceRateFeedID);
 }
