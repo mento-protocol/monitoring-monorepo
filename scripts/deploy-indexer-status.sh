@@ -73,6 +73,7 @@ wait_for_deployment_registration() {
         echo "" >&2
         echo "⚠️  Deployment $target still unregistered after ${elapsed}s — that's past the normal P50 of ~2 min." >&2
         echo "   Likely causes (check before waiting longer):" >&2
+        echo "     • Envio already has 3 live deployments; delete a stale non-prod deployment first" >&2
         echo "     • Envio Cloud's webhook receiver lost the push event (their side, opaque to us)" >&2
         echo "     • Push was a no-op (same SHA already on the deploy branch — see deploy-indexer.sh warning)" >&2
         echo "     • Envio's build queue is backed up" >&2
@@ -225,7 +226,8 @@ else
     if [[ "$wait_status" -ne 0 ]]; then
       if [[ "$wait_status" -eq 1 ]]; then
         echo "❌ Deployment $TARGET_COMMIT did not register within $((REGISTRATION_TIMEOUT_SECONDS / 60)) minutes." >&2
-        echo "   This is almost always an Envio-side issue (broken webhook, stuck build queue)." >&2
+        echo "   First check active deployment count: 3 live deployments means Envio has no room for a new one." >&2
+        echo "   If fewer than 3 deployments exist, treat this as an Envio-side issue (broken webhook, stuck build queue)." >&2
         echo "   The push to the deploy branch succeeded — verify on GitHub and check Envio's UI:" >&2
         echo "   https://envio.dev/app/${ENVIO_ORG}/${ENVIO_INDEXER}" >&2
       else

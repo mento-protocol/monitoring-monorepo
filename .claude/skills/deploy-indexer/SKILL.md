@@ -5,7 +5,7 @@ title: Deploy Indexer Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-05-29
 ---
 
 # Deploy Indexer (end-to-end)
@@ -51,6 +51,7 @@ In parallel:
 - `git status --porcelain` — must be empty. A dirty tree means uncommitted work; deploying it would ship a commit that doesn't exist on origin. Surface and stop.
 - (Branch-mode only) Verify the branch tracks an upstream: `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}` must succeed (and `git ls-remote --exit-code origin "$BRANCH"` must find the remote ref). A local-only branch with no upstream is not a valid deploy source — its `HEAD` was never pushed to `origin`, so the deploy would ship unreproducible code. Surface and stop; tell the user to `git push -u origin <branch>` first.
 - (Branch-mode only) `git rev-list --left-right --count @{upstream}...HEAD` — both counts MUST be `0`. The right count (ahead) catches local commits that would silently ship via `envio` without ever landing on the tracked branch; the left count (behind) catches a stale local checkout that would deploy an outdated commit. If either is non-zero, surface the divergence and stop — the user must `git pull --rebase` (behind) or `git push` (ahead) first.
+- `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — count `data.deployments[]` before pushing. The mento hosted indexer can only keep three live deployments. If three entries already exist, Envio has no room to create another deployment: keep the `prod_status == "prod"` deployment and delete, or ask the user to delete, an obsolete non-prod deployment before pushing a fresh SHA.
 - Parse the user's arguments for the boolean flags `--no-promote` and `--no-verify`; capture as `NO_PROMOTE` and `NO_VERIFY`. Any non-flag token (e.g. a stray SHA) is an error — surface and stop, since the underlying script doesn't accept one.
 - `git rev-parse --short=7 HEAD` — capture as `TARGET_COMMIT`. **Use `--short=7` explicitly**, not bare `--short`: Envio's API stores `commit_hash` truncated to exactly 7 chars, and `startswith(target)` matches on that — an 8-char short SHA (which is what `git rev-parse --short` returns once a repo's `core.abbrev` ticks up past 7) silently matches zero rows in the babysit + promote-verify queries. The deploy always uses `HEAD`; to deploy a different commit, the user must check it out first.
 - If `BRANCH != main`: **default `NO_PROMOTE=true`** (fail-closed), and surface the branch name + commit short sha clearly. Override the default only when the user's request explicitly says "promote" / "go live" / similar — never on a bare `/deploy-indexer` from a feature branch. The reasoning: pre-merge deploys exist precisely because the dashboard codebase doesn't yet query the new schema; promoting before merge is almost always wrong, so make it explicit-opt-in instead of confirm-to-skip.
@@ -107,10 +108,14 @@ up to chain head. They fail for different reasons and want different responses.
 ### Phase 2a — Confirm registration (5 min hard ceiling, do not background blind)
 
 Normal registration completes 2-3 min after the `envio` push. If the deployment
-hasn't appeared in Envio's API by ~5 min, **the webhook is almost always broken
-on Envio's side** (their app missed the push event, their build queue is jammed,
-or — the silent failure mode — `pnpm deploy:indexer` no-op'd because the deploy
-branch was already at HEAD). Waiting longer rarely recovers; investigate now.
+hasn't appeared in Envio's API by ~5 min, check the active deployment count
+first. **Three live deployments means Envio has no room to create another
+deployment**; delete, or ask the user to delete, an obsolete non-prod deployment
+before pushing a fresh SHA. If there are fewer than three deployments, then
+treat the miss as an Envio-side webhook/build problem (their app missed the push
+event, their build queue is jammed, or — the silent failure mode —
+`pnpm deploy:indexer` no-op'd because the deploy branch was already at HEAD).
+Waiting longer rarely recovers; investigate now.
 
 Run the registration probe in the **foreground** with a tight ceiling:
 
