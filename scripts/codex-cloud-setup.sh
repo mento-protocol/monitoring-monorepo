@@ -361,7 +361,25 @@ echo "==> Verifying dashboard dependency resolution"
 pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
 
 echo "==> Running Envio codegen"
+# Drop any stale type facade first: a reused/cached checkout may already carry
+# the gitignored .envio/types.d.ts, which would let the verification below pass
+# even if THIS codegen run silently wrote nothing -- the exact miss we guard for.
+rm -f indexer-envio/.envio/types.d.ts
 pnpm indexer:codegen
+
+echo "==> Verifying Envio codegen output"
+if [ ! -s "indexer-envio/.envio/types.d.ts" ]; then
+  cat >&2 <<'MSG'
+error: Envio codegen did not produce indexer-envio/.envio/types.d.ts.
+`pnpm --filter @mento-protocol/indexer-envio typecheck` and the indexer vitest
+suites resolve types from this file and will fail without it. `envio codegen` is
+quiet in CI/non-TTY mode and exits 0 even when it writes nothing, so re-run
+`pnpm indexer:codegen` and inspect the envio CLI output for the underlying error.
+(The ReScript `generated/` dir is intentionally not produced here -- it is only
+needed for `pnpm indexer:dev`/`start`, which needs Docker plus live RPC.)
+MSG
+  exit 1
+fi
 
 echo "==> Validating repo-visible agent context"
 pnpm agent:context-check
