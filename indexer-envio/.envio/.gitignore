@@ -1,2 +1,5 @@
 # Ephemeral codegen output. Add other .envio entries here as needed.
 types.d.ts
+# Content hash of the schema/config that produced types.d.ts, written by
+# scripts/claude-code-web-setup.sh so a warm bootstrap can skip redundant codegen.
+.web-bootstrap-codegen.sha256

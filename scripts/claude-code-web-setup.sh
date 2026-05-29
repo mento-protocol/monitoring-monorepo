@@ -57,18 +57,76 @@ else
   echo "WARN: network access, keep defaults) to enable local Trunk fmt/lint hooks." >&2
 fi
 
+# Content-addressed skip markers let a warm bootstrap (the cached environment
+# Setup script and the SessionStart hook both re-enter this script on a fresh
+# container) avoid re-running work the snapshot already has. hash_inputs is
+# deterministic (sorted), expands directories to their files, tolerates missing
+# optional inputs, and is guarded at every call site so a hashing miss degrades
+# to a safe rebuild rather than aborting under `set -euo pipefail`.
+hash_inputs() {
+  {
+    for p in "$@"; do
+      if [ -d "$p" ]; then
+        find "$p" -type f 2>/dev/null
+      elif [ -e "$p" ]; then
+        printf '%s\n' "$p"
+      fi
+    done
+  } | sort -u | xargs -r sha256sum 2>/dev/null | sha256sum | awk '{print $1}'
+}
+
 echo "==> Installing workspace dependencies"
-CI=true pnpm install --frozen-lockfile
+# Skip the (~15s) reinstall when neither the lockfile nor the shared-config build
+# inputs changed since the last bootstrap. shared-config is built by the root
+# postinstall (tsc -> shared-config/dist), which other packages import from, so a
+# shared-config/src edit must bust the marker even when pnpm-lock.yaml is
+# unchanged. The marker lives inside the gitignored node_modules, so it is
+# discarded whenever the dependency tree is.
+deps_marker="node_modules/.web-bootstrap-deps.sha256"
+deps_hash="$(hash_inputs pnpm-lock.yaml shared-config/src shared-config/package.json shared-config/tsconfig.json || true)"
+if [ -d node_modules ] && [ -n "$deps_hash" ] &&
+  [ "$(cat "$deps_marker" 2>/dev/null)" = "$deps_hash" ]; then
+  echo "deps + shared-config unchanged since last bootstrap; skipping pnpm install."
+  deps_skipped=1
+else
+  CI=true pnpm install --frozen-lockfile
+  # Rebuild shared-config explicitly: on a src-only change (lockfile unchanged)
+  # the install above is a no-op that skips the postinstall build, leaving
+  # shared-config/dist stale for the dashboard/bridge imports that resolve it.
+  pnpm --filter @mento-protocol/monitoring-config build
+  deps_skipped=0
+fi
 
 echo "==> Verifying dashboard dependency resolution"
 pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
 
+# Record the deps marker only AFTER the resolution check passes, so a successful
+# install + failed verification never caches a broken state (a warm restart
+# would otherwise skip install and re-hit the same failure).
+if [ "$deps_skipped" = "0" ] && [ -n "$deps_hash" ]; then
+  printf '%s' "$deps_hash" >"$deps_marker"
+fi
+
 echo "==> Running Envio codegen"
-# Drop any stale type facade first: a reused/cached checkout may already carry
-# the gitignored .envio/types.d.ts, which would let the verification below pass
-# even if THIS codegen run silently wrote nothing — the exact miss we guard for.
-rm -f indexer-envio/.envio/types.d.ts
-pnpm indexer:codegen
+# Skip the (~6s) regen when the type facade already exists AND every input Envio
+# codegen reads is byte-identical. The input set mirrors the .envio cache key in
+# .github/workflows/ci.yml (config*.yaml, schema.graphql, the indexer package
+# manifest, abis/**, scripts/**) — notably the ABIs, which feed the generated
+# event types — so the skip can never serve stale types. Hashing config*.yaml
+# (real files) rather than the config.yaml symlink also survives checkouts that
+# do not materialise symlinks. The marker lives in the gitignored .envio dir.
+codegen_marker="indexer-envio/.envio/.web-bootstrap-codegen.sha256"
+codegen_hash="$(hash_inputs indexer-envio/config*.yaml indexer-envio/schema.graphql indexer-envio/package.json indexer-envio/abis indexer-envio/scripts || true)"
+if [ -s "indexer-envio/.envio/types.d.ts" ] && [ -n "$codegen_hash" ] &&
+  [ "$(cat "$codegen_marker" 2>/dev/null)" = "$codegen_hash" ]; then
+  echo "Envio types up to date for the current codegen inputs; skipping codegen."
+else
+  # Drop any stale type facade first: a reused/cached checkout may already carry
+  # the gitignored .envio/types.d.ts, which would let the verification below pass
+  # even if THIS codegen run silently wrote nothing — the exact miss we guard for.
+  rm -f indexer-envio/.envio/types.d.ts
+  pnpm indexer:codegen
+fi
 
 echo "==> Verifying Envio codegen output"
 # `envio codegen` is quiet in CI/non-TTY mode and exits 0 even when it writes
@@ -86,6 +144,12 @@ fail without it. Re-run 'pnpm indexer:codegen' and inspect the envio CLI
 output for the underlying error.
 MSG
   exit 1
+fi
+# Record the inputs that produced this verified facade so a later bootstrap with
+# unchanged codegen inputs can skip the regen above. Written only after the
+# existence check passes, so the marker never caches a failed/empty codegen.
+if [ -n "$codegen_hash" ]; then
+  printf '%s' "$codegen_hash" >"$codegen_marker"
 fi
 
 echo "==> Installing Playwright Chromium for dashboard browser tests"
