@@ -146,6 +146,13 @@ export function useWindowedHistory<T extends WindowedHistoryRow>({
   const cappedRef = useRef(false);
   const fetchingRef = useRef(false);
   const pageCountRef = useRef(0);
+  // Bumped on every reset. An older-page fetch captures this before its await
+  // and discards its result if the generation changed mid-flight — otherwise a
+  // request in flight when the pool/network switches resolves AFTER the reset
+  // and writes the old pool's rows into the freshly-cleared Map (cross-pool
+  // contamination, and a short stale page would even flip `reachedStart` on the
+  // new pool, permanently disabling its scroll-back).
+  const generationRef = useRef(0);
   // Oldest timestamp the caller has asked us to reach. `Infinity` = no request
   // yet (continuation never fires for a finite oldest > Infinity).
   const pendingTargetRef = useRef<number>(Infinity);
@@ -168,6 +175,9 @@ export function useWindowedHistory<T extends WindowedHistoryRow>({
     cappedRef.current = false;
     fetchingRef.current = false;
     pageCountRef.current = 0;
+    // Invalidate any in-flight older-page fetch so its stale result is dropped
+    // instead of merged into the new pool's now-empty Map.
+    generationRef.current += 1;
     pendingTargetRef.current = Infinity;
     setOlderError(undefined);
     setIsFetchingOlder(false);
@@ -257,6 +267,10 @@ export function useWindowedHistory<T extends WindowedHistoryRow>({
 
     fetchingRef.current = true;
     setIsFetchingOlder(true);
+    // Snapshot the generation so a reset (pool/network switch) that lands while
+    // this request is in flight causes us to drop the result instead of writing
+    // the old pool's rows into the new pool's Map.
+    const generation = generationRef.current;
     // Min loaded timestamp is exactly the boundary for the next older page.
     const beforeTimestamp = minTimestamp(loadedRef.current.values());
     try {
@@ -268,6 +282,10 @@ export function useWindowedHistory<T extends WindowedHistoryRow>({
         beforeTimestamp,
         selectRows: sel,
       });
+      // Reset raced ahead of this resolve — abandon the stale page entirely and
+      // touch none of the flags: the new generation already cleared them on
+      // reset and may own an in-flight fetch of its own by now.
+      if (generation !== generationRef.current) return;
       for (const r of batch) loadedRef.current.set(r.id, r);
       pageCountRef.current += 1;
       // A short page means we hit the start of indexed history.
@@ -276,12 +294,19 @@ export function useWindowedHistory<T extends WindowedHistoryRow>({
       setOlderError(undefined);
       setVersion((ver) => ver + 1);
     } catch (err) {
+      // Same generation guard as the success path — a reset mid-flight must not
+      // surface the stale request's error against the new pool.
+      if (generation !== generationRef.current) return;
       // Non-fatal: loaded rows stay rendered. We did NOT advance any cursor
       // (it's derived from the Map), so the next request retries the same page.
       setOlderError(err instanceof Error ? err : new Error(String(err)));
     } finally {
-      fetchingRef.current = false;
-      setIsFetchingOlder(false);
+      // Only release the flags if we still own them — a stale resolve must not
+      // clear the fetching state the new generation set after its reset.
+      if (generation === generationRef.current) {
+        fetchingRef.current = false;
+        setIsFetchingOlder(false);
+      }
     }
   }, []);
 

@@ -280,6 +280,41 @@ describe("useWindowedHistory", () => {
     expect(tsOf(ref.current)).toEqual([97, 98, 99, 100, 101, 102]);
   });
 
+  it("discards a stale older page that resolves AFTER a resetKey change", async () => {
+    // Race: an older-page fetch is in flight when the user switches pools. The
+    // old request must NOT write its rows into the new pool's Map, and must not
+    // flip reachedStart/capped on the new pool (which would disable scroll-back).
+    headResponse = headOf(102, 101, 100);
+    let resolveOld: ((v: unknown) => void) | undefined;
+    requestMock.mockImplementationOnce(
+      () =>
+        new Promise((res) => {
+          resolveOld = res;
+        }),
+    );
+    const { ref, rerender } = render();
+    await settle();
+    await act(async () => ref.current!.ensureLoadedBefore(98)); // starts the fetch
+    expect(requestMock).toHaveBeenCalledTimes(1);
+
+    // Switch pools while the old request is still pending; new head seeds pool-2.
+    headResponse = headOf(202, 201, 200);
+    rerender("celo-mainnet:pool-2");
+    await settle();
+    expect(tsOf(ref.current)).toEqual([200, 201, 202]);
+
+    // The stale pool-1 request finally resolves with a SHORT page (would set
+    // reachedStart if merged). It must be dropped entirely.
+    await act(async () => {
+      resolveOld?.({ OracleSnapshot: [row(99)] });
+    });
+    await settle();
+
+    expect(tsOf(ref.current)).toEqual([200, 201, 202]); // no pool-1 rows leaked
+    expect(ref.current!.reachedStart).toBe(false); // stale short page ignored
+    expect(ref.current!.capped).toBe(false);
+  });
+
   it("drops all frozen pages when resetKey changes", async () => {
     headResponse = headOf(102, 101, 100);
     requestMock.mockResolvedValue({
