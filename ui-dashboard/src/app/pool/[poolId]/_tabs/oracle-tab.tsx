@@ -174,11 +174,15 @@ export function OracleTab(props: OracleTabProps) {
     },
     [oldestLoadedTs, ensureLoadedBefore],
   );
+  // Clear a pending look-ahead on unmount AND on pool/network switch — the tab
+  // doesn't remount across a poolId param change, so without the identity dep a
+  // debounce timer armed for the old pool would fire ~150ms later and call
+  // ensureLoadedBefore on the freshly-reset new pool.
   useEffect(
     () => () => {
       if (lookAheadTimer.current) clearTimeout(lookAheadTimer.current);
     },
-    [],
+    [network.id, poolId],
   );
 
   // Fetch the active deviation breaker (VALUE_DELTA or MEDIAN_DELTA) for this
