@@ -607,7 +607,7 @@ describe("fetchNetworkData — pools query failure", () => {
       w30d: { from: 0, to: 30000 },
     });
 
-    expect(result.error).toEqual({ message: poolsError.message });
+    expect(result.error).toBe(poolsError);
     expect(result.pools).toHaveLength(0);
     expect(result.snapshots).toHaveLength(0);
     expect(result.fees).toBeNull();
@@ -642,7 +642,7 @@ describe("fetchNetworkData — fees query failure only", () => {
     });
 
     expect(result.error).toBeNull();
-    expect(result.feeSnapshotsError).toEqual({ message: feesErr.message });
+    expect(result.feeSnapshotsError).toBe(feesErr);
     expect(result.snapshotsError).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.fees).toBeNull();
@@ -674,7 +674,7 @@ describe("fetchNetworkData — snapshots query failure only", () => {
     });
 
     expect(result.error).toBeNull();
-    expect(result.snapshotsError).toEqual({ message: snapErr.message });
+    expect(result.snapshotsError).toBe(snapErr);
     expect(result.feeSnapshotsError).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.snapshots).toHaveLength(0);
@@ -685,7 +685,7 @@ describe("fetchNetworkData — snapshots query failure only", () => {
 // fetchNetworkData — non-Error rejections wrapped
 
 describe("fetchNetworkData — non-Error thrown values", () => {
-  it("wraps string rejection in a { message } object for pools failure", async () => {
+  it("wraps string rejection in Error for pools failure", async () => {
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockRejectedValue("something went wrong");
@@ -696,7 +696,8 @@ describe("fetchNetworkData — non-Error thrown values", () => {
       w30d: { from: 0, to: 30000 },
     });
 
-    expect(result.error).toEqual({ message: "something went wrong" });
+    expect(result.error).toBeInstanceOf(Error);
+    expect(result.error?.message).toBe("something went wrong");
   });
 });
 
@@ -729,7 +730,7 @@ describe("fetchNetworkData — LP query failure only", () => {
     expect(result.pools).toHaveLength(1);
     expect(result.fees).not.toBeNull();
     expect(result.uniqueLpAddresses).toBeNull();
-    expect(result.lpError).toEqual({ message: lpErr.message });
+    expect(result.lpError).toBe(lpErr);
   });
 });
 
@@ -781,7 +782,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
     expect(result1.network.id).toBe("celo-mainnet");
 
     // Network 2: error, but still returns correct network metadata
-    expect(result2.error).toEqual({ message: poolsErr.message });
+    expect(result2.error).toBe(poolsErr);
     expect(result2.pools).toHaveLength(0);
     expect(result2.network.id).toBe("celo-sepolia-local");
   });
@@ -800,7 +801,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
     });
 
     expect(result.network).toBe(MOCK_NETWORK_2);
-    expect(result.error).toEqual({ message: err.message });
+    expect(result.error).toBe(err);
   });
 
   it("fees failure on one network does not affect pools or snapshots", async () => {
@@ -827,7 +828,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
 
     expect(result.error).toBeNull();
     expect(result.pools).toHaveLength(1);
-    expect(result.feeSnapshotsError).toEqual({ message: feesErr.message });
+    expect(result.feeSnapshotsError).toBe(feesErr);
     expect(result.snapshotsError).toBeNull();
     expect(result.fees).toBeNull();
   });
@@ -855,7 +856,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
 
     expect(result.error).toBeNull();
     expect(result.pools).toHaveLength(1);
-    expect(result.snapshotsError).toEqual({ message: snapErr.message });
+    expect(result.snapshotsError).toBe(snapErr);
     expect(result.feeSnapshotsError).toBeNull();
     expect(result.snapshots).toHaveLength(0);
     expect(result.fees).not.toBeNull();
@@ -968,6 +969,8 @@ describe("fetchAllNetworks — orchestration", () => {
     const second = results.find((r) => r.network.id === "monad-mainnet")!;
 
     expect(second.network.id).toBe("monad-mainnet");
+    // fetchAllNetworks flattens the Error to a plain { message } at the RSC
+    // boundary (#661), so it's no longer the same instance.
     expect(second.error).toEqual({ message: err.message });
     expect(second.pools).toHaveLength(0);
   });
@@ -1004,7 +1007,7 @@ describe("fetchAllNetworks — orchestration", () => {
     expect(callCount).toBeGreaterThan(0);
   });
 
-  it("wraps non-Error rejections in plain { message } objects", async () => {
+  it("flattens non-Error rejections to plain { message } objects", async () => {
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockRejectedValue("string rejection");
@@ -1012,7 +1015,10 @@ describe("fetchAllNetworks — orchestration", () => {
     const results = await fetchAllNetworks();
 
     for (const result of results) {
+      // fetchAllNetworks flattens error channels to RSC-serializable
+      // { message } objects (#661) — never raw Error instances.
       expect(result.error).toEqual({ message: "string rejection" });
+      expect(result.error).not.toBeInstanceOf(Error);
     }
   });
 });
@@ -1023,9 +1029,9 @@ describe("showInitialSkeleton", () => {
   });
 
   it("does NOT show the skeleton when rows exist, even while revalidating", () => {
-    // The degraded-SSR fix: fallbackData populated rows and the hook flipped
-    // revalidateOnMount, so isLoading is true on first render — but the table
-    // must stay visible (no layout-shift skeleton swap).
+    // The degraded-SSR fix (#661): fallbackData populated rows and the hook
+    // flipped revalidateOnMount, so isLoading is true on the first render — but
+    // the table must stay visible (no layout-shift skeleton swap).
     expect(showInitialSkeleton(true, 3)).toBe(false);
   });
 
