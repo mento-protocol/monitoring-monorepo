@@ -7,16 +7,42 @@
 # $CLAUDE_CODE_REMOTE so local Claude Code sessions don't re-run a heavy install
 # on every prompt — local devs already have a working tree.
 #
-# Synchronous (no `{"async": true, ...}` header): the session waits for the
-# bootstrap so the agent never tries to run quality-gate / tests / lint commands
-# before deps and codegen exist. Switch to async by emitting the JSON header
-# below before the install steps if the latency cost matters more than the
-# race-condition risk.
+# SessionStart fires on `startup`, `resume`, `clear`, and `compact` unless the
+# settings.json entry pins a `matcher`. We only want the heavy install on
+# `startup` — a hosted container that has already booted, run install/codegen,
+# and is just resuming or compacting context does not need 60s+ of pnpm work
+# again. Read the JSON `source` from stdin and skip non-startup events.
+#
+# Synchronous (no `{"async": true, ...}` header): the script runs to completion
+# before the agent receives control. Note that SessionStart's exit code is
+# advisory in Claude Code — a failed bootstrap surfaces in the hook log but
+# does not by itself block the agent from running tools. Pair this with
+# explicit dependency checks in the gates that consume them.
 
 set -euo pipefail
 
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
+fi
+
+# Inspect SessionStart payload on stdin (best-effort: if stdin is not present
+# or the payload is unparseable, default to running the bootstrap rather than
+# silently skipping). Only `startup` triggers the heavy install/codegen path.
+HOOK_INPUT=""
+if [ ! -t 0 ]; then
+  HOOK_INPUT="$(cat || true)"
+fi
+if [ -n "$HOOK_INPUT" ]; then
+  SOURCE="$(printf '%s' "$HOOK_INPUT" |
+    node -e "let s=''; process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).source||'')}catch{process.stdout.write('')}})" \
+    2>/dev/null || true)"
+  case "$SOURCE" in
+    startup | "") ;;
+    *)
+      echo "claude-code-web SessionStart: skipping bootstrap on source=$SOURCE." >&2
+      exit 0
+      ;;
+  esac
 fi
 
 REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
