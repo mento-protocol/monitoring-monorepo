@@ -61,6 +61,28 @@ export function readXRange(
 }
 
 /**
+ * Classify a Plotly relayout event into the action the chart should take:
+ *   - `"reset"` — the X axis autoranged ("All" button / double-click). The
+ *     viewport now shows the whole loaded series, so decimation must drop its
+ *     stale zoom window (`setVisibleRange(null)`); but there's nothing new to
+ *     fetch, so the look-ahead does NOT fire.
+ *   - `[lo, hi]` — an explicit X-range change (pan / wheel-X zoom / rangeslider
+ *     drag). Refine decimation to that window AND evaluate the look-ahead.
+ *   - `null` — no X-axis change (Y-only wheel-zoom, unrelated relayout). Ignore.
+ *
+ * Splitting "reset" out of `readXRange`'s null is the fix for a desync: before,
+ * an autorange reset returned null and left `visibleRange` pinned to the prior
+ * zoom, so the axis looked reset while the trace stayed decimated to the old
+ * narrow window. Pure + exported for unit testing.
+ */
+export function relayoutAction(
+  e: Readonly<Record<string, unknown>>,
+): "reset" | [number, number] | null {
+  if (e["xaxis.autorange"]) return "reset";
+  return readXRange(e);
+}
+
+/**
  * Look-ahead gate: given the requested visible X range (unix seconds) and the
  * oldest loaded timestamp, return the timestamp to load back to — or `null`
  * when the left edge still has comfortable headroom and no fetch is needed.
@@ -339,17 +361,23 @@ export function OracleChart({
         style={{ width: "100%", height: 420 }}
         useResizeHandler
         onRelayout={(e) => {
-          // Y-only wheel-zooms and autorange resets carry no X-range change →
-          // `readXRange` returns null and we don't refine decimation or fetch.
           // The trigger only ever READS data; it never calls relayout, and
           // `uirevision` pins the viewport across the resulting data change —
           // so there's no feedback loop with the wheel handler.
-          const range = readXRange(
+          const action = relayoutAction(
             e as unknown as Readonly<Record<string, unknown>>,
           );
-          if (!range) return;
-          setVisibleRange(range);
-          onVisibleXRangeChange?.(range);
+          // "All"/double-click autorange: clear the zoom window so decimation
+          // re-scopes to the full loaded series (otherwise the axis looks reset
+          // while the trace stays clipped to the old zoom). Nothing new to load.
+          if (action === "reset") {
+            setVisibleRange(null);
+            return;
+          }
+          // Y-only zooms / unrelated relayouts carry no X change → ignore.
+          if (!action) return;
+          setVisibleRange(action);
+          onVisibleXRangeChange?.(action);
         }}
         onInitialized={(_figure, graphDiv) => {
           cleanupWheelRef.current?.();

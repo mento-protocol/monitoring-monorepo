@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { describe, expect, it } from "vitest";
-import { lookAheadTarget, readXRange } from "../oracle-chart";
+import { lookAheadTarget, readXRange, relayoutAction } from "../oracle-chart";
 
 // Plotly emits X range as ISO-ish strings; convert to unix seconds.
 const sec = (iso: string) => new Date(iso).getTime() / 1000;
@@ -50,6 +50,36 @@ describe("readXRange", () => {
         "xaxis.range[1]": "2026-05-01T00:00:00Z",
       }),
     ).toBeNull();
+  });
+});
+
+describe("relayoutAction", () => {
+  it('classifies an autorange reset as "reset" (not null)', () => {
+    // The desync fix: the handler must clear the decimation window on reset so
+    // the trace re-scopes to the full series. `readXRange` returns null here,
+    // which previously left the stale zoom window pinned.
+    expect(relayoutAction({ "xaxis.autorange": true })).toBe("reset");
+    expect(readXRange({ "xaxis.autorange": true })).toBeNull();
+  });
+
+  it("returns the range for an explicit X-range change (pan / zoom)", () => {
+    const action = relayoutAction({
+      "xaxis.range[0]": "2026-05-01T00:00:00Z",
+      "xaxis.range[1]": "2026-05-08T00:00:00Z",
+    });
+    expect(action).not.toBe("reset");
+    expect(action).not.toBeNull();
+    expect((action as [number, number])[1]).toBeGreaterThan(
+      (action as [number, number])[0],
+    );
+  });
+
+  it("returns null for a Y-only zoom (no X change, no reset)", () => {
+    expect(relayoutAction({ "yaxis.range": [0.99, 1.01] })).toBeNull();
+  });
+
+  it("returns null for an unrelated relayout", () => {
+    expect(relayoutAction({ dragmode: "pan" })).toBeNull();
   });
 });
 
