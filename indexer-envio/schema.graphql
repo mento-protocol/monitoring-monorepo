@@ -221,7 +221,7 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   oracleOk: Boolean!
   numReporters: Int!
   # Magnitude can run into billions of bps on degenerate (effectively
-  # one-sided) reserves; see `degenerateReserves` flag and BACKLOG entry.
+  # one-sided) reserves; see the `degenerateReserves` flag (PR #676).
   priceDifference: BigInt!
   degenerateReserves: Boolean!
   rebalanceThreshold: Int!
