@@ -207,13 +207,30 @@ export function useWindowedHistory<T extends WindowedHistoryRow>({
     [headData, selectRows],
   );
 
-  // Merge head rows into the loaded Map. The head only adds/refreshes — it
-  // never removes — so rows aging out of the newest-1000 window persist.
-  useEffect(() => {
-    if (headRows.length === 0) return;
-    for (const r of headRows) loadedRef.current.set(r.id, r);
-    setVersion((v) => v + 1);
-  }, [headRows]);
+  // Merge head rows into the loaded Map during render (NOT in an effect),
+  // guarded on headData identity. The head only adds/refreshes by id — never
+  // removes — so rows aging out of the newest-1000 window persist, keeping the
+  // series gap-free. This is an imperative ref accumulator (not derived state),
+  // and Map.set-by-id is idempotent under StrictMode's double render. Kept in
+  // lockstep with the reset above so a pool switch clears, then repopulates,
+  // within one commit.
+  // Guard on `headRows` IDENTITY, not `headData`: `headRows` is the memoized
+  // inner array, so it only changes when the head CONTENT changes (real SWR
+  // returns a stable `data` ref on no-op revalidations; tests reuse a stable
+  // inner array under a fresh envelope). Guarding on the `headData` envelope
+  // would re-fire every render under such mocks → infinite loop. Init to a
+  // unique sentinel so the first payload merges on mount.
+  const headSentinelRef = useRef<T[]>([]);
+  const [prevHeadRows, setPrevHeadRows] = useState<T[]>(
+    headSentinelRef.current,
+  );
+  if (prevHeadRows !== headRows) {
+    setPrevHeadRows(headRows);
+    if (headRows.length > 0) {
+      for (const r of headRows) loadedRef.current.set(r.id, r);
+      setVersion((v) => v + 1);
+    }
+  }
 
   // ----- Merged, sorted view. ------------------------------------------------
   const rows = useMemo(() => {
