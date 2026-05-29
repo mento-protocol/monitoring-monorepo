@@ -34,12 +34,12 @@ read identity with access to the `project_factory`-managed project.
 
 - **PR plan:** don't. The only way to full-refresh the PR plan is to arm the
   read-only plan SA — the SA a malicious same-repo PR can mint via a plan-time
-  data source — with project read, *widening* the PR attack surface.
-  `-refresh=false` is a *functional* limitation (the PR plan won't surface
+  data source — with project read, _widening_ the PR attack surface.
+  `-refresh=false` is a _functional_ limitation (the PR plan won't surface
   out-of-band drift), not a security gap; drift is caught daily anyway.
 - **Drift leg:** evaluated explicitly (incl. an operator offering to create the
   grant, 2026-05-29) and declined on cost/benefit. The only sound build is a
-  *dedicated* `*-drift-readonly@` SA (never PR-reachable) with a hand-scoped read
+  _dedicated_ `*-drift-readonly@` SA (never PR-reachable) with a hand-scoped read
   role on the alerts project + a human-reviewed apply on the `terraform/`
   platform stack — moderate, recurring cost (the scoped role must track the
   stack's resource set). The gain is low and partial: it takes the daily

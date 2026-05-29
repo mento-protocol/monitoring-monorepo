@@ -87,8 +87,8 @@ CI-equivalent diff scan, or `pnpm react-doctor` locally for a full scan.
 CI also runs a full-score floor and fails unless
 `react-doctor --full --score --offline` returns `100`.
 Some high-noise React Doctor rules are intentionally disabled in ESLint to keep
-IDE signal useful; the standalone CLI/diff gate is the source of truth for those
-rules.
+IDE signal useful; the standalone CLI/diff gate and `BACKLOG.md` remain the
+source of truth for those rules.
 
 Project-wide silences live in `react-doctor.config.json`. Current state:
 
@@ -112,10 +112,12 @@ Project-wide silences live in `react-doctor.config.json`. Current state:
   `HASURA_TIMEOUT_MS` backward-compat re-export. New imports still target
   `@/lib/hasura-timeout` directly so server code does not pull in SWR.
 
-### React Doctor cleanup state
+### Historical Cleanup Notes
 
 The dashboard's enforced React Doctor state is **100 / 100 (0 diagnostics)**.
-The PR #367 diff-gate follow-ups are fully cleaned up; no deferred items remain.
+Historical cleanup notes live in `BACKLOG.md` under "Follow-ups deferred from
+PR #367 (react-doctor diff gate)". Single source of truth — update there, not
+here.
 
 ## Tech Stack
 
