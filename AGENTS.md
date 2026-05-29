@@ -216,8 +216,7 @@ detailed rules in the checklist.
 # Install all deps (gated: pnpm refuses registry versions <3 days old via
 # minimumReleaseAge in pnpm-workspace.yaml; @mento-protocol/* is exempted.
 # Frozen-lockfile installs are unaffected.)
-pnpm install                       # Local/worktree setup
-./scripts/codex-cloud-setup.sh     # Codex Cloud setup; replaces local install
+pnpm install
 
 # Indexer
 pnpm indexer:codegen              # Generate types from schema (multichain mainnet)
@@ -395,10 +394,6 @@ backing the behavior with repo-visible commands: `pnpm agent:quality-gate`,
 
 For commands that watch a long-running external process (Envio sync, PR CI, deploy progress, etc.), prefer the `Monitor` tool over `/loop` + cron. Monitor runs a single shell script that polls internally at 30–60s and only emits stdout lines (== notifications) on state changes worth surfacing. Cron / `/loop` fires a full Stop turn per interval, which triggers a macOS notification regardless of whether anything changed — a 60-min sync produces ~12 idle notifications, vs 2–3 with Monitor. `babysit-indexer-deploy` and `babysit-pr` are the canonical examples; if you find yourself writing a new "watch X every Y minutes" command, model it on those.
 
-When `Monitor` is not available, such as in a Codex Cloud task, use the
-repo-local `babysit-pr` skill or `pnpm pr:ready-state --pr <number> --watch
---compact` as the foreground watch loop.
-
 ## New Worktree / Clone Setup
 
 After creating a new worktree or cloning the repo, run:
@@ -409,11 +404,32 @@ After creating a new worktree or cloning the repo, run:
 
 This installs deps and runs Envio codegen (required for `indexer-envio` TypeScript to compile — the `generated/` dir is gitignored).
 
-For Codex Cloud, set the environment setup command to
-`./scripts/codex-cloud-setup.sh` instead of the local worktree script. Cloud
-setup runs in a hosted container with setup-time internet access and must be
-self-contained; do not rely on untracked local files, shell aliases, or personal
-home-directory skills being present.
+## Claude Code on the web setup
+
+Claude Code on the web sessions run in a hosted container that does not inherit
+the user's local `~/.claude` skills or shell environment. The repo bootstraps
+itself through a SessionStart hook (`.claude/settings.json` →
+`.claude/hooks/session-start.sh`) that delegates to:
+
+```bash
+./scripts/claude-code-web-setup.sh
+```
+
+The script is gated on `$CLAUDE_CODE_REMOTE` so it is a no-op for local Claude
+Code sessions. It performs the same install + codegen contract as
+`./scripts/setup.sh` plus a Playwright Chromium install for the dashboard
+browser fixture suite. The Playwright step is non-fatal: hosted environments
+that restrict outbound access to `cdn.playwright.dev` will skip the download
+and warn instead of failing the bootstrap.
+
+Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
+(mirrored under `.agents/skills/` for Codex), so the familiar `/ship` and
+`/babysit-pr` workflows resolve to repo-visible commands (`pnpm
+agent:quality-gate`, `pnpm agent:autoreview`, `pnpm pr:ready-state`) without
+needing a developer's personal skills present. When the Claude `Monitor` tool
+is unavailable in the hosted session, the `babysit-pr` skill falls back to
+`pnpm pr:ready-state --pr <number> --watch --compact` as the foreground watch
+loop.
 
 ## Pre-Push Checklist (MANDATORY for server-side work)
 
