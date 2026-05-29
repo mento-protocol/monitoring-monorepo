@@ -132,8 +132,12 @@ if [[ -n "$GH_API_TOKEN" ]]; then
     echo "==> GH_TOKEN detected; installing current gh from the GitHub release tarball"
     gh_tmp="$(mktemp -d)"
     gh_arch="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
+    # `|| gh_tag=""` keeps a blocked/timed-out lookup from tripping `set -e` and
+    # aborting the whole bootstrap — the optional gh install must degrade to the
+    # MCP fallback, never fail setup. The pipe runs under pipefail, so the bare
+    # assignment's non-zero status would otherwise terminate the script here.
     gh_tag="$(curl -fsS -o /dev/null -w '%{redirect_url}' --max-time 20 \
-      https://github.com/cli/cli/releases/latest | sed -E 's@.*/tag/@@')"
+      https://github.com/cli/cli/releases/latest | sed -E 's@.*/tag/@@')" || gh_tag=""
     if [[ -n "$gh_tag" ]] &&
       curl -fsSL --max-time 90 -o "$gh_tmp/gh.tgz" \
         "https://github.com/cli/cli/releases/download/${gh_tag}/gh_${gh_tag#v}_linux_${gh_arch}.tar.gz" &&
@@ -148,6 +152,12 @@ if [[ -n "$GH_API_TOKEN" ]]; then
   fi
   if ! command -v gh >/dev/null 2>&1; then
     echo "WARN: gh is not installed (download failed above); using the GitHub MCP server for PR/API work." >&2
+  elif ! gh api --help 2>/dev/null | grep -q -- '--slurp'; then
+    # An older gh may still be on PATH if the tarball upgrade failed (no sudo,
+    # blocked download). pr:ready-state calls `gh api --paginate --slurp`, which
+    # that binary lacks, so do NOT advertise availability — force the MCP fallback.
+    echo "WARN: gh on PATH is too old (no 'gh api --slurp'); the release-tarball upgrade did not apply." >&2
+    echo "WARN: pr:ready-state needs --slurp; using the GitHub MCP server for PR/API work meanwhile." >&2
   elif gh auth status >/dev/null 2>&1; then
     echo "gh is installed and authenticated via GH_TOKEN; gh-backed PR flows (pr:ready-state) are available."
     echo "Reminder: pass --repo <owner/name> (or set GH_REPO) — the git remote is the local proxy, not a GitHub host."
