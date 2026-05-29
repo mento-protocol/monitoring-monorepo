@@ -58,17 +58,42 @@ else
 fi
 
 echo "==> Installing workspace dependencies"
-CI=true pnpm install --frozen-lockfile
+# Both the cached environment Setup script and the SessionStart hook re-enter
+# this script on a fresh container, so skip the (~15s) reinstall when a previous
+# bootstrap already installed deps for this exact lockfile. Any pnpm-lock.yaml
+# change — or a wiped node_modules — busts the content marker and reinstalls.
+# The marker lives inside the gitignored node_modules, so it is naturally
+# discarded whenever the dependency tree is.
+deps_marker="node_modules/.web-bootstrap-lock.sha256"
+deps_hash="$(sha256sum pnpm-lock.yaml | awk '{print $1}')"
+if [ -d node_modules ] && [ -f "$deps_marker" ] &&
+  [ "$(cat "$deps_marker" 2>/dev/null)" = "$deps_hash" ]; then
+  echo "deps already installed for this pnpm-lock.yaml; skipping pnpm install."
+else
+  CI=true pnpm install --frozen-lockfile
+  printf '%s' "$deps_hash" >"$deps_marker"
+fi
 
 echo "==> Verifying dashboard dependency resolution"
 pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
 
 echo "==> Running Envio codegen"
-# Drop any stale type facade first: a reused/cached checkout may already carry
-# the gitignored .envio/types.d.ts, which would let the verification below pass
-# even if THIS codegen run silently wrote nothing — the exact miss we guard for.
-rm -f indexer-envio/.envio/types.d.ts
-pnpm indexer:codegen
+# Skip the (~6s) regen when the type facade already exists for the current
+# schema + config — the dominant inputs to the generated types. A change to
+# either (or a missing facade) busts the marker and forces a clean regen. The
+# marker lives in the gitignored .envio dir, so it is discarded with the facade.
+codegen_marker="indexer-envio/.envio/.web-bootstrap-codegen.sha256"
+codegen_hash="$(cat indexer-envio/schema.graphql indexer-envio/config.yaml | sha256sum | awk '{print $1}')"
+if [ -s "indexer-envio/.envio/types.d.ts" ] && [ -f "$codegen_marker" ] &&
+  [ "$(cat "$codegen_marker" 2>/dev/null)" = "$codegen_hash" ]; then
+  echo "Envio types up to date for the current schema/config; skipping codegen."
+else
+  # Drop any stale type facade first: a reused/cached checkout may already carry
+  # the gitignored .envio/types.d.ts, which would let the verification below pass
+  # even if THIS codegen run silently wrote nothing — the exact miss we guard for.
+  rm -f indexer-envio/.envio/types.d.ts
+  pnpm indexer:codegen
+fi
 
 echo "==> Verifying Envio codegen output"
 # `envio codegen` is quiet in CI/non-TTY mode and exits 0 even when it writes
@@ -87,6 +112,10 @@ output for the underlying error.
 MSG
   exit 1
 fi
+# Record the inputs that produced this verified facade so a later bootstrap with
+# an unchanged schema/config can skip the regen above. Written only after the
+# existence check passes, so the marker never caches a failed/empty codegen.
+printf '%s' "$codegen_hash" >"$codegen_marker"
 
 echo "==> Installing Playwright Chromium for dashboard browser tests"
 # Non-fatal: hosted environments often restrict outbound network access
