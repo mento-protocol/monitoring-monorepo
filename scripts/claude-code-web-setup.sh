@@ -42,17 +42,27 @@ pnpm indexer:codegen
 
 echo "==> Installing Playwright Chromium for dashboard browser tests"
 # Non-fatal: hosted environments often restrict outbound network access
-# (cdn.playwright.dev returns 403 "Host not in allowlist"). Browser tests are
-# optional for most agent flows; warn and continue so the rest of the bootstrap
-# (codegen, context-check) still completes. Allow `cdn.playwright.dev` in the
-# environment's network policy to unblock this step.
-if ! pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium; then
-  echo "WARN: Playwright Chromium install failed (likely network policy)." >&2
+# (cdn.playwright.dev returns 403 "Host not in allowlist") or run without sudo
+# (so `--with-deps` cannot install OS packages). Browser tests are optional for
+# most agent flows; warn and continue so the rest of the bootstrap (codegen,
+# context-check) still completes. `--with-deps` mirrors the repo CI workflows
+# (`.github/workflows/ci.yml` and `update-snapshots.yml`) so a successful
+# bootstrap leaves the container actually able to run the browser fixtures.
+if ! pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
+  echo "WARN: Playwright Chromium install failed." >&2
   echo "WARN: 'pnpm --filter @mento-protocol/ui-dashboard test:browser' will not work" >&2
-  echo "WARN: until the environment allows access to cdn.playwright.dev." >&2
+  echo "WARN: until the environment allows access to cdn.playwright.dev and can" >&2
+  echo "WARN: install OS dependencies (sudo apt-get) for Chromium." >&2
 fi
 
 echo "==> Validating repo-visible agent context"
 pnpm agent:context-check
+
+echo "==> Checking optional GitHub CLI auth"
+if command -v gh >/dev/null 2>&1; then
+  gh auth status || true
+else
+  echo "gh is not installed in this image; PR ship/babysit flows need GitHub tooling."
+fi
 
 echo "Claude Code on the web setup complete."

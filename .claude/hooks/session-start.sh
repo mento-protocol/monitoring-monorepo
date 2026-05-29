@@ -30,4 +30,9 @@ fi
 # Invoke via `bash` so the executable bit on the script does not matter — the
 # repo is sometimes checked out with mode 0644 (e.g. when pushed via the
 # GitHub Contents API instead of `git push`).
-exec bash "$SETUP_SCRIPT"
+#
+# Redirect the setup script's stdout to stderr so Claude Code does not pull
+# 10–20K tokens of pnpm install / codegen / Playwright output into the model
+# session context. Setup progress still surfaces in the SessionStart hook log;
+# only the final exit code matters to the agent.
+exec bash "$SETUP_SCRIPT" >&2
