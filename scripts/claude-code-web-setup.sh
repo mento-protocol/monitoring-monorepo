@@ -100,23 +100,35 @@ fi
 echo "==> Validating repo-visible agent context"
 pnpm agent:context-check
 
-echo "==> Reporting GitHub integration mode"
-# Unlike scripts/codex-cloud-setup.sh, this script does NOT install or auth `gh`.
+echo "==> Configuring GitHub integration mode"
 # In Claude Code on the web, git transport is proxied through a local credential
 # proxy (origin is http://local_proxy@127.0.0.1:.../git/...) that authenticates
 # git only, so no GitHub token is exposed in the container and `gh` has no
 # credential by default. api.github.com itself IS reachable (it is in the default
-# Trusted allowlist), so GitHub API work can flow two ways: the GitHub MCP
-# server (default, no setup) or `gh` once you install it (apt) AND provide a
-# GH_TOKEN env var in the environment settings. Until a GH_TOKEN is set, the
-# gh-backed `pnpm pr:ready-state` probe — and the ship/babysit skills that wrap
-# it — are unavailable; use the mcp__github__* tools for PR readiness instead.
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  echo "gh is present and authenticated; gh-backed PR flows (pr:ready-state) are available."
-  gh auth status || true
+# Trusted allowlist), so GitHub API work flows two ways: the GitHub MCP server
+# (default, zero setup) or `gh` once a GH_TOKEN env var is set. We auto-install
+# `gh` from the default Ubuntu apt repo (NOT cli.github.com, which is blocked)
+# ONLY when a token is present — there is no point paying the install cost
+# otherwise. We deliberately do NOT run `gh auth setup-git`: the credential proxy
+# already owns git auth and overriding it would break pushes. `gh` is used purely
+# for the API (pr:ready-state / ship / babysit); pushes stay on the proxy.
+GH_API_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+if [[ -n "$GH_API_TOKEN" ]]; then
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "==> GH_TOKEN detected; installing gh from the default apt repo"
+    sudo apt-get install -y gh >/dev/null 2>&1 ||
+      echo "WARN: gh install failed (apt blocked?); falling back to the GitHub MCP server." >&2
+  fi
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    echo "gh is installed and authenticated via GH_TOKEN; gh-backed PR flows (pr:ready-state) are available."
+  else
+    echo "WARN: gh present but not authenticated — check the GH_TOKEN scopes/org approval." >&2
+    echo "WARN: using the GitHub MCP server for PR/API work meanwhile." >&2
+  fi
 else
-  echo "gh is unavailable/unauthenticated: using the GitHub MCP server for PR/API work."
-  echo "To enable gh flows, 'apt install -y gh' in the setup script and set GH_TOKEN in env settings."
+  echo "No GH_TOKEN set: using the GitHub MCP server for PR/API work (default)."
+  echo "To enable gh-backed flows (pr:ready-state/ship/babysit), set a fine-grained GH_TOKEN"
+  echo "in the environment settings; gh then auto-installs here on the next session."
 fi
 
 echo "Claude Code on the web setup complete."
