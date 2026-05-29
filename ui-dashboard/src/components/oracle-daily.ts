@@ -4,7 +4,14 @@
 // verdict), NOT the per-snapshot band recompute the raw path runs — so a
 // zoomed-out candle stays red when an intraday trip recovered by close.
 
+import { escapePlotText } from "@/lib/plot";
+
 const FIXIDITY_ONE = 1e24;
+
+// Markers-only below this point count, lines+markers at or above it. Shared with
+// the raw path (buildOraclePlotData in oracle-chart.tsx) so the two resolutions
+// keep identical sparse-vs-dense visual semantics.
+export const SPARSE_SERIES_THRESHOLD = 20;
 
 // Switch the chart from the raw keyset path to daily candles when the visible
 // X span (unix seconds) exceeds this. At raw cadence (~170 medians/day on a
@@ -88,8 +95,12 @@ function buildDailyHover(c: OracleDailyCandle): string {
     `O ${fmtPrice(fixToFloat(c.openPrice))}  H ${fmtPrice(fixToFloat(c.highPrice))}  ` +
     `L ${fmtPrice(fixToFloat(c.lowPrice))}  C ${fmtPrice(fixToFloat(c.closePrice))}`;
   const verdict = c.anyOutOfBand ? " · OUT OF BAND" : "";
+  // Escape the DB-sourced ratio — Plotly renders HTML in `text`, so an
+  // unescaped string is an XSS sink (mirrors the raw path's escapePlotText use).
   const dev =
-    c.maxDeviationRatio !== "-1" ? ` · max dev ${c.maxDeviationRatio}` : "";
+    c.maxDeviationRatio !== "-1"
+      ? ` · max dev ${escapePlotText(c.maxDeviationRatio)}`
+      : "";
   return `${date}<br>${ohlc}<br>${c.sampleCount} medians${verdict}${dev}`;
 }
 
@@ -119,7 +130,7 @@ export function buildDailyPlotData({
   baseline: number | null;
   thresholdRatio: number | null;
 }): OracleDailyPlotData {
-  const isSparse = candles.length < 20;
+  const isSparse = candles.length < SPARSE_SERIES_THRESHOLD;
   const timestamps = candles.map((c) =>
     new Date(Number(c.bucketStart) * 1000).toISOString(),
   );

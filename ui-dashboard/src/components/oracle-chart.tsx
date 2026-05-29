@@ -19,6 +19,7 @@ import {
 } from "./oracle-chart-hover";
 import {
   DAILY_MODE_SPAN_SECONDS,
+  SPARSE_SERIES_THRESHOLD,
   buildDailyPlotData,
   computeOracleYRange,
   type OracleDailyCandle,
@@ -402,6 +403,12 @@ export function OracleChart({
     breakerConfigStatus,
   );
 
+  // Gate on raw snapshots only (not dailyCandles): raw is the default view, and
+  // daily mode is zoom-gated (needs visibleRange > threshold), so daily can't
+  // render on first paint anyway. "Empty raw but non-empty daily" can't persist
+  // either — both derive from the same `oracle_median_updated` events, so a pool
+  // with daily candles always has raw medians; the only empty-raw window is the
+  // brief parallel-fetch load, after which raw fills in.
   if (snapshots.length === 0) return null;
 
   const plotData = selectOraclePlotData({
@@ -505,7 +512,7 @@ function buildOraclePlotData({
   const currentBaseline = breakerConfigStatus === "ready" ? baseline : null;
   const currentThresholdRatio =
     breakerConfigStatus === "ready" ? thresholdRatio : null;
-  const isSparse = snapshots.length < 20;
+  const isSparse = snapshots.length < SPARSE_SERIES_THRESHOLD;
   const timestamps = snapshots.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString(),
   );
