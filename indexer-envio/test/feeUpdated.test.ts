@@ -14,6 +14,8 @@ import {
 import {
   _setMockERC20Decimals,
   _clearMockERC20Decimals,
+  _setMockRebalancingState,
+  _clearMockRebalancingStates,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 
@@ -61,6 +63,12 @@ function mockEventData(logIndex = 1, blockNumber = 200): MockEventData {
 describe("FPMM fee-config event handlers", () => {
   beforeEach(() => {
     _clearMockERC20Decimals();
+    _clearMockRebalancingStates();
+  });
+
+  afterEach(() => {
+    _clearMockERC20Decimals();
+    _clearMockRebalancingStates();
   });
 
   it("LPFeeUpdated writes newFee (as Number) to Pool.lpFee and touches updatedAt", async function () {
@@ -143,6 +151,55 @@ describe("FPMM fee-config event handlers", () => {
       undefined,
       "Handler must not create a pool from thin air",
     );
+  });
+
+  it("RebalanceThresholdUpdated preserves exact-zero degeneracy when decimals are unknown", async function () {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedFpmmPool(mockDb);
+
+    _setMockRebalancingState(42220, POOL_ADDRESS, {
+      oraclePriceNumerator: 10n ** 12n,
+      oraclePriceDenominator: 10n ** 12n,
+      rebalanceThreshold: 6000,
+      priceDifference: 8_500n,
+    });
+
+    const poolId = makePoolId(42220, POOL_ADDRESS);
+    const seeded = mockDb.entities.Pool.get(poolId) as
+      | Record<string, unknown>
+      | undefined;
+    assert.ok(seeded, "Pool should exist after seed");
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      token0: undefined,
+      token1: undefined,
+      tokenDecimalsKnown: false,
+      reserves0: 0n,
+      reserves1: 1_000n * 10n ** 18n,
+      degenerateReserves: false,
+      invertRateFeedKnown: true,
+      rebalanceThresholdsKnown: true,
+      oracleOk: true,
+    });
+
+    const event = FPMM.RebalanceThresholdUpdated.createMockEvent({
+      oldThresholdAbove: 5000n,
+      oldThresholdBelow: 5000n,
+      newThresholdAbove: 6000n,
+      newThresholdBelow: 6000n,
+      mockEventData: mockEventData(4, 500),
+    });
+    mockDb = await FPMM.RebalanceThresholdUpdated.processEvent({
+      event,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId) as
+      | { degenerateReserves: boolean; priceDifference: bigint }
+      | undefined;
+    assert.ok(pool);
+    assert.equal(pool.degenerateReserves, true);
+    assert.equal(pool.priceDifference, 8_500n);
   });
 
   it("keeps direct Pool writes behind the preload guard", () => {

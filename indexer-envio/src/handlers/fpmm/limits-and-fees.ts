@@ -26,6 +26,7 @@ import {
   upsertSnapshot,
 } from "../../pool.js";
 import {
+  classifyExactZeroReserves,
   computePriceDifference,
   hasDegenerateReserves,
   pickActiveThreshold,
@@ -33,6 +34,16 @@ import {
 import { recordHealthSample } from "../../healthScore.js";
 import { bootstrapAndResolveBreakerSnapshotFields } from "../../breakers.js";
 import { getBreakerConfigsByFeed } from "../../rpc.js";
+
+function degenerateReservesForThresholdUpdate(pool: Pool): boolean {
+  const exactZeroDegenerateState = classifyExactZeroReserves(pool);
+  return (
+    exactZeroDegenerateState ??
+    (pool.tokenDecimalsKnown
+      ? hasDegenerateReserves(pool)
+      : pool.degenerateReserves)
+  );
+}
 
 // ---------------------------------------------------------------------------
 // FPMM.TradingLimitConfigured
@@ -329,9 +340,7 @@ indexer.onEvent(
     // fields and preserves existing breach/health state.
     let priceDifferenceFromMedian: bigint | null = null;
     let active: number | null = null;
-    const degenerateReserves = existing.tokenDecimalsKnown
-      ? hasDegenerateReserves(existing)
-      : existing.degenerateReserves;
+    const degenerateReserves = degenerateReservesForThresholdUpdate(existing);
     if (medianFresh) {
       // Synthetic pool view using `lastMedianPrice` (clean median) for both
       // direction-pick AND priceDifference. Without this, upsertPool's

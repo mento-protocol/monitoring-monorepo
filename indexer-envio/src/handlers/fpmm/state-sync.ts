@@ -223,13 +223,22 @@ indexer.onEvent(
       existing: { pool: existing },
     });
 
-    if (resolved) {
+    const recordDegenerateHealthBoundary =
+      !resolved && updateReservesDegenerate && pool.degenerateReserves;
+    if (resolved || recordDegenerateHealthBoundary) {
       // Health score: compute snapshot fields + update pool accumulators.
       // Note: upsertPool above calls context.Pool.set(pool) internally with
       // default health fields. We immediately overwrite with the correct
       // health accumulators here. Safe because Envio is single-threaded, but
       // the double-write is intentional — health update must come after upsertPool
       // so we have the final pool state to accumulate against.
+      //
+      // Exact one-sided reserve updates can be trusted even when
+      // getRebalancingState reverts. In that case upsertPool has already
+      // closed the breach and persisted degenerateReserves=true; recording a
+      // health sample here advances the cursor with a zero health ratio so the
+      // drained interval does not keep accruing against the previous unhealthy
+      // lastDeviationRatio.
       const effectiveBps = Number(effectiveThreshold(pool));
       const { snapshotFields, poolUpdate } = recordHealthSample(
         pool,
@@ -257,7 +266,7 @@ indexer.onEvent(
       // doesn't match the deviation is worse than no row — the chart
       // history would show a fake sample. Pool entity still gets updated;
       // the next event with known orientation will write the snapshot.
-      if (orientationKnown) {
+      if (resolved && orientationKnown) {
         const snapshot: OracleSnapshot = {
           id,
           chainId: event.chainId,
