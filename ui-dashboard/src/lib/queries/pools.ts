@@ -31,7 +31,6 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleExpiry
       lastRebalancedAt
       deviationBreachStartedAt
-      breakerTripped
       lpFee
       protocolFee
       limitStatus
@@ -82,6 +81,7 @@ export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
       rebalanceThresholdsKnown
       tokenDecimalsKnown
       degenerateReserves
+      breakerTripped
     }
   }
 `;

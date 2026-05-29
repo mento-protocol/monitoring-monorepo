@@ -501,6 +501,64 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     assert.equal(cfg!.status, "TRIPPED");
   });
 
+  it("TradingModeUpdated (manual override) drives Pool.breakerTripped and clears it", async () => {
+    let mockDb = MockDb.createMockDb();
+    const poolId = makePoolId(
+      CHAIN_ID,
+      "0xabc0000000000000000000000000000000000002",
+    );
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CHAIN_ID,
+        referenceRateFeedID: FEED,
+        breakerTripped: false,
+      }),
+    );
+
+    // Manual halt override (bootstraps the MEDIAN_DELTA config, sets TRIPPED).
+    mockDb = await BreakerBox.TradingModeUpdated.processEvent({
+      event: BreakerBox.TradingModeUpdated.createMockEvent({
+        rateFeedID: FEED,
+        tradingMode: 3n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 2,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 250, timestamp: 1_700_001_500 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      true,
+      "manual halt override should mark the pool halted",
+    );
+
+    // Manual clear (tradingMode 0).
+    mockDb = await BreakerBox.TradingModeUpdated.processEvent({
+      event: BreakerBox.TradingModeUpdated.createMockEvent({
+        rateFeedID: FEED,
+        tradingMode: 0n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 3,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 260, timestamp: 1_700_002_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      false,
+      "manual clear should lift the halt",
+    );
+  });
+
   it("TradingModeUpdated leaves disabled BreakerConfigs untouched", async () => {
     let mockDb = MockDb.createMockDb();
     // Seed an ENABLED config, then immediately disable it.

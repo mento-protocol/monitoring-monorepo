@@ -76,6 +76,15 @@ type AttentionPool = {
   health: HealthStatus;
 };
 
+// Severity order for the homepage "needs attention" list: a sustained breach
+// (CRITICAL) outranks a price-breaker halt (HALTED), which outranks a WARN.
+// Module-scoped so it doesn't count against the OG-builder's line budget.
+const ATTENTION_RANK: Record<string, number> = {
+  CRITICAL: 3,
+  HALTED: 2,
+  WARN: 1,
+};
+
 export type HomepageOgData = {
   totalTvlUsd: number | null;
   tvlWoWPct: number | null;
@@ -92,7 +101,7 @@ export type HomepageOgData = {
   chainCount: number;
   chains: string[];
   healthBuckets: Record<HealthStatus, number>;
-  /** Pools in WARN/CRITICAL state, highest severity first, up to 3. */
+  /** Pools in WARN / HALTED / CRITICAL state, highest severity first, up to 3. */
   attentionPools: AttentionPool[];
   /** True when at least one configured chain's pool query failed. All
    * protocol-wide aggregates in this payload reflect only the chains in
@@ -135,6 +144,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     rebalanceThresholdsKnown?: boolean;
     tokenDecimalsKnown?: boolean;
     degenerateReserves?: boolean;
+    breakerTripped?: boolean;
   };
   // Parallelizing both saves ~200ms p50 on the success path; serializing
   // would only help if `poolsResult` failed, which is < 1% of calls.
@@ -179,6 +189,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
             rebalanceThresholdsKnown: t.rebalanceThresholdsKnown,
             tokenDecimalsKnown: t.tokenDecimalsKnown,
             degenerateReserves: t.degenerateReserves,
+            breakerTripped: t.breakerTripped,
           };
     });
   }
@@ -387,8 +398,11 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   for (const slice of slices) {
     for (const pool of slice.pools) {
       const status = computeEffectiveStatus(pool, slice.network.chainId);
-      healthBuckets[status] = (healthBuckets[status] ?? 0) + 1;
-      if (status === "WARN" || status === "CRITICAL") {
+      // healthBuckets is initialized with every HealthStatus key, so the index
+      // is always defined — no `?? 0` needed (and dropping it offsets the
+      // complexity of the HALTED branch below to keep this within budget).
+      healthBuckets[status] += 1;
+      if (status === "WARN" || status === "CRITICAL" || status === "HALTED") {
         attentionPools.push({
           name: poolName(
             slice.network,
@@ -401,10 +415,10 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
       }
     }
   }
-  // CRITICAL first, then WARN, each alphabetical.
+  // CRITICAL first, then HALTED, then WARN, each alphabetical.
   attentionPools.sort((a, b) => {
-    if (a.health !== b.health) return a.health === "CRITICAL" ? -1 : 1;
-    return a.name.localeCompare(b.name);
+    const d = (ATTENTION_RANK[b.health] ?? 0) - (ATTENTION_RANK[a.health] ?? 0);
+    return d !== 0 ? d : a.name.localeCompare(b.name);
   });
 
   return {

@@ -31,22 +31,22 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
   const weekendPause = !oracleIsFresh && isWeekend();
 
-  // For the no-data branch, skip computeHealthStatus — with the indexer's
-  // zero-initialised fields it would return CRITICAL from the stale
-  // timestamp, contradicting the "not yet available" copy below. Show
-  // N/A instead, which matches the virtual-pool branch visually.
+  // Resolve the real status first. computeHealthStatus ranks HALTED ABOVE the
+  // hasHealthData gate, so a tripped price breaker resolves to HALTED even when
+  // health data isn't trusted yet — the halt must surface regardless. Keying on
+  // the resolved status (not the raw flag) keeps it consistent with the fleet
+  // chip: stale / weekend pools resolve to CRITICAL / WEEKEND, not HALTED.
+  const computed = isVirtual
+    ? "N/A"
+    : computeHealthStatus(pool, network.chainId);
+  const showHalted = computed === "HALTED";
+  // No-data pools otherwise resolve to a misleading CRITICAL from the indexer's
+  // zero-initialised stale timestamp — suppress that to N/A (matching the
+  // virtual-pool branch). Never suppress a real halt.
   const badgeStatus =
-    isVirtual || !hasHealthData
-      ? "N/A"
-      : computeHealthStatus(pool, network.chainId);
-  // A tripped price breaker (fresh oracle) resolves to HALTED — surface it as
-  // its own exception state so the detail page stops reading "healthy" while
-  // swaps are paused. Keying on the resolved status (not the raw flag) keeps it
-  // consistent with the fleet chip: stale / weekend pools resolve to
-  // CRITICAL / WEEKEND and fall through to those branches / the header instead.
-  const showHalted = badgeStatus === "HALTED";
+    !isVirtual && !hasHealthData && !showHalted ? "N/A" : computed;
 
-  const hasContent = isVirtual || !hasHealthData || weekendPause || showHalted;
+  const hasContent = isVirtual || showHalted || !hasHealthData || weekendPause;
   if (!hasContent) return null;
 
   return (
@@ -59,10 +59,6 @@ export function HealthPanel({ pool }: HealthPanelProps) {
       {isVirtual ? (
         <p className="text-sm text-slate-400">
           VirtualPool — no oracle data. Health monitoring is not applicable.
-        </p>
-      ) : !hasHealthData ? (
-        <p className="text-sm text-slate-400">
-          Oracle health data not yet available — indexer schema update pending.
         </p>
       ) : showHalted ? (
         <div className="flex items-start gap-3 rounded-lg border border-orange-700/50 bg-orange-900/20 px-4 py-3 text-sm text-orange-100">
@@ -81,6 +77,10 @@ export function HealthPanel({ pool }: HealthPanelProps) {
             threshold and cooldown.
           </span>
         </div>
+      ) : !hasHealthData ? (
+        <p className="text-sm text-slate-400">
+          Oracle health data not yet available — indexer schema update pending.
+        </p>
       ) : (
         <div className="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
           <span

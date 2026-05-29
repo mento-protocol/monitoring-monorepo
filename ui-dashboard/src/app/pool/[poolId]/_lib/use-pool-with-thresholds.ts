@@ -23,6 +23,7 @@ type ThresholdsExtRow = {
   rebalanceThresholdsKnown?: boolean;
   tokenDecimalsKnown?: boolean;
   degenerateReserves?: boolean;
+  breakerTripped?: boolean;
 };
 
 export type PoolWithThresholdsResult = {
@@ -70,6 +71,7 @@ export function usePoolWithThresholds(
       rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
       tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
       degenerateReserves: thresholdsExt.degenerateReserves,
+      breakerTripped: thresholdsExt.breakerTripped,
     };
   }, [rawPool, thresholdsExt]);
   return { pool, thresholdsLoading, thresholdsError };

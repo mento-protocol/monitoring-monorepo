@@ -170,6 +170,7 @@ export async function fetchPoolOgDataUncached(
         rebalanceThresholdsKnown: ext.rebalanceThresholdsKnown,
         tokenDecimalsKnown: ext.tokenDecimalsKnown,
         degenerateReserves: ext.degenerateReserves,
+        breakerTripped: ext.breakerTripped,
       }
     : rawPool;
 
@@ -233,8 +234,9 @@ export async function fetchPoolOgDataUncached(
   const volumeSeries = priceable
     ? computeVolumeSeries(dailyRows, sym0, sym1, pool, rates)
     : [];
-  const oracle = computeOracleFreshness(pool, chainId);
-
+  // `oracle` inlined (vs a `const`) to keep this OG builder within its
+  // max-lines budget after adding the breakerTripped merge above; the
+  // freshness calc is pure + cheap, so the second call is free.
   return {
     name: poolName(network, t0, t1),
     chainLabel: network.label,
@@ -247,8 +249,8 @@ export async function fetchPoolOgDataUncached(
     healthReasons: computeHealthReasons(pool, chainId),
     tvlSeries,
     volumeSeries,
-    oracleAgeSeconds: oracle.ageSeconds,
-    oracleFresh: oracle.fresh,
+    oracleAgeSeconds: computeOracleFreshness(pool, chainId).ageSeconds,
+    oracleFresh: computeOracleFreshness(pool, chainId).fresh,
   };
 }
 
@@ -445,6 +447,7 @@ type PoolOgThresholdsExtRow = {
   rebalanceThresholdsKnown?: boolean;
   tokenDecimalsKnown?: boolean;
   degenerateReserves?: boolean;
+  breakerTripped?: boolean;
 };
 
 // 60s TTL — pool health can flip during an incident; a 1h cache meant a

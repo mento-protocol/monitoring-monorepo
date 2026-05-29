@@ -21,7 +21,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
       rebalanceThreshold
       lastRebalancedAt
       deviationBreachStartedAt
-      breakerTripped
       lpFee
       protocolFee
       limitStatus
@@ -52,6 +51,7 @@ export const POOL_THRESHOLDS_KNOWN_EXT = `
       rebalanceThresholdsKnown
       tokenDecimalsKnown
       degenerateReserves
+      breakerTripped
     }
   }
 `;

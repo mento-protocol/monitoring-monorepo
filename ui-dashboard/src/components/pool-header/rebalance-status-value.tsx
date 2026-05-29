@@ -225,6 +225,11 @@ function getPassiveStatus(
   if (health === "WEEKEND") {
     return { text: "Markets closed", color: "text-slate-400" };
   }
+  if (health === "HALTED") {
+    // Price breaker tripped — swaps paused, so rebalancing is moot. Surface the
+    // halt instead of falling through to the oracle-stale / diagnostics copy.
+    return { text: "Trading halted", color: "text-orange-400" };
+  }
   if (health === "N/A") {
     return { text: "N/A", color: "text-slate-500" };
   }
