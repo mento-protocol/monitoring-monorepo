@@ -65,8 +65,18 @@ For a Codex Cloud environment, configure the environment setup script to run:
 ./scripts/codex-cloud-setup.sh
 ```
 
+Also configure the optional maintenance script for cached container resumes:
+
+```bash
+./scripts/codex-cloud-maintenance.sh
+```
+
 That path performs the frozen install, Envio codegen, and agent-context check
-inside the cloud container, while relying only on repo-visible files.
+inside the cloud container, while relying only on repo-visible files. The
+maintenance path runs after Codex checks out the task branch in a cached
+container; it refreshes `origin/main`, syncs branch lockfile changes with
+`pnpm install --frozen-lockfile --prefer-offline`, reruns Envio codegen, and
+validates the agent context.
 
 If you install manually, verify the dashboard can resolve its Sentry package
 after `pnpm install`:

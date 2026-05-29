@@ -354,6 +354,47 @@ command shim. Do not add repo-local `.agents/skills/autoreview` or
 `.claude/skills/autoreview` copies unless the global skill is intentionally
 forked.
 
+Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
+`~/.claude` directories. Configure the Codex Cloud environment setup script as:
+
+```bash
+./scripts/codex-cloud-setup.sh
+```
+
+Configure the optional Codex Cloud environment maintenance script as:
+
+```bash
+./scripts/codex-cloud-maintenance.sh
+```
+
+Codex Cloud setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for GitHub
+CLI-backed PR workflows, installs GitHub CLI from the official apt repository if
+the base image lacks it, configures git to use `gh` credentials for fetch/push,
+and refreshes `origin/main` before agent work starts. It also
+prewarms the pinned Trunk CLI and runs `./tools/trunk install` so
+Trunk-managed linters/runtimes are available before a task starts. If the cloud
+proxy blocks Trunk, allowlist
+`https://trunk.io/releases/`; if direct egress is available but the proxy is the
+blocker, set `CODEX_CLOUD_TRUNK_BYPASS_PROXY=1` to add `trunk.io` to `NO_PROXY`
+during setup. If neither route is available, set `CODEX_CLOUD_TRUNK_TARBALL_URL`
+to a reachable mirror of the pinned Linux Trunk tarball and set
+`CODEX_CLOUD_TRUNK_TARBALL_SHA256` so setup verifies the mirrored artifact before
+installing it. Keep `CODEX_CLOUD_TRUNK_INSTALL_TOOLS=true` (the default) for
+normal Cloud runs; set it to `false` only when using a base image with a
+prewarmed Trunk cache.
+
+Codex Cloud maintenance runs when Codex resumes a cached container after
+checking out the task branch. It skips apt/tool installation, re-establishes
+repo-local git state, refreshes `origin/main`, syncs branch lockfile changes via
+`CI=true pnpm install --frozen-lockfile --prefer-offline`, regenerates Envio
+types, and runs `pnpm agent:context-check`.
+
+For workflow continuity, this repo includes thin repo-local `ship` and
+`babysit-pr` skill adapters under `.agents/skills/` with matching
+`.claude/skills/` mirrors. They preserve the familiar command names while
+backing the behavior with repo-visible commands: `pnpm agent:quality-gate`,
+`pnpm agent:autoreview` when available, and `pnpm pr:ready-state`.
+
 ### SessionEnd hook (reflect nudge)
 
 `scripts/agent-session-end-hook.sh` runs on SessionEnd for both Claude Code and Codex. When the session left commits or unstaged changes in the tree, it prints a one-line nudge to run `/reflect` so any new learnings get captured in memory / `AGENTS.md` / `CLAUDE.md` before context is lost. Silent on no-op sessions.
