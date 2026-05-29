@@ -361,6 +361,10 @@ echo "==> Verifying dashboard dependency resolution"
 pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
 
 echo "==> Running Envio codegen"
+# Drop any stale type facade first: a reused/cached checkout may already carry
+# the gitignored .envio/types.d.ts, which would let the verification below pass
+# even if THIS codegen run silently wrote nothing -- the exact miss we guard for.
+rm -f indexer-envio/.envio/types.d.ts
 pnpm indexer:codegen
 
 echo "==> Verifying Envio codegen output"
