@@ -19,6 +19,18 @@ import type { SnapshotWindows } from "@/lib/volume";
 
 export type { SnapshotWindows, TimeRange } from "@/lib/volume";
 
+/**
+ * Plain, RSC-serializable error shape. `NetworkData` crosses the Server →
+ * Client boundary as `initialNetworkData`, and React's Flight serializer
+ * opaques `Error` instances to a generic "An error occurred in the Server
+ * Components render…" placeholder in production builds. Carrying the failure
+ * as a plain `{ message }` object keeps the real cause renderable in
+ * `<ErrorBox message={…}>` on the client. Convert at the fetch boundary
+ * (see `toErrorShape` in `./fetch`) — never store an `Error` instance on a
+ * field that ships to the client.
+ */
+export type SerializableError = { message: string };
+
 export type NetworkData = {
   network: Network;
   snapshotWindows: SnapshotWindows;
@@ -77,7 +89,7 @@ export type NetworkData = {
    * surfaced a mid-pagination error). Blanks all fee surfaces (tile, chart,
    * leaderboard) since they all read from snapshots.
    */
-  feeSnapshotsError: Error | null;
+  feeSnapshotsError: SerializableError | null;
   /**
    * True when paginated snapshot fetch hit `SNAPSHOT_MAX_PAGES` without
    * exhausting the result set — `feeSnapshots` carries the most-recent rows
@@ -93,26 +105,26 @@ export type NetworkData = {
   poolLabels: Map<string, PoolLabel>;
   uniqueLpAddresses: string[] | null;
   rates: OracleRateMap;
-  error: Error | null;
+  error: SerializableError | null;
   /**
    * Failure of the oracle rates query for this network. With no rates,
    * any non-USD-pegged token (FX) silently mis-prices to "unpriced", so
    * every fee surface — KPI tile, chart, leaderboard — must gate on this.
    */
-  ratesError: Error | null;
+  ratesError: SerializableError | null;
   /**
    * Per-window snapshot errors. A window only gets an error when the
    * pagination failure / truncation actually affects that window — i.e.,
    * we didn't fetch rows going back as far as the window's lower bound.
    */
-  snapshotsError: Error | null;
-  snapshots7dError: Error | null;
-  snapshots30dError: Error | null;
+  snapshotsError: SerializableError | null;
+  snapshots7dError: SerializableError | null;
+  snapshots30dError: SerializableError | null;
   /** Error on the paginated all-history daily fetch. */
-  snapshotsAllDailyError: Error | null;
+  snapshotsAllDailyError: SerializableError | null;
   /** Error on the paginated all-history daily Broker rollup fetch. */
-  brokerSnapshotsAllDailyError: Error | null;
-  lpError: Error | null;
+  brokerSnapshotsAllDailyError: SerializableError | null;
+  lpError: SerializableError | null;
 };
 
 /**

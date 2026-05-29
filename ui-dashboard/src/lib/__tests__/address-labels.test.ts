@@ -70,7 +70,7 @@ describe("getLabels", () => {
     const result = await getLabels();
     expect(mocks.hgetall).toHaveBeenCalledWith("labels");
     expect(Object.keys(result)).toHaveLength(2);
-    expect(result["0xaaa"].name).toBe("One");
+    expect(result["0xaaa"]!.name).toBe("One");
   });
 
   it("returns empty object when every hash returns null", async () => {
@@ -91,8 +91,8 @@ describe("getLabels", () => {
         : null,
     );
     const result = await getLabels();
-    expect(result["0xaaa"].name).toBe("Legacy");
-    expect(result["0xaaa"].tags).toEqual(["DeFi"]);
+    expect(result["0xaaa"]!.name).toBe("Legacy");
+    expect(result["0xaaa"]!.tags).toEqual(["DeFi"]);
     expect((result["0xaaa"] as Record<string, unknown>).label).toBeUndefined();
   });
 
@@ -108,9 +108,9 @@ describe("upsertEntry", () => {
   it("writes a single HSET to the flat labels hash, lowercasing the address", async () => {
     await upsertEntry("0xABC", { name: "Test", tags: [], isPublic: true });
     expect(mocks.hset).toHaveBeenCalledTimes(1);
-    const [key, fields] = mocks.hset.mock.calls[0];
+    const [key, fields] = mocks.hset.mock.calls[0]!;
     expect(key).toBe("labels");
-    const value = JSON.parse((fields as Record<string, string>)["0xabc"]);
+    const value = JSON.parse((fields as Record<string, string>)["0xabc"]!);
     expect(value.name).toBe("Test");
     expect(value.isPublic).toBe(true);
     expect(value.updatedAt).toBeTruthy();
@@ -123,8 +123,8 @@ describe("upsertEntry", () => {
       tags: [],
       createdAt: "2025-01-01T00:00:00.000Z",
     });
-    const [, fields] = mocks.hset.mock.calls[0];
-    const value = JSON.parse((fields as Record<string, string>)["0xabc"]);
+    const [, fields] = mocks.hset.mock.calls[0]!;
+    const value = JSON.parse((fields as Record<string, string>)["0xabc"]!);
     expect(value.createdAt).toBe("2025-01-01T00:00:00.000Z");
   });
 });
@@ -152,7 +152,7 @@ describe("importLabels", () => {
       },
     });
     expect(mocks.hset).toHaveBeenCalledTimes(1);
-    const [key, fields] = mocks.hset.mock.calls[0];
+    const [key, fields] = mocks.hset.mock.calls[0]!;
     expect(key).toBe("labels");
     expect(Object.keys(fields as Record<string, string>).sort()).toEqual([
       "0xaaa",
@@ -170,8 +170,8 @@ describe("importLabels", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     });
-    const [, fields] = mocks.hset.mock.calls[0];
-    const value = JSON.parse((fields as Record<string, string>)["0xabc"]);
+    const [, fields] = mocks.hset.mock.calls[0]!;
+    const value = JSON.parse((fields as Record<string, string>)["0xabc"]!);
     expect(value.isPublic).toBe(false);
   });
 
@@ -184,8 +184,8 @@ describe("importLabels", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     });
-    const [, fields] = mocks.hset.mock.calls[0];
-    const value = JSON.parse((fields as Record<string, string>)["0xabc"]);
+    const [, fields] = mocks.hset.mock.calls[0]!;
+    const value = JSON.parse((fields as Record<string, string>)["0xabc"]!);
     expect(value.isPublic).toBe(true);
   });
 

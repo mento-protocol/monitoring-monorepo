@@ -141,8 +141,9 @@ describe("buildDailySeries — pool filtering", () => {
     expect(out.series).toEqual([]);
     expect(out.nowTvl).toBeCloseTo(200, 6);
     expect(out.byChain).toHaveLength(1);
-    expect(out.byChain[0].series).toEqual([]);
-    expect(out.byChain[0].nowTvl).toBeCloseTo(200, 6);
+    const byChain0 = out.byChain[0]!;
+    expect(byChain0.series).toEqual([]);
+    expect(byChain0.nowTvl).toBeCloseTo(200, 6);
   });
 });
 
@@ -177,16 +178,23 @@ describe("buildDailySeries — forward-fill across days", () => {
 
     // 5 buckets: day 0, 1, 2, 3, 4(=today)
     expect(series).toHaveLength(5);
-    expect(series[0].timestamp).toBe(day0);
-    expect(series[4].timestamp).toBe(today);
+    const [s0, s1, s2, s3, s4] = [
+      series[0]!,
+      series[1]!,
+      series[2]!,
+      series[3]!,
+      series[4]!,
+    ];
+    expect(s0.timestamp).toBe(day0);
+    expect(s4.timestamp).toBe(today);
     // Days 0,1,2 → day-0 snapshot reserves → $200
-    expect(series[0].tvlUSD).toBeCloseTo(200, 6);
-    expect(series[1].tvlUSD).toBeCloseTo(200, 6);
-    expect(series[2].tvlUSD).toBeCloseTo(200, 6);
+    expect(s0.tvlUSD).toBeCloseTo(200, 6);
+    expect(s1.tvlUSD).toBeCloseTo(200, 6);
+    expect(s2.tvlUSD).toBeCloseTo(200, 6);
     // Day 3 → day-3 snapshot → $400 (cursor advanced to latest ≤ bucket)
-    expect(series[3].tvlUSD).toBeCloseTo(400, 6);
+    expect(s3.tvlUSD).toBeCloseTo(400, 6);
     // Day 4 → forward-fill from day-3 → $400
-    expect(series[4].tvlUSD).toBeCloseTo(400, 6);
+    expect(s4.tvlUSD).toBeCloseTo(400, 6);
     // nowTvl uses live reserves (10 + 10 = $20), not latest snapshot.
     expect(nowTvl).toBeCloseTo(20, 6);
   });
@@ -219,9 +227,10 @@ describe("buildDailySeries — forward-fill across days", () => {
 
     // Buckets: day0, today (2 total; startDay = day0).
     expect(series).toHaveLength(2);
-    expect(series[0].timestamp).toBe(day0);
-    expect(series[0].tvlUSD).toBeCloseTo(100, 6);
-    expect(series[1].tvlUSD).toBeCloseTo(100, 6);
+    const [sr0, sr1] = [series[0]!, series[1]!];
+    expect(sr0.timestamp).toBe(day0);
+    expect(sr0.tvlUSD).toBeCloseTo(100, 6);
+    expect(sr1.tvlUSD).toBeCloseTo(100, 6);
   });
 
   it("uses the first snapshot's reserves for its calendar-day bucket (no synthetic zero)", () => {
@@ -246,8 +255,9 @@ describe("buildDailySeries — forward-fill across days", () => {
       }),
     ]);
 
-    expect(series[0].timestamp).toBe(day0);
-    expect(series[0].tvlUSD).toBeCloseTo(100, 6);
+    const snap0 = series[0]!;
+    expect(snap0.timestamp).toBe(day0);
+    expect(snap0.tvlUSD).toBeCloseTo(100, 6);
   });
 
   it("places mid-day snapshot updates in the same calendar-day bucket", () => {
@@ -275,8 +285,9 @@ describe("buildDailySeries — forward-fill across days", () => {
       }),
     ]);
 
-    expect(series[0].timestamp).toBe(day0);
-    expect(series[0].tvlUSD).toBeCloseTo(100, 6);
+    const firstBucket = series[0]!;
+    expect(firstBucket.timestamp).toBe(day0);
+    expect(firstBucket.tvlUSD).toBeCloseTo(100, 6);
   });
 });
 
@@ -322,13 +333,20 @@ describe("buildDailySeries — pools with mismatched snapshot start days", () =>
     ]);
 
     expect(series).toHaveLength(5);
+    const [p0, p1, p2, p3, p4] = [
+      series[0]!,
+      series[1]!,
+      series[2]!,
+      series[3]!,
+      series[4]!,
+    ];
     // Days 0–2: only pool A contributes (B's cursor stays at -1 → skipped).
-    expect(series[0].tvlUSD).toBeCloseTo(200, 6);
-    expect(series[1].tvlUSD).toBeCloseTo(200, 6);
-    expect(series[2].tvlUSD).toBeCloseTo(200, 6);
+    expect(p0.tvlUSD).toBeCloseTo(200, 6);
+    expect(p1.tvlUSD).toBeCloseTo(200, 6);
+    expect(p2.tvlUSD).toBeCloseTo(200, 6);
     // Days 3–4: A ($200) + B ($100) = $300.
-    expect(series[3].tvlUSD).toBeCloseTo(300, 6);
-    expect(series[4].tvlUSD).toBeCloseTo(300, 6);
+    expect(p3.tvlUSD).toBeCloseTo(300, 6);
+    expect(p4.tvlUSD).toBeCloseTo(300, 6);
     // nowTvl uses BOTH pools' live reserves: $20 + $40 = $60.
     expect(nowTvl).toBeCloseTo(60, 6);
   });
@@ -368,9 +386,10 @@ describe("buildDailySeries — input normalisation", () => {
     ]);
 
     expect(series).toHaveLength(3);
-    expect(series[0].tvlUSD).toBeCloseTo(200, 6); // day 0
-    expect(series[1].tvlUSD).toBeCloseTo(400, 6); // day 1
-    expect(series[2].tvlUSD).toBeCloseTo(100, 6); // today (latest)
+    const [d0, d1, d2] = [series[0]!, series[1]!, series[2]!];
+    expect(d0.tvlUSD).toBeCloseTo(200, 6); // day 0
+    expect(d1.tvlUSD).toBeCloseTo(400, 6); // day 1
+    expect(d2.tvlUSD).toBeCloseTo(100, 6); // today (latest)
   });
 });
 
@@ -457,11 +476,12 @@ describe("buildDailySeries — nowTvl semantics", () => {
     ]);
 
     expect(series).toHaveLength(1);
-    expect(series[0].tvlUSD).toBeCloseTo(100, 6);
+    expect(series[0]!.tvlUSD).toBeCloseTo(100, 6);
     expect(nowTvl).toBeCloseTo(220, 6);
     expect(byChain).toHaveLength(1);
-    expect(byChain[0].series[0].tvlUSD).toBeCloseTo(100, 6);
-    expect(byChain[0].nowTvl).toBeCloseTo(220, 6);
+    const bc0 = byChain[0]!;
+    expect(bc0.series[0]!.tvlUSD).toBeCloseTo(100, 6);
+    expect(bc0.nowTvl).toBeCloseTo(220, 6);
   });
 });
 
@@ -509,29 +529,32 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     ]);
 
     expect(series).toHaveLength(2); // day 0 (yesterday) + today
-    expect(series[0].timestamp).toBe(day0);
-    expect(series[0].tvlUSD).toBeCloseTo(300, 6);
+    const [ms0, ms1] = [series[0]!, series[1]!];
+    expect(ms0.timestamp).toBe(day0);
+    expect(ms0.tvlUSD).toBeCloseTo(300, 6);
     // today forward-fills both chains.
-    expect(series[1].tvlUSD).toBeCloseTo(300, 6);
+    expect(ms1.tvlUSD).toBeCloseTo(300, 6);
     expect(nowTvl).toBeCloseTo(60, 6);
 
     // Per-chain decomposition: bucket sums equal the total, nowTvl sums equal
     // the total, and chain ordering matches networkData (legend stability).
     expect(byChain).toHaveLength(2);
-    expect(byChain[0].network.id).toBe(TVL_NETWORK.id);
-    expect(byChain[1].network.id).toBe(TVL_NETWORK_2.id);
-    expect(byChain[0].series).toHaveLength(2);
-    expect(byChain[1].series).toHaveLength(2);
-    expect(byChain[0].series[0].tvlUSD).toBeCloseTo(200, 6); // chain A day 0
-    expect(byChain[1].series[0].tvlUSD).toBeCloseTo(100, 6); // chain B day 0
-    expect(byChain[0].nowTvl).toBeCloseTo(20, 6);
-    expect(byChain[1].nowTvl).toBeCloseTo(40, 6);
+    const [mc0, mc1] = [byChain[0]!, byChain[1]!];
+    expect(mc0.network.id).toBe(TVL_NETWORK.id);
+    expect(mc1.network.id).toBe(TVL_NETWORK_2.id);
+    expect(mc0.series).toHaveLength(2);
+    expect(mc1.series).toHaveLength(2);
+    expect(mc0.series[0]!.tvlUSD).toBeCloseTo(200, 6); // chain A day 0
+    expect(mc1.series[0]!.tvlUSD).toBeCloseTo(100, 6); // chain B day 0
+    expect(mc0.nowTvl).toBeCloseTo(20, 6);
+    expect(mc1.nowTvl).toBeCloseTo(40, 6);
     for (let i = 0; i < series.length; i++) {
-      expect(
-        byChain[0].series[i].tvlUSD + byChain[1].series[i].tvlUSD,
-      ).toBeCloseTo(series[i].tvlUSD, 6);
+      expect(mc0.series[i]!.tvlUSD + mc1.series[i]!.tvlUSD).toBeCloseTo(
+        series[i]!.tvlUSD,
+        6,
+      );
     }
-    expect(byChain[0].nowTvl + byChain[1].nowTvl).toBeCloseTo(nowTvl, 6);
+    expect(mc0.nowTvl + mc1.nowTvl).toBeCloseTo(nowTvl, 6);
   });
 
   it("includes chains with zero contribution in a bucket as 0, not omitted", () => {
@@ -583,9 +606,14 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     // chain B contributes nothing on day 0 + day 1 → those buckets must
     // emit 0, not be missing from chain B's series.
     expect(chainB.series).toHaveLength(3);
-    expect(chainB.series[0].tvlUSD).toBe(0);
-    expect(chainB.series[1].tvlUSD).toBe(0);
-    expect(chainB.series[2].tvlUSD).toBeCloseTo(100, 6);
+    const [cb0, cb1, cb2] = [
+      chainB.series[0]!,
+      chainB.series[1]!,
+      chainB.series[2]!,
+    ];
+    expect(cb0.tvlUSD).toBe(0);
+    expect(cb1.tvlUSD).toBe(0);
+    expect(cb2.tvlUSD).toBeCloseTo(100, 6);
   });
 
   it("includes current-only chains in the breakdown latest point", () => {
@@ -621,14 +649,14 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     ]);
 
     expect(series).toHaveLength(1);
-    expect(series[0].tvlUSD).toBeCloseTo(200, 6);
+    expect(series[0]!.tvlUSD).toBeCloseTo(200, 6);
     expect(nowTvl).toBeCloseTo(120, 6);
     expect(byChain).toHaveLength(2);
     const currentOnlyChain = byChain.find(
       (c) => c.network.id === TVL_NETWORK_2.id,
     )!;
     expect(currentOnlyChain.series).toHaveLength(1);
-    expect(currentOnlyChain.series[0].tvlUSD).toBe(0);
+    expect(currentOnlyChain.series[0]!.tvlUSD).toBe(0);
     expect(currentOnlyChain.nowTvl).toBeCloseTo(100, 6);
   });
 
@@ -666,7 +694,7 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     ]);
 
     expect(series).toHaveLength(1);
-    expect(series[0].tvlUSD).toBeCloseTo(200, 6);
+    expect(series[0]!.tvlUSD).toBeCloseTo(200, 6);
     expect(nowTvl).toBeCloseTo(120, 6);
     const failedChain = byChain.find((c) => c.network.id === TVL_NETWORK_2.id)!;
     expect(failedChain.series).toEqual([]);
@@ -702,7 +730,7 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     ]);
 
     expect(byChain).toHaveLength(1);
-    expect(byChain[0].network.id).toBe(TVL_NETWORK.id);
+    expect(byChain[0]!.network.id).toBe(TVL_NETWORK.id);
   });
 });
 
@@ -868,15 +896,16 @@ describe("TvlOverTimeChart render", () => {
       y: number[];
     }>;
     expect(traces).toHaveLength(3);
-    expect(traces[0].name).toBe("Total");
-    expect(traces[0].x).toHaveLength(1);
-    expect(traces[0].y).toEqual([300]);
-    expect(traces[1].name).toBe(TVL_NETWORK.label);
-    expect(traces[1].x).toHaveLength(1);
-    expect(traces[1].y).toEqual([200]);
-    expect(traces[2].name).toBe(TVL_NETWORK_2.label);
-    expect(traces[2].x).toHaveLength(1);
-    expect(traces[2].y).toEqual([100]);
+    const [t0, t1, t2] = [traces[0]!, traces[1]!, traces[2]!];
+    expect(t0.name).toBe("Total");
+    expect(t0.x).toHaveLength(1);
+    expect(t0.y).toEqual([300]);
+    expect(t1.name).toBe(TVL_NETWORK.label);
+    expect(t1.x).toHaveLength(1);
+    expect(t1.y).toEqual([200]);
+    expect(t2.name).toBe(TVL_NETWORK_2.label);
+    expect(t2.x).toHaveLength(1);
+    expect(t2.y).toEqual([100]);
   });
 
   it("renders current live TVL without historical zero-fill when snapshots failed before rows", () => {
@@ -909,12 +938,13 @@ describe("TvlOverTimeChart render", () => {
       y: number[];
     }>;
     expect(traces).toHaveLength(2);
-    expect(traces[0].name).toBe("Total");
-    expect(traces[0].x).toHaveLength(1);
-    expect(traces[0].y).toEqual([200]);
-    expect(traces[1].name).toBe(TVL_NETWORK.label);
-    expect(traces[1].x).toHaveLength(1);
-    expect(traces[1].y).toEqual([200]);
+    const [tr0, tr1] = [traces[0]!, traces[1]!];
+    expect(tr0.name).toBe("Total");
+    expect(tr0.x).toHaveLength(1);
+    expect(tr0.y).toEqual([200]);
+    expect(tr1.name).toBe(TVL_NETWORK.label);
+    expect(tr1.x).toHaveLength(1);
+    expect(tr1.y).toEqual([200]);
   });
 
   it("renders a skeleton (not the real value) in the hero while loading", () => {

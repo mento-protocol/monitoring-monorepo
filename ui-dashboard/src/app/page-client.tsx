@@ -7,6 +7,7 @@ import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import {
+  showInitialSkeleton,
   useAllNetworksData,
   type NetworkData,
 } from "@/hooks/use-all-networks-data";
@@ -414,7 +415,7 @@ function GlobalContent({
 
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">All Pools</h2>
-        {isLoading ? (
+        {showInitialSkeleton(isLoading, networkData.length) ? (
           <Skeleton rows={5} />
         ) : failedNetworks.length === 0 && globalEntries.length === 0 ? (
           <EmptyBox message="No pools found across any chain." />

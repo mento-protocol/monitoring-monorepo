@@ -55,8 +55,8 @@ describe("TagPills", () => {
     });
     const pills = container.querySelectorAll("span:not([data-overflow])");
     expect(pills.length).toBe(2);
-    expect(pills[0].textContent).toBe("Whale");
-    expect(pills[1].textContent).toBe("MEV Bot");
+    expect(pills[0]!.textContent).toBe("Whale");
+    expect(pills[1]!.textContent).toBe("MEV Bot");
   });
 
   it("pills have the expected styling classes", () => {
@@ -107,15 +107,16 @@ describe("TagPills", () => {
 
     const pills = containerEl.querySelectorAll("span");
     pills.forEach((pill, index) => {
+      const rect = pillRects[index]!;
       vi.spyOn(pill, "getBoundingClientRect").mockReturnValue({
         x: 0,
-        y: pillRects[index].top,
-        top: pillRects[index].top,
+        y: rect.top,
+        top: rect.top,
         left: 0,
         right: 80,
-        bottom: pillRects[index].bottom,
+        bottom: rect.bottom,
         width: 80,
-        height: pillRects[index].bottom - pillRects[index].top,
+        height: rect.bottom - rect.top,
         toJSON: () => ({}),
       });
     });

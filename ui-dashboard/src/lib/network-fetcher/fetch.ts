@@ -44,6 +44,7 @@ import type {
   BrokerDailySnapshotRow,
   NetworkData,
   PaginatedPageResult,
+  SerializableError,
   SnapshotPageResult,
 } from "./types";
 
@@ -730,12 +731,48 @@ export async function fetchNetworkData(
 }
 
 /**
+ * Rebuild a `NetworkData`'s nine error channels as plain `{ message }` objects
+ * (#661). `fetchNetworkData` populates them with `Error` instances internally
+ * (structurally assignable to `SerializableError`), but those must not cross
+ * the Server → Client boundary: React's Flight serializer opaques `Error`
+ * instances to a generic "…message is omitted in production builds…"
+ * placeholder, which would then render into `<ErrorBox>` instead of the real
+ * cause. Reading `.message` into a fresh literal yields a plain object that
+ * survives serialization. Idempotent — a value already shaped `{ message }`
+ * round-trips unchanged. Applied once, here at the `fetchAllNetworks` boundary
+ * (per the issue), so `fetchNetworkData` stays a pure internal fetcher.
+ */
+function toSerializableError(
+  e: SerializableError | null,
+): SerializableError | null {
+  return e === null ? null : { message: e.message };
+}
+
+function withSerializableErrors(data: NetworkData): NetworkData {
+  return {
+    ...data,
+    error: toSerializableError(data.error),
+    ratesError: toSerializableError(data.ratesError),
+    feeSnapshotsError: toSerializableError(data.feeSnapshotsError),
+    snapshotsError: toSerializableError(data.snapshotsError),
+    snapshots7dError: toSerializableError(data.snapshots7dError),
+    snapshots30dError: toSerializableError(data.snapshots30dError),
+    snapshotsAllDailyError: toSerializableError(data.snapshotsAllDailyError),
+    brokerSnapshotsAllDailyError: toSerializableError(
+      data.brokerSnapshotsAllDailyError,
+    ),
+    lpError: toSerializableError(data.lpError),
+  };
+}
+
+/**
  * Fetches pools, full-history daily snapshots (paginated), protocol fees, and
  * LP counts for ALL configured networks in parallel. Window-specific snapshot
  * arrays (24h/7d/30d) are derived in-memory from `snapshotsAllDaily` so we
  * make one paginated request instead of four overlapping ones, and avoid
  * Hasura's silent 1000-row cap on windowed queries. Uses Promise.allSettled
- * so one failing network doesn't block others.
+ * so one failing network doesn't block others. Error channels are flattened to
+ * plain `{ message }` objects so they survive the RSC boundary (see #661).
  */
 export async function fetchAllNetworks(): Promise<NetworkData[]> {
   const configuredNetworkIds = NETWORK_IDS.filter(isConfiguredNetworkId);
@@ -747,13 +784,16 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
   );
 
   return results.map((result, i) => {
-    if (result.status === "fulfilled") return result.value;
-    return emptyNetworkData(
-      NETWORKS[configuredNetworkIds[i]!],
-      windows,
-      result.reason instanceof Error
-        ? result.reason
-        : new Error(String(result.reason)),
-    );
+    const networkData =
+      result.status === "fulfilled"
+        ? result.value
+        : emptyNetworkData(
+            NETWORKS[configuredNetworkIds[i]!],
+            windows,
+            result.reason instanceof Error
+              ? result.reason
+              : new Error(String(result.reason)),
+          );
+    return withSerializableErrors(networkData);
   });
 }

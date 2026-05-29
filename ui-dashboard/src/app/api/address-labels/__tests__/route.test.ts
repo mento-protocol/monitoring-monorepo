@@ -59,7 +59,7 @@ describe("GET /api/address-labels", () => {
     expect(res.status).toBe(200);
     expect(getLabels).toHaveBeenCalledOnce();
     const body = (await res.json()) as Record<string, { name: string }>;
-    expect(body[VALID_ADDR].name).toBe("Alice");
+    expect(body[VALID_ADDR]!.name).toBe("Alice");
   });
 
   it("ignores any chainId/scope query params (back-compat: flat map only)", async () => {
@@ -174,7 +174,7 @@ describe("PUT /api/address-labels", () => {
     );
     expect(res.status).toBe(200);
     const [addr, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock
-      .calls[0];
+      .calls[0]!;
     expect(addr).toBe(VALID_ADDR);
     expect(entry).toMatchObject({ name: "", tags: ["whale"] });
   });
@@ -187,7 +187,7 @@ describe("PUT /api/address-labels", () => {
     const calls = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls).toHaveLength(1);
     expect(calls[0]).toHaveLength(2); // (address, entry) — no scope arg
-    expect(calls[0][0]).toBe(VALID_ADDR);
+    expect(calls[0]![0]).toBe(VALID_ADDR);
   });
 
   it("rejects name longer than 200 chars", async () => {
@@ -245,7 +245,7 @@ describe("PUT /api/address-labels", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(entry.tags).toEqual(["whale"]);
   });
 
@@ -271,7 +271,7 @@ describe("PUT /api/address-labels", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(entry.tags).toEqual(["Whale"]);
   });
 
@@ -287,7 +287,7 @@ describe("PUT /api/address-labels", () => {
       jsonReq({ address: VALID_ADDR, name: "User edit", tags: ["whale"] }),
     );
     expect(res.status).toBe(200);
-    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(entry.source).toBe("arkham");
     expect(entry.createdAt).toBe("2025-01-01T00:00:00Z");
   });
@@ -302,7 +302,7 @@ describe("PUT /api/address-labels", () => {
       jsonReq({ address: VALID_ADDR, name: "User edit", tags: ["whale"] }),
     );
     expect(res.status).toBe(200);
-    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(entry.source).toBeUndefined();
   });
 
@@ -315,7 +315,7 @@ describe("PUT /api/address-labels", () => {
     });
     const res = await PUT(jsonReq({ address: VALID_ADDR, name: "Edited" }));
     expect(res.status).toBe(200);
-    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(entry.source).toBe("minipay");
   });
 });
@@ -366,6 +366,6 @@ describe("DELETE /api/address-labels", () => {
     const calls = (deleteLabel as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls).toHaveLength(1);
     expect(calls[0]).toHaveLength(1); // (address) — no scope arg
-    expect(calls[0][0]).toBe(VALID_ADDR);
+    expect(calls[0]![0]).toBe(VALID_ADDR);
   });
 });

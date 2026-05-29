@@ -99,7 +99,7 @@ function median(sorted: readonly number[]): number {
   const n = sorted.length;
   if (n === 0) return Number.NaN;
   const mid = Math.floor(n / 2);
-  return n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  return n % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
 }
 
 export function computeRewardThresholds(

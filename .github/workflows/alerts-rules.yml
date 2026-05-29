@@ -2,21 +2,40 @@ name: Alerts Rules
 
 # Terraform plan-on-PR + apply-on-merge for `alerts/rules/` — the Grafana
 # alert rule + contact point + notification policy stack. The stack's GCS
-# backend impersonates `org-terraform@mento-terraform-seed-ffac` (see
-# `alerts/rules/versions.tf`), so the CI deployer SA needs
-# `roles/iam.serviceAccountTokenCreator` on `org-terraform`. That grant lives
-# in `terraform/ci-wif.tf` (resource `ci_alerts_org_terraform_token_creator`,
-# shared with `alerts/infra/`) and must be applied from the top-level stack
-# before this workflow can succeed.
+# backend impersonates a seed-project SA (see `alerts/rules/versions.tf`).
+# The plan and apply jobs use a read/write split for plan-time blast-radius
+# reduction:
+#   - apply (on merge) authenticates as the write-capable CI deployer SA
+#     (`GCP_SERVICE_ACCOUNT`) and impersonates `org-terraform@…seed` for the
+#     backend (state writes + locking via `storage.admin`). The deployer SA's
+#     `roles/iam.serviceAccountTokenCreator` grant on `org-terraform` lives in
+#     `terraform/ci-wif.tf` (`ci_alerts_org_terraform_token_creator`, shared
+#     with `alerts/infra/`).
+#   - plan (on PR) authenticates as the read-only CI SA
+#     (`GCP_SERVICE_ACCOUNT_PLAN`) and overrides the backend impersonation to
+#     `org-terraform-plan-readonly@…seed` via `-backend-config`. That seed SA
+#     holds only `roles/storage.objectViewer` on the state bucket, so plan
+#     passes `-lock=false` (it can't write the GCS lock object). This keeps a
+#     malicious PR's plan-time data source off the write-capable SA chain.
+#     Both grants live in `terraform/ci-wif.tf`. The grafana provider auths via
+#     `TF_VAR_grafana_service_account_token`, unaffected by the SA swap.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
 #     `terraform plan -detailed-exitcode` and emits a `has-changes` job
 #     output. On PRs it posts a sticky comment with the plan diff.
-#   - `apply` job only runs on push/dispatch to main AND only when the plan
-#     reported actual changes. When there are no changes the apply job is
-#     skipped entirely, which means the `production` Environment's
-#     required-reviewer prompt only fires on real-change merges.
+#   - `apply` job only runs on push/dispatch to main, only when the plan
+#     reported actual changes, and only for stack-root changes or explicit
+#     workflow_dispatch. No-change merges skip apply entirely, so the
+#     `production` Environment approval only fires on eligible real-change
+#     merges. Workflow/notifier-only edits can still plan, but they do not open
+#     the gate for unrelated drift.
+#   - During the legacy Discord cleanup, the apply job first targets the
+#     notification policy when old Discord contact points are still planned for
+#     destroy. Grafana rejects contact-point deletes while a policy still
+#     references them, and removed resources no longer give Terraform an
+#     ordering edge on their own.
+#
 # Note: we intentionally do NOT save the plan as a binary artifact for
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
 # sensitive data in cleartext in the plan file"
@@ -39,12 +58,14 @@ on:
     paths:
       - alerts/rules/**
       - scripts/sanitize-terraform-output.sh
+      - scripts/notify-terraform-apply.mjs
       - .github/workflows/alerts-rules.yml
   push:
     branches: [main]
     paths:
       - alerts/rules/**
       - scripts/sanitize-terraform-output.sh
+      - scripts/notify-terraform-apply.mjs
       - .github/workflows/alerts-rules.yml
 
 # PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR
@@ -99,6 +120,7 @@ jobs:
         working-directory: alerts/rules
     outputs:
       has-changes: ${{ steps.detect.outputs.has-changes }}
+      stack-changed: ${{ steps.stack_changes.outputs.stack-changed }}
     env:
       # Grafana Cloud (drives the grafana provider; needs Admin role on the stack)
       TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
@@ -108,12 +130,42 @@ jobs:
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Detect stack path changes
+        id: stack_changes
+        working-directory: ${{ github.workspace }}
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          STACK_PATH: alerts/rules
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$BASE_SHA" ] || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$STACK_PATH"; then
+            echo "stack-changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          # Read-only plan SA: PR plan jobs authenticate as the plan-readonly
+          # CI SA so a malicious PR's plan-time data source can't mint tokens
+          # for the write-capable deployer. The apply job below keeps
+          # `GCP_SERVICE_ACCOUNT`. See file header + `terraform/ci-wif.tf`.
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -127,7 +179,13 @@ jobs:
         run: terraform fmt -check -recursive
 
       - name: Init
-        run: terraform init -input=false
+        # Override the backend impersonation (hardcoded to the write-capable
+        # `org-terraform@…seed` in versions.tf, used by the apply job) to the
+        # read-only `org-terraform-plan-readonly@…seed` SA, which holds only
+        # `roles/storage.objectViewer` on the state bucket. `-backend-config`
+        # takes precedence over the backend block; fresh CI runners have no
+        # cached `.terraform`, so no `-reconfigure` is needed.
+        run: terraform init -input=false -backend-config="impersonate_service_account=org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
 
       - name: Validate
         run: terraform validate -no-color
@@ -144,12 +202,14 @@ jobs:
         # tee raw Terraform output to GitHub logs.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
         # (HashiCorp docs); apply re-plans at gate-approval time instead.
-        # `-lock-timeout=2m`: speculative PR plans can race a main-branch
-        # apply (separate concurrency groups). 2m is short enough not to stall
-        # CI on a long apply, long enough to absorb typical lock holds.
+        # `-lock=false`: the read-only plan SA (objectViewer only) can't
+        # create/delete the GCS lock object, so plan must skip locking. Safe
+        # because plan only reads state and re-runs on every push; a skipped
+        # lock can't drop work the way a missed apply could. The apply job
+        # below keeps locking via the write-capable SA.
         run: |
           set +e
-          terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
+          terraform plan -detailed-exitcode -no-color -input=false -lock=false > /tmp/tf-plan.raw 2>&1
           EXITCODE=$?
           set -e
           "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-plan.raw /tmp/tf-plan.txt
@@ -205,13 +265,18 @@ jobs:
         env:
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+          STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
         run: |
           {
             echo '## Terraform Plan — `alerts/rules/`'
             echo
             if [ "$PLAN_OUTCOME" = "success" ]; then
               if [ "$HAS_CHANGES" = "true" ]; then
-                echo '**Status:** 📝 changes detected — merge will trigger apply'
+                if [ "$STACK_CHANGED" = "true" ]; then
+                  echo '**Status:** 📝 changes detected — stack change is eligible for apply'
+                else
+                  echo '**Status:** ⚠️ drift detected — stack path unchanged, apply will skip'
+                fi
               else
                 echo '**Status:** ✅ no changes — merge will skip apply'
               fi
@@ -231,6 +296,23 @@ jobs:
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Notify Slack that Terraform apply is pending
+        if: >-
+          success()
+          && github.ref == 'refs/heads/main'
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && steps.detect.outputs.has-changes == 'true'
+          && (github.event_name == 'workflow_dispatch' || steps.stack_changes.outputs.stack-changed == 'true')
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: "${{ vars.TERRAFORM_APPLY_SLACK_CHANNEL || '#ci-failures' }}"
+          TERRAFORM_PLAN_FILE: /tmp/tf-plan.txt
+          TERRAFORM_STACK_LABEL: alerts/rules
+          TERRAFORM_TARGET_ENVIRONMENT: production
+        run: node "$GITHUB_WORKSPACE/scripts/notify-terraform-apply.mjs"
+
       - name: Post plan as sticky PR comment
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
@@ -242,6 +324,7 @@ jobs:
           # hardening pattern).
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+          STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
         with:
           script: |
             const fs = require("fs");
@@ -262,11 +345,14 @@ jobs:
 
             const planOutcome = process.env.PLAN_OUTCOME || "unknown";
             const hasChanges = process.env.HAS_CHANGES === "true";
+            const stackChanged = process.env.STACK_CHANGED === "true";
             const statusIcon = planOutcome === "success"
-              ? (hasChanges ? "📝" : "✅")
+              ? (hasChanges ? (stackChanged ? "📝" : "⚠️") : "✅")
               : "❌";
             const statusText = planOutcome === "success"
-              ? (hasChanges ? "changes detected — merge will trigger apply" : "no changes — merge will skip apply")
+              ? (hasChanges
+                  ? (stackChanged ? "changes detected — stack change is eligible for apply" : "drift detected — stack path unchanged, apply will skip")
+                  : "no changes — merge will skip apply")
               : "plan failed";
 
             const runUrl =
@@ -323,14 +409,15 @@ jobs:
   apply:
     name: Terraform Apply (alerts/rules)
     needs: plan
-    # Apply when (a) on main, (b) push or dispatch event, AND (c) plan said
-    # there are real changes. When `has-changes=false` the job is skipped
-    # entirely — the production-environment approval prompt never fires for
-    # no-op merges (the gap that motivated the saved-plan refactor).
+    # Apply when (a) on main, (b) push or dispatch event, (c) plan said
+    # there are real changes, AND (d) the stack root changed or a maintainer
+    # explicitly dispatched the workflow. Workflow/notifier-only edits can
+    # surface drift in the plan without opening the production approval gate.
     if: >-
       github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.plan.outputs.has-changes == 'true'
+      && (github.event_name == 'workflow_dispatch' || needs.plan.outputs.stack-changed == 'true')
     # Reuses the existing `production` environment shared with metrics-bridge,
     # aegis, and alerts/infra. The required-reviewer rule on that environment
     # gates each apply behind manual approval.

@@ -90,7 +90,7 @@ describe("buildAddressBookRows", () => {
       [customRow(ADDR_A, NET_CELO)],
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].isCustom).toBe(true);
+    expect(rows[0]!.isCustom).toBe(true);
   });
 
   it("custom row for one address does NOT suppress contract rows for unrelated addresses", () => {
@@ -108,7 +108,7 @@ describe("buildAddressBookRows", () => {
       [customRow(ADDR_A, NET_CELO)],
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].isCustom).toBe(true);
+    expect(rows[0]!.isCustom).toBe(true);
   });
 
   it("matches addresses case-insensitively", () => {
@@ -117,7 +117,7 @@ describe("buildAddressBookRows", () => {
       [customRow(ADDR_A_LC, NET_CELO)],
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].isCustom).toBe(true);
+    expect(rows[0]!.isCustom).toBe(true);
   });
 
   it("custom rows come first in the result", () => {
@@ -125,7 +125,7 @@ describe("buildAddressBookRows", () => {
       [contractRow(ADDR_B, NET_CELO)],
       [customRow(ADDR_A, NET_CELO)],
     );
-    expect(rows[0].isCustom).toBe(true);
+    expect(rows[0]!.isCustom).toBe(true);
   });
 });
 

@@ -1,13 +1,14 @@
 ###############################
-# CI failures Slack channel    #
+# CI operations Slack channel  #
 ###############################
 #
-# A dedicated `#ci-failures` channel for the
-# `.github/workflows/notify-slack-on-main-failure.yml` workflow to post into
-# when any push-to-main workflow conclusion is `failure`. Separate from
-# `#alerts-critical` / `#alerts-infra` because CI failures are different
-# operational signal — they tell you "the deploy pipeline broke", not
-# "production is degraded."
+# A dedicated `#ci-failures` channel for GitHub Actions operational messages:
+# main-branch workflow failures from `.github/workflows/notify-slack-on-main-failure.yml`
+# and, by default, Terraform apply-pending summaries from the CI-applied
+# Terraform stacks. Separate from `#alerts-critical` / `#alerts-infra` because
+# CI messages are about deploy/release machinery, not direct production
+# degradation. Set the repository variable `TERRAFORM_APPLY_SLACK_CHANNEL` if
+# Terraform apply summaries should go to a different public Slack channel.
 #
 # Same restapi-against-Slack pattern as `channels/sentry-bridge/slack_channels.tf`
 # (per-project channels). Reuses the existing `restapi.slack` provider in
@@ -95,7 +96,7 @@ resource "restapi_object" "ci_failures_channel_member" {
 }
 
 output "ci_failures_channel_id" {
-  description = "Slack channel ID for #ci-failures (used by the notify-slack-on-main-failure workflow)"
+  description = "Slack channel ID for #ci-failures (used by GitHub Actions operational notifications)"
   value       = restapi_object.ci_failures_channel.id
 }
 
@@ -249,33 +250,10 @@ resource "restapi_object" "ci_failures_invite_eng" {
     # `alltrue([])` is `true` in Terraform, so without it a real failure
     # like `{"ok": false, "error": "missing_scope"}` (top-level error,
     # NO `errors` array) would silently pass the postcondition.
-    #
-    # The `channel_not_found` branch is a one-time migration escape hatch for
-    # old state. Previous config also stored `id_attribute = "ok"` but used
-    # `read_path = "/conversations.info?channel={id}"`, so refresh asks Slack
-    # for `channel=true` or `channel=false` before Terraform can persist the
-    # new `/api.test` read path. `id = "false"` is only accepted when the
-    # historical create response was the benign all-already_in_channel case;
-    # a fresh create failure such as missing_scope or channel_not_found still
-    # fails this postcondition.
     postcondition {
       condition = (
         self.api_response != null && (
           try(jsondecode(self.api_response).ok, false) == true
-          || (
-            try(jsondecode(self.api_response).error, "") == "channel_not_found"
-            && (
-              self.id == "true"
-              || (
-                self.id == "false"
-                && try(length(jsondecode(self.create_response).errors), 0) > 0
-                && alltrue([
-                  for err in try(jsondecode(self.create_response).errors, []) :
-                  try(err.error, "") == "already_in_channel"
-                ])
-              )
-            )
-          )
           || (
             try(length(jsondecode(self.api_response).errors), 0) > 0
             && alltrue([

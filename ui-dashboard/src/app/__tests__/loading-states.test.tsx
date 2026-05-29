@@ -62,7 +62,7 @@ describe("route-level loading UIs", () => {
     );
     expect(table).not.toBeNull();
     const [header] = Array.from(table!.children) as HTMLElement[];
-    expect(header.children).toHaveLength(10);
+    expect(header!.children).toHaveLength(10);
   });
 
   it("PoolDetailLoading skeleton matches the real page shape (7 tabs, 6-col table)", () => {
@@ -72,7 +72,7 @@ describe("route-level loading UIs", () => {
     );
     expect(table).not.toBeNull();
     const [header] = Array.from(table!.children) as HTMLElement[];
-    expect(header.children).toHaveLength(6);
+    expect(header!.children).toHaveLength(6);
 
     // Tab strip: 7 placeholder bars inside a flex container with a bottom border
     const tabStrip = container.querySelector(".flex.gap-1.border-b");

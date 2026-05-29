@@ -36,7 +36,7 @@ export function HealthBadge({ status }: { status: string }) {
     },
   };
 
-  const cfg = configs[status] ?? configs["N/A"];
+  const cfg = configs[status] ?? configs["N/A"]!;
   return (
     <span
       className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${cfg.bg} ${cfg.text}`}
@@ -110,7 +110,7 @@ export function LimitBadge({ status }: { status: string }) {
     },
   };
 
-  const cfg = configs[status] ?? configs["N/A"];
+  const cfg = configs[status] ?? configs["N/A"]!;
   return (
     <span
       className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${cfg.bg} ${cfg.text}`}

@@ -29,7 +29,7 @@ const COLOR_BANDS: ReadonlyArray<{ max: number; color: string }> = [
 
 function markerColor(pct: number): string {
   for (const band of COLOR_BANDS) if (pct <= band.max) return band.color;
-  return COLOR_BANDS[COLOR_BANDS.length - 1].color;
+  return COLOR_BANDS[COLOR_BANDS.length - 1]!.color;
 }
 
 // `autorange: true` on the y-axis lets > 100% render without clipping —

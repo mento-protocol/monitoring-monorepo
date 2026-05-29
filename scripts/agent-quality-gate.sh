@@ -1082,6 +1082,9 @@ while IFS= read -r path; do
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
           ;;
+        scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
+          add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
+          ;;
         scripts/eslint-baseline-diff.mjs)
           # The lint wrapper. A regression here would mask all per-package
           # baseline drift. Re-run every package's lint to exercise the

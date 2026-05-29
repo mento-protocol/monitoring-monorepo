@@ -136,8 +136,8 @@ describe("mergeTransactionRows", () => {
     };
     const { rows, capped } = mergeTransactionRows(data);
     expect(rows).toHaveLength(4);
-    expect(rows[0].timestamp).toBe("1000");
-    expect(rows[3].timestamp).toBe("700");
+    expect(rows[0]!.timestamp).toBe("1000");
+    expect(rows[3]!.timestamp).toBe("700");
     expect(capped).toBe(false);
   });
 

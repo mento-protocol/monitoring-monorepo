@@ -36,8 +36,8 @@ describe("TagInput", () => {
     });
     const pills = container.querySelectorAll("span.inline-flex");
     expect(pills.length).toBe(2);
-    expect(pills[0].textContent).toContain("Whale");
-    expect(pills[1].textContent).toContain("CEX");
+    expect(pills[0]!.textContent).toContain("Whale");
+    expect(pills[1]!.textContent).toContain("CEX");
   });
 
   it("calls onChange without removed tag when X is clicked", () => {
@@ -114,7 +114,7 @@ describe("TagInput", () => {
     expect(listbox).not.toBeNull();
     const options = listbox!.querySelectorAll('[role="option"]');
     expect(options.length).toBe(1);
-    expect(options[0].textContent).toBe("Market Maker");
+    expect(options[0]!.textContent).toBe("Market Maker");
   });
 
   it("does not duplicate an already-added tag", () => {

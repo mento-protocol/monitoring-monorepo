@@ -173,7 +173,7 @@ describe("checkRebalanceStatus", () => {
     expect(result.canRebalance).toBe(true);
     // OLS must probe determineAction(address), NOT rebalance(address) — the
     // latter triggers an ERC20 transfer revert when simulated from address(0).
-    const callData = mockCall.mock.calls[0][0].data as string;
+    const callData = mockCall.mock.calls[0]![0].data as string;
     expect(callData.slice(0, 10)).toBe(DETERMINE_ACTION_SELECTOR);
   });
 
@@ -198,7 +198,7 @@ describe("checkRebalanceStatus", () => {
     expect(result.rawError).toBe("OLS_OUT_OF_COLLATERAL");
     expect(result.message).toContain("collateral");
     // Regression guard: ensure probe went through determineAction, not rebalance.
-    const callData = mockCall.mock.calls[0][0].data as string;
+    const callData = mockCall.mock.calls[0]![0].data as string;
     expect(callData.slice(0, 10)).toBe(DETERMINE_ACTION_SELECTOR);
   });
 

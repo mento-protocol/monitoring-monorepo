@@ -98,10 +98,10 @@ describe("stripAuthHeaders — exception value redaction", () => {
       },
     };
     const scrubbed = scrub(event);
-    expect(scrubbed.exception.values[0].value).toBe(
+    expect(scrubbed.exception.values[0]!.value).toBe(
       "fetch failed https://celo-mainnet.infura.io/v3/xyz",
     );
-    expect(scrubbed.exception.values[1].value).toBe(
+    expect(scrubbed.exception.values[1]!.value).toBe(
       "second frame mentions https://api.example.com/pools",
     );
   });
@@ -111,7 +111,7 @@ describe("stripAuthHeaders — exception value redaction", () => {
       exception: { values: [{ type: "Error", value: "plain message" }] },
     };
     const scrubbed = scrub(event);
-    expect(scrubbed.exception.values[0].value).toBe("plain message");
+    expect(scrubbed.exception.values[0]!.value).toBe("plain message");
   });
 });
 
@@ -149,10 +149,10 @@ describe("stripAuthHeaders — breadcrumb redaction", () => {
       ],
     };
     const scrubbed = scrub(event);
-    expect(scrubbed.breadcrumbs[0].message).toBe(
+    expect(scrubbed.breadcrumbs[0]!.message).toBe(
       "GET https://api.example.com/feed — 200",
     );
-    expect(scrubbed.breadcrumbs[0].data.url).toBe(
+    expect(scrubbed.breadcrumbs[0]!.data.url).toBe(
       "https://api.example.com/feed",
     );
   });

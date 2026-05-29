@@ -172,12 +172,11 @@ describe("buildCustomRows", () => {
       displayNet,
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].isCustom).toBe(true);
-    expect(rows[0].network).toBe(displayNet);
-    expect(rows[0].key).toBe(
-      "custom:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    );
-    expect(rows[0].name).toBe("Cross-chain Whale");
+    const row = rows[0]!;
+    expect(row.isCustom).toBe(true);
+    expect(row.network).toBe(displayNet);
+    expect(row.key).toBe("custom:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(row.name).toBe("Cross-chain Whale");
   });
 
   it("propagates source / createdAt / updatedAt / tags onto the rendered row", () => {
@@ -193,10 +192,11 @@ describe("buildCustomRows", () => {
       ],
       displayNet,
     );
-    expect(rows[0].source).toBe("arkham");
-    expect(rows[0].tags).toEqual(["enriched"]);
-    expect(rows[0].createdAt).toBe("2026-02-02T00:00:00.000Z");
-    expect(rows[0].updatedAt).toBe("2026-02-03T00:00:00.000Z");
+    const row = rows[0]!;
+    expect(row.source).toBe("arkham");
+    expect(row.tags).toEqual(["enriched"]);
+    expect(row.createdAt).toBe("2026-02-02T00:00:00.000Z");
+    expect(row.updatedAt).toBe("2026-02-03T00:00:00.000Z");
   });
 
   it("emits one row per custom entry, address-keyed (no merging)", () => {

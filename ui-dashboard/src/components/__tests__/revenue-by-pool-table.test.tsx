@@ -172,7 +172,7 @@ function renderFeeCells(networks: NetworkData[]): CellRecord {
   const parts = html.split("font-mono text-right");
   // parts[0] is the prefix before the first cell; parts[1..n] start after
   // each marker. We need the segment up to the next </td>.
-  const cells: string[] = parts.slice(1).map((seg) => seg.split("</td>")[0]);
+  const cells: string[] = parts.slice(1).map((seg) => seg.split("</td>")[0]!);
 
   return {
     fees24h: cells[0] ?? "",

@@ -176,8 +176,8 @@ describe("PoolDetailWithHealthSchema", () => {
     const result = PoolDetailWithHealthSchema.safeParse({ Pool: [full] });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.Pool[0].token0Decimals).toBe(18);
-      expect(result.data.Pool[0].token1Decimals).toBe(6);
+      expect(result.data.Pool[0]!.token0Decimals).toBe(18);
+      expect(result.data.Pool[0]!.token1Decimals).toBe(6);
     }
   });
 
@@ -190,8 +190,8 @@ describe("PoolDetailWithHealthSchema", () => {
     const result = PoolDetailWithHealthSchema.safeParse({ Pool: [row] });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.Pool[0].token0Decimals).toBe(18);
-      expect(result.data.Pool[0].token1Decimals).toBe(6);
+      expect(result.data.Pool[0]!.token0Decimals).toBe(18);
+      expect(result.data.Pool[0]!.token1Decimals).toBe(6);
     }
   });
 
@@ -267,8 +267,8 @@ describe("schema validation logic", () => {
     const result = schema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.Pool[0].id).toBe("0x1");
-      expect("unknown" in result.data.Pool[0]).toBe(false);
+      expect(result.data.Pool[0]!.id).toBe("0x1");
+      expect("unknown" in result.data.Pool[0]!).toBe(false);
     }
   });
 });

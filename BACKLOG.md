@@ -19,8 +19,8 @@ Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`.
 DORA metrics and Dev Containers remain intentionally excluded. CodeScene-equivalent
 OSS quality checks have shipped (knip, dependency-cruiser, ESLint complexity
 budgets, jscpd, code-health history, indexer `no-unsafe-*`, three blocking
-mutation gates); residual `noUncheckedIndexedAccess` burn-down for `ui-dashboard`
-is now tracked as GitHub issues #666–#671.
+mutation gates); the `noUncheckedIndexedAccess` burn-down for `ui-dashboard`
+completed via GitHub issues #666–#671 — the flag is now on across all packages.
 
 ### `mise` Toolchain Management Trial
 
@@ -96,18 +96,11 @@ _Auto-apply design decision resolved 2026-05-27._ `alerts/rules/`, `alerts/infra
 
 ## Terraform CI/CD audit follow-ups (post-#622)
 
-PR #622 shipped a saved-plan-style "skip-when-no-changes" + production-environment gate refactor for `alerts/rules/` and `alerts/infra/`. Follow-up PRs added Aegis auto-apply, scheduled drift detection, and the local Terraform apply guard. The remaining audit follow-ups below cover plan-credential hardening, quality-of-life fixes, and deferred deeper-investment items.
+PR #622 shipped a saved-plan-style "skip-when-no-changes" + production-environment gate refactor for `alerts/rules/` and `alerts/infra/`. Follow-up PRs added Aegis auto-apply, scheduled drift detection, and the local Terraform apply guard. Plan-credential hardening is now complete: the read-only plan SA (`metrics-bridge-plan-readonly@` → `org-terraform-plan-readonly@…seed`, `objectViewer` on the state bucket only) runs every PR-triggered Terraform plan job — the grafana-only stacks (`alerts-rules`, `aegis`) via `-backend-config` + `-lock=false`, and `alerts/infra` via the same plus `-refresh=false` (its google provider would otherwise refresh GCP resources the read-only seed SA can't read). Apply jobs stay on the write-capable deployer. The items below are deferred by design.
 
-### Tier 1 — Hardening + coverage
+### Deferred
 
-- [ ] **Finish the read-only plan SA workflow swap.** PRs #630 / #640 added the `metrics-bridge-plan-readonly@` CI SA and the `org-terraform-plan-readonly@` seed-project SA with `roles/storage.objectViewer` on the state bucket. Remaining work: after that Terraform wiring is applied and `GCP_SERVICE_ACCOUNT_PLAN` is seeded, switch Terraform plan jobs in `alerts-rules.yml`, `alerts-infra.yml`, `aegis-terraform.yml`, and `terraform-drift.yml` to the read-only chain via `-backend-config="impersonate_service_account=..."` + `-lock=false`; apply jobs stay on the write-capable deployer. This does NOT mitigate `TF_VAR_*` cleartext exposure at plan time — providers still need them to refresh.
-
-### Tier 2 — Deferred
-
-- [ ] **`alerts/infra/onchain-event-handler/local-dotenv-file.tf` exit-2 false positive.** The `local_file.env_file` resource always plans as "create" on fresh-checkout CI runners (the file is gitignored and absent on clean clone). Defeats the skip-when-no-changes optimization for alerts-infra — production gate fires on every merge. Fix: replace with `terraform_data` + `local-exec` provisioner so refresh has no on-disk state to drift against. `removed { lifecycle { destroy = false } }` block detaches the old resource without nuking local `.env` files.
-- [ ] **PR #609 follow-up — mixed-state trading-mode visibility.** When firing AND resolved trading-mode alerts arrive in the same Grafana group notification, the title's global `🚨` masks the resolved entries. Fix: switch the trading-mode title to the count-summary pattern proven in `slack.trading_limits_alert_title` (`[N FIRING | M RESOLVED] {{ .CommonLabels.alertname }}`) + embed per-alert emoji inline in body bold heading. Slack template update only.
-
-### Tier 3 — Deferred
+- [ ] **`terraform-drift.yml` read-only swap + full-refresh `alerts/infra` PR plan — deferred (by design).** The read-only plan SA exists to stop a malicious _PR_ from minting a write-SA token via a plan-time data source. `terraform-drift.yml` is `schedule` + `workflow_dispatch` only — it never runs attacker-controlled PR code, so swapping it has near-zero security value; left on the write SA (its TODO comment notes the same). Separately, the `alerts/infra` PR plan uses `-refresh=false` because the read-only seed SA has no project roles; a _full-refresh_ read-only plan (and a drift swap) would need that seed SA granted read access (e.g. `roles/viewer`) on the `alerts/infra`-managed `project_factory` project — a grant in a project not visible to the read-only agent SA, requiring an operator with seed/org credentials. Marginal value is low (drift detection already runs full-refresh on the write SA; the fork guard + read-only PR plan already cover the PR attack surface), so deferred until an operator wants it.
 
 - [ ] **Saved-plan binding via KMS — deferred.** PR #622's audit considered re-introducing the binary `tfplan` artifact via KMS envelope encryption to recover the "binding plan" property (byte-for-byte equality between PR-time review and apply-time execution). Recommendation: defer. Cost/value analysis: alerts stacks change ~1-2× per month, blast radius is alert delivery (recoverable on 15-min cycle), and the drift window between plan and apply is mitigated by the re-plan at apply gate. **Hard prerequisite to revisit: keep scheduled drift detection healthy for every auto-applied stack.** Once drift is caught within 24h regardless of which plan ran, the marginal value of binding-plan approaches zero. Reopen only if a higher-blast-radius stack (e.g. `terraform/` platform) moves to auto-apply.
 
@@ -128,7 +121,6 @@ Items below are net-new functionality or polish, not migration blockers.
 
 ### Tier 3 — Hygiene / cosmetic
 
-- [ ] **Remove `ci_failures_invite_eng` read-path migration guard** — PR #597 temporarily accepts legacy `channel_not_found` refreshes for old state whose `read_path` still asks Slack for `channel=true` or `channel=false` before persisting the new `/api.test` read path. After the PR #597 apply confirms state is clean, remove that postcondition branch from `alerts/infra/ci-failures-channel.tf`.
 - [ ] **Orphan GCS state files** — after PR #556 renamed backend prefixes to `alerts-infra` + `alerts-rules`, the old paths (`gs://<state-bucket>/alerts/default.tfstate` and `gs://<state-bucket>/monitoring-monorepo-alerts/default.tfstate`) still exist on GCS. No functional impact, pennies/month storage. Delete with `gcloud storage rm` on next cleanup pass.
 
 ### Sentry → Slack follow-ups (post #561 + #570)

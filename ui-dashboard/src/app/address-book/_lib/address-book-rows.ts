@@ -40,7 +40,7 @@ export function findContractInitial(address: string): AddressEntry | undefined {
   if (matched.size !== 1) return undefined;
   const [name] = matched;
   return {
-    name,
+    name: name!,
     tags: [],
     updatedAt: new Date().toISOString(),
   };

@@ -73,7 +73,7 @@ describe("POST /api/hasura/[networkId]", () => {
     });
 
     expect(res.status).toBe(200);
-    const [, init] = fetchMock.mock.calls[0];
+    const [, init] = fetchMock.mock.calls[0]!;
     const headers = new Headers(init?.headers);
     expect(headers.get("x-hasura-admin-secret")).toBe("testing");
     expect(headers.get("content-type")).toBe("application/json");
@@ -91,7 +91,7 @@ describe("POST /api/hasura/[networkId]", () => {
       params: Promise.resolve({ networkId: "celo-mainnet-local" }),
     });
 
-    const [, init] = fetchMock.mock.calls[0];
+    const [, init] = fetchMock.mock.calls[0]!;
     const headers = new Headers(init?.headers);
     expect(headers.get("x-hasura-admin-secret")).toBeNull();
   });

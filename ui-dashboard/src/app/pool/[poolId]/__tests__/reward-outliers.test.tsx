@@ -21,8 +21,8 @@ describe("computeRewardThresholds", () => {
     // sorted [0,1,1,2,2] → MAD=1. Mild=6, strong=8.
     const thresholds = computeRewardThresholds(["1", "2", "3", "4", "5"])!;
     expect(thresholds).not.toBeNull();
-    expect(thresholds[0].cutoff).toBeCloseTo(8, 6);
-    expect(thresholds[1].cutoff).toBeCloseTo(6, 6);
+    expect(thresholds[0]!.cutoff).toBeCloseTo(8, 6);
+    expect(thresholds[1]!.cutoff).toBeCloseTo(6, 6);
   });
 
   it("returns null when MAD is zero (every sample identical)", () => {
@@ -46,8 +46,8 @@ describe("computeRewardThresholds", () => {
       "-5",
       "abc",
     ])!;
-    expect(thresholds[0].cutoff).toBeCloseTo(8, 6);
-    expect(thresholds[1].cutoff).toBeCloseTo(6, 6);
+    expect(thresholds[0]!.cutoff).toBeCloseTo(8, 6);
+    expect(thresholds[1]!.cutoff).toBeCloseTo(6, 6);
   });
 
   it("computes cutoff = median + k·MAD for even-N inputs", () => {
@@ -57,18 +57,18 @@ describe("computeRewardThresholds", () => {
       Array.from({ length: 30 }, (_, i) => String(i + 1)),
     )!;
     const [strong, mild] = thresholds;
-    expect(strong.tier.kMad).toBe(5);
-    expect(strong.cutoff).toBeCloseTo(53, 6);
-    expect(mild.tier.kMad).toBe(3);
-    expect(mild.cutoff).toBeCloseTo(38, 6);
+    expect(strong!.tier.kMad).toBe(5);
+    expect(strong!.cutoff).toBeCloseTo(53, 6);
+    expect(mild!.tier.kMad).toBe(3);
+    expect(mild!.cutoff).toBeCloseTo(38, 6);
   });
 
   it("returns thresholds in strongest-tier-first order", () => {
     const thresholds = computeRewardThresholds(
       Array.from({ length: 100 }, (_, i) => String(i + 1)),
     )!;
-    expect(thresholds[0].tier.kMad).toBeGreaterThan(thresholds[1].tier.kMad);
-    expect(thresholds[0].cutoff).toBeGreaterThan(thresholds[1].cutoff);
+    expect(thresholds[0]!.tier.kMad).toBeGreaterThan(thresholds[1]!.tier.kMad);
+    expect(thresholds[0]!.cutoff).toBeGreaterThan(thresholds[1]!.cutoff);
   });
 
   it("highlights tail outliers on sub-cent pools (regression: codex P2)", () => {

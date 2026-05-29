@@ -84,8 +84,8 @@ describe("GET /api/address-labels/export", () => {
       chains?: unknown;
     };
     expect(body.exportedAt).toBeDefined();
-    expect(body.addresses["0xabc"].name).toBe("Test");
-    expect(body.addresses["0xggg"].name).toBe("Other");
+    expect(body.addresses["0xabc"]!.name).toBe("Test");
+    expect(body.addresses["0xggg"]!.name).toBe("Other");
     // Legacy global/chains keys must NOT appear in new snapshots.
     expect(body.global).toBeUndefined();
     expect(body.chains).toBeUndefined();
@@ -107,8 +107,8 @@ describe("GET /api/address-labels/export", () => {
       reports?: Record<string, { body: string; version: number }>;
     };
     expect(body.reports).toBeDefined();
-    expect(body.reports?.["0xabc"].body).toBe("Investigation");
-    expect(body.reports?.["0xabc"].version).toBe(1);
+    expect(body.reports?.["0xabc"]!.body).toBe("Investigation");
+    expect(body.reports?.["0xabc"]!.version).toBe(1);
   });
 
   it("ignores any chainId/scope query params (back-compat)", async () => {

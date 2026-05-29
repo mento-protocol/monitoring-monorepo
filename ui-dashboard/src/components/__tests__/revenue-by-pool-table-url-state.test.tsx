@@ -130,7 +130,7 @@ function ariaSortByLabel(html: string): Record<string, string> {
   for (const seg of html.split("</th>")) {
     const sort = seg.match(/aria-sort="([^"]+)"/);
     const label = seg.match(/<button[^>]*>([^<]+)/);
-    if (sort && label) result[label[1].trim()] = sort[1];
+    if (sort && label) result[label[1]!.trim()] = sort[1]!;
   }
   return result;
 }

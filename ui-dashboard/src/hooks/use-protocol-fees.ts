@@ -148,7 +148,7 @@ async function fetchAllProtocolFees(): Promise<NetworkData[]> {
   return results.map((r, i) =>
     r.status === "fulfilled"
       ? r.value
-      : blankNetworkData(NETWORKS[ids[i]], windows, {
+      : blankNetworkData(NETWORKS[ids[i]!], windows, {
           error:
             r.reason instanceof Error ? r.reason : new Error(String(r.reason)),
         }),

@@ -192,7 +192,7 @@ describe("AddressLabelForm — save flow", () => {
     setInputValue("al-name", "  Whale Alice  ");
     await submit();
     expect(mockUpsertEntry).toHaveBeenCalledTimes(1);
-    const [calledAddress, calledEntry] = mockUpsertEntry.mock.calls[0];
+    const [calledAddress, calledEntry] = mockUpsertEntry.mock.calls[0]!;
     expect(calledAddress).toBe(VALID_ADDR);
     expect(calledEntry).toMatchObject({
       name: "Whale Alice",
@@ -207,7 +207,7 @@ describe("AddressLabelForm — save flow", () => {
     setInputValue("al-name", "Alice");
     setInputValue("al-notes", "   ");
     await submit();
-    const [, calledEntry] = mockUpsertEntry.mock.calls[0];
+    const [, calledEntry] = mockUpsertEntry.mock.calls[0]!;
     expect(calledEntry.notes).toBeUndefined();
   });
 
@@ -257,7 +257,8 @@ describe("AddressLabelForm — save flow", () => {
     // post-save updatedAt. The formId on `false` must equal the formId on
     // `true` — the page checks identity to discard stale callbacks.
     expect(onSavingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
-    const [trueCall, falseCall] = onSavingChange.mock.calls;
+    const trueCall = onSavingChange.mock.calls[0]!;
+    const falseCall = onSavingChange.mock.calls[1]!;
     expect(trueCall[1]).toBe(falseCall[1]);
     expect(typeof trueCall[1]).toBe("string");
   });
@@ -370,7 +371,8 @@ describe("AddressLabelForm — delete flow", () => {
       await Promise.resolve();
     });
     expect(onDeletingChange.mock.calls.map((c) => c[0])).toEqual([true, false]);
-    const [trueCall, falseCall] = onDeletingChange.mock.calls;
+    const trueCall = onDeletingChange.mock.calls[0]!;
+    const falseCall = onDeletingChange.mock.calls[1]!;
     // formId stable across the (true → false) pair
     expect(trueCall[1]).toBe(falseCall[1]);
   });
