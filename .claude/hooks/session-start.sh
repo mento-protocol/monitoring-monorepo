@@ -26,7 +26,7 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
 fi
 
 # Inspect SessionStart payload on stdin (best-effort: if stdin is not present
-# or the payload is unparseable, default to running the bootstrap rather than
+# or the payload is unparsable, default to running the bootstrap rather than
 # silently skipping). Only `startup` triggers the heavy install/codegen path.
 HOOK_INPUT=""
 if [ ! -t 0 ]; then
