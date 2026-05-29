@@ -158,8 +158,18 @@ jobs:
         # versions.tf). Write legs init plain against the deployer.
         env:
           PLAN_SA: ${{ matrix.planSa }}
+          GCP_SA_PLAN: ${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}
         run: |
           if [ "$PLAN_SA" = "readonly" ]; then
+            # Fail loud rather than silently elevate: the auth ternary
+            # (`matrix.planSa == 'readonly' && PLAN || WRITE`) falls through to
+            # the write SA if `GCP_SERVICE_ACCOUNT_PLAN` is empty (`true && ''`
+            # is falsy in GHA), which would defeat least privilege without an
+            # error signal. A missing secret should stop the readonly leg here.
+            if [ -z "$GCP_SA_PLAN" ]; then
+              echo "::error::GCP_SERVICE_ACCOUNT_PLAN is not set — readonly leg would silently fall back to the write SA"
+              exit 1
+            fi
             terraform init -input=false -backend-config="impersonate_service_account=org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
           else
             terraform init -input=false
