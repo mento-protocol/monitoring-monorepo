@@ -256,8 +256,12 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
 # of history in a single Hasura page: the 1000-row cap is ~3.5 days of raw
 # medians on a busy feed, but ~2.7 years of daily candles. Written ONLY from the
 # MedianUpdated handler (`source = "oracle_median_updated"`), the same population
-# the raw oracle chart plots — so a candle's verdict equals the OR of that day's
-# raw points.
+# the raw oracle chart plots — so a candle's `anyOutOfBand` equals the
+# OR of that day's raw chart-red points whenever each median carried a persisted
+# breaker band. Early-history rows with an unseeded EMA persist a null band →
+# neutral here, while the chart's `snapshotIsRed` falls back to the *current*
+# config for those (a narrow divergence at the daily/raw seam, settled in the
+# chart follow-up).
 type OraclePriceDailySnapshot @index(fields: ["poolId", "bucketStart"]) {
   id: ID! # `${poolId}-${bucketStart}`
   chainId: Int! @index
