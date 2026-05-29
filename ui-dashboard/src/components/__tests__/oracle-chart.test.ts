@@ -8,7 +8,12 @@ import {
 } from "../oracle-chart";
 import type { OracleSnapshot } from "@/lib/types";
 
-const { buildOracleShapes, buildOracleXaxis, buildOraclePlotData } = __test__;
+const {
+  buildOracleShapes,
+  buildOracleXaxis,
+  buildOraclePlotData,
+  buildOracleLayout,
+} = __test__;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -517,5 +522,30 @@ describe("buildOraclePlotData y-range autosize", () => {
       thresholdRatio: 0.01,
     });
     expect(yMax).toBeGreaterThan(yMin);
+  });
+});
+
+describe("buildOracleLayout uirevision", () => {
+  const baseArgs = {
+    shapes: [],
+    xaxis: buildOracleXaxis(["2026-05-01T00:00:00.000Z"], true),
+    yMin: 0.99,
+    yMax: 1.01,
+    baseline: 1.0,
+    thresholdRatio: 0.01,
+  };
+
+  it("carries the uirevision token through to the layout", () => {
+    const layout = buildOracleLayout({
+      ...baseArgs,
+      uirevision: "celo-mainnet:42220-0xpool",
+    });
+    // Preserves zoom/pan across re-renders while the token is unchanged.
+    expect(layout.uirevision).toBe("celo-mainnet:42220-0xpool");
+  });
+
+  it("leaves uirevision undefined when no token is passed (no pinning)", () => {
+    const layout = buildOracleLayout(baseArgs);
+    expect(layout.uirevision).toBeUndefined();
   });
 });

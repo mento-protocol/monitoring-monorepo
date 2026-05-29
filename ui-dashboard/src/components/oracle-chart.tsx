@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { OracleSnapshot } from "@/lib/types";
+import { decimateSeries } from "@/lib/oracle-decimation";
 import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
@@ -31,6 +32,52 @@ const ORACLE_CHART_CONFIG = {
   ...PLOTLY_CONFIG,
   scrollZoom: false,
 } as const;
+
+// SVG `scatter` with per-point marker/color/hover arrays renders one DOM node
+// per point and gets sluggish past a few thousand. Cap rendered points; the
+// decimator preserves every anomalous point regardless of this cap.
+const ORACLE_CHART_MAX_POINTS = 2000;
+
+/**
+ * Read the requested visible X range (unix seconds) out of a Plotly relayout
+ * event. Returns `null` when the event carries no X-range change — Y-only
+ * wheel-zooms (`yaxis.range` only) and autorange resets — so the caller never
+ * fires a history fetch in response to a Y zoom or a "show all" reset. Exported
+ * for direct unit testing.
+ */
+export function readXRange(
+  e: Readonly<Record<string, unknown>>,
+): [number, number] | null {
+  if (e["xaxis.autorange"]) return null;
+  const rangeArr = e["xaxis.range"] as readonly unknown[] | undefined;
+  const lo = e["xaxis.range[0]"] ?? rangeArr?.[0];
+  const hi = e["xaxis.range[1]"] ?? rangeArr?.[1];
+  if (lo == null || hi == null) return null;
+  // Plotly date-axis range values are ISO-ish strings (or ms numbers from the
+  // wheel handler) — `new Date(...)` handles both; /1000 → unix seconds.
+  const L = new Date(lo as string | number).getTime() / 1000;
+  const R = new Date(hi as string | number).getTime() / 1000;
+  return Number.isFinite(L) && Number.isFinite(R) && R > L ? [L, R] : null;
+}
+
+/**
+ * Look-ahead gate: given the requested visible X range (unix seconds) and the
+ * oldest loaded timestamp, return the timestamp to load back to — or `null`
+ * when the left edge still has comfortable headroom and no fetch is needed.
+ * Triggers one span-fraction before the edge so scroll-back stays fluid rather
+ * than stuttering at the boundary. Pure + exported for unit testing.
+ */
+export function lookAheadTarget(
+  range: [number, number],
+  oldestLoadedTs: number,
+  fraction: number,
+): number | null {
+  const [left, right] = range;
+  const span = right - left;
+  if (span <= 0) return null;
+  if (left - oldestLoadedTs < span * fraction) return left - span * fraction;
+  return null;
+}
 
 interface BreakerConfigForChart {
   breakerKind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
@@ -94,6 +141,52 @@ export function resolveSnapshotBand(
   };
 }
 
+/**
+ * Whether a reported price falls outside its breaker band.
+ *
+ * Returns `null` (verdict unknown → render neutral, never red) when no usable
+ * band exists. We guard both `baseline === 0` (divide-by-zero — every marker
+ * would render red) AND `thresholdRatio === 0` (`|x-b|/b > 0` is true for any
+ * inexact price — same all-red failure). `fixidityToFloat("0")` is a finite
+ * `0`, which a naive `!= null` check would miss, so the zero guards matter.
+ */
+function priceOutOfBand(
+  price: number,
+  baseline: number | null,
+  thresholdRatio: number | null,
+): boolean | null {
+  if (
+    baseline == null ||
+    baseline === 0 ||
+    thresholdRatio == null ||
+    thresholdRatio === 0 ||
+    !Number.isFinite(price)
+  ) {
+    return null;
+  }
+  return Math.abs(price - baseline) / baseline > thresholdRatio;
+}
+
+/**
+ * Whether a snapshot renders as a "red" marker — a rejected report or an
+ * out-of-band median. Used by the decimator's anomaly filter so these points
+ * survive at any zoom. Mirrors the marker-color logic in `buildSnapshotMarkers`.
+ */
+function snapshotIsRed(
+  s: OracleSnapshot,
+  currentBaseline: number | null,
+  currentThresholdRatio: number | null,
+): boolean {
+  if (!s.oracleOk) return true;
+  const price =
+    !s.oraclePrice || s.oraclePrice === "0"
+      ? Number.NaN
+      : Number(s.oraclePrice) / FIXIDITY_ONE;
+  if (!Number.isFinite(price)) return false; // neutral, not red
+  const band = resolveSnapshotBand(s, currentBaseline, currentThresholdRatio);
+  return priceOutOfBand(price, band.baseline, band.thresholdRatio) === true;
+}
+
 type BreakerConfigStatus = "loading" | "ready" | "missing";
 
 interface OracleChartProps {
@@ -106,6 +199,44 @@ interface OracleChartProps {
   // from "no breaker exists for this feed" — only in `ready` do we color
   // markers green/red against the band; the others render a neutral state.
   breakerConfigStatus?: BreakerConfigStatus;
+  // Plotly `uirevision` token — pass `${networkId}:${poolId}`. While it stays
+  // the same, Plotly preserves the user's zoom/pan across every data change
+  // (30s repoll, scroll-back append). Changing it (pool/network switch) resets
+  // the viewport to the default window.
+  uirevision?: string | undefined;
+  // Fired (with the requested visible X range in unix seconds) whenever the
+  // user pans/zooms the X axis. The pool tab debounces this into the
+  // windowed-history hook's `ensureLoadedBefore` to page in older data.
+  onVisibleXRangeChange?: ((range: [number, number]) => void) | undefined;
+}
+
+/**
+ * Cap rendered points to the visible window, preserving every anomalous (red)
+ * point. The current-band fallback (gated on `ready`, mirroring
+ * buildOraclePlotData) feeds the anomaly filter so a point's verdict matches
+ * its marker color.
+ */
+function useDecimatedSnapshots(
+  snapshots: OracleSnapshot[],
+  visibleRange: [number, number] | null,
+  baseline: number | null,
+  thresholdRatio: number | null,
+  breakerConfigStatus: BreakerConfigStatus,
+): OracleSnapshot[] {
+  const currentBaseline = breakerConfigStatus === "ready" ? baseline : null;
+  const currentThresholdRatio =
+    breakerConfigStatus === "ready" ? thresholdRatio : null;
+  return useMemo(
+    () =>
+      decimateSeries(snapshots, {
+        visibleRange,
+        cap: ORACLE_CHART_MAX_POINTS,
+        getTimestamp: (s) => Number(s.timestamp),
+        isAnomalous: (s) =>
+          snapshotIsRed(s, currentBaseline, currentThresholdRatio),
+      }),
+    [snapshots, visibleRange, currentBaseline, currentThresholdRatio],
+  );
 }
 
 export function OracleChart({
@@ -115,19 +246,26 @@ export function OracleChart({
   breachStartedAt,
   breakerConfig,
   breakerConfigStatus = "ready",
+  uirevision,
+  onVisibleXRangeChange,
 }: OracleChartProps) {
   // Stash the wheel-listener cleanup so we can detach when react-plotly tears
   // the chart down (onPurge) or remounts it. Without this, stacked listeners
   // on re-init would amplify scroll deltas. MUST be declared before the
   // `snapshots.length === 0` early-return so hook order is stable.
   const cleanupWheelRef = useRef<(() => void) | null>(null);
-
-  if (snapshots.length === 0) return null;
+  // Latest requested visible X range (unix seconds) from onRelayout — scopes
+  // decimation so a zoomed-in window shows exact raw points. Also a hook, so
+  // it lives above the early-return.
+  const [visibleRange, setVisibleRange] = useState<[number, number] | null>(
+    null,
+  );
 
   // Gate band geometry on `ready` only. SWR keeps the previous `breakerConfig`
   // payload during a revalidation failure, so without this null-out a stale
   // band could keep drawing while the legend / markers correctly show the
-  // neutral state. Treat any non-ready status as "no band".
+  // neutral state. Treat any non-ready status as "no band". (Pure — safe to
+  // compute above the early-return; the decimation memo below depends on it.)
   const baseline =
     breakerConfigStatus === "ready" && breakerConfig
       ? breakerConfig.breakerKind === "VALUE_DELTA"
@@ -139,8 +277,20 @@ export function OracleChart({
       ? fixidityToFloat(breakerConfig.rateChangeThreshold)
       : null;
 
-  const plotData = buildOraclePlotData({
+  // Decimate to a bounded render count within the visible window, preserving
+  // every anomalous point and the window endpoints.
+  const visibleSnapshots = useDecimatedSnapshots(
     snapshots,
+    visibleRange,
+    baseline,
+    thresholdRatio,
+    breakerConfigStatus,
+  );
+
+  if (snapshots.length === 0) return null;
+
+  const plotData = buildOraclePlotData({
+    snapshots: visibleSnapshots,
     token0Symbol,
     token1Symbol,
     baseline,
@@ -160,6 +310,7 @@ export function OracleChart({
     yMax: plotData.yMax,
     baseline,
     thresholdRatio,
+    uirevision,
   });
 
   // Whether ANY snapshot carries a persisted at-the-time band. When the
@@ -187,6 +338,19 @@ export function OracleChart({
         config={ORACLE_CHART_CONFIG}
         style={{ width: "100%", height: 420 }}
         useResizeHandler
+        onRelayout={(e) => {
+          // Y-only wheel-zooms and autorange resets carry no X-range change →
+          // `readXRange` returns null and we don't refine decimation or fetch.
+          // The trigger only ever READS data; it never calls relayout, and
+          // `uirevision` pins the viewport across the resulting data change —
+          // so there's no feedback loop with the wheel handler.
+          const range = readXRange(
+            e as unknown as Readonly<Record<string, unknown>>,
+          );
+          if (!range) return;
+          setVisibleRange(range);
+          onVisibleXRangeChange?.(range);
+        }}
         onInitialized={(_figure, graphDiv) => {
           cleanupWheelRef.current?.();
           cleanupWheelRef.current = attachOracleWheelHandler(
@@ -378,22 +542,13 @@ function buildSnapshotMarkers({
   // normally writes `null` for an unseeded `0n` baseline AND for a zero
   // effective threshold, but a manual DB write or backfill edge case could
   // still surface either as zero — treat both as "no band".
+  // Thin band-shaped adapter over the shared `priceOutOfBand` so the marker
+  // verdict and the decimator's anomaly filter can never drift apart.
   const isOutOfBand = (
     price: number,
     band: { baseline: number | null; thresholdRatio: number | null },
-  ): boolean | null => {
-    if (
-      band.baseline == null ||
-      band.baseline === 0 ||
-      band.thresholdRatio == null ||
-      band.thresholdRatio === 0 ||
-      !Number.isFinite(price)
-    )
-      return null;
-    return (
-      Math.abs(price - band.baseline) / band.baseline > band.thresholdRatio
-    );
-  };
+  ): boolean | null =>
+    priceOutOfBand(price, band.baseline, band.thresholdRatio);
 
   const markerColors = snapshots.map((s, i) => {
     if (!s.oracleOk) return "#ef4444"; // rejected report — red regardless
@@ -592,6 +747,7 @@ function buildOracleLayout({
   yMax,
   baseline,
   thresholdRatio,
+  uirevision,
 }: {
   shapes: Plotly.Layout["shapes"];
   xaxis: ReturnType<typeof buildOracleXaxis>;
@@ -599,6 +755,7 @@ function buildOracleLayout({
   yMax: number;
   baseline: number | null;
   thresholdRatio: number | null;
+  uirevision?: string | undefined;
 }) {
   // Pick a tick precision that resolves the breaker band. For a 0.15% threshold
   // on a baseline of 1.0, ticks like 0.998 / 1.000 / 1.002 are right; for a
@@ -614,6 +771,14 @@ function buildOracleLayout({
 
   return {
     ...PLOTLY_BASE_LAYOUT,
+    // While `uirevision` is unchanged, Plotly preserves the user's zoom/pan
+    // across every re-render — the 30s repoll and each scroll-back append.
+    // It changes only on a pool/network switch (the caller keys it on
+    // `${networkId}:${poolId}`), which resets the viewport to the default
+    // window below. The initial `xaxis.range` is still honored on mount.
+    // Spread conditionally: exactOptionalPropertyTypes rejects an explicit
+    // `undefined` on Plotly's optional `uirevision`.
+    ...(uirevision != null ? { uirevision } : {}),
     shapes,
     xaxis,
     yaxis: {
@@ -744,4 +909,5 @@ export const __test__ = {
   buildOracleShapes,
   buildOracleXaxis,
   buildOraclePlotData,
+  buildOracleLayout,
 };

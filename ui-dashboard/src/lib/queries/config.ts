@@ -68,14 +68,31 @@ export const ORACLE_SNAPSHOTS = `
 // landed today, the breaker would trip"). The update_reserves /
 // rebalanced rows store pool-internal post-state deviation, not oracle
 // deviation, so they're excluded for the same reason.
+//
+// Keyset-paginated: `timestamp: { _lt: $beforeTimestamp }` lets the chart
+// scroll back past the 1000-row Hasura cap one page at a time (see
+// `useWindowedHistory`). The newest window passes a far-future sentinel
+// cursor; older pages pass the oldest-loaded timestamp. `order_by` carries
+// an `id` tiebreaker so the ordering is deterministic when two medians share
+// a timestamp; the page-merge dedups by `id`, so a co-timestamped boundary
+// row is harmless.
+//
+// `breakerBaselineAtSnapshot` / `breakerThresholdAtSnapshot` are now selected
+// here directly (folded in from the former `ORACLE_SNAPSHOTS_CHART_BANDS_EXT`
+// companion). The companion existed to isolate a hosted-Hasura schema-lag
+// window when those fields first shipped (PR #631) — that window is long
+// closed (both fields resolve on prod today), so the second round-trip is no
+// longer worth it. Nullable for pre-deploy rows + unseeded EMA — the chart
+// falls back to the current band in those cases.
 export const ORACLE_SNAPSHOTS_CHART = `
-  query OracleSnapshotsChart($poolId: String!, $limit: Int!) {
+  query OracleSnapshotsChart($poolId: String!, $limit: Int!, $beforeTimestamp: numeric!) {
     OracleSnapshot(
       where: {
         poolId: { _eq: $poolId }
         source: { _eq: "oracle_median_updated" }
+        timestamp: { _lt: $beforeTimestamp }
       }
-      order_by: { timestamp: desc }
+      order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
     ) {
       id chainId
@@ -91,33 +108,6 @@ export const ORACLE_SNAPSHOTS_CHART = `
       txHash
       deviationRatio
       hasHealthData
-    }
-  }
-`;
-
-// Companion query for the persisted-at-write breaker fields. Isolated from
-// `ORACLE_SNAPSHOTS_CHART` for the same schema-lag reason as `POOL_CONFIG_EXT`
-// — they ship with the indexer resync, so during the deploy+promote window
-// hosted Hasura rejects them as "field not found". Keeping them off the
-// primary chart query means a misordered deploy (merge-before-promote)
-// degrades just the per-snapshot band path to the current-band fallback
-// instead of breaking the whole oracle chart. Nullable for pre-deploy rows
-// + unseeded EMA — the chart falls back to the current band in those cases.
-//
-// Note: the active deviation breaker is now fetched via the shared
-// `POOL_BREAKER_CONFIG` query (PR #635) — `BREAKER_CONFIG_FOR_RATE_FEED`
-// was removed to dedup the per-page Hasura fetch.
-export const ORACLE_SNAPSHOTS_CHART_BANDS_EXT = `
-  query OracleSnapshotsChartBandsExt($poolId: String!, $limit: Int!) {
-    OracleSnapshot(
-      where: {
-        poolId: { _eq: $poolId }
-        source: { _eq: "oracle_median_updated" }
-      }
-      order_by: { timestamp: desc }
-      limit: $limit
-    ) {
-      id
       breakerBaselineAtSnapshot
       breakerThresholdAtSnapshot
     }
