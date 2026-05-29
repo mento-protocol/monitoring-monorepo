@@ -19,7 +19,12 @@ import {
 } from "@/test-utils/network-fixtures";
 
 // Mock hooks that have side effects / SWR dependency
-vi.mock("@/hooks/use-all-networks-data", () => ({
+// Keep the real `showInitialSkeleton` (a pure helper) and mock only the hook —
+// a bare factory would leave the new named export undefined, crashing render.
+vi.mock("@/hooks/use-all-networks-data", async () => ({
+  ...(await vi.importActual<typeof import("@/hooks/use-all-networks-data")>(
+    "@/hooks/use-all-networks-data",
+  )),
   useAllNetworksData: vi.fn(),
 }));
 

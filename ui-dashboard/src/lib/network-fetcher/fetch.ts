@@ -44,6 +44,7 @@ import type {
   BrokerDailySnapshotRow,
   NetworkData,
   PaginatedPageResult,
+  SerializableError,
   SnapshotPageResult,
 } from "./types";
 
@@ -122,8 +123,33 @@ export const blankNetworkData = (
 const emptyNetworkData = (
   network: Network,
   snapshotWindows: SnapshotWindows,
-  error: Error,
+  error: SerializableError,
 ): NetworkData => blankNetworkData(network, snapshotWindows, { error });
+
+/**
+ * Convert any caught value to a plain, RSC-serializable `{ message }` object.
+ * Per-network failures cross the Server → Client boundary on `NetworkData`,
+ * where React's Flight serializer opaques real `Error` instances to a generic
+ * placeholder in production builds — see `SerializableError` in `./types`.
+ * Keep `Error` instances internal (e.g. `PaginatedPageResult.error`); convert
+ * here at the boundary before storing on a client-shipped field.
+ */
+const toErrorShape = (reason: unknown): SerializableError => ({
+  message: reason instanceof Error ? reason.message : String(reason),
+});
+
+/**
+ * Resolve a settled paginated fetch to its boundary error shape: a rejected
+ * promise → the rejection reason; a fulfilled-but-degraded page → the
+ * preserved mid-loop `error`; otherwise `null`. Keeps the `Error`-instance →
+ * `{ message }` conversion at the boundary and out of `fetchNetworkData`.
+ */
+const settledError = <T>(
+  result: PromiseSettledResult<PaginatedPageResult<T>>,
+): SerializableError | null => {
+  if (result.status === "rejected") return toErrorShape(result.reason);
+  return result.value.error ? toErrorShape(result.value.error) : null;
+};
 
 /**
  * Envio's hosted Hasura silently caps every query at 1000 rows regardless of
@@ -374,11 +400,7 @@ export async function fetchNetworkData(
     });
     pools = poolsRes.Pool ?? [];
   } catch (err) {
-    return emptyNetworkData(
-      network,
-      windows,
-      err instanceof Error ? err : new Error(String(err)),
-    );
+    return emptyNetworkData(network, windows, toErrorShape(err));
   }
 
   const poolIds = pools.map((p) => p.id);
@@ -532,19 +554,13 @@ export async function fetchNetworkData(
     });
   }
 
-  const toError = (reason: unknown) =>
-    reason instanceof Error ? reason : new Error(String(reason));
-
   const rates = buildOracleRateMap(pools, network);
 
   const feeSnapshots =
     feeSnapshotsResult.status === "fulfilled"
       ? feeSnapshotsResult.value.rows
       : [];
-  const feeSnapshotsError =
-    feeSnapshotsResult.status === "rejected"
-      ? toError(feeSnapshotsResult.reason)
-      : (feeSnapshotsResult.value.error ?? null);
+  const feeSnapshotsError = settledError(feeSnapshotsResult);
   // Cap-exhaustion: helper returns `truncated: true, error: null`. We still
   // aggregate from the rows we did fetch; consumers gate on this flag to
   // mark the all-time total approximate.
@@ -562,11 +578,11 @@ export async function fetchNetworkData(
   // hook's fail-loud invariant: if we expected rates and got none, set
   // `ratesError` so consumers blank the tile rather than render a
   // confidently-wrong (understated) total.
-  const ssrRatesError =
+  const ssrRatesError: SerializableError | null =
     pools.length > 0 && rates.size === 0
-      ? new Error(
-          `Oracle rates unavailable for ${network.label} — FX-token fees can't be priced`,
-        )
+      ? {
+          message: `Oracle rates unavailable for ${network.label} — FX-token fees can't be priced`,
+        }
       : null;
   const fees =
     feeSnapshotsResult.status === "fulfilled" &&
@@ -588,10 +604,7 @@ export async function fetchNetworkData(
     snapshotsAllDailyResult.status === "fulfilled"
       ? snapshotsAllDailyResult.value.truncated
       : false;
-  const snapshotsAllDailyError =
-    snapshotsAllDailyResult.status === "rejected"
-      ? toError(snapshotsAllDailyResult.reason)
-      : (snapshotsAllDailyResult.value.error ?? null);
+  const snapshotsAllDailyError = settledError(snapshotsAllDailyResult);
 
   // Legacy v2 daily volume — already filtered to `routedViaV3Router=false`
   // server-side, so no client-side disambiguation is needed.
@@ -603,10 +616,9 @@ export async function fetchNetworkData(
     brokerSnapshotsAllDailyResult.status === "fulfilled"
       ? brokerSnapshotsAllDailyResult.value.truncated
       : false;
-  const brokerSnapshotsAllDailyError =
-    brokerSnapshotsAllDailyResult.status === "rejected"
-      ? toError(brokerSnapshotsAllDailyResult.reason)
-      : (brokerSnapshotsAllDailyResult.value.error ?? null);
+  const brokerSnapshotsAllDailyError = settledError(
+    brokerSnapshotsAllDailyResult,
+  );
 
   // PoolDailySnapshot rows are UTC-midnight-aligned incremental aggregates
   // (one row per pool per UTC day). Anchoring on today's UTC midnight gives
@@ -645,14 +657,15 @@ export async function fetchNetworkData(
     snapshotsAllDaily.length > 0
       ? Number(snapshotsAllDaily[snapshotsAllDaily.length - 1]!.timestamp)
       : Number.POSITIVE_INFINITY;
-  const paginationIssue: Error | null =
+  const paginationIssue: SerializableError | null =
     snapshotsAllDailyError ??
     (snapshotsAllDailyTruncated
-      ? new Error(
-          "Snapshot pagination truncated before reaching the requested window",
-        )
+      ? {
+          message:
+            "Snapshot pagination truncated before reaching the requested window",
+        }
       : null);
-  const windowError = (windowFrom: number): Error | null =>
+  const windowError = (windowFrom: number): SerializableError | null =>
     paginationIssue !== null && oldestFetchedTs > windowFrom
       ? paginationIssue
       : null;
@@ -725,7 +738,8 @@ export async function fetchNetworkData(
     snapshots30dError,
     snapshotsAllDailyError,
     brokerSnapshotsAllDailyError,
-    lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
+    lpError:
+      lpResult.status === "rejected" ? toErrorShape(lpResult.reason) : null,
   };
 }
 
@@ -751,9 +765,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
     return emptyNetworkData(
       NETWORKS[configuredNetworkIds[i]!],
       windows,
-      result.reason instanceof Error
-        ? result.reason
-        : new Error(String(result.reason)),
+      toErrorShape(result.reason),
     );
   });
 }

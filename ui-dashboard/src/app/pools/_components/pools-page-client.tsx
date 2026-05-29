@@ -6,6 +6,7 @@ import Link from "next/link";
 import { buildPoolDetailHref, buildPoolsFilterUrl } from "@/lib/routing";
 import { useGQL } from "@/lib/graphql";
 import {
+  showInitialSkeleton,
   useAllNetworksData,
   type NetworkData,
 } from "@/hooks/use-all-networks-data";
@@ -199,7 +200,7 @@ function PoolsContent({
         >
           Pools
         </h2>
-        {poolsLoading ? (
+        {showInitialSkeleton(poolsLoading, networkData.length) ? (
           <Skeleton rows={3} />
         ) : failedNetworks.length === 0 && entries.length === 0 ? (
           <EmptyBox message="No pools found across any chain." />
