@@ -383,14 +383,14 @@ function OracleChartScrollbackStatus({
         : "";
     return (
       <p className="px-1 -mt-3 mb-4 text-xs text-amber-400" role="status">
-        Couldn&rsquo;t load older snapshots — showing data{back}. Pan left again
-        to retry.
+        Could not load older snapshots — showing data{back}. Pan left again to
+        retry.
       </p>
     );
   }
   if (capped) {
     return (
-      <p className="px-1 -mt-3 mb-4 text-xs text-amber-400">
+      <p className="px-1 -mt-3 mb-4 text-xs text-amber-400" role="status">
         Loaded the maximum history window — older entries exist beyond this
         range.
       </p>
@@ -398,7 +398,7 @@ function OracleChartScrollbackStatus({
   }
   if (reachedStart) {
     return (
-      <p className="px-1 -mt-3 mb-4 text-xs text-slate-600">
+      <p className="px-1 -mt-3 mb-4 text-xs text-slate-600" role="status">
         Beginning of recorded oracle history.
       </p>
     );

@@ -51,6 +51,19 @@ describe("decimateSeries", () => {
     expect(out).toHaveLength(300);
   });
 
+  it("does NOT keep normals when anomalies alone fill the cap (no cap bypass)", () => {
+    // 2,500 reds then 5,000 normals, cap 2,000. Every red survives (anomalies
+    // always win), but the normals must be dropped — keeping them all would
+    // blow past the cap, which is exactly the bypass this guards against.
+    const rows: Row[] = [];
+    for (let i = 0; i < 7500; i += 1) rows.push(row(i, i < 2500));
+    const out = decimateSeries(rows, opts({ cap: 2000 }));
+    const reds = out.filter((r) => r.red).length;
+    const normals = out.filter((r) => !r.red).length;
+    expect(reds).toBe(2500); // all anomalies kept
+    expect(normals).toBeLessThan(10); // ~only the endpoint, never 5000
+  });
+
   it("keeps the first and last in-window points (line endpoints)", () => {
     const rows = Array.from({ length: 5000 }, (_, i) => row(i));
     const out = decimateSeries(rows, opts({ cap: 500 }));

@@ -91,8 +91,9 @@ export interface UseWindowedHistoryResult<T extends WindowedHistoryRow> {
 // `TS_CURSOR_INITIAL` in `use-stables-data.ts`.
 const TS_CURSOR_INITIAL = "9999999999";
 const DEFAULT_MAX_PAGES = 100;
-// One-shot older-page fetch: a touch more slack than the 8s poll timeout since
-// a deep page can be a cold scan.
+// Abort budget for a single older-page fetch — generous since a deep page can
+// be a cold scan, but bounded so a wedged connection fails fast instead of
+// hanging the scroll-back.
 const OLDER_PAGE_TIMEOUT_MS = 10_000;
 
 function minTimestamp<T extends WindowedHistoryRow>(rows: Iterable<T>): string {

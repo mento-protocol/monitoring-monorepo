@@ -55,16 +55,19 @@ export function decimateSeries<T>(rows: T[], opts: DecimateOptions<T>): T[] {
   keep.add(0);
   keep.add(windowed.length - 1);
 
-  // 4. Stride the normals into whatever budget remains after anomalies.
+  // 4. Fit the normals into whatever budget remains after anomalies.
   const budget = Math.max(0, cap - keep.size);
-  if (budget > 0 && normalIdx.length > budget) {
+  if (normalIdx.length <= budget) {
+    // They all fit (budget covers them) — keep every normal point.
+    for (const idx of normalIdx) keep.add(idx);
+  } else if (budget > 0) {
+    // More normals than budget — stride them down to ~budget.
     const stride = Math.ceil(normalIdx.length / budget);
     for (let j = 0; j < normalIdx.length; j += stride) keep.add(normalIdx[j]!);
-  } else {
-    // Budget covers all normals (only possible when anomalies pushed us over
-    // the cap on their own) — keep them all; anomalies still win.
-    for (const idx of normalIdx) keep.add(idx);
   }
+  // budget === 0 (anomalies + endpoints already fill the cap): keep NO normals.
+  // Anomalies always survive — that's the point — but we must NOT also keep
+  // every normal here, or a window dense with red points blows past the cap.
 
   // Emit in original ASC order.
   const out: T[] = [];
