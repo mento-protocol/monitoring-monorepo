@@ -115,14 +115,19 @@ function render(resetKey = "celo-mainnet:pool-1"): {
 }
 
 // Flush pending fetches + React effects (incl. the continuation effect).
+// The cycles MUST run sequentially — each act() fully flushes before the next,
+// so the continuation effect's next page can settle. We chain them via reduce
+// (rather than an await-in-loop) so the sequencing is explicit and lint-clean.
 async function settle() {
-  for (let i = 0; i < 8; i += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    await act(async () => {
+  const flushOnce = () =>
+    act(async () => {
       await Promise.resolve();
       await new Promise((r) => setTimeout(r, 0));
     });
-  }
+  await Array.from({ length: 8 }).reduce<Promise<unknown>>(
+    (chain) => chain.then(flushOnce),
+    Promise.resolve(),
+  );
 }
 
 const tsOf = (r: HookResult | null) =>
