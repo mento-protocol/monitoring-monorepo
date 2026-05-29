@@ -23,6 +23,10 @@ import {
   selfHealTokenDecimals,
   upsertDailySnapshot,
 } from "../pool.js";
+// Imported directly from the submodule (not re-exported via the `../pool.js`
+// barrel) so this PR doesn't shift the line of the pre-existing `upsertPool`
+// complexity entry in eslint-baseline.json past the 30-line absorb window.
+import { upsertOraclePriceDaily } from "../pool/oracle-rollup.js";
 import { recordBreachTransition } from "../deviationBreach.js";
 import { recordHealthSample } from "../healthScore.js";
 import { computeMedianLineageNext } from "../oracleJump.js";
@@ -671,6 +675,23 @@ indexer.onEvent(
           pool: persistedPool,
           blockTimestamp,
           blockNumber,
+        });
+
+        // Daily OHLC rollup of the oracle median price — backs the chart's
+        // zoomed-out multi-year view (>1000-row Hasura cap on raw medians).
+        // Reads from the materialized `snapshot` so any field added upstream is
+        // already resolved into it.
+        await upsertOraclePriceDaily({
+          context,
+          chainId: event.chainId,
+          poolId,
+          blockTimestamp,
+          blockNumber,
+          oraclePrice: snapshot.oraclePrice,
+          oracleOk: snapshot.oracleOk,
+          deviationRatio: snapshot.deviationRatio,
+          breakerBaselineAtSnapshot: snapshot.breakerBaselineAtSnapshot,
+          breakerThresholdAtSnapshot: snapshot.breakerThresholdAtSnapshot,
         });
       }),
     );

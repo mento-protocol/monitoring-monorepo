@@ -4,6 +4,7 @@ import type {
   Pool,
   PoolSnapshot,
   PoolDailySnapshot,
+  OraclePriceDailySnapshot,
   DeviationThresholdBreach,
 } from "envio";
 
@@ -30,5 +31,12 @@ export type SnapshotContext = {
   PoolDailySnapshot: {
     get: (id: string) => Promise<PoolDailySnapshot | undefined>;
     set: (entity: PoolDailySnapshot) => void;
+  };
+};
+
+export type OracleRollupContext = {
+  OraclePriceDailySnapshot: {
+    get: (id: string) => Promise<OraclePriceDailySnapshot | undefined>;
+    set: (entity: OraclePriceDailySnapshot) => void;
   };
 };

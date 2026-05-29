@@ -252,6 +252,53 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   breakerThresholdAtSnapshot: BigInt
 }
 
+# Daily OHLC rollup of the oracle median price. Lets the oracle chart span years
+# of history in a single Hasura page: the 1000-row cap is ~3.5 days of raw
+# medians on a busy feed, but ~2.7 years of daily candles. Written ONLY from the
+# MedianUpdated handler (`source = "oracle_median_updated"`), the same population
+# the raw oracle chart plots — so a candle's `anyOutOfBand` equals the
+# OR of that day's raw chart-red points whenever each median carried a persisted
+# breaker band. Early-history rows with an unseeded EMA persist a null band →
+# neutral here, while the chart's `snapshotIsRed` falls back to the *current*
+# config for those (a narrow divergence at the daily/raw seam, settled in the
+# chart follow-up).
+type OraclePriceDailySnapshot @index(fields: ["poolId", "bucketStart"]) {
+  id: ID! # `${poolId}-${bucketStart}`
+  chainId: Int! @index
+  poolId: String! @index
+  bucketStart: BigInt! @index # UTC day bucket (ts / 86400 * 86400)
+  # OHLC of oraclePrice across the day (Fixidity 1e24, same scale + no
+  # precision config as OracleSnapshot.oraclePrice). open = first sample,
+  # close = last sample, so a candle's close equals the last raw point of the
+  # day — the seam the chart uses to hand off between daily and raw zoom.
+  openPrice: BigInt!
+  highPrice: BigInt!
+  lowPrice: BigInt!
+  closePrice: BigInt!
+  sampleCount: Int!
+  # OR across the day of each median's chart-red verdict — a rejected report
+  # (!oracleOk) OR a price outside its breaker band (the bigint mirror of
+  # `priceOutOfBand` in ui-dashboard/src/components/oracle-chart.tsx). Precomputed
+  # so a zoomed-out candle stays red when an intraday trip recovered by close.
+  anyOutOfBand: Boolean!
+  # Numeric max across the day of OracleSnapshot.deviationRatio (priceDifference /
+  # rebalanceThreshold, 6dp fixed string). The rebalance-frame signal, kept
+  # distinct from the breaker verdict above. Stored as the 6dp string; folded
+  # numerically (lexical max is wrong: "9.500000" > "10.000000"). Can be the
+  # "-1" no-health-data sentinel (same as OracleSnapshot.deviationRatio /
+  # Pool.lastDeviationRatio) on a day where every sample lacked health data —
+  # numeric fold keeps any real ratio over "-1", so "-1" only persists when ALL
+  # samples were no-data. Check for "-1" before computing deviation metrics.
+  maxDeviationRatio: String!
+  # End-of-day breaker band (the last median's persisted baseline + threshold,
+  # Fixidity 1e24). Carried for hover only — the chart draws only the current
+  # band. Nullable for the same reasons as the OracleSnapshot breaker fields
+  # (pre-deploy rows + unseeded EMA write null).
+  endBreakerBaselineAtSnapshot: BigInt
+  endBreakerThresholdAtSnapshot: BigInt
+  blockNumber: BigInt!
+}
+
 type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {
   id: ID!
   chainId: Int!
