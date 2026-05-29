@@ -17,7 +17,6 @@ import { attachOracleWheelHandler } from "./oracle-chart-wheel";
 import { formatOracleChartHoverText } from "./oracle-chart-hover";
 import { OracleChartLegend } from "./oracle-chart-legend";
 import {
-  DAILY_MODE_SPAN_SECONDS,
   SPARSE_SERIES_THRESHOLD,
   buildDailyPlotData,
   computeOracleYRange,
@@ -25,9 +24,6 @@ import {
   type OracleDailyCandle,
   type OraclePlotData,
 } from "./oracle-daily";
-
-export { DAILY_MODE_SPAN_SECONDS };
-export type { OracleDailyCandle };
 
 export { formatOracleChartHoverText };
 
