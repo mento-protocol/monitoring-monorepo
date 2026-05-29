@@ -31,6 +31,32 @@ if command -v corepack >/dev/null 2>&1; then
 fi
 pnpm --version
 
+echo "==> Prewarming Trunk CLI and linters"
+# Trunk powers the git pre-commit/pre-push hooks (.trunk/hooks) and `trunk fmt`.
+# The launcher self-downloads the pinned CLI from trunk.io, which is NOT in the
+# default Trusted allowlist for Claude Code on the web. Everything else Trunk
+# needs (node/python runtimes, prettier/markdownlint via npm, checkov/codespell/
+# yamllint via PyPI, trufflehog/osv-scanner/actionlint via GitHub releases, tool
+# binaries on *.amazonaws.com) is already covered by the Trusted defaults, so the
+# ONLY host to add is trunk.io. In the environment's network settings choose
+# "Custom", keep "include defaults", and add:
+#     trunk.io
+#     *.trunk.io
+# Non-fatal: if trunk.io is still blocked the hooks degrade gracefully (see
+# .trunk/hooks) and CI still enforces Trunk on the PR, so warn and continue
+# rather than aborting the whole bootstrap.
+if ./tools/trunk --version >/dev/null 2>&1; then
+  ./tools/trunk --version
+  if ! ./tools/trunk install; then
+    echo "WARN: 'trunk install' could not preinstall all linters; hooks may run a reduced set." >&2
+  fi
+else
+  echo "WARN: Trunk CLI could not be downloaded (is trunk.io allowlisted?)." >&2
+  echo "WARN: git pre-commit/pre-push hooks will be skipped this session." >&2
+  echo "WARN: Add 'trunk.io' and '*.trunk.io' to the env's Allowed domains (Custom" >&2
+  echo "WARN: network access, keep defaults) to enable local Trunk fmt/lint hooks." >&2
+fi
+
 echo "==> Installing workspace dependencies"
 CI=true pnpm install --frozen-lockfile
 
@@ -39,6 +65,22 @@ pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentr
 
 echo "==> Running Envio codegen"
 pnpm indexer:codegen
+
+echo "==> Verifying Envio codegen output"
+# `envio codegen` is quiet in CI/non-TTY mode and exits 0 even when it writes
+# nothing, so the exit code alone is not a reliable signal. The agent typecheck
+# and vitest loops resolve indexer types from .envio/types.d.ts (the `envio` npm
+# package supplies the runtime); the ReScript `generated/` dir is only needed
+# for `pnpm indexer:dev`/`start` (Docker + live RPC), which is not a hosted-agent
+# flow. Assert the type facade exists so a silent codegen miss fails the
+# bootstrap here instead of surfacing as confusing type errors mid-task.
+if [ ! -s "indexer-envio/.envio/types.d.ts" ]; then
+  echo "ERROR: Envio codegen did not produce indexer-envio/.envio/types.d.ts." >&2
+  echo "ERROR: indexer typecheck and the vitest suites resolve types from this" >&2
+  echo "ERROR: file and will fail without it. Re-run 'pnpm indexer:codegen' and" >&2
+  echo "ERROR: inspect the envio CLI output for the underlying error." >&2
+  exit 1
+fi
 
 echo "==> Installing Playwright Chromium for dashboard browser tests"
 # Non-fatal: hosted environments often restrict outbound network access
@@ -58,11 +100,20 @@ fi
 echo "==> Validating repo-visible agent context"
 pnpm agent:context-check
 
-echo "==> Checking optional GitHub CLI auth"
+echo "==> Reporting GitHub integration mode"
+# Unlike scripts/codex-cloud-setup.sh, this script does NOT install or auth `gh`.
+# In Claude Code on the web, git transport is proxied through a local credential
+# proxy (origin is http://local_proxy@127.0.0.1:.../git/...) and api.github.com
+# has no direct egress, so `gh` has no token to use and cannot reach the API.
+# GitHub API work (PR status, reviews, CI, comments) goes through the GitHub MCP
+# server instead. Consequently the gh-backed `pnpm pr:ready-state` probe — and
+# the ship/babysit skills that wrap it — are not available in web sessions; use
+# the mcp__github__* tools for PR readiness here.
 if command -v gh >/dev/null 2>&1; then
+  echo "gh is present; note that PR readiness in web sessions still uses the GitHub MCP server."
   gh auth status || true
 else
-  echo "gh is not installed in this image; PR ship/babysit flows need GitHub tooling."
+  echo "gh is not installed (expected): web sessions use the GitHub MCP server for PR/API work."
 fi
 
 echo "Claude Code on the web setup complete."

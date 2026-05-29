@@ -12,5 +12,22 @@ if [[ ! -x "${TRUNK}" ]]; then
   exit 0
 fi
 
+# The trunk launcher self-downloads the pinned CLI from trunk.io on first use.
+# In a restricted-network sandbox (e.g. Claude Code on the web, where trunk.io
+# is not in the default egress allowlist) that download 403s and the launcher
+# exits non-zero, which would otherwise block every push. Probe provisioning
+# first and, when trunk cannot be obtained, skip with a warning — same posture
+# as the "trunk not found" branch above. The hook is fast-feedback convenience;
+# CI still enforces trunk on the PR. Allowlist trunk.io (+ *.trunk.io) to enable
+# it; set TRUNK_HOOK_REQUIRE=1 to hard-fail instead of skipping.
+if ! TRUNK_LAUNCHER_QUIET=true "${TRUNK}" --version >/dev/null 2>&1; then
+  if [[ "${TRUNK_HOOK_REQUIRE:-0}" == "1" ]]; then
+    echo "trunk could not be provisioned and TRUNK_HOOK_REQUIRE=1 — failing pre-push." >&2
+    exit 1
+  fi
+  echo "warning: trunk CLI could not be provisioned (download blocked? allowlist trunk.io) — skipping pre-push hooks." >&2
+  exit 0
+fi
+
 # Feed stdin to trunk (branch/sha pairs from git)
 TRUNK_LAUNCHER_QUIET=true "${TRUNK}" git-hooks callback pre-push -- "$@"
