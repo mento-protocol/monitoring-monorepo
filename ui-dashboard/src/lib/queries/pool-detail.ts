@@ -37,10 +37,11 @@ export const POOL_DETAIL_WITH_HEALTH = `
 `;
 
 // Single-pool sibling of `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN`. Same
-// isolation rationale: keeps the data-trust flags OFF the page's primary
-// `POOL_DETAIL_WITH_HEALTH` query so a schema-lag during deploy degrades
-// just the never-rebalance affordance / USD math instead of breaking
-// the entire pool detail page.
+// isolation rationale: keeps the data-trust / degenerate classification
+// flags OFF the page's primary `POOL_DETAIL_WITH_HEALTH` query so a
+// schema-lag during deploy degrades just the never-rebalance affordance,
+// USD math, and degenerate health under-bound instead of breaking the
+// entire pool detail page.
 export const POOL_THRESHOLDS_KNOWN_EXT = `
   query PoolThresholdsKnownExt($id: String!, $chainId: Int!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
@@ -49,6 +50,7 @@ export const POOL_THRESHOLDS_KNOWN_EXT = `
       rebalanceThresholdBelow
       rebalanceThresholdsKnown
       tokenDecimalsKnown
+      degenerateReserves
     }
   }
 `;

@@ -144,6 +144,23 @@ test.describe("dashboard browser flows", () => {
     await expect(page.getByRole("tabpanel")).toContainText("Bought");
   });
 
+  test("marks one-sided reserve oracle snapshots on the Oracle tab", async ({
+    page,
+  }) => {
+    await page.goto(`/pool/${CELO_POOL_ID}?tab=oracle`);
+
+    await expect(page.getByRole("tab", { name: "Oracle" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByText("one-sided")).toBeVisible();
+    await expect(
+      page.locator(
+        '[title="73,000,000,000 bps from effectively one-sided reserves"]',
+      ),
+    ).toBeVisible();
+  });
+
   test("shows a degraded query state without hiding healthy page sections", async ({
     page,
   }) => {

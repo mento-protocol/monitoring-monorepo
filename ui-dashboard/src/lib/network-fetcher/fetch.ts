@@ -436,8 +436,7 @@ export async function fetchNetworkData(
         healthTotalSeconds?: string;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
-    // Live-tail cursor — split from ALL_POOLS_BREACH_ROLLUP so a schema-lag
-    // failure on these newer fields does not hide persisted uptime counters.
+    // Live-tail cursor is isolated so schema-lag does not hide persisted uptime counters.
     timed<{
       Pool: {
         id: string;
@@ -445,14 +444,9 @@ export async function fetchNetworkData(
         lastDeviationRatio?: string;
       }[];
     }>(ALL_POOLS_HEALTH_CURSOR, { chainId: network.chainId }),
-    // Data-trust flags (`rebalanceThresholdsKnown` triple +
-    // `tokenDecimalsKnown`) — isolated for the same schema-lag reason as
-    // the breach rollup above. Consumers degrade safely when the fields
-    // are missing: thresholds fall back to the 10000-bps under-bound;
-    // USD math via `getSnapshotVolumeInUsd` returns null and the volume
-    // column shows "—" rather than a 6-dp-USDC-as-18-dp scaled lie.
-    // Split-side fields included because `isNeverRebalance` needs BOTH
-    // above/below to be 0.
+    // Data-trust / degenerate-classification flags. Isolated so schema-lag
+    // degrades thresholds, USD math, and degenerate health without failing
+    // the main pool list; split sides are needed for `isNeverRebalance`.
     timed<{
       Pool: {
         id: string;
@@ -460,6 +454,7 @@ export async function fetchNetworkData(
         rebalanceThresholdBelow?: number;
         rebalanceThresholdsKnown?: boolean;
         tokenDecimalsKnown?: boolean;
+        degenerateReserves?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
     // RPC probe remains the global badge path until indexed CdpPool rows are
@@ -491,8 +486,7 @@ export async function fetchNetworkData(
     });
   }
 
-  // Merge live-tail cursor fields separately. If this query fails during a
-  // schema-lag window, the UI still uses the persisted health counters.
+  // Merge live-tail cursor fields; on schema-lag, persisted health counters remain usable.
   if (healthCursorResult.status === "fulfilled") {
     const cursorById = new Map(
       (healthCursorResult.value.Pool ?? []).map((r) => [r.id, r]),
@@ -509,12 +503,8 @@ export async function fetchNetworkData(
     });
   }
 
-  // Merge data-trust flags into the pool objects. On failure (schema-
-  // lag during deploy), the fields stay `undefined` and
-  // `isNeverRebalance` / `effectiveThreshold` fall back to the safe
-  // 10000-bps under-bound; `getSnapshotVolumeInUsd` returns null
-  // when `tokenDecimalsKnown` is undefined-or-false so untrusted-decimal
-  // pools don't fake a USD volume from schema-default 18/18.
+  // Merge isolated flags. On schema-lag, fields stay undefined and consumers
+  // use conservative fallbacks instead of failing the whole pool list.
   if (rebalanceThresholdsKnownResult.status === "fulfilled") {
     const knownById = new Map(
       (rebalanceThresholdsKnownResult.value.Pool ?? []).map((r) => [r.id, r]),
@@ -529,12 +519,10 @@ export async function fetchNetworkData(
             rebalanceThresholdBelow: r.rebalanceThresholdBelow,
             rebalanceThresholdsKnown: r.rebalanceThresholdsKnown,
             tokenDecimalsKnown: r.tokenDecimalsKnown,
+            degenerateReserves: r.degenerateReserves,
           };
     });
   }
-
-  const toError = (reason: unknown) =>
-    reason instanceof Error ? reason : new Error(String(reason));
 
   const rates = buildOracleRateMap(pools, network);
 
@@ -728,6 +716,10 @@ export async function fetchNetworkData(
     brokerSnapshotsAllDailyError,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };
+}
+
+function toError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error(String(reason));
 }
 
 /**

@@ -2,7 +2,9 @@ import { strict as assert } from "assert";
 import { computePriceDifference } from "../src/EventHandlers";
 import {
   buildRebalanceOutcome,
+  classifyExactZeroReserves,
   computeEffectivenessRatio,
+  hasDegenerateReserves,
   tryDeriveRebalanceState,
 } from "../src/priceDifference";
 
@@ -305,6 +307,87 @@ describe("computePriceDifference", () => {
       }),
     );
     assert.equal(pd, 0n);
+  });
+
+  it("flags reserves where one normalized side is below 0.01% of the other", () => {
+    assert.equal(
+      hasDegenerateReserves(
+        pool({
+          reserves0: 9_999n,
+          reserves1: 100_000_000n,
+          oraclePrice: SCALE,
+          token0Decimals: 6,
+          token1Decimals: 6,
+        }),
+      ),
+      true,
+    );
+  });
+
+  it("does not flag reserves exactly at the 0.01% boundary", () => {
+    assert.equal(
+      hasDegenerateReserves(
+        pool({
+          reserves0: 10_000n,
+          reserves1: 100_000_000n,
+          oraclePrice: SCALE,
+          token0Decimals: 6,
+          token1Decimals: 6,
+        }),
+      ),
+      false,
+    );
+  });
+
+  it("normalizes token decimals before reserve-degeneracy detection", () => {
+    assert.equal(
+      hasDegenerateReserves(
+        pool({
+          reserves0: 10_000_000n,
+          reserves1: 999n,
+          oraclePrice: SCALE,
+          token0Decimals: 6,
+          token1Decimals: 18,
+        }),
+      ),
+      true,
+    );
+  });
+});
+
+describe("classifyExactZeroReserves", () => {
+  it("flags one zero reserve side without requiring token decimals", () => {
+    assert.equal(
+      classifyExactZeroReserves({
+        reserves0: 0n,
+        reserves1: 1_000n,
+      }),
+      true,
+    );
+    assert.equal(
+      classifyExactZeroReserves({
+        reserves0: 1_000n,
+        reserves1: 0n,
+      }),
+      true,
+    );
+  });
+
+  it("classifies both-zero reserves as non-degenerate and both-nonzero as unknown", () => {
+    assert.equal(
+      classifyExactZeroReserves({
+        reserves0: 0n,
+        reserves1: 0n,
+      }),
+      false,
+    );
+    assert.equal(
+      classifyExactZeroReserves({
+        reserves0: 1n,
+        reserves1: 1n,
+      }),
+      undefined,
+    );
   });
 });
 
