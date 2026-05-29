@@ -88,7 +88,8 @@ function buildDailyHover(c: OracleDailyCandle): string {
     `O ${fmtPrice(fixToFloat(c.openPrice))}  H ${fmtPrice(fixToFloat(c.highPrice))}  ` +
     `L ${fmtPrice(fixToFloat(c.lowPrice))}  C ${fmtPrice(fixToFloat(c.closePrice))}`;
   const verdict = c.anyOutOfBand ? " · OUT OF BAND" : "";
-  const dev = c.maxDeviationRatio !== "-1" ? ` · max dev ${c.maxDeviationRatio}` : "";
+  const dev =
+    c.maxDeviationRatio !== "-1" ? ` · max dev ${c.maxDeviationRatio}` : "";
   return `${date}<br>${ohlc}<br>${c.sampleCount} medians${verdict}${dev}`;
 }
 

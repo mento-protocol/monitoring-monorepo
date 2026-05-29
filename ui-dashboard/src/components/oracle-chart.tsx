@@ -326,7 +326,11 @@ function selectOraclePlotData({
   const useDaily =
     span !== null && span > DAILY_MODE_SPAN_SECONDS && !!dailyCandles?.length;
   if (useDaily && dailyCandles) {
-    return buildDailyPlotData({ candles: dailyCandles, baseline, thresholdRatio });
+    return buildDailyPlotData({
+      candles: dailyCandles,
+      baseline,
+      thresholdRatio,
+    });
   }
   return buildOraclePlotData({
     snapshots: visibleSnapshots,

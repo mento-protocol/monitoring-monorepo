@@ -8,7 +8,8 @@ import {
 
 // Fixidity 1e24 string from a float (6dp precision). Avoids BigInt literals —
 // the dashboard tsconfig targets ES2017, which forbids them even in tests.
-const fix = (n: number): string => n.toFixed(6).replace(".", "") + "0".repeat(18);
+const fix = (n: number): string =>
+  n.toFixed(6).replace(".", "") + "0".repeat(18);
 
 function candle(overrides: Partial<OracleDailyCandle> = {}): OracleDailyCandle {
   return {

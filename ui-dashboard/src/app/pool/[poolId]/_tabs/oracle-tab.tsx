@@ -110,7 +110,11 @@ function useOracleLookAhead({
       if (lookAheadTimer.current) clearTimeout(lookAheadTimer.current);
       if (range[1] - range[0] > DAILY_MODE_SPAN_SECONDS) return;
       lookAheadTimer.current = setTimeout(() => {
-        const target = lookAheadTarget(range, oldestLoadedTs, LOOKAHEAD_FRACTION);
+        const target = lookAheadTarget(
+          range,
+          oldestLoadedTs,
+          LOOKAHEAD_FRACTION,
+        );
         if (target !== null) ensureLoadedBefore(target);
       }, LOOKAHEAD_DEBOUNCE_MS);
     },
