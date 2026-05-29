@@ -304,6 +304,17 @@ export function OracleChart({
   const [visibleRange, setVisibleRange] = useState<[number, number] | null>(
     null,
   );
+  // Reset the zoom window when the chart identity changes (pool/network switch).
+  // Plotly's own viewport reset fires onRelayout only AFTER the first render of
+  // the new pool, so without this the first render would scope decimation to the
+  // OLD pool's X window (and seed buildOracleXaxis's 7d anchor from a cropped
+  // subset). The previous-value tracker is a ref (compared, never rendered);
+  // only `visibleRange` is state.
+  const prevUirevisionRef = useRef(uirevision);
+  if (prevUirevisionRef.current !== uirevision) {
+    prevUirevisionRef.current = uirevision;
+    setVisibleRange(null);
+  }
 
   // Gate band geometry on `ready` only. SWR keeps the previous `breakerConfig`
   // payload during a revalidation failure, so without this null-out a stale

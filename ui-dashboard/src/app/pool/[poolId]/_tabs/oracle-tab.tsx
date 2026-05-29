@@ -146,6 +146,7 @@ export function OracleTab(props: OracleTabProps) {
     capped: chartCapped,
     isFetchingOlder,
     olderError,
+    headError,
     ensureLoadedBefore,
   } = useWindowedHistory<OracleSnapshot>({
     query: chartQuery,
@@ -320,6 +321,8 @@ export function OracleTab(props: OracleTabProps) {
       <OracleChartScrollbackStatus
         isFetchingOlder={isFetchingOlder}
         olderError={olderError}
+        headError={headError}
+        hasChartRows={chartRows.length > 0}
         capped={chartCapped}
         reachedStart={reachedStart}
         oldestLoadedTs={oldestLoadedTs}
@@ -359,16 +362,31 @@ export function OracleTab(props: OracleTabProps) {
 function OracleChartScrollbackStatus({
   isFetchingOlder,
   olderError,
+  headError,
+  hasChartRows,
   capped,
   reachedStart,
   oldestLoadedTs,
 }: {
   isFetchingOlder: boolean;
   olderError: Error | undefined;
+  headError: Error | undefined;
+  hasChartRows: boolean;
   capped: boolean;
   reachedStart: boolean;
   oldestLoadedTs: number;
 }) {
+  // Head-poll failure with nothing rendered yet: the chart area is blank, so
+  // tell the operator it's a fetch failure (not "no oracle data"). SWR retries
+  // the head automatically. When history IS already rendered we stay quiet —
+  // the last-good series keeps showing and the failure is in the network panel.
+  if (headError && !hasChartRows) {
+    return (
+      <p className="px-1 -mt-3 mb-4 text-xs text-amber-400" role="status">
+        Could not load live oracle data — retrying…
+      </p>
+    );
+  }
   if (isFetchingOlder) {
     return (
       <p className="px-1 -mt-3 mb-4 text-xs text-slate-500" role="status">

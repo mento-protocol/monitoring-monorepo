@@ -340,4 +340,26 @@ describe("useWindowedHistory", () => {
     expect(ref.current!.reachedStart).toBe(false);
     expect(ref.current!.capped).toBe(false);
   });
+
+  it("releases the in-flight flag when the cursor computation throws (no deadlock)", async () => {
+    // A malformed timestamp makes minTimestamp's BigInt() throw while computing
+    // the next-page cursor. That throw must be caught and the in-flight flag
+    // released (it's inside the try/finally), or scroll-back deadlocks for the
+    // whole session. Before the fix the throw was outside the try.
+    headResponse = {
+      data: {
+        OracleSnapshot: [row(102), { id: "bad", timestamp: "nope", value: 0 }],
+      },
+      error: undefined,
+      isLoading: false,
+    };
+    const { ref } = render();
+    await settle();
+    await act(async () => ref.current!.ensureLoadedBefore(0));
+    await settle();
+
+    expect(ref.current!.olderError).toBeInstanceOf(Error);
+    expect(ref.current!.isFetchingOlder).toBe(false); // finally released it
+    expect(requestMock).not.toHaveBeenCalled(); // threw before the network call
+  });
 });

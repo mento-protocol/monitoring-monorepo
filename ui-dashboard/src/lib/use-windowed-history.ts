@@ -289,9 +289,12 @@ export function useWindowedHistory<T extends WindowedHistoryRow>({
     // this request is in flight causes us to drop the result instead of writing
     // the old pool's rows into the new pool's Map.
     const generation = generationRef.current;
-    // Min loaded timestamp is exactly the boundary for the next older page.
-    const beforeTimestamp = minTimestamp(loadedRef.current.values());
     try {
+      // Min loaded timestamp is the boundary for the next older page. Computed
+      // INSIDE the try so a malformed-row `BigInt` throw still releases
+      // `fetchingRef` via finally — otherwise scroll-back deadlocks for the
+      // whole session (every later fetch silently no-ops on the stuck flag).
+      const beforeTimestamp = minTimestamp(loadedRef.current.values());
       const batch = await requestOlderRows({
         client: c,
         query: q,
