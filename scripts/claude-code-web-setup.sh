@@ -103,17 +103,20 @@ pnpm agent:context-check
 echo "==> Reporting GitHub integration mode"
 # Unlike scripts/codex-cloud-setup.sh, this script does NOT install or auth `gh`.
 # In Claude Code on the web, git transport is proxied through a local credential
-# proxy (origin is http://local_proxy@127.0.0.1:.../git/...) and api.github.com
-# has no direct egress, so `gh` has no token to use and cannot reach the API.
-# GitHub API work (PR status, reviews, CI, comments) goes through the GitHub MCP
-# server instead. Consequently the gh-backed `pnpm pr:ready-state` probe — and
-# the ship/babysit skills that wrap it — are not available in web sessions; use
-# the mcp__github__* tools for PR readiness here.
-if command -v gh >/dev/null 2>&1; then
-  echo "gh is present; note that PR readiness in web sessions still uses the GitHub MCP server."
+# proxy (origin is http://local_proxy@127.0.0.1:.../git/...) that authenticates
+# git only, so no GitHub token is exposed in the container and `gh` has no
+# credential by default. api.github.com itself IS reachable (it is in the default
+# Trusted allowlist), so GitHub API work can flow two ways: the GitHub MCP
+# server (default, no setup) or `gh` once you install it (apt) AND provide a
+# GH_TOKEN env var in the environment settings. Until a GH_TOKEN is set, the
+# gh-backed `pnpm pr:ready-state` probe — and the ship/babysit skills that wrap
+# it — are unavailable; use the mcp__github__* tools for PR readiness instead.
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  echo "gh is present and authenticated; gh-backed PR flows (pr:ready-state) are available."
   gh auth status || true
 else
-  echo "gh is not installed (expected): web sessions use the GitHub MCP server for PR/API work."
+  echo "gh is unavailable/unauthenticated: using the GitHub MCP server for PR/API work."
+  echo "To enable gh flows, 'apt install -y gh' in the setup script and set GH_TOKEN in env settings."
 fi
 
 echo "Claude Code on the web setup complete."
