@@ -7,11 +7,11 @@
 
 set -euo pipefail
 
-readonly DEFAULT_REPO_SLUG="mento-protocol/monitoring-monorepo"
-readonly DEFAULT_ORIGIN_URL="https://github.com/${DEFAULT_REPO_SLUG}.git"
-
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# shellcheck source=scripts/codex-cloud-git-helpers.sh
+source "$REPO_ROOT/scripts/codex-cloud-git-helpers.sh"
 
 run_as_root() {
   if [[ "$(id -u)" == "0" ]]; then
@@ -83,43 +83,6 @@ ensure_github_cli() {
   return 1
 }
 
-ensure_origin_remote() {
-  local origin_url="${CODEX_CLOUD_ORIGIN_URL:-}"
-  if [[ -z "$origin_url" ]]; then
-    if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
-      origin_url="https://github.com/${GITHUB_REPOSITORY}.git"
-    else
-      origin_url="$DEFAULT_ORIGIN_URL"
-    fi
-  fi
-
-  if git remote get-url origin >/dev/null 2>&1; then
-    local existing_origin
-    existing_origin="$(git remote get-url origin)"
-    if [[ -n "${CODEX_CLOUD_ORIGIN_URL:-}" && "$existing_origin" != "$origin_url" ]]; then
-      echo "==> Replacing origin remote from CODEX_CLOUD_ORIGIN_URL: ${origin_url}"
-      git remote set-url origin "$origin_url"
-    elif [[ "$existing_origin" =~ ^git@github\.com:(.+)$ ]]; then
-      local repo_path
-      repo_path="${BASH_REMATCH[1]%.git}"
-      local https_origin="https://github.com/${repo_path}.git"
-      echo "==> Rewriting SSH origin for token-backed cloud auth: ${https_origin}"
-      git remote set-url origin "$https_origin"
-    elif [[ "$existing_origin" =~ ^ssh://git@github\.com/(.+)$ ]]; then
-      local repo_path
-      repo_path="${BASH_REMATCH[1]%.git}"
-      local https_origin="https://github.com/${repo_path}.git"
-      echo "==> Rewriting SSH origin for token-backed cloud auth: ${https_origin}"
-      git remote set-url origin "$https_origin"
-    else
-      echo "==> Using existing origin remote: ${existing_origin}"
-    fi
-  else
-    echo "==> Adding missing origin remote: ${origin_url}"
-    git remote add origin "$origin_url"
-  fi
-}
-
 ensure_origin_main_ref() {
   echo "==> Refreshing origin/main for path-aware agent gates"
   if git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"; then
@@ -133,14 +96,8 @@ MSG
   return 1
 }
 
-normalize_github_token_env() {
-  if [[ -z "${GH_TOKEN:-}" && -n "${GITHUB_TOKEN:-}" ]]; then
-    export GH_TOKEN="$GITHUB_TOKEN"
-  fi
-}
-
 ensure_github_auth() {
-  normalize_github_token_env
+  codex_cloud_normalize_github_token_env
 
   echo "==> Verifying GitHub CLI auth"
   if gh auth status >/dev/null 2>&1; then
@@ -379,7 +336,7 @@ ensure_github_cli
 ensure_github_auth
 configure_github_git_auth
 
-ensure_origin_remote
+codex_cloud_ensure_origin_remote
 verify_origin_git_auth
 ensure_origin_main_ref
 
