@@ -416,10 +416,10 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ORACLE_PRICE_DAILY).toContain("OraclePriceDailySnapshot");
     expect(queries.ORACLE_PRICE_DAILY).toContain("closePrice");
     expect(queries.ORACLE_PRICE_DAILY).toContain("anyOutOfBand");
-    // Chronological for the chart; no `limit` so the 1000-row cap (≈2.7yr daily)
-    // applies rather than a smaller silent truncation.
+    // DESC so the 1000-row cap drops the OLDEST days (keeping the newest ~2.7yr);
+    // the consumer reverses to chronological. No `limit` (the cap is the bound).
     expect(queries.ORACLE_PRICE_DAILY).toContain(
-      "order_by: [{ bucketStart: asc }]",
+      "order_by: [{ bucketStart: desc }]",
     );
     expect(queries.ORACLE_PRICE_DAILY).not.toContain("limit:");
   });

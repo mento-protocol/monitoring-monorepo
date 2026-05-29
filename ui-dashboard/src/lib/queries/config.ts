@@ -129,10 +129,11 @@ export const ORACLE_SNAPSHOTS_CHART = `
 `;
 
 // Daily OHLC rollup of the oracle median price (one row per pool per UTC day),
-// for the chart's zoomed-out resolution. `bucketStart` asc = chronological.
-// No `limit` → Hasura's 1000-row cap applies, which at daily granularity is
-// ~2.7 years (vs ~3.5 days for the raw `oracle_median_updated` feed) — so the
-// whole history fits one page. `anyOutOfBand` is the precomputed breaker
+// for the chart's zoomed-out resolution. Ordered `bucketStart` DESC so Hasura's
+// 1000-row cap truncates the OLDEST days, not the newest — at daily granularity
+// that's the most recent ~2.7 years (vs ~3.5 days for the raw
+// `oracle_median_updated` feed). The consumer (`useOracleDailyCandles`) reverses
+// to chronological ASC for the chart. `anyOutOfBand` is the precomputed breaker
 // verdict (the chart colors candles from it directly); `maxDeviationRatio` can
 // be the "-1" no-health-data sentinel. See `OraclePriceDailySnapshot` in
 // indexer-envio/schema.graphql.
@@ -140,7 +141,7 @@ export const ORACLE_PRICE_DAILY = `
   query OraclePriceDaily($poolId: String!) {
     OraclePriceDailySnapshot(
       where: { poolId: { _eq: $poolId } }
-      order_by: [{ bucketStart: asc }]
+      order_by: [{ bucketStart: desc }]
     ) {
       bucketStart
       openPrice

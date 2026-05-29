@@ -74,6 +74,11 @@ const LOOKAHEAD_FRACTION = 0.2;
 // is needed. Pass the already virtual-pool-guarded `chartQuery` (null on a
 // virtual pool → no fetch); inherits the useGQL revalidation gates. Undefined
 // while loading → the chart stays on the raw path.
+//
+// The query orders DESC (so the 1000-row cap drops the oldest days, keeping the
+// newest ~2.7yr); reverse to chronological ASC here for the chart's line.
+// `[...].reverse()` (not `toReversed`) for the ES2017 target. Memoized so the
+// reversed array stays referentially stable across renders.
 function useOracleDailyCandles(
   chartQuery: string | null,
   variables: { poolId: string },
@@ -82,7 +87,8 @@ function useOracleDailyCandles(
     chartQuery ? ORACLE_PRICE_DAILY : null,
     variables,
   );
-  return data?.OraclePriceDailySnapshot;
+  const rows = data?.OraclePriceDailySnapshot;
+  return useMemo(() => (rows ? [...rows].reverse() : undefined), [rows]);
 }
 
 // Debounced look-ahead: when the user pans/zooms so the left edge approaches the
