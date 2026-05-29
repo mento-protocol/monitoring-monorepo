@@ -284,7 +284,11 @@ type OraclePriceDailySnapshot @index(fields: ["poolId", "bucketStart"]) {
   # Numeric max across the day of OracleSnapshot.deviationRatio (priceDifference /
   # rebalanceThreshold, 6dp fixed string). The rebalance-frame signal, kept
   # distinct from the breaker verdict above. Stored as the 6dp string; folded
-  # numerically (lexical max is wrong: "9.500000" > "10.000000").
+  # numerically (lexical max is wrong: "9.500000" > "10.000000"). Can be the
+  # "-1" no-health-data sentinel (same as OracleSnapshot.deviationRatio /
+  # Pool.lastDeviationRatio) on a day where every sample lacked health data —
+  # numeric fold keeps any real ratio over "-1", so "-1" only persists when ALL
+  # samples were no-data. Check for "-1" before computing deviation metrics.
   maxDeviationRatio: String!
   # End-of-day breaker band (the last median's persisted baseline + threshold,
   # Fixidity 1e24). Carried for hover only — the chart draws only the current

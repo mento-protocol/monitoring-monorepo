@@ -271,4 +271,48 @@ describe("upsertOraclePriceDaily", () => {
     assert.equal(row(store, SECONDS_PER_DAY)!.closePrice, 2n * ONE);
     assert.equal(store.size, 2);
   });
+
+  it("skips a zero-price outage sample without corrupting the candle", async () => {
+    const { store, context } = makeCtx();
+    const normal = 2n * ONE;
+    await fire(context, { price: normal, deviationRatio: "0.300000" });
+    await fire(context, { price: 0n, deviationRatio: "0.900000" }); // outage → skipped
+    const r = row(store, 0n)!;
+    assert.equal(r.openPrice, normal);
+    assert.equal(r.lowPrice, normal, "zero-price must not set lowPrice=0");
+    assert.equal(r.closePrice, normal, "zero-price must not set close=0");
+    assert.equal(r.sampleCount, 1, "zero-price sample is not counted");
+    assert.equal(
+      r.maxDeviationRatio,
+      "0.300000",
+      "skipped sample's ratio ignored",
+    );
+  });
+
+  it("creates no candle for a day whose only sample is a zero-price outage", async () => {
+    const { store, context } = makeCtx();
+    await fire(context, { price: 0n });
+    assert.equal(row(store, 0n), undefined);
+    assert.equal(store.size, 0);
+  });
+
+  it("folds maxDeviationRatio across the -1 no-health-data sentinel", async () => {
+    const a = makeCtx();
+    await fire(a.context, { deviationRatio: "-1" }); // no-data sample
+    await fire(a.context, { deviationRatio: "0.500000" });
+    assert.equal(
+      row(a.store, 0n)!.maxDeviationRatio,
+      "0.500000",
+      "a real ratio beats the -1 sentinel",
+    );
+
+    const b = makeCtx();
+    await fire(b.context, { deviationRatio: "-1" });
+    await fire(b.context, { deviationRatio: "-1" });
+    assert.equal(
+      row(b.store, 0n)!.maxDeviationRatio,
+      "-1",
+      "an all-no-data day persists -1",
+    );
+  });
 });

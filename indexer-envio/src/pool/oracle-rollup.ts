@@ -81,6 +81,15 @@ export const upsertOraclePriceDaily = async ({
   breakerBaselineAtSnapshot: bigint | undefined;
   breakerThresholdAtSnapshot: bigint | undefined;
 }): Promise<void> => {
+  // A zero median price is an oracle outage (all reporters expired). The raw
+  // chart maps `oraclePrice === "0"` → NaN → not plotted, so a zero sample must
+  // not fold into the candle either — otherwise open/low/close would be dragged
+  // to 0 (a wick to the chart floor + a close=0 that corrupts the daily→raw
+  // handoff). Skip it entirely, mirroring the chart's gap. (`oracleOk` is always
+  // true at the only write site, so there's no rejected-report red to lose here;
+  // if a caller ever passes `oracleOk: false` with a zero price, revisit.)
+  if (oraclePrice === 0n) return;
+
   const bucketStart = dayBucket(blockTimestamp);
   const id = dailySnapshotId(poolId, bucketStart);
   const existing = await context.OraclePriceDailySnapshot.get(id);
