@@ -22,8 +22,11 @@ import {
   selfHealInvertRateFeed,
   selfHealTokenDecimals,
   upsertDailySnapshot,
-  upsertOraclePriceDaily,
 } from "../pool.js";
+// Imported directly from the submodule (not re-exported via the `../pool.js`
+// barrel) so this PR doesn't shift the line of the pre-existing `upsertPool`
+// complexity entry in eslint-baseline.json past the 30-line absorb window.
+import { upsertOraclePriceDaily } from "../pool/oracle-rollup.js";
 import { recordBreachTransition } from "../deviationBreach.js";
 import { recordHealthSample } from "../healthScore.js";
 import { computeMedianLineageNext } from "../oracleJump.js";

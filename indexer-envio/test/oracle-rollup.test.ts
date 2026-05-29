@@ -4,8 +4,8 @@ import type { OraclePriceDailySnapshot } from "envio";
 import {
   sampleOutOfBand,
   upsertOraclePriceDaily,
-  type OracleRollupContext,
-} from "../src/pool.js";
+} from "../src/pool/oracle-rollup.js";
+import type { OracleRollupContext } from "../src/pool/types.js";
 
 // SortedOracles stores prices + breaker bands at 24dp; the rollup works on raw
 // Fixidity values, so 1e24 represents "1.0".

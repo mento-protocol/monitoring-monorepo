@@ -58,16 +58,8 @@ export {
   selfHealTokenDecimals,
   selfHealWrappedExchangeId,
 } from "./pool/self-heal.js";
-export type {
-  PoolContext,
-  SnapshotContext,
-  OracleRollupContext,
-} from "./pool/types.js";
+export type { PoolContext, SnapshotContext } from "./pool/types.js";
 export { upsertDailySnapshot, upsertSnapshot } from "./pool/snapshots.js";
-export {
-  sampleOutOfBand,
-  upsertOraclePriceDaily,
-} from "./pool/oracle-rollup.js";
 
 // ---------------------------------------------------------------------------
 // Pool upsert (with cumulative fields)

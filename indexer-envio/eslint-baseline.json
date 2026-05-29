@@ -66,14 +66,14 @@
     "file": "src/pool.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 57. Maximum allowed is 15.",
-    "line": 317,
+    "line": 284,
     "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
   },
   {
     "file": "src/pool.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
-    "line": 317,
+    "line": 284,
     "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
   },
   {
