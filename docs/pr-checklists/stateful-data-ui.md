@@ -108,7 +108,7 @@ If the PR touches a table with pagination, sort, filter, search, or linked chart
 
 - [ ] Is table state URL-backed or intentionally local?
 - [ ] If local-only, is that explicitly called out as an intentional scope decision?
-- [ ] If URL-backed, does the URL canonicalize after data-driven clamping (no stale `?page=N` past totalPages, no `?page=1` default, no malformed `?page=foo` lingering)? Pattern: `lib/use-table-sort.ts:156-174` mount-time canonicalization + the bridge-flows pager `page=1` URL-clearing test. PR #653 shipped without this — Cursor caught it: `?page=999` rendered page 2 (clamped) but kept `?page=999` in the address bar, breaking refresh/share fidelity.
+- [ ] If URL-backed, does the URL canonicalize after data-driven clamping (no stale `?page=N` past totalPages, no `?page=1` default, no malformed `?page=foo` lingering)? Pattern: `lib/use-table-sort.ts:156-174` mount-time canonicalization + the bridge-flows pager `page=1` URL-clearing test. PR #653 shipped with this failure mode: `?page=999` rendered page 2 (clamped) but kept `?page=999` in the address bar, breaking refresh/share fidelity.
 
 ---
 
