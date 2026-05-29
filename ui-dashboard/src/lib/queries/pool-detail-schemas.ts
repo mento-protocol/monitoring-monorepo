@@ -90,8 +90,9 @@ const PoolDetailRowSchema = z.object({
     .nullable()
     .optional()
     .transform((v) => v ?? undefined),
-  // Price-breaker halt flag (drives the "HALTED" status). Optional — absent on
-  // older schema versions before the indexer field landed.
+  // Price-breaker halt flag (drives the "HALTED" status). `.optional()` is
+  // type-safety only — back-compat is the promote-indexer-before-merge ordering,
+  // NOT this gate (Hasura rejects the unknown selected field before Zod parses).
   breakerTripped: z.boolean().optional(),
   lpFee: z.number().optional(),
   protocolFee: z.number().optional(),

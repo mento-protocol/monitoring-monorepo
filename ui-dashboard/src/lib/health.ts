@@ -523,8 +523,9 @@ const STATUS_RANK: Record<HealthStatus, number> = {
   OK: 1,
   WARN: 2,
   WEEKEND: 3,
-  // Halt outranks WARN/WEEKEND but sits below CRITICAL, so a co-occurring
-  // deviation/limit CRITICAL (the louder protocol fault) still wins.
+  // Rank applies only to the limit axis via worstStatus: a limit-CRITICAL
+  // outranks a halt. A deviation-CRITICAL is short-circuited by the HALTED
+  // return in computeHealthStatus above and is never compared here.
   HALTED: 4,
   CRITICAL: 5,
 };
