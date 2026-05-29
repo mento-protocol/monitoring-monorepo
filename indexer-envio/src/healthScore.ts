@@ -311,6 +311,10 @@ export interface RecordHealthSampleResult {
  * @param blockTimestamp — block timestamp of the event
  * @param isNeverRebalance — true iff governance configured the pool to
  *   never rebalance (see `computeHealthSnapshotFields`).
+ * Degenerate reserves are derived from `pool`: they keep the faithful
+ * priceDifference on the snapshot, but the health sample itself is recorded
+ * as healthy/zero-ratio so uptime counters do not charge drained windows as
+ * deviation failures.
  */
 export function recordHealthSample(
   pool: Pool,
@@ -327,8 +331,12 @@ export function recordHealthSample(
   // wrongly classified as no-data.
   const dataAvailable =
     pool.rebalanceThresholdsKnown || pool.rebalanceThreshold > 0;
+  // Preserve the faithful snapshot `priceDifference`, but exclude drained /
+  // effectively one-sided windows from deviation health accounting. Persisting
+  // a zero health ratio makes the following interval accrue as healthy.
+  const healthPriceDifference = pool.degenerateReserves ? 0n : priceDifference;
   const snapshotFields = computeHealthSnapshotFields(
-    priceDifference,
+    healthPriceDifference,
     effectiveThresholdBps,
     isNeverRebalance,
     dataAvailable,

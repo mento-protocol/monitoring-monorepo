@@ -92,6 +92,11 @@ type Pool {
   # self-heal RPC eventually succeeds. Required because preload-phase RPC
   # failures would otherwise persist a fabricated `false` and never retry.
   invertRateFeedKnown: Boolean!
+  # True when normalized reserves are effectively one-sided (<0.01% on one
+  # side). `priceDifference` remains the faithful on-chain magnitude; this
+  # flag lets breach accounting and UI consumers treat drained-pool windows
+  # separately from normal keeper-coverage breaches.
+  degenerateReserves: Boolean!
   priceDifference: BigInt!
   rebalanceThreshold: Int!
   # Direction-split thresholds (bps) populated from `FPMMRebalanceThresholdUpdated`
@@ -215,7 +220,10 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   oraclePrice: BigInt!
   oracleOk: Boolean!
   numReporters: Int!
+  # Magnitude can run into billions of bps on degenerate (effectively
+  # one-sided) reserves; see `degenerateReserves` flag and BACKLOG entry.
   priceDifference: BigInt!
+  degenerateReserves: Boolean!
   rebalanceThreshold: Int!
   source: String!
   blockNumber: BigInt!

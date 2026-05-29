@@ -5,7 +5,7 @@ title: Envio Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-05-29
 allowed-tools: Bash, Read, Grep, Glob, WebFetch
 ---
 
@@ -45,7 +45,7 @@ pnpm deploy:indexer:logs [--follow] [--level error] [--build]
 ## Deployment lifecycle
 
 1. **Push** to the `envio` branch — Envio GitHub App picks it up and starts a build. There is **no** `envio deploy` command.
-2. **Build** produces a new deployment keyed by the short commit hash. A deployment with commit X appears in `envio-cloud indexer get mento mento-protocol` a few minutes after push (expect ~5–15 min). Until then `deployment status` returns **404**.
+2. **Build** produces a new deployment keyed by the short commit hash. A deployment with commit X appears in `envio-cloud indexer get mento mento-protocol` a few minutes after push (expect ~5–15 min). Until then `deployment status` returns **404**. If no new deployment appears and `data.deployments[]` already has three entries, Envio has no room to create another deployment; delete, or ask the user to delete, an obsolete non-prod deployment before retrying with a fresh SHA.
 3. **Sync** — the new deployment re-indexes from `start_block`. The previous deployment keeps serving the GraphQL endpoint with zero downtime.
 4. **Promote** — when sync completes, call `deployment promote` to swap `prod_status` to `prod`. Only then does the public GraphQL endpoint point at the new deployment.
 
@@ -161,6 +161,7 @@ Notes:
 
 - **Hasura silently caps queries at 1000 rows.** Aggregate functions are disabled on the hosted service. For large pulls, use the offset-pagination helper (`ui-dashboard/src/lib/network-fetcher/fetch.ts` exports `fetchAllFeeSnapshotPages`) or do rollups indexer-side — do not rely on `limit: 10000` working.
 - **Free tier auto-deletes after 30 days** (or 7 days idle, or 20GB storage, or 100k events). Paid tiers lift this; the mento indexer is on the `medium` tier. Don't confuse "deployment disappeared" with "build failed" — check `indexer get` first.
+- **Hosted deployment cap is three live deployments.** `envio-cloud indexer get mento mento-protocol -o json` shows the full `data.deployments[]` list. If it already contains three entries, a new push can fail to register because Envio has no capacity for another deployment. Keep the `prod_status == "prod"` deployment and remove an obsolete non-prod deployment before retrying.
 - **Re-index on every push.** Schema changes, handler edits, ABI bumps, and config tweaks all invalidate cache. Budget sync time before any deploy (the mento indexer takes ~15–40 min depending on how far behind head).
 - **`has_processed_to_end_block: false` is not a failure.** Live indexers have `end_block: 0` so this flag can never flip. Use `timestamp_caught_up_to_head_or_endblock` instead.
 - **Don't set generic `ENVIO_RPC_URL` in multichain mode** — it routes every chain to the same RPC. Use `ENVIO_RPC_URL_<chainId>` (e.g. `ENVIO_RPC_URL_42220`).
@@ -172,7 +173,7 @@ Notes:
 
 When asked to "monitor the latest deployment until ready to promote":
 
-1. `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — required to surface `deployments[]` + `prod_status`. Filter for the newest entry where `prod_status !== "prod"`. (`pnpm deploy:indexer:info <commit>` is the wrapper for inspecting a specific known commit, not for the "find newest pending" step.) If no pending deployment exists, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
+1. `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — required to surface `deployments[]` + `prod_status`. Filter for the newest entry where `prod_status !== "prod"`. (`pnpm deploy:indexer:info <commit>` is the wrapper for inspecting a specific known commit, not for the "find newest pending" step.) If no pending deployment exists, count `deployments[]` first: three live entries means Envio has no room for a new deployment and you must delete, or ask the user to delete, an obsolete non-prod deployment before retrying. If fewer than three deployments exist, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
 2. Poll `deployment status <commit> -o json` every 5–15 min (Envio builds finish fast, syncs take minutes–hours).
 3. Ready-to-promote condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`.
 4. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**

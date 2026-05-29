@@ -71,6 +71,7 @@ export type IndexerTestHelpers<Db extends MockDb = MockDb> = {
     LPFeeUpdated: EventProcessor<unknown, Db>;
     ProtocolFeeUpdated: EventProcessor<unknown, Db>;
     RebalanceIncentiveUpdated: EventProcessor<unknown, Db>;
+    RebalanceThresholdUpdated: EventProcessor<unknown, Db>;
   };
   VirtualPoolFactory: {
     VirtualPoolDeployed: EventProcessor<unknown, Db>;
@@ -276,6 +277,7 @@ export const TestHelpers = {
     "LPFeeUpdated",
     "ProtocolFeeUpdated",
     "RebalanceIncentiveUpdated",
+    "RebalanceThresholdUpdated",
   ]),
   VirtualPoolFactory: contract("VirtualPoolFactory", ["VirtualPoolDeployed"]),
   VirtualPool: contract("VirtualPool", ["UpdateReserves", "Swap"]),

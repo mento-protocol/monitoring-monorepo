@@ -4,7 +4,11 @@
 
 import type { Pool } from "envio";
 import { extractAddressFromPoolId, isVirtualPool } from "./helpers.js";
-import { computePriceDifference } from "./priceDifference.js";
+import {
+  classifyExactZeroReserves,
+  computePriceDifference,
+  hasDegenerateReserves,
+} from "./priceDifference.js";
 import {
   compactFees,
   feesEffect,
@@ -142,6 +146,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   // false = unread (schema default); true = real on-chain value persisted.
   // While false, upsertPool's self-heal retries the effect on every event.
   invertRateFeedKnown: false,
+  degenerateReserves: false,
   priceDifference: 0n,
   rebalanceThreshold: 0,
   rebalanceThresholdAbove: 0,
@@ -183,6 +188,26 @@ export const DEFAULT_ORACLE_FIELDS = {
   cumulativeCriticalSeconds: 0n,
   breachCount: 0,
 };
+
+type OracleDelta = Partial<typeof DEFAULT_ORACLE_FIELDS>;
+
+function nextDegenerateReserveState(
+  next: Pool,
+  oracleDelta: OracleDelta | undefined,
+  canClassifyDegenerateReserves: boolean,
+): boolean {
+  if (oracleDelta?.degenerateReserves !== undefined)
+    return oracleDelta.degenerateReserves;
+  const exactZeroState = classifyExactZeroReserves(next);
+  if (exactZeroState !== undefined) return exactZeroState;
+  return canClassifyDegenerateReserves
+    ? hasDegenerateReserves(next)
+    : next.degenerateReserves;
+}
+
+function canClassifyDegenerateReserveState(pool: Pool): boolean {
+  return !isVirtualPool(pool) && pool.tokenDecimalsKnown;
+}
 
 const getOrCreatePool = async (
   context: PoolContext,
@@ -466,11 +491,17 @@ export const upsertPool = async ({
     oracleDelta.priceDifference !== undefined;
   const canRecompute =
     !isVirtualPool(next) && next.oraclePrice > 0n && next.tokenDecimalsKnown;
+  const canClassifyDegenerateReserves = canClassifyDegenerateReserveState(next);
   const priceDifference = hasContractPriceDiff
     ? oracleDelta.priceDifference!
     : canRecompute
       ? computePriceDifference(next)
       : next.priceDifference;
+  const degenerateReserves = nextDegenerateReserveState(
+    next,
+    oracleDelta,
+    canClassifyDegenerateReserves,
+  );
 
   // When priceDifference is frozen (no contract-provided value AND can't
   // recompute), skip the breach pipeline entirely. Feeding the frozen
@@ -489,15 +520,32 @@ export const upsertPool = async ({
   // limits-and-fees known-zero fallback's `upsertPool` routing would
   // never close the breach (it relied on the breach pipeline to close it
   // via the falling-edge logic).
+  //
+  // EXCEPTION: when reserves become degenerate while an anchor is already
+  // open, run the pipeline even with a frozen priceDifference. The degenerate
+  // early-exit in `nextDeviationBreachStartedAt` is the evidence needed to
+  // close the breach immediately.
   const priceDifferenceTrustworthy = hasContractPriceDiff || canRecompute;
   const becameNeverRebalance = isNeverRebalance(next);
-  if (!priceDifferenceTrustworthy && !becameNeverRebalance) {
-    const persistedNoBreach: Pool = { ...next, priceDifference };
+  const shouldCloseDegenerateBreach =
+    degenerateReserves && existing.deviationBreachStartedAt > 0n;
+  if (
+    shouldSkipFrozenPriceBreachPipeline({
+      priceDifferenceTrustworthy,
+      becameNeverRebalance,
+      shouldCloseDegenerateBreach,
+    })
+  ) {
+    const persistedNoBreach: Pool = {
+      ...next,
+      priceDifference,
+      degenerateReserves,
+    };
     context.Pool.set(persistedNoBreach);
     return persistedNoBreach;
   }
 
-  const withDeviation = { ...next, priceDifference };
+  const withDeviation = { ...next, priceDifference, degenerateReserves };
   // Compute breach-start BEFORE health, so computeHealthStatus reads the
   // current row's anchor (grace window is keyed on it). Reversing the order
   // would ask health about the stale (prior-event) breach start.
@@ -539,3 +587,19 @@ export const upsertPool = async ({
   context.Pool.set(final);
   return final;
 };
+
+function shouldSkipFrozenPriceBreachPipeline({
+  priceDifferenceTrustworthy,
+  becameNeverRebalance,
+  shouldCloseDegenerateBreach,
+}: {
+  priceDifferenceTrustworthy: boolean;
+  becameNeverRebalance: boolean;
+  shouldCloseDegenerateBreach: boolean;
+}): boolean {
+  return (
+    !priceDifferenceTrustworthy &&
+    !becameNeverRebalance &&
+    !shouldCloseDegenerateBreach
+  );
+}

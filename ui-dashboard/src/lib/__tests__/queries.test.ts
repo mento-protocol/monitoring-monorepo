@@ -157,6 +157,9 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
       "rebalanceThresholdBelow",
     );
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
+      "degenerateReserves",
+    );
     // No heavy / unrelated fields piggybacking — isolation must stay tight
     // so a schema-lag failure on the rollup query degrades only `isNeverRebalance`,
     // not the entire pools page.
@@ -178,6 +181,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain(
       "rebalanceThresholdBelow",
     );
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain("degenerateReserves");
     expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain("healthStatus");
     expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain("oraclePrice");
     // Keyed by id + chainId — single-pool variant of the all-pools query.
