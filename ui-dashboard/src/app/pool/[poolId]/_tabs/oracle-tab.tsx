@@ -3,7 +3,7 @@
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
 import type { Network } from "@/lib/networks";
-import { OracleChart } from "@/components/oracle-chart";
+import { OracleChart, lookAheadTarget } from "@/components/oracle-chart";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -19,10 +19,10 @@ import {
   relativeTime,
 } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
+import { useWindowedHistory } from "@/lib/use-windowed-history";
 import {
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
-  ORACLE_SNAPSHOTS_CHART_BANDS_EXT,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
   POOL_BREAKER_CONFIG,
 } from "@/lib/queries";
@@ -36,7 +36,7 @@ import {
   type OracleSnapshot,
   type Pool,
 } from "@/lib/types";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { matchesRowSearch } from "../_lib/helpers";
 import type { OracleSortCol } from "../_lib/types";
 import { usePoolScopedCountFallback } from "../_lib/use-pool-scoped-count-fallback";
@@ -51,6 +51,17 @@ type OracleTabProps = {
 // Search always uses newest-first so the bounded window is chronologically
 // consistent with what the warning text says ("most recent N snapshots").
 const SEARCH_ORDER_BY = buildOrderBy("timestamp", "desc");
+
+// Stable module-level selector for the windowed-history hook (an unstable
+// inline arrow would re-key the head fetch every render).
+const selectOracleSnapshots = (data: unknown): OracleSnapshot[] =>
+  (data as { OracleSnapshot?: OracleSnapshot[] }).OracleSnapshot ?? [];
+
+// Debounce the stream of relayout events during a pan gesture into one
+// look-ahead evaluation, and trigger the next older page once the requested
+// left edge gets within this fraction of a span of the oldest loaded point.
+const LOOKAHEAD_DEBOUNCE_MS = 150;
+const LOOKAHEAD_FRACTION = 0.2;
 
 // eslint-disable-next-line complexity, sonarjs/cognitive-complexity, max-lines-per-function -- Existing tab keeps oracle filtering, pagination, and degraded count state co-located.
 export function OracleTab(props: OracleTabProps) {
@@ -120,59 +131,59 @@ export function OracleTab(props: OracleTabProps) {
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
-  // Charts use a dedicated query (200 most recent rows) so they always show
-  // full history context regardless of table pagination or sort state.
-  const { data: chartData } = useGQL<{ OracleSnapshot: OracleSnapshot[] }>(
-    ORACLE_SNAPSHOTS_CHART,
-    // Hasura caps every query at 1000 rows. 1000 covers >7d at the typical
-    // oracle-snapshot cadence (heartbeat + delta-triggered), which is the
-    // default visible window the chart opens to.
-    { poolId, limit: 1000 },
+  // The chart fetches its own keyset-paginated history (decoupled from table
+  // pagination / sort), so it scrolls back past the 1000-row Hasura cap on
+  // demand. The live head polls the newest window every 30s; older pages are
+  // fetched once and frozen (see `useWindowedHistory`). Persisted breaker
+  // bands ride the same query now, so there's no companion fetch to merge.
+  const chartQuery =
+    pool && isVirtualPool(pool) ? null : ORACLE_SNAPSHOTS_CHART;
+  const chartVariables = useMemo(() => ({ poolId }), [poolId]);
+  const {
+    rows: chartRows,
+    oldestLoadedTs,
+    reachedStart,
+    capped: chartCapped,
+    isFetchingOlder,
+    olderError,
+    headError,
+    ensureLoadedBefore,
+  } = useWindowedHistory<OracleSnapshot>({
+    query: chartQuery,
+    variables: chartVariables,
+    selectRows: selectOracleSnapshots,
+    resetKey: `${network.id}:${poolId}`,
+  });
+
+  // Debounced look-ahead: when the user pans/zooms the X axis such that the
+  // left edge approaches the oldest loaded point, page in the next older
+  // window. Gated on data-need (not on the event firing), so the wheel
+  // handler's own relayouts can't spuriously fetch.
+  const lookAheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleVisibleXRangeChange = useCallback(
+    (range: [number, number]) => {
+      if (lookAheadTimer.current) clearTimeout(lookAheadTimer.current);
+      lookAheadTimer.current = setTimeout(() => {
+        const target = lookAheadTarget(
+          range,
+          oldestLoadedTs,
+          LOOKAHEAD_FRACTION,
+        );
+        if (target !== null) ensureLoadedBefore(target);
+      }, LOOKAHEAD_DEBOUNCE_MS);
+    },
+    [oldestLoadedTs, ensureLoadedBefore],
   );
-  // Companion query for the per-snapshot persisted breaker fields. Isolated
-  // from `ORACLE_SNAPSHOTS_CHART` so a hosted-Hasura schema-lag (the deploy
-  // window before the indexer promote lands) degrades to the current-band
-  // fallback instead of breaking the whole chart. Merged by `id` below.
-  const { data: bandsData } = useGQL<{
-    OracleSnapshot: Array<{
-      id: string;
-      breakerBaselineAtSnapshot: string | null;
-      breakerThresholdAtSnapshot: string | null;
-    }>;
-  }>(ORACLE_SNAPSHOTS_CHART_BANDS_EXT, { poolId, limit: 1000 });
-  const chartRows = useMemo(() => {
-    const raw = chartData?.OracleSnapshot ?? [];
-    const bandById = new Map<
-      string,
-      {
-        breakerBaselineAtSnapshot: string | null;
-        breakerThresholdAtSnapshot: string | null;
-      }
-    >();
-    for (const row of bandsData?.OracleSnapshot ?? []) {
-      bandById.set(row.id, {
-        breakerBaselineAtSnapshot: row.breakerBaselineAtSnapshot,
-        breakerThresholdAtSnapshot: row.breakerThresholdAtSnapshot,
-      });
-    }
-    const merged = raw.map((s) => {
-      const bands = bandById.get(s.id);
-      // Merge fail-open: when the companion query errors (schema-lag) or a
-      // row hasn't been indexed yet, leave the fields null and let the chart
-      // fall back to the current band. Same shape as pre-deploy rows.
-      return {
-        ...s,
-        breakerBaselineAtSnapshot: bands?.breakerBaselineAtSnapshot ?? null,
-        breakerThresholdAtSnapshot: bands?.breakerThresholdAtSnapshot ?? null,
-      };
-    });
-    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-    // ES2017 with no polyfill — keep the spread+sort form.
-    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-    return [...merged].sort(
-      (a, b) => Number(a.timestamp) - Number(b.timestamp),
-    );
-  }, [chartData, bandsData]);
+  // Clear a pending look-ahead on unmount AND on pool/network switch — the tab
+  // doesn't remount across a poolId param change, so without the identity dep a
+  // debounce timer armed for the old pool would fire ~150ms later and call
+  // ensureLoadedBefore on the freshly-reset new pool.
+  useEffect(
+    () => () => {
+      if (lookAheadTimer.current) clearTimeout(lookAheadTimer.current);
+    },
+    [network.id, poolId],
+  );
 
   // Fetch the active deviation breaker (VALUE_DELTA or MEDIAN_DELTA) for this
   // pool's rate feed. The chart needs `referenceValue` / `medianRatesEMA` as
@@ -308,6 +319,17 @@ export function OracleTab(props: OracleTabProps) {
         breachStartedAt={pool?.deviationBreachStartedAt}
         breakerConfig={breakerConfig}
         breakerConfigStatus={breakerConfigStatus}
+        uirevision={`${network.id}:${poolId}`}
+        onVisibleXRangeChange={handleVisibleXRangeChange}
+      />
+      <OracleChartScrollbackStatus
+        isFetchingOlder={isFetchingOlder}
+        olderError={olderError}
+        headError={headError}
+        hasChartRows={chartRows.length > 0}
+        capped={chartCapped}
+        reachedStart={reachedStart}
+        oldestLoadedTs={oldestLoadedTs}
       />
       <TableSearch
         value={search}
@@ -337,6 +359,73 @@ export function OracleTab(props: OracleTabProps) {
       )}
     </>
   );
+}
+
+// Passive status line under the chart for the scroll-back lifecycle. No toast:
+// a transient older-page error must not tear down the rendered history.
+function OracleChartScrollbackStatus({
+  isFetchingOlder,
+  olderError,
+  headError,
+  hasChartRows,
+  capped,
+  reachedStart,
+  oldestLoadedTs,
+}: {
+  isFetchingOlder: boolean;
+  olderError: Error | undefined;
+  headError: Error | undefined;
+  hasChartRows: boolean;
+  capped: boolean;
+  reachedStart: boolean;
+  oldestLoadedTs: number;
+}) {
+  // Head-poll failure with nothing rendered yet: the chart area is blank, so
+  // tell the operator it's a fetch failure (not "no oracle data"). SWR retries
+  // the head automatically. When history IS already rendered we stay quiet —
+  // the last-good series keeps showing and the failure is in the network panel.
+  if (headError && !hasChartRows) {
+    return (
+      <p className="px-1 -mt-3 mb-4 text-xs text-amber-400" role="status">
+        Could not load live oracle data — retrying…
+      </p>
+    );
+  }
+  if (isFetchingOlder) {
+    return (
+      <p className="px-1 -mt-3 mb-4 text-xs text-slate-500" role="status">
+        Loading older history…
+      </p>
+    );
+  }
+  if (olderError) {
+    const back =
+      Number.isFinite(oldestLoadedTs) && oldestLoadedTs > 0
+        ? ` back to ${formatTimestamp(String(oldestLoadedTs))}`
+        : "";
+    return (
+      <p className="px-1 -mt-3 mb-4 text-xs text-amber-400" role="status">
+        Could not load older snapshots — showing data{back}. Pan left again to
+        retry.
+      </p>
+    );
+  }
+  if (capped) {
+    return (
+      <p className="px-1 -mt-3 mb-4 text-xs text-amber-400" role="status">
+        Loaded the maximum history window — older entries exist beyond this
+        range.
+      </p>
+    );
+  }
+  if (reachedStart) {
+    return (
+      <p className="px-1 -mt-3 mb-4 text-xs text-slate-600" role="status">
+        Beginning of recorded oracle history.
+      </p>
+    );
+  }
+  return null;
 }
 
 type OracleSnapshotsTableProps = {

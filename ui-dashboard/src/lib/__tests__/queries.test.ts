@@ -43,7 +43,6 @@ const EXPECTED_EXPORT_NAMES = [
   "TRADING_LIMITS",
   "ORACLE_SNAPSHOTS",
   "ORACLE_SNAPSHOTS_CHART",
-  "ORACLE_SNAPSHOTS_CHART_BANDS_EXT",
   "ORACLE_SNAPSHOTS_COUNT_PAGE",
   "POOL_DEPLOYMENT",
   "POOL_LP_POSITIONS",
@@ -385,21 +384,30 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ORACLE_SNAPSHOTS_CHART).toContain("hasHealthData");
   });
 
-  it("ORACLE_SNAPSHOTS_CHART_BANDS_EXT is isolated (rationale: schema-lag resilience)", () => {
-    // The new persisted-band fields ride a companion query so a Hasura
-    // schema-lag during the indexer promote window degrades to the
-    // current-band fallback instead of breaking the chart.
-    expect(queries.ORACLE_SNAPSHOTS_CHART_BANDS_EXT).toContain(
+  it("ORACLE_SNAPSHOTS_CHART folds in the persisted breaker band fields", () => {
+    // The persisted-band fields used to ride a companion query
+    // (ORACLE_SNAPSHOTS_CHART_BANDS_EXT) to survive a hosted-Hasura schema-lag
+    // window. That window is long closed (both fields resolve on prod), so
+    // they're now selected on the primary chart query — one round-trip.
+    expect(queries.ORACLE_SNAPSHOTS_CHART).toContain(
       "breakerBaselineAtSnapshot",
     );
-    expect(queries.ORACLE_SNAPSHOTS_CHART_BANDS_EXT).toContain(
+    expect(queries.ORACLE_SNAPSHOTS_CHART).toContain(
       "breakerThresholdAtSnapshot",
     );
-    expect(queries.ORACLE_SNAPSHOTS_CHART).not.toContain(
-      "breakerBaselineAtSnapshot",
+  });
+
+  it("ORACLE_SNAPSHOTS_CHART is keyset-paginated by timestamp", () => {
+    // Scroll-back past the 1000-row Hasura cap: the chart pages older windows
+    // via `timestamp: { _lt: $beforeTimestamp }` with an `id` order tiebreaker.
+    expect(queries.ORACLE_SNAPSHOTS_CHART).toContain(
+      "$beforeTimestamp: numeric!",
     );
-    expect(queries.ORACLE_SNAPSHOTS_CHART).not.toContain(
-      "breakerThresholdAtSnapshot",
+    expect(queries.ORACLE_SNAPSHOTS_CHART).toContain(
+      "timestamp: { _lt: $beforeTimestamp }",
+    );
+    expect(queries.ORACLE_SNAPSHOTS_CHART).toContain(
+      "order_by: [{ timestamp: desc }, { id: desc }]",
     );
   });
 
