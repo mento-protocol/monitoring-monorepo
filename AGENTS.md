@@ -361,6 +361,12 @@ Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
 ./scripts/codex-cloud-setup.sh
 ```
 
+Configure the optional Codex Cloud environment maintenance script as:
+
+```bash
+./scripts/codex-cloud-maintenance.sh
+```
+
 Codex Cloud setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for GitHub
 CLI-backed PR workflows, installs GitHub CLI from the official apt repository if
 the base image lacks it, configures git to use `gh` credentials for fetch/push,
@@ -376,6 +382,12 @@ to a reachable mirror of the pinned Linux Trunk tarball and set
 installing it. Keep `CODEX_CLOUD_TRUNK_INSTALL_TOOLS=true` (the default) for
 normal Cloud runs; set it to `false` only when using a base image with a
 prewarmed Trunk cache.
+
+Codex Cloud maintenance runs when Codex resumes a cached container after
+checking out the task branch. It skips apt/tool installation, re-establishes
+repo-local git state, refreshes `origin/main`, syncs branch lockfile changes via
+`CI=true pnpm install --frozen-lockfile --prefer-offline`, regenerates Envio
+types, and runs `pnpm agent:context-check`.
 
 For workflow continuity, this repo includes thin repo-local `ship` and
 `babysit-pr` skill adapters under `.agents/skills/` with matching
