@@ -89,9 +89,14 @@ describe("sampleOutOfBand", () => {
     const thresholds = [ONE / 100n, ONE / 20n, ONE / 1000n];
     for (const b of baselines) {
       for (const t of thresholds) {
-        const dIn = (b * t) / (4n * ONE); // relative deviation ≈ t/4
-        const dOut = (4n * b * t) / ONE; // relative deviation ≈ 4t
-        for (const price of [b + dIn, b - dIn, b + dOut, b - dOut]) {
+        const deltaIn = (b * t) / (4n * ONE); // relative deviation ≈ t/4
+        const deltaOut = (4n * b * t) / ONE; // relative deviation ≈ 4t
+        for (const price of [
+          b + deltaIn,
+          b - deltaIn,
+          b + deltaOut,
+          b - deltaOut,
+        ]) {
           assert.equal(
             sampleOutOfBand(price, b, t),
             floatVerdict(price, b, t),
