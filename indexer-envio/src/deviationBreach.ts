@@ -189,6 +189,9 @@ export async function recordBreachTransition(
   //      awareness, so it already encodes "should this be treated as a
   //      continuing breach" more correctly than a raw price check.
   const wasBreached = prev ? prev.deviationBreachStartedAt > 0n : false;
+  // Normal callers should already have a zero anchor for degenerate samples
+  // because `nextDeviationBreachStartedAt` closes them. Keep the explicit
+  // guard here as defense-in-depth for direct callers or future write paths.
   const isBreached =
     next.deviationBreachStartedAt > 0n && !next.degenerateReserves;
 

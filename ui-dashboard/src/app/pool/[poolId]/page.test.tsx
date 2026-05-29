@@ -661,6 +661,19 @@ describe("Pool detail tab search", () => {
     );
   });
 
+  it("marks one-sided oracle rows even when price difference is zero", () => {
+    oracleRowsForTest = [
+      {
+        ...oracleRows[0]!,
+        priceDifference: "0",
+        degenerateReserves: true,
+      },
+    ];
+    const html = renderWithParams({ tab: "oracle" });
+    expect(html).toContain("one-sided");
+    expect(html).toContain("0 bps from effectively one-sided reserves");
+  });
+
   it("loads chart and count oracle queries and renders pagination metadata", () => {
     const html = renderWithParams({ tab: "oracle" });
     expect(useGQLMock).toHaveBeenCalledWith(

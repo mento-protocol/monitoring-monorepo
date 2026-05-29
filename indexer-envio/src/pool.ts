@@ -193,11 +193,17 @@ type OracleDelta = Partial<typeof DEFAULT_ORACLE_FIELDS>;
 function nextDegenerateReserveState(
   next: Pool,
   oracleDelta: OracleDelta | undefined,
-  canRecompute: boolean,
+  canClassifyDegenerateReserves: boolean,
 ): boolean {
   if (oracleDelta?.degenerateReserves !== undefined)
     return oracleDelta.degenerateReserves;
-  return canRecompute ? hasDegenerateReserves(next) : next.degenerateReserves;
+  return canClassifyDegenerateReserves
+    ? hasDegenerateReserves(next)
+    : next.degenerateReserves;
+}
+
+function canClassifyDegenerateReserveState(pool: Pool): boolean {
+  return !isVirtualPool(pool) && pool.tokenDecimalsKnown;
 }
 
 const getOrCreatePool = async (
@@ -482,6 +488,7 @@ export const upsertPool = async ({
     oracleDelta.priceDifference !== undefined;
   const canRecompute =
     !isVirtualPool(next) && next.oraclePrice > 0n && next.tokenDecimalsKnown;
+  const canClassifyDegenerateReserves = canClassifyDegenerateReserveState(next);
   const priceDifference = hasContractPriceDiff
     ? oracleDelta.priceDifference!
     : canRecompute
@@ -490,7 +497,7 @@ export const upsertPool = async ({
   const degenerateReserves = nextDegenerateReserveState(
     next,
     oracleDelta,
-    canRecompute,
+    canClassifyDegenerateReserves,
   );
 
   // When priceDifference is frozen (no contract-provided value AND can't

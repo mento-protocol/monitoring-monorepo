@@ -503,6 +503,34 @@ function OracleSnapshotsTable({
   );
 }
 
+function priceDifferencePresentation(
+  diffBps: number,
+  diffPct: string | null,
+  degenerateReserves: boolean,
+) {
+  if (!degenerateReserves && diffBps <= 0) {
+    return {
+      visible: false,
+      label: "—",
+      title: "",
+      showBadge: false,
+      className: undefined,
+    };
+  }
+  const title = degenerateReserves
+    ? `${diffBps.toLocaleString()} bps from effectively one-sided reserves`
+    : `${diffBps.toLocaleString()} bps`;
+  const label =
+    diffBps > 0 ? (diffPct !== null ? `${diffPct}%` : `${diffBps} bps`) : "—";
+  return {
+    visible: true,
+    label,
+    title,
+    showBadge: degenerateReserves,
+    className: degenerateReserves ? "text-amber-300" : undefined,
+  };
+}
+
 function OracleSnapshotRow({
   row,
   network,
@@ -525,6 +553,11 @@ function OracleSnapshotRow({
     row.hasHealthData !== false && diffBps > 0 && thresholdBps > 0
       ? ((diffBps / thresholdBps) * 100).toFixed(1)
       : null;
+  const diffPresentation = priceDifferencePresentation(
+    diffBps,
+    diffPct,
+    degenerateReserves,
+  );
 
   return (
     <Row>
@@ -553,17 +586,13 @@ function OracleSnapshotRow({
         {parseOraclePriceToNumber(row.oraclePrice, sym0).toFixed(6)}
       </Td>
       <Td mono small align="right">
-        {diffBps > 0 ? (
+        {diffPresentation.visible ? (
           <span
-            className={degenerateReserves ? "text-amber-300" : undefined}
-            title={
-              degenerateReserves
-                ? `${diffBps.toLocaleString()} bps from effectively one-sided reserves`
-                : `${diffBps.toLocaleString()} bps`
-            }
+            className={diffPresentation.className}
+            title={diffPresentation.title}
           >
-            {diffPct !== null ? `${diffPct}%` : `${diffBps} bps`}
-            {degenerateReserves && (
+            {diffPresentation.label}
+            {diffPresentation.showBadge && (
               <span className="ml-1 rounded border border-amber-500/40 px-1 text-[9px] uppercase text-amber-300">
                 one-sided
               </span>

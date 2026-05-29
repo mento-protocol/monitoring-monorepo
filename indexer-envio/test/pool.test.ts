@@ -7,7 +7,9 @@ import {
   nextDeviationBreachStartedAt,
   nextOpenBreachEntryThreshold,
   preloadPoolCache,
+  upsertPool,
 } from "../src/pool";
+import type { PoolContext } from "../src/pool/types";
 import { makePool } from "./helpers/makePool";
 
 describe("isInDeviationBreach", () => {
@@ -346,6 +348,59 @@ function makeCtx(isPreload: boolean, pools: Record<string, Pool | undefined>) {
     },
   };
 }
+
+function makeUpsertCtx() {
+  const written: Pool[] = [];
+  const context: PoolContext = {
+    effect: (async () => null) as PoolContext["effect"],
+    Pool: {
+      get: async () => undefined,
+      set: (entity) => written.push(entity),
+    },
+    DeviationThresholdBreach: {
+      get: async () => undefined,
+      set: () => undefined,
+    },
+    BiPoolExchange: {
+      get: async () => undefined,
+      set: () => undefined,
+    } as unknown as PoolContext["BiPoolExchange"],
+  };
+  return { context, written };
+}
+
+describe("upsertPool degenerate reserves", () => {
+  it("classifies degenerate reserves even when oracle price is zero", async () => {
+    const oneUnit = 10n ** 18n;
+    const existing = makePool({
+      id: "42220-0x0000000000000000000000000000000000000001",
+      oraclePrice: 0n,
+      invertRateFeedKnown: true,
+      tokenDecimalsKnown: true,
+      reserves0: 1_000n * oneUnit,
+      reserves1: 1_000n * oneUnit,
+      degenerateReserves: false,
+      priceDifference: 123n,
+    });
+    const { context, written } = makeUpsertCtx();
+
+    const result = await upsertPool({
+      context,
+      chainId: existing.chainId,
+      poolId: existing.id,
+      source: "fpmm_update_reserves",
+      blockNumber: 2n,
+      blockTimestamp: 1_700_000_001n,
+      txHash: "0xabc",
+      reservesDelta: { reserve0: 0n, reserve1: 1_000n * oneUnit },
+      existing: { pool: existing },
+    });
+
+    assert.isTrue(result.degenerateReserves);
+    assert.isTrue(written.at(-1)?.degenerateReserves);
+    assert.equal(result.priceDifference, existing.priceDifference);
+  });
+});
 
 describe("maybePreloadPool", () => {
   it("returns false and touches nothing when not in preload phase", async () => {
