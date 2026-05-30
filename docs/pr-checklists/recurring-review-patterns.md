@@ -56,7 +56,7 @@ tldr: required-status workflows MUST NOT use `paths:`/`paths-ignore:` (skipped r
 - Hard cap is **1,000 lines**, enforced by `max-lines` in each package's `eslint.config.mjs` (incl. `indexer-envio` since 2026-05-04). CI blocks merges past this. Per-file escape via `// eslint-disable-next-line max-lines` with a comment explaining why the file genuinely needs to stay big.
 - Exemptions (rule disabled): `**/__tests__/**`, `**/*.test.{ts,tsx}`, `**/src/lib/types.ts` (pure type definitions), `indexer-envio/test/Test.ts` (envio-generated harness).
 - **Unused-imports gate**: `eslint-plugin-unused-imports` is wired into every package's config with `unused-imports/no-unused-imports: "error"`. Refactor PRs that move blocks between modules can't leave dead imports behind — `--fix` removes them mechanically.
-- A monthly drift detector runs on cron and opens a PR appending newly-over-budget files to `BACKLOG.md` so growth doesn't slip past unnoticed.
+- Files near the line budget are tracked in `docs/notes/file-size-watch.md`; refresh the counts before starting a split so growth doesn't slip past unnoticed.
 - Why this exists: PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 lines after a year of unchecked growth. The refactor was a 4-day project; appending one more tab inline was a 30-minute task. Each individual decision was rational; the cumulative drift was not.
 
 ### Security / CSP
@@ -89,8 +89,8 @@ tldr: `generateMetadata` reading access-controlled data must gate on `isPublic =
 
 ### Code health budgets — `docs/pr-checklists/code-health.md`
 
-CodeScene-equivalent OSS quality checks. Tier-1 ships in PR 1; later tiers
-ratchet in over PR 2-6 of the BACKLOG plan.
+CodeScene-equivalent OSS quality checks. These shipped tier-by-tier; the
+ratchet is now fully in place.
 
 - **Cross-package boundaries (blocking, `pnpm code-health:deps`)**: `indexer-envio` is isolated; `ui-dashboard`, `metrics-bridge`, and `aegis` must not import each other's internals; `shared-config` is a leaf. New cross-package imports MUST be justified or routed through `shared-config`. Config-data JSON under `indexer-envio/config/**` is the one allowed escape hatch for the dashboard (used by cross-validation tests).
 - **No circular dependencies (blocking)**: `pnpm code-health:deps` fails on any cycle. The historical `indexer-envio/src/{pool,deviationBreach}.ts` cycle was broken by importing health predicates directly from `pool/health.js`; no baseline carve-out remains.

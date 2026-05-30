@@ -23,7 +23,7 @@ name: Terraform Drift Detection
 # resources the read-only seed SA has no project roles to read. Making that leg
 # read-only too would need a `roles/viewer` grant for the seed SA on the
 # `project_factory`-managed project (operator/seed creds) — deferred by design;
-# see BACKLOG "Terraform CI/CD audit follow-ups".
+# see docs/notes/terraform-cicd-hardening-decisions-2026-05.md.
 
 on:
   schedule:

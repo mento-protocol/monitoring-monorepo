@@ -194,7 +194,7 @@ describe("poll", () => {
  * `REBALANCE_PROBE_EVERY_N_POLLS` is captured as a const at module-load time
  * from `process.env`, so each cadence value needs a fresh module graph
  * (env stub → resetModules → dynamic import). Locks the fix for the
- * `EVERY_N=1` foot-gun (BACKLOG `Rebalance probe: handle EVERY_N=1`):
+ * `EVERY_N=1` foot-gun:
  * with the previous `(cycle % N) === 1` predicate, `cycle % 1` is always 0
  * so `=== 1` was never true and the probe silently never ran.
  */
@@ -233,7 +233,7 @@ describe("rebalance probe cadence", () => {
   }
 
   it("EVERY_N=1: probe runs on every successful poll (foot-gun regression)", async () => {
-    // Locks the BACKLOG foot-gun fix. Pre-fix, the predicate was
+    // Locks the EVERY_N=1 foot-gun fix. Pre-fix, the predicate was
     // `(cycle % N) !== 1` and `cycle % 1` is always 0, so the early-return
     // ALWAYS triggered and the probe NEVER ran with EVERY_N=1.
     vi.stubEnv("REBALANCE_PROBE_EVERY_N_POLLS", "1");

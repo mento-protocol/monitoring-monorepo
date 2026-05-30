@@ -222,8 +222,8 @@ locals {
   #     failed in production with `[REBALANCE_PROBE_FAILED]: Missing or
   #     invalid parameters`, leaving the gauges absent, which propagated
   #     NoData through this rule and stuck the critical alerts in Normal for
-  #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see the
-  #     Aegis Monad coverage entry in BACKLOG.md.
+  #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see
+  #     issue #707 (Aegis Monad reserve coverage).
   deviation_warning_summary_annotation            = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
@@ -381,7 +381,7 @@ locals {
   #     via Treb-driven RPC reads in the Aegis NestJS service).
   #   - Celo-only — Monad reserves aren't tracked in Aegis yet; future
   #     Monad-reserve breach annotations will lack the balance line until
-  #     Aegis grows Monad coverage. Tracked in BACKLOG.md.
+  #     Aegis grows Monad coverage. Tracked in issue #707.
   #   - USDC / USDT / axlUSDC all expose 6dp on chain; `/ 1e6` normalises
   #     to human units so the template's `printf "%.2f"` renders in the
   #     same scale as the dashboard tooltip.
