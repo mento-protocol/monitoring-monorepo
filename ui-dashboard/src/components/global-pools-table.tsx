@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { poolTvlUSD } from "@/lib/tokens";
 import { type TradingLimit } from "@/lib/types";
 import { Table } from "@/components/table";
@@ -22,6 +22,22 @@ export type {
   GlobalSortContext,
 } from "./global-pools-table/sort";
 export { globalPoolKey, sortGlobalPools } from "./global-pools-table/sort";
+
+// Stable no-op subscribe for the client-detection `useSyncExternalStore` (the
+// value never changes after hydration, so there's nothing to subscribe to).
+const subscribeNoop = (): (() => void) => () => {};
+
+// SSR-safe "are we past hydration?" — the server snapshot is `false` so the
+// static HTML omits client-only (wall-clock-dependent) content; the client
+// snapshot is `true` post-hydration. Avoids a useEffect+setState mount gate
+// (which react-doctor flags as initializing state in an effect).
+function useIsClient(): boolean {
+  return useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false,
+  );
+}
 
 function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
   return entries.some((e) => e.network.hasVirtualPools);
@@ -108,9 +124,13 @@ export function GlobalPoolsTable({
 
   const showVirtualPoolSource = hasAnyVirtualPools(entries);
 
+  // `isWeekend()` reads the wall clock, so SSR-rendering it would mismatch the
+  // client; gate the banner on `useIsClient()` so it only shows post-hydration.
+  const isClient = useIsClient();
+
   return (
     <>
-      {isWeekend() && <WeekendBanner />}
+      {isClient && isWeekend() && <WeekendBanner />}
       <Table>
         <PoolTableHeader
           sortKey={sortKey}

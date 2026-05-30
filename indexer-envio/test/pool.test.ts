@@ -393,7 +393,10 @@ describe("upsertPool breaker halt (cold-start)", () => {
         get: async () => undefined,
         set: (entity: Pool) => written.push(entity),
       },
-      DeviationThresholdBreach: { get: async () => undefined, set: () => undefined },
+      DeviationThresholdBreach: {
+        get: async () => undefined,
+        set: () => undefined,
+      },
       BiPoolExchange: { get: async () => undefined, set: () => undefined },
       BreakerConfig: {
         getWhere: async () => [
@@ -464,7 +467,10 @@ describe("upsertPool breaker halt (cold-start)", () => {
     const context = {
       effect: (async () => null) as PoolContext["effect"],
       Pool: { get: async () => undefined, set: (e: Pool) => written.push(e) },
-      DeviationThresholdBreach: { get: async () => undefined, set: () => undefined },
+      DeviationThresholdBreach: {
+        get: async () => undefined,
+        set: () => undefined,
+      },
       BiPoolExchange: { get: async () => undefined, set: () => undefined },
     } as unknown as PoolContext;
     const existing = makePool({
