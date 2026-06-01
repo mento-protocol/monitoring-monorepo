@@ -130,15 +130,30 @@ function applyOracleRelayout(
  * visible immediately); this defers only the React-side work — re-scoping
  * decimation, re-evaluating daily-mode, firing look-ahead — to once the viewport
  * settles within a frame. The latest event in a frame wins, which matches the
- * chart's final axis state. Returns a stable handler. Exported for unit testing.
+ * chart's final axis state. `resetKey` (`${networkId}:${poolId}`) cancels any
+ * pending frame when the chart identity changes — OracleTab does NOT remount
+ * across a poolId change, so without this a frame scheduled for the old pool
+ * would flush after `useOracleViewport` has reset the new one, applying the old
+ * pool's X range and firing look-ahead against the new pool. Returns a stable
+ * handler. Exported for unit testing.
  */
 export function useCoalescedRelayout(
   setVisibleRange: (range: [number, number] | null) => void,
   setShowAll: (showAll: boolean) => void,
-  onVisibleXRangeChange?: ((range: [number, number]) => void) | undefined,
+  onVisibleXRangeChange: ((range: [number, number]) => void) | undefined,
+  resetKey: string | undefined,
 ): (e: unknown) => void {
   const pendingRef = useRef<unknown>(null);
   const rafIdRef = useRef<number | null>(null);
+  // Keep the latest look-ahead callback in a ref so a queued flush never fires a
+  // stale closure if the prop changes (e.g. oldestLoadedTs advances as older
+  // pages load) between scheduling and firing. setVisibleRange/setShowAll are
+  // stable state setters, so flush — and thus the returned handler — stays
+  // referentially stable across parent re-renders.
+  const onVisibleXRangeChangeRef = useRef(onVisibleXRangeChange);
+  useEffect(() => {
+    onVisibleXRangeChangeRef.current = onVisibleXRangeChange;
+  });
   const flush = useCallback(() => {
     rafIdRef.current = null;
     const e = pendingRef.current;
@@ -148,15 +163,20 @@ export function useCoalescedRelayout(
         e,
         setVisibleRange,
         setShowAll,
-        onVisibleXRangeChange,
+        onVisibleXRangeChangeRef.current,
       );
     }
-  }, [setVisibleRange, setShowAll, onVisibleXRangeChange]);
+  }, [setVisibleRange, setShowAll]);
+  // Cancel + drop any pending frame on unmount AND on chart-identity change
+  // (`resetKey`). Clearing the refs (not just cancelling) lets the next event
+  // re-arm the rAF for the new pool.
   useEffect(
     () => () => {
       if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+      pendingRef.current = null;
     },
-    [],
+    [resetKey],
   );
   return useCallback(
     (e: unknown) => {
@@ -568,11 +588,14 @@ export function OracleChart({
     uirevision,
   });
 
-  // One React state update per animation frame instead of per wheel tick.
+  // One React state update per animation frame instead of per wheel tick;
+  // `uirevision` (= `${networkId}:${poolId}`) cancels a pending frame on a
+  // pool/network switch so it can't apply the old pool's range.
   const handleRelayout = useCoalescedRelayout(
     setVisibleRange,
     setShowAll,
     onVisibleXRangeChange,
+    uirevision,
   );
 
   // Gate on raw snapshots only (not dailyCandles): raw is the default view, and

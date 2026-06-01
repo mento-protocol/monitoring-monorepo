@@ -93,6 +93,24 @@ describe("decimateSeries", () => {
     expect(out).toHaveLength(2);
   });
 
+  it("falls back when all rows sit to the RIGHT of the window (binary-search end=0)", () => {
+    // Window+margin entirely before the data → slice(0, 0) = [] → full series.
+    // Guards the empty-slice fallback after the O(log n) bounds refactor.
+    const rows = Array.from({ length: 50 }, (_, i) => row(5000 + i));
+    const out = decimateSeries(rows, opts({ visibleRange: [0, 1], cap: 100 }));
+    expect(out).toEqual(rows);
+  });
+
+  it("falls back when all rows sit to the LEFT of the window (binary-search start=len)", () => {
+    // Window+margin entirely after the data → slice(len, len) = [] → full series.
+    const rows = Array.from({ length: 50 }, (_, i) => row(i));
+    const out = decimateSeries(
+      rows,
+      opts({ visibleRange: [5000, 5001], cap: 100 }),
+    );
+    expect(out).toEqual(rows);
+  });
+
   it("returns the empty input unchanged", () => {
     expect(decimateSeries<Row>([], opts())).toEqual([]);
   });

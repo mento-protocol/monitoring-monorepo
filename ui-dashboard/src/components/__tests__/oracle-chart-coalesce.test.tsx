@@ -17,6 +17,8 @@ const relayout = (loIso: string, hiIso: string) => ({
   "xaxis.range[0]": loIso,
   "xaxis.range[1]": hiIso,
 });
+// "All" button / double-click autorange.
+const resetRelayout = () => ({ "xaxis.autorange": true });
 
 // Deterministic rAF queue — jsdom's rAF + fake-timer interplay is fiddly, and a
 // manual queue makes the "exactly one flush per frame" assertions exact.
@@ -36,16 +38,21 @@ let root: Root;
 let handler: (e: unknown) => void;
 let mounted = false;
 
-function Harness() {
+function Harness({ resetKey }: { resetKey: string }) {
   // useCallback keeps the returned handler referentially stable across renders,
   // so capturing it in render is deterministic for the test.
   handler = useCoalescedRelayout(
     setVisibleRange,
     setShowAll,
     onVisibleXRangeChange,
+    resetKey,
   );
   return null;
 }
+
+// Re-render the harness with a new chart identity (pool/network switch).
+const rerenderWithKey = (resetKey: string) =>
+  act(() => root.render(<Harness resetKey={resetKey} />));
 
 beforeEach(() => {
   rafQueue = [];
@@ -61,7 +68,7 @@ beforeEach(() => {
   onVisibleXRangeChange.mockClear();
   container = document.createElement("div");
   root = createRoot(container);
-  act(() => root.render(<Harness />));
+  act(() => root.render(<Harness resetKey="celo:poolA" />));
   mounted = true;
 });
 
@@ -124,5 +131,56 @@ describe("useCoalescedRelayout", () => {
 
     act(() => flushFrame());
     expect(setVisibleRange).not.toHaveBeenCalled();
+  });
+
+  it("latest action wins when range then reset coalesce in one frame", () => {
+    act(() => {
+      handler(relayout("2026-05-01T00:00:00Z", "2026-05-08T00:00:00Z")); // range
+      handler(resetRelayout()); // "All" — reset wins
+    });
+    act(() => flushFrame());
+    expect(setShowAll).toHaveBeenCalledTimes(1);
+    expect(setShowAll).toHaveBeenCalledWith(true);
+    expect(setVisibleRange).toHaveBeenCalledTimes(1);
+    expect(setVisibleRange).toHaveBeenCalledWith(null);
+    expect(onVisibleXRangeChange).not.toHaveBeenCalled(); // reset never pages
+  });
+
+  it("latest action wins when reset then range coalesce in one frame", () => {
+    act(() => {
+      handler(resetRelayout()); // "All"
+      handler(relayout("2026-05-02T00:00:00Z", "2026-05-09T00:00:00Z")); // range wins
+    });
+    act(() => flushFrame());
+    expect(setShowAll).toHaveBeenCalledTimes(1);
+    expect(setShowAll).toHaveBeenCalledWith(false);
+    expect(setVisibleRange).toHaveBeenCalledTimes(1);
+    expect(setVisibleRange).toHaveBeenCalledWith([
+      sec("2026-05-02T00:00:00Z"),
+      sec("2026-05-09T00:00:00Z"),
+    ]);
+    expect(onVisibleXRangeChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a pending frame on chart-identity change, then re-arms for the new pool", () => {
+    // A frame scheduled for poolA must not flush after a switch to poolB —
+    // OracleTab doesn't remount across a poolId change.
+    act(() =>
+      handler(relayout("2026-05-01T00:00:00Z", "2026-05-08T00:00:00Z")),
+    );
+    rerenderWithKey("celo:poolB");
+    act(() => flushFrame());
+    expect(setVisibleRange).not.toHaveBeenCalled();
+
+    // The next event re-arms cleanly against the new identity.
+    act(() =>
+      handler(relayout("2026-05-05T00:00:00Z", "2026-05-12T00:00:00Z")),
+    );
+    act(() => flushFrame());
+    expect(setVisibleRange).toHaveBeenCalledTimes(1);
+    expect(setVisibleRange).toHaveBeenCalledWith([
+      sec("2026-05-05T00:00:00Z"),
+      sec("2026-05-12T00:00:00Z"),
+    ]);
   });
 });
