@@ -2,7 +2,7 @@
 // SortedOracles event handlers (OracleReported, MedianUpdated, expiry)
 // ---------------------------------------------------------------------------
 
-import type { OracleSnapshot, Pool } from "envio";
+import type { EvmOnEventContext, OracleSnapshot, Pool } from "envio";
 import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, isVirtualPool } from "../helpers.js";
 import {
@@ -83,6 +83,238 @@ function holdOracleReportedCursor(
   });
 }
 
+/** Per-event inputs shared by every pool in an OracleReported fan-out. Computed
+ * once in the handler so the per-pool worker takes a single context arg instead
+ * of closing over the raw `event`. */
+interface OracleReportedPoolCtx {
+  chainId: number;
+  rateFeedID: string;
+  oraclePrice: bigint;
+  txHash: string;
+  logIndex: number;
+  /** `eventId(chainId, blockNumber, logIndex)` — the OracleSnapshot id is this
+   * suffixed with `-${poolId}`. */
+  snapshotIdBase: string;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  oracleTimestamp: bigint;
+  breakerSnapshotFields: {
+    breakerBaselineAtSnapshot: bigint;
+    breakerThresholdAtSnapshot: bigint;
+  } | null;
+}
+
+/** Process one pool's OracleReported update: self-heal, advance the oracle
+ * cursor (or hold it when decimals are untrusted), then run the
+ * breach/health/snapshot pipeline. Extracted from the handler's fan-out so the
+ * handler stays well under the max-lines budget; one distinct pool per call
+ * (getPoolsByFeed returns unique ids), so writes don't race. */
+async function processOracleReportedPool(
+  context: EvmOnEventContext,
+  poolId: string,
+  c: OracleReportedPoolCtx,
+): Promise<void> {
+  const initial = await context.Pool.get(poolId);
+  if (!initial) return;
+  // Self-heal invertRateFeed before computePriceDifference reads it.
+  // Without this, a pool deployed during an RPC blip whose only event
+  // post-deploy is OracleReported would persist wrong-orientation
+  // priceDifference / health / breach state until an FPMM event runs
+  // upsertPool's heal.
+  const existing = await selfHealTokenDecimals(
+    context,
+    await selfHealInvertRateFeed(context, initial),
+  );
+
+  // Resolve oracleExpiry from DB if already populated, otherwise fetch
+  // via RPC (one-time seed — subsequent events use the DB value).
+  const oracleExpiry =
+    existing.oracleExpiry > 0n
+      ? existing.oracleExpiry
+      : ((await context.effect(reportExpiryEffect, {
+          chainId: c.chainId,
+          rateFeedID: c.rateFeedID,
+          blockNumber: c.blockNumber,
+        })) ?? existing.oracleExpiry);
+
+  const oraclePrice = c.oraclePrice;
+
+  // `lastOracleReportAt` is intentionally NOT advanced here.
+  // OracleReported fires for every reporter, but the on-chain median's
+  // freshness is bounded by the median reporter's timestamp — not the
+  // max across all reporters. Tracking max-of-all here would let a
+  // fresh non-median reporter extend our derive-path freshness gate
+  // past the actual median's contract expiry. The pragmatic alternative
+  // (per claude[bot] review on PR #358): only advance `lastOracleReportAt`
+  // in the `MedianUpdated` handler using `blockTimestamp`. That's an
+  // under-bound — if reporters are fresh but the median hasn't moved
+  // recently, derive falls through to RPC. Safe by construction: never
+  // passes stale-median data through the freshness gate.
+  //
+  // We DO advance `lastFreshReporterAt = max(prev, event.params.timestamp)`
+  // here. Diagnostic-only field — see schema.graphql for why it can't
+  // replace `lastOracleReportAt` as the freshness gate.
+  const updatedPool: Pool = {
+    ...existing,
+    oracleTimestamp: c.oracleTimestamp,
+    oracleTxHash: c.txHash,
+    oracleOk: true,
+    oraclePrice,
+    oracleExpiry,
+    oracleNumReporters: existing.oracleNumReporters,
+    lastFreshReporterAt:
+      c.oracleTimestamp > existing.lastFreshReporterAt
+        ? c.oracleTimestamp
+        : existing.lastFreshReporterAt,
+    updatedAtBlock: c.blockNumber,
+    updatedAtTimestamp: c.blockTimestamp,
+  };
+  // `tokenDecimalsKnown` gate: when decimals aren't known we cannot
+  // compute a trustworthy `priceDifference` (`normalizeTo18` would
+  // skew by `10^(18 - real_dec)`), and feeding the frozen-or-default
+  // `existing.priceDifference` into the breach pipeline would let
+  // `nextDeviationBreachStartedAt` / `recordBreachTransition` open or
+  // close `DeviationThresholdBreach` rows from stale data — corrupting
+  // breach durations and alert rollups. Skip the breach + health +
+  // snapshot pipeline entirely; the Pool entity still advances
+  // diagnostic fields (`oraclePrice`, `lastFreshReporterAt`) but the
+  // FRESHNESS cursor (`oracleTimestamp` / `oracleOk`) is HELD on the
+  // existing values — advancing them would let the dashboard's homepage
+  // table + OG card (which recompute health from `oracleTimestamp` +
+  // `priceDifference` without checking `hasHealthData`) classify a
+  // pool with untrusted deviation data as "OK / fresh" instead of
+  // degraded (codex P2 #3214513402, PR 1.6).
+  // Mirrors the two-cursor model in state-sync.ts.
+  //
+  // Exception: never-rebalance pools (both split sides 0 + known)
+  // don't need priceDifference math at all — `effectiveThreshold`
+  // returns 1e12, the breach predicate / `computeHealthStatus` /
+  // `nextDeviationBreachStartedAt` all short-circuit to OK / no-breach
+  // regardless of priceDifference. Letting them through means uptime
+  // accrual keeps moving on every oracle event even if decimals
+  // self-heal stays stuck (e.g. governance-paused pool's fee tokens).
+  if (shouldHoldOracleReportedCursor(updatedPool)) {
+    holdOracleReportedCursor(context, updatedPool, existing);
+    return;
+  }
+
+  // For the never-rebalance + decimals-untrusted fall-through case
+  // above, computePriceDifference would normalize against schema-default
+  // 18/18 and produce a fabricated value that gets persisted onto the
+  // OracleSnapshot row. The breach predicate / `computeHealthStatus` /
+  // `nextDeviationBreachStartedAt` ignore it (1e12 effective threshold
+  // short-circuits everything to no-breach / OK), but consumers who
+  // read the row's priceDifference directly (BreachEvent, oracle tab
+  // detail) would see a fake non-zero value. Preserve existing instead.
+  const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
+  const priceDifference = priceDifferenceForOracleSample(
+    updatedPool,
+    decimalsTrustworthy,
+    oraclePrice,
+  );
+  const degenerateReserves = degenerateReservesForOracleSample(
+    updatedPool,
+    decimalsTrustworthy,
+  );
+  const withDev = { ...updatedPool, priceDifference, degenerateReserves };
+  const deviationBreachStartedAt = nextDeviationBreachStartedAt(
+    existing,
+    withDev,
+    c.blockTimestamp,
+  );
+  const withBreach = { ...withDev, deviationBreachStartedAt };
+  const healthStatus = computeHealthStatus(withBreach, c.blockTimestamp);
+  const finalPool = { ...withBreach, healthStatus };
+
+  const breachPoolUpdate = await recordBreachTransition(
+    context,
+    existing,
+    finalPool,
+    {
+      blockTimestamp: c.blockTimestamp,
+      blockNumber: c.blockNumber,
+      txHash: c.txHash,
+      logIndex: c.logIndex,
+      source: "oracle_reported",
+    },
+  );
+
+  // Health score: compute snapshot fields + update pool accumulators.
+  // Pass `Number(effectiveThreshold(finalPool))` so asymmetric pools
+  // whose active side currently sits at 0 still accrue uptime via the
+  // 10000 fallback (raw `rebalanceThreshold` would route through the
+  // no-data sentinel). `isNeverRebalance(finalPool)` short-circuits
+  // governance-disabled pools to OK regardless.
+  const effectiveBps = Number(effectiveThreshold(finalPool));
+  const { snapshotFields, poolUpdate } = recordHealthSample(
+    finalPool,
+    priceDifference,
+    effectiveBps,
+    c.blockTimestamp,
+    isNeverRebalance(finalPool),
+  );
+  const merged: Pool = {
+    ...finalPool,
+    ...poolUpdate,
+    ...breachPoolUpdate,
+  };
+  // `recordHealthSample` may have flipped `hasHealthData: false → true`
+  // on the first valid sample. The earlier `computeHealthStatus` call
+  // ran against the OLD value (returning `N/A` via the new gate), so
+  // `merged.healthStatus` is stale. Recompute against `merged` so the
+  // persisted state is consistent (codex P2 PR #370 #3214748736).
+  const persistedPool: Pool = {
+    ...merged,
+    healthStatus: computeHealthStatus(merged, c.blockTimestamp),
+  };
+  context.Pool.set(persistedPool);
+
+  const snapshot: OracleSnapshot = {
+    id: c.snapshotIdBase + `-${poolId}`,
+    chainId: c.chainId,
+    poolId,
+    timestamp: c.blockTimestamp,
+    oraclePrice,
+    oracleOk: true,
+    numReporters: existing.oracleNumReporters,
+    priceDifference,
+    degenerateReserves,
+    // Persist the effective threshold so asymmetric pools with active
+    // side = 0 still show a non-zero denominator in the chart's
+    // deviation-ratio math (raw 0 would render 0%/—). Use
+    // `persistableThreshold` not `effectiveBps` directly: the 1e12
+    // never-rebalance sentinel overflows `OracleSnapshot.rebalanceThreshold`'s
+    // `Int!` (32-bit signed). Dashboards detect never-rebalance by joining
+    // the Pool entity's `rebalanceThresholdsKnown` + above/below fields.
+    rebalanceThreshold: persistableThreshold(finalPool),
+    source: "oracle_reported",
+    blockNumber: c.blockNumber,
+    txHash: c.txHash,
+    // No breaker, or unseeded EMA / unconfigured referenceValue →
+    // undefined (Envio's nullable codegen). The chart consumer falls
+    // back to the current band for these rows.
+    breakerBaselineAtSnapshot:
+      c.breakerSnapshotFields?.breakerBaselineAtSnapshot,
+    breakerThresholdAtSnapshot:
+      c.breakerSnapshotFields?.breakerThresholdAtSnapshot,
+    ...snapshotFields,
+  };
+  context.OracleSnapshot.set(snapshot);
+
+  // Refresh the daily snapshot's frozen health counters even though no
+  // pool-side activity (swap/rebalance/mint/burn/UR) fired. Without
+  // this, a quiet pool whose only updates are oracle reports has no
+  // PoolDailySnapshot rows after the last activity event, and the 7d
+  // tile's "latest row <= sevenDaysAgo" anchor silently broadens past
+  // 7 days instead of degrading to "—".
+  await upsertDailySnapshot({
+    context,
+    pool: persistedPool,
+    blockTimestamp: c.blockTimestamp,
+    blockNumber: c.blockNumber,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // SortedOracles.OracleReported
 // ---------------------------------------------------------------------------
@@ -116,7 +348,6 @@ indexer.onEvent(
     }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const oracleTimestamp = event.params.timestamp;
 
     // Bootstrap-if-needed + resolve in one call. See helper doc; bootstrap
     // covers fresh-sync feeds whose BreakerBox events predate start_block.
@@ -131,213 +362,29 @@ indexer.onEvent(
         poolsLength: poolIds.length,
       });
 
+    const poolCtx: OracleReportedPoolCtx = {
+      chainId: event.chainId,
+      rateFeedID,
+      oraclePrice: event.params.value,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+      snapshotIdBase: eventId(
+        event.chainId,
+        event.block.number,
+        event.logIndex,
+      ),
+      blockNumber,
+      blockTimestamp,
+      oracleTimestamp: event.params.timestamp,
+      breakerSnapshotFields,
+    };
     // Each poolId is distinct (getPoolsByFeed returns unique rows) so pool
     // writes don't race. Fan out in parallel — on a rate feed shared by 5-10
     // pools this collapses N sequential awaits into 1 concurrent batch.
     await Promise.all(
-      poolIds.map(async (poolId) => {
-        const initial = await context.Pool.get(poolId);
-        if (!initial) return;
-        // Self-heal invertRateFeed before computePriceDifference reads it.
-        // Without this, a pool deployed during an RPC blip whose only event
-        // post-deploy is OracleReported would persist wrong-orientation
-        // priceDifference / health / breach state until an FPMM event runs
-        // upsertPool's heal.
-        const existing = await selfHealTokenDecimals(
-          context,
-          await selfHealInvertRateFeed(context, initial),
-        );
-
-        // Resolve oracleExpiry from DB if already populated, otherwise fetch
-        // via RPC (one-time seed — subsequent events use the DB value).
-        const oracleExpiry =
-          existing.oracleExpiry > 0n
-            ? existing.oracleExpiry
-            : ((await context.effect(reportExpiryEffect, {
-                chainId: event.chainId,
-                rateFeedID,
-                blockNumber,
-              })) ?? existing.oracleExpiry);
-
-        const oraclePrice = event.params.value;
-
-        // `lastOracleReportAt` is intentionally NOT advanced here.
-        // OracleReported fires for every reporter, but the on-chain median's
-        // freshness is bounded by the median reporter's timestamp — not the
-        // max across all reporters. Tracking max-of-all here would let a
-        // fresh non-median reporter extend our derive-path freshness gate
-        // past the actual median's contract expiry. The pragmatic alternative
-        // (per claude[bot] review on PR #358): only advance `lastOracleReportAt`
-        // in the `MedianUpdated` handler using `blockTimestamp`. That's an
-        // under-bound — if reporters are fresh but the median hasn't moved
-        // recently, derive falls through to RPC. Safe by construction: never
-        // passes stale-median data through the freshness gate.
-        //
-        // We DO advance `lastFreshReporterAt = max(prev, event.params.timestamp)`
-        // here. Diagnostic-only field — see schema.graphql for why it can't
-        // replace `lastOracleReportAt` as the freshness gate.
-        const updatedPool: Pool = {
-          ...existing,
-          oracleTimestamp,
-          oracleTxHash: event.transaction.hash,
-          oracleOk: true,
-          oraclePrice,
-          oracleExpiry,
-          oracleNumReporters: existing.oracleNumReporters,
-          lastFreshReporterAt:
-            oracleTimestamp > existing.lastFreshReporterAt
-              ? oracleTimestamp
-              : existing.lastFreshReporterAt,
-          updatedAtBlock: blockNumber,
-          updatedAtTimestamp: blockTimestamp,
-        };
-        // `tokenDecimalsKnown` gate: when decimals aren't known we cannot
-        // compute a trustworthy `priceDifference` (`normalizeTo18` would
-        // skew by `10^(18 - real_dec)`), and feeding the frozen-or-default
-        // `existing.priceDifference` into the breach pipeline would let
-        // `nextDeviationBreachStartedAt` / `recordBreachTransition` open or
-        // close `DeviationThresholdBreach` rows from stale data — corrupting
-        // breach durations and alert rollups. Skip the breach + health +
-        // snapshot pipeline entirely; the Pool entity still advances
-        // diagnostic fields (`oraclePrice`, `lastFreshReporterAt`) but the
-        // FRESHNESS cursor (`oracleTimestamp` / `oracleOk`) is HELD on the
-        // existing values — advancing them would let the dashboard's homepage
-        // table + OG card (which recompute health from `oracleTimestamp` +
-        // `priceDifference` without checking `hasHealthData`) classify a
-        // pool with untrusted deviation data as "OK / fresh" instead of
-        // degraded (codex P2 #3214513402, PR 1.6).
-        // Mirrors the two-cursor model in state-sync.ts.
-        //
-        // Exception: never-rebalance pools (both split sides 0 + known)
-        // don't need priceDifference math at all — `effectiveThreshold`
-        // returns 1e12, the breach predicate / `computeHealthStatus` /
-        // `nextDeviationBreachStartedAt` all short-circuit to OK / no-breach
-        // regardless of priceDifference. Letting them through means uptime
-        // accrual keeps moving on every oracle event even if decimals
-        // self-heal stays stuck (e.g. governance-paused pool's fee tokens).
-        if (shouldHoldOracleReportedCursor(updatedPool)) {
-          holdOracleReportedCursor(context, updatedPool, existing);
-          return;
-        }
-
-        // For the never-rebalance + decimals-untrusted fall-through case
-        // above, computePriceDifference would normalize against schema-default
-        // 18/18 and produce a fabricated value that gets persisted onto the
-        // OracleSnapshot row. The breach predicate / `computeHealthStatus` /
-        // `nextDeviationBreachStartedAt` ignore it (1e12 effective threshold
-        // short-circuits everything to no-breach / OK), but consumers who
-        // read the row's priceDifference directly (BreachEvent, oracle tab
-        // detail) would see a fake non-zero value. Preserve existing instead.
-        const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
-        const priceDifference = priceDifferenceForOracleSample(
-          updatedPool,
-          decimalsTrustworthy,
-          oraclePrice,
-        );
-        const degenerateReserves = degenerateReservesForOracleSample(
-          updatedPool,
-          decimalsTrustworthy,
-        );
-        const withDev = { ...updatedPool, priceDifference, degenerateReserves };
-        const deviationBreachStartedAt = nextDeviationBreachStartedAt(
-          existing,
-          withDev,
-          blockTimestamp,
-        );
-        const withBreach = { ...withDev, deviationBreachStartedAt };
-        const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
-        const finalPool = { ...withBreach, healthStatus };
-
-        const breachPoolUpdate = await recordBreachTransition(
-          context,
-          existing,
-          finalPool,
-          {
-            blockTimestamp,
-            blockNumber,
-            txHash: event.transaction.hash,
-            logIndex: event.logIndex,
-            source: "oracle_reported",
-          },
-        );
-
-        // Health score: compute snapshot fields + update pool accumulators.
-        // Pass `Number(effectiveThreshold(finalPool))` so asymmetric pools
-        // whose active side currently sits at 0 still accrue uptime via the
-        // 10000 fallback (raw `rebalanceThreshold` would route through the
-        // no-data sentinel). `isNeverRebalance(finalPool)` short-circuits
-        // governance-disabled pools to OK regardless.
-        const effectiveBps = Number(effectiveThreshold(finalPool));
-        const { snapshotFields, poolUpdate } = recordHealthSample(
-          finalPool,
-          priceDifference,
-          effectiveBps,
-          blockTimestamp,
-          isNeverRebalance(finalPool),
-        );
-        const merged: Pool = {
-          ...finalPool,
-          ...poolUpdate,
-          ...breachPoolUpdate,
-        };
-        // `recordHealthSample` may have flipped `hasHealthData: false → true`
-        // on the first valid sample. The earlier `computeHealthStatus` call
-        // ran against the OLD value (returning `N/A` via the new gate), so
-        // `merged.healthStatus` is stale. Recompute against `merged` so the
-        // persisted state is consistent (codex P2 PR #370 #3214748736).
-        const persistedPool: Pool = {
-          ...merged,
-          healthStatus: computeHealthStatus(merged, blockTimestamp),
-        };
-        context.Pool.set(persistedPool);
-
-        const snapshot: OracleSnapshot = {
-          id:
-            eventId(event.chainId, event.block.number, event.logIndex) +
-            `-${poolId}`,
-          chainId: event.chainId,
-          poolId,
-          timestamp: blockTimestamp,
-          oraclePrice,
-          oracleOk: true,
-          numReporters: existing.oracleNumReporters,
-          priceDifference,
-          degenerateReserves,
-          // Persist the effective threshold so asymmetric pools with active
-          // side = 0 still show a non-zero denominator in the chart's
-          // deviation-ratio math (raw 0 would render 0%/—). Use
-          // `persistableThreshold` not `effectiveBps` directly: the 1e12
-          // never-rebalance sentinel overflows `OracleSnapshot.rebalanceThreshold`'s
-          // `Int!` (32-bit signed). Dashboards detect never-rebalance by joining
-          // the Pool entity's `rebalanceThresholdsKnown` + above/below fields.
-          rebalanceThreshold: persistableThreshold(finalPool),
-          source: "oracle_reported",
-          blockNumber,
-          txHash: event.transaction.hash,
-          // No breaker, or unseeded EMA / unconfigured referenceValue →
-          // undefined (Envio's nullable codegen). The chart consumer falls
-          // back to the current band for these rows.
-          breakerBaselineAtSnapshot:
-            breakerSnapshotFields?.breakerBaselineAtSnapshot,
-          breakerThresholdAtSnapshot:
-            breakerSnapshotFields?.breakerThresholdAtSnapshot,
-          ...snapshotFields,
-        };
-        context.OracleSnapshot.set(snapshot);
-
-        // Refresh the daily snapshot's frozen health counters even though no
-        // pool-side activity (swap/rebalance/mint/burn/UR) fired. Without
-        // this, a quiet pool whose only updates are oracle reports has no
-        // PoolDailySnapshot rows after the last activity event, and the 7d
-        // tile's "latest row <= sevenDaysAgo" anchor silently broadens past
-        // 7 days instead of degrading to "—".
-        await upsertDailySnapshot({
-          context,
-          pool: persistedPool,
-          blockTimestamp,
-          blockNumber,
-        });
-      }),
+      poolIds.map((poolId) =>
+        processOracleReportedPool(context, poolId, poolCtx),
+      ),
     );
     // Cold-start: if this OracleReported is the first event for a feed whose
     // BreakerBox configs predate start_block, the resolve above bootstrapped
