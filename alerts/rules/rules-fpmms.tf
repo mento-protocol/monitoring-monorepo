@@ -31,7 +31,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — oracle report overdue (> 1.2× expiry).{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — oracle report overdue (> 1.2× expiry).{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}{{ $lastOracleUpdateUrl := index $values.OracleAge.Labels \"last_oracle_update_url\" }} Last update: {{ if $lastOracleUpdateUrl }}<{{ $lastOracleUpdateUrl }}|{{ humanizeDuration $values.OracleAge.Value }} ago>{{ else }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ end }}.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -134,7 +134,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}{{ $lastOracleUpdateUrl := index $values.OracleAge.Labels \"last_oracle_update_url\" }} Last update: {{ if $lastOracleUpdateUrl }}<{{ $lastOracleUpdateUrl }}|{{ humanizeDuration $values.OracleAge.Value }} ago>{{ else }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ end }}.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -224,7 +224,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Liveness {{ printf \"%.2f\" $values.A.Value }} > 3 — report badly stale.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary     = "Liveness {{ printf \"%.2f\" $values.A.Value }} > 3 — report badly stale.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}{{ $lastOracleUpdateUrl := index $values.OracleAge.Labels \"last_oracle_update_url\" }} Last update: {{ if $lastOracleUpdateUrl }}<{{ $lastOracleUpdateUrl }}|{{ humanizeDuration $values.OracleAge.Value }} ago>{{ else }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ end }}.{{ else }} Oracle has never reported on this pool.{{ end }}"
       description = "Liveness ratio exceeds 3× the contract expiry. If Oracle Down stays quiet while this fires, the indexer's oracleOk derivation has drifted from the on-chain expiry check."
     }
 

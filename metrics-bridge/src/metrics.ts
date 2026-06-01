@@ -2,6 +2,7 @@ import { Gauge, Counter, Registry } from "prom-client";
 import {
   chainSlug,
   explorerAddressUrl,
+  explorerTxUrl,
   hasChain,
 } from "@mento-protocol/monitoring-config/chains";
 import {
@@ -82,6 +83,10 @@ const poolLabels = [
   "pool_address_short",
   "block_explorer_url",
 ] as const;
+// Issue #698 deliberately carries the last oracle tx URL on timestamp/expiry
+// gauges so Grafana annotations can link the Slack "last update" text. Keep
+// this scoped to oracle liveness gauges; do not add it to every pool series.
+const oracleUpdateLabels = [...poolLabels, "last_oracle_update_url"] as const;
 const deviationAlertStateLabels = [...poolLabels, "state"] as const;
 const deviationAlertTransitionCounterLabels = [
   ...poolLabels,
@@ -136,13 +141,13 @@ export const gauges = {
   oracleTimestamp: new Gauge({
     name: "mento_pool_oracle_timestamp",
     help: "Unix timestamp of the last oracle report. Use with oracle_expiry to compute live liveness ratio.",
-    labelNames: poolLabels,
+    labelNames: oracleUpdateLabels,
     registers: [register],
   }),
   oracleExpiry: new Gauge({
     name: "mento_pool_oracle_expiry",
     help: "Oracle report expiry window in seconds",
-    labelNames: poolLabels,
+    labelNames: oracleUpdateLabels,
     registers: [register],
   }),
   deviationRatio: new Gauge({
@@ -311,177 +316,191 @@ export function updateMetrics(
   pools: PoolRow[],
   nowSeconds = Math.floor(Date.now() / 1000),
 ): void {
-  // Reset pool-level gauges to evict stale label sets from removed pools.
-  for (const g of Object.values(gauges)) {
-    if (!POLL_PRESERVED_GAUGES.has(g)) g.reset();
-  }
+  resetPollGauges();
 
   const activePoolIds = new Set<string>();
   for (const pool of pools) {
     activePoolIds.add(pool.id);
-    const address = poolIdAddress(pool.id);
-    const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
-    warnIfUnknown(pool, derivedPair);
-    const labels = {
-      pool_id: pool.id,
-      chain_id: String(pool.chainId),
-      chain_name: chainSlug(pool.chainId),
-      pair: derivedPair ?? pool.id,
-      pool_address_short: shortAddress(address),
-      block_explorer_url: explorerAddressUrl(pool.chainId, address) ?? "",
-    };
+    updatePoolMetrics(pool, nowSeconds);
+  }
+  pruneDeviationAlertStates(activePoolIds);
+}
 
-    const deviationAlert = observeDeviationAlertState(
-      pool,
-      labels.pair,
-      nowSeconds,
-    );
-    gauges.deviationAlertState.set(
-      { ...labels, state: deviationAlert.state },
-      1,
-    );
-    for (const transition of deviationAlert.newTransitions) {
-      counters.deviationAlertTransitions.inc({
+function resetPollGauges(): void {
+  // Reset pool-level gauges to evict stale label sets from removed pools.
+  for (const g of Object.values(gauges)) {
+    if (!POLL_PRESERVED_GAUGES.has(g)) g.reset();
+  }
+}
+
+function updatePoolMetrics(pool: PoolRow, nowSeconds: number): void {
+  const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
+  warnIfUnknown(pool, derivedPair);
+  const labels = poolDisplayLabels(pool, derivedPair);
+
+  recordDeviationAlertMetrics(pool, labels, nowSeconds);
+  recordStatusAndOracleMetrics(pool, labels);
+  recordDeviationMetrics(pool, labels);
+  recordRebalanceMetrics(pool, labels);
+  recordOraclePriceMetrics(pool, labels);
+  recordLimitMetrics(pool, labels);
+  recordReserveShareMetrics(pool, labels);
+}
+
+function recordDeviationAlertMetrics(
+  pool: PoolRow,
+  labels: PoolDisplayLabels,
+  nowSeconds: number,
+): void {
+  const deviationAlert = observeDeviationAlertState(
+    pool,
+    labels.pair,
+    nowSeconds,
+  );
+  gauges.deviationAlertState.set({ ...labels, state: deviationAlert.state }, 1);
+  for (const transition of deviationAlert.newTransitions) {
+    counters.deviationAlertTransitions.inc({
+      ...labels,
+      from: transition.from,
+      to: transition.to,
+      reason: transition.reason,
+    });
+  }
+  for (const transition of deviationAlert.activeTransitions) {
+    gauges.deviationAlertTransitionActive.set(
+      {
         ...labels,
         from: transition.from,
         to: transition.to,
         reason: transition.reason,
-      });
-    }
-    for (const transition of deviationAlert.activeTransitions) {
-      gauges.deviationAlertTransitionActive.set(
-        {
-          ...labels,
-          from: transition.from,
-          to: transition.to,
-          reason: transition.reason,
-          breach_started_at: transition.breachStartedAtLabel,
-          breach_ended_at: transition.endedAtLabel,
-          breach_duration: transition.durationLabel,
-        },
-        1,
-      );
-    }
-
-    gauges.healthStatus.set(labels, healthStatusToNumber(pool.healthStatus));
-    gauges.oracleOk.set(labels, pool.oracleOk ? 1 : 0);
-    gauges.oracleTimestamp.set(labels, Number(pool.oracleTimestamp));
-    gauges.oracleExpiry.set(labels, Number(pool.oracleExpiry));
-    // Skip the "-1" no-data sentinel. The indexer writes "-1" both on initial
-    // pool creation AND during no-data intervals (rebalanceThreshold <= 0),
-    // even after hasHealthData has been set to true.
-    const devRatio = fp(pool.lastDeviationRatio);
-    if (devRatio >= 0) {
-      gauges.deviationRatio.set(labels, devRatio);
-    }
-    gauges.deviationBreachStart.set(
-      labels,
-      Number(pool.deviationBreachStartedAt),
+        breach_started_at: transition.breachStartedAtLabel,
+        breach_ended_at: transition.endedAtLabel,
+        breach_duration: transition.durationLabel,
+      },
+      1,
     );
-    const openBreachPeak = fp(pool.currentOpenBreachPeak);
-    const openBreachEntryThreshold =
-      pool.currentOpenBreachEntryThreshold > 0
-        ? pool.currentOpenBreachEntryThreshold
-        : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
-    if (openBreachPeak > 0) {
-      gauges.deviationOpenBreachPeakRatio.set(
-        labels,
-        openBreachPeak / openBreachEntryThreshold,
-      );
-    }
-    gauges.lastRebalancedAt.set(labels, Number(pool.lastRebalancedAt));
-    // Skip only the explicit "-1" no-data sentinel the indexer writes before
-    // a pool has ever rebalanced (or for degenerate rebalances with zero
-    // pre-deviation). Negative non-sentinel values (rebalance moved price
-    // FURTHER from oracle) are legitimate observations and MUST publish — the
-    // `Rebalance Ineffective` alert explicitly treats `< 0` as worse-than-noop.
-    if (pool.lastEffectivenessRatio !== "-1") {
-      gauges.rebalanceEffectiveness.set(
-        labels,
-        fp(pool.lastEffectivenessRatio),
-      );
-    }
-    // Swap fee — skip the `-1` sentinel the indexer writes when the initial
-    // RPC fetch at pool creation failed (rpc.ts:fetchFees). Without this gate
-    // the `Oracle Jump` alert would see a "0 bps" threshold and fire on the
-    // first real oracle movement. `-1` on either side means we can't trust
-    // the sum.
-    if (pool.lpFee >= 0 && pool.protocolFee >= 0) {
-      gauges.swapFeeBps.set(labels, pool.lpFee + pool.protocolFee);
-    }
-    gauges.oracleJumpBps.set(labels, fp(pool.lastOracleJumpBps));
-    gauges.oracleJumpAt.set(labels, Number(pool.lastOracleJumpAt));
-    // Skip the 0 sentinel: the alert annotation gates on series presence so
-    // a missing prev cleanly drops the line instead of rendering "0".
-    if (pool.lastMedianPrice !== "0") {
-      gauges.oraclePrice.set(
-        labels,
-        toHumanUnits(BigInt(pool.lastMedianPrice), SORTED_ORACLES_DECIMALS),
-      );
-    }
-    // Pair-gate the prev fields. Post-migration the first MedianUpdated has
-    // prevMedianPrice > 0 (carried from the old row) but prevMedianAt = 0
-    // (new column default), so a price-only check would render a 1970
-    // timestamp on the first jump after deploy.
-    if (pool.prevMedianPrice !== "0" && pool.prevMedianAt !== "0") {
-      gauges.oraclePrevPrice.set(
-        labels,
-        toHumanUnits(BigInt(pool.prevMedianPrice), SORTED_ORACLES_DECIMALS),
-      );
-      gauges.oraclePrevPriceAt.set(labels, Number(pool.prevMedianAt));
-    }
-    gauges.limitPressure.set(
-      { ...labels, token_index: "0" },
-      fp(pool.limitPressure0),
-    );
-    gauges.limitPressure.set(
-      { ...labels, token_index: "1" },
-      fp(pool.limitPressure1),
-    );
-
-    // Reserve share — face-value % of each token in the pool, decimal-
-    // adjusted so 6dp / 18dp pairs (e.g. USDC / USDm) compute correctly.
-    // Used by the deviation-breach Slack alert to render "17% USDT / 83%
-    // USDm" alongside the magnitude. Both legs in USD-pegged FPMMs makes
-    // this a meaningful imbalance indicator; on FX pools it's a decent
-    // proxy.
-    //
-    // Casting BigInt-string reserves to Number is fine for a *ratio*: we
-    // divide two values of similar magnitude and IEEE-754 float precision
-    // (~15 decimal digits) is far more than needed for a percentage
-    // rendered to one decimal place.
-    //
-    // Empty pool (both reserves zero) → skip emit; the share is undefined
-    // and we don't want a misleading 0/0 series. One-sided dead pool
-    // (single reserve zero) → emit 0.0/1.0 so the alert renders "100%
-    // USDT / 0% USDm", which IS the diagnostic signal.
-    //
-    // Two flat gauges (token0 / token1) instead of a single gauge with a
-    // `token_index` label so the annotation queries on the deviation-
-    // breach critical alert match the firing alert's label set exactly.
-    // The `token_symbol` label carries the resolved symbol so the
-    // annotation template can render "axlUSDC / USDm" without parsing
-    // `pair` (sprig `splitList` is unavailable in Grafana annotation
-    // templates). Falls back to literal "token0" / "token1" when the
-    // contract address isn't in @mento-protocol/contracts — matches the
-    // existing fallback semantics for `pair`.
-    const r0 = Number(pool.reserves0) / 10 ** pool.token0Decimals;
-    const r1 = Number(pool.reserves1) / 10 ** pool.token1Decimals;
-    const total = r0 + r1;
-    if (Number.isFinite(total) && total > 0) {
-      const token0Symbol = tokenSymbol(pool.chainId, pool.token0) ?? "token0";
-      const token1Symbol = tokenSymbol(pool.chainId, pool.token1) ?? "token1";
-      gauges.reserveShareToken0.set(
-        { ...labels, token_symbol: token0Symbol },
-        r0 / total,
-      );
-      gauges.reserveShareToken1.set(
-        { ...labels, token_symbol: token1Symbol },
-        r1 / total,
-      );
-    }
   }
-  pruneDeviationAlertStates(activePoolIds);
+}
+
+function recordStatusAndOracleMetrics(
+  pool: PoolRow,
+  labels: PoolDisplayLabels,
+): void {
+  const oracleLabels = oracleUpdateMetricLabels(pool, labels);
+  gauges.healthStatus.set(labels, healthStatusToNumber(pool.healthStatus));
+  gauges.oracleOk.set(labels, pool.oracleOk ? 1 : 0);
+  gauges.oracleTimestamp.set(oracleLabels, Number(pool.oracleTimestamp));
+  gauges.oracleExpiry.set(oracleLabels, Number(pool.oracleExpiry));
+}
+
+function recordDeviationMetrics(
+  pool: PoolRow,
+  labels: PoolDisplayLabels,
+): void {
+  // Skip the "-1" no-data sentinel. The indexer writes "-1" both on initial
+  // pool creation AND during no-data intervals (rebalanceThreshold <= 0),
+  // even after hasHealthData has been set to true.
+  const devRatio = fp(pool.lastDeviationRatio);
+  if (devRatio >= 0) {
+    gauges.deviationRatio.set(labels, devRatio);
+  }
+  gauges.deviationBreachStart.set(
+    labels,
+    Number(pool.deviationBreachStartedAt),
+  );
+  const openBreachPeak = fp(pool.currentOpenBreachPeak);
+  const openBreachEntryThreshold =
+    pool.currentOpenBreachEntryThreshold > 0
+      ? pool.currentOpenBreachEntryThreshold
+      : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
+  if (openBreachPeak > 0) {
+    gauges.deviationOpenBreachPeakRatio.set(
+      labels,
+      openBreachPeak / openBreachEntryThreshold,
+    );
+  }
+}
+
+function recordRebalanceMetrics(
+  pool: PoolRow,
+  labels: PoolDisplayLabels,
+): void {
+  gauges.lastRebalancedAt.set(labels, Number(pool.lastRebalancedAt));
+  // Skip only the explicit "-1" no-data sentinel the indexer writes before
+  // a pool has ever rebalanced (or for degenerate rebalances with zero
+  // pre-deviation). Negative non-sentinel values (rebalance moved price
+  // FURTHER from oracle) are legitimate observations and MUST publish — the
+  // `Rebalance Ineffective` alert explicitly treats `< 0` as worse-than-noop.
+  if (pool.lastEffectivenessRatio !== "-1") {
+    gauges.rebalanceEffectiveness.set(labels, fp(pool.lastEffectivenessRatio));
+  }
+  // Swap fee — skip the `-1` sentinel the indexer writes when the initial
+  // RPC fetch at pool creation failed (rpc.ts:fetchFees). Without this gate
+  // the `Oracle Jump` alert would see a "0 bps" threshold and fire on the
+  // first real oracle movement. `-1` on either side means we can't trust
+  // the sum.
+  if (pool.lpFee >= 0 && pool.protocolFee >= 0) {
+    gauges.swapFeeBps.set(labels, pool.lpFee + pool.protocolFee);
+  }
+}
+
+function recordOraclePriceMetrics(
+  pool: PoolRow,
+  labels: PoolDisplayLabels,
+): void {
+  gauges.oracleJumpBps.set(labels, fp(pool.lastOracleJumpBps));
+  gauges.oracleJumpAt.set(labels, Number(pool.lastOracleJumpAt));
+  // Skip the 0 sentinel: the alert annotation gates on series presence so
+  // a missing prev cleanly drops the line instead of rendering "0".
+  if (pool.lastMedianPrice !== "0") {
+    gauges.oraclePrice.set(
+      labels,
+      toHumanUnits(BigInt(pool.lastMedianPrice), SORTED_ORACLES_DECIMALS),
+    );
+  }
+  // Pair-gate the prev fields. Post-migration the first MedianUpdated has
+  // prevMedianPrice > 0 (carried from the old row) but prevMedianAt = 0
+  // (new column default), so a price-only check would render a 1970
+  // timestamp on the first jump after deploy.
+  if (pool.prevMedianPrice !== "0" && pool.prevMedianAt !== "0") {
+    gauges.oraclePrevPrice.set(
+      labels,
+      toHumanUnits(BigInt(pool.prevMedianPrice), SORTED_ORACLES_DECIMALS),
+    );
+    gauges.oraclePrevPriceAt.set(labels, Number(pool.prevMedianAt));
+  }
+}
+
+function recordLimitMetrics(pool: PoolRow, labels: PoolDisplayLabels): void {
+  gauges.limitPressure.set(
+    { ...labels, token_index: "0" },
+    fp(pool.limitPressure0),
+  );
+  gauges.limitPressure.set(
+    { ...labels, token_index: "1" },
+    fp(pool.limitPressure1),
+  );
+}
+
+function recordReserveShareMetrics(
+  pool: PoolRow,
+  labels: PoolDisplayLabels,
+): void {
+  const r0 = Number(pool.reserves0) / 10 ** pool.token0Decimals;
+  const r1 = Number(pool.reserves1) / 10 ** pool.token1Decimals;
+  const total = r0 + r1;
+  if (Number.isFinite(total) && total > 0) {
+    const token0Symbol = tokenSymbol(pool.chainId, pool.token0) ?? "token0";
+    const token1Symbol = tokenSymbol(pool.chainId, pool.token1) ?? "token1";
+    gauges.reserveShareToken0.set(
+      { ...labels, token_symbol: token0Symbol },
+      r0 / total,
+    );
+    gauges.reserveShareToken1.set(
+      { ...labels, token_symbol: token1Symbol },
+      r1 / total,
+    );
+  }
 }
 
 /**
@@ -498,9 +517,27 @@ export type PoolDisplayLabels = {
   block_explorer_url: string;
 };
 
-export function poolDisplayLabels(pool: PoolRow): PoolDisplayLabels {
+type OracleUpdateLabels = PoolDisplayLabels & {
+  last_oracle_update_url: string;
+};
+
+function oracleUpdateMetricLabels(
+  pool: PoolRow,
+  labels: PoolDisplayLabels,
+): OracleUpdateLabels {
+  return {
+    ...labels,
+    last_oracle_update_url:
+      pool.oracleTxHash &&
+      (explorerTxUrl(pool.chainId, pool.oracleTxHash) ?? ""),
+  };
+}
+
+export function poolDisplayLabels(
+  pool: PoolRow,
+  derivedPair = poolName(pool.chainId, pool.token0, pool.token1),
+): PoolDisplayLabels {
   const address = poolIdAddress(pool.id);
-  const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
   return {
     pool_id: pool.id,
     chain_id: String(pool.chainId),
