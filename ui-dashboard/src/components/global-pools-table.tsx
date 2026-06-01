@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo } from "react";
 import { poolTvlUSD } from "@/lib/tokens";
 import { type TradingLimit } from "@/lib/types";
 import { Table } from "@/components/table";
-import { isWeekend } from "@/lib/weekend";
+import { useIsWeekend } from "@/hooks/use-is-weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { useTableSort } from "@/lib/use-table-sort";
 import {
@@ -22,22 +22,6 @@ export type {
   GlobalSortContext,
 } from "./global-pools-table/sort";
 export { globalPoolKey, sortGlobalPools } from "./global-pools-table/sort";
-
-// Stable no-op subscribe for the client-detection `useSyncExternalStore` (the
-// value never changes after hydration, so there's nothing to subscribe to).
-const subscribeNoop = (): (() => void) => () => {};
-
-// SSR-safe "are we past hydration?" — the server snapshot is `false` so the
-// static HTML omits client-only (wall-clock-dependent) content; the client
-// snapshot is `true` post-hydration. Avoids a useEffect+setState mount gate
-// (which react-doctor flags as initializing state in an effect).
-function useIsClient(): boolean {
-  return useSyncExternalStore(
-    subscribeNoop,
-    () => true,
-    () => false,
-  );
-}
 
 function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
   return entries.some((e) => e.network.hasVirtualPools);
@@ -123,14 +107,15 @@ export function GlobalPoolsTable({
   );
 
   const showVirtualPoolSource = hasAnyVirtualPools(entries);
-
-  // `isWeekend()` reads the wall clock, so SSR-rendering it would mismatch the
-  // client; gate the banner on `useIsClient()` so it only shows post-hydration.
-  const isClient = useIsClient();
+  // SSR-safe: only show the weekend banner after mount. The server's
+  // wall-clock day can differ from the viewer's (and a cached SSR payload can
+  // outlive the weekend), so gating on isWeekend() during render would emit
+  // server HTML the client discards as a hydration mismatch. See useIsWeekend.
+  const showWeekendBanner = useIsWeekend();
 
   return (
     <>
-      {isClient && isWeekend() && <WeekendBanner />}
+      {showWeekendBanner && <WeekendBanner />}
       <Table>
         <PoolTableHeader
           sortKey={sortKey}

@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+/** @vitest-environment jsdom */
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { isWeekend } from "@/lib/weekend";
 import type { Pool } from "@/lib/types";
 
 // Mock weekend module — default to not-weekend so existing tests are deterministic
@@ -70,18 +75,41 @@ const BASE_POOL: Pool = {
 };
 
 describe("HealthPanel weekend mode", () => {
-  it("shows weekend explanation when oracle is stale and it is the weekend", async () => {
+  // isWeekend is mocked to false by default; the tests that exercise the
+  // weekend path set it true, and this restores the default afterwards.
+  // (clearAllMocks would NOT — it clears call history but leaves the
+  // mockReturnValue override in place.)
+  afterEach(() => {
+    vi.mocked(isWeekend).mockReturnValue(false);
+  });
+
+  it("defers the weekend explanation to after mount, keeping it out of SSR HTML", async () => {
     const weekend = await import("@/lib/weekend");
     // mockReturnValue (not Once) — called by both computeHealthStatus and health-panel directly
     vi.mocked(weekend.isWeekend).mockReturnValue(true);
 
     const stalePool: Pool = { ...BASE_POOL, oracleTimestamp: STALE_TS };
-    const html = renderToStaticMarkup(<HealthPanel pool={stalePool} />);
 
-    expect(html).toContain("Trading is paused for the weekend");
-    expect(html).toContain("FX markets are closed");
+    // SSR-safe: useIsWeekend() is false until mount, so the server HTML omits
+    // the weekend banner and matches the client's first render — no hydration
+    // mismatch when the server's wall-clock day differs from the viewer's.
+    const ssrHtml = renderToStaticMarkup(<HealthPanel pool={stalePool} />);
+    expect(ssrHtml).not.toContain("Trading is paused for the weekend");
 
-    vi.mocked(weekend.isWeekend).mockReturnValue(false); // reset
+    // After the client mounts, the useIsWeekend effect resolves and the
+    // weekend explanation appears.
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<HealthPanel pool={stalePool} />);
+    });
+    expect(container.textContent).toContain(
+      "Trading is paused for the weekend",
+    );
+    expect(container.textContent).toContain("FX markets are closed");
+    await act(async () => {
+      root.unmount();
+    });
   });
 
   it("does not show weekend explanation when oracle is fresh even on a weekend", async () => {
@@ -92,8 +120,6 @@ describe("HealthPanel weekend mode", () => {
     const html = renderToStaticMarkup(<HealthPanel pool={freshPool} />);
 
     expect(html).not.toContain("Trading is paused for the weekend");
-
-    vi.mocked(weekend.isWeekend).mockReturnValue(false); // reset
   });
 
   it("does not show weekend explanation when oracle is stale but it is not the weekend", () => {
