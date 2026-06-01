@@ -90,33 +90,6 @@ describe("attachOracleWheelHandler", () => {
     expect(Object.keys(update)).toEqual(["xaxis.range"]);
   });
 
-  it("mirrors the X-zoom window into onXZoom as unix seconds matching the relayout", () => {
-    // The wheel's relayout is programmatic (react-plotly's onRelayout never
-    // fires for it), so the handler reports the new window via onXZoom — that's
-    // what lets the chart hold a wheel zoom across SWR repolls.
-    const onXZoom = vi.fn();
-    cleanup();
-    cleanup = attachOracleWheelHandler(graphDiv, onXZoom);
-    fireWheel({ clientX: 400, clientY: 180, deltaY: 100 });
-
-    expect(relayoutSpy).toHaveBeenCalledTimes(1);
-    expect(onXZoom).toHaveBeenCalledTimes(1);
-    const [loSec, hiSec] = onXZoom.mock.calls[0]![0] as [number, number];
-    const relayoutRange = (
-      relayoutSpy.mock.calls[0]![1] as Record<string, [string, string]>
-    )["xaxis.range"]!;
-    expect(loSec).toBe(Math.floor(new Date(relayoutRange[0]).getTime() / 1000));
-    expect(hiSec).toBe(Math.floor(new Date(relayoutRange[1]).getTime() / 1000));
-  });
-
-  it("does not call onXZoom on a Y-axis zoom", () => {
-    const onXZoom = vi.fn();
-    cleanup();
-    cleanup = attachOracleWheelHandler(graphDiv, onXZoom);
-    fireWheel({ clientX: 30, clientY: 180, deltaY: 100 }); // over the y-axis
-    expect(onXZoom).not.toHaveBeenCalled();
-  });
-
   it("zooms Y (not X) when cursor is over the y-axis tick column", () => {
     // Cursor at (30, 180) — to the left of plotL=64, within plotT/plotB.
     const { preventSpy } = fireWheel({

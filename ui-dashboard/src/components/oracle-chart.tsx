@@ -487,11 +487,6 @@ export function OracleChart({
           cleanupWheelRef.current?.();
           cleanupWheelRef.current = attachOracleWheelHandler(
             graphDiv as unknown as HTMLElement,
-            // Mirror a wheel X-zoom into visibleRange (a stable setter) so the
-            // supply-range gate omits the range and uirevision holds the zoom
-            // across repolls. The native onRelayout also fires for the wheel
-            // and clears showAll, so this is an idempotent safety net.
-            setVisibleRange,
           );
         }}
         onPurge={() => {
