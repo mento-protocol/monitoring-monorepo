@@ -42,7 +42,6 @@ import {
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 
-const replaceMock = vi.fn();
 const redirectMock = vi.fn();
 const useGQLMock = vi.fn();
 const getNameMock = vi.fn((address: string | null | undefined) => {
@@ -70,8 +69,6 @@ vi.mock("react", async (importOriginal) => {
 vi.mock("next/navigation", () => ({
   redirect: (href: string) => redirectMock(href),
   useParams: () => ({ poolId: encodeURIComponent("pool-1") }),
-  useRouter: () => ({ replace: replaceMock }),
-  useSearchParams: () => currentSearchParams,
 }));
 
 vi.mock("@/components/network-provider", () => ({
@@ -215,7 +212,6 @@ import PoolDetailPage, { decodePoolId, parseTabLimit } from "./page";
 import { PoolHeader } from "./_components/pool-header";
 import { POOL_NOT_FOUND_DEST } from "@/lib/routing";
 
-let currentSearchParams = new URLSearchParams();
 let interactiveContainer: HTMLDivElement | null = null;
 let interactiveRoot: Root | null = null;
 let oracleCount = 51;
@@ -394,7 +390,8 @@ function makeTrustFlagsResult(pool: Pool = basePool) {
 }
 
 function renderWithParams(params: Record<string, string> = {}) {
-  currentSearchParams = new URLSearchParams(params);
+  const qs = new URLSearchParams(params).toString();
+  window.history.replaceState({}, "", `/pool/pool-1${qs ? `?${qs}` : ""}`);
   return renderToStaticMarkup(<PoolDetailPage />);
 }
 
@@ -427,11 +424,9 @@ beforeEach(() => {
   redirectMock.mockImplementation((href: string) => {
     throw new Error(`NEXT_REDIRECT:${href}`);
   });
-  replaceMock.mockReset();
   useGQLMock.mockReset();
   getNameMock.mockClear();
   getTagsMock.mockClear();
-  currentSearchParams = new URLSearchParams();
   oracleCount = 51;
   oracleCountError = false;
   oracleRowsForTest = oracleRows;
@@ -504,8 +499,7 @@ afterEach(() => {
 });
 
 function renderInteractive(params: Record<string, string> = {}) {
-  currentSearchParams = new URLSearchParams(params);
-  const qs = currentSearchParams.toString();
+  const qs = new URLSearchParams(params).toString();
   window.history.replaceState({}, "", `/pool/pool-1${qs ? `?${qs}` : ""}`);
   interactiveContainer = document.createElement("div");
   document.body.appendChild(interactiveContainer);
@@ -1112,10 +1106,9 @@ describe("Pool detail tab search", () => {
     });
 
     expect(document.activeElement).toBe(input);
-    expect(replaceMock).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?tab=swaps");
 
     act(() => {
-      currentSearchParams = new URLSearchParams({ limit: "50" });
       window.history.replaceState({}, "", "/pool/pool-1?limit=50");
     });
 
@@ -1123,11 +1116,9 @@ describe("Pool detail tab search", () => {
       vi.advanceTimersByTime(150);
     });
 
-    const lastCall = replaceMock.mock.calls.at(-1)?.[0] as string | undefined;
-    expect(lastCall).toBeTruthy();
-    expect(lastCall).toContain("limit=50");
-    expect(lastCall).toContain("swapsQ=0xabc");
-    expect(document.activeElement).toBe(input);
+    const nextParams = new URLSearchParams(window.location.search);
+    expect(nextParams.get("limit")).toBe("50");
+    expect(nextParams.get("swapsQ")).toBe("0xabc");
   });
 });
 

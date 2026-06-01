@@ -43,6 +43,8 @@ function eligiblePool(overrides: Partial<PoolRow> = {}): PoolRow {
     healthStatus: "OK",
     oracleOk: true,
     oracleTimestamp: "1713200000",
+    oracleTxHash:
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     oracleExpiry: "300",
     lastDeviationRatio: "1.10", // > REBALANCE_PROBE_DEVIATION_THRESHOLD (1.05)
     deviationBreachStartedAt: "1713100000", // > 0

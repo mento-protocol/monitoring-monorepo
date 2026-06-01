@@ -144,6 +144,52 @@ test.describe("dashboard browser flows", () => {
     await expect(page.getByRole("tabpanel")).toContainText("Bought");
   });
 
+  test("switches pool tabs without refetching the route payload", async ({
+    page,
+  }) => {
+    await page.goto(`/pool/${CELO_POOL_ID}`);
+
+    await expect(
+      page.getByRole("heading", { name: "USDC/USDm" }),
+    ).toBeVisible();
+    await expect(page.getByRole("tab", { name: "LPs" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    const rscRequests: string[] = [];
+    page.on("request", (request) => {
+      const url = request.url();
+      if (url.includes("_rsc=")) rscRequests.push(url);
+    });
+
+    await page.getByRole("tab", { name: "swaps" }).click();
+
+    await expect(page).toHaveURL(/tab=swaps/);
+    await expect(page.getByRole("tab", { name: "swaps" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByRole("tabpanel")).toContainText("Sold");
+    expect(rscRequests).toEqual([]);
+  });
+
+  test("contains the pool tab overflow on mobile", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/pool/${CELO_POOL_ID}?tab=swaps`);
+
+    await expect(page.getByRole("tab", { name: "swaps" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const hasDocumentOverflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth >
+        document.documentElement.clientWidth + 1,
+    );
+    expect(hasDocumentOverflow).toBe(false);
+  });
+
   test("omits deviation threshold remnants on the Oracle tab", async ({
     page,
   }) => {

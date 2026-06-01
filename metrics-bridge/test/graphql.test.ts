@@ -32,6 +32,8 @@ const BASE_POOL = {
   healthStatus: "OK",
   oracleOk: true,
   oracleTimestamp: "1713200000",
+  oracleTxHash:
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   oracleExpiry: "300",
   lastDeviationRatio: "0.42",
   deviationBreachStartedAt: "0",
@@ -106,6 +108,17 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: BASE_POOL.id,
+              oracleTxHash:
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            },
+          ],
+        });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -114,6 +127,8 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
     expect(res.Pool[0]).toMatchObject({
       id: BASE_POOL.id,
       lastMedianPrice: "1150000000000000000000000",
+      oracleTxHash:
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       prevMedianPrice: "1120000000000000000000000",
       prevMedianAt: "1713199580",
       currentOpenBreachPeak: "15000",
@@ -134,6 +149,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsOpenBreach")) {
         return Promise.resolve({ Pool: [] });
       }
+      if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.resolve({ Pool: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -144,6 +162,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       // Pre-existing column rides the base query — current-price gauge
       // keeps working in degraded mode.
       lastMedianPrice: "1150000000000000000000000",
+      oracleTxHash: "",
       prevMedianPrice: "0",
       prevMedianAt: "0",
       lastOracleJumpBps: "3.0000",
@@ -169,6 +188,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsOpenBreach")) {
         return Promise.reject(unknownFieldError("currentOpenBreachPeak"));
       }
+      if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.resolve({ Pool: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -189,6 +211,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
         return Promise.reject(new Error("network down"));
       }
       if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOracleTx")) {
         return Promise.resolve({ Pool: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
@@ -222,6 +247,16 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: "different-pool-id",
+              oracleTxHash: "0x1",
+            },
+          ],
+        });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -229,10 +264,33 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
     expect(res.Pool[0]).toMatchObject({
       id: BASE_POOL.id,
       lastMedianPrice: "1150000000000000000000000",
+      oracleTxHash: "",
       prevMedianPrice: "0",
       prevMedianAt: "0",
       currentOpenBreachPeak: "0",
       currentOpenBreachEntryThreshold: 0,
+    });
+  });
+
+  it("falls back to an empty oracle tx hash when Hasura reports an unknown field", async () => {
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsOracleLineage")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.reject(unknownFieldError("oracleTxHash"));
+      }
+      return Promise.resolve({ Pool: [BASE_POOL] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      oracleTxHash: "",
     });
   });
 });

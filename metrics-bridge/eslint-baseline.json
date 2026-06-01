@@ -21,27 +21,6 @@
     "linePreview": " | function transitionReason( | from: DeviationAlertState,"
   },
   {
-    "file": "src/metrics.ts",
-    "ruleId": "complexity",
-    "message": "Function 'updateMetrics' has a complexity of 23. Maximum allowed is 10.",
-    "line": 303,
-    "linePreview": " | export function updateMetrics( | pools: PoolRow[],"
-  },
-  {
-    "file": "src/metrics.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'updateMetrics' has too many lines (126). Maximum allowed is 60.",
-    "line": 303,
-    "linePreview": " | export function updateMetrics( | pools: PoolRow[],"
-  },
-  {
-    "file": "src/metrics.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 29 to the 15 allowed.",
-    "line": 303,
-    "linePreview": " | export function updateMetrics( | pools: PoolRow[],"
-  },
-  {
     "file": "src/rebalance-check.ts",
     "ruleId": "complexity",
     "message": "Function 'decodeBlockedRevert' has a complexity of 11. Maximum allowed is 10.",

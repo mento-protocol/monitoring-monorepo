@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useOracleViewport } from "./oracle-chart-viewport";
 import type { OracleSnapshot } from "@/lib/types";
 import { decimateSeries } from "@/lib/oracle-decimation";
@@ -44,6 +44,10 @@ const ORACLE_CHART_CONFIG = {
 // per point and gets sluggish past a few thousand. Cap rendered points; the
 // decimator preserves every anomalous point regardless of this cap.
 const ORACLE_CHART_MAX_POINTS = 2000;
+
+// Stable `<Plot style>` reference — react-plotly.js doesn't redraw on style
+// identity, but keeping it module-level avoids a needless object per render.
+const PLOT_STYLE = { width: "100%", height: 420 } as const;
 
 /**
  * Read the requested visible X range (unix seconds) out of a Plotly relayout
@@ -114,6 +118,88 @@ function applyOracleRelayout(
   setVisibleRange(action);
   setShowAll(false);
   onVisibleXRangeChange?.(action);
+}
+
+/**
+ * Coalesce the stream of `onRelayout` events into at most one React state
+ * update per animation frame. The wheel handler fires a relayout on every tick
+ * (up to ~120/s on a trackpad), and each one previously ran `applyOracleRelayout`
+ * synchronously → a full decimation recompute + `Plotly.react` redraw, twice per
+ * tick, pinning the main thread to ~10fps during a zoom. The wheel's own
+ * `Plotly.relayout` already reframes the axis instantly every tick (the zoom is
+ * visible immediately); this defers only the React-side work — re-scoping
+ * decimation, re-evaluating daily-mode, firing look-ahead — to once the viewport
+ * settles within a frame. The latest event in a frame wins, which matches the
+ * chart's final axis state. `resetKey` (`${networkId}:${poolId}`) cancels any
+ * pending frame when the chart identity changes — OracleTab does NOT remount
+ * across a poolId change, so without this a frame scheduled for the old pool
+ * would flush after `useOracleViewport` has reset the new one, applying the old
+ * pool's X range and firing look-ahead against the new pool. Returns a stable
+ * handler. Exported for unit testing.
+ */
+export function useCoalescedRelayout(
+  setVisibleRange: (range: [number, number] | null) => void,
+  setShowAll: (showAll: boolean) => void,
+  onVisibleXRangeChange: ((range: [number, number]) => void) | undefined,
+  resetKey: string | undefined,
+): (e: unknown) => void {
+  const pendingRef = useRef<unknown>(null);
+  const rafIdRef = useRef<number | null>(null);
+  // Keep the latest look-ahead callback in a ref so a queued flush never fires a
+  // stale closure if the prop changes (e.g. oldestLoadedTs advances as older
+  // pages load) between scheduling and firing. setVisibleRange/setShowAll are
+  // stable state setters, so flush — and thus the returned handler — stays
+  // referentially stable across parent re-renders.
+  const onVisibleXRangeChangeRef = useRef(onVisibleXRangeChange);
+  useEffect(() => {
+    onVisibleXRangeChangeRef.current = onVisibleXRangeChange;
+  });
+
+  // Cancel + drop any pending frame the instant the chart identity changes,
+  // DURING render. This must NOT be an effect: a queued `requestAnimationFrame`
+  // fires before the next paint, whereas passive (and even layout) effect
+  // cleanup runs after the commit — so an effect could let the old-pool flush
+  // apply a stale X range / fire look-ahead against the new pool before the
+  // cleanup cancels it. OracleTab reuses this component across a poolId change,
+  // so that window is real. Running here (mirroring useOracleViewport's
+  // render-phase reset on the same key) guarantees the cancel precedes the
+  // browser's rAF. The `!= null` guard keeps it SSR-safe: rafIdRef is always
+  // null on the server, so cancelAnimationFrame is never called there.
+  const prevResetKeyRef = useRef(resetKey);
+  if (prevResetKeyRef.current !== resetKey) {
+    prevResetKeyRef.current = resetKey;
+    if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+    rafIdRef.current = null;
+    pendingRef.current = null;
+  }
+
+  const flush = useCallback(() => {
+    rafIdRef.current = null;
+    const e = pendingRef.current;
+    pendingRef.current = null;
+    if (e != null) {
+      applyOracleRelayout(
+        e,
+        setVisibleRange,
+        setShowAll,
+        onVisibleXRangeChangeRef.current,
+      );
+    }
+  }, [setVisibleRange, setShowAll]);
+  // Cancel any pending frame on unmount (identity-change is handled above).
+  useEffect(
+    () => () => {
+      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+    },
+    [],
+  );
+  return useCallback(
+    (e: unknown) => {
+      pendingRef.current = e;
+      rafIdRef.current ??= requestAnimationFrame(flush);
+    },
+    [flush],
+  );
 }
 
 /**
@@ -366,6 +452,98 @@ function selectOraclePlotData({
   });
 }
 
+/**
+ * Memoized plot model: decimate → build trace data + layout, all referentially
+ * stable. react-plotly.js 2.6 ref-compares `data`/`layout`/`config` in
+ * `componentDidUpdate` and skips `Plotly.react` when all three are unchanged,
+ * so a 30s SWR repoll or a coalesced relayout whose decimated output is
+ * identical no longer rebuilds + redraws the SVG (the dominant per-tick cost).
+ * Extracted to keep `OracleChart` under the max-lines-per-function budget.
+ */
+function useOracleChartModel({
+  snapshots,
+  visibleRange,
+  showAll,
+  dailyCandles,
+  token0Symbol,
+  token1Symbol,
+  baseline,
+  thresholdRatio,
+  breakerConfigStatus,
+  applyInitialRange,
+  uirevision,
+}: {
+  snapshots: OracleSnapshot[];
+  visibleRange: [number, number] | null;
+  showAll: boolean;
+  dailyCandles: readonly OracleDailyCandle[] | undefined;
+  token0Symbol: string;
+  token1Symbol: string;
+  baseline: number | null;
+  thresholdRatio: number | null;
+  breakerConfigStatus: BreakerConfigStatus;
+  applyInitialRange: boolean;
+  uirevision: string | undefined;
+}) {
+  // Decimate to a bounded render count within the visible window, preserving
+  // every anomalous point and the window endpoints.
+  const visibleSnapshots = useDecimatedSnapshots(
+    snapshots,
+    visibleRange,
+    baseline,
+    thresholdRatio,
+    breakerConfigStatus,
+  );
+  const plotData = useMemo(
+    () =>
+      selectOraclePlotData({
+        visibleRange,
+        showAll,
+        dailyCandles,
+        visibleSnapshots,
+        token0Symbol,
+        token1Symbol,
+        baseline,
+        thresholdRatio,
+        breakerConfigStatus,
+      }),
+    [
+      visibleRange,
+      showAll,
+      dailyCandles,
+      visibleSnapshots,
+      token0Symbol,
+      token1Symbol,
+      baseline,
+      thresholdRatio,
+      breakerConfigStatus,
+    ],
+  );
+  const shapes = useMemo(
+    () => buildOracleShapes(plotData.yMax, baseline, thresholdRatio),
+    [plotData.yMax, baseline, thresholdRatio],
+  );
+  const layout = useMemo(
+    () =>
+      buildOracleLayout({
+        shapes,
+        plotData,
+        applyInitialRange,
+        baseline,
+        thresholdRatio,
+        uirevision,
+      }),
+    [shapes, plotData, applyInitialRange, baseline, thresholdRatio, uirevision],
+  );
+  // Stable `data` reference (changes only when the trace does) so react-plotly
+  // skips the redraw when the figure is unchanged.
+  const traceData = useMemo(
+    () => [plotData.deviationTrace],
+    [plotData.deviationTrace],
+  );
+  return { traceData, layout };
+}
+
 export function OracleChart({
   snapshots,
   token0Symbol = "Token 0",
@@ -399,14 +577,29 @@ export function OracleChart({
     breakerConfigStatus,
   );
 
-  // Decimate to a bounded render count within the visible window, preserving
-  // every anomalous point and the window endpoints.
-  const visibleSnapshots = useDecimatedSnapshots(
+  // Decimate + build a memoized, referentially-stable trace/layout (see hook).
+  const { traceData, layout } = useOracleChartModel({
     snapshots,
     visibleRange,
+    showAll,
+    dailyCandles,
+    token0Symbol,
+    token1Symbol,
     baseline,
     thresholdRatio,
     breakerConfigStatus,
+    applyInitialRange,
+    uirevision,
+  });
+
+  // One React state update per animation frame instead of per wheel tick;
+  // `uirevision` (= `${networkId}:${poolId}`) cancels a pending frame on a
+  // pool/network switch so it can't apply the old pool's range.
+  const handleRelayout = useCoalescedRelayout(
+    setVisibleRange,
+    setShowAll,
+    onVisibleXRangeChange,
+    uirevision,
   );
 
   // Gate on raw snapshots only (not dailyCandles): raw is the default view, and
@@ -414,29 +607,9 @@ export function OracleChart({
   // render on first paint anyway. "Empty raw but non-empty daily" can't persist
   // either — both derive from the same `oracle_median_updated` events, so a pool
   // with daily candles always has raw medians; the only empty-raw window is the
-  // brief parallel-fetch load, after which raw fills in.
+  // brief parallel-fetch load, after which raw fills in. After all hooks so hook
+  // order stays stable across the empty→loaded transition.
   if (snapshots.length === 0) return null;
-
-  const plotData = selectOraclePlotData({
-    visibleRange,
-    showAll,
-    dailyCandles,
-    visibleSnapshots,
-    token0Symbol,
-    token1Symbol,
-    baseline,
-    thresholdRatio,
-    breakerConfigStatus,
-  });
-  const shapes = buildOracleShapes(plotData.yMax, baseline, thresholdRatio);
-  const layout = buildOracleLayout({
-    shapes,
-    plotData,
-    applyInitialRange,
-    baseline,
-    thresholdRatio,
-    uirevision,
-  });
 
   // Whether ANY snapshot carries a persisted at-the-time band. When the
   // current breaker fetch is loading / errored / missing, the markers can
@@ -462,19 +635,12 @@ export function OracleChart({
         }
       />
       <Plot
-        data={[plotData.deviationTrace]}
+        data={traceData}
         layout={layout}
         config={ORACLE_CHART_CONFIG}
-        style={{ width: "100%", height: 420 }}
+        style={PLOT_STYLE}
         useResizeHandler
-        onRelayout={(e) =>
-          applyOracleRelayout(
-            e,
-            setVisibleRange,
-            setShowAll,
-            onVisibleXRangeChange,
-          )
-        }
+        onRelayout={handleRelayout}
         onInitialized={(_figure, graphDiv) => {
           cleanupWheelRef.current?.();
           cleanupWheelRef.current = attachOracleWheelHandler(

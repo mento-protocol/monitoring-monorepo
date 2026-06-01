@@ -239,20 +239,6 @@
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'PoolDetail' has a complexity of 26. Maximum allowed is 15.",
-    "line": 72,
-    "linePreview": " | function PoolDetail() { | const { network } = useNetwork();"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolDetail' has too many lines (177). Maximum allowed is 100.",
-    "line": 72,
-    "linePreview": " | function PoolDetail() { | const { network } = useNetwork();"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'PoolTabPanel' has too many lines (122). Maximum allowed is 100.",
     "line": 473,

@@ -121,6 +121,42 @@ const pools = [
 
 const poolsById = new Map(pools.map((pool) => [pool.id, pool]));
 
+function tradingLimitFixture(pool, token, limit0, limit1) {
+  return {
+    id: `${pool.id}-${token}`,
+    chainId: pool.chainId,
+    poolId: pool.id,
+    token,
+    limit0,
+    limit1,
+    decimals: 15,
+    netflow0: "0",
+    netflow1: "0",
+    lastUpdated0: "0",
+    lastUpdated1: "0",
+    limitPressure0: "0",
+    limitPressure1: "0",
+    limitStatus: "OK",
+    updatedAtBlock: pool.updatedAtBlock,
+    updatedAtTimestamp: pool.updatedAtTimestamp,
+  };
+}
+
+const tradingLimits = pools.flatMap((pool) => [
+  tradingLimitFixture(
+    pool,
+    pool.token0,
+    "77000000000000000000",
+    "154000000000000000000",
+  ),
+  tradingLimitFixture(
+    pool,
+    pool.token1,
+    "100000000000000000000",
+    "200000000000000000000",
+  ),
+]);
+
 function poolRowsForChain(chainId) {
   return pools.filter((pool) => pool.chainId === Number(chainId));
 }
@@ -313,8 +349,17 @@ function handleGraphQL({ query, variables = {} }) {
     case "BrokerDailySnapshotsAll":
       return { BrokerDailySnapshot: [] };
     case "AllTradingLimits":
+      return {
+        TradingLimit: tradingLimits.filter(
+          (limit) => limit.chainId === Number(variables.chainId),
+        ),
+      };
     case "TradingLimits":
-      return { TradingLimit: [] };
+      return {
+        TradingLimit: tradingLimits.filter(
+          (limit) => limit.poolId === String(variables.poolId),
+        ),
+      };
     case "AllOlsPools":
     case "OlsPool":
       return { OlsPool: [] };

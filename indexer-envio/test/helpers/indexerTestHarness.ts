@@ -58,54 +58,35 @@ export type EventProcessor<Args = unknown, Db extends MockDb = MockDb> = {
   processEvent: (args: { event: unknown; mockDb: Db }) => Promise<Db>;
 };
 
+/** Every event on a contract resolves to an `EventProcessor`. Event names are
+ * intentionally NOT hand-listed: the runtime builds each one on demand (see
+ * `contract`) and `processEvent` dispatches to whatever handler the indexer
+ * registered for `(contract, event)`. So a newly-handled event is reachable
+ * from tests with no edit to this file. */
+export type ContractTestHelpers<Db extends MockDb = MockDb> = Record<
+  string,
+  EventProcessor<unknown, Db>
+>;
+
+/** Contracts are listed explicitly (they change rarely and the names aid
+ * autocomplete); their events are open (see `ContractTestHelpers`). */
 export type IndexerTestHelpers<Db extends MockDb = MockDb> = {
   MockDb: { createMockDb: () => Db };
-  Broker: { Swap: EventProcessor<unknown, Db> };
-  FPMMFactory: { FPMMDeployed: EventProcessor<unknown, Db> };
-  FPMM: {
-    UpdateReserves: EventProcessor<unknown, Db>;
-    Swap: EventProcessor<unknown, Db>;
-    Mint: EventProcessor<unknown, Db>;
-    Burn: EventProcessor<unknown, Db>;
-    Rebalanced: EventProcessor<unknown, Db>;
-    LPFeeUpdated: EventProcessor<unknown, Db>;
-    ProtocolFeeUpdated: EventProcessor<unknown, Db>;
-    RebalanceIncentiveUpdated: EventProcessor<unknown, Db>;
-    RebalanceThresholdUpdated: EventProcessor<unknown, Db>;
-  };
-  VirtualPoolFactory: {
-    VirtualPoolDeployed: EventProcessor<unknown, Db>;
-  };
-  VirtualPool: {
-    UpdateReserves: EventProcessor<unknown, Db>;
-    Swap: EventProcessor<unknown, Db>;
-  };
-  BiPoolManager: {
-    ExchangeCreated: EventProcessor<unknown, Db>;
-    ExchangeDestroyed: EventProcessor<unknown, Db>;
-    BucketsUpdated: EventProcessor<unknown, Db>;
-    SpreadUpdated: EventProcessor<unknown, Db>;
-  };
-  ERC20FeeToken: { Transfer: EventProcessor<unknown, Db> };
-  BreakerBox: {
-    BreakerStatusUpdated: EventProcessor<unknown, Db>;
-    BreakerTripped: EventProcessor<unknown, Db>;
-    ResetSuccessful: EventProcessor<unknown, Db>;
-    BreakerRemoved: EventProcessor<unknown, Db>;
-    TradingModeUpdated: EventProcessor<unknown, Db>;
-  };
-  MedianDeltaBreaker: { MedianRateEMAReset: EventProcessor<unknown, Db> };
-  SortedOracles: { MedianUpdated: EventProcessor<unknown, Db> };
-  WormholeNttManager: {
-    TransferSentDetailed: EventProcessor<unknown, Db>;
-    TransferSentDigest: EventProcessor<unknown, Db>;
-    TransferRedeemed: EventProcessor<unknown, Db>;
-    MessageAttestedTo: EventProcessor<unknown, Db>;
-    InboundTransferQueued: EventProcessor<unknown, Db>;
-  };
-  WormholeTransceiver: { ReceivedMessage: EventProcessor<unknown, Db> };
-  TestWormholeNttManager: IndexerTestHelpers<Db>["WormholeNttManager"];
-  TestWormholeTransceiver: IndexerTestHelpers<Db>["WormholeTransceiver"];
+  Broker: ContractTestHelpers<Db>;
+  FPMMFactory: ContractTestHelpers<Db>;
+  FPMM: ContractTestHelpers<Db>;
+  VirtualPoolFactory: ContractTestHelpers<Db>;
+  VirtualPool: ContractTestHelpers<Db>;
+  BiPoolManager: ContractTestHelpers<Db>;
+  ERC20FeeToken: ContractTestHelpers<Db>;
+  V2StableToken: ContractTestHelpers<Db>;
+  BreakerBox: ContractTestHelpers<Db>;
+  MedianDeltaBreaker: ContractTestHelpers<Db>;
+  SortedOracles: ContractTestHelpers<Db>;
+  WormholeNttManager: ContractTestHelpers<Db>;
+  WormholeTransceiver: ContractTestHelpers<Db>;
+  TestWormholeNttManager: ContractTestHelpers<Db>;
+  TestWormholeTransceiver: ContractTestHelpers<Db>;
 };
 
 function entityStore(
@@ -252,61 +233,42 @@ function makeEventProcessor(contractName: string, eventName: string) {
   };
 }
 
-function contract<EventName extends string>(
+/** Build a contract's event helpers lazily: any accessed event name resolves to
+ * a cached `makeEventProcessor`. Event names are NOT enumerated here —
+ * `processEvent` dispatches to whatever handler the indexer registered for
+ * `(contractName, eventName)`, so adding a handler makes its event reachable
+ * automatically. (The footgun this replaces: a hand-listed array silently
+ * omitting a new event surfaced as `undefined.processEvent` at run time.) */
+function contract(
   contractName: string,
-  eventNames: readonly EventName[],
-): Record<EventName, ReturnType<typeof makeEventProcessor>> {
-  return Object.fromEntries(
-    eventNames.map((eventName) => [
-      eventName,
-      makeEventProcessor(contractName, eventName),
-    ]),
-  ) as Record<EventName, ReturnType<typeof makeEventProcessor>>;
+): Record<string, ReturnType<typeof makeEventProcessor>> {
+  const cache: Record<string, ReturnType<typeof makeEventProcessor>> = {};
+  return new Proxy(cache, {
+    get(target, prop) {
+      if (typeof prop !== "string") return undefined;
+      target[prop] ??= makeEventProcessor(contractName, prop);
+      return target[prop];
+    },
+  });
 }
 
+// Contracts are listed; their events are resolved on demand by `contract`'s
+// Proxy from the indexer's registered handlers — no per-event maintenance.
 export const TestHelpers = {
   MockDb: { createMockDb },
-  Broker: contract("Broker", ["Swap"]),
-  FPMMFactory: contract("FPMMFactory", ["FPMMDeployed"]),
-  FPMM: contract("FPMM", [
-    "UpdateReserves",
-    "Swap",
-    "Mint",
-    "Burn",
-    "Rebalanced",
-    "LPFeeUpdated",
-    "ProtocolFeeUpdated",
-    "RebalanceIncentiveUpdated",
-    "RebalanceThresholdUpdated",
-  ]),
-  VirtualPoolFactory: contract("VirtualPoolFactory", ["VirtualPoolDeployed"]),
-  VirtualPool: contract("VirtualPool", ["UpdateReserves", "Swap"]),
-  BiPoolManager: contract("BiPoolManager", [
-    "ExchangeCreated",
-    "ExchangeDestroyed",
-    "BucketsUpdated",
-    "SpreadUpdated",
-  ]),
-  ERC20FeeToken: contract("ERC20FeeToken", ["Transfer"]),
-  V2StableToken: contract("V2StableToken", ["Transfer"]),
-  BreakerBox: contract("BreakerBox", [
-    "BreakerStatusUpdated",
-    "BreakerTripped",
-    "ResetSuccessful",
-    "BreakerRemoved",
-    "TradingModeUpdated",
-    "RateFeedRemoved",
-  ]),
-  MedianDeltaBreaker: contract("MedianDeltaBreaker", ["MedianRateEMAReset"]),
-  SortedOracles: contract("SortedOracles", ["MedianUpdated"]),
-  WormholeNttManager: contract("WormholeNttManager", [
-    "TransferSentDetailed",
-    "TransferSentDigest",
-    "TransferRedeemed",
-    "MessageAttestedTo",
-    "InboundTransferQueued",
-  ]),
-  WormholeTransceiver: contract("WormholeTransceiver", ["ReceivedMessage"]),
+  Broker: contract("Broker"),
+  FPMMFactory: contract("FPMMFactory"),
+  FPMM: contract("FPMM"),
+  VirtualPoolFactory: contract("VirtualPoolFactory"),
+  VirtualPool: contract("VirtualPool"),
+  BiPoolManager: contract("BiPoolManager"),
+  ERC20FeeToken: contract("ERC20FeeToken"),
+  V2StableToken: contract("V2StableToken"),
+  BreakerBox: contract("BreakerBox"),
+  MedianDeltaBreaker: contract("MedianDeltaBreaker"),
+  SortedOracles: contract("SortedOracles"),
+  WormholeNttManager: contract("WormholeNttManager"),
+  WormholeTransceiver: contract("WormholeTransceiver"),
 };
 
 TestHelpers.TestWormholeNttManager = TestHelpers.WormholeNttManager;

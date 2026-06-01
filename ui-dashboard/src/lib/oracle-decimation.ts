@@ -90,11 +90,45 @@ function sliceToWindow<T>(
   const span = hi - lo;
   const from = lo - span;
   const to = hi + span;
-  const sliced = rows.filter((r) => {
-    const t = getTimestamp(r);
-    return t >= from && t <= to;
-  });
+  // `rows` is sorted ASC by timestamp (contract above), so binary-search the
+  // window bounds: O(log n + k) instead of an O(n) scan over what can be tens
+  // of thousands of accumulated rows on every relayout during a zoom gesture.
+  const start = lowerBoundByTs(rows, from, getTimestamp); // first ts >= from
+  const end = upperBoundByTs(rows, to, getTimestamp); // first ts > to
+  const sliced = rows.slice(start, end);
   // Never return empty just because the window sits between two sparse points —
   // fall back to the full series so the chart still renders something.
   return sliced.length > 0 ? sliced : rows;
+}
+
+// First index whose timestamp is >= `target` (lower_bound). Assumes ASC sort.
+function lowerBoundByTs<T>(
+  rows: T[],
+  target: number,
+  getTimestamp: (row: T) => number,
+): number {
+  let lo = 0;
+  let hi = rows.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (getTimestamp(rows[mid]!) < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+// First index whose timestamp is > `target` (upper_bound). Assumes ASC sort.
+function upperBoundByTs<T>(
+  rows: T[],
+  target: number,
+  getTimestamp: (row: T) => number,
+): number {
+  let lo = 0;
+  let hi = rows.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (getTimestamp(rows[mid]!) <= target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
