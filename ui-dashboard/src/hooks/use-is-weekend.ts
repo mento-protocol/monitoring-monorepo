@@ -3,10 +3,17 @@
 import { useSyncExternalStore } from "react";
 import { isWeekend } from "@/lib/weekend";
 
-// Static store: the weekend flag is read per mount, not subscribed to a live
-// source (the banner is informational, not a ticking countdown), so subscribe
-// is a no-op.
-const subscribe = (): (() => void) => () => {};
+// Re-read the weekend flag on each hour boundary so a session left open across
+// a market transition (Fri 21:00 / Sun 23:00 UTC) self-corrects without a
+// refresh. This matters beyond the informational banner: health-panel's
+// weekend-pause message and deviation-cell's hidden deviation bar are gated on
+// the same flag, so a stale value would otherwise linger until the next
+// navigation. Hourly granularity is plenty (a banner up to ~1h late is fine)
+// and each wakeup is a single Date comparison.
+const subscribe = (notify: () => void): (() => void) => {
+  const id = setInterval(notify, 60 * 60 * 1000);
+  return () => clearInterval(id);
+};
 
 /**
  * SSR-safe FX-weekend flag.

@@ -1,9 +1,10 @@
 /** @vitest-environment jsdom */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { isWeekend } from "@/lib/weekend";
 import type { Pool } from "@/lib/types";
 
 // Mock weekend module — default to not-weekend so existing tests are deterministic
@@ -74,6 +75,14 @@ const BASE_POOL: Pool = {
 };
 
 describe("HealthPanel weekend mode", () => {
+  // isWeekend is mocked to false by default; the tests that exercise the
+  // weekend path set it true, and this restores the default afterwards.
+  // (clearAllMocks would NOT — it clears call history but leaves the
+  // mockReturnValue override in place.)
+  afterEach(() => {
+    vi.mocked(isWeekend).mockReturnValue(false);
+  });
+
   it("defers the weekend explanation to after mount, keeping it out of SSR HTML", async () => {
     const weekend = await import("@/lib/weekend");
     // mockReturnValue (not Once) — called by both computeHealthStatus and health-panel directly
@@ -101,8 +110,6 @@ describe("HealthPanel weekend mode", () => {
     await act(async () => {
       root.unmount();
     });
-
-    vi.mocked(weekend.isWeekend).mockReturnValue(false); // reset
   });
 
   it("does not show weekend explanation when oracle is fresh even on a weekend", async () => {
@@ -113,8 +120,6 @@ describe("HealthPanel weekend mode", () => {
     const html = renderToStaticMarkup(<HealthPanel pool={freshPool} />);
 
     expect(html).not.toContain("Trading is paused for the weekend");
-
-    vi.mocked(weekend.isWeekend).mockReturnValue(false); // reset
   });
 
   it("does not show weekend explanation when oracle is stale but it is not the weekend", () => {
