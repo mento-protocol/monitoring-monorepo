@@ -100,7 +100,12 @@ export function PoolHeader({
   );
   const exchangeVolumeRows =
     exchangeVolumeData?.BrokerExchangeDailySnapshot ?? [];
+  // The Hasura "field not found" error during the indexer deploy+resync
+  // window collapses to `v2Error`; surface as a degraded panel rather
+  // than silently rendering nothing.
   const v2HasError = v2Error !== undefined;
+  // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
+  // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
 
   // Mirror poolName's USDm-last ordering so the linked title matches the
@@ -240,7 +245,7 @@ export function PoolHeader({
       ) : (
         <>
           <div className="my-5 h-px bg-slate-800" />
-          <PoolConfigPanel {...{ pool, tradingLimits, tradingLimitsError }} />
+          <PoolConfigPanel pool={pool} />
           <BreakerPanel pool={pool} />
         </>
       )}

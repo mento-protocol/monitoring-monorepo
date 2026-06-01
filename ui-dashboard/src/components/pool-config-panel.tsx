@@ -1,12 +1,10 @@
 "use client";
 
-import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
 import { isNeverRebalance } from "@/lib/health";
 import { AddressLink } from "@/components/address-link";
 import { InfoPopover } from "@/components/info-popover";
 import { Stat } from "@/components/stat";
-import { formatDurationShort } from "@/lib/bridge-status";
-import { formatWei, TRADING_LIMITS_INTERNAL_DECIMALS } from "@/lib/format";
 import { HASURA_TIMEOUT_MS, useGQL } from "@/lib/graphql";
 import { POOL_CONFIG_EXT } from "@/lib/queries";
 import { PoolConfigExtSchema } from "@/lib/queries/pool-detail-schemas";
@@ -15,15 +13,11 @@ import { chainlinkFeed, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 
 interface PoolConfigPanelProps {
   pool: Pool;
-  tradingLimits?: TradingLimit[] | undefined;
-  tradingLimitsError?: boolean | undefined;
 }
 
 type PoolConfigExtRow = {
   rebalanceReward?: number | undefined;
 };
-
-const EMPTY_TRADING_LIMITS: TradingLimit[] = [];
 
 // `-1` is the indexer's "RPC read failed, not yet self-healed" sentinel;
 // `undefined` means the field hasn't reached hosted Hasura yet (phased
@@ -33,52 +27,6 @@ function formatBps(bps: number | null | undefined): string {
   return `${(bps / 100).toFixed(2)}%`;
 }
 
-function formatReporterCount(value: number | null | undefined): string {
-  if (value == null || value <= 0) return "—";
-  return value.toLocaleString();
-}
-
-function formatSeconds(value: string | null | undefined): string {
-  const seconds = Number(value);
-  if (!Number.isFinite(seconds) || seconds <= 0) return "—";
-  return formatDurationShort(seconds);
-}
-
-function TradingLimitConfigValue({
-  network,
-  tradingLimits,
-  hasError,
-}: {
-  network: ReturnType<typeof useNetwork>["network"];
-  tradingLimits: TradingLimit[];
-  hasError: boolean;
-}) {
-  if (hasError) return <span className="text-rose-400">Unavailable</span>;
-  if (tradingLimits.length === 0) {
-    return <span className="text-slate-500">—</span>;
-  }
-
-  return (
-    <span className="flex flex-col gap-1 text-xs leading-5 text-slate-300">
-      {tradingLimits.map((tl) => {
-        const sym = tokenSymbol(network, tl.token);
-        return (
-          <span key={tl.id}>
-            <span className="text-slate-400">{sym}</span>{" "}
-            <span className="font-mono">
-              L0 {formatWei(tl.limit0, TRADING_LIMITS_INTERNAL_DECIMALS, 2)}
-            </span>{" "}
-            <span className="text-slate-500">/</span>{" "}
-            <span className="font-mono">
-              L1 {formatWei(tl.limit1, TRADING_LIMITS_INTERNAL_DECIMALS, 2)}
-            </span>
-          </span>
-        );
-      })}
-    </span>
-  );
-}
-
 /** Static pool parameters row: swap fee, oracle/strategy provenance, and
  *  rebalance threshold/reward. Renders just the `<dl>` so callers (the
  *  pool header card) can stack it under the live KPI strip with a
@@ -86,11 +34,7 @@ function TradingLimitConfigValue({
  *  mechanics). `rebalanceReward` is fetched via POOL_CONFIG_EXT so the
  *  page survives the indexer deploy+resync window. */
 // eslint-disable-next-line complexity, max-lines-per-function -- Existing panel keeps schema-lag fallback and pool config rendering together.
-export function PoolConfigPanel({
-  pool,
-  tradingLimits = EMPTY_TRADING_LIMITS,
-  tradingLimitsError = false,
-}: PoolConfigPanelProps) {
+export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
   const neverRebalances = isNeverRebalance(pool);
@@ -159,16 +103,6 @@ export function PoolConfigPanel({
         }
       />
       <Stat
-        label="Oracle Expiry"
-        value={formatSeconds(pool.oracleExpiry)}
-        mono
-      />
-      <Stat
-        label="Oracle Reporters"
-        value={formatReporterCount(pool.oracleNumReporters)}
-        mono
-      />
-      <Stat
         label={
           <span className="inline-flex items-center gap-1">
             Rebalance Threshold
@@ -210,30 +144,6 @@ export function PoolConfigPanel({
         }
         value={formatBps(rebalanceReward)}
         mono
-      />
-      <Stat
-        label={
-          <span className="inline-flex items-center gap-1">
-            Limit Windows
-            <InfoPopover
-              label="Limit Windows"
-              content="TradingLimitsV2 window durations: L0 is the 5-minute limit, L1 is the 24-hour limit, and LG is the lifetime/global limit."
-            />
-          </span>
-        }
-        value="L0 5m / L1 24h / LG lifetime"
-        mono
-      />
-      <Stat
-        label="Limit Caps"
-        value={
-          <TradingLimitConfigValue
-            network={network}
-            tradingLimits={tradingLimits}
-            hasError={tradingLimitsError}
-          />
-        }
-        className="sm:col-span-2 lg:col-span-2"
       />
       <Stat
         label="Rebalance Strategy"

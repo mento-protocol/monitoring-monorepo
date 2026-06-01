@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { Pool, TradingLimit } from "@/lib/types";
+import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { POOL_CONFIG_EXT } from "@/lib/queries";
 import { PoolConfigExtSchema } from "@/lib/queries/pool-detail-schemas";
@@ -71,30 +71,10 @@ const BASE_POOL: Pool = {
   createdAtTimestamp: "1000",
   updatedAtBlock: "2",
   updatedAtTimestamp: "2000",
-  oracleExpiry: "300",
-  oracleNumReporters: 4,
   lpFee: 3,
   protocolFee: 2,
   rebalanceThreshold: 3333,
   rebalancerAddress: STRATEGY_ADDR,
-};
-
-const BASE_LIMIT: TradingLimit = {
-  id: `${BASE_POOL.id}-${USDC_ADDR}`,
-  poolId: BASE_POOL.id,
-  token: USDC_ADDR,
-  limit0: "77000000000000000000",
-  limit1: "154000000000000000000",
-  decimals: 15,
-  netflow0: "0",
-  netflow1: "0",
-  lastUpdated0: "1",
-  lastUpdated1: "1",
-  limitPressure0: "0.0000",
-  limitPressure1: "0.0000",
-  limitStatus: "OK",
-  updatedAtBlock: "2",
-  updatedAtTimestamp: "2000",
 };
 
 describe("PoolConfigPanel", () => {
@@ -202,59 +182,9 @@ describe("PoolConfigPanel", () => {
       expect(html).not.toContain("data.chain.link");
     });
 
-    it("renders oracle expiry and reporter count as config rows", () => {
+    it("does not render an Expiry sub-line (expiry moved to OraclePriceValue)", () => {
       const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
-      expect(html).toMatch(/Oracle Expiry[\s\S]*?5m/);
-      expect(html).toMatch(/Oracle Reporters[\s\S]*?4/);
-    });
-
-    it("falls back to '—' when oracle expiry and reporter count are unknown", () => {
-      const pool: Pool = {
-        ...BASE_POOL,
-        oracleExpiry: undefined,
-        oracleNumReporters: undefined,
-      };
-      const html = renderToStaticMarkup(<PoolConfigPanel pool={pool} />);
-      expect(html).toMatch(/Oracle Expiry[\s\S]*?—/);
-      expect(html).toMatch(/Oracle Reporters[\s\S]*?—/);
-    });
-
-    it("treats zero reporter count as the unknown seed sentinel", () => {
-      const html = renderToStaticMarkup(
-        <PoolConfigPanel pool={{ ...BASE_POOL, oracleNumReporters: 0 }} />,
-      );
-      expect(html).toMatch(/Oracle Reporters[\s\S]*?—/);
-    });
-  });
-
-  describe("Trading limit config rows", () => {
-    it("renders L0/L1 windows and per-token caps from the existing trading limit data", () => {
-      const html = renderToStaticMarkup(
-        <PoolConfigPanel pool={BASE_POOL} tradingLimits={[BASE_LIMIT]} />,
-      );
-
-      expect(html).toMatch(
-        /Limit Windows[\s\S]*?L0 5m \/ L1 24h \/ LG lifetime/,
-      );
-      expect(html).toContain("USDC");
-      expect(html).toContain("L0 77,000.00");
-      expect(html).toContain("L1 154,000.00");
-    });
-
-    it("renders clear empty states for missing or failed trading-limit config", () => {
-      const emptyHtml = renderToStaticMarkup(
-        <PoolConfigPanel pool={BASE_POOL} tradingLimits={[]} />,
-      );
-      const errorHtml = renderToStaticMarkup(
-        <PoolConfigPanel
-          pool={BASE_POOL}
-          tradingLimits={[BASE_LIMIT]}
-          tradingLimitsError
-        />,
-      );
-
-      expect(emptyHtml).toMatch(/Limit Caps[\s\S]*?—/);
-      expect(errorHtml).toMatch(/Limit Caps[\s\S]*?Unavailable/);
+      expect(html).not.toMatch(/Expiry/);
     });
   });
 
