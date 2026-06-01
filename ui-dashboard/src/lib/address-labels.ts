@@ -27,6 +27,7 @@ import {
 } from "./address-labels-shared";
 
 // Data access helpers (all server-side)
+// Keep individual HMGET payloads bounded for Upstash request-size/backpressure limits.
 const HMGET_CHUNK_SIZE = 1000;
 
 function chunk<T>(arr: readonly T[], size: number): T[][] {

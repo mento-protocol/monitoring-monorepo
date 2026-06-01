@@ -144,6 +144,23 @@ describe("getLabelsForAddresses", () => {
     expect(await getLabelsForAddresses([])).toEqual({});
     expect(mocks.hmget).not.toHaveBeenCalled();
   });
+
+  it("filters out null entries returned for absent hash fields", async () => {
+    mocks.hmget.mockResolvedValue({
+      "0xaaa": {
+        name: "Present",
+        tags: [],
+        isPublic: true,
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      "0xbbb": null,
+    });
+
+    const result = await getLabelsForAddresses(["0xaaa", "0xbbb"]);
+
+    expect(Object.keys(result)).toEqual(["0xaaa"]);
+    expect(result["0xbbb"]).toBeUndefined();
+  });
 });
 
 describe("upsertEntry", () => {
