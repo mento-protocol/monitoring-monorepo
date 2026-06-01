@@ -7,9 +7,14 @@ import {
 import {
   _clearBreakerMocks,
   _clearBootstrapCaches,
+  _setMockBreakerList,
+  _setMockBreakerKind,
+  _setMockBreakerDefaults,
+  _setMockBreakerFeedState,
 } from "../src/EventHandlers.ts";
 import { makeRateFeedDependencyId } from "../src/breakers.ts";
 import { registerMockRateFeedDependenciesHttp } from "../src/rpc/http-test-mock-bridge.js";
+import { makePool } from "./helpers/makePool.js";
 
 // These tests drive the REAL `fetchRateFeedDependencies` array-walk + control
 // read through the RateFeedDependenciesSet handler (`force` refresh → effect →
@@ -130,6 +135,56 @@ describe("RateFeedDependenciesSet — RPC walk + edge reconcile (#712)", () => {
     assert.ok(
       next.entities.RateFeedDependency.get(edgeId(OLD_DEP)),
       "transient failure must NOT truncate the existing edge set",
+    );
+  });
+
+  it("inherits a pool-less, already-tripped dependency's halt (bootstraps the dep's config)", async () => {
+    // DEP_Y is tripped on-chain via a MEDIAN_DELTA breaker but has NO pools and
+    // no live BreakerBox event in range — only loading FEED_X's dependency edge
+    // bootstraps Y's BreakerConfig. Without that bootstrap, computeOwnFeedHalted(Y)
+    // would read zero rows and the dependent's pool would never inherit the halt.
+    const MD_BREAKER = "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9";
+    _setMockBreakerList(CHAIN_ID, [MD_BREAKER]);
+    _setMockBreakerKind(CHAIN_ID, MD_BREAKER, "MEDIAN_DELTA");
+    _setMockBreakerDefaults(CHAIN_ID, MD_BREAKER, {
+      activatesTradingMode: 3,
+      defaultCooldownTime: 900n,
+      defaultRateChangeThreshold: 4n * 10n ** 22n,
+    });
+    _setMockBreakerFeedState(CHAIN_ID, MD_BREAKER, DEP_Y, {
+      enabled: true,
+      tradingMode: 3, // TRIPPED
+      lastStatusUpdatedAt: 1_700_000_000n,
+      cooldownTime: 0n,
+      rateChangeThreshold: 0n,
+      smoothingFactor: 5n * 10n ** 21n,
+      medianRatesEMA: 1_000_000n,
+      referenceValue: null,
+    });
+    registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED_X, [DEP_Y]);
+
+    const mockDb = MockDb.createMockDb();
+    const poolId = `${CHAIN_ID}-0x00000000000000000000000000000000000000a1`;
+    mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        referenceRateFeedID: FEED_X,
+        breakerTripped: false,
+      }),
+    );
+
+    const next = await BreakerBox.RateFeedDependenciesSet.processEvent({
+      event: depEvent([DEP_Y]),
+      mockDb,
+    });
+
+    const pool = next.entities.Pool.get(poolId) as
+      | { breakerTripped: boolean }
+      | undefined;
+    assert.equal(
+      pool?.breakerTripped,
+      true,
+      "dependent pool inherits the pool-less dependency's halt",
     );
   });
 });

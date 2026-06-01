@@ -927,6 +927,20 @@ export async function loadFeedDependencies(args: {
     return false;
   }
   await reconcileDependencyEdges(context, chainId, rateFeedID, deps);
+  // Hydrate each dependency feed's own BreakerConfig rows. A dependency may have
+  // no pools and no live BreakerBox event in our range (its config predates
+  // start_block and it never trips/resets again), in which case nothing else
+  // bootstraps it — and `computeOwnFeedHalted(dep)` reading zero rows would
+  // silently drop an already-tripped dependency's halt. Bounded + cached.
+  for (const dep of deps) {
+    await bootstrapFeedBreakerConfigs(
+      context,
+      chainId,
+      dep,
+      blockNumber,
+      blockTimestamp,
+    );
+  }
   markBootstrapAttempted(cacheKey);
   _bootstrapBackoffUntilTs.delete(cacheKey);
   return true;
