@@ -628,3 +628,169 @@ function parseRateFeedBreakerStatus(raw: unknown): {
     enabled: Boolean(obj.enabled),
   };
 }
+
+// ---------------------------------------------------------------------------
+// BreakerBox rate-feed dependencies (#712)
+//
+// On-chain `getRateFeedTradingMode(feed)` ORs in each dependency feed's OWN
+// trading mode (one level, non-recursive). To model that — and the reverse-edge
+// fan-out — we read the current dependency set per feed. There is no bulk
+// getter and the array is wholesale-replaced via `setRateFeedDependencies`, so
+// we walk the public array getter `rateFeedDependencies(feed, i)` until it
+// reverts (out-of-bounds), then reconcile.
+//
+// CRITICAL — out-of-bounds is NOT a decodable revert on the prod RPC. forno
+// (and QuickNode) report an out-of-bounds array read as a generic
+// `ContractFunctionExecutionError: "Missing or invalid parameters…"` with no
+// revert data — the exact phrasing block-fallback.ts also treats as a transient
+// rejection. A getter failure is therefore indistinguishable, by message or
+// error type, from a real provider outage. We disambiguate with a CONTROL read:
+// if `getRateFeeds()` succeeds at the same block the node is healthy, so the
+// getter failure is a genuine end-of-array; if the control ALSO fails it's
+// transient → return null so the caller retries (never truncate the set on a
+// blip). Blip-resistance: when ENVIO_RPC_FALLBACK_URL_<chain> is configured,
+// readContractWithBlockFallback cross-checks the terminating read on the
+// secondary node; if no fallback is set, a single-call blip surviving the
+// control read could truncate — self-healed by the next RateFeedDependenciesSet
+// or a process restart, and verified post-deploy against the known edges.
+//
+// (Defined at file end so insertions don't shift the line-keyed ESLint baseline
+// entries for fetchBreakerDefaults / fetchBreakerFeedState above.)
+// ---------------------------------------------------------------------------
+
+const RATE_FEED_DEPENDENCIES_ABI = [
+  {
+    type: "function",
+    name: "rateFeedDependencies",
+    inputs: [{ type: "address" }, { type: "uint256" }],
+    outputs: [{ type: "address" }],
+    stateMutability: "view",
+  },
+] as const;
+
+const GET_RATE_FEEDS_ABI = [
+  {
+    type: "function",
+    name: "getRateFeeds",
+    inputs: [],
+    outputs: [{ type: "address[]" }],
+    stateMutability: "view",
+  },
+] as const;
+
+// Safety cap: today the most-connected feed has 2 dependencies; 32 leaves ample
+// headroom while bounding the loop if a node ever returns successes without an
+// out-of-bounds terminator.
+const RATE_FEED_DEPENDENCIES_MAX = 32;
+
+type DepReadCtx = {
+  chainId: number;
+  breakerBoxAddress: `0x${string}`;
+  client: ReturnType<typeof getRpcClient>;
+  fallback: ReturnType<typeof getFallbackRpcClient>;
+  blockNumber: bigint;
+  log: RpcLogger;
+};
+
+type DepRead =
+  | { kind: "addr"; addr: string }
+  | { kind: "empty" }
+  | { kind: "transient" };
+
+/** True when `getRateFeeds()` returns at the requested block — proves the node
+ * is responsive, so a sibling getter failure is a genuine contract revert
+ * (out-of-bounds) rather than a transient provider rejection. */
+async function controlReadHealthy(ctx: DepReadCtx): Promise<boolean> {
+  try {
+    const { usedLatestFallback } = await readContractWithBlockFallback(
+      ctx.chainId,
+      ctx.client,
+      {
+        address: ctx.breakerBoxAddress,
+        abi: GET_RATE_FEEDS_ABI,
+        functionName: "getRateFeeds",
+      },
+      ctx.blockNumber,
+      ctx.fallback,
+      ctx.log,
+    );
+    return !usedLatestFallback;
+  } catch {
+    return false;
+  }
+}
+
+/** Read one dependency slot. A successful read yields the lowercased address.
+ * A getter failure is disambiguated by the control read: control-healthy ⇒
+ * genuine out-of-bounds (`empty`); control-failed ⇒ `transient`.
+ * `usedLatestFallback` is rejected as transient — dependencies are governance-
+ * mutable, so a `latest` stand-in for a historical block could read a newer set
+ * than existed at the event block. */
+async function readDepAtIndex(
+  ctx: DepReadCtx,
+  feed: string,
+  index: number,
+): Promise<DepRead> {
+  try {
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      ctx.chainId,
+      ctx.client,
+      {
+        address: ctx.breakerBoxAddress,
+        abi: RATE_FEED_DEPENDENCIES_ABI,
+        functionName: "rateFeedDependencies",
+        args: [feed as `0x${string}`, BigInt(index)],
+      },
+      ctx.blockNumber,
+      ctx.fallback,
+      ctx.log,
+    );
+    if (usedLatestFallback) return { kind: "transient" };
+    return { kind: "addr", addr: (result as string).toLowerCase() };
+  } catch {
+    return (await controlReadHealthy(ctx))
+      ? { kind: "empty" }
+      : { kind: "transient" };
+  }
+}
+
+/** Returns the current dependency feeds for `rateFeedID` at `blockNumber`
+ * (lowercased), or null on a transient RPC failure (caller retries / backs off).
+ * An empty array means the feed genuinely has no dependencies (control-read
+ * confirmed). See the block comment above for the out-of-bounds rationale. */
+export async function fetchRateFeedDependencies(
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
+): Promise<string[] | null> {
+  let breakerBoxAddress: `0x${string}`;
+  try {
+    breakerBoxAddress = requireContractAddress(chainId, "BreakerBox");
+  } catch {
+    return null;
+  }
+
+  const ctx: DepReadCtx = {
+    chainId,
+    breakerBoxAddress,
+    client: getRpcClient(chainId),
+    fallback: getFallbackRpcClient(chainId),
+    blockNumber,
+    log,
+  };
+  const deps: string[] = [];
+  for (let i = 0; i < RATE_FEED_DEPENDENCIES_MAX; i++) {
+    const r = await readDepAtIndex(ctx, rateFeedID, i);
+    if (r.kind === "addr") {
+      deps.push(r.addr);
+      continue;
+    }
+    if (r.kind === "empty") return deps;
+    return null; // transient — caller retries on the next event
+  }
+  log.warn(
+    `breakers.fetchRateFeedDependencies.cap_hit chain=${chainId} feed=${rateFeedID} — reached ${RATE_FEED_DEPENDENCIES_MAX} dependencies without an out-of-bounds terminator`,
+  );
+  return deps;
+}

@@ -42,6 +42,7 @@ import {
   bootstrapFeedBreakerConfigs,
   nextMedianEMA,
   resolveBreakerSnapshotFields,
+  syncDependencyHaltOnColdStart,
   syncHaltOnColdStart,
 } from "../breakers.js";
 
@@ -793,6 +794,16 @@ indexer.onEvent(
       rateFeedID,
       breakerConfigs.length === 0 && poolIds.length > 0,
     );
+    // Cold-start the feed's dependency edges too (set pre-start_block) — an
+    // already-tripped dependency must mark this feed's pools halted.
+    await syncDependencyHaltOnColdStart({
+      context,
+      chainId: event.chainId,
+      rateFeedID,
+      blockNumber,
+      blockTimestamp,
+      hasPools: poolIds.length > 0,
+    });
   },
 );
 

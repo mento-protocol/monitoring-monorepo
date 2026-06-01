@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import type { Breaker, BreakerConfig, Pool } from "envio";
+import type { Breaker, BreakerConfig, Pool, RateFeedDependency } from "envio";
 import {
   breakerTrippedOnFeedAssign,
   clearPoolsBreakerHalt,
+  makeRateFeedDependencyId,
   syncHaltOnColdStart,
   syncPoolsBreakerHalt,
 } from "../src/breakers.ts";
@@ -50,13 +51,24 @@ function makePool(
   } as unknown as Pool;
 }
 
+function makeDep(rateFeedID: string, dependsOn: string): RateFeedDependency {
+  return {
+    id: makeRateFeedDependencyId(CHAIN, rateFeedID, dependsOn),
+    chainId: CHAIN,
+    rateFeedID,
+    dependsOn,
+  };
+}
+
 function makeCtx(opts: {
   configs: BreakerConfig[];
   breakers: Breaker[];
   pools: Pool[];
+  deps?: RateFeedDependency[];
 }) {
   const pools = new Map(opts.pools.map((p) => [p.id, { ...p }]));
   const breakers = new Map(opts.breakers.map((b) => [b.id, b]));
+  const deps = new Map((opts.deps ?? []).map((d) => [d.id, { ...d }]));
   const sets: Pool[] = [];
   const ctx = {
     BreakerConfig: {
@@ -65,6 +77,23 @@ function makeCtx(opts: {
     },
     Breaker: {
       get: async (id: string) => breakers.get(id),
+    },
+    // Single-field getWhere on either edge field (forward: deps of a feed;
+    // reverse: dependents of a feed), mirroring the Envio query surface.
+    RateFeedDependency: {
+      getWhere: async (where: {
+        rateFeedID?: { _eq: string };
+        dependsOn?: { _eq: string };
+      }) =>
+        [...deps.values()].filter((d) =>
+          where.rateFeedID
+            ? d.rateFeedID === where.rateFeedID._eq
+            : where.dependsOn
+              ? d.dependsOn === where.dependsOn._eq
+              : true,
+        ),
+      set: (d: RateFeedDependency) => deps.set(d.id, d),
+      deleteUnsafe: (id: string) => deps.delete(id),
     },
     Pool: {
       get: async (id: string) => pools.get(id),
@@ -82,7 +111,7 @@ function makeCtx(opts: {
       },
     },
   } as unknown as Ctx;
-  return { ctx, pools, sets };
+  return { ctx, pools, sets, deps };
 }
 
 describe("syncPoolsBreakerHalt", () => {
@@ -336,6 +365,97 @@ describe("breakerTrippedOnFeedAssign", () => {
         FEED,
       ),
       false,
+    );
+  });
+});
+
+// Dependency-driven halts (#712): on-chain getRateFeedTradingMode ORs in each
+// dependency feed's OWN trading mode (one level). `syncPoolsBreakerHalt` fans a
+// trip/reset on a dependency feed out to every dependent feed's pools.
+describe("syncPoolsBreakerHalt — dependency fan-out", () => {
+  // DEP_FEED (Y) is a dependency of FEED (X); POOL_A lives on FEED (X).
+  const DEP_FEED = "0xdddd000000000000000000000000000000000001";
+
+  it("marks the dependent feed's pools tripped when a dependency trips", async () => {
+    const { ctx, pools } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      // The dependency's OWN config is tripped; FEED (X) has no own config.
+      configs: [
+        makeConfig({
+          rateFeedID: DEP_FEED,
+          status: "TRIPPED",
+          breaker_id: "breaker-md",
+        }),
+      ],
+      pools: [makePool(POOL_A, false)],
+      deps: [makeDep(FEED, DEP_FEED)], // X depends on Y
+    });
+    // A breaker event fires on the DEPENDENCY (Y) — the fan-out must reach X.
+    await syncPoolsBreakerHalt(ctx, CHAIN, DEP_FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, true);
+  });
+
+  it("does NOT propagate a MARKET_HOURS dependency trip (weekend != fault)", async () => {
+    const { ctx, pools, sets } = makeCtx({
+      breakers: [makeBreaker("breaker-mh", "MARKET_HOURS")],
+      configs: [
+        makeConfig({
+          rateFeedID: DEP_FEED,
+          status: "TRIPPED",
+          breaker_id: "breaker-mh",
+        }),
+      ],
+      pools: [makePool(POOL_A, false)],
+      deps: [makeDep(FEED, DEP_FEED)],
+    });
+    await syncPoolsBreakerHalt(ctx, CHAIN, DEP_FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, false);
+    assert.equal(sets.length, 0, "no-op: MARKET_HOURS excluded on deps too");
+  });
+
+  it("clears the dependent's inherited halt when the dependency resets", async () => {
+    const { ctx, pools } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      configs: [
+        makeConfig({
+          rateFeedID: DEP_FEED,
+          status: "OK",
+          breaker_id: "breaker-md",
+        }),
+      ],
+      pools: [makePool(POOL_A, true)], // currently halted via the dependency
+      deps: [makeDep(FEED, DEP_FEED)],
+    });
+    await syncPoolsBreakerHalt(ctx, CHAIN, DEP_FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, false);
+  });
+
+  it("does not propagate beyond one hop (a dependent's dependents are untouched)", async () => {
+    // Z depends on X, X depends on Y. Y trips. X must halt; Z must NOT — on-chain
+    // resolution is one level, and X's OWN mode (read by Z) is unaffected by Y.
+    const Z_FEED = "0xeeee000000000000000000000000000000000002";
+    const POOL_ON_Z = `${CHAIN}-0xaaa0000000000000000000000000000000000009`;
+    const { ctx, pools } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      configs: [
+        makeConfig({
+          rateFeedID: DEP_FEED,
+          status: "TRIPPED",
+          breaker_id: "breaker-md",
+        }),
+      ],
+      pools: [
+        makePool(POOL_A, false), // on FEED (X)
+        { ...makePool(POOL_ON_Z, false), referenceRateFeedID: Z_FEED } as Pool,
+      ],
+      deps: [makeDep(FEED, DEP_FEED), makeDep(Z_FEED, FEED)],
+    });
+    await syncPoolsBreakerHalt(ctx, CHAIN, DEP_FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, true, "X (depends on Y)");
+    assert.equal(
+      pools.get(POOL_ON_Z)?.breakerTripped,
+      false,
+      "Z (depends on X) is one hop too far",
     );
   });
 });

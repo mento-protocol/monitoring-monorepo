@@ -26,6 +26,7 @@ import {
   effectiveThreshold,
   ensureBreaker,
   ensureBreakerConfig,
+  loadFeedDependencies,
   makeBreakerId,
   maybePreloadBreaker,
   syncPoolsBreakerHalt,
@@ -158,6 +159,32 @@ indexer.onEvent(
     const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
     if (await maybePreloadPool(context, poolIds)) return;
     await clearPoolsBreakerHalt(context, event.chainId, rateFeedID);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// BreakerBox.RateFeedDependenciesSet — the feed's dependency set was replaced.
+// The event's `dependencies` array is an indexed dynamic type (only a topic
+// hash on-chain, not decodable), so RPC-read the authoritative current set,
+// reconcile the persisted edges, then re-sync the feed's pools — a gained/lost
+// dependency can move the feed's halt OR (computeFeedHalted ORs in each dep).
+// ---------------------------------------------------------------------------
+
+indexer.onEvent(
+  { contract: "BreakerBox", event: "RateFeedDependenciesSet" },
+  async ({ event, context }) => {
+    // Feed-scoped event — no single breaker entity to preload; bail in preload.
+    if (context.isPreload) return;
+    const rateFeedID = asAddress(event.params.rateFeedID);
+    await loadFeedDependencies({
+      context,
+      chainId: event.chainId,
+      rateFeedID,
+      blockNumber: asBigInt(event.block.number),
+      blockTimestamp: asBigInt(event.block.timestamp),
+      force: true,
+    });
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );
 

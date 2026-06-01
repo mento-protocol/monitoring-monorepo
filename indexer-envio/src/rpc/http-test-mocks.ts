@@ -40,6 +40,28 @@ const GET_BREAKERS_ABI = [
   },
 ] as const;
 
+// BreakerBox dependency-graph getters (#712) — the array-walk getter and the
+// `getRateFeeds()` control read used by `fetchRateFeedDependencies`.
+const RATE_FEED_DEPS_ABI = [
+  {
+    type: "function",
+    name: "rateFeedDependencies",
+    inputs: [
+      { name: "", type: "address" },
+      { name: "", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "getRateFeeds",
+    inputs: [],
+    outputs: [{ name: "", type: "address[]" }],
+    stateMutability: "view",
+  },
+] as const;
+
 const TEST_RPC_ABI = [
   ...FPMM_MINIMAL_ABI,
   ...FPMM_FEE_ABI,
@@ -50,6 +72,7 @@ const TEST_RPC_ABI = [
   ...MEDIAN_DELTA_BREAKER_ABI,
   ...VALUE_DELTA_BREAKER_ABI,
   ...GET_BREAKERS_ABI,
+  ...RATE_FEED_DEPS_ABI,
   ...(SortedOraclesContract.abi as Abi),
 ] as const satisfies Abi;
 

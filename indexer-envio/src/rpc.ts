@@ -96,6 +96,7 @@ export {
   fetchBreakerKind,
   fetchBreakerDefaults,
   fetchBreakerFeedState,
+  fetchRateFeedDependencies,
 } from "./rpc/breakers.js";
 
 // ---------------------------------------------------------------------------

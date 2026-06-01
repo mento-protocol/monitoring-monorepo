@@ -410,6 +410,8 @@ describe("upsertPool breaker halt (cold-start)", () => {
         ],
       },
       Breaker: { get: async () => ({ id: "b", kind }) },
+      // No dependency edges in these cases — the feed's own breaker drives it.
+      RateFeedDependency: { getWhere: async () => [] },
     } as unknown as PoolContext;
     return { context, written };
   }

@@ -1541,6 +1541,24 @@ type BreakerTripEvent @index(fields: ["rateFeedID", "blockTimestamp"]) {
   thresholdAtTrip: BigInt!
 }
 
+# One directed edge of BreakerBox's rate-feed dependency graph: trading on
+# `rateFeedID` is halted on-chain when `dependsOn`'s OWN trading mode is tripped
+# (getRateFeedTradingMode ORs in each dependency's mode, one level, non-
+# recursive). The on-chain `dependencies` array is set wholesale via
+# `setRateFeedDependencies`, so these edges are reconciled (replace, not append)
+# whenever the set is (re)read. Both addresses lowercased.
+#   - `rateFeedID` @index → forward lookup: the deps of a feed (computeFeedHalted).
+#   - `dependsOn`  @index → reverse lookup: the dependents of a feed, for the
+#     breaker-event fan-out in syncPoolsBreakerHalt.
+# chainId is filtered in memory (Envio getWhere is single-field only — same
+# rationale as getPoolsByFeed / getBreakerConfigsByFeed).
+type RateFeedDependency {
+  id: ID! # "{chainId}-{rateFeedID}-{dependsOn}"
+  chainId: Int!
+  rateFeedID: String! @index # the dependent feed (lowercased)
+  dependsOn: String! @index # dependency feed whose own halt OR's in (lowercased)
+}
+
 # ============================================================================
 # Bridge Flows — generic (provider-agnostic) core
 #
