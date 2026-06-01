@@ -3,7 +3,7 @@
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
 import { computeHealthStatus, isOracleFresh } from "@/lib/health";
-import { isWeekend } from "@/lib/weekend";
+import { useIsWeekend } from "@/hooks/use-is-weekend";
 import { useNetwork } from "@/components/network-provider";
 
 interface HealthPanelProps {
@@ -20,6 +20,8 @@ interface HealthPanelProps {
  */
 export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
+  // SSR-safe weekend flag (server/client wall-clock days can differ). See useIsWeekend.
+  const isWeekendNow = useIsWeekend();
   const isVirtual = isVirtualPool(pool);
   // Trust only `hasHealthData === true` — `pool.healthStatus` is always
   // populated now (indexer's DEFAULT_ORACLE_FIELDS sets it to "N/A" even
@@ -29,7 +31,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
-  const weekendPause = !oracleIsFresh && isWeekend();
+  const weekendPause = !oracleIsFresh && isWeekendNow;
 
   // Resolve the real status first. computeHealthStatus ranks HALTED ABOVE the
   // hasHealthData gate, so a tripped price breaker resolves to HALTED even when

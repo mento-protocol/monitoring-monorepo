@@ -9,7 +9,7 @@ import {
   isNeverRebalance,
   isOracleFresh,
 } from "@/lib/health";
-import { isWeekend } from "@/lib/weekend";
+import { useIsWeekend } from "@/hooks/use-is-weekend";
 import { relativeTime, formatTimestamp } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { InfoPopover } from "@/components/info-popover";
@@ -41,12 +41,14 @@ export function DeviationCell({
       ? pool.deviationBreachStartedAt
       : null;
 
+  // SSR-safe weekend flag (server/client wall-clock days can differ). See useIsWeekend.
+  const isWeekendNow = useIsWeekend();
   // Look up the trip transaction so the "breach Xh ago" badge can link to
   // the explorer. Gate on the same conditions that the early-return
   // guards check below — virtual / no-health-data / weekend-stale cells
   // render null, so firing the query for them would be a wasted round-trip.
   const willRender =
-    !isVirtual && hasHealthData && !(!oracleIsFresh && isWeekend());
+    !isVirtual && hasHealthData && !(!oracleIsFresh && isWeekendNow);
   const { data: tripTxData } = useGQL<{
     DeviationThresholdBreach: { startedByTxHash?: string }[];
   }>(breachStartedAt && willRender ? POOL_OPEN_BREACH_TX : null, {
@@ -58,7 +60,7 @@ export function DeviationCell({
 
   if (isVirtual) return null;
   if (!hasHealthData) return null;
-  if (!oracleIsFresh && isWeekend()) return null;
+  if (!oracleIsFresh && isWeekendNow) return null;
 
   const status = computeHealthStatus(pool, network.chainId);
 
