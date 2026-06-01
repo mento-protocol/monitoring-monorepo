@@ -134,8 +134,9 @@ async function CanonicalPoolDetailPage({
   const explicitChainId = parseRouteChainId(resolvedSearchParams.chainId);
   const canonicalPoolId = routeCanonicalPoolId(decodedId, explicitChainId);
 
+  const clientParams = toURLSearchParams(resolvedSearchParams);
   if (canonicalPoolId !== decodedId) {
-    const redirectParams = toURLSearchParams(resolvedSearchParams);
+    const redirectParams = new URLSearchParams(clientParams);
     redirectParams.delete("chainId");
     redirect(buildPoolDetailUrl(canonicalPoolId, redirectParams));
   }
@@ -143,7 +144,7 @@ async function CanonicalPoolDetailPage({
     redirect(POOL_NOT_FOUND_DEST);
   }
 
-  return <PoolDetailPageClient />;
+  return <PoolDetailPageClient initialSearch={clientParams.toString()} />;
 }
 
 export default function PoolDetailPage({

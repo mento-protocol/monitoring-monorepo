@@ -22,13 +22,12 @@ import { getTabLabel } from "../_lib/helpers";
  *  - Space / Enter (or click) on the focused tab activates it via the
  *    native `<button>`'s `onClick` → `onSelect`.
  *
- *  Manual activation (vs. automatic) because the pool page wires
- *  `onSelect` to a `router.replace` URL change, which triggers a Next
- *  App Router RSC refetch. Automatic activation would fire that
- *  navigation per arrow keystroke — a held arrow key turns into a
- *  navigation storm, plus a stale-prop race (the URL-backed `active`
- *  prop hasn't updated by the time the next arrow fires) that can
- *  desync focus from the URL state. Codex flagged both on PR #350.
+ *  Manual activation (vs. automatic) because tab activation still changes
+ *  URL state and fetches tab-specific data. Automatic activation would fire
+ *  that work per arrow keystroke — a held arrow key turns into a query storm,
+ *  plus a stale-prop race (the URL-backed `active` prop hasn't updated by
+ *  the time the next arrow fires) that can desync focus from URL state.
+ *  Codex flagged both on PR #350.
  *
  *  `visibleTabs` is the page-side filtered list (e.g. `breaches` is
  *  hidden for virtual pools, `ols` only shows when the pool has an OLS
@@ -68,10 +67,10 @@ export function PoolTablist({
     // shared flex row, NOT inside the tablist itself. Folding the
     // select into the tablist (as the previous markup did) is a
     // critical a11y violation.
-    <div className="flex gap-1 border-b border-slate-800">
+    <div className="flex w-full min-w-0 gap-1 overflow-x-auto border-b border-slate-800">
       <div
         ref={tablistRef}
-        className="flex gap-1"
+        className="flex min-w-max gap-1"
         role="tablist"
         aria-label="Pool data tabs"
         onKeyDown={handleKeyDown}

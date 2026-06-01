@@ -118,6 +118,12 @@ vi.mock("@/components/table", () => ({
 
 import { PoolDetailPageClient as PoolDetailPage } from "../_components/pool-detail-page-client";
 
+function renderPoolDetailPage() {
+  return renderToStaticMarkup(
+    <PoolDetailPage initialSearch={mockSearchParams.toString()} />,
+  );
+}
+
 const BASE_POOL: Pool = {
   id: "42220-0xpool",
   chainId: 42220,
@@ -180,7 +186,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).toContain("Pool 0xpool not found.");
     expect(html).not.toContain('role="tablist"');
     expect(html).not.toContain('role="tabpanel"');
@@ -211,7 +217,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).toContain("GBPm");
     expect(html).toContain("USDm");
     expect(html).toContain("Total Value");
@@ -265,7 +271,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).toContain("Token decimals are unverified for this pool");
     expect(html).toContain(
       "Token amount tab data is hidden because token decimals are unverified for this pool.",
@@ -308,7 +314,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).toContain("Token decimals are unverified for this pool");
     expect(html).toContain(
       "Token amount tab data is hidden because token decimals are unverified for this pool.",
@@ -354,7 +360,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).toContain(
       "Checking token decimal metadata before rendering token amount tab data.",
     );
@@ -399,7 +405,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).toContain("Token decimal metadata is unavailable");
     expect(html).toContain(
       "Token amount tab data is hidden until token decimal metadata can be verified.",
@@ -438,7 +444,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).not.toContain("Total Value");
     expect(html).not.toContain("≈ $");
   });
@@ -473,7 +479,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).not.toContain("Total Value");
     expect(html).not.toContain("≈ $");
   });
@@ -500,7 +506,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).toContain(
       "LP provider data is unavailable until this environment is reindexed with the LiquidityPosition schema.",
     );
@@ -529,7 +535,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     expect(html).toContain(
       "LP provider data is only available for FPMM pools.",
     );
@@ -558,7 +564,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    const html = renderToStaticMarkup(<PoolDetailPage />);
+    const html = renderPoolDetailPage();
     // The explorer link should use the raw hex address, not the namespaced form.
     expect(html).not.toContain("42220-0xd8da6bf2");
     expect(html).toContain("0xd8da6bf2");
@@ -633,7 +639,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    renderToStaticMarkup(<PoolDetailPage />);
+    renderPoolDetailPage();
 
     const fired = new Set(firedOperationNames());
     for (const [tabName, ops] of Object.entries(TAB_OPS)) {
@@ -661,7 +667,7 @@ describe("Pool detail LPs tab", () => {
       return gqlResult(undefined);
     });
 
-    renderToStaticMarkup(<PoolDetailPage />);
+    renderPoolDetailPage();
 
     const fired = new Set(firedOperationNames());
     for (const [tabName, ops] of Object.entries(TAB_OPS)) {
@@ -723,7 +729,7 @@ describe("Pool detail LPs tab", () => {
         return gqlResult(undefined);
       });
 
-      renderToStaticMarkup(<PoolDetailPage />);
+      renderPoolDetailPage();
 
       const fired = new Set(firedOperationNames());
       for (const [tabName, ops] of Object.entries(TAB_OPS)) {
@@ -772,6 +778,6 @@ describe("Pool detail LPs tab", () => {
       },
     );
 
-    renderToStaticMarkup(<PoolDetailPage />);
+    renderPoolDetailPage();
   });
 });

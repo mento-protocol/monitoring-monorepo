@@ -31,8 +31,14 @@ import {
 import type { OlsPool, Pool, PoolSnapshot, TradingLimit } from "@/lib/types";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo } from "react";
+import { useParams } from "next/navigation";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 import { PoolHeader } from "./pool-header";
 import { PoolTablist } from "./pool-tablist";
 import {
@@ -55,75 +61,78 @@ import { RebalancesTab } from "../_tabs/rebalances-tab";
 import { ReservesTab } from "../_tabs/reserves-tab";
 import { SwapsTab } from "../_tabs/swaps-tab";
 
-export function PoolDetailPageClient() {
+export function PoolDetailPageClient({
+  initialSearch = windowLocationSearch(),
+}: {
+  initialSearch?: string;
+} = {}) {
   return (
     <Suspense>
-      <PoolDetail />
+      <PoolDetail initialSearch={initialSearch} />
     </Suspense>
   );
 }
 
 type SearchParamsReader = Pick<URLSearchParams, "get" | "toString">;
+type PoolNetwork = ReturnType<typeof useNetwork>["network"];
+type ReplacePoolURL = (tab: Tab, limit: number) => void;
+type SetTabSearch = (tab: Tab, value: string) => void;
 
 function readSearchParam(params: SearchParamsReader, key: string) {
   return params.get(key);
 }
 
-function PoolDetail() {
-  const { network } = useNetwork();
-  const { poolId } = useParams<{ poolId: string }>();
-  const searchParams = useSearchParams();
-  const { replace } = useRouter();
-
-  const decodedId = decodePoolId(poolId);
-  const normalizedPoolId = normalizePoolIdForChain(decodedId, network.chainId);
-  const poolAddress = stripChainIdFromPoolId(normalizedPoolId);
-  const rawTab = readSearchParam(searchParams, "tab");
-  const requestedTab: Tab = TABS.includes(rawTab as Tab)
-    ? (rawTab as Tab)
-    : "providers";
-  const limit = parseTabLimit(readSearchParam(searchParams, "limit"));
+function usePoolUrlState(initialSearch: string, normalizedPoolId: string) {
+  const urlSearch = useURLSearch(initialSearch);
+  const urlParams = useMemo(() => new URLSearchParams(urlSearch), [urlSearch]);
 
   const getCurrentParams = useCallback(() => {
     if (typeof window !== "undefined") {
       return new URLSearchParams(window.location.search);
     }
-    return new URLSearchParams(searchParams.toString());
-  }, [searchParams]);
+    return new URLSearchParams(urlParams.toString());
+  }, [urlParams]);
 
   const replaceURL = useCallback(
     (params: URLSearchParams) => {
-      replace(buildPoolDetailUrl(normalizedPoolId, params), {
-        scroll: false,
-      });
+      const nextParams = new URLSearchParams(params.toString());
+      if (typeof window !== "undefined") {
+        const nextUrl = buildPoolDetailUrl(normalizedPoolId, nextParams);
+        window.history.replaceState(window.history.state, "", nextUrl);
+        notifyURLSearchSubscribers();
+      }
     },
-    [replace, normalizedPoolId],
+    [normalizedPoolId],
   );
 
-  const setURL = useCallback(
-    (t: Tab, lim: number) => {
-      const p = getCurrentParams();
-      if (t !== "providers") p.set("tab", t);
-      else p.delete("tab");
-      if (lim !== 25) p.set("limit", String(lim));
-      else p.delete("limit");
-      replaceURL(p);
+  const replacePoolURL = useCallback<ReplacePoolURL>(
+    (tab, limit) => {
+      const params = getCurrentParams();
+      if (tab !== "providers") params.set("tab", tab);
+      else params.delete("tab");
+      if (limit !== 25) params.set("limit", String(limit));
+      else params.delete("limit");
+      replaceURL(params);
     },
     [getCurrentParams, replaceURL],
   );
 
-  const setTabSearch = useCallback(
-    (t: Tab, value: string) => {
-      const p = getCurrentParams();
-      const key = SEARCH_PARAM_BY_TAB[t];
+  const setTabSearch = useCallback<SetTabSearch>(
+    (tab, value) => {
+      const params = getCurrentParams();
+      const key = SEARCH_PARAM_BY_TAB[tab];
       const trimmedValue = value.trim();
-      if (trimmedValue) p.set(key, trimmedValue);
-      else p.delete(key);
-      replaceURL(p);
+      if (trimmedValue) params.set(key, trimmedValue);
+      else params.delete(key);
+      replaceURL(params);
     },
     [getCurrentParams, replaceURL],
   );
 
+  return { urlParams, replacePoolURL, setTabSearch };
+}
+
+function usePoolDetailData(normalizedPoolId: string, network: PoolNetwork) {
   const {
     data: poolData,
     error: poolErr,
@@ -132,90 +141,59 @@ function PoolDetail() {
     id: normalizedPoolId,
     chainId: network.chainId,
   });
-
   const { pool, thresholdsLoading, thresholdsError } = usePoolWithThresholds(
     poolData?.Pool?.[0] ?? null,
     normalizedPoolId,
     network.chainId,
   );
-
   const { data: limitsData, error: limitsError } = useGQL<{
     TradingLimit: TradingLimit[];
   }>(TRADING_LIMITS, { poolId: normalizedPoolId });
-  const tradingLimits = limitsData?.TradingLimit ?? [];
-  const tradingLimitsError = limitsError !== undefined;
-
   const { data: deployData } = useGQL<{
     FactoryDeployment: { txHash: string }[];
   }>(POOL_DEPLOYMENT, { poolId: normalizedPoolId });
-  const deployTxHash = deployData?.FactoryDeployment?.[0]?.txHash;
-
   const { data: olsData, isLoading: olsLoading } = useGQL<{
     OlsPool: OlsPool[];
   }>(OLS_POOL, { poolId: normalizedPoolId });
-
-  // Non-FPMM pools have no snapshot history — skip the fetch to avoid a
-  // useless network round trip.
   const fpmmPool = pool ? isFpmm(pool) : false;
 
-  // Hoisted out of `_tabs/swaps-tab.tsx` so the sub-hero TVL/volume charts
-  // can render independently of which tab is active. useGQL is SWR-based and
-  // dedupes by key + vars, so SwapsTab/LiquidityTab's identical
-  // POOL_DAILY_SNAPSHOTS_CHART queries share this response — DO NOT remove
-  // as "redundant" without also removing the tab-local copies.
-  const {
-    data: dailySnapshotData,
-    error: dailySnapshotError,
-    isLoading: dailySnapshotLoading,
-  } = useGQL<{ PoolDailySnapshot: PoolSnapshot[] }>(
-    fpmmPool ? POOL_DAILY_SNAPSHOTS_CHART : null,
-    { poolId: normalizedPoolId },
-    SNAPSHOT_REFRESH_MS,
-  );
-  const dailySnapshots = dailySnapshotData?.PoolDailySnapshot ?? [];
+  return {
+    pool,
+    poolErr,
+    poolLoading,
+    thresholdsLoading,
+    thresholdsError,
+    tradingLimits: limitsData?.TradingLimit ?? [],
+    tradingLimitsError: limitsError !== undefined,
+    deployTxHash: deployData?.FactoryDeployment?.[0]?.txHash,
+    olsData,
+    olsLoading,
+    fpmmPool,
+    ...useDailySnapshots(normalizedPoolId, fpmmPool),
+    ...usePoolRates(pool, network),
+  };
+}
 
-  // Non-USDm pairs (axlEUROC/EURm, etc.) need a rate map derived from all
-  // pools that have a USDm leg to convert their reserves/volume to USD.
-  // Without this the TVL and Volume charts render $0 for such pools.
-  // Skip the fetch entirely once we can prove the current pool is already
-  // USD-priceable with an empty rate map (USDm/USDC/USDT/AUSD legs) —
-  // avoids a permanent 5-min-refresh background query on the common case.
-  // Default to `false` while pool is still loading so USD-priceable pairs
-  // never kick off the request on first render. FX pairs serialize
-  // briefly behind the pool query, which is fine because charts are
-  // already gated behind `!pool` below.
-  //
-  // Uses ORACLE_RATES (slim ~5-field query) rather than ALL_POOLS_WITH_HEALTH
-  // (44 fields + non-oracleOk pools). `buildOracleRateMap`'s Pick<> matches
-  // what we request, and the map output is identical.
-  const poolNeedsRates = pool ? !canPricePool(pool, network, new Map()) : false;
-  const { data: ratePoolsData, error: allPoolsError } = useGQL<{
-    Pool: Array<Pick<Pool, "token0" | "token1" | "oraclePrice" | "oracleOk">>;
-  }>(
-    poolNeedsRates ? ORACLE_RATES : null,
-    { chainId: network.chainId },
-    SNAPSHOT_REFRESH_MS,
-  );
-  const ratePools = useMemo(() => ratePoolsData?.Pool ?? [], [ratePoolsData]);
-  const rates = useMemo(
-    () => buildOracleRateMap(ratePools, network),
-    [ratePools, network],
-  );
-  // ratesLoading only fires for pools that actually need the fetch — a
-  // USD-pegged pair with its query disabled shouldn't block chart render.
-  const ratesLoading =
-    poolNeedsRates && ratePoolsData === undefined && !allPoolsError;
-  const ratesError = allPoolsError !== undefined;
-
+function usePoolTabState({
+  fpmmPool,
+  olsData,
+  olsLoading,
+  requestedTab,
+  urlParams,
+}: {
+  fpmmPool: boolean;
+  olsData: { OlsPool: OlsPool[] } | undefined;
+  olsLoading: boolean;
+  requestedTab: Tab;
+  urlParams: URLSearchParams;
+}) {
   const hasOlsPool = selectActiveOlsPool(olsData?.OlsPool) !== null;
-  // Keep OLS tab visible while loading so ?tab=ols deep links don't flicker
   const olsTabVisible = hasOlsPool || olsLoading;
-  // Non-FPMM pools (virtual pools) have no deviation breach model — hide
-  // the tab rather than render an empty panel, same pattern as OLS.
   const visibleTabs = useMemo(
     () =>
       TABS.filter(
-        (t) => (t !== "ols" || olsTabVisible) && (t !== "breaches" || fpmmPool),
+        (tab) =>
+          (tab !== "ols" || olsTabVisible) && (tab !== "breaches" || fpmmPool),
       ),
     [olsTabVisible, fpmmPool],
   );
@@ -223,56 +201,82 @@ function PoolDetail() {
     ? requestedTab
     : (visibleTabs[0] ?? "providers");
   const activeSearch =
-    readSearchParam(searchParams, SEARCH_PARAM_BY_TAB[tab]) ?? "";
-  const poolMissing = !poolLoading && !poolErr && !pool;
+    readSearchParam(urlParams, SEARCH_PARAM_BY_TAB[tab]) ?? "";
 
-  // Canonicalize the URL when the requested tab was filtered out (e.g.
-  // ?tab=breaches on a virtual pool, where the breaches tab is hidden).
-  // Without this, refresh / share / back-forward render `tab` while the
-  // address bar still says `requestedTab`, so users can't reproduce the
-  // visible state. Same pattern as the legacy-poolId redirect above.
-  //
-  // MUST sit ABOVE the `!pool` early-return below — putting it after the
-  // return changes the hook count between the loading-render (effect
-  // fires) and the not-found-render (effect doesn't fire), which trips
-  // React's "rendered fewer hooks" guard.
+  return { visibleTabs, tab, activeSearch };
+}
+
+function PoolDetail({ initialSearch }: { initialSearch: string }) {
+  const { network } = useNetwork();
+  const { poolId } = useParams<{ poolId: string }>();
+  const decodedId = decodePoolId(poolId);
+  const normalizedPoolId = normalizePoolIdForChain(decodedId, network.chainId);
+  const poolAddress = stripChainIdFromPoolId(normalizedPoolId);
+  const { urlParams, replacePoolURL, setTabSearch } = usePoolUrlState(
+    initialSearch,
+    normalizedPoolId,
+  );
+  const rawTab = readSearchParam(urlParams, "tab");
+  const requestedTab: Tab = TABS.includes(rawTab as Tab)
+    ? (rawTab as Tab)
+    : "providers";
+  const limit = parseTabLimit(readSearchParam(urlParams, "limit"));
+  const detail = usePoolDetailData(normalizedPoolId, network);
+  const { visibleTabs, tab, activeSearch } = usePoolTabState({
+    fpmmPool: detail.fpmmPool,
+    olsData: detail.olsData,
+    olsLoading: detail.olsLoading,
+    requestedTab,
+    urlParams,
+  });
+  const poolMissing = !detail.poolLoading && !detail.poolErr && !detail.pool;
+
   useEffect(() => {
     if (
-      pool &&
+      detail.pool &&
       tab !== requestedTab &&
-      // Only rewrite when the requestedTab IS a valid Tab string but isn't
-      // currently visible; bare missing/unknown tab params can stay as-is
-      // because they always fall through to the default already.
       TABS.includes(rawTab as Tab) &&
       !visibleTabs.includes(rawTab as Tab)
     ) {
-      setURL(tab, limit);
+      replacePoolURL(tab, limit);
     }
-  }, [pool, tab, requestedTab, rawTab, visibleTabs, limit, setURL]);
+  }, [
+    detail.pool,
+    tab,
+    requestedTab,
+    rawTab,
+    visibleTabs,
+    limit,
+    replacePoolURL,
+  ]);
 
   return (
     <div className="space-y-6">
-      <PoolBreadcrumb pool={pool} poolAddress={poolAddress} network={network} />
+      <PoolBreadcrumb
+        pool={detail.pool}
+        poolAddress={poolAddress}
+        network={network}
+      />
 
       <PoolOverview
-        poolErr={poolErr}
-        poolLoading={poolLoading}
-        pool={pool}
+        poolErr={detail.poolErr}
+        poolLoading={detail.poolLoading}
+        pool={detail.pool}
         normalizedPoolId={normalizedPoolId}
-        deployTxHash={deployTxHash}
-        tradingLimits={tradingLimits}
-        tradingLimitsError={tradingLimitsError}
-        fpmmPool={fpmmPool}
+        deployTxHash={detail.deployTxHash}
+        tradingLimits={detail.tradingLimits}
+        tradingLimitsError={detail.tradingLimitsError}
+        fpmmPool={detail.fpmmPool}
         network={network}
-        dailySnapshots={dailySnapshots}
-        dailySnapshotLoading={dailySnapshotLoading}
-        dailySnapshotError={dailySnapshotError}
-        poolNeedsRates={poolNeedsRates}
-        ratesLoading={ratesLoading}
-        ratesError={ratesError}
-        thresholdsLoading={thresholdsLoading}
-        thresholdsError={thresholdsError}
-        rates={rates}
+        dailySnapshots={detail.dailySnapshots}
+        dailySnapshotLoading={detail.dailySnapshotLoading}
+        dailySnapshotError={detail.dailySnapshotError}
+        poolNeedsRates={detail.poolNeedsRates}
+        ratesLoading={detail.ratesLoading}
+        ratesError={detail.ratesError}
+        thresholdsLoading={detail.thresholdsLoading}
+        thresholdsError={detail.thresholdsError}
+        rates={detail.rates}
       />
 
       {!poolMissing && (
@@ -280,24 +284,24 @@ function PoolDetail() {
           <PoolTablist
             visibleTabs={visibleTabs}
             active={tab}
-            onSelect={(t) => setURL(t, limit)}
+            onSelect={(t) => replacePoolURL(t, limit)}
             limit={limit}
-            onLimitChange={(l) => setURL(tab, l)}
+            onLimitChange={(l) => replacePoolURL(tab, l)}
           />
 
           <PoolTabPanel
             tab={tab}
             normalizedPoolId={normalizedPoolId}
             limit={limit}
-            pool={pool}
+            pool={detail.pool}
             activeSearch={activeSearch}
             setTabSearch={setTabSearch}
-            tradingLimits={tradingLimits}
-            tradingLimitsError={tradingLimitsError}
-            fpmmPool={fpmmPool}
+            tradingLimits={detail.tradingLimits}
+            tradingLimitsError={detail.tradingLimitsError}
+            fpmmPool={detail.fpmmPool}
             network={network}
-            thresholdsLoading={thresholdsLoading}
-            thresholdsError={thresholdsError}
+            thresholdsLoading={detail.thresholdsLoading}
+            thresholdsError={detail.thresholdsError}
           />
         </>
       )}
@@ -590,5 +594,77 @@ function PoolTabPanel({
         )}
       </TokenAmountTrustGate>
     </div>
+  );
+}
+
+function useDailySnapshots(normalizedPoolId: string, fpmmPool: boolean) {
+  // Hoisted out of `_tabs/swaps-tab.tsx` so sub-hero charts render
+  // independently of which tab is active. useGQL dedupes identical tab-local
+  // queries by key + vars.
+  const { data, error, isLoading } = useGQL<{
+    PoolDailySnapshot: PoolSnapshot[];
+  }>(
+    fpmmPool ? POOL_DAILY_SNAPSHOTS_CHART : null,
+    { poolId: normalizedPoolId },
+    SNAPSHOT_REFRESH_MS,
+  );
+  return {
+    dailySnapshots: data?.PoolDailySnapshot ?? [],
+    dailySnapshotError: error,
+    dailySnapshotLoading: isLoading,
+  };
+}
+
+function usePoolRates(pool: Pool | null, network: PoolNetwork) {
+  const poolNeedsRates = pool ? !canPricePool(pool, network, new Map()) : false;
+  const { data, error } = useGQL<{
+    Pool: Array<Pick<Pool, "token0" | "token1" | "oraclePrice" | "oracleOk">>;
+  }>(
+    poolNeedsRates ? ORACLE_RATES : null,
+    { chainId: network.chainId },
+    SNAPSHOT_REFRESH_MS,
+  );
+  const ratePools = useMemo(() => data?.Pool ?? [], [data]);
+  const rates = useMemo(
+    () => buildOracleRateMap(ratePools, network),
+    [ratePools, network],
+  );
+  return {
+    poolNeedsRates,
+    rates,
+    ratesError: error !== undefined,
+    ratesLoading: poolNeedsRates && data === undefined && !error,
+  };
+}
+
+const urlSearchSubscribers = new Set<() => void>();
+
+function normalizeSearch(search: string) {
+  if (!search) return "";
+  return search.startsWith("?") ? search : `?${search}`;
+}
+
+function windowLocationSearch() {
+  if (typeof window === "undefined") return "";
+  return window.location.search;
+}
+
+function subscribeURLSearch(onStoreChange: () => void) {
+  if (typeof window === "undefined") return () => {};
+  urlSearchSubscribers.add(onStoreChange);
+  window.addEventListener("popstate", onStoreChange);
+  return () => {
+    urlSearchSubscribers.delete(onStoreChange);
+    window.removeEventListener("popstate", onStoreChange);
+  };
+}
+
+function notifyURLSearchSubscribers() {
+  for (const subscriber of urlSearchSubscribers) subscriber();
+}
+
+function useURLSearch(initialSearch: string) {
+  return useSyncExternalStore(subscribeURLSearch, windowLocationSearch, () =>
+    normalizeSearch(initialSearch),
   );
 }
