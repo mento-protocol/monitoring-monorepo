@@ -385,9 +385,17 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     );
   });
 
-  it("ORACLE_SNAPSHOTS_CHART selects deviationRatio + hasHealthData", () => {
-    expect(queries.ORACLE_SNAPSHOTS_CHART).toContain("deviationRatio");
-    expect(queries.ORACLE_SNAPSHOTS_CHART).toContain("hasHealthData");
+  it("ORACLE_SNAPSHOTS queries stay scoped to oracle/breaker fields", () => {
+    for (const query of [
+      queries.ORACLE_SNAPSHOTS,
+      queries.ORACLE_SNAPSHOTS_CHART,
+    ]) {
+      expect(query).not.toContain("priceDifference");
+      expect(query).not.toContain("rebalanceThreshold");
+      expect(query).not.toContain("deviationRatio");
+      expect(query).not.toContain("hasHealthData");
+      expect(query).not.toContain("degenerateReserves");
+    }
   });
 
   it("ORACLE_SNAPSHOTS_CHART folds in the persisted breaker band fields", () => {

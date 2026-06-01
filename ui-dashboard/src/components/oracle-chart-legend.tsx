@@ -10,7 +10,6 @@ import type {
 // component needs no fixidity helpers (avoids a value-import cycle with
 // oracle-chart.tsx; the BreakerConfig types are type-only imports).
 export function OracleChartLegend({
-  breachStartedAt,
   breakerConfig,
   breakerConfigStatus,
   hasPersistedBands,
@@ -18,7 +17,6 @@ export function OracleChartLegend({
   thresholdRatio,
   baselineLabel,
 }: {
-  breachStartedAt: string | null | undefined;
   breakerConfig: BreakerConfigForChart | null | undefined;
   breakerConfigStatus: BreakerConfigStatus;
   hasPersistedBands: boolean;
@@ -58,12 +56,6 @@ export function OracleChartLegend({
           <span className="inline-block w-2 h-2 rounded-full bg-slate-500" />
           {msg}
         </span>
-        {breachStartedAt && Number(breachStartedAt) > 0 && (
-          <span className="flex items-center gap-1">
-            <span className="inline-block w-4 border-t-2 border-dotted border-red-500" />
-            Rebalance breach start
-          </span>
-        )}
       </div>
     );
   }
@@ -95,12 +87,6 @@ export function OracleChartLegend({
         Current baseline ({baselineLabel}
         {baseline != null ? ` = ${formatBaseline(baseline)}` : ""})
       </span>
-      {breachStartedAt && Number(breachStartedAt) > 0 && (
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-4 border-t-2 border-dotted border-red-500" />
-          Rebalance breach start
-        </span>
-      )}
     </div>
   );
 }

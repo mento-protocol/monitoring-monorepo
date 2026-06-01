@@ -190,7 +190,7 @@ test.describe("dashboard browser flows", () => {
     expect(hasDocumentOverflow).toBe(false);
   });
 
-  test("marks one-sided reserve oracle snapshots on the Oracle tab", async ({
+  test("omits deviation threshold remnants on the Oracle tab", async ({
     page,
   }) => {
     await page.goto(`/pool/${CELO_POOL_ID}?tab=oracle`);
@@ -199,12 +199,19 @@ test.describe("dashboard browser flows", () => {
       "aria-selected",
       "true",
     );
-    await expect(page.getByText("one-sided")).toBeVisible();
+    const tabpanel = page.getByRole("tabpanel", { name: "oracle" });
     await expect(
-      page.locator(
-        '[title="73,000,000,000 bps from effectively one-sided reserves"]',
-      ),
+      tabpanel.getByText("Oracle Price vs Breaker Band"),
     ).toBeVisible();
+    await expect(tabpanel.getByText("Deviation breach started")).toHaveCount(0);
+    await expect(tabpanel.getByText("Rebalance breach start")).toHaveCount(0);
+    await expect(
+      tabpanel.getByRole("columnheader", { name: "Price Diff" }),
+    ).toHaveCount(0);
+    await expect(
+      tabpanel.getByRole("columnheader", { name: "Threshold" }),
+    ).toHaveCount(0);
+    await expect(tabpanel.getByText("one-sided")).toHaveCount(0);
   });
 
   test("shows a degraded query state without hiding healthy page sections", async ({

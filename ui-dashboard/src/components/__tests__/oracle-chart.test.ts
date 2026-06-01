@@ -44,12 +44,9 @@ function oracleSnapshot(
     oraclePrice: "1000000000000000000000000", // 1.0 in Fixidity 1e24
     oracleOk: true,
     numReporters: 3,
-    priceDifference: "0",
-    rebalanceThreshold: 500,
     source: "SortedOracles",
     blockNumber: "1",
     txHash: "0xabc",
-    hasHealthData: true,
     ...overrides,
   };
 }
@@ -229,41 +226,23 @@ describe("resolveSnapshotBand", () => {
 
 describe("buildOracleShapes", () => {
   it("returns no band shapes when baseline is null", () => {
-    const shapes = buildOracleShapes(undefined, 1.1, null, 0.01);
+    const shapes = buildOracleShapes(1.1, null, 0.01);
     expect(shapes).toEqual([]);
   });
 
   it("returns no band shapes when thresholdRatio is null", () => {
-    const shapes = buildOracleShapes(undefined, 1.1, 1.0, null);
+    const shapes = buildOracleShapes(1.1, 1.0, null);
     expect(shapes).toEqual([]);
   });
 
-  it("returns only the breach guide when band is absent but breach is set", () => {
-    const shapes = buildOracleShapes("1778457600", 1.1, null, null);
-    expect(shapes).toHaveLength(1);
-    expect(shapes![0]).toMatchObject({
-      type: "line",
-      xref: "x",
-      yref: "paper",
-      layer: "above",
-    });
-  });
+  it("emits three band rects + two threshold lines + baseline", () => {
+    const shapes = buildOracleShapes(1.5, 1.0, 0.01);
+    // 3 rects + 2 threshold lines + 1 baseline = 6.
+    expect(shapes).toHaveLength(6);
 
-  it("emits three band rects + two threshold lines + baseline + breach guide", () => {
-    const shapes = buildOracleShapes("1778457600", 1.5, 1.0, 0.01);
-    // 3 rects + 2 threshold lines + 1 baseline + 1 breach guide = 7.
-    expect(shapes).toHaveLength(7);
-
-    // Order: red-below, green-inside, red-above, dashed-Lo, dashed-Hi, baseline, breach guide.
-    const [
-      redBelow,
-      greenInside,
-      redAbove,
-      threshLo,
-      threshHi,
-      baselineLine,
-      breachGuide,
-    ] = shapes!;
+    // Order: red-below, green-inside, red-above, dashed-Lo, dashed-Hi, baseline.
+    const [redBelow, greenInside, redAbove, threshLo, threshHi, baselineLine] =
+      shapes!;
 
     expect(redBelow).toMatchObject({
       type: "rect",
@@ -308,37 +287,17 @@ describe("buildOracleShapes", () => {
       y0: 1.0,
       y1: 1.0,
     });
-    // Breach guide (vertical, against paper-y). The x-anchor is derived from
-    // `breachStartedAt * 1000` → ISO; asserting it pins the unit semantics so
-    // a regression to (e.g.) millisecond inputs would surface here.
-    expect(breachGuide).toMatchObject({
-      type: "line",
-      xref: "x",
-      yref: "paper",
-      layer: "above",
-      line: { color: "#ef4444", dash: "dot" },
-      x0: "2026-05-11T00:00:00.000Z",
-      x1: "2026-05-11T00:00:00.000Z",
-    });
-  });
-
-  it("omits the breach guide when breachStartedAt is unset / zero", () => {
-    const unset = buildOracleShapes(undefined, 1.5, 1.0, 0.01);
-    expect(unset).toHaveLength(6); // 3 rects + 2 thresholds + 1 baseline.
-
-    const zero = buildOracleShapes("0", 1.5, 1.0, 0.01);
-    expect(zero).toHaveLength(6);
   });
 
   it("anchors the upper red rect past max(baseline*10, yMax*2)", () => {
-    const shapes = buildOracleShapes(undefined, 1.5, 1.0, 0.01);
+    const shapes = buildOracleShapes(1.5, 1.0, 0.01);
     const redAbove = shapes![2];
     // max(1*10, 1.5*2) = 10 — the `baseline*10` term wins.
     expect(redAbove).toMatchObject({ y1: 10 });
   });
 
   it("anchors past yMax*2 when yMax dominates baseline (zoomed-out branch)", () => {
-    const shapes = buildOracleShapes(undefined, 6, 1.0, 0.01);
+    const shapes = buildOracleShapes(6, 1.0, 0.01);
     const redAbove = shapes![2];
     // max(1*10, 6*2) = max(10, 12) = 12 — the `yMax*2` term wins.
     expect(redAbove).toMatchObject({ y1: 12 });

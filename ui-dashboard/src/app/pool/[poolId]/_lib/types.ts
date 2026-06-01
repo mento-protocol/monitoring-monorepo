@@ -1,5 +1,1 @@
-export type OracleSortCol =
-  | "timestamp"
-  | "oracleOk"
-  | "oraclePrice"
-  | "priceDifference";
+export type OracleSortCol = "timestamp" | "oracleOk" | "oraclePrice";

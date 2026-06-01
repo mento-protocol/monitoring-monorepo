@@ -43,14 +43,9 @@ export const ORACLE_SNAPSHOTS = `
       oraclePrice
       oracleOk
       numReporters
-      priceDifference
-      degenerateReserves
-      rebalanceThreshold
       source
       blockNumber
       txHash
-      deviationRatio
-      hasHealthData
     }
   }
 `;
@@ -66,12 +61,9 @@ export const ORACLE_SNAPSHOTS = `
 // a single outlier reporter that doesn't move the median never trips a
 // breaker. Restricting the chart to oracle_median_updated keeps the
 // band verdict semantically correct (a red point means "if this median
-// landed today, the breaker would trip"). This source filter is defensive
-// for price-difference-based modes only: drained-pool priceDifference
-// outliers can still exist on median rows, and the current chart stays
-// correct because it plots oraclePrice against breaker bands. The
-// update_reserves / rebalanced rows store pool-internal post-state
-// deviation, not oracle deviation, so they're excluded for the same reason.
+// landed today, the breaker would trip"). The update_reserves / rebalanced
+// rows are pool-state snapshots rather than oracle median changes, so they
+// are excluded from this breaker-band chart.
 //
 // Keyset-paginated: `timestamp: { _lt: $beforeTimestamp }` lets the chart
 // scroll back past the 1000-row Hasura cap one page at a time (see
@@ -114,14 +106,9 @@ export const ORACLE_SNAPSHOTS_CHART = `
       oraclePrice
       oracleOk
       numReporters
-      priceDifference
-      degenerateReserves
-      rebalanceThreshold
       source
       blockNumber
       txHash
-      deviationRatio
-      hasHealthData
       breakerBaselineAtSnapshot
       breakerThresholdAtSnapshot
     }
