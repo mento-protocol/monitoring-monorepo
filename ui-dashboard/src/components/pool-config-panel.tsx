@@ -33,8 +33,8 @@ function formatBps(bps: number | null | undefined): string {
   return `${(bps / 100).toFixed(2)}%`;
 }
 
-function formatCount(value: number | null | undefined): string {
-  if (value == null || value < 0) return "—";
+function formatReporterCount(value: number | null | undefined): string {
+  if (value == null || value <= 0) return "—";
   return value.toLocaleString();
 }
 
@@ -45,13 +45,14 @@ function formatSeconds(value: string | null | undefined): string {
 }
 
 function TradingLimitConfigValue({
+  network,
   tradingLimits,
   hasError,
 }: {
+  network: ReturnType<typeof useNetwork>["network"];
   tradingLimits: TradingLimit[];
   hasError: boolean;
 }) {
-  const { network } = useNetwork();
   if (hasError) return <span className="text-rose-400">Unavailable</span>;
   if (tradingLimits.length === 0) {
     return <span className="text-slate-500">—</span>;
@@ -164,7 +165,7 @@ export function PoolConfigPanel({
       />
       <Stat
         label="Oracle Reporters"
-        value={formatCount(pool.oracleNumReporters)}
+        value={formatReporterCount(pool.oracleNumReporters)}
         mono
       />
       <Stat
@@ -211,15 +212,23 @@ export function PoolConfigPanel({
         mono
       />
       <Stat
-        label="Limit Windows"
+        label={
+          <span className="inline-flex items-center gap-1">
+            Limit Windows
+            <InfoPopover
+              label="Limit Windows"
+              content="TradingLimitsV2 window durations: L0 is the 5-minute limit, L1 is the 24-hour limit, and LG is the lifetime/global limit."
+            />
+          </span>
+        }
         value="L0 5m / L1 24h / LG lifetime"
         mono
-        title="TradingLimitsV2 window durations"
       />
       <Stat
         label="Limit Caps"
         value={
           <TradingLimitConfigValue
+            network={network}
             tradingLimits={tradingLimits}
             hasError={tradingLimitsError}
           />

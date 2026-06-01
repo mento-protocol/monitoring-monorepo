@@ -218,6 +218,13 @@ describe("PoolConfigPanel", () => {
       expect(html).toMatch(/Oracle Expiry[\s\S]*?—/);
       expect(html).toMatch(/Oracle Reporters[\s\S]*?—/);
     });
+
+    it("treats zero reporter count as the unknown seed sentinel", () => {
+      const html = renderToStaticMarkup(
+        <PoolConfigPanel pool={{ ...BASE_POOL, oracleNumReporters: 0 }} />,
+      );
+      expect(html).toMatch(/Oracle Reporters[\s\S]*?—/);
+    });
   });
 
   describe("Trading limit config rows", () => {

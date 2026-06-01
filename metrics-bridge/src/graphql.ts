@@ -195,7 +195,9 @@ export async function fetchPools(): Promise<BridgePoolsResponse> {
 
   const lineageById = new Map(lineage.Pool.map((p) => [p.id, p]));
   const openBreachById = new Map(openBreach.Pool.map((p) => [p.id, p]));
-  const oracleTxById = new Map(oracleTx.Pool.map((p) => [p.id, p]));
+  const oracleTxById = new Map(
+    oracleTx.Pool.filter((p) => p.oracleTxHash).map((p) => [p.id, p]),
+  );
   return {
     Pool: base.Pool.map((p) => ({
       ...p,

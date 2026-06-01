@@ -527,9 +527,9 @@ function oracleUpdateMetricLabels(
 ): OracleUpdateLabels {
   return {
     ...labels,
-    last_oracle_update_url:
-      pool.oracleTxHash &&
-      (explorerTxUrl(pool.chainId, pool.oracleTxHash) ?? ""),
+    last_oracle_update_url: pool.oracleTxHash
+      ? (explorerTxUrl(pool.chainId, pool.oracleTxHash) ?? "")
+      : "",
   };
 }
 

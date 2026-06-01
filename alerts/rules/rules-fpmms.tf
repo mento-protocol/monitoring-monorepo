@@ -134,7 +134,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}{{ $lastOracleUpdateUrl := index $values.OracleAge.Labels \"last_oracle_update_url\" }} Last update: {{ if $lastOracleUpdateUrl }}<{{ $lastOracleUpdateUrl }}|{{ humanizeDuration $values.OracleAge.Value }} ago>{{ else }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ end }}.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -156,9 +156,10 @@ resource "grafana_rule_group" "fpmms_oracle" {
       })
     }
 
-    # See Oracle Liveness for the OracleTs / OracleAge rationale — same
-    # pair is used here so the annotation can detect the never-reported
-    # sentinel (oracle_timestamp == 0) instead of leaning on an age cutoff.
+    # See Oracle Liveness for the OracleTs / OracleAge rationale. Oracle Down
+    # fires on oracle_ok, which deliberately omits the transaction URL label to
+    # avoid alert-identity churn. Strip that label from companion timestamp
+    # queries so Grafana still matches these values to A's pool fingerprint.
     data {
       ref_id         = "OracleTs"
       datasource_uid = var.prometheus_datasource_uid
@@ -168,7 +169,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleTs"
-        expr    = "mento_pool_oracle_timestamp"
+        expr    = "max without (last_oracle_update_url) (mento_pool_oracle_timestamp)"
         instant = true
       })
     }
@@ -182,7 +183,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = "time() - mento_pool_oracle_timestamp"
+        expr    = "time() - max without (last_oracle_update_url) (mento_pool_oracle_timestamp)"
         instant = true
       })
     }
