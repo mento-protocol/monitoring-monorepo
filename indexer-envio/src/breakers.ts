@@ -8,7 +8,7 @@
 // hydrate from RPC via `fetchBreakerDefaults` / `fetchBreakerFeedState`.
 // ---------------------------------------------------------------------------
 
-import type { Breaker, BreakerConfig, Pool } from "envio";
+import type { Breaker, BreakerConfig, Pool, RateFeedDependency } from "envio";
 import type { EvmOnEventContext } from "envio";
 import { asAddress, isVirtualPool } from "./helpers.js";
 import { getPoolsByFeed, type BreakerKindRpc } from "./rpc.js";
@@ -17,6 +17,7 @@ import {
   breakerFeedStateEffect,
   breakerKindEffect,
   breakerListEffect,
+  rateFeedDependenciesEffect,
 } from "./rpc/effects.js";
 
 /** ID for the per-breaker `Breaker` entity. */
@@ -205,18 +206,23 @@ export function _clearBootstrapCaches(): void {
   _bootstrapBackoffUntilTs.clear();
 }
 
+// Returns true when the feed's breaker configs are known-hydrated (already
+// cached, no breakers registered, or every breaker just hydrated) and false
+// when a transient RPC failure left them incomplete (backoff set). Callers that
+// fan out over OTHER feeds' configs (dependency loading) use this to avoid
+// caching their own work as done while a dependency stayed unhydrated.
 export async function bootstrapFeedBreakerConfigs(
   context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
   blockNumber: bigint,
   blockTimestamp: bigint,
-): Promise<void> {
+): Promise<boolean> {
   const cacheKey = `${chainId}:${rateFeedID.toLowerCase()}`;
-  if (_bootstrapAttempted.has(cacheKey)) return;
+  if (_bootstrapAttempted.has(cacheKey)) return true;
   // Skip retry while inside the negative-cache TTL window.
   const backoffUntil = _bootstrapBackoffUntilTs.get(cacheKey);
-  if (backoffUntil !== undefined && blockTimestamp < backoffUntil) return;
+  if (backoffUntil !== undefined && blockTimestamp < backoffUntil) return false;
 
   // Only mark as attempted AFTER a successful BreakerBox.getBreakers() call.
   // A transient RPC failure here would otherwise permanently poison the
@@ -230,14 +236,14 @@ export async function bootstrapFeedBreakerConfigs(
   });
   if (!breakerAddresses) {
     setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
-    return;
+    return false;
   }
   if (breakerAddresses.length === 0) {
     // Empty list is itself authoritative (no breakers registered for this
     // BreakerBox at this block) — safe to cache so we don't refetch.
     markBootstrapAttempted(cacheKey);
     _bootstrapBackoffUntilTs.delete(cacheKey);
-    return;
+    return true;
   }
 
   // Track whether every per-breaker hydration call succeeded. A null return
@@ -274,6 +280,7 @@ export async function bootstrapFeedBreakerConfigs(
   } else {
     setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
   }
+  return allSucceeded;
 }
 
 /** Set a backoff TTL for a (chain, feed) tuple, applying FIFO eviction at
@@ -670,45 +677,55 @@ export async function handleRateChangeThresholdUpdated({
  * (Defined here at file end so its insertion doesn't shift the line-keyed
  * ESLint baseline entry for `bootstrapFeedBreakerConfigs` above.) */
 export async function computeFeedHalted(
-  // Only needs the breaker entities — narrowed so `upsertPool` (PoolContext)
-  // can call it without the full EvmOnEventContext surface.
-  context: Pick<EvmOnEventContext, "BreakerConfig" | "Breaker">,
+  // Only needs the breaker + dependency entities — narrowed so `upsertPool`
+  // (PoolContext) can call it without the full EvmOnEventContext surface.
+  context: Pick<
+    EvmOnEventContext,
+    "BreakerConfig" | "Breaker" | "RateFeedDependency"
+  >,
   chainId: number,
   rateFeedID: string,
 ): Promise<boolean> {
-  const configs = await context.BreakerConfig.getWhere({
+  // Halted if the feed's OWN breakers are tripped...
+  if (await computeOwnFeedHalted(context, chainId, rateFeedID)) return true;
+  // ...OR if any dependency feed's OWN breakers are tripped. On-chain
+  // getRateFeedTradingMode ORs in `rateFeedTradingMode[dep]` (the dependency's
+  // direct mode) one level deep, non-recursive — so we OR each dependency's
+  // OWN halt, NOT its transitive halt. See RateFeedDependency in schema.graphql.
+  const deps = await context.RateFeedDependency.getWhere({
     rateFeedID: { _eq: asAddress(rateFeedID) },
   });
-  for (const cfg of configs) {
-    if (cfg.chainId !== chainId) continue;
-    if (!cfg.enabled) continue;
-    if (cfg.status !== "TRIPPED") continue;
-    const breaker = await context.Breaker.get(cfg.breaker_id);
-    if (!breaker || breaker.kind === "MARKET_HOURS") continue;
-    return true;
+  for (const dep of deps) {
+    if (dep.chainId !== chainId) continue;
+    if (await computeOwnFeedHalted(context, chainId, dep.dependsOn))
+      return true;
   }
   return false;
 }
 
-/** Recompute `Pool.breakerTripped` for every pool on `rateFeedID` and persist
- * any change. Idempotent and self-correcting: reads the feed's full
- * BreakerConfig set each call, so it stays correct regardless of which
- * BreakerBox transition triggered it. Call it after any trip / reset / enable /
- * remove that can move the OR. */
+/** Recompute `Pool.breakerTripped` for `rateFeedID` AND every feed that depends
+ * on it, persisting any change. Idempotent and self-correcting: each feed's halt
+ * is recomputed from its full BreakerConfig + dependency set, so it stays correct
+ * regardless of which BreakerBox transition triggered it. Call it after any trip
+ * / reset / enable / remove that can move the OR — the reverse-edge fan-out then
+ * propagates the change to dependent feeds' pools automatically. */
 export async function syncPoolsBreakerHalt(
   context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
 ): Promise<void> {
-  const halted = await computeFeedHalted(context, chainId, rateFeedID);
-  const poolIds = await getPoolsByFeed(context, chainId, asAddress(rateFeedID));
-  for (const poolId of poolIds) {
-    const pool = await context.Pool.get(poolId);
-    if (!pool || pool.breakerTripped === halted) continue;
-    // VirtualPools (v2) stay N/A regardless of breaker state — don't mark them
-    // halted (the dashboard never surfaces it for them anyway).
-    if (isVirtualPool(pool)) continue;
-    context.Pool.set({ ...pool, breakerTripped: halted });
+  const feed = asAddress(rateFeedID);
+  await recomputeFeedPools(context, chainId, feed);
+  // Reverse-edge fan-out: a trip/reset on `feed` also moves the halt OR for
+  // every feed that DEPENDS ON it. One hop only — on-chain dependency
+  // resolution is one level, so a dependent's own dependents are unaffected
+  // (their OR reads this feed's dependents' OWN modes, not `feed`'s).
+  const dependents = await context.RateFeedDependency.getWhere({
+    dependsOn: { _eq: feed },
+  });
+  for (const edge of dependents) {
+    if (edge.chainId !== chainId) continue;
+    await recomputeFeedPools(context, chainId, edge.rateFeedID);
   }
 }
 
@@ -719,7 +736,10 @@ export async function syncPoolsBreakerHalt(
  * BreakerBox event — and otherwise preserves the existing flag. Extracted so
  * `upsertPool` doesn't take on the gate's cognitive complexity. */
 export async function breakerTrippedOnFeedAssign(
-  context: Pick<EvmOnEventContext, "BreakerConfig" | "Breaker">,
+  context: Pick<
+    EvmOnEventContext,
+    "BreakerConfig" | "Breaker" | "RateFeedDependency"
+  >,
   chainId: number,
   existing: Pick<
     Pool,
@@ -760,23 +780,248 @@ export async function syncHaltOnColdStart(
   await syncPoolsBreakerHalt(context, chainId, rateFeedID);
 }
 
-/** Force `breakerTripped=false` for every pool on `rateFeedID`. Used by the
- * `RateFeedRemoved` handler: once a feed is removed from BreakerBox no breaker
- * governs it, so on-chain `getRateFeedTradingMode` returns unrestricted and the
- * pools are no longer halted. A plain `syncPoolsBreakerHalt` recompute can't be
- * used here — the feed's persisted BreakerConfig rows stay TRIPPED as a
- * historical record (a removed feed receives no further events to reset them),
- * so the recompute would re-derive `true`. Skips VirtualPools (never halted). */
-export async function clearPoolsBreakerHalt(
+/** Handle `RateFeedRemoved` for `rateFeedID`. Mirrors on-chain `removeRateFeed`,
+ * which `delete`s the feed's `rateFeedTradingMode` (→ 0 / unrestricted), its
+ * `rateFeedDependencies` array, and its breaker statuses. So:
+ *   1. Disable the feed's BreakerConfig rows. Mirrors `deleteBreakerStatus`:
+ *      `status` is left at its last value as the historical record of the last
+ *      trip, but `enabled=false` makes `computeOwnFeedHalted` skip the rows — so
+ *      the removed feed stops halting itself AND any feed that depends on it.
+ *   2. Delete the feed's OWN dependency edges (mirrors `delete
+ *      rateFeedDependencies[feed]`). Edges where this feed is a DEPENDENCY of
+ *      another feed are KEPT: on-chain only the removed feed's own array is
+ *      cleared, and the dependent un-halts via the recompute in step 3 — deleting
+ *      those reverse edges would wrongly drop the inheritance if the feed were
+ *      re-added and re-tripped.
+ *   3. Recompute the feed's own pools (now un-halted) and fan out to its
+ *      dependents (which inherit the now-disabled feed's halt = false).
+ * Replaces a plain force-clear: disabling the configs is what lets the recompute
+ * derive `false` instead of re-deriving `true` from stale-TRIPPED rows, and the
+ * recompute is what propagates the un-halt to dependents. Skips VirtualPools
+ * (handled inside `syncPoolsBreakerHalt`).
+ *
+ * Residual (fails safe, by design): we keep `status` so the historical trip
+ * record survives. If a removed feed that was TRIPPED is later re-ADDED and
+ * re-enabled (BreakerStatusUpdated flips `enabled` without refreshing `status`),
+ * it — and any feed still depending on it — can show a halt until the next real
+ * trip/reset refreshes the row. This mirrors the existing `BreakerRemoved`
+ * disabled+TRIPPED behavior and over-reports rather than under-reports a halt
+ * (the conservative direction for a monitoring dashboard). */
+export async function clearHaltOnFeedRemoved(
   context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
 ): Promise<void> {
+  const feed = asAddress(rateFeedID);
+  const configs = await context.BreakerConfig.getWhere({
+    rateFeedID: { _eq: feed },
+  });
+  for (const cfg of configs) {
+    if (cfg.chainId !== chainId) continue;
+    if (!cfg.enabled) continue;
+    context.BreakerConfig.set({ ...cfg, enabled: false });
+  }
+  const ownEdges = await context.RateFeedDependency.getWhere({
+    rateFeedID: { _eq: feed },
+  });
+  for (const edge of ownEdges) {
+    if (edge.chainId !== chainId) continue;
+    context.RateFeedDependency.deleteUnsafe(edge.id);
+  }
+  await syncPoolsBreakerHalt(context, chainId, feed);
+}
+
+// ---------------------------------------------------------------------------
+// Rate-feed dependency graph (#712)
+//
+// BreakerBox lets a feed inherit halts from its dependency feeds. We model the
+// edges as `RateFeedDependency` rows and OR each dependency's OWN halt into the
+// dependent feed's `breakerTripped`. Edges are read from RPC (the on-chain
+// event's `dependencies` array is an indexed dynamic type — only a topic hash,
+// not decodable) and reconciled (replace, not append) since
+// `setRateFeedDependencies` sets the whole array.
+//
+// (Defined at file end so insertions don't shift line-keyed baseline entries.)
+// ---------------------------------------------------------------------------
+
+/** Is `rateFeedID` halted by its OWN breakers? True when it has at least one
+ * ENABLED, non-MARKET_HOURS BreakerConfig in the TRIPPED state — the same
+ * predicate the dashboard's `pickTrippableConfig` uses. MARKET_HOURS is excluded
+ * on purpose: a weekend FX closure is a scheduled unavailability that renders via
+ * the dashboard's WEEKEND path, not a price-breaker fault. This is the per-feed
+ * primitive `computeFeedHalted` ORs over self + each dependency (one level). */
+async function computeOwnFeedHalted(
+  context: Pick<EvmOnEventContext, "BreakerConfig" | "Breaker">,
+  chainId: number,
+  rateFeedID: string,
+): Promise<boolean> {
+  const configs = await context.BreakerConfig.getWhere({
+    rateFeedID: { _eq: asAddress(rateFeedID) },
+  });
+  for (const cfg of configs) {
+    if (cfg.chainId !== chainId) continue;
+    if (!cfg.enabled) continue;
+    if (cfg.status !== "TRIPPED") continue;
+    const breaker = await context.Breaker.get(cfg.breaker_id);
+    if (!breaker || breaker.kind === "MARKET_HOURS") continue;
+    return true;
+  }
+  return false;
+}
+
+/** Recompute `Pool.breakerTripped` (dependency-aware) for every pool on a single
+ * feed and persist any change. The per-feed core of `syncPoolsBreakerHalt`,
+ * split out so the reverse-edge fan-out applies it to each dependent without
+ * recursing back into the fan-out (keeps propagation one hop). */
+async function recomputeFeedPools(
+  context: EvmOnEventContext,
+  chainId: number,
+  rateFeedID: string,
+): Promise<void> {
+  const halted = await computeFeedHalted(context, chainId, rateFeedID);
   const poolIds = await getPoolsByFeed(context, chainId, asAddress(rateFeedID));
   for (const poolId of poolIds) {
     const pool = await context.Pool.get(poolId);
-    if (!pool || !pool.breakerTripped) continue;
+    if (!pool || pool.breakerTripped === halted) continue;
+    // VirtualPools (v2) stay N/A regardless of breaker state.
     if (isVirtualPool(pool)) continue;
-    context.Pool.set({ ...pool, breakerTripped: false });
+    context.Pool.set({ ...pool, breakerTripped: halted });
+  }
+}
+
+/** ID for a `RateFeedDependency` edge: `{chainId}-{rateFeedID}-{dependsOn}`. */
+export function makeRateFeedDependencyId(
+  chainId: number,
+  rateFeedID: string,
+  dependsOn: string,
+): string {
+  return `${chainId}-${asAddress(rateFeedID)}-${asAddress(dependsOn)}`;
+}
+
+/** Reconcile `rateFeedID`'s persisted dependency edges to `deps` (the current
+ * on-chain set): delete edges no longer present, upsert the rest. Replace (not
+ * merge) semantics mirror `setRateFeedDependencies`, which sets the whole array. */
+async function reconcileDependencyEdges(
+  context: EvmOnEventContext,
+  chainId: number,
+  rateFeedID: string,
+  deps: string[],
+): Promise<void> {
+  const feed = asAddress(rateFeedID);
+  const want = new Set(deps.map((d) => asAddress(d)));
+  const existing = await context.RateFeedDependency.getWhere({
+    rateFeedID: { _eq: feed },
+  });
+  for (const edge of existing) {
+    if (edge.chainId !== chainId) continue;
+    if (!want.has(edge.dependsOn))
+      context.RateFeedDependency.deleteUnsafe(edge.id);
+  }
+  for (const dependsOn of want) {
+    const row: RateFeedDependency = {
+      id: makeRateFeedDependencyId(chainId, feed, dependsOn),
+      chainId,
+      rateFeedID: feed,
+      dependsOn,
+    };
+    context.RateFeedDependency.set(row);
+  }
+}
+
+/** RPC-read `rateFeedID`'s current dependency set and reconcile its edges.
+ * Returns true when edges were (re)loaded (caller should re-sync the feed's
+ * pools), false when skipped (already attempted / within backoff) or the RPC
+ * read failed. Reuses the breaker-bootstrap caches under a `dep:` key namespace
+ * so a feed's deps are read at most once per process unless `force` (the
+ * RateFeedDependenciesSet handler) bypasses the cache to pick up a change. */
+export async function loadFeedDependencies(args: {
+  context: EvmOnEventContext;
+  chainId: number;
+  rateFeedID: string;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  force?: boolean;
+}): Promise<boolean> {
+  const { context, chainId, rateFeedID, blockNumber, blockTimestamp } = args;
+  const cacheKey = `dep:${chainId}:${rateFeedID.toLowerCase()}`;
+  if (!args.force) {
+    if (_bootstrapAttempted.has(cacheKey)) return false;
+    const backoffUntil = _bootstrapBackoffUntilTs.get(cacheKey);
+    if (backoffUntil !== undefined && blockTimestamp < backoffUntil)
+      return false;
+  }
+  const deps = await context.effect(rateFeedDependenciesEffect, {
+    chainId,
+    rateFeedID,
+    blockNumber,
+  });
+  if (deps === null) {
+    setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
+    // A forced refresh that fails must not stay "attempted", or a later oracle
+    // event won't retry the changed set.
+    if (args.force) _bootstrapAttempted.delete(cacheKey);
+    return false;
+  }
+  await reconcileDependencyEdges(context, chainId, rateFeedID, deps);
+  // Hydrate each dependency feed's own BreakerConfig rows. A dependency may have
+  // no pools and no live BreakerBox event in our range (its config predates
+  // start_block and it never trips/resets again), in which case nothing else
+  // bootstraps it — and `computeOwnFeedHalted(dep)` reading zero rows would
+  // silently drop an already-tripped dependency's halt. Bounded + cached.
+  let allHydrated = true;
+  for (const dep of deps) {
+    if (
+      !(await bootstrapFeedBreakerConfigs(
+        context,
+        chainId,
+        dep,
+        blockNumber,
+        blockTimestamp,
+      ))
+    ) {
+      allHydrated = false;
+    }
+  }
+  if (allHydrated) {
+    markBootstrapAttempted(cacheKey);
+    _bootstrapBackoffUntilTs.delete(cacheKey);
+  } else {
+    // A dependency's config bootstrap failed transiently — do NOT mark the
+    // dep-load done, or a later event would skip the reload and the dependent's
+    // pools could stay wrong until restart. Back off and retry; the edges are
+    // already reconciled so the re-sync below still runs (best-effort, self-
+    // corrects once the dependency hydrates).
+    setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
+    if (args.force) _bootstrapAttempted.delete(cacheKey);
+  }
+  return true;
+}
+
+/** Cold-start for the dependency graph, mirroring `syncHaltOnColdStart` for the
+ * breaker-config graph. The current dependency edges were set before
+ * `start_block`, so no `RateFeedDependenciesSet` fires in our range — load them
+ * (once per feed) on the dependent's oracle events. If a dependency is already
+ * tripped, the feed's pools must reflect the inherited halt, so re-sync when the
+ * edges are first loaded. Gated on `hasPools` (a feed with no pools has no
+ * `breakerTripped` to set; its halt still propagates to its dependents via their
+ * own load + the breaker-event fan-out). No-op once loaded, so safe per event. */
+export async function syncDependencyHaltOnColdStart(args: {
+  context: EvmOnEventContext;
+  chainId: number;
+  rateFeedID: string;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  hasPools: boolean;
+}): Promise<void> {
+  if (!args.hasPools) return;
+  const loaded = await loadFeedDependencies({
+    context: args.context,
+    chainId: args.chainId,
+    rateFeedID: args.rateFeedID,
+    blockNumber: args.blockNumber,
+    blockTimestamp: args.blockTimestamp,
+  });
+  if (loaded) {
+    await syncPoolsBreakerHalt(args.context, args.chainId, args.rateFeedID);
   }
 }

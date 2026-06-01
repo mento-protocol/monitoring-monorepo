@@ -13,15 +13,21 @@ import {
   _clearBreakerMocks,
   _clearBootstrapCaches,
 } from "../src/EventHandlers.ts";
-import { makeBreakerConfigId, makeBreakerId } from "../src/breakers.ts";
+import {
+  makeBreakerConfigId,
+  makeBreakerId,
+  makeRateFeedDependencyId,
+} from "../src/breakers.ts";
 import { makePoolId } from "../src/helpers.ts";
 import { makePool } from "./helpers/makePool.js";
+import { registerMockRateFeedDependenciesHttp } from "../src/rpc/http-test-mock-bridge.js";
 
 type MockDb = MockDbWith<{
   Breaker: WritableEntity;
   BreakerConfig: WritableEntity;
   BreakerTripEvent: EntityReader;
   Pool: WritableEntity;
+  RateFeedDependency: WritableEntity;
 }>;
 
 const TestHelpers = indexerTestHelpers<MockDb>();
@@ -275,7 +281,7 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     );
   });
 
-  it("RateFeedRemoved clears Pool.breakerTripped even though configs stay TRIPPED", async () => {
+  it("RateFeedRemoved disables the feed's configs (keeps status) and clears its pools", async () => {
     let mockDb = MockDb.createMockDb();
     const poolId = makePoolId(
       CHAIN_ID,
@@ -344,12 +350,110 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
       false,
       "RateFeedRemoved should clear the halt",
     );
-    // Config stays TRIPPED (historical record) — proves clear, not recompute.
+    // Config is DISABLED on removal (mirrors on-chain deleteBreakerStatus) so the
+    // recompute derives false, but `status` is kept as the historical record.
     const cfgId = makeBreakerConfigId(CHAIN_ID, MD_BREAKER, FEED);
+    const cfg = mockDb.entities.BreakerConfig.get(cfgId) as {
+      status: string;
+      enabled: boolean;
+    };
+    assert.equal(cfg.status, "TRIPPED", "status kept as historical record");
+    assert.equal(cfg.enabled, false, "config disabled on feed removal");
+  });
+
+  it("removing a DEPENDENCY feed un-halts the dependent's pools (end-to-end)", async () => {
+    // DEP_FEED (Y) is a dependency of FEED (X). Trip Y → X inherits the halt via
+    // the reverse fan-out. Then RateFeedRemoved(Y) must un-halt X (on-chain
+    // removeRateFeed deletes rateFeedTradingMode[Y] → 0, so X no longer inherits).
+    const DEP_FEED = "0xa1a8003936862e7a15092a91898d69fa8bce290c";
+    _setMockBreakerFeedState(CHAIN_ID, MD_BREAKER, DEP_FEED, {
+      enabled: true,
+      tradingMode: 0,
+      lastStatusUpdatedAt: 1_700_000_000n,
+      cooldownTime: 0n,
+      rateChangeThreshold: 0n,
+      smoothingFactor: 5n * 10n ** 21n,
+      medianRatesEMA: 1_171_560_280_196_965_000_000_000n,
+      referenceValue: null,
+    });
+
+    let mockDb = MockDb.createMockDb();
+    const poolId = makePoolId(
+      CHAIN_ID,
+      "0xabc0000000000000000000000000000000000003",
+    );
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        referenceRateFeedID: FEED,
+        breakerTripped: false,
+      }),
+    );
+    // FEED (X) depends on DEP_FEED (Y).
+    mockDb = mockDb.entities.RateFeedDependency.set({
+      id: makeRateFeedDependencyId(CHAIN_ID, FEED, DEP_FEED),
+      chainId: CHAIN_ID,
+      rateFeedID: FEED,
+      dependsOn: DEP_FEED,
+    });
+
+    // Enable + trip Y. The trip fans out to X (its dependent).
+    for (const ev of [
+      BreakerBox.BreakerStatusUpdated.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: DEP_FEED,
+        status: true,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 0,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 100, timestamp: 1_700_000_500 },
+        },
+      }),
+    ]) {
+      mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+        event: ev,
+        mockDb,
+      });
+    }
+    mockDb = await BreakerBox.BreakerTripped.processEvent({
+      event: BreakerBox.BreakerTripped.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: DEP_FEED,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 7,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 200, timestamp: 1_700_001_000 },
+        },
+      }),
+      mockDb,
+    });
     assert.equal(
-      (mockDb.entities.BreakerConfig.get(cfgId) as { status: string }).status,
-      "TRIPPED",
-      "config remains TRIPPED after feed removal",
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      true,
+      "precondition: dependent inherits the dependency's halt",
+    );
+
+    // Remove Y → X must un-halt.
+    mockDb = await BreakerBox.RateFeedRemoved.processEvent({
+      event: BreakerBox.RateFeedRemoved.createMockEvent({
+        rateFeedID: DEP_FEED,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 3,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 400, timestamp: 1_700_003_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      false,
+      "removing the dependency un-halts the dependent",
     );
   });
 
@@ -768,5 +872,62 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     const prior = 1_171_560_280_196_965_000_000_000n;
     const expected = (newMedian * sf + prior * (FIXED_1 - sf)) / FIXED_1;
     assert.equal(cfg!.medianRatesEMA, expected);
+  });
+
+  it("SortedOracles.MedianUpdated cold-starts dependency edges so a tripped dependency halts the dependent's pools", async () => {
+    // The PRIMARY production path for #712: dependency edges are set before
+    // start_block, so the dormant RateFeedDependenciesSet event never fires in
+    // range. The dependent feed's MedianUpdated cold-start is what loads the
+    // edges + the dependency's config and re-syncs the inherited halt. FEED's own
+    // breaker is OK (beforeEach mock); the DEPENDENCY is tripped, and FEED's pool
+    // must end up halted purely via the dependency edge.
+    const DEP_FEED = "0xa1a8003936862e7a15092a91898d69fa8bce290c";
+    _setMockBreakerFeedState(CHAIN_ID, MD_BREAKER, DEP_FEED, {
+      enabled: true,
+      tradingMode: 3, // TRIPPED
+      lastStatusUpdatedAt: 1_700_000_000n,
+      cooldownTime: 0n,
+      rateChangeThreshold: 0n,
+      smoothingFactor: 5n * 10n ** 21n,
+      medianRatesEMA: 1_000_000n,
+      referenceValue: null,
+    });
+    registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, [DEP_FEED]);
+
+    let mockDb = MockDb.createMockDb();
+    const poolId = makePoolId(
+      CHAIN_ID,
+      "0x00000000000000000000000000000000000000d1",
+    );
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        referenceRateFeedID: FEED,
+        breakerTripped: false,
+      }),
+    );
+
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: SortedOracles.MedianUpdated.createMockEvent({
+        token: FEED,
+        value: 1_180_000_000_000_000_000_000_000n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 5,
+          srcAddress: "0xefb84935239dacdecf7c5ba76d8de40b077b7b33",
+          block: { number: 300, timestamp: 1_700_002_000 },
+        },
+      }),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId) as
+      | { breakerTripped: boolean }
+      | undefined;
+    assert.equal(
+      pool?.breakerTripped,
+      true,
+      "dependent pool inherits the tripped dependency's halt via the MedianUpdated cold-start",
+    );
   });
 });

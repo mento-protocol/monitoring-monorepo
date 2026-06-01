@@ -25,6 +25,8 @@ export type PoolContext = {
   // rate feed is first assigned (so a pool appearing mid-halt isn't stuck false).
   BreakerConfig: EvmOnEventContext["BreakerConfig"];
   Breaker: EvmOnEventContext["Breaker"];
+  // `computeFeedHalted` also ORs in each dependency feed's halt (one level).
+  RateFeedDependency: EvmOnEventContext["RateFeedDependency"];
 };
 
 export type SnapshotContext = {

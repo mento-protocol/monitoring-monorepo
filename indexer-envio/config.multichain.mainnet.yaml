@@ -224,6 +224,7 @@ contracts:
       - event: BreakerStatusUpdated
       - event: RateFeedAdded
       - event: RateFeedRemoved
+      - event: RateFeedDependenciesSet
       - event: BreakerTripped
       - event: ResetSuccessful
       - event: TradingModeUpdated

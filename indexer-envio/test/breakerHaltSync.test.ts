@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import type { Breaker, BreakerConfig, Pool } from "envio";
+import type { Breaker, BreakerConfig, Pool, RateFeedDependency } from "envio";
 import {
   breakerTrippedOnFeedAssign,
-  clearPoolsBreakerHalt,
+  clearHaltOnFeedRemoved,
+  makeRateFeedDependencyId,
   syncHaltOnColdStart,
   syncPoolsBreakerHalt,
 } from "../src/breakers.ts";
@@ -26,12 +27,15 @@ function makeBreaker(id: string, kind: Breaker["kind"]): Breaker {
 }
 
 function makeConfig(over: Partial<BreakerConfig>): BreakerConfig {
+  const breaker_id = over.breaker_id ?? "breaker-md";
+  const rateFeedID = over.rateFeedID ?? FEED;
   return {
+    id: `${CHAIN}-${breaker_id}-${rateFeedID}`,
     chainId: CHAIN,
-    rateFeedID: FEED,
+    rateFeedID,
     enabled: true,
     status: "OK",
-    breaker_id: "breaker-md",
+    breaker_id,
     ...over,
   } as unknown as BreakerConfig;
 }
@@ -50,21 +54,53 @@ function makePool(
   } as unknown as Pool;
 }
 
+function makeDep(rateFeedID: string, dependsOn: string): RateFeedDependency {
+  return {
+    id: makeRateFeedDependencyId(CHAIN, rateFeedID, dependsOn),
+    chainId: CHAIN,
+    rateFeedID,
+    dependsOn,
+  };
+}
+
 function makeCtx(opts: {
   configs: BreakerConfig[];
   breakers: Breaker[];
   pools: Pool[];
+  deps?: RateFeedDependency[];
 }) {
   const pools = new Map(opts.pools.map((p) => [p.id, { ...p }]));
   const breakers = new Map(opts.breakers.map((b) => [b.id, b]));
+  const deps = new Map((opts.deps ?? []).map((d) => [d.id, { ...d }]));
+  const configs = new Map(opts.configs.map((c) => [c.id, { ...c }]));
   const sets: Pool[] = [];
   const ctx = {
+    // Mutable so `clearHaltOnFeedRemoved` can disable rows and the recompute
+    // reads the updated `enabled` flag.
     BreakerConfig: {
       getWhere: async ({ rateFeedID }: { rateFeedID: { _eq: string } }) =>
-        opts.configs.filter((c) => c.rateFeedID === rateFeedID._eq),
+        [...configs.values()].filter((c) => c.rateFeedID === rateFeedID._eq),
+      set: (c: BreakerConfig) => configs.set(c.id, c),
     },
     Breaker: {
       get: async (id: string) => breakers.get(id),
+    },
+    // Single-field getWhere on either edge field (forward: deps of a feed;
+    // reverse: dependents of a feed), mirroring the Envio query surface.
+    RateFeedDependency: {
+      getWhere: async (where: {
+        rateFeedID?: { _eq: string };
+        dependsOn?: { _eq: string };
+      }) =>
+        [...deps.values()].filter((d) =>
+          where.rateFeedID
+            ? d.rateFeedID === where.rateFeedID._eq
+            : where.dependsOn
+              ? d.dependsOn === where.dependsOn._eq
+              : true,
+        ),
+      set: (d: RateFeedDependency) => deps.set(d.id, d),
+      deleteUnsafe: (id: string) => deps.delete(id),
     },
     Pool: {
       get: async (id: string) => pools.get(id),
@@ -82,7 +118,7 @@ function makeCtx(opts: {
       },
     },
   } as unknown as Ctx;
-  return { ctx, pools, sets };
+  return { ctx, pools, sets, deps, configs };
 }
 
 describe("syncPoolsBreakerHalt", () => {
@@ -210,18 +246,26 @@ describe("syncPoolsBreakerHalt", () => {
   });
 });
 
-describe("clearPoolsBreakerHalt", () => {
-  it("forces breakerTripped=false even while configs stay TRIPPED (feed removed)", async () => {
-    const { ctx, pools, sets } = makeCtx({
+describe("clearHaltOnFeedRemoved", () => {
+  const DEP_FEED = "0xdddd000000000000000000000000000000000001";
+
+  it("disables the feed's configs and clears its pools (recompute now derives false)", async () => {
+    const { ctx, pools, configs } = makeCtx({
       breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
-      // Configs remain TRIPPED (historical record after RateFeedRemoved) — a
-      // recompute would re-derive true, so clear must NOT recompute.
+      // Config was TRIPPED; on removal it is DISABLED so the recompute derives
+      // false, while `status` is left as the historical record of the last trip.
       configs: [makeConfig({ status: "TRIPPED", breaker_id: "breaker-md" })],
       pools: [makePool(POOL_A, true)],
     });
-    await clearPoolsBreakerHalt(ctx, CHAIN, FEED);
+    await clearHaltOnFeedRemoved(ctx, CHAIN, FEED);
     assert.equal(pools.get(POOL_A)?.breakerTripped, false);
-    assert.equal(sets.length, 1);
+    const cfg = [...configs.values()][0];
+    assert.equal(
+      cfg.enabled,
+      false,
+      "config disabled (mirrors deleteBreakerStatus)",
+    );
+    assert.equal(cfg.status, "TRIPPED", "status kept as historical record");
   });
 
   it("is a no-op when the pool is already not halted", async () => {
@@ -230,7 +274,7 @@ describe("clearPoolsBreakerHalt", () => {
       configs: [],
       pools: [makePool(POOL_A, false)],
     });
-    await clearPoolsBreakerHalt(ctx, CHAIN, FEED);
+    await clearHaltOnFeedRemoved(ctx, CHAIN, FEED);
     assert.equal(sets.length, 0);
   });
 
@@ -240,7 +284,7 @@ describe("clearPoolsBreakerHalt", () => {
       configs: [],
       pools: [makePool(POOL_A, true), makePool(POOL_B, true)],
     });
-    await clearPoolsBreakerHalt(ctx, CHAIN, FEED);
+    await clearHaltOnFeedRemoved(ctx, CHAIN, FEED);
     assert.equal(pools.get(POOL_A)?.breakerTripped, false);
     assert.equal(pools.get(POOL_B)?.breakerTripped, false);
   });
@@ -251,8 +295,48 @@ describe("clearPoolsBreakerHalt", () => {
       configs: [],
       pools: [makePool(POOL_A, true, "virtual_pool_factory")],
     });
-    await clearPoolsBreakerHalt(ctx, CHAIN, FEED);
+    await clearHaltOnFeedRemoved(ctx, CHAIN, FEED);
     assert.equal(sets.length, 0, "VP must not be written");
+  });
+
+  it("un-halts a dependent feed's pools when the DEPENDENCY is removed (keeps the edge)", async () => {
+    // POOL_A is on FEED (X), halted only via its dependency DEP_FEED (Y). Removing
+    // Y disables Y's config, so X's recompute (the fan-out) drops the inherited
+    // halt. The X->Y edge is KEPT (on-chain X's dep array still lists Y).
+    const { ctx, pools, deps } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      configs: [
+        makeConfig({
+          rateFeedID: DEP_FEED,
+          status: "TRIPPED",
+          breaker_id: "breaker-md",
+        }),
+      ],
+      pools: [makePool(POOL_A, true)],
+      deps: [makeDep(FEED, DEP_FEED)],
+    });
+    await clearHaltOnFeedRemoved(ctx, CHAIN, DEP_FEED);
+    assert.equal(
+      pools.get(POOL_A)?.breakerTripped,
+      false,
+      "dependent un-halts",
+    );
+    assert.equal(deps.size, 1, "reverse edge X->Y is kept");
+  });
+
+  it("deletes the removed feed's OWN edges when the removed feed was the dependent", async () => {
+    // FEED (X) depends on DEP_FEED (Y). Removing X deletes X's own dep array
+    // (on-chain `delete rateFeedDependencies[X]`), so a later trip on Y can't
+    // re-derive X from a stale edge.
+    const { ctx, pools, deps } = makeCtx({
+      breakers: [],
+      configs: [],
+      pools: [makePool(POOL_A, true)],
+      deps: [makeDep(FEED, DEP_FEED)],
+    });
+    await clearHaltOnFeedRemoved(ctx, CHAIN, FEED);
+    assert.equal(deps.size, 0, "removed feed's own X->Y edge deleted");
+    assert.equal(pools.get(POOL_A)?.breakerTripped, false);
   });
 });
 
@@ -336,6 +420,97 @@ describe("breakerTrippedOnFeedAssign", () => {
         FEED,
       ),
       false,
+    );
+  });
+});
+
+// Dependency-driven halts (#712): on-chain getRateFeedTradingMode ORs in each
+// dependency feed's OWN trading mode (one level). `syncPoolsBreakerHalt` fans a
+// trip/reset on a dependency feed out to every dependent feed's pools.
+describe("syncPoolsBreakerHalt — dependency fan-out", () => {
+  // DEP_FEED (Y) is a dependency of FEED (X); POOL_A lives on FEED (X).
+  const DEP_FEED = "0xdddd000000000000000000000000000000000001";
+
+  it("marks the dependent feed's pools tripped when a dependency trips", async () => {
+    const { ctx, pools } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      // The dependency's OWN config is tripped; FEED (X) has no own config.
+      configs: [
+        makeConfig({
+          rateFeedID: DEP_FEED,
+          status: "TRIPPED",
+          breaker_id: "breaker-md",
+        }),
+      ],
+      pools: [makePool(POOL_A, false)],
+      deps: [makeDep(FEED, DEP_FEED)], // X depends on Y
+    });
+    // A breaker event fires on the DEPENDENCY (Y) — the fan-out must reach X.
+    await syncPoolsBreakerHalt(ctx, CHAIN, DEP_FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, true);
+  });
+
+  it("does NOT propagate a MARKET_HOURS dependency trip (weekend != fault)", async () => {
+    const { ctx, pools, sets } = makeCtx({
+      breakers: [makeBreaker("breaker-mh", "MARKET_HOURS")],
+      configs: [
+        makeConfig({
+          rateFeedID: DEP_FEED,
+          status: "TRIPPED",
+          breaker_id: "breaker-mh",
+        }),
+      ],
+      pools: [makePool(POOL_A, false)],
+      deps: [makeDep(FEED, DEP_FEED)],
+    });
+    await syncPoolsBreakerHalt(ctx, CHAIN, DEP_FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, false);
+    assert.equal(sets.length, 0, "no-op: MARKET_HOURS excluded on deps too");
+  });
+
+  it("clears the dependent's inherited halt when the dependency resets", async () => {
+    const { ctx, pools } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      configs: [
+        makeConfig({
+          rateFeedID: DEP_FEED,
+          status: "OK",
+          breaker_id: "breaker-md",
+        }),
+      ],
+      pools: [makePool(POOL_A, true)], // currently halted via the dependency
+      deps: [makeDep(FEED, DEP_FEED)],
+    });
+    await syncPoolsBreakerHalt(ctx, CHAIN, DEP_FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, false);
+  });
+
+  it("does not propagate beyond one hop (a dependent's dependents are untouched)", async () => {
+    // Z depends on X, X depends on Y. Y trips. X must halt; Z must NOT — on-chain
+    // resolution is one level, and X's OWN mode (read by Z) is unaffected by Y.
+    const Z_FEED = "0xeeee000000000000000000000000000000000002";
+    const POOL_ON_Z = `${CHAIN}-0xaaa0000000000000000000000000000000000009`;
+    const { ctx, pools } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      configs: [
+        makeConfig({
+          rateFeedID: DEP_FEED,
+          status: "TRIPPED",
+          breaker_id: "breaker-md",
+        }),
+      ],
+      pools: [
+        makePool(POOL_A, false), // on FEED (X)
+        { ...makePool(POOL_ON_Z, false), referenceRateFeedID: Z_FEED } as Pool,
+      ],
+      deps: [makeDep(FEED, DEP_FEED), makeDep(Z_FEED, FEED)],
+    });
+    await syncPoolsBreakerHalt(ctx, CHAIN, DEP_FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, true, "X (depends on Y)");
+    assert.equal(
+      pools.get(POOL_ON_Z)?.breakerTripped,
+      false,
+      "Z (depends on X) is one hop too far",
     );
   });
 });

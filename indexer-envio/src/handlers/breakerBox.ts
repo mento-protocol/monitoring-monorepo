@@ -20,12 +20,13 @@ import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt } from "../helpers.js";
 import {
   bootstrapFeedBreakerConfigs,
-  clearPoolsBreakerHalt,
+  clearHaltOnFeedRemoved,
   computeCooldownEndsAt,
   effectiveCooldown,
   effectiveThreshold,
   ensureBreaker,
   ensureBreakerConfig,
+  loadFeedDependencies,
   makeBreakerId,
   maybePreloadBreaker,
   syncPoolsBreakerHalt,
@@ -149,15 +150,41 @@ indexer.onEvent(
 indexer.onEvent(
   { contract: "BreakerBox", event: "RateFeedRemoved" },
   async ({ event, context }) => {
-    // The feed no longer has BreakerBox oversight, so its pools are no longer
-    // halted by a price breaker — clear the flag. (Existing BreakerConfig rows
-    // remain as historical record; a removed feed receives no further events,
-    // so we clear pools directly rather than recompute from those stale-TRIPPED
-    // rows, which would re-derive `true`.)
+    // Mirror on-chain removeRateFeed (delete rateFeedTradingMode + the feed's
+    // dependency array + breaker statuses): disable the feed's configs, drop its
+    // own dependency edges, and recompute — which un-halts both its own pools AND
+    // any feed that depended on it (whose inherited halt now resolves to false).
+    // See clearHaltOnFeedRemoved.
     const rateFeedID = asAddress(event.params.rateFeedID);
     const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
     if (await maybePreloadPool(context, poolIds)) return;
-    await clearPoolsBreakerHalt(context, event.chainId, rateFeedID);
+    await clearHaltOnFeedRemoved(context, event.chainId, rateFeedID);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// BreakerBox.RateFeedDependenciesSet — the feed's dependency set was replaced.
+// The event's `dependencies` array is an indexed dynamic type (only a topic
+// hash on-chain, not decodable), so RPC-read the authoritative current set,
+// reconcile the persisted edges, then re-sync the feed's pools — a gained/lost
+// dependency can move the feed's halt OR (computeFeedHalted ORs in each dep).
+// ---------------------------------------------------------------------------
+
+indexer.onEvent(
+  { contract: "BreakerBox", event: "RateFeedDependenciesSet" },
+  async ({ event, context }) => {
+    // Feed-scoped event — no single breaker entity to preload; bail in preload.
+    if (context.isPreload) return;
+    const rateFeedID = asAddress(event.params.rateFeedID);
+    await loadFeedDependencies({
+      context,
+      chainId: event.chainId,
+      rateFeedID,
+      blockNumber: asBigInt(event.block.number),
+      blockTimestamp: asBigInt(event.block.timestamp),
+      force: true,
+    });
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );
 

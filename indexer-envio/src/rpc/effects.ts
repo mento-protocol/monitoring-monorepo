@@ -46,6 +46,7 @@ import {
   fetchBreakerFeedState,
   fetchBreakerKind,
   fetchBreakerList,
+  fetchRateFeedDependencies,
   type BreakerKindRpc,
 } from "./breakers.js";
 import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
@@ -677,6 +678,27 @@ export const breakerListEffect = createEffect(
   async ({ input, context }) =>
     (await fetchBreakerList(input.chainId, input.blockNumber, context.log)) ??
     null,
+);
+
+// Block-keyed like `breakerListEffect`; stays `cache: false` because the
+// dependency set is governance-mutable (RateFeedDependenciesSet) and a
+// persistent cache would mask a change. Per-feed dedup across blocks is handled
+// by the in-memory bootstrap cache in breakers.ts.
+export const rateFeedDependenciesEffect = createEffect(
+  {
+    name: "rateFeedDependencies",
+    input: { chainId: S.int32, rateFeedID: S.string, blockNumber: S.bigint },
+    output: S.nullable(S.array(S.string)),
+    rateLimit: { calls: 50, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) =>
+    (await fetchRateFeedDependencies(
+      input.chainId,
+      input.rateFeedID,
+      input.blockNumber,
+      context.log,
+    )) ?? null,
 );
 
 export const breakerKindEffect = createEffect(

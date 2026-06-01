@@ -417,12 +417,75 @@ export function registerMockBreakerFeedStateHttp(
   }
 }
 
+/** Mocks the `rateFeedDependencies(feed, i)` array walk + the `getRateFeeds()`
+ * control read used to disambiguate the out-of-bounds terminator. A list mocks
+ * indices 0..n-1 then an out-of-bounds error at n (control read healthy); null
+ * mocks both the index-0 read AND the control read as errors, simulating a
+ * transient outage so `fetchRateFeedDependencies` returns null. */
+export function registerMockRateFeedDependenciesHttp(
+  chainId: number,
+  rateFeedID: string,
+  deps: string[] | null,
+): void {
+  const breakerBoxAddress = safeBreakerBox(chainId);
+  if (!breakerBoxAddress) return;
+  if (deps === null) {
+    setTestRpcErrorMock({
+      group: "rateFeedDeps",
+      chainId,
+      address: breakerBoxAddress,
+      functionName: "getRateFeeds",
+    });
+    setTestRpcErrorMock({
+      group: "rateFeedDeps",
+      chainId,
+      address: breakerBoxAddress,
+      functionName: "rateFeedDependencies",
+      callArgs: [rateFeedID, 0n],
+    });
+    return;
+  }
+  // Control read is healthy (node responsive) so a getter failure reads as a
+  // genuine out-of-bounds, not a transient rejection.
+  setTestRpcMock({
+    group: "rateFeedDeps",
+    chainId,
+    address: breakerBoxAddress,
+    functionName: "getRateFeeds",
+    result: [],
+  });
+  deps.forEach((dep, i) => {
+    setTestRpcMock({
+      group: "rateFeedDeps",
+      chainId,
+      address: breakerBoxAddress,
+      functionName: "rateFeedDependencies",
+      callArgs: [rateFeedID, BigInt(i)],
+      result: dep,
+    });
+  });
+  setTestRpcErrorMock({
+    group: "rateFeedDeps",
+    chainId,
+    address: breakerBoxAddress,
+    functionName: "rateFeedDependencies",
+    callArgs: [rateFeedID, BigInt(deps.length)],
+    // forno reports an out-of-bounds array read with this exact phrasing (no
+    // decodable revert data) — see fetchRateFeedDependencies. Using the real
+    // message exercises the control-read disambiguation against the same
+    // archive-depth-routing string a transient rejection would produce.
+    message:
+      "Missing or invalid parameters.\nDouble check you have provided the correct parameters.",
+  });
+}
+
 export function clearBreakerHttpMocks(): void {
   for (const group of [
     "breakerKind",
     "breakerDefaults",
     "breakerFeedState",
     "breakerList",
+    "rateFeedDeps",
   ]) {
     clearTestRpcMockGroup(group);
   }
