@@ -387,6 +387,14 @@ export function OracleChart({
   // intent, reset on pool switch. See useOracleViewport / resolveDailyView.
   const { visibleRange, setVisibleRange, showAll, setShowAll } =
     useOracleViewport(uirevision);
+  // Supply an explicit xaxis.range ONLY on the default view — no active user
+  // zoom/pan (`visibleRange`) and not "All" (`showAll`). There the recomputed
+  // `[maxTs - 7d, maxTs]` keeps the right edge tracking new samples each SWR
+  // repoll, and a pool switch (which resets the viewport here) lands back on
+  // the 7-day default. Once the user has a viewport, omit range/autorange so
+  // uirevision preserves it across repolls — re-supplying a recomputed range
+  // would otherwise clobber a scroll-wheel zoom on the next data load.
+  const applyInitialRange = visibleRange === null && !showAll;
 
   const { baseline, thresholdRatio } = resolveCurrentBand(
     breakerConfig,
@@ -430,9 +438,8 @@ export function OracleChart({
   );
   const layout = buildOracleLayout({
     shapes,
-    xaxis: buildOracleXaxis(plotData.timestamps, plotData.isSparse),
-    yMin: plotData.yMin,
-    yMax: plotData.yMax,
+    plotData,
+    applyInitialRange,
     baseline,
     thresholdRatio,
     uirevision,
@@ -777,12 +784,22 @@ function buildOracleShapes(
   return shapes;
 }
 
-function buildOracleXaxis(timestamps: string[], isSparse: boolean) {
+function buildOracleXaxis(
+  timestamps: string[],
+  isSparse: boolean,
+  applyInitialRange = true,
+) {
   // Default visible window = last 7 days (the most operationally useful
   // horizon for spotting recent breaker trips). The rangeselector buttons
   // + rangeslider below let you scrub further if needed. Falls back to a
   // padded all-data window when there are fewer than ~20 snapshots.
   const xaxisBase = makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY);
+  // After the initial paint, omit `range`/`autorange` entirely so uirevision
+  // preserves the user's zoom/pan across SWR repolls. Supplying a recomputed
+  // range here would override a scroll-wheel zoom on the next data load. This
+  // also drops the stale `maxTs - 7d` clamp from the daily / "All" view, where
+  // a recomputed 7-day range was wrong for the full-extent intent.
+  if (!applyInitialRange) return xaxisBase;
   if (timestamps.length === 1) {
     // Newly-indexed pool with exactly one snapshot — pad ±1h around the
     // sole timestamp so the marker doesn't render against a zero-width
@@ -819,21 +836,24 @@ function buildOracleXaxis(timestamps: string[], isSparse: boolean) {
 
 function buildOracleLayout({
   shapes,
-  xaxis,
-  yMin,
-  yMax,
+  plotData,
+  applyInitialRange,
   baseline,
   thresholdRatio,
   uirevision,
 }: {
   shapes: Plotly.Layout["shapes"];
-  xaxis: ReturnType<typeof buildOracleXaxis>;
-  yMin: number;
-  yMax: number;
+  plotData: OraclePlotData;
+  applyInitialRange: boolean;
   baseline: number | null;
   thresholdRatio: number | null;
   uirevision?: string | undefined;
 }) {
+  const xaxis = buildOracleXaxis(
+    plotData.timestamps,
+    plotData.isSparse,
+    applyInitialRange,
+  );
   // Pick a tick precision that resolves the breaker band. For a 0.15% threshold
   // on a baseline of 1.0, ticks like 0.998 / 1.000 / 1.002 are right; for a
   // wider 4% threshold on a 1.08 baseline, 1.04 / 1.08 / 1.12 reads cleanly.
@@ -861,7 +881,7 @@ function buildOracleLayout({
     yaxis: {
       title: { text: "Oracle price", font: { size: 10 } },
       ...PLOTLY_AXIS_DEFAULTS,
-      range: [yMin, yMax],
+      range: [plotData.yMin, plotData.yMax],
       tickformat,
       // Allow the user to scroll-zoom / drag-pan Y independently of X. The
       // wider band-tint rectangles already extend past the visible range,
