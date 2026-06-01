@@ -139,17 +139,10 @@ export async function fetchPoolOgDataUncached(
         signal,
       }),
       // Isolated trust / degenerate flags keep schema-lag from failing the
-      // unfurl; health uses conservative WARN/CRITICAL under-bounds.
-      client.request<{
-        Pool: {
-          id: string;
-          rebalanceThresholdAbove?: number;
-          rebalanceThresholdBelow?: number;
-          rebalanceThresholdsKnown?: boolean;
-          tokenDecimalsKnown?: boolean;
-          degenerateReserves?: boolean;
-        }[];
-      }>({
+      // unfurl; health uses conservative WARN/CRITICAL under-bounds. Typed via
+      // the shared `PoolOgThresholdsExtRow` (the cast target below) so the
+      // response shape can't drift from it as new ext fields are added.
+      client.request<{ Pool: PoolOgThresholdsExtRow[] }>({
         document: POOL_THRESHOLDS_KNOWN_EXT,
         variables: { id: poolId, chainId },
         signal,

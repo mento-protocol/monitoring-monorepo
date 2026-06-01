@@ -295,6 +295,7 @@ export const TestHelpers = {
     "ResetSuccessful",
     "BreakerRemoved",
     "TradingModeUpdated",
+    "RateFeedRemoved",
   ]),
   MedianDeltaBreaker: contract("MedianDeltaBreaker", ["MedianRateEMAReset"]),
   SortedOracles: contract("SortedOracles", ["MedianUpdated"]),

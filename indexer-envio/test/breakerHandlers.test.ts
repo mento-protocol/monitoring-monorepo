@@ -275,6 +275,84 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     );
   });
 
+  it("RateFeedRemoved clears Pool.breakerTripped even though configs stay TRIPPED", async () => {
+    let mockDb = MockDb.createMockDb();
+    const poolId = makePoolId(
+      CHAIN_ID,
+      "0xabc0000000000000000000000000000000000002",
+    );
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CHAIN_ID,
+        referenceRateFeedID: FEED,
+        breakerTripped: false,
+      }),
+    );
+    // Bootstrap config + trip so the pool is halted AND the BreakerConfig row
+    // is TRIPPED (a recompute would re-derive true).
+    mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+      event: BreakerBox.BreakerStatusUpdated.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: FEED,
+        status: true,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 0,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 100, timestamp: 1_700_000_500 },
+        },
+      }),
+      mockDb,
+    });
+    mockDb = await BreakerBox.BreakerTripped.processEvent({
+      event: BreakerBox.BreakerTripped.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: FEED,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 7,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 200, timestamp: 1_700_001_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      true,
+      "precondition: pool halted",
+    );
+
+    // Remove the feed from BreakerBox → no breaker governs it → not halted.
+    mockDb = await BreakerBox.RateFeedRemoved.processEvent({
+      event: BreakerBox.RateFeedRemoved.createMockEvent({
+        rateFeedID: FEED,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 3,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 400, timestamp: 1_700_003_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      false,
+      "RateFeedRemoved should clear the halt",
+    );
+    // Config stays TRIPPED (historical record) — proves clear, not recompute.
+    const cfgId = makeBreakerConfigId(CHAIN_ID, MD_BREAKER, FEED);
+    assert.equal(
+      (mockDb.entities.BreakerConfig.get(cfgId) as { status: string }).status,
+      "TRIPPED",
+      "config remains TRIPPED after feed removal",
+    );
+  });
+
   it("ResetSuccessful transitions BreakerConfig back to OK and refreshes cooldownEndsAt", async () => {
     let mockDb = MockDb.createMockDb();
     // Seed + trip.

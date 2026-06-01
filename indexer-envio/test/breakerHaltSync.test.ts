@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import type { Breaker, BreakerConfig, Pool } from "envio";
 import {
   breakerTrippedOnFeedAssign,
+  clearPoolsBreakerHalt,
+  syncHaltOnColdStart,
   syncPoolsBreakerHalt,
 } from "../src/breakers.ts";
 
@@ -205,6 +207,75 @@ describe("syncPoolsBreakerHalt", () => {
     await syncPoolsBreakerHalt(ctx, CHAIN, FEED);
     assert.equal(pools.get(POOL_A)?.breakerTripped, false);
     assert.equal(sets.length, 0, "VP must not be written");
+  });
+});
+
+describe("clearPoolsBreakerHalt", () => {
+  it("forces breakerTripped=false even while configs stay TRIPPED (feed removed)", async () => {
+    const { ctx, pools, sets } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      // Configs remain TRIPPED (historical record after RateFeedRemoved) — a
+      // recompute would re-derive true, so clear must NOT recompute.
+      configs: [makeConfig({ status: "TRIPPED", breaker_id: "breaker-md" })],
+      pools: [makePool(POOL_A, true)],
+    });
+    await clearPoolsBreakerHalt(ctx, CHAIN, FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, false);
+    assert.equal(sets.length, 1);
+  });
+
+  it("is a no-op when the pool is already not halted", async () => {
+    const { ctx, sets } = makeCtx({
+      breakers: [],
+      configs: [],
+      pools: [makePool(POOL_A, false)],
+    });
+    await clearPoolsBreakerHalt(ctx, CHAIN, FEED);
+    assert.equal(sets.length, 0);
+  });
+
+  it("fans out to every pool on the feed", async () => {
+    const { ctx, pools } = makeCtx({
+      breakers: [],
+      configs: [],
+      pools: [makePool(POOL_A, true), makePool(POOL_B, true)],
+    });
+    await clearPoolsBreakerHalt(ctx, CHAIN, FEED);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, false);
+    assert.equal(pools.get(POOL_B)?.breakerTripped, false);
+  });
+
+  it("skips VirtualPools (never written)", async () => {
+    const { ctx, sets } = makeCtx({
+      breakers: [],
+      configs: [],
+      pools: [makePool(POOL_A, true, "virtual_pool_factory")],
+    });
+    await clearPoolsBreakerHalt(ctx, CHAIN, FEED);
+    assert.equal(sets.length, 0, "VP must not be written");
+  });
+});
+
+describe("syncHaltOnColdStart", () => {
+  it("recomputes halt when shouldSync is true (cold-start bootstrap)", async () => {
+    const { ctx, pools } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      configs: [makeConfig({ status: "TRIPPED", breaker_id: "breaker-md" })],
+      pools: [makePool(POOL_A, false)],
+    });
+    await syncHaltOnColdStart(ctx, CHAIN, FEED, true);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, true);
+  });
+
+  it("is a no-op when shouldSync is false (configs already existed)", async () => {
+    const { ctx, pools, sets } = makeCtx({
+      breakers: [makeBreaker("breaker-md", "MEDIAN_DELTA")],
+      configs: [makeConfig({ status: "TRIPPED", breaker_id: "breaker-md" })],
+      pools: [makePool(POOL_A, false)],
+    });
+    await syncHaltOnColdStart(ctx, CHAIN, FEED, false);
+    assert.equal(pools.get(POOL_A)?.breakerTripped, false);
+    assert.equal(sets.length, 0, "no recompute when not a cold-start");
   });
 });
 

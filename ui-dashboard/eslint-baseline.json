@@ -821,7 +821,7 @@
   {
     "file": "src/lib/pool-og.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'fetchPoolOgDataUncached' has too many lines (128). Maximum allowed is 100.",
+    "message": "Async function 'fetchPoolOgDataUncached' has too many lines (119). Maximum allowed is 100.",
     "line": 98,
     "linePreview": "/** @internal Exported for testing — skip the cache wrapper. */ | export async function fetchPoolOgDataUncached( | rawPoolId: string,"
   },

@@ -736,3 +736,47 @@ export async function breakerTrippedOnFeedAssign(
   }
   return computeFeedHalted(context, chainId, nextReferenceRateFeedID);
 }
+
+/** Cold-start halt fix for the SortedOracles path. When a feed is first seen via
+ * an oracle event (`OracleReported` / `MedianUpdated`) and its BreakerBox config
+ * events all predate `start_block`, those handlers bootstrap the `BreakerConfig`
+ * rows from current on-chain state — which can be already-TRIPPED — but the
+ * bootstrap never flows through a BreakerBox handler, so existing pools on the
+ * feed keep `breakerTripped=false` until the next live transition. Call this
+ * after such a bootstrap (gated on `shouldSync` = "configs were absent and at
+ * least one pool references the feed") to recompute the halt once. No-op
+ * otherwise, so it's safe to call on every event; `syncPoolsBreakerHalt` itself
+ * skips VirtualPools and only writes pools whose flag actually changes.
+ *
+ * (Defined at file end so its insertion doesn't shift line-keyed baseline
+ * entries above.) */
+export async function syncHaltOnColdStart(
+  context: EvmOnEventContext,
+  chainId: number,
+  rateFeedID: string,
+  shouldSync: boolean,
+): Promise<void> {
+  if (!shouldSync) return;
+  await syncPoolsBreakerHalt(context, chainId, rateFeedID);
+}
+
+/** Force `breakerTripped=false` for every pool on `rateFeedID`. Used by the
+ * `RateFeedRemoved` handler: once a feed is removed from BreakerBox no breaker
+ * governs it, so on-chain `getRateFeedTradingMode` returns unrestricted and the
+ * pools are no longer halted. A plain `syncPoolsBreakerHalt` recompute can't be
+ * used here — the feed's persisted BreakerConfig rows stay TRIPPED as a
+ * historical record (a removed feed receives no further events to reset them),
+ * so the recompute would re-derive `true`. Skips VirtualPools (never halted). */
+export async function clearPoolsBreakerHalt(
+  context: EvmOnEventContext,
+  chainId: number,
+  rateFeedID: string,
+): Promise<void> {
+  const poolIds = await getPoolsByFeed(context, chainId, asAddress(rateFeedID));
+  for (const poolId of poolIds) {
+    const pool = await context.Pool.get(poolId);
+    if (!pool || !pool.breakerTripped) continue;
+    if (isVirtualPool(pool)) continue;
+    context.Pool.set({ ...pool, breakerTripped: false });
+  }
+}
