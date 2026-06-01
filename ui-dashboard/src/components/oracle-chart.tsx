@@ -154,6 +154,25 @@ export function useCoalescedRelayout(
   useEffect(() => {
     onVisibleXRangeChangeRef.current = onVisibleXRangeChange;
   });
+
+  // Cancel + drop any pending frame the instant the chart identity changes,
+  // DURING render. This must NOT be an effect: a queued `requestAnimationFrame`
+  // fires before the next paint, whereas passive (and even layout) effect
+  // cleanup runs after the commit — so an effect could let the old-pool flush
+  // apply a stale X range / fire look-ahead against the new pool before the
+  // cleanup cancels it. OracleTab reuses this component across a poolId change,
+  // so that window is real. Running here (mirroring useOracleViewport's
+  // render-phase reset on the same key) guarantees the cancel precedes the
+  // browser's rAF. The `!= null` guard keeps it SSR-safe: rafIdRef is always
+  // null on the server, so cancelAnimationFrame is never called there.
+  const prevResetKeyRef = useRef(resetKey);
+  if (prevResetKeyRef.current !== resetKey) {
+    prevResetKeyRef.current = resetKey;
+    if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+    rafIdRef.current = null;
+    pendingRef.current = null;
+  }
+
   const flush = useCallback(() => {
     rafIdRef.current = null;
     const e = pendingRef.current;
@@ -167,16 +186,12 @@ export function useCoalescedRelayout(
       );
     }
   }, [setVisibleRange, setShowAll]);
-  // Cancel + drop any pending frame on unmount AND on chart-identity change
-  // (`resetKey`). Clearing the refs (not just cancelling) lets the next event
-  // re-arm the rAF for the new pool.
+  // Cancel any pending frame on unmount (identity-change is handled above).
   useEffect(
     () => () => {
-      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
-      rafIdRef.current = null;
-      pendingRef.current = null;
+      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
     },
-    [resetKey],
+    [],
   );
   return useCallback(
     (e: unknown) => {

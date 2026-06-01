@@ -168,7 +168,14 @@ describe("useCoalescedRelayout", () => {
     act(() =>
       handler(relayout("2026-05-01T00:00:00Z", "2026-05-08T00:00:00Z")),
     );
+    expect(rafQueue.filter(Boolean)).toHaveLength(1);
+
     rerenderWithKey("celo:poolB");
+    // Cancelled DURING render, not in a post-commit effect: the queued frame is
+    // already invalidated before any rAF could fire (rAF runs pre-paint, ahead
+    // of effect cleanup). This is the ordering a passive/layout effect misses.
+    expect(rafQueue.filter(Boolean)).toHaveLength(0);
+
     act(() => flushFrame());
     expect(setVisibleRange).not.toHaveBeenCalled();
 
