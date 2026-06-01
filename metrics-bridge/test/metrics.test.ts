@@ -29,6 +29,11 @@ describe("updateMetrics", () => {
     block_explorer_url:
       "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
   };
+  const oracleLabels = {
+    ...poolLabels,
+    last_oracle_update_url:
+      "https://celoscan.io/tx/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  };
 
   beforeEach(() => {
     register.resetMetrics();
@@ -56,14 +61,28 @@ describe("updateMetrics", () => {
   it("parses oracleTimestamp from BigInt string", async () => {
     updateMetrics([makePool()]);
     expect(
-      await getGaugeValue(register, "mento_pool_oracle_timestamp", poolLabels),
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_timestamp",
+        oracleLabels,
+      ),
+    ).toBe(1713200000);
+  });
+
+  it("leaves oracle update URL empty when oracleTxHash is absent", async () => {
+    updateMetrics([makePool({ oracleTxHash: "" })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_timestamp", {
+        ...poolLabels,
+        last_oracle_update_url: "",
+      }),
     ).toBe(1713200000);
   });
 
   it("parses oracleExpiry from BigInt string", async () => {
     updateMetrics([makePool()]);
     expect(
-      await getGaugeValue(register, "mento_pool_oracle_expiry", poolLabels),
+      await getGaugeValue(register, "mento_pool_oracle_expiry", oracleLabels),
     ).toBe(300);
   });
 
