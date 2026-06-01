@@ -249,7 +249,6 @@ interface OracleChartProps {
   snapshots: OracleSnapshot[];
   token0Symbol?: string | undefined;
   token1Symbol?: string | undefined;
-  breachStartedAt?: string | null | undefined;
   breakerConfig?: BreakerConfigForChart | null | undefined;
   // Lets the chart distinguish "still fetching the breaker for this feed"
   // from "no breaker exists for this feed" — only in `ready` do we color
@@ -371,7 +370,6 @@ export function OracleChart({
   snapshots,
   token0Symbol = "Token 0",
   token1Symbol = "Token 1",
-  breachStartedAt,
   breakerConfig,
   breakerConfigStatus = "ready",
   uirevision,
@@ -430,12 +428,7 @@ export function OracleChart({
     thresholdRatio,
     breakerConfigStatus,
   });
-  const shapes = buildOracleShapes(
-    breachStartedAt,
-    plotData.yMax,
-    baseline,
-    thresholdRatio,
-  );
+  const shapes = buildOracleShapes(plotData.yMax, baseline, thresholdRatio);
   const layout = buildOracleLayout({
     shapes,
     plotData,
@@ -459,7 +452,6 @@ export function OracleChart({
         Oracle Price vs Breaker Band
       </h3>
       <OracleChartLegend
-        breachStartedAt={breachStartedAt}
         breakerConfig={breakerConfig}
         breakerConfigStatus={breakerConfigStatus}
         hasPersistedBands={hasPersistedBands}
@@ -676,7 +668,6 @@ function buildSnapshotMarkers({
 }
 
 function buildOracleShapes(
-  breachStartedAt: string | null | undefined,
   yMax: number,
   baseline: number | null,
   thresholdRatio: number | null,
@@ -757,26 +748,6 @@ function buildOracleShapes(
       y0: baseline,
       y1: baseline,
       line: { color: "rgba(148,163,184,0.6)", width: 1, dash: "dot" },
-      layer: "above",
-    });
-  }
-
-  if (breachStartedAt && Number(breachStartedAt) > 0) {
-    // `deviationBreachStartedAt` is the *rebalance* threshold's breach anchor
-    // (priceDifference > rebalanceThreshold), not a breaker trip. We keep
-    // the guide line because it's operationally useful context, but the
-    // legend explicitly labels it "Rebalance breach start" so it isn't
-    // confused with the breaker band the rest of the chart visualizes.
-    const breachIso = new Date(Number(breachStartedAt) * 1000).toISOString();
-    shapes.push({
-      type: "line",
-      xref: "x",
-      yref: "paper",
-      x0: breachIso,
-      x1: breachIso,
-      y0: 0,
-      y1: 1,
-      line: { color: "#ef4444", width: 2, dash: "dot" },
       layer: "above",
     });
   }

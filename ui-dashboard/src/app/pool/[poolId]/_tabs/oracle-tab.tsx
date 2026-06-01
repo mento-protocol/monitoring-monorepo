@@ -318,8 +318,6 @@ export function OracleTab(props: OracleTabProps) {
         r.source,
         statusAliases,
         parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6),
-        Number(r.priceDifference) > 0 ? r.priceDifference : null,
-        r.rebalanceThreshold > 0 ? String(r.rebalanceThreshold) : null,
         r.txHash,
       ]);
     });
@@ -351,14 +349,6 @@ export function OracleTab(props: OracleTabProps) {
 
   return (
     <>
-      {pool?.deviationBreachStartedAt &&
-        Number(pool.deviationBreachStartedAt) > 0 && (
-          <div className="rounded-lg border border-red-800/50 bg-red-900/20 px-4 py-2.5 mb-4 text-sm text-red-300">
-            Deviation breach started{" "}
-            {relativeTime(pool.deviationBreachStartedAt)} — oracle price
-            deviation exceeds the rebalance threshold.
-          </div>
-        )}
       {chartRows.length > 0 && chartRows.length < 20 && (
         <div className="rounded-lg border border-slate-700/50 bg-slate-800/40 px-4 py-2 mb-4 text-xs text-slate-400">
           Only {chartRows.length} oracle snapshot
@@ -370,7 +360,6 @@ export function OracleTab(props: OracleTabProps) {
         snapshots={chartRows}
         token0Symbol={sym0}
         token1Symbol={sym1}
-        breachStartedAt={pool?.deviationBreachStartedAt}
         breakerConfig={breakerConfig}
         breakerConfigStatus={breakerConfigStatus}
         uirevision={`${network.id}:${poolId}`}
@@ -550,16 +539,6 @@ function OracleSnapshotsTableHeader({
             Price ({sym0}/{sym1}){arrow("oraclePrice")}
           </button>
         </Th>
-        <Th align="right" aria-sort={ariaSortFor("priceDifference")}>
-          <button
-            type="button"
-            onClick={() => onSort("priceDifference")}
-            className="hover:text-indigo-400 transition-colors"
-          >
-            Price Diff{arrow("priceDifference")}
-          </button>
-        </Th>
-        <Th align="right">Threshold</Th>
         <Th aria-sort={ariaSortFor("timestamp")}>
           <button
             type="button"
@@ -647,34 +626,6 @@ function OracleSnapshotsTable({
   );
 }
 
-function priceDifferencePresentation(
-  diffBps: number,
-  diffPct: string | null,
-  degenerateReserves: boolean,
-) {
-  if (!degenerateReserves && diffBps <= 0) {
-    return {
-      visible: false,
-      label: "—",
-      title: "",
-      showBadge: false,
-      className: undefined,
-    };
-  }
-  const title = degenerateReserves
-    ? `${diffBps.toLocaleString()} bps from effectively one-sided reserves`
-    : `${diffBps.toLocaleString()} bps`;
-  const label =
-    diffBps > 0 ? (diffPct !== null ? `${diffPct}%` : `${diffBps} bps`) : "—";
-  return {
-    visible: true,
-    label,
-    title,
-    showBadge: degenerateReserves,
-    className: degenerateReserves ? "text-amber-300" : undefined,
-  };
-}
-
 function OracleSnapshotRow({
   row,
   network,
@@ -687,21 +638,6 @@ function OracleSnapshotRow({
   const txUrl = row.txHash
     ? `${network.explorerBaseUrl}/tx/${row.txHash}`
     : null;
-  const diffBps = Number(row.priceDifference);
-  const thresholdBps = row.rebalanceThreshold;
-  const degenerateReserves = row.degenerateReserves === true;
-  // `hasHealthData=false` rows preserve the previous priceDifference and may
-  // carry a raw threshold of 0 or an unread fallback — show "—" rather than
-  // fake a %.
-  const diffPct =
-    row.hasHealthData !== false && diffBps > 0 && thresholdBps > 0
-      ? ((diffBps / thresholdBps) * 100).toFixed(1)
-      : null;
-  const diffPresentation = priceDifferencePresentation(
-    diffBps,
-    diffPct,
-    degenerateReserves,
-  );
 
   return (
     <Row>
@@ -728,32 +664,6 @@ function OracleSnapshotRow({
       </Td>
       <Td mono small align="right">
         {parseOraclePriceToNumber(row.oraclePrice, sym0).toFixed(6)}
-      </Td>
-      <Td mono small align="right">
-        {diffPresentation.visible ? (
-          <span
-            className={diffPresentation.className}
-            title={diffPresentation.title}
-          >
-            {diffPresentation.label}
-            {diffPresentation.showBadge && (
-              <span className="ml-1 rounded border border-amber-500/40 px-1 text-[9px] uppercase text-amber-300">
-                one-sided
-              </span>
-            )}
-          </span>
-        ) : (
-          "—"
-        )}
-      </Td>
-      <Td mono small align="right">
-        {thresholdBps > 0 ? (
-          <span title={`${thresholdBps.toLocaleString()} bps`}>
-            {(thresholdBps / 100).toFixed(2)}%
-          </span>
-        ) : (
-          "—"
-        )}
       </Td>
       <Td small muted title={formatTimestamp(row.timestamp)}>
         {txUrl ? (

@@ -236,6 +236,7 @@ const basePool: Pool = {
   oraclePrice: "1000000000000000000000000",
   rebalancerAddress: "0xrebalancer",
 };
+let poolForTest: Pool = basePool;
 
 const swaps: SwapEvent[] = [
   {
@@ -312,8 +313,6 @@ const oracleRows: OracleSnapshot[] = [
     source: "median-feed",
     oracleOk: true,
     oraclePrice: "1100000000000000000000000",
-    priceDifference: "42",
-    rebalanceThreshold: 12,
     numReporters: 5,
     blockNumber: "5001",
     timestamp: "1700000600",
@@ -436,12 +435,13 @@ beforeEach(() => {
   oracleCount = 51;
   oracleCountError = false;
   oracleRowsForTest = oracleRows;
+  poolForTest = basePool;
   window.history.replaceState({}, "", "/pool/pool-1");
 
   useGQLMock.mockImplementation(
     (query: unknown, variables?: { offset?: number; limit?: number }) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
-        return makeGqlResult({ Pool: [basePool] });
+        return makeGqlResult({ Pool: [poolForTest] });
       if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === TRADING_LIMITS)
         return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
@@ -645,33 +645,21 @@ describe("Pool detail tab search", () => {
     expect(html).toContain(">median-feed</a>");
   });
 
-  it("marks oracle rows whose price difference comes from one-sided reserves", () => {
-    oracleRowsForTest = [
-      {
-        ...oracleRows[0]!,
-        priceDifference: "73000000000",
-        rebalanceThreshold: 5000,
-        degenerateReserves: true,
-      },
-    ];
+  it("does not render pool deviation breach status on the oracle tab", () => {
+    poolForTest = {
+      ...basePool,
+      deviationBreachStartedAt: "1700000000",
+    };
     const html = renderWithParams({ tab: "oracle" });
-    expect(html).toContain("one-sided");
-    expect(html).toContain(
-      "73,000,000,000 bps from effectively one-sided reserves",
-    );
+    expect(html).not.toContain("Deviation breach started");
+    expect(html).not.toContain("Rebalance breach start");
   });
 
-  it("marks one-sided oracle rows even when price difference is zero", () => {
-    oracleRowsForTest = [
-      {
-        ...oracleRows[0]!,
-        priceDifference: "0",
-        degenerateReserves: true,
-      },
-    ];
+  it("omits pool deviation fields from oracle rows", () => {
     const html = renderWithParams({ tab: "oracle" });
-    expect(html).toContain("one-sided");
-    expect(html).toContain("0 bps from effectively one-sided reserves");
+    expect(html).not.toContain("Price Diff");
+    expect(html).not.toContain("one-sided");
+    expect(html).not.toContain("73,000,000,000 bps");
   });
 
   it("loads chart and count oracle queries and renders pagination metadata", () => {
@@ -697,29 +685,23 @@ describe("Pool detail tab search", () => {
 
   it("updates aria-sort when oracle sort changes", () => {
     const container = renderInteractive({ tab: "oracle" });
-    const priceDiffButton = Array.from(
+    const oracleOkButton = Array.from(
       container.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Price Diff")) as
+    ).find((button) => button.textContent?.includes("Oracle OK")) as
       | HTMLButtonElement
       | undefined;
 
-    expect(priceDiffButton).toBeTruthy();
+    expect(oracleOkButton).toBeTruthy();
 
     act(() => {
-      priceDiffButton?.dispatchEvent(
-        new MouseEvent("click", { bubbles: true }),
-      );
+      oracleOkButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     const ascendingHeaders = Array.from(
       container.querySelectorAll("th"),
     ).filter((th) => th.getAttribute("aria-sort") === "ascending");
-    expect(ascendingHeaders).toHaveLength(0);
-    const descendingHeaders = Array.from(
-      container.querySelectorAll("th"),
-    ).filter((th) => th.getAttribute("aria-sort") === "descending");
     expect(
-      descendingHeaders.some((th) => th.textContent?.includes("Price Diff")),
+      ascendingHeaders.some((th) => th.textContent?.includes("Oracle OK")),
     ).toBe(true);
   });
 
