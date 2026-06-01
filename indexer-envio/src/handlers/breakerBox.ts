@@ -20,6 +20,7 @@ import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt } from "../helpers.js";
 import {
   bootstrapFeedBreakerConfigs,
+  clearPoolsBreakerHalt,
   computeCooldownEndsAt,
   effectiveCooldown,
   effectiveThreshold,
@@ -27,7 +28,10 @@ import {
   ensureBreakerConfig,
   makeBreakerId,
   maybePreloadBreaker,
+  syncPoolsBreakerHalt,
 } from "../breakers.js";
+import { getPoolsByFeed } from "../rpc.js";
+import { maybePreloadPool } from "../pool.js";
 
 // ---------------------------------------------------------------------------
 // BreakerBox.BreakerAdded — lifecycle: a new breaker contract is registered.
@@ -69,10 +73,17 @@ indexer.onEvent(
     const configs = await context.BreakerConfig.getWhere({
       breakerAddress: { _eq: breakerAddress },
     });
+    // A breaker can serve multiple feeds; disabling it may clear the halt OR
+    // on any of them, so collect the touched feeds and re-sync each.
+    const affectedFeeds = new Set<string>();
     for (const cfg of configs) {
       if (cfg.chainId === event.chainId && cfg.enabled) {
         context.BreakerConfig.set({ ...cfg, enabled: false });
+        affectedFeeds.add(cfg.rateFeedID);
       }
+    }
+    for (const feed of affectedFeeds) {
+      await syncPoolsBreakerHalt(context, event.chainId, feed);
     }
   },
 );
@@ -115,6 +126,10 @@ indexer.onEvent(
     if (cfg.enabled !== enabled) {
       context.BreakerConfig.set({ ...cfg, enabled });
     }
+    // Always re-sync (not just on an enabled flip): `ensureBreakerConfig` may
+    // have just bootstrapped an already-TRIPPED config from RPC with `enabled`
+    // unchanged, which the enabled-only gate would otherwise miss.
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );
 
@@ -133,9 +148,16 @@ indexer.onEvent(
 
 indexer.onEvent(
   { contract: "BreakerBox", event: "RateFeedRemoved" },
-  async () => {
-    // No-op. Existing BreakerConfig rows for the removed feed remain as
-    // historical record; they'll never receive new events.
+  async ({ event, context }) => {
+    // The feed no longer has BreakerBox oversight, so its pools are no longer
+    // halted by a price breaker — clear the flag. (Existing BreakerConfig rows
+    // remain as historical record; a removed feed receives no further events,
+    // so we clear pools directly rather than recompute from those stale-TRIPPED
+    // rows, which would re-derive `true`.)
+    const rateFeedID = asAddress(event.params.rateFeedID);
+    const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
+    if (await maybePreloadPool(context, poolIds)) return;
+    await clearPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );
 
@@ -207,6 +229,10 @@ indexer.onEvent(
       tripCountLifetime: cfg.tripCountLifetime + 1,
     };
     context.BreakerConfig.set(updated);
+
+    // Reflect the halt onto every pool on this feed (price breakers only;
+    // MARKET_HOURS is excluded inside the helper).
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );
 
@@ -253,6 +279,9 @@ indexer.onEvent(
       cooldownEndsAt: computeCooldownEndsAt(blockTimestamp, cooldown),
       lastResetAt: blockTimestamp,
     });
+
+    // Clearing the trip may lift the feed's halt — re-sync the pools.
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );
 
@@ -312,5 +341,8 @@ indexer.onEvent(
         cooldownEndsAt: computeCooldownEndsAt(blockTimestamp, cooldown),
       });
     }
+
+    // Manual override touched every enabled config on the feed — re-sync once.
+    await syncPoolsBreakerHalt(context, event.chainId, rateFeedID);
   },
 );

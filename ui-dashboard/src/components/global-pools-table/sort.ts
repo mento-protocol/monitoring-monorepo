@@ -36,12 +36,15 @@ export const GLOBAL_SORT_KEYS: ReadonlySet<GlobalSortKey> = new Set([
 ]);
 
 // Higher rank = more severe. "desc" puts highest rank first → CRITICAL first.
+// Mirrors STATUS_RANK in lib/health.ts: HALTED outranks WEEKEND/WARN (a halted
+// pool deserves attention) but sits below CRITICAL.
 const HEALTH_ORDER: Record<string, number> = {
   "N/A": 0,
   OK: 1,
   WARN: 2,
   WEEKEND: 3,
-  CRITICAL: 4,
+  HALTED: 4,
+  CRITICAL: 5,
 };
 
 /** Build a unique key for a pool entry so pools from different chains with the same ID don't collide. */

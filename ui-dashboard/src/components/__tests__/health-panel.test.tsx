@@ -109,3 +109,32 @@ describe("HealthPanel weekend mode", () => {
     expect(html).toBe("");
   });
 });
+
+describe("HealthPanel breaker halt", () => {
+  it("renders the HALTED badge + halt explanation when a price breaker is tripped", () => {
+    const haltedPool: Pool = { ...BASE_POOL, breakerTripped: true };
+    const html = renderToStaticMarkup(<HealthPanel pool={haltedPool} />);
+
+    expect(html).toContain("Halted");
+    expect(html).toContain("Trading is halted");
+    expect(html).toContain("circuit breaker is tripped");
+  });
+
+  it("collapses to nothing for a healthy, non-halted pool", () => {
+    const html = renderToStaticMarkup(<HealthPanel pool={BASE_POOL} />);
+    expect(html).toBe("");
+  });
+
+  it("defers to the header (no halt panel) when the oracle is stale on a weekday, even if a breaker is tripped", () => {
+    // Stale + weekday → computeHealthStatus resolves to CRITICAL (the deeper
+    // fault), not HALTED, so the exception panel stays collapsed and the
+    // header surfaces the critical state — keeping detail + fleet consistent.
+    const staleHalted: Pool = {
+      ...BASE_POOL,
+      oracleTimestamp: STALE_TS,
+      breakerTripped: true,
+    };
+    const html = renderToStaticMarkup(<HealthPanel pool={staleHalted} />);
+    expect(html).toBe("");
+  });
+});

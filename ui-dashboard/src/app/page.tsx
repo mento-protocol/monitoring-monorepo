@@ -33,8 +33,8 @@ export function buildDescription(
     parts.push(`7d volume ${formatUSD(data.totalVolume7dUsd)}`);
   }
   parts.push(`${data.poolCount} pools on ${data.chains.join(" + ")}`);
-  const { WARN = 0, CRITICAL = 0 } = data.healthBuckets;
-  const attention = WARN + CRITICAL;
+  const { WARN = 0, CRITICAL = 0, HALTED = 0 } = data.healthBuckets;
+  const attention = WARN + CRITICAL + HALTED;
   if (attention > 0) {
     parts.push(`${attention} ${attention === 1 ? "needs" : "need"} attention`);
   }

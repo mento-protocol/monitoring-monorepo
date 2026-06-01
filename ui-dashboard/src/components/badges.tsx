@@ -1,4 +1,4 @@
-/** Health status badge for oracle/pool health (OK | WARN | WEEKEND | CRITICAL | N/A) */
+/** Health status badge for oracle/pool health (OK | WARN | WEEKEND | HALTED | CRITICAL | N/A) */
 export function HealthBadge({ status }: { status: string }) {
   const configs: Record<
     string,
@@ -21,6 +21,15 @@ export function HealthBadge({ status }: { status: string }) {
       dot: "🌙",
       bg: "bg-slate-500/20",
       text: "text-slate-300",
+    },
+    HALTED: {
+      label: "Halted",
+      dot: "🛑",
+      // Orange — distinct from WARN (amber) and CRITICAL (red): trading is
+      // paused by a circuit breaker, a real user impact but not a protocol
+      // fault on our side.
+      bg: "bg-orange-500/20",
+      text: "text-orange-300",
     },
     CRITICAL: {
       label: "CRITICAL",

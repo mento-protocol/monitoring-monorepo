@@ -3,7 +3,13 @@
  * Mirrors the logic in the indexer's EventHandlers.ts.
  */
 
-export type HealthStatus = "OK" | "WARN" | "WEEKEND" | "CRITICAL" | "N/A";
+export type HealthStatus =
+  | "OK"
+  | "WARN"
+  | "WEEKEND"
+  | "HALTED"
+  | "CRITICAL"
+  | "N/A";
 
 import { isWeekend, tradingSecondsInRange } from "./weekend";
 import { isVirtualPool } from "./types";
@@ -69,6 +75,10 @@ interface PoolHealthState {
   hasHealthData?: boolean | undefined;
   lastRebalancedAt?: string | null | undefined;
   deviationBreachStartedAt?: string | null | undefined;
+  // Indexer-denormalized: a price breaker (MEDIAN_DELTA / VALUE_DELTA, not
+  // MARKET_HOURS) is tripped → swaps halted → "HALTED". Weekend FX closures
+  // (MARKET_HOURS) flow through the WEEKEND path instead.
+  breakerTripped?: boolean | undefined;
 }
 
 /**
@@ -240,6 +250,10 @@ export function computeHealthStatus(
     return "CRITICAL";
   }
   if (pool.oracleOk === false) return "CRITICAL";
+  // Swaps halted now — above the data-trust/config gates (a halt is real even
+  // if deviation is untrusted / never-rebalance / degenerate), below the oracle
+  // gates (a stale/broken oracle is the deeper fault; weekend stays WEEKEND).
+  if (pool.breakerTripped === true) return "HALTED";
   // Indexer flagged the deviation accrual as untrusted — don't render
   // synthesized health status. See docblock for rationale.
   if (pool.hasHealthData === false) return "N/A";
@@ -247,6 +261,17 @@ export function computeHealthStatus(
   // priceDifference magnitude. Mirrors indexer `computeHealthStatus`.
   if (isNeverRebalance(pool)) return "OK";
   if (pool.degenerateReserves === true) return "OK";
+  return deviationTierStatus(pool, nowSeconds);
+}
+
+/**
+ * Deviation-magnitude tier for a fresh, trusted, rebalancing pool. Extracted
+ * from `computeHealthStatus` for the complexity budget; behaviour is identical.
+ */
+function deviationTierStatus(
+  pool: PoolHealthState,
+  nowSeconds: number,
+): HealthStatus {
   const diff = Number(pool.priceDifference ?? "0");
   const devRatio = diff / effectiveThreshold(pool);
   if (devRatio <= DEVIATION_TOLERANCE_RATIO) return "OK";
@@ -498,7 +523,11 @@ const STATUS_RANK: Record<HealthStatus, number> = {
   OK: 1,
   WARN: 2,
   WEEKEND: 3,
-  CRITICAL: 4,
+  // Rank applies only to the limit axis via worstStatus: a limit-CRITICAL
+  // outranks a halt. A deviation-CRITICAL is short-circuited by the HALTED
+  // return in computeHealthStatus above and is never compared here.
+  HALTED: 4,
+  CRITICAL: 5,
 };
 
 export function worstStatus(a: HealthStatus, b: HealthStatus): HealthStatus {
@@ -551,6 +580,9 @@ export function computeEffectiveStatus(
     degenerateReserves?: boolean | undefined;
     deviationBreachStartedAt?: string | null | undefined;
     lastRebalancedAt?: string | null | undefined;
+    // Price-breaker halt flag — propagated through `computeHealthStatus` to
+    // surface "HALTED". See `PoolHealthState.breakerTripped`.
+    breakerTripped?: boolean | undefined;
     limitStatus?: string | undefined;
     limitPressure0?: string | undefined;
     limitPressure1?: string | undefined;

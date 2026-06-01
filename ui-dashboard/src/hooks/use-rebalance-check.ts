@@ -77,8 +77,16 @@ function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {
 
   // Pass chainId so chain-aware staleness thresholds are used (e.g. Monad = 360s)
   const health = computeHealthStatus(pool, chainId);
-  // WEEKEND = expected oracle staleness during FX market closure, not actionable
-  if (health === "OK" || health === "N/A" || health === "WEEKEND") return false;
+  // WEEKEND = expected oracle staleness during FX market closure, not actionable.
+  // HALTED = a price breaker tripped, so swaps are paused — a rebalance probe is
+  // moot (and can't execute) until it resets.
+  if (
+    health === "OK" ||
+    health === "N/A" ||
+    health === "WEEKEND" ||
+    health === "HALTED"
+  )
+    return false;
 
   // Only check if deviation is at or above threshold (pool actually needs rebalancing).
   // Use the same fallback as computeHealthStatus (10000 bps) when threshold is missing.

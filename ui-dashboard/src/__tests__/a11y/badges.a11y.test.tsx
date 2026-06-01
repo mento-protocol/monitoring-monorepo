@@ -64,6 +64,7 @@ describe("HealthBadge a11y", () => {
     ["OK", "OK"],
     ["WARN", "WARN"],
     ["WEEKEND", "Weekend"],
+    ["HALTED", "Halted"],
     ["CRITICAL", "CRITICAL"],
     ["N/A", "N/A"],
   ];

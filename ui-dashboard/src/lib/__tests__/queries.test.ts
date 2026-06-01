@@ -161,6 +161,11 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
       "degenerateReserves",
     );
+    // breakerTripped rides this isolated companion (not the main query) so the
+    // whole pools fan-out doesn't fail during the indexer deploy/promote window.
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
+      "breakerTripped",
+    );
     // No heavy / unrelated fields piggybacking — isolation must stay tight
     // so a schema-lag failure on the rollup query degrades only `isNeverRebalance`,
     // not the entire pools page.

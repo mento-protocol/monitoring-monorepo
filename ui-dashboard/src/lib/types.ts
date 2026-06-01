@@ -58,6 +58,9 @@ export type Pool = {
   rebalanceThresholdsKnown?: boolean | undefined;
   lastRebalancedAt?: string | undefined;
   deviationBreachStartedAt?: string | undefined;
+  // Indexer-denormalized: price circuit breaker tripped → swaps halted →
+  // "HALTED" status. See `PoolHealthState.breakerTripped` in lib/health.ts.
+  breakerTripped?: boolean | undefined;
   lpFee?: number | undefined;
   protocolFee?: number | undefined;
   rebalanceReward?: number | undefined;
