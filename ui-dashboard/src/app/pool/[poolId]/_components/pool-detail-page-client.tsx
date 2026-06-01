@@ -95,9 +95,8 @@ function usePoolUrlState(initialSearch: string, normalizedPoolId: string) {
 
   const replaceURL = useCallback(
     (params: URLSearchParams) => {
-      const nextParams = new URLSearchParams(params.toString());
       if (typeof window !== "undefined") {
-        const nextUrl = buildPoolDetailUrl(normalizedPoolId, nextParams);
+        const nextUrl = buildPoolDetailUrl(normalizedPoolId, params);
         window.history.replaceState(window.history.state, "", nextUrl);
         notifyURLSearchSubscribers();
       }
