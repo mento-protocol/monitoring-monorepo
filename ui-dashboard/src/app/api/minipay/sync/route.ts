@@ -9,6 +9,7 @@ import {
   getLastSyncedBlock,
   getMiniPaySetSize,
 } from "@/lib/minipay";
+import { withFlushedMonitor } from "@/lib/sentry-cron";
 
 // `nodejs` runtime needed for fetch + setTimeout pacing in the Dune client.
 // The hosted route is for incremental cron syncs only. First-run/backfill
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const startedAt = Date.now();
 
   try {
-    return await Sentry.withMonitor(
+    return await withFlushedMonitor(
       "minipay-sync",
       async () => {
         const fromBlock = await getLastSyncedBlock();

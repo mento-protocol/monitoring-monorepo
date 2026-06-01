@@ -27,6 +27,13 @@ import {
 } from "./address-labels-shared";
 
 // Data access helpers (all server-side)
+const HMGET_CHUNK_SIZE = 1000;
+
+function chunk<T>(arr: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 /**
  * Read every label as a flat address → entry map.
@@ -49,6 +56,41 @@ export async function getLabel(address: string): Promise<AddressEntry | null> {
   const flat = await redis.hget<Record<string, unknown>>(LABELS_KEY, lower);
   if (flat) return upgradeEntry(flat);
   return null;
+}
+
+/**
+ * Read labels for a bounded address set. This avoids full-hash HGETALL for
+ * cron jobs that only need presence checks for discovered candidates.
+ */
+export async function getLabelsForAddresses(
+  addresses: readonly string[],
+): Promise<Record<string, AddressEntry>> {
+  if (addresses.length === 0) return {};
+
+  const redis = getRedis();
+  const result: Record<string, AddressEntry> = {};
+  const unique = Array.from(
+    new Set(addresses.map((address) => address.toLowerCase())),
+  );
+
+  for (const batch of chunk(unique, HMGET_CHUNK_SIZE)) {
+    // Chunks are independent, but serializing avoids dispatching multiple
+    // large HMGETs to Upstash at once when discovery returns a big universe.
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop
+    const raw = await redis.hmget<Record<string, Record<string, unknown>>>(
+      LABELS_KEY,
+      ...batch,
+    );
+    for (const [address, entry] of Object.entries(raw ?? {})) {
+      if (typeof entry === "object" && entry !== null) {
+        result[address.toLowerCase()] = upgradeEntry(
+          entry as Record<string, unknown>,
+        );
+      }
+    }
+  }
+
+  return result;
 }
 
 export async function upsertEntry(

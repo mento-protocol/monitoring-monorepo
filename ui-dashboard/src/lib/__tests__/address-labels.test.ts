@@ -6,14 +6,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@upstash/redis", () => {
   const hgetall = vi.fn();
   const hget = vi.fn();
+  const hmget = vi.fn();
   const hset = vi.fn();
   const hdel = vi.fn();
   const evalMock = vi.fn();
   return {
     Redis: function MockRedis() {
-      return { hgetall, hget, hset, hdel, eval: evalMock };
+      return { hgetall, hget, hmget, hset, hdel, eval: evalMock };
     },
-    __mocks: { hgetall, hget, hset, hdel, evalMock },
+    __mocks: { hgetall, hget, hmget, hset, hdel, evalMock },
   };
 });
 
@@ -22,6 +23,7 @@ vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "fake-token");
 
 import {
   getLabels,
+  getLabelsForAddresses,
   getLabel,
   upsertEntry,
   deleteLabel,
@@ -37,6 +39,7 @@ const mocks = (
     __mocks: {
       hgetall: ReturnType<typeof vi.fn>;
       hget: ReturnType<typeof vi.fn>;
+      hmget: ReturnType<typeof vi.fn>;
       hset: ReturnType<typeof vi.fn>;
       hdel: ReturnType<typeof vi.fn>;
       evalMock: ReturnType<typeof vi.fn>;
@@ -101,6 +104,45 @@ describe("getLabels", () => {
     await getLabels();
     expect(mocks.hgetall).toHaveBeenCalledTimes(1);
     expect(mocks.hgetall).toHaveBeenCalledWith("labels");
+  });
+});
+
+describe("getLabelsForAddresses", () => {
+  it("reads only requested address fields with HMGET", async () => {
+    mocks.hmget.mockResolvedValue({
+      "0xaaa": {
+        name: "One",
+        tags: [],
+        isPublic: true,
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    });
+
+    const result = await getLabelsForAddresses(["0xAAA", "0xBBB", "0xAAA"]);
+
+    expect(mocks.hmget).toHaveBeenCalledWith("labels", "0xaaa", "0xbbb");
+    expect(mocks.hgetall).not.toHaveBeenCalled();
+    expect(Object.keys(result)).toEqual(["0xaaa"]);
+    expect(result["0xaaa"]!.name).toBe("One");
+  });
+
+  it("chunks large field lists", async () => {
+    mocks.hmget.mockResolvedValue({});
+    const addresses = Array.from(
+      { length: 1001 },
+      (_, i) => `0x${i.toString(16).padStart(40, "0")}`,
+    );
+
+    await getLabelsForAddresses(addresses);
+
+    expect(mocks.hmget).toHaveBeenCalledTimes(2);
+    expect(mocks.hmget.mock.calls[0]!.length).toBe(1 + 1000);
+    expect(mocks.hmget.mock.calls[1]!.length).toBe(1 + 1);
+  });
+
+  it("returns empty object without Redis when input is empty", async () => {
+    expect(await getLabelsForAddresses([])).toEqual({});
+    expect(mocks.hmget).not.toHaveBeenCalled();
   });
 });
 

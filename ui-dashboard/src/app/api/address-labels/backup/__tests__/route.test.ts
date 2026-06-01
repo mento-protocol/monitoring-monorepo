@@ -13,6 +13,7 @@ vi.mock("@sentry/nextjs", async (importOriginal) => {
     ...actual,
     captureException: vi.fn(),
     captureMessage: vi.fn(),
+    flush: vi.fn().mockResolvedValue(true),
     // withMonitor must still execute the wrapped callback — the tests rely
     // on the route's return value, not on the Sentry monitor side effects.
     withMonitor: vi.fn(

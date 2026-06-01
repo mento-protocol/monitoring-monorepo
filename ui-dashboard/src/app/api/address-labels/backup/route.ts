@@ -19,6 +19,7 @@ import {
   type SnapshotHashName,
   hashBlobPathname,
 } from "@/lib/address-labels/backup-format";
+import { withFlushedMonitor } from "@/lib/sentry-cron";
 
 // 5min serverless-function budget covers the steady-state cron: 7 parallel
 // HGETALLs + 8 parallel blob uploads (one per hash + manifest). Per-hash
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // check-in on exit. Missed runs (vs. the declared schedule) fire a Sentry
   // alert. Schedule mirrors vercel.json crons entry.
   try {
-    return await Sentry.withMonitor(
+    return await withFlushedMonitor(
       "address-labels-backup",
       async () => {
         // Read all 7 hashes from Upstash in parallel. labels + reports lead
