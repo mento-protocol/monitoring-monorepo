@@ -190,6 +190,24 @@ test.describe("dashboard browser flows", () => {
     ).toBeVisible();
   });
 
+  test("shows the FX weekend banner after mount without a hydration mismatch", async ({
+    page,
+  }) => {
+    // Pin the CLIENT clock to a Saturday so the weekend banner should show.
+    // SSR renders with the server's own wall-clock day (often a weekday), so
+    // gating the banner on a render-time isWeekend() would diverge from the
+    // client and trip a hydration mismatch — caught by the afterEach
+    // console-error assertion. useIsWeekend defers the banner to after mount, so
+    // SSR and the hydration pass agree and the banner fades in client-side.
+    await page.clock.setFixedTime(new Date("2026-04-18T12:00:00Z")); // Saturday
+    await page.goto("/pools");
+
+    await expect(page.getByRole("heading", { name: "Pools" })).toBeVisible();
+    await expect(
+      page.getByText(/FX markets are closed this weekend/),
+    ).toBeVisible();
+  });
+
   test("shows rebalance-blocked prose without the raw Solidity error code", async ({
     page,
   }) => {

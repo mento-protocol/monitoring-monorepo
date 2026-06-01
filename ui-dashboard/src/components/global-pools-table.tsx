@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { poolTvlUSD } from "@/lib/tokens";
 import { type TradingLimit } from "@/lib/types";
 import { Table } from "@/components/table";
-import { isWeekend } from "@/lib/weekend";
+import { useIsWeekend } from "@/hooks/use-is-weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { useTableSort } from "@/lib/use-table-sort";
 import {
@@ -107,10 +107,15 @@ export function GlobalPoolsTable({
   );
 
   const showVirtualPoolSource = hasAnyVirtualPools(entries);
+  // SSR-safe: only show the weekend banner after mount. The server's
+  // wall-clock day can differ from the viewer's (and a cached SSR payload can
+  // outlive the weekend), so gating on isWeekend() during render would emit
+  // server HTML the client discards as a hydration mismatch. See useIsWeekend.
+  const showWeekendBanner = useIsWeekend();
 
   return (
     <>
-      {isWeekend() && <WeekendBanner />}
+      {showWeekendBanner && <WeekendBanner />}
       <Table>
         <PoolTableHeader
           sortKey={sortKey}
