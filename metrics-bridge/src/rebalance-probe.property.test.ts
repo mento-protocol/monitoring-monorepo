@@ -43,6 +43,7 @@ function eligiblePool(overrides: Partial<PoolRow> = {}): PoolRow {
     healthStatus: "OK",
     oracleOk: true,
     oracleTimestamp: "1713200000",
+    lastOracleReportAt: "1713200000",
     oracleTxHash:
       "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     oracleExpiry: "300",

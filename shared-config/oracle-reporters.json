@@ -1,0 +1,108 @@
+{
+  "42220": {
+    "feeds": {
+      "0x0f61ba9c30ef7caee7e5cc1f96bffcb0f52ccd64": {
+        "pair": "CHF/USD"
+      },
+      "0x26076b9702885d475ac8c3db3bd9f250dc5a318b": {
+        "pair": "EUR/USD"
+      },
+      "0xa1a8003936862e7a15092a91898d69fa8bce290c": {
+        "pair": "USDC/USD"
+      },
+      "0xfde35b45cbd2504fb5dc514f007bc2de27034274": {
+        "pair": "JPY/USD"
+      },
+      "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a": {
+        "pair": "EUR/USD"
+      },
+      "0xf590b62f9cfcc6409075b1ecac8176fe25744b88": {
+        "pair": "GBP/USD"
+      },
+      "0xe06c10c63377cd098b589c0b90314bfb55751558": {
+        "pair": "USDT/USD"
+      }
+    },
+    "reporters": {
+      "0x1b904277b22ca598ef17b38f64de5f9c29cd31bd": {
+        "type": "CHAINLINK",
+        "name": "Chainlink CHF/USD"
+      },
+      "0x6490a3ffad86ca14ff84be380d5639fb8fbd311b": {
+        "type": "CHAINLINK",
+        "name": "Chainlink EUR/USD or USDC/USD"
+      },
+      "0x1327a32fa7e3a0c3c0a5828d4f3ff16ce9e13ee9": {
+        "type": "CHAINLINK",
+        "name": "Chainlink JPY/USD"
+      },
+      "0xc4918a76a7fdb113f2dfa9b162e875f271a2f7b8": {
+        "type": "CHAINLINK",
+        "name": "Chainlink EUR/USD"
+      },
+      "0x215d3ba962597defb38da439ed4db8e8a63e409a": {
+        "type": "CHAINLINK",
+        "name": "Chainlink GBP/USD"
+      },
+      "0x564dd5fec58e7103c2a6041b7dd1bb3074a4616b": {
+        "type": "CHAINLINK",
+        "name": "Chainlink USDT/USD"
+      }
+    }
+  },
+  "143": {
+    "feeds": {
+      "0xac414205651f4a62b614b6be9e5318a182c33eb0": {
+        "pair": "USDT/USD"
+      },
+      "0xf47172ce00522cc7db02109634a92ce866a15fcc": {
+        "pair": "AUSD/USD"
+      },
+      "0xec57482aa55e3ad026c315a0e4a692b776c318ca": {
+        "pair": "EUR/USD"
+      },
+      "0xea4103a6a122fbe2cdb07a80d4d293be07bb29fa": {
+        "pair": "GBP/USD"
+      },
+      "0x81a313ff894bfc6093d33b5514e34d7faa41b7ef": {
+        "pair": "USDC/USD"
+      },
+      "0x2ee56be22d6af8c1b0ac97149b6f42d3b0bfb8c2": {
+        "pair": "CHF/USD"
+      },
+      "0xb9addcd1d1ce7d49dbb540e2677f1c572bc8d195": {
+        "pair": "JPY/USD"
+      }
+    },
+    "reporters": {
+      "0x0fb76625e4f43b8183d7c899df13024cbe030b0d": {
+        "type": "CHAINLINK",
+        "name": "ChainlinkRelayerV1USDTUSD"
+      },
+      "0x2604f6dafed5b6204868e15e89ca41c2d5f6d9c2": {
+        "type": "CHAINLINK",
+        "name": "ChainlinkRelayerV1AUSDUSD"
+      },
+      "0x1de9678363193412264911ebcc797c54da09ecbf": {
+        "type": "CHAINLINK",
+        "name": "ChainlinkRelayerV1EURUSD"
+      },
+      "0xdb8fc8c6daac8f73e21e9cc145440ab899d60e55": {
+        "type": "CHAINLINK",
+        "name": "ChainlinkRelayerV1GBPUSD"
+      },
+      "0xb1683db4d2d74e951c54314f1bca1e8fbb299fe2": {
+        "type": "CHAINLINK",
+        "name": "ChainlinkRelayerV1USDCUSD"
+      },
+      "0xf091f44a7b8cb8c57747275496fdb9957b3d0909": {
+        "type": "CHAINLINK",
+        "name": "ChainlinkRelayerV1CHFUSD"
+      },
+      "0x30fa361bd8315926e6ef4ceb88a353fab5a11f86": {
+        "type": "CHAINLINK",
+        "name": "ChainlinkRelayerV1JPYUSD"
+      }
+    }
+  }
+}

@@ -3,7 +3,10 @@ import {
   DEVIATION_TOLERANCE_RATIO,
 } from "@mento-protocol/monitoring-config/thresholds";
 import { LEGACY_OPEN_BREACH_ENTRY_THRESHOLD } from "./config.js";
+import { isFxPair, isFxWeekend } from "./fx-market.js";
 import type { PoolRow } from "./types.js";
+
+export { USD_PEGGED_SYMBOLS } from "./fx-market.js";
 
 export const DEVIATION_WARNING_PENDING_SECONDS = 900;
 export const DEVIATION_CRITICAL_FIRING_SECONDS = 3_660;
@@ -62,21 +65,6 @@ type ClassifiedDeviationAlertState = Pick<
 const previousStates = new Map<string, StateSnapshot>();
 const recentTransitions = new Map<string, DeviationAlertTransition>();
 
-// Mirrors ui-dashboard/src/lib/tokens.ts and alerts/rules/main.tf's
-// `usd_pegged_symbols_regex_part`. The drift-protection test in
-// test/deviation-alert-state.test.ts enforces this until the FX classifier
-// moves into shared-config.
-export const USD_PEGGED_SYMBOLS: ReadonlySet<string> = new Set([
-  "USDm",
-  "USDC",
-  "USDT",
-  "USDT0",
-  "USD₮",
-  "AUSD",
-  "cUSD",
-  "axlUSDC",
-]);
-
 function fp(value: string): number {
   return parseFloat(value);
 }
@@ -88,19 +76,6 @@ function openBreachPeakRatio(pool: PoolRow): number {
       ? pool.currentOpenBreachEntryThreshold
       : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
   return openBreachPeak > 0 ? openBreachPeak / openBreachEntryThreshold : 0;
-}
-
-function isFxPair(pair: string): boolean {
-  const [token0, token1, extra] = pair.split("/");
-  if (!token0 || !token1 || extra) return false;
-  return !(USD_PEGGED_SYMBOLS.has(token0) && USD_PEGGED_SYMBOLS.has(token1));
-}
-
-function isFxWeekend(nowSeconds: number): boolean {
-  const date = new Date(nowSeconds * 1000);
-  const day = date.getUTCDay();
-  const hour = date.getUTCHours();
-  return day === 6 || (day === 0 && hour < 23) || (day === 5 && hour >= 21);
 }
 
 function formatUtcTimestamp(seconds: number): string {

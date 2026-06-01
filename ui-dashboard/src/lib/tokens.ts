@@ -172,31 +172,6 @@ export function isFxPool(
 }
 
 /**
- * Returns the Chainlink data feed URL + display pair for a given token
- * symbol and chainId, or null if no mapping exists. Only applicable to
- * FPMM pools. Add new chains / symbols to CHAINLINK_FEEDS as they go live.
- *
- * `pair` is derived from the slug: `"gbp-usd"` → `"GBP/USD"`, suitable
- * for "via {pair} oracle" labels in the UI.
- */
-export function chainlinkFeed(
-  tokenSymbol: string,
-  chainId: number,
-): { url: string; pair: string } | null {
-  const chainConfig = CHAINLINK_FEEDS[chainId];
-  if (!chainConfig) return null;
-  // Normalise: strip "axl" prefix and lowercase for matching
-  const sym = tokenSymbol.replace(/^axl/i, "").toLowerCase();
-  const slug = chainConfig.slugs[sym];
-  if (!slug) return null;
-  const pair = slug
-    .split("-")
-    .map((s) => s.toUpperCase())
-    .join("/");
-  return { url: `${chainConfig.baseUrl}/${slug}`, pair };
-}
-
-/**
  * True when the pool's legs are USD-convertible: one leg is USDm or the rate
  * map can price one of the non-USDm legs. Intentionally does NOT require
  * `oraclePrice` — volume conversion uses per-snapshot `swapVolumeX` values
@@ -300,37 +275,3 @@ export function poolTvlUSD(
   }
   return 0;
 }
-
-/** Per-chain Chainlink feed configuration. Add new entries as new chains go live. */
-const CHAINLINK_FEEDS: Record<
-  number,
-  { baseUrl: string; slugs: Record<string, string> }
-> = {
-  42220: {
-    // Celo Mainnet
-    baseUrl: "https://data.chain.link/feeds/celo/mainnet",
-    slugs: {
-      usdc: "usdc-usd",
-      usdt: "usdt-usd",
-      gbp: "gbp-usd",
-      gbpm: "gbp-usd",
-      eur: "eur-usd",
-      eurm: "eur-usd",
-      euroc: "eur-usd",
-    },
-  },
-  143: {
-    // Monad Mainnet
-    baseUrl: "https://data.chain.link/feeds/monad/monad",
-    slugs: {
-      usdc: "usdc-usd",
-      usdt: "usdt-usd",
-      ausd: "ausd-usd",
-      gbp: "gbp-usd",
-      gbpm: "gbp-usd",
-      eur: "eur-usd",
-      eurm: "eur-usd",
-    },
-  },
-  // 10143: { baseUrl: "...", slugs: { ... } }, // Monad Testnet — add when live
-};

@@ -24,6 +24,7 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleOk
       oraclePrice
       oracleTimestamp
+      lastOracleReportAt
       oracleTxHash
       priceDifference
       rebalanceThreshold

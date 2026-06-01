@@ -51,8 +51,11 @@ export {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
+  _setMockRateFeedOracles,
+  _clearMockRateFeedOracles,
   fetchReferenceRateFeedID,
   fetchNumReporters,
+  fetchRateFeedOracles,
   fetchReportExpiry,
 } from "./rpc/oracle-state.js";
 export {

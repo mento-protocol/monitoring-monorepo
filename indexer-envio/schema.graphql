@@ -185,6 +185,28 @@ type Pool {
   updatedAtTimestamp: BigInt!
 }
 
+enum OracleReporterType {
+  CHAINLINK
+  REDSTONE
+  BRIDGED
+  MANUAL
+}
+
+type RateFeed @index(fields: ["chainId", "feedAddress"]) {
+  id: ID! # "{chainId}-{feedAddress}"
+  chainId: Int! @index
+  feedAddress: String! @index
+  pair: String!
+  reporters: [String!]!
+  reporterTypes: [OracleReporterType!]!
+  # True when reporters/reportersTypes came from a full SortedOracles.getOracles
+  # RPC read. False means the row was reconstructed from one event delta after
+  # RPC failed, so the next oracle event should retry full hydration.
+  reportersComplete: Boolean!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
 type DeviationThresholdBreach @index(fields: ["poolId", "startedAt"]) {
   id: ID! # "{poolId}-{startedAt}"
   chainId: Int! @index

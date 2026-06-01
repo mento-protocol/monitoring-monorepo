@@ -44,6 +44,7 @@ import {
   resolveBreakerSnapshotFields,
   syncHaltOnColdStart,
 } from "../breakers.js";
+import { ensureRateFeed, preloadRateFeed } from "./rateFeed.js";
 
 function priceDifferenceForOracleSample(
   pool: Pool,
@@ -338,6 +339,7 @@ indexer.onEvent(
     // pattern as MedianUpdated below. See `maybePreloadPool` in pool.ts.
     if (context.isPreload) {
       await Promise.all([
+        preloadRateFeed(context, event.chainId, rateFeedID),
         maybePreloadPool(context, poolIds),
         ...breakerConfigs.map(async (cfg) => {
           await context.Breaker.get(cfg.breaker_id);
@@ -347,6 +349,14 @@ indexer.onEvent(
     }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+
+    await ensureRateFeed({
+      context,
+      chainId: event.chainId,
+      feedAddress: rateFeedID,
+      blockNumber,
+      blockTimestamp,
+    });
 
     // Bootstrap-if-needed + resolve in one call. See helper doc; bootstrap
     // covers fresh-sync feeds whose BreakerBox events predate start_block.
@@ -419,6 +429,7 @@ indexer.onEvent(
     // `maybePreloadPool` semantics — return without proceeding to writes.
     if (context.isPreload) {
       await Promise.all([
+        preloadRateFeed(context, event.chainId, rateFeedID),
         maybePreloadPool(context, poolIds),
         ...breakerConfigs.map(async (cfg) => {
           await context.Breaker.get(cfg.breaker_id);
@@ -429,6 +440,14 @@ indexer.onEvent(
 
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+
+    await ensureRateFeed({
+      context,
+      chainId: event.chainId,
+      feedAddress: rateFeedID,
+      blockNumber,
+      blockTimestamp,
+    });
 
     // Eager bootstrap BEFORE the snapshot resolve. On a fresh sync where the
     // BreakerBox `BreakerAdded` / per-feed config events all predate

@@ -19,6 +19,7 @@ import {
   observeDeviationAlertState,
   pruneDeviationAlertStates,
 } from "./deviation-alert-state.js";
+import { classifyFxMarketPause } from "./fx-market.js";
 import type { PoolRow } from "./types.js";
 
 // SortedOracles fixed-point scale — keep in sync with
@@ -87,6 +88,7 @@ const poolLabels = [
 // gauges so Grafana annotations can link the Slack "last update" text. Keep
 // this scoped to oracle liveness gauges; do not add it to every pool series.
 const oracleUpdateLabels = [...poolLabels, "last_oracle_update_url"] as const;
+const oracleMarketPauseLabels = [...poolLabels, "reason"] as const;
 const deviationAlertStateLabels = [...poolLabels, "state"] as const;
 const deviationAlertTransitionCounterLabels = [
   ...poolLabels,
@@ -134,14 +136,32 @@ const pollErrorLabels = ["kind"] as const;
 export const gauges = {
   oracleOk: new Gauge({
     name: "mento_pool_oracle_ok",
-    help: "Oracle can-trade flag at last on-chain event (1=ok, 0=not ok). For live staleness, use (time() - oracle_timestamp) / oracle_expiry in PromQL.",
+    help: "Live scrape-time oracle usability (1=contract ok and last report is inside expiry, 0=not usable or expired).",
     labelNames: poolLabels,
+    registers: [register],
+  }),
+  oracleContractOk: new Gauge({
+    name: "mento_pool_oracle_contract_ok",
+    help: "Raw event-time contract can-trade flag from the indexer (1=ok, 0=not ok), before scrape-time expiry derivation.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  oracleMarketPause: new Gauge({
+    name: "mento_pool_oracle_market_pause",
+    help: "1 when an FX pool's oracle staleness is expected because TradFi markets are closed or inside the post-reopen grace window. Label reason is bounded.",
+    labelNames: oracleMarketPauseLabels,
     registers: [register],
   }),
   oracleTimestamp: new Gauge({
     name: "mento_pool_oracle_timestamp",
-    help: "Unix timestamp of the last oracle report. Use with oracle_expiry to compute live liveness ratio.",
+    help: "Raw/display Unix timestamp from the indexer oracle cursor. Diagnostic only; live freshness uses mento_pool_oracle_live_timestamp.",
     labelNames: oracleUpdateLabels,
+    registers: [register],
+  }),
+  oracleLiveTimestamp: new Gauge({
+    name: "mento_pool_oracle_live_timestamp",
+    help: "Unix timestamp of the freshness anchor used to derive live oracle usability.",
+    labelNames: poolLabels,
     registers: [register],
   }),
   oracleExpiry: new Gauge({
@@ -339,7 +359,7 @@ function updatePoolMetrics(pool: PoolRow, nowSeconds: number): void {
   const labels = poolDisplayLabels(pool, derivedPair);
 
   recordDeviationAlertMetrics(pool, labels, nowSeconds);
-  recordStatusAndOracleMetrics(pool, labels);
+  recordStatusAndOracleMetrics(pool, labels, nowSeconds);
   recordDeviationMetrics(pool, labels);
   recordRebalanceMetrics(pool, labels);
   recordOraclePriceMetrics(pool, labels);
@@ -385,12 +405,35 @@ function recordDeviationAlertMetrics(
 function recordStatusAndOracleMetrics(
   pool: PoolRow,
   labels: PoolDisplayLabels,
+  nowSeconds: number,
 ): void {
   const oracleLabels = oracleUpdateMetricLabels(pool, labels);
   gauges.healthStatus.set(labels, healthStatusToNumber(pool.healthStatus));
-  gauges.oracleOk.set(labels, pool.oracleOk ? 1 : 0);
+  gauges.oracleContractOk.set(labels, pool.oracleOk ? 1 : 0);
+  gauges.oracleOk.set(labels, isOracleLive(pool, nowSeconds) ? 1 : 0);
+  const marketPause = classifyFxMarketPause(labels.pair, nowSeconds);
+  if (marketPause !== null) {
+    gauges.oracleMarketPause.set({ ...labels, reason: marketPause }, 1);
+  }
   gauges.oracleTimestamp.set(oracleLabels, Number(pool.oracleTimestamp));
+  gauges.oracleLiveTimestamp.set(labels, Number(pool.lastOracleReportAt));
   gauges.oracleExpiry.set(oracleLabels, Number(pool.oracleExpiry));
+}
+
+export function isOracleLive(
+  pool: Pick<PoolRow, "oracleOk" | "lastOracleReportAt" | "oracleExpiry">,
+  nowSeconds: number,
+): boolean {
+  const timestamp = Number(pool.lastOracleReportAt);
+  const expiry = Number(pool.oracleExpiry);
+  return (
+    pool.oracleOk &&
+    Number.isFinite(timestamp) &&
+    Number.isFinite(expiry) &&
+    timestamp > 0 &&
+    expiry > 0 &&
+    nowSeconds - timestamp < expiry
+  );
 }
 
 function recordDeviationMetrics(

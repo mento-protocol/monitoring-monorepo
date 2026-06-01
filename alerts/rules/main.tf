@@ -45,11 +45,12 @@ locals {
   # ── FX weekend suppression ────────────────────────────────────────────────
   # FX markets are closed Fri 21:00 UTC → Sun 23:00 UTC, so pools whose
   # oracle feed is an FX rate (EUR, GBP, KES, BRL, …) legitimately stop
-  # reporting over weekends. These pools still fire `mento_pool_oracle_ok`
-  # correctly when the contract-level expiry is crossed — that path is
-  # handled by the separate Oracle Down rule and stays armed always — but
-  # the ratio-based liveness thresholds would page every weekend for
-  # reasons the operator can't fix.
+  # reporting over weekends. `mento_pool_oracle_ok` is a live scrape-time
+  # freshness signal now, so live Oracle Down and ratio-based liveness both need
+  # per-series FX pause suppression; otherwise a healthy paused FX feed pages
+  # every weekend for reasons the operator can't fix. Raw contract-down remains
+  # an always-on critical rule because a false contract flag is never an
+  # expected market pause.
   #
   # Why PromQL-level gating instead of `grafana_mute_timing`: a mute timing
   # applies to the whole rule (every firing series), so using it here would
@@ -78,19 +79,42 @@ locals {
     local.usd_pegged_symbols_regex_part,
     local.usd_pegged_symbols_regex_part,
   )
-  fx_weekend_gate_promql = "(day_of_week() == 6 or (day_of_week() == 0 and hour() < 23) or (day_of_week() == 5 and hour() >= 21))"
+  fx_weekend_gate_promql      = "(day_of_week() == 6 or (day_of_week() == 0 and hour() < 23) or (day_of_week() == 5 and hour() >= 21))"
+  fx_reopen_grace_gate_promql = "(day_of_week() == 0 and hour() == 23)"
+  fx_oracle_pause_gate_promql = format("(%s or %s)", local.fx_weekend_gate_promql, local.fx_reopen_grace_gate_promql)
 
-  # Liveness ratio with FX weekend suppression. The `unless` arm selects the
-  # oracle-timestamp series for FX pairs during the weekend window — those
-  # series are dropped from the main ratio. Using `mento_pool_oracle_timestamp`
-  # (not the ratio itself) for the suppression match avoids re-evaluating the
-  # division twice per tick. Referenced by the warning + critical rules in
-  # rules-fpmms.tf.
-  fx_gated_liveness_ratio_promql = format(
-    "((time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)) unless (mento_pool_oracle_timestamp{pair!~\"%s\",pair=~\".+/.+\"} and on() %s)",
+  # Shared live Oracle Down / liveness suppressor. This intentionally stays pure
+  # PromQL time/pair logic instead of depending on the new
+  # `mento_pool_oracle_market_pause` gauge, so alert-rule rollout is safe even
+  # before the bridge deploy that publishes the diagnostic pause metric.
+  # The timestamp expression keeps a rollout fallback to the old raw timestamp
+  # series so Grafana can apply before the bridge revision that publishes
+  # `mento_pool_oracle_live_timestamp`.
+  oracle_live_timestamp_compat_promql = "(mento_pool_oracle_live_timestamp or max without (last_oracle_update_url) (mento_pool_oracle_timestamp))"
+  fx_oracle_pause_promql = format(
+    "(mento_pool_oracle_live_timestamp{pair!~\"%s\",pair=~\".+/.+\"} or max without (last_oracle_update_url) (mento_pool_oracle_timestamp{pair!~\"%s\",pair=~\".+/.+\"})) and on() %s",
     local.usd_pegged_pair_regex,
-    local.fx_weekend_gate_promql,
+    local.usd_pegged_pair_regex,
+    local.fx_oracle_pause_gate_promql,
   )
+
+  # Liveness ratio with FX market-pause suppression. The `unless` arm selects
+  # the live oracle-timestamp series for FX pairs during the weekend +
+  # reopen-grace windows — those series are dropped from the main ratio. Using
+  # `mento_pool_oracle_live_timestamp` (not the ratio itself) for the
+  # suppression match avoids re-evaluating the division twice per tick.
+  # Referenced by the warning + critical rules in rules-fpmms.tf.
+  fx_gated_liveness_ratio_promql = format(
+    "((time() - %s) / ignoring(last_oracle_update_url) (mento_pool_oracle_expiry > 0)) unless on(chain_id, pool_id, pair) (%s)",
+    local.oracle_live_timestamp_compat_promql,
+    local.fx_oracle_pause_promql,
+  )
+
+  # During rollout the alert rules can apply before metrics-bridge publishes
+  # the split raw contract flag. Fall back to the legacy `oracle_ok` series;
+  # once both exist, PromQL `or` keeps the left-hand contract-only metric.
+  oracle_contract_down_active_promql = "mento_pool_oracle_contract_ok or mento_pool_oracle_ok"
+  oracle_live_down_active_promql     = "mento_pool_oracle_ok unless on(chain_id, pool_id, pair) (${local.fx_oracle_pause_promql})"
 
   # Shared per-series weekend suppressors for deviation/rebalancer rules.
   # They intentionally gate only FX pairs (non-USD-pegged pair labels) and
@@ -111,8 +135,7 @@ locals {
   # gate drops. Sydney has only been open for ~1h at Sun 23:00 UTC, so paging
   # immediately at 23:05 UTC is mostly noise for FX pairs. Keep this separate
   # from the shared deviation gate so Deviation Breach resumes at reopen.
-  fx_rebalancer_reopen_grace_gate_promql = "(day_of_week() == 0 and hour() == 23)"
-  fx_rebalancer_stale_gate_promql        = format("(%s or %s)", local.fx_weekend_gate_promql, local.fx_rebalancer_reopen_grace_gate_promql)
+  fx_rebalancer_stale_gate_promql = format("(%s or %s)", local.fx_weekend_gate_promql, local.fx_reopen_grace_gate_promql)
   fx_rebalancer_stale_suppressed_breach_start_promql = format(
     "mento_pool_deviation_breach_start{pair!~\"%s\",pair=~\".+/.+\"} and on() %s",
     local.usd_pegged_pair_regex,

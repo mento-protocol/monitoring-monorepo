@@ -20,6 +20,7 @@ describe("healthStatusToNumber", () => {
 });
 
 describe("updateMetrics", () => {
+  const DEFAULT_NOW_SECONDS = 1713200100;
   const poolLabels = {
     pool_id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
     chain_id: "42220",
@@ -36,6 +37,8 @@ describe("updateMetrics", () => {
   };
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(DEFAULT_NOW_SECONDS * 1000));
     register.resetMetrics();
     resetDeviationAlertStateForTests();
   });
@@ -44,10 +47,21 @@ describe("updateMetrics", () => {
     vi.useRealTimers();
   });
 
-  it("sets oracle_ok to 1 when oracleOk is true", async () => {
+  it("sets oracle_ok to 1 when oracleOk is true and the report is fresh", async () => {
     updateMetrics([makePool()]);
     expect(
       await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
+    ).toBe(1);
+  });
+
+  it("sets oracle_contract_ok to the raw event-time contract flag", async () => {
+    updateMetrics([makePool()]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_contract_ok",
+        poolLabels,
+      ),
     ).toBe(1);
   });
 
@@ -56,6 +70,121 @@ describe("updateMetrics", () => {
     expect(
       await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
     ).toBe(0);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_contract_ok",
+        poolLabels,
+      ),
+    ).toBe(0);
+  });
+
+  it("sets oracle_ok to 0 when the last report has crossed expiry", async () => {
+    updateMetrics([makePool()], 1713200301);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_contract_ok",
+        poolLabels,
+      ),
+    ).toBe(1);
+  });
+
+  it("uses lastOracleReportAt, not the latest reporter timestamp, for live oracle freshness", async () => {
+    updateMetrics(
+      [
+        makePool({
+          lastOracleReportAt: "1713199600",
+          oracleTimestamp: "1713200000",
+        }),
+      ],
+      1713200001,
+    );
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_live_timestamp",
+        poolLabels,
+      ),
+    ).toBe(1713199600);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_timestamp", {
+        ...poolLabels,
+        last_oracle_update_url:
+          "https://celoscan.io/tx/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+    ).toBe(1713200000);
+  });
+
+  it("sets oracle_ok to 0 when expiry is unavailable", async () => {
+    updateMetrics([makePool({ oracleExpiry: "0" })], DEFAULT_NOW_SECONDS);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
+    ).toBe(0);
+  });
+
+  it("publishes FX weekend market pause during the closed window", async () => {
+    const fridayClose = Date.UTC(2024, 3, 19, 21, 0, 0) / 1000;
+    updateMetrics([makePool()], fridayClose);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_market_pause", {
+        ...poolLabels,
+        reason: "fx_weekend_closed",
+      }),
+    ).toBe(1);
+  });
+
+  it("publishes FX reopen grace after the weekend gate drops", async () => {
+    const sundayReopen = Date.UTC(2024, 3, 21, 23, 0, 0) / 1000;
+    updateMetrics([makePool()], sundayReopen);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_market_pause", {
+        ...poolLabels,
+        reason: "fx_reopen_grace",
+      }),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_market_pause", {
+        ...poolLabels,
+        reason: "fx_weekend_closed",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("does not publish FX market pause after reopen grace", async () => {
+    const afterGrace = Date.UTC(2024, 3, 22, 0, 0, 0) / 1000;
+    updateMetrics([makePool()], afterGrace);
+    expect(
+      await getMetricValues(register, "mento_pool_oracle_market_pause"),
+    ).toHaveLength(0);
+  });
+
+  it("does not market-pause USD-pegged pools or malformed pair labels", async () => {
+    const fridayClose = Date.UTC(2024, 3, 19, 21, 0, 0) / 1000;
+    updateMetrics(
+      [
+        makePool({
+          id: "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+          token0: "0x765de816845861e75a25fca122bb6898b8b1282a",
+          token1: "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
+        }),
+        makePool({
+          id: "42220-0xdeadbeef00000000000000000000000000000000",
+          token0: "0xdeadbeef00000000000000000000000000000000",
+          token1: "0xfeedface00000000000000000000000000000000",
+        }),
+      ],
+      fridayClose,
+    );
+    expect(
+      await getMetricValues(register, "mento_pool_oracle_market_pause"),
+    ).toHaveLength(0);
   });
 
   it("parses oracleTimestamp from BigInt string", async () => {
@@ -67,6 +196,17 @@ describe("updateMetrics", () => {
         oracleLabels,
       ),
     ).toBe(1713200000);
+  });
+
+  it("parses live oracle timestamp from lastOracleReportAt", async () => {
+    updateMetrics([makePool({ lastOracleReportAt: "1713199900" })]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_live_timestamp",
+        poolLabels,
+      ),
+    ).toBe(1713199900);
   });
 
   it("leaves oracle update URL empty when oracleTxHash is absent", async () => {

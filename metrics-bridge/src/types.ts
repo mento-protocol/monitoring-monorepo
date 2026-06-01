@@ -7,6 +7,7 @@ export interface PoolRow {
   healthStatus: string;
   oracleOk: boolean;
   oracleTimestamp: string;
+  lastOracleReportAt: string;
   oracleTxHash: string;
   oracleExpiry: string;
   lastDeviationRatio: string;
