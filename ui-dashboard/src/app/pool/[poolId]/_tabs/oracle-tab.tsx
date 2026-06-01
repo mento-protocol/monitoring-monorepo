@@ -329,6 +329,8 @@ export function OracleTab(props: OracleTabProps) {
         setSortDir((d) => (d === "asc" ? "desc" : "asc"));
       } else {
         setSortCol(col);
+        // Bad oracle verdicts are operationally interesting, so the first
+        // Oracle OK click sorts false rows to the top.
         setSortDir(col === "oracleOk" ? "asc" : "desc");
       }
       setRawPage(1);
