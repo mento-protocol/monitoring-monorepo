@@ -81,6 +81,7 @@ export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
       rebalanceThresholdsKnown
       tokenDecimalsKnown
       degenerateReserves
+      breakerTripped
     }
   }
 `;

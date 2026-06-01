@@ -41,7 +41,9 @@ function buildAlt(data: HomepageOgData | null): string {
   }
   parts.push(`${data.poolCount} pools on ${data.chains.join(" + ")}`);
   const attention =
-    (data.healthBuckets.WARN ?? 0) + (data.healthBuckets.CRITICAL ?? 0);
+    (data.healthBuckets.WARN ?? 0) +
+    (data.healthBuckets.CRITICAL ?? 0) +
+    (data.healthBuckets.HALTED ?? 0);
   parts.push(
     attention === 0
       ? "all healthy"

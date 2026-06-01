@@ -15,7 +15,8 @@ interface HealthPanelProps {
  * (DeviationCell, Rebalance Status cell, metric grid). Rebalance diagnostics
  * moved into the Rebalance Status cell's tooltip, so this panel only stays
  * mounted for environmental states the header can't express: virtual pool,
- * missing health data, or the weekend pause. Otherwise it returns null.
+ * missing health data, the weekend pause, or a price-breaker halt. Otherwise
+ * it returns null.
  */
 export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
@@ -32,17 +33,23 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
   const weekendPause = !oracleIsFresh && isWeekendNow;
 
-  const hasContent = isVirtual || !hasHealthData || weekendPause;
-  if (!hasContent) return null;
-
-  // For the no-data branch, skip computeHealthStatus — with the indexer's
-  // zero-initialised fields it would return CRITICAL from the stale
-  // timestamp, contradicting the "not yet available" copy below. Show
-  // N/A instead, which matches the virtual-pool branch visually.
+  // Resolve the real status first. computeHealthStatus ranks HALTED ABOVE the
+  // hasHealthData gate, so a tripped price breaker resolves to HALTED even when
+  // health data isn't trusted yet — the halt must surface regardless. Keying on
+  // the resolved status (not the raw flag) keeps it consistent with the fleet
+  // chip: stale / weekend pools resolve to CRITICAL / WEEKEND, not HALTED.
+  const computed = isVirtual
+    ? "N/A"
+    : computeHealthStatus(pool, network.chainId);
+  const showHalted = computed === "HALTED";
+  // No-data pools otherwise resolve to a misleading CRITICAL from the indexer's
+  // zero-initialised stale timestamp — suppress that to N/A (matching the
+  // virtual-pool branch). Never suppress a real halt.
   const badgeStatus =
-    isVirtual || !hasHealthData
-      ? "N/A"
-      : computeHealthStatus(pool, network.chainId);
+    !isVirtual && !hasHealthData && !showHalted ? "N/A" : computed;
+
+  const hasContent = isVirtual || showHalted || !hasHealthData || weekendPause;
+  if (!hasContent) return null;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -55,6 +62,23 @@ export function HealthPanel({ pool }: HealthPanelProps) {
         <p className="text-sm text-slate-400">
           VirtualPool — no oracle data. Health monitoring is not applicable.
         </p>
+      ) : showHalted ? (
+        <div className="flex items-start gap-3 rounded-lg border border-orange-700/50 bg-orange-900/20 px-4 py-3 text-sm text-orange-100">
+          <span
+            className="text-base leading-5 flex-shrink-0"
+            aria-hidden="true"
+          >
+            🛑
+          </span>
+          <span>
+            <span className="font-medium text-orange-200">
+              Trading is halted.
+            </span>{" "}
+            A price circuit breaker is tripped for this rate feed, so swaps are
+            paused until it resets — see the breaker panel below for the live
+            threshold and cooldown.
+          </span>
+        </div>
       ) : !hasHealthData ? (
         <p className="text-sm text-slate-400">
           Oracle health data not yet available — indexer schema update pending.

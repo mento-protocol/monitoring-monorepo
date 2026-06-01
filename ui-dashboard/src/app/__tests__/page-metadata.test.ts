@@ -13,7 +13,14 @@ const baseData: Parameters<typeof buildDescription>[0] = {
   tvlSeries: [],
   poolCount: 12,
   chainCount: 2,
-  healthBuckets: { OK: 12, WARN: 0, CRITICAL: 0, WEEKEND: 0, "N/A": 0 },
+  healthBuckets: {
+    OK: 12,
+    WARN: 0,
+    CRITICAL: 0,
+    WEEKEND: 0,
+    HALTED: 0,
+    "N/A": 0,
+  },
   attentionPools: [],
 };
 

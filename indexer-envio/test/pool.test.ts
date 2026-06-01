@@ -382,6 +382,118 @@ function makeUpsertCtx() {
   return { context, written };
 }
 
+describe("upsertPool breaker halt (cold-start)", () => {
+  const FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
+
+  function makeCtxWithBreaker(tripped: boolean, kind = "MEDIAN_DELTA") {
+    const written: Pool[] = [];
+    const context = {
+      effect: (async () => null) as PoolContext["effect"],
+      Pool: {
+        get: async () => undefined,
+        set: (entity: Pool) => written.push(entity),
+      },
+      DeviationThresholdBreach: {
+        get: async () => undefined,
+        set: () => undefined,
+      },
+      BiPoolExchange: { get: async () => undefined, set: () => undefined },
+      BreakerConfig: {
+        getWhere: async () => [
+          {
+            chainId: 42220,
+            rateFeedID: FEED,
+            enabled: true,
+            status: tripped ? "TRIPPED" : "OK",
+            breaker_id: "b",
+          },
+        ],
+      },
+      Breaker: { get: async () => ({ id: "b", kind }) },
+    } as unknown as PoolContext;
+    return { context, written };
+  }
+
+  it("marks breakerTripped=true when the feed is first assigned while a price breaker is tripped", async () => {
+    const { context } = makeCtxWithBreaker(true);
+    const existing = makePool({
+      id: "42220-0x00000000000000000000000000000000000000aa",
+      referenceRateFeedID: "",
+      breakerTripped: false,
+      invertRateFeedKnown: true,
+      tokenDecimalsKnown: true,
+    });
+    const result = await upsertPool({
+      context,
+      chainId: 42220,
+      poolId: existing.id,
+      source: "fpmm_factory",
+      blockNumber: 2n,
+      blockTimestamp: 1_700_000_001n,
+      txHash: "0xabc",
+      referenceRateFeedID: FEED,
+      existing: { pool: existing },
+    });
+    assert.isTrue(result.breakerTripped);
+  });
+
+  it("leaves breakerTripped=false when the feed is assigned and the breaker is OK", async () => {
+    const { context } = makeCtxWithBreaker(false);
+    const existing = makePool({
+      id: "42220-0x00000000000000000000000000000000000000bb",
+      referenceRateFeedID: "",
+      breakerTripped: false,
+      invertRateFeedKnown: true,
+      tokenDecimalsKnown: true,
+    });
+    const result = await upsertPool({
+      context,
+      chainId: 42220,
+      poolId: existing.id,
+      source: "fpmm_factory",
+      blockNumber: 2n,
+      blockTimestamp: 1_700_000_001n,
+      txHash: "0xabc",
+      referenceRateFeedID: FEED,
+      existing: { pool: existing },
+    });
+    assert.isFalse(result.breakerTripped);
+  });
+
+  it("does not recompute (preserves breakerTripped) when the feed was already assigned", async () => {
+    // Gate is the ""→set transition; a steady-state event keeps the prior flag
+    // and never touches BreakerConfig (which would throw here).
+    const written: Pool[] = [];
+    const context = {
+      effect: (async () => null) as PoolContext["effect"],
+      Pool: { get: async () => undefined, set: (e: Pool) => written.push(e) },
+      DeviationThresholdBreach: {
+        get: async () => undefined,
+        set: () => undefined,
+      },
+      BiPoolExchange: { get: async () => undefined, set: () => undefined },
+    } as unknown as PoolContext;
+    const existing = makePool({
+      id: "42220-0x00000000000000000000000000000000000000cc",
+      referenceRateFeedID: FEED,
+      breakerTripped: true,
+      invertRateFeedKnown: true,
+      tokenDecimalsKnown: true,
+    });
+    const result = await upsertPool({
+      context,
+      chainId: 42220,
+      poolId: existing.id,
+      source: "fpmm_update_reserves",
+      blockNumber: 2n,
+      blockTimestamp: 1_700_000_001n,
+      txHash: "0xabc",
+      existing: { pool: existing },
+    });
+    assert.isTrue(result.breakerTripped);
+  });
+});
+
 describe("upsertPool degenerate reserves", () => {
   it("classifies degenerate reserves even when oracle price is zero", async () => {
     const oneUnit = 10n ** 18n;

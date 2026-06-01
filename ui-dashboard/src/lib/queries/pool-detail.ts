@@ -51,6 +51,7 @@ export const POOL_THRESHOLDS_KNOWN_EXT = `
       rebalanceThresholdsKnown
       tokenDecimalsKnown
       degenerateReserves
+      breakerTripped
     }
   }
 `;

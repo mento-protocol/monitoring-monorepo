@@ -14,11 +14,14 @@ import {
   _clearBootstrapCaches,
 } from "../src/EventHandlers.ts";
 import { makeBreakerConfigId, makeBreakerId } from "../src/breakers.ts";
+import { makePoolId } from "../src/helpers.ts";
+import { makePool } from "./helpers/makePool.js";
 
 type MockDb = MockDbWith<{
   Breaker: WritableEntity;
   BreakerConfig: WritableEntity;
   BreakerTripEvent: EntityReader;
+  Pool: WritableEntity;
 }>;
 
 const TestHelpers = indexerTestHelpers<MockDb>();
@@ -195,6 +198,159 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     assert.equal(tripRow!.thresholdAtTrip, THRESHOLD);
     // referenceAtTrip = the EMA snapshot we mirrored at bootstrap time.
     assert.equal(tripRow!.referenceAtTrip, 1_171_560_280_196_965_000_000_000n);
+  });
+
+  it("BreakerTripped sets Pool.breakerTripped=true; ResetSuccessful clears it", async () => {
+    let mockDb = MockDb.createMockDb();
+    const poolId = makePoolId(
+      CHAIN_ID,
+      "0xabc0000000000000000000000000000000000001",
+    );
+    // Seed a pool wired to this feed, untripped.
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CHAIN_ID,
+        referenceRateFeedID: FEED,
+        breakerTripped: false,
+      }),
+    );
+
+    // Bootstrap the (MEDIAN_DELTA) breaker config for the feed.
+    mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+      event: BreakerBox.BreakerStatusUpdated.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: FEED,
+        status: true,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 0,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 100, timestamp: 1_700_000_500 },
+        },
+      }),
+      mockDb,
+    });
+
+    // Trip → pool halted.
+    mockDb = await BreakerBox.BreakerTripped.processEvent({
+      event: BreakerBox.BreakerTripped.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: FEED,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 7,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 200, timestamp: 1_700_001_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      true,
+      "pool should be halted after the price breaker trips",
+    );
+
+    // Reset → pool tradeable again.
+    mockDb = await BreakerBox.ResetSuccessful.processEvent({
+      event: BreakerBox.ResetSuccessful.createMockEvent({
+        rateFeedID: FEED,
+        breaker: MD_BREAKER,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 9,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 300, timestamp: 1_700_002_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      false,
+      "pool halt should clear after reset",
+    );
+  });
+
+  it("RateFeedRemoved clears Pool.breakerTripped even though configs stay TRIPPED", async () => {
+    let mockDb = MockDb.createMockDb();
+    const poolId = makePoolId(
+      CHAIN_ID,
+      "0xabc0000000000000000000000000000000000002",
+    );
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CHAIN_ID,
+        referenceRateFeedID: FEED,
+        breakerTripped: false,
+      }),
+    );
+    // Bootstrap config + trip so the pool is halted AND the BreakerConfig row
+    // is TRIPPED (a recompute would re-derive true).
+    mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+      event: BreakerBox.BreakerStatusUpdated.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: FEED,
+        status: true,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 0,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 100, timestamp: 1_700_000_500 },
+        },
+      }),
+      mockDb,
+    });
+    mockDb = await BreakerBox.BreakerTripped.processEvent({
+      event: BreakerBox.BreakerTripped.createMockEvent({
+        breaker: MD_BREAKER,
+        rateFeedID: FEED,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 7,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 200, timestamp: 1_700_001_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      true,
+      "precondition: pool halted",
+    );
+
+    // Remove the feed from BreakerBox → no breaker governs it → not halted.
+    mockDb = await BreakerBox.RateFeedRemoved.processEvent({
+      event: BreakerBox.RateFeedRemoved.createMockEvent({
+        rateFeedID: FEED,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 3,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 400, timestamp: 1_700_003_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      false,
+      "RateFeedRemoved should clear the halt",
+    );
+    // Config stays TRIPPED (historical record) — proves clear, not recompute.
+    const cfgId = makeBreakerConfigId(CHAIN_ID, MD_BREAKER, FEED);
+    assert.equal(
+      (mockDb.entities.BreakerConfig.get(cfgId) as { status: string }).status,
+      "TRIPPED",
+      "config remains TRIPPED after feed removal",
+    );
   });
 
   it("ResetSuccessful transitions BreakerConfig back to OK and refreshes cooldownEndsAt", async () => {
@@ -421,6 +577,64 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     assert.equal(cfg!.enabled, true);
     assert.equal(cfg!.tradingMode, 3);
     assert.equal(cfg!.status, "TRIPPED");
+  });
+
+  it("TradingModeUpdated (manual override) drives Pool.breakerTripped and clears it", async () => {
+    let mockDb = MockDb.createMockDb();
+    const poolId = makePoolId(
+      CHAIN_ID,
+      "0xabc0000000000000000000000000000000000002",
+    );
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CHAIN_ID,
+        referenceRateFeedID: FEED,
+        breakerTripped: false,
+      }),
+    );
+
+    // Manual halt override (bootstraps the MEDIAN_DELTA config, sets TRIPPED).
+    mockDb = await BreakerBox.TradingModeUpdated.processEvent({
+      event: BreakerBox.TradingModeUpdated.createMockEvent({
+        rateFeedID: FEED,
+        tradingMode: 3n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 2,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 250, timestamp: 1_700_001_500 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      true,
+      "manual halt override should mark the pool halted",
+    );
+
+    // Manual clear (tradingMode 0).
+    mockDb = await BreakerBox.TradingModeUpdated.processEvent({
+      event: BreakerBox.TradingModeUpdated.createMockEvent({
+        rateFeedID: FEED,
+        tradingMode: 0n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 3,
+          srcAddress: BREAKER_BOX_ADDR,
+          block: { number: 260, timestamp: 1_700_002_000 },
+        },
+      }),
+      mockDb,
+    });
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { breakerTripped: boolean })
+        .breakerTripped,
+      false,
+      "manual clear should lift the halt",
+    );
   });
 
   it("TradingModeUpdated leaves disabled BreakerConfigs untouched", async () => {

@@ -384,7 +384,6 @@ export async function fetchNetworkData(
 
   const poolIds = pools.map((p) => p.id);
   const fpmmPoolIds = pools.flatMap((p) => (isFpmm(p) ? [p.id] : []));
-  const shouldQuery = shouldQueryPoolSnapshots(poolIds);
 
   const emptySnapshotPage: SnapshotPageResult = {
     rows: [],
@@ -404,7 +403,7 @@ export async function fetchNetworkData(
     cdpPoolIdsResult,
   ] = await Promise.allSettled([
     fetchAllFeeSnapshotPages(client, network.chainId, network.id),
-    shouldQuery
+    shouldQueryPoolSnapshots(poolIds)
       ? fetchAllDailySnapshotPages(client, poolIds, network.id)
       : Promise.resolve(emptySnapshotPage),
     // Legacy v2 daily volume rollup (Broker.Swap with `routedViaV3Router=false`).
@@ -455,6 +454,7 @@ export async function fetchNetworkData(
         rebalanceThresholdsKnown?: boolean;
         tokenDecimalsKnown?: boolean;
         degenerateReserves?: boolean;
+        breakerTripped?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
     // RPC probe remains the global badge path until indexed CdpPool rows are
@@ -520,6 +520,7 @@ export async function fetchNetworkData(
             rebalanceThresholdsKnown: r.rebalanceThresholdsKnown,
             tokenDecimalsKnown: r.tokenDecimalsKnown,
             degenerateReserves: r.degenerateReserves,
+            breakerTripped: r.breakerTripped,
           };
     });
   }
@@ -620,7 +621,6 @@ export async function fetchNetworkData(
     to: todayMidnight + SECS_PER_DAY,
   };
 
-  const snapshots = filterSnapshotsToWindow(snapshotsAllDaily, dw24h);
   const snapshots7d = filterSnapshotsToWindow(snapshotsAllDaily, dw7d);
   const snapshots30d = filterSnapshotsToWindow(snapshotsAllDaily, dw30d);
 
@@ -687,7 +687,7 @@ export async function fetchNetworkData(
     network,
     snapshotWindows: windows,
     pools,
-    snapshots,
+    snapshots: filterSnapshotsToWindow(snapshotsAllDaily, dw24h),
     snapshots7d,
     snapshots30d,
     snapshotsAllDaily,

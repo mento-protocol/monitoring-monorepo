@@ -526,6 +526,131 @@ describe("computeHealthStatus", () => {
       }),
     ).toBe("OK");
   });
+
+  // --- HALTED: price circuit breaker tripped ---------------------------------
+  it('returns "HALTED" when a price breaker is tripped on a fresh, in-tolerance pool', () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        breakerTripped: true,
+      }),
+    ).toBe("HALTED");
+  });
+
+  it("HALTED beats the hasHealthData=false N/A gate (a halt is real without trusted deviation)", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        hasHealthData: false,
+        breakerTripped: true,
+      }),
+    ).toBe("HALTED");
+  });
+
+  it("HALTED beats the never-rebalance OK shortcut", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "1000",
+        rebalanceThresholdAbove: 0,
+        rebalanceThresholdBelow: 0,
+        rebalanceThresholdsKnown: true,
+        breakerTripped: true,
+      }),
+    ).toBe("HALTED");
+  });
+
+  it("HALTED beats the degenerate-reserves OK shortcut", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "999999",
+        rebalanceThreshold: 5000,
+        degenerateReserves: true,
+        breakerTripped: true,
+      }),
+    ).toBe("HALTED");
+  });
+
+  it("HALTED wins over a deviation breach (halt gate is above the deviation tiers)", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "100000", // ratio = 20 → would be CRITICAL
+        rebalanceThreshold: 5000,
+        deviationBreachStartedAt: "1",
+        breakerTripped: true,
+      }),
+    ).toBe("HALTED");
+  });
+
+  it("a stale oracle still wins over a tripped breaker (deeper fault) → CRITICAL", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: STALE_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        breakerTripped: true,
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("weekend FX closure still reads WEEKEND even if a breaker is tripped", async () => {
+    const weekend = await import("../weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValueOnce(true);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: STALE_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        breakerTripped: true,
+      }),
+    ).toBe("WEEKEND");
+  });
+
+  it("oracleOk=false still wins over a tripped breaker → CRITICAL", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: false,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        breakerTripped: true,
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("breakerTripped=false leaves the normal pipeline untouched", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "1000",
+        rebalanceThreshold: 5000,
+        breakerTripped: false,
+      }),
+    ).toBe("OK");
+  });
 });
 
 describe("computePoolUptimePct", () => {
@@ -823,6 +948,15 @@ describe("worstStatus", () => {
   it("returns same value when both are equal", () => {
     expect(worstStatus("OK", "OK")).toBe("OK");
     expect(worstStatus("N/A", "N/A")).toBe("N/A");
+  });
+
+  it("ranks HALTED above WARN/WEEKEND but below CRITICAL", () => {
+    expect(worstStatus("HALTED", "OK")).toBe("HALTED");
+    expect(worstStatus("HALTED", "WARN")).toBe("HALTED");
+    expect(worstStatus("HALTED", "WEEKEND")).toBe("HALTED");
+    expect(worstStatus("HALTED", "N/A")).toBe("HALTED");
+    // A genuine deviation/limit CRITICAL is the louder fault signal and wins.
+    expect(worstStatus("HALTED", "CRITICAL")).toBe("CRITICAL");
   });
 });
 

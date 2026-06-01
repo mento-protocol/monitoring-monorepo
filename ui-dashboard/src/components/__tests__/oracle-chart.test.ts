@@ -421,6 +421,19 @@ describe("buildOracleXaxis", () => {
     expect(xaxis.range).toBeUndefined();
     expect(xaxis.autorange).toBeUndefined();
   });
+
+  it("omits range/autorange after the initial paint so uirevision holds the zoom", () => {
+    // The wheel handler sets the Plotly range directly; on the next SWR repoll
+    // the layout must NOT re-supply a range, or it clobbers that zoom and the
+    // view snaps back out. applyInitialRange=false models every post-mount render.
+    const ts: string[] = [];
+    for (let i = 0; i < 25; i++) {
+      ts.push(new Date(Date.UTC(2026, 4, 1, i)).toISOString());
+    }
+    const xaxis = buildOracleXaxis(ts, false, false);
+    expect(xaxis.range).toBeUndefined();
+    expect(xaxis.autorange).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -528,9 +541,14 @@ describe("buildOraclePlotData y-range autosize", () => {
 describe("buildOracleLayout uirevision", () => {
   const baseArgs = {
     shapes: [],
-    xaxis: buildOracleXaxis(["2026-05-01T00:00:00.000Z"], true),
-    yMin: 0.99,
-    yMax: 1.01,
+    plotData: {
+      deviationTrace: {},
+      timestamps: ["2026-05-01T00:00:00.000Z"],
+      isSparse: true,
+      yMin: 0.99,
+      yMax: 1.01,
+    },
+    applyInitialRange: true,
     baseline: 1.0,
     thresholdRatio: 0.01,
   };

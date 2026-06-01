@@ -42,6 +42,7 @@ import {
   bootstrapFeedBreakerConfigs,
   nextMedianEMA,
   resolveBreakerSnapshotFields,
+  syncHaltOnColdStart,
 } from "../breakers.js";
 
 function priceDifferenceForOracleSample(
@@ -236,11 +237,7 @@ indexer.onEvent(
           updatedPool,
           decimalsTrustworthy,
         );
-        const withDev = {
-          ...updatedPool,
-          priceDifference,
-          degenerateReserves,
-        };
+        const withDev = { ...updatedPool, priceDifference, degenerateReserves };
         const deviationBreachStartedAt = nextDeviationBreachStartedAt(
           existing,
           withDev,
@@ -341,6 +338,11 @@ indexer.onEvent(
         });
       }),
     );
+    // Cold-start: if this OracleReported is the first event for a feed whose
+    // BreakerBox configs predate start_block, the resolve above bootstrapped
+    // them (possibly already-TRIPPED) — recompute halt for the feed's pools.
+    const coldStart = breakerConfigs.length === 0 && poolIds.length > 0;
+    await syncHaltOnColdStart(context, event.chainId, rateFeedID, coldStart);
   },
 );
 
@@ -781,6 +783,16 @@ indexer.onEvent(
         );
       }
     }
+    // Cold-start: if the configs for this feed were just bootstrapped (first
+    // MedianUpdated for a feed whose BreakerBox events predate start_block),
+    // an already-TRIPPED config hasn't flowed through a BreakerBox handler —
+    // recompute halt for the feed's pools once.
+    await syncHaltOnColdStart(
+      context,
+      event.chainId,
+      rateFeedID,
+      breakerConfigs.length === 0 && poolIds.length > 0,
+    );
   },
 );
 
