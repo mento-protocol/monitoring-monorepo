@@ -2,10 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useMemo, useRef } from "react";
-import {
-  useInitialRangeGate,
-  useOracleViewport,
-} from "./oracle-chart-viewport";
+import { useOracleViewport } from "./oracle-chart-viewport";
 import type { OracleSnapshot } from "@/lib/types";
 import { decimateSeries } from "@/lib/oracle-decimation";
 import {
@@ -390,7 +387,14 @@ export function OracleChart({
   // intent, reset on pool switch. See useOracleViewport / resolveDailyView.
   const { visibleRange, setVisibleRange, showAll, setShowAll } =
     useOracleViewport(uirevision);
-  const applyInitialRange = useInitialRangeGate(uirevision, !!snapshots.length);
+  // Supply an explicit xaxis.range ONLY on the default view — no active user
+  // zoom/pan (`visibleRange`) and not "All" (`showAll`). There the recomputed
+  // `[maxTs - 7d, maxTs]` keeps the right edge tracking new samples each SWR
+  // repoll, and a pool switch (which resets the viewport here) lands back on
+  // the 7-day default. Once the user has a viewport, omit range/autorange so
+  // uirevision preserves it across repolls — re-supplying a recomputed range
+  // would otherwise clobber a scroll-wheel zoom on the next data load.
+  const applyInitialRange = visibleRange === null && !showAll;
 
   const { baseline, thresholdRatio } = resolveCurrentBand(
     breakerConfig,
@@ -483,6 +487,11 @@ export function OracleChart({
           cleanupWheelRef.current?.();
           cleanupWheelRef.current = attachOracleWheelHandler(
             graphDiv as unknown as HTMLElement,
+            // Mirror a wheel X-zoom into visibleRange (a stable setter) so the
+            // supply-range gate omits the range and uirevision holds the zoom
+            // across repolls. The native onRelayout also fires for the wheel
+            // and clears showAll, so this is an idempotent safety net.
+            setVisibleRange,
           );
         }}
         onPurge={() => {

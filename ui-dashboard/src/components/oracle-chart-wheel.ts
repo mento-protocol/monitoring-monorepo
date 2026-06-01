@@ -21,6 +21,10 @@ interface ZoomContext {
   graphDiv: HTMLElement;
   area: PlotArea;
   delta: number;
+  // Called with the new X window (unix seconds) after an X zoom, so the chart
+  // can mirror it into React state. The wheel's relayout is programmatic, so
+  // react-plotly's onRelayout never fires for it.
+  onXZoom?: ((range: [number, number]) => void) | undefined;
 }
 
 interface PlotlyFullLayout {
@@ -83,15 +87,26 @@ function zoomXAroundCursor(
   const frac = (xPos - ctx.area.plotL) / (ctx.area.plotR - ctx.area.plotL);
   const cursorMs = xMin + span * frac;
   const newSpan = span * (ctx.delta > 0 ? 1.1 : 1 / 1.1);
+  const startMs = cursorMs - newSpan * frac;
+  const endMs = cursorMs + newSpan * (1 - frac);
   void ctx.Plotly.relayout(ctx.graphDiv, {
     "xaxis.range": [
-      new Date(cursorMs - newSpan * frac).toISOString(),
-      new Date(cursorMs + newSpan * (1 - frac)).toISOString(),
+      new Date(startMs).toISOString(),
+      new Date(endMs).toISOString(),
     ],
   });
+  // Mirror the new window into React state (unix seconds) so the chart's
+  // viewport logic — decimation, daily-mode, and the supply-range gate — tracks
+  // the wheel zoom. Without this the next data-load re-render re-supplies the
+  // default range and snaps the zoom back out (the relayout above is
+  // programmatic, so react-plotly's onRelayout doesn't catch it).
+  ctx.onXZoom?.([Math.floor(startMs / 1000), Math.floor(endMs / 1000)]);
 }
 
-export function attachOracleWheelHandler(graphDiv: HTMLElement): () => void {
+export function attachOracleWheelHandler(
+  graphDiv: HTMLElement,
+  onXZoom?: (range: [number, number]) => void,
+): () => void {
   const onWheel = (e: WheelEvent) => {
     const Plotly = (window as unknown as { Plotly?: PlotlyAPI }).Plotly;
     const layout = (graphDiv as unknown as { _fullLayout?: PlotlyFullLayout })
@@ -114,7 +129,7 @@ export function attachOracleWheelHandler(graphDiv: HTMLElement): () => void {
     if (Math.abs(delta) < 1) return;
     e.preventDefault();
 
-    const ctx: ZoomContext = { Plotly, graphDiv, area, delta };
+    const ctx: ZoomContext = { Plotly, graphDiv, area, delta, onXZoom };
     if (overYAxis) {
       zoomYAroundCursor(ctx, layout.yaxis.range, yPos);
     } else {
