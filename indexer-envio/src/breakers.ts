@@ -206,18 +206,23 @@ export function _clearBootstrapCaches(): void {
   _bootstrapBackoffUntilTs.clear();
 }
 
+// Returns true when the feed's breaker configs are known-hydrated (already
+// cached, no breakers registered, or every breaker just hydrated) and false
+// when a transient RPC failure left them incomplete (backoff set). Callers that
+// fan out over OTHER feeds' configs (dependency loading) use this to avoid
+// caching their own work as done while a dependency stayed unhydrated.
 export async function bootstrapFeedBreakerConfigs(
   context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
   blockNumber: bigint,
   blockTimestamp: bigint,
-): Promise<void> {
+): Promise<boolean> {
   const cacheKey = `${chainId}:${rateFeedID.toLowerCase()}`;
-  if (_bootstrapAttempted.has(cacheKey)) return;
+  if (_bootstrapAttempted.has(cacheKey)) return true;
   // Skip retry while inside the negative-cache TTL window.
   const backoffUntil = _bootstrapBackoffUntilTs.get(cacheKey);
-  if (backoffUntil !== undefined && blockTimestamp < backoffUntil) return;
+  if (backoffUntil !== undefined && blockTimestamp < backoffUntil) return false;
 
   // Only mark as attempted AFTER a successful BreakerBox.getBreakers() call.
   // A transient RPC failure here would otherwise permanently poison the
@@ -231,14 +236,14 @@ export async function bootstrapFeedBreakerConfigs(
   });
   if (!breakerAddresses) {
     setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
-    return;
+    return false;
   }
   if (breakerAddresses.length === 0) {
     // Empty list is itself authoritative (no breakers registered for this
     // BreakerBox at this block) — safe to cache so we don't refetch.
     markBootstrapAttempted(cacheKey);
     _bootstrapBackoffUntilTs.delete(cacheKey);
-    return;
+    return true;
   }
 
   // Track whether every per-breaker hydration call succeeded. A null return
@@ -275,6 +280,7 @@ export async function bootstrapFeedBreakerConfigs(
   } else {
     setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
   }
+  return allSucceeded;
 }
 
 /** Set a backoff TTL for a (chain, feed) tuple, applying FIFO eviction at
@@ -932,17 +938,32 @@ export async function loadFeedDependencies(args: {
   // start_block and it never trips/resets again), in which case nothing else
   // bootstraps it — and `computeOwnFeedHalted(dep)` reading zero rows would
   // silently drop an already-tripped dependency's halt. Bounded + cached.
+  let allHydrated = true;
   for (const dep of deps) {
-    await bootstrapFeedBreakerConfigs(
-      context,
-      chainId,
-      dep,
-      blockNumber,
-      blockTimestamp,
-    );
+    if (
+      !(await bootstrapFeedBreakerConfigs(
+        context,
+        chainId,
+        dep,
+        blockNumber,
+        blockTimestamp,
+      ))
+    ) {
+      allHydrated = false;
+    }
   }
-  markBootstrapAttempted(cacheKey);
-  _bootstrapBackoffUntilTs.delete(cacheKey);
+  if (allHydrated) {
+    markBootstrapAttempted(cacheKey);
+    _bootstrapBackoffUntilTs.delete(cacheKey);
+  } else {
+    // A dependency's config bootstrap failed transiently — do NOT mark the
+    // dep-load done, or a later event would skip the reload and the dependent's
+    // pools could stay wrong until restart. Back off and retry; the edges are
+    // already reconciled so the re-sync below still runs (best-effort, self-
+    // corrects once the dependency hydrates).
+    setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
+    if (args.force) _bootstrapAttempted.delete(cacheKey);
+  }
   return true;
 }
 
