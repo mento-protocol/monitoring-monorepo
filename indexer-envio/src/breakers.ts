@@ -780,25 +780,55 @@ export async function syncHaltOnColdStart(
   await syncPoolsBreakerHalt(context, chainId, rateFeedID);
 }
 
-/** Force `breakerTripped=false` for every pool on `rateFeedID`. Used by the
- * `RateFeedRemoved` handler: once a feed is removed from BreakerBox no breaker
- * governs it, so on-chain `getRateFeedTradingMode` returns unrestricted and the
- * pools are no longer halted. A plain `syncPoolsBreakerHalt` recompute can't be
- * used here — the feed's persisted BreakerConfig rows stay TRIPPED as a
- * historical record (a removed feed receives no further events to reset them),
- * so the recompute would re-derive `true`. Skips VirtualPools (never halted). */
-export async function clearPoolsBreakerHalt(
+/** Handle `RateFeedRemoved` for `rateFeedID`. Mirrors on-chain `removeRateFeed`,
+ * which `delete`s the feed's `rateFeedTradingMode` (→ 0 / unrestricted), its
+ * `rateFeedDependencies` array, and its breaker statuses. So:
+ *   1. Disable the feed's BreakerConfig rows. Mirrors `deleteBreakerStatus`:
+ *      `status` is left at its last value as the historical record of the last
+ *      trip, but `enabled=false` makes `computeOwnFeedHalted` skip the rows — so
+ *      the removed feed stops halting itself AND any feed that depends on it.
+ *   2. Delete the feed's OWN dependency edges (mirrors `delete
+ *      rateFeedDependencies[feed]`). Edges where this feed is a DEPENDENCY of
+ *      another feed are KEPT: on-chain only the removed feed's own array is
+ *      cleared, and the dependent un-halts via the recompute in step 3 — deleting
+ *      those reverse edges would wrongly drop the inheritance if the feed were
+ *      re-added and re-tripped.
+ *   3. Recompute the feed's own pools (now un-halted) and fan out to its
+ *      dependents (which inherit the now-disabled feed's halt = false).
+ * Replaces a plain force-clear: disabling the configs is what lets the recompute
+ * derive `false` instead of re-deriving `true` from stale-TRIPPED rows, and the
+ * recompute is what propagates the un-halt to dependents. Skips VirtualPools
+ * (handled inside `syncPoolsBreakerHalt`).
+ *
+ * Residual (fails safe, by design): we keep `status` so the historical trip
+ * record survives. If a removed feed that was TRIPPED is later re-ADDED and
+ * re-enabled (BreakerStatusUpdated flips `enabled` without refreshing `status`),
+ * it — and any feed still depending on it — can show a halt until the next real
+ * trip/reset refreshes the row. This mirrors the existing `BreakerRemoved`
+ * disabled+TRIPPED behavior and over-reports rather than under-reports a halt
+ * (the conservative direction for a monitoring dashboard). */
+export async function clearHaltOnFeedRemoved(
   context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
 ): Promise<void> {
-  const poolIds = await getPoolsByFeed(context, chainId, asAddress(rateFeedID));
-  for (const poolId of poolIds) {
-    const pool = await context.Pool.get(poolId);
-    if (!pool || !pool.breakerTripped) continue;
-    if (isVirtualPool(pool)) continue;
-    context.Pool.set({ ...pool, breakerTripped: false });
+  const feed = asAddress(rateFeedID);
+  const configs = await context.BreakerConfig.getWhere({
+    rateFeedID: { _eq: feed },
+  });
+  for (const cfg of configs) {
+    if (cfg.chainId !== chainId) continue;
+    if (!cfg.enabled) continue;
+    context.BreakerConfig.set({ ...cfg, enabled: false });
   }
+  const ownEdges = await context.RateFeedDependency.getWhere({
+    rateFeedID: { _eq: feed },
+  });
+  for (const edge of ownEdges) {
+    if (edge.chainId !== chainId) continue;
+    context.RateFeedDependency.deleteUnsafe(edge.id);
+  }
+  await syncPoolsBreakerHalt(context, chainId, feed);
 }
 
 // ---------------------------------------------------------------------------

@@ -20,7 +20,7 @@ import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt } from "../helpers.js";
 import {
   bootstrapFeedBreakerConfigs,
-  clearPoolsBreakerHalt,
+  clearHaltOnFeedRemoved,
   computeCooldownEndsAt,
   effectiveCooldown,
   effectiveThreshold,
@@ -150,15 +150,15 @@ indexer.onEvent(
 indexer.onEvent(
   { contract: "BreakerBox", event: "RateFeedRemoved" },
   async ({ event, context }) => {
-    // The feed no longer has BreakerBox oversight, so its pools are no longer
-    // halted by a price breaker — clear the flag. (Existing BreakerConfig rows
-    // remain as historical record; a removed feed receives no further events,
-    // so we clear pools directly rather than recompute from those stale-TRIPPED
-    // rows, which would re-derive `true`.)
+    // Mirror on-chain removeRateFeed (delete rateFeedTradingMode + the feed's
+    // dependency array + breaker statuses): disable the feed's configs, drop its
+    // own dependency edges, and recompute — which un-halts both its own pools AND
+    // any feed that depended on it (whose inherited halt now resolves to false).
+    // See clearHaltOnFeedRemoved.
     const rateFeedID = asAddress(event.params.rateFeedID);
     const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
     if (await maybePreloadPool(context, poolIds)) return;
-    await clearPoolsBreakerHalt(context, event.chainId, rateFeedID);
+    await clearHaltOnFeedRemoved(context, event.chainId, rateFeedID);
   },
 );
 
