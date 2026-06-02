@@ -13,9 +13,10 @@ import type { CdpInstance } from "./types.js";
 const DEBT_TOKEN_DECIMALS = 18;
 
 // One series per CDP market (3 today: GBPm/CHFm/JPYm on Celo), so cardinality
-// is bounded by market count. `symbol` + `block_explorer_url` let the Slack
-// alert template render a readable title and a TroveManager deep link without
-// a PromQL join. `collateral_id` is the stable per-market grouping key
+// is bounded by market count. `symbol` lets the Slack alert template render a
+// readable title + dashboard deep link without a PromQL join;
+// `block_explorer_url` carries the TroveManager link for annotations/ad-hoc
+// triage. `collateral_id` is the stable per-market grouping key
 // ("{chainId}-{troveManager}").
 const cdpLabels = [
   "symbol",
@@ -86,47 +87,69 @@ function cdpDisplayLabels({
   };
 }
 
-// Refreshes every CDP gauge from the joined instance/collateral rows. Reset
-// first so a market that drops out of the indexer response evicts its stale
-// series instead of freezing at the last value.
+interface PreparedCdpSeries {
+  labels: CdpLabelValues;
+  shutdown: number;
+  spDeposits: number;
+  systemDebt: number;
+  liquidationTotal: number;
+  userRedemptionTotal: number;
+  shortfallSubsidyTotal: number;
+  // null when SystemParams is not yet loaded — the −1-wei sentinel is withheld.
+  spHeadroom: number | null;
+}
+
+// spHeadroom carries a −1-wei sentinel until SystemParams is loaded; a real
+// negative headroom (the danger we alert on) is orders of magnitude larger.
+// Gate on the collateral flag so the critical "below floor" rule never reads
+// the sentinel as a sub-zero breach.
+function prepareCdpSeries({
+  instance,
+  collateral,
+}: CdpInstance): PreparedCdpSeries {
+  return {
+    labels: cdpDisplayLabels({ instance, collateral }),
+    shutdown: instance.isShutDown ? 1 : 0,
+    spDeposits: toHumanUnits(BigInt(instance.spDeposits), DEBT_TOKEN_DECIMALS),
+    systemDebt: toHumanUnits(BigInt(instance.systemDebt), DEBT_TOKEN_DECIMALS),
+    liquidationTotal: instance.liqCountCum,
+    userRedemptionTotal: Math.max(
+      0,
+      instance.redemptionCountCum - instance.rebalanceRedemptionCountCum,
+    ),
+    shortfallSubsidyTotal: toHumanUnits(
+      BigInt(instance.shortfallSubsidyCum),
+      DEBT_TOKEN_DECIMALS,
+    ),
+    spHeadroom: collateral.systemParamsLoaded
+      ? toHumanUnits(BigInt(instance.spHeadroom), DEBT_TOKEN_DECIMALS)
+      : null,
+  };
+}
+
+// Refreshes every CDP gauge from the joined instance/collateral rows.
+//
+// All conversions happen up front (prepareCdpSeries): a malformed value throws
+// BEFORE any gauge is reset, so the poll loop's cdp_update handler keeps the
+// last good series instead of leaving a half-cleared registry — which
+// `no_data_state=OK` would otherwise read as a silent all-clear. The reset +
+// publish loop below is pure `.set()` and cannot throw, so the registry only
+// ever transitions between two consistent states. The reset still evicts the
+// series of any market that dropped out of the indexer response.
 export function updateCdpMetrics(cdps: CdpInstance[]): void {
+  const prepared = cdps.map(prepareCdpSeries);
+
   for (const g of Object.values(cdpGauges)) g.reset();
 
-  for (const cdp of cdps) {
-    const { instance, collateral } = cdp;
-    const labels = cdpDisplayLabels(cdp);
-
-    cdpGauges.shutdown.set(labels, instance.isShutDown ? 1 : 0);
-    cdpGauges.spDeposits.set(
-      labels,
-      toHumanUnits(BigInt(instance.spDeposits), DEBT_TOKEN_DECIMALS),
-    );
-    cdpGauges.systemDebt.set(
-      labels,
-      toHumanUnits(BigInt(instance.systemDebt), DEBT_TOKEN_DECIMALS),
-    );
-    cdpGauges.liquidationTotal.set(labels, instance.liqCountCum);
-    cdpGauges.userRedemptionTotal.set(
-      labels,
-      Math.max(
-        0,
-        instance.redemptionCountCum - instance.rebalanceRedemptionCountCum,
-      ),
-    );
-    cdpGauges.shortfallSubsidyTotal.set(
-      labels,
-      toHumanUnits(BigInt(instance.shortfallSubsidyCum), DEBT_TOKEN_DECIMALS),
-    );
-
-    // spHeadroom carries a −1-wei sentinel until SystemParams is loaded; a
-    // real negative headroom (the danger we alert on) is orders of magnitude
-    // larger. Gate on the collateral flag so the critical "below floor" rule
-    // never reads the sentinel as a sub-zero breach.
-    if (collateral.systemParamsLoaded) {
-      cdpGauges.spHeadroom.set(
-        labels,
-        toHumanUnits(BigInt(instance.spHeadroom), DEBT_TOKEN_DECIMALS),
-      );
+  for (const row of prepared) {
+    cdpGauges.shutdown.set(row.labels, row.shutdown);
+    cdpGauges.spDeposits.set(row.labels, row.spDeposits);
+    cdpGauges.systemDebt.set(row.labels, row.systemDebt);
+    cdpGauges.liquidationTotal.set(row.labels, row.liquidationTotal);
+    cdpGauges.userRedemptionTotal.set(row.labels, row.userRedemptionTotal);
+    cdpGauges.shortfallSubsidyTotal.set(row.labels, row.shortfallSubsidyTotal);
+    if (row.spHeadroom !== null) {
+      cdpGauges.spHeadroom.set(row.labels, row.spHeadroom);
     }
   }
 }

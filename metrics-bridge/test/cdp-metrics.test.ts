@@ -118,6 +118,24 @@ describe("updateCdpMetrics", () => {
     );
   });
 
+  it("throws on a malformed row BEFORE clearing the registry (no silent all-clear)", async () => {
+    // Seed a known-good poll.
+    updateCdpMetrics([makeCdp()]);
+    expect(await getGaugeValue(register, "mento_cdp_shutdown", labels)).toBe(0);
+
+    // A row with an unparseable BigInt must throw during preparation, leaving
+    // the previously-published series intact (the poll loop logs cdp_update and
+    // retries next cycle) — never a half-cleared registry that no_data_state=OK
+    // would read as an all-clear.
+    expect(() =>
+      updateCdpMetrics([makeCdp({ instance: { systemDebt: "not-a-number" } })]),
+    ).toThrow();
+    expect(await getGaugeValue(register, "mento_cdp_shutdown", labels)).toBe(0);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_debt", labels),
+    ).toBeCloseTo(305501.17, 1);
+  });
+
   it("carries a TroveManager block-explorer deep link", async () => {
     updateCdpMetrics([makeCdp()]);
     const [series] = await getMetricValues(register, "mento_cdp_shutdown");
