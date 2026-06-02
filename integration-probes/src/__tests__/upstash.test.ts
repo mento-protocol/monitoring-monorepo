@@ -34,6 +34,24 @@ describe("writeSnapshotToUpstash", () => {
     expect(JSON.parse(body[0]?.[2] ?? "{}")).toEqual(fixtureSnapshot());
   });
 
+  it("adds a timeout signal to Upstash writes", async () => {
+    const signals: AbortSignal[] = [];
+    await writeSnapshotToUpstash({
+      snapshot: fixtureSnapshot(),
+      env: {
+        UPSTASH_REDIS_REST_URL: "https://redis.test",
+        UPSTASH_REDIS_REST_TOKEN: "token",
+      },
+      fetcher: async (_input, init) => {
+        if (init?.signal) signals.push(init.signal);
+        return new Response("{}");
+      },
+    });
+
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[0]?.aborted).toBe(false);
+  });
+
   it("refuses to publish contract-fallback snapshots", async () => {
     await expect(
       writeSnapshotToUpstash({

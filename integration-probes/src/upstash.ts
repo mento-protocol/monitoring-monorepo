@@ -7,6 +7,7 @@ import {
 } from "./types.js";
 
 const HISTORY_TTL_SECONDS = 90 * 24 * 60 * 60;
+const DEFAULT_UPSTASH_TIMEOUT_MS = 60_000;
 
 export type WriteSnapshotResult = {
   latestKey: string;
@@ -17,11 +18,13 @@ export async function writeSnapshotToUpstash(args: {
   snapshot: IntegrationProbeSnapshot;
   fetcher?: FetchLike | undefined;
   env?: NodeJS.ProcessEnv | undefined;
+  timeoutMs?: number | undefined;
 }): Promise<WriteSnapshotResult> {
   const env = args.env ?? process.env;
   const fetcher = args.fetcher ?? fetch;
   const url = env.UPSTASH_REDIS_REST_URL;
   const token = env.UPSTASH_REDIS_REST_TOKEN;
+  const timeoutMs = args.timeoutMs ?? DEFAULT_UPSTASH_TIMEOUT_MS;
   if (args.snapshot.pairSource.kind !== "hasura") {
     throw new Error(
       "Refusing to publish integration probe snapshot without Hasura-derived active pairs.",
@@ -40,6 +43,7 @@ export async function writeSnapshotToUpstash(args: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
     },
+    ...(timeoutMs > 0 && { signal: AbortSignal.timeout(timeoutMs) }),
     body: JSON.stringify([
       ["SET", LATEST_SNAPSHOT_KEY, payload],
       ["SET", historyKey, payload, "EX", String(HISTORY_TTL_SECONDS)],
