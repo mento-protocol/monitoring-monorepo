@@ -959,6 +959,7 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
         referenceRateFeedID: FEED,
         breakerTripped: false,
         invertRateFeedKnown: true,
+        tokenDecimalsKnown: true,
         oracleExpiry: 1_700_010_000n,
       }),
     );
