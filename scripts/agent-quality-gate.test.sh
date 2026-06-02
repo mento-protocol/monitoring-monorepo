@@ -303,6 +303,68 @@ if (!dependsOn.includes("build")) {
 }
 NODE
   fail "expected turbo size-limit task to depend on build"
+node - <<'NODE' ||
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const config = require("./ui-dashboard/.size-limit.cjs");
+const { collectManifestReferencedStaticAssets } = config._private;
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "size-limit-manifest-"));
+
+function write(relativePath, contents = "") {
+  const absolutePath = path.join(tmp, relativePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, contents);
+}
+
+try {
+  write(".next/static/chunks/client.js", 'import("/_next/static/chunks/transitive.js");');
+  write(".next/static/chunks/current.js");
+  write(".next/static/chunks/dotted..js");
+  write(".next/static/chunks/transitive.js");
+  write(".next/static/chunks/current.css");
+  write(".next/static/chunks/stale.js");
+  write(".next/static/chunks/stale.css");
+  write(".next/static/build-id/_buildManifest.js");
+  write(
+    ".next/build-manifest.json",
+    JSON.stringify({
+      lowPriorityFiles: ["static/build-id/_buildManifest.js"],
+      rootMainFiles: ["static/chunks/current.js", "static/chunks/dotted..js"],
+    }),
+  );
+  write(
+    ".next/server/app/page/page_client-reference-manifest.js",
+    'globalThis.__RSC_MANIFEST["/page"] = {"entryCSSFiles":{"layout":[{"path":"static/chunks/current.css"}]},"entryJSFiles":{"layout":["/_next/static/chunks/client.js"]}};',
+  );
+
+  assert.deepEqual(
+    collectManifestReferencedStaticAssets({
+      cwd: tmp,
+      extension: ".js",
+      prefixes: ["static/chunks/"],
+    }),
+    [
+      ".next/static/chunks/client.js",
+      ".next/static/chunks/current.js",
+      ".next/static/chunks/dotted..js",
+      ".next/static/chunks/transitive.js",
+    ],
+  );
+  assert.deepEqual(
+    collectManifestReferencedStaticAssets({
+      cwd: tmp,
+      extension: ".css",
+      prefixes: ["static/"],
+    }),
+    [".next/static/chunks/current.css"],
+  );
+} finally {
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+NODE
+  fail "expected size-limit config to ignore stale static chunks"
 assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/shared-config/src/**'
 assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/shared-config/*.json'
 assert_turbo_task_has_input "test:browser" "playwright.config.ts"
