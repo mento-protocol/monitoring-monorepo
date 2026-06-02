@@ -38,6 +38,11 @@ type BracketsResponse = {
   InterestRateBracket: CdpBorrowingRevenueBracket[];
 };
 
+type BracketPageResult = {
+  rows: CdpBorrowingRevenueBracket[];
+  truncated: boolean;
+};
+
 type NetworkCdpBorrowingRevenue = {
   network: Network;
   summary: CdpBorrowingRevenueSummary | null;
@@ -58,7 +63,11 @@ const EMPTY_SUMMARY: CdpBorrowingRevenueSummary = {
   marketCount: 0,
   activeInterestBracketCount: 0,
   unpricedSymbols: [],
+  bracketsTruncated: false,
 };
+
+const BRACKET_PAGE_SIZE = 1000;
+const BRACKET_MAX_PAGES = 20;
 
 function mergeSummaries(
   rows: ReadonlyArray<NetworkCdpBorrowingRevenue>,
@@ -76,6 +85,8 @@ function mergeSummaries(
     merged.annualizedInterestUSD += row.summary.annualizedInterestUSD;
     merged.marketCount += row.summary.marketCount;
     merged.activeInterestBracketCount += row.summary.activeInterestBracketCount;
+    merged.bracketsTruncated =
+      merged.bracketsTruncated || row.summary.bracketsTruncated;
     for (const symbol of row.summary.unpricedSymbols) {
       unpricedSymbols.add(symbol);
     }
@@ -96,6 +107,32 @@ async function requestWithTimeout<T>(
     variables,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
+}
+
+async function fetchAllBracketPages(
+  client: GraphQLClient,
+  collateralIds: string[],
+): Promise<BracketPageResult> {
+  const rows: CdpBorrowingRevenueBracket[] = [];
+  for (let page = 0; page < BRACKET_MAX_PAGES; page++) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Bracket pagination is intentionally sequential so we can stop after the first short page.
+    const response = await requestWithTimeout<BracketsResponse>(
+      client,
+      CDP_BORROWING_REVENUE_BRACKETS,
+      {
+        collateralIds,
+        limit: BRACKET_PAGE_SIZE,
+        offset: page * BRACKET_PAGE_SIZE,
+      },
+    );
+    const pageRows = response.InterestRateBracket ?? [];
+    rows.push(...pageRows);
+    if (pageRows.length < BRACKET_PAGE_SIZE) {
+      return { rows, truncated: false };
+    }
+  }
+
+  return { rows, truncated: true };
 }
 
 async function fetchRevenueForNetwork(
@@ -131,14 +168,13 @@ async function fetchRevenueForNetwork(
       };
     }
 
-    const [ratesResponse, bracketResponse] = await Promise.all([
+    const [ratesResponse, bracketPages] = await Promise.all([
       requestWithTimeout<{ Pool: OracleRatePool[] }>(client, ORACLE_RATES, {
         chainId: network.chainId,
       }),
-      requestWithTimeout<BracketsResponse>(
+      fetchAllBracketPages(
         client,
-        CDP_BORROWING_REVENUE_BRACKETS,
-        { collateralIds: collaterals.map((c) => c.id) },
+        collaterals.map((c) => c.id),
       ),
     ]);
     const rates: OracleRateMap = buildOracleRateMap(
@@ -150,8 +186,9 @@ async function fetchRevenueForNetwork(
       summary: aggregateCdpBorrowingRevenue({
         collaterals,
         instances,
-        brackets: bracketResponse.InterestRateBracket ?? [],
+        brackets: bracketPages.rows,
         rates,
+        bracketsTruncated: bracketPages.truncated,
       }),
       error: null,
     };

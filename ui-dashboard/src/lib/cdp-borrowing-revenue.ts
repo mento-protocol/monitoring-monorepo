@@ -37,6 +37,7 @@ export type CdpBorrowingRevenueSummary = {
   marketCount: number;
   activeInterestBracketCount: number;
   unpricedSymbols: string[];
+  bracketsTruncated: boolean;
 };
 
 type AggregateArgs = {
@@ -45,6 +46,7 @@ type AggregateArgs = {
   brackets: ReadonlyArray<CdpBorrowingRevenueBracket>;
   rates: OracleRateMap;
   nowSeconds?: number;
+  bracketsTruncated?: boolean;
 };
 
 function accruedInterestWei(
@@ -87,6 +89,7 @@ export function aggregateCdpBorrowingRevenue({
   brackets,
   rates,
   nowSeconds = Math.floor(Date.now() / 1000),
+  bracketsTruncated = false,
 }: AggregateArgs): CdpBorrowingRevenueSummary {
   const symbolByCollateralId = new Map(
     collaterals.map((c) => [c.id, c.symbol]),
@@ -143,5 +146,6 @@ export function aggregateCdpBorrowingRevenue({
     marketCount: collaterals.length,
     activeInterestBracketCount,
     unpricedSymbols: [...unpricedSymbols].sort(),
+    bracketsTruncated,
   };
 }

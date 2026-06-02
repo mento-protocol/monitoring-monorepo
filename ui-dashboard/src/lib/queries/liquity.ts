@@ -69,10 +69,16 @@ export const CDP_BORROWING_REVENUE_MARKETS = `
 `;
 
 export const CDP_BORROWING_REVENUE_BRACKETS = `
-  query CdpBorrowingRevenueBrackets($collateralIds: [String!]!) {
+  query CdpBorrowingRevenueBrackets(
+    $collateralIds: [String!]!
+    $limit: Int!
+    $offset: Int!
+  ) {
     InterestRateBracket(
       where: { collateralId: { _in: $collateralIds } }
       order_by: [{ collateralId: asc }, { rate: asc }]
+      limit: $limit
+      offset: $offset
     ) {
       id collateralId rate totalDebt sumDebtTimesRateD36
       pendingDebtTimesOneYearD36 updatedAt

@@ -29,6 +29,7 @@ const EMPTY_CDP_REVENUE: CdpBorrowingRevenueSummary = {
   marketCount: 0,
   activeInterestBracketCount: 0,
   unpricedSymbols: [],
+  bracketsTruncated: false,
 };
 
 vi.mock("@/hooks/use-protocol-fees", () => ({
@@ -175,6 +176,34 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("≈ $20.00");
     expect(html).toContain("Approximate");
     expect(html).toContain("unpriced debt token: JPYm");
+  });
+
+  it("shows CDP borrowing fees as loading before the hook resolves", () => {
+    const html = renderRevenue([], false, {
+      summary: null,
+      isLoading: true,
+      hasError: false,
+    });
+
+    expect(html).toContain("CDP Borrowing Fees");
+    expect(html).toContain("Loading CDP borrowing fees");
+    expect(html).not.toContain("Unable to load CDP borrowing fees");
+  });
+
+  it("marks CDP borrowing fees approximate when bracket pagination is capped", () => {
+    const html = renderRevenue([], false, {
+      summary: {
+        ...EMPTY_CDP_REVENUE,
+        totalRevenueUSD: 20,
+        upfrontFeesUSD: 20,
+        bracketsTruncated: true,
+      },
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain("≈ $20.00");
+    expect(html).toContain("interest brackets exceed pagination cap");
   });
 
   it("isolates CDP borrowing fee failures from swap fee chart and table props", () => {

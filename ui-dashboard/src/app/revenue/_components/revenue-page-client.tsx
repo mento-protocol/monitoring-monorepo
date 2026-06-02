@@ -225,7 +225,9 @@ function SwapFeesTile({ state }: { state: SwapFeesTileState }) {
 
 function CdpBorrowingFeesTile({ state }: { state: CdpBorrowingFeesTileState }) {
   const { summary, isLoading, hasError } = state;
-  const isApproximate = (summary?.unpricedSymbols.length ?? 0) > 0;
+  const isApproximate =
+    (summary?.unpricedSymbols.length ?? 0) > 0 ||
+    (summary?.bracketsTruncated ?? false);
   const mainValue = isLoading
     ? "…"
     : hasError || summary === null
@@ -238,12 +240,7 @@ function CdpBorrowingFeesTile({ state }: { state: CdpBorrowingFeesTileState }) {
           { label: "Interest", value: summary.accruedInterestUSD },
         ]
       : null;
-  const subtitle =
-    hasError || summary === null
-      ? "Unable to load CDP borrowing fees"
-      : isApproximate
-        ? `Approximate — unpriced debt token${summary.unpricedSymbols.length === 1 ? "" : "s"}: ${summary.unpricedSymbols.join(", ")}`
-        : "Upfront fees plus accrued interest from Liquity v2";
+  const subtitle = cdpBorrowingFeesSubtitle(summary, isLoading, hasError);
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
@@ -266,6 +263,22 @@ function CdpBorrowingFeesTile({ state }: { state: CdpBorrowingFeesTileState }) {
       <p className="mt-2 text-xs text-slate-500 min-h-4">{subtitle}</p>
     </div>
   );
+}
+
+function cdpBorrowingFeesSubtitle(
+  summary: CdpBorrowingRevenueSummary | null,
+  isLoading: boolean,
+  hasError: boolean,
+): string {
+  if (isLoading) return "Loading CDP borrowing fees";
+  if (hasError || summary === null) return "Unable to load CDP borrowing fees";
+  if (summary.bracketsTruncated) {
+    return "Approximate — interest brackets exceed pagination cap";
+  }
+  if (summary.unpricedSymbols.length > 0) {
+    return `Approximate — unpriced debt token${summary.unpricedSymbols.length === 1 ? "" : "s"}: ${summary.unpricedSymbols.join(", ")}`;
+  }
+  return "Upfront fees plus accrued interest from Liquity v2";
 }
 
 function ReserveYieldTile() {
