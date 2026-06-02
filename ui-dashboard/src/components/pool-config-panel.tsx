@@ -1,6 +1,10 @@
 "use client";
 
 import { isVirtualPool, type Pool, type RateFeed } from "@/lib/types";
+import {
+  getChainlinkDataFeedUrl,
+  getRateFeedPair,
+} from "@mento-protocol/monitoring-config/oracle-reporters";
 import { isNeverRebalance } from "@/lib/health";
 import { AddressLink } from "@/components/address-link";
 import { InfoPopover } from "@/components/info-popover";
@@ -21,6 +25,11 @@ type PoolConfigExtRow = {
 };
 
 type RateFeedExtRow = RateFeed;
+
+type OracleSource = {
+  label: string;
+  url: string | null;
+};
 
 // `-1` is the indexer's "RPC read failed, not yet self-healed" sentinel;
 // `undefined` means the field hasn't reached hosted Hasura yet (phased
@@ -46,7 +55,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
   if (isVirtual) return null;
 
   const rebalanceReward = configExt?.Pool?.[0]?.rebalanceReward;
-  const oracleSource = formatOracleSource(rateFeedExt?.RateFeed?.[0]);
+  const oracleSource = formatOracleSource(rateFeedExt?.RateFeed?.[0], pool);
 
   const lpFee = pool.lpFee;
   const protocolFee = pool.protocolFee;
@@ -76,7 +85,10 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
         value={formatBps(swapFeeTotal)}
         mono
       />
-      <Stat label="Oracle Source" value={<span>{oracleSource}</span>} />
+      <Stat
+        label="Oracle Source"
+        value={<OracleSourceValue {...oracleSource} />}
+      />
       <Stat
         label={
           <span className="inline-flex items-center gap-1">
@@ -147,16 +159,59 @@ function formatReporterType(type: RateFeed["reporterTypes"][number]): string {
   }
 }
 
-function formatOracleSource(rateFeed: RateFeedExtRow | undefined): string {
-  if (!rateFeed) return "SortedOracles";
+function OracleSourceValue({ label, url }: OracleSource) {
+  if (!url) return <span>{label}</span>;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="text-indigo-300 transition-colors hover:text-indigo-200"
+    >
+      {label}
+    </a>
+  );
+}
+
+function formatOracleSource(
+  rateFeed: RateFeedExtRow | undefined,
+  pool: Pool,
+): OracleSource {
+  const feedAddress = pool.referenceRateFeedID ?? "";
+  const staticPair = feedAddress
+    ? getRateFeedPair(pool.chainId, feedAddress)
+    : null;
+  if (!rateFeed && staticPair) {
+    return {
+      label: `Chainlink ${staticPair}`,
+      url: getChainlinkDataFeedUrl(pool.chainId, staticPair),
+    };
+  }
+  if (!rateFeed) return { label: "SortedOracles", url: null };
   const pair =
-    rateFeed.pair && rateFeed.pair !== "Unknown" ? rateFeed.pair : "";
+    rateFeed.pair && rateFeed.pair !== "Unknown"
+      ? rateFeed.pair
+      : (staticPair ?? "");
   const uniqueTypes = Array.from(new Set(rateFeed.reporterTypes));
   if (uniqueTypes.length === 1 && uniqueTypes[0]) {
-    return [formatReporterType(uniqueTypes[0]), pair].filter(Boolean).join(" ");
+    const label = [formatReporterType(uniqueTypes[0]), pair]
+      .filter(Boolean)
+      .join(" ");
+    return {
+      label,
+      url:
+        uniqueTypes[0] === "CHAINLINK" && pair
+          ? getChainlinkDataFeedUrl(pool.chainId, pair)
+          : null,
+    };
   }
-  if (uniqueTypes.length > 1) return ["Mixed", pair].filter(Boolean).join(" ");
-  return ["SortedOracles", pair].filter(Boolean).join(" ");
+  if (uniqueTypes.length > 1) {
+    return { label: ["Mixed", pair].filter(Boolean).join(" "), url: null };
+  }
+  return {
+    label: ["SortedOracles", pair].filter(Boolean).join(" "),
+    url: null,
+  };
 }
 
 function usePoolConfigExt(pool: Pool, isVirtual: boolean) {

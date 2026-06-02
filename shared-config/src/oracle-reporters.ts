@@ -27,6 +27,10 @@ type RawOracleReportersJson = Record<string, RawChainEntry | undefined>;
 
 const ROOT = oracleReportersJson as RawOracleReportersJson;
 const REPORTER_TYPE_SET = new Set<string>(ORACLE_REPORTER_TYPES);
+const CHAINLINK_FEED_PATH_BY_CHAIN: Readonly<Record<number, string>> = {
+  42220: "celo/mainnet",
+  143: "monad/monad",
+};
 
 function chainEntry(chainId: number): RawChainEntry | undefined {
   return ROOT[String(chainId)];
@@ -49,6 +53,24 @@ export function getRateFeedPair(
   return (
     chainEntry(chainId)?.feeds?.[normalizeAddress(feedAddress)]?.pair ?? null
   );
+}
+
+export function getChainlinkDataFeedUrl(
+  chainId: number,
+  pair: string,
+): string | null {
+  const path = CHAINLINK_FEED_PATH_BY_CHAIN[chainId];
+  if (!path) return null;
+  const slug = pair.toLowerCase().replace(/\//g, "-");
+  return `https://data.chain.link/feeds/${path}/${slug}`;
+}
+
+export function getRateFeedChainlinkDataFeedUrl(
+  chainId: number,
+  feedAddress: string,
+): string | null {
+  const pair = getRateFeedPair(chainId, feedAddress);
+  return pair ? getChainlinkDataFeedUrl(chainId, pair) : null;
 }
 
 export function getOracleReporterType(

@@ -10,6 +10,7 @@ import {
 
 const USDC_FEED = "0xa1a8003936862e7a15092a91898d69fa8bce290c";
 const GBP_FEED = "0xf590b62f9cfcc6409075b1ecac8176fe25744b88";
+const MONAD_GBP_FEED = "0xea4103a6a122fbe2cdb07a80d4d293be07bb29fa";
 
 function defaultUseGQL(query?: unknown) {
   if (query === POOL_RATE_FEED_EXT) {
@@ -194,11 +195,13 @@ describe("PoolConfigPanel", () => {
   });
 
   describe("Oracle Source tile", () => {
-    it("renders the RateFeed reporter label", () => {
+    it("renders the RateFeed reporter label as a chain-aware Chainlink link", () => {
       const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
       expect(html).toContain("Chainlink USDC/USD");
       expect(html).toContain("Oracle Source");
-      expect(html).not.toContain("data.chain.link");
+      expect(html).toContain(
+        'href="https://data.chain.link/feeds/celo/mainnet/usdc-usd"',
+      );
     });
 
     it("does not guess Chainlink source from token symbols for non-USDm pairs", () => {
@@ -228,7 +231,55 @@ describe("PoolConfigPanel", () => {
       };
       const html = renderToStaticMarkup(<PoolConfigPanel pool={pool} />);
       expect(html).toContain("Chainlink GBP/USD");
+      expect(html).toContain(
+        'href="https://data.chain.link/feeds/celo/mainnet/gbp-usd"',
+      );
       expect(html).not.toContain("Chainlink USDC/USD");
+    });
+
+    it("links Monad Chainlink feeds to the Monad Chainlink path", () => {
+      mockUseGQL.mockImplementation((query?: unknown) => {
+        if (query === POOL_RATE_FEED_EXT) {
+          return {
+            data: {
+              RateFeed: [
+                {
+                  id: `143-${MONAD_GBP_FEED}`,
+                  chainId: 143,
+                  feedAddress: MONAD_GBP_FEED,
+                  pair: "GBP/USD",
+                  reporterTypes: ["CHAINLINK"],
+                },
+              ],
+            },
+          };
+        }
+        return defaultUseGQL(query);
+      });
+      const pool: Pool = {
+        ...BASE_POOL,
+        id: "143-0xpool",
+        chainId: 143,
+        referenceRateFeedID: MONAD_GBP_FEED,
+      };
+      const html = renderToStaticMarkup(<PoolConfigPanel pool={pool} />);
+      expect(html).toContain("Chainlink GBP/USD");
+      expect(html).toContain(
+        'href="https://data.chain.link/feeds/monad/monad/gbp-usd"',
+      );
+      expect(html).not.toContain("feeds/celo/mainnet/gbp-usd");
+    });
+
+    it("keeps the Chainlink link during RateFeed schema lag for known feeds", () => {
+      mockUseGQL.mockImplementation((query?: unknown) => {
+        if (query === POOL_RATE_FEED_EXT) return {};
+        return defaultUseGQL(query);
+      });
+      const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
+      expect(html).toContain("Chainlink USDC/USD");
+      expect(html).toContain(
+        'href="https://data.chain.link/feeds/celo/mainnet/usdc-usd"',
+      );
     });
 
     it("renders 'SortedOracles' when the RateFeed row is absent", () => {
@@ -246,12 +297,16 @@ describe("PoolConfigPanel", () => {
       expect(html).not.toContain("data.chain.link");
     });
 
-    it("renders 'SortedOracles' when the isolated RateFeed query is unavailable", () => {
+    it("renders 'SortedOracles' when the isolated RateFeed query is unavailable and the feed is unknown", () => {
       mockUseGQL.mockImplementation((query?: unknown) => {
         if (query === POOL_RATE_FEED_EXT) return {};
         return defaultUseGQL(query);
       });
-      const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
+      const pool: Pool = {
+        ...BASE_POOL,
+        referenceRateFeedID: "0x0000000000000000000000000000000000000000",
+      };
+      const html = renderToStaticMarkup(<PoolConfigPanel pool={pool} />);
       expect(html).toContain("SortedOracles");
     });
 

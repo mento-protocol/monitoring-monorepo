@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import oracleReportersJson from "../oracle-reporters.json" with { type: "json" };
 import {
   describeRateFeed,
+  getChainlinkDataFeedUrl,
   getOracleReporterType,
+  getRateFeedChainlinkDataFeedUrl,
   getRateFeedPair,
   knownRateFeedsByChain,
 } from "../src/oracle-reporters";
@@ -45,11 +47,28 @@ describe("oracle reporter registry", () => {
     });
   });
 
+  it("builds chain-aware Chainlink data feed URLs", () => {
+    expect(getChainlinkDataFeedUrl(42220, "GBP/USD")).toBe(
+      "https://data.chain.link/feeds/celo/mainnet/gbp-usd",
+    );
+    expect(getChainlinkDataFeedUrl(143, "GBP/USD")).toBe(
+      "https://data.chain.link/feeds/monad/monad/gbp-usd",
+    );
+    expect(
+      getRateFeedChainlinkDataFeedUrl(
+        143,
+        "0xea4103a6a122fbe2cdb07a80d4d293be07bb29fa",
+      ),
+    ).toBe("https://data.chain.link/feeds/monad/monad/gbp-usd");
+  });
+
   it("returns stable defaults for unknown feeds and chains", () => {
     const unknownFeed = "0x0000000000000000000000000000000000000000";
 
     expect(getRateFeedPair(42220, unknownFeed)).toBeNull();
     expect(getRateFeedPair(999_999, unknownFeed)).toBeNull();
+    expect(getChainlinkDataFeedUrl(999_999, "GBP/USD")).toBeNull();
+    expect(getRateFeedChainlinkDataFeedUrl(42220, unknownFeed)).toBeNull();
     expect(knownRateFeedsByChain(999_999).size).toBe(0);
     expect(describeRateFeed(999_999, unknownFeed, [])).toEqual({
       pair: "Unknown",
