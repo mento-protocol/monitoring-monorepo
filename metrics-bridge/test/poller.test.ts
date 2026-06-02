@@ -37,10 +37,14 @@ vi.mock("../src/rebalance-probe.js", () => ({
 // (N=5) tests use the top-level static import.
 import { poll, _resetPollCycleForTests } from "../src/poller.js";
 import { fetchPools } from "../src/graphql.js";
+import { fetchCdps } from "../src/cdp-graphql.js";
+import { updateCdpMetrics } from "../src/cdp-metrics.js";
 import { markHealthy } from "../src/server.js";
 import { runRebalanceProbes } from "../src/rebalance-probe.js";
 
 const mockFetchPools = vi.mocked(fetchPools);
+const mockFetchCdps = vi.mocked(fetchCdps);
+const mockUpdateCdpMetrics = vi.mocked(updateCdpMetrics);
 const mockMarkHealthy = vi.mocked(markHealthy);
 const mockRunRebalanceProbes = vi.mocked(runRebalanceProbes);
 
@@ -120,6 +124,35 @@ describe("poll", () => {
     mockFetchPools.mockRejectedValueOnce(new Error("network error"));
     await poll();
     expect(mockMarkHealthy).not.toHaveBeenCalled();
+  });
+
+  it("increments pollErrors with cdp_query kind when the CDP fetch fails, without derailing the FPMM poll", async () => {
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    mockFetchCdps.mockRejectedValueOnce(new Error("cdp hasura down"));
+
+    await poll();
+
+    expect(await pollErrorValue("cdp_query")).toBe(1);
+    // A CDP query failure must not clear gauges or flip the bridge unhealthy.
+    expect(mockUpdateCdpMetrics).not.toHaveBeenCalled();
+    expect(mockMarkHealthy).toHaveBeenCalledOnce();
+    expect(
+      await getGaugeValue(register, "mento_pool_bridge_last_poll"),
+    ).toBeGreaterThan(0);
+  });
+
+  it("increments pollErrors with cdp_update kind when the CDP metric update throws", async () => {
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    mockFetchCdps.mockResolvedValueOnce([]);
+    mockUpdateCdpMetrics.mockImplementationOnce(() => {
+      throw new Error("cdp metrics boom");
+    });
+
+    await poll();
+
+    expect(await pollErrorValue("cdp_update")).toBe(1);
+    // The FPMM poll already succeeded before the CDP refresh ran.
+    expect(mockMarkHealthy).toHaveBeenCalledOnce();
   });
 
   it("preserves previous gauge values after failure", async () => {

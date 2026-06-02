@@ -50,8 +50,7 @@ function collateral(troveManager: string, symbol: string) {
 }
 
 function missingEntityError(): ClientError {
-  // Shape Hasura returns before it has tracked the CDP entities — matches the
-  // SUT's `/field ... not found/` degradation guard.
+  // Shape Hasura returns before it has tracked the CDP entities.
   return new ClientError(
     {
       data: undefined,
@@ -100,16 +99,15 @@ describe("fetchCdps", () => {
     expect(cdps[0].collateral.symbol).toBe("GBPm");
   });
 
-  it("degrades to [] (warn once) when the CDP entities aren't tracked yet", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("propagates schema drift (does NOT silently degrade to [])", async () => {
+    // The primary CDP query must surface a missing-entity error as a cdp_query
+    // poll error, not a healthy-looking empty result that would clear every
+    // gauge under no_data_state=OK.
     requestSpy.mockRejectedValue(missingEntityError());
-    expect(await fetchCdps()).toEqual([]);
-    expect(await fetchCdps()).toEqual([]);
-    // Warned at most once across repeated misses (module-level latch).
-    expect(warn.mock.calls.length).toBeLessThanOrEqual(1);
+    await expect(fetchCdps()).rejects.toThrow();
   });
 
-  it("re-throws a non-schema error (network/timeout) so the poll loop records it", async () => {
+  it("re-throws a network/timeout error so the poll loop records it", async () => {
     requestSpy.mockRejectedValue(new Error("network down"));
     await expect(fetchCdps()).rejects.toThrow("network down");
   });

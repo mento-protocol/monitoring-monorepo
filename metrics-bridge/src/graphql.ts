@@ -134,7 +134,7 @@ const client = new GraphQLClient(HASURA_URL);
 //   field 'prevMedianAt' not found in type 'Pool'
 // Match conservatively so a transient network/timeout error never trips
 // the degraded path.
-export function isUnknownFieldError(err: unknown): boolean {
+function isUnknownFieldError(err: unknown): boolean {
   if (!(err instanceof ClientError)) return false;
   const errors = err.response?.errors ?? [];
   return errors.some((e) =>
