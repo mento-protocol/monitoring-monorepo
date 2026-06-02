@@ -392,6 +392,13 @@ describe("aggregator quote builders", () => {
     )?.quote?.(input, env);
     expect(relayRequest?.url).toBe("https://api.relay.link/quote/v2");
 
+    const squidRequest = AGGREGATOR_ADAPTERS.find(
+      (item) => item.id === "squid",
+    )?.quote?.(input, env);
+    expect(
+      JSON.parse(String(squidRequest?.init?.body)) as { quoteOnly?: boolean },
+    ).toMatchObject({ quoteOnly: true });
+
     const kyberRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "kyberswap",
     )?.quote?.(input, env);

@@ -654,7 +654,7 @@ function squidBody(input: QuoteProbeInput): unknown {
     fromAddress: input.takerAddress,
     toAddress: input.takerAddress,
     slippage: 1,
-    quoteOnly: false,
+    quoteOnly: true,
   };
 }
 

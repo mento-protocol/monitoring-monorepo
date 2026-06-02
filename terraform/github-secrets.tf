@@ -50,15 +50,42 @@ resource "github_actions_secret" "vercel_automation_bypass" {
   value       = vercel_project.dashboard.protection_bypass_for_automation_secret
 }
 
-# Integration probes OpenOcean Pro key
-# ────────────────────────────────────
+# Integration probes runtime secrets
+# ───────────────────────────────────
 #
-# `.github/workflows/integration-probes.yml` uses this repo secret to query the
-# OpenOcean Pro swap API without Cloudflare blocking the scheduled probe. The
-# key comes from the platform stack's gitignored `terraform.tfvars`, not from a
-# committed file. Keeping it here gives the same drift-reconciliation behavior
-# as the Vercel bypass mirror: once `openocean_api_key` is populated and the
-# platform stack is applied, Terraform owns the repo secret.
+# `.github/workflows/integration-probes.yml` uses these repo secrets to discover
+# active Mento v3 pairs from the shared Envio endpoint, write the latest snapshot
+# to the dashboard's Upstash database, and query the OpenOcean Pro swap API
+# without Cloudflare blocking the scheduled probe. Hasura and Upstash values are
+# mirrored from the existing platform resources; the OpenOcean key comes from the
+# platform stack's gitignored `terraform.tfvars`, not from a committed file.
+# Keeping the mirrors here gives the same drift-reconciliation behavior as the
+# Vercel bypass mirror: every platform apply reconciles the GitHub workflow
+# runtime back to the Terraform-owned dashboard runtime.
+
+resource "github_actions_secret" "integration_probe_hasura_url" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  repository  = "monitoring-monorepo"
+  secret_name = "INTEGRATION_PROBES_HASURA_URL"
+  value       = var.hasura_url
+}
+
+resource "github_actions_secret" "integration_probe_upstash_redis_rest_url" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  repository  = "monitoring-monorepo"
+  secret_name = "UPSTASH_REDIS_REST_URL"
+  value       = local.redis_rest_url
+}
+
+resource "github_actions_secret" "integration_probe_upstash_redis_rest_token" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  repository  = "monitoring-monorepo"
+  secret_name = "UPSTASH_REDIS_REST_TOKEN"
+  value       = upstash_redis_database.address_labels.rest_token
+}
 
 resource "github_actions_secret" "integration_probe_openocean_api_key" {
   # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as

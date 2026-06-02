@@ -143,9 +143,12 @@ pnpm integrations:probe --adapter openocean,relay --chain 42220 --pair-limit 1 -
 discovery. `LIFI_API_KEY` is optional but recommended for scheduled runs because
 the unauthenticated LI.FI quote API can return multi-hour public rate limits.
 `OPENOCEAN_API_KEY` enables the OpenOcean Pro endpoint for OpenOcean checks and
-is managed by the platform Terraform stack from `openocean_api_key`. Adapter
-credentials are optional; missing keys render as `needs_key` instead of failing
-the chain check.
+is managed by the platform Terraform stack from `openocean_api_key`. The same
+platform stack mirrors `INTEGRATION_PROBES_HASURA_URL`,
+`UPSTASH_REDIS_REST_URL`, and `UPSTASH_REDIS_REST_TOKEN` into repo-level GitHub
+Actions secrets so scheduled writers use the same Terraform-owned runtime as the
+dashboard. Adapter credentials are optional; missing keys render as `needs_key`
+instead of failing the chain check.
 
 ### Address Book & Backup Cron
 
