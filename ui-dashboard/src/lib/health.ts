@@ -53,6 +53,7 @@ interface PoolHealthState {
   wrappedExchangeId?: string | null | undefined;
   oracleOk?: boolean | undefined;
   oracleTimestamp?: string | undefined;
+  lastOracleReportAt?: string | undefined;
   oracleExpiry?: string | undefined;
   priceDifference?: string | undefined;
   degenerateReserves?: boolean | undefined;
@@ -195,12 +196,13 @@ export function getOracleStalenessThreshold(
 export function isOracleFresh(
   pool: {
     oracleTimestamp?: string | undefined;
+    lastOracleReportAt?: string | undefined;
     oracleExpiry?: string | undefined;
   },
   nowSeconds = Math.floor(Date.now() / 1000),
   chainId?: number,
 ): boolean {
-  const oracleTs = Number(pool.oracleTimestamp ?? "0");
+  const oracleTs = oracleFreshnessTimestamp(pool);
   const stalenessThreshold = getOracleStalenessThreshold(pool, chainId);
   return oracleTs !== 0 && nowSeconds - oracleTs <= stalenessThreshold;
 }
@@ -228,7 +230,7 @@ export function isOracleFresh(
  * indexer's decimals-unknown early-return path (codex P2 #3214513402,
  * PR 1.6): the homepage table + OG card recompute health here without
  * checking `hasHealthData`, so without this gate a pool whose indexer
- * advanced `oracleTimestamp` from before the freshness-cursor preserve
+ * advanced raw oracle timestamps from before the freshness-cursor preserve
  * fix landed would render OK / fresh while its `priceDifference` is
  * still stale / default. Strict `=== false` so callers from queries
  * that don't fetch the field (older snapshots) keep the prior behaviour.
@@ -352,7 +354,6 @@ type HealthCounterState = {
   lastDeviationRatio?: string | undefined;
   oracleExpiry?: string | undefined;
 };
-
 /** Return the counter pair with the current open interval included.
  *
  * The indexer persists health counters only when a later health sample closes
@@ -441,6 +442,13 @@ export function liveHealthCounters(
     healthBinarySeconds: String(baseBinary + (prevHealthy ? carrySeconds : 0)),
     healthTotalSeconds: String(baseTotal + duration),
   };
+}
+
+export function oracleFreshnessTimestamp(pool: {
+  oracleTimestamp?: string | undefined;
+  lastOracleReportAt?: string | undefined;
+}): number {
+  return Number(pool.oracleTimestamp ?? "0");
 }
 
 /**

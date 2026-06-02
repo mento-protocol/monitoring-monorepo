@@ -1,4 +1,4 @@
-# Terraform state — managed remotely in GCS (mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts).
+# Terraform state — managed remotely in GCS (mento-terraform-tfstate-6ed6/alerts-rules).
 terraform.tfstate
 terraform.tfstate.backup
 

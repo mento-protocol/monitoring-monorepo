@@ -1,4 +1,7 @@
-import { ORACLE_STALE_SECONDS_BY_CHAIN } from "@/lib/health";
+import {
+  ORACLE_STALE_SECONDS_BY_CHAIN,
+  oracleFreshnessTimestamp,
+} from "@/lib/health";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
@@ -30,7 +33,7 @@ const STATIC_HEALTH_TOOLTIP: Record<string, string> = {
 function healthTooltip(status: string, p: Pool, chainId?: number): string {
   const staticText = STATIC_HEALTH_TOOLTIP[status];
   if (staticText) return staticText;
-  const oracleTs = Number(p.oracleTimestamp ?? "0");
+  const oracleTs = oracleFreshnessTimestamp(p);
   // Mirror computeHealthStatus: use the indexed per-feed expiry, falling back to the
   // per-chain default so the tooltip root-cause matches the badge on non-300s networks.
   const chainFallback =

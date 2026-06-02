@@ -45,11 +45,13 @@ export function isWeekend(now = new Date()): boolean {
 export function isWeekendOracleStale(
   pool: {
     oracleTimestamp?: string | undefined;
+    lastOracleReportAt?: string | undefined;
     oracleExpiry?: string | undefined;
   },
   isOracleFreshFn: (
     pool: {
       oracleTimestamp?: string | undefined;
+      lastOracleReportAt?: string | undefined;
       oracleExpiry?: string | undefined;
     },
     nowSeconds?: number,

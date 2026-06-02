@@ -68,6 +68,27 @@ export const POOL_CONFIG_EXT = `
   }
 `;
 
+// Isolated from POOL_DETAIL_WITH_HEALTH because RateFeed is a new indexer
+// entity. During the hosted deploy+resync window Hasura may reject the type;
+// the config panel should keep rendering and degrade only Oracle Source.
+export const POOL_RATE_FEED_EXT = `
+  query PoolRateFeedExt($chainId: Int!, $feedAddress: String!) {
+    RateFeed(
+      where: {
+        chainId: { _eq: $chainId }
+        feedAddress: { _eq: $feedAddress }
+      }
+      limit: 1
+    ) {
+      id
+      chainId
+      feedAddress
+      pair
+      reporterTypes
+    }
+  }
+`;
+
 // VirtualPool -> BiPoolExchange reverse-join. Replaces the temporary
 // /api/v2-exchange-config route from PR #359; reads the indexer's
 // `BiPoolExchange` entity directly via the `wrappedByPoolId` back-reference

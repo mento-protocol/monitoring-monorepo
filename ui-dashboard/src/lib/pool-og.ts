@@ -16,6 +16,7 @@ import {
   computeEffectiveStatus,
   computeHealthStatus,
   isOracleFresh,
+  oracleFreshnessTimestamp,
   type HealthStatus,
 } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
@@ -430,7 +431,7 @@ function computeOracleFreshness(
   pool: Pool,
   chainId: number,
 ): { ageSeconds: number | null; fresh: boolean } {
-  const oracleTs = Number(pool.oracleTimestamp ?? "0");
+  const oracleTs = oracleFreshnessTimestamp(pool);
   if (!oracleTs || isVirtualPool(pool)) {
     return { ageSeconds: null, fresh: false };
   }

@@ -95,6 +95,8 @@ contracts:
     abi_file_path: abis/SortedOracles.json
     handler: src/EventHandlers.ts
     events:
+      - event: OracleAdded
+      - event: OracleRemoved
       - event: OracleReported
       - event: MedianUpdated
       - event: ReportExpirySet
