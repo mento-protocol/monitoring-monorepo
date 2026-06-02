@@ -429,9 +429,11 @@ locals {
   #   - ResUSDC is chain-agnostic (USDC/USDm exists on both chains); ResUSDT /
   #     ResAxlUSDC are Celo-only and ResUSDT0 / ResAUSD are Monad-only, so each
   #     binds to its own chain's pool instances via the `on(chain_name)` join.
-  #   - USDC / USDT / axlUSDC / USDT0 / AUSD all expose 6dp on chain; `/ 1e6` normalises
-  #     to human units so the template's `printf "%.2f"` renders in the
-  #     same scale as the dashboard tooltip.
+  #   - The `*_balanceOf` gauges are ALREADY in whole-token units — Aegis
+  #     divides by the token's decimals before exporting (metric.ts
+  #     `tokenAmountToWholeUnits`, e.g. USDC_balanceOf{chain="celo"} ≈ 127909).
+  #     So the query uses the gauge value directly; do NOT divide by 1e6 (that
+  #     would render 127909 as "0.13"). `printf "%.2f"` then shows whole tokens.
   #   - Aegis emits labels {chain="celo", job="aegis-metrics", owner=
   #     "Reserve", ownerValue=...} — no pool_id / pair — so a bare query
   #     returns no match against the per-pool alert instances. Fix: cross-
@@ -485,25 +487,26 @@ locals {
     # (those tokens are Celo-only; Monad uses USDT0 / AUSD below).
     {
       ref_id = "ResUSDC"
-      expr   = "label_replace(USDC_balanceOf{owner=\"Reserve\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{pair=\"USDC/USDm\"} * 0 + 1)"
+      expr   = "label_replace(USDC_balanceOf{owner=\"Reserve\"}, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{pair=\"USDC/USDm\"} * 0 + 1)"
     },
     {
       ref_id = "ResUSDT"
-      expr   = "label_replace(USDT_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"USDT/USDm\"} * 0 + 1)"
+      expr   = "label_replace(USDT_balanceOf{owner=\"Reserve\", chain=\"celo\"}, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"USDT/USDm\"} * 0 + 1)"
     },
     {
       ref_id = "ResAxlUSDC"
-      expr   = "label_replace(axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"axlUSDC/USDm\"} * 0 + 1)"
+      expr   = "label_replace(axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"}, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"axlUSDC/USDm\"} * 0 + 1)"
     },
-    # Monad reserve tokens (issue #707). USDT0/AUSD are Monad-only, so these
-    # queries naturally resolve to the Monad pool instances only.
+    # Monad reserve tokens (issue #707). USDT0/AUSD are Monad-only; both
+    # operands pin chain="monad" for parity with the Celo-token queries above,
+    # so a future same-named token on another chain can't silently fan out.
     {
       ref_id = "ResUSDT0"
-      expr   = "label_replace(USDT0_balanceOf{owner=\"Reserve\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{pair=\"USDT0/USDm\"} * 0 + 1)"
+      expr   = "label_replace(USDT0_balanceOf{owner=\"Reserve\", chain=\"monad\"}, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"monad\", pair=\"USDT0/USDm\"} * 0 + 1)"
     },
     {
       ref_id = "ResAUSD"
-      expr   = "label_replace(AUSD_balanceOf{owner=\"Reserve\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{pair=\"AUSD/USDm\"} * 0 + 1)"
+      expr   = "label_replace(AUSD_balanceOf{owner=\"Reserve\", chain=\"monad\"}, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"monad\", pair=\"AUSD/USDm\"} * 0 + 1)"
     },
   ]
 
