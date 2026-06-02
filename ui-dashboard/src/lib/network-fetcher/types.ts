@@ -70,11 +70,10 @@ export type NetworkData = {
   tradingLimits: TradingLimit[];
   olsPoolIds: Set<string>;
   /**
-   * Pool IDs classified as CDP or Reserve for global strategy badges. Indexed
-   * Celo derives CDP from CdpPool rows and intentionally withholds Reserve
-   * without a positive indexed Reserve source; Monad uses the runtime probe
-   * fallback in `lib/strategy-detection.ts` until its strategy events are
-   * indexed.
+   * Pool IDs classified as CDP or Reserve for global strategy badges. CDP
+   * badges are Celo-only and come from indexed CdpPool rows. Indexed Celo
+   * intentionally withholds Reserve without a positive indexed Reserve
+   * source; non-Celo fallback probes only contribute Reserve classifications.
    */
   cdpPoolIds: Set<string>;
   reservePoolIds: Set<string>;

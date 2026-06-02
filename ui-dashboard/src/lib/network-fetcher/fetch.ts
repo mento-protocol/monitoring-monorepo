@@ -463,9 +463,9 @@ export async function fetchNetworkData(
         breakerTripped?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
-    // Celo's CDPLiquidityStrategy stream is indexed/backfilled, so CDP badges
-    // come from CdpPool rows there. Monad keeps the runtime probe below until
-    // its strategy events are subscribed and backfilled.
+    // CDP badges are Celo-only and come from indexed CdpPool rows. The
+    // runtime probe is a non-Celo Reserve fallback and must not produce CDP
+    // badges.
     requestIndexedCdpPools(network, timed),
     requestFallbackStrategies(network, pools),
   ]);
@@ -833,7 +833,7 @@ function resolveStrategyIds({
 
   if (!usesIndexedCdpPools(network)) {
     return {
-      cdpPoolIds: fallbackStrategies.cdpPoolIds,
+      cdpPoolIds: new Set<string>(),
       reservePoolIds: fallbackStrategies.reservePoolIds,
     };
   }

@@ -10,9 +10,17 @@ import type { Network } from "@/lib/networks";
 import { isNetworkDataFullyHealthy } from "@/lib/fetch-all-networks";
 import type { Pool } from "@/lib/types";
 
+const { mockDetectProbedStrategies } = vi.hoisted(() => ({
+  mockDetectProbedStrategies: vi.fn(),
+}));
+
 vi.mock("@sentry/nextjs", () => ({
   captureException: vi.fn(),
   captureMessage: vi.fn(),
+}));
+
+vi.mock("@/lib/strategy-detection", () => ({
+  detectProbedStrategies: mockDetectProbedStrategies,
 }));
 
 import * as Sentry from "@sentry/nextjs";
@@ -53,10 +61,10 @@ const MOCK_NETWORK_2: Network = {
  * production-side, but it means the happy-path test fixtures must include
  * at least one oracle-eligible pool.
  */
-function makePool(id: string): Pool {
+function makePool(id: string, chainId: number = 42220): Pool {
   return {
     id,
-    chainId: 42220,
+    chainId,
     token0: "USDm",
     token1: "EURm",
     source: "FPMM",
@@ -142,6 +150,10 @@ function mockRequest(impl: (query: string) => unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockDetectProbedStrategies.mockResolvedValue({
+    cdpPoolIds: new Set<string>(),
+    reservePoolIds: new Set<string>(),
+  });
   // Sentry de-dup maps live at module scope — clear between tests so
   // previous runs don't suppress subsequent captures.
   warnedCapKeys.clear();
@@ -349,6 +361,59 @@ describe("fetchNetworkData — happy path", () => {
     expect(isNetworkDataFullyHealthy(result)).toBe(false);
     expect(result.cdpPoolIds).toEqual(new Set());
     expect(result.reservePoolIds).toEqual(new Set());
+  });
+
+  it("drops non-Celo fallback CDP ids while preserving fallback Reserve ids", async () => {
+    const monadNetwork: Network = {
+      ...MOCK_NETWORK,
+      id: "monad-mainnet",
+      label: "Monad",
+      chainId: 143,
+      hasuraUrl: "https://hasura-monad.example.com/v1/graphql",
+      explorerBaseUrl: "https://monadscan.com",
+      rpcUrl: "https://rpc-monad.example.com",
+    };
+    const cdpLikePool = {
+      ...makePool("143-0x000000000000000000000000000000000000aaaa", 143),
+      rebalancerAddress: "0x000000000000000000000000000000000000c0c0",
+    };
+    const reservePool = {
+      ...makePool("143-0x000000000000000000000000000000000000bbbb", 143),
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    };
+
+    mockDetectProbedStrategies.mockResolvedValueOnce({
+      cdpPoolIds: new Set([cdpLikePool.id]),
+      reservePoolIds: new Set([reservePool.id]),
+    });
+    mockRequest((query) => {
+      if (query.includes("OlsPool")) return { OlsPool: [] };
+      if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [cdpLikePool, reservePool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(monadNetwork, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(new Set([reservePool.id]));
+    expect(mockDetectProbedStrategies).toHaveBeenCalledWith(monadNetwork, [
+      cdpLikePool,
+      reservePool,
+    ]);
+
+    const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    expect(
+      calls.some((args) => extractQuery(args[0]).includes("AllCdpPools")),
+    ).toBe(false);
   });
 
   it("deduplicates LP addresses across multiple positions", async () => {

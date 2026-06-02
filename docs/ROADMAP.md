@@ -47,7 +47,7 @@ Last updated: 2026-05-18
 - [x] **Fully multichain** — network switcher dropped; all chains shown together with chain icon prefix
 - [x] Token symbol mapping via `isFpmm()` in `tokens.ts`
 - [x] Shared `PoolsTable` component (reused across home + pools pages)
-- [x] **CDP strategy badge** on global pools table (Celo via indexed CdpPool rows; Monad via runtime fallback until strategy events are indexed)
+- [x] **CDP strategy badge** on global pools table (Celo via indexed CdpPool rows; non-Celo chains never render CDP badges)
 - [x] **LimitBadge + LimitPanel** — `limitStatus` / `limitPressure0/1` from TradingLimit entity
 - [x] **RebalancerBadge + RebalancerPanel** — rebalancer liveness status + diagnostics
 - [x] **TVL on global page** — TVL-over-time chart + KPI tiles with 24h/7d/30d change %
@@ -145,8 +145,8 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 ### CDP Monitoring Rollout
 
 - [ ] Deploy and backfill the Liquity v2 Celo indexer changes, promote the synced deployment, and verify hosted Hasura exposes the CDP schema before production dashboard rollout.
-- [x] Cut the Celo global pools table from the RPC strategy probe to indexed `CdpPool` rows, with Monad kept behind an explicit fallback.
-- [ ] Subscribe/backfill Monad `CDPLiquidityStrategy` events and remove the remaining runtime strategy fallback.
+- [x] Cut the global pools table from CDP RPC probing to Celo-only indexed `CdpPool` rows; the remaining Monad runtime fallback is Reserve-only.
+- [ ] Add an indexed positive Reserve source for Monad and remove the remaining runtime strategy fallback.
 
 ---
 

@@ -179,7 +179,7 @@ describe("detectProbedStrategies", () => {
     expect(mockDetectStrategyType).not.toHaveBeenCalled();
   });
 
-  it("sorts probed pools into cdp / reserve sets; drops unknown and ols", async () => {
+  it("classifies Reserve only; drops CDP, unknown, and OLS probe results", async () => {
     mockDetectStrategyType
       .mockResolvedValueOnce("cdp")
       .mockResolvedValueOnce("reserve")
@@ -196,7 +196,7 @@ describe("detectProbedStrategies", () => {
       ),
     ]);
 
-    expect(result.cdpPoolIds).toEqual(new Set([`${MONAD.chainId}-${POOL_A}`]));
+    expect(result.cdpPoolIds).toEqual(new Set());
     expect(result.reservePoolIds).toEqual(
       new Set([`${MONAD.chainId}-${POOL_B}`]),
     );
@@ -204,7 +204,7 @@ describe("detectProbedStrategies", () => {
   });
 
   it("configures the viem transport with the probe timeout budget", async () => {
-    mockDetectStrategyType.mockResolvedValueOnce("cdp");
+    mockDetectStrategyType.mockResolvedValueOnce("reserve");
 
     await detectProbedStrategies(MONAD, [makePool(POOL_A, REB_CDP)]);
 
@@ -228,8 +228,8 @@ describe("detectProbedStrategies", () => {
   it("returns the successful sibling classification when one rebalancer in the batch fails", async () => {
     mockDetectStrategyType.mockImplementation(
       async (_client, strategy: `0x${string}`) => {
-        if (strategy.toLowerCase() === REB_RESERVE) throw new Error("rpc down");
-        return "cdp";
+        if (strategy.toLowerCase() === REB_CDP) throw new Error("rpc down");
+        return "reserve";
       },
     );
 
@@ -238,13 +238,15 @@ describe("detectProbedStrategies", () => {
       makePool(POOL_B, REB_RESERVE),
     ]);
 
-    expect(result.cdpPoolIds).toEqual(new Set([`${MONAD.chainId}-${POOL_A}`]));
-    expect(result.reservePoolIds.has(`${MONAD.chainId}-${POOL_B}`)).toBe(false);
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(
+      new Set([`${MONAD.chainId}-${POOL_B}`]),
+    );
     expect(mockCaptureException).toHaveBeenCalledTimes(1);
   });
 
   it("probes each unique rebalancer once even when many pools share it", async () => {
-    mockDetectStrategyType.mockResolvedValue("cdp");
+    mockDetectStrategyType.mockResolvedValue("reserve");
 
     const result = await detectProbedStrategies(MONAD, [
       makePool(POOL_A, REB_SHARED),
@@ -253,12 +255,13 @@ describe("detectProbedStrategies", () => {
     ]);
 
     expect(mockDetectStrategyType).toHaveBeenCalledTimes(1);
-    expect(result.cdpPoolIds.size).toBe(3);
+    expect(result.cdpPoolIds.size).toBe(0);
+    expect(result.reservePoolIds.size).toBe(3);
   });
 
   it("keys the cache by lowercased rebalancer across separate calls", async () => {
     // First call with mixed-case address populates the cache.
-    mockDetectStrategyType.mockResolvedValueOnce("cdp");
+    mockDetectStrategyType.mockResolvedValueOnce("reserve");
     await detectProbedStrategies(MONAD, [
       makePool(POOL_A, REB_CDP.toUpperCase().replace("0X", "0x")),
     ]);
@@ -270,11 +273,14 @@ describe("detectProbedStrategies", () => {
       makePool(POOL_B, REB_CDP),
     ]);
     expect(mockDetectStrategyType).toHaveBeenCalledTimes(1);
-    expect(result.cdpPoolIds).toEqual(new Set([`${MONAD.chainId}-${POOL_B}`]));
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(
+      new Set([`${MONAD.chainId}-${POOL_B}`]),
+    );
   });
 
   it("reuses cached results across calls within the TTL", async () => {
-    mockDetectStrategyType.mockResolvedValue("cdp");
+    mockDetectStrategyType.mockResolvedValue("reserve");
 
     await detectProbedStrategies(MONAD, [makePool(POOL_A, REB_CDP)]);
     await detectProbedStrategies(MONAD, [makePool(POOL_B, REB_CDP)]);
@@ -287,7 +293,7 @@ describe("detectProbedStrategies", () => {
     const now = new Date("2026-04-24T00:00:00Z");
     vi.setSystemTime(now);
 
-    mockDetectStrategyType.mockResolvedValue("cdp");
+    mockDetectStrategyType.mockResolvedValue("reserve");
 
     await detectProbedStrategies(MONAD, [makePool(POOL_A, REB_CDP)]);
     expect(mockDetectStrategyType).toHaveBeenCalledTimes(1);
@@ -302,7 +308,7 @@ describe("detectProbedStrategies", () => {
   it("scopes cache per network.id, not chainId — same-chain variants don't leak", async () => {
     // Both networks share chainId 143 but are different deployments.
     // Cache keyed on chainId alone would reuse the first result.
-    mockDetectStrategyType.mockResolvedValue("cdp");
+    mockDetectStrategyType.mockResolvedValue("reserve");
 
     await detectProbedStrategies(MONAD, [makePool(POOL_A, REB_SHARED)]);
     await detectProbedStrategies(MONAD_ALT, [

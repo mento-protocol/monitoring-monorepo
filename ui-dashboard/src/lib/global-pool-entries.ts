@@ -24,7 +24,7 @@ type DerivedEntries = {
   tradingLimitsByKey: Map<string, TradingLimit[]>;
   /** Set of globalPoolKeys that have an active OLS strategy. */
   olsPoolKeys: Set<string>;
-  /** Set of globalPoolKeys classified as CDP by CdpPool rows or fallback probe. */
+  /** Set of globalPoolKeys classified as CDP by Celo CdpPool rows. */
   cdpPoolKeys: Set<string>;
   /**
    * Set of globalPoolKeys classified as Reserve. Indexed Celo withholds this
