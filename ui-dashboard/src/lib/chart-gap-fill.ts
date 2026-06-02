@@ -1,3 +1,5 @@
+import { bucketTimestamp } from "./time-series";
+
 export type ChartGapFillPoint = {
   timestamp: number;
   value: number;
@@ -18,10 +20,6 @@ type BucketedObservation = ChartGapFillPoint & {
   bucket: number;
   index: number;
 };
-
-function bucketTimestamp(timestamp: number, bucketSeconds: number): number {
-  return Math.floor(timestamp / bucketSeconds) * bucketSeconds;
-}
 
 function firstBucketAtOrAfter(
   timestamp: number,
@@ -112,7 +110,7 @@ export function zeroFillSeries(
   const startBucket = firstBucketAtOrAfter(range.from, range.bucketSeconds);
   const byBucket = new Map<number, number>();
   for (const point of sortedBucketedObservations(points, range.bucketSeconds)) {
-    if (point.timestamp < range.from || point.timestamp >= range.to) continue;
+    if (point.timestamp >= range.to) continue;
     if (point.bucket < startBucket || point.bucket >= range.to) continue;
     byBucket.set(point.bucket, point.value);
   }

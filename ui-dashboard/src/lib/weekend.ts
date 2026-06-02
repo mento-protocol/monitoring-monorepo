@@ -10,6 +10,9 @@
  */
 
 import FX_CALENDAR from "@mento-protocol/monitoring-config/fx-calendar.json";
+import type { Network } from "./networks";
+import { isFpmm, isFxPool } from "./tokens";
+import type { Pool } from "./types";
 
 export const FX_CLOSE_DAY = FX_CALENDAR.fxCloseDay;
 export const FX_CLOSE_HOUR_UTC = FX_CALENDAR.fxCloseHourUtc;
@@ -129,6 +132,44 @@ export function fxWeekendBands({
   }
 
   return shapes;
+}
+
+export function fxPoolWeekendBands({
+  pool,
+  network,
+  from,
+  to,
+}: {
+  pool: Pool | null | undefined;
+  network: Network | undefined;
+  from: number;
+  to: number;
+}): Plotly.Layout["shapes"] {
+  if (!pool || !network || !isFpmm(pool)) return [];
+  if (!isFxPool(network, pool.token0 ?? null, pool.token1 ?? null)) return [];
+  return fxWeekendBands({ from, to });
+}
+
+export function fxPoolWeekendBandsForSeries({
+  pool,
+  network,
+  series,
+  endPaddingSeconds = 0,
+}: {
+  pool: Pool | null | undefined;
+  network: Network | undefined;
+  series: readonly { timestamp: number }[];
+  endPaddingSeconds?: number;
+}): Plotly.Layout["shapes"] {
+  const first = series[0];
+  const last = series[series.length - 1];
+  if (!first || !last) return [];
+  return fxPoolWeekendBands({
+    pool,
+    network,
+    from: first.timestamp,
+    to: last.timestamp + endPaddingSeconds,
+  });
 }
 
 /**

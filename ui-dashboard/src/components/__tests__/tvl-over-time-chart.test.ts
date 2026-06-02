@@ -557,11 +557,10 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     expect(mc0.nowTvl + mc1.nowTvl).toBeCloseTo(nowTvl, 6);
   });
 
-  it("includes chains with zero contribution in a bucket as 0, not omitted", () => {
+  it("starts each per-chain history at that chain's first observed bucket", () => {
     // Chain A has snapshots on day 0 and day 2; chain B only on day 2.
-    // For day 0 + day 1 buckets, chain B should appear with tvlUSD=0
-    // (not undefined, not omitted) so legend traces stay aligned to the
-    // shared x-axis instead of starting mid-chart.
+    // Chain B should not emit pre-history zeroes on day 0 + day 1. Once its
+    // first observation appears, later missing buckets still zero-fill.
     const today = dayAlignedNow();
     const day0 = today - 2 * SECONDS_PER_DAY;
     const day2 = today;
@@ -603,17 +602,7 @@ describe("buildDailySeries — multi-chain aggregation", () => {
 
     expect(byChain).toHaveLength(2);
     const chainB = byChain.find((c) => c.network.id === TVL_NETWORK_2.id)!;
-    // chain B contributes nothing on day 0 + day 1 → those buckets must
-    // emit 0, not be missing from chain B's series.
-    expect(chainB.series).toHaveLength(3);
-    const [cb0, cb1, cb2] = [
-      chainB.series[0]!,
-      chainB.series[1]!,
-      chainB.series[2]!,
-    ];
-    expect(cb0.tvlUSD).toBe(0);
-    expect(cb1.tvlUSD).toBe(0);
-    expect(cb2.tvlUSD).toBeCloseTo(100, 6);
+    expect(chainB.series).toEqual([{ timestamp: day2, tvlUSD: 100 }]);
   });
 
   it("includes current-only chains in the breakdown latest point", () => {
@@ -655,8 +644,7 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     const currentOnlyChain = byChain.find(
       (c) => c.network.id === TVL_NETWORK_2.id,
     )!;
-    expect(currentOnlyChain.series).toHaveLength(1);
-    expect(currentOnlyChain.series[0]!.tvlUSD).toBe(0);
+    expect(currentOnlyChain.series).toEqual([]);
     expect(currentOnlyChain.nowTvl).toBeCloseTo(100, 6);
   });
 

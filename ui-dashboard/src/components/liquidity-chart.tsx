@@ -13,9 +13,8 @@ import {
   RANGE_SELECTOR_BUTTONS_DAILY,
   makeDateXAxis,
 } from "@/lib/plot";
-import { SECONDS_PER_DAY } from "@/lib/time-series";
-import { isFpmm, isFxPool } from "@/lib/tokens";
-import { fxWeekendBands } from "@/lib/weekend";
+import { dailySnapshotRange, type TimeSeriesRange } from "@/lib/time-series";
+import { fxPoolWeekendBands } from "@/lib/weekend";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 const SORTED_ORACLES_DECIMALS = 24;
@@ -41,17 +40,15 @@ type LiquiditySeriesInput = {
   snapshots: PoolSnapshot[];
   pool: Pool | null;
   token0Symbol: string;
+  range: TimeSeriesRange;
 };
 
 function buildLiquiditySeries({
   snapshots,
   pool,
   token0Symbol,
+  range,
 }: LiquiditySeriesInput): LiquiditySeries {
-  const sorted = [...snapshots].sort(
-    (a, b) => Number(a.timestamp) - Number(b.timestamp),
-  );
-  const range = dailyRange(sorted);
   const nonUsdmUsdPrice = parseSortedOracleFeedUsdPrice(
     pool?.oraclePrice ?? "0",
   );
@@ -60,14 +57,14 @@ function buildLiquiditySeries({
   const dec0 = pool?.token0Decimals ?? 18;
   const dec1 = pool?.token1Decimals ?? 18;
   const raw0Series = forwardFillSeries(
-    sorted.map((s) => ({
+    snapshots.map((s) => ({
       timestamp: Number(s.timestamp),
       value: parseWei(s.reserves0, dec0),
     })),
     range,
   );
   const raw1Series = forwardFillSeries(
-    sorted.map((s) => ({
+    snapshots.map((s) => ({
       timestamp: Number(s.timestamp),
       value: parseWei(s.reserves1, dec1),
     })),
@@ -94,47 +91,6 @@ function buildLiquiditySeries({
   };
 }
 
-function dayBucket(timestamp: number): number {
-  return Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-}
-
-function currentDayBucket(): number {
-  return dayBucket(Math.floor(Date.now() / 1000));
-}
-
-function dailyRange(snapshots: PoolSnapshot[]): {
-  from: number;
-  to: number;
-  bucketSeconds: number;
-} {
-  const first = snapshots[0]!;
-  const last = snapshots[snapshots.length - 1]!;
-  const from = dayBucket(Number(first.timestamp));
-  const lastSnapshotEnd = dayBucket(Number(last.timestamp)) + SECONDS_PER_DAY;
-  const todayEnd = currentDayBucket() + SECONDS_PER_DAY;
-  return {
-    from,
-    to: Math.max(lastSnapshotEnd, todayEnd),
-    bucketSeconds: SECONDS_PER_DAY,
-  };
-}
-
-function makeFxWeekendShapes({
-  pool,
-  network,
-  from,
-  to,
-}: {
-  pool: Pool | null | undefined;
-  network: Network | undefined;
-  from: number;
-  to: number;
-}): Plotly.Layout["shapes"] {
-  if (!pool || !network || !isFpmm(pool)) return [];
-  if (!isFxPool(network, pool.token0 ?? null, pool.token1 ?? null)) return [];
-  return fxWeekendBands({ from, to });
-}
-
 function parseSortedOracleFeedUsdPrice(rawPrice: string): number {
   if (!rawPrice || rawPrice === "0") return 0;
   const feedValue = Number(rawPrice) / 10 ** SORTED_ORACLES_DECIMALS;
@@ -152,7 +108,7 @@ export function LiquidityChart({
   const sorted = [...snapshots].sort(
     (a, b) => Number(a.timestamp) - Number(b.timestamp),
   );
-  const range = dailyRange(sorted);
+  const range = dailySnapshotRange(sorted);
 
   // Convert raw token reserves to USD value using the current oracle price as
   // an approximation for all historical data points. This lets both series share
@@ -166,6 +122,7 @@ export function LiquidityChart({
       snapshots: sorted,
       pool,
       token0Symbol,
+      range,
     });
   const trace0 = makeReserveTrace({
     timestamps,
@@ -202,7 +159,7 @@ export function LiquidityChart({
         data={[trace0, trace1]}
         layout={{
           ...makeLayout(useUsd),
-          shapes: makeFxWeekendShapes({
+          shapes: fxPoolWeekendBands({
             pool,
             network,
             from: range.from,

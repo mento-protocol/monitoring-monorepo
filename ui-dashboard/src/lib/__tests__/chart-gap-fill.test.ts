@@ -35,6 +35,21 @@ describe("forwardFillSeries", () => {
     ]);
   });
 
+  it("uses the latest pre-range observation to seed the first bucket", () => {
+    const series = forwardFillSeries(
+      [
+        { timestamp: DAY, value: 10 },
+        { timestamp: 2 * DAY, value: 20 },
+      ],
+      { from: 3 * DAY, to: 5 * DAY, bucketSeconds: DAY },
+    );
+
+    expect(series).toEqual([
+      { timestamp: 3 * DAY, value: 20 },
+      { timestamp: 4 * DAY, value: 20 },
+    ]);
+  });
+
   it("aligns mid-bucket observations down to their bucket", () => {
     const series = forwardFillSeries(
       [{ timestamp: DAY + 12 * 3_600, value: 12 }],

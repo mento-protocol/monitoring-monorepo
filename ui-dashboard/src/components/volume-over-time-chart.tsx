@@ -240,26 +240,32 @@ export function buildDailyVolumeSeries(
     }
   }
 
-  const series: SeriesPoint[] = zeroFillSeries(
-    Array.from(totalBuckets, ([timestamp, value]) => ({ timestamp, value })),
-    range,
-  ).map((point) => ({ timestamp: point.timestamp, volumeUSD: point.value }));
+  const series: SeriesPoint[] = volumeSeriesFromBuckets(totalBuckets, range);
   const byChain: ChainVolumeSeries[] = Array.from(perChain.values()).map(
     (entry) => ({
       network: entry.network,
-      series: zeroFillSeries(
-        Array.from(
-          perChainBuckets.get(entry.network.id) ?? new Map<number, number>(),
-          ([timestamp, value]) => ({ timestamp, value }),
-        ),
+      series: volumeSeriesFromBuckets(
+        perChainBuckets.get(entry.network.id) ?? new Map<number, number>(),
         range,
-      ).map((point) => ({
-        timestamp: point.timestamp,
-        volumeUSD: point.value,
-      })),
+      ),
     }),
   );
   return { series, byChain, volumePartial };
+}
+
+function volumeSeriesFromBuckets(
+  buckets: ReadonlyMap<number, number>,
+  range: { from: number; to: number; bucketSeconds: number },
+): SeriesPoint[] {
+  const series: SeriesPoint[] = [];
+  for (
+    let timestamp = range.from;
+    timestamp < range.to;
+    timestamp += range.bucketSeconds
+  ) {
+    series.push({ timestamp, volumeUSD: buckets.get(timestamp) ?? 0 });
+  }
+  return series;
 }
 
 /**

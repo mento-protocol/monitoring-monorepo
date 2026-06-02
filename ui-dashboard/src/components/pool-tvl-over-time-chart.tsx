@@ -2,25 +2,19 @@
 
 import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
-import {
-  canValueTvl,
-  isFpmm,
-  isFxPool,
-  poolTvlUSD,
-  type OracleRateMap,
-} from "@/lib/tokens";
+import { canValueTvl, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { forwardFillSeries } from "@/lib/chart-gap-fill";
 import {
-  SECONDS_PER_DAY,
+  dailySnapshotRange,
   filterSeriesByRange,
   stockWoWChangePct,
   type RangeKey,
   type TimeSeriesPoint,
 } from "@/lib/time-series";
-import { fxWeekendBands } from "@/lib/weekend";
+import { fxPoolWeekendBandsForSeries } from "@/lib/weekend";
 
 interface PoolTvlOverTimeChartProps {
   pool: Pool;
@@ -75,7 +69,7 @@ export function PoolTvlOverTimeChart({
         points.push({ timestamp: Number(snap.timestamp), value });
       }
     }
-    const range = dailyRange(sorted);
+    const range = dailySnapshotRange(sorted);
     const filled: TimeSeriesPoint[] = [];
     for (const point of forwardFillSeries(points, range)) {
       if (point.value === undefined) continue;
@@ -97,7 +91,12 @@ export function PoolTvlOverTimeChart({
     [fullSeries, range],
   );
   const shapes = useMemo(
-    () => makeFxWeekendShapes(pool, network, visibleSeries),
+    () =>
+      fxPoolWeekendBandsForSeries({
+        pool,
+        network,
+        series: visibleSeries,
+      }),
     [pool, network, visibleSeries],
   );
 
@@ -141,41 +140,4 @@ export function PoolTvlOverTimeChart({
       }
     />
   );
-}
-
-function dayBucket(timestamp: number): number {
-  return Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-}
-
-function currentDayBucket(): number {
-  return dayBucket(Math.floor(Date.now() / 1000));
-}
-
-function dailyRange(snapshots: PoolSnapshot[]): {
-  from: number;
-  to: number;
-  bucketSeconds: number;
-} {
-  const first = snapshots[0]!;
-  const last = snapshots[snapshots.length - 1]!;
-  const from = dayBucket(Number(first.timestamp));
-  const lastSnapshotEnd = dayBucket(Number(last.timestamp)) + SECONDS_PER_DAY;
-  const todayEnd = currentDayBucket() + SECONDS_PER_DAY;
-  return {
-    from,
-    to: Math.max(lastSnapshotEnd, todayEnd),
-    bucketSeconds: SECONDS_PER_DAY,
-  };
-}
-
-function makeFxWeekendShapes(
-  pool: Pool,
-  network: Network,
-  series: TimeSeriesPoint[],
-): Plotly.Layout["shapes"] {
-  if (!isFpmm(pool) || !isFxPool(network, pool.token0, pool.token1)) return [];
-  const first = series[0];
-  const last = series[series.length - 1];
-  if (!first || !last) return [];
-  return fxWeekendBands({ from: first.timestamp, to: last.timestamp });
 }

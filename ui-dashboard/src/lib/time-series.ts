@@ -55,6 +55,46 @@ export type TimeSeriesPoint = {
   value: number;
 };
 
+export type TimeSeriesRange = {
+  from: number;
+  to: number;
+  bucketSeconds: number;
+};
+
+export type Timestamped = {
+  timestamp: number | string;
+};
+
+export function bucketTimestamp(
+  timestamp: number,
+  bucketSeconds: number,
+): number {
+  return Math.floor(timestamp / bucketSeconds) * bucketSeconds;
+}
+
+export function dailyBucket(timestamp: number): number {
+  return bucketTimestamp(timestamp, SECONDS_PER_DAY);
+}
+
+function currentDayBucket(): number {
+  return dailyBucket(Math.floor(Date.now() / 1000));
+}
+
+export function dailySnapshotRange(
+  snapshots: readonly Timestamped[],
+): TimeSeriesRange {
+  const first = snapshots[0]!;
+  const last = snapshots[snapshots.length - 1]!;
+  const from = dailyBucket(Number(first.timestamp));
+  const lastSnapshotEnd = dailyBucket(Number(last.timestamp)) + SECONDS_PER_DAY;
+  const todayEnd = currentDayBucket() + SECONDS_PER_DAY;
+  return {
+    from,
+    to: Math.max(lastSnapshotEnd, todayEnd),
+    bucketSeconds: SECONDS_PER_DAY,
+  };
+}
+
 export function filterSeriesByRange(
   series: readonly TimeSeriesPoint[],
   range: RangeKey,

@@ -13,9 +13,8 @@ import {
   RANGE_SELECTOR_BUTTONS_DAILY,
   makeDateXAxis,
 } from "@/lib/plot";
-import { SECONDS_PER_DAY } from "@/lib/time-series";
-import { isFpmm, isFxPool } from "@/lib/tokens";
-import { fxWeekendBands } from "@/lib/weekend";
+import { dailySnapshotRange, type TimeSeriesRange } from "@/lib/time-series";
+import { fxPoolWeekendBands } from "@/lib/weekend";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
@@ -28,18 +27,12 @@ interface SnapshotChartProps {
   rebalanceTimestamps?: string[];
 }
 
-type DailyRange = {
-  from: number;
-  to: number;
-  bucketSeconds: number;
-};
-
 type SnapshotChartSeries = {
   days: string[];
   vol0: number[];
   vol1: number[];
   cumSwaps: Array<number | null>;
-  range: DailyRange;
+  range: TimeSeriesRange;
 };
 
 function makeRebalanceShapes(
@@ -58,32 +51,11 @@ function makeRebalanceShapes(
   }));
 }
 
-function dayBucket(timestamp: number): number {
-  return Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-}
-
-function currentDayBucket(): number {
-  return dayBucket(Math.floor(Date.now() / 1000));
-}
-
-function dailyRange(snapshots: PoolSnapshot[]): DailyRange {
-  const first = snapshots[0]!;
-  const last = snapshots[snapshots.length - 1]!;
-  const from = dayBucket(Number(first.timestamp));
-  const lastSnapshotEnd = dayBucket(Number(last.timestamp)) + SECONDS_PER_DAY;
-  const todayEnd = currentDayBucket() + SECONDS_PER_DAY;
-  return {
-    from,
-    to: Math.max(lastSnapshotEnd, todayEnd),
-    bucketSeconds: SECONDS_PER_DAY,
-  };
-}
-
 function buildSnapshotChartSeries(
   sorted: PoolSnapshot[],
   pool: Pool,
 ): SnapshotChartSeries {
-  const range = dailyRange(sorted);
+  const range = dailySnapshotRange(sorted);
   const vol0Series = zeroFillSeries(
     sorted.map((s) => ({
       timestamp: Number(s.timestamp),
@@ -115,22 +87,6 @@ function buildSnapshotChartSeries(
     cumSwaps: cumSwapSeries.map((point) => point.value ?? null),
     range,
   };
-}
-
-function makeFxWeekendShapes({
-  pool,
-  network,
-  from,
-  to,
-}: {
-  pool: Pool | null | undefined;
-  network: Network | undefined;
-  from: number;
-  to: number;
-}): Plotly.Layout["shapes"] {
-  if (!pool || !network || !isFpmm(pool)) return [];
-  if (!isFxPool(network, pool.token0 ?? null, pool.token1 ?? null)) return [];
-  return fxWeekendBands({ from, to });
 }
 
 function makeSnapshotLayout(
@@ -190,7 +146,7 @@ export function SnapshotChart({
     pool,
   );
   const shapes = [
-    ...makeFxWeekendShapes({
+    ...fxPoolWeekendBands({
       pool,
       network,
       from: range.from,
