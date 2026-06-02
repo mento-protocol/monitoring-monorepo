@@ -30,7 +30,7 @@ const NETWORK_WITH_CHAINLINK: Network = {
 
 const NETWORK_WITHOUT_CHAINLINK: Network = {
   ...NETWORK_WITH_CHAINLINK,
-  // Use a chain ID not in CHAINLINK_FEEDS to force the SortedOracles branch.
+  // Use an unmapped chain ID to force fallback branches.
   chainId: 9999999,
 };
 
@@ -146,6 +146,28 @@ describe("OraclePriceValue", () => {
     // Visible textual marker so users who can't rely on color still get
     // the staleness signal — color alone failed the a11y bar.
     expect(html).toContain("· stale");
+  });
+
+  it("uses oracleTimestamp for freshness when lastOracleReportAt is older", () => {
+    const staleLiveTs = String(Math.floor(Date.now() / 1000) - 3600);
+    const freshRawTs = String(Math.floor(Date.now() / 1000) - 60);
+    const pool: Pool = {
+      ...BASE_POOL,
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: freshRawTs,
+      lastOracleReportAt: staleLiveTs,
+      oracleExpiry: "300",
+      oracleTxHash:
+        "0xcb81fe1d4ff72d75ce29bf7905ea852d7e8da98e1831f575c5b71687e9acc936",
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+    expect(html).not.toContain("· stale");
+    expect(html).not.toContain("text-red-400");
+    expect(html).toContain(
+      'href="https://celoscan.io/tx/0xcb81fe1d4ff72d75ce29bf7905ea852d7e8da98e1831f575c5b71687e9acc936"',
+    );
   });
 
   it("omits the 'last …' subline when oracleTimestamp is absent", () => {

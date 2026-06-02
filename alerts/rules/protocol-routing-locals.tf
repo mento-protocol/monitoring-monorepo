@@ -21,8 +21,7 @@ locals {
   #   chainlink_feed_path → `data.chain.link/feeds/<chainlink_feed_path>/...` two-segment
   #                         path component. Celo uses `celo/mainnet`, Monad uses
   #                         `monad/monad` (the network segment is the literal "monad",
-  #                         not "mainnet" — verified in `ui-dashboard/src/lib/tokens.ts`
-  #                         CHAINLINK_FEEDS map and confirmed against the live pages).
+  #                         not "mainnet"; confirmed against the live pages).
   #                         Empty when Chainlink doesn't publish feeds for this chain
   #                         (testnets) — gates the Chainlink-feed link in the
   #                         trading-mode template.

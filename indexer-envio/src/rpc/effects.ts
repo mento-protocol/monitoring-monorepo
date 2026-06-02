@@ -32,6 +32,7 @@ import {
 } from "./pool-state.js";
 import {
   fetchNumReporters,
+  fetchRateFeedOracles,
   fetchReferenceRateFeedID,
   fetchReportExpiry,
 } from "./oracle-state.js";
@@ -546,6 +547,27 @@ export const numReportersEffect = createEffect(
   },
   async ({ input, context }) =>
     (await fetchNumReporters(
+      input.chainId,
+      input.rateFeedID,
+      input.blockNumber,
+      context.log,
+    )) ?? null,
+);
+
+export const rateFeedOraclesEffect = createEffect(
+  {
+    name: "rateFeedOracles",
+    input: {
+      chainId: S.int32,
+      rateFeedID: S.string,
+      blockNumber: S.bigint,
+    },
+    output: S.nullable(S.array(S.string)),
+    rateLimit: { calls: 200, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) =>
+    (await fetchRateFeedOracles(
       input.chainId,
       input.rateFeedID,
       input.blockNumber,
