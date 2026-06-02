@@ -757,31 +757,10 @@
   },
   {
     "file": "src/lib/network-fetcher/fetch.ts",
-    "ruleId": "complexity",
-    "message": "Async function 'fetchNetworkData' has a complexity of 39. Maximum allowed is 15.",
-    "line": 356,
-    "linePreview": "/** @internal Exported for testing only. */ | export async function fetchNetworkData( | network: Network,"
-  },
-  {
-    "file": "src/lib/network-fetcher/fetch.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async function 'fetchNetworkData' has too many lines (288). Maximum allowed is 100.",
-    "line": 358,
-    "linePreview": "/** @internal Exported for testing only. */ | export async function fetchNetworkData( | network: Network,"
-  },
-  {
-    "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
     "line": 193,
     "linePreview": "*/ | async function fetchPaginatedRows<TRow, TVars>(args: { | client: GraphQLClient;"
-  },
-  {
-    "file": "src/lib/network-fetcher/fetch.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 27 to the 18 allowed.",
-    "line": 356,
-    "linePreview": "/** @internal Exported for testing only. */ | export async function fetchNetworkData( | network: Network,"
   },
   {
     "file": "src/lib/pool-og.ts",

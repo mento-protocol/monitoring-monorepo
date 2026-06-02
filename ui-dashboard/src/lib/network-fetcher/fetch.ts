@@ -355,6 +355,7 @@ export async function fetchAllFeeSnapshotPages(
 }
 
 /** @internal Exported for testing only. */
+// eslint-disable-next-line complexity, max-lines-per-function, sonarjs/cognitive-complexity -- Existing network orchestrator owns many fail-open slices; keep the exception visible in source instead of carrying a churn-prone baseline tuple.
 export async function fetchNetworkData(
   network: Network,
   windows: { w24h: TimeRange; w7d: TimeRange; w30d: TimeRange },
