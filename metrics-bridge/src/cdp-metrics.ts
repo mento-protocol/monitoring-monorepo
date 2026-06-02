@@ -99,24 +99,31 @@ interface PreparedCdpSeries {
   spHeadroom: number | null;
 }
 
-// `toHumanUnits` truncates any |value| < 1e-6 tokens (< 1e12 wei) to exactly 0,
-// dropping both the sign and the "is it nonzero" signal. That's a blind spot
-// for the wei-denominated gauges whose alert rules treat ANY nonzero value as
+// `toHumanUnits` floors to 6 fractional digits, so any |value| < 1e-6 tokens
+// (< 1e12 wei) collapses to exactly 0 — dropping the sign AND the "is it
+// nonzero / did it move" signal. That's a blind spot for the wei-denominated
+// gauges whose alert rules treat ANY nonzero value (or any increment) as
 // significant:
 //   - `mento_cdp_sp_headroom < 0` — deposits a sub-microtoken below the floor
 //     would publish 0 and never fire.
 //   - `increase(mento_cdp_shortfall_subsidy_total[6h]) > 0` — a first subsidy
-//     of e.g. 1 wei would show no increase and never fire.
-// Preserve a sub-precision nonzero as ±1e-6 (the helper's own precision floor)
-// so the breach still trips; the magnitude there is dust either way. Exact 0
-// stays 0. Counts (liqCountCum etc.) are plain integers, not wei, so they don't
-// route through here.
+//     of 1 wei, OR a later 1→2 wei dust increment, would show no change and
+//     never fire.
+//
+// A BigInt below 2^53 wei (~0.009 tokens) is exactly representable as a Number,
+// so dividing by 1e18 keeps EVERY wei increment distinct and strictly
+// monotonic — sign preserved, no two values collapse. Above 2^53 the shared
+// scaled conversion takes over: low-order wei are far below alert resolution at
+// that magnitude (and Number() would drop them anyway), while the rule has long
+// since crossed its threshold. Counts (liqCountCum etc.) are plain integers,
+// not wei, so they don't route through here.
+const MAX_EXACT_WEI = 9_007_199_254_740_992n; // 2^53
+
 function humanUnitsPreservingDust(raw: bigint): number {
-  const human = toHumanUnits(raw, DEBT_TOKEN_DECIMALS);
-  if (human !== 0) return human;
-  if (raw > 0n) return 1e-6;
-  if (raw < 0n) return -1e-6;
-  return 0;
+  if (raw > -MAX_EXACT_WEI && raw < MAX_EXACT_WEI) {
+    return Number(raw) / 10 ** DEBT_TOKEN_DECIMALS;
+  }
+  return toHumanUnits(raw, DEBT_TOKEN_DECIMALS);
 }
 
 // spHeadroom carries a −1-wei sentinel until SystemParams is loaded; a real

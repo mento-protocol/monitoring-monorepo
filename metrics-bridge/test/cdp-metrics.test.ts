@@ -122,6 +122,24 @@ describe("updateCdpMetrics", () => {
     ).toBeGreaterThan(0);
   });
 
+  it("keeps successive sub-microtoken shortfall increments distinct (monotonic, so increase() catches each)", async () => {
+    // 1 wei → 2 wei, both well below 1e-6 tokens. The exported sample must
+    // change so increase(shortfall_total[6h]) > 0 catches the second loss too.
+    updateCdpMetrics([makeCdp({ instance: { shortfallSubsidyCum: "1" } })]);
+    const first = (await getGaugeValue(
+      register,
+      "mento_cdp_shortfall_subsidy_total",
+      labels,
+    )) as number;
+    updateCdpMetrics([makeCdp({ instance: { shortfallSubsidyCum: "2" } })]);
+    const second = (await getGaugeValue(
+      register,
+      "mento_cdp_shortfall_subsidy_total",
+      labels,
+    )) as number;
+    expect(second).toBeGreaterThan(first);
+  });
+
   it("withholds the headroom gauge until SystemParams is loaded (sentinel guard)", async () => {
     updateCdpMetrics([
       makeCdp({
