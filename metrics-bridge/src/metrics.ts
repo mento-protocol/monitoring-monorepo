@@ -417,6 +417,11 @@ function recordStatusAndOracleMetrics(
   const oracleLabels = oracleUpdateMetricLabels(pool, labels);
   gauges.healthStatus.set(labels, healthStatusToNumber(pool.healthStatus));
   gauges.oracleContractOk.set(labels, pool.oracleOk ? 1 : 0);
+  // Alert liveness uses the observed report timestamp, not `lastOracleReportAt`.
+  // The indexer keeps `lastOracleReportAt` as a safe under-bound for its
+  // derive path because it falls back to RPC when unsure. Alerting on that
+  // under-bound would false-page flat single-reporter feeds whose on-chain
+  // timestamp refreshed without emitting `MedianUpdated`.
   gauges.oracleOk.set(labels, isOracleLive(pool, nowSeconds) ? 1 : 0);
   const marketPause = classifyFxMarketPause(labels.pair, nowSeconds);
   if (marketPause !== null) {
