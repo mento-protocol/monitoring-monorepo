@@ -16,7 +16,9 @@ describe("writeSnapshotToUpstash", () => {
       },
       fetcher: async (input, init) => {
         calls.push({ input, init });
-        return new Response("{}");
+        return new Response(
+          JSON.stringify([{ result: "OK" }, { result: "OK" }]),
+        );
       },
     });
 
@@ -44,7 +46,9 @@ describe("writeSnapshotToUpstash", () => {
       },
       fetcher: async (_input, init) => {
         if (init?.signal) signals.push(init.signal);
-        return new Response("{}");
+        return new Response(
+          JSON.stringify([{ result: "OK" }, { result: "OK" }]),
+        );
       },
     });
 
@@ -92,6 +96,27 @@ describe("writeSnapshotToUpstash", () => {
         fetcher: async () => new Response("{}", { status: 500 }),
       }),
     ).rejects.toThrow("Upstash write failed: HTTP 500");
+  });
+
+  it("surfaces per-command pipeline errors", async () => {
+    await expect(
+      writeSnapshotToUpstash({
+        snapshot: fixtureSnapshot(),
+        env: {
+          UPSTASH_REDIS_REST_URL: "https://redis.test",
+          UPSTASH_REDIS_REST_TOKEN: "token",
+        },
+        fetcher: async () =>
+          new Response(
+            JSON.stringify([
+              { result: "OK" },
+              { error: "ERR invalid expire time" },
+            ]),
+          ),
+      }),
+    ).rejects.toThrow(
+      "Upstash write failed: command 2: ERR invalid expire time",
+    );
   });
 });
 

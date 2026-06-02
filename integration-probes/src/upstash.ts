@@ -52,5 +52,24 @@ export async function writeSnapshotToUpstash(args: {
   if (!response.ok) {
     throw new Error(`Upstash write failed: HTTP ${response.status}`);
   }
+  const pipelineResult = (await response.json()) as unknown;
+  assertSuccessfulPipeline(pipelineResult);
   return { latestKey: LATEST_SNAPSHOT_KEY, historyKey };
+}
+
+function assertSuccessfulPipeline(payload: unknown): void {
+  if (!Array.isArray(payload)) {
+    throw new Error("Upstash write failed: invalid pipeline response");
+  }
+  const errors = payload.flatMap((item, index) => {
+    if (!isPipelineItem(item) || !("error" in item)) return [];
+    return [`command ${index + 1}: ${String(item.error)}`];
+  });
+  if (errors.length > 0) {
+    throw new Error(`Upstash write failed: ${errors.join("; ")}`);
+  }
+}
+
+function isPipelineItem(value: unknown): value is { error?: unknown } {
+  return typeof value === "object" && value !== null;
 }

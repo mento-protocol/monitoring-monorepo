@@ -349,7 +349,6 @@ describe("aggregator quote builders", () => {
       "socket",
       "rubic",
       "relay",
-      "1inch",
       "kyberswap",
     ];
 
@@ -367,6 +366,11 @@ describe("aggregator quote builders", () => {
     expect(JSON.stringify(lifiRequest?.init?.headers)).toContain(
       "x-lifi-api-key",
     );
+    const lifiIntegrator = new URL(lifiRequest?.url ?? "").searchParams.get(
+      "integrator",
+    );
+    expect(lifiIntegrator).toBe("mento-probes");
+    expect(lifiIntegrator?.length).toBeLessThanOrEqual(23);
 
     const openOceanRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "openocean",
@@ -386,5 +390,12 @@ describe("aggregator quote builders", () => {
     expect(JSON.stringify(kyberRequest?.init?.headers)).toContain(
       "x-client-id",
     );
+  });
+
+  it("marks 1inch unsupported on Celo and Monad until docs list support", () => {
+    const oneInch = AGGREGATOR_ADAPTERS.find((item) => item.id === "1inch");
+
+    expect(oneInch?.support[42220]).toBe("unsupported");
+    expect(oneInch?.support[143]).toBe("unsupported");
   });
 });

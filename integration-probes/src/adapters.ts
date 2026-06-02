@@ -9,6 +9,7 @@ import type {
 } from "./types.js";
 
 const DEFAULT_TAKER = "0x000000000000000000000000000000000000dEaD";
+const LIFI_INTEGRATOR = "mento-probes";
 
 type ChainSupport = "supported" | "unsupported" | "unknown";
 
@@ -458,9 +459,9 @@ function oneInchAdapter(): AggregatorAdapter {
     kind: "dex",
     tier: 1,
     credentialEnv: ["ONEINCH_API_KEY"],
-    support: { 42220: "unknown", 143: "unknown" },
+    support: { 42220: "unsupported", 143: "unsupported" },
     researchNote:
-      "1inch requires API-keyed probing; chain support is not assumed.",
+      "Current 1inch v6.1 docs do not list Celo or Monad; keep unsupported until separate support evidence exists.",
     quote: (input, env) =>
       getRequest(oneInchUrl(input), {
         Authorization: `Bearer ${env.ONEINCH_API_KEY!}`,
@@ -558,7 +559,7 @@ function lifiUrl(input: QuoteProbeInput): string {
     fromAddress: input.takerAddress,
     toAddress: input.takerAddress,
     slippage: "0.01",
-    integrator: "mento-integration-probes",
+    integrator: LIFI_INTEGRATOR,
   });
   return url.toString();
 }
