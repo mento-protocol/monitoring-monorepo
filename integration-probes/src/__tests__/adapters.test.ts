@@ -7,6 +7,10 @@ import {
 import type { AggregatorAdapter } from "../adapters.js";
 import type { ChainProbeConfig, QuoteProbeInput } from "../types.js";
 
+const ROUTER = "0x1111111111111111111111111111111111111111";
+const POOL = "0x2222222222222222222222222222222222222222";
+const OTHER_POOL = "0x3333333333333333333333333333333333333333";
+
 const input: QuoteProbeInput = {
   chainId: 42220,
   pairId: "42220:EURm-USDm:42220-0xpool",
@@ -30,9 +34,19 @@ const chain: ChainProbeConfig = {
   chainId: 42220,
   chainLabel: "Celo",
   chainSlug: "celo",
-  routerAddresses: ["0x1111111111111111111111111111111111111111"],
-  poolAddresses: ["0x2222222222222222222222222222222222222222"],
-  pairs: [],
+  routerAddresses: [ROUTER],
+  poolAddresses: [POOL, OTHER_POOL],
+  pairs: [
+    {
+      id: input.pairId,
+      chainId: input.chainId,
+      poolId: "42220-0xpool",
+      poolAddress: POOL,
+      poolSource: "test",
+      base: input.sellToken,
+      quote: input.buyToken,
+    },
+  ],
 };
 
 describe("probeAdapterPair", () => {
@@ -81,7 +95,7 @@ describe("probeAdapterPair", () => {
         new Response(
           JSON.stringify({
             transactionRequest: {
-              to: "0x1111111111111111111111111111111111111111",
+              to: ROUTER,
             },
           }),
         ),
@@ -90,6 +104,58 @@ describe("probeAdapterPair", () => {
 
     expect(result.status).toBe("pass");
     expect(result.evidence[0]?.type).toBe("router-address");
+  });
+
+  it("passes on pool evidence only for the current pair", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "public",
+      label: "Public",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => ({ url: "https://example.test" }),
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({ route: [{ data: `swap through ${POOL}` }] }),
+        ),
+      env: {},
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.evidence[0]?.type).toBe("pool-address");
+  });
+
+  it("does not pass on pool evidence from a different pair", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "public",
+      label: "Public",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => ({ url: "https://example.test" }),
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({ route: [{ data: `swap through ${OTHER_POOL}` }] }),
+        ),
+      env: {},
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.evidence).toEqual([]);
   });
 
   it("does not pass on label-only Mento evidence", async () => {

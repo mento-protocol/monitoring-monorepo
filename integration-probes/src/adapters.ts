@@ -158,7 +158,7 @@ async function fetchAndEvaluate(args: {
   const payload = await responseJson(response);
   const detected = detectEvidence(payload, {
     routerAddresses: args.chain.routerAddresses,
-    poolAddresses: args.chain.poolAddresses,
+    poolAddresses: pairPoolAddresses(args.chain, args.input.pairId),
   });
   const status = statusFromResponse(response.status, detected.passes, payload);
   return {
@@ -342,6 +342,14 @@ export function poolIdFromPairId(pairId: string): string {
   const first = pairId.indexOf(marker);
   const second = pairId.indexOf(marker, first + 1);
   return second >= 0 ? pairId.slice(second + 1) : pairId;
+}
+
+function pairPoolAddresses(
+  chain: ChainProbeConfig,
+  pairId: string,
+): readonly string[] {
+  const pair = chain.pairs.find((item) => item.id === pairId);
+  return pair?.poolAddress ? [pair.poolAddress] : [];
 }
 
 function lifiAdapter(): AggregatorAdapter {
