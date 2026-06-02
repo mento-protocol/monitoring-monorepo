@@ -3,6 +3,7 @@ packages:
   - indexer-envio
   - ui-dashboard
   - metrics-bridge
+  - integration-probes
   - aegis
   - alerts/infra/onchain-event-handler
 

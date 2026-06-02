@@ -124,6 +124,25 @@ Most env vars are managed by Terraform (set for `production` and `preview` targe
 | `BLOB_STORE_ID`            | Vercel store integration | Blob OIDC store id for backup and restore routes |
 | `BLOB_WEBHOOK_PUBLIC_KEY`  | Vercel store integration | Blob OIDC public key for the connected store     |
 
+### Aggregator Integration Probes
+
+The `/integrations` dashboard page reads the latest quote-only probe snapshot
+from Upstash key `integration-probes:latest`. The scheduled
+`.github/workflows/integration-probes.yml` workflow refreshes it daily and can
+also be run manually with `workflow_dispatch`.
+
+```bash
+pnpm integrations:probe
+pnpm integrations:probe --write-upstash
+pnpm integrations:probe --adapter openocean,relay --chain 42220 --pair-limit 1 --output .tmp/integration-probe-smoke.json
+```
+
+`INTEGRATION_PROBES_HASURA_URL` can override `NEXT_PUBLIC_HASURA_URL` for pool
+discovery. `LIFI_API_KEY` is optional but recommended for scheduled runs because
+the unauthenticated LI.FI quote API can return multi-hour public rate limits.
+Adapter credentials are optional; missing keys render as `needs_key` instead of
+failing the chain check.
+
 ### Address Book & Backup Cron
 
 The dashboard includes a private address book at `/address-book` for labeling wallet addresses with company or entity names. Labels are stored in Upstash Redis and displayed inline throughout the UI. Forensic reports (long-form markdown investigations attached to an address) live in the same Upstash instance under the `reports` hash.

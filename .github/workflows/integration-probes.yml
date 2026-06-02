@@ -1,0 +1,44 @@
+name: Integration Probes
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 17 6 * * *
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-probes
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Run aggregator integration probes
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_HASURA_URL: ${{ vars.NEXT_PUBLIC_HASURA_URL }}
+      INTEGRATION_PROBES_HASURA_URL: ${{ secrets.INTEGRATION_PROBES_HASURA_URL }}
+      UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+      UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+      LIFI_API_KEY: ${{ secrets.LIFI_API_KEY }}
+      ZEROX_API_KEY: ${{ secrets.ZEROX_API_KEY }}
+      ONEINCH_API_KEY: ${{ secrets.ONEINCH_API_KEY }}
+      SQUID_INTEGRATOR_ID: ${{ secrets.SQUID_INTEGRATOR_ID }}
+      SOCKET_API_KEY: ${{ secrets.SOCKET_API_KEY }}
+      RANGO_API_KEY: ${{ secrets.RANGO_API_KEY }}
+      OKX_DEX_API_KEY: ${{ secrets.OKX_DEX_API_KEY }}
+      OKX_DEX_SECRET: ${{ secrets.OKX_DEX_SECRET }}
+      OKX_DEX_PASSPHRASE: ${{ secrets.OKX_DEX_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: Run probes
+        run: pnpm integrations:probe --write-upstash --output reports/integration-probes/latest.json
+      - uses: actions/upload-artifact@c7d193f32edcb7bfad88892161225aeda64e9392 # v4.9.0
+        if: always()
+        with:
+          name: integration-probes
+          path: reports/integration-probes/latest.json
+          if-no-files-found: ignore

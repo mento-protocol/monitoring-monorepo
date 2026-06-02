@@ -192,6 +192,21 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `BLOB_STORE_ID`                          | Vercel Blob OIDC store id for daily label backups (set by the Vercel store integration)                    |
 | `BLOB_WEBHOOK_PUBLIC_KEY`                | Vercel Blob OIDC public key (set by the Vercel store integration)                                          |
 
+### Integration Probes
+
+| Variable                        | Description                                               |
+| ------------------------------- | --------------------------------------------------------- |
+| `INTEGRATION_PROBES_HASURA_URL` | Optional override for the pool-discovery GraphQL endpoint |
+| `LIFI_API_KEY`                  | Optional LI.FI API key to avoid public quote rate limits  |
+| `ZEROX_API_KEY`                 | Optional 0x quote API key                                 |
+| `ONEINCH_API_KEY`               | Optional 1inch quote API key                              |
+| `SQUID_INTEGRATOR_ID`           | Optional Squid integrator id                              |
+| `SOCKET_API_KEY`                | Optional Socket quote API key                             |
+| `RANGO_API_KEY`                 | Optional Rango quote API key                              |
+| `OKX_DEX_API_KEY`               | Optional OKX DEX API key                                  |
+| `OKX_DEX_SECRET`                | Optional OKX DEX signing secret                           |
+| `OKX_DEX_PASSPHRASE`            | Optional OKX DEX passphrase                               |
+
 Production env vars are managed by Terraform except the Blob OIDC variables, which are managed by the Vercel store integration. See [`terraform/`](./terraform/).
 
 ## Deployment
@@ -259,6 +274,16 @@ managed by the `platform` Terraform stack:
 pnpm tf list        # show all registered Terraform stacks
 pnpm infra:plan     # preview platform changes
 pnpm infra:apply    # apply platform changes after review
+```
+
+Aggregator integration snapshots are produced by the scheduled
+`Integration Probes` GitHub Actions workflow and rendered at
+`/integrations`. Run the same quote-only check manually with:
+
+```bash
+pnpm integrations:probe
+pnpm integrations:probe --write-upstash
+pnpm integrations:probe --adapter openocean,relay --chain 42220 --pair-limit 1 --output .tmp/integration-probe-smoke.json
 ```
 
 ## Contract Addresses
