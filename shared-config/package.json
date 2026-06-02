@@ -9,6 +9,7 @@
     "./fx-calendar.json": "./fx-calendar.json",
     "./chain-metadata.json": "./chain-metadata.json",
     "./aggregators.json": "./aggregators.json",
+    "./oracle-reporters.json": "./oracle-reporters.json",
     "./chains": {
       "types": "./dist/chains.d.ts",
       "default": "./dist/chains.js"
@@ -16,6 +17,10 @@
     "./aggregators": {
       "types": "./dist/aggregators.d.ts",
       "default": "./dist/aggregators.js"
+    },
+    "./oracle-reporters": {
+      "types": "./dist/oracle-reporters.d.ts",
+      "default": "./dist/oracle-reporters.js"
     },
     "./tokens": {
       "types": "./dist/tokens.d.ts",

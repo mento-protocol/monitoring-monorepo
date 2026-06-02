@@ -31,7 +31,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — oracle report overdue (> 1.2× expiry).{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}{{ $lastOracleUpdateUrl := index $values.OracleAge.Labels \"last_oracle_update_url\" }} Last update: {{ if $lastOracleUpdateUrl }}<{{ $lastOracleUpdateUrl }}|{{ humanizeDuration $values.OracleAge.Value }} ago>{{ else }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ end }}.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — oracle report overdue (> 1.2× expiry).{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last live update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -57,13 +57,10 @@ resource "grafana_rule_group" "fpmms_oracle" {
     }
 
     # Two queries, used together by the annotation template:
-    #   - OracleTs: raw timestamp. == 0 means the indexer never received a
-    #     report for this pool (default sentinel, see
-    #     indexer-envio/src/pool.ts:212+). The template branches on this
-    #     to render "Oracle has never reported" — keying off the explicit
-    #     zero, not an age heuristic, so legitimately stale-for-years
-    #     pools still render their actual age.
-    #   - OracleAge: seconds-since-report; only meaningful when OracleTs > 0.
+    #   - OracleTs: live freshness timestamp. == 0 means the indexer has never
+    #     seen a live median update for this pool.
+    #   - OracleAge: seconds since live update; only meaningful when
+    #     OracleTs > 0.
     data {
       ref_id         = "OracleTs"
       datasource_uid = var.prometheus_datasource_uid
@@ -73,7 +70,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleTs"
-        expr    = "mento_pool_oracle_timestamp"
+        expr    = local.oracle_live_timestamp_compat_promql
         instant = true
       })
     }
@@ -87,7 +84,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = "time() - mento_pool_oracle_timestamp"
+        expr    = format("time() - %s", local.oracle_live_timestamp_compat_promql)
         instant = true
       })
     }
@@ -121,20 +118,20 @@ resource "grafana_rule_group" "fpmms_oracle" {
     }
   }
 
-  # Two critical rules kept separate so Slack names the precise failure:
-  #   - `Oracle Down`: contract can-trade flag; stays 24/7 un-gated because a
-  #     broken FX feed (vs. merely paused) must still page on weekends.
-  #   - `Oracle Liveness Critical`: ratio > 3; FX-weekend gated like the
-  #     warning, since a paused FX oracle sails past 3× within hours.
+  # Three critical rules kept separate so Slack names the precise failure:
+  #   - `Oracle Contract Down`: raw event-time contract flag, never FX-gated.
+  #   - `Oracle Down`: live scrape-time usability bit (contract flag plus
+  #     expiry freshness), suppressed only while an FX market pause is expected.
+  #   - `Oracle Liveness Critical`: ratio > 3, using the same FX pause gate.
   rule {
-    name           = "Oracle Down"
+    name           = "Oracle Contract Down"
     condition      = "threshold"
     for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Oracle contract flag is false — swaps will revert.{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -151,15 +148,11 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "mento_pool_oracle_ok"
+        expr    = local.oracle_contract_down_active_promql
         instant = true
       })
     }
 
-    # See Oracle Liveness for the OracleTs / OracleAge rationale. Oracle Down
-    # fires on oracle_ok, which deliberately omits the transaction URL label to
-    # avoid alert-identity churn. Strip that label from companion timestamp
-    # queries so Grafana still matches these values to A's pool fingerprint.
     data {
       ref_id         = "OracleTs"
       datasource_uid = var.prometheus_datasource_uid
@@ -218,6 +211,96 @@ resource "grafana_rule_group" "fpmms_oracle" {
   }
 
   rule {
+    name           = "Oracle Down"
+    condition      = "threshold"
+    for            = "1m"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    annotations = {
+      summary = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last live update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        expr    = local.oracle_live_down_active_promql
+        instant = true
+      })
+    }
+
+    # See Oracle Liveness for the OracleTs / OracleAge rationale. Oracle Down
+    # fires on the same live freshness anchor, so its Slack age text cannot
+    # drift from the timestamp used by the live-down gate.
+    data {
+      ref_id         = "OracleTs"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleTs"
+        expr    = local.oracle_live_timestamp_compat_promql
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "OracleAge"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleAge"
+        expr    = format("time() - %s", local.oracle_live_timestamp_compat_promql)
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [0.5], type = "lt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_critical_pool.contact_point
+      group_by        = local.notify_critical_pool.group_by
+      group_wait      = local.notify_critical_pool.group_wait
+      group_interval  = local.notify_critical_pool.group_interval
+      repeat_interval = local.notify_critical_pool.repeat_interval
+    }
+  }
+
+  rule {
     name           = "Oracle Liveness Critical"
     condition      = "threshold"
     for            = "1m"
@@ -225,7 +308,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Liveness {{ printf \"%.2f\" $values.A.Value }} > 3 — report badly stale.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}{{ $lastOracleUpdateUrl := index $values.OracleAge.Labels \"last_oracle_update_url\" }} Last update: {{ if $lastOracleUpdateUrl }}<{{ $lastOracleUpdateUrl }}|{{ humanizeDuration $values.OracleAge.Value }} ago>{{ else }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ end }}.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary     = "Liveness {{ printf \"%.2f\" $values.A.Value }} > 3 — report badly stale.{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last live update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
       description = "Liveness ratio exceeds 3× the contract expiry. If Oracle Down stays quiet while this fires, the indexer's oracleOk derivation has drifted from the on-chain expiry check."
     }
 
@@ -251,8 +334,8 @@ resource "grafana_rule_group" "fpmms_oracle" {
     }
 
     # See Oracle Liveness for the OracleTs / OracleAge rationale — same
-    # pair is used here so the annotation can detect the never-reported
-    # sentinel (oracle_timestamp == 0) instead of leaning on an age cutoff.
+    # pair is used here so the annotation can detect the never-live-update
+    # sentinel instead of leaning on an age cutoff.
     data {
       ref_id         = "OracleTs"
       datasource_uid = var.prometheus_datasource_uid
@@ -262,7 +345,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleTs"
-        expr    = "mento_pool_oracle_timestamp"
+        expr    = local.oracle_live_timestamp_compat_promql
         instant = true
       })
     }
@@ -276,7 +359,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = "time() - mento_pool_oracle_timestamp"
+        expr    = format("time() - %s", local.oracle_live_timestamp_compat_promql)
         instant = true
       })
     }
@@ -1262,7 +1345,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
 # Not FX-weekend gated. A large FX jump on Monday open IS exactly the
 # LP-leakage event the alert is designed to catch; suppressing it would
 # hide the most expensive arbitrage window of the week. The existing
-# `Oracle Down` critical rule is un-suppressed for the same reason.
+# `Oracle Contract Down` critical rule is un-suppressed for the same reason.
 resource "grafana_rule_group" "fpmms_oracle_jump" {
   name             = "Oracle Price Jump"
   folder_uid       = grafana_folder.fpmms.uid

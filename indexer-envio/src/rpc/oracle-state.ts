@@ -87,6 +87,47 @@ export function _clearMockReportExpiry(): void {
   clearTestRpcMockGroup("reportExpiry");
 }
 
+const _testRateFeedOracles = new Map<string, string[] | null>();
+
+/** @internal Test-only: pre-set a mock getOracles response for a rateFeedID. */
+export function _setMockRateFeedOracles(
+  chainId: number,
+  rateFeedID: string,
+  oracles: string[] | null,
+): void {
+  const key = `${chainId}:${rateFeedID.toLowerCase()}`;
+  _testRateFeedOracles.set(key, oracles);
+  let sortedOraclesAddress: string | undefined;
+  try {
+    sortedOraclesAddress = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return;
+  }
+  if (oracles === null) {
+    setTestRpcErrorMock({
+      group: "rateFeedOracles",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "getOracles",
+      callArgs: [rateFeedID],
+    });
+  } else {
+    setTestRpcMock({
+      group: "rateFeedOracles",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "getOracles",
+      callArgs: [rateFeedID],
+      result: oracles,
+    });
+  }
+}
+
+export function _clearMockRateFeedOracles(): void {
+  _testRateFeedOracles.clear();
+  clearTestRpcMockGroup("rateFeedOracles");
+}
+
 /** Returns SortedOracles address for chainId, throws if not in @mento-protocol/contracts. */
 const SORTED_ORACLES_ADDRESS = SortedOraclesContract.address;
 
@@ -164,6 +205,51 @@ export async function fetchNumReporters(
     return Number(result);
   } catch (err) {
     logRpcFailure(chainId, "numRates", rateFeedID, err, blockNumber, log);
+    return null;
+  }
+}
+
+/** Returns active oracle reporter addresses for the given rateFeedID at the
+ * requested block, or null on error. A latest-block fallback is rejected:
+ * reporter membership is governance-mutable and must match the indexed event
+ * window. */
+export async function fetchRateFeedOracles(
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
+): Promise<string[] | null> {
+  const mockKey = `${chainId}:${rateFeedID.toLowerCase()}`;
+  if (_testRateFeedOracles.has(mockKey)) {
+    const mocked = _testRateFeedOracles.get(mockKey);
+    return mocked ? mocked.map((oracle) => oracle.toLowerCase()) : null;
+  }
+
+  let address: `0x${string}`;
+  try {
+    address = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return null;
+  }
+  try {
+    const client = getRpcClient(chainId);
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      chainId,
+      client,
+      {
+        address,
+        abi: SortedOraclesContract.abi,
+        functionName: "getOracles",
+        args: [rateFeedID as `0x${string}`],
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+      log,
+    );
+    if (usedLatestFallback) return null;
+    return (result as readonly string[]).map((oracle) => oracle.toLowerCase());
+  } catch (err) {
+    logRpcFailure(chainId, "getOracles", rateFeedID, err, blockNumber, log);
     return null;
   }
 }

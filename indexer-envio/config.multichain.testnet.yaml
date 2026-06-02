@@ -75,6 +75,8 @@ contracts:
     abi_file_path: abis/SortedOracles.json
     handler: src/EventHandlers.ts
     events:
+      - event: OracleAdded
+      - event: OracleRemoved
       - event: OracleReported
       - event: MedianUpdated
       - event: ReportExpirySet
@@ -372,7 +374,7 @@ chains:
       - name: LiquityCollateralRegistry
         address: []
       - name: CDPLiquidityStrategy
-        address: [] # Keep dashboard RPC fallback until strategy events are indexed/backfilled.
+        address: [] # No CDP liquidity strategy on Monad Testnet — CDPs are Celo-only.
       - name: ReserveTroveFactory
         address: []
       - name: LiquityActivePool

@@ -1,15 +1,22 @@
 "use client";
 
-import { isVirtualPool, type Pool } from "@/lib/types";
+import { isVirtualPool, type Pool, type RateFeed } from "@/lib/types";
+import {
+  getChainlinkDataFeedUrl,
+  getRateFeedChainlinkDataFeedUrl,
+  getRateFeedPair,
+  getRateFeedReporterType,
+} from "@mento-protocol/monitoring-config/oracle-reporters";
 import { isNeverRebalance } from "@/lib/health";
 import { AddressLink } from "@/components/address-link";
 import { InfoPopover } from "@/components/info-popover";
 import { Stat } from "@/components/stat";
 import { HASURA_TIMEOUT_MS, useGQL } from "@/lib/graphql";
-import { POOL_CONFIG_EXT } from "@/lib/queries";
-import { PoolConfigExtSchema } from "@/lib/queries/pool-detail-schemas";
-import { useNetwork } from "@/components/network-provider";
-import { chainlinkFeed, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import { POOL_CONFIG_EXT, POOL_RATE_FEED_EXT } from "@/lib/queries";
+import {
+  PoolConfigExtSchema,
+  PoolRateFeedExtSchema,
+} from "@/lib/queries/pool-detail-schemas";
 
 interface PoolConfigPanelProps {
   pool: Pool;
@@ -17,6 +24,13 @@ interface PoolConfigPanelProps {
 
 type PoolConfigExtRow = {
   rebalanceReward?: number | undefined;
+};
+
+type RateFeedExtRow = RateFeed;
+
+type OracleSource = {
+  label: string;
+  url: string | null;
 };
 
 // `-1` is the indexer's "RPC read failed, not yet self-healed" sentinel;
@@ -35,14 +49,15 @@ function formatBps(bps: number | null | undefined): string {
  *  page survives the indexer deploy+resync window. */
 // eslint-disable-next-line complexity, max-lines-per-function -- Existing panel keeps schema-lag fallback and pool config rendering together.
 export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
-  const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
   const neverRebalances = isNeverRebalance(pool);
   const { data: configExt } = usePoolConfigExt(pool, isVirtual);
+  const { data: rateFeedExt } = usePoolRateFeedExt(pool, isVirtual);
 
   if (isVirtual) return null;
 
   const rebalanceReward = configExt?.Pool?.[0]?.rebalanceReward;
+  const oracleSource = formatOracleSource(rateFeedExt?.RateFeed?.[0], pool);
 
   const lpFee = pool.lpFee;
   const protocolFee = pool.protocolFee;
@@ -54,19 +69,6 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
     lpFee != null && lpFee >= 0 && protocolFee != null && protocolFee >= 0
       ? lpFee + protocolFee
       : null;
-
-  // Prefer the non-USDm leg's feed and fall back to the USDm leg, so the
-  // link points at the specific pair being oracled (USDC/USD on a USDC
-  // pool, not generically USDm). Checking sym1 first picks the wrong leg
-  // when USDm happens to be token1.
-  const sym0 = tokenSymbol(network, pool.token0);
-  const sym1 = tokenSymbol(network, pool.token1);
-  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-  const nonUsdmSym = usdmIsToken0 ? sym1 : sym0;
-  const usdmSym = usdmIsToken0 ? sym0 : sym1;
-  const feed =
-    chainlinkFeed(nonUsdmSym, network.chainId) ??
-    chainlinkFeed(usdmSym, network.chainId);
 
   const strategyAddress = pool.rebalancerAddress ?? null;
 
@@ -87,20 +89,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
       />
       <Stat
         label="Oracle Source"
-        value={
-          feed ? (
-            <a
-              href={feed.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-indigo-300 hover:text-indigo-400 transition-colors"
-            >
-              Chainlink {feed.pair}
-            </a>
-          ) : (
-            <span>SortedOracles</span>
-          )
-        }
+        value={<OracleSourceValue {...oracleSource} />}
       />
       <Stat
         label={
@@ -159,6 +148,93 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
   );
 }
 
+function formatReporterType(type: RateFeed["reporterTypes"][number]): string {
+  switch (type) {
+    case "CHAINLINK":
+      return "Chainlink";
+    case "REDSTONE":
+      return "Redstone";
+    case "BRIDGED":
+      return "Bridged";
+    case "MANUAL":
+      return "Manual";
+  }
+}
+
+function OracleSourceValue({ label, url }: OracleSource) {
+  if (!url) return <span>{label}</span>;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="text-indigo-300 transition-colors hover:text-indigo-200"
+    >
+      {label}
+    </a>
+  );
+}
+
+function formatOracleSource(
+  rateFeed: RateFeedExtRow | undefined,
+  pool: Pool,
+): OracleSource {
+  const feedAddress = pool.referenceRateFeedID ?? "";
+  const staticPair = feedAddress
+    ? getRateFeedPair(pool.chainId, feedAddress)
+    : null;
+  if (!rateFeed && staticPair) {
+    return formatStaticOracleSource(pool, staticPair);
+  }
+  if (!rateFeed) return { label: "SortedOracles", url: null };
+  const pair =
+    rateFeed.pair && rateFeed.pair !== "Unknown"
+      ? rateFeed.pair
+      : (staticPair ?? "");
+  const uniqueTypes = Array.from(new Set(rateFeed.reporterTypes));
+  if (uniqueTypes.length === 1 && uniqueTypes[0]) {
+    const label = [formatReporterType(uniqueTypes[0]), pair]
+      .filter(Boolean)
+      .join(" ");
+    return {
+      label,
+      url:
+        uniqueTypes[0] === "CHAINLINK" && pair
+          ? getPoolChainlinkUrl(pool, pair)
+          : null,
+    };
+  }
+  if (uniqueTypes.length > 1) {
+    return { label: ["Mixed", pair].filter(Boolean).join(" "), url: null };
+  }
+  return {
+    label: ["SortedOracles", pair].filter(Boolean).join(" "),
+    url: null,
+  };
+}
+
+function formatStaticOracleSource(pool: Pool, pair: string): OracleSource {
+  const feedAddress = pool.referenceRateFeedID ?? "";
+  const reporterType = feedAddress
+    ? getRateFeedReporterType(pool.chainId, feedAddress)
+    : null;
+  const labelPrefix = reporterType
+    ? formatReporterType(reporterType)
+    : "SortedOracles";
+  return {
+    label: `${labelPrefix} ${pair}`,
+    url: reporterType === "CHAINLINK" ? getPoolChainlinkUrl(pool, pair) : null,
+  };
+}
+
+function getPoolChainlinkUrl(pool: Pool, pair: string): string | null {
+  const feedAddress = pool.referenceRateFeedID;
+  return feedAddress
+    ? (getRateFeedChainlinkDataFeedUrl(pool.chainId, feedAddress) ??
+        getChainlinkDataFeedUrl(pool.chainId, pair))
+    : getChainlinkDataFeedUrl(pool.chainId, pair);
+}
+
 function usePoolConfigExt(pool: Pool, isVirtual: boolean) {
   return useGQL<{ Pool: PoolConfigExtRow[] }>(
     isVirtual ? null : POOL_CONFIG_EXT,
@@ -166,6 +242,18 @@ function usePoolConfigExt(pool: Pool, isVirtual: boolean) {
     {
       timeoutMs: HASURA_TIMEOUT_MS,
       schema: PoolConfigExtSchema,
+    },
+  );
+}
+
+function usePoolRateFeedExt(pool: Pool, isVirtual: boolean) {
+  const feedAddress = pool.referenceRateFeedID?.toLowerCase();
+  return useGQL<{ RateFeed: RateFeedExtRow[] }>(
+    isVirtual || !feedAddress ? null : POOL_RATE_FEED_EXT,
+    { chainId: pool.chainId, feedAddress },
+    {
+      timeoutMs: HASURA_TIMEOUT_MS,
+      schema: PoolRateFeedExtSchema,
     },
   );
 }

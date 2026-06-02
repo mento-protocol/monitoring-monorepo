@@ -19,6 +19,7 @@ import {
   observeDeviationAlertState,
   pruneDeviationAlertStates,
 } from "./deviation-alert-state.js";
+import { classifyFxMarketPause } from "./fx-market.js";
 import type { PoolRow } from "./types.js";
 
 // SortedOracles fixed-point scale — keep in sync with
@@ -67,6 +68,13 @@ export function healthStatusToNumber(status: string): number {
 }
 
 const fp = (s: string) => parseFloat(s);
+const ORACLE_STALE_SECONDS = 300;
+const ORACLE_STALE_SECONDS_BY_CHAIN: Readonly<Record<number, number>> = {
+  42220: 300,
+  11142220: 300,
+  143: 360,
+  10143: 360,
+};
 
 export const register = new Registry();
 
@@ -87,6 +95,7 @@ const poolLabels = [
 // gauges so Grafana annotations can link the Slack "last update" text. Keep
 // this scoped to oracle liveness gauges; do not add it to every pool series.
 const oracleUpdateLabels = [...poolLabels, "last_oracle_update_url"] as const;
+const oracleMarketPauseLabels = [...poolLabels, "reason"] as const;
 const deviationAlertStateLabels = [...poolLabels, "state"] as const;
 const deviationAlertTransitionCounterLabels = [
   ...poolLabels,
@@ -128,20 +137,40 @@ export type PollErrorKind =
   | "hasura_query"
   | "update_metrics"
   | "mark_healthy"
-  | "rebalance_probe";
+  | "rebalance_probe"
+  | "cdp_query"
+  | "cdp_update";
 const pollErrorLabels = ["kind"] as const;
 
 export const gauges = {
   oracleOk: new Gauge({
     name: "mento_pool_oracle_ok",
-    help: "Oracle can-trade flag at last on-chain event (1=ok, 0=not ok). For live staleness, use (time() - oracle_timestamp) / oracle_expiry in PromQL.",
+    help: "Live scrape-time oracle usability (1=contract ok and last report is inside expiry, 0=not usable or expired).",
     labelNames: poolLabels,
+    registers: [register],
+  }),
+  oracleContractOk: new Gauge({
+    name: "mento_pool_oracle_contract_ok",
+    help: "Raw event-time contract can-trade flag from the indexer (1=ok, 0=not ok), before scrape-time expiry derivation.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  oracleMarketPause: new Gauge({
+    name: "mento_pool_oracle_market_pause",
+    help: "1 when an FX pool's oracle staleness is expected because TradFi markets are closed or inside the post-reopen grace window. Label reason is bounded.",
+    labelNames: oracleMarketPauseLabels,
     registers: [register],
   }),
   oracleTimestamp: new Gauge({
     name: "mento_pool_oracle_timestamp",
-    help: "Unix timestamp of the last oracle report. Use with oracle_expiry to compute live liveness ratio.",
+    help: "Raw/display Unix timestamp from the indexer oracle cursor. Diagnostic only; live freshness uses mento_pool_oracle_live_timestamp.",
     labelNames: oracleUpdateLabels,
+    registers: [register],
+  }),
+  oracleLiveTimestamp: new Gauge({
+    name: "mento_pool_oracle_live_timestamp",
+    help: "Unix timestamp of the freshness anchor used to derive live oracle usability.",
+    labelNames: poolLabels,
     registers: [register],
   }),
   oracleExpiry: new Gauge({
@@ -339,7 +368,7 @@ function updatePoolMetrics(pool: PoolRow, nowSeconds: number): void {
   const labels = poolDisplayLabels(pool, derivedPair);
 
   recordDeviationAlertMetrics(pool, labels, nowSeconds);
-  recordStatusAndOracleMetrics(pool, labels);
+  recordStatusAndOracleMetrics(pool, labels, nowSeconds);
   recordDeviationMetrics(pool, labels);
   recordRebalanceMetrics(pool, labels);
   recordOraclePriceMetrics(pool, labels);
@@ -385,12 +414,49 @@ function recordDeviationAlertMetrics(
 function recordStatusAndOracleMetrics(
   pool: PoolRow,
   labels: PoolDisplayLabels,
+  nowSeconds: number,
 ): void {
   const oracleLabels = oracleUpdateMetricLabels(pool, labels);
   gauges.healthStatus.set(labels, healthStatusToNumber(pool.healthStatus));
-  gauges.oracleOk.set(labels, pool.oracleOk ? 1 : 0);
+  gauges.oracleContractOk.set(labels, pool.oracleOk ? 1 : 0);
+  // Alert liveness uses the observed report timestamp, not `lastOracleReportAt`.
+  // The indexer keeps `lastOracleReportAt` as a safe under-bound for its
+  // derive path because it falls back to RPC when unsure. Alerting on that
+  // under-bound would false-page flat single-reporter feeds whose on-chain
+  // timestamp refreshed without emitting `MedianUpdated`.
+  gauges.oracleOk.set(labels, isOracleLive(pool, nowSeconds) ? 1 : 0);
+  const marketPause = classifyFxMarketPause(labels.pair, nowSeconds);
+  if (marketPause !== null) {
+    gauges.oracleMarketPause.set({ ...labels, reason: marketPause }, 1);
+  }
   gauges.oracleTimestamp.set(oracleLabels, Number(pool.oracleTimestamp));
-  gauges.oracleExpiry.set(oracleLabels, Number(pool.oracleExpiry));
+  gauges.oracleLiveTimestamp.set(labels, Number(pool.oracleTimestamp));
+  gauges.oracleExpiry.set(oracleLabels, oracleExpirySeconds(pool));
+}
+
+export function isOracleLive(
+  pool: Pick<
+    PoolRow,
+    "chainId" | "oracleOk" | "oracleTimestamp" | "oracleExpiry"
+  >,
+  nowSeconds: number,
+): boolean {
+  const timestamp = Number(pool.oracleTimestamp);
+  const expiry = oracleExpirySeconds(pool);
+  return (
+    pool.oracleOk &&
+    Number.isFinite(timestamp) &&
+    timestamp > 0 &&
+    nowSeconds - timestamp <= expiry
+  );
+}
+
+function oracleExpirySeconds(
+  pool: Pick<PoolRow, "chainId" | "oracleExpiry">,
+): number {
+  const indexed = Number(pool.oracleExpiry);
+  if (Number.isFinite(indexed) && indexed > 0) return indexed;
+  return ORACLE_STALE_SECONDS_BY_CHAIN[pool.chainId] ?? ORACLE_STALE_SECONDS;
 }
 
 function recordDeviationMetrics(

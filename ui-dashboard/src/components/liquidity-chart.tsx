@@ -3,6 +3,8 @@
 import dynamic from "next/dynamic";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { parseWei } from "@/lib/format";
+import type { Network } from "@/lib/networks";
+import { forwardFillSeries } from "@/lib/chart-gap-fill";
 import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
@@ -11,6 +13,8 @@ import {
   RANGE_SELECTOR_BUTTONS_DAILY,
   makeDateXAxis,
 } from "@/lib/plot";
+import { dailySnapshotRange, type TimeSeriesRange } from "@/lib/time-series";
+import { fxPoolWeekendBands } from "@/lib/weekend";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 const SORTED_ORACLES_DECIMALS = 24;
@@ -18,6 +22,7 @@ const SORTED_ORACLES_DECIMALS = 24;
 interface LiquidityChartProps {
   snapshots: PoolSnapshot[];
   pool: Pool | null;
+  network?: Network;
   token0Symbol?: string;
   token1Symbol?: string;
 }
@@ -25,17 +30,25 @@ interface LiquidityChartProps {
 type LiquiditySeries = {
   useUsd: boolean;
   timestamps: string[];
-  reserves0Usd: number[];
-  reserves1Usd: number[];
-  raw0: number[];
-  raw1: number[];
+  reserves0Usd: Array<number | null>;
+  reserves1Usd: Array<number | null>;
+  raw0: Array<number | null>;
+  raw1: Array<number | null>;
+};
+
+type LiquiditySeriesInput = {
+  snapshots: PoolSnapshot[];
+  pool: Pool | null;
+  token0Symbol: string;
+  range: TimeSeriesRange;
 };
 
 function buildLiquiditySeries({
   snapshots,
   pool,
   token0Symbol,
-}: Required<LiquidityChartProps>): LiquiditySeries {
+  range,
+}: LiquiditySeriesInput): LiquiditySeries {
   const nonUsdmUsdPrice = parseSortedOracleFeedUsdPrice(
     pool?.oraclePrice ?? "0",
   );
@@ -43,24 +56,38 @@ function buildLiquiditySeries({
   const useUsd = nonUsdmUsdPrice > 0;
   const dec0 = pool?.token0Decimals ?? 18;
   const dec1 = pool?.token1Decimals ?? 18;
-  const toUsd0 = (raw: string) => {
-    const amount = parseWei(raw, dec0);
+  const raw0Series = forwardFillSeries(
+    snapshots.map((s) => ({
+      timestamp: Number(s.timestamp),
+      value: parseWei(s.reserves0, dec0),
+    })),
+    range,
+  );
+  const raw1Series = forwardFillSeries(
+    snapshots.map((s) => ({
+      timestamp: Number(s.timestamp),
+      value: parseWei(s.reserves1, dec1),
+    })),
+    range,
+  );
+  const toUsd0 = (amount: number | undefined): number | null => {
+    if (amount === undefined) return null;
     return useUsd && !usdmIsToken0 ? amount * nonUsdmUsdPrice : amount;
   };
-  const toUsd1 = (raw: string) => {
-    const amount = parseWei(raw, dec1);
+  const toUsd1 = (amount: number | undefined): number | null => {
+    if (amount === undefined) return null;
     return useUsd && usdmIsToken0 ? amount * nonUsdmUsdPrice : amount;
   };
 
   return {
     useUsd,
-    timestamps: snapshots.map((s) =>
-      new Date(Number(s.timestamp) * 1000).toISOString(),
+    timestamps: raw0Series.map((point) =>
+      new Date(point.timestamp * 1000).toISOString(),
     ),
-    reserves0Usd: snapshots.map((s) => toUsd0(s.reserves0)),
-    reserves1Usd: snapshots.map((s) => toUsd1(s.reserves1)),
-    raw0: snapshots.map((s) => parseWei(s.reserves0, dec0)),
-    raw1: snapshots.map((s) => parseWei(s.reserves1, dec1)),
+    reserves0Usd: raw0Series.map((point) => toUsd0(point.value)),
+    reserves1Usd: raw1Series.map((point) => toUsd1(point.value)),
+    raw0: raw0Series.map((point) => point.value ?? null),
+    raw1: raw1Series.map((point) => point.value ?? null),
   };
 }
 
@@ -73,10 +100,15 @@ function parseSortedOracleFeedUsdPrice(rawPrice: string): number {
 export function LiquidityChart({
   snapshots,
   pool,
+  network,
   token0Symbol = "Token 0",
   token1Symbol = "Token 1",
 }: LiquidityChartProps) {
   if (snapshots.length === 0) return null;
+  const sorted = [...snapshots].sort(
+    (a, b) => Number(a.timestamp) - Number(b.timestamp),
+  );
+  const range = dailySnapshotRange(sorted);
 
   // Convert raw token reserves to USD value using the current oracle price as
   // an approximation for all historical data points. This lets both series share
@@ -86,7 +118,12 @@ export function LiquidityChart({
   // token. The oracle chart uses pool display direction, which intentionally
   // inverts USDm-base pools and is not suitable for reserve USD conversion.
   const { useUsd, timestamps, reserves0Usd, reserves1Usd, raw0, raw1 } =
-    buildLiquiditySeries({ snapshots, pool, token0Symbol, token1Symbol });
+    buildLiquiditySeries({
+      snapshots: sorted,
+      pool,
+      token0Symbol,
+      range,
+    });
   const trace0 = makeReserveTrace({
     timestamps,
     values: reserves0Usd,
@@ -120,7 +157,15 @@ export function LiquidityChart({
       </div>
       <Plot
         data={[trace0, trace1]}
-        layout={makeLayout(useUsd)}
+        layout={{
+          ...makeLayout(useUsd),
+          shapes: fxPoolWeekendBands({
+            pool,
+            network,
+            from: range.from,
+            to: range.to,
+          }),
+        }}
         config={PLOTLY_CONFIG}
         style={{ width: "100%", height: 320 }}
         useResizeHandler
@@ -139,8 +184,8 @@ function makeReserveTrace({
   fillcolor,
 }: {
   timestamps: string[];
-  values: number[];
-  raw: number[];
+  values: Array<number | null>;
+  raw: Array<number | null>;
   tokenSymbol: string;
   useUsd: boolean;
   color: string;

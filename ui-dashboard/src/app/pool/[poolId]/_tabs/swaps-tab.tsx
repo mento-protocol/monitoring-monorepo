@@ -151,6 +151,7 @@ export function SwapsTab({
             token0Symbol={sym0}
             token1Symbol={sym1}
             pool={pool}
+            network={network}
             rebalanceTimestamps={rebalanceTimestamps}
           />
           <SnapshotSummary

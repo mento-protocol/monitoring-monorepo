@@ -47,7 +47,7 @@ Last updated: 2026-05-18
 - [x] **Fully multichain** — network switcher dropped; all chains shown together with chain icon prefix
 - [x] Token symbol mapping via `isFpmm()` in `tokens.ts`
 - [x] Shared `PoolsTable` component (reused across home + pools pages)
-- [x] **CDP strategy badge** on global pools table (runtime RPC probe; indexed CdpPool cutover pending backfill)
+- [x] **CDP strategy badge** on global pools table (Celo via indexed CdpPool rows; non-Celo chains never render CDP badges)
 - [x] **LimitBadge + LimitPanel** — `limitStatus` / `limitPressure0/1` from TradingLimit entity
 - [x] **RebalancerBadge + RebalancerPanel** — rebalancer liveness status + diagnostics
 - [x] **TVL on global page** — TVL-over-time chart + KPI tiles with 24h/7d/30d change %
@@ -86,13 +86,14 @@ Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state 
 
 **Live protocol alert rules** (Terraform-managed in `alerts/rules/`; Aegis service-health stays in `aegis/terraform/`):
 
-| Alert Group      | What it monitors                                                | Channels                                                                            |
-| ---------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Oracle Relayers  | Stale price feeds, low native-token balance for relayer wallets | Slack #alerts-oracles + #alerts-critical/Splunk (page, prod chains)                 |
-| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                                | Slack #alerts-reserve                                                               |
-| Trading Modes    | Circuit breakers tripped (trading halted per rate feed)         | Slack #alerts-critical/Splunk (page, prod chains); #alerts-testnet (staging chains) |
-| Trading Limits   | L0/L1/LG utilization >90%                                       | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)                     |
-| Aegis Service    | RPC failures, data staleness                                    | Slack #alerts-infra; #alerts-critical/Splunk (page)                                 |
+| Alert Group      | What it monitors                                                  | Channels                                                                                |
+| ---------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Oracle Relayers  | Stale price feeds, low native-token balance for relayer wallets   | Slack #alerts-oracles + #alerts-critical/Splunk (page, prod chains)                     |
+| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                                  | Slack #alerts-reserve                                                                   |
+| Trading Modes    | Circuit breakers tripped (trading halted per rate feed)           | Slack #alerts-critical/Splunk (page, prod chains); #alerts-testnet (staging chains)     |
+| Trading Limits   | L0/L1/LG utilization >90%                                         | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)                         |
+| CDPs             | SP headroom/thinning, shutdown, liquidation/redemption, shortfall | Slack #alerts-cdps (warnings); #alerts-critical (shutdown / SP-below-floor / shortfall) |
+| Aegis Service    | RPC failures, data staleness                                      | Slack #alerts-infra; #alerts-critical/Splunk (page)                                     |
 
 Slack is the active delivery path; page-severity alerts still escalate through Splunk On-Call.
 
@@ -115,28 +116,34 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
 **Live FPMM + bridge rule inventory:**
 
-| Service          | Rule                                    | Severity | Threshold                                                                 |
-| ---------------- | --------------------------------------- | -------- | ------------------------------------------------------------------------- |
-| `fpmms`          | Oracle Liveness                         | warning  | liveness ratio `> 1.2` for 2m (FX-weekend gated)                          |
-| `fpmms`          | Oracle Down                             | critical | `oracle_ok < 0.5` for 1m                                                  |
-| `fpmms`          | Oracle Liveness Critical                | critical | liveness ratio `> 3` for 1m (FX-weekend gated)                            |
-| `fpmms`          | Deviation Breach                        | warning  | `deviation_ratio > 1.01` for 15m (above 1% tolerance)                     |
-| `fpmms`          | Deviation Breach (anchored)             | warning  | anchored breach + deviation-ratio data unavailable for 15m                |
-| `fpmms`          | Deviation Breach Critical               | critical | breach >3600s AND `deviation_ratio > 1.05` (magnitude + duration)         |
-| `fpmms`          | Deviation Breach Critical (anchored)    | critical | breach >3600s AND deviation-ratio data unavailable                        |
-| `fpmms`          | Deviation Breach State Changed          | warning  | recent warning-tier deviation state transition                            |
-| `fpmms`          | Deviation Breach Critical State Changed | critical | recent critical-tier deviation state transition                           |
-| `fpmms`          | Trading Limit Pressure                  | warning  | `limit_pressure > 0.8` for 5m                                             |
-| `fpmms`          | Trading Limit Tripped                   | critical | `limit_pressure >= 1` for 2m                                              |
-| `fpmms`          | Rebalancer Stale                        | critical | 1h+ breach AND 30m+ since last rebalance; FX weekend + reopen-gated       |
-| `fpmms`          | Rebalance Effectiveness                 | warning  | last in-breach rebalance closed <50% of gap-to-boundary, `for=15m`        |
-| `metrics-bridge` | Not Reporting                           | critical | `time() - bridge_last_poll > 90` for 2m                                   |
-| `metrics-bridge` | Poll Errors                             | critical | `sum by (kind)(rate(poll_errors_total{kind=~".+"}[5m])) > 0.01/s` for 10m |
+| Service          | Rule                                    | Severity | Threshold                                                                        |
+| ---------------- | --------------------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `fpmms`          | Oracle Liveness                         | warning  | liveness ratio `> 1.2` for 2m (FX-weekend gated)                                 |
+| `fpmms`          | Oracle Down                             | critical | `oracle_ok < 0.5` for 1m                                                         |
+| `fpmms`          | Oracle Liveness Critical                | critical | liveness ratio `> 3` for 1m (FX-weekend gated)                                   |
+| `fpmms`          | Deviation Breach                        | warning  | `deviation_ratio > 1.01` for 15m (above 1% tolerance)                            |
+| `fpmms`          | Deviation Breach (anchored)             | warning  | anchored breach + deviation-ratio data unavailable for 15m                       |
+| `fpmms`          | Deviation Breach Critical               | critical | breach >3600s AND `deviation_ratio > 1.05` (magnitude + duration)                |
+| `fpmms`          | Deviation Breach Critical (anchored)    | critical | breach >3600s AND deviation-ratio data unavailable                               |
+| `fpmms`          | Deviation Breach State Changed          | warning  | recent warning-tier deviation state transition                                   |
+| `fpmms`          | Deviation Breach Critical State Changed | critical | recent critical-tier deviation state transition                                  |
+| `fpmms`          | Trading Limit Pressure                  | warning  | `limit_pressure > 0.8` for 5m                                                    |
+| `fpmms`          | Trading Limit Tripped                   | critical | `limit_pressure >= 1` for 2m                                                     |
+| `fpmms`          | Rebalancer Stale                        | critical | 1h+ breach AND 30m+ since last rebalance; FX weekend + reopen-gated              |
+| `fpmms`          | Rebalance Effectiveness                 | warning  | last in-breach rebalance closed <50% of gap-to-boundary, `for=15m`               |
+| `oracles`        | Oracle Report Outlier                   | warning  | consecutive-report jump ≥1% FX / ≥0.5% USD-pegged, within 10m (FX-weekend gated) |
+| `metrics-bridge` | Not Reporting                           | critical | `time() - bridge_last_poll > 90` for 2m                                          |
+| `metrics-bridge` | Poll Errors                             | critical | `sum by (kind)(rate(poll_errors_total{kind=~".+"}[5m])) > 0.01/s` for 10m        |
+| `cdps`           | System Shutdown                         | critical | `mento_cdp_shutdown > 0.5` for 1m                                                |
+| `cdps`           | Stability Pool Below Floor              | critical | `mento_cdp_sp_headroom < 0` for 15m (below MIN_BOLD_IN_SP)                       |
+| `cdps`           | Stability Pool Thin                     | warning  | `sp_deposits / system_debt < 0.02` for 30m                                       |
+| `cdps`           | Liquidations Detected                   | warning  | `increase(mento_cdp_liquidation_total[1h]) > 0.5`                                |
+| `cdps`           | User Redemptions Detected               | warning  | `increase(mento_cdp_user_redemption_total[1h]) > 0.5` (excl. rebalancer)         |
+| `cdps`           | Redemption Shortfall Subsidized         | critical | `increase(mento_cdp_shortfall_subsidy_total[6h]) > 0`                            |
 
 ### Deferred
 
-- **Oracle report outliers** (`service=oracles`) — large deltas between consecutive reports. Needs indexer to surface historical oracle prices; design still TBD.
-- **Stability Pool headroom** (`service=cdps`) — blocked on production CDP backfill and alert-rule rollout.
+- **TCR / ICR-distribution alerts** (`service=cdps`) — deferred until the indexer computes a real TCR (today `tcrBps`/`icrP1Bps`/`icrFracBelowMcrBps` are `−1` sentinels). Tracked under "CDP live risk refinements" below.
 
 ---
 
@@ -145,7 +152,8 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 ### CDP Monitoring Rollout
 
 - [ ] Deploy and backfill the Liquity v2 Celo indexer changes, promote the synced deployment, and verify hosted Hasura exposes the CDP schema before production dashboard rollout.
-- [ ] Cut the global pools table from the RPC strategy probe to indexed `CdpPool` rows once all CDP-capable networks have strategy events indexed or an explicit fallback.
+- [x] Cut the global pools table from CDP RPC probing to Celo-only indexed `CdpPool` rows; the remaining Monad runtime fallback is Reserve-only.
+- [ ] Add an indexed positive Reserve source for Monad and remove the remaining runtime strategy fallback.
 
 ---
 
@@ -157,7 +165,6 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 - [ ] **`turnoverCum` per pool** — cumulative notional over time-weighted TVL (spec §2); needs TWAP-style accumulator on `Pool`
 - [ ] **`timeInWarnCum` per pool** — warn-state rollup mirroring the existing `cumulativeCriticalSeconds`
 - [ ] **ChainStat / GlobalStat aggregate entities** — protocol-level metrics; sources `chainProtocolFeesCum` / `globalProtocolFeesCum`
-- [ ] **Oracle report history** — unblocks oracle-outlier alerts
 - [ ] **`lastOracleUpdateTxHash` on `Pool`** — unblocks tx-link enrichment in Slack alerts
 
 ### Dashboard Backlog

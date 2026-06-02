@@ -63,6 +63,12 @@ For every new field / changed field / changed behavior, walk the full path:
 - [ ] consumer/UI tests updated
 - [ ] fixtures reflect the new schema reality
 
+### Pool config / oracle-source UI
+
+- [ ] If a pool config tile changes, verify it does not duplicate data already shown in sibling panels such as Oracle Price or Trading Limits.
+- [ ] If Oracle Source is Chainlink-backed, keep the visible value as a Chainlink feed link; do not replace it with a generic SortedOracles label.
+- [ ] Verify chain-aware Chainlink URLs for both Celo and Monad pools so Monad feeds do not point at Celo feed paths.
+
 If one layer is missing, stop and fix it before opening the PR.
 
 ---

@@ -16,6 +16,7 @@
  */
 
 import { z } from "zod";
+import { ORACLE_REPORTER_TYPES } from "@mento-protocol/monitoring-config/oracle-reporters";
 
 // ---------------------------------------------------------------------------
 // POOL_BREACH_ROLLUP
@@ -43,6 +44,24 @@ const PoolConfigExtRowSchema = z.object({
 
 export const PoolConfigExtSchema = z.object({
   Pool: z.array(PoolConfigExtRowSchema),
+});
+
+// ---------------------------------------------------------------------------
+// POOL_RATE_FEED_EXT
+// ---------------------------------------------------------------------------
+
+const OracleReporterTypeSchema = z.enum(ORACLE_REPORTER_TYPES);
+
+const PoolRateFeedExtRowSchema = z.object({
+  id: z.string(),
+  chainId: z.number(),
+  feedAddress: z.string(),
+  pair: z.string(),
+  reporterTypes: z.array(OracleReporterTypeSchema),
+});
+
+export const PoolRateFeedExtSchema = z.object({
+  RateFeed: z.array(PoolRateFeedExtRowSchema),
 });
 
 // ---------------------------------------------------------------------------

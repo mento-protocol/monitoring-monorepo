@@ -6,12 +6,15 @@ import { canValueTvl, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
+import { forwardFillSeries } from "@/lib/chart-gap-fill";
 import {
+  dailySnapshotRange,
   filterSeriesByRange,
   stockWoWChangePct,
   type RangeKey,
   type TimeSeriesPoint,
 } from "@/lib/time-series";
+import { fxPoolWeekendBandsForSeries } from "@/lib/weekend";
 
 interface PoolTvlOverTimeChartProps {
   pool: Pool;
@@ -52,8 +55,8 @@ export function PoolTvlOverTimeChart({
     const sorted = [...snapshots].sort(
       (a, b) => Number(a.timestamp) - Number(b.timestamp),
     );
-    // Skip points where TVL is unknowable (untrusted decimals → null) so
-    // the historical line shows gaps for those windows rather than
+    // Skip points where TVL is unknowable (untrusted decimals → null) so the
+    // fill helper returns undefined before any trusted observation rather than
     // synthesizing $0. See `poolTvlUSD` in `lib/tokens.ts`.
     const points: TimeSeriesPoint[] = [];
     for (const snap of sorted) {
@@ -66,17 +69,35 @@ export function PoolTvlOverTimeChart({
         points.push({ timestamp: Number(snap.timestamp), value });
       }
     }
+    const range = dailySnapshotRange(sorted);
+    const filled: TimeSeriesPoint[] = [];
+    for (const point of forwardFillSeries(points, range)) {
+      if (point.value === undefined) continue;
+      filled.push({
+        timestamp: point.timestamp,
+        value: point.value,
+      });
+    }
     const nowSec = Math.floor(Date.now() / 1000);
     const currentTvl = poolTvlUSD(pool, network, rates);
     if (currentTvl !== null) {
-      points.push({ timestamp: nowSec, value: currentTvl });
+      filled.push({ timestamp: nowSec, value: currentTvl });
     }
-    return points;
+    return filled;
   }, [pool, network, snapshots, rates]);
 
   const visibleSeries = useMemo(
     () => filterSeriesByRange(fullSeries, range),
     [fullSeries, range],
+  );
+  const shapes = useMemo(
+    () =>
+      fxPoolWeekendBandsForSeries({
+        pool,
+        network,
+        series: visibleSeries,
+      }),
+    [pool, network, visibleSeries],
   );
 
   const currentTvl = poolTvlUSD(pool, network, rates);
@@ -107,6 +128,7 @@ export function PoolTvlOverTimeChart({
       isLoading={isLoading}
       hasError={hasError}
       hasSnapshotError={false}
+      shapes={shapes}
       emptyMessage={
         hasError
           ? "Unable to load TVL history"

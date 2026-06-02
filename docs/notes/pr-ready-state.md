@@ -200,6 +200,10 @@ routine post-push action, and never post duplicate review requests while an
 existing current-head request is `requested`, `in_flight`, or `approved`. A
 manual `@codex review` is only a fallback when the current head has no Codex
 signal after the normal automatic-review window.
+If `chatgpt-codex-connector[bot]` replies that code-review usage limits are
+reached, stop posting further `@codex review` requests. The Codex
+PR-description approval remains externally blocked until quota/settings are
+restored or the gate is intentionally overridden.
 
 ## Babysitting Speed Discipline
 

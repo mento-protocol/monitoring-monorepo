@@ -4,8 +4,49 @@ import React from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { formatOraclePrice, formatTimestamp, relativeTime } from "@/lib/format";
-import { getOracleStalenessThreshold, isOracleFresh } from "@/lib/health";
+import {
+  getOracleStalenessThreshold,
+  isOracleFresh,
+  oracleFreshnessTimestamp,
+} from "@/lib/health";
 import { explorerTxUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+
+function oracleFreshnessDisplay(pool: Pool, network: Network) {
+  const freshnessTs = oracleFreshnessTimestamp(pool);
+  if (freshnessTs === 0) {
+    return { updatedTitle: undefined, updatedHref: null, lastLabel: null };
+  }
+
+  const freshnessTsString = String(freshnessTs);
+  return {
+    updatedTitle: formatTimestamp(freshnessTsString),
+    updatedHref:
+      pool.oracleTxHash && pool.oracleTimestamp === freshnessTsString
+        ? explorerTxUrl(network, pool.oracleTxHash)
+        : null,
+    lastLabel: `last ${relativeTime(freshnessTsString)}`,
+  };
+}
+
+function oraclePriceDisplay(pool: Pool, network: Network, inverted: boolean) {
+  const sym0 = tokenSymbol(network, pool.token0);
+  const sym1 = tokenSymbol(network, pool.token1);
+  const feedVal =
+    pool.oraclePrice && pool.oraclePrice !== "0"
+      ? Number(pool.oraclePrice) / 10 ** 24
+      : 0;
+  const titleToken = USDM_SYMBOLS.has(sym0) ? sym1 : sym0;
+  const quoteToken = USDM_SYMBOLS.has(sym0) ? sym0 : sym1;
+  const base = inverted ? quoteToken : titleToken;
+  const quote = inverted ? titleToken : quoteToken;
+  const rawPrice = inverted ? 1 / feedVal : feedVal;
+  const displayPrice = feedVal > 0 ? formatOraclePrice(rawPrice) : "—";
+  const fullPrice =
+    feedVal > 0
+      ? rawPrice.toFixed(12).replace(/0+$/, "").replace(/\.$/, "")
+      : "";
+  return { base, quote, displayPrice, fullPrice };
+}
 
 export function OraclePriceValue({
   pool,
@@ -15,45 +56,24 @@ export function OraclePriceValue({
   network: Network;
 }) {
   const [inverted, setInverted] = React.useState(false);
-  const sym0 = tokenSymbol(network, pool.token0);
-  const sym1 = tokenSymbol(network, pool.token1);
-  const feedVal =
-    pool.oraclePrice && pool.oraclePrice !== "0"
-      ? Number(pool.oraclePrice) / 10 ** 24
-      : 0;
-  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-  const titleToken = usdmIsToken0 ? sym1 : sym0;
-  const quoteToken = usdmIsToken0 ? sym0 : sym1;
-  const base = inverted ? quoteToken : titleToken;
-  const quote = inverted ? titleToken : quoteToken;
-  const rawPrice = inverted ? 1 / feedVal : feedVal;
-  const displayPrice = feedVal > 0 ? formatOraclePrice(rawPrice) : "—";
-  // Full precision for the hover tooltip — 12dp comfortably preserves the
-  // indexer's 24-decimal fixed-point price across any FX pair.
-  const fullPrice =
-    feedVal > 0
-      ? rawPrice.toFixed(12).replace(/0+$/, "").replace(/\.$/, "")
-      : "";
+  const { base, quote, displayPrice, fullPrice } = oraclePriceDisplay(
+    pool,
+    network,
+    inverted,
+  );
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const fresh = isOracleFresh(pool, nowSeconds, network.chainId);
   const priceColor = fresh ? "text-white" : "text-red-400";
   const subColor = fresh ? "text-slate-500" : "text-red-400";
 
-  const hasTs = pool.oracleTimestamp != null && pool.oracleTimestamp !== "0";
   const expiryMinutes = Math.round(
     getOracleStalenessThreshold(pool, network.chainId) / 60,
   );
-  const updatedTitle = hasTs
-    ? formatTimestamp(pool.oracleTimestamp!)
-    : undefined;
-  const updatedHref =
-    hasTs && pool.oracleTxHash
-      ? explorerTxUrl(network, pool.oracleTxHash)
-      : null;
-  const lastLabel = hasTs
-    ? `last ${relativeTime(pool.oracleTimestamp!)}`
-    : null;
+  const { updatedTitle, updatedHref, lastLabel } = oracleFreshnessDisplay(
+    pool,
+    network,
+  );
 
   return (
     <span className="flex flex-col gap-0.5">

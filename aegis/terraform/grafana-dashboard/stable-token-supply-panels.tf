@@ -56,7 +56,7 @@ locals {
         }
         overrides = [
           {
-            matcher = { id = "byName", options = "cUSD" }
+            matcher = { id = "byName", options = "USDm" }
             properties = [
               {
                 id    = "color"
@@ -69,7 +69,7 @@ locals {
             ]
           },
           {
-            matcher = { id = "byName", options = "cEUR" }
+            matcher = { id = "byName", options = "EURm" }
             properties = [
               {
                 id    = "color"
@@ -82,7 +82,7 @@ locals {
             ]
           },
           {
-            matcher = { id = "byName", options = "cREAL" }
+            matcher = { id = "byName", options = "BRLm" }
             properties = [
               {
                 id    = "color"
@@ -95,7 +95,7 @@ locals {
             ]
           },
           {
-            matcher = { id = "byName", options = "cKES" }
+            matcher = { id = "byName", options = "KESm" }
             properties = [
               {
                 id    = "color"
@@ -108,7 +108,7 @@ locals {
             ]
           },
           {
-            matcher = { id = "byName", options = "PUSO" }
+            matcher = { id = "byName", options = "PHPm" }
             properties = [
               {
                 id    = "color"
@@ -121,7 +121,7 @@ locals {
             ]
           },
           {
-            matcher = { id = "byName", options = "cCOP" }
+            matcher = { id = "byName", options = "COPm" }
             properties = [
               {
                 id    = "color"
@@ -149,79 +149,79 @@ locals {
       transparent   = false
       targets = [
         {
-          expr         = "cUSD_totalSupply{chain=\"celo\"}"
-          legendFormat = "cUSD"
-          refId        = "cUSD"
+          expr         = "USDm_totalSupply{chain=\"celo\"}"
+          legendFormat = "USDm"
+          refId        = "USDm"
         },
         {
-          expr         = "cEUR_totalSupply{chain=\"celo\"}"
-          legendFormat = "cEUR"
-          refId        = "cEUR"
+          expr         = "EURm_totalSupply{chain=\"celo\"}"
+          legendFormat = "EURm"
+          refId        = "EURm"
         },
         {
-          expr         = "cREAL_totalSupply{chain=\"celo\"}"
-          legendFormat = "cREAL"
-          refId        = "cREAL"
+          expr         = "BRLm_totalSupply{chain=\"celo\"}"
+          legendFormat = "BRLm"
+          refId        = "BRLm"
         },
         {
-          expr         = "eXOF_totalSupply{chain=\"celo\"}"
-          legendFormat = "eXOF"
-          refId        = "eXOF"
+          expr         = "XOFm_totalSupply{chain=\"celo\"}"
+          legendFormat = "XOFm"
+          refId        = "XOFm"
         },
         {
-          expr         = "cKES_totalSupply{chain=\"celo\"}"
-          legendFormat = "cKES"
-          refId        = "cKES"
+          expr         = "KESm_totalSupply{chain=\"celo\"}"
+          legendFormat = "KESm"
+          refId        = "KESm"
         },
         {
-          expr         = "PUSO_totalSupply{chain=\"celo\"}"
-          legendFormat = "PUSO"
-          refId        = "PUSO"
+          expr         = "PHPm_totalSupply{chain=\"celo\"}"
+          legendFormat = "PHPm"
+          refId        = "PHPm"
         },
         {
-          expr         = "cCOP_totalSupply{chain=\"celo\"}"
-          legendFormat = "cCOP"
-          refId        = "cCOP"
+          expr         = "COPm_totalSupply{chain=\"celo\"}"
+          legendFormat = "COPm"
+          refId        = "COPm"
         },
         {
-          expr         = "cGHS_totalSupply{chain=\"celo\"}"
-          legendFormat = "cGHS"
-          refId        = "cGHS"
+          expr         = "GHSm_totalSupply{chain=\"celo\"}"
+          legendFormat = "GHSm"
+          refId        = "GHSm"
         },
         {
-          expr         = "cGBP_totalSupply{chain=\"celo\"}"
-          legendFormat = "cGBP"
-          refId        = "cGBP"
+          expr         = "GBPm_totalSupply{chain=\"celo\"}"
+          legendFormat = "GBPm"
+          refId        = "GBPm"
         },
         {
-          expr         = "cZAR_totalSupply{chain=\"celo\"}"
-          legendFormat = "cZAR"
-          refId        = "cZAR"
+          expr         = "ZARm_totalSupply{chain=\"celo\"}"
+          legendFormat = "ZARm"
+          refId        = "ZARm"
         },
         {
-          expr         = "cCAD_totalSupply{chain=\"celo\"}"
-          legendFormat = "cCAD"
-          refId        = "cCAD"
+          expr         = "CADm_totalSupply{chain=\"celo\"}"
+          legendFormat = "CADm"
+          refId        = "CADm"
         },
         {
-          expr         = "cAUD_totalSupply{chain=\"celo\"}"
-          legendFormat = "cAUD"
-          refId        = "cAUD"
+          expr         = "AUDm_totalSupply{chain=\"celo\"}"
+          legendFormat = "AUDm"
+          refId        = "AUDm"
         },
         {
-          expr         = "cCHF_totalSupply{chain=\"celo\"}"
-          legendFormat = "cCHF"
-          refId        = "cCHF"
+          expr         = "CHFm_totalSupply{chain=\"celo\"}"
+          legendFormat = "CHFm"
+          refId        = "CHFm"
         },
         {
-          expr         = "cNGN_totalSupply{chain=\"celo\"}"
-          legendFormat = "cNGN"
-          refId        = "cNGN"
+          expr         = "NGNm_totalSupply{chain=\"celo\"}"
+          legendFormat = "NGNm"
+          refId        = "NGNm"
         },
         {
-          expr         = "cJPY_totalSupply{chain=\"celo\"}"
-          legendFormat = "cJPY"
-          refId        = "cJPY"
+          expr         = "JPYm_totalSupply{chain=\"celo\"}"
+          legendFormat = "JPYm"
+          refId        = "JPYm"
         }
       ]
     }),
@@ -323,113 +323,113 @@ locals {
       ]
       targets = [
         {
-          # cUSD is 1:1 with USD (no conversion needed)
-          expr         = "cUSD_totalSupply{chain=\"celo\"}"
-          legendFormat = "cUSD"
-          refId        = "cUSD"
+          # USDm is 1:1 with USD (no conversion needed)
+          expr         = "USDm_totalSupply{chain=\"celo\"}"
+          legendFormat = "USDm"
+          refId        = "USDm"
         },
         {
-          # cEUR: Multiply cEUR supply by the dynamic EUR/USD exchange rate from SortedOracles
-          expr         = "cEUR_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"EURUSD\"}"
-          legendFormat = "cEUR"
-          refId        = "cEUR"
+          # EURm: Multiply EURm supply by the dynamic EUR/USD exchange rate from SortedOracles
+          expr         = "EURm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"EURUSD\"}"
+          legendFormat = "EURm"
+          refId        = "EURm"
         },
         {
-          # cREAL: Multiply by dynamic BRL/USD rate
-          expr         = "cREAL_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"BRLUSD\"}"
-          legendFormat = "cREAL"
-          refId        = "cREAL"
+          # BRLm: Multiply by dynamic BRL/USD rate
+          expr         = "BRLm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"BRLUSD\"}"
+          legendFormat = "BRLm"
+          refId        = "BRLm"
         },
         {
-          # eXOF: Multiply by dynamic XOF/USD rate
-          expr         = "eXOF_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"XOFUSD\"}"
-          legendFormat = "eXOF"
-          refId        = "eXOF"
+          # XOFm: Multiply by dynamic XOF/USD rate
+          expr         = "XOFm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"XOFUSD\"}"
+          legendFormat = "XOFm"
+          refId        = "XOFm"
         },
         {
-          # cKES: Multiply by dynamic KES/USD rate
-          expr         = "cKES_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"KESUSD\"}"
-          legendFormat = "cKES"
-          refId        = "cKES"
+          # KESm: Multiply by dynamic KES/USD rate
+          expr         = "KESm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"KESUSD\"}"
+          legendFormat = "KESm"
+          refId        = "KESm"
         },
         {
-          # PUSO: Multiply by dynamic PHP/USD rate
-          expr         = "PUSO_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"PHPUSD\"}"
-          legendFormat = "PUSO"
-          refId        = "PUSO"
+          # PHPm: Multiply by dynamic PHP/USD rate
+          expr         = "PHPm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"PHPUSD\"}"
+          legendFormat = "PHPm"
+          refId        = "PHPm"
         },
         {
-          # cCOP: Multiply by dynamic COP/USD rate
-          expr         = "cCOP_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"COPUSD\"}"
-          legendFormat = "cCOP"
-          refId        = "cCOP"
+          # COPm: Multiply by dynamic COP/USD rate
+          expr         = "COPm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"COPUSD\"}"
+          legendFormat = "COPm"
+          refId        = "COPm"
         },
         {
-          # cGHS: Multiply by dynamic GHS/USD rate
-          expr         = "cGHS_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"GHSUSD\"}"
-          legendFormat = "cGHS"
-          refId        = "cGHS"
+          # GHSm: Multiply by dynamic GHS/USD rate
+          expr         = "GHSm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"GHSUSD\"}"
+          legendFormat = "GHSm"
+          refId        = "GHSm"
         },
         {
-          # cGBP: Multiply by dynamic GBP/USD rate
-          expr         = "cGBP_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"GBPUSD\"}"
-          legendFormat = "cGBP"
-          refId        = "cGBP"
+          # GBPm: Multiply by dynamic GBP/USD rate
+          expr         = "GBPm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"GBPUSD\"}"
+          legendFormat = "GBPm"
+          refId        = "GBPm"
         },
         {
-          # cZAR: Multiply by dynamic South African rand/USD rate
-          expr         = "cZAR_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"ZARUSD\"}"
-          legendFormat = "cZAR"
-          refId        = "cZAR"
+          # ZARm: Multiply by dynamic South African rand/USD rate
+          expr         = "ZARm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"ZARUSD\"}"
+          legendFormat = "ZARm"
+          refId        = "ZARm"
         },
         {
-          # cCAD: Multiply by dynamic CAD/USD rate
-          expr         = "cCAD_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"CADUSD\"}"
-          legendFormat = "cCAD"
-          refId        = "cCAD"
+          # CADm: Multiply by dynamic CAD/USD rate
+          expr         = "CADm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"CADUSD\"}"
+          legendFormat = "CADm"
+          refId        = "CADm"
         },
         {
-          # cAUD: Multiply by dynamic AUD/USD rate
-          expr         = "cAUD_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"AUDUSD\"}"
-          legendFormat = "cAUD"
-          refId        = "cAUD"
+          # AUDm: Multiply by dynamic AUD/USD rate
+          expr         = "AUDm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"AUDUSD\"}"
+          legendFormat = "AUDm"
+          refId        = "AUDm"
         },
         {
-          # cCHF: Multiply by dynamic CHF/USD rate
-          expr         = "cCHF_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"CHFUSD\"}"
-          legendFormat = "cCHF"
-          refId        = "cCHF"
+          # CHFm: Multiply by dynamic CHF/USD rate
+          expr         = "CHFm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"CHFUSD\"}"
+          legendFormat = "CHFm"
+          refId        = "CHFm"
         },
         {
-          # cNGN: Multiply by dynamic NGN/USD rate
-          expr         = "cNGN_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"NGNUSD\"}"
-          legendFormat = "cNGN"
-          refId        = "cNGN"
+          # NGNm: Multiply by dynamic NGN/USD rate
+          expr         = "NGNm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"NGNUSD\"}"
+          legendFormat = "NGNm"
+          refId        = "NGNm"
         },
         {
-          # cJPY: Multiply by dynamic JPY/USD rate
-          expr         = "cJPY_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"JPYUSD\"}"
-          legendFormat = "cJPY"
-          refId        = "cJPY"
+          # JPYm: Multiply by dynamic JPY/USD rate
+          expr         = "JPYm_totalSupply{chain=\"celo\"} * on() group_left SortedOracles_medianRate_rate{chain=\"celo\", token=\"JPYUSD\"}"
+          legendFormat = "JPYm"
+          refId        = "JPYm"
         },
         {
           # Combined total of all stable tokens in USD using dynamic exchange rates
           expr         = <<-EOT
-            cUSD_totalSupply{chain="celo"} +
-            (cEUR_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="EURUSD"}) +
-            (cREAL_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="BRLUSD"}) +
-            (eXOF_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="XOFUSD"}) +
-            (cKES_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="KESUSD"}) +
-            (PUSO_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="PHPUSD"}) +
-            (cCOP_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="COPUSD"}) +
-            (cGHS_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="GHSUSD"}) +
-            (cGBP_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="GBPUSD"}) +
-            (cZAR_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="ZARUSD"}) +
-            (cCAD_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="CADUSD"}) +
-            (cAUD_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="AUDUSD"}) +
-            (cCHF_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="CHFUSD"}) +
-            (cNGN_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="NGNUSD"}) +
-            (cJPY_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="JPYUSD"})
+            USDm_totalSupply{chain="celo"} +
+            (EURm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="EURUSD"}) +
+            (BRLm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="BRLUSD"}) +
+            (XOFm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="XOFUSD"}) +
+            (KESm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="KESUSD"}) +
+            (PHPm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="PHPUSD"}) +
+            (COPm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="COPUSD"}) +
+            (GHSm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="GHSUSD"}) +
+            (GBPm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="GBPUSD"}) +
+            (ZARm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="ZARUSD"}) +
+            (CADm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="CADUSD"}) +
+            (AUDm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="AUDUSD"}) +
+            (CHFm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="CHFUSD"}) +
+            (NGNm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="NGNUSD"}) +
+            (JPYm_totalSupply{chain="celo"} * on() group_left SortedOracles_medianRate_rate{chain="celo", token="JPYUSD"})
           EOT
           legendFormat = "Total Supply (USD)"
           refId        = "Total"

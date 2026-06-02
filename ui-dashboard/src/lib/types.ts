@@ -1,3 +1,5 @@
+import type { OracleReporterType } from "@mento-protocol/monitoring-config/oracle-reporters";
+
 /**
  * Chain IDs for production mainnet networks on the multichain indexer.
  * These are safe to import in API routes (no NEXT_PUBLIC_* side effects).
@@ -46,6 +48,7 @@ export type Pool = {
   oracleOk?: boolean | undefined;
   oraclePrice?: string | undefined;
   oracleTimestamp?: string | undefined;
+  lastOracleReportAt?: string | undefined;
   oracleTxHash?: string | undefined;
   oracleExpiry?: string | undefined;
   oracleNumReporters?: number | undefined;
@@ -89,6 +92,14 @@ export type Pool = {
   // deploy-time RPC failed (the next event's self-heal is not wired here —
   // tracked as Phase 2 follow-up if any pre-Phase-2 VP shows up missing it).
   wrappedExchangeId?: string | undefined;
+};
+
+export type RateFeed = {
+  id: string;
+  chainId: number;
+  feedAddress: string;
+  pair: string;
+  reporterTypes: OracleReporterType[];
 };
 
 /**
@@ -389,6 +400,21 @@ export type OlsPool = {
   addedAtTimestamp: string;
   updatedAtBlock: string;
   updatedAtTimestamp: string;
+};
+
+export type CdpPool = {
+  id?: string | undefined;
+  chainId?: number | undefined;
+  collateralId: string | null;
+  debtToken?: string | undefined;
+  poolId: string;
+  strategyAddress?: string | undefined;
+  rebalanceCooldownSec?: number | undefined;
+  addedAtBlock?: string | undefined;
+  addedAtTimestamp?: string | undefined;
+  updatedAtBlock?: string | undefined;
+  updatedAtTimestamp?: string | undefined;
+  removed?: boolean | undefined;
 };
 
 export type OlsLiquidityEvent = {

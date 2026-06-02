@@ -143,9 +143,9 @@ resource "grafana_message_template" "slack_trading_mode_alert_message" {
   # AND `$chainlinkSlug` (per-rateFeed allowlist — only set for feeds Chainlink actually
   # publishes; cross-rates like CELOAUD are absent and the line is dropped instead of
   # linking to a 404). The path is a full two-segment slug because Chainlink's URLs
-  # aren't uniform: Celo uses `celo/mainnet`, Monad uses `monad/monad`. Source of truth
-  # for the chain path: `ui-dashboard/src/lib/tokens.ts` CHAINLINK_FEEDS. Source of truth
-  # for the per-feed allowlist: `reference-data-directory.vercel.app/feeds-<chain>-mainnet.json`.
+  # aren't uniform: Celo uses `celo/mainnet`, Monad uses `monad/monad`. Keep the
+  # chain path in `protocol-routing-locals.tf` aligned with live Chainlink pages;
+  # the per-feed allowlist comes from `reference-data-directory.vercel.app/feeds-<chain>-mainnet.json`.
   template = <<-EOT
 {{ define "slack.trading_mode_alert_message" }}
 {{ $mixedState := and (len .Alerts.Firing) (len .Alerts.Resolved) -}}

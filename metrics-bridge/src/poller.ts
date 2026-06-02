@@ -1,4 +1,6 @@
 import { fetchPools } from "./graphql.js";
+import { fetchCdps } from "./cdp-graphql.js";
+import { updateCdpMetrics } from "./cdp-metrics.js";
 import {
   gauges,
   counters,
@@ -39,6 +41,34 @@ function recordPollError(
   console.error(message, error);
 }
 
+// CDP (service=cdps) gauges share this poll loop so bridge liveness +
+// poll-error infrastructure cover them too. Failures here must NOT derail the
+// FPMM metrics or flip the bridge unhealthy — a CDP schema/Hasura hiccup
+// should only stale the CDP series. Query and update errors are split into
+// separate `cdp_query` / `cdp_update` channels (mirrors the FPMM split).
+async function refreshCdpMetrics(): Promise<void> {
+  let cdps;
+  try {
+    cdps = await fetchCdps();
+  } catch (error) {
+    recordPollError(
+      "cdp_query",
+      "CDP poll failed while querying Hasura:",
+      error,
+    );
+    return;
+  }
+  try {
+    updateCdpMetrics(cdps);
+  } catch (error) {
+    recordPollError(
+      "cdp_update",
+      "CDP poll failed while updating metrics:",
+      error,
+    );
+  }
+}
+
 async function maybeRunRebalanceProbe(pools: PoolRow[]): Promise<void> {
   if (pollCycle % REBALANCE_PROBE_EVERY_N_POLLS !== 0) return;
   try {
@@ -51,6 +81,16 @@ async function maybeRunRebalanceProbe(pools: PoolRow[]): Promise<void> {
 }
 
 export async function poll(): Promise<void> {
+  // FPMM and CDP are independent legs queried from separate Hasura entities.
+  // Run the CDP refresh unconditionally — a malformed FPMM pool row (which
+  // early-returns out of `pollPools`) must NOT skip the CDP refresh, or the
+  // shutdown / SP-floor / shortfall rules would silently evaluate stale samples
+  // while the CDP rows are still queryable. Each leg records its own errors.
+  await pollPools();
+  await refreshCdpMetrics();
+}
+
+async function pollPools(): Promise<void> {
   let pools: PoolRow[];
   try {
     const data = await fetchPools();

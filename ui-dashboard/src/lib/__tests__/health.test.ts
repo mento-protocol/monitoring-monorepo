@@ -1077,6 +1077,20 @@ describe("computeHealthStatus oracle staleness boundary", () => {
     ).toBe("OK");
   });
 
+  it("uses oracleTimestamp for live freshness when lastOracleReportAt is older", () => {
+    const staleMedianTs = String(frozenNowSec - 301);
+    const freshReporterTs = String(frozenNowSec - 120);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: freshReporterTs,
+        lastOracleReportAt: staleMedianTs,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("OK");
+  });
+
   it("oracle at 301s is stale → CRITICAL", () => {
     const ts301 = String(frozenNowSec - 301);
     expect(

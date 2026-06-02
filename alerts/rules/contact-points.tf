@@ -106,6 +106,17 @@ resource "grafana_contact_point" "slack_infra" {
   }
 }
 
+resource "grafana_contact_point" "slack_cdps" {
+  name = "slack-alerts-cdps"
+
+  slack {
+    token     = var.slack_bot_token
+    recipient = var.slack_channel_cdps
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text      = local.slack_body_template
+  }
+}
+
 locals {
   # Shared message body — both contact points (critical + warnings) render the
   # same structure so operators can't mistake fields between channels. Split
@@ -172,6 +183,8 @@ locals {
     {{ if and $isResolved .Annotations.resolved_title -}}{{ $title = .Annotations.resolved_title }}{{ end -}}
     {{ if .Labels.pool_id -}}
     *<https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|{{ $title }}{{ if .Labels.pair }} — {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
+    {{ else if and (eq .Labels.service "cdps") .Labels.symbol -}}
+    *<https://monitoring.mento.org/cdps/{{ .Labels.symbol | toLower }}|{{ $title }} — {{ .Labels.symbol }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
     {{ else -}}
     *{{ $title }}*
     {{ end -}}
@@ -311,6 +324,28 @@ locals {
   notify_warning_infra = {
     contact_point   = grafana_contact_point.slack_infra.name
     group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
+    repeat_interval = "4h"
+  }
+
+  # CDP (service=cdps) rules group by `collateral_id` — the per-market key the
+  # bridge carries on every `mento_cdp_*` series — instead of `pool_id` (CDP
+  # markets are not FPMM pools). Criticals page #alerts-critical alongside every
+  # other critical; warnings route to the dedicated #alerts-cdps channel.
+  # `notify_critical_cdps` omits `alertname` so co-firing per-market criticals
+  # (e.g. Shutdown + SP Below Floor) collapse into one Slack thread per market.
+  notify_critical_cdps = {
+    contact_point   = grafana_contact_point.slack_critical.name
+    group_by        = ["grafana_folder", "chain_id", "collateral_id"]
+    group_wait      = "30s"
+    group_interval  = "5m"
+    repeat_interval = "1h"
+  }
+
+  notify_warning_cdps = {
+    contact_point   = grafana_contact_point.slack_cdps.name
+    group_by        = ["grafana_folder", "chain_id", "collateral_id"]
     group_wait      = "1m"
     group_interval  = "10m"
     repeat_interval = "4h"
