@@ -18,13 +18,14 @@ import {
   ALL_POOLS_WITH_HEALTH,
   ALL_TRADING_LIMITS,
   ALL_OLS_POOLS,
+  ALL_CDP_POOLS,
   BROKER_DAILY_SNAPSHOTS_ALL,
   POOL_DAILY_FEE_SNAPSHOTS_PAGE,
   POOL_DAILY_SNAPSHOTS_ALL,
   UNIQUE_LP_ADDRESSES,
 } from "@/lib/queries";
 import { aggregateProtocolFees } from "@/lib/protocol-fees";
-import { detectProbedStrategies } from "@/lib/strategy-detection";
+import { usesRuntimeStrategyProbe } from "@/lib/strategy-probe-scope";
 import {
   buildSnapshotWindows,
   filterSnapshotsToWindow,
@@ -38,6 +39,7 @@ import type {
   PoolSnapshotWindow,
   TradingLimit,
   OlsPool,
+  CdpPool,
 } from "@/lib/types";
 import { isFpmm, buildOracleRateMap } from "@/lib/tokens";
 import type {
@@ -73,6 +75,7 @@ export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
     n.snapshots30dError === null &&
     n.snapshotsAllDailyError === null &&
     n.brokerSnapshotsAllDailyError === null &&
+    n.strategyError === null &&
     n.lpError === null
   );
 }
@@ -102,6 +105,7 @@ export const blankNetworkData = (
   olsPoolIds: new Set(),
   cdpPoolIds: new Set(),
   reservePoolIds: new Set(),
+  strategyError: null,
   fees: null,
   feeSnapshots: [],
   feeSnapshotsError: null,
@@ -351,6 +355,7 @@ export async function fetchAllFeeSnapshotPages(
 }
 
 /** @internal Exported for testing only. */
+// eslint-disable-next-line complexity, max-lines-per-function, sonarjs/cognitive-complexity -- Existing network orchestrator owns many fail-open slices; keep the exception visible in source instead of carrying a churn-prone baseline tuple.
 export async function fetchNetworkData(
   network: Network,
   windows: { w24h: TimeRange; w7d: TimeRange; w30d: TimeRange },
@@ -400,7 +405,8 @@ export async function fetchNetworkData(
     breachRollupResult,
     healthCursorResult,
     rebalanceThresholdsKnownResult,
-    cdpPoolIdsResult,
+    indexedCdpPoolsResult,
+    fallbackStrategiesResult,
   ] = await Promise.allSettled([
     fetchAllFeeSnapshotPages(client, network.chainId, network.id),
     shouldQueryPoolSnapshots(poolIds)
@@ -457,9 +463,11 @@ export async function fetchNetworkData(
         breakerTripped?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
-    // RPC probe remains the global badge path until indexed CdpPool rows are
-    // backfilled on every network that can expose CDP-backed FPMMs.
-    detectProbedStrategies(network, pools),
+    // CDP badges are Celo-only and come from indexed CdpPool rows. The
+    // runtime probe is a non-Celo Reserve fallback and must not produce CDP
+    // badges.
+    requestIndexedCdpPools(network, timed),
+    requestFallbackStrategies(network, pools),
   ]);
 
   // Merge the rollup fields into the pool objects. On failure (including
@@ -673,15 +681,18 @@ export async function fetchNetworkData(
       ? new Set((olsResult.value.OlsPool ?? []).map((p) => p.poolId))
       : new Set<string>();
 
-  // `detectProbedStrategies` already fails open (catches and Sentry-logs
-  // RPC errors itself), so a rejected Promise here would signal something
-  // the helper couldn't swallow — still degrade to empty so the fetch
-  // overall stays up. Consumers downstream treat "pool absent from both
-  // sets" as "detection unavailable" and avoid confident badges.
-  const { cdpPoolIds, reservePoolIds } =
-    cdpPoolIdsResult.status === "fulfilled"
-      ? cdpPoolIdsResult.value
-      : { cdpPoolIds: new Set<string>(), reservePoolIds: new Set<string>() };
+  const { cdpPoolIds, reservePoolIds } = resolveStrategyIds({
+    network,
+    pools,
+    indexedCdpPoolsResult,
+    fallbackStrategiesResult,
+  });
+  const strategyError = resolveStrategyError({
+    network,
+    olsResult,
+    indexedCdpPoolsResult,
+    fallbackStrategiesResult,
+  });
 
   return {
     network,
@@ -698,6 +709,7 @@ export async function fetchNetworkData(
     olsPoolIds,
     cdpPoolIds,
     reservePoolIds,
+    strategyError,
     fees,
     feeSnapshots,
     feeSnapshotsError,
@@ -718,12 +730,157 @@ export async function fetchNetworkData(
   };
 }
 
+const INDEXED_CDP_POOL_CHAIN_IDS = new Set([42220]);
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+type TimedRequest = <T>(
+  document: string,
+  variables?: Record<string, unknown>,
+) => Promise<T>;
+
+type CdpPoolsResponse = {
+  CdpPool: Pick<CdpPool, "poolId" | "strategyAddress">[];
+};
+
+type ProbedStrategies = {
+  cdpPoolIds: Set<string>;
+  reservePoolIds: Set<string>;
+};
+
+type StrategyIdsArgs = {
+  network: Network;
+  pools: Pool[];
+  indexedCdpPoolsResult: PromiseSettledResult<CdpPoolsResponse>;
+  fallbackStrategiesResult: PromiseSettledResult<Readonly<ProbedStrategies>>;
+};
+
+type StrategyErrorArgs = {
+  network: Network;
+  olsResult: PromiseSettledResult<{ OlsPool: Pick<OlsPool, "poolId">[] }>;
+  indexedCdpPoolsResult: PromiseSettledResult<CdpPoolsResponse>;
+  fallbackStrategiesResult: PromiseSettledResult<Readonly<ProbedStrategies>>;
+};
+
+function usesIndexedCdpPools(network: Pick<Network, "chainId">): boolean {
+  return INDEXED_CDP_POOL_CHAIN_IDS.has(network.chainId);
+}
+
+function hasRebalancerAddress(pool: Pool): boolean {
+  const rebalancer = pool.rebalancerAddress;
+  return (
+    rebalancer !== undefined &&
+    /^0x[a-fA-F0-9]{40}$/.test(rebalancer) &&
+    rebalancer.toLowerCase() !== ZERO_ADDRESS
+  );
+}
+
+function activeCdpPoolIdsFromIndexedRows(
+  pools: Pool[],
+  cdpPools: Pick<CdpPool, "poolId" | "strategyAddress">[],
+): Set<string> {
+  const activeRebalancerByPoolId = new Map<string, string>();
+  for (const pool of pools) {
+    if (!hasRebalancerAddress(pool)) continue;
+    const rebalancer = pool.rebalancerAddress;
+    if (rebalancer === undefined) continue;
+    activeRebalancerByPoolId.set(pool.id, rebalancer.toLowerCase());
+  }
+
+  const cdpPoolIds = new Set<string>();
+  for (const cdpPool of cdpPools) {
+    const activeRebalancer = activeRebalancerByPoolId.get(cdpPool.poolId);
+    if (activeRebalancer === undefined) continue;
+    if (cdpPool.strategyAddress?.toLowerCase() !== activeRebalancer) continue;
+    cdpPoolIds.add(cdpPool.poolId);
+  }
+  return cdpPoolIds;
+}
+
+function emptyStrategyIds(): ProbedStrategies {
+  return {
+    cdpPoolIds: new Set<string>(),
+    reservePoolIds: new Set<string>(),
+  };
+}
+
+function requestIndexedCdpPools(
+  network: Network,
+  timed: TimedRequest,
+): Promise<CdpPoolsResponse> {
+  if (!usesIndexedCdpPools(network)) return Promise.resolve({ CdpPool: [] });
+  return timed<CdpPoolsResponse>(ALL_CDP_POOLS, { chainId: network.chainId });
+}
+
+async function requestFallbackStrategies(
+  network: Network,
+  pools: Pool[],
+): Promise<Readonly<ProbedStrategies>> {
+  if (!usesRuntimeStrategyProbe(network)) return emptyStrategyIds();
+  const { detectProbedStrategies } = await import("@/lib/strategy-detection");
+  return detectProbedStrategies(network, pools);
+}
+
+function resolveStrategyIds({
+  network,
+  pools,
+  indexedCdpPoolsResult,
+  fallbackStrategiesResult,
+}: StrategyIdsArgs): ProbedStrategies {
+  const fallbackStrategies =
+    fallbackStrategiesResult.status === "fulfilled"
+      ? fallbackStrategiesResult.value
+      : emptyStrategyIds();
+
+  if (!usesIndexedCdpPools(network)) {
+    return {
+      cdpPoolIds: new Set<string>(),
+      reservePoolIds: fallbackStrategies.reservePoolIds,
+    };
+  }
+
+  const cdpPoolIds =
+    indexedCdpPoolsResult.status === "fulfilled"
+      ? activeCdpPoolIdsFromIndexedRows(
+          pools,
+          indexedCdpPoolsResult.value.CdpPool ?? [],
+        )
+      : new Set<string>();
+
+  return {
+    cdpPoolIds,
+    // Indexed Celo has a positive CDP source, but no positive Reserve source.
+    // Unknown active rebalancers stay unbadged instead of being inferred as
+    // Reserve from the absence of an OLS/CDP row.
+    reservePoolIds: new Set<string>(),
+  };
+}
+
+function resolveStrategyError({
+  network,
+  olsResult,
+  indexedCdpPoolsResult,
+  fallbackStrategiesResult,
+}: StrategyErrorArgs): Error | null {
+  if (olsResult.status === "rejected") return toError(olsResult.reason);
+  if (
+    usesIndexedCdpPools(network) &&
+    indexedCdpPoolsResult.status === "rejected"
+  )
+    return toError(indexedCdpPoolsResult.reason);
+  if (
+    usesRuntimeStrategyProbe(network) &&
+    fallbackStrategiesResult.status === "rejected"
+  )
+    return toError(fallbackStrategiesResult.reason);
+  return null;
+}
+
 function toError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error(String(reason));
 }
 
 /**
- * Rebuild a `NetworkData`'s nine error channels as plain `{ message }` objects
+ * Rebuild a `NetworkData`'s ten error channels as plain `{ message }` objects
  * (#661). `fetchNetworkData` populates them with `Error` instances internally
  * (structurally assignable to `SerializableError`), but those must not cross
  * the Server → Client boundary: React's Flight serializer opaques `Error`
@@ -753,6 +910,7 @@ function withSerializableErrors(data: NetworkData): NetworkData {
     brokerSnapshotsAllDailyError: toSerializableError(
       data.brokerSnapshotsAllDailyError,
     ),
+    strategyError: toSerializableError(data.strategyError),
     lpError: toSerializableError(data.lpError),
   };
 }

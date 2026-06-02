@@ -1,11 +1,16 @@
 /**
- * Batch strategy-type detection for the global pools table.
+ * Runtime Reserve strategy fallback for networks without an indexed positive
+ * Reserve source.
  *
- * The indexer tracks OLS registrations in a dedicated entity, but CDP pools
- * are indistinguishable from Reserve pools at the GraphQL layer — both just
- * expose `rebalancerAddress`. To surface the "CDP" strategy badge we probe
- * each unique rebalancer contract via RPC using the same detection logic as
- * `rebalance-check.ts` (getCDPConfig / reserve / getPools selector probes).
+ * Celo CDP badges come from indexed CdpPool rows. CDPs are Celo-only, so this
+ * module deliberately does not produce CDP classifications for fallback
+ * networks even if the generic strategy probe returns `"cdp"`.
+ *
+ * For fallback networks, a strategy-backed pool is just a Pool row with a
+ * `rebalancerAddress`. To surface Reserve badges without guessing from the
+ * absence of OLS/CDP rows, we probe each unique rebalancer contract via RPC
+ * using the same detection logic as `rebalance-check.ts` (getCDPConfig /
+ * reserve / getPools selector probes) and keep only positive Reserve results.
  *
  * Probes are grouped by unique rebalancer address and cached at module scope
  * so the cost amortizes to ~1 RPC call per deployed strategy contract per
@@ -16,12 +21,6 @@
  * treat absence from both sets as "strategy detection unavailable" and
  * avoid rendering a confident badge — see `poolStrategies()` in
  * `global-pools-table.tsx` for the UI contract.
- *
- * TODO(cdp-indexer): move CDP strategy tracking into the indexer, parallel
- * to the `OlsPool` entity in `indexer-envio/schema.graphql`. That lets the
- * dashboard derive `cdpPoolIds` from a single GraphQL query (same as OLS)
- * and removes the runtime RPC dependency this module introduces. Until
- * that lands, this is a UI-layer stopgap.
  */
 
 import * as Sentry from "@sentry/nextjs";
@@ -29,6 +28,7 @@ import { isAddress } from "viem";
 import { detectStrategyType, type StrategyType } from "@/lib/rebalance-check";
 import type { Network } from "@/lib/networks";
 import { getViemClient } from "@/lib/rpc-client";
+import { usesRuntimeStrategyProbe } from "@/lib/strategy-probe-scope";
 import type { Pool } from "@/lib/types";
 
 type CacheEntry = {
@@ -68,6 +68,12 @@ const sentryLastCapturedAt = new Map<string, number>();
 // deployment boundaries.
 const cacheKey = (networkId: string, rebalancer: string): string =>
   `${networkId}:${rebalancer.toLowerCase()}`;
+
+function canRunRuntimeProbe(
+  network: Network,
+): network is Network & { rpcUrl: string } {
+  return usesRuntimeStrategyProbe(network) && network.rpcUrl !== undefined;
+}
 
 export function clearStrategyTypeCache(): void {
   strategyTypeCache.clear();
@@ -131,8 +137,11 @@ function captureProbeFailure(
 }
 
 /**
- * Strategy classifications derived from RPC probes, one Set per positively
- * identified type. A pool appearing in neither set means either:
+ * Strategy classifications derived from RPC probes. `cdpPoolIds` is retained
+ * for fetcher shape compatibility, but runtime fallback networks never fill
+ * it because CDP markets are Celo-only and Celo uses indexed CdpPool rows.
+ *
+ * A pool appearing in neither set means either:
  *   - it has no `rebalancerAddress` (no strategy attached), or
  *   - its probe errored (transport failure) or hit the timeout.
  *
@@ -153,15 +162,16 @@ function emptyStrategies(): ProbedStrategies {
 
 /**
  * Probe every unique rebalancer contract referenced by `pools` and return
- * positive identifications only. Pools whose probe errored, timed out, or
- * returned `"unknown"` are deliberately absent from both sets so the UI
- * can render an "unavailable" state rather than a confident mis-badge.
+ * positive Reserve identifications only. Pools whose probe errored, timed out,
+ * returned `"unknown"`, or returned `"cdp"` are deliberately absent from both
+ * sets so the UI can render an "unavailable" state rather than a confident
+ * mis-badge.
  */
 export async function detectProbedStrategies(
   network: Network,
   pools: Pool[],
 ): Promise<Readonly<ProbedStrategies>> {
-  if (!network.rpcUrl) return emptyStrategies();
+  if (!canRunRuntimeProbe(network)) return emptyStrategies();
 
   const poolsByRebalancer = new Map<string, Pool[]>();
   for (const pool of pools) {
@@ -234,13 +244,12 @@ export async function detectProbedStrategies(
   const reservePoolIds = new Set<string>();
   for (const [rebalancer, group] of poolsByRebalancer) {
     const type = typeByRebalancer.get(rebalancer);
-    if (type === "cdp") {
-      for (const pool of group) cdpPoolIds.add(pool.id);
-    } else if (type === "reserve") {
+    if (type === "reserve") {
       for (const pool of group) reservePoolIds.add(pool.id);
     }
-    // "ols" is tracked by the indexer's OlsPool entity (authoritative) and
-    // "unknown" / absent = probe failed → leave out of both sets.
+    // "cdp" is ignored here because CDPs are Celo-only and Celo uses
+    // indexed CdpPool rows. "ols" is tracked by the indexer's OlsPool entity
+    // (authoritative), and "unknown" / absent = probe failed.
   }
   return { cdpPoolIds, reservePoolIds };
 }

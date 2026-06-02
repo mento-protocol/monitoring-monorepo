@@ -7,11 +7,20 @@ import {
   partialPageLastCapturedAt,
 } from "../use-all-networks-data";
 import type { Network } from "@/lib/networks";
+import { isNetworkDataFullyHealthy } from "@/lib/fetch-all-networks";
 import type { Pool } from "@/lib/types";
+
+const { mockDetectProbedStrategies } = vi.hoisted(() => ({
+  mockDetectProbedStrategies: vi.fn(),
+}));
 
 vi.mock("@sentry/nextjs", () => ({
   captureException: vi.fn(),
   captureMessage: vi.fn(),
+}));
+
+vi.mock("@/lib/strategy-detection", () => ({
+  detectProbedStrategies: mockDetectProbedStrategies,
 }));
 
 import * as Sentry from "@sentry/nextjs";
@@ -52,10 +61,10 @@ const MOCK_NETWORK_2: Network = {
  * production-side, but it means the happy-path test fixtures must include
  * at least one oracle-eligible pool.
  */
-function makePool(id: string): Pool {
+function makePool(id: string, chainId: number = 42220): Pool {
   return {
     id,
-    chainId: 42220,
+    chainId,
     token0: "USDm",
     token1: "EURm",
     source: "FPMM",
@@ -86,10 +95,9 @@ import { GraphQLClient } from "graphql-request";
  *   "Pool"              matches Pool, PoolDailySnapshot
  *   "PoolDailySnapshot" matches only PoolDailySnapshot
  *
- * Callers should check most-specific first (PoolDailySnapshot > Pool). If
- * `impl` does not handle a PoolDailySnapshot query (impl returns something
- * without that key), we default to an empty page so the pagination loop exits
- * cleanly rather than silently routing the query to the Pool branch.
+ * Callers should check most-specific first (PoolDailySnapshot / CdpPool /
+ * OlsPool > Pool). If `impl` does not handle a specific query, we default to
+ * an empty response rather than silently routing it to the Pool branch.
  */
 // Extracts the GraphQL document string from either the positional-arg form
 // (`client.request(query, variables)`) or the object form
@@ -124,12 +132,28 @@ function mockRequest(impl: (query: string) => unknown) {
         return Promise.resolve(r);
       return Promise.resolve({ PoolDailySnapshot: [] });
     }
+    if (query.includes("CdpPool")) {
+      const r = impl(query);
+      if (r != null && typeof r === "object" && "CdpPool" in r)
+        return Promise.resolve(r);
+      return Promise.resolve({ CdpPool: [] });
+    }
+    if (query.includes("OlsPool")) {
+      const r = impl(query);
+      if (r != null && typeof r === "object" && "OlsPool" in r)
+        return Promise.resolve(r);
+      return Promise.resolve({ OlsPool: [] });
+    }
     return Promise.resolve(impl(query));
   });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockDetectProbedStrategies.mockResolvedValue({
+    cdpPoolIds: new Set<string>(),
+    reservePoolIds: new Set<string>(),
+  });
   // Sentry de-dup maps live at module scope — clear between tests so
   // previous runs don't suppress subsequent captures.
   warnedCapKeys.clear();
@@ -207,6 +231,189 @@ describe("fetchNetworkData — happy path", () => {
       limit: 1000,
       offset: 0,
     });
+  });
+
+  it("uses indexed CdpPool rows on Celo without inferring Reserve from unknown strategies", async () => {
+    const cdpPool = {
+      ...makePool("42220-0x000000000000000000000000000000000000aaaa"),
+      rebalancerAddress: "0x000000000000000000000000000000000000c0c0",
+    };
+    const reservePool = {
+      ...makePool("42220-0x000000000000000000000000000000000000bbbb"),
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    };
+    const olsPool = {
+      ...makePool("42220-0x000000000000000000000000000000000000cccc"),
+      rebalancerAddress: "0x000000000000000000000000000000000000e0e0",
+    };
+
+    mockRequest((query) => {
+      if (query.includes("CdpPool"))
+        return {
+          CdpPool: [
+            {
+              poolId: cdpPool.id,
+              collateralId: "gbpm",
+              strategyAddress: cdpPool.rebalancerAddress,
+            },
+          ],
+        };
+      if (query.includes("OlsPool"))
+        return { OlsPool: [{ poolId: olsPool.id }] };
+      if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool"))
+        return { Pool: [cdpPool, reservePool, olsPool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.cdpPoolIds).toEqual(new Set([cdpPool.id]));
+    expect(result.reservePoolIds).toEqual(new Set());
+    expect(result.reservePoolIds.has(olsPool.id)).toBe(false);
+
+    const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    const cdpCall = calls.find((args) =>
+      extractQuery(args[0]).includes("AllCdpPools"),
+    );
+    expect(cdpCall).toBeDefined();
+    expect(extractVariables(cdpCall![0], cdpCall![1])).toEqual({
+      chainId: 42220,
+    });
+  });
+
+  it("ignores indexed CdpPool rows that do not match the active rebalancer", async () => {
+    const staleCdpPool = {
+      ...makePool("42220-0x000000000000000000000000000000000000eeee"),
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    };
+
+    mockRequest((query) => {
+      if (query.includes("CdpPool"))
+        return {
+          CdpPool: [
+            {
+              poolId: staleCdpPool.id,
+              collateralId: "gbpm",
+              strategyAddress: "0x000000000000000000000000000000000000c0c0",
+            },
+          ],
+        };
+      if (query.includes("OlsPool")) return { OlsPool: [] };
+      if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [staleCdpPool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(new Set());
+  });
+
+  it("withholds Reserve badges when the indexed CdpPool query fails", async () => {
+    const reserveCandidate = {
+      ...makePool("42220-0x000000000000000000000000000000000000dddd"),
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    };
+    const cdpErr = new Error("CdpPool schema unavailable");
+
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
+      if (query.includes("CdpPool")) return Promise.reject(cdpErr);
+      if (query.includes("OlsPool")) return Promise.resolve({ OlsPool: [] });
+      if (query.includes("PoolDailySnapshot"))
+        return Promise.resolve({ PoolDailySnapshot: [] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [] });
+      if (query.includes("LiquidityPosition"))
+        return Promise.resolve({ LiquidityPosition: [] });
+      if (query.includes("Pool"))
+        return Promise.resolve({ Pool: [reserveCandidate] });
+      return Promise.resolve({});
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.strategyError).toBe(cdpErr);
+    expect(isNetworkDataFullyHealthy(result)).toBe(false);
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(new Set());
+  });
+
+  it("drops non-Celo fallback CDP ids while preserving fallback Reserve ids", async () => {
+    const monadNetwork: Network = {
+      ...MOCK_NETWORK,
+      id: "monad-mainnet",
+      label: "Monad",
+      chainId: 143,
+      hasuraUrl: "https://hasura-monad.example.com/v1/graphql",
+      explorerBaseUrl: "https://monadscan.com",
+      rpcUrl: "https://rpc-monad.example.com",
+    };
+    const cdpLikePool = {
+      ...makePool("143-0x000000000000000000000000000000000000aaaa", 143),
+      rebalancerAddress: "0x000000000000000000000000000000000000c0c0",
+    };
+    const reservePool = {
+      ...makePool("143-0x000000000000000000000000000000000000bbbb", 143),
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    };
+
+    mockDetectProbedStrategies.mockResolvedValueOnce({
+      cdpPoolIds: new Set([cdpLikePool.id]),
+      reservePoolIds: new Set([reservePool.id]),
+    });
+    mockRequest((query) => {
+      if (query.includes("OlsPool")) return { OlsPool: [] };
+      if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [cdpLikePool, reservePool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(monadNetwork, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(new Set([reservePool.id]));
+    expect(mockDetectProbedStrategies).toHaveBeenCalledWith(monadNetwork, [
+      cdpLikePool,
+      reservePool,
+    ]);
+
+    const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    expect(
+      calls.some((args) => extractQuery(args[0]).includes("AllCdpPools")),
+    ).toBe(false);
   });
 
   it("deduplicates LP addresses across multiple positions", async () => {

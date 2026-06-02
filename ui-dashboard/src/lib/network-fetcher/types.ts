@@ -70,14 +70,19 @@ export type NetworkData = {
   tradingLimits: TradingLimit[];
   olsPoolIds: Set<string>;
   /**
-   * Pool IDs whose `rebalancerAddress` was positively probed as a CDP or
-   * Reserve strategy (see `lib/strategy-detection.ts`). Pools whose probe
-   * errored/timed out appear in NEITHER set — consumers must not default
-   * absence to "Reserve", because doing so would surface a misleading
-   * confident badge on every transport outage.
+   * Pool IDs classified as CDP or Reserve for global strategy badges. CDP
+   * badges are Celo-only and come from indexed CdpPool rows. Indexed Celo
+   * intentionally withholds Reserve without a positive indexed Reserve
+   * source; non-Celo fallback probes only contribute Reserve classifications.
    */
   cdpPoolIds: Set<string>;
   reservePoolIds: Set<string>;
+  /**
+   * Strategy-classification query/probe failures. This does not blank the
+   * table, but it marks SSR payloads degraded so SWR retries immediately
+   * instead of pinning missing badges until the next poll.
+   */
+  strategyError: SerializableError | null;
   fees: ProtocolFeeSummary | null;
   /**
    * Daily-rollup fee snapshots, paginated to all-time history. Source of truth

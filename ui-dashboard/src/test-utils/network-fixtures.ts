@@ -125,6 +125,7 @@ export function makeNetworkData(
     olsPoolIds: new Set(),
     cdpPoolIds: new Set(),
     reservePoolIds: new Set(),
+    strategyError: null,
     fees: null,
     feeSnapshots: [],
     feeSnapshotsError: null,

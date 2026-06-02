@@ -402,6 +402,21 @@ export type OlsPool = {
   updatedAtTimestamp: string;
 };
 
+export type CdpPool = {
+  id?: string | undefined;
+  chainId?: number | undefined;
+  collateralId: string | null;
+  debtToken?: string | undefined;
+  poolId: string;
+  strategyAddress?: string | undefined;
+  rebalanceCooldownSec?: number | undefined;
+  addedAtBlock?: string | undefined;
+  addedAtTimestamp?: string | undefined;
+  updatedAtBlock?: string | undefined;
+  updatedAtTimestamp?: string | undefined;
+  removed?: boolean | undefined;
+};
+
 export type OlsLiquidityEvent = {
   id: string;
   chainId: number;

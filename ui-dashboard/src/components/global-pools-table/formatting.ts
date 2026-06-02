@@ -8,9 +8,9 @@ export function poolStrategies(
   isReserve: boolean,
 ): PoolStrategyLabel[] {
   // Precedence: OLS (indexer-tracked) > CDP > Reserve. All three require a
-  // positive signal — pools with a rebalancer whose RPC probe failed
-  // deliberately render no badge rather than misclassifying as Reserve.
-  // See `lib/strategy-detection.ts` for probe semantics.
+  // positive signal. Indexed Celo currently has a positive CDP source but no
+  // positive Reserve source; fallback-network RPC probe failures also leave
+  // the pool out of every set rather than misclassifying it as Reserve.
   if (isOls) return ["Open"];
   if (isCdp) return ["CDP"];
   if (isReserve) return ["Reserve"];
