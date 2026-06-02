@@ -350,6 +350,55 @@ describe("buildDailySeries — pools with mismatched snapshot start days", () =>
     // nowTvl uses BOTH pools' live reserves: $20 + $40 = $60.
     expect(nowTvl).toBeCloseTo(60, 6);
   });
+
+  it("starts per-chain history at the earliest pool observation regardless of pool order", () => {
+    const today = dayAlignedNow();
+    const day0 = today - 4 * SECONDS_PER_DAY;
+    const day3 = today - 1 * SECONDS_PER_DAY;
+    const earlyPool = makeTvlPool({
+      id: "pool-early",
+      reserves0: TEN,
+      reserves1: TEN,
+    });
+    const latePool = makeTvlPool({
+      id: "pool-late",
+      reserves0: TWENTY,
+      reserves1: TWENTY,
+    });
+    const earlySnapshot = makeSnapshot({
+      poolId: "pool-early",
+      timestamp: day0,
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    });
+    const lateSnapshot = makeSnapshot({
+      poolId: "pool-late",
+      timestamp: day3,
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+
+    const { series, byChain } = buildDailySeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [latePool, earlyPool],
+        snapshots30d: [lateSnapshot, earlySnapshot],
+      }),
+    ]);
+
+    expect(series.map((point) => point.timestamp)).toEqual([
+      day0,
+      day0 + SECONDS_PER_DAY,
+      day0 + 2 * SECONDS_PER_DAY,
+      day3,
+      today,
+    ]);
+    expect(series.map((point) => point.tvlUSD)).toEqual([
+      200, 200, 200, 300, 300,
+    ]);
+    expect(byChain).toHaveLength(1);
+    expect(byChain[0]!.series).toEqual(series);
+  });
 });
 
 describe("buildDailySeries — input normalisation", () => {

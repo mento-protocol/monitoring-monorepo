@@ -300,8 +300,19 @@ function accumulatePoolHistory({
     bucket.tvl += point.value;
     bucket.anyContributed = true;
     const id = history.network.id;
-    if (!firstChainBucket.has(id)) firstChainBucket.set(id, point.timestamp);
+    rememberFirstChainBucket(firstChainBucket, id, point.timestamp);
     bucket.perChainTvl.set(id, (bucket.perChainTvl.get(id) ?? 0) + point.value);
+  }
+}
+
+function rememberFirstChainBucket(
+  firstChainBucket: Map<string, number>,
+  chainId: string,
+  timestamp: number,
+): void {
+  const previous = firstChainBucket.get(chainId);
+  if (previous === undefined || timestamp < previous) {
+    firstChainBucket.set(chainId, timestamp);
   }
 }
 
