@@ -1,4 +1,6 @@
 import { fetchPools } from "./graphql.js";
+import { fetchCdps } from "./cdp-graphql.js";
+import { updateCdpMetrics } from "./cdp-metrics.js";
 import {
   gauges,
   counters,
@@ -37,6 +39,34 @@ function recordPollError(
 ): void {
   counters.pollErrors.inc({ kind });
   console.error(message, error);
+}
+
+// CDP (service=cdps) gauges share this poll loop so bridge liveness +
+// poll-error infrastructure cover them too. Failures here must NOT derail the
+// FPMM metrics or flip the bridge unhealthy — a CDP schema/Hasura hiccup
+// should only stale the CDP series. Query and update errors are split into
+// separate `cdp_query` / `cdp_update` channels (mirrors the FPMM split).
+async function refreshCdpMetrics(): Promise<void> {
+  let cdps;
+  try {
+    cdps = await fetchCdps();
+  } catch (error) {
+    recordPollError(
+      "cdp_query",
+      "CDP poll failed while querying Hasura:",
+      error,
+    );
+    return;
+  }
+  try {
+    updateCdpMetrics(cdps);
+  } catch (error) {
+    recordPollError(
+      "cdp_update",
+      "CDP poll failed while updating metrics:",
+      error,
+    );
+  }
 }
 
 async function maybeRunRebalanceProbe(pools: PoolRow[]): Promise<void> {
@@ -87,6 +117,8 @@ export async function poll(): Promise<void> {
     );
     return;
   }
+
+  await refreshCdpMetrics();
 
   await maybeRunRebalanceProbe(pools);
   // Increment AFTER the probe check so cycle 0 (cold start) fires the

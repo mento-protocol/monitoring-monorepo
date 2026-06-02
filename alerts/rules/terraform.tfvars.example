@@ -20,6 +20,7 @@ grafana_service_account_token = "glsa_REPLACE_ME"
 # slack_channel_oracles  = "#alerts-oracles"
 # slack_channel_pools    = "#alerts-pools"
 # slack_channel_infra    = "#alerts-infra"
+# slack_channel_cdps     = "#alerts-cdps"
 # slack_channel_reserve  = "#alerts-reserve"
 # slack_channel_testnet  = "#alerts-testnet"
 # slack_channel_warnings = "#alerts-warning" # [DEPRECATED] retained for legacy warning-channel compatibility

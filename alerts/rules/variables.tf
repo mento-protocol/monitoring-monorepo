@@ -58,6 +58,12 @@ variable "slack_channel_infra" {
   default     = "#alerts-infra"
 }
 
+variable "slack_channel_cdps" {
+  type        = string
+  description = "Slack channel for CDP (Liquity v2) warning alerts (stability-pool thinning, liquidation/redemption activity)."
+  default     = "#alerts-cdps"
+}
+
 variable "slack_channel_reserve" {
   type        = string
   description = "Slack channel for reserve balance warning alerts."

@@ -21,6 +21,11 @@ resource "grafana_folder" "indexer" {
   uid   = "indexer"
 }
 
+resource "grafana_folder" "cdps" {
+  title = "CDPs"
+  uid   = "cdps"
+}
+
 resource "grafana_folder" "oracle_relayers" {
   title = "Oracle Relayers"
 }

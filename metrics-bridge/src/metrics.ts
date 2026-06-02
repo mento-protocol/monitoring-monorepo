@@ -137,7 +137,9 @@ export type PollErrorKind =
   | "hasura_query"
   | "update_metrics"
   | "mark_healthy"
-  | "rebalance_probe";
+  | "rebalance_probe"
+  | "cdp_query"
+  | "cdp_update";
 const pollErrorLabels = ["kind"] as const;
 
 export const gauges = {

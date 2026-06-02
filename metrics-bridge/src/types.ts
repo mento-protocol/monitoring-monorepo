@@ -42,3 +42,46 @@ export interface PoolRow {
 export interface BridgePoolsResponse {
   Pool: PoolRow[];
 }
+
+// ── CDP (Liquity v2) rows ──────────────────────────────────────────────────
+// One `LiquityInstance` per CDP market (GBPm / CHFm / JPYm on Celo). BigInt
+// columns arrive as decimal strings over GraphQL; Int columns as numbers.
+// `spHeadroom = spDeposits − MIN_BOLD_IN_SP` (signed; −1 wei sentinel until
+// SystemParams is loaded — gate on the collateral's `systemParamsLoaded`).
+export interface LiquityInstanceRow {
+  id: string;
+  collateralId: string;
+  chainId: number;
+  systemDebt: string;
+  spDeposits: string;
+  spHeadroom: string;
+  isShutDown: boolean;
+  currentRedemptionRateBps: number;
+  activeTroveCount: number;
+  liqCountCum: number;
+  redemptionCountCum: number;
+  rebalanceRedemptionCountCum: number;
+  shortfallSubsidyCum: string;
+}
+
+// `LiquityCollateral` carries the per-market identity + immutable SystemParams
+// snapshot. Joined to its instance by `LiquityCollateral.id === instance.collateralId`.
+export interface LiquityCollateralRow {
+  id: string;
+  symbol: string;
+  chainId: number;
+  troveManager: string;
+  debtToken: string;
+  systemParamsLoaded: boolean;
+}
+
+// An instance joined to its collateral — what the CDP gauge updater consumes.
+export interface CdpInstance {
+  instance: LiquityInstanceRow;
+  collateral: LiquityCollateralRow;
+}
+
+export interface BridgeCdpsResponse {
+  LiquityInstance: LiquityInstanceRow[];
+  LiquityCollateral: LiquityCollateralRow[];
+}
