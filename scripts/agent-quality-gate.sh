@@ -537,6 +537,7 @@ add_workspace_quality_commands() {
   add_ui_size_limit "$reason"
   add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
   add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
+  add_package_quality_commands "@mento-protocol/integration-probes" "$reason"
   add_package_quality_commands "@mento-protocol/monitoring-config" "$reason"
   add_aegis_quality_commands "$reason"
 }
@@ -728,6 +729,9 @@ while IFS= read -r path; do
         metrics-bridge/knip.json)
           add_turbo_package_task "@mento-protocol/metrics-bridge" "knip" "knip config changed"
           ;;
+        integration-probes/knip.json)
+          add_turbo_package_task "@mento-protocol/integration-probes" "knip" "knip config changed"
+          ;;
         aegis/knip.json)
           add_turbo_package_task "@mento-protocol/aegis" "knip" "knip config changed"
           ;;
@@ -874,6 +878,15 @@ while IFS= read -r path; do
       esac
       add_package_quality_commands "@mento-protocol/metrics-bridge" "metrics-bridge changed"
       ;;
+    integration-probes/*)
+      add_surface "integration-probes"
+      case "$path" in
+        integration-probes/src/*)
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "integration probe data flow changed"
+          ;;
+      esac
+      add_package_quality_commands "@mento-protocol/integration-probes" "integration-probes changed"
+      ;;
     aegis/*)
       add_surface "aegis"
       case "$path" in
@@ -899,6 +912,7 @@ while IFS= read -r path; do
       add_command "pnpm --filter @mento-protocol/monitoring-config build" "shared-config exports changed"
       add_command "pnpm --filter @mento-protocol/ui-dashboard typecheck" "shared-config consumers should typecheck"
       add_command "pnpm --filter @mento-protocol/metrics-bridge typecheck" "shared-config consumers should typecheck"
+      add_command "pnpm --filter @mento-protocol/integration-probes typecheck" "shared-config consumers should typecheck"
       # shared-config is imported into the dashboard client bundle via
       # `@mento-protocol/monitoring-config` — changes to chain/token
       # metadata or helpers can shift the emitted JS. Mirrors the
@@ -1095,6 +1109,7 @@ while IFS= read -r path; do
           add_package_quality_commands "@mento-protocol/ui-dashboard" "ESLint baseline wrapper changed"
           add_package_quality_commands "@mento-protocol/indexer-envio" "ESLint baseline wrapper changed"
           add_package_quality_commands "@mento-protocol/metrics-bridge" "ESLint baseline wrapper changed"
+          add_package_quality_commands "@mento-protocol/integration-probes" "ESLint baseline wrapper changed"
           ;;
         scripts/eslint-baseline-diff.test.mjs)
           add_command "node scripts/eslint-baseline-diff.test.mjs" "ESLint baseline wrapper test changed"

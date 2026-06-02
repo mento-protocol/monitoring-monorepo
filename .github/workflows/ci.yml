@@ -42,6 +42,7 @@ jobs:
       ui: ${{ steps.filter.outputs.ui }}
       indexer: ${{ steps.filter.outputs.indexer }}
       bridge: ${{ steps.filter.outputs.bridge }}
+      integrationProbes: ${{ steps.filter.outputs.integrationProbes }}
       aegis: ${{ steps.filter.outputs.aegis }}
       alerts: ${{ steps.filter.outputs.alerts }}
       terraform: ${{ steps.filter.outputs.terraform }}
@@ -104,6 +105,17 @@ jobs:
               - pnpm-lock.yaml
               - package.json
               - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
+            integrationProbes:
+              - integration-probes/**
+              - shared-config/**
+              - scripts/eslint-baseline-diff.mjs
+              - pnpm-lock.yaml
+              - package.json
+              - pnpm-workspace.yaml
+              - .node-version
+              - .github/workflows/ci.yml
+              - .github/workflows/integration-probes.yml
               - .github/actions/pnpm-install/**
             aegis:
               - aegis/**
@@ -432,6 +444,47 @@ jobs:
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
+  integration-probes:
+    name: Quality Checks (integration-probes)
+    needs: changes
+    if: needs.changes.outputs.integrationProbes == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    permissions:
+      checks: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: Resolve main baseline (PR baseline-growth check)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          if git ls-tree --name-only origin/main -- integration-probes/eslint-baseline.json | grep -q .; then
+            git show origin/main:integration-probes/eslint-baseline.json > /tmp/main-baseline-integration-probes.json
+          else
+            : > /tmp/main-baseline-integration-probes.json
+          fi
+          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-integration-probes.json" >> "$GITHUB_ENV"
+      - name: Typecheck
+        run: pnpm --filter @mento-protocol/integration-probes typecheck
+      - name: Lint
+        run: pnpm --filter @mento-protocol/integration-probes lint
+      - name: Knip (dead-code / dep hygiene, blocking)
+        run: pnpm --filter @mento-protocol/integration-probes knip
+      - name: Test with coverage
+        run: pnpm --filter @mento-protocol/integration-probes test:coverage
+      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        with:
+          fail_ci_if_error: false
+          flags: integration-probes
+          directory: integration-probes/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
   alerts:
     name: Quality Checks (alerts-onchain-event-handler)
     needs: changes
@@ -633,7 +686,7 @@ jobs:
     # workspace edit to recheck the architecture. Also fires on `codeHealth`
     # (dep-cruiser config + knip configs) so a PR that only edits the
     # rule file is validated against the codebase before merge.
-    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -657,6 +710,7 @@ jobs:
         ui,
         indexer,
         bridge,
+        integration-probes,
         aegis,
         alerts,
         terraform,
@@ -673,6 +727,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,aegis,alerts,terraform,deps,scripts
+          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,terraform,deps,scripts
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

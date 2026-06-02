@@ -11,12 +11,12 @@ last_verified: 2026-05-28
 `terraform.stacks.json` is the machine-readable registry for Terraform roots.
 Use it instead of inferring ownership from directory names.
 
-| Stack             | Path               | State prefix          | Owns                                                                                                                                      | Plan/apply policy                                                 |
-| ----------------- | ------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, CI WIF/IAM | Manual plan; human-approved local apply                           |
-| `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings        | PR plan; `main` apply through the `production` GitHub Environment |
-| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Sentry bridge, Slack channel lifecycle, related GCP resources                                   | PR plan; `main` apply through the `production` GitHub Environment |
-| `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard, Aegis folder, Aegis service-health rule group                                                                    | PR plan; `main` apply through the `production` GitHub Environment |
+| Stack             | Path               | State prefix          | Owns                                                                                                                                                                         | Plan/apply policy                                                 |
+| ----------------- | ------------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, CI WIF/IAM, repo-level GitHub Actions secrets | Manual plan; human-approved local apply                           |
+| `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                           | PR plan; `main` apply through the `production` GitHub Environment |
+| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Sentry bridge, Slack channel lifecycle, related GCP resources                                                                      | PR plan; `main` apply through the `production` GitHub Environment |
+| `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard, Aegis folder, Aegis service-health rule group                                                                                                       | PR plan; `main` apply through the `production` GitHub Environment |
 
 ## Commands
 

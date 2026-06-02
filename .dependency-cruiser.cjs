@@ -3,7 +3,7 @@
  *
  * Tier 1 (this file, blocking):
  *   - no circular dependencies
- *   - no cross-package leakage between dashboard / indexer / metrics-bridge / aegis
+ *   - no cross-package leakage between dashboard / indexer / metrics-bridge / integration-probes / aegis
  *   - shared-config must stay a leaf (no imports of other workspace packages)
  *
  * Tier 3 intra-package layer rules (also in this file, blocking):
@@ -114,6 +114,22 @@ module.exports = {
       to: { path: "^ui-dashboard/" },
     },
     {
+      name: "integration-probes-no-runtime-package-leakage",
+      severity: "error",
+      comment:
+        "integration-probes runs as an external quote probe and must not import dashboard, indexer, metrics-bridge, or Aegis runtime internals. Shared metadata should come through shared-config.",
+      from: { path: "^integration-probes/" },
+      to: { path: "^(ui-dashboard|indexer-envio|metrics-bridge|aegis)/" },
+    },
+    {
+      name: "runtime-packages-no-integration-probes",
+      severity: "error",
+      comment:
+        "ui-dashboard, indexer-envio, and metrics-bridge must not import integration-probes. Probe output crosses into the dashboard only through the Upstash snapshot schema.",
+      from: { path: "^(ui-dashboard|indexer-envio|metrics-bridge)/" },
+      to: { path: "^integration-probes/" },
+    },
+    {
       name: "shared-config-stays-leaf",
       severity: "error",
       comment:
@@ -122,7 +138,9 @@ module.exports = {
         path: "^shared-config/",
         pathNot: "^shared-config/__tests__/",
       },
-      to: { path: "^(ui-dashboard|indexer-envio|metrics-bridge)/" },
+      to: {
+        path: "^(ui-dashboard|indexer-envio|metrics-bridge|integration-probes)/",
+      },
     },
     {
       name: "shared-config-tests-only-indexer-config-json",
@@ -141,7 +159,7 @@ module.exports = {
       comment:
         "shared-config tests must not import ui-dashboard or metrics-bridge runtime. The dashboard/bridge boundary has no data-only escape hatch like the indexer one.",
       from: { path: "^shared-config/__tests__/" },
-      to: { path: "^(ui-dashboard|metrics-bridge)/" },
+      to: { path: "^(ui-dashboard|metrics-bridge|integration-probes)/" },
     },
     {
       name: "aegis-no-dashboard-indexer-bridge",
@@ -149,7 +167,9 @@ module.exports = {
       comment:
         "Aegis is the App Engine v2 alerting service and must not import dashboard, indexer, or metrics-bridge internals. Shared monitoring metadata should be routed through shared-config.",
       from: { path: "^aegis/" },
-      to: { path: "^(ui-dashboard|indexer-envio|metrics-bridge)/" },
+      to: {
+        path: "^(ui-dashboard|indexer-envio|metrics-bridge|integration-probes)/",
+      },
     },
     {
       name: "dashboard-indexer-bridge-no-aegis",
@@ -282,6 +302,17 @@ module.exports = {
       to: { path: "^ui-dashboard/src/app/revenue/_components/" },
     },
     {
+      name: "dashboard-route-private-integrations",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/integrations/_components/ is private to the integrations route. No code outside app/integrations/ — including lib/, components/, or other routes — may import from it.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/integrations/",
+      },
+      to: { path: "^ui-dashboard/src/app/integrations/_components/" },
+    },
+    {
       name: "indexer-handlers-no-rpc-internals",
       severity: "error",
       comment:
@@ -322,7 +353,7 @@ module.exports = {
       ],
     },
     includeOnly: {
-      path: "^(shared-config|ui-dashboard|indexer-envio|metrics-bridge|aegis)/",
+      path: "^(shared-config|ui-dashboard|indexer-envio|metrics-bridge|integration-probes|aegis)/",
     },
     enhancedResolveOptions: {
       exportsFields: ["exports"],

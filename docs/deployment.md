@@ -116,6 +116,11 @@ service-health alerts use `aegis` (`pnpm aegis:tf:plan`).
 
 Most env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit Terraform-managed vars manually in the Vercel dashboard. The Blob store identity variables are managed by the Vercel Blob store integration and should not be added to Terraform.
 
+Agent rule: never create or rotate dashboard, workflow, or platform secrets with
+manual CLI commands (`gh secret set`, `vercel env add`, `gcloud secrets versions
+add`, etc.). Add or update the owning Terraform resource/integration instead,
+document the source of truth here, and wait for a human-approved plan/apply.
+
 | Variable                   | Source                   | Description                                      |
 | -------------------------- | ------------------------ | ------------------------------------------------ |
 | `NEXT_PUBLIC_HASURA_URL`   | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad mainnet)       |
@@ -123,6 +128,32 @@ Most env vars are managed by Terraform (set for `production` and `preview` targe
 | `UPSTASH_REDIS_REST_TOKEN` | Terraform output         | Address labels Redis token — auto-set            |
 | `BLOB_STORE_ID`            | Vercel store integration | Blob OIDC store id for backup and restore routes |
 | `BLOB_WEBHOOK_PUBLIC_KEY`  | Vercel store integration | Blob OIDC public key for the connected store     |
+
+### Aggregator Integration Probes
+
+The `/integrations` dashboard page reads the latest quote-only probe snapshot
+from Upstash key `integration-probes:latest`. The scheduled
+`.github/workflows/integration-probes.yml` workflow refreshes it daily and can
+also be run manually with `workflow_dispatch`. `integration-probes:latest`
+expires after 3 days so missed scheduled probes surface as stale/missing
+dashboard data; dated history keys expire after 90 days.
+
+```bash
+pnpm integrations:probe
+pnpm integrations:probe --write-upstash
+pnpm integrations:probe --adapter openocean,relay --chain 42220 --pair-limit 1 --output .tmp/integration-probe-smoke.json
+```
+
+`INTEGRATION_PROBES_HASURA_URL` can override `NEXT_PUBLIC_HASURA_URL` for pool
+discovery. `LIFI_API_KEY` is optional but recommended for scheduled runs because
+the unauthenticated LI.FI quote API can return multi-hour public rate limits.
+`OPENOCEAN_API_KEY` enables the OpenOcean Pro endpoint for OpenOcean checks and
+is managed by the platform Terraform stack from `openocean_api_key`. The same
+platform stack mirrors `INTEGRATION_PROBES_HASURA_URL`,
+`UPSTASH_REDIS_REST_URL`, and `UPSTASH_REDIS_REST_TOKEN` into repo-level GitHub
+Actions secrets so scheduled writers use the same Terraform-owned runtime as the
+dashboard. Adapter credentials are optional; missing keys render as `needs_key`
+instead of failing the chain check.
 
 ### Address Book & Backup Cron
 
