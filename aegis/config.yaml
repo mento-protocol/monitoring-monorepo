@@ -35,6 +35,38 @@ global:
     RelayerSignerXOFUSD: '0x2C5dB0140b6B25CA6a37304198095B23E2604dF2'
     RelayerSignerZARUSD: '0xc0342D31Cc875f3dC85E3Ab352e60698444197AE'
 
+tokens:
+  cUSD:
+    decimals: 18
+  cEUR:
+    decimals: 18
+  cREAL:
+    decimals: 18
+  eXOF:
+    decimals: 18
+  cKES:
+    decimals: 18
+  PUSO:
+    decimals: 18
+  cCOP:
+    decimals: 18
+  cGHS:
+    decimals: 18
+  cGBP:
+    decimals: 18
+  cZAR:
+    decimals: 18
+  cCAD:
+    decimals: 18
+  cAUD:
+    decimals: 18
+  cCHF:
+    decimals: 18
+  cNGN:
+    decimals: 18
+  cJPY:
+    decimals: 18
+
 chains:
   - id: celo
     label: celo

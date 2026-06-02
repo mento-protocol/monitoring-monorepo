@@ -12,6 +12,13 @@ const GlobalConfig = z.object({
   vars: z.record(z.string(), z.string()),
 });
 
+const TokenConfig = z
+  .object({
+    decimals: z.number().int().nonnegative(),
+  })
+  .brand<'TokenConfig'>();
+export type TokenConfig = z.infer<typeof TokenConfig>;
+
 export const ChainConfig = z
   .object({
     id: z.string(),
@@ -48,6 +55,7 @@ export type MetricTemplate = z.infer<typeof MetricTemplate>;
 const Config = z
   .object({
     global: GlobalConfig,
+    tokens: z.record(z.string(), TokenConfig).default({}),
     chains: z.array(ChainConfig),
     metrics: z.array(MetricTemplate),
   })
