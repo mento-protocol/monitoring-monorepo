@@ -11,6 +11,7 @@ export type OracleReporterType = (typeof ORACLE_REPORTER_TYPES)[number];
 
 type RawFeedEntry = {
   pair: string;
+  chainlinkSlug?: string;
   type?: string;
 };
 
@@ -41,6 +42,13 @@ function normalizeAddress(address: string): string {
   return address.toLowerCase();
 }
 
+function feedEntry(
+  chainId: number,
+  feedAddress: string,
+): RawFeedEntry | undefined {
+  return chainEntry(chainId)?.feeds?.[normalizeAddress(feedAddress)];
+}
+
 function isReporterType(
   value: string | undefined,
 ): value is OracleReporterType {
@@ -51,26 +59,25 @@ export function getRateFeedPair(
   chainId: number,
   feedAddress: string,
 ): string | null {
-  return (
-    chainEntry(chainId)?.feeds?.[normalizeAddress(feedAddress)]?.pair ?? null
-  );
+  return feedEntry(chainId, feedAddress)?.pair ?? null;
 }
 
 export function getRateFeedReporterType(
   chainId: number,
   feedAddress: string,
 ): OracleReporterType | null {
-  const raw = chainEntry(chainId)?.feeds?.[normalizeAddress(feedAddress)]?.type;
+  const raw = feedEntry(chainId, feedAddress)?.type;
   return isReporterType(raw) ? raw : null;
 }
 
 export function getChainlinkDataFeedUrl(
   chainId: number,
   pair: string,
+  slugOverride?: string,
 ): string | null {
   const path = CHAINLINK_FEED_PATH_BY_CHAIN[chainId];
   if (!path) return null;
-  const slug = pair.toLowerCase().replace(/\//g, "-");
+  const slug = slugOverride ?? pair.toLowerCase().replace(/\//g, "-");
   return `https://data.chain.link/feeds/${path}/${slug}`;
 }
 
@@ -78,8 +85,10 @@ export function getRateFeedChainlinkDataFeedUrl(
   chainId: number,
   feedAddress: string,
 ): string | null {
-  const pair = getRateFeedPair(chainId, feedAddress);
-  return pair ? getChainlinkDataFeedUrl(chainId, pair) : null;
+  const entry = feedEntry(chainId, feedAddress);
+  return entry?.type === "CHAINLINK"
+    ? getChainlinkDataFeedUrl(chainId, entry.pair, entry.chainlinkSlug)
+    : null;
 }
 
 export function getOracleReporterType(

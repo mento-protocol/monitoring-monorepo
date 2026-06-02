@@ -3,6 +3,7 @@
 import { isVirtualPool, type Pool, type RateFeed } from "@/lib/types";
 import {
   getChainlinkDataFeedUrl,
+  getRateFeedChainlinkDataFeedUrl,
   getRateFeedPair,
   getRateFeedReporterType,
 } from "@mento-protocol/monitoring-config/oracle-reporters";
@@ -199,7 +200,7 @@ function formatOracleSource(
       label,
       url:
         uniqueTypes[0] === "CHAINLINK" && pair
-          ? getChainlinkDataFeedUrl(pool.chainId, pair)
+          ? getPoolChainlinkUrl(pool, pair)
           : null,
     };
   }
@@ -222,11 +223,16 @@ function formatStaticOracleSource(pool: Pool, pair: string): OracleSource {
     : "SortedOracles";
   return {
     label: `${labelPrefix} ${pair}`,
-    url:
-      reporterType === "CHAINLINK"
-        ? getChainlinkDataFeedUrl(pool.chainId, pair)
-        : null,
+    url: reporterType === "CHAINLINK" ? getPoolChainlinkUrl(pool, pair) : null,
   };
+}
+
+function getPoolChainlinkUrl(pool: Pool, pair: string): string | null {
+  const feedAddress = pool.referenceRateFeedID;
+  return feedAddress
+    ? (getRateFeedChainlinkDataFeedUrl(pool.chainId, feedAddress) ??
+        getChainlinkDataFeedUrl(pool.chainId, pair))
+    : getChainlinkDataFeedUrl(pool.chainId, pair);
 }
 
 function usePoolConfigExt(pool: Pool, isVirtual: boolean) {

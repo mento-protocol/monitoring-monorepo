@@ -114,7 +114,12 @@ locals {
   # the split raw contract flag. Fall back to the legacy `oracle_ok` series;
   # once both exist, PromQL `or` keeps the left-hand contract-only metric.
   oracle_contract_down_active_promql = "mento_pool_oracle_contract_ok or mento_pool_oracle_ok"
-  oracle_live_down_active_promql     = "mento_pool_oracle_ok unless on(chain_id, pool_id, pair) (${local.fx_oracle_pause_promql})"
+  # Oracle Down should not double-page when the raw contract flag is already
+  # false; Oracle Contract Down owns that failure. During rollout, keep the
+  # legacy live-down series only for pools where the split contract metric is
+  # absent.
+  oracle_live_down_unpaused_promql = "((mento_pool_oracle_ok and on(chain_id, pool_id, pair) (mento_pool_oracle_contract_ok > 0.5)) or (mento_pool_oracle_ok unless on(chain_id, pool_id, pair) mento_pool_oracle_contract_ok))"
+  oracle_live_down_active_promql   = "(${local.oracle_live_down_unpaused_promql}) unless on(chain_id, pool_id, pair) (${local.fx_oracle_pause_promql})"
 
   # Shared per-series weekend suppressors for deviation/rebalancer rules.
   # They intentionally gate only FX pairs (non-USD-pegged pair labels) and

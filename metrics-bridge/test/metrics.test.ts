@@ -101,7 +101,7 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
-  it("uses lastOracleReportAt, not the latest reporter timestamp, for live oracle freshness", async () => {
+  it("uses oracleTimestamp for live oracle freshness when the median value is flat", async () => {
     updateMetrics(
       [
         makePool({
@@ -113,14 +113,14 @@ describe("updateMetrics", () => {
     );
     expect(
       await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
-    ).toBe(0);
+    ).toBe(1);
     expect(
       await getGaugeValue(
         register,
         "mento_pool_oracle_live_timestamp",
         poolLabels,
       ),
-    ).toBe(1713199600);
+    ).toBe(1713200000);
     expect(
       await getGaugeValue(register, "mento_pool_oracle_timestamp", {
         ...poolLabels,
@@ -145,7 +145,7 @@ describe("updateMetrics", () => {
       [
         makePool({
           oracleExpiry: "0",
-          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 301),
+          oracleTimestamp: String(DEFAULT_NOW_SECONDS - 301),
         }),
       ],
       DEFAULT_NOW_SECONDS,
@@ -161,7 +161,7 @@ describe("updateMetrics", () => {
         makePool({
           chainId: 143,
           oracleExpiry: "0",
-          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 360),
+          oracleTimestamp: String(DEFAULT_NOW_SECONDS - 360),
         }),
         DEFAULT_NOW_SECONDS,
       ),
@@ -171,7 +171,7 @@ describe("updateMetrics", () => {
         makePool({
           chainId: 143,
           oracleExpiry: "0",
-          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 361),
+          oracleTimestamp: String(DEFAULT_NOW_SECONDS - 361),
         }),
         DEFAULT_NOW_SECONDS,
       ),
@@ -247,8 +247,8 @@ describe("updateMetrics", () => {
     ).toBe(1713200000);
   });
 
-  it("parses live oracle timestamp from lastOracleReportAt", async () => {
-    updateMetrics([makePool({ lastOracleReportAt: "1713199900" })]);
+  it("parses live oracle timestamp from oracleTimestamp", async () => {
+    updateMetrics([makePool({ oracleTimestamp: "1713199900" })]);
     expect(
       await getGaugeValue(
         register,

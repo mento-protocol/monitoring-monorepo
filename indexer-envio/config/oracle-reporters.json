@@ -15,6 +15,7 @@
       },
       "0xfde35b45cbd2504fb5dc514f007bc2de27034274": {
         "pair": "JPY/USD",
+        "chainlinkSlug": "jpy-usd-fx",
         "type": "CHAINLINK"
       },
       "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a": {

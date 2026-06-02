@@ -242,8 +242,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
 
     # See Oracle Liveness for the OracleTs / OracleAge rationale. Oracle Down
     # fires on the same live freshness anchor, so its Slack age text cannot
-    # show a fresh raw reporter update while the median freshness gate is
-    # expired.
+    # drift from the timestamp used by the live-down gate.
     data {
       ref_id         = "OracleTs"
       datasource_uid = var.prometheus_datasource_uid

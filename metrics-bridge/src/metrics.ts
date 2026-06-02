@@ -423,18 +423,18 @@ function recordStatusAndOracleMetrics(
     gauges.oracleMarketPause.set({ ...labels, reason: marketPause }, 1);
   }
   gauges.oracleTimestamp.set(oracleLabels, Number(pool.oracleTimestamp));
-  gauges.oracleLiveTimestamp.set(labels, Number(pool.lastOracleReportAt));
+  gauges.oracleLiveTimestamp.set(labels, Number(pool.oracleTimestamp));
   gauges.oracleExpiry.set(oracleLabels, oracleExpirySeconds(pool));
 }
 
 export function isOracleLive(
   pool: Pick<
     PoolRow,
-    "chainId" | "oracleOk" | "lastOracleReportAt" | "oracleExpiry"
+    "chainId" | "oracleOk" | "oracleTimestamp" | "oracleExpiry"
   >,
   nowSeconds: number,
 ): boolean {
-  const timestamp = Number(pool.lastOracleReportAt);
+  const timestamp = Number(pool.oracleTimestamp);
   const expiry = oracleExpirySeconds(pool);
   return (
     pool.oracleOk &&

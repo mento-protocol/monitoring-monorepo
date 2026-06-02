@@ -11,7 +11,10 @@ import {
 } from "../src/oracle-reporters";
 
 type RawChainEntry = {
-  feeds: Record<string, { pair: string; type?: string }>;
+  feeds: Record<
+    string,
+    { pair: string; chainlinkSlug?: string; type?: string }
+  >;
   reporters?: Record<string, { type?: string }>;
 };
 
@@ -73,6 +76,12 @@ describe("oracle reporter registry", () => {
         "0xea4103a6a122fbe2cdb07a80d4d293be07bb29fa",
       ),
     ).toBe("https://data.chain.link/feeds/monad/monad/gbp-usd");
+    expect(
+      getRateFeedChainlinkDataFeedUrl(
+        42220,
+        "0xfde35b45cbd2504fb5dc514f007bc2de27034274",
+      ),
+    ).toBe("https://data.chain.link/feeds/celo/mainnet/jpy-usd-fx");
   });
 
   it("returns stable defaults for unknown feeds and chains", () => {

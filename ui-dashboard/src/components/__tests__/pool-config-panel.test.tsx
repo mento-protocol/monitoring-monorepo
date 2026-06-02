@@ -10,6 +10,7 @@ import {
 
 const USDC_FEED = "0xa1a8003936862e7a15092a91898d69fa8bce290c";
 const GBP_FEED = "0xf590b62f9cfcc6409075b1ecac8176fe25744b88";
+const JPY_FEED = "0xfde35b45cbd2504fb5dc514f007bc2de27034274";
 const MONAD_GBP_FEED = "0xea4103a6a122fbe2cdb07a80d4d293be07bb29fa";
 
 function defaultUseGQL(query?: unknown) {
@@ -268,6 +269,42 @@ describe("PoolConfigPanel", () => {
         'href="https://data.chain.link/feeds/monad/monad/gbp-usd"',
       );
       expect(html).not.toContain("feeds/celo/mainnet/gbp-usd");
+    });
+
+    it("uses per-feed Chainlink slug overrides", () => {
+      mockUseGQL.mockImplementation((query?: unknown) => {
+        if (query === POOL_RATE_FEED_EXT) {
+          return {
+            data: {
+              RateFeed: [
+                {
+                  id: `42220-${JPY_FEED}`,
+                  chainId: 42220,
+                  feedAddress: JPY_FEED,
+                  pair: "JPY/USD",
+                  reporterTypes: ["CHAINLINK"],
+                },
+              ],
+            },
+          };
+        }
+        return defaultUseGQL(query);
+      });
+      const html = renderToStaticMarkup(
+        <PoolConfigPanel
+          pool={{
+            ...BASE_POOL,
+            token0: GBP_ADDR,
+            token1: USDM_ADDR,
+            referenceRateFeedID: JPY_FEED,
+          }}
+        />,
+      );
+      expect(html).toContain("Chainlink JPY/USD");
+      expect(html).toContain(
+        'href="https://data.chain.link/feeds/celo/mainnet/jpy-usd-fx"',
+      );
+      expect(html).not.toContain('feeds/celo/mainnet/jpy-usd"');
     });
 
     it("keeps the Chainlink link during RateFeed schema lag for known feeds", () => {
