@@ -101,7 +101,7 @@ assert.equal(
 assert.equal(parsePullRequestNumberFromCommitMessage("manual commit"), null);
 
 const payload = buildSlackPayload({
-  channel: "#ci-failures",
+  channel: "#ci-operations",
   stackLabel: "alerts/infra",
   targetEnvironment: "production",
   workflowName: "Alerts Infra",
@@ -121,7 +121,7 @@ const payload = buildSlackPayload({
   parsedPlan: parsed,
 });
 
-assert.equal(payload.channel, "#ci-failures");
+assert.equal(payload.channel, "#ci-operations");
 assert.equal(
   payload.text,
   "Terraform apply pending: alerts/infra (2 add, 1 change, 1 destroy)",
@@ -133,7 +133,7 @@ assert.match(
 assert.match(JSON.stringify(payload.blocks), /Resource addresses only/);
 
 const payloadNoPr = buildSlackPayload({
-  channel: "#ci-failures",
+  channel: "#ci-operations",
   stackLabel: "alerts<&>/rules",
   targetEnvironment: "production",
   workflowName: "Alerts Rules",
