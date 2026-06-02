@@ -99,6 +99,19 @@ interface PreparedCdpSeries {
   spHeadroom: number | null;
 }
 
+// `toHumanUnits` truncates any |value| < 1e-6 tokens (< 1e12 wei) to exactly 0,
+// dropping the sign. For spHeadroom that creates a blind spot precisely at the
+// floor: deposits a sub-microtoken below MIN_BOLD_IN_SP would publish 0 and
+// never trip the critical `mento_cdp_sp_headroom < 0` rule. Preserve the sign
+// at sub-precision (the magnitude there is dust either way) so a just-below-
+// floor breach still fires. Positive dust is left as 0 — at/above floor is not
+// a breach.
+function signedHeadroomHuman(rawHeadroom: bigint): number {
+  const human = toHumanUnits(rawHeadroom, DEBT_TOKEN_DECIMALS);
+  if (human === 0 && rawHeadroom < 0n) return -1e-6;
+  return human;
+}
+
 // spHeadroom carries a −1-wei sentinel until SystemParams is loaded; a real
 // negative headroom (the danger we alert on) is orders of magnitude larger.
 // Gate on the collateral flag so the critical "below floor" rule never reads
@@ -122,7 +135,7 @@ function prepareCdpSeries({
       DEBT_TOKEN_DECIMALS,
     ),
     spHeadroom: collateral.systemParamsLoaded
-      ? toHumanUnits(BigInt(instance.spHeadroom), DEBT_TOKEN_DECIMALS)
+      ? signedHeadroomHuman(BigInt(instance.spHeadroom))
       : null,
   };
 }

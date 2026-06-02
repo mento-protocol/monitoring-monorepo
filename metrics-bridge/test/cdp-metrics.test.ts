@@ -90,6 +90,24 @@ describe("updateCdpMetrics", () => {
     ).toBe(0);
   });
 
+  it("publishes a NEGATIVE headroom for a sub-microtoken floor breach (sign preserved below toHumanUnits precision)", async () => {
+    // deposits 1 wei below MIN_BOLD_IN_SP → headroom = -1 wei. toHumanUnits
+    // truncates |x| < 1e-6 to 0; without sign preservation the < 0 critical
+    // rule would never fire on a genuine just-below-floor breach.
+    updateCdpMetrics([
+      makeCdp({
+        instance: { spHeadroom: "-1" },
+        collateral: { systemParamsLoaded: true },
+      }),
+    ]);
+    const headroom = await getGaugeValue(
+      register,
+      "mento_cdp_sp_headroom",
+      labels,
+    );
+    expect(headroom).toBeLessThan(0);
+  });
+
   it("withholds the headroom gauge until SystemParams is loaded (sentinel guard)", async () => {
     updateCdpMetrics([
       makeCdp({
