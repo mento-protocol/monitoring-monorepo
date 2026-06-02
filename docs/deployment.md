@@ -116,6 +116,11 @@ service-health alerts use `aegis` (`pnpm aegis:tf:plan`).
 
 Most env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit Terraform-managed vars manually in the Vercel dashboard. The Blob store identity variables are managed by the Vercel Blob store integration and should not be added to Terraform.
 
+Agent rule: never create or rotate dashboard, workflow, or platform secrets with
+manual CLI commands (`gh secret set`, `vercel env add`, `gcloud secrets versions
+add`, etc.). Add or update the owning Terraform resource/integration instead,
+document the source of truth here, and wait for a human-approved plan/apply.
+
 | Variable                   | Source                   | Description                                      |
 | -------------------------- | ------------------------ | ------------------------------------------------ |
 | `NEXT_PUBLIC_HASURA_URL`   | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad mainnet)       |

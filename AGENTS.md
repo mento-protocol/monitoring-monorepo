@@ -26,6 +26,16 @@ Context authority, placement, and metadata rules live in
 and non-canonical notes/plans as historical input that must be verified before
 use.
 
+## Secrets Rule (IaC Before CLI)
+
+Agents must not create, rotate, or overwrite secrets manually with CLI commands
+such as `gh secret set`, `vercel env add`, `gcloud secrets versions add`, or
+provider-specific secret commands. Always prefer IaC: model the secret in the
+owning Terraform stack or the documented owning integration, update the docs in
+the same PR, and surface the required human-approved plan/apply step. If the
+secret cannot be represented in IaC yet, stop and ask for an IaC path instead of
+using a CLI workaround.
+
 > **Any PR that adds or changes stateful data flow across layers must ship with explicit invariants, degraded-mode behavior, and interaction tests before opening.**
 
 This repo has already paid the tax for learning this the hard way.
