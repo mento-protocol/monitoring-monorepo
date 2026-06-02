@@ -86,13 +86,14 @@ Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state 
 
 **Live protocol alert rules** (Terraform-managed in `alerts/rules/`; Aegis service-health stays in `aegis/terraform/`):
 
-| Alert Group      | What it monitors                                                | Channels                                                                            |
-| ---------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Oracle Relayers  | Stale price feeds, low native-token balance for relayer wallets | Slack #alerts-oracles + #alerts-critical/Splunk (page, prod chains)                 |
-| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                                | Slack #alerts-reserve                                                               |
-| Trading Modes    | Circuit breakers tripped (trading halted per rate feed)         | Slack #alerts-critical/Splunk (page, prod chains); #alerts-testnet (staging chains) |
-| Trading Limits   | L0/L1/LG utilization >90%                                       | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)                     |
-| Aegis Service    | RPC failures, data staleness                                    | Slack #alerts-infra; #alerts-critical/Splunk (page)                                 |
+| Alert Group      | What it monitors                                                  | Channels                                                                                |
+| ---------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Oracle Relayers  | Stale price feeds, low native-token balance for relayer wallets   | Slack #alerts-oracles + #alerts-critical/Splunk (page, prod chains)                     |
+| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                                  | Slack #alerts-reserve                                                                   |
+| Trading Modes    | Circuit breakers tripped (trading halted per rate feed)           | Slack #alerts-critical/Splunk (page, prod chains); #alerts-testnet (staging chains)     |
+| Trading Limits   | L0/L1/LG utilization >90%                                         | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)                         |
+| CDPs             | SP headroom/thinning, shutdown, liquidation/redemption, shortfall | Slack #alerts-cdps (warnings); #alerts-critical (shutdown / SP-below-floor / shortfall) |
+| Aegis Service    | RPC failures, data staleness                                      | Slack #alerts-infra; #alerts-critical/Splunk (page)                                     |
 
 Slack is the active delivery path; page-severity alerts still escalate through Splunk On-Call.
 
@@ -133,10 +134,16 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 | `oracles`        | Oracle Report Outlier                   | warning  | consecutive-report jump ≥1% FX / ≥0.5% USD-pegged, within 10m (FX-weekend gated) |
 | `metrics-bridge` | Not Reporting                           | critical | `time() - bridge_last_poll > 90` for 2m                                          |
 | `metrics-bridge` | Poll Errors                             | critical | `sum by (kind)(rate(poll_errors_total{kind=~".+"}[5m])) > 0.01/s` for 10m        |
+| `cdps`           | System Shutdown                         | critical | `mento_cdp_shutdown > 0.5` for 1m                                                |
+| `cdps`           | Stability Pool Below Floor              | critical | `mento_cdp_sp_headroom < 0` for 15m (below MIN_BOLD_IN_SP)                       |
+| `cdps`           | Stability Pool Thin                     | warning  | `sp_deposits / system_debt < 0.02` for 30m                                       |
+| `cdps`           | Liquidations Detected                   | warning  | `increase(mento_cdp_liquidation_total[1h]) > 0.5`                                |
+| `cdps`           | User Redemptions Detected               | warning  | `increase(mento_cdp_user_redemption_total[1h]) > 0.5` (excl. rebalancer)         |
+| `cdps`           | Redemption Shortfall Subsidized         | critical | `increase(mento_cdp_shortfall_subsidy_total[6h]) > 0`                            |
 
 ### Deferred
 
-- **Stability Pool headroom** (`service=cdps`) — blocked on production CDP backfill and alert-rule rollout.
+- **TCR / ICR-distribution alerts** (`service=cdps`) — deferred until the indexer computes a real TCR (today `tcrBps`/`icrP1Bps`/`icrFracBelowMcrBps` are `−1` sentinels). Tracked under "CDP live risk refinements" below.
 
 ---
 
