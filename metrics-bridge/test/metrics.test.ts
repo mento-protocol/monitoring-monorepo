@@ -5,6 +5,7 @@ import {
   counters,
   updateMetrics,
   healthStatusToNumber,
+  isOracleLive,
 } from "../src/metrics.js";
 import { resetDeviationAlertStateForTests } from "../src/deviation-alert-state.js";
 import { makePool, getGaugeValue, getMetricValues } from "./fixtures.js";
@@ -93,6 +94,13 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
+  it("keeps oracle_ok at 1 at the exact expiry boundary", async () => {
+    updateMetrics([makePool()], 1713200300);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
+    ).toBe(1);
+  });
+
   it("uses lastOracleReportAt, not the latest reporter timestamp, for live oracle freshness", async () => {
     updateMetrics(
       [
@@ -122,11 +130,52 @@ describe("updateMetrics", () => {
     ).toBe(1713200000);
   });
 
-  it("sets oracle_ok to 0 when expiry is unavailable", async () => {
+  it("uses the Celo fallback expiry when indexed expiry is unavailable", async () => {
     updateMetrics([makePool({ oracleExpiry: "0" })], DEFAULT_NOW_SECONDS);
     expect(
       await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_expiry", oracleLabels),
+    ).toBe(300);
+  });
+
+  it("marks reports stale after the Celo fallback expiry", async () => {
+    updateMetrics(
+      [
+        makePool({
+          oracleExpiry: "0",
+          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 301),
+        }),
+      ],
+      DEFAULT_NOW_SECONDS,
+    );
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
     ).toBe(0);
+  });
+
+  it("uses the Monad fallback expiry for zero-expiry live checks", () => {
+    expect(
+      isOracleLive(
+        makePool({
+          chainId: 143,
+          oracleExpiry: "0",
+          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 360),
+        }),
+        DEFAULT_NOW_SECONDS,
+      ),
+    ).toBe(true);
+    expect(
+      isOracleLive(
+        makePool({
+          chainId: 143,
+          oracleExpiry: "0",
+          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 361),
+        }),
+        DEFAULT_NOW_SECONDS,
+      ),
+    ).toBe(false);
   });
 
   it("publishes FX weekend market pause during the closed window", async () => {

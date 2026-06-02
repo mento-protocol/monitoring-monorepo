@@ -68,6 +68,13 @@ export function healthStatusToNumber(status: string): number {
 }
 
 const fp = (s: string) => parseFloat(s);
+const ORACLE_STALE_SECONDS = 300;
+const ORACLE_STALE_SECONDS_BY_CHAIN: Readonly<Record<number, number>> = {
+  42220: 300,
+  11142220: 300,
+  143: 360,
+  10143: 360,
+};
 
 export const register = new Registry();
 
@@ -417,23 +424,32 @@ function recordStatusAndOracleMetrics(
   }
   gauges.oracleTimestamp.set(oracleLabels, Number(pool.oracleTimestamp));
   gauges.oracleLiveTimestamp.set(labels, Number(pool.lastOracleReportAt));
-  gauges.oracleExpiry.set(oracleLabels, Number(pool.oracleExpiry));
+  gauges.oracleExpiry.set(oracleLabels, oracleExpirySeconds(pool));
 }
 
 export function isOracleLive(
-  pool: Pick<PoolRow, "oracleOk" | "lastOracleReportAt" | "oracleExpiry">,
+  pool: Pick<
+    PoolRow,
+    "chainId" | "oracleOk" | "lastOracleReportAt" | "oracleExpiry"
+  >,
   nowSeconds: number,
 ): boolean {
   const timestamp = Number(pool.lastOracleReportAt);
-  const expiry = Number(pool.oracleExpiry);
+  const expiry = oracleExpirySeconds(pool);
   return (
     pool.oracleOk &&
     Number.isFinite(timestamp) &&
-    Number.isFinite(expiry) &&
     timestamp > 0 &&
-    expiry > 0 &&
-    nowSeconds - timestamp < expiry
+    nowSeconds - timestamp <= expiry
   );
+}
+
+function oracleExpirySeconds(
+  pool: Pick<PoolRow, "chainId" | "oracleExpiry">,
+): number {
+  const indexed = Number(pool.oracleExpiry);
+  if (Number.isFinite(indexed) && indexed > 0) return indexed;
+  return ORACLE_STALE_SECONDS_BY_CHAIN[pool.chainId] ?? ORACLE_STALE_SECONDS;
 }
 
 function recordDeviationMetrics(
