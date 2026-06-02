@@ -30,7 +30,27 @@ describe("writeSnapshotToUpstash", () => {
       ["SET", "integration-probes:latest"],
       ["SET", "integration-probes:history:2026-06-01"],
     ]);
+    expect(body[1]?.slice(3)).toEqual(["EX", String(90 * 24 * 60 * 60)]);
     expect(JSON.parse(body[0]?.[2] ?? "{}")).toEqual(fixtureSnapshot());
+  });
+
+  it("refuses to publish contract-fallback snapshots", async () => {
+    await expect(
+      writeSnapshotToUpstash({
+        snapshot: fixtureSnapshot({
+          pairSource: {
+            kind: "contracts-fallback",
+            hasuraUrlConfigured: false,
+            note: "dry-run fallback",
+          },
+        }),
+        env: {
+          UPSTASH_REDIS_REST_URL: "https://redis.test",
+          UPSTASH_REDIS_REST_TOKEN: "token",
+        },
+        fetcher: async () => new Response("{}"),
+      }),
+    ).rejects.toThrow("without Hasura-derived active pairs");
   });
 
   it("reports missing Upstash credentials explicitly", async () => {
@@ -57,7 +77,9 @@ describe("writeSnapshotToUpstash", () => {
   });
 });
 
-function fixtureSnapshot(): IntegrationProbeSnapshot {
+function fixtureSnapshot(
+  overrides: Partial<IntegrationProbeSnapshot> = {},
+): IntegrationProbeSnapshot {
   return {
     schemaVersion: 1,
     generatedAt: "2026-06-01T12:00:00.000Z",
@@ -78,5 +100,6 @@ function fixtureSnapshot(): IntegrationProbeSnapshot {
       needsKeyChainChecks: 0,
       unsupportedChainChecks: 0,
     },
+    ...overrides,
   };
 }

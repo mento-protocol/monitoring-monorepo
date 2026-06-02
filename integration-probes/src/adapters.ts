@@ -106,6 +106,12 @@ export function aggregatePairStatus(
   if (results.every((result) => result.status === "needs_key")) {
     return "needs_key";
   }
+  if (
+    results.some((result) => result.status === "needs_key") &&
+    results.every((result) => ["pass", "needs_key"].includes(result.status))
+  ) {
+    return "needs_key";
+  }
   if (results.some((result) => result.status === "rate_limited")) {
     return "rate_limited";
   }

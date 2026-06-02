@@ -19,6 +19,9 @@ import {
   type ProbeChainId,
 } from "./types.js";
 
+const DEFAULT_ADAPTER_CONCURRENCY = 3;
+const DEFAULT_PAIR_CONCURRENCY = 4;
+
 export type RunProbeOptions = {
   amountUsd?: string | undefined;
   hasuraUrl?: string | undefined;
@@ -30,6 +33,8 @@ export type RunProbeOptions = {
   adapterIds?: readonly string[] | undefined;
   timeoutMs?: number | undefined;
   pairLimit?: number | undefined;
+  adapterConcurrency?: number | undefined;
+  pairConcurrency?: number | undefined;
 };
 
 export async function runIntegrationProbes(
@@ -59,6 +64,14 @@ export async function runIntegrationProbes(
     amountUsd,
     env,
     fetcher,
+    adapterConcurrency: normalizeConcurrency(
+      options.adapterConcurrency,
+      DEFAULT_ADAPTER_CONCURRENCY,
+    ),
+    pairConcurrency: normalizeConcurrency(
+      options.pairConcurrency,
+      DEFAULT_PAIR_CONCURRENCY,
+    ),
   });
 
   return {
@@ -139,21 +152,25 @@ async function probeAdapters(args: {
   amountUsd: string;
   env: NodeJS.ProcessEnv;
   fetcher: FetchLike;
+  adapterConcurrency: number;
+  pairConcurrency: number;
 }): Promise<AggregatorProbeResult[]> {
-  const results: AggregatorProbeResult[] = [];
-  for (const adapter of args.adapters) {
-    const chains = await probeAdapterChains({ ...args, adapter });
-    results.push({
-      id: adapter.id,
-      label: adapter.label,
-      kind: adapter.kind,
-      tier: adapter.tier,
-      credentialEnv: [...(adapter.credentialEnv ?? [])],
-      researchNote: adapter.researchNote,
-      chains,
-    });
-  }
-  return results;
+  return mapConcurrent(
+    args.adapters,
+    args.adapterConcurrency,
+    async (adapter) => {
+      const chains = await probeAdapterChains({ ...args, adapter });
+      return {
+        id: adapter.id,
+        label: adapter.label,
+        kind: adapter.kind,
+        tier: adapter.tier,
+        credentialEnv: [...(adapter.credentialEnv ?? [])],
+        researchNote: adapter.researchNote,
+        chains,
+      };
+    },
+  );
 }
 
 async function probeAdapterChains(args: {
@@ -162,6 +179,7 @@ async function probeAdapterChains(args: {
   amountUsd: string;
   env: NodeJS.ProcessEnv;
   fetcher: FetchLike;
+  pairConcurrency: number;
 }): Promise<ChainProbeResult[]> {
   const out: ChainProbeResult[] = [];
   for (const chain of args.chains) {
@@ -177,22 +195,20 @@ async function probeChainPairs(args: {
   amountUsd: string;
   env: NodeJS.ProcessEnv;
   fetcher: FetchLike;
+  pairConcurrency: number;
 }): Promise<PairProbeResult[]> {
   const inputs = buildQuoteInputs({
     chain: args.chain,
     amountUsd: args.amountUsd,
     takerAddress: PROBE_TAKER_ADDRESS,
   });
-  const results: PairProbeResult[] = [];
-  for (const input of inputs) {
+  return mapConcurrent(inputs, args.pairConcurrency, async (input) => {
     try {
-      const result = await probeAdapterPair({ ...args, input });
-      results.push(result);
+      return await probeAdapterPair({ ...args, input });
     } catch (error) {
-      results.push(errorResult(input, error));
+      return errorResult(input, error);
     }
-  }
-  return results;
+  });
 }
 
 function chainResult(
@@ -234,6 +250,40 @@ function errorResult(
     responsePreview: null,
     error: error instanceof Error ? error.message : String(error),
   };
+}
+
+function normalizeConcurrency(
+  value: number | undefined,
+  fallback: number,
+): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error("Probe concurrency must be a positive integer");
+  }
+  return value;
+}
+
+async function mapConcurrent<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await mapper(
+          items[currentIndex]!,
+          currentIndex,
+        );
+      }
+    }),
+  );
+  return results;
 }
 
 function nextStepFor(

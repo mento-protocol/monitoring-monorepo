@@ -144,6 +144,72 @@ describe("runIntegrationProbes", () => {
     expect(snapshot.aggregators[0]?.chains[0]?.pairs[0]?.poolId).toBe(POOL);
   });
 
+  it("bounds pair probe concurrency", async () => {
+    const rowA = poolRow(POOL, "EURm");
+    const rowB = poolRow(
+      "42220-0x4444444444444444444444444444444444444444",
+      "GBPm",
+    );
+    let active = 0;
+    let maxActive = 0;
+    const snapshot = await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [passingAdapter()],
+      pairConcurrency: 2,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(JSON.stringify({ data: { Pool: [rowA, rowB] } }));
+        }
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        active -= 1;
+        return new Response(
+          JSON.stringify({
+            route: [{ pool: "0x3333333333333333333333333333333333333333" }],
+          }),
+        );
+      },
+    });
+
+    expect(snapshot.aggregators[0]?.chains[0]?.pairCoverage.total).toBe(4);
+    expect(maxActive).toBeLessThanOrEqual(2);
+  });
+
+  it("runs independent adapters concurrently", async () => {
+    const starts: string[] = [];
+    await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [namedAdapter("first"), namedAdapter("second")],
+      adapterConcurrency: 2,
+      pairConcurrency: 1,
+      pairLimit: 1,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(
+            JSON.stringify({ data: { Pool: [poolRow(POOL, "EURm")] } }),
+          );
+        }
+        starts.push(String(input));
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return new Response(
+          JSON.stringify({
+            route: [{ pool: "0x3333333333333333333333333333333333333333" }],
+          }),
+        );
+      },
+    });
+
+    expect(starts.slice(0, 2).sort()).toEqual([
+      "https://first.test",
+      "https://second.test",
+    ]);
+  });
+
   it("rejects unknown selected adapter ids", async () => {
     await expect(
       runIntegrationProbes({
@@ -156,6 +222,32 @@ describe("runIntegrationProbes", () => {
     ).rejects.toThrow("Unknown adapter id");
   });
 });
+
+function namedAdapter(id: string): AggregatorAdapter {
+  return {
+    id,
+    label: id,
+    kind: "dex",
+    tier: 1,
+    support: { 42220: "supported" },
+    researchNote: id,
+    quote: () => ({ url: `https://${id}.test` }),
+  };
+}
+
+function poolRow(id: string, baseSymbol: string): PoolRow {
+  return {
+    id,
+    chainId: 42220,
+    token0: tokenAddress(baseSymbol),
+    token1: tokenAddress("USDm"),
+    token0Decimals: 18,
+    token1Decimals: 18,
+    source: "fpmm_factory",
+    reserves0: "1",
+    reserves1: "1",
+  };
+}
 
 function passingAdapter(): AggregatorAdapter {
   return {

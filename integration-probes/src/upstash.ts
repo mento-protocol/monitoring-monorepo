@@ -6,6 +6,8 @@ import {
   type IntegrationProbeSnapshot,
 } from "./types.js";
 
+const HISTORY_TTL_SECONDS = 90 * 24 * 60 * 60;
+
 export type WriteSnapshotResult = {
   latestKey: string;
   historyKey: string;
@@ -20,6 +22,11 @@ export async function writeSnapshotToUpstash(args: {
   const fetcher = args.fetcher ?? fetch;
   const url = env.UPSTASH_REDIS_REST_URL;
   const token = env.UPSTASH_REDIS_REST_TOKEN;
+  if (args.snapshot.pairSource.kind !== "hasura") {
+    throw new Error(
+      "Refusing to publish integration probe snapshot without Hasura-derived active pairs.",
+    );
+  }
   if (!url || !token) {
     throw new Error(
       "Upstash Redis not configured. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.",
@@ -35,7 +42,7 @@ export async function writeSnapshotToUpstash(args: {
     },
     body: JSON.stringify([
       ["SET", LATEST_SNAPSHOT_KEY, payload],
-      ["SET", historyKey, payload],
+      ["SET", historyKey, payload, "EX", String(HISTORY_TTL_SECONDS)],
     ]),
   });
   if (!response.ok) {

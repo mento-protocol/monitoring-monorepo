@@ -322,6 +322,9 @@ describe("aggregatePairStatus", () => {
     expect(aggregatePairStatus([{ status: "pass" }, { status: "fail" }])).toBe(
       "fail",
     );
+    expect(
+      aggregatePairStatus([{ status: "pass" }, { status: "needs_key" }]),
+    ).toBe("needs_key");
     expect(aggregatePairStatus([])).toBe("error");
   });
 });

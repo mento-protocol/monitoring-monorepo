@@ -294,6 +294,17 @@ module.exports = {
       to: { path: "^ui-dashboard/src/app/revenue/_components/" },
     },
     {
+      name: "dashboard-route-private-integrations",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/integrations/_components/ is private to the integrations route. No code outside app/integrations/ — including lib/, components/, or other routes — may import from it.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/integrations/",
+      },
+      to: { path: "^ui-dashboard/src/app/integrations/_components/" },
+    },
+    {
       name: "indexer-handlers-no-rpc-internals",
       severity: "error",
       comment:
