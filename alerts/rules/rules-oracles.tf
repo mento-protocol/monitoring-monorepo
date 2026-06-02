@@ -34,6 +34,11 @@ locals {
   # Weekend FX suppression reuses `fx_oracle_pause_gate_promql` (Fri ≥21:00 UTC →
   # Sun <23:00 UTC + the Sun 23:00 reopen-grace hour) — the v3 PromQL equivalent
   # of the `weekend_mute` timing applied to the Aegis oracle-relayer policies.
+  #
+  # The `unless` arm deliberately omits the `>= ${oracle_outlier_fx_bps}` filter:
+  # the goal is to suppress ALL FX-feed firing during the weekend window, not
+  # just above-threshold jumps. Do NOT "symmetrise" it by adding the threshold —
+  # that would let a stale post-reopen jump gauge re-fire mid-window.
   oracle_outlier_expr = <<-EOT
     (
       (
@@ -114,7 +119,7 @@ resource "grafana_rule_group" "oracles_report_outlier" {
     # non-zero MedianUpdated yet (the `0` sentinel is skipped by the bridge).
     annotations = {
       summary               = "Oracle report for {{ $labels.pair }} on {{ $labels.chain_name }} jumped {{ if $values.JumpPct }}{{ printf \"%.4g\" $values.JumpPct.Value }}{{ else }}?{{ end }}% vs the prior report — possible oracle outlier."
-      description           = "The latest median moved more than the consecutive-report threshold (1.0% FX / 0.5% USD-pegged) vs the immediately-prior median. This sits below the on-chain breaker band, so the breaker won't have tripped — check the rate-feed reporters for a bad print or a stale source before the next report compounds it."
+      description           = "The latest median moved more than the consecutive-report threshold (≥${local.oracle_outlier_fx_bps} bps FX / ≥${local.oracle_outlier_stablecoin_bps} bps USD-pegged) vs the immediately-prior median. This sits below the on-chain breaker band, so the breaker won't have tripped — check the rate-feed reporters for a bad print or a stale source before the next report compounds it."
       current_oracle_price  = "{{ if and $values.OraclePrice $values.AgeNow }}{{ printf \"%.4g\" $values.OraclePrice.Value }} ({{ humanizeDuration $values.AgeNow.Value }} ago){{ end }}"
       previous_oracle_price = "{{ if and $values.OraclePrev $values.PrevAge }}{{ printf \"%.4g\" $values.OraclePrev.Value }} ({{ humanizeDuration $values.PrevAge.Value }} ago){{ end }}"
     }
