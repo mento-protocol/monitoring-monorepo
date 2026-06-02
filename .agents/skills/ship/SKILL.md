@@ -76,12 +76,34 @@ Never force-push or amend unless the user explicitly requests it.
 
 ## PR
 
-Create or update the PR with:
+Create or update the PR with this body shape:
 
-- concise summary
-- validation commands and results
-- review/verification caveats
-- issue closure references only when the PR fully satisfies the issue
+```markdown
+## The Problem
+
+- Maximum three bullets that explain the problem in plain English.
+
+## The Solution
+
+- Simple explanation of how this PR solves it, understandable before reading
+  the diff.
+
+## Details
+
+- Implementation details, invariants, caveats, and scope boundaries.
+
+## Validation
+
+- Commands and results.
+```
+
+Rules:
+
+- The first two sections are mandatory and must appear in that order.
+- Do not start with an implementation change log.
+- Put review/verification caveats, detailed technical notes, and issue closure
+  references after `The Solution`.
+- Use issue closure references only when the PR fully satisfies the issue.
 
 For substantial work, default to a draft PR unless the user asked for a ready
 PR.
