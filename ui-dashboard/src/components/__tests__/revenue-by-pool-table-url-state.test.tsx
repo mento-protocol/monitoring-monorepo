@@ -96,6 +96,7 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     olsPoolIds: new Set(),
     cdpPoolIds: new Set(),
     reservePoolIds: new Set(),
+    strategyError: null,
     fees: null,
     feeSnapshots: snapshots,
     feeSnapshotsError: null,

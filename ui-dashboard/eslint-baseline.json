@@ -765,8 +765,8 @@
   {
     "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "max-lines-per-function",
-    "message": "Async function 'fetchNetworkData' has too many lines (283). Maximum allowed is 100.",
-    "line": 356,
+    "message": "Async function 'fetchNetworkData' has too many lines (290). Maximum allowed is 100.",
+    "line": 358,
     "linePreview": "/** @internal Exported for testing only. */ | export async function fetchNetworkData( | network: Network,"
   },
   {

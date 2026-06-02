@@ -68,7 +68,7 @@ export const ALL_CDP_POOLS = `
       where: { removed: { _eq: false }, chainId: { _eq: $chainId } }
       limit: 1000
     ) {
-      poolId collateralId
+      poolId collateralId strategyAddress
     }
   }
 `;

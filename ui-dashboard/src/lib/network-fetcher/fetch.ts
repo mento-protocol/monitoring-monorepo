@@ -75,6 +75,7 @@ export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
     n.snapshots30dError === null &&
     n.snapshotsAllDailyError === null &&
     n.brokerSnapshotsAllDailyError === null &&
+    n.strategyError === null &&
     n.lpError === null
   );
 }
@@ -104,6 +105,7 @@ export const blankNetworkData = (
   olsPoolIds: new Set(),
   cdpPoolIds: new Set(),
   reservePoolIds: new Set(),
+  strategyError: null,
   fees: null,
   feeSnapshots: [],
   feeSnapshotsError: null,
@@ -686,6 +688,12 @@ export async function fetchNetworkData(
     indexedCdpPoolsResult,
     fallbackStrategiesResult,
   });
+  const strategyError = resolveStrategyError({
+    network,
+    olsResult,
+    indexedCdpPoolsResult,
+    fallbackStrategiesResult,
+  });
 
   return {
     network,
@@ -702,6 +710,7 @@ export async function fetchNetworkData(
     olsPoolIds,
     cdpPoolIds,
     reservePoolIds,
+    strategyError,
     fees,
     feeSnapshots,
     feeSnapshotsError,
@@ -730,7 +739,9 @@ type TimedRequest = <T>(
   variables?: Record<string, unknown>,
 ) => Promise<T>;
 
-type CdpPoolsResponse = { CdpPool: Pick<CdpPool, "poolId">[] };
+type CdpPoolsResponse = {
+  CdpPool: Pick<CdpPool, "poolId" | "strategyAddress">[];
+};
 
 type ProbedStrategies = {
   cdpPoolIds: Set<string>;
@@ -742,6 +753,13 @@ type StrategyIdsArgs = {
   pools: Pool[];
   olsPoolIds: Set<string>;
   olsLoaded: boolean;
+  indexedCdpPoolsResult: PromiseSettledResult<CdpPoolsResponse>;
+  fallbackStrategiesResult: PromiseSettledResult<Readonly<ProbedStrategies>>;
+};
+
+type StrategyErrorArgs = {
+  network: Network;
+  olsResult: PromiseSettledResult<{ OlsPool: Pick<OlsPool, "poolId">[] }>;
   indexedCdpPoolsResult: PromiseSettledResult<CdpPoolsResponse>;
   fallbackStrategiesResult: PromiseSettledResult<Readonly<ProbedStrategies>>;
 };
@@ -771,6 +789,28 @@ function deriveReservePoolIdsFromIndexedStrategies(
     reservePoolIds.add(pool.id);
   }
   return reservePoolIds;
+}
+
+function activeCdpPoolIdsFromIndexedRows(
+  pools: Pool[],
+  cdpPools: Pick<CdpPool, "poolId" | "strategyAddress">[],
+): Set<string> {
+  const activeRebalancerByPoolId = new Map<string, string>();
+  for (const pool of pools) {
+    if (!hasRebalancerAddress(pool)) continue;
+    const rebalancer = pool.rebalancerAddress;
+    if (rebalancer === undefined) continue;
+    activeRebalancerByPoolId.set(pool.id, rebalancer.toLowerCase());
+  }
+
+  const cdpPoolIds = new Set<string>();
+  for (const cdpPool of cdpPools) {
+    const activeRebalancer = activeRebalancerByPoolId.get(cdpPool.poolId);
+    if (activeRebalancer === undefined) continue;
+    if (cdpPool.strategyAddress?.toLowerCase() !== activeRebalancer) continue;
+    cdpPoolIds.add(cdpPool.poolId);
+  }
+  return cdpPoolIds;
 }
 
 function emptyStrategyIds(): ProbedStrategies {
@@ -819,8 +859,9 @@ function resolveStrategyIds({
 
   const cdpPoolIds =
     indexedCdpPoolsResult.status === "fulfilled"
-      ? new Set(
-          (indexedCdpPoolsResult.value.CdpPool ?? []).map((p) => p.poolId),
+      ? activeCdpPoolIdsFromIndexedRows(
+          pools,
+          indexedCdpPoolsResult.value.CdpPool ?? [],
         )
       : new Set<string>();
 
@@ -840,12 +881,32 @@ function resolveStrategyIds({
   };
 }
 
+function resolveStrategyError({
+  network,
+  olsResult,
+  indexedCdpPoolsResult,
+  fallbackStrategiesResult,
+}: StrategyErrorArgs): Error | null {
+  if (olsResult.status === "rejected") return toError(olsResult.reason);
+  if (
+    usesIndexedCdpPools(network) &&
+    indexedCdpPoolsResult.status === "rejected"
+  )
+    return toError(indexedCdpPoolsResult.reason);
+  if (
+    usesRuntimeStrategyProbe(network) &&
+    fallbackStrategiesResult.status === "rejected"
+  )
+    return toError(fallbackStrategiesResult.reason);
+  return null;
+}
+
 function toError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error(String(reason));
 }
 
 /**
- * Rebuild a `NetworkData`'s nine error channels as plain `{ message }` objects
+ * Rebuild a `NetworkData`'s ten error channels as plain `{ message }` objects
  * (#661). `fetchNetworkData` populates them with `Error` instances internally
  * (structurally assignable to `SerializableError`), but those must not cross
  * the Server → Client boundary: React's Flight serializer opaques `Error`
@@ -875,6 +936,7 @@ function withSerializableErrors(data: NetworkData): NetworkData {
     brokerSnapshotsAllDailyError: toSerializableError(
       data.brokerSnapshotsAllDailyError,
     ),
+    strategyError: toSerializableError(data.strategyError),
     lpError: toSerializableError(data.lpError),
   };
 }

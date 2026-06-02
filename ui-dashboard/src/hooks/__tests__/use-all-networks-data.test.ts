@@ -7,6 +7,7 @@ import {
   partialPageLastCapturedAt,
 } from "../use-all-networks-data";
 import type { Network } from "@/lib/networks";
+import { isNetworkDataFullyHealthy } from "@/lib/fetch-all-networks";
 import type { Pool } from "@/lib/types";
 
 vi.mock("@sentry/nextjs", () => ({
@@ -236,7 +237,15 @@ describe("fetchNetworkData — happy path", () => {
 
     mockRequest((query) => {
       if (query.includes("CdpPool"))
-        return { CdpPool: [{ poolId: cdpPool.id, collateralId: "gbpm" }] };
+        return {
+          CdpPool: [
+            {
+              poolId: cdpPool.id,
+              collateralId: "gbpm",
+              strategyAddress: cdpPool.rebalancerAddress,
+            },
+          ],
+        };
       if (query.includes("OlsPool"))
         return { OlsPool: [{ poolId: olsPool.id }] };
       if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
@@ -267,6 +276,42 @@ describe("fetchNetworkData — happy path", () => {
     expect(extractVariables(cdpCall![0], cdpCall![1])).toEqual({
       chainId: 42220,
     });
+  });
+
+  it("ignores indexed CdpPool rows that do not match the active rebalancer", async () => {
+    const staleCdpPool = {
+      ...makePool("42220-0x000000000000000000000000000000000000eeee"),
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    };
+
+    mockRequest((query) => {
+      if (query.includes("CdpPool"))
+        return {
+          CdpPool: [
+            {
+              poolId: staleCdpPool.id,
+              collateralId: "gbpm",
+              strategyAddress: "0x000000000000000000000000000000000000c0c0",
+            },
+          ],
+        };
+      if (query.includes("OlsPool")) return { OlsPool: [] };
+      if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [staleCdpPool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(new Set([staleCdpPool.id]));
   });
 
   it("withholds Reserve badges when the indexed CdpPool query fails", async () => {
@@ -300,6 +345,8 @@ describe("fetchNetworkData — happy path", () => {
     });
 
     expect(result.error).toBeNull();
+    expect(result.strategyError).toBe(cdpErr);
+    expect(isNetworkDataFullyHealthy(result)).toBe(false);
     expect(result.cdpPoolIds).toEqual(new Set());
     expect(result.reservePoolIds).toEqual(new Set());
   });
