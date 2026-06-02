@@ -35,6 +35,9 @@ pnpm --filter @mento-protocol/integration-probes knip
 - Active stablecoin coverage comes from indexed USDm hub-pair pools when a
   Hasura URL is configured. Contract metadata fallback is for dry-run
   visibility only.
+- `integration-probes:latest` expires after 3 days so failed scheduled probes
+  degrade the dashboard instead of showing stale health forever. Dated history
+  keys expire after 90 days.
 
 ## Env Vars
 

@@ -17,6 +17,38 @@ describe("IntegrationProbesTable", () => {
     expect(html).toContain("EURm -&gt; USDm");
     expect(html).toContain("HTTP 200");
   });
+
+  it("shows non-pass pair evidence before capped passing rows", () => {
+    const snapshot = fixtureSnapshot();
+    const chain = snapshot.aggregators[0]?.chains[0];
+    if (!chain) throw new Error("missing chain fixture");
+    chain.pairs = [
+      ...Array.from({ length: 12 }, (_, index) =>
+        pairFixture({
+          chainId: chain.chainId,
+          poolId: `${chain.chainId}-0xpass${index}`,
+          status: "pass",
+          sellSymbol: `PASS${index}`,
+          error: null,
+        }),
+      ),
+      pairFixture({
+        chainId: chain.chainId,
+        poolId: `${chain.chainId}-0xfail`,
+        status: "fail",
+        sellSymbol: "FAILINGm",
+        error: "missing router evidence",
+      }),
+    ];
+
+    const html = renderToStaticMarkup(
+      <IntegrationProbesTable snapshot={snapshot} />,
+    );
+
+    expect(html).toContain("FAILINGm -&gt; USDm");
+    expect(html).toContain("missing router evidence");
+    expect(html).toContain("1 more route checks in the snapshot.");
+  });
 });
 
 function fixtureSnapshot(): IntegrationProbeSnapshot {
@@ -83,31 +115,54 @@ function chainFixture(
     blockingReason: passing ? null : "fixture",
     nextStep: passing ? null : "fixture next step",
     pairs: [
-      {
-        pairId: `${chainId}:EURm-USDm:${chainId}-0xpool`,
+      pairFixture({
+        chainId,
         poolId: `${chainId}-0xpool`,
-        direction: "base-to-usdm",
-        sellSymbol: "EURm",
-        buySymbol: "USDm",
         status,
-        evidence: passing
-          ? [
-              {
-                type: "router-address",
-                value: "0x1111111111111111111111111111111111111111",
-                path: "$.tx.to",
-              },
-            ]
-          : [],
-        sourceLabels: [],
-        txTarget: null,
-        downstreamProvider: null,
-        requestUrl: null,
-        httpStatus: passing ? 200 : null,
-        latencyMs: passing ? 42 : null,
-        responsePreview: null,
+        sellSymbol: "EURm",
         error: passing ? null : "fixture",
-      },
+      }),
     ],
+  };
+}
+
+function pairFixture({
+  chainId,
+  poolId,
+  status,
+  sellSymbol,
+  error,
+}: {
+  chainId: number;
+  poolId: string;
+  status: IntegrationProbeSnapshot["aggregators"][number]["chains"][number]["pairs"][number]["status"];
+  sellSymbol: string;
+  error: string | null;
+}): IntegrationProbeSnapshot["aggregators"][number]["chains"][number]["pairs"][number] {
+  const passing = status === "pass";
+  return {
+    pairId: `${chainId}:${sellSymbol}-USDm:${poolId}`,
+    poolId,
+    direction: "base-to-usdm",
+    sellSymbol,
+    buySymbol: "USDm",
+    status,
+    evidence: passing
+      ? [
+          {
+            type: "router-address",
+            value: "0x1111111111111111111111111111111111111111",
+            path: "$.tx.to",
+          },
+        ]
+      : [],
+    sourceLabels: [],
+    txTarget: null,
+    downstreamProvider: null,
+    requestUrl: null,
+    httpStatus: passing ? 200 : null,
+    latencyMs: passing ? 42 : null,
+    responsePreview: null,
+    error,
   };
 }

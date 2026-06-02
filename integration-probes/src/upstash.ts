@@ -7,6 +7,7 @@ import {
 } from "./types.js";
 
 const HISTORY_TTL_SECONDS = 90 * 24 * 60 * 60;
+const LATEST_TTL_SECONDS = 3 * 24 * 60 * 60;
 const DEFAULT_UPSTASH_TIMEOUT_MS = 60_000;
 
 export type WriteSnapshotResult = {
@@ -45,7 +46,7 @@ export async function writeSnapshotToUpstash(args: {
     },
     ...(timeoutMs > 0 && { signal: AbortSignal.timeout(timeoutMs) }),
     body: JSON.stringify([
-      ["SET", LATEST_SNAPSHOT_KEY, payload],
+      ["SET", LATEST_SNAPSHOT_KEY, payload, "EX", String(LATEST_TTL_SECONDS)],
       ["SET", historyKey, payload, "EX", String(HISTORY_TTL_SECONDS)],
     ]),
   });

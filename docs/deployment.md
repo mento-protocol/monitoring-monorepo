@@ -129,7 +129,9 @@ Most env vars are managed by Terraform (set for `production` and `preview` targe
 The `/integrations` dashboard page reads the latest quote-only probe snapshot
 from Upstash key `integration-probes:latest`. The scheduled
 `.github/workflows/integration-probes.yml` workflow refreshes it daily and can
-also be run manually with `workflow_dispatch`.
+also be run manually with `workflow_dispatch`. `integration-probes:latest`
+expires after 3 days so missed scheduled probes surface as stale/missing
+dashboard data; dated history keys expire after 90 days.
 
 ```bash
 pnpm integrations:probe

@@ -102,7 +102,7 @@ function ChainCell({ chain }: { chain?: IntegrationProbeChain | undefined }) {
 }
 
 function ChainEvidence({ chain }: { chain: IntegrationProbeChain }) {
-  const visiblePairs = chain.pairs.slice(0, 12);
+  const visiblePairs = prioritizedPairs(chain.pairs).slice(0, 12);
   const hiddenCount = Math.max(0, chain.pairs.length - visiblePairs.length);
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
@@ -136,6 +136,16 @@ function ChainEvidence({ chain }: { chain: IntegrationProbeChain }) {
       </div>
     </div>
   );
+}
+
+function prioritizedPairs(
+  pairs: IntegrationProbeChain["pairs"],
+): IntegrationProbeChain["pairs"] {
+  return [...pairs].sort((left, right) => {
+    const leftPriority = left.status === "pass" ? 1 : 0;
+    const rightPriority = right.status === "pass" ? 1 : 0;
+    return leftPriority - rightPriority;
+  });
 }
 
 function evidenceText(pair: IntegrationProbeChain["pairs"][number]): string {

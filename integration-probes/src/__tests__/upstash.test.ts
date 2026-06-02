@@ -32,6 +32,7 @@ describe("writeSnapshotToUpstash", () => {
       ["SET", "integration-probes:latest"],
       ["SET", "integration-probes:history:2026-06-01"],
     ]);
+    expect(body[0]?.slice(3)).toEqual(["EX", String(3 * 24 * 60 * 60)]);
     expect(body[1]?.slice(3)).toEqual(["EX", String(90 * 24 * 60 * 60)]);
     expect(JSON.parse(body[0]?.[2] ?? "{}")).toEqual(fixtureSnapshot());
   });

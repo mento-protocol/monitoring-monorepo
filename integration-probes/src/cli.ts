@@ -164,8 +164,8 @@ function parseChain(value: string): ProbeChainId {
 
 function parsePositiveInt(value: string, flag: string): number {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`${flag} requires a non-negative integer`);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${flag} requires a positive integer`);
   }
   return parsed;
 }
