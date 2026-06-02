@@ -3,6 +3,7 @@ import {
   PROBE_TAKER_ADDRESS,
   aggregatePairStatus,
   blockingReason,
+  poolIdFromPairId,
   probeAdapterPair,
   type AggregatorAdapter,
 } from "./adapters.js";
@@ -218,7 +219,7 @@ function errorResult(
 ): PairProbeResult {
   return {
     pairId: input.pairId,
-    poolId: input.pairId,
+    poolId: poolIdFromPairId(input.pairId),
     direction: input.direction,
     sellSymbol: input.sellToken.symbol,
     buySymbol: input.buyToken.symbol,

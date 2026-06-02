@@ -327,7 +327,7 @@ function responsePreview(payload: unknown): string {
   return text.length > 600 ? `${text.slice(0, 600)}...` : text;
 }
 
-function poolIdFromPairId(pairId: string): string {
+export function poolIdFromPairId(pairId: string): string {
   const marker = ":";
   const first = pairId.indexOf(marker);
   const second = pairId.indexOf(marker, first + 1);
@@ -564,7 +564,7 @@ function openOceanUrl(input: QuoteProbeInput): string {
   setParams(url, {
     inTokenAddress: input.sellToken.address,
     outTokenAddress: input.buyToken.address,
-    amountDecimals: input.amountRaw,
+    amount: input.amountDecimal,
     account: input.takerAddress,
     slippage: "1",
     gasPriceDecimals: "1000000000",

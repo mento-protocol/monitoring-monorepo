@@ -361,5 +361,12 @@ describe("aggregator quote builders", () => {
     expect(JSON.stringify(lifiRequest?.init?.headers)).toContain(
       "x-lifi-api-key",
     );
+
+    const openOceanRequest = AGGREGATOR_ADAPTERS.find(
+      (item) => item.id === "openocean",
+    )?.quote?.(input, env);
+    const openOceanParams = new URL(openOceanRequest?.url ?? "").searchParams;
+    expect(openOceanParams.get("amount")).toBe(input.amountDecimal);
+    expect(openOceanParams.has("amountDecimals")).toBe(false);
   });
 });

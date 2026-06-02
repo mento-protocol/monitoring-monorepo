@@ -115,6 +115,35 @@ describe("runIntegrationProbes", () => {
     expect(snapshot.aggregators[0]?.chains[0]?.pairCoverage.total).toBe(2);
   });
 
+  it("keeps pool ids normalized when an adapter throws", async () => {
+    const row: PoolRow = {
+      id: POOL,
+      chainId: 42220,
+      token0: tokenAddress("EURm"),
+      token1: tokenAddress("USDm"),
+      token0Decimals: 18,
+      token1Decimals: 18,
+      source: "fpmm_factory",
+      reserves0: "1",
+      reserves1: "1",
+    };
+    const snapshot = await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [throwingAdapter()],
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(JSON.stringify({ data: { Pool: [row] } }));
+        }
+        return new Response("{}");
+      },
+    });
+
+    expect(snapshot.aggregators[0]?.chains[0]?.pairs[0]?.status).toBe("error");
+    expect(snapshot.aggregators[0]?.chains[0]?.pairs[0]?.poolId).toBe(POOL);
+  });
+
   it("rejects unknown selected adapter ids", async () => {
     await expect(
       runIntegrationProbes({
@@ -137,6 +166,20 @@ function passingAdapter(): AggregatorAdapter {
     support: { 42220: "supported", 143: "supported" },
     researchNote: "fixture",
     quote: () => ({ url: "https://quote.test" }),
+  };
+}
+
+function throwingAdapter(): AggregatorAdapter {
+  return {
+    id: "throwing",
+    label: "Throwing",
+    kind: "dex",
+    tier: 1,
+    support: { 42220: "supported" },
+    researchNote: "throwing",
+    quote: () => {
+      throw new Error("quote failed");
+    },
   };
 }
 
