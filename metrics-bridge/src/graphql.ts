@@ -25,7 +25,6 @@ const BRIDGE_POOLS_QUERY = gql`
       healthStatus
       oracleOk
       oracleTimestamp
-      lastOracleReportAt
       oracleExpiry
       lastDeviationRatio
       deviationBreachStartedAt

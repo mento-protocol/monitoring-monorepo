@@ -18,6 +18,7 @@ import {
   POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
+  POOL_ORACLE_REPORT_EXT,
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { buildPoolDetailUrl } from "@/lib/routing";
@@ -140,8 +141,23 @@ function usePoolDetailData(normalizedPoolId: string, network: PoolNetwork) {
     id: normalizedPoolId,
     chainId: network.chainId,
   });
+  const { data: oracleReportData } = useGQL<{
+    Pool: { id: string; lastOracleReportAt?: string }[];
+  }>(
+    POOL_ORACLE_REPORT_EXT,
+    { id: normalizedPoolId, chainId: network.chainId },
+    undefined,
+    { timeoutMs: 5000 },
+  );
+  const poolWithOracleReport = useMemo<Pool | null>(() => {
+    const rawPool = poolData?.Pool?.[0] ?? null;
+    const oracleReport = oracleReportData?.Pool?.[0];
+    return rawPool && oracleReport
+      ? { ...rawPool, lastOracleReportAt: oracleReport.lastOracleReportAt }
+      : rawPool;
+  }, [oracleReportData, poolData]);
   const { pool, thresholdsLoading, thresholdsError } = usePoolWithThresholds(
-    poolData?.Pool?.[0] ?? null,
+    poolWithOracleReport,
     normalizedPoolId,
     network.chainId,
   );

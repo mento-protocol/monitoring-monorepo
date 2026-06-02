@@ -105,7 +105,6 @@ describe("updateMetrics", () => {
     updateMetrics(
       [
         makePool({
-          lastOracleReportAt: "1713199600",
           oracleTimestamp: "1713200000",
         }),
       ],

@@ -31,6 +31,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_HEALTH_CURSOR",
   "POOL_HEALTH_7D_ANCHOR",
   "POOL_OPEN_BREACH_TX",
+  "POOL_ORACLE_REPORT_EXT",
   "POOL_DEVIATION_BREACHES_PAGE",
   "POOL_DEVIATION_BREACHES_COUNT",
   "POOL_DEVIATION_BREACHES_ALL",
@@ -118,7 +119,6 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             oracleOk
             oraclePrice
             oracleTimestamp
-            lastOracleReportAt
             oracleTxHash
             priceDifference
             rebalanceThreshold
@@ -264,6 +264,13 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_HEALTH_CURSOR).toContain("lastDeviationRatio");
     expect(queries.POOL_HEALTH_CURSOR).not.toContain("healthBinarySeconds");
     expect(queries.POOL_HEALTH_CURSOR).not.toContain("healthTotalSeconds");
+  });
+
+  it("POOL_ORACLE_REPORT_EXT isolates single-pool oracle report freshness", () => {
+    expect(queries.POOL_ORACLE_REPORT_EXT).toContain("$id: String!");
+    expect(queries.POOL_ORACLE_REPORT_EXT).toContain("$chainId: Int!");
+    expect(queries.POOL_ORACLE_REPORT_EXT).toContain("lastOracleReportAt");
+    expect(queries.POOL_DETAIL_WITH_HEALTH).not.toContain("lastOracleReportAt");
   });
 
   it("POOL_HEALTH_7D_ANCHOR is scoped by id + chainId at sevenDaysAgo timestamp", () => {

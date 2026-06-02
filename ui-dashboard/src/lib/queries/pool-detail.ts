@@ -13,7 +13,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
       oracleOk
       oraclePrice
       oracleTimestamp
-      lastOracleReportAt
       oracleTxHash
       oracleExpiry
       oracleNumReporters
@@ -33,6 +32,18 @@ export const POOL_DETAIL_WITH_HEALTH = `
       swapCount
       healthTotalSeconds
       hasHealthData
+    }
+  }
+`;
+
+// Isolated from POOL_DETAIL_WITH_HEALTH for schema-lag resilience. Until the
+// hosted indexer/Hasura schema exposes this field, the detail page still
+// renders and freshness consumers fall back to `oracleTimestamp`.
+export const POOL_ORACLE_REPORT_EXT = `
+  query PoolOracleReportExt($id: String!, $chainId: Int!) {
+    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
+      id
+      lastOracleReportAt
     }
   }
 `;
