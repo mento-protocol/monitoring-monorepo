@@ -10,8 +10,8 @@ vercel_token = "vcp_..."
 
 # ── GitHub ────────────────────────────────────────────────────────────────────
 # PAT for writing repository Actions secrets on
-# `mento-protocol/monitoring-monorepo` (used by the Vercel-bypass mirror in
-# `github-secrets.tf`). Fine-grained PAT scoped to that repo with
+# `mento-protocol/monitoring-monorepo` (used by `github-secrets.tf` for
+# platform-owned repo secrets). Fine-grained PAT scoped to that repo with
 # Repository → Secrets: Read/write. Org-admin scope is NOT needed here —
 # the secrets managed by this stack are repo-level.
 #
@@ -37,6 +37,12 @@ upstash_api_key = "..."
 # Default in variables.tf points to the current Envio endpoint.
 # Override here only if the deployment ID changes.
 # hasura_url = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql"
+
+# ── Integration Probes ────────────────────────────────────────────────────────
+# OpenOcean Pro API key for the scheduled integration-probes workflow.
+# Leave empty until provisioned; the GitHub Actions secret resource is
+# `count`-gated so `terraform apply` succeeds without it.
+# openocean_api_key = "..."
 
 # ── Arkham Intelligence ───────────────────────────────────────────────────────
 # API key for the nightly /api/arkham/enrich cron that tags Mento counterparties.

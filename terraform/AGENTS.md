@@ -10,7 +10,7 @@ last_verified: 2026-05-20
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, and Workload Identity Federation. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules/global routing, `alerts/infra/` for event-driven delivery) and `aegis/terraform/` (Aegis dashboard + service-health alert).
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, Workload Identity Federation, and repo-level GitHub Actions secrets owned by the platform stack. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules/global routing, `alerts/infra/` for event-driven delivery) and `aegis/terraform/` (Aegis dashboard + service-health alert).
 
 ## Operating Rules
 

@@ -13,10 +13,10 @@ variable "vercel_team_id" {
 }
 
 # ── GitHub ────────────────────────────────────────────────────────────────────
-# Used to mirror Vercel-managed secrets (e.g. `VERCEL_AUTOMATION_BYPASS_SECRET`)
-# into the `monitoring-monorepo` GitHub Actions secrets so CI can consume
-# them. `alerts/infra/` uses a separate token of the same shape for its own
-# `TF_VAR_*` repo-secret mirrors.
+# Used to manage repo-level GitHub Actions secrets that belong to the platform
+# stack, including the Vercel bypass mirror and integration-probe credentials.
+# `alerts/infra/` uses a separate token of the same shape for its own `TF_VAR_*`
+# repo-secret mirrors.
 
 variable "github_owner" {
   description = "GitHub organization that owns the repo whose Actions secrets this stack manages."
@@ -73,6 +73,18 @@ variable "hasura_url" {
   description = "GraphQL endpoint for the shared Envio indexer."
   type        = string
   default     = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql"
+}
+
+# ── Integration Probes ────────────────────────────────────────────────────────
+
+variable "openocean_api_key" {
+  description = <<-EOT
+    OpenOcean Pro API key for the scheduled integration-probes workflow.
+    Mirrors into the repo-level Actions secret `OPENOCEAN_API_KEY`.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 # ── Auth (Google OAuth / NextAuth) ─────────────────────────────────────────

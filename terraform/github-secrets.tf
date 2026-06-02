@@ -1,4 +1,7 @@
-# GitHub repo Actions secret sourced from Vercel state.
+# GitHub repo Actions secrets managed by the platform stack.
+#
+# Vercel automation bypass secret
+# ───────────────────────────────
 #
 # `.github/workflows/lighthouse.yml` runs against Vercel-Auth-protected
 # preview deployments. To get past the SSO interstitial it needs the
@@ -45,4 +48,24 @@ resource "github_actions_secret" "vercel_automation_bypass" {
   repository  = "monitoring-monorepo"
   secret_name = "VERCEL_AUTOMATION_BYPASS_SECRET"
   value       = vercel_project.dashboard.protection_bypass_for_automation_secret
+}
+
+# Integration probes OpenOcean Pro key
+# ────────────────────────────────────
+#
+# `.github/workflows/integration-probes.yml` uses this repo secret to query the
+# OpenOcean Pro swap API without Cloudflare blocking the scheduled probe. The
+# key comes from the platform stack's gitignored `terraform.tfvars`, not from a
+# committed file. Keeping it here gives the same drift-reconciliation behavior
+# as the Vercel bypass mirror: once `openocean_api_key` is populated and the
+# platform stack is applied, Terraform owns the repo secret.
+
+resource "github_actions_secret" "integration_probe_openocean_api_key" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.openocean_api_key == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "OPENOCEAN_API_KEY"
+  value       = var.openocean_api_key
 }
