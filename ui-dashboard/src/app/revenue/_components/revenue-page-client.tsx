@@ -229,7 +229,7 @@ function CdpBorrowingFeesTile({ state }: { state: CdpBorrowingFeesTileState }) {
     (summary?.unpricedSymbols.length ?? 0) > 0 ||
     (summary?.bracketsTruncated ?? false);
   const mainValue = isLoading
-    ? "…"
+    ? "—"
     : hasError || summary === null
       ? "N/A"
       : `${isApproximate ? "≈ " : ""}${formatUSD(summary.totalRevenueUSD)}`;

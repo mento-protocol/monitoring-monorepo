@@ -59,7 +59,6 @@ const EMPTY_SUMMARY: CdpBorrowingRevenueSummary = {
   totalRevenueUSD: 0,
   upfrontFeesUSD: 0,
   accruedInterestUSD: 0,
-  annualizedInterestUSD: 0,
   marketCount: 0,
   activeInterestBracketCount: 0,
   unpricedSymbols: [],
@@ -82,7 +81,6 @@ function mergeSummaries(
     merged.totalRevenueUSD += row.summary.totalRevenueUSD;
     merged.upfrontFeesUSD += row.summary.upfrontFeesUSD;
     merged.accruedInterestUSD += row.summary.accruedInterestUSD;
-    merged.annualizedInterestUSD += row.summary.annualizedInterestUSD;
     merged.marketCount += row.summary.marketCount;
     merged.activeInterestBracketCount += row.summary.activeInterestBracketCount;
     merged.bracketsTruncated =
@@ -209,7 +207,7 @@ async function fetchAllCdpBorrowingRevenue(): Promise<
 }
 
 export function useCdpBorrowingRevenue(): CdpBorrowingRevenueResult {
-  const { data, isLoading } = useSWR<NetworkCdpBorrowingRevenue[]>(
+  const { data, error, isLoading } = useSWR<NetworkCdpBorrowingRevenue[]>(
     SWR_KEY_CDP_BORROWING_REVENUE,
     fetchAllCdpBorrowingRevenue,
     SHARED_QUERY_SWR_CONFIG,
@@ -220,6 +218,6 @@ export function useCdpBorrowingRevenue(): CdpBorrowingRevenueResult {
     summary:
       data === undefined ? null : (mergeSummaries(rows) ?? EMPTY_SUMMARY),
     isLoading,
-    hasError: rows.some((row) => row.error !== null),
+    hasError: error !== undefined || rows.some((row) => row.error !== null),
   };
 }

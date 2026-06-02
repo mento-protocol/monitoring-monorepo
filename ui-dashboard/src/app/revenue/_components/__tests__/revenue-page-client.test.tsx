@@ -25,7 +25,6 @@ const EMPTY_CDP_REVENUE: CdpBorrowingRevenueSummary = {
   totalRevenueUSD: 0,
   upfrontFeesUSD: 0,
   accruedInterestUSD: 0,
-  annualizedInterestUSD: 0,
   marketCount: 0,
   activeInterestBracketCount: 0,
   unpricedSymbols: [],
@@ -139,7 +138,6 @@ describe("RevenuePageClient degraded fee states", () => {
         totalRevenueUSD: 242.5,
         upfrontFeesUSD: 180,
         accruedInterestUSD: 62.5,
-        annualizedInterestUSD: 125,
         marketCount: 2,
         activeInterestBracketCount: 1,
       },
@@ -186,6 +184,7 @@ describe("RevenuePageClient degraded fee states", () => {
     });
 
     expect(html).toContain("CDP Borrowing Fees");
+    expect(html).toContain("—");
     expect(html).toContain("Loading CDP borrowing fees");
     expect(html).not.toContain("Unable to load CDP borrowing fees");
   });

@@ -1,4 +1,3 @@
-import { parseWei } from "./format";
 import { tokenToUSD, type OracleRateMap } from "./tokens";
 
 const ZERO = BigInt(0);
@@ -33,7 +32,6 @@ export type CdpBorrowingRevenueSummary = {
   totalRevenueUSD: number;
   upfrontFeesUSD: number;
   accruedInterestUSD: number;
-  annualizedInterestUSD: number;
   marketCount: number;
   activeInterestBracketCount: number;
   unpricedSymbols: string[];
@@ -68,10 +66,11 @@ function accruedInterestWei(
   );
 }
 
-function annualizedInterestWei(
-  bracket: Pick<CdpBorrowingRevenueBracket, "sumDebtTimesRateD36">,
-): bigint {
-  return BigInt(bracket.sumDebtTimesRateD36) / D18;
+function weiToTokenAmount(wei: bigint): number {
+  // Split before Number() so large cumulative wei values keep token-scale precision.
+  const whole = wei / D18;
+  const fractional = wei % D18;
+  return Number(whole) + Number(fractional) / 1e18;
 }
 
 function weiToTokenUSD(
@@ -80,7 +79,7 @@ function weiToTokenUSD(
   rates: OracleRateMap,
 ): number | null {
   if (wei <= ZERO) return 0;
-  return tokenToUSD(symbol, parseWei(wei.toString(), 18), rates);
+  return tokenToUSD(symbol, weiToTokenAmount(wei), rates);
 }
 
 export function aggregateCdpBorrowingRevenue({
@@ -97,7 +96,6 @@ export function aggregateCdpBorrowingRevenue({
   const unpricedSymbols = new Set<string>();
   let upfrontFeesUSD = 0;
   let accruedInterestUSD = 0;
-  let annualizedInterestUSD = 0;
   let activeInterestBracketCount = 0;
 
   const addPricedWei = (symbol: string | undefined, wei: bigint): number => {
@@ -132,17 +130,12 @@ export function aggregateCdpBorrowingRevenue({
       symbol,
       accruedInterestWei(bracket, nowSeconds),
     );
-    annualizedInterestUSD += addPricedWei(
-      symbol,
-      annualizedInterestWei(bracket),
-    );
   }
 
   return {
     totalRevenueUSD: upfrontFeesUSD + accruedInterestUSD,
     upfrontFeesUSD,
     accruedInterestUSD,
-    annualizedInterestUSD,
     marketCount: collaterals.length,
     activeInterestBracketCount,
     unpricedSymbols: [...unpricedSymbols].sort(),

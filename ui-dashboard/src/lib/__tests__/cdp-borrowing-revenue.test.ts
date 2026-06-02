@@ -88,7 +88,6 @@ describe("aggregateCdpBorrowingRevenue", () => {
 
     expect(result.upfrontFeesUSD).toBeCloseTo(180, 6);
     expect(result.accruedInterestUSD).toBeCloseTo(62.5, 6);
-    expect(result.annualizedInterestUSD).toBeCloseTo(125, 6);
     expect(result.totalRevenueUSD).toBeCloseTo(242.5, 6);
     expect(result.marketCount).toBe(2);
     expect(result.activeInterestBracketCount).toBe(1);
@@ -118,7 +117,6 @@ describe("aggregateCdpBorrowingRevenue", () => {
     });
 
     expect(result.accruedInterestUSD).toBeCloseTo(12.5, 6);
-    expect(result.annualizedInterestUSD).toBe(0);
     expect(result.activeInterestBracketCount).toBe(0);
   });
 
@@ -151,6 +149,6 @@ describe("aggregateCdpBorrowingRevenue", () => {
     });
 
     expect(result.accruedInterestUSD).toBe(0);
-    expect(result.annualizedInterestUSD).toBeCloseTo(125, 6);
+    expect(result.activeInterestBracketCount).toBe(1);
   });
 });
