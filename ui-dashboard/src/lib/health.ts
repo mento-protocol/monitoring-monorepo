@@ -448,7 +448,7 @@ export function oracleFreshnessTimestamp(pool: {
   oracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
 }): number {
-  return Number(pool.lastOracleReportAt ?? pool.oracleTimestamp ?? "0");
+  return Number(pool.oracleTimestamp ?? "0");
 }
 
 /**

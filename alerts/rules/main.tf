@@ -111,14 +111,15 @@ locals {
   )
 
   # During rollout the alert rules can apply before metrics-bridge publishes
-  # the split raw contract flag. Fall back to the legacy `oracle_ok` series;
-  # once both exist, PromQL `or` keeps the left-hand contract-only metric.
+  # the split raw contract flag. Fall back to the legacy `oracle_ok` series
+  # only for Oracle Contract Down: before the bridge split, that metric means
+  # raw contract can-trade, not live freshness.
   oracle_contract_down_active_promql = "mento_pool_oracle_contract_ok or mento_pool_oracle_ok"
   # Oracle Down should not double-page when the raw contract flag is already
-  # false; Oracle Contract Down owns that failure. During rollout, keep the
-  # legacy live-down series only for pools where the split contract metric is
-  # absent.
-  oracle_live_down_unpaused_promql = "((mento_pool_oracle_ok and on(chain_id, pool_id, pair) (mento_pool_oracle_contract_ok > 0.5)) or (mento_pool_oracle_ok unless on(chain_id, pool_id, pair) mento_pool_oracle_contract_ok))"
+  # false; Oracle Contract Down owns that failure. Do not fall back to legacy
+  # `mento_pool_oracle_ok` here because pre-split bridge revisions used it for
+  # the raw contract flag, not scrape-time liveness.
+  oracle_live_down_unpaused_promql = "mento_pool_oracle_ok and on(chain_id, pool_id, pair) (mento_pool_oracle_contract_ok > 0.5)"
   oracle_live_down_active_promql   = "(${local.oracle_live_down_unpaused_promql}) unless on(chain_id, pool_id, pair) (${local.fx_oracle_pause_promql})"
 
   # Shared per-series weekend suppressors for deviation/rebalancer rules.

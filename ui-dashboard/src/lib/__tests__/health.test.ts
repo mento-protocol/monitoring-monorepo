@@ -1077,7 +1077,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
     ).toBe("OK");
   });
 
-  it("uses lastOracleReportAt over raw oracleTimestamp for freshness", () => {
+  it("uses oracleTimestamp for live freshness when lastOracleReportAt is older", () => {
     const staleMedianTs = String(frozenNowSec - 301);
     const freshReporterTs = String(frozenNowSec - 120);
     expect(
@@ -1088,7 +1088,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
-    ).toBe("CRITICAL");
+    ).toBe("OK");
   });
 
   it("oracle at 301s is stale → CRITICAL", () => {

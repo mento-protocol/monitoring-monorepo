@@ -148,7 +148,7 @@ describe("OraclePriceValue", () => {
     expect(html).toContain("· stale");
   });
 
-  it("uses lastOracleReportAt for staleness when raw oracleTimestamp is newer", () => {
+  it("uses oracleTimestamp for freshness when lastOracleReportAt is older", () => {
     const staleLiveTs = String(Math.floor(Date.now() / 1000) - 3600);
     const freshRawTs = String(Math.floor(Date.now() / 1000) - 60);
     const pool: Pool = {
@@ -163,9 +163,11 @@ describe("OraclePriceValue", () => {
     const html = renderToStaticMarkup(
       <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
     );
-    expect(html).toContain("· stale");
-    expect(html).toContain("text-red-400");
-    expect(html).not.toContain("href=");
+    expect(html).not.toContain("· stale");
+    expect(html).not.toContain("text-red-400");
+    expect(html).toContain(
+      'href="https://celoscan.io/tx/0xcb81fe1d4ff72d75ce29bf7905ea852d7e8da98e1831f575c5b71687e9acc936"',
+    );
   });
 
   it("omits the 'last …' subline when oracleTimestamp is absent", () => {

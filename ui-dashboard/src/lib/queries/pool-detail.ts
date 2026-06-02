@@ -36,18 +36,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
   }
 `;
 
-// Isolated from POOL_DETAIL_WITH_HEALTH for schema-lag resilience. Until the
-// hosted indexer/Hasura schema exposes this field, the detail page still
-// renders and freshness consumers fall back to `oracleTimestamp`.
-export const POOL_ORACLE_REPORT_EXT = `
-  query PoolOracleReportExt($id: String!, $chainId: Int!) {
-    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
-      id
-      lastOracleReportAt
-    }
-  }
-`;
-
 // Single-pool sibling of `ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN`. Same
 // isolation rationale: keeps the data-trust / degenerate classification
 // flags OFF the page's primary `POOL_DETAIL_WITH_HEALTH` query so a
