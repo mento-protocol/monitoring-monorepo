@@ -108,6 +108,20 @@ describe("updateCdpMetrics", () => {
     expect(headroom).toBeLessThan(0);
   });
 
+  it("publishes a POSITIVE shortfall total for a sub-microtoken subsidy (so increase() > 0 fires)", async () => {
+    // First RedemptionShortfallSubsidized adds 1 wei. toHumanUnits truncates it
+    // to 0; without dust preservation increase(shortfall_total[6h]) stays 0 and
+    // the critical "protocol absorbed a loss" rule never fires.
+    updateCdpMetrics([makeCdp({ instance: { shortfallSubsidyCum: "1" } })]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_cdp_shortfall_subsidy_total",
+        labels,
+      ),
+    ).toBeGreaterThan(0);
+  });
+
   it("withholds the headroom gauge until SystemParams is loaded (sentinel guard)", async () => {
     updateCdpMetrics([
       makeCdp({

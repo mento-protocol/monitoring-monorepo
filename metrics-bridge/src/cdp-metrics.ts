@@ -100,16 +100,23 @@ interface PreparedCdpSeries {
 }
 
 // `toHumanUnits` truncates any |value| < 1e-6 tokens (< 1e12 wei) to exactly 0,
-// dropping the sign. For spHeadroom that creates a blind spot precisely at the
-// floor: deposits a sub-microtoken below MIN_BOLD_IN_SP would publish 0 and
-// never trip the critical `mento_cdp_sp_headroom < 0` rule. Preserve the sign
-// at sub-precision (the magnitude there is dust either way) so a just-below-
-// floor breach still fires. Positive dust is left as 0 — at/above floor is not
-// a breach.
-function signedHeadroomHuman(rawHeadroom: bigint): number {
-  const human = toHumanUnits(rawHeadroom, DEBT_TOKEN_DECIMALS);
-  if (human === 0 && rawHeadroom < 0n) return -1e-6;
-  return human;
+// dropping both the sign and the "is it nonzero" signal. That's a blind spot
+// for the wei-denominated gauges whose alert rules treat ANY nonzero value as
+// significant:
+//   - `mento_cdp_sp_headroom < 0` — deposits a sub-microtoken below the floor
+//     would publish 0 and never fire.
+//   - `increase(mento_cdp_shortfall_subsidy_total[6h]) > 0` — a first subsidy
+//     of e.g. 1 wei would show no increase and never fire.
+// Preserve a sub-precision nonzero as ±1e-6 (the helper's own precision floor)
+// so the breach still trips; the magnitude there is dust either way. Exact 0
+// stays 0. Counts (liqCountCum etc.) are plain integers, not wei, so they don't
+// route through here.
+function humanUnitsPreservingDust(raw: bigint): number {
+  const human = toHumanUnits(raw, DEBT_TOKEN_DECIMALS);
+  if (human !== 0) return human;
+  if (raw > 0n) return 1e-6;
+  if (raw < 0n) return -1e-6;
+  return 0;
 }
 
 // spHeadroom carries a −1-wei sentinel until SystemParams is loaded; a real
@@ -130,12 +137,11 @@ function prepareCdpSeries({
       0,
       instance.redemptionCountCum - instance.rebalanceRedemptionCountCum,
     ),
-    shortfallSubsidyTotal: toHumanUnits(
+    shortfallSubsidyTotal: humanUnitsPreservingDust(
       BigInt(instance.shortfallSubsidyCum),
-      DEBT_TOKEN_DECIMALS,
     ),
     spHeadroom: collateral.systemParamsLoaded
-      ? signedHeadroomHuman(BigInt(instance.spHeadroom))
+      ? humanUnitsPreservingDust(BigInt(instance.spHeadroom))
       : null,
   };
 }
