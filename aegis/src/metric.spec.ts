@@ -3,21 +3,21 @@ import { MetricSource } from './config/MetricSource';
 import { Metric } from './metric';
 
 const STABLE_TOTAL_SUPPLY_TOKENS = [
-  'cUSD',
-  'cEUR',
-  'cREAL',
-  'eXOF',
-  'cKES',
-  'PUSO',
-  'cCOP',
-  'cGHS',
-  'cGBP',
-  'cZAR',
-  'cCAD',
-  'cAUD',
-  'cCHF',
-  'cNGN',
-  'cJPY',
+  'USDm',
+  'EURm',
+  'BRLm',
+  'XOFm',
+  'KESm',
+  'PHPm',
+  'COPm',
+  'GHSm',
+  'GBPm',
+  'ZARm',
+  'CADm',
+  'AUDm',
+  'CHFm',
+  'NGNm',
+  'JPYm',
 ] as const;
 
 const TOKEN_METADATA = {
