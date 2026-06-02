@@ -123,7 +123,7 @@ describe("updateCdpMetrics", () => {
     updateCdpMetrics([makeCdp()]);
     expect(await getGaugeValue(register, "mento_cdp_shutdown", labels)).toBe(0);
 
-    // A row with an unparseable BigInt must throw during preparation, leaving
+    // A row with an unparsable BigInt must throw during preparation, leaving
     // the previously-published series intact (the poll loop logs cdp_update and
     // retries next cycle) — never a half-cleared registry that no_data_state=OK
     // would read as an all-clear.
