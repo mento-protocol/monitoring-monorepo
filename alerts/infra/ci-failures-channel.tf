@@ -1,5 +1,5 @@
 ###############################
-# CI operations Slack channel  #
+# CI failures Slack channel    #
 ###############################
 #
 # A dedicated `#ci-failures` channel for main-branch GitHub Actions failures
