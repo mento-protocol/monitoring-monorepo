@@ -180,7 +180,15 @@ chains:
     contracts:
       SortedOracles: '0x6f92C745346057a61b259579256159458a0a6A92'
       BreakerBox: '0x9fc1E0d10fb38954Da385B8B25aB2BbaF3241722'
+      # Reserve token contracts for the ReserveV2 balance gauges (issue #707).
+      # Verified on-chain (Monad mainnet, chainId 143): each exposes its
+      # symbol, 6 decimals, and a live Reserve balance.
+      USDC: '0x754704bc059f8c67012fed69bc8a327a5aafb603'
+      USDT0: '0xe7cd86e13ac4309349f30b3435a9d337750fc82d'
+      AUSD: '0x00000000efe302beaa2b3e6e1b18d08d69a9012a'
     vars:
+      # Monad ReserveV2 — overrides the global (Celo) Reserve for this chain.
+      Reserve: '0x4255Cf38e51516766180b33122029A88Cb853806'
       # Monad rate feeds (same IDs on monad mainnet and testnet)
       USDCUSD: '0x81a313Ff894BFC6093d33b5514E34D7FAA41B7eF'
       AUSDUSD: '0xf47172cE00522Cc7dB02109634A92CE866a15FCC'
@@ -627,6 +635,30 @@ metrics:
     schedule: 0/10 * * * * *
     type: gauge
     chains: [celo]
+    variants:
+      - [Reserve]
+
+  # Monad ReserveV2 balances (issue #707). Same gauge names as Celo
+  # (USDC_balanceOf, ...) but distinct series via the `chain` label, so the
+  # critical-deviation rebalance annotation can render a per-chain suffix.
+  - source: USDC.balanceOf(address owner)(uint256)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [monad]
+    variants:
+      - [Reserve]
+
+  - source: USDT0.balanceOf(address owner)(uint256)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [monad]
+    variants:
+      - [Reserve]
+
+  - source: AUSD.balanceOf(address owner)(uint256)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [monad]
     variants:
       - [Reserve]
 
