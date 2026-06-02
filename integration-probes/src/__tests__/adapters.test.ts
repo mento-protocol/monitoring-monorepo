@@ -372,7 +372,19 @@ describe("aggregator quote builders", () => {
       (item) => item.id === "openocean",
     )?.quote?.(input, env);
     const openOceanParams = new URL(openOceanRequest?.url ?? "").searchParams;
-    expect(openOceanParams.get("amount")).toBe(input.amountDecimal);
-    expect(openOceanParams.has("amountDecimals")).toBe(false);
+    expect(openOceanParams.get("amountDecimals")).toBe(input.amountRaw);
+    expect(openOceanParams.has("amount")).toBe(false);
+
+    const relayRequest = AGGREGATOR_ADAPTERS.find(
+      (item) => item.id === "relay",
+    )?.quote?.(input, env);
+    expect(relayRequest?.url).toBe("https://api.relay.link/quote/v2");
+
+    const kyberRequest = AGGREGATOR_ADAPTERS.find(
+      (item) => item.id === "kyberswap",
+    )?.quote?.(input, env);
+    expect(JSON.stringify(kyberRequest?.init?.headers)).toContain(
+      "x-client-id",
+    );
   });
 });

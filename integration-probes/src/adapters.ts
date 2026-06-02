@@ -447,7 +447,7 @@ function relayAdapter(): AggregatorAdapter {
     researchNote:
       "Relay is a current candidate for both chains; quote evidence decides pass/fail.",
     quote: (input) =>
-      postRequest("https://api.relay.link/quote", relayBody(input)),
+      postRequest("https://api.relay.link/quote/v2", relayBody(input)),
   };
 }
 
@@ -476,7 +476,10 @@ function kyberAdapter(): AggregatorAdapter {
     tier: 2,
     support: { 42220: "unsupported", 143: "supported" },
     researchNote: "KyberSwap docs list Monad but not Celo.",
-    quote: (input) => getRequest(kyberUrl(input)),
+    quote: (input) =>
+      getRequest(kyberUrl(input), {
+        "x-client-id": "mento-integration-probes",
+      }),
   };
 }
 
@@ -573,7 +576,7 @@ function openOceanUrl(input: QuoteProbeInput): string {
   setParams(url, {
     inTokenAddress: input.sellToken.address,
     outTokenAddress: input.buyToken.address,
-    amount: input.amountDecimal,
+    amountDecimals: input.amountRaw,
     account: input.takerAddress,
     slippage: "1",
     gasPriceDecimals: "1000000000",
