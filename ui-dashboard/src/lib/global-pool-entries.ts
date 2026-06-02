@@ -24,14 +24,13 @@ type DerivedEntries = {
   tradingLimitsByKey: Map<string, TradingLimit[]>;
   /** Set of globalPoolKeys that have an active OLS strategy. */
   olsPoolKeys: Set<string>;
-  /** Set of globalPoolKeys whose rebalancer positively probed as CDP. */
+  /** Set of globalPoolKeys classified as CDP by CdpPool rows or fallback probe. */
   cdpPoolKeys: Set<string>;
   /**
-   * Set of globalPoolKeys whose rebalancer positively probed as Reserve.
-   * Pools with a rebalancer that appear in none of {ols, cdp, reserve} had
-   * their probe fail (transport error, timeout, or uncategorised) — see
-   * `lib/strategy-detection.ts`. The pools page treats that absence as
-   * "strategy detection unavailable" rather than a confident Reserve.
+   * Set of globalPoolKeys classified as Reserve. Indexed networks derive this
+   * by exclusion only after OLS+CdpPool both load; fallback networks use the
+   * RPC probe. Pools with a rebalancer that appear in none of {ols, cdp,
+   * reserve} are "strategy detection unavailable", not known Reserve.
    */
   reservePoolKeys: Set<string>;
 };

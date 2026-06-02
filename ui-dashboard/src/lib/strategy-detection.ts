@@ -1,11 +1,16 @@
 /**
- * Batch strategy-type detection for the global pools table.
+ * Runtime strategy-type fallback for networks whose CDPLiquidityStrategy
+ * PoolAdded/PoolRemoved stream is not indexed yet.
  *
- * The indexer tracks OLS registrations in a dedicated entity, but CDP pools
- * are indistinguishable from Reserve pools at the GraphQL layer — both just
- * expose `rebalancerAddress`. To surface the "CDP" strategy badge we probe
- * each unique rebalancer contract via RPC using the same detection logic as
- * `rebalance-check.ts` (getCDPConfig / reserve / getPools selector probes).
+ * Indexed networks derive CDP badges from CdpPool rows instead of this module.
+ * Monad still needs the RPC probe until its CDPLiquidityStrategy events are
+ * subscribed and backfilled, so the fallback remains narrowly scoped there.
+ *
+ * For fallback networks, CDP pools are indistinguishable from Reserve pools at
+ * the GraphQL Pool layer — both just expose `rebalancerAddress`. To surface the
+ * "CDP" strategy badge we probe each unique rebalancer contract via RPC using
+ * the same detection logic as `rebalance-check.ts` (getCDPConfig / reserve /
+ * getPools selector probes).
  *
  * Probes are grouped by unique rebalancer address and cached at module scope
  * so the cost amortizes to ~1 RPC call per deployed strategy contract per
@@ -17,11 +22,8 @@
  * avoid rendering a confident badge — see `poolStrategies()` in
  * `global-pools-table.tsx` for the UI contract.
  *
- * TODO(cdp-indexer): move CDP strategy tracking into the indexer, parallel
- * to the `OlsPool` entity in `indexer-envio/schema.graphql`. That lets the
- * dashboard derive `cdpPoolIds` from a single GraphQL query (same as OLS)
- * and removes the runtime RPC dependency this module introduces. Until
- * that lands, this is a UI-layer stopgap.
+ * TODO(monad-cdp-indexer): remove this module after Monad strategy events are
+ * indexed/backfilled and the dashboard can use CdpPool rows on every network.
  */
 
 import * as Sentry from "@sentry/nextjs";
@@ -29,6 +31,7 @@ import { isAddress } from "viem";
 import { detectStrategyType, type StrategyType } from "@/lib/rebalance-check";
 import type { Network } from "@/lib/networks";
 import { getViemClient } from "@/lib/rpc-client";
+import { usesRuntimeStrategyProbe } from "@/lib/strategy-probe-scope";
 import type { Pool } from "@/lib/types";
 
 type CacheEntry = {
@@ -68,6 +71,12 @@ const sentryLastCapturedAt = new Map<string, number>();
 // deployment boundaries.
 const cacheKey = (networkId: string, rebalancer: string): string =>
   `${networkId}:${rebalancer.toLowerCase()}`;
+
+function canRunRuntimeProbe(
+  network: Network,
+): network is Network & { rpcUrl: string } {
+  return usesRuntimeStrategyProbe(network) && network.rpcUrl !== undefined;
+}
 
 export function clearStrategyTypeCache(): void {
   strategyTypeCache.clear();
@@ -161,7 +170,7 @@ export async function detectProbedStrategies(
   network: Network,
   pools: Pool[],
 ): Promise<Readonly<ProbedStrategies>> {
-  if (!network.rpcUrl) return emptyStrategies();
+  if (!canRunRuntimeProbe(network)) return emptyStrategies();
 
   const poolsByRebalancer = new Map<string, Pool[]>();
   for (const pool of pools) {

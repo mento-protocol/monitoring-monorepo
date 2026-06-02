@@ -70,11 +70,10 @@ export type NetworkData = {
   tradingLimits: TradingLimit[];
   olsPoolIds: Set<string>;
   /**
-   * Pool IDs whose `rebalancerAddress` was positively probed as a CDP or
-   * Reserve strategy (see `lib/strategy-detection.ts`). Pools whose probe
-   * errored/timed out appear in NEITHER set — consumers must not default
-   * absence to "Reserve", because doing so would surface a misleading
-   * confident badge on every transport outage.
+   * Pool IDs classified as CDP or Reserve for global strategy badges. Indexed
+   * networks derive CDP from CdpPool rows and Reserve by exclusion after both
+   * OLS+CdpPool queries succeed; Monad uses the runtime probe fallback in
+   * `lib/strategy-detection.ts` until its strategy events are indexed.
    */
   cdpPoolIds: Set<string>;
   reservePoolIds: Set<string>;

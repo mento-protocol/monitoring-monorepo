@@ -582,7 +582,7 @@ describe("GlobalPoolsTable — Strategy badge", () => {
   const WITH_REBALANCER = { id: POOL_ID, rebalancerAddress: "0xreb" };
   const NO_REBALANCER = { id: POOL_ID, rebalancerAddress: "" };
 
-  it("renders a Reserve badge only when positively probed as Reserve", () => {
+  it("renders a Reserve badge only when classified as Reserve", () => {
     const entry = makeEntry(WITH_REBALANCER);
     const html = renderToStaticMarkup(
       <GlobalPoolsTable

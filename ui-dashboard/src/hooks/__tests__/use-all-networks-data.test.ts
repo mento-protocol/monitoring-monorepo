@@ -86,10 +86,9 @@ import { GraphQLClient } from "graphql-request";
  *   "Pool"              matches Pool, PoolDailySnapshot
  *   "PoolDailySnapshot" matches only PoolDailySnapshot
  *
- * Callers should check most-specific first (PoolDailySnapshot > Pool). If
- * `impl` does not handle a PoolDailySnapshot query (impl returns something
- * without that key), we default to an empty page so the pagination loop exits
- * cleanly rather than silently routing the query to the Pool branch.
+ * Callers should check most-specific first (PoolDailySnapshot / CdpPool /
+ * OlsPool > Pool). If `impl` does not handle a specific query, we default to
+ * an empty response rather than silently routing it to the Pool branch.
  */
 // Extracts the GraphQL document string from either the positional-arg form
 // (`client.request(query, variables)`) or the object form
@@ -123,6 +122,18 @@ function mockRequest(impl: (query: string) => unknown) {
       if (r != null && typeof r === "object" && "PoolDailySnapshot" in r)
         return Promise.resolve(r);
       return Promise.resolve({ PoolDailySnapshot: [] });
+    }
+    if (query.includes("CdpPool")) {
+      const r = impl(query);
+      if (r != null && typeof r === "object" && "CdpPool" in r)
+        return Promise.resolve(r);
+      return Promise.resolve({ CdpPool: [] });
+    }
+    if (query.includes("OlsPool")) {
+      const r = impl(query);
+      if (r != null && typeof r === "object" && "OlsPool" in r)
+        return Promise.resolve(r);
+      return Promise.resolve({ OlsPool: [] });
     }
     return Promise.resolve(impl(query));
   });
@@ -207,6 +218,90 @@ describe("fetchNetworkData — happy path", () => {
       limit: 1000,
       offset: 0,
     });
+  });
+
+  it("uses indexed CdpPool rows on Celo and derives Reserve by exclusion only after strategy queries succeed", async () => {
+    const cdpPool = {
+      ...makePool("42220-0x000000000000000000000000000000000000aaaa"),
+      rebalancerAddress: "0x000000000000000000000000000000000000c0c0",
+    };
+    const reservePool = {
+      ...makePool("42220-0x000000000000000000000000000000000000bbbb"),
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    };
+    const olsPool = {
+      ...makePool("42220-0x000000000000000000000000000000000000cccc"),
+      rebalancerAddress: "0x000000000000000000000000000000000000e0e0",
+    };
+
+    mockRequest((query) => {
+      if (query.includes("CdpPool"))
+        return { CdpPool: [{ poolId: cdpPool.id, collateralId: "gbpm" }] };
+      if (query.includes("OlsPool"))
+        return { OlsPool: [{ poolId: olsPool.id }] };
+      if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool"))
+        return { Pool: [cdpPool, reservePool, olsPool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.cdpPoolIds).toEqual(new Set([cdpPool.id]));
+    expect(result.reservePoolIds).toEqual(new Set([reservePool.id]));
+    expect(result.reservePoolIds.has(olsPool.id)).toBe(false);
+
+    const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    const cdpCall = calls.find((args) =>
+      extractQuery(args[0]).includes("AllCdpPools"),
+    );
+    expect(cdpCall).toBeDefined();
+    expect(extractVariables(cdpCall![0], cdpCall![1])).toEqual({
+      chainId: 42220,
+    });
+  });
+
+  it("withholds Reserve badges when the indexed CdpPool query fails", async () => {
+    const reserveCandidate = {
+      ...makePool("42220-0x000000000000000000000000000000000000dddd"),
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    };
+    const cdpErr = new Error("CdpPool schema unavailable");
+
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
+      if (query.includes("CdpPool")) return Promise.reject(cdpErr);
+      if (query.includes("OlsPool")) return Promise.resolve({ OlsPool: [] });
+      if (query.includes("PoolDailySnapshot"))
+        return Promise.resolve({ PoolDailySnapshot: [] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [] });
+      if (query.includes("LiquidityPosition"))
+        return Promise.resolve({ LiquidityPosition: [] });
+      if (query.includes("Pool"))
+        return Promise.resolve({ Pool: [reserveCandidate] });
+      return Promise.resolve({});
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(new Set());
   });
 
   it("deduplicates LP addresses across multiple positions", async () => {

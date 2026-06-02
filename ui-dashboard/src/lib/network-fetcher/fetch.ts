@@ -18,13 +18,14 @@ import {
   ALL_POOLS_WITH_HEALTH,
   ALL_TRADING_LIMITS,
   ALL_OLS_POOLS,
+  ALL_CDP_POOLS,
   BROKER_DAILY_SNAPSHOTS_ALL,
   POOL_DAILY_FEE_SNAPSHOTS_PAGE,
   POOL_DAILY_SNAPSHOTS_ALL,
   UNIQUE_LP_ADDRESSES,
 } from "@/lib/queries";
 import { aggregateProtocolFees } from "@/lib/protocol-fees";
-import { detectProbedStrategies } from "@/lib/strategy-detection";
+import { usesRuntimeStrategyProbe } from "@/lib/strategy-probe-scope";
 import {
   buildSnapshotWindows,
   filterSnapshotsToWindow,
@@ -38,6 +39,7 @@ import type {
   PoolSnapshotWindow,
   TradingLimit,
   OlsPool,
+  CdpPool,
 } from "@/lib/types";
 import { isFpmm, buildOracleRateMap } from "@/lib/tokens";
 import type {
@@ -400,7 +402,8 @@ export async function fetchNetworkData(
     breachRollupResult,
     healthCursorResult,
     rebalanceThresholdsKnownResult,
-    cdpPoolIdsResult,
+    indexedCdpPoolsResult,
+    fallbackStrategiesResult,
   ] = await Promise.allSettled([
     fetchAllFeeSnapshotPages(client, network.chainId, network.id),
     shouldQueryPoolSnapshots(poolIds)
@@ -457,9 +460,11 @@ export async function fetchNetworkData(
         breakerTripped?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
-    // RPC probe remains the global badge path until indexed CdpPool rows are
-    // backfilled on every network that can expose CDP-backed FPMMs.
-    detectProbedStrategies(network, pools),
+    // Celo's CDPLiquidityStrategy stream is indexed/backfilled, so CDP badges
+    // come from CdpPool rows there. Monad keeps the runtime probe below until
+    // its strategy events are subscribed and backfilled.
+    requestIndexedCdpPools(network, timed),
+    requestFallbackStrategies(network, pools),
   ]);
 
   // Merge the rollup fields into the pool objects. On failure (including
@@ -673,15 +678,14 @@ export async function fetchNetworkData(
       ? new Set((olsResult.value.OlsPool ?? []).map((p) => p.poolId))
       : new Set<string>();
 
-  // `detectProbedStrategies` already fails open (catches and Sentry-logs
-  // RPC errors itself), so a rejected Promise here would signal something
-  // the helper couldn't swallow — still degrade to empty so the fetch
-  // overall stays up. Consumers downstream treat "pool absent from both
-  // sets" as "detection unavailable" and avoid confident badges.
-  const { cdpPoolIds, reservePoolIds } =
-    cdpPoolIdsResult.status === "fulfilled"
-      ? cdpPoolIdsResult.value
-      : { cdpPoolIds: new Set<string>(), reservePoolIds: new Set<string>() };
+  const { cdpPoolIds, reservePoolIds } = resolveStrategyIds({
+    network,
+    pools,
+    olsPoolIds,
+    olsLoaded: olsResult.status === "fulfilled",
+    indexedCdpPoolsResult,
+    fallbackStrategiesResult,
+  });
 
   return {
     network,
@@ -715,6 +719,124 @@ export async function fetchNetworkData(
     snapshotsAllDailyError,
     brokerSnapshotsAllDailyError,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
+  };
+}
+
+const INDEXED_CDP_POOL_CHAIN_IDS = new Set([42220]);
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+type TimedRequest = <T>(
+  document: string,
+  variables?: Record<string, unknown>,
+) => Promise<T>;
+
+type CdpPoolsResponse = { CdpPool: Pick<CdpPool, "poolId">[] };
+
+type ProbedStrategies = {
+  cdpPoolIds: Set<string>;
+  reservePoolIds: Set<string>;
+};
+
+type StrategyIdsArgs = {
+  network: Network;
+  pools: Pool[];
+  olsPoolIds: Set<string>;
+  olsLoaded: boolean;
+  indexedCdpPoolsResult: PromiseSettledResult<CdpPoolsResponse>;
+  fallbackStrategiesResult: PromiseSettledResult<Readonly<ProbedStrategies>>;
+};
+
+function usesIndexedCdpPools(network: Pick<Network, "chainId">): boolean {
+  return INDEXED_CDP_POOL_CHAIN_IDS.has(network.chainId);
+}
+
+function hasRebalancerAddress(pool: Pool): boolean {
+  const rebalancer = pool.rebalancerAddress;
+  return (
+    rebalancer !== undefined &&
+    /^0x[a-fA-F0-9]{40}$/.test(rebalancer) &&
+    rebalancer.toLowerCase() !== ZERO_ADDRESS
+  );
+}
+
+function deriveReservePoolIdsFromIndexedStrategies(
+  pools: Pool[],
+  olsPoolIds: Set<string>,
+  cdpPoolIds: Set<string>,
+): Set<string> {
+  const reservePoolIds = new Set<string>();
+  for (const pool of pools) {
+    if (!hasRebalancerAddress(pool)) continue;
+    if (olsPoolIds.has(pool.id) || cdpPoolIds.has(pool.id)) continue;
+    reservePoolIds.add(pool.id);
+  }
+  return reservePoolIds;
+}
+
+function emptyStrategyIds(): ProbedStrategies {
+  return {
+    cdpPoolIds: new Set<string>(),
+    reservePoolIds: new Set<string>(),
+  };
+}
+
+function requestIndexedCdpPools(
+  network: Network,
+  timed: TimedRequest,
+): Promise<CdpPoolsResponse> {
+  if (!usesIndexedCdpPools(network)) return Promise.resolve({ CdpPool: [] });
+  return timed<CdpPoolsResponse>(ALL_CDP_POOLS, { chainId: network.chainId });
+}
+
+async function requestFallbackStrategies(
+  network: Network,
+  pools: Pool[],
+): Promise<Readonly<ProbedStrategies>> {
+  if (!usesRuntimeStrategyProbe(network)) return emptyStrategyIds();
+  const { detectProbedStrategies } = await import("@/lib/strategy-detection");
+  return detectProbedStrategies(network, pools);
+}
+
+function resolveStrategyIds({
+  network,
+  pools,
+  olsPoolIds,
+  olsLoaded,
+  indexedCdpPoolsResult,
+  fallbackStrategiesResult,
+}: StrategyIdsArgs): ProbedStrategies {
+  const fallbackStrategies =
+    fallbackStrategiesResult.status === "fulfilled"
+      ? fallbackStrategiesResult.value
+      : emptyStrategyIds();
+
+  if (!usesIndexedCdpPools(network)) {
+    return {
+      cdpPoolIds: fallbackStrategies.cdpPoolIds,
+      reservePoolIds: fallbackStrategies.reservePoolIds,
+    };
+  }
+
+  const cdpPoolIds =
+    indexedCdpPoolsResult.status === "fulfilled"
+      ? new Set(
+          (indexedCdpPoolsResult.value.CdpPool ?? []).map((p) => p.poolId),
+        )
+      : new Set<string>();
+
+  return {
+    cdpPoolIds,
+    // Reserve badges are derived by exclusion only when both indexed strategy
+    // sources are present. If CdpPool or OlsPool fails during schema rollout,
+    // absence is "strategy unavailable", not known Reserve.
+    reservePoolIds:
+      indexedCdpPoolsResult.status === "fulfilled" && olsLoaded
+        ? deriveReservePoolIdsFromIndexedStrategies(
+            pools,
+            olsPoolIds,
+            cdpPoolIds,
+          )
+        : new Set<string>(),
   };
 }
 
