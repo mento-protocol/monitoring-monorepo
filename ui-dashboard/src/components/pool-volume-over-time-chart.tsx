@@ -4,14 +4,21 @@ import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
 import { getSnapshotVolumeInUsd } from "@/lib/volume";
 import type { Network } from "@/lib/networks";
-import { canPricePool, type OracleRateMap } from "@/lib/tokens";
+import {
+  canPricePool,
+  isFpmm,
+  isFxPool,
+  type OracleRateMap,
+} from "@/lib/tokens";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
+import { zeroFillSeries } from "@/lib/chart-gap-fill";
 import {
   SECONDS_PER_DAY,
   type RangeKey,
   type TimeSeriesPoint,
 } from "@/lib/time-series";
+import { fxWeekendBands } from "@/lib/weekend";
 
 interface PoolVolumeOverTimeChartProps {
   pool: Pool;
@@ -76,12 +83,10 @@ export function PoolVolumeOverTimeChart({
     if (fullSeries.length === 0) return fullSeries;
     const todayStart =
       Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-    const byBucket = new Map<number, number>();
     let earliest = todayStart;
     for (const pt of fullSeries) {
       const bucket =
         Math.floor(pt.timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-      byBucket.set(bucket, pt.value);
       if (bucket < earliest) earliest = bucket;
     }
     const windowStart =
@@ -90,12 +95,16 @@ export function PoolVolumeOverTimeChart({
         : range === "30d"
           ? todayStart - 29 * SECONDS_PER_DAY
           : earliest;
-    const points: TimeSeriesPoint[] = [];
-    for (let ts = windowStart; ts <= todayStart; ts += SECONDS_PER_DAY) {
-      points.push({ timestamp: ts, value: byBucket.get(ts) ?? 0 });
-    }
-    return points;
+    return zeroFillSeries(fullSeries, {
+      from: windowStart,
+      to: todayStart + SECONDS_PER_DAY,
+      bucketSeconds: SECONDS_PER_DAY,
+    });
   }, [fullSeries, range]);
+  const shapes = useMemo(
+    () => makeFxWeekendShapes(pool, network, visibleSeries),
+    [pool, network, visibleSeries],
+  );
 
   const rangeTotal = useMemo(
     () => visibleSeries.reduce((sum, pt) => sum + pt.value, 0),
@@ -120,6 +129,7 @@ export function PoolVolumeOverTimeChart({
       isLoading={isLoading}
       hasError={hasError}
       hasSnapshotError={false}
+      shapes={shapes}
       emptyMessage={
         hasError
           ? "Unable to load volume history"
@@ -131,4 +141,19 @@ export function PoolVolumeOverTimeChart({
       }
     />
   );
+}
+
+function makeFxWeekendShapes(
+  pool: Pool,
+  network: Network,
+  series: TimeSeriesPoint[],
+): Plotly.Layout["shapes"] {
+  if (!isFpmm(pool) || !isFxPool(network, pool.token0, pool.token1)) return [];
+  const first = series[0];
+  const last = series[series.length - 1];
+  if (!first || !last) return [];
+  return fxWeekendBands({
+    from: first.timestamp,
+    to: last.timestamp + SECONDS_PER_DAY,
+  });
 }

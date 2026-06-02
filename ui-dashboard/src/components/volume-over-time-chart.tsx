@@ -19,6 +19,7 @@ import {
   type RangeKey,
   type TimeSeriesPoint,
 } from "@/lib/time-series";
+import { zeroFillSeries } from "@/lib/chart-gap-fill";
 
 type SeriesPoint = { timestamp: number; volumeUSD: number };
 
@@ -94,11 +95,13 @@ const USD_WEI_PER_CENT = BigInt(10) ** BigInt(16);
  */
 type PerChainVolume = {
   network: Network;
+};
+type VolumeHistory = PerChainVolume & {
   bucketTotals: Map<number, number>;
 };
 type NetworkAggregateState = {
+  histories: VolumeHistory[];
   perChain: Map<string, PerChainVolume>;
-  totalBuckets: Map<number, number>;
   minSnapshotBucket: number;
   skippedUntrustedDecimalSnapshot: boolean;
 };
@@ -119,6 +122,7 @@ function aggregateNetworkVolume(
   // shows a partial-data badge separately.
   if (netData.error !== null) return;
   const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
+  const perPool = new Map<string, VolumeHistory>();
   for (const snapshot of netData.snapshotsAllDaily) {
     const timestamp = Number(snapshot.timestamp);
     if (window && (timestamp < window.from || timestamp >= window.to)) continue;
@@ -136,19 +140,25 @@ function aggregateNetworkVolume(
     if (volume === null) continue;
     const bucket = Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
     state.minSnapshotBucket = Math.min(state.minSnapshotBucket, bucket);
-    state.totalBuckets.set(
-      bucket,
-      (state.totalBuckets.get(bucket) ?? 0) + volume,
-    );
-    let entry = state.perChain.get(netData.network.id);
+    let entry = perPool.get(snapshot.poolId);
     if (!entry) {
-      entry = { network: netData.network, bucketTotals: new Map() };
-      state.perChain.set(netData.network.id, entry);
+      entry = {
+        network: netData.network,
+        bucketTotals: new Map(),
+      };
+      perPool.set(snapshot.poolId, entry);
     }
     entry.bucketTotals.set(
       bucket,
       (entry.bucketTotals.get(bucket) ?? 0) + volume,
     );
+  }
+
+  for (const history of perPool.values()) {
+    state.histories.push(history);
+    if (!state.perChain.has(history.network.id)) {
+      state.perChain.set(history.network.id, { network: history.network });
+    }
   }
 }
 
@@ -159,15 +169,15 @@ export function buildDailyVolumeSeries(
   // Keyed by Network.id so distinct configured networks that share a chainId
   // (e.g. celo-mainnet vs celo-mainnet-local) stay separate in the breakdown.
   const state: NetworkAggregateState = {
+    histories: [],
     perChain: new Map(),
-    totalBuckets: new Map(),
     minSnapshotBucket: Infinity,
     skippedUntrustedDecimalSnapshot: false,
   };
   for (const netData of networkData) {
     aggregateNetworkVolume(state, netData, window);
   }
-  const { perChain, totalBuckets, minSnapshotBucket } = state;
+  const { histories, perChain, minSnapshotBucket } = state;
   const skippedUntrustedDecimalSnapshot = state.skippedUntrustedDecimalSnapshot;
 
   const volumePartial = skippedUntrustedDecimalSnapshot
@@ -196,25 +206,59 @@ export function buildDailyVolumeSeries(
   const lastBucket =
     endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
 
-  const series: SeriesPoint[] = [];
-  const byChain: ChainVolumeSeries[] = Array.from(perChain.values()).map(
-    (entry) => ({ network: entry.network, series: [] }),
-  );
-  for (
-    let timestamp = startBucket;
-    timestamp <= lastBucket;
-    timestamp += SECONDS_PER_DAY
-  ) {
-    series.push({ timestamp, volumeUSD: totalBuckets.get(timestamp) ?? 0 });
-    let i = 0;
-    for (const entry of perChain.values()) {
-      byChain[i]!.series.push({
+  const range = {
+    from: startBucket,
+    to: lastBucket + SECONDS_PER_DAY,
+    bucketSeconds: SECONDS_PER_DAY,
+  };
+  const totalBuckets = new Map<number, number>();
+  const perChainBuckets = new Map<string, Map<number, number>>();
+  for (const entry of perChain.values()) {
+    perChainBuckets.set(entry.network.id, new Map());
+  }
+
+  // Fill per pool before summing so idle pools contribute explicit zeros while
+  // pools with no prior observations do not invent pre-history volume.
+  for (const history of histories) {
+    const filled = zeroFillSeries(
+      Array.from(history.bucketTotals, ([timestamp, value]) => ({
         timestamp,
-        volumeUSD: entry.bucketTotals.get(timestamp) ?? 0,
-      });
-      i++;
+        value,
+      })),
+      range,
+    );
+    const chainBuckets = perChainBuckets.get(history.network.id)!;
+    for (const point of filled) {
+      totalBuckets.set(
+        point.timestamp,
+        (totalBuckets.get(point.timestamp) ?? 0) + point.value,
+      );
+      chainBuckets.set(
+        point.timestamp,
+        (chainBuckets.get(point.timestamp) ?? 0) + point.value,
+      );
     }
   }
+
+  const series: SeriesPoint[] = zeroFillSeries(
+    Array.from(totalBuckets, ([timestamp, value]) => ({ timestamp, value })),
+    range,
+  ).map((point) => ({ timestamp: point.timestamp, volumeUSD: point.value }));
+  const byChain: ChainVolumeSeries[] = Array.from(perChain.values()).map(
+    (entry) => ({
+      network: entry.network,
+      series: zeroFillSeries(
+        Array.from(
+          perChainBuckets.get(entry.network.id) ?? new Map<number, number>(),
+          ([timestamp, value]) => ({ timestamp, value }),
+        ),
+        range,
+      ).map((point) => ({
+        timestamp: point.timestamp,
+        volumeUSD: point.value,
+      })),
+    }),
+  );
   return { series, byChain, volumePartial };
 }
 
@@ -265,15 +309,14 @@ export function buildBrokerDailyV2Series(
   const lastBucket =
     endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
 
-  const series: SeriesPoint[] = [];
-  for (
-    let timestamp = startBucket;
-    timestamp <= lastBucket;
-    timestamp += SECONDS_PER_DAY
-  ) {
-    series.push({ timestamp, volumeUSD: totalBuckets.get(timestamp) ?? 0 });
-  }
-  return series;
+  return zeroFillSeries(
+    Array.from(totalBuckets, ([timestamp, value]) => ({ timestamp, value })),
+    {
+      from: startBucket,
+      to: lastBucket + SECONDS_PER_DAY,
+      bucketSeconds: SECONDS_PER_DAY,
+    },
+  ).map((point) => ({ timestamp: point.timestamp, volumeUSD: point.value }));
 }
 
 /**
@@ -335,17 +378,29 @@ function VersionBadge({ version }: { version: Version }): ReactNode {
 // unavailable) without poisoning the v3 number, which is fetched from a
 // different rollup. Otherwise a confident "$X v3 · $0 v2" misleads on every
 // Broker outage even when v3 is fully synced.
-function computeHeadline(
-  isLoading: boolean,
-  hasError: boolean,
-  hasSnapshotError: boolean,
-  hasBrokerSnapshotError: boolean,
-  v3Partial: VolumePartialState,
-  v3Points: SeriesPoint[],
-  v2Points: SeriesPoint[],
-  v3Total: number,
-  v2Total: number,
-): ReactNode {
+type VolumeHeadlineInput = {
+  isLoading: boolean;
+  hasError: boolean;
+  hasSnapshotError: boolean;
+  hasBrokerSnapshotError: boolean;
+  v3Partial: VolumePartialState;
+  v3Points: SeriesPoint[];
+  v2Points: SeriesPoint[];
+  v3Total: number;
+  v2Total: number;
+};
+
+function computeHeadline({
+  isLoading,
+  hasError,
+  hasSnapshotError,
+  hasBrokerSnapshotError,
+  v3Partial,
+  v3Points,
+  v2Points,
+  v3Total,
+  v2Total,
+}: VolumeHeadlineInput): ReactNode {
   if (isLoading) return "…";
   if (hasError) return "N/A";
   if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)
@@ -422,6 +477,77 @@ function computeHeadline(
   );
 }
 
+function activeVolumeWindow(
+  networkData: NetworkData[],
+  range: RangeKey,
+): TimeRange | undefined {
+  if (range === "all") return undefined;
+  // All networks are fetched together by `fetchAllNetworks`, so their
+  // `snapshotWindows` are anchored at the same hour boundary — taking
+  // index 0 is representative. Falls back to a fresh `Date.now()` window
+  // only on cold-start before the first SWR fetch resolves.
+  const fetchWindows = networkData[0]?.snapshotWindows;
+  if (fetchWindows)
+    return range === "7d" ? fetchWindows.w7d : fetchWindows.w30d;
+  return range === "7d"
+    ? snapshotWindow7d(Date.now())
+    : snapshotWindow30d(Date.now());
+}
+
+function toVolumePoints(points: SeriesPoint[]): TimeSeriesPoint[] {
+  return points.map((p) => ({ timestamp: p.timestamp, value: p.volumeUSD }));
+}
+
+function buildVersionBreakdown(
+  visibleV3Points: SeriesPoint[],
+  visibleV2Points: SeriesPoint[],
+): BreakdownSeries[] {
+  return [
+    {
+      name: "v3",
+      color: V3_COLOR,
+      series: toVolumePoints(visibleV3Points),
+    },
+    {
+      name: "v2",
+      color: V2_COLOR,
+      series: toVolumePoints(visibleV2Points),
+    },
+  ];
+}
+
+function buildStackedTotalSeries(
+  visibleV3Points: SeriesPoint[],
+  visibleV2Points: SeriesPoint[],
+): TimeSeriesPoint[] {
+  const byTs = new Map<number, number>();
+  for (const p of visibleV3Points)
+    byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
+  for (const p of visibleV2Points)
+    byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
+  return Array.from(byTs)
+    .sort((a, b) => a[0] - b[0])
+    .map(([timestamp, value]) => ({ timestamp, value }));
+}
+
+function sumVolumeUsd(points: SeriesPoint[]): number {
+  return points.reduce((sum, p) => sum + p.volumeUSD, 0);
+}
+
+function volumeEmptyMessage(
+  hasError: boolean,
+  hasSnapshotError: boolean,
+  visibleVolumePartial: VolumePartialState,
+): string {
+  return hasError
+    ? "Unable to load volume history"
+    : hasSnapshotError
+      ? "Historical data partial — some chains failed to load"
+      : visibleVolumePartial === null
+        ? "Historical volume unavailable — token decimals unverified"
+        : "Not enough history yet";
+}
+
 interface VolumeOverTimeChartProps {
   networkData: NetworkData[];
   isLoading: boolean;
@@ -452,29 +578,14 @@ export function VolumeOverTimeChart({
   // tracking the dominant-side delta keeps the headline meaningful. v2 WoW
   // can be added once v2 volumes are large enough to read at chart scale.
   const fullV3Series = useMemo<TimeSeriesPoint[]>(
-    () =>
-      fullVolumeSeries.series.map((p) => ({
-        timestamp: p.timestamp,
-        value: p.volumeUSD,
-      })),
+    () => toVolumePoints(fullVolumeSeries.series),
     [fullVolumeSeries],
   );
 
-  const activeWindow = useMemo<TimeRange | undefined>(() => {
-    if (range === "all") return undefined;
-    // All networks are fetched together by `fetchAllNetworks`, so their
-    // `snapshotWindows` are anchored at the same hour boundary — taking
-    // index 0 is representative. Falls back to a fresh `Date.now()` window
-    // only on cold-start before the first SWR fetch resolves.
-    const fetchWindows = networkData[0]?.snapshotWindows;
-    return fetchWindows
-      ? range === "7d"
-        ? fetchWindows.w7d
-        : fetchWindows.w30d
-      : range === "7d"
-        ? snapshotWindow7d(Date.now())
-        : snapshotWindow30d(Date.now());
-  }, [networkData, range]);
+  const activeWindow = useMemo(
+    () => activeVolumeWindow(networkData, range),
+    [networkData, range],
+  );
 
   // v3 series for the active window — reuses fullV3Result on the "all" tab
   // since the window matches.
@@ -499,31 +610,19 @@ export function VolumeOverTimeChart({
   // Stack v3 (bottom) + v2 (top). Distinct, named legend entries; the chart
   // card suppresses its own total trace in `stacked` mode so the breakdown
   // areas read directly.
-  const visibleBreakdown = useMemo<BreakdownSeries[]>(() => {
-    const toPoints = (xs: SeriesPoint[]) =>
-      xs.map((p) => ({ timestamp: p.timestamp, value: p.volumeUSD }));
-    return [
-      {
-        name: "v3",
-        color: V3_COLOR,
-        series: toPoints(visibleV3Points),
-      },
-      {
-        name: "v2",
-        color: V2_COLOR,
-        series: toPoints(visibleV2Points),
-      },
-    ];
-  }, [visibleV3Points, visibleV2Points]);
+  const visibleBreakdown = useMemo(
+    () => buildVersionBreakdown(visibleV3Points, visibleV2Points),
+    [visibleV3Points, visibleV2Points],
+  );
 
   // Per-version range totals — rolling-window bucketing means each side's
   // sum equals that version's volume for the visible range.
   const v3RangeTotal = useMemo(
-    () => visibleV3Points.reduce((sum, p) => sum + p.volumeUSD, 0),
+    () => sumVolumeUsd(visibleV3Points),
     [visibleV3Points],
   );
   const v2RangeTotal = useMemo(
-    () => visibleV2Points.reduce((sum, p) => sum + p.volumeUSD, 0),
+    () => sumVolumeUsd(visibleV2Points),
     [visibleV2Points],
   );
 
@@ -535,38 +634,30 @@ export function VolumeOverTimeChart({
   // v2 ≥ ~35% of v3 the stacked top exceeds y-max and Plotly clips the
   // upper bars. Day buckets are aligned (both helpers floor to UTC-day),
   // so summing by timestamp is exact.
-  const visibleSeriesForCard = useMemo<TimeSeriesPoint[]>(() => {
-    const byTs = new Map<number, number>();
-    for (const p of visibleV3Points)
-      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
-    for (const p of visibleV2Points)
-      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
-    return Array.from(byTs)
-      .sort((a, b) => a[0] - b[0])
-      .map(([timestamp, value]) => ({ timestamp, value }));
-  }, [visibleV3Points, visibleV2Points]);
+  const visibleSeriesForCard = useMemo(
+    () => buildStackedTotalSeries(visibleV3Points, visibleV2Points),
+    [visibleV3Points, visibleV2Points],
+  );
 
-  const headline = computeHeadline(
+  const headline = computeHeadline({
     isLoading,
     hasError,
     hasSnapshotError,
     hasBrokerSnapshotError,
-    visibleVolumePartial,
-    visibleV3Points,
-    visibleV2Points,
-    v3RangeTotal,
-    v2RangeTotal,
-  );
+    v3Partial: visibleVolumePartial,
+    v3Points: visibleV3Points,
+    v2Points: visibleV2Points,
+    v3Total: v3RangeTotal,
+    v2Total: v2RangeTotal,
+  });
 
   const change = weekOverWeekChangePct(fullV3Series);
 
-  const emptyMessage = hasError
-    ? "Unable to load volume history"
-    : hasSnapshotError
-      ? "Historical data partial — some chains failed to load"
-      : visibleVolumePartial === null
-        ? "Historical volume unavailable — token decimals unverified"
-        : "Not enough history yet";
+  const emptyMessage = volumeEmptyMessage(
+    hasError,
+    hasSnapshotError,
+    visibleVolumePartial,
+  );
 
   return (
     <TimeSeriesChartCard

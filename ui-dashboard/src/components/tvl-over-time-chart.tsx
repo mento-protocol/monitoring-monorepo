@@ -12,6 +12,7 @@ import {
   TimeSeriesChartCard,
   type BreakdownSeries,
 } from "@/components/time-series-chart-card";
+import { forwardFillSeries } from "@/lib/chart-gap-fill";
 import {
   SECONDS_PER_DAY,
   filterSeriesByRange,
@@ -222,22 +223,68 @@ function buildHistoricalSeries({
   windowStartBucket,
   endBucket,
 }: HistoricalSeriesInput): HistoricalSeries {
-  const cursors = new Array<number>(histories.length).fill(-1);
-  const series: SeriesPoint[] = [];
-  const perChainSeries = new Map<string, SeriesPoint[]>();
-  for (const c of chainsSeen) perChainSeries.set(c.id, []);
-
+  const buckets = new Map<
+    number,
+    { tvl: number; anyContributed: boolean; perChainTvl: Map<string, number> }
+  >();
+  const bucketTimestamps: number[] = [];
   for (
     let timestamp = windowStartBucket;
     timestamp <= endBucket;
     timestamp += bucketSeconds
   ) {
-    const bucket = computeHistoricalBucket(
-      histories,
-      cursors,
-      timestamp,
+    bucketTimestamps.push(timestamp);
+  }
+
+  // Fill each pool independently before summing buckets. A pool whose first
+  // snapshot starts later contributes `undefined` before that point rather
+  // than a synthetic zero TVL, while already-observed pools continue forward.
+  for (const history of histories) {
+    const points: TimeSeriesPoint[] = [];
+    for (const point of history.points) {
+      const poolTvl = poolTvlUSD(
+        { ...history.pool, reserves0: point.r0, reserves1: point.r1 },
+        history.network,
+        history.rates,
+      );
+      // Skip pools whose TVL is unknowable (untrusted decimals → null).
+      // Summing null as 0 would understate aggregate / per-chain TVL.
+      if (poolTvl === null) continue;
+      points.push({ timestamp: point.ts, value: poolTvl });
+    }
+
+    const filled = forwardFillSeries(points, {
+      from: windowStartBucket,
+      to: endBucket + bucketSeconds,
       bucketSeconds,
-    );
+    });
+    for (const point of filled) {
+      if (point.value === undefined) continue;
+      let bucket = buckets.get(point.timestamp);
+      if (!bucket) {
+        bucket = { tvl: 0, anyContributed: false, perChainTvl: new Map() };
+        buckets.set(point.timestamp, bucket);
+      }
+      bucket.tvl += point.value;
+      bucket.anyContributed = true;
+      const id = history.network.id;
+      bucket.perChainTvl.set(
+        id,
+        (bucket.perChainTvl.get(id) ?? 0) + point.value,
+      );
+    }
+  }
+
+  const series: SeriesPoint[] = [];
+  const perChainSeries = new Map<string, SeriesPoint[]>();
+  for (const c of chainsSeen) perChainSeries.set(c.id, []);
+
+  for (const timestamp of bucketTimestamps) {
+    const bucket = buckets.get(timestamp) ?? {
+      tvl: 0,
+      anyContributed: false,
+      perChainTvl: new Map<string, number>(),
+    };
     appendAggregateBucket(series, bucket, timestamp);
     appendPerChainBucket(
       perChainSeries,
@@ -248,43 +295,6 @@ function buildHistoricalSeries({
     );
   }
   return { series, perChainSeries };
-}
-
-function computeHistoricalBucket(
-  histories: PoolHistory[],
-  cursors: number[],
-  timestamp: number,
-  bucketSeconds: number,
-): { tvl: number; anyContributed: boolean; perChainTvl: Map<string, number> } {
-  let tvl = 0;
-  let anyContributed = false;
-  const perChainTvl = new Map<string, number>();
-
-  for (let i = 0; i < histories.length; i++) {
-    const history = histories[i]!;
-    while (
-      cursors[i]! + 1 < history.points.length &&
-      history.points[cursors[i]! + 1]!.ts < timestamp + bucketSeconds
-    ) {
-      cursors[i] = cursors[i]! + 1;
-    }
-    if (cursors[i]! < 0) continue;
-    const point = history.points[cursors[i]!]!;
-    const poolTvl = poolTvlUSD(
-      { ...history.pool, reserves0: point.r0, reserves1: point.r1 },
-      history.network,
-      history.rates,
-    );
-    // Skip pools whose TVL is unknowable (untrusted decimals → null).
-    // Summing null as 0 would understate aggregate / per-chain TVL.
-    if (poolTvl === null) continue;
-    tvl += poolTvl;
-    anyContributed = true;
-    const id = history.network.id;
-    perChainTvl.set(id, (perChainTvl.get(id) ?? 0) + poolTvl);
-  }
-
-  return { tvl, anyContributed, perChainTvl };
 }
 
 function appendAggregateBucket(

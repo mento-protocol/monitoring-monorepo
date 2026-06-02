@@ -87,6 +87,50 @@ const WEEKEND_DURATION_SECONDS =
   ((FX_REOPEN_DAY - FX_CLOSE_DAY + 7) % 7) * 86400 +
   (FX_REOPEN_HOUR_UTC - FX_CLOSE_HOUR_UTC) * 3600;
 
+export type FxWeekendBandShape = NonNullable<Plotly.Layout["shapes"]>[number];
+
+/**
+ * Plotly rectangles for FX weekend closures that overlap `[from, to)`.
+ * Intended for FX pool charts only; aggregate charts can mix FX and non-FX
+ * pools, so their quiet periods are not semantically uniform.
+ */
+export function fxWeekendBands({
+  from,
+  to,
+}: {
+  from: number;
+  to: number;
+}): FxWeekendBandShape[] {
+  if (to <= from) return [];
+
+  const shapes: FxWeekendBandShape[] = [];
+  const offset = from - ANCHOR_FRI_2100;
+  let k = Math.floor(offset / WEEK_SECONDS);
+
+  while (true) {
+    const weekendStart = ANCHOR_FRI_2100 + k * WEEK_SECONDS;
+    const weekendEnd = weekendStart + WEEKEND_DURATION_SECONDS;
+    if (weekendStart >= to) break;
+    if (weekendEnd > from) {
+      shapes.push({
+        type: "rect",
+        xref: "x",
+        yref: "paper",
+        x0: new Date(Math.max(weekendStart, from) * 1000).toISOString(),
+        x1: new Date(Math.min(weekendEnd, to) * 1000).toISOString(),
+        y0: 0,
+        y1: 1,
+        fillcolor: "rgba(148, 163, 184, 0.10)",
+        line: { width: 0 },
+        layer: "below",
+      });
+    }
+    k += 1;
+  }
+
+  return shapes;
+}
+
 /**
  * Seconds in [startTs, endTs) that fall inside FX weekend windows
  * (Fri 21:00 UTC → Sun 23:00 UTC). Closed-form: enumerates weekend windows

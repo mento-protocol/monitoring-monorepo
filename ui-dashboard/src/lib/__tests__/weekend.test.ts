@@ -4,6 +4,7 @@ import {
   FX_CLOSE_HOUR_UTC,
   FX_REOPEN_HOUR_UTC,
   ANCHOR_FRI_2100,
+  fxWeekendBands,
   nextMarketHoursTransition,
   tradingSecondsInRange,
   weekendOverlapSeconds,
@@ -245,6 +246,44 @@ describe("weekendOverlapSeconds", () => {
     const start = sec(utc(4, 0)); // Thursday
     const end = start + 5 * 86400;
     expect(weekendOverlapSeconds(start, end)).toBe(180000);
+  });
+});
+
+describe("fxWeekendBands", () => {
+  it("returns clipped Plotly rectangles for overlapping FX weekend windows", () => {
+    const from = sec(utc(5, FX_CLOSE_HOUR_UTC + 1));
+    const to = sec(utc(0, FX_REOPEN_HOUR_UTC - 1));
+
+    const bands = fxWeekendBands({ from, to });
+
+    expect(bands).toHaveLength(1);
+    expect(bands[0]).toMatchObject({
+      type: "rect",
+      xref: "x",
+      yref: "paper",
+      x0: new Date(from * 1000).toISOString(),
+      x1: new Date(to * 1000).toISOString(),
+      y0: 0,
+      y1: 1,
+      layer: "below",
+    });
+  });
+
+  it("returns one band per weekend in the visible range", () => {
+    const from = sec(utc(1, 0));
+    const to = from + 14 * 86400;
+
+    const bands = fxWeekendBands({ from, to });
+
+    expect(bands).toHaveLength(2);
+    expect(bands[0]?.x0).toBe("2026-03-13T21:00:00.000Z");
+    expect(bands[0]?.x1).toBe("2026-03-15T23:00:00.000Z");
+    expect(bands[1]?.x0).toBe("2026-03-20T21:00:00.000Z");
+    expect(bands[1]?.x1).toBe("2026-03-22T23:00:00.000Z");
+  });
+
+  it("returns no bands for zero-width ranges", () => {
+    expect(fxWeekendBands({ from: 100, to: 100 })).toEqual([]);
   });
 });
 
