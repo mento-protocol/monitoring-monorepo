@@ -11,6 +11,18 @@ vi.mock("../src/graphql.js", () => ({
   fetchPools: vi.fn(),
 }));
 
+// Keep poll() hermetic — without these mocks the success path's
+// `refreshCdpMetrics()` reaches the real `fetchCdps()` and waits on the live
+// 15s Hasura timeout (or makes a real network call) in CI. The CDP refresh has
+// its own dedicated coverage in cdp-metrics.test.ts.
+vi.mock("../src/cdp-graphql.js", () => ({
+  fetchCdps: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../src/cdp-metrics.js", () => ({
+  updateCdpMetrics: vi.fn(),
+}));
+
 vi.mock("../src/server.js", () => ({
   markHealthy: vi.fn(),
 }));

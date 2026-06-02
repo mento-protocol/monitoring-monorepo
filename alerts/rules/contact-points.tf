@@ -184,7 +184,7 @@ locals {
     {{ if .Labels.pool_id -}}
     *<https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|{{ $title }}{{ if .Labels.pair }} — {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
     {{ else if and (eq .Labels.service "cdps") .Labels.symbol -}}
-    *<https://monitoring.mento.org/cdps/{{ .Labels.symbol | lower }}|{{ $title }} — {{ .Labels.symbol }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
+    *<https://monitoring.mento.org/cdps/{{ .Labels.symbol | toLower }}|{{ $title }} — {{ .Labels.symbol }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
     {{ else -}}
     *{{ $title }}*
     {{ end -}}
