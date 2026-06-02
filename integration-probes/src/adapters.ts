@@ -118,6 +118,9 @@ export function aggregatePairStatus(
   if (results.every((result) => result.status === "no_liquidity")) {
     return "no_liquidity";
   }
+  if (results.every((result) => result.status === "error")) {
+    return "error";
+  }
   return "fail";
 }
 
