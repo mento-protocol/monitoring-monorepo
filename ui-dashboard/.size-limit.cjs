@@ -115,9 +115,22 @@ function collectManifestReferencedStaticAssets({
   return [...assets].map((asset) => `${distDir}/${asset}`).sort();
 }
 
+function hasBuildManifests({ cwd = process.cwd(), distDir = DIST_DIR } = {}) {
+  const absoluteDistDir = path.resolve(cwd, distDir);
+  return listFiles(absoluteDistDir).some(isBuildManifest);
+}
+
 function manifestPathsOrFallback(extension, prefixes, fallbackGlob) {
   const paths = collectManifestReferencedStaticAssets({ extension, prefixes });
-  return paths.length > 0 ? paths : [fallbackGlob];
+  if (paths.length > 0) return paths;
+
+  if (hasBuildManifests()) {
+    process.stderr.write(
+      `[size-limit] warning: manifests found but no ${extension} assets extracted; falling back to ${fallbackGlob}\n`,
+    );
+  }
+
+  return [fallbackGlob];
 }
 
 /** @type {import('size-limit').SizeLimitConfig} */
@@ -151,7 +164,7 @@ const config = [
 ];
 
 Object.defineProperty(config, "_private", {
-  value: { collectManifestReferencedStaticAssets },
+  value: { collectManifestReferencedStaticAssets, manifestPathsOrFallback },
 });
 
 module.exports = config;

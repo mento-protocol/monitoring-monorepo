@@ -309,8 +309,13 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const config = require("./ui-dashboard/.size-limit.cjs");
-const { collectManifestReferencedStaticAssets } = config._private;
+const {
+  collectManifestReferencedStaticAssets,
+  manifestPathsOrFallback,
+} = config._private;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "size-limit-manifest-"));
+const originalCwd = process.cwd();
+const originalStderrWrite = process.stderr.write;
 
 function write(relativePath, contents = "") {
   const absolutePath = path.join(tmp, relativePath);
@@ -322,7 +327,7 @@ try {
   write(".next/static/chunks/client.js", 'import("/_next/static/chunks/transitive.js");');
   write(".next/static/chunks/current.js");
   write(".next/static/chunks/dotted..js");
-  write(".next/static/chunks/transitive.js");
+  write(".next/static/chunks/transitive.js", 'import("/_next/static/chunks/client.js");');
   write(".next/static/chunks/current.css");
   write(".next/static/chunks/stale.js");
   write(".next/static/chunks/stale.css");
@@ -360,7 +365,24 @@ try {
     }),
     [".next/static/chunks/current.css"],
   );
+
+  const warnings = [];
+  process.chdir(tmp);
+  process.stderr.write = (chunk) => {
+    warnings.push(String(chunk));
+    return true;
+  };
+  assert.deepEqual(
+    manifestPathsOrFallback(".woff2", ["static/"], ".next/static/**/*.woff2"),
+    [".next/static/**/*.woff2"],
+  );
+  assert.match(
+    warnings.join(""),
+    /manifests found but no \.woff2 assets extracted/,
+  );
 } finally {
+  process.chdir(originalCwd);
+  process.stderr.write = originalStderrWrite;
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 NODE
