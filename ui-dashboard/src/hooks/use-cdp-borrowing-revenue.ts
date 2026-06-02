@@ -99,11 +99,12 @@ async function requestWithTimeout<T>(
   client: GraphQLClient,
   document: string,
   variables: Record<string, unknown>,
+  signal: AbortSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 ): Promise<T> {
   return client.request<T>({
     document,
     variables,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal,
   });
 }
 
@@ -112,6 +113,7 @@ async function fetchAllBracketPages(
   collateralIds: string[],
 ): Promise<BracketPageResult> {
   const rows: CdpBorrowingRevenueBracket[] = [];
+  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   for (let page = 0; page < BRACKET_MAX_PAGES; page++) {
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Bracket pagination is intentionally sequential so we can stop after the first short page.
     const response = await requestWithTimeout<BracketsResponse>(
@@ -122,6 +124,7 @@ async function fetchAllBracketPages(
         limit: BRACKET_PAGE_SIZE,
         offset: page * BRACKET_PAGE_SIZE,
       },
+      signal,
     );
     const pageRows = response.InterestRateBracket ?? [];
     rows.push(...pageRows);
