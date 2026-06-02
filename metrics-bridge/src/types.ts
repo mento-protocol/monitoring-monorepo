@@ -56,8 +56,6 @@ export interface LiquityInstanceRow {
   spDeposits: string;
   spHeadroom: string;
   isShutDown: boolean;
-  currentRedemptionRateBps: number;
-  activeTroveCount: number;
   liqCountCum: number;
   redemptionCountCum: number;
   rebalanceRedemptionCountCum: number;

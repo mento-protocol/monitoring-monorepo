@@ -20,8 +20,6 @@ function makeCdp(
       spDeposits: "9216312198471370821833", // ~9_216 GBPm
       spHeadroom: "9215312198471370821833", // deposits − 1 floor
       isShutDown: false,
-      currentRedemptionRateBps: 10050,
-      activeTroveCount: 4,
       liqCountCum: 0,
       redemptionCountCum: 395,
       rebalanceRedemptionCountCum: 394,

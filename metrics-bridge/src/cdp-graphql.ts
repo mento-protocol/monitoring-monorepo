@@ -25,8 +25,6 @@ const BRIDGE_CDPS_QUERY = gql`
       spDeposits
       spHeadroom
       isShutDown
-      currentRedemptionRateBps
-      activeTroveCount
       liqCountCum
       redemptionCountCum
       rebalanceRedemptionCountCum
