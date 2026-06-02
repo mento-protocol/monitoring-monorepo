@@ -33,7 +33,7 @@ export default async function IntegrationsPage() {
 
       {snapshot ? (
         <IntegrationsContent snapshot={snapshot} />
-      ) : (
+      ) : error ? null : (
         <EmptyBox message="No integration probe snapshot has been published yet." />
       )}
     </div>

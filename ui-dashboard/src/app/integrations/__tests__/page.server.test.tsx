@@ -42,5 +42,6 @@ describe("IntegrationsPage", () => {
 
     expect(html).toContain("Integration probes unavailable");
     expect(html).toContain("Redis offline");
+    expect(html).not.toContain("No integration probe snapshot");
   });
 });
