@@ -362,10 +362,15 @@ function openOceanAdapter(): AggregatorAdapter {
     label: "OpenOcean",
     kind: "dex",
     tier: 2,
+    credentialEnv: ["OPENOCEAN_API_KEY"],
     support: { 42220: "supported", 143: "supported" },
     researchNote:
-      "OpenOcean is already observed in the repo registry on both chains.",
-    quote: (input) => getRequest(openOceanUrl(input)),
+      "OpenOcean Pro endpoint is keyed and already observed in the repo registry on both chains.",
+    quote: (input, env) =>
+      getRequest(openOceanUrl(input), {
+        apikey: env.OPENOCEAN_API_KEY!,
+        "content-type": "application/json",
+      }),
   };
 }
 
@@ -573,14 +578,16 @@ function optionalLifiHeaders(
 function openOceanUrl(input: QuoteProbeInput): string {
   const aliases: Record<number, string> = { 42220: "celo", 143: "monad" };
   const chain = aliases[input.chainId] ?? String(input.chainId);
-  const url = new URL(`https://open-api.openocean.finance/v4/${chain}/swap`);
+  const url = new URL(
+    `https://open-api-pro.openocean.finance/v4/${chain}/swap`,
+  );
   setParams(url, {
     inTokenAddress: input.sellToken.address,
     outTokenAddress: input.buyToken.address,
-    amountDecimals: input.amountRaw,
+    amount: input.amountDecimal,
     account: input.takerAddress,
     slippage: "1",
-    gasPriceDecimals: "1000000000",
+    gasPrice: "1",
   });
   return url.toString();
 }

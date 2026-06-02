@@ -43,8 +43,8 @@ pnpm --filter @mento-protocol/integration-probes knip
 - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are required only
   when writing snapshots.
 - Adapter credentials are optional and should surface as `needs_key` when
-  missing: `ZEROX_API_KEY`, `ONEINCH_API_KEY`, `SQUID_INTEGRATOR_ID`,
-  `SOCKET_API_KEY`, `RANGO_API_KEY`, `OKX_DEX_API_KEY`, `OKX_DEX_SECRET`, and
-  `OKX_DEX_PASSPHRASE`.
+  missing: `OPENOCEAN_API_KEY`, `ZEROX_API_KEY`, `ONEINCH_API_KEY`,
+  `SQUID_INTEGRATOR_ID`, `SOCKET_API_KEY`, `RANGO_API_KEY`,
+  `OKX_DEX_API_KEY`, `OKX_DEX_SECRET`, and `OKX_DEX_PASSPHRASE`.
 - `LIFI_API_KEY` is optional but recommended for scheduled probes because the
   unauthenticated LI.FI endpoint can return multi-hour public rate limits.

@@ -336,6 +336,7 @@ describe("aggregator quote builders", () => {
   it("builds configured quote requests for v1 live adapters", () => {
     const env = {
       LIFI_API_KEY: "lifi-key",
+      OPENOCEAN_API_KEY: "openocean-key",
       ZEROX_API_KEY: "0x-key",
       ONEINCH_API_KEY: "one-inch-key",
       SOCKET_API_KEY: "socket-key",
@@ -375,9 +376,16 @@ describe("aggregator quote builders", () => {
     const openOceanRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "openocean",
     )?.quote?.(input, env);
+    expect(openOceanRequest?.url).toContain(
+      "https://open-api-pro.openocean.finance/v4/celo/swap",
+    );
+    expect(JSON.stringify(openOceanRequest?.init?.headers)).toContain(
+      "openocean-key",
+    );
     const openOceanParams = new URL(openOceanRequest?.url ?? "").searchParams;
-    expect(openOceanParams.get("amountDecimals")).toBe(input.amountRaw);
-    expect(openOceanParams.has("amount")).toBe(false);
+    expect(openOceanParams.get("amount")).toBe(input.amountDecimal);
+    expect(openOceanParams.get("gasPrice")).toBe("1");
+    expect(openOceanParams.has("amountDecimals")).toBe(false);
 
     const relayRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "relay",
@@ -397,5 +405,25 @@ describe("aggregator quote builders", () => {
 
     expect(oneInch?.support[42220]).toBe("unsupported");
     expect(oneInch?.support[143]).toBe("unsupported");
+  });
+
+  it("requires an OpenOcean Pro API key before probing OpenOcean", async () => {
+    const openOcean = AGGREGATOR_ADAPTERS.find(
+      (item) => item.id === "openocean",
+    );
+    expect(openOcean).toBeDefined();
+
+    const result = await probeAdapterPair({
+      adapter: openOcean!,
+      chain,
+      input,
+      fetcher: async () => {
+        throw new Error("should not fetch without a key");
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("needs_key");
+    expect(result.error).toBe("Missing OPENOCEAN_API_KEY");
   });
 });
