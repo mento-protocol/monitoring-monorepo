@@ -480,6 +480,10 @@ resource "grafana_rule_group" "cdps" {
         refId      = "threshold"
         type       = "threshold"
         expression = "reduced"
+        # > 0 (not the > 0.5 used by the liquidation/redemption rules above):
+        # shortfall is a debt-token AMOUNT, not an integer event count, so any
+        # non-zero value is a real loss — > 0.5 would silently miss a
+        # sub-half-token shortfall.
         conditions = [{
           evaluator = { params = [0], type = "gt" }
           operator  = { type = "and" }
