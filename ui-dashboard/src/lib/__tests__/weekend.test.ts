@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Network } from "../networks";
+import type { Pool } from "../types";
 import {
   isWeekend,
   FX_CLOSE_HOUR_UTC,
   FX_REOPEN_HOUR_UTC,
   ANCHOR_FRI_2100,
+  fxPoolWeekendBands,
+  fxPoolWeekendBandsForSeries,
+  fxWeekendBands,
   nextMarketHoursTransition,
   tradingSecondsInRange,
   weekendOverlapSeconds,
@@ -245,6 +250,140 @@ describe("weekendOverlapSeconds", () => {
     const start = sec(utc(4, 0)); // Thursday
     const end = start + 5 * 86400;
     expect(weekendOverlapSeconds(start, end)).toBe(180000);
+  });
+});
+
+describe("fxWeekendBands", () => {
+  it("returns clipped Plotly rectangles for overlapping FX weekend windows", () => {
+    const from = sec(utc(5, FX_CLOSE_HOUR_UTC + 1));
+    const to = sec(utc(0, FX_REOPEN_HOUR_UTC - 1));
+
+    const bands = fxWeekendBands({ from, to });
+
+    expect(bands).toHaveLength(1);
+    expect(bands[0]).toMatchObject({
+      type: "rect",
+      xref: "x",
+      yref: "paper",
+      x0: new Date(from * 1000).toISOString(),
+      x1: new Date(to * 1000).toISOString(),
+      y0: 0,
+      y1: 1,
+      layer: "below",
+    });
+  });
+
+  it("returns one band per weekend in the visible range", () => {
+    const from = sec(utc(1, 0));
+    const to = from + 14 * 86400;
+
+    const bands = fxWeekendBands({ from, to });
+
+    expect(bands).toHaveLength(2);
+    expect(bands[0]?.x0).toBe("2026-03-13T21:00:00.000Z");
+    expect(bands[0]?.x1).toBe("2026-03-15T23:00:00.000Z");
+    expect(bands[1]?.x0).toBe("2026-03-20T21:00:00.000Z");
+    expect(bands[1]?.x1).toBe("2026-03-22T23:00:00.000Z");
+  });
+
+  it("returns no bands for zero-width ranges", () => {
+    expect(fxWeekendBands({ from: 100, to: 100 })).toEqual([]);
+  });
+});
+
+const FX_NETWORK: Network = {
+  id: "celo-mainnet",
+  label: "Celo",
+  chainId: 42220,
+  contractsNamespace: null,
+  hasuraUrl: "https://example.com/v1/graphql",
+  hasuraSecret: "",
+  explorerBaseUrl: "https://celoscan.io",
+  tokenSymbols: {
+    "0xusd": "USDm",
+    "0xfx": "EURm",
+    "0xusdc": "USDC",
+  },
+  addressLabels: {},
+  local: false,
+  hasVirtualPools: false,
+  testnet: false,
+};
+
+const FX_POOL: Pool = {
+  id: "42220-0xpool",
+  chainId: 42220,
+  token0: "0xusd",
+  token1: "0xfx",
+  token0Decimals: 18,
+  token1Decimals: 18,
+  tokenDecimalsKnown: true,
+  source: "FPMM",
+  createdAtBlock: "1",
+  createdAtTimestamp: "1",
+  updatedAtBlock: "1",
+  updatedAtTimestamp: "1",
+};
+
+describe("fxPoolWeekendBands", () => {
+  it("returns weekend bands for FPMM FX pools", () => {
+    const from = sec(utc(5, FX_CLOSE_HOUR_UTC + 1));
+    const to = sec(utc(0, FX_REOPEN_HOUR_UTC - 1));
+
+    expect(
+      fxPoolWeekendBands({ pool: FX_POOL, network: FX_NETWORK, from, to }),
+    ).toEqual(fxWeekendBands({ from, to }));
+  });
+
+  it("returns no bands without an FPMM FX pool", () => {
+    const from = sec(utc(5, FX_CLOSE_HOUR_UTC + 1));
+    const to = sec(utc(0, FX_REOPEN_HOUR_UTC - 1));
+    const usdPool = { ...FX_POOL, token1: "0xusdc" };
+    const virtualPool = { ...FX_POOL, source: "VirtualPool" };
+
+    expect(
+      fxPoolWeekendBands({ pool: null, network: FX_NETWORK, from, to }),
+    ).toEqual([]);
+    expect(
+      fxPoolWeekendBands({ pool: FX_POOL, network: undefined, from, to }),
+    ).toEqual([]);
+    expect(
+      fxPoolWeekendBands({ pool: usdPool, network: FX_NETWORK, from, to }),
+    ).toEqual([]);
+    expect(
+      fxPoolWeekendBands({ pool: virtualPool, network: FX_NETWORK, from, to }),
+    ).toEqual([]);
+  });
+});
+
+describe("fxPoolWeekendBandsForSeries", () => {
+  it("uses the first series timestamp and last timestamp plus padding", () => {
+    const from = sec(utc(5, FX_CLOSE_HOUR_UTC + 1));
+    const last = from + 3600;
+    const endPaddingSeconds = 24 * 3600;
+
+    const bands = fxPoolWeekendBandsForSeries({
+      pool: FX_POOL,
+      network: FX_NETWORK,
+      series: [{ timestamp: from }, { timestamp: last }],
+      endPaddingSeconds,
+    });
+
+    expect(bands).toHaveLength(1);
+    expect(bands[0]?.x0).toBe(new Date(from * 1000).toISOString());
+    expect(bands[0]?.x1).toBe(
+      new Date((last + endPaddingSeconds) * 1000).toISOString(),
+    );
+  });
+
+  it("returns no bands for an empty series", () => {
+    expect(
+      fxPoolWeekendBandsForSeries({
+        pool: FX_POOL,
+        network: FX_NETWORK,
+        series: [],
+      }),
+    ).toEqual([]);
   });
 });
 

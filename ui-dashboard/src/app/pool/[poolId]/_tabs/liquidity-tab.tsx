@@ -140,6 +140,7 @@ export function LiquidityTab({
         <LiquidityChart
           snapshots={snapshots}
           pool={pool}
+          network={network}
           token0Symbol={sym0}
           token1Symbol={sym1}
         />

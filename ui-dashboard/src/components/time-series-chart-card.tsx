@@ -120,6 +120,8 @@ interface TimeSeriesChartCardProps {
    * 3M — pass their own array here.
    */
   ranges?: ReadonlyArray<{ key: RangeKey; label: string }>;
+  /** Plotly layout shapes, e.g. FX weekend closure bands. */
+  shapes?: Plotly.Layout["shapes"];
 }
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
@@ -147,6 +149,7 @@ export function TimeSeriesChartCard({
   yAxisTopPadding = 0.35,
   customSortedHover = false,
   ranges = RANGES,
+  shapes,
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
@@ -341,6 +344,7 @@ export function TimeSeriesChartCard({
           fixedrange: true,
         },
         showlegend: showPlotlyLegend,
+        ...(shapes ? { shapes } : {}),
         ...(showPlotlyLegend
           ? {
               legend: {
@@ -383,6 +387,7 @@ export function TimeSeriesChartCard({
     useCustomLegend,
     customLegendHidden,
     customLegendKey,
+    shapes,
   ]);
 
   // Cross-fade in stacked mode: pre-render every visibility combo (2^N

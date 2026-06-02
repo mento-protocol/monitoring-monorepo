@@ -581,20 +581,6 @@
     "linePreview": "event?: { clientX?: number; clientY?: number }; | }) => { | if (!enabled) return;"
   },
   {
-    "file": "src/components/volume-over-time-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'VolumeOverTimeChart' has too many lines (113). Maximum allowed is 100.",
-    "line": 441,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/no-many-boolean-props | export function VolumeOverTimeChart({ | networkData,"
-  },
-  {
-    "file": "src/components/volume-over-time-chart.tsx",
-    "ruleId": "max-params",
-    "message": "Function 'computeHeadline' has too many parameters (9). Maximum allowed is 5.",
-    "line": 338,
-    "linePreview": "// Broker outage even when v3 is fully synced. | function computeHeadline( | isLoading: boolean,"
-  },
-  {
     "file": "src/lib/address-book.ts",
     "ruleId": "complexity",
     "message": "Function 'countImportLabels' has a complexity of 29. Maximum allowed is 15.",

@@ -10,6 +10,9 @@
  */
 
 import FX_CALENDAR from "@mento-protocol/monitoring-config/fx-calendar.json";
+import type { Network } from "./networks";
+import { isFpmm, isFxPool } from "./tokens";
+import type { Pool } from "./types";
 
 export const FX_CLOSE_DAY = FX_CALENDAR.fxCloseDay;
 export const FX_CLOSE_HOUR_UTC = FX_CALENDAR.fxCloseHourUtc;
@@ -86,6 +89,88 @@ const WEEK_SECONDS = 7 * 24 * 3600;
 const WEEKEND_DURATION_SECONDS =
   ((FX_REOPEN_DAY - FX_CLOSE_DAY + 7) % 7) * 86400 +
   (FX_REOPEN_HOUR_UTC - FX_CLOSE_HOUR_UTC) * 3600;
+
+export type FxWeekendBandShape = NonNullable<Plotly.Layout["shapes"]>[number];
+
+/**
+ * Plotly rectangles for FX weekend closures that overlap `[from, to)`.
+ * Intended for FX pool charts only; aggregate charts can mix FX and non-FX
+ * pools, so their quiet periods are not semantically uniform.
+ */
+export function fxWeekendBands({
+  from,
+  to,
+}: {
+  from: number;
+  to: number;
+}): FxWeekendBandShape[] {
+  if (to <= from) return [];
+
+  const shapes: FxWeekendBandShape[] = [];
+  const offset = from - ANCHOR_FRI_2100;
+  let k = Math.floor(offset / WEEK_SECONDS);
+
+  while (true) {
+    const weekendStart = ANCHOR_FRI_2100 + k * WEEK_SECONDS;
+    const weekendEnd = weekendStart + WEEKEND_DURATION_SECONDS;
+    if (weekendStart >= to) break;
+    if (weekendEnd > from) {
+      shapes.push({
+        type: "rect",
+        xref: "x",
+        yref: "paper",
+        x0: new Date(Math.max(weekendStart, from) * 1000).toISOString(),
+        x1: new Date(Math.min(weekendEnd, to) * 1000).toISOString(),
+        y0: 0,
+        y1: 1,
+        fillcolor: "rgba(148, 163, 184, 0.10)",
+        line: { width: 0 },
+        layer: "below",
+      });
+    }
+    k += 1;
+  }
+
+  return shapes;
+}
+
+export function fxPoolWeekendBands({
+  pool,
+  network,
+  from,
+  to,
+}: {
+  pool: Pool | null | undefined;
+  network: Network | undefined;
+  from: number;
+  to: number;
+}): Plotly.Layout["shapes"] {
+  if (!pool || !network || !isFpmm(pool)) return [];
+  if (!isFxPool(network, pool.token0 ?? null, pool.token1 ?? null)) return [];
+  return fxWeekendBands({ from, to });
+}
+
+export function fxPoolWeekendBandsForSeries({
+  pool,
+  network,
+  series,
+  endPaddingSeconds = 0,
+}: {
+  pool: Pool | null | undefined;
+  network: Network | undefined;
+  series: readonly { timestamp: number }[];
+  endPaddingSeconds?: number;
+}): Plotly.Layout["shapes"] {
+  const first = series[0];
+  const last = series[series.length - 1];
+  if (!first || !last) return [];
+  return fxPoolWeekendBands({
+    pool,
+    network,
+    from: first.timestamp,
+    to: last.timestamp + endPaddingSeconds,
+  });
+}
 
 /**
  * Seconds in [startTs, endTs) that fall inside FX weekend windows
