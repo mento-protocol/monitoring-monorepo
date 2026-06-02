@@ -8,8 +8,8 @@ export function poolStrategies(
   isReserve: boolean,
 ): PoolStrategyLabel[] {
   // Precedence: OLS (indexer-tracked) > CDP > Reserve. All three require a
-  // positive signal. On indexed networks, Reserve-by-exclusion is only built
-  // after OLS+CdpPool both load; on fallback networks, failed RPC probes leave
+  // positive signal. Indexed Celo currently has a positive CDP source but no
+  // positive Reserve source; fallback-network RPC probe failures also leave
   // the pool out of every set rather than misclassifying it as Reserve.
   if (isOls) return ["Open"];
   if (isCdp) return ["CDP"];

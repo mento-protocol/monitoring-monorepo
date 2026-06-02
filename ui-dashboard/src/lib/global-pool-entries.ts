@@ -27,10 +27,10 @@ type DerivedEntries = {
   /** Set of globalPoolKeys classified as CDP by CdpPool rows or fallback probe. */
   cdpPoolKeys: Set<string>;
   /**
-   * Set of globalPoolKeys classified as Reserve. Indexed networks derive this
-   * by exclusion only after OLS+CdpPool both load; fallback networks use the
-   * RPC probe. Pools with a rebalancer that appear in none of {ols, cdp,
-   * reserve} are "strategy detection unavailable", not known Reserve.
+   * Set of globalPoolKeys classified as Reserve. Indexed Celo withholds this
+   * without a positive indexed source; fallback networks use the RPC probe.
+   * Pools with a rebalancer that appear in none of {ols, cdp, reserve} are
+   * "strategy detection unavailable", not known Reserve.
    */
   reservePoolKeys: Set<string>;
 };

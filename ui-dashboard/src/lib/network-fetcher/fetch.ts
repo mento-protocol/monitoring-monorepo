@@ -683,8 +683,6 @@ export async function fetchNetworkData(
   const { cdpPoolIds, reservePoolIds } = resolveStrategyIds({
     network,
     pools,
-    olsPoolIds,
-    olsLoaded: olsResult.status === "fulfilled",
     indexedCdpPoolsResult,
     fallbackStrategiesResult,
   });
@@ -751,8 +749,6 @@ type ProbedStrategies = {
 type StrategyIdsArgs = {
   network: Network;
   pools: Pool[];
-  olsPoolIds: Set<string>;
-  olsLoaded: boolean;
   indexedCdpPoolsResult: PromiseSettledResult<CdpPoolsResponse>;
   fallbackStrategiesResult: PromiseSettledResult<Readonly<ProbedStrategies>>;
 };
@@ -775,20 +771,6 @@ function hasRebalancerAddress(pool: Pool): boolean {
     /^0x[a-fA-F0-9]{40}$/.test(rebalancer) &&
     rebalancer.toLowerCase() !== ZERO_ADDRESS
   );
-}
-
-function deriveReservePoolIdsFromIndexedStrategies(
-  pools: Pool[],
-  olsPoolIds: Set<string>,
-  cdpPoolIds: Set<string>,
-): Set<string> {
-  const reservePoolIds = new Set<string>();
-  for (const pool of pools) {
-    if (!hasRebalancerAddress(pool)) continue;
-    if (olsPoolIds.has(pool.id) || cdpPoolIds.has(pool.id)) continue;
-    reservePoolIds.add(pool.id);
-  }
-  return reservePoolIds;
 }
 
 function activeCdpPoolIdsFromIndexedRows(
@@ -840,8 +822,6 @@ async function requestFallbackStrategies(
 function resolveStrategyIds({
   network,
   pools,
-  olsPoolIds,
-  olsLoaded,
   indexedCdpPoolsResult,
   fallbackStrategiesResult,
 }: StrategyIdsArgs): ProbedStrategies {
@@ -867,17 +847,10 @@ function resolveStrategyIds({
 
   return {
     cdpPoolIds,
-    // Reserve badges are derived by exclusion only when both indexed strategy
-    // sources are present. If CdpPool or OlsPool fails during schema rollout,
-    // absence is "strategy unavailable", not known Reserve.
-    reservePoolIds:
-      indexedCdpPoolsResult.status === "fulfilled" && olsLoaded
-        ? deriveReservePoolIdsFromIndexedStrategies(
-            pools,
-            olsPoolIds,
-            cdpPoolIds,
-          )
-        : new Set<string>(),
+    // Indexed Celo has a positive CDP source, but no positive Reserve source.
+    // Unknown active rebalancers stay unbadged instead of being inferred as
+    // Reserve from the absence of an OLS/CDP row.
+    reservePoolIds: new Set<string>(),
   };
 }
 

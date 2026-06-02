@@ -221,7 +221,7 @@ describe("fetchNetworkData — happy path", () => {
     });
   });
 
-  it("uses indexed CdpPool rows on Celo and derives Reserve by exclusion only after strategy queries succeed", async () => {
+  it("uses indexed CdpPool rows on Celo without inferring Reserve from unknown strategies", async () => {
     const cdpPool = {
       ...makePool("42220-0x000000000000000000000000000000000000aaaa"),
       rebalancerAddress: "0x000000000000000000000000000000000000c0c0",
@@ -264,7 +264,7 @@ describe("fetchNetworkData — happy path", () => {
     });
 
     expect(result.cdpPoolIds).toEqual(new Set([cdpPool.id]));
-    expect(result.reservePoolIds).toEqual(new Set([reservePool.id]));
+    expect(result.reservePoolIds).toEqual(new Set());
     expect(result.reservePoolIds.has(olsPool.id)).toBe(false);
 
     const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
@@ -311,7 +311,7 @@ describe("fetchNetworkData — happy path", () => {
     });
 
     expect(result.cdpPoolIds).toEqual(new Set());
-    expect(result.reservePoolIds).toEqual(new Set([staleCdpPool.id]));
+    expect(result.reservePoolIds).toEqual(new Set());
   });
 
   it("withholds Reserve badges when the indexed CdpPool query fails", async () => {

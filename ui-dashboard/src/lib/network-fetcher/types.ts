@@ -71,9 +71,10 @@ export type NetworkData = {
   olsPoolIds: Set<string>;
   /**
    * Pool IDs classified as CDP or Reserve for global strategy badges. Indexed
-   * networks derive CDP from CdpPool rows and Reserve by exclusion after both
-   * OLS+CdpPool queries succeed; Monad uses the runtime probe fallback in
-   * `lib/strategy-detection.ts` until its strategy events are indexed.
+   * Celo derives CDP from CdpPool rows and intentionally withholds Reserve
+   * without a positive indexed Reserve source; Monad uses the runtime probe
+   * fallback in `lib/strategy-detection.ts` until its strategy events are
+   * indexed.
    */
   cdpPoolIds: Set<string>;
   reservePoolIds: Set<string>;
