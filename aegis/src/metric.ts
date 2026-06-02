@@ -65,6 +65,9 @@ export class Metric {
     'USDC.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
     'USDT.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
     'axlUSDC.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    // Monad reserve tokens (issue #707); both verified 6dp on-chain.
+    'USDT0.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    'AUSD.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
     'SortedOracles.medianRate': (output) => this.parseMedianRate(output),
     'SortedOracles.isOldestReportExpired': (output) =>
       this.parseOldestReportExpired(output),
