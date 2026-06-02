@@ -2,6 +2,31 @@ import { ConfigService } from '@nestjs/config';
 import { MetricSource } from './config/MetricSource';
 import { Metric } from './metric';
 
+const STABLE_TOTAL_SUPPLY_TOKENS = [
+  'USDm',
+  'EURm',
+  'BRLm',
+  'XOFm',
+  'KESm',
+  'PHPm',
+  'COPm',
+  'GHSm',
+  'GBPm',
+  'ZARm',
+  'CADm',
+  'AUDm',
+  'CHFm',
+  'NGNm',
+  'JPYm',
+] as const;
+
+const TOKEN_METADATA = {
+  ...Object.fromEntries(
+    STABLE_TOTAL_SUPPLY_TOKENS.map((symbol) => [symbol, { decimals: 18 }]),
+  ),
+  TEST6: { decimals: 6 },
+};
+
 describe('Metric.parse', () => {
   let metric: Metric;
   let mockConfigService: jest.Mocked<ConfigService>;
@@ -16,6 +41,9 @@ describe('Metric.parse', () => {
           { label: 'testChainLabel', vars: { '0x123': 'mockValue' } },
           { label: 'celo', vars: { '0x123': 'mockValue' } },
         ];
+      }
+      if (key === 'tokens') {
+        return TOKEN_METADATA;
       }
       // Add other config keys as needed
       return undefined;
@@ -253,12 +281,39 @@ describe('Metric.parse', () => {
     });
   });
 
+  describe('configured token totalSupply()', () => {
+    it('should match the legacy 18-decimal conversion for every configured stable token', () => {
+      const rawSupply = 123_456n * 1_000_000_000_000_000_000n + 999_999n;
+      const legacyResult = Number(rawSupply / 1_000_000_000_000_000_000n);
+
+      STABLE_TOTAL_SUPPLY_TOKENS.forEach((symbol) => {
+        const result = metric.parse(rawSupply, symbol, 'totalSupply');
+        expect(result).toBe(legacyResult);
+      });
+    });
+
+    it('should use the configured decimal precision instead of assuming 18 decimals', () => {
+      const rawSupply = 123_456_789n;
+      const result = metric.parse(rawSupply, 'TEST6', 'totalSupply');
+
+      expect(result).toBe(123);
+    });
+
+    it('should require token metadata before parsing totalSupply', () => {
+      const metricName = 'UNKNOWN.totalSupply';
+
+      expect(() => metric.parse(10n, 'UNKNOWN', 'totalSupply')).toThrow(
+        `Unknown metric '${metricName}'. If this is a totalSupply metric, add 'UNKNOWN' to the 'tokens' map in config.yaml. Otherwise, add a parser entry to Metric.metricParsers.`,
+      );
+    });
+  });
+
   it('should throw an error for unknown function', () => {
     const metricName = `TestContract.unknownFunction`;
     const funcName = 'unknownFunction';
     const output = BigInt(10);
     expect(() => metric.parse(output, 'TestContract', funcName)).toThrow(
-      `Unknown metric '${metricName}'. Make sure to add a case for it in the Metric.parse() method.`,
+      `Unknown metric '${metricName}'. If this is a totalSupply metric, add 'TestContract' to the 'tokens' map in config.yaml. Otherwise, add a parser entry to Metric.metricParsers.`,
     );
   });
 
