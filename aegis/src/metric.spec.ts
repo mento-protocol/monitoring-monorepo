@@ -303,7 +303,7 @@ describe('Metric.parse', () => {
       const metricName = 'UNKNOWN.totalSupply';
 
       expect(() => metric.parse(10n, 'UNKNOWN', 'totalSupply')).toThrow(
-        `Unknown metric '${metricName}'. Make sure to add a case for it in the Metric.parse() method.`,
+        `Unknown metric '${metricName}'. If this is a totalSupply metric, add 'UNKNOWN' to the 'tokens' map in config.yaml. Otherwise, add a parser entry to Metric.metricParsers.`,
       );
     });
   });
@@ -313,7 +313,7 @@ describe('Metric.parse', () => {
     const funcName = 'unknownFunction';
     const output = BigInt(10);
     expect(() => metric.parse(output, 'TestContract', funcName)).toThrow(
-      `Unknown metric '${metricName}'. Make sure to add a case for it in the Metric.parse() method.`,
+      `Unknown metric '${metricName}'. If this is a totalSupply metric, add 'TestContract' to the 'tokens' map in config.yaml. Otherwise, add a parser entry to Metric.metricParsers.`,
     );
   });
 

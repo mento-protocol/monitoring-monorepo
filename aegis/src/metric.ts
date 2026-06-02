@@ -169,7 +169,7 @@ export class Metric {
     if (parser) return parser(output);
 
     throw new Error(
-      `Unknown metric '${metricName}'. Make sure to add a case for it in the Metric.parse() method.`,
+      `Unknown metric '${metricName}'. If this is a totalSupply metric, add '${contractName}' to the 'tokens' map in config.yaml. Otherwise, add a parser entry to Metric.metricParsers.`,
     );
   }
 

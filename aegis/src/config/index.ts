@@ -99,5 +99,17 @@ export default () => {
     });
   });
 
+  const tokenSymbols = new Set(Object.keys(config.tokens));
+  config.metrics.forEach((metric) => {
+    if (
+      metric.source.functionAbi.name === 'totalSupply' &&
+      !tokenSymbols.has(metric.source.contract)
+    ) {
+      throw new Error(
+        `Token config missing for totalSupply source '${metric.source.contract}' - add it to the 'tokens' map in config.yaml`,
+      );
+    }
+  });
+
   return config;
 };
