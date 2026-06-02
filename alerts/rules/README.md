@@ -5,9 +5,9 @@ templates for Mento monitoring.
 
 ## Scope
 
-- **In this module:** protocol `grafana_rule_group` resources for FPMM pool health, oracle relayers, reserve balances, trading modes, trading limits, indexer health, and metrics-bridge liveness. This stack also owns the singleton `grafana_notification_policy`, protocol/Aegis contact points, message templates, mute timings, and protocol folders.
+- **In this module:** protocol `grafana_rule_group` resources for FPMM pool health, oracle report quality, oracle relayers, reserve balances, trading modes, trading limits, indexer health, and metrics-bridge liveness. This stack also owns the singleton `grafana_notification_policy`, protocol/Aegis contact points, message templates, mute timings, and protocol folders.
 - **Not in this module:** Aegis dashboards and the Aegis service-health rule group. Those stay in [`aegis/terraform`](../../aegis/terraform).
-- **Folder convention:** one folder per `service` label (`FPMMs`, `Indexer`, `Metrics Bridge`, `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`). `oracles` and `cdps` folders will be added when their first rule groups land.
+- **Folder convention:** one folder per `service` label (`FPMMs`, `Oracles`, `Indexer`, `Metrics Bridge`, `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`). The `cdps` folder will be added when its first rule group lands.
 
 ## State
 
