@@ -251,18 +251,18 @@ locals {
   #     Slack. The message is terminated with a period in the template since
   #     ERROR_MESSAGES entries are bare phrases — keeps the shared dashboard
   #     tooltip's em-dash-joined render path uncluttered.
-  #   - For Celo reserve-strategy pools, `rebalance_reason` OPTIONALLY appends
+  #   - For reserve-strategy pools, `rebalance_reason` OPTIONALLY appends
   #     ` Reserve Balance: X.XX <token>` when the firing pool's `pair` matches
-  #     a USD-pegged stable we have Aegis coverage for (USDC / USDT / axlUSDC).
+  #     a USD-pegged stable we have Aegis coverage for (Celo: USDC / USDT /
+  #     axlUSDC; Monad: USDC / USDT0 / AUSD — added in issue #707).
   #     The balance value is read from Aegis's existing per-token
-  #     `${TOKEN}_balanceOf{owner="Reserve",chain="celo"}` series —
+  #     `${TOKEN}_balanceOf{owner="Reserve",chain=$CHAIN}` series —
   #     production-stable for years and refreshed every 10s — rather than a
   #     metrics-bridge probe (the in-bridge enrichment shipped in PR #237
   #     failed in production with `[REBALANCE_PROBE_FAILED]: Missing or
   #     invalid parameters`, leaving the gauges absent, which propagated
   #     NoData through this rule and stuck the critical alerts in Normal for
-  #     ~9h on 2026-04-28). Monad reserves aren't in Aegis yet — see
-  #     issue #707 (Aegis Monad reserve coverage).
+  #     ~9h on 2026-04-28).
   deviation_warning_summary_annotation            = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
@@ -401,6 +401,12 @@ locals {
           {{ " Reserve Balance: " }}{{ printf "%.2f" $values.ResUSDT.Value }} USDT
         {{- else if and (eq $chain "celo") (eq $pair "axlUSDC/USDm") $values.ResAxlUSDC -}}
           {{ " Reserve Balance: " }}{{ printf "%.2f" $values.ResAxlUSDC.Value }} axlUSDC
+        {{- else if and (eq $chain "monad") (eq $pair "USDC/USDm") $values.ResUSDC -}}
+          {{ " Reserve Balance: " }}{{ printf "%.2f" $values.ResUSDC.Value }} USDC
+        {{- else if and (eq $chain "monad") (eq $pair "USDT0/USDm") $values.ResUSDT0 -}}
+          {{ " Reserve Balance: " }}{{ printf "%.2f" $values.ResUSDT0.Value }} USDT0
+        {{- else if and (eq $chain "monad") (eq $pair "AUSD/USDm") $values.ResAUSD -}}
+          {{ " Reserve Balance: " }}{{ printf "%.2f" $values.ResAUSD.Value }} AUSD
         {{- end -}}
       {{- end -}}
     {{- end -}}
@@ -414,14 +420,16 @@ locals {
   # in one place. The threshold node is rule-specific (warning has a
   # different bound than critical), so it stays inline in each rule.
   #
-  # Aegis-sourced reserve balances (ResUSDC / ResUSDT / ResAxlUSDC):
-  #   - Read Aegis's existing `${TOKEN}_balanceOf{owner="Reserve",chain=
-  #     "celo"}` series (production-stable for years; refreshed every 10s
-  #     via Treb-driven RPC reads in the Aegis NestJS service).
-  #   - Celo-only — Monad reserves aren't tracked in Aegis yet; future
-  #     Monad-reserve breach annotations will lack the balance line until
-  #     Aegis grows Monad coverage. Tracked in issue #707.
-  #   - USDC / USDT / axlUSDC all expose 6dp on chain; `/ 1e6` normalises
+  # Aegis-sourced reserve balances (ResUSDC / ResUSDT / ResAxlUSDC on Celo;
+  # ResUSDC / ResUSDT0 / ResAUSD on Monad — issue #707):
+  #   - Read Aegis's `${TOKEN}_balanceOf{owner="Reserve"}` series, one per
+  #     chain via the `chain` label (production-stable for years on Celo;
+  #     refreshed every 10s via Treb-driven RPC reads in the Aegis NestJS
+  #     service).
+  #   - ResUSDC is chain-agnostic (USDC/USDm exists on both chains); ResUSDT /
+  #     ResAxlUSDC are Celo-only and ResUSDT0 / ResAUSD are Monad-only, so each
+  #     binds to its own chain's pool instances via the `on(chain_name)` join.
+  #   - USDC / USDT / axlUSDC / USDT0 / AUSD all expose 6dp on chain; `/ 1e6` normalises
   #     to human units so the template's `printf "%.2f"` renders in the
   #     same scale as the dashboard tooltip.
   #   - Aegis emits labels {chain="celo", job="aegis-metrics", owner=
@@ -470,9 +478,14 @@ locals {
       ref_id = "B"
       expr   = "mento_pool_rebalance_blocked > 0"
     },
+    # ResUSDC is chain-AGNOSTIC: USDC/USDm pools exist on both Celo and Monad.
+    # Both operands omit a chain pin so `label_replace(...) * on(chain_name)
+    # group_left(...)` produces one balance row per chain (celo, monad), each
+    # joining to its own pool instance. ResUSDT / ResAxlUSDC stay Celo-pinned
+    # (those tokens are Celo-only; Monad uses USDT0 / AUSD below).
     {
       ref_id = "ResUSDC"
-      expr   = "label_replace(USDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"USDC/USDm\"} * 0 + 1)"
+      expr   = "label_replace(USDC_balanceOf{owner=\"Reserve\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{pair=\"USDC/USDm\"} * 0 + 1)"
     },
     {
       ref_id = "ResUSDT"
@@ -481,6 +494,16 @@ locals {
     {
       ref_id = "ResAxlUSDC"
       expr   = "label_replace(axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"axlUSDC/USDm\"} * 0 + 1)"
+    },
+    # Monad reserve tokens (issue #707). USDT0/AUSD are Monad-only, so these
+    # queries naturally resolve to the Monad pool instances only.
+    {
+      ref_id = "ResUSDT0"
+      expr   = "label_replace(USDT0_balanceOf{owner=\"Reserve\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{pair=\"USDT0/USDm\"} * 0 + 1)"
+    },
+    {
+      ref_id = "ResAUSD"
+      expr   = "label_replace(AUSD_balanceOf{owner=\"Reserve\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{pair=\"AUSD/USDm\"} * 0 + 1)"
     },
   ]
 
@@ -495,7 +518,7 @@ locals {
   # widen the NoData surface.
   deviation_rebalancer_annotation_queries = [
     for query in local.deviation_annotation_queries : query
-    if contains(["B", "ResUSDC", "ResUSDT", "ResAxlUSDC"], query.ref_id)
+    if contains(["B", "ResUSDC", "ResUSDT", "ResAxlUSDC", "ResUSDT0", "ResAUSD"], query.ref_id)
   ]
 
   # ── Oracle Jump Critical annotation-only data sources ─────────────────────
