@@ -51,6 +51,35 @@ export const CDP_MARKETS = `
   }
 `;
 
+export const CDP_BORROWING_REVENUE_MARKETS = `
+  query CdpBorrowingRevenueMarkets($chainId: Int!) {
+    LiquityCollateral(
+      where: { chainId: { _eq: $chainId } }
+      order_by: { collIndex: asc }
+    ) {
+      id chainId collIndex symbol
+    }
+    LiquityInstance(
+      where: { chainId: { _eq: $chainId } }
+      order_by: { collateralId: asc }
+    ) {
+      id collateralId chainId borrowingFeeCum
+    }
+  }
+`;
+
+export const CDP_BORROWING_REVENUE_BRACKETS = `
+  query CdpBorrowingRevenueBrackets($collateralIds: [String!]!) {
+    InterestRateBracket(
+      where: { collateralId: { _in: $collateralIds } }
+      order_by: [{ collateralId: asc }, { rate: asc }]
+    ) {
+      id collateralId rate totalDebt sumDebtTimesRateD36
+      pendingDebtTimesOneYearD36 updatedAt
+    }
+  }
+`;
+
 export const CDP_MARKET_DETAIL = `
   query CdpMarketDetail($collateralId: String!) {
     LiquityCollateral(where: { id: { _eq: $collateralId } }, limit: 1) {
