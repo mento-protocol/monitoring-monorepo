@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { UUID, randomUUID } from 'crypto';
 import { Gauge, register } from 'prom-client';
-import type { ChainConfig } from './config';
+import type { ChainConfig, TokenConfig } from './config';
 import { MetricSource } from './config/MetricSource';
 
 /**
@@ -17,6 +17,8 @@ const ORACLE_RATE_DECIMAL_SCALE = 1_000_000_000_000n;
 
 const inputName = (input: { name?: string }, index: number): string =>
   input.name ?? `in${index}`;
+
+type MetricParser = (output: unknown) => number | number[];
 
 /**
  * Metric class manages Prometheus gauges for on-chain contract queries.
@@ -51,6 +53,26 @@ export class Metric {
   gauge: Gauge | Gauge[];
 
   private labels: Record<string, string> = {};
+  private tokenDecimalsBySymbol: Record<string, number> = {};
+
+  private readonly metricParsers: Record<string, MetricParser> = {
+    'BreakerBox.getRateFeedTradingMode': (output) =>
+      this.bigintToSafeNumber(output as bigint),
+    'CELOToken.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 18),
+    // Native handles non-ERC20 native gas tokens (e.g. MON, ETH) fetched via
+    // eth_getBalance. Like CELO (which is ERC20-compatible), they use 18 decimals.
+    'Native.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 18),
+    'USDC.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    'USDT.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    'axlUSDC.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    'SortedOracles.medianRate': (output) => this.parseMedianRate(output),
+    'SortedOracles.isOldestReportExpired': (output) =>
+      this.parseOldestReportExpired(output),
+    'Broker.tradingLimitsState': (output) =>
+      this.parseTradingLimitsState(output),
+    'Broker.tradingLimitsConfig': (output) =>
+      this.parseTradingLimitsConfig(output),
+  };
 
   /**
    * Validates that a bigint value is within the specified Solidity type range and converts to number.
@@ -87,71 +109,10 @@ export class Metric {
     if (!chains) {
       throw new Error('No chains configured');
     }
-    const chainConfig = chains.find(
-      (conf: ChainConfig) => conf.label === chainLabel,
-    );
-    if (!chainConfig) {
-      throw new Error(`Unknown chain label ${chainLabel}`);
-    }
-    this.labels = this.source.functionAbi.inputs.reduce(
-      (acc, input, idx) => {
-        const arg = args[idx];
-        const name = inputName(input, idx);
-        if (arg === undefined) {
-          throw new Error(
-            `Missing argument ${idx} for ${source.contract}.${source.functionAbi.name}`,
-          );
-        }
-        acc[name] = arg;
-        acc[`${name}Value`] = chainConfig.vars[arg] ?? arg;
-        return acc;
-      },
-      {} as Record<string, string>,
-    );
-    this.labels.chain = chainLabel;
-
-    // Support multiple return values by creating multiple gauges with suffixes
-    if (source.functionAbi.outputs.length > 1) {
-      this.gauge = source.functionAbi.outputs.map((output, idx) => {
-        if (!output.name || output.name.trim() === '') {
-          throw new Error(
-            `Output at index ${idx} for function ${source.functionAbi.name} must have a name for multi-gauge metrics`,
-          );
-        }
-        const gaugeName = `${this.name}_${output.name}`;
-        const existingMetric = register.getSingleMetric(gaugeName);
-        if (existingMetric) {
-          return existingMetric as Gauge<string>;
-        } else {
-          return new Gauge({
-            name: gaugeName,
-            help: `Return value ${output.name} of ${source.raw}`,
-            labelNames: ['chain'].concat(
-              source.functionAbi.inputs.map(inputName),
-              source.functionAbi.inputs.map(
-                (input, idx) => `${inputName(input, idx)}Value`,
-              ),
-            ),
-          });
-        }
-      });
-    } else {
-      const metric = register.getSingleMetric(this.name);
-      if (metric) {
-        this.gauge = metric as Gauge<string>;
-      } else {
-        this.gauge = new Gauge({
-          name: this.name,
-          help: `Return value of ${source.raw}`,
-          labelNames: ['chain'].concat(
-            source.functionAbi.inputs.map(inputName),
-            source.functionAbi.inputs.map(
-              (input, idx) => `${inputName(input, idx)}Value`,
-            ),
-          ),
-        });
-      }
-    }
+    const chainConfig = this.getChainConfig(chains, chainLabel);
+    this.tokenDecimalsBySymbol = this.getTokenDecimals(configService);
+    this.labels = this.buildLabels(args, chainConfig);
+    this.gauge = this.buildGauge();
   }
 
   get name(): string {
@@ -195,125 +156,172 @@ export class Metric {
     functionName: string,
   ): number | number[] {
     const metricName = `${contractName}.${functionName}`;
-    switch (metricName) {
-      case 'BreakerBox.getRateFeedTradingMode':
-        const parsed = output as bigint;
-        if (parsed > Number.MAX_SAFE_INTEGER) {
-          throw new Error(`Value ${parsed} is too large to be a safe integer`);
-        }
-        return Number(parsed);
-
-      case 'CELOToken.balanceOf':
-      case 'Native.balanceOf':
-        // Native handles non-ERC20 native gas tokens (e.g. MON, ETH) fetched via
-        // eth_getBalance. Like CELO (which is ERC20-compatible), they use 18 decimals.
-        const celoDecimals = 1e18;
-        const celoBalanceInWei = output as bigint;
-        const celoBalanceInEther = celoBalanceInWei / BigInt(celoDecimals);
-        if (celoBalanceInEther > Number.MAX_SAFE_INTEGER) {
-          throw new Error(
-            `Value ${celoBalanceInEther} is too large to be a safe integer`,
-          );
-        }
-        return Number(celoBalanceInEther);
-
-      case 'USDC.balanceOf':
-      case 'USDT.balanceOf':
-      case 'axlUSDC.balanceOf':
-        const decimals = 1e6;
-        const balance = output as bigint;
-        const balanceInEther = balance / BigInt(decimals);
-        if (balanceInEther > Number.MAX_SAFE_INTEGER) {
-          throw new Error(
-            `Value ${balanceInEther} is too large to be a safe integer`,
-          );
-        }
-        return Number(balanceInEther);
-
-      case 'SortedOracles.medianRate':
-        // Returns (rate, denominator) from SortedOracles
-        // rate is typically multiplied by denominator (usually 1e24)
-        // We need to return rate / denominator to get the actual exchange rate
-        const [rate, denominator] = output as [bigint, bigint];
-        const actualRate = this.oracleRateToNumber(rate, denominator);
-        // Return rate and denominator separately for flexibility in Grafana
-        return [actualRate, Number(denominator)];
-
-      case 'SortedOracles.isOldestReportExpired':
-        const [isExpired] = output as [boolean, bigint];
-        // Returns array: [isExpired as number, 0 for oracle address]
-        // Oracle address is not tracked (set to 0) to avoid number overflow issues
-        // The second gauge exists but is not used in dashboards/alerts
-        return [isExpired ? 1 : 0, 0];
-
-      case 'Broker.tradingLimitsState':
-        // The struct is returned as: (lastUpdated0, lastUpdated1, netflow0, netflow1, netflowGlobal)
-        // All netflows are int48 values representing flow without decimals
-        // Timestamps are uint32 Unix timestamps
-        const [lastUpdated0, lastUpdated1, netflow0, netflow1, netflowGlobal] =
-          output as [bigint, bigint, bigint, bigint, bigint];
-
-        return [
-          // uint32: 0 to 2^32 - 1
-          this.validateSolidityType(lastUpdated0, 'uint32'),
-          this.validateSolidityType(lastUpdated1, 'uint32'),
-          // int48: -(2^47) to 2^47 - 1
-          this.validateSolidityType(netflow0, 'int48'),
-          this.validateSolidityType(netflow1, 'int48'),
-          this.validateSolidityType(netflowGlobal, 'int48'),
-        ];
-
-      case 'Broker.tradingLimitsConfig':
-        // The config struct is returned as: (timestep0, timestep1, limit0, limit1, limitGlobal, flags)
-        // timestep0/timestep1 are uint32 time windows in seconds
-        // limit0/limit1/limitGlobal are int48 threshold values
-        // flags is uint8 bitfield (0 = disabled)
-        const [timestep0, timestep1, limit0, limit1, limitGlobal, flags] =
-          output as [bigint, bigint, bigint, bigint, bigint, bigint];
-
-        return [
-          // uint32: 0 to 2^32 - 1
-          this.validateSolidityType(timestep0, 'uint32'),
-          this.validateSolidityType(timestep1, 'uint32'),
-          // int48: -(2^47) to 2^47 - 1
-          this.validateSolidityType(limit0, 'int48'),
-          this.validateSolidityType(limit1, 'int48'),
-          this.validateSolidityType(limitGlobal, 'int48'),
-          // uint8: 0 to 2^8 - 1
-          this.validateSolidityType(flags, 'uint8'),
-        ];
-
-      case 'cUSD.totalSupply':
-      case 'cEUR.totalSupply':
-      case 'cREAL.totalSupply':
-      case 'eXOF.totalSupply':
-      case 'cKES.totalSupply':
-      case 'PUSO.totalSupply':
-      case 'cCOP.totalSupply':
-      case 'cGHS.totalSupply':
-      case 'cGBP.totalSupply':
-      case 'cZAR.totalSupply':
-      case 'cCAD.totalSupply':
-      case 'cAUD.totalSupply':
-      case 'cCHF.totalSupply':
-      case 'cNGN.totalSupply':
-      case 'cJPY.totalSupply':
-        // All stable tokens have 18 decimals
-        const decimals18 = 1e18;
-        const totalSupply = output as bigint;
-        const totalSupplyInEther = totalSupply / BigInt(decimals18);
-        if (totalSupplyInEther > Number.MAX_SAFE_INTEGER) {
-          throw new Error(
-            `Value ${totalSupplyInEther} is too large to be a safe integer`,
-          );
-        }
-        return Number(totalSupplyInEther);
-
-      default:
-        throw new Error(
-          `Unknown metric '${metricName}'. Make sure to add a case for it in the Metric.parse() method.`,
-        );
+    const totalSupply = this.parseConfiguredTokenTotalSupply(
+      output,
+      contractName,
+      functionName,
+    );
+    if (totalSupply !== undefined) {
+      return totalSupply;
     }
+
+    const parser = this.metricParsers[metricName];
+    if (parser) return parser(output);
+
+    throw new Error(
+      `Unknown metric '${metricName}'. If this is a totalSupply metric, add '${contractName}' to the 'tokens' map in config.yaml. Otherwise, add a parser entry to Metric.metricParsers.`,
+    );
+  }
+
+  private getChainConfig(
+    chains: ChainConfig[],
+    chainLabel: string,
+  ): ChainConfig {
+    const chainConfig = chains.find(
+      (conf: ChainConfig) => conf.label === chainLabel,
+    );
+    if (!chainConfig) {
+      throw new Error(`Unknown chain label ${chainLabel}`);
+    }
+    return chainConfig;
+  }
+
+  private getTokenDecimals(
+    configService: ConfigService,
+  ): Record<string, number> {
+    const tokenConfigs =
+      configService.get<Record<string, TokenConfig>>('tokens') ?? {};
+    return Object.fromEntries(
+      Object.entries(tokenConfigs).map(([symbol, config]) => [
+        symbol,
+        config.decimals,
+      ]),
+    );
+  }
+
+  private buildLabels(
+    args: string[],
+    chainConfig: ChainConfig,
+  ): Record<string, string> {
+    const labels = this.source.functionAbi.inputs.reduce(
+      (acc, input, idx) => {
+        const arg = args[idx];
+        const name = inputName(input, idx);
+        if (arg === undefined) {
+          throw new Error(
+            `Missing argument ${idx} for ${this.source.contract}.${this.source.functionAbi.name}`,
+          );
+        }
+        acc[name] = arg;
+        acc[`${name}Value`] = chainConfig.vars[arg] ?? arg;
+        return acc;
+      },
+      {} as Record<string, string>,
+    );
+    labels.chain = this.chainLabel;
+    return labels;
+  }
+
+  private buildGauge(): Gauge | Gauge[] {
+    if (this.source.functionAbi.outputs.length > 1) {
+      return this.buildMultiGauge();
+    }
+    return this.getOrCreateGauge(
+      this.name,
+      `Return value of ${this.source.raw}`,
+    );
+  }
+
+  private buildMultiGauge(): Gauge[] {
+    return this.source.functionAbi.outputs.map((output, idx) => {
+      if (!output.name || output.name.trim() === '') {
+        throw new Error(
+          `Output at index ${idx} for function ${this.source.functionAbi.name} must have a name for multi-gauge metrics`,
+        );
+      }
+      return this.getOrCreateGauge(
+        `${this.name}_${output.name}`,
+        `Return value ${output.name} of ${this.source.raw}`,
+      );
+    });
+  }
+
+  private getOrCreateGauge(name: string, help: string): Gauge<string> {
+    const existingMetric = register.getSingleMetric(name);
+    if (existingMetric) {
+      return existingMetric as Gauge<string>;
+    }
+    return new Gauge({
+      name,
+      help,
+      labelNames: this.labelNames(),
+    });
+  }
+
+  private labelNames(): string[] {
+    return ['chain'].concat(
+      this.source.functionAbi.inputs.map(inputName),
+      this.source.functionAbi.inputs.map(
+        (input, idx) => `${inputName(input, idx)}Value`,
+      ),
+    );
+  }
+
+  private parseConfiguredTokenTotalSupply(
+    output: unknown,
+    contractName: string,
+    functionName: string,
+  ): number | undefined {
+    const tokenDecimals = this.tokenDecimalsBySymbol[contractName];
+    if (functionName !== 'totalSupply' || tokenDecimals === undefined) {
+      return undefined;
+    }
+    return this.tokenAmountToWholeUnits(output, tokenDecimals);
+  }
+
+  private bigintToSafeNumber(value: bigint): number {
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error(`Value ${value} is too large to be a safe integer`);
+    }
+    return Number(value);
+  }
+
+  private parseMedianRate(output: unknown): number[] {
+    const [rate, denominator] = output as [bigint, bigint];
+    const actualRate = this.oracleRateToNumber(rate, denominator);
+    return [actualRate, Number(denominator)];
+  }
+
+  private parseOldestReportExpired(output: unknown): number[] {
+    const [isExpired] = output as [boolean, bigint];
+    return [isExpired ? 1 : 0, 0];
+  }
+
+  private parseTradingLimitsState(output: unknown): number[] {
+    const [lastUpdated0, lastUpdated1, netflow0, netflow1, netflowGlobal] =
+      output as [bigint, bigint, bigint, bigint, bigint];
+
+    return [
+      this.validateSolidityType(lastUpdated0, 'uint32'),
+      this.validateSolidityType(lastUpdated1, 'uint32'),
+      this.validateSolidityType(netflow0, 'int48'),
+      this.validateSolidityType(netflow1, 'int48'),
+      this.validateSolidityType(netflowGlobal, 'int48'),
+    ];
+  }
+
+  private parseTradingLimitsConfig(output: unknown): number[] {
+    const [timestep0, timestep1, limit0, limit1, limitGlobal, flags] =
+      output as [bigint, bigint, bigint, bigint, bigint, bigint];
+
+    return [
+      this.validateSolidityType(timestep0, 'uint32'),
+      this.validateSolidityType(timestep1, 'uint32'),
+      this.validateSolidityType(limit0, 'int48'),
+      this.validateSolidityType(limit1, 'int48'),
+      this.validateSolidityType(limitGlobal, 'int48'),
+      this.validateSolidityType(flags, 'uint8'),
+    ];
   }
 
   private oracleRateToNumber(rate: bigint, denominator: bigint): number {
@@ -333,5 +341,14 @@ export class Metric {
       Number(integerPart) +
       Number(scaledFraction) / Number(ORACLE_RATE_DECIMAL_SCALE)
     );
+  }
+
+  private tokenAmountToWholeUnits(output: unknown, decimals: number): number {
+    const divisor = 10n ** BigInt(decimals);
+    const wholeUnits = (output as bigint) / divisor;
+    if (wholeUnits > Number.MAX_SAFE_INTEGER) {
+      throw new Error(`Value ${wholeUnits} is too large to be a safe integer`);
+    }
+    return Number(wholeUnits);
   }
 }

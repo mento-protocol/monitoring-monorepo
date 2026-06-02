@@ -11,6 +11,11 @@ resource "grafana_folder" "fpmms" {
   uid   = "fpmms"
 }
 
+resource "grafana_folder" "oracles" {
+  title = "Oracles"
+  uid   = "oracles"
+}
+
 resource "grafana_folder" "metrics_bridge" {
   title = "Metrics Bridge"
   uid   = "metrics-bridge"
