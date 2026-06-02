@@ -18,6 +18,7 @@ import {
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { NETWORKS } from "@/lib/networks";
+import { withFlushedMonitor } from "@/lib/sentry-cron";
 
 // Vercel hobby/pro hard caps the per-invocation duration on `serverless` —
 // a 5k-address run at 60ms spacing is ~5 minutes which fits in the 800s
@@ -235,7 +236,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const startedAt = Date.now();
 
   try {
-    return await Sentry.withMonitor(
+    return await withFlushedMonitor(
       "arkham-enrich",
       async () => {
         // Pre-flight: health check, address discovery, and existing-label

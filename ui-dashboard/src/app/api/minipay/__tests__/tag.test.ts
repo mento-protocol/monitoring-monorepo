@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/address-labels", () => ({
-  getLabels: vi.fn(),
+  getLabelsForAddresses: vi.fn(),
   importLabelsIfAbsent: vi.fn().mockResolvedValue(0),
 }));
 
@@ -25,15 +25,19 @@ vi.mock("@/lib/minipay", () => ({
 vi.mock("@sentry/nextjs", () => ({
   withMonitor: vi.fn(async (_name: string, fn: () => Promise<unknown>) => fn()),
   captureException: vi.fn(),
+  flush: vi.fn().mockResolvedValue(true),
 }));
 
 import { GET } from "../tag/route";
-import { getLabels, importLabelsIfAbsent } from "@/lib/address-labels";
+import {
+  getLabelsForAddresses,
+  importLabelsIfAbsent,
+} from "@/lib/address-labels";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { intersectMiniPay, getMiniPaySetSize } from "@/lib/minipay";
 import * as Sentry from "@sentry/nextjs";
 
-const mockGetLabels = vi.mocked(getLabels);
+const mockGetLabelsForAddresses = vi.mocked(getLabelsForAddresses);
 const mockImportLabelsIfAbsent = vi.mocked(importLabelsIfAbsent);
 const mockDiscover = vi.mocked(discoverMentoAddresses);
 const mockIntersect = vi.mocked(intersectMiniPay);
@@ -81,7 +85,7 @@ describe("GET /api/minipay/tag — filtering", () => {
       addresses: ["0xa", "0xb", "0xc"],
       perEntity: [],
     });
-    mockGetLabels.mockResolvedValue({
+    mockGetLabelsForAddresses.mockResolvedValue({
       // 0xa has an Arkham label — must NOT be re-tagged
       "0xa": {
         name: "Binance",
@@ -98,6 +102,11 @@ describe("GET /api/minipay/tag — filtering", () => {
     const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(200);
 
+    expect(mockGetLabelsForAddresses).toHaveBeenCalledWith([
+      "0xa",
+      "0xb",
+      "0xc",
+    ]);
     // intersect should be called with only 0xc — others were filtered out
     expect(mockIntersect).toHaveBeenCalledWith(["0xc"]);
 
@@ -109,7 +118,7 @@ describe("GET /api/minipay/tag — filtering", () => {
 
   it("reports the insert-only write count to surface labels added during the scan", async () => {
     mockDiscover.mockResolvedValue({ addresses: ["0xa"], perEntity: [] });
-    mockGetLabels.mockResolvedValue({});
+    mockGetLabelsForAddresses.mockResolvedValue({});
     mockIntersect.mockResolvedValue(["0xa"]);
     mockImportLabelsIfAbsent.mockResolvedValue(0);
 
@@ -125,7 +134,7 @@ describe("GET /api/minipay/tag — filtering", () => {
       addresses: ["0xa", "0xb", "0xc"],
       perEntity: [],
     });
-    mockGetLabels.mockResolvedValue({});
+    mockGetLabelsForAddresses.mockResolvedValue({});
     mockIntersect.mockResolvedValue(["0xa", "0xc"]);
 
     const res = await GET(
@@ -147,7 +156,7 @@ describe("GET /api/minipay/tag — filtering", () => {
 
   it("non-dryRun does not include wouldWrite (keeps payload small)", async () => {
     mockDiscover.mockResolvedValue({ addresses: ["0xa"], perEntity: [] });
-    mockGetLabels.mockResolvedValue({});
+    mockGetLabelsForAddresses.mockResolvedValue({});
     mockIntersect.mockResolvedValue(["0xa"]);
 
     const res = await GET(makeReq({ bearer: "cron-secret" }));
@@ -158,7 +167,7 @@ describe("GET /api/minipay/tag — filtering", () => {
 
   it("keeps Sentry maxRuntime aligned with the route execution budget", async () => {
     mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
-    mockGetLabels.mockResolvedValue({});
+    mockGetLabelsForAddresses.mockResolvedValue({});
     mockIntersect.mockResolvedValue([]);
 
     const res = await GET(makeReq({ bearer: "cron-secret" }));
@@ -186,7 +195,7 @@ describe("GET /api/minipay/tag — filtering", () => {
     expect(body.minipaySetSize).toBe(0);
     expect(body.discovered).toBe(0);
     expect(mockDiscover).not.toHaveBeenCalled();
-    expect(mockGetLabels).not.toHaveBeenCalled();
+    expect(mockGetLabelsForAddresses).not.toHaveBeenCalled();
     expect(mockIntersect).not.toHaveBeenCalled();
     expect(mockImportLabelsIfAbsent).not.toHaveBeenCalled();
   });

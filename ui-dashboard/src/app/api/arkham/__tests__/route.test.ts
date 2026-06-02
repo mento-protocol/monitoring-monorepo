@@ -31,6 +31,7 @@ vi.mock("@sentry/nextjs", () => ({
   withMonitor: vi.fn(async (_name: string, fn: () => Promise<unknown>) => fn()),
   captureException: vi.fn(),
   captureMessage: vi.fn(),
+  flush: vi.fn().mockResolvedValue(true),
 }));
 
 import { GET } from "../enrich/route";

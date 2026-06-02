@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { getLabels, importLabelsIfAbsent } from "@/lib/address-labels";
+import {
+  getLabelsForAddresses,
+  importLabelsIfAbsent,
+} from "@/lib/address-labels";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { requireCronAuth } from "@/lib/cron-auth";
@@ -10,6 +13,7 @@ import {
   toMiniPayEntry,
 } from "@/lib/minipay";
 import { NETWORKS } from "@/lib/networks";
+import { withFlushedMonitor } from "@/lib/sentry-cron";
 
 // `nodejs` for fetch + Redis pacing; 800s budget covers a full Mento
 // universe scan + chunked SMISMEMBER + chunked importLabels write.
@@ -91,7 +95,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const startedAt = Date.now();
 
   try {
-    return await Sentry.withMonitor(
+    return await withFlushedMonitor(
       "minipay-tag",
       async () => {
         // SCARD is a single Redis call; check it first before paying for the
@@ -116,12 +120,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           return NextResponse.json(body);
         }
 
-        const [discovery, existing] = await Promise.all([
-          discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
-          getLabels(),
-        ]);
-
+        const discovery = await discoverMentoAddresses(
+          hasuraUrl,
+          CELO_CHAIN_ID,
+        );
         const { addresses, perEntity } = discovery;
+        const existing = await getLabelsForAddresses(addresses);
 
         // Drop anything already labelled by any source. MiniPay writes only
         // to fresh addresses to avoid stomping Arkham/manual labels.
