@@ -122,6 +122,14 @@ module.exports = {
       to: { path: "^(ui-dashboard|indexer-envio|metrics-bridge|aegis)/" },
     },
     {
+      name: "runtime-packages-no-integration-probes",
+      severity: "error",
+      comment:
+        "ui-dashboard, indexer-envio, and metrics-bridge must not import integration-probes. Probe output crosses into the dashboard only through the Upstash snapshot schema.",
+      from: { path: "^(ui-dashboard|indexer-envio|metrics-bridge)/" },
+      to: { path: "^integration-probes/" },
+    },
+    {
       name: "shared-config-stays-leaf",
       severity: "error",
       comment:
