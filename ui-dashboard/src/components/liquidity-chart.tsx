@@ -59,14 +59,6 @@ function buildLiquiditySeries({
   const useUsd = nonUsdmUsdPrice > 0;
   const dec0 = pool?.token0Decimals ?? 18;
   const dec1 = pool?.token1Decimals ?? 18;
-  const toUsd0 = (raw: string) => {
-    const amount = parseWei(raw, dec0);
-    return useUsd && !usdmIsToken0 ? amount * nonUsdmUsdPrice : amount;
-  };
-  const toUsd1 = (raw: string) => {
-    const amount = parseWei(raw, dec1);
-    return useUsd && usdmIsToken0 ? amount * nonUsdmUsdPrice : amount;
-  };
   const raw0Series = forwardFillSeries(
     sorted.map((s) => ({
       timestamp: Number(s.timestamp),
@@ -81,26 +73,22 @@ function buildLiquiditySeries({
     })),
     range,
   );
+  const toUsd0 = (amount: number | undefined): number | null => {
+    if (amount === undefined) return null;
+    return useUsd && !usdmIsToken0 ? amount * nonUsdmUsdPrice : amount;
+  };
+  const toUsd1 = (amount: number | undefined): number | null => {
+    if (amount === undefined) return null;
+    return useUsd && usdmIsToken0 ? amount * nonUsdmUsdPrice : amount;
+  };
 
   return {
     useUsd,
     timestamps: raw0Series.map((point) =>
       new Date(point.timestamp * 1000).toISOString(),
     ),
-    reserves0Usd: forwardFillSeries(
-      sorted.map((s) => ({
-        timestamp: Number(s.timestamp),
-        value: toUsd0(s.reserves0),
-      })),
-      range,
-    ).map((point) => point.value ?? null),
-    reserves1Usd: forwardFillSeries(
-      sorted.map((s) => ({
-        timestamp: Number(s.timestamp),
-        value: toUsd1(s.reserves1),
-      })),
-      range,
-    ).map((point) => point.value ?? null),
+    reserves0Usd: raw0Series.map((point) => toUsd0(point.value)),
+    reserves1Usd: raw1Series.map((point) => toUsd1(point.value)),
     raw0: raw0Series.map((point) => point.value ?? null),
     raw1: raw1Series.map((point) => point.value ?? null),
   };
