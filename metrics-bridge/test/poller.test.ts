@@ -126,6 +126,18 @@ describe("poll", () => {
     expect(mockMarkHealthy).not.toHaveBeenCalled();
   });
 
+  it("still runs the CDP refresh when the FPMM poll fails early (independent legs)", async () => {
+    // A malformed FPMM row / Hasura failure early-returns out of the FPMM leg;
+    // the CDP rows are queried separately and must still refresh.
+    mockFetchPools.mockRejectedValueOnce(new Error("fpmm hasura down"));
+
+    await poll();
+
+    expect(await pollErrorValue("hasura_query")).toBe(1);
+    expect(mockFetchCdps).toHaveBeenCalledOnce();
+    expect(mockUpdateCdpMetrics).toHaveBeenCalledOnce();
+  });
+
   it("increments pollErrors with cdp_query kind when the CDP fetch fails, without derailing the FPMM poll", async () => {
     mockFetchPools.mockResolvedValueOnce(makePoolResponse());
     mockFetchCdps.mockRejectedValueOnce(new Error("cdp hasura down"));

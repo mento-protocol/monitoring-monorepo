@@ -81,6 +81,16 @@ async function maybeRunRebalanceProbe(pools: PoolRow[]): Promise<void> {
 }
 
 export async function poll(): Promise<void> {
+  // FPMM and CDP are independent legs queried from separate Hasura entities.
+  // Run the CDP refresh unconditionally — a malformed FPMM pool row (which
+  // early-returns out of `pollPools`) must NOT skip the CDP refresh, or the
+  // shutdown / SP-floor / shortfall rules would silently evaluate stale samples
+  // while the CDP rows are still queryable. Each leg records its own errors.
+  await pollPools();
+  await refreshCdpMetrics();
+}
+
+async function pollPools(): Promise<void> {
   let pools: PoolRow[];
   try {
     const data = await fetchPools();
@@ -117,8 +127,6 @@ export async function poll(): Promise<void> {
     );
     return;
   }
-
-  await refreshCdpMetrics();
 
   await maybeRunRebalanceProbe(pools);
   // Increment AFTER the probe check so cycle 0 (cold start) fires the
