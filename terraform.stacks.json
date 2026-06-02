@@ -32,7 +32,7 @@
       "id": "alerts-rules",
       "name": "Alerts Rules",
       "path": "alerts/rules",
-      "description": "Protocol Grafana alert rules, Grafana folders, global notification policy, contact points, message templates, and mute timings.",
+      "description": "Protocol Grafana alert rules plus the Aegis service-health rule group, Grafana folders, global notification policy, contact points, message templates, and mute timings.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",
@@ -96,7 +96,7 @@
       "id": "aegis",
       "name": "Aegis",
       "path": "aegis/terraform",
-      "description": "Aegis Grafana dashboard, Aegis folder, and Aegis service-health rule group. Protocol alert rules and global routing live in alerts-rules.",
+      "description": "Aegis Grafana dashboard and Aegis folder. Alert rules (including the Aegis service-health rule group) and global routing live in alerts-rules.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",

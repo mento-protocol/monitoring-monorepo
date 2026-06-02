@@ -11,12 +11,12 @@ last_verified: 2026-05-28
 `terraform.stacks.json` is the machine-readable registry for Terraform roots.
 Use it instead of inferring ownership from directory names.
 
-| Stack             | Path               | State prefix          | Owns                                                                                                                                      | Plan/apply policy                                                 |
-| ----------------- | ------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, CI WIF/IAM | Manual plan; human-approved local apply                           |
-| `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings        | PR plan; `main` apply through the `production` GitHub Environment |
-| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Sentry bridge, Slack channel lifecycle, related GCP resources                                   | PR plan; `main` apply through the `production` GitHub Environment |
-| `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard, Aegis folder, Aegis service-health rule group                                                                    | PR plan; `main` apply through the `production` GitHub Environment |
+| Stack             | Path               | State prefix          | Owns                                                                                                                                                                     | Plan/apply policy                                                 |
+| ----------------- | ------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, CI WIF/IAM                                | Manual plan; human-approved local apply                           |
+| `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules + the Aegis service-health rule group, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings | PR plan; `main` apply through the `production` GitHub Environment |
+| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Sentry bridge, Slack channel lifecycle, related GCP resources                                                                  | PR plan; `main` apply through the `production` GitHub Environment |
+| `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                 | PR plan; `main` apply through the `production` GitHub Environment |
 
 ## Commands
 
@@ -81,13 +81,24 @@ route these summaries to another public channel.
 The one-time Aegis-to-alerts Grafana state migration was completed on
 2026-05-27 and applied successfully. Do not rerun the migration script.
 
+On 2026-06-02 the Aegis **service-health** rule group
+(`grafana_rule_group.aegis_service_alerts`) was relocated from the `aegis`
+stack into `alerts-rules` (issue #706). Because Terraform `moved {}` blocks do
+not cross state backends, this was an import-then-state-rm move: PR1 added the
+resource to `alerts/rules/rules-aegis-service.tf` and the operator
+`terraform import`ed the existing Grafana object into `alerts-rules` state
+(0-diff) before approving that apply; PR2 removed it from `aegis/terraform` and
+the operator `terraform state rm`'d it from `aegis` state (no Grafana delete)
+before approving that apply. The Grafana object and its firing state were
+preserved throughout; the Aegis folder stays in the `aegis` stack.
+
 Current ownership:
 
-- `alerts-rules` owns protocol rule groups, protocol folders, the global
-  Grafana notification policy, contact points, message templates, and mute
-  timings.
-- `aegis` owns only the Aegis Grafana folder, Aegis dashboard, and
-  `grafana_rule_group.aegis_service_alerts`.
+- `alerts-rules` owns protocol rule groups, the Aegis service-health rule
+  group (`grafana_rule_group.aegis_service_alerts`), protocol folders, the
+  global Grafana notification policy, contact points, message templates, and
+  mute timings.
+- `aegis` owns only the Aegis Grafana folder and Aegis dashboard.
 
 Local gitignored tfvars files must follow the same ownership:
 
@@ -104,6 +115,7 @@ pnpm alerts:rules:plan
 pnpm aegis:tf:plan
 ```
 
-Expected result: protocol rule groups and global routing resources appear only
-in `alerts-rules`; Aegis state contains the dashboard resources and
-`grafana_rule_group.aegis_service_alerts`.
+Expected result: protocol rule groups, global routing resources, and
+`grafana_rule_group.aegis_service_alerts` appear only in `alerts-rules`; the
+`aegis` state contains only the Aegis folder + dashboard resources (the
+`grep grafana_rule_group` against `aegis` returns nothing).
