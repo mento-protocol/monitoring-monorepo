@@ -39,6 +39,13 @@ data "grafana_folder" "reserve" {
   title = "Reserve"
 }
 
+# Aegis folder is owned by the aegis stack (aegis/terraform). The relocated
+# Aegis service-health rule group (rules-aegis-service.tf, issue #706) lives in
+# it, so look it up rather than creating a second folder.
+data "grafana_folder" "aegis" {
+  title = "Aegis"
+}
+
 resource "grafana_folder" "trading_modes" {
   title = "Trading Modes"
 }
