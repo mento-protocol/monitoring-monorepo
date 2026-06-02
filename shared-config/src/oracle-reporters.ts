@@ -11,6 +11,7 @@ export type OracleReporterType = (typeof ORACLE_REPORTER_TYPES)[number];
 
 type RawFeedEntry = {
   pair: string;
+  type?: string;
 };
 
 type RawReporterEntry = {
@@ -53,6 +54,14 @@ export function getRateFeedPair(
   return (
     chainEntry(chainId)?.feeds?.[normalizeAddress(feedAddress)]?.pair ?? null
   );
+}
+
+export function getRateFeedReporterType(
+  chainId: number,
+  feedAddress: string,
+): OracleReporterType | null {
+  const raw = chainEntry(chainId)?.feeds?.[normalizeAddress(feedAddress)]?.type;
+  return isReporterType(raw) ? raw : null;
 }
 
 export function getChainlinkDataFeedUrl(

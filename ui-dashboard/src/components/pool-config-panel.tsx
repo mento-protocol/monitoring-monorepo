@@ -4,6 +4,7 @@ import { isVirtualPool, type Pool, type RateFeed } from "@/lib/types";
 import {
   getChainlinkDataFeedUrl,
   getRateFeedPair,
+  getRateFeedReporterType,
 } from "@mento-protocol/monitoring-config/oracle-reporters";
 import { isNeverRebalance } from "@/lib/health";
 import { AddressLink } from "@/components/address-link";
@@ -182,10 +183,7 @@ function formatOracleSource(
     ? getRateFeedPair(pool.chainId, feedAddress)
     : null;
   if (!rateFeed && staticPair) {
-    return {
-      label: `Chainlink ${staticPair}`,
-      url: getChainlinkDataFeedUrl(pool.chainId, staticPair),
-    };
+    return formatStaticOracleSource(pool, staticPair);
   }
   if (!rateFeed) return { label: "SortedOracles", url: null };
   const pair =
@@ -211,6 +209,23 @@ function formatOracleSource(
   return {
     label: ["SortedOracles", pair].filter(Boolean).join(" "),
     url: null,
+  };
+}
+
+function formatStaticOracleSource(pool: Pool, pair: string): OracleSource {
+  const feedAddress = pool.referenceRateFeedID ?? "";
+  const reporterType = feedAddress
+    ? getRateFeedReporterType(pool.chainId, feedAddress)
+    : null;
+  const labelPrefix = reporterType
+    ? formatReporterType(reporterType)
+    : "SortedOracles";
+  return {
+    label: `${labelPrefix} ${pair}`,
+    url:
+      reporterType === "CHAINLINK"
+        ? getChainlinkDataFeedUrl(pool.chainId, pair)
+        : null,
   };
 }
 

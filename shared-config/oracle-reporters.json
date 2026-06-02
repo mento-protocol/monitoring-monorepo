@@ -2,25 +2,32 @@
   "42220": {
     "feeds": {
       "0x0f61ba9c30ef7caee7e5cc1f96bffcb0f52ccd64": {
-        "pair": "CHF/USD"
+        "pair": "CHF/USD",
+        "type": "CHAINLINK"
       },
       "0x26076b9702885d475ac8c3db3bd9f250dc5a318b": {
-        "pair": "EUR/USD"
+        "pair": "EUR/USD",
+        "type": "CHAINLINK"
       },
       "0xa1a8003936862e7a15092a91898d69fa8bce290c": {
-        "pair": "USDC/USD"
+        "pair": "USDC/USD",
+        "type": "CHAINLINK"
       },
       "0xfde35b45cbd2504fb5dc514f007bc2de27034274": {
-        "pair": "JPY/USD"
+        "pair": "JPY/USD",
+        "type": "CHAINLINK"
       },
       "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a": {
-        "pair": "EUR/USD"
+        "pair": "EUR/USD",
+        "type": "CHAINLINK"
       },
       "0xf590b62f9cfcc6409075b1ecac8176fe25744b88": {
-        "pair": "GBP/USD"
+        "pair": "GBP/USD",
+        "type": "CHAINLINK"
       },
       "0xe06c10c63377cd098b589c0b90314bfb55751558": {
-        "pair": "USDT/USD"
+        "pair": "USDT/USD",
+        "type": "CHAINLINK"
       }
     },
     "reporters": {
@@ -53,25 +60,32 @@
   "143": {
     "feeds": {
       "0xac414205651f4a62b614b6be9e5318a182c33eb0": {
-        "pair": "USDT/USD"
+        "pair": "USDT/USD",
+        "type": "CHAINLINK"
       },
       "0xf47172ce00522cc7db02109634a92ce866a15fcc": {
-        "pair": "AUSD/USD"
+        "pair": "AUSD/USD",
+        "type": "CHAINLINK"
       },
       "0xec57482aa55e3ad026c315a0e4a692b776c318ca": {
-        "pair": "EUR/USD"
+        "pair": "EUR/USD",
+        "type": "CHAINLINK"
       },
       "0xea4103a6a122fbe2cdb07a80d4d293be07bb29fa": {
-        "pair": "GBP/USD"
+        "pair": "GBP/USD",
+        "type": "CHAINLINK"
       },
       "0x81a313ff894bfc6093d33b5514e34d7faa41b7ef": {
-        "pair": "USDC/USD"
+        "pair": "USDC/USD",
+        "type": "CHAINLINK"
       },
       "0x2ee56be22d6af8c1b0ac97149b6f42d3b0bfb8c2": {
-        "pair": "CHF/USD"
+        "pair": "CHF/USD",
+        "type": "CHAINLINK"
       },
       "0xb9addcd1d1ce7d49dbb540e2677f1c572bc8d195": {
-        "pair": "JPY/USD"
+        "pair": "JPY/USD",
+        "type": "CHAINLINK"
       }
     },
     "reporters": {

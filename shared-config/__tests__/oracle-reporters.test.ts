@@ -6,11 +6,12 @@ import {
   getOracleReporterType,
   getRateFeedChainlinkDataFeedUrl,
   getRateFeedPair,
+  getRateFeedReporterType,
   knownRateFeedsByChain,
 } from "../src/oracle-reporters";
 
 type RawChainEntry = {
-  feeds: Record<string, { pair: string }>;
+  feeds: Record<string, { pair: string; type?: string }>;
   reporters?: Record<string, { type?: string }>;
 };
 
@@ -24,6 +25,18 @@ describe("oracle reporter registry", () => {
     expect(
       getRateFeedPair(42220, "0xf590b62f9cfcc6409075b1ecac8176fe25744b88"),
     ).toBe("GBP/USD");
+  });
+
+  it("maps known rate feeds to static adapter types and unknown feeds to null", () => {
+    const unknownFeed = "0x0000000000000000000000000000000000000000";
+
+    expect(
+      getRateFeedReporterType(
+        143,
+        "0xEA4103A6a122fbe2CDB07A80d4D293be07bB29fa",
+      ),
+    ).toBe("CHAINLINK");
+    expect(getRateFeedReporterType(42220, unknownFeed)).toBeNull();
   });
 
   it("maps known reporters to static adapter types and unknown reporters to manual", () => {
