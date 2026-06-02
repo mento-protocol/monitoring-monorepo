@@ -163,6 +163,26 @@ size-limit reads `.next/` output. High-risk or cross-layer commands stay
 outside Turbo, including codegen, install, dep-cruiser, mutation baselines, and
 Terraform.
 
+## PR description standard
+
+Every PR description must start with these sections, in this order:
+
+### The Problem
+
+- Maximum three bullets.
+- State the user/operator/reviewer problem in plain English.
+- Avoid implementation details unless they are needed to understand the impact.
+
+### The Solution
+
+- Explain in simple terms how the PR solves that problem.
+- Keep this understandable before reading the diff.
+- Put deeper implementation notes, invariants, validation, caveats, and issue
+  references after these two sections.
+
+The first two sections are not a change log. They are the reviewer-facing story
+for why the PR exists and why this approach resolves it.
+
 ## PR feedback sweep rule
 
 Before declaring a PR clean, inspect every GitHub feedback surface: top-level PR/issue comments, review submissions and bodies, inline review threads/comments, check-run annotations, and failing check logs. Bot reviews can post actionable multi-finding reports as top-level comments, not only inline comments. A clean or resolved inline-thread list is necessary but not sufficient.
