@@ -22,6 +22,7 @@ import {
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { useGQL } from "@/lib/graphql";
 import {
+  LEGACY_VOLUME_WINDOW_TRADERS_LATEST,
   VOLUME_TODAY_TRADERS,
   VOLUME_WINDOW_TRADERS_LATEST,
 } from "@/lib/queries/volume";
@@ -35,6 +36,11 @@ type VolumeWindowTradersLatest = z.infer<
   typeof VolumeWindowTradersLatestSchema
 >;
 type VolumeTodayTraders = z.infer<typeof VolumeTodayTradersSchema>;
+type GqlState<T> = {
+  data: T | undefined;
+  isLoading: boolean;
+  error: unknown;
+};
 
 const SECONDS_PER_DAY = 86_400;
 
@@ -455,26 +461,7 @@ function TradersTile({
   isLoading: boolean;
   networkData: NetworkData[];
 }) {
-  const snapshotGql = useGQL<VolumeWindowTradersLatest>(
-    VOLUME_WINDOW_TRADERS_LATEST,
-    { windowKey: "all" },
-    {
-      schema: VolumeWindowTradersLatestSchema,
-      // The "all" window snapshot only rolls over at the per-chain
-      // UTC-midnight heartbeat, so the default
-      // 30s polling cadence is wildly over-cadenced for this tile. 5min
-      // keeps a fresh-after-rollover read without burning the Envio
-      // "small" tier quota for a multi-KB address list on every poll.
-      refreshInterval: 5 * 60_000,
-      // Required by docs/pr-checklists/swr-polling-hasura.md §1 — without
-      // a request-level timeout, a wedged TCP connection would hold the
-      // poll open for the full 5min interval. 30s is conservative for
-      // the long interval (the canonical 8s example pairs with a 10s
-      // poll); the trader address list is small enough that 30s never
-      // legitimately times out on healthy Hasura.
-      timeoutMs: 30_000,
-    },
-  );
+  const snapshotGql = useVolumeWindowTradersSnapshot();
   // Today's traders aren't yet in the closed-day snapshot (the heartbeat
   // only flushes at the next UTC midnight on the first swap of the new
   // day), so without this merge a wallet whose first-ever v3 swap is
@@ -619,6 +606,37 @@ function TradersTile({
   return <Tile label="Traders" value={value} subtitle={subtitle} />;
 }
 
+function useVolumeWindowTradersSnapshot(): GqlState<VolumeWindowTradersLatest> {
+  const primarySnapshotGql = useGQL<VolumeWindowTradersLatest>(
+    VOLUME_WINDOW_TRADERS_LATEST,
+    { windowKey: "all" },
+    {
+      schema: VolumeWindowTradersLatestSchema,
+      // The "all" window snapshot only rolls over at the per-chain
+      // UTC-midnight heartbeat, so the default 30s polling cadence is wildly
+      // over-cadenced for this tile. 5min keeps a fresh-after-rollover read
+      // without burning quota for a multi-KB address list on every poll.
+      refreshInterval: 5 * 60_000,
+      // Required by docs/pr-checklists/swr-polling-hasura.md §1 — without a
+      // request-level timeout, a wedged TCP connection would hold the poll
+      // open for the full 5min interval.
+      timeoutMs: 30_000,
+    },
+  );
+  const legacySnapshotGql = useGQL<VolumeWindowTradersLatest>(
+    primarySnapshotGql.error && !primarySnapshotGql.data
+      ? LEGACY_VOLUME_WINDOW_TRADERS_LATEST
+      : null,
+    { windowKey: "all" },
+    {
+      schema: VolumeWindowTradersLatestSchema,
+      refreshInterval: 5 * 60_000,
+      timeoutMs: 30_000,
+    },
+  );
+  return preferPrimaryGqlResult(primarySnapshotGql, legacySnapshotGql);
+}
+
 // Minute-polled UTC-day ticker. Returns an integer day-since-epoch
 // that flips at UTC midnight, so any `useMemo` / `useGQL` variables
 // keyed on it (`todayMidnight`, the today-partial query window)
@@ -644,4 +662,12 @@ function useUtcDayKey(): number {
     return () => window.clearInterval(id);
   }, []);
   return key;
+}
+
+function preferPrimaryGqlResult<T>(
+  primary: GqlState<T>,
+  fallback: GqlState<T>,
+): GqlState<T> {
+  if (primary.data || primary.isLoading || !primary.error) return primary;
+  return fallback;
 }

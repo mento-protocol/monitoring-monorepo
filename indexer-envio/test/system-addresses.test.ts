@@ -13,6 +13,8 @@ const CHAIN_TEST_FIXTURE = 99999;
 const CELO_BROKER = "0x777a8255ca72412f0d706dc03c9d1987306b4cad";
 const CELO_BIPOOLMANAGER = "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901";
 const CELO_RESERVE = "0x9380fa34fd9e4fd14c06305fd7b6199089ed4eb9";
+const CELO_OPEN_LIQUIDITY_STRATEGY =
+  "0x54e2ae8c8448912e17ce0b2453bafb7b0d80e40f";
 const CELO_PROTOCOL_FEE_RECIPIENT =
   "0x0dd57f6f181d0469143fe9380762d8a112e96e4a";
 
@@ -109,6 +111,13 @@ describe("isSystemAddress", () => {
         rebalancerAddress: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
       }),
       false,
+    );
+  });
+
+  it("flags non-user-facing static protocol contracts as protocol actor entry points", () => {
+    assert.equal(
+      isProtocolActorEntryPoint(CHAIN_CELO, CELO_OPEN_LIQUIDITY_STRATEGY),
+      true,
     );
   });
 

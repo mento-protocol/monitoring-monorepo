@@ -17,7 +17,11 @@ const ADDRESS = "0x00000000000000000000000000000000000000aa";
 let container: HTMLElement;
 let root: Root;
 
-function Host() {
+function Host({
+  allowSourceExclusions = true,
+}: {
+  allowSourceExclusions?: boolean;
+}) {
   const [exclusions, setExclusions] = useState<VolumeExclusionState>({
     addresses: [],
     sources: [],
@@ -25,6 +29,7 @@ function Host() {
   return (
     <VolumeExclusionFilter
       exclusions={exclusions}
+      allowSourceExclusions={allowSourceExclusions}
       sourceOptions={[]}
       onChange={setExclusions}
     />
@@ -78,5 +83,17 @@ describe("VolumeExclusionFilter", () => {
 
     expect(container.textContent).toContain("0x0000...00aa");
     expect(container.textContent).not.toContain("Ignored:");
+  });
+
+  it("does not add source exclusions when source filtering is disabled", () => {
+    act(() => {
+      root.render(<Host allowSourceExclusions={false} />);
+    });
+
+    setInputValue("cluster-abc");
+    clickAdd();
+
+    expect(container.textContent).toContain("No exploratory exclusions.");
+    expect(container.textContent).toContain("Ignored: cluster-abc");
   });
 });

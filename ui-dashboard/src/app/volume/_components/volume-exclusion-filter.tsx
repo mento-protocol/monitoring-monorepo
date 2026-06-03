@@ -10,6 +10,7 @@ import {
 
 type Props = {
   exclusions: VolumeExclusionState;
+  allowSourceExclusions?: boolean;
   sourceOptions: readonly string[];
   onChange: (next: VolumeExclusionState) => void;
 };
@@ -18,6 +19,7 @@ const MAX_SOURCE_OPTIONS = 10;
 
 export function VolumeExclusionFilter({
   exclusions,
+  allowSourceExclusions = true,
   sourceOptions,
   onChange,
 }: Props) {
@@ -27,17 +29,24 @@ export function VolumeExclusionFilter({
 
   const availableSourceOptions = useMemo(
     () =>
-      sourceOptions
+      (allowSourceExclusions ? sourceOptions : [])
         .filter((source) => !exclusions.sources.includes(source))
         .slice(0, MAX_SOURCE_OPTIONS),
-    [exclusions.sources, sourceOptions],
+    [allowSourceExclusions, exclusions.sources, sourceOptions],
   );
 
   const addDraft = () => {
     const parsed = parseVolumeExclusionInput(draft);
-    setInvalidTokens(parsed.invalid);
-    if (parsed.addresses.length === 0 && parsed.sources.length === 0) return;
-    onChange(mergeVolumeExclusions(exclusions, parsed));
+    const added = allowSourceExclusions
+      ? parsed
+      : {
+          addresses: parsed.addresses,
+          sources: [],
+          invalid: [...parsed.invalid, ...parsed.sources],
+        };
+    setInvalidTokens(added.invalid);
+    if (added.addresses.length === 0 && added.sources.length === 0) return;
+    onChange(mergeVolumeExclusions(exclusions, added));
     setDraft("");
     setInvalidTokens([]);
   };
@@ -61,6 +70,7 @@ export function VolumeExclusionFilter({
         <ExclusionSummary
           exclusions={exclusions}
           active={active}
+          allowSourceExclusions={allowSourceExclusions}
           onRemoveAddress={removeAddress}
           onRemoveSource={removeSource}
         />
@@ -68,6 +78,7 @@ export function VolumeExclusionFilter({
           draft={draft}
           invalidTokens={invalidTokens}
           active={active}
+          allowSourceExclusions={allowSourceExclusions}
           sourceOptions={availableSourceOptions}
           onDraftChange={setDraft}
           onAddDraft={addDraft}
@@ -89,11 +100,13 @@ export function VolumeExclusionFilter({
 function ExclusionSummary({
   exclusions,
   active,
+  allowSourceExclusions,
   onRemoveAddress,
   onRemoveSource,
 }: {
   exclusions: VolumeExclusionState;
   active: boolean;
+  allowSourceExclusions: boolean;
   onRemoveAddress: (address: string) => void;
   onRemoveSource: (source: string) => void;
 }) {
@@ -110,9 +123,9 @@ function ExclusionSummary({
         )}
       </div>
       <p className="max-w-3xl text-xs text-slate-500">
-        Applies to loaded top-window rows with matching trader addresses or
-        source attribution. Canonical hero totals and pool snapshots stay
-        unfiltered.
+        {allowSourceExclusions
+          ? "Applies to loaded top-window rows with matching trader addresses or source attribution. Canonical hero totals and pool snapshots stay unfiltered."
+          : "Applies to loaded top-window rows with matching trader addresses. Canonical hero totals and pool snapshots stay unfiltered."}
       </p>
       <ExclusionChips
         exclusions={exclusions}
@@ -166,6 +179,7 @@ function ExclusionControls({
   draft,
   invalidTokens,
   active,
+  allowSourceExclusions,
   sourceOptions,
   onDraftChange,
   onAddDraft,
@@ -175,6 +189,7 @@ function ExclusionControls({
   draft: string;
   invalidTokens: readonly string[];
   active: boolean;
+  allowSourceExclusions: boolean;
   sourceOptions: readonly string[];
   onDraftChange: (next: string) => void;
   onAddDraft: () => void;
@@ -187,7 +202,7 @@ function ExclusionControls({
         htmlFor="volume-exclusion-input"
         className="text-xs font-medium text-slate-400"
       >
-        Add address or source
+        {allowSourceExclusions ? "Add address or source" : "Add address"}
       </label>
       <div className="flex gap-2">
         <input
@@ -200,7 +215,7 @@ function ExclusionControls({
               onAddDraft();
             }
           }}
-          placeholder="0x... or cluster-..."
+          placeholder={allowSourceExclusions ? "0x... or cluster-..." : "0x..."}
           className="min-w-0 flex-1 rounded-md border border-slate-800 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
         />
         <button

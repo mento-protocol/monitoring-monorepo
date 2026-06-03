@@ -47,6 +47,7 @@ const BROKER_PROXY = "0x777A8255cA72412f0d706dc03C9D1987306B4CaD";
 // entry point or a v3 Router entry point; Broker.Swap distinguishes those by
 // brokerCaller (Router direct-to-Broker vs VirtualPool).
 const V3_ROUTER = "0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6";
+const OPEN_LIQUIDITY_STRATEGY = "0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f";
 const VIRTUAL_POOL_ADDR =
   "0x00000000000000000000000000000000000000aa".toLowerCase();
 
@@ -482,6 +483,27 @@ describe("Broker.Swap handler", () => {
       false,
       "isSystemAddress must check ONLY caller (signer EOA); checking brokerCaller too would wrongly hide MentoRouter users",
     );
+  });
+
+  it("flags v2 signer rows as system when tx.to is a protocol actor entry point", async () => {
+    const NORMAL_EOA = "0xc2cccccccccccccccccccccccccccccccccccccc";
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      txTo: OPEN_LIQUIDITY_STRATEGY,
+      txFrom: NORMAL_EOA,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const id = `${CHAIN_CELO}-${NORMAL_EOA.toLowerCase()}-${dayTs}`;
+    const row = mockDb.entities.BrokerTraderDailySnapshot.get(id) as
+      | { caller: string; isSystemAddress: boolean }
+      | undefined;
+    assert.isOk(row, "BrokerTraderDailySnapshot row missing");
+    assert.equal(row!.caller, NORMAL_EOA.toLowerCase());
+    assert.equal(row!.isSystemAddress, true);
   });
 
   it("does NOT write trader/aggregator rollups when routedViaV3Router=true (avoids double-count vs v3)", async () => {

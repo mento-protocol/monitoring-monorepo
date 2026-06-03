@@ -392,6 +392,55 @@ export const BROKER_VOLUME_WINDOW_LATEST = /* GraphQL */ `
   }
 `;
 
+// Compatibility fallback for dashboards deployed before the hosted indexer
+// schema has promoted the renamed volume snapshot entities. GraphQL aliases
+// preserve the new response shape while reading the previous entity names.
+export const LEGACY_VOLUME_WINDOW_LATEST = /* GraphQL */ `
+  query LegacyVolumeWindowLatest($windowKey: String!) {
+    volumeWindowSnapshots: LeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      id
+      chainId
+      windowKey
+      snapshotDay
+      windowStartDay
+      totalVolumeUsdWei
+      totalVolumeUsdWeiIncludingSystem
+      totalSwapCount
+      totalSwapCountIncludingSystem
+      uniqueTraders
+      uniqueTradersIncludingSystem
+    }
+  }
+`;
+
+export const LEGACY_BROKER_VOLUME_WINDOW_LATEST = /* GraphQL */ `
+  query LegacyBrokerVolumeWindowLatest($windowKey: String!) {
+    brokerVolumeWindowSnapshots: BrokerLeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      id
+      chainId
+      windowKey
+      snapshotDay
+      windowStartDay
+      totalVolumeUsdWei
+      totalVolumeUsdWeiIncludingSystem
+      totalSwapCount
+      totalSwapCountIncludingSystem
+      uniqueTraders
+      uniqueTradersIncludingSystem
+    }
+  }
+`;
+
 // Isolated firstDay slice query — same rationale as POOL_CONFIG_EXT /
 // POOL_BREACH_ROLLUP in queries/pools.ts. Hosted Hasura rejects new
 // columns with "field not found" during the deploy+resync window, so
@@ -441,6 +490,46 @@ export const BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
   }
 `;
 
+export const LEGACY_VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
+  query LegacyVolumeWindowFirstDayLatest($windowKey: String!) {
+    volumeWindowFirstDaySnapshots: LeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      firstDayVolumeUsdWei
+      firstDayVolumeUsdWeiIncludingSystem
+      firstDaySwapCount
+      firstDaySwapCountIncludingSystem
+      firstDayExclusiveUniqueTraders
+      firstDayExclusiveUniqueTradersIncludingSystem
+    }
+  }
+`;
+
+export const LEGACY_BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
+  query LegacyBrokerVolumeWindowFirstDayLatest($windowKey: String!) {
+    brokerVolumeWindowFirstDaySnapshots: BrokerLeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      firstDayVolumeUsdWei
+      firstDayVolumeUsdWeiIncludingSystem
+      firstDaySwapCount
+      firstDaySwapCountIncludingSystem
+      firstDayExclusiveUniqueTraders
+      firstDayExclusiveUniqueTradersIncludingSystem
+    }
+  }
+`;
+
 // Isolated address-list slice for the homepage Traders tile. Lets the UI
 // cross-chain-dedupe via a `Set<string>` instead of naive-summing
 // `uniqueTraders` (which double-counts wallets active on multiple chains).
@@ -449,6 +538,21 @@ export const BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
 export const VOLUME_WINDOW_TRADERS_LATEST = /* GraphQL */ `
   query VolumeWindowTradersLatest($windowKey: String!) {
     volumeWindowTraderSnapshots: VolumeWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      windowTraders
+    }
+  }
+`;
+
+export const LEGACY_VOLUME_WINDOW_TRADERS_LATEST = /* GraphQL */ `
+  query LegacyVolumeWindowTradersLatest($windowKey: String!) {
+    volumeWindowTraderSnapshots: LeaderboardWindowSnapshot(
       where: { windowKey: { _eq: $windowKey } }
       order_by: [{ chainId: asc }, { snapshotDay: desc }]
       distinct_on: [chainId]

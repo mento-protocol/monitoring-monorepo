@@ -110,6 +110,21 @@ const STATIC_SYSTEM_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
   return out;
 })();
 
+const USER_ENTRY_POINT_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
+  const out = new Map<number, Set<string>>();
+  const userEntryPointNamePatterns = /^(Broker|Router(v\d+)?)$/;
+  for (const chainId of ALL_INDEXED_CHAIN_IDS) {
+    const set = new Set<string>();
+    for (const entry of iterateContractAddresses(chainId)) {
+      if (userEntryPointNamePatterns.test(entry.rawName)) {
+        set.add(entry.address);
+      }
+    }
+    out.set(chainId, set);
+  }
+  return out;
+})();
+
 const MANUAL_PROTOCOL_ACTORS_BY_CHAIN: Map<number, Set<string>> = (() => {
   const out = new Map<number, Set<string>>();
   for (const entry of PROTOCOL_ACTOR_ENTRIES) {
@@ -153,9 +168,10 @@ export function isSystemAddress(
  * Returns true when the transaction entry point itself proves the swap was
  * initiated by protocol automation. This is intentionally narrower than
  * `isSystemAddress`: the static system set includes user-facing Broker/Router
- * contracts, and OR-checking all tx.to values would hide normal users routing
- * through the Mento UI. Dynamic pool rebalancers and manual overrides are safe
- * tx.to filters because those contracts are protocol-controlled actors.
+ * contracts, and OR-checking those direct entry points would hide normal users
+ * routing through the Mento UI. Dynamic pool rebalancers, manual overrides,
+ * and non-user-facing static contracts are safe tx.to filters because those
+ * contracts are protocol-controlled actors.
  */
 export function isProtocolActorEntryPoint(
   chainId: number,
@@ -167,6 +183,12 @@ export function isProtocolActorEntryPoint(
   if (
     pool?.rebalancerAddress &&
     pool.rebalancerAddress.toLowerCase() === lower
+  ) {
+    return true;
+  }
+  if (
+    STATIC_SYSTEM_ADDRESSES_BY_CHAIN.get(chainId)?.has(lower) &&
+    !USER_ENTRY_POINT_ADDRESSES_BY_CHAIN.get(chainId)?.has(lower)
   ) {
     return true;
   }

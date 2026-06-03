@@ -107,8 +107,13 @@ function useVolumePageModel({
     showChart,
   });
   const rows = readVolumeRows(queries);
+  const effectiveExclusions = useMemo(
+    () => volumeExclusionsForVenue(venue, exclusions),
+    [venue, exclusions],
+  );
   const aggregates = useVolumeAggregates({
-    exclusions,
+    exclusions: effectiveExclusions,
+    venue,
     includeProtocolActors,
     traderRows: rows.traderRows,
     v2TraderRows: rows.v2TraderRows,
@@ -257,6 +262,7 @@ type VolumeRows = ReturnType<typeof readVolumeRows>;
 
 function useVolumeAggregates({
   exclusions,
+  venue,
   includeProtocolActors,
   traderRows,
   v2TraderRows,
@@ -264,6 +270,7 @@ function useVolumeAggregates({
   v2AggregatorRows,
 }: {
   exclusions: VolumeUrlState["exclusions"];
+  venue: VolumeUrlState["venue"];
   includeProtocolActors: boolean;
   traderRows: VolumeRows["traderRows"];
   v2TraderRows: VolumeRows["v2TraderRows"];
@@ -272,6 +279,7 @@ function useVolumeAggregates({
 }) {
   const exclusionModel = useVolumeExclusionModel({
     exclusions,
+    venue,
     includeProtocolActors,
     traderRows,
     v2TraderRows,
@@ -526,11 +534,16 @@ function VolumePageView({
   model: VolumePageModel;
 }) {
   const { hero, status, aggregates } = model;
+  const displayedExclusions = volumeExclusionsForVenue(
+    urlState.venue,
+    urlState.exclusions,
+  );
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8 space-y-6">
       <VolumePageHeader urlState={urlState} />
       <VolumeExclusionFilter
-        exclusions={urlState.exclusions}
+        exclusions={displayedExclusions}
+        allowSourceExclusions={urlState.venue === "v3"}
         sourceOptions={aggregates.sourceOptions}
         onChange={urlState.updateExclusions}
       />
@@ -895,6 +908,7 @@ function v3SourceChart(urlState: VolumeUrlState, model: VolumePageModel) {
 
 function useVolumeExclusionModel({
   exclusions,
+  venue,
   includeProtocolActors,
   traderRows,
   v2TraderRows,
@@ -902,6 +916,7 @@ function useVolumeExclusionModel({
   v2AggregatorRows,
 }: {
   exclusions: ReturnType<typeof useVolumeUrlState>["exclusions"];
+  venue: ReturnType<typeof useVolumeUrlState>["venue"];
   includeProtocolActors: boolean;
   traderRows: readonly TraderDailyRow[];
   v2TraderRows: readonly BrokerTraderDailyRow[];
@@ -950,12 +965,13 @@ function useVolumeExclusionModel({
   );
   const sourceOptions = useMemo(
     () =>
-      buildSourceOptions({
-        traderRows,
-        v3AggregatorRows,
-        v2AggregatorRows,
-      }),
-    [traderRows, v3AggregatorRows, v2AggregatorRows],
+      venue === "v3"
+        ? buildSourceOptions({
+            traderRows,
+            v3AggregatorRows,
+          })
+        : [],
+    [venue, traderRows, v3AggregatorRows],
   );
   return {
     hasExploratoryExclusions,
@@ -965,6 +981,14 @@ function useVolumeExclusionModel({
     filteredV2AggregatorRows,
     sourceOptions,
   };
+}
+
+function volumeExclusionsForVenue(
+  venue: VolumeUrlState["venue"],
+  exclusions: VolumeUrlState["exclusions"],
+): VolumeUrlState["exclusions"] {
+  if (venue === "v3" || exclusions.sources.length === 0) return exclusions;
+  return { addresses: exclusions.addresses, sources: [] };
 }
 
 function useVolumeChartControls(
@@ -1013,11 +1037,9 @@ function rangeLabel(range: VolumeRangeKey): string {
 function buildSourceOptions({
   traderRows,
   v3AggregatorRows,
-  v2AggregatorRows,
 }: {
   traderRows: readonly TraderDailyRow[];
   v3AggregatorRows: readonly AggregatorDailyRow[];
-  v2AggregatorRows: readonly BrokerAggregatorDailyRow[];
 }): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -1028,7 +1050,6 @@ function buildSourceOptions({
     }
   }
   for (const row of v3AggregatorRows) appendSource(out, seen, row.aggregator);
-  for (const row of v2AggregatorRows) appendSource(out, seen, row.aggregator);
   return out;
 }
 

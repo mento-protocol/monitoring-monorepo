@@ -21,7 +21,10 @@ import {
 import { computeSwapUsdWei } from "../usd.js";
 import { UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
 import { getContractAddress } from "../contractAddresses.js";
-import { isSystemAddress } from "../system-addresses.js";
+import {
+  isProtocolActorEntryPoint,
+  isSystemAddress,
+} from "../system-addresses.js";
 import { classifyAggregator } from "../aggregators.js";
 import { maybeHeartbeatFlushV2 } from "../volumeWindowFlush.js";
 import { buildSwapAddressFields } from "../swap.js";
@@ -101,7 +104,9 @@ async function writeBrokerProducerRollups(args: {
     blockTimestamp,
     volumeUsdWei,
   } = args;
-  const callerIsSystem = isSystemAddress(chainId, caller);
+  const callerIsSystem =
+    isSystemAddress(chainId, caller) ||
+    isProtocolActorEntryPoint(chainId, txTo);
   const callerDayId = `${chainId}-${caller}-${dayTs}`;
   const aggregator = classifyBrokerEntryPoint(chainId, txTo);
   const aggDayId = `${chainId}-${aggregator}-${dayTs}`;
@@ -355,7 +360,8 @@ indexer.onEvent(
     // aren't in the `Pool` table). The static contracts.json check still
     // catches Mento internal addresses.
     //
-    // We deliberately check ONLY `caller` (signer EOA), not `brokerCaller`.
+    // We deliberately check ONLY `caller` (signer EOA) plus the narrow
+    // protocol-actor entry-point set, not every `brokerCaller`.
     // Mento's `system-addresses` set includes both true protocol-internal
     // contracts (Reserve, MigrationMultisig, ReserveLiquidityStrategy) AND
     // user-facing routers that wrap normal swaps (MentoRouter v1/v2,

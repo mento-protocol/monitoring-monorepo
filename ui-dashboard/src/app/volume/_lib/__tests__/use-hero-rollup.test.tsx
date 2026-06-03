@@ -35,6 +35,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
+  LEGACY_VOLUME_WINDOW_LATEST,
   VOLUME_PARTIAL_OVERLAP_TRADERS,
   VOLUME_TODAY_TRADERS,
   VOLUME_WINDOW_FIRSTDAY_LATEST,
@@ -191,6 +192,31 @@ function render(): { current: HookResult | null } {
 // ---------------------------------------------------------------------------
 
 describe("useHeroRollup orchestration", () => {
+  it("falls back to the previous snapshot entity name when the renamed hero query errors", () => {
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: undefined,
+      isLoading: false,
+      error: new Error("field VolumeWindowSnapshot not found"),
+    });
+    gqlResponses.set(LEGACY_VOLUME_WINDOW_LATEST, {
+      data: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_TODAY_TRADERS, {
+      data: { volumeTodayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+
+    const ref = render();
+    const result = ref.current;
+    expect(result).not.toBeNull();
+    expect(lastVariables.has(LEGACY_VOLUME_WINDOW_LATEST)).toBe(true);
+    expect(result!.hasError).toBe(false);
+    expect(result!.totalVolume).toBeCloseTo(1000, 4);
+  });
+
   it("phase 1: primary snapshot + today resolved, firstDay + yesterday still loading → degraded banner stays up, tiles render", () => {
     // Snapshot is at T-2 → degraded state. Today's partial is empty
     // (no swap yet today, which is exactly when this matters).

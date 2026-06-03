@@ -8,6 +8,10 @@ import {
   BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST,
   BROKER_VOLUME_WINDOW_LATEST,
   BROKER_VOLUME_YESTERDAY_TRADERS,
+  LEGACY_BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST,
+  LEGACY_BROKER_VOLUME_WINDOW_LATEST,
+  LEGACY_VOLUME_WINDOW_FIRSTDAY_LATEST,
+  LEGACY_VOLUME_WINDOW_LATEST,
   VOLUME_PARTIAL_OVERLAP_TRADERS,
   VOLUME_TODAY_TRADERS,
   VOLUME_WINDOW_FIRSTDAY_LATEST,
@@ -42,6 +46,11 @@ import type { Venue } from "./url-state";
 
 type HeroV3Data = { volumeWindowSnapshots: VolumeWindowRow[] };
 type HeroV2Data = { brokerVolumeWindowSnapshots: VolumeWindowRow[] };
+type GqlState<T> = {
+  data: T | undefined;
+  isLoading: boolean;
+  error: unknown;
+};
 
 /**
  * Hero-tile data slice for the volume page (total volume, unique
@@ -109,10 +118,32 @@ export function useHeroRollup({
     { windowKey: range },
     { schema: VolumeWindowLatestSchema },
   );
+  const legacyHeroV3Result = useGQL<HeroV3Data>(
+    venue === "v3" && heroV3Result.error && !heroV3Result.data
+      ? LEGACY_VOLUME_WINDOW_LATEST
+      : null,
+    { windowKey: range },
+    { schema: VolumeWindowLatestSchema },
+  );
   const heroV2Result = useGQL<HeroV2Data>(
     venue === "v2" ? BROKER_VOLUME_WINDOW_LATEST : null,
     { windowKey: range },
     { schema: BrokerVolumeWindowLatestSchema },
+  );
+  const legacyHeroV2Result = useGQL<HeroV2Data>(
+    venue === "v2" && heroV2Result.error && !heroV2Result.data
+      ? LEGACY_BROKER_VOLUME_WINDOW_LATEST
+      : null,
+    { windowKey: range },
+    { schema: BrokerVolumeWindowLatestSchema },
+  );
+  const heroV3Snapshot = preferPrimaryGqlResult(
+    heroV3Result,
+    legacyHeroV3Result,
+  );
+  const heroV2Snapshot = preferPrimaryGqlResult(
+    heroV2Result,
+    legacyHeroV2Result,
   );
 
   // Today's UTC midnight in seconds. The hero snapshot's upper bound is
@@ -140,8 +171,8 @@ export function useHeroRollup({
 
   const snapshotRows =
     venue === "v3"
-      ? heroV3Result.data?.volumeWindowSnapshots
-      : heroV2Result.data?.brokerVolumeWindowSnapshots;
+      ? heroV3Snapshot.data?.volumeWindowSnapshots
+      : heroV2Snapshot.data?.brokerVolumeWindowSnapshots;
   const todayPartialRows =
     venue === "v3"
       ? todayV3Result.data?.volumeTodayTraders
@@ -159,6 +190,15 @@ export function useHeroRollup({
     { windowKey: range },
     { schema: VolumeWindowFirstDayLatestSchema },
   );
+  const legacyHeroFirstDayV3Result = useGQL<{
+    volumeWindowFirstDaySnapshots: VolumeWindowFirstDayRow[];
+  }>(
+    venue === "v3" && heroFirstDayV3Result.error && !heroFirstDayV3Result.data
+      ? LEGACY_VOLUME_WINDOW_FIRSTDAY_LATEST
+      : null,
+    { windowKey: range },
+    { schema: VolumeWindowFirstDayLatestSchema },
+  );
   const heroFirstDayV2Result = useGQL<{
     brokerVolumeWindowFirstDaySnapshots: VolumeWindowFirstDayRow[];
   }>(
@@ -166,10 +206,27 @@ export function useHeroRollup({
     { windowKey: range },
     { schema: BrokerVolumeWindowFirstDayLatestSchema },
   );
+  const legacyHeroFirstDayV2Result = useGQL<{
+    brokerVolumeWindowFirstDaySnapshots: VolumeWindowFirstDayRow[];
+  }>(
+    venue === "v2" && heroFirstDayV2Result.error && !heroFirstDayV2Result.data
+      ? LEGACY_BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST
+      : null,
+    { windowKey: range },
+    { schema: BrokerVolumeWindowFirstDayLatestSchema },
+  );
+  const heroFirstDayV3Snapshot = preferPrimaryGqlResult(
+    heroFirstDayV3Result,
+    legacyHeroFirstDayV3Result,
+  );
+  const heroFirstDayV2Snapshot = preferPrimaryGqlResult(
+    heroFirstDayV2Result,
+    legacyHeroFirstDayV2Result,
+  );
   const firstDayRows =
     venue === "v3"
-      ? heroFirstDayV3Result.data?.volumeWindowFirstDaySnapshots
-      : heroFirstDayV2Result.data?.brokerVolumeWindowFirstDaySnapshots;
+      ? heroFirstDayV3Snapshot.data?.volumeWindowFirstDaySnapshots
+      : heroFirstDayV2Snapshot.data?.brokerVolumeWindowFirstDaySnapshots;
 
   // First-pass merge — without `yesterdayRows`. Used solely to discover
   // which chains are in the DEGRADED state (snapshotDay = today - 2 days),
@@ -308,12 +365,12 @@ export function useHeroRollup({
   // TraderDailySnapshot query (which is fast — capped at 1000 by design).
   const isLoading =
     venue === "v3"
-      ? heroV3Result.isLoading || todayV3Result.isLoading
-      : heroV2Result.isLoading || todayV2Result.isLoading;
+      ? heroV3Snapshot.isLoading || todayV3Result.isLoading
+      : heroV2Snapshot.isLoading || todayV2Result.isLoading;
   const hasError =
     venue === "v3"
-      ? !!heroV3Result.error || !!todayV3Result.error
-      : !!heroV2Result.error || !!todayV2Result.error;
+      ? !!heroV3Snapshot.error || !!todayV3Result.error
+      : !!heroV2Snapshot.error || !!todayV2Result.error;
 
   return {
     todayMidnight,
@@ -326,4 +383,12 @@ export function useHeroRollup({
     isLoading,
     hasError,
   };
+}
+
+function preferPrimaryGqlResult<T>(
+  primary: GqlState<T>,
+  fallback: GqlState<T>,
+): GqlState<T> {
+  if (primary.data || primary.isLoading || !primary.error) return primary;
+  return fallback;
 }
