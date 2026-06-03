@@ -329,27 +329,6 @@
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent({ | initialNetworkData,"
   },
   {
-    "file": "src/app/revenue/_components/revenue-page-client.tsx",
-    "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 17. Maximum allowed is 15.",
-    "line": 41,
-    "linePreview": " | const aggregated = useMemo(() => { | let totalFeesAllTime: number | null ="
-  },
-  {
-    "file": "src/app/revenue/_components/revenue-page-client.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'RevenueContent' has too many lines (135). Maximum allowed is 100.",
-    "line": 20,
-    "linePreview": " | function RevenueContent() { | // Slim fees-only fetch. `useAllNetworksData` would pull paginated daily"
-  },
-  {
-    "file": "src/app/revenue/_components/revenue-page-client.tsx",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 18 allowed.",
-    "line": 41,
-    "linePreview": " | const aggregated = useMemo(() => { | let totalFeesAllTime: number | null ="
-  },
-  {
     "file": "src/components/address-label-form.tsx",
     "ruleId": "complexity",
     "message": "Function 'AddressLabelForm' has a complexity of 32. Maximum allowed is 15.",
