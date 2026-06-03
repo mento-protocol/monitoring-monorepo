@@ -90,7 +90,9 @@ sentry_slack_critical_channel_id = "C0AURREPNDU"       # Optional, defaults to c
 slack_bot_token = "xoxb-..."
 
 # Splunk On-Call API credentials for the on-call announcer. A read-only key is
-# sufficient.
+# sufficient. Leave both empty to keep the announcer disabled until the first
+# credential bootstrap; setting both values enables the Cloud Function,
+# scheduler, @support-engineer usergroup management, and GitHub secret sync.
 splunk_on_call_api_id  = "your-splunk-on-call-api-id"
 splunk_on_call_api_key = "your-splunk-on-call-api-key"
 

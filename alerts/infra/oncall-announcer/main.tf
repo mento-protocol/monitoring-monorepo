@@ -2,6 +2,10 @@
 # Cloud Function #
 ##################
 
+resource "terraform_data" "cloudbuild_builder_dependency" {
+  input = var.cloudbuild_builder_dependency
+}
+
 # CKV_GCP_124: ALLOW_ALL ingress is required for Cloud Scheduler HTTP targets;
 # invocation is still restricted to the scheduler service account via OIDC IAM.
 # trunk-ignore(checkov/CKV_GCP_124)
@@ -73,6 +77,7 @@ resource "google_cloudfunctions2_function" "oncall_announcer" {
   }
 
   depends_on = [
+    terraform_data.cloudbuild_builder_dependency,
     google_secret_manager_secret_iam_member.runtime_slack_bot_token,
     google_secret_manager_secret_iam_member.runtime_splunk_on_call_api_id,
     google_secret_manager_secret_iam_member.runtime_splunk_on_call_api_key,

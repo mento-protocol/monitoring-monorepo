@@ -61,6 +61,9 @@ export async function handleRotation(
 
   if (
     previous?.victoropsUsername === current.username &&
+    // Defensive against manually edited or truncated GCS state. If the Slack
+    // user ID is missing, rebuild state from Splunk On-Call instead of
+    // trusting a typed-but-corrupt object.
     previous.slackUserId.length > 0
   ) {
     await dependencies.updateSupportUsergroup(previous.slackUserId, config);

@@ -116,6 +116,7 @@ module "onchain_event_handler" {
 
   # Project service account email (created explicitly above)
   project_service_account_email = google_service_account.project_sa.email
+  cloudbuild_builder_dependency = google_project_iam_member.cloudbuild_builder.id
 
   quicknode_signing_secret = var.quicknode_signing_secret
 
@@ -135,7 +136,6 @@ module "onchain_event_handler" {
   depends_on = [
     module.slack_channels,
     module.project_factory,
-    google_project_iam_member.cloudbuild_builder,
     google_service_account.project_sa
   ]
 }
@@ -179,6 +179,16 @@ data "http" "slack_public_channels" {
 }
 
 locals {
+  oncall_announcer_api_id_configured  = nonsensitive(var.splunk_on_call_api_id) != ""
+  oncall_announcer_api_key_configured = nonsensitive(var.splunk_on_call_api_key) != ""
+  oncall_announcer_enabled = (
+    local.oncall_announcer_api_id_configured
+    && local.oncall_announcer_api_key_configured
+  )
+  oncall_announcer_partially_configured = (
+    local.oncall_announcer_api_id_configured
+    != local.oncall_announcer_api_key_configured
+  )
   oncall_slack_channel_lookup_id = try([
     for channel in jsondecode(data.http.slack_public_channels.response_body).channels :
     channel.id if channel.name == var.oncall_slack_channel_name
@@ -195,8 +205,21 @@ locals {
   ]
 }
 
+resource "terraform_data" "oncall_announcer_credentials_guard" {
+  count = local.oncall_announcer_partially_configured ? 1 : 0
+
+  input = "invalid"
+
+  lifecycle {
+    precondition {
+      condition     = !local.oncall_announcer_partially_configured
+      error_message = "Set both splunk_on_call_api_id and splunk_on_call_api_key, or leave both empty to keep the on-call announcer disabled until credentials are bootstrapped."
+    }
+  }
+}
+
 resource "restapi_object" "support_engineer_usergroup" {
-  count = length(local.support_engineer_existing_usergroup_ids) == 0 ? 1 : 0
+  count = local.oncall_announcer_enabled && length(local.support_engineer_existing_usergroup_ids) == 0 ? 1 : 0
 
   provider = restapi.slack
 
@@ -235,19 +258,24 @@ resource "restapi_object" "support_engineer_usergroup" {
 
 locals {
   support_engineer_usergroup_id = (
-    length(local.support_engineer_existing_usergroup_ids) > 0
+    !local.oncall_announcer_enabled
+    ? ""
+    : length(local.support_engineer_existing_usergroup_ids) > 0
     ? local.support_engineer_existing_usergroup_ids[0]
     : restapi_object.support_engineer_usergroup[0].id
   )
 }
 
 module "oncall_announcer" {
+  count = local.oncall_announcer_enabled ? 1 : 0
+
   source = "./oncall-announcer"
 
   project_id                    = local.project_id
   region                        = var.region
   common_labels                 = local.common_labels
   project_service_account_email = google_service_account.project_sa.email
+  cloudbuild_builder_dependency = google_project_iam_member.cloudbuild_builder.id
 
   announce_on_first_run                 = var.oncall_announce_on_first_run
   schedule                              = var.oncall_rotation_check_schedule
@@ -262,9 +290,9 @@ module "oncall_announcer" {
   support_issues_url                    = var.oncall_support_issues_url
 
   depends_on = [
-    google_project_iam_member.cloudbuild_builder,
     module.project_factory,
     restapi_object.support_engineer_usergroup,
+    terraform_data.oncall_announcer_credentials_guard,
     google_service_account.project_sa
   ]
 }
@@ -298,13 +326,11 @@ locals {
   # from a separate map keyed by the same names. Splitting these keeps the
   # iteration surface non-sensitive while the actual secret values flow
   # only through the resource's `value` field.
-  alerts_infra_ci_secret_names = toset([
+  alerts_infra_ci_base_secret_names = toset([
     "TF_VAR_SENTRY_AUTH_TOKEN",
     "TF_VAR_BILLING_ACCOUNT",
     "TF_VAR_QUICKNODE_API_KEY",
     "TF_VAR_QUICKNODE_SIGNING_SECRET",
-    "TF_VAR_SPLUNK_ON_CALL_API_ID",
-    "TF_VAR_SPLUNK_ON_CALL_API_KEY",
     # Slack bot OAuth token (xoxb-...) consumed by the restapi.slack provider
     # to create/archive Slack channels and by the Cloud Function to post
     # on-chain event notifications. Same chicken-and-egg pattern as
@@ -324,6 +350,14 @@ locals {
     # new one fully propagates).
     "TF_VAR_GITHUB_TOKEN",
   ])
+  alerts_infra_ci_oncall_secret_names = local.oncall_announcer_enabled ? toset([
+    "TF_VAR_SPLUNK_ON_CALL_API_ID",
+    "TF_VAR_SPLUNK_ON_CALL_API_KEY",
+  ]) : toset([])
+  alerts_infra_ci_secret_names = setunion(
+    local.alerts_infra_ci_base_secret_names,
+    local.alerts_infra_ci_oncall_secret_names,
+  )
 
   alerts_infra_ci_secret_values = {
     TF_VAR_SENTRY_AUTH_TOKEN        = var.sentry_auth_token

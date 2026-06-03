@@ -1,5 +1,8 @@
 # This module deploys the TypeScript Cloud Function that processes QuickNode webhooks and routes them to Slack
 
+resource "terraform_data" "cloudbuild_builder_dependency" {
+  input = var.cloudbuild_builder_dependency
+}
 
 ##################
 # Cloud Function #
@@ -88,6 +91,7 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
   }
 
   depends_on = [
+    terraform_data.cloudbuild_builder_dependency,
     google_secret_manager_secret_version.quicknode_signing_secret,
     google_secret_manager_secret_version.slack_bot_token,
     google_storage_bucket_iam_member.cloud_build_storage_access,

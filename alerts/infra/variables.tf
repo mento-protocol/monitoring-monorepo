@@ -168,25 +168,17 @@ variable "splunk_on_call_api_base_url" {
 }
 
 variable "splunk_on_call_api_id" {
-  description = "Splunk On-Call API ID used for X-VO-Api-Id by the on-call announcer."
+  description = "Splunk On-Call API ID used for X-VO-Api-Id by the on-call announcer. Leave empty with splunk_on_call_api_key to keep the announcer disabled until credentials are bootstrapped."
   type        = string
   sensitive   = true
-
-  validation {
-    condition     = length(var.splunk_on_call_api_id) > 0
-    error_message = "splunk_on_call_api_id must not be empty."
-  }
+  default     = ""
 }
 
 variable "splunk_on_call_api_key" {
-  description = "Splunk On-Call API key used for X-VO-Api-Key by the on-call announcer. A read-only key is sufficient."
+  description = "Splunk On-Call API key used for X-VO-Api-Key by the on-call announcer. A read-only key is sufficient. Leave empty with splunk_on_call_api_id to keep the announcer disabled until credentials are bootstrapped."
   type        = string
   sensitive   = true
-
-  validation {
-    condition     = length(var.splunk_on_call_api_key) > 0
-    error_message = "splunk_on_call_api_key must not be empty."
-  }
+  default     = ""
 }
 
 variable "splunk_on_call_escalation_policy_slug" {

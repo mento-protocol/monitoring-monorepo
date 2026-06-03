@@ -487,6 +487,8 @@ jobs:
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
       TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
+      TF_VAR_splunk_on_call_api_id: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_ID }}
+      TF_VAR_splunk_on_call_api_key: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_KEY }}
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
       TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     steps:

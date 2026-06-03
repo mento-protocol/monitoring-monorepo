@@ -44,6 +44,11 @@ variable "project_service_account_email" {
   type        = string
 }
 
+variable "cloudbuild_builder_dependency" {
+  description = "Opaque dependency token for the shared Cloud Build builder IAM grant."
+  type        = string
+}
+
 variable "region" {
   description = "Google Cloud region for the function and scheduler"
   type        = string
