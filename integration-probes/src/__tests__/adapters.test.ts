@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGGREGATOR_ADAPTERS,
   aggregatePairStatus,
+  blockingReason,
   probeAdapterPair,
 } from "../adapters.js";
 import type { AggregatorAdapter } from "../adapters.js";
@@ -10,6 +11,7 @@ import type { ChainProbeConfig, QuoteProbeInput } from "../types.js";
 const ROUTER = "0x1111111111111111111111111111111111111111";
 const POOL = "0x2222222222222222222222222222222222222222";
 const OTHER_POOL = "0x3333333333333333333333333333333333333333";
+const PRIMARY_TARGET = "0x4444444444444444444444444444444444444444";
 
 const input: QuoteProbeInput = {
   chainId: 42220,
@@ -45,6 +47,40 @@ const chain: ChainProbeConfig = {
       poolSource: "test",
       base: input.sellToken,
       quote: input.buyToken,
+    },
+  ],
+};
+
+const monadInput: QuoteProbeInput = {
+  ...input,
+  chainId: 143,
+  pairId: "143:GBPm-USDm:143-0xpool",
+  sellToken: {
+    symbol: "USDm",
+    address: "0xBC69212B8E4d445b2307C9D32dD68E2A4Df00115",
+    decimals: 18,
+  },
+  buyToken: {
+    symbol: "GBPm",
+    address: "0x39bb4E0a204412bB98e821d25e7d955e69d40Fd1",
+    decimals: 18,
+  },
+  amountDecimal: "100",
+  amountRaw: "100000000000000000000",
+};
+
+const monadChain: ChainProbeConfig = {
+  ...chain,
+  chainId: 143,
+  chainLabel: "Monad",
+  chainSlug: "monad",
+  pairs: [
+    {
+      ...chain.pairs[0]!,
+      id: monadInput.pairId,
+      chainId: monadInput.chainId,
+      base: monadInput.buyToken,
+      quote: monadInput.sellToken,
     },
   ],
 };
@@ -181,6 +217,630 @@ describe("probeAdapterPair", () => {
     expect(result.status).toBe("fail");
     expect(result.sourceLabels).toEqual(["Mento"]);
     expect(result.evidence).toEqual([]);
+  });
+
+  it("passes when a later quote attempt contains Mento address evidence", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async (url) =>
+        new Response(
+          JSON.stringify(
+            String(url).includes("discovery")
+              ? { transactionRequest: { data: `swap through ${ROUTER}` } }
+              : { route: [{ protocol: "Other" }] },
+          ),
+        ),
+      env: {},
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.requestUrl).toBe("https://example.test/discovery");
+    expect(result.routeVariant).toBe("allow-openocean");
+    expect(result.routeAmountUsd).toBe("1000");
+    expect(result.attemptCount).toBe(2);
+  });
+
+  it("follows LI.FI Fly routes to Monad Fly distributions for pool evidence", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+    const calls: string[] = [];
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url) => {
+        const href = String(url);
+        calls.push(href);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          return new Response(
+            JSON.stringify({
+              tool: "fly",
+              transactionRequest: { to: PRIMARY_TARGET },
+            }),
+          );
+        }
+        if (href.startsWith("https://api.fly.trade/aggregator/quote?")) {
+          return new Response(
+            JSON.stringify({
+              id: "391cd96d-c4bb-453a-8ab8-2459b5a2f57c",
+              targetAddress: "0x5555555555555555555555555555555555555555",
+            }),
+          );
+        }
+        if (
+          href ===
+          "https://api.fly.trade/aggregator/distributions?quoteId=391cd96d-c4bb-453a-8ab8-2459b5a2f57c"
+        ) {
+          return new Response(
+            JSON.stringify({
+              distributions: [
+                { route: [{ protocol: "mento-v3", pool: { address: POOL } }] },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected URL ${href}`);
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.requestUrl).toContain(
+      "https://api.fly.trade/aggregator/distributions",
+    );
+    expect(result.evidence).toEqual([
+      {
+        path: "$.distributions[0].route[0].pool.address",
+        type: "pool-address",
+        value: POOL,
+      },
+    ]);
+    expect(result.sourceLabels).toEqual(["mento-v3"]);
+    expect(result.downstreamProvider).toBe("fly");
+    expect(result.txTarget).toBe(PRIMARY_TARGET);
+    expect(result.routeVariant).toBe("default");
+    expect(result.attemptCount).toBe(1);
+    expect(calls).toHaveLength(3);
+  });
+
+  it("uses the winning LI.FI discovery amount for Fly follow-up quotes", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+    const scaledAmountRaw = "1000000000000000000000";
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url) => {
+        const href = String(url);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          const quoteUrl = new URL(href);
+          const isWinningFlyAttempt =
+            quoteUrl.searchParams.get("allowExchanges") === "fly" &&
+            quoteUrl.searchParams.get("fromAmount") === scaledAmountRaw;
+          return new Response(
+            JSON.stringify(
+              isWinningFlyAttempt
+                ? { tool: "fly" }
+                : { route: [{ protocol: "Other" }], tool: "openocean" },
+            ),
+          );
+        }
+        if (href.startsWith("https://api.fly.trade/aggregator/quote?")) {
+          const quoteUrl = new URL(href);
+          expect(quoteUrl.searchParams.get("sellAmount")).toBe(scaledAmountRaw);
+          return new Response(
+            JSON.stringify({
+              id: "a0f5ff76-93d1-4c17-ad29-519c7be0f59d",
+            }),
+          );
+        }
+        if (
+          href ===
+          "https://api.fly.trade/aggregator/distributions?quoteId=a0f5ff76-93d1-4c17-ad29-519c7be0f59d"
+        ) {
+          return new Response(
+            JSON.stringify({
+              distributions: [
+                { route: [{ protocol: "mento-v3", pool: { address: POOL } }] },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected URL ${href}`);
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.routeVariant).toBe("allow-fly");
+    expect(result.routeAmountUsd).toBe("1000");
+    expect(result.attemptCount).toBe(7);
+  });
+
+  it("does not pass LI.FI Fly distributions with router-only evidence", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url) => {
+        const href = String(url);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          return new Response(JSON.stringify({ tool: "fly" }));
+        }
+        if (href.startsWith("https://api.fly.trade/aggregator/quote?")) {
+          return new Response(
+            JSON.stringify({
+              id: "71e58343-6b4c-4e80-9b6e-899ae3386161",
+            }),
+          );
+        }
+        if (
+          href ===
+          "https://api.fly.trade/aggregator/distributions?quoteId=71e58343-6b4c-4e80-9b6e-899ae3386161"
+        ) {
+          return new Response(
+            JSON.stringify({
+              distributions: [
+                {
+                  route: [{ protocol: "mento-v3" }],
+                  transactionRequest: { to: ROUTER },
+                },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected URL ${href}`);
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.evidence).toEqual([]);
+    expect(result.sourceLabels).toEqual(["mento-v3"]);
+    expect(result.requestUrl).toContain(
+      "https://api.fly.trade/aggregator/distributions",
+    );
+  });
+
+  it("requires Fly pool evidence when the primary LI.FI Fly payload passes", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url) => {
+        const href = String(url);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          return new Response(
+            JSON.stringify({
+              tool: "fly",
+              transactionRequest: { to: ROUTER },
+            }),
+          );
+        }
+        if (href.startsWith("https://api.fly.trade/aggregator/quote?")) {
+          return new Response(
+            JSON.stringify({
+              id: "b3c4a2b3-9be5-4f97-8221-9c98305f2a17",
+            }),
+          );
+        }
+        if (
+          href ===
+          "https://api.fly.trade/aggregator/distributions?quoteId=b3c4a2b3-9be5-4f97-8221-9c98305f2a17"
+        ) {
+          return new Response(
+            JSON.stringify({
+              distributions: [{ route: [{ protocol: "mento-v3" }] }],
+            }),
+          );
+        }
+        throw new Error(`unexpected URL ${href}`);
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.evidence).toEqual([]);
+    expect(result.txTarget).toBe(ROUTER);
+    expect(result.requestUrl).toContain(
+      "https://api.fly.trade/aggregator/distributions",
+    );
+  });
+
+  it("does not use Fly downstream evidence for non-Fly LI.FI routes", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+    const calls: string[] = [];
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain,
+      input,
+      fetcher: async (url) => {
+        const href = String(url);
+        calls.push(href);
+        return new Response(
+          JSON.stringify({
+            tool: "nordstern",
+            route: [{ protocol: "Nordstern Finance" }],
+          }),
+        );
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.downstreamProvider).toBe("nordstern");
+    expect(calls.length).toBeGreaterThan(1);
+    expect(calls.every((href) => href.startsWith("https://li.quest"))).toBe(
+      true,
+    );
+  });
+
+  it("keeps LI.FI Fly downstream throttles as rate-limited", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url) => {
+        const href = String(url);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          return new Response(JSON.stringify({ tool: "fly" }));
+        }
+        return new Response(JSON.stringify({ message: "slow down" }), {
+          status: 429,
+        });
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("rate_limited");
+    expect(result.requestUrl).toContain(
+      "https://api.fly.trade/aggregator/quote",
+    );
+    expect(result.error).toBe("HTTP 429: slow down");
+  });
+
+  it("continues route discovery after a quote attempt throws", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async (url) => {
+        if (!String(url).includes("discovery")) {
+          throw new Error("temporary network error");
+        }
+        return new Response(
+          JSON.stringify({
+            transactionRequest: { data: `swap through ${ROUTER}` },
+          }),
+        );
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.requestUrl).toBe("https://example.test/discovery");
+    expect(result.routeVariant).toBe("allow-openocean");
+    expect(result.routeAmountUsd).toBe("1000");
+    expect(result.attemptCount).toBe(2);
+  });
+
+  it("keeps fallback metadata aligned with the final tied attempt", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(JSON.stringify({ route: [{ protocol: "Other" }] })),
+      env: {},
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.requestUrl).toBe("https://example.test/discovery");
+    expect(result.routeVariant).toBe("allow-openocean");
+    expect(result.routeAmountUsd).toBe("1000");
+    expect(result.attemptCount).toBe(2);
+  });
+
+  it("surfaces terminal rate limits instead of masking them with fallbacks", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/rate-limited",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async (url) => {
+        if (String(url).includes("rate-limited")) {
+          return new Response(JSON.stringify({ message: "slow down" }), {
+            status: 429,
+          });
+        }
+        return new Response(JSON.stringify({ route: [{ protocol: "Mento" }] }));
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("rate_limited");
+    expect(result.requestUrl).toBe("https://example.test/rate-limited");
+    expect(result.routeVariant).toBe("allow-openocean");
+    expect(result.error).toBe("HTTP 429: slow down");
+    expect(result.attemptCount).toBe(2);
+  });
+
+  it("caps repeated request errors before exhausting route discovery", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+        {
+          url: "https://example.test/late-pass",
+          amountDecimal: "10000",
+          variant: "allow-mento",
+        },
+      ],
+    };
+    let calls = 0;
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () => {
+        calls += 1;
+        throw new Error("temporary network error");
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.requestUrl).toBe("https://example.test/discovery");
+    expect(result.routeVariant).toBe("allow-openocean");
+    expect(result.attemptCount).toBe(2);
+    expect(calls).toBe(2);
+  });
+
+  it("caps repeated HTTP error responses before exhausting route discovery", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+        {
+          url: "https://example.test/late-pass",
+          amountDecimal: "10000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+    let calls = 0;
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ message: "upstream timeout" }), {
+          status: 503,
+        });
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.requestUrl).toBe("https://example.test/discovery");
+    expect(result.routeVariant).toBe("allow-openocean");
+    expect(result.error).toBe("HTTP 503: upstream timeout");
+    expect(result.attemptCount).toBe(2);
+    expect(calls).toBe(2);
+  });
+
+  it("marks route discovery as rate-limited when the quote-attempt budget is exhausted", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+    let calls = 0;
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ route: [{ protocol: "Other" }] }));
+      },
+      env: {},
+      quoteBudget: { remaining: 1 },
+    });
+
+    expect(result.status).toBe("rate_limited");
+    expect(result.requestUrl).toBeNull();
+    expect(result.error).toBe("Adapter quote-attempt budget exhausted.");
+    expect(result.attemptCount).toBe(1);
+    expect(blockingReason(result.status)).toContain("request budget");
+    expect(calls).toBe(1);
+  });
+
+  it("marks budget exhaustion before the first quote as rate-limited", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () => {
+        throw new Error("should not fetch after exhausting the budget");
+      },
+      env: {},
+      quoteBudget: { remaining: 0 },
+    });
+
+    expect(result.status).toBe("rate_limited");
+    expect(result.requestUrl).toBeNull();
+    expect(result.routeVariant).toBeNull();
+    expect(result.sourceLabels).toEqual([]);
+    expect(result.error).toBe("Adapter quote-attempt budget exhausted.");
+    expect(result.attemptCount).toBe(0);
   });
 
   it("keeps no-liquidity and rate-limit responses explicit", async () => {
@@ -338,6 +998,58 @@ describe("probeAdapterPair", () => {
     expect(result.error).toBe("CELO blockchain temporarily down");
   });
 
+  it("extracts message fields from object error payloads", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "message-error",
+      label: "Message Error",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => ({ url: "https://example.test" }),
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            error: { code: 503, message: "upstream unavailable" },
+          }),
+        ),
+      env: {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("upstream unavailable");
+  });
+
+  it("stringifies object error payloads without a reason or message", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "object-error",
+      label: "Object Error",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => ({ url: "https://example.test" }),
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(JSON.stringify({ error: { code: 503 } })),
+      env: {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe('{"code":503}');
+  });
+
   it("returns unsupported before requiring credentials", async () => {
     const adapter: AggregatorAdapter = {
       id: "unsupported",
@@ -435,7 +1147,7 @@ describe("aggregator quote builders", () => {
 
     for (const id of expected) {
       const adapter = AGGREGATOR_ADAPTERS.find((item) => item.id === id);
-      const request = adapter?.quote?.(input, env);
+      const request = firstQuoteRequest(adapter?.quote?.(input, env));
 
       expect(request?.url, id).toContain("http");
       expect(JSON.stringify(request), id).toContain(input.sellToken.address);
@@ -444,25 +1156,65 @@ describe("aggregator quote builders", () => {
     const lifiRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "lifi",
     )?.quote?.(input, env);
-    expect(JSON.stringify(lifiRequest?.init?.headers)).toContain(
+    const lifiRequests = quoteRequests(lifiRequest);
+    const lifiDefaultRequest = lifiRequests[0];
+    expect(lifiRequests.length).toBeGreaterThan(1);
+    expect(JSON.stringify(lifiDefaultRequest?.init?.headers)).toContain(
       "x-lifi-api-key",
     );
-    const lifiIntegrator = new URL(lifiRequest?.url ?? "").searchParams.get(
-      "integrator",
-    );
+    const lifiIntegrator = new URL(
+      lifiDefaultRequest?.url ?? "",
+    ).searchParams.get("integrator");
     expect(lifiIntegrator).toBe("mento-probes");
     expect(lifiIntegrator?.length).toBeLessThanOrEqual(23);
+    expect(
+      lifiRequests.some((request) =>
+        request.url.includes("allowExchanges=openocean"),
+      ),
+    ).toBe(true);
+    expect(
+      lifiRequests.some((request) =>
+        request.url.includes("allowExchanges=mento"),
+      ),
+    ).toBe(false);
+    expect(
+      lifiRequests.some((request) =>
+        request.url.includes("allowExchanges=fly"),
+      ),
+    ).toBe(false);
+    expect(
+      lifiRequests.some((request) => request.amountDecimal === "100000"),
+    ).toBe(true);
+    expect(lifiRequests[0]?.afterResponse).toBeUndefined();
+    const monadLifiRequests = quoteRequests(
+      AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi")?.quote?.(
+        monadInput,
+        env,
+      ),
+    );
+    expect(
+      monadLifiRequests.some((request) =>
+        request.url.includes("allowExchanges=fly"),
+      ),
+    ).toBe(true);
+    expect(monadLifiRequests[0]?.afterResponse).toEqual(expect.any(Function));
+    expect(
+      AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi")
+        ?.maxQuoteRequestsPerRun,
+    ).toBe(180);
 
     const openOceanRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "openocean",
     )?.quote?.(input, env);
-    expect(openOceanRequest?.url).toContain(
+    const openOceanQuoteRequest = firstQuoteRequest(openOceanRequest);
+    expect(openOceanQuoteRequest?.url).toContain(
       "https://open-api-pro.openocean.finance/v4/celo/swap",
     );
-    expect(JSON.stringify(openOceanRequest?.init?.headers)).toContain(
+    expect(JSON.stringify(openOceanQuoteRequest?.init?.headers)).toContain(
       "openocean-key",
     );
-    const openOceanParams = new URL(openOceanRequest?.url ?? "").searchParams;
+    const openOceanParams = new URL(openOceanQuoteRequest?.url ?? "")
+      .searchParams;
     expect(openOceanParams.get("amountDecimals")).toBe(input.amountRaw);
     expect(openOceanParams.get("gasPriceDecimals")).toBe("1000000000");
     expect(openOceanParams.get("enabledDexIds")).toBe("8");
@@ -472,21 +1224,26 @@ describe("aggregator quote builders", () => {
     const relayRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "relay",
     )?.quote?.(input, env);
-    expect(relayRequest?.url).toBe("https://api.relay.link/quote/v2");
+    expect(firstQuoteRequest(relayRequest)?.url).toBe(
+      "https://api.relay.link/quote/v2",
+    );
 
     const squidRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "squid",
     )?.quote?.(input, env);
+    const squidQuoteRequest = firstQuoteRequest(squidRequest);
     expect(
-      JSON.parse(String(squidRequest?.init?.body)) as { quoteOnly?: boolean },
+      JSON.parse(String(squidQuoteRequest?.init?.body)) as {
+        quoteOnly?: boolean;
+      },
     ).toMatchObject({ quoteOnly: true });
 
     const kyberRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "kyberswap",
     )?.quote?.(input, env);
-    expect(JSON.stringify(kyberRequest?.init?.headers)).toContain(
-      "x-client-id",
-    );
+    expect(
+      JSON.stringify(firstQuoteRequest(kyberRequest)?.init?.headers),
+    ).toContain("x-client-id");
   });
 
   it("marks 1inch unsupported on Celo and Monad until docs list support", () => {
@@ -494,6 +1251,20 @@ describe("aggregator quote builders", () => {
 
     expect(oneInch?.support[42220]).toBe("unsupported");
     expect(oneInch?.support[143]).toBe("unsupported");
+  });
+
+  it("can still build the parked 1inch quote request", () => {
+    const oneInch = AGGREGATOR_ADAPTERS.find((item) => item.id === "1inch");
+    const request = firstQuoteRequest(
+      oneInch?.quote?.(input, { ONEINCH_API_KEY: "one-inch-key" }),
+    );
+
+    expect(request?.url).toContain(
+      "https://api.1inch.dev/swap/v6.1/42220/quote",
+    );
+    expect(request?.url).toContain(`src=${input.sellToken.address}`);
+    expect(request?.url).toContain(`dst=${input.buyToken.address}`);
+    expect(JSON.stringify(request?.init?.headers)).toContain("one-inch-key");
   });
 
   it("requires an OpenOcean Pro API key before probing OpenOcean", async () => {
@@ -515,4 +1286,43 @@ describe("aggregator quote builders", () => {
     expect(result.status).toBe("needs_key");
     expect(result.error).toBe("Missing OPENOCEAN_API_KEY");
   });
+
+  it("requires a LI.FI API key before probing LI.FI/Jumper", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+    expect(lifi?.credentialEnv).toEqual(["LIFI_API_KEY"]);
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain,
+      input,
+      fetcher: async () => {
+        throw new Error("should not fetch without a key");
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("needs_key");
+    expect(result.error).toBe("Missing LIFI_API_KEY");
+  });
 });
+
+type QuoteRequestFixture = {
+  url: string;
+  init?: RequestInit;
+  amountDecimal?: string;
+  amountRaw?: string;
+  afterResponse?: unknown;
+  variant?: string;
+};
+
+function quoteRequests(request: unknown): QuoteRequestFixture[] {
+  if (!request) return [];
+  return (
+    Array.isArray(request) ? request : [request]
+  ) as QuoteRequestFixture[];
+}
+
+function firstQuoteRequest(request: unknown): QuoteRequestFixture | undefined {
+  return quoteRequests(request)[0];
+}

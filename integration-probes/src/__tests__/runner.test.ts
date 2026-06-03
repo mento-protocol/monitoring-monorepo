@@ -178,6 +178,63 @@ describe("runIntegrationProbes", () => {
     expect(maxActive).toBeLessThanOrEqual(2);
   });
 
+  it("shares adapter quote-attempt budgets across pair probes", async () => {
+    let quoteFetches = 0;
+    const snapshot = await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [budgetedAdapter()],
+      pairConcurrency: 1,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(
+            JSON.stringify({ data: { Pool: [poolRow(POOL, "EURm")] } }),
+          );
+        }
+        quoteFetches += 1;
+        return new Response(JSON.stringify({ route: [{ protocol: "Other" }] }));
+      },
+    });
+
+    const pairs = snapshot.aggregators[0]?.chains[0]?.pairs ?? [];
+    expect(quoteFetches).toBe(3);
+    expect(pairs.map((pair) => pair.attemptCount)).toEqual([2, 1]);
+  });
+
+  it("serializes budgeted adapter pair probes", async () => {
+    const rowA = poolRow(POOL, "EURm");
+    const rowB = poolRow(
+      "42220-0x4444444444444444444444444444444444444444",
+      "GBPm",
+    );
+    let active = 0;
+    let maxActive = 0;
+    await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [budgetedPassingAdapter()],
+      pairConcurrency: 4,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(JSON.stringify({ data: { Pool: [rowA, rowB] } }));
+        }
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        active -= 1;
+        return new Response(
+          JSON.stringify({
+            route: [{ pool: "0x3333333333333333333333333333333333333333" }],
+          }),
+        );
+      },
+    });
+
+    expect(maxActive).toBe(1);
+  });
+
   it("runs independent adapters concurrently", async () => {
     const starts: string[] = [];
     await runIntegrationProbes({
@@ -258,6 +315,29 @@ function passingAdapter(): AggregatorAdapter {
     support: { 42220: "supported", 143: "supported" },
     researchNote: "fixture",
     quote: () => ({ url: "https://quote.test" }),
+  };
+}
+
+function budgetedAdapter(): AggregatorAdapter {
+  return {
+    id: "budgeted",
+    label: "Budgeted",
+    kind: "dex",
+    tier: 1,
+    support: { 42220: "supported" },
+    maxQuoteRequestsPerRun: 3,
+    researchNote: "budgeted",
+    quote: () => [
+      { url: "https://budgeted.test/default", variant: "default" },
+      { url: "https://budgeted.test/discovery", variant: "discovery" },
+    ],
+  };
+}
+
+function budgetedPassingAdapter(): AggregatorAdapter {
+  return {
+    ...passingAdapter(),
+    maxQuoteRequestsPerRun: 100,
   };
 }
 

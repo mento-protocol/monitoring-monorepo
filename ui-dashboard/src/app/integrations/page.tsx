@@ -78,7 +78,7 @@ function IntegrationsContent({
               Route checks
             </h2>
             <p className="text-sm text-slate-400">
-              {snapshot.amountUsd} stable unit per direction;{" "}
+              Default {snapshot.amountUsd} stable unit per direction;{" "}
               {snapshot.pairSource.note}
             </p>
           </div>

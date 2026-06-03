@@ -7,6 +7,7 @@ import {
   probeAdapterPair,
   type AggregatorAdapter,
 } from "./adapters.js";
+import type { QuoteAttemptBudget } from "./adapterTypes.js";
 import { buildChainProbeConfigs, buildQuoteInputs } from "./pairs.js";
 import {
   SNAPSHOT_SCHEMA_VERSION,
@@ -159,7 +160,12 @@ async function probeAdapters(args: {
     args.adapters,
     args.adapterConcurrency,
     async (adapter) => {
-      const chains = await probeAdapterChains({ ...args, adapter });
+      const quoteBudget = quoteAttemptBudget(adapter);
+      const chains = await probeAdapterChains({
+        ...args,
+        adapter,
+        quoteBudget,
+      });
       return {
         id: adapter.id,
         label: adapter.label,
@@ -180,6 +186,7 @@ async function probeAdapterChains(args: {
   env: NodeJS.ProcessEnv;
   fetcher: FetchLike;
   pairConcurrency: number;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<ChainProbeResult[]> {
   const out: ChainProbeResult[] = [];
   for (const chain of args.chains) {
@@ -196,19 +203,28 @@ async function probeChainPairs(args: {
   env: NodeJS.ProcessEnv;
   fetcher: FetchLike;
   pairConcurrency: number;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<PairProbeResult[]> {
   const inputs = buildQuoteInputs({
     chain: args.chain,
     amountUsd: args.amountUsd,
     takerAddress: PROBE_TAKER_ADDRESS,
   });
-  return mapConcurrent(inputs, args.pairConcurrency, async (input) => {
+  const pairConcurrency = args.quoteBudget ? 1 : args.pairConcurrency;
+  return mapConcurrent(inputs, pairConcurrency, async (input) => {
     try {
       return await probeAdapterPair({ ...args, input });
     } catch (error) {
       return errorResult(input, error);
     }
   });
+}
+
+function quoteAttemptBudget(
+  adapter: AggregatorAdapter,
+): QuoteAttemptBudget | undefined {
+  if (adapter.maxQuoteRequestsPerRun === undefined) return undefined;
+  return { remaining: adapter.maxQuoteRequestsPerRun };
 }
 
 function chainResult(
@@ -244,6 +260,9 @@ function errorResult(
     sourceLabels: [],
     txTarget: null,
     downstreamProvider: null,
+    routeVariant: null,
+    routeAmountUsd: null,
+    attemptCount: null,
     requestUrl: null,
     httpStatus: null,
     latencyMs: null,

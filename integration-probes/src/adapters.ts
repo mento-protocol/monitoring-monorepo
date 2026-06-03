@@ -1,4 +1,30 @@
 import { detectEvidence } from "./evidence.js";
+import {
+  flyDistributionsUrl,
+  flyQuoteId,
+  flyQuoteUrl,
+  getRequest,
+  kyberUrl,
+  LIFI_MAX_QUOTE_REQUESTS_PER_RUN,
+  lifiFlyNetwork,
+  lifiPayloadUsesFly,
+  lifiQuoteRequests,
+  oneInchUrl,
+  openOceanUrl,
+  postRequest,
+  relayBody,
+  rubicBody,
+  socketUrl,
+  squidBody,
+  zeroXUrl,
+} from "./adapterRequests.js";
+import type {
+  QuoteAttemptBudget,
+  QuoteRequest,
+  QuoteResponseEvidenceArgs,
+  QuoteResponseEvidenceHook,
+  TimedPayload,
+} from "./adapterTypes.js";
 import type {
   AggregatorKind,
   ChainProbeConfig,
@@ -9,18 +35,9 @@ import type {
 } from "./types.js";
 
 const DEFAULT_TAKER = "0x000000000000000000000000000000000000dEaD";
-const LIFI_INTEGRATOR = "mento-probes";
-const OPENOCEAN_GAS_PRICE_WEI = "1000000000";
-const OPENOCEAN_MENTO_V3_DEX_ID = "8";
+const REQUEST_ERROR_ATTEMPT_LIMIT = 2;
 
 type ChainSupport = "supported" | "unsupported" | "unknown";
-
-type QuoteRequest = {
-  url: string;
-  init?: RequestInit;
-};
-
-type RequestHeaders = Record<string, string>;
 
 export type AggregatorAdapter = {
   id: string;
@@ -30,7 +47,11 @@ export type AggregatorAdapter = {
   credentialEnv?: readonly string[];
   researchNote: string;
   support: Partial<Record<number, ChainSupport>>;
-  quote?: (input: QuoteProbeInput, env: NodeJS.ProcessEnv) => QuoteRequest;
+  quote?: (
+    input: QuoteProbeInput,
+    env: NodeJS.ProcessEnv,
+  ) => QuoteRequest | readonly QuoteRequest[];
+  maxQuoteRequestsPerRun?: number;
   nextStep?: string;
 };
 
@@ -76,6 +97,7 @@ export async function probeAdapterPair(args: {
   input: QuoteProbeInput;
   fetcher: FetchLike;
   env: NodeJS.ProcessEnv;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<PairProbeResult> {
   const unsupported = unsupportedResult(args.adapter, args.input);
   if (unsupported) return unsupported;
@@ -136,7 +158,7 @@ export function blockingReason(status: ProbeStatus): string | null {
     case "needs_key":
       return "Probe credentials are missing.";
     case "rate_limited":
-      return "Aggregator API rate-limited the probe.";
+      return "Aggregator API rate-limited the probe or the probe hit its configured request budget.";
     case "no_liquidity":
       return "Aggregator returned no route or no liquidity.";
     case "error":
@@ -152,17 +174,147 @@ async function fetchAndEvaluate(args: {
   input: QuoteProbeInput;
   fetcher: FetchLike;
   env: NodeJS.ProcessEnv;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<PairProbeResult> {
-  const request = args.adapter.quote!(args.input, args.env);
+  const requests = normalizeQuoteRequests(
+    args.adapter.quote!(args.input, args.env),
+  );
+  let fallback: PairProbeResult | null = null;
+  let attemptCount = 0;
+  let requestErrorAttempts = 0;
+  for (const request of requests) {
+    if (!consumeQuoteAttempt(args.quoteBudget)) {
+      return quoteBudgetExhaustedResult(args.input, attemptCount);
+    }
+    attemptCount += 1;
+    const result = {
+      ...(await fetchAndEvaluateAttempt({ ...args, request })),
+      attemptCount,
+    };
+    if (result.status === "pass") return result;
+    fallback = betterFallback(fallback, result);
+    if (requestErrored(result)) {
+      requestErrorAttempts += 1;
+    }
+    if (terminalStatus(result.status)) {
+      return result;
+    }
+    if (requestErrorLimitReached(result, requestErrorAttempts)) {
+      return result;
+    }
+  }
+  return fallback
+    ? { ...fallback, attemptCount }
+    : skippedResult(args.input, "error", "No quote requests built.");
+}
+
+function quoteBudgetExhaustedResult(
+  input: QuoteProbeInput,
+  attemptCount: number,
+): PairProbeResult {
+  return {
+    ...skippedResult(
+      input,
+      "rate_limited",
+      "Adapter quote-attempt budget exhausted.",
+    ),
+    attemptCount,
+  };
+}
+
+function requestErrorLimitReached(
+  result: PairProbeResult,
+  requestErrorAttempts: number,
+): boolean {
+  return (
+    requestErrored(result) &&
+    requestErrorAttempts >= REQUEST_ERROR_ATTEMPT_LIMIT
+  );
+}
+
+async function fetchAndEvaluateAttempt(args: {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  fetcher: FetchLike;
+  request: QuoteRequest;
+  quoteBudget?: QuoteAttemptBudget | undefined;
+}): Promise<PairProbeResult> {
+  try {
+    return await fetchAndEvaluateRequest(args);
+  } catch (error) {
+    return requestErrorResult(args.input, args.request, error);
+  }
+}
+
+async function fetchAndEvaluateRequest(args: {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  fetcher: FetchLike;
+  request: QuoteRequest;
+  quoteBudget?: QuoteAttemptBudget | undefined;
+}): Promise<PairProbeResult> {
+  const response = await fetchTimedPayload({
+    fetcher: args.fetcher,
+    request: args.request,
+  });
+  const primaryResult = probeResultFromPayload({
+    chain: args.chain,
+    input: args.input,
+    request: args.request,
+    ...response,
+  });
+  if (!args.request.afterResponse) {
+    return primaryResult;
+  }
+  const downstreamResult = await args.request.afterResponse({
+    chain: args.chain,
+    input: args.input,
+    fetcher: args.fetcher,
+    request: args.request,
+    payload: response.payload,
+    primaryResult,
+    quoteBudget: args.quoteBudget,
+  });
+  return downstreamResult ?? primaryResult;
+}
+
+async function fetchTimedPayload(args: {
+  fetcher: FetchLike;
+  request: QuoteRequest;
+}): Promise<TimedPayload> {
   const startedAt = Date.now();
-  const response = await args.fetcher(request.url, request.init);
+  const response = await args.fetcher(args.request.url, args.request.init);
   const latencyMs = Date.now() - startedAt;
   const payload = await responseJson(response);
-  const detected = detectEvidence(payload, {
-    routerAddresses: args.chain.routerAddresses,
+  return {
+    payload,
+    statusCode: response.status,
+    latencyMs,
+    requestUrl: args.request.url,
+  };
+}
+
+function probeResultFromPayload(args: {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  request: QuoteRequest;
+  payload: unknown;
+  statusCode: number;
+  latencyMs: number;
+  requestUrl: string;
+  evidenceMode?: "router-or-pool" | "pool-only" | undefined;
+}): PairProbeResult {
+  const routerAddresses =
+    args.evidenceMode === "pool-only" ? [] : args.chain.routerAddresses;
+  const detected = detectEvidence(args.payload, {
+    routerAddresses,
     poolAddresses: pairPoolAddresses(args.chain, args.input.pairId),
   });
-  const status = statusFromResponse(response.status, detected.passes, payload);
+  const status = statusFromResponse(
+    args.statusCode,
+    detected.passes,
+    args.payload,
+  );
   return {
     pairId: args.input.pairId,
     poolId: poolIdFromPairId(args.input.pairId),
@@ -174,14 +326,68 @@ async function fetchAndEvaluate(args: {
     sourceLabels: detected.sourceLabels,
     txTarget: detected.txTarget,
     downstreamProvider: detected.downstreamProvider,
-    requestUrl: request.url,
-    httpStatus: response.status,
-    latencyMs,
-    responsePreview: responsePreview(payload),
-    error: response.ok
-      ? payloadErrorMessage(payload)
-      : errorMessage(payload, response.status),
+    routeVariant: args.request.variant ?? null,
+    routeAmountUsd: args.request.amountDecimal ?? args.input.amountDecimal,
+    attemptCount: 1,
+    requestUrl: args.requestUrl,
+    httpStatus: args.statusCode,
+    latencyMs: args.latencyMs,
+    responsePreview: responsePreview(args.payload),
+    error: responseOk(args.statusCode)
+      ? payloadErrorMessage(args.payload)
+      : errorMessage(args.payload, args.statusCode),
   };
+}
+
+function normalizeQuoteRequests(
+  requests: QuoteRequest | readonly QuoteRequest[],
+): readonly QuoteRequest[] {
+  if (Array.isArray(requests)) return requests as readonly QuoteRequest[];
+  return [requests as QuoteRequest];
+}
+
+function betterFallback(
+  current: PairProbeResult | null,
+  candidate: PairProbeResult,
+): PairProbeResult {
+  if (!current) return candidate;
+  return fallbackPriority(candidate.status) >= fallbackPriority(current.status)
+    ? candidate
+    : current;
+}
+
+function fallbackPriority(status: ProbeStatus): number {
+  switch (status) {
+    case "fail":
+      return 6;
+    case "no_liquidity":
+      return 5;
+    case "unsupported":
+      return 4;
+    case "error":
+      return 3;
+    case "rate_limited":
+      return 2;
+    case "needs_key":
+      return 1;
+    case "pass":
+      return 0;
+  }
+}
+
+function terminalStatus(status: ProbeStatus): boolean {
+  return status === "needs_key" || status === "rate_limited";
+}
+
+function requestErrored(result: PairProbeResult): boolean {
+  return result.status === "error" && result.requestUrl !== null;
+}
+
+function consumeQuoteAttempt(budget: QuoteAttemptBudget | undefined): boolean {
+  if (!budget) return true;
+  if (budget.remaining <= 0) return false;
+  budget.remaining -= 1;
+  return true;
 }
 
 async function responseJson(response: Response): Promise<unknown> {
@@ -203,6 +409,10 @@ function statusFromResponse(
   if (payloadErrorMessage(payload)) return statusFromPayloadError(payload);
   if (passes) return "pass";
   return routeAbsent(payload) ? "no_liquidity" : "fail";
+}
+
+function responseOk(statusCode: number): boolean {
+  return statusCode >= 200 && statusCode < 300;
 }
 
 function statusFromHttpError(
@@ -254,6 +464,23 @@ function cloudflareBlocked(payload: unknown): boolean {
   return text.includes("cloudflare") || text.includes("attention required");
 }
 
+function requestErrorResult(
+  input: QuoteProbeInput,
+  request: QuoteRequest,
+  error: unknown,
+): PairProbeResult {
+  return {
+    ...skippedResult(
+      input,
+      "error",
+      error instanceof Error ? error.message : String(error),
+    ),
+    routeVariant: request.variant ?? null,
+    routeAmountUsd: request.amountDecimal ?? input.amountDecimal,
+    requestUrl: request.url,
+  };
+}
+
 function unsupportedResult(
   adapter: AggregatorAdapter,
   input: QuoteProbeInput,
@@ -279,6 +506,9 @@ function skippedResult(
     sourceLabels: [],
     txTarget: null,
     downstreamProvider: null,
+    routeVariant: null,
+    routeAmountUsd: null,
+    attemptCount: null,
     requestUrl: null,
     httpStatus: null,
     latencyMs: null,
@@ -361,9 +591,13 @@ function lifiAdapter(): AggregatorAdapter {
     label: "LI.FI / Jumper",
     kind: "cross_chain",
     tier: 1,
+    credentialEnv: ["LIFI_API_KEY"],
     support: { 42220: "supported", 143: "supported" },
-    researchNote: "LI.FI chain metadata lists both Celo and Monad.",
-    quote: (input, env) => getRequest(lifiUrl(input), optionalLifiHeaders(env)),
+    maxQuoteRequestsPerRun: LIFI_MAX_QUOTE_REQUESTS_PER_RUN,
+    researchNote:
+      "LI.FI chain metadata lists both Celo and Monad; scheduled probes use an API key and route-discovery attempts to avoid confusing cheaper non-Mento default routes with missing Mento support.",
+    quote: (input, env) =>
+      lifiQuoteRequests(input, env, lifiAfterResponseHook(input)),
   };
 }
 
@@ -545,165 +779,137 @@ function excludedAdapter(
   };
 }
 
-function getRequest(url: string, headers?: RequestHeaders): QuoteRequest {
-  return { url, ...(headers && { init: { headers } }) };
+function lifiAfterResponseHook(
+  input: QuoteProbeInput,
+): QuoteResponseEvidenceHook | undefined {
+  return lifiFlyNetwork(input.chainId) ? lifiFlyEvidence : undefined;
 }
 
-function postRequest(
-  url: string,
-  body: unknown,
-  headers?: RequestHeaders,
-): QuoteRequest {
+async function lifiFlyEvidence(
+  args: QuoteResponseEvidenceArgs,
+): Promise<PairProbeResult | null> {
+  if (!lifiPayloadUsesFly(args.payload)) return null;
+  const network = lifiFlyNetwork(args.input.chainId);
+  if (!network) return null;
+
+  const quoteRequest = downstreamRequest(
+    args.request,
+    flyQuoteUrl(lifiFollowUpInput(args.input, args.request), network),
+  );
+  const quotePayload = await fetchDownstreamPayload({
+    ...args,
+    request: quoteRequest,
+  });
+  if ("result" in quotePayload) return quotePayload.result;
+  if (!responseOk(quotePayload.statusCode)) {
+    return annotateDownstreamResult(
+      args.primaryResult,
+      probeResultFromPayload({
+        chain: args.chain,
+        input: args.input,
+        request: quoteRequest,
+        ...quotePayload,
+      }),
+    );
+  }
+
+  const quoteId = flyQuoteId(quotePayload.payload);
+  if (!quoteId) {
+    return annotateDownstreamResult(
+      args.primaryResult,
+      requestErrorResult(
+        args.input,
+        quoteRequest,
+        "Fly quote response did not include a quote id.",
+      ),
+    );
+  }
+
+  const distributionRequest = downstreamRequest(
+    args.request,
+    flyDistributionsUrl(quoteId),
+  );
+  const distributionPayload = await fetchDownstreamPayload({
+    ...args,
+    request: distributionRequest,
+  });
+  if ("result" in distributionPayload) return distributionPayload.result;
+  return annotateDownstreamResult(
+    args.primaryResult,
+    probeResultFromPayload({
+      chain: args.chain,
+      input: args.input,
+      request: distributionRequest,
+      evidenceMode: "pool-only",
+      ...distributionPayload,
+    }),
+  );
+}
+
+async function fetchDownstreamPayload(args: {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  fetcher: FetchLike;
+  request: QuoteRequest;
+  quoteBudget?: QuoteAttemptBudget | undefined;
+}): Promise<TimedPayload | { result: PairProbeResult }> {
+  if (!consumeQuoteAttempt(args.quoteBudget)) {
+    return {
+      result: {
+        ...quoteBudgetExhaustedResult(args.input, 0),
+        routeAmountUsd: args.request.amountDecimal ?? args.input.amountDecimal,
+        routeVariant: args.request.variant ?? null,
+      },
+    };
+  }
+  try {
+    return await fetchTimedPayload({
+      fetcher: args.fetcher,
+      request: args.request,
+    });
+  } catch (error) {
+    return {
+      result: requestErrorResult(args.input, args.request, error),
+    };
+  }
+}
+
+function annotateDownstreamResult(
+  primary: PairProbeResult,
+  downstream: PairProbeResult,
+): PairProbeResult {
+  return {
+    ...downstream,
+    downstreamProvider:
+      primary.downstreamProvider ?? downstream.downstreamProvider,
+    sourceLabels: mergedStrings(primary.sourceLabels, downstream.sourceLabels),
+    txTarget: primary.txTarget ?? downstream.txTarget,
+  };
+}
+
+function mergedStrings(
+  left: readonly string[],
+  right: readonly string[],
+): string[] {
+  return [...new Set([...left, ...right])].sort();
+}
+
+function downstreamRequest(parent: QuoteRequest, url: string): QuoteRequest {
   return {
     url,
-    init: {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify(body),
-    },
+    ...(parent.amountDecimal ? { amountDecimal: parent.amountDecimal } : {}),
+    ...(parent.amountRaw ? { amountRaw: parent.amountRaw } : {}),
+    ...(parent.variant ? { variant: parent.variant } : {}),
   };
 }
 
-function lifiUrl(input: QuoteProbeInput): string {
-  const url = new URL("https://li.quest/v1/quote");
-  setParams(url, {
-    fromChain: String(input.chainId),
-    toChain: String(input.chainId),
-    fromToken: input.sellToken.address,
-    toToken: input.buyToken.address,
-    fromAmount: input.amountRaw,
-    fromAddress: input.takerAddress,
-    toAddress: input.takerAddress,
-    slippage: "0.01",
-    integrator: LIFI_INTEGRATOR,
-  });
-  return url.toString();
-}
-
-function optionalLifiHeaders(
-  env: NodeJS.ProcessEnv,
-): RequestHeaders | undefined {
-  return env.LIFI_API_KEY ? { "x-lifi-api-key": env.LIFI_API_KEY } : undefined;
-}
-
-function openOceanUrl(input: QuoteProbeInput): string {
-  const aliases: Record<number, string> = { 42220: "celo", 143: "monad" };
-  const chain = aliases[input.chainId] ?? String(input.chainId);
-  const url = new URL(
-    `https://open-api-pro.openocean.finance/v4/${chain}/swap`,
-  );
-  setParams(url, {
-    inTokenAddress: input.sellToken.address,
-    outTokenAddress: input.buyToken.address,
-    amountDecimals: input.amountRaw,
-    account: input.takerAddress,
-    slippage: "1",
-    gasPriceDecimals: OPENOCEAN_GAS_PRICE_WEI,
-    enabledDexIds: OPENOCEAN_MENTO_V3_DEX_ID,
-  });
-  return url.toString();
-}
-
-function zeroXUrl(input: QuoteProbeInput): string {
-  const url = new URL("https://api.0x.org/swap/allowance-holder/quote");
-  setParams(url, {
-    chainId: String(input.chainId),
-    sellToken: input.sellToken.address,
-    buyToken: input.buyToken.address,
-    sellAmount: input.amountRaw,
-    taker: input.takerAddress,
-  });
-  return url.toString();
-}
-
-function oneInchUrl(input: QuoteProbeInput): string {
-  const url = new URL(`https://api.1inch.dev/swap/v6.1/${input.chainId}/quote`);
-  setParams(url, {
-    src: input.sellToken.address,
-    dst: input.buyToken.address,
-    amount: input.amountRaw,
-    includeTokensInfo: "true",
-    includeProtocols: "true",
-  });
-  return url.toString();
-}
-
-function socketUrl(input: QuoteProbeInput): string {
-  const url = new URL("https://api.socket.tech/v2/quote");
-  setParams(url, {
-    fromChainId: String(input.chainId),
-    toChainId: String(input.chainId),
-    fromTokenAddress: input.sellToken.address,
-    toTokenAddress: input.buyToken.address,
-    fromAmount: input.amountRaw,
-    userAddress: input.takerAddress,
-    singleTxOnly: "true",
-  });
-  return url.toString();
-}
-
-function kyberUrl(input: QuoteProbeInput): string {
-  const aliases: Record<number, string> = { 143: "monad" };
-  const chain = aliases[input.chainId] ?? String(input.chainId);
-  const url = new URL(
-    `https://aggregator-api.kyberswap.com/${chain}/api/v1/routes`,
-  );
-  setParams(url, {
-    tokenIn: input.sellToken.address,
-    tokenOut: input.buyToken.address,
-    amountIn: input.amountRaw,
-  });
-  return url.toString();
-}
-
-function squidBody(input: QuoteProbeInput): unknown {
+function lifiFollowUpInput(
+  input: QuoteProbeInput,
+  request: QuoteRequest,
+): QuoteProbeInput {
   return {
-    fromChain: String(input.chainId),
-    toChain: String(input.chainId),
-    fromToken: input.sellToken.address,
-    toToken: input.buyToken.address,
-    fromAmount: input.amountRaw,
-    fromAddress: input.takerAddress,
-    toAddress: input.takerAddress,
-    slippage: 1,
-    quoteOnly: true,
+    ...input,
+    amountDecimal: request.amountDecimal ?? input.amountDecimal,
+    amountRaw: request.amountRaw ?? input.amountRaw,
   };
-}
-
-function relayBody(input: QuoteProbeInput): unknown {
-  return {
-    user: input.takerAddress,
-    recipient: input.takerAddress,
-    originChainId: input.chainId,
-    destinationChainId: input.chainId,
-    originCurrency: input.sellToken.address,
-    destinationCurrency: input.buyToken.address,
-    amount: input.amountRaw,
-    tradeType: "EXACT_INPUT",
-  };
-}
-
-function rubicBody(input: QuoteProbeInput): unknown {
-  return {
-    srcTokenBlockchain: rubicChain(input.chainId),
-    dstTokenBlockchain: rubicChain(input.chainId),
-    srcTokenAddress: input.sellToken.address,
-    dstTokenAddress: input.buyToken.address,
-    srcTokenAmount: input.amountDecimal,
-    fromAddress: input.takerAddress,
-    receiver: input.takerAddress,
-    slippage: 0.01,
-    referrer: "mento",
-  };
-}
-
-function rubicChain(chainId: number): string {
-  const aliases: Record<number, string> = { 42220: "CELO", 143: "MONAD" };
-  return aliases[chainId] ?? String(chainId);
-}
-
-function setParams(url: URL, params: Record<string, string>): void {
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
 }

@@ -64,6 +64,9 @@ export type PairProbeResult = {
   sourceLabels: string[];
   txTarget: string | null;
   downstreamProvider: string | null;
+  routeVariant: string | null;
+  routeAmountUsd: string | null;
+  attemptCount: number | null;
   requestUrl: string | null;
   httpStatus: number | null;
   latencyMs: number | null;

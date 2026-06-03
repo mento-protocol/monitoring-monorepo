@@ -145,15 +145,34 @@ pnpm integrations:probe --adapter openocean,relay --chain 42220 --pair-limit 1 -
 ```
 
 `INTEGRATION_PROBES_HASURA_URL` can override `NEXT_PUBLIC_HASURA_URL` for pool
-discovery. `LIFI_API_KEY` is optional but recommended for scheduled runs because
-the unauthenticated LI.FI quote API can return multi-hour public rate limits.
-`OPENOCEAN_API_KEY` enables the OpenOcean Pro endpoint for OpenOcean checks and
-is managed by the platform Terraform stack from `openocean_api_key`. The same
-platform stack mirrors `INTEGRATION_PROBES_HASURA_URL`,
-`UPSTASH_REDIS_REST_URL`, and `UPSTASH_REDIS_REST_TOKEN` into repo-level GitHub
-Actions secrets so scheduled writers use the same Terraform-owned runtime as the
-dashboard. Adapter credentials are optional; missing keys render as `needs_key`
+discovery. `LIFI_API_KEY` authenticates LI.FI/Jumper quote probes with the
+`x-lifi-api-key` header so scheduled runs avoid public quote limits, and
+`OPENOCEAN_API_KEY` enables the OpenOcean Pro endpoint for OpenOcean checks.
+Both are managed by the platform Terraform stack from `lifi_api_key` and
+`openocean_api_key`. The same platform stack mirrors
+`INTEGRATION_PROBES_HASURA_URL`, `UPSTASH_REDIS_REST_URL`, and
+`UPSTASH_REDIS_REST_TOKEN` into repo-level GitHub Actions secrets so scheduled
+writers use the same Terraform-owned runtime as the dashboard. Adapter
+credentials are optional at the stack level; missing keys render as `needs_key`
 instead of failing the chain check.
+
+LI.FI/Jumper checks start with the default nominal quote and then try
+route-discovery variants with current LI.FI OpenOcean exchange filters and
+larger stable-unit amounts. This catches integrations that can route through
+Mento v3 even when small default swaps prefer cheaper non-Mento venues. A
+discovered route still passes only when the response contains Routerv300 or
+registered pool/VirtualPool address evidence. LI.FI quote attempts are capped
+at 180 per scheduled run, and repeated request/HTTP errors are capped at two
+attempts per route, so discovery cannot exhaust the API quota or starve the
+scheduled writer before it publishes degraded results.
+Budgeted adapters run pair probes serially so downstream evidence follow-ups
+cannot be starved by other in-flight pair probes.
+
+Monad LI.FI/Jumper routes can use Fly as the downstream provider. When LI.FI
+returns `tool: "fly"`, the probe follows Fly's quote and distributions APIs and
+uses only registered Mento v3 pool-address evidence from the Fly distributions
+response as a pass. Celo LI.FI/Jumper probes stay on LI.FI response evidence;
+they do not borrow Fly evidence for a chain where LI.FI has not exposed Fly.
 
 ### Address Book & Backup Cron
 

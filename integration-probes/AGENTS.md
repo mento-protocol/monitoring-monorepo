@@ -35,6 +35,22 @@ pnpm --filter @mento-protocol/integration-probes knip
 - Active stablecoin coverage comes from indexed USDm hub-pair pools when a
   Hasura URL is configured. Contract metadata fallback is for dry-run
   visibility only.
+- LI.FI/Jumper probes use ordered route-discovery attempts after the default
+  quote so cheaper non-Mento venues on small swaps do not mask an available
+  Mento v3 route. Discovery uses current LI.FI tool keys only; do not add
+  speculative `allowExchanges` values that are absent from `/v1/tools`. These
+  attempts still pass only with Routerv300 or registered pool/VirtualPool
+  address evidence.
+- Monad LI.FI quotes can delegate to Fly. When LI.FI returns `tool: "fly"`,
+  follow Fly's quote and distributions APIs and pass only if the distributions
+  response exposes a registered Mento v3 pool address. Celo LI.FI checks do not
+  use Fly fallback evidence; they must return direct Mento address evidence.
+- LI.FI quote attempts are capped at 180 per scheduled run, and repeated
+  request/HTTP errors during route discovery are capped at two attempts per
+  route, so an aggregator outage or discovery loop cannot starve the scheduled
+  writer. Budgeted adapters run pair probes serially so downstream follow-up
+  requests, such as LI.FI-to-Fly evidence checks, cannot be starved by other
+  in-flight pair probes.
 - `integration-probes:latest` expires after 3 days so failed scheduled probes
   degrade the dashboard instead of showing stale health forever. Dated history
   keys expire after 90 days.
@@ -45,9 +61,10 @@ pnpm --filter @mento-protocol/integration-probes knip
   pool discovery query.
 - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are required only
   when writing snapshots.
-- Adapter credentials are optional and should surface as `needs_key` when
-  missing: `OPENOCEAN_API_KEY`, `ZEROX_API_KEY`, `ONEINCH_API_KEY`,
-  `SQUID_INTEGRATOR_ID`, `SOCKET_API_KEY`, `RANGO_API_KEY`,
-  `OKX_DEX_API_KEY`, `OKX_DEX_SECRET`, and `OKX_DEX_PASSPHRASE`.
-- `LIFI_API_KEY` is optional but recommended for scheduled probes because the
-  unauthenticated LI.FI endpoint can return multi-hour public rate limits.
+- Adapter credentials are optional at the infrastructure layer and should
+  surface as `needs_key` when missing: `LIFI_API_KEY`, `OPENOCEAN_API_KEY`,
+  `ZEROX_API_KEY`, `ONEINCH_API_KEY`, `SQUID_INTEGRATOR_ID`,
+  `SOCKET_API_KEY`, `RANGO_API_KEY`, `OKX_DEX_API_KEY`, `OKX_DEX_SECRET`, and
+  `OKX_DEX_PASSPHRASE`.
+- `LIFI_API_KEY` authenticates LI.FI/Jumper quote probes with
+  `x-lifi-api-key`; keep it server-side and Terraform-managed.

@@ -16,6 +16,9 @@ describe("IntegrationProbesTable", () => {
     expect(html).toContain("router-address");
     expect(html).toContain("EURm -&gt; USDm");
     expect(html).toContain("HTTP 200");
+    expect(html).toContain("variant default");
+    expect(html).toContain("amount 1");
+    expect(html).toContain("3 attempts");
   });
 
   it("shows non-pass pair evidence before capped passing rows", () => {
@@ -159,6 +162,9 @@ function pairFixture({
     sourceLabels: [],
     txTarget: null,
     downstreamProvider: null,
+    routeVariant: passing ? "default" : null,
+    routeAmountUsd: passing ? "1" : null,
+    attemptCount: passing ? 3 : null,
     requestUrl: null,
     httpStatus: passing ? 200 : null,
     latencyMs: passing ? 42 : null,

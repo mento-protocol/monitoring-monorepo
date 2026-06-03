@@ -194,19 +194,19 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 ### Integration Probes
 
-| Variable                        | Description                                               |
-| ------------------------------- | --------------------------------------------------------- |
-| `INTEGRATION_PROBES_HASURA_URL` | Optional override for the pool-discovery GraphQL endpoint |
-| `LIFI_API_KEY`                  | Optional LI.FI API key to avoid public quote rate limits  |
-| `OPENOCEAN_API_KEY`             | Optional OpenOcean Pro quote API key                      |
-| `ZEROX_API_KEY`                 | Optional 0x quote API key                                 |
-| `ONEINCH_API_KEY`               | Optional 1inch quote API key                              |
-| `SQUID_INTEGRATOR_ID`           | Optional Squid integrator id                              |
-| `SOCKET_API_KEY`                | Optional Socket quote API key                             |
-| `RANGO_API_KEY`                 | Optional Rango quote API key                              |
-| `OKX_DEX_API_KEY`               | Optional OKX DEX API key                                  |
-| `OKX_DEX_SECRET`                | Optional OKX DEX signing secret                           |
-| `OKX_DEX_PASSPHRASE`            | Optional OKX DEX passphrase                               |
+| Variable                        | Description                                                      |
+| ------------------------------- | ---------------------------------------------------------------- |
+| `INTEGRATION_PROBES_HASURA_URL` | Optional override for the pool-discovery GraphQL endpoint        |
+| `LIFI_API_KEY`                  | LI.FI/Jumper quote API key; probes return `needs_key` without it |
+| `OPENOCEAN_API_KEY`             | Optional OpenOcean Pro quote API key                             |
+| `ZEROX_API_KEY`                 | Optional 0x quote API key                                        |
+| `ONEINCH_API_KEY`               | Optional 1inch quote API key                                     |
+| `SQUID_INTEGRATOR_ID`           | Optional Squid integrator id                                     |
+| `SOCKET_API_KEY`                | Optional Socket quote API key                                    |
+| `RANGO_API_KEY`                 | Optional Rango quote API key                                     |
+| `OKX_DEX_API_KEY`               | Optional OKX DEX API key                                         |
+| `OKX_DEX_SECRET`                | Optional OKX DEX signing secret                                  |
+| `OKX_DEX_PASSPHRASE`            | Optional OKX DEX passphrase                                      |
 
 Production env vars are managed by Terraform except the Blob OIDC variables, which are managed by the Vercel store integration. See [`terraform/`](./terraform/).
 

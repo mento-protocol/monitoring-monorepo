@@ -39,6 +39,11 @@ upstash_api_key = "..."
 # hasura_url = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql"
 
 # ── Integration Probes ────────────────────────────────────────────────────────
+# LI.FI API key for the scheduled integration-probes workflow.
+# Leave empty until provisioned; the GitHub Actions secret resource is
+# `count`-gated so `terraform apply` succeeds without it.
+# lifi_api_key = "..."
+
 # OpenOcean Pro API key for the scheduled integration-probes workflow.
 # Leave empty until provisioned; the GitHub Actions secret resource is
 # `count`-gated so `terraform apply` succeeds without it.

@@ -77,6 +77,16 @@ variable "hasura_url" {
 
 # ── Integration Probes ────────────────────────────────────────────────────────
 
+variable "lifi_api_key" {
+  description = <<-EOT
+    LI.FI API key for the scheduled integration-probes workflow.
+    Mirrors into the repo-level Actions secret `LIFI_API_KEY`.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "openocean_api_key" {
   description = <<-EOT
     OpenOcean Pro API key for the scheduled integration-probes workflow.
