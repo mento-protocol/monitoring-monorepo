@@ -157,7 +157,7 @@ export function blockingReason(status: ProbeStatus): string | null {
     case "needs_key":
       return "Probe credentials are missing.";
     case "rate_limited":
-      return "Aggregator API rate-limited the probe.";
+      return "Aggregator API rate-limited the probe or the probe hit its configured request budget.";
     case "no_liquidity":
       return "Aggregator returned no route or no liquidity.";
     case "error":
@@ -183,7 +183,7 @@ async function fetchAndEvaluate(args: {
   let requestErrorAttempts = 0;
   for (const request of requests) {
     if (!consumeQuoteAttempt(args.quoteBudget)) {
-      return quoteBudgetExhaustedResult(args.input, fallback, attemptCount);
+      return quoteBudgetExhaustedResult(args.input, attemptCount);
     }
     attemptCount += 1;
     const result = {
@@ -199,7 +199,7 @@ async function fetchAndEvaluate(args: {
       return result;
     }
     if (requestErrorLimitReached(result, requestErrorAttempts)) {
-      return { ...(fallback ?? result), attemptCount };
+      return result;
     }
   }
   return fallback
@@ -209,16 +209,16 @@ async function fetchAndEvaluate(args: {
 
 function quoteBudgetExhaustedResult(
   input: QuoteProbeInput,
-  fallback: PairProbeResult | null,
   attemptCount: number,
 ): PairProbeResult {
-  return fallback
-    ? { ...fallback, attemptCount }
-    : skippedResult(
-        input,
-        "rate_limited",
-        "Adapter quote-attempt budget exhausted.",
-      );
+  return {
+    ...skippedResult(
+      input,
+      "rate_limited",
+      "Adapter quote-attempt budget exhausted.",
+    ),
+    attemptCount,
+  };
 }
 
 function requestErrorLimitReached(

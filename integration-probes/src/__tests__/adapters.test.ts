@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGGREGATOR_ADAPTERS,
   aggregatePairStatus,
+  blockingReason,
   probeAdapterPair,
 } from "../adapters.js";
 import type { AggregatorAdapter } from "../adapters.js";
@@ -357,8 +358,8 @@ describe("probeAdapterPair", () => {
     });
 
     expect(result.status).toBe("error");
-    expect(result.requestUrl).toBe("https://example.test/default");
-    expect(result.routeVariant).toBe("default");
+    expect(result.requestUrl).toBe("https://example.test/discovery");
+    expect(result.routeVariant).toBe("allow-openocean");
     expect(result.attemptCount).toBe(2);
     expect(calls).toBe(2);
   });
@@ -405,13 +406,14 @@ describe("probeAdapterPair", () => {
     });
 
     expect(result.status).toBe("error");
-    expect(result.requestUrl).toBe("https://example.test/default");
+    expect(result.requestUrl).toBe("https://example.test/discovery");
+    expect(result.routeVariant).toBe("allow-openocean");
     expect(result.error).toBe("HTTP 503: upstream timeout");
     expect(result.attemptCount).toBe(2);
     expect(calls).toBe(2);
   });
 
-  it("stops route discovery when the quote-attempt budget is exhausted", async () => {
+  it("marks route discovery as rate-limited when the quote-attempt budget is exhausted", async () => {
     const adapter: AggregatorAdapter = {
       id: "multi-attempt",
       label: "Multi Attempt",
@@ -446,13 +448,15 @@ describe("probeAdapterPair", () => {
       quoteBudget: { remaining: 1 },
     });
 
-    expect(result.status).toBe("fail");
-    expect(result.requestUrl).toBe("https://example.test/default");
+    expect(result.status).toBe("rate_limited");
+    expect(result.requestUrl).toBeNull();
+    expect(result.error).toBe("Adapter quote-attempt budget exhausted.");
     expect(result.attemptCount).toBe(1);
+    expect(blockingReason(result.status)).toContain("request budget");
     expect(calls).toBe(1);
   });
 
-  it("keeps the best fallback when the run-level quote budget is exhausted", async () => {
+  it("marks budget exhaustion before the first quote as rate-limited", async () => {
     const adapter: AggregatorAdapter = {
       id: "multi-attempt",
       label: "Multi Attempt",
@@ -478,17 +482,19 @@ describe("probeAdapterPair", () => {
       adapter,
       chain,
       input,
-      fetcher: async () =>
-        new Response(JSON.stringify({ route: [{ protocol: "Mento" }] })),
+      fetcher: async () => {
+        throw new Error("should not fetch after exhausting the budget");
+      },
       env: {},
-      quoteBudget: { remaining: 1 },
+      quoteBudget: { remaining: 0 },
     });
 
-    expect(result.status).toBe("fail");
-    expect(result.requestUrl).toBe("https://example.test/default");
-    expect(result.routeVariant).toBe("default");
-    expect(result.sourceLabels).toEqual(["Mento"]);
-    expect(result.attemptCount).toBe(1);
+    expect(result.status).toBe("rate_limited");
+    expect(result.requestUrl).toBeNull();
+    expect(result.routeVariant).toBeNull();
+    expect(result.sourceLabels).toEqual([]);
+    expect(result.error).toBe("Adapter quote-attempt budget exhausted.");
+    expect(result.attemptCount).toBe(0);
   });
 
   it("keeps no-liquidity and rate-limit responses explicit", async () => {
