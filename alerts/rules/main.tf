@@ -5,7 +5,7 @@ provider "grafana" {
 
 # One folder per `service` label. Protocol-wide folders live in this stack
 # together with the global Grafana notification policy, while Aegis keeps only
-# its service-health folder/rules in `aegis/terraform`.
+# its service-health folder/dashboard in `aegis/terraform`.
 resource "grafana_folder" "fpmms" {
   title = "FPMMs"
   uid   = "fpmms"
