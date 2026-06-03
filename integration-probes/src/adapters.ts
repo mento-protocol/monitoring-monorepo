@@ -263,7 +263,7 @@ async function fetchAndEvaluateRequest(args: {
     request: args.request,
     ...response,
   });
-  if (primaryResult.status === "pass" || !args.request.afterResponse) {
+  if (!args.request.afterResponse) {
     return primaryResult;
   }
   const downstreamResult = await args.request.afterResponse({
