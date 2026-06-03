@@ -10,6 +10,7 @@ import type {
 
 const DEFAULT_TAKER = "0x000000000000000000000000000000000000dEaD";
 const LIFI_INTEGRATOR = "mento-probes";
+const OPENOCEAN_GAS_PRICE_WEI = "1000000000";
 const OPENOCEAN_MENTO_V3_DEX_ID = "8";
 
 type ChainSupport = "supported" | "unsupported" | "unknown";
@@ -597,7 +598,7 @@ function openOceanUrl(input: QuoteProbeInput): string {
     amountDecimals: input.amountRaw,
     account: input.takerAddress,
     slippage: "1",
-    gasPriceDecimals: "1000000000",
+    gasPriceDecimals: OPENOCEAN_GAS_PRICE_WEI,
     enabledDexIds: OPENOCEAN_MENTO_V3_DEX_ID,
   });
   return url.toString();
