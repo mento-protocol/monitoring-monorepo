@@ -44,9 +44,10 @@ doing this when blocked on a user decision, waiting on approval for a production
 mutation, a long task has finished and needs user follow-up, or plan feedback is
 required before meaningful progress can continue.
 
-Use Charlie's voice and keep the spoken message short and specific. Both Codex
-and Claude should prefer the repo-standard key file path so behavior does not
-depend on shell startup files or stripped environment variables:
+Use Charlie's voice with `sag` when it is installed and configured. Keep the
+spoken message short and specific. Both Codex and Claude should prefer the
+repo-standard key file path so behavior does not depend on shell startup files
+or stripped environment variables:
 
 ```bash
 sag --api-key-file "$HOME/.config/sag/elevenlabs-api-key" -v Charlie "hey, i need your approval to deploy the Alloy collector"
@@ -59,10 +60,30 @@ local audio device. Store the key for agent nudges in
 inherit shell startup files, and its environment policy strips secret-like
 variables such as `ELEVENLABS_API_KEY`, even when they exist in `.zshrc`. Claude
 may inherit `.zshrc` in local shells, but should still use the same key-file
-command so the two agents behave consistently. In Codex, request escalated
-execution for the nudge instead of trying to run it inside the workspace
-sandbox. If `sag` fails, report the failure in chat and continue with the
-visible written request; do not silently assume the user heard the nudge.
+command so the two agents behave consistently.
+
+Because `sag` is a third-party Homebrew package, it may not exist on every
+developer machine. Use this fallback order:
+
+```bash
+msg="hey, i need your feedback on the deploy"
+if command -v sag >/dev/null 2>&1 && [ -r "$HOME/.config/sag/elevenlabs-api-key" ]; then
+  sag --api-key-file "$HOME/.config/sag/elevenlabs-api-key" -v Charlie "$msg"
+elif command -v say >/dev/null 2>&1; then
+  say "$msg"
+elif command -v spd-say >/dev/null 2>&1; then
+  spd-say "$msg"
+else
+  printf 'spoken nudge unavailable; falling back to chat only: %s\n' "$msg" >&2
+fi
+```
+
+On macOS, `say` is the expected built-in fallback. Linux has no universal
+built-in TTS command; `spd-say` is best-effort only when installed. In Codex,
+request escalated execution for the nudge instead of trying to run it inside the
+workspace sandbox. If every spoken path fails, report the failure in chat and
+continue with the visible written request; do not silently assume the user heard
+the nudge.
 
 Do not wire this into the existing SessionEnd hook. The current shared hook
 events do not know whether the agent is genuinely waiting on the user versus
