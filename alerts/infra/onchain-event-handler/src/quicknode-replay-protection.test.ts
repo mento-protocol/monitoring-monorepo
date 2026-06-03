@@ -252,6 +252,8 @@ describe("reserveQuickNodeNonce", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[0][0]).toBe(metadataTokenUrl);
     expect(String(fetchMock.mock.calls[1][0])).toContain("nonce");
-    expect(String(fetchMock.mock.calls[2][0])).toContain("nonce");
+    expect(String(fetchMock.mock.calls[2][0])).toContain(
+      nonceHash("nonce-2", "1700000001"),
+    );
   });
 });

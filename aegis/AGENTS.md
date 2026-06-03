@@ -27,4 +27,9 @@ last_verified: 2026-05-20
 
 ## Verification
 
-Run `pnpm aegis:lint`, `pnpm aegis:typecheck`, `pnpm aegis:test`, `pnpm aegis:build`, and Terraform fmt/init/validate for `aegis/terraform` when relevant.
+Run `pnpm aegis:lint`, `pnpm aegis:typecheck`, `pnpm --filter @mento-protocol/aegis test:cov`, `pnpm aegis:build`, and Terraform fmt/init/validate for `aegis/terraform` when relevant.
+
+Aegis Jest coverage floors were measured on 2026-06-03 after adding config,
+metrics, query, and watcher specs: statements 87.91, branches 79.23, functions
+89.61, lines 87.97. The enforced floor keeps a two-point variance margin at
+statements 85, branches 77, functions 87, and lines 85.
