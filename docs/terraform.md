@@ -105,8 +105,8 @@ Local gitignored tfvars files must follow the same ownership:
 - `alerts/rules/terraform.tfvars`: Grafana token, Slack bot token, and Splunk
   On-Call webhook URL.
 - `alerts/infra/terraform.tfvars`: Sentry token, Slack bot token, QuickNode
-  credentials, GitHub PAT, and Splunk On-Call API ID/key for the on-call
-  announcer.
+  credentials, GitHub PAT, and Splunk On-Call API ID/key plus Slack channel
+  and usergroup IDs for the on-call announcer.
 - `aegis/terraform/terraform.tfvars`: only `grafana_service_account_token`.
 
 Verify ownership and drift with:

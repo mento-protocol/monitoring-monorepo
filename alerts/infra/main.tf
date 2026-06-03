@@ -171,13 +171,6 @@ module "onchain_event_listeners" {
 # On-call Announcer #
 #####################
 
-data "http" "slack_public_channels" {
-  url = "https://slack.com/api/conversations.list?types=public_channel&exclude_archived=true&limit=1000"
-  request_headers = {
-    Authorization = "Bearer ${var.slack_bot_token}"
-  }
-}
-
 locals {
   oncall_announcer_api_id_configured  = nonsensitive(var.splunk_on_call_api_id) != ""
   oncall_announcer_api_key_configured = nonsensitive(var.splunk_on_call_api_key) != ""
@@ -189,67 +182,31 @@ locals {
     local.oncall_announcer_api_id_configured
     != local.oncall_announcer_api_key_configured
   )
-  oncall_slack_channel_lookup_id = try([
-    for channel in jsondecode(data.http.slack_public_channels.response_body).channels :
-    channel.id if channel.name == var.oncall_slack_channel_name
-  ][0], "")
-  oncall_slack_channel_id = (
-    var.oncall_slack_channel_id != ""
-    ? var.oncall_slack_channel_id
-    : local.oncall_slack_channel_lookup_id
+  oncall_announcer_missing_channel_id = (
+    local.oncall_announcer_enabled
+    && var.oncall_slack_channel_id == ""
   )
-
+  oncall_announcer_missing_usergroup_id = (
+    local.oncall_announcer_enabled
+    && var.oncall_support_usergroup_id == ""
+  )
+  oncall_announcer_invalid_config = (
+    local.oncall_announcer_partially_configured
+    || local.oncall_announcer_missing_channel_id
+    || local.oncall_announcer_missing_usergroup_id
+  )
+  oncall_slack_channel_id = var.oncall_slack_channel_id
 }
 
-resource "terraform_data" "oncall_announcer_credentials_guard" {
-  count = local.oncall_announcer_partially_configured ? 1 : 0
+resource "terraform_data" "oncall_announcer_config_guard" {
+  count = local.oncall_announcer_invalid_config ? 1 : 0
 
   input = "invalid"
 
   lifecycle {
     precondition {
-      condition     = !local.oncall_announcer_partially_configured
-      error_message = "Set both splunk_on_call_api_id and splunk_on_call_api_key, or leave both empty to keep the on-call announcer disabled until credentials are bootstrapped."
-    }
-  }
-}
-
-resource "restapi_object" "support_engineer_usergroup" {
-  count = local.oncall_announcer_enabled && var.oncall_support_usergroup_id == "" ? 1 : 0
-
-  provider = restapi.slack
-
-  path        = "/usergroups.create"
-  create_path = "/usergroups.create"
-  read_path   = "/api.test"
-
-  destroy_path   = "/usergroups.disable?usergroup={id}"
-  destroy_method = "POST"
-
-  update_path   = ""
-  update_method = "POST"
-
-  data = jsonencode({
-    name        = var.oncall_support_usergroup_name
-    handle      = var.oncall_support_usergroup_handle
-    description = "Current support engineer from Splunk On-Call"
-    channels    = local.oncall_slack_channel_id
-  })
-
-  id_attribute              = "usergroup/id"
-  ignore_all_server_changes = true
-
-  lifecycle {
-    prevent_destroy = true
-
-    precondition {
-      condition     = local.oncall_slack_channel_id != ""
-      error_message = "Could not resolve the on-call Slack channel. Set oncall_slack_channel_id explicitly or ensure #${var.oncall_slack_channel_name} exists and the Slack token has channels:read."
-    }
-
-    postcondition {
-      condition     = self.api_response != null && try(jsondecode(self.api_response).ok, false) == true
-      error_message = "Slack usergroups.create failed for @${var.oncall_support_usergroup_handle}: ${try(jsondecode(self.api_response).error, "unknown")}"
+      condition     = !local.oncall_announcer_invalid_config
+      error_message = "Set both splunk_on_call_api_id and splunk_on_call_api_key, or leave both empty to keep the on-call announcer disabled. When enabled, set oncall_slack_channel_id and oncall_support_usergroup_id explicitly."
     }
   }
 }
@@ -258,9 +215,7 @@ locals {
   support_engineer_usergroup_id = (
     !local.oncall_announcer_enabled
     ? ""
-    : var.oncall_support_usergroup_id != ""
-    ? var.oncall_support_usergroup_id
-    : restapi_object.support_engineer_usergroup[0].id
+    : var.oncall_support_usergroup_id
   )
 }
 
@@ -289,8 +244,7 @@ module "oncall_announcer" {
 
   depends_on = [
     module.project_factory,
-    restapi_object.support_engineer_usergroup,
-    terraform_data.oncall_announcer_credentials_guard,
+    terraform_data.oncall_announcer_config_guard,
     google_service_account.project_sa
   ]
 }
@@ -349,6 +303,8 @@ locals {
     "TF_VAR_GITHUB_TOKEN",
   ])
   alerts_infra_ci_oncall_secret_names = local.oncall_announcer_enabled ? toset([
+    "TF_VAR_ONCALL_SLACK_CHANNEL_ID",
+    "TF_VAR_ONCALL_SUPPORT_USERGROUP_ID",
     "TF_VAR_SPLUNK_ON_CALL_API_ID",
     "TF_VAR_SPLUNK_ON_CALL_API_KEY",
   ]) : toset([])
@@ -358,14 +314,16 @@ locals {
   )
 
   alerts_infra_ci_secret_values = {
-    TF_VAR_SENTRY_AUTH_TOKEN        = var.sentry_auth_token
-    TF_VAR_BILLING_ACCOUNT          = var.billing_account
-    TF_VAR_QUICKNODE_API_KEY        = var.quicknode_api_key
-    TF_VAR_QUICKNODE_SIGNING_SECRET = var.quicknode_signing_secret
-    TF_VAR_SPLUNK_ON_CALL_API_ID    = var.splunk_on_call_api_id
-    TF_VAR_SPLUNK_ON_CALL_API_KEY   = var.splunk_on_call_api_key
-    TF_VAR_SLACK_BOT_TOKEN          = var.slack_bot_token
-    TF_VAR_GITHUB_TOKEN             = var.github_token
+    TF_VAR_SENTRY_AUTH_TOKEN           = var.sentry_auth_token
+    TF_VAR_BILLING_ACCOUNT             = var.billing_account
+    TF_VAR_QUICKNODE_API_KEY           = var.quicknode_api_key
+    TF_VAR_QUICKNODE_SIGNING_SECRET    = var.quicknode_signing_secret
+    TF_VAR_ONCALL_SLACK_CHANNEL_ID     = var.oncall_slack_channel_id
+    TF_VAR_ONCALL_SUPPORT_USERGROUP_ID = var.oncall_support_usergroup_id
+    TF_VAR_SPLUNK_ON_CALL_API_ID       = var.splunk_on_call_api_id
+    TF_VAR_SPLUNK_ON_CALL_API_KEY      = var.splunk_on_call_api_key
+    TF_VAR_SLACK_BOT_TOKEN             = var.slack_bot_token
+    TF_VAR_GITHUB_TOKEN                = var.github_token
   }
 }
 

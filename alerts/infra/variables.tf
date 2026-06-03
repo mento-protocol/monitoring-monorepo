@@ -107,24 +107,13 @@ variable "oncall_rotation_check_schedule" {
 }
 
 variable "oncall_slack_channel_id" {
-  description = "Optional explicit Slack channel ID for on-call rotation announcements. Leave empty to resolve oncall_slack_channel_name via Slack conversations.list."
+  description = "Slack channel ID for on-call rotation announcements. Required when the on-call announcer is enabled."
   type        = string
   default     = ""
 
   validation {
     condition     = var.oncall_slack_channel_id == "" || can(regex("^[CG][A-Z0-9]{8,}$", var.oncall_slack_channel_id))
     error_message = "oncall_slack_channel_id must be empty or a Slack channel ID such as C0123ABC456."
-  }
-}
-
-variable "oncall_slack_channel_name" {
-  description = "Public Slack channel name, without leading #, used when oncall_slack_channel_id is empty."
-  type        = string
-  default     = "eng"
-
-  validation {
-    condition     = can(regex("^[a-z0-9_-]+$", var.oncall_slack_channel_name))
-    error_message = "oncall_slack_channel_name must be a Slack channel name without the leading #."
   }
 }
 
@@ -139,19 +128,8 @@ variable "oncall_support_issues_url" {
   }
 }
 
-variable "oncall_support_usergroup_handle" {
-  description = "Slack usergroup handle, without leading @, for the current support engineer."
-  type        = string
-  default     = "support-engineer"
-
-  validation {
-    condition     = can(regex("^[a-z0-9_-]+$", var.oncall_support_usergroup_handle))
-    error_message = "oncall_support_usergroup_handle must contain only lowercase letters, numbers, underscores, and hyphens."
-  }
-}
-
 variable "oncall_support_usergroup_id" {
-  description = "Existing Slack usergroup ID for @support-engineer. Leave empty for Terraform to create and manage the usergroup."
+  description = "Slack usergroup ID for @support-engineer. Required when the on-call announcer is enabled."
   type        = string
   default     = ""
 
@@ -159,12 +137,6 @@ variable "oncall_support_usergroup_id" {
     condition     = var.oncall_support_usergroup_id == "" || can(regex("^S[A-Z0-9]{8,}$", var.oncall_support_usergroup_id))
     error_message = "oncall_support_usergroup_id must be empty or a Slack usergroup ID such as S0123ABC456."
   }
-}
-
-variable "oncall_support_usergroup_name" {
-  description = "Slack display name for the current support engineer usergroup."
-  type        = string
-  default     = "Support Engineer"
 }
 
 variable "splunk_on_call_api_base_url" {

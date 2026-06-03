@@ -56,7 +56,7 @@ graph LR
 
 - **Terraform** >= 1.10.0
 - **GCP account** with billing enabled
-- **Slack bot** with channel-management, chat, usergroup, and email lookup scopes
+- **Slack bot** with channel-management, chat, usergroup membership, and email lookup scopes
 - **Sentry account** (for JS error monitoring)
 - **QuickNode account** (for blockchain monitoring)
 
@@ -92,13 +92,16 @@ slack_bot_token = "xoxb-..."
 # Splunk On-Call API credentials for the on-call announcer. A read-only key is
 # sufficient. Leave both empty to keep the announcer disabled until the first
 # credential bootstrap; setting both values enables the Cloud Function,
-# scheduler, @support-engineer usergroup management, and GitHub secret sync.
+# scheduler, @support-engineer membership management, and GitHub secret sync.
 splunk_on_call_api_id  = "your-splunk-on-call-api-id"
 splunk_on_call_api_key = "your-splunk-on-call-api-key"
 
-# Optional: set this to reuse an existing @support-engineer Slack usergroup.
-# Leave empty for Terraform to create and manage it.
-# oncall_support_usergroup_id = "S0123ABC456"
+# Required when the announcer is enabled: Slack channel ID for #eng.
+oncall_slack_channel_id = "C0123ABC456"
+
+# Required when the announcer is enabled: Slack usergroup ID for
+# @support-engineer. Create the usergroup in Slack once, then paste its ID here.
+oncall_support_usergroup_id = "S0123ABC456"
 
 # GCP Configuration
 project_name     = "alerts"              # Optional, defaults to "alerts"
@@ -221,8 +224,8 @@ multisigs = {
 - Posts one Slack message to `#eng` only when the on-call username changes
 - Replaces `@support-engineer` membership with exactly that Slack user on every run
 - Stores last-seen state in a private GCS bucket to suppress duplicate announcements
-- Creates and manages `@support-engineer` unless `oncall_support_usergroup_id`
-  is set to reuse an existing Slack usergroup
+- Uses the configured `@support-engineer` Slack usergroup ID and replaces its
+  membership with exactly the current on-call Slack user
 
 ### QuickNode Webhooks
 
