@@ -245,7 +245,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.ui == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       checks: write
       contents: read
