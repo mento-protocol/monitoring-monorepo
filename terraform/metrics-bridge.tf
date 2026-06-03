@@ -12,7 +12,7 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
 
 # ── Metrics Bridge (Cloud Run) ───────────────────────────────────────────────
 # Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
-# Scraped by Grafana Agent (Aegis repo) → Grafana Cloud alert rules.
+# Scraped by Grafana Alloy (Aegis repo) → Grafana Cloud alert rules.
 #
 # Image is managed out-of-band: `pnpm bridge:deploy` (or the CI workflow)
 # runs `gcloud run services update metrics-bridge --image=<digest>` after
@@ -87,7 +87,7 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   }
 }
 
-# Allow unauthenticated access so Grafana Agent can scrape /metrics.
+# Allow unauthenticated access so Grafana Alloy can scrape /metrics.
 resource "google_cloud_run_v2_service_iam_member" "metrics_bridge_public" {
   project  = google_cloud_run_v2_service.metrics_bridge.project
   location = google_cloud_run_v2_service.metrics_bridge.location

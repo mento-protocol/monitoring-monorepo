@@ -78,7 +78,7 @@ There are three main components you have to think about:
 
 1. The `aegis` service that polls view calls and exposes Prometheus metrics based on a `config.yaml` file.
 2. A service that ingests the metrics, this could be:
-   a. A `grafana-agent` instance which pushes the metrics to grafana-cloud.
+   a. The Grafana Alloy App Engine collector in `grafana-agent/`, which pushes the metrics to Grafana Cloud.
    b. A Prometheus server that ingests the metrics.
 3. (Optional) Helper smart contracts, which do any transformations needed to on-chain data for ingestion by `aegis.`
 
@@ -92,7 +92,7 @@ From inside `aegis/`, `pnpm deploy` is equivalent. The deploy script rebuilds
 `dist/`, creates a temporary App Engine app root with the root pnpm lockfile's
 Aegis importer, and uploads that staged service to `mento-monitoring`.
 
-To deploy the `grafana-agent`, first seed the Grafana Cloud Secret Manager
+To deploy the Alloy collector, first seed the Grafana Cloud Secret Manager
 versions in a fresh project, then follow the instructions in
 [grafana-agent/README.md](./grafana-agent/README.md).
 

@@ -6,7 +6,11 @@ FORCE="${FORCE:-0}"
 
 usage() {
   cat <<'USAGE'
-Seed Grafana Agent Secret Manager versions.
+Seed Grafana Alloy remote-write Secret Manager versions.
+
+The secret IDs and environment variable names intentionally retain the
+grafana-agent prefix for compatibility with existing Terraform and deploy
+automation.
 
 Required environment variables:
   GRAFANA_AGENT_ENDPOINT

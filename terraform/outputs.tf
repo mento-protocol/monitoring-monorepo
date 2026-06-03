@@ -34,7 +34,7 @@ output "artifact_registry_url" {
 }
 
 output "metrics_bridge_url" {
-  description = "Cloud Run URL for the metrics bridge — add as Grafana Agent scrape target."
+  description = "Cloud Run URL for the metrics bridge — add as Grafana Alloy scrape target."
   value       = google_cloud_run_v2_service.metrics_bridge.uri
 }
 
@@ -44,7 +44,7 @@ output "aegis_app_engine_url" {
 }
 
 output "aegis_grafana_agent_url" {
-  description = "Grafana Agent App Engine URL in the monitoring project."
+  description = "Grafana Alloy App Engine URL in the monitoring project. The service name remains grafana-agent for URL stability."
   value       = "https://grafana-agent-dot-${google_project.monitoring.project_id}.uc.r.appspot.com"
 }
 

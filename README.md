@@ -239,8 +239,9 @@ pnpm aegis:deploy   # builds, stages a locked App Engine app, then deploys to me
 pnpm aegis:logs
 ```
 
-Grafana Agent deploys from the same project. On a fresh project bootstrap,
-create the Secret Manager versions before the first deploy:
+Grafana Alloy deploys from the same project under the existing `grafana-agent`
+service/command names. On a fresh project bootstrap, create the Secret Manager
+versions before the first deploy:
 
 ```bash
 pnpm aegis:agent:seed-secrets

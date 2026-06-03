@@ -1,8 +1,7 @@
 #!/bin/sh
-# entrypoint.sh — fetch Grafana Cloud credentials from Secret Manager at
-# container start, export as env vars, then exec grafana-agent with
-# `-config.expand-env=true` so the agent substitutes `${VAR}` references
-# in agent.yaml at startup.
+# entrypoint.sh - fetch Grafana Cloud credentials from Secret Manager at
+# container start, export them as env vars, then exec Grafana Alloy. The Alloy
+# config reads these values with sys.env().
 #
 # Why runtime fetch instead of build-time substitution:
 #   Previous flow rendered agent.yaml on the Cloud Build VM and shipped the
@@ -14,7 +13,7 @@
 #
 # Required IAM: the App Engine default service account
 # (`<project>@appspot.gserviceaccount.com`) needs
-# `roles/secretmanager.secretAccessor` on each of:
+# `roles/secretmanager.secretAccessor` on each legacy grafana-agent-* secret:
 #   - grafana-agent-endpoint
 #   - grafana-agent-username
 #   - grafana-agent-password
@@ -77,7 +76,7 @@ GRAFANA_AGENT_PASSWORD=$(fetch_secret grafana-agent-password)
 
 export GRAFANA_AGENT_ENDPOINT GRAFANA_AGENT_USERNAME GRAFANA_AGENT_PASSWORD
 
-exec /bin/grafana-agent \
-  -config.file=/etc/agent/agent.yaml \
-  -config.expand-env=true \
-  -server.http.address=0.0.0.0:8080
+exec /bin/alloy run \
+  --server.http.listen-addr=0.0.0.0:8080 \
+  --storage.path=/var/lib/alloy/data \
+  /etc/alloy/config.alloy

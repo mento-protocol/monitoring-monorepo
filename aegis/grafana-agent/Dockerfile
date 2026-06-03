@@ -1,9 +1,6 @@
-# grafana/agent:v0.43.4 is the last pre-Alloy-rename release and ships on
-# Ubuntu Jammy 22.04 LTS (supported through April 2027). The previous pin
-# at v0.35.0 sat on Ubuntu Lunar 23.04, EOL'd Jan 2024 and removed from
-# the archive — `apt-get update` 404s, so the jq/curl install below fails.
-# Pinned by digest to remove tag-mutability risk.
-FROM grafana/agent:v0.43.4@sha256:6fdea192ec80f34548b2f722212df4185f36a346fddb6c9735b7a4f6e26b697e
+# Official Grafana Alloy image, pinned by the multi-arch index digest to remove
+# tag-mutability risk while letting App Engine select its Linux platform.
+FROM grafana/alloy:v1.16.1@sha256:51aeb9d829239345070619dad3edd6873186f913c84f45b365b74574fcb38ec0
 
 # Install jq + ensure curl is present so entrypoint.sh can call the GCE
 # metadata server and Secret Manager. base64 ships in coreutils on Debian.
@@ -12,26 +9,25 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends jq curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Add healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD wget --no-verbose --tries=1 --spider http://localhost:8080/-/healthy || exit 1
+# Add healthcheck.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD curl -fsS http://localhost:8080/-/healthy >/dev/null || exit 1
 
 # Create a non-root user for security.
-# `grafana/agent` is Debian-based (BusyBox `addgroup`/`adduser -D` aren't
-# available) AND already uses GID/UID 1000 for its built-in `grafana`
-# account, so we pick 10001 to avoid the collision.
+# The previous Agent image used this dedicated UID/GID to avoid base-image
+# account collisions. Keep the runtime identity stable while moving to Alloy.
 RUN groupadd -g 10001 agent && \
     useradd -u 10001 -g agent -M -s /usr/sbin/nologin agent
 
-# Prometheus WAL directory (configured in agent.yaml as `wal_directory`).
-# /etc is owned by root, so the non-root `agent` user can't `mkdir` at
-# runtime — pre-create and chown here.
-RUN mkdir -p /etc/agent/data && chown -R agent:agent /etc/agent
+# Alloy stores WAL and component state under --storage.path. The directory is
+# owned by root in the base image, so pre-create and chown for the non-root
+# runtime user.
+RUN mkdir -p /etc/alloy /var/lib/alloy/data && \
+    chown -R agent:agent /etc/alloy /var/lib/alloy
 
-# agent.yaml uses ${VAR} references for Grafana Cloud credentials. The
-# entrypoint script fetches the values from Secret Manager at container
-# start and `grafana-agent -config.expand-env=true` performs the
-# substitution. Neither file contains any secret material.
-COPY --chown=agent:agent agent.yaml /etc/agent/agent.yaml
+# config.alloy reads Grafana Cloud credentials with sys.env(). The entrypoint
+# script fetches the values from Secret Manager at container start and exports
+# them before exec'ing Alloy. Neither file contains secret material.
+COPY --chown=agent:agent config.alloy /etc/alloy/config.alloy
 # `COPY --chmod=...` requires BuildKit, which Cloud Build's default Docker
 # driver doesn't enable. App Engine's source-based build runs the legacy
 # builder, so we chmod in a separate RUN step that works on both.

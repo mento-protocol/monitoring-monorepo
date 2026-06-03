@@ -179,7 +179,7 @@ variable "gcp_region" {
 }
 
 variable "aegis_app_engine_location_id" {
-  description = "App Engine location for Aegis and its Grafana Agent. App Engine location is immutable once created; use us-central to preserve uc.r.appspot.com URLs."
+  description = "App Engine location for Aegis and its Grafana Alloy collector. App Engine location is immutable once created; use us-central to preserve uc.r.appspot.com URLs."
   type        = string
   default     = "us-central"
 
