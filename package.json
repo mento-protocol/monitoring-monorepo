@@ -68,6 +68,9 @@
     "alerts:handler:build": "pnpm --filter @mento-protocol/alerts-onchain-event-handler build",
     "alerts:handler:typecheck": "pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck",
     "alerts:handler:test": "pnpm --filter @mento-protocol/alerts-onchain-event-handler test",
+    "alerts:oncall:build": "pnpm --filter @mento-protocol/alerts-oncall-announcer build",
+    "alerts:oncall:typecheck": "pnpm --filter @mento-protocol/alerts-oncall-announcer typecheck",
+    "alerts:oncall:test": "pnpm --filter @mento-protocol/alerts-oncall-announcer test",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
     "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
     "code-health:schema-diff": "git show origin/main:indexer-envio/schema.graphql > /tmp/schema-base-local.graphql && node scripts/schema-diff.mjs /tmp/schema-base-local.graphql indexer-envio/schema.graphql"

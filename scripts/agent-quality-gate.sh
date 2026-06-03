@@ -510,6 +510,14 @@ add_aegis_quality_commands() {
   add_checklist "docs/pr-checklists/code-health.md" "$reason (code-health gates fire on this change)"
 }
 
+add_alerts_oncall_quality_commands() {
+  local reason="$1"
+  add_turbo_package_task "@mento-protocol/alerts-oncall-announcer" "lint" "$reason"
+  add_turbo_package_task "@mento-protocol/alerts-oncall-announcer" "typecheck" "$reason"
+  add_command "pnpm --filter @mento-protocol/alerts-oncall-announcer test:coverage" "$reason (coverage floor)"
+  add_turbo_package_task "@mento-protocol/alerts-oncall-announcer" "knip" "$reason (knip: unused files/deps/exports)"
+}
+
 add_indexer_mutation_baseline() {
   local reason="$1"
   add_command "pnpm indexer:mutation" "$reason"
@@ -982,7 +990,7 @@ while IFS= read -r path; do
           add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "Safe ABI changed (handler imports it)"
           add_terraform_validate_commands "alerts/infra" "Safe ABI changed (listener filter uses it at plan time)"
           ;;
-        alerts/infra/onchain-event-handler/src/*|alerts/infra/onchain-event-handler/package.json|alerts/infra/onchain-event-handler/tsconfig.json|alerts/infra/onchain-event-handler/vitest.config.ts|alerts/infra/onchain-event-handler/knip.json|alerts/infra/onchain-event-handler/eslint.config.mjs|alerts/infra/onchain-event-handler/package-lock.json)
+        alerts/infra/onchain-event-handler/src/*|alerts/infra/onchain-event-handler/package.json|alerts/infra/onchain-event-handler/pnpm-lock.yaml|alerts/infra/onchain-event-handler/pnpm-workspace.yaml|alerts/infra/onchain-event-handler/tsconfig.json|alerts/infra/onchain-event-handler/vitest.config.ts|alerts/infra/onchain-event-handler/knip.json|alerts/infra/onchain-event-handler/eslint.config.mjs)
           add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts onchain-event-handler changed"
           ;;
         alerts/infra/onchain-event-handler/*.tf)
@@ -994,6 +1002,18 @@ while IFS= read -r path; do
         # scripts hit the generic `*.sh → bash -n $(quote_path "$path")`
         # branch above; the others are doc/config-only and don't gate
         # anything.
+      esac
+      ;;
+    alerts/infra/oncall-announcer/*)
+      add_surface "alerts-infra"
+      case "$path" in
+        alerts/infra/oncall-announcer/src/*|alerts/infra/oncall-announcer/package.json|alerts/infra/oncall-announcer/pnpm-lock.yaml|alerts/infra/oncall-announcer/pnpm-workspace.yaml|alerts/infra/oncall-announcer/tsconfig.json|alerts/infra/oncall-announcer/vitest.config.ts|alerts/infra/oncall-announcer/knip.json|alerts/infra/oncall-announcer/eslint.config.mjs)
+          add_alerts_oncall_quality_commands "alerts oncall-announcer changed"
+          ;;
+        alerts/infra/oncall-announcer/*.tf)
+          add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
+          add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
+          ;;
       esac
       ;;
     alerts/infra/scripts/*)

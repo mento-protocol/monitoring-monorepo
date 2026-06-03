@@ -90,10 +90,6 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
   depends_on = [
     google_secret_manager_secret_version.quicknode_signing_secret,
     google_secret_manager_secret_version.slack_bot_token,
-    # IAM grants for the Cloud Build SA must propagate before the function's
-    # build step kicks off, otherwise the build can race ahead and fail
-    # even though the IAM resources are in the same plan.
-    google_project_iam_member.cloudbuild_builder,
     google_storage_bucket_iam_member.cloud_build_storage_access,
     # Runtime SA needs per-secret Secret Manager access before boot.
     google_secret_manager_secret_iam_member.runtime_quicknode_signing_secret,
@@ -303,16 +299,6 @@ resource "google_storage_bucket_iam_member" "cloud_build_storage_access" {
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${var.project_service_account_email}"
 }
-
-# Allow Cloud Build service account to build the cloud function and write build logs
-resource "google_project_iam_member" "cloudbuild_builder" {
-  project = var.project_id
-  role    = "roles/cloudbuild.builds.builder"
-  # checkov:skip=CKV_GCP_49:The cloudbuild builder role should be safe to assign
-  # See https://docs.prismacloud.io/en/enterprise-edition/policy-reference/google-cloud-policies/google-cloud-iam-policies/bc-gcp-iam-10
-  member = "serviceAccount:${var.project_service_account_email}"
-}
-
 
 ##################
 # Secret Manager #

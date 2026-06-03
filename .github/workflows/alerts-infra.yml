@@ -38,6 +38,10 @@ name: Alerts Infra
 #     workflow_dispatch. Workflow/notifier-only edits can still plan, but they
 #     do not open the `production` Environment gate for unrelated drift.
 #
+# Required repository secrets mirror the `alerts_infra_ci_secret_names` local in
+# alerts/infra/main.tf, including Splunk On-Call credentials for the on-call
+# announcer: TF_VAR_SPLUNK_ON_CALL_API_ID and TF_VAR_SPLUNK_ON_CALL_API_KEY.
+#
 # Note: we intentionally do NOT save the plan as a binary artifact for
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
 # sensitive data in cleartext in the plan file"
@@ -141,6 +145,9 @@ jobs:
       # QuickNode
       TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
       TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
+      # Splunk On-Call / VictorOps API (read-only key is sufficient)
+      TF_VAR_splunk_on_call_api_id: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_ID }}
+      TF_VAR_splunk_on_call_api_key: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_KEY }}
       # Slack (for restapi.slack provider — creates/archives Sentry alert channels)
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
       # GitHub (for github_actions_secret resources that self-manage these secrets)

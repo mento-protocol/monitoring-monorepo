@@ -68,6 +68,9 @@ jobs:
       - name: pnpm audit handler deploy lockfile (high+ only)
         working-directory: alerts/infra/onchain-event-handler
         run: pnpm audit --audit-level=high
+      - name: pnpm audit on-call announcer deploy lockfile (high+ only)
+        working-directory: alerts/infra/oncall-announcer
+        run: pnpm audit --audit-level=high
 
   lockfile-lint:
     name: lockfile integrity + registry check
@@ -96,3 +99,7 @@ jobs:
         # Same gate for the package-local lockfile Cloud Build uses as the
         # on-chain handler deploy source of truth.
         run: LOCKFILE_LINT_ROOT=alerts/infra/onchain-event-handler node scripts/lockfile-lint.mjs
+      - name: on-call announcer lockfile integrity + registry check
+        # Same gate for the package-local lockfile Cloud Build uses as the
+        # on-call announcer deploy source of truth.
+        run: LOCKFILE_LINT_ROOT=alerts/infra/oncall-announcer node scripts/lockfile-lint.mjs
