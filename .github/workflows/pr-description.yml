@@ -54,26 +54,33 @@ jobs:
           fi
 
           # 3) The description must START with the two mandated sections, exactly
-          #    and in order (AGENTS.md "PR description standard"). First strip
-          #    fenced code blocks and HTML-comment blocks so example '##' lines
-          #    inside them aren't mistaken for real section headings.
-          stripped=$(awk '
-            BEGIN { fence = 0; comment = 0 }
+          #    and in order (AGENTS.md "PR description standard").
+          #
+          #    For the OPENING check, strip only HTML comments (so the template's
+          #    markdownlint pragma is allowed) — NOT code fences: a leading code
+          #    fence is real content before the headings and must be rejected.
+          comment_stripped=$(awk '
             comment { if ($0 ~ /-->/) comment = 0; next }
             /<!--/ && $0 !~ /-->/ { comment = 1; next }
             $0 ~ /^[[:space:]]*<!--.*-->[[:space:]]*$/ { next }
+            { print }
+          ' <<<"$PR_BODY")
+          # The first non-blank line must be exactly '## The Problem' (rejects
+          # leading prose, a '# Summary' H1, a leading code fence, or
+          # '## The Problem extra'). Case-exact, exact heading line.
+          firstline=$(grep -vE '^[[:space:]]*$' <<<"$comment_stripped" | sed -n '1p' || true)
+          # For the SECOND section, also strip code fences so an example '##' line
+          # inside a fence (after the first heading) isn't taken as the heading.
+          fence_stripped=$(awk '
+            BEGIN { fence = 0 }
             $0 ~ /^[[:space:]]*(```|~~~)/ { fence = ! fence; next }
             fence { next }
             { print }
-          ' <<<"$PR_BODY")
-          # First non-blank line must be exactly '## The Problem' (rejects leading
-          # prose / a '# Summary' H1 / '## The Problem extra'); the next H2 heading
-          # must be exactly '## The Solution'. Case-exact, exact heading lines.
-          firstline=$(grep -vE '^[[:space:]]*$' <<<"$stripped" | sed -n '1p' || true)
-          second=$(grep -E '^##[[:space:]]' <<<"$stripped" | sed -n '2p' || true)
+          ' <<<"$comment_stripped")
+          second=$(grep -E '^##[[:space:]]' <<<"$fence_stripped" | sed -n '2p' || true)
           if ! grep -qE '^##[[:space:]]+The Problem[[:space:]]*$' <<<"$firstline" \
              || ! grep -qE '^##[[:space:]]+The Solution[[:space:]]*$' <<<"$second"; then
-            echo "::error::PR description must START with '## The Problem' then '## The Solution' as its first two sections — exact title-case, exact heading lines, in order, with no content before (HTML comments and code fences are ignored). See AGENTS.md 'PR description standard' / .github/PULL_REQUEST_TEMPLATE.md."
+            echo "::error::PR description must START with '## The Problem' then '## The Solution' as its first two sections — exact title-case, exact heading lines, in order, with no content before (only HTML comments may precede '## The Problem'). See AGENTS.md 'PR description standard' / .github/PULL_REQUEST_TEMPLATE.md."
             exit 1
           fi
 
