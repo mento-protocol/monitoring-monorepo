@@ -118,6 +118,7 @@ export function AggregatorBreakdownSection({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- Existing table renderer carried through this route rename; keep the waiver scoped instead of reseeding package baseline.
 function AggregatorTable({
   aggregators,
   venueLabel,

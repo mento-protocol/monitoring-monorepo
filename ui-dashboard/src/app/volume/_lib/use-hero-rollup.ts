@@ -66,6 +66,7 @@ type HeroV2Data = { brokerVolumeWindowSnapshots: VolumeWindowRow[] };
  * slice is small but its derivation chain is dense — naming the slice
  * keeps the parent client readable.
  */
+// eslint-disable-next-line complexity, max-lines-per-function, sonarjs/cognitive-complexity -- Existing hero rollup hook carried through this route rename; keep the waiver scoped instead of reseeding package baseline.
 export function useHeroRollup({
   venue,
   range,

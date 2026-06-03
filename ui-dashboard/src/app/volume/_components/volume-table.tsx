@@ -203,6 +203,7 @@ function VolumeTableHead({
   );
 }
 
+// eslint-disable-next-line complexity, max-lines-per-function -- Existing expandable row renderer carried through this route rename; keep the waiver scoped instead of reseeding package baseline.
 function TraderRow({
   rank,
   trader,
@@ -346,6 +347,7 @@ function TraderRow({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- Existing pool-breakdown renderer carried through this route rename; keep the waiver scoped instead of reseeding package baseline.
 function ExpandedBreakdown({
   rows,
   pools,

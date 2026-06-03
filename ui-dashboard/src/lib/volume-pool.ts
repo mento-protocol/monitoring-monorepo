@@ -50,6 +50,7 @@ const OTHER_KEY = "__other__";
  * pool isn't in the metadata map (still indexing, removed, etc.) we
  * fall back to a truncated address.
  */
+// eslint-disable-next-line max-lines-per-function -- Existing pool aggregation helper carried through this route rename; keep the waiver scoped instead of reseeding package baseline.
 export function aggregatePoolDailyVolume(
   rows: readonly PoolDailyVolumeRow[],
   poolLabel: (poolId: string) => string,

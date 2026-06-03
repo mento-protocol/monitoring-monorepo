@@ -214,6 +214,7 @@ function addPartialRowsByChain(
   }
 }
 
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- Existing hero-overlap helper carried through this route rename; keep the waiver scoped instead of reseeding package baseline.
 export function buildHeroPartialOverlapQueryInput(args: {
   snapshotRows: ReadonlyArray<VolumeWindowRow> | undefined;
   todayRows: ReadonlyArray<VolumeTodayTraderRow> | undefined;
@@ -391,6 +392,7 @@ export function buildHeroPartialOverlapQueryInput(args: {
  * the fallback count path remains approximate; volume and swap counts are
  * exact through slice subtraction either way.
  */
+// eslint-disable-next-line complexity, max-lines-per-function, sonarjs/cognitive-complexity -- Existing hero merge helper carried through this route rename; keep the waiver scoped instead of reseeding package baseline.
 export function mergeHeroSnapshot(args: {
   snapshotRows: ReadonlyArray<VolumeWindowRow> | undefined;
   todayRows: ReadonlyArray<VolumeTodayTraderRow> | undefined;

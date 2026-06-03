@@ -109,6 +109,7 @@ export interface TraderDailyRow {
  *  fields are forced to neutral values (0 volume, 0 count, `true`
  *  activeOutsideFirstDay) — `all` has no first-day boundary and `24h`
  *  has an empty inclusive range. */
+// eslint-disable-next-line sonarjs/cognitive-complexity -- Existing window aggregation helper carried through this route rename; keep the waiver scoped instead of reseeding package baseline.
 export function aggregatePerWindow(
   rows: ReadonlyArray<TraderDailyRow>,
   chainId: number,

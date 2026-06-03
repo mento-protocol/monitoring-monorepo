@@ -231,55 +231,6 @@
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent({ | initialNetworkData,"
   },
   {
-    "file": "src/app/volume/_components/aggregator-breakdown-section.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'AggregatorTable' has too many lines (144). Maximum allowed is 100.",
-    "line": 121,
-    "linePreview": " | function AggregatorTable({ | aggregators,"
-  },
-  {
-    "file": "src/app/volume/_components/volume-table.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'TraderRow' has a complexity of 16. Maximum allowed is 15.",
-    "line": 206,
-    "linePreview": " | function TraderRow({ | rank,"
-  },
-  {
-    "file": "src/app/volume/_components/volume-table.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'ExpandedBreakdown' has too many lines (115). Maximum allowed is 100.",
-    "line": 349,
-    "linePreview": " | function ExpandedBreakdown({ | rows,"
-  },
-  {
-    "file": "src/app/volume/_components/volume-table.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'TraderRow' has too many lines (133). Maximum allowed is 100.",
-    "line": 206,
-    "linePreview": " | function TraderRow({ | rank,"
-  },
-  {
-    "file": "src/app/volume/_lib/use-hero-rollup.ts",
-    "ruleId": "complexity",
-    "message": "Function 'useHeroRollup' has a complexity of 40. Maximum allowed is 15.",
-    "line": 69,
-    "linePreview": "*/ | export function useHeroRollup({ | venue,"
-  },
-  {
-    "file": "src/app/volume/_lib/use-hero-rollup.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'useHeroRollup' has too many lines (213). Maximum allowed is 100.",
-    "line": 69,
-    "linePreview": "*/ | export function useHeroRollup({ | venue,"
-  },
-  {
-    "file": "src/app/volume/_lib/use-hero-rollup.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 26 to the 18 allowed.",
-    "line": 69,
-    "linePreview": "*/ | export function useHeroRollup({ | venue,"
-  },
-  {
     "file": "src/components/address-label-form.tsx",
     "ruleId": "complexity",
     "message": "Function 'AddressLabelForm' has a complexity of 32. Maximum allowed is 15.",
@@ -733,47 +684,5 @@
     "message": "Function 'readSortFromParams' has too many parameters (6). Maximum allowed is 5.",
     "line": 26,
     "linePreview": " | function readSortFromParams<K extends string>( | params: URLSearchParams,"
-  },
-  {
-    "file": "src/lib/volume-hero.ts",
-    "ruleId": "complexity",
-    "message": "Function 'buildHeroPartialOverlapQueryInput' has a complexity of 18. Maximum allowed is 15.",
-    "line": 217,
-    "linePreview": " | export function buildHeroPartialOverlapQueryInput(args: { | snapshotRows: ReadonlyArray<VolumeWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/volume-hero.ts",
-    "ruleId": "complexity",
-    "message": "Function 'mergeHeroSnapshot' has a complexity of 30. Maximum allowed is 15.",
-    "line": 394,
-    "linePreview": "*/ | export function mergeHeroSnapshot(args: { | snapshotRows: ReadonlyArray<VolumeWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/volume-hero.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'mergeHeroSnapshot' has too many lines (123). Maximum allowed is 100.",
-    "line": 394,
-    "linePreview": "*/ | export function mergeHeroSnapshot(args: { | snapshotRows: ReadonlyArray<VolumeWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/volume-hero.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 18 allowed.",
-    "line": 217,
-    "linePreview": " | export function buildHeroPartialOverlapQueryInput(args: { | snapshotRows: ReadonlyArray<VolumeWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/volume-hero.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 55 to the 18 allowed.",
-    "line": 394,
-    "linePreview": "*/ | export function mergeHeroSnapshot(args: { | snapshotRows: ReadonlyArray<VolumeWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/volume-pool.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'aggregatePoolDailyVolume' has too many lines (106). Maximum allowed is 100.",
-    "line": 53,
-    "linePreview": "*/ | export function aggregatePoolDailyVolume( | rows: readonly PoolDailyVolumeRow[],"
   }
 ]
