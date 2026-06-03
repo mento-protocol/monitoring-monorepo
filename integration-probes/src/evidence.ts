@@ -3,6 +3,8 @@ import type { AddressEvidence } from "./types.js";
 
 const ADDRESS_RE = /0x[a-fA-F0-9]{40}/g;
 const ADDRESS_EXACT_RE = /^0x[a-fA-F0-9]{40}$/;
+const HEX_PAYLOAD_RE = /^0x(?:[a-fA-F0-9]{2})+$/;
+const ABI_ADDRESS_PADDING = "0".repeat(24);
 const MENTO_LABEL_RE = /\bmento\b/i;
 const LABEL_KEYS = new Set([
   "name",
@@ -111,11 +113,58 @@ function collectAddressEvidence(
     const address = normalizeAddress(match[0]!);
     const type = evidenceType(address, routerSet, poolSet);
     if (!type) continue;
-    const key = `${type}:${address}:${item.path}`;
-    if (state.seen.has(key)) continue;
-    state.seen.add(key);
-    state.out.push({ type, value: address, path: item.path });
+    pushEvidence(type, address, item.path, state);
   }
+  if (!HEX_PAYLOAD_RE.test(item.value)) return;
+  const hexPayload = item.value.toLowerCase();
+  collectPackedAddressEvidence({
+    item,
+    hexPayload,
+    addresses: routerSet,
+    type: "router-address",
+    state,
+  });
+  collectPackedAddressEvidence({
+    item,
+    hexPayload,
+    addresses: poolSet,
+    type: "pool-address",
+    state,
+  });
+}
+
+type PackedAddressEvidenceArgs = {
+  item: StringAtPath;
+  hexPayload: string;
+  addresses: ReadonlySet<string>;
+  type: AddressEvidence["type"];
+  state: AddressEvidenceState;
+};
+
+function collectPackedAddressEvidence({
+  item,
+  hexPayload,
+  addresses,
+  type,
+  state,
+}: PackedAddressEvidenceArgs): void {
+  for (const address of addresses) {
+    const abiEncodedAddress = ABI_ADDRESS_PADDING + address.slice(2);
+    if (!hexPayload.includes(abiEncodedAddress)) continue;
+    pushEvidence(type, address, item.path, state);
+  }
+}
+
+function pushEvidence(
+  type: AddressEvidence["type"],
+  address: string,
+  path: string,
+  state: AddressEvidenceState,
+): void {
+  const key = `${type}:${address}:${path}`;
+  if (state.seen.has(key)) return;
+  state.seen.add(key);
+  state.out.push({ type, value: address, path });
 }
 
 function evidenceType(

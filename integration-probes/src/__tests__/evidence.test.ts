@@ -33,6 +33,60 @@ describe("detectEvidence", () => {
     expect(result.evidence[0]?.type).toBe("pool-address");
   });
 
+  it("passes on router address evidence inside ABI calldata", () => {
+    const result = detectEvidence(
+      {
+        transactionRequest: {
+          data: `0x90411a32${"0".repeat(24)}${ROUTER.slice(2)}`,
+        },
+      },
+      { routerAddresses: [ROUTER], poolAddresses: [POOL] },
+    );
+
+    expect(result.passes).toBe(true);
+    expect(result.evidence).toEqual([
+      {
+        type: "router-address",
+        value: ROUTER,
+        path: "$.transactionRequest.data",
+      },
+    ]);
+  });
+
+  it("passes on pool address evidence inside ABI calldata", () => {
+    const result = detectEvidence(
+      {
+        transactionRequest: {
+          data: `0x90411a32${"0".repeat(24)}${POOL.slice(2)}`,
+        },
+      },
+      { routerAddresses: [ROUTER], poolAddresses: [POOL] },
+    );
+
+    expect(result.passes).toBe(true);
+    expect(result.evidence).toEqual([
+      {
+        type: "pool-address",
+        value: POOL,
+        path: "$.transactionRequest.data",
+      },
+    ]);
+  });
+
+  it("does not pass on unpadded address bytes inside calldata", () => {
+    const result = detectEvidence(
+      {
+        transactionRequest: {
+          data: `0x90411a32${POOL.slice(2)}`,
+        },
+      },
+      { routerAddresses: [ROUTER], poolAddresses: [POOL] },
+    );
+
+    expect(result.passes).toBe(false);
+    expect(result.evidence).toEqual([]);
+  });
+
   it("does not pass on label-only Mento evidence", () => {
     const result = detectEvidence(
       { route: [{ protocol: "Mento" }] },

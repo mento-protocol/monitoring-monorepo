@@ -204,6 +204,19 @@ describe("probeAdapterPair", () => {
         }),
       env: {},
     });
+    const noAvailLiquidity = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            code: 500,
+            error: "No avail liquidity for the pair",
+          }),
+        ),
+      env: {},
+    });
     const rateLimited = await probeAdapterPair({
       adapter,
       chain,
@@ -213,6 +226,7 @@ describe("probeAdapterPair", () => {
     });
 
     expect(noLiquidity.status).toBe("no_liquidity");
+    expect(noAvailLiquidity.status).toBe("no_liquidity");
     expect(rateLimited.status).toBe("rate_limited");
   });
 
@@ -449,9 +463,11 @@ describe("aggregator quote builders", () => {
       "openocean-key",
     );
     const openOceanParams = new URL(openOceanRequest?.url ?? "").searchParams;
-    expect(openOceanParams.get("amount")).toBe(input.amountDecimal);
-    expect(openOceanParams.get("gasPrice")).toBe("1");
-    expect(openOceanParams.has("amountDecimals")).toBe(false);
+    expect(openOceanParams.get("amountDecimals")).toBe(input.amountRaw);
+    expect(openOceanParams.get("gasPriceDecimals")).toBe("1000000000");
+    expect(openOceanParams.get("enabledDexIds")).toBe("8");
+    expect(openOceanParams.has("amount")).toBe(false);
+    expect(openOceanParams.has("gasPrice")).toBe(false);
 
     const relayRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "relay",
