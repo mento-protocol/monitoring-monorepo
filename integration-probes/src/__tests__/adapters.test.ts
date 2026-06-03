@@ -363,6 +363,95 @@ describe("probeAdapterPair", () => {
     expect(calls).toBe(2);
   });
 
+  it("caps repeated HTTP error responses before exhausting route discovery", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+        {
+          url: "https://example.test/late-pass",
+          amountDecimal: "10000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+    let calls = 0;
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ message: "upstream timeout" }), {
+          status: 503,
+        });
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.requestUrl).toBe("https://example.test/default");
+    expect(result.error).toBe("HTTP 503: upstream timeout");
+    expect(result.attemptCount).toBe(2);
+    expect(calls).toBe(2);
+  });
+
+  it("stops route discovery when the quote-attempt budget is exhausted", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+    let calls = 0;
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ route: [{ protocol: "Other" }] }));
+      },
+      env: {},
+      quoteBudget: { remaining: 1 },
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.requestUrl).toBe("https://example.test/default");
+    expect(result.attemptCount).toBe(1);
+    expect(calls).toBe(1);
+  });
+
   it("keeps no-liquidity and rate-limit responses explicit", async () => {
     const adapter: AggregatorAdapter = {
       id: "public",
@@ -696,10 +785,14 @@ describe("aggregator quote builders", () => {
       lifiRequests.some((request) =>
         request.url.includes("allowExchanges=mento"),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       lifiRequests.some((request) => request.amountDecimal === "100000"),
     ).toBe(true);
+    expect(
+      AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi")
+        ?.maxQuoteRequestsPerRun,
+    ).toBe(180);
 
     const openOceanRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "openocean",

@@ -37,10 +37,14 @@ pnpm --filter @mento-protocol/integration-probes knip
   visibility only.
 - LI.FI/Jumper probes use ordered route-discovery attempts after the default
   quote so cheaper non-Mento venues on small swaps do not mask an available
-  Mento v3 route. These attempts still pass only with Routerv300 or registered
-  pool/VirtualPool address evidence.
-- Repeated request-level errors during route discovery are capped at two
-  attempts per route so an aggregator outage cannot starve the scheduled writer.
+  Mento v3 route. Discovery uses current LI.FI tool keys only; do not add
+  speculative `allowExchanges` values that are absent from `/v1/tools`. These
+  attempts still pass only with Routerv300 or registered pool/VirtualPool
+  address evidence.
+- LI.FI quote attempts are capped at 180 per scheduled run, and repeated
+  request/HTTP errors during route discovery are capped at two attempts per
+  route, so an aggregator outage or discovery loop cannot starve the scheduled
+  writer.
 - `integration-probes:latest` expires after 3 days so failed scheduled probes
   degrade the dashboard instead of showing stale health forever. Dated history
   keys expire after 90 days.

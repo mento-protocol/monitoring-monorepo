@@ -10,6 +10,7 @@ import type {
 
 const DEFAULT_TAKER = "0x000000000000000000000000000000000000dEaD";
 const LIFI_INTEGRATOR = "mento-probes";
+const LIFI_MAX_QUOTE_REQUESTS_PER_RUN = 180;
 const LIFI_ROUTE_DISCOVERY_MULTIPLIERS = [
   1n,
   10n,
@@ -31,6 +32,10 @@ type QuoteRequest = {
   amountDecimal?: string;
 };
 
+export type QuoteAttemptBudget = {
+  remaining: number;
+};
+
 type RequestHeaders = Record<string, string>;
 
 export type AggregatorAdapter = {
@@ -45,6 +50,7 @@ export type AggregatorAdapter = {
     input: QuoteProbeInput,
     env: NodeJS.ProcessEnv,
   ) => QuoteRequest | readonly QuoteRequest[];
+  maxQuoteRequestsPerRun?: number;
   nextStep?: string;
 };
 
@@ -90,6 +96,7 @@ export async function probeAdapterPair(args: {
   input: QuoteProbeInput;
   fetcher: FetchLike;
   env: NodeJS.ProcessEnv;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<PairProbeResult> {
   const unsupported = unsupportedResult(args.adapter, args.input);
   if (unsupported) return unsupported;
@@ -166,6 +173,7 @@ async function fetchAndEvaluate(args: {
   input: QuoteProbeInput;
   fetcher: FetchLike;
   env: NodeJS.ProcessEnv;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<PairProbeResult> {
   const requests = normalizeQuoteRequests(
     args.adapter.quote!(args.input, args.env),
@@ -174,6 +182,9 @@ async function fetchAndEvaluate(args: {
   let attemptCount = 0;
   let requestErrorAttempts = 0;
   for (const request of requests) {
+    if (!consumeQuoteAttempt(args.quoteBudget)) {
+      return quoteBudgetExhaustedResult(args.input, fallback, attemptCount);
+    }
     attemptCount += 1;
     const result = {
       ...(await fetchAndEvaluateAttempt({ ...args, request })),
@@ -183,17 +194,39 @@ async function fetchAndEvaluate(args: {
     fallback = betterFallback(fallback, result);
     if (requestErrored(result)) {
       requestErrorAttempts += 1;
-      if (requestErrorAttempts >= REQUEST_ERROR_ATTEMPT_LIMIT) {
-        return { ...(fallback ?? result), attemptCount };
-      }
     }
-    if (terminalStatus(result.status)) {
+    if (shouldStopAfterAttempt(result, requestErrorAttempts)) {
       return { ...(fallback ?? result), attemptCount };
     }
   }
   return fallback
     ? { ...fallback, attemptCount }
     : skippedResult(args.input, "error", "No quote requests built.");
+}
+
+function quoteBudgetExhaustedResult(
+  input: QuoteProbeInput,
+  fallback: PairProbeResult | null,
+  attemptCount: number,
+): PairProbeResult {
+  return fallback
+    ? { ...fallback, attemptCount }
+    : skippedResult(
+        input,
+        "rate_limited",
+        "Adapter quote-attempt budget exhausted.",
+      );
+}
+
+function shouldStopAfterAttempt(
+  result: PairProbeResult,
+  requestErrorAttempts: number,
+): boolean {
+  return (
+    terminalStatus(result.status) ||
+    (requestErrored(result) &&
+      requestErrorAttempts >= REQUEST_ERROR_ATTEMPT_LIMIT)
+  );
 }
 
 async function fetchAndEvaluateAttempt(args: {
@@ -289,11 +322,14 @@ function terminalStatus(status: ProbeStatus): boolean {
 }
 
 function requestErrored(result: PairProbeResult): boolean {
-  return (
-    result.status === "error" &&
-    result.httpStatus === null &&
-    result.requestUrl !== null
-  );
+  return result.status === "error" && result.requestUrl !== null;
+}
+
+function consumeQuoteAttempt(budget: QuoteAttemptBudget | undefined): boolean {
+  if (!budget) return true;
+  if (budget.remaining <= 0) return false;
+  budget.remaining -= 1;
+  return true;
 }
 
 async function responseJson(response: Response): Promise<unknown> {
@@ -495,6 +531,7 @@ function lifiAdapter(): AggregatorAdapter {
     tier: 1,
     credentialEnv: ["LIFI_API_KEY"],
     support: { 42220: "supported", 143: "supported" },
+    maxQuoteRequestsPerRun: LIFI_MAX_QUOTE_REQUESTS_PER_RUN,
     researchNote:
       "LI.FI chain metadata lists both Celo and Monad; scheduled probes use an API key and route-discovery attempts to avoid confusing cheaper non-Mento default routes with missing Mento support.",
     quote: lifiQuoteRequests,
@@ -729,13 +766,6 @@ function lifiQuoteRequests(
         input,
         routeParams: { allowExchanges: "openocean" },
         variant: "allow-openocean",
-      }),
-      lifiDiscoveryRequest({
-        amount,
-        headers,
-        input,
-        routeParams: { allowExchanges: "mento" },
-        variant: "allow-mento",
       }),
     );
   }

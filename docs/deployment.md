@@ -157,13 +157,14 @@ credentials are optional at the stack level; missing keys render as `needs_key`
 instead of failing the chain check.
 
 LI.FI/Jumper checks start with the default nominal quote and then try
-route-discovery variants with OpenOcean/Mento exchange filters and larger
-stable-unit amounts. This catches integrations that can route through Mento v3
-even when small default swaps prefer cheaper non-Mento venues. A discovered
-route still passes only when the response contains Routerv300 or registered
-pool/VirtualPool address evidence. Repeated request-level errors are capped at
-two attempts per route so an aggregator outage cannot starve the scheduled
-writer before it publishes degraded results.
+route-discovery variants with current LI.FI OpenOcean exchange filters and
+larger stable-unit amounts. This catches integrations that can route through
+Mento v3 even when small default swaps prefer cheaper non-Mento venues. A
+discovered route still passes only when the response contains Routerv300 or
+registered pool/VirtualPool address evidence. LI.FI quote attempts are capped
+at 180 per scheduled run, and repeated request/HTTP errors are capped at two
+attempts per route, so discovery cannot exhaust the API quota or starve the
+scheduled writer before it publishes degraded results.
 
 ### Address Book & Backup Cron
 

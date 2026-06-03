@@ -6,6 +6,7 @@ import {
   poolIdFromPairId,
   probeAdapterPair,
   type AggregatorAdapter,
+  type QuoteAttemptBudget,
 } from "./adapters.js";
 import { buildChainProbeConfigs, buildQuoteInputs } from "./pairs.js";
 import {
@@ -159,7 +160,12 @@ async function probeAdapters(args: {
     args.adapters,
     args.adapterConcurrency,
     async (adapter) => {
-      const chains = await probeAdapterChains({ ...args, adapter });
+      const quoteBudget = quoteAttemptBudget(adapter);
+      const chains = await probeAdapterChains({
+        ...args,
+        adapter,
+        quoteBudget,
+      });
       return {
         id: adapter.id,
         label: adapter.label,
@@ -180,6 +186,7 @@ async function probeAdapterChains(args: {
   env: NodeJS.ProcessEnv;
   fetcher: FetchLike;
   pairConcurrency: number;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<ChainProbeResult[]> {
   const out: ChainProbeResult[] = [];
   for (const chain of args.chains) {
@@ -196,6 +203,7 @@ async function probeChainPairs(args: {
   env: NodeJS.ProcessEnv;
   fetcher: FetchLike;
   pairConcurrency: number;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<PairProbeResult[]> {
   const inputs = buildQuoteInputs({
     chain: args.chain,
@@ -209,6 +217,13 @@ async function probeChainPairs(args: {
       return errorResult(input, error);
     }
   });
+}
+
+function quoteAttemptBudget(
+  adapter: AggregatorAdapter,
+): QuoteAttemptBudget | undefined {
+  if (adapter.maxQuoteRequestsPerRun === undefined) return undefined;
+  return { remaining: adapter.maxQuoteRequestsPerRun };
 }
 
 function chainResult(
