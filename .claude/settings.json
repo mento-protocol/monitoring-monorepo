@@ -38,7 +38,7 @@
       "Bash(bash ./scripts/check-react-doctor-diff.sh:*)",
       "Bash(bash scripts/check-react-doctor-score.sh:*)",
       "Bash(bash ./scripts/check-react-doctor-score.sh:*)",
-      "Bash(sag --api-key-file * -v Charlie:*)",
+      "Bash(sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie:*)",
       "Bash(say:*)",
       "Bash(spd-say:*)",
       "Bash(ESLINT_BASELINE_MAIN=* node *)",

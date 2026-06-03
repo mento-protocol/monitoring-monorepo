@@ -50,7 +50,7 @@ repo-standard key file path so behavior does not depend on shell startup files
 or stripped environment variables:
 
 ```bash
-sag --api-key-file "$HOME/.config/sag/elevenlabs-api-key" -v Charlie "hey, i need your approval to deploy the Alloy collector"
+sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "hey, i need your approval to deploy the Alloy collector"
 ```
 
 `sag` needs network access to ElevenLabs, a readable ElevenLabs API key, and the
@@ -68,7 +68,7 @@ developer machine. Use this fallback order:
 ```bash
 msg="hey, i need your feedback on the deploy"
 if command -v sag >/dev/null 2>&1 && [ -r "$HOME/.config/sag/elevenlabs-api-key" ]; then
-  sag --api-key-file "$HOME/.config/sag/elevenlabs-api-key" -v Charlie "$msg"
+  sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "$msg"
 elif command -v say >/dev/null 2>&1; then
   say "$msg"
 elif command -v spd-say >/dev/null 2>&1; then
