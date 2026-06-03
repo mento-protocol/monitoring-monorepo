@@ -58,6 +58,10 @@ splunk_on_call_api_key = "your-splunk-on-call-api-key"
 # Set this if the channel lookup ever fails due pagination or privacy.
 # oncall_slack_channel_id = "C0123ABC456"
 
+# Optional: set this to reuse an existing @support-engineer usergroup. Leave
+# empty for Terraform to create and manage the usergroup.
+# oncall_support_usergroup_id = "S0123ABC456"
+
 # Optional: poll every 15 minutes by default; state dedupe means only rotations
 # post Slack messages.
 # oncall_rotation_check_schedule = "*/15 * * * *"

@@ -45,6 +45,24 @@ describe("GCS rotation state", () => {
     await expect(readRotationState(config, fetchMock)).resolves.toBeUndefined();
   });
 
+  it("returns undefined when the state object contains malformed JSON", async () => {
+    resetStateTokenCacheForTests();
+    const malformedStateResponse = {
+      json: vi.fn(async () => {
+        throw new SyntaxError("Unexpected end of JSON input");
+      }),
+      ok: true,
+      status: 200,
+      statusText: "OK",
+    } as unknown as Response;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ access_token: "token" }))
+      .mockResolvedValueOnce(malformedStateResponse);
+
+    await expect(readRotationState(config, fetchMock)).resolves.toBeUndefined();
+  });
+
   it("writes JSON state to the configured object", async () => {
     resetStateTokenCacheForTests();
     const fetchMock = vi

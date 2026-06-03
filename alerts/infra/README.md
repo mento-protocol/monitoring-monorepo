@@ -96,6 +96,10 @@ slack_bot_token = "xoxb-..."
 splunk_on_call_api_id  = "your-splunk-on-call-api-id"
 splunk_on_call_api_key = "your-splunk-on-call-api-key"
 
+# Optional: set this to reuse an existing @support-engineer Slack usergroup.
+# Leave empty for Terraform to create and manage it.
+# oncall_support_usergroup_id = "S0123ABC456"
+
 # GCP Configuration
 project_name     = "alerts"              # Optional, defaults to "alerts"
 org_id           = "599540483579"
@@ -217,6 +221,8 @@ multisigs = {
 - Posts one Slack message to `#eng` only when the on-call username changes
 - Replaces `@support-engineer` membership with exactly that Slack user on every run
 - Stores last-seen state in a private GCS bucket to suppress duplicate announcements
+- Creates and manages `@support-engineer` unless `oncall_support_usergroup_id`
+  is set to reuse an existing Slack usergroup
 
 ### QuickNode Webhooks
 

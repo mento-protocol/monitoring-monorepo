@@ -150,6 +150,17 @@ variable "oncall_support_usergroup_handle" {
   }
 }
 
+variable "oncall_support_usergroup_id" {
+  description = "Existing Slack usergroup ID for @support-engineer. Leave empty for Terraform to create and manage the usergroup."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.oncall_support_usergroup_id == "" || can(regex("^S[A-Z0-9]{8,}$", var.oncall_support_usergroup_id))
+    error_message = "oncall_support_usergroup_id must be empty or a Slack usergroup ID such as S0123ABC456."
+  }
+}
+
 variable "oncall_support_usergroup_name" {
   description = "Slack display name for the current support engineer usergroup."
   type        = string

@@ -76,7 +76,11 @@ export async function readRotationState(
     throw new Error(`Failed to read on-call state: ${response.status}`);
   }
 
-  return (await response.json()) as RotationState;
+  try {
+    return (await response.json()) as RotationState;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function writeRotationState(

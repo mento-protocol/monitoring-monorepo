@@ -199,10 +199,6 @@ locals {
     : local.oncall_slack_channel_lookup_id
   )
 
-  support_engineer_existing_usergroup_ids = [
-    for ug in jsondecode(data.http.slack_usergroups_list.response_body).usergroups :
-    ug.id if ug.handle == var.oncall_support_usergroup_handle
-  ]
 }
 
 resource "terraform_data" "oncall_announcer_credentials_guard" {
@@ -219,7 +215,7 @@ resource "terraform_data" "oncall_announcer_credentials_guard" {
 }
 
 resource "restapi_object" "support_engineer_usergroup" {
-  count = local.oncall_announcer_enabled && length(local.support_engineer_existing_usergroup_ids) == 0 ? 1 : 0
+  count = local.oncall_announcer_enabled && var.oncall_support_usergroup_id == "" ? 1 : 0
 
   provider = restapi.slack
 
@@ -244,6 +240,8 @@ resource "restapi_object" "support_engineer_usergroup" {
   ignore_all_server_changes = true
 
   lifecycle {
+    prevent_destroy = true
+
     precondition {
       condition     = local.oncall_slack_channel_id != ""
       error_message = "Could not resolve the on-call Slack channel. Set oncall_slack_channel_id explicitly or ensure #${var.oncall_slack_channel_name} exists and the Slack token has channels:read."
@@ -260,8 +258,8 @@ locals {
   support_engineer_usergroup_id = (
     !local.oncall_announcer_enabled
     ? ""
-    : length(local.support_engineer_existing_usergroup_ids) > 0
-    ? local.support_engineer_existing_usergroup_ids[0]
+    : var.oncall_support_usergroup_id != ""
+    ? var.oncall_support_usergroup_id
     : restapi_object.support_engineer_usergroup[0].id
   )
 }
