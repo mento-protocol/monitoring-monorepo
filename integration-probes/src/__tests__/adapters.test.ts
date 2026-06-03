@@ -227,6 +227,52 @@ describe("probeAdapterPair", () => {
     expect(result.attemptCount).toBe(2);
   });
 
+  it("continues route discovery after a quote attempt throws", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async (url) => {
+        if (!String(url).includes("discovery")) {
+          throw new Error("temporary network error");
+        }
+        return new Response(
+          JSON.stringify({
+            transactionRequest: { data: `swap through ${ROUTER}` },
+          }),
+        );
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.requestUrl).toBe("https://example.test/discovery");
+    expect(result.routeVariant).toBe("allow-openocean");
+    expect(result.routeAmountUsd).toBe("1000");
+    expect(result.attemptCount).toBe(2);
+  });
+
   it("keeps no-liquidity and rate-limit responses explicit", async () => {
     const adapter: AggregatorAdapter = {
       id: "public",

@@ -174,7 +174,7 @@ async function fetchAndEvaluate(args: {
   for (const request of requests) {
     attemptCount += 1;
     const result = {
-      ...(await fetchAndEvaluateRequest({ ...args, request })),
+      ...(await fetchAndEvaluateAttempt({ ...args, request })),
       attemptCount,
     };
     if (result.status === "pass") return result;
@@ -184,6 +184,19 @@ async function fetchAndEvaluate(args: {
   return fallback
     ? { ...fallback, attemptCount }
     : skippedResult(args.input, "error", "No quote requests built.");
+}
+
+async function fetchAndEvaluateAttempt(args: {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  fetcher: FetchLike;
+  request: QuoteRequest;
+}): Promise<PairProbeResult> {
+  try {
+    return await fetchAndEvaluateRequest(args);
+  } catch (error) {
+    return requestErrorResult(args.input, args.request, error);
+  }
 }
 
 async function fetchAndEvaluateRequest(args: {
@@ -333,6 +346,23 @@ function unsupportedResponse(payload: unknown): boolean {
 function cloudflareBlocked(payload: unknown): boolean {
   const text = JSON.stringify(payload).toLowerCase();
   return text.includes("cloudflare") || text.includes("attention required");
+}
+
+function requestErrorResult(
+  input: QuoteProbeInput,
+  request: QuoteRequest,
+  error: unknown,
+): PairProbeResult {
+  return {
+    ...skippedResult(
+      input,
+      "error",
+      error instanceof Error ? error.message : String(error),
+    ),
+    routeVariant: request.variant ?? null,
+    routeAmountUsd: request.amountDecimal ?? input.amountDecimal,
+    requestUrl: request.url,
+  };
 }
 
 function unsupportedResult(
