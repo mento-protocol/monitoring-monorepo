@@ -367,7 +367,7 @@ function lifiAdapter(): AggregatorAdapter {
       "LI.FI chain metadata lists both Celo and Monad; scheduled probes use an API key to avoid public quote limits.",
     quote: (input, env) =>
       getRequest(lifiUrl(input), {
-        "x-lifi-api-key": env.LIFI_API_KEY!,
+        "x-lifi-api-key": env.LIFI_API_KEY ?? "",
       }),
   };
 }

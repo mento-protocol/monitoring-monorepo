@@ -444,9 +444,6 @@ describe("aggregator quote builders", () => {
     const lifiRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "lifi",
     )?.quote?.(input, env);
-    expect(
-      AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi")?.credentialEnv,
-    ).toEqual(["LIFI_API_KEY"]);
     expect(JSON.stringify(lifiRequest?.init?.headers)).toContain(
       "x-lifi-api-key",
     );
@@ -522,6 +519,7 @@ describe("aggregator quote builders", () => {
   it("requires a LI.FI API key before probing LI.FI/Jumper", async () => {
     const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
     expect(lifi).toBeDefined();
+    expect(lifi?.credentialEnv).toEqual(["LIFI_API_KEY"]);
 
     const result = await probeAdapterPair({
       adapter: lifi!,
