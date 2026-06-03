@@ -145,14 +145,15 @@ pnpm integrations:probe --adapter openocean,relay --chain 42220 --pair-limit 1 -
 ```
 
 `INTEGRATION_PROBES_HASURA_URL` can override `NEXT_PUBLIC_HASURA_URL` for pool
-discovery. `LIFI_API_KEY` is optional but recommended for scheduled runs because
-the unauthenticated LI.FI quote API can return multi-hour public rate limits.
-`OPENOCEAN_API_KEY` enables the OpenOcean Pro endpoint for OpenOcean checks and
-is managed by the platform Terraform stack from `openocean_api_key`. The same
-platform stack mirrors `INTEGRATION_PROBES_HASURA_URL`,
-`UPSTASH_REDIS_REST_URL`, and `UPSTASH_REDIS_REST_TOKEN` into repo-level GitHub
-Actions secrets so scheduled writers use the same Terraform-owned runtime as the
-dashboard. Adapter credentials are optional; missing keys render as `needs_key`
+discovery. `LIFI_API_KEY` authenticates LI.FI/Jumper quote probes with the
+`x-lifi-api-key` header so scheduled runs avoid public quote limits, and
+`OPENOCEAN_API_KEY` enables the OpenOcean Pro endpoint for OpenOcean checks.
+Both are managed by the platform Terraform stack from `lifi_api_key` and
+`openocean_api_key`. The same platform stack mirrors
+`INTEGRATION_PROBES_HASURA_URL`, `UPSTASH_REDIS_REST_URL`, and
+`UPSTASH_REDIS_REST_TOKEN` into repo-level GitHub Actions secrets so scheduled
+writers use the same Terraform-owned runtime as the dashboard. Adapter
+credentials are optional at the stack level; missing keys render as `needs_key`
 instead of failing the chain check.
 
 ### Address Book & Backup Cron

@@ -197,7 +197,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | Variable                        | Description                                               |
 | ------------------------------- | --------------------------------------------------------- |
 | `INTEGRATION_PROBES_HASURA_URL` | Optional override for the pool-discovery GraphQL endpoint |
-| `LIFI_API_KEY`                  | Optional LI.FI API key to avoid public quote rate limits  |
+| `LIFI_API_KEY`                  | LI.FI quote API key for LI.FI/Jumper probes               |
 | `OPENOCEAN_API_KEY`             | Optional OpenOcean Pro quote API key                      |
 | `ZEROX_API_KEY`                 | Optional 0x quote API key                                 |
 | `ONEINCH_API_KEY`               | Optional 1inch quote API key                              |

@@ -444,6 +444,9 @@ describe("aggregator quote builders", () => {
     const lifiRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "lifi",
     )?.quote?.(input, env);
+    expect(
+      AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi")?.credentialEnv,
+    ).toEqual(["LIFI_API_KEY"]);
     expect(JSON.stringify(lifiRequest?.init?.headers)).toContain(
       "x-lifi-api-key",
     );
@@ -514,5 +517,23 @@ describe("aggregator quote builders", () => {
 
     expect(result.status).toBe("needs_key");
     expect(result.error).toBe("Missing OPENOCEAN_API_KEY");
+  });
+
+  it("requires a LI.FI API key before probing LI.FI/Jumper", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain,
+      input,
+      fetcher: async () => {
+        throw new Error("should not fetch without a key");
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("needs_key");
+    expect(result.error).toBe("Missing LIFI_API_KEY");
   });
 });

@@ -361,9 +361,14 @@ function lifiAdapter(): AggregatorAdapter {
     label: "LI.FI / Jumper",
     kind: "cross_chain",
     tier: 1,
+    credentialEnv: ["LIFI_API_KEY"],
     support: { 42220: "supported", 143: "supported" },
-    researchNote: "LI.FI chain metadata lists both Celo and Monad.",
-    quote: (input, env) => getRequest(lifiUrl(input), optionalLifiHeaders(env)),
+    researchNote:
+      "LI.FI chain metadata lists both Celo and Monad; scheduled probes use an API key to avoid public quote limits.",
+    quote: (input, env) =>
+      getRequest(lifiUrl(input), {
+        "x-lifi-api-key": env.LIFI_API_KEY!,
+      }),
   };
 }
 
@@ -578,12 +583,6 @@ function lifiUrl(input: QuoteProbeInput): string {
     integrator: LIFI_INTEGRATOR,
   });
   return url.toString();
-}
-
-function optionalLifiHeaders(
-  env: NodeJS.ProcessEnv,
-): RequestHeaders | undefined {
-  return env.LIFI_API_KEY ? { "x-lifi-api-key": env.LIFI_API_KEY } : undefined;
 }
 
 function openOceanUrl(input: QuoteProbeInput): string {
