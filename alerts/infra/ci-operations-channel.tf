@@ -1,0 +1,122 @@
+################################
+# CI operations Slack channel   #
+################################
+#
+# A neutral home for GitHub Actions operational messages that are not failures,
+# especially Terraform apply-pending summaries from the CI-applied Terraform
+# stacks. Keep actual main-branch workflow failure alerts in #ci-failures.
+
+resource "restapi_object" "ci_operations_channel" {
+  provider = restapi.slack
+
+  path        = "/conversations.create"
+  create_path = "/conversations.create"
+  read_path   = "/conversations.info?channel={id}"
+
+  destroy_path   = "/conversations.archive?channel={id}"
+  destroy_method = "POST"
+
+  update_path   = ""
+  update_method = "POST"
+
+  data = jsonencode({
+    name       = "ci-operations"
+    is_private = false
+  })
+
+  id_attribute              = "channel/id"
+  ignore_all_server_changes = true
+
+  lifecycle {
+    postcondition {
+      condition     = self.api_response != null && try(jsondecode(self.api_response).ok, false) == true
+      error_message = "Slack conversations.create failed for #ci-operations: ${try(jsondecode(self.api_response).error, "unknown")}"
+    }
+  }
+}
+
+# Join so lifecycle archive calls keep working. Posting uses chat:write.public
+# and does not require membership.
+resource "restapi_object" "ci_operations_channel_member" {
+  provider = restapi.slack
+
+  path        = "/conversations.join"
+  create_path = "/conversations.join"
+  read_path   = "/conversations.info?channel={id}"
+
+  destroy_path   = "/api.test"
+  destroy_method = "POST"
+
+  update_path   = ""
+  update_method = "POST"
+
+  data = jsonencode({
+    channel = restapi_object.ci_operations_channel.id
+  })
+
+  id_attribute              = "channel/id"
+  ignore_all_server_changes = true
+
+  depends_on = [restapi_object.ci_operations_channel]
+
+  lifecycle {
+    postcondition {
+      condition     = self.api_response != null && try(jsondecode(self.api_response).ok, false) == true
+      error_message = "Slack conversations.join failed for #ci-operations: ${try(jsondecode(self.api_response).error, "unknown")}"
+    }
+  }
+}
+
+resource "restapi_object" "ci_operations_invite_eng" {
+  count = local.eng_user_ids_csv == "" ? 0 : 1
+
+  provider = restapi.slack
+
+  path        = "/conversations.invite"
+  create_path = "/conversations.invite"
+  read_path   = "/api.test"
+
+  destroy_path   = "/api.test"
+  destroy_method = "POST"
+
+  update_path   = ""
+  update_method = "POST"
+
+  data = jsonencode({
+    channel = restapi_object.ci_operations_channel.id
+    users   = local.eng_user_ids_csv
+    force   = true
+  })
+
+  force_new = [
+    local.eng_user_ids_csv,
+  ]
+
+  id_attribute              = "ok"
+  ignore_all_server_changes = true
+
+  depends_on = [restapi_object.ci_operations_channel_member]
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.api_response != null && (
+          try(jsondecode(self.api_response).ok, false) == true
+          || (
+            try(length(jsondecode(self.api_response).errors), 0) > 0
+            && alltrue([
+              for err in try(jsondecode(self.api_response).errors, []) :
+              try(err.error, "") == "already_in_channel"
+            ])
+          )
+        )
+      )
+      error_message = "Slack conversations.invite failed for #ci-operations @eng: ${try(jsondecode(self.api_response).error, try(jsondecode(self.api_response).errors[0].error, "unknown"))}"
+    }
+  }
+}
+
+output "ci_operations_channel_id" {
+  description = "Slack channel ID for #ci-operations (used by Terraform apply-pending notifications)"
+  value       = restapi_object.ci_operations_channel.id
+}

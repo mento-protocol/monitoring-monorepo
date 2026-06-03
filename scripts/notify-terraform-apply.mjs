@@ -4,7 +4,7 @@ import { request } from "node:https";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_PLAN_FILE = "/tmp/tf-plan.txt";
-const DEFAULT_SLACK_CHANNEL = "#ci-failures";
+const DEFAULT_SLACK_CHANNEL = "#ci-operations";
 const MAX_RESOURCE_LINES = 10;
 const MAX_TYPE_LINES = 8;
 const USER_AGENT = "mento-monitoring-terraform-apply-notifier";

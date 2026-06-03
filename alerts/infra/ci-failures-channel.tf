@@ -1,14 +1,11 @@
 ###############################
-# CI operations Slack channel  #
+# CI failures Slack channel    #
 ###############################
 #
-# A dedicated `#ci-failures` channel for GitHub Actions operational messages:
-# main-branch workflow failures from `.github/workflows/notify-slack-on-main-failure.yml`
-# and, by default, Terraform apply-pending summaries from the CI-applied
-# Terraform stacks. Separate from `#alerts-critical` / `#alerts-infra` because
-# CI messages are about deploy/release machinery, not direct production
-# degradation. Set the repository variable `TERRAFORM_APPLY_SLACK_CHANNEL` if
-# Terraform apply summaries should go to a different public Slack channel.
+# A dedicated `#ci-failures` channel for main-branch GitHub Actions failures
+# from `.github/workflows/notify-slack-on-main-failure.yml`. Terraform
+# apply-pending summaries are intentionally routed to `#ci-operations` instead
+# so approval waits do not look like failed builds.
 #
 # Same restapi-against-Slack pattern as `channels/sentry-bridge/slack_channels.tf`
 # (per-project channels). Reuses the existing `restapi.slack` provider in
