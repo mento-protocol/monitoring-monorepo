@@ -29,7 +29,7 @@ Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for i
 
 - `pnpm tf validate alerts-rules` / `pnpm tf validate alerts-delivery` for local validation.
 - `pnpm alerts:rules:plan` and `pnpm alerts:infra:plan` — must show 0 changes against existing state unless the PR intentionally changes the stack.
-- `pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck` and `test` — green on handler changes. Lint/knip are wired but verify they pass too after dep bumps.
+- `pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck` and `test:coverage` — green on handler changes. Lint/knip are wired but verify they pass too after dep bumps.
 - `pnpm agent:quality-gate` for any combined edit — path-aware routing.
 
 For Cloud Function deploy verification, follow `docs/pr-checklists/terraform-cloudrun.md`.

@@ -1288,7 +1288,7 @@ Deploy indexer schema and dashboard together so the UI never points at a schema-
 End-to-end:
 
 1. **Indexer-local**: `pnpm indexer:dev` scoped to Celo block ranges that cover all three TroveManagers (GBPm/CHFm/JPYm), their StabilityPools, shared CDPLiquidityStrategy, ReserveTroveFactory, and at least one TroveOperation, Liquidation, Redemption, StabilityPool balance/deposit update, ReserveTroveCreated, PoolAdded/PoolRemoved, and ShutDown-path fixture where available. Hit local Hasura: `SELECT * FROM "LiquityCollateral"` (expect 3 rows), `SELECT * FROM "LiquityInstance"` (expect 3 rows), `SELECT * FROM "Trove" WHERE status='active' LIMIT 10`. Cross-check ICR values against Celoscan-decoded TroveUpdated logs.
-2. **Unit tests**: `pnpm --filter @mento-protocol/indexer-envio test` — Phase A.5 tests must pass.
+2. **Unit tests**: `pnpm --filter @mento-protocol/indexer-envio test:coverage` — Phase A.5 tests must pass.
 3. **TCR sanity check**: pick a recent TroveOperation tx; compute expected TCR from on-chain `TroveManager.getTCR(price)` view; compare to our derived `LiquityInstance.tcrBps` after applying interest accrual to the snapshot timestamp. Tolerance ±25 bps; investigate if larger.
 4. **Hasura prod**: post-deploy curl-verify each query before the UI relies on it:
    ```bash

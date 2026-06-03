@@ -4,6 +4,7 @@
 
 import axios from "axios";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "./logger";
 import { formatSlackMessage, sendToSlack } from "./slack";
 import type { QuickNodeDecodedLog } from "./types";
 
@@ -103,6 +104,7 @@ describe("sendToSlack", () => {
 
   beforeEach(() => {
     vi.useRealTimers();
+    vi.clearAllMocks();
     postMock.mockReset();
   });
 
@@ -149,6 +151,32 @@ describe("sendToSlack", () => {
     );
 
     expect(postMock).toHaveBeenCalledOnce();
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Slack postMessage attempt failed",
+      expect.objectContaining({
+        attempt: 1,
+        maxRetries: 4,
+        error: {
+          name: "SlackApiError",
+          message: "Slack chat.postMessage failed: invalid_auth",
+        },
+        status: 200,
+        statusText: "OK",
+        slackError: "invalid_auth",
+      }),
+    );
+    expect(logger.error).toHaveBeenCalledWith(
+      "Slack postMessage failed after all retries",
+      expect.objectContaining({
+        error: expect.objectContaining({
+          name: "SlackApiError",
+          message: "Slack chat.postMessage failed: invalid_auth",
+        }),
+        status: 200,
+        statusText: "OK",
+        slackError: "invalid_auth",
+      }),
+    );
   });
 
   it("respects Slack Retry-After on rate-limited responses", async () => {
@@ -176,5 +204,89 @@ describe("sendToSlack", () => {
     await result;
 
     expect(postMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("logs retry-after metadata for retryable Slack API response errors", async () => {
+    vi.useFakeTimers();
+    postMock.mockResolvedValueOnce({
+      data: { ok: false, error: "internal_error" },
+      headers: { "Retry-After": "2" },
+      status: 500,
+      statusText: "Server Error",
+    });
+    postMock.mockResolvedValueOnce({
+      data: { ok: true },
+      status: 200,
+      statusText: "OK",
+    });
+
+    const result = sendToSlack("xoxb-test", "Calerts", message);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(postMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await result;
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Slack postMessage attempt failed",
+      expect.objectContaining({
+        attempt: 1,
+        maxRetries: 4,
+        status: 500,
+        statusText: "Server Error",
+        slackError: "internal_error",
+      }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      "Retrying Slack postMessage request",
+      {
+        attempt: 2,
+        delayMs: 2_000,
+        retryAfterDelayMs: 2_000,
+      },
+    );
+    expect(logger.info).toHaveBeenCalledWith("Slack message sent after retry", {
+      channelId: "Calerts",
+      text: message.text,
+      attempt: 2,
+    });
+  });
+
+  it("does not retry aborted Slack requests", async () => {
+    const abortError = new Error("Operation aborted");
+    abortError.name = "AbortError";
+    postMock.mockRejectedValue(abortError);
+
+    await expect(sendToSlack("xoxb-test", "Calerts", message)).rejects.toThrow(
+      "Operation aborted",
+    );
+
+    expect(postMock).toHaveBeenCalledOnce();
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Slack postMessage attempt failed",
+      expect.objectContaining({
+        attempt: 1,
+        maxRetries: 4,
+        error: {
+          name: "AbortError",
+          message: "Operation aborted",
+        },
+        status: undefined,
+        statusText: undefined,
+        slackError: undefined,
+      }),
+    );
+    expect(logger.error).toHaveBeenCalledWith(
+      "Slack postMessage failed after all retries",
+      expect.objectContaining({
+        error: expect.objectContaining({
+          name: "AbortError",
+          message: "Operation aborted",
+        }),
+        status: undefined,
+        statusText: undefined,
+        slackError: undefined,
+      }),
+    );
   });
 });

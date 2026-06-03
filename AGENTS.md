@@ -160,19 +160,23 @@ package-manager config, review the script/lifecycle diff first, then
 temporarily set `agent.qualityGate.allowPackageScriptChanges=true` in local git
 config for that push.
 
-Package-local gate tasks for `lint`, `typecheck`, `test`, `knip`, dashboard
-build, dashboard size-limit, local dashboard browser tests, and dashboard React
-Doctor checks run through Turbo's local filesystem cache
+Package-local gate tasks for `lint`, `typecheck`, `knip`, dashboard build,
+dashboard size-limit, local dashboard browser tests, and dashboard React Doctor
+checks run through Turbo's local filesystem cache
 (`pnpm exec turbo run ... --cache=local:rw`). Remote caching is disabled in
 `turbo.json`. The Turbo config is only for the gate's explicit per-package
 `--filter` invocations; do not use it as a general workspace task orchestrator.
+Per-package coverage floors run as direct package commands such as
+`pnpm --filter <pkg> test:coverage` (or Aegis `test:cov`) so they always
+exercise the current local coverage threshold rather than a stale cached test
+result.
 Dashboard build/browser/React Doctor cache keys explicitly include
 `shared-config`, package-manager, workflow, wrapper-script, and relevant env
 inputs; CI still runs browser tests normally and remains the Linux snapshot
 authority. The only task dependency is `size-limit -> build`, because
-size-limit reads `.next/` output. High-risk or cross-layer commands stay
-outside Turbo, including codegen, install, dep-cruiser, mutation baselines, and
-Terraform.
+size-limit reads `.next/` output. High-risk or cross-layer commands stay outside
+Turbo, including codegen, install, dep-cruiser, coverage floors, mutation
+baselines, and Terraform.
 
 ## PR description standard
 
@@ -495,7 +499,7 @@ git fetch origin main
 pnpm dashboard:react-doctor:diff
 pnpm --filter @mento-protocol/ui-dashboard typecheck
 pnpm --filter @mento-protocol/indexer-envio typecheck
-pnpm --filter @mento-protocol/indexer-envio test
+pnpm --filter @mento-protocol/indexer-envio test:coverage
 pnpm indexer:codegen   # Validates Envio can parse handler entry point + module imports
 pnpm --filter @mento-protocol/ui-dashboard test:coverage
 ```

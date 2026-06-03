@@ -33,6 +33,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 2
     permissions:
+      checks: write
       contents: read
       actions: read
       # dorny/paths-filter reads PR file lists through the Pulls API.
@@ -512,9 +513,9 @@ jobs:
       - name: Knip
         working-directory: alerts/infra/onchain-event-handler
         run: pnpm run knip
-      - name: Test
+      - name: Test with coverage
         working-directory: alerts/infra/onchain-event-handler
-        run: pnpm run test
+        run: pnpm run test:coverage
       # Verify event-hashes.json is in sync with safe-abi.json. The handler
       # computes Safe event topic hashes at runtime from safe-abi.json
       # (constants.ts:extractEventSignatures), and the QuickNode webhook
@@ -538,6 +539,12 @@ jobs:
         run: |
           find alerts/infra -name '*.sh' -not -path '*/node_modules/*' -print0 \
             | xargs -0 -I {} bash -n {}
+      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        with:
+          fail_ci_if_error: false
+          flags: alerts-onchain-event-handler
+          directory: alerts/infra/onchain-event-handler/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
