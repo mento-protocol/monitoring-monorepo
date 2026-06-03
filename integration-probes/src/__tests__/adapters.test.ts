@@ -317,6 +317,52 @@ describe("probeAdapterPair", () => {
     expect(result.attemptCount).toBe(2);
   });
 
+  it("caps repeated request errors before exhausting route discovery", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+        {
+          url: "https://example.test/late-pass",
+          amountDecimal: "10000",
+          variant: "allow-mento",
+        },
+      ],
+    };
+    let calls = 0;
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () => {
+        calls += 1;
+        throw new Error("temporary network error");
+      },
+      env: {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.requestUrl).toBe("https://example.test/default");
+    expect(result.routeVariant).toBe("default");
+    expect(result.attemptCount).toBe(2);
+    expect(calls).toBe(2);
+  });
+
   it("keeps no-liquidity and rate-limit responses explicit", async () => {
     const adapter: AggregatorAdapter = {
       id: "public",

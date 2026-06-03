@@ -161,7 +161,9 @@ route-discovery variants with OpenOcean/Mento exchange filters and larger
 stable-unit amounts. This catches integrations that can route through Mento v3
 even when small default swaps prefer cheaper non-Mento venues. A discovered
 route still passes only when the response contains Routerv300 or registered
-pool/VirtualPool address evidence.
+pool/VirtualPool address evidence. Repeated request-level errors are capped at
+two attempts per route so an aggregator outage cannot starve the scheduled
+writer before it publishes degraded results.
 
 ### Address Book & Backup Cron
 

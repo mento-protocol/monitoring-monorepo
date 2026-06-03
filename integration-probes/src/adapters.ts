@@ -18,6 +18,7 @@ const LIFI_ROUTE_DISCOVERY_MULTIPLIERS = [
   10_000n,
   100_000n,
 ] as const;
+const REQUEST_ERROR_ATTEMPT_LIMIT = 2;
 const OPENOCEAN_GAS_PRICE_WEI = "1000000000";
 const OPENOCEAN_MENTO_V3_DEX_ID = "8";
 
@@ -171,6 +172,7 @@ async function fetchAndEvaluate(args: {
   );
   let fallback: PairProbeResult | null = null;
   let attemptCount = 0;
+  let requestErrorAttempts = 0;
   for (const request of requests) {
     attemptCount += 1;
     const result = {
@@ -179,6 +181,12 @@ async function fetchAndEvaluate(args: {
     };
     if (result.status === "pass") return result;
     fallback = betterFallback(fallback, result);
+    if (requestErrored(result)) {
+      requestErrorAttempts += 1;
+      if (requestErrorAttempts >= REQUEST_ERROR_ATTEMPT_LIMIT) {
+        return { ...(fallback ?? result), attemptCount };
+      }
+    }
     if (terminalStatus(result.status)) {
       return { ...(fallback ?? result), attemptCount };
     }
@@ -278,6 +286,14 @@ function fallbackPriority(status: ProbeStatus): number {
 
 function terminalStatus(status: ProbeStatus): boolean {
   return status === "needs_key" || status === "rate_limited";
+}
+
+function requestErrored(result: PairProbeResult): boolean {
+  return (
+    result.status === "error" &&
+    result.httpStatus === null &&
+    result.requestUrl !== null
+  );
 }
 
 async function responseJson(response: Response): Promise<unknown> {
