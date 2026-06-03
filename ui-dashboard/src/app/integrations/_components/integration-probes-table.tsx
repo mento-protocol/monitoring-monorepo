@@ -165,6 +165,11 @@ function metaText(pair: IntegrationProbeChain["pairs"][number]): string {
     pair.httpStatus === null ? null : `HTTP ${pair.httpStatus}`,
     pair.latencyMs === null ? null : `${pair.latencyMs}ms`,
     pair.downstreamProvider ? `provider ${pair.downstreamProvider}` : null,
+    pair.routeVariant ? `variant ${pair.routeVariant}` : null,
+    pair.routeAmountUsd ? `amount ${pair.routeAmountUsd}` : null,
+    pair.attemptCount && pair.attemptCount > 1
+      ? `${pair.attemptCount} attempts`
+      : null,
   ].filter((part): part is string => part !== null);
   return parts.length > 0 ? parts.join(" | ") : "quote not requested";
 }

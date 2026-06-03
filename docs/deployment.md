@@ -156,6 +156,13 @@ writers use the same Terraform-owned runtime as the dashboard. Adapter
 credentials are optional at the stack level; missing keys render as `needs_key`
 instead of failing the chain check.
 
+LI.FI/Jumper checks start with the default nominal quote and then try
+route-discovery variants with OpenOcean/Mento exchange filters and larger
+stable-unit amounts. This catches integrations that can route through Mento v3
+even when small default swaps prefer cheaper non-Mento venues. A discovered
+route still passes only when the response contains Routerv300 or registered
+pool/VirtualPool address evidence.
+
 ### Address Book & Backup Cron
 
 The dashboard includes a private address book at `/address-book` for labeling wallet addresses with company or entity names. Labels are stored in Upstash Redis and displayed inline throughout the UI. Forensic reports (long-form markdown investigations attached to an address) live in the same Upstash instance under the `reports` hash.

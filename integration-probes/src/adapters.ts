@@ -10,6 +10,14 @@ import type {
 
 const DEFAULT_TAKER = "0x000000000000000000000000000000000000dEaD";
 const LIFI_INTEGRATOR = "mento-probes";
+const LIFI_ROUTE_DISCOVERY_MULTIPLIERS = [
+  1n,
+  10n,
+  100n,
+  1_000n,
+  10_000n,
+  100_000n,
+] as const;
 const OPENOCEAN_GAS_PRICE_WEI = "1000000000";
 const OPENOCEAN_MENTO_V3_DEX_ID = "8";
 
@@ -18,6 +26,8 @@ type ChainSupport = "supported" | "unsupported" | "unknown";
 type QuoteRequest = {
   url: string;
   init?: RequestInit;
+  variant?: string;
+  amountDecimal?: string;
 };
 
 type RequestHeaders = Record<string, string>;
@@ -30,7 +40,10 @@ export type AggregatorAdapter = {
   credentialEnv?: readonly string[];
   researchNote: string;
   support: Partial<Record<number, ChainSupport>>;
-  quote?: (input: QuoteProbeInput, env: NodeJS.ProcessEnv) => QuoteRequest;
+  quote?: (
+    input: QuoteProbeInput,
+    env: NodeJS.ProcessEnv,
+  ) => QuoteRequest | readonly QuoteRequest[];
   nextStep?: string;
 };
 
@@ -153,9 +166,34 @@ async function fetchAndEvaluate(args: {
   fetcher: FetchLike;
   env: NodeJS.ProcessEnv;
 }): Promise<PairProbeResult> {
-  const request = args.adapter.quote!(args.input, args.env);
+  const requests = normalizeQuoteRequests(
+    args.adapter.quote!(args.input, args.env),
+  );
+  let fallback: PairProbeResult | null = null;
+  let attemptCount = 0;
+  for (const request of requests) {
+    attemptCount += 1;
+    const result = {
+      ...(await fetchAndEvaluateRequest({ ...args, request })),
+      attemptCount,
+    };
+    if (result.status === "pass") return result;
+    fallback = betterFallback(fallback, result);
+    if (terminalStatus(result.status)) return result;
+  }
+  return fallback
+    ? { ...fallback, attemptCount }
+    : skippedResult(args.input, "error", "No quote requests built.");
+}
+
+async function fetchAndEvaluateRequest(args: {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  fetcher: FetchLike;
+  request: QuoteRequest;
+}): Promise<PairProbeResult> {
   const startedAt = Date.now();
-  const response = await args.fetcher(request.url, request.init);
+  const response = await args.fetcher(args.request.url, args.request.init);
   const latencyMs = Date.now() - startedAt;
   const payload = await responseJson(response);
   const detected = detectEvidence(payload, {
@@ -174,7 +212,10 @@ async function fetchAndEvaluate(args: {
     sourceLabels: detected.sourceLabels,
     txTarget: detected.txTarget,
     downstreamProvider: detected.downstreamProvider,
-    requestUrl: request.url,
+    routeVariant: args.request.variant ?? null,
+    routeAmountUsd: args.request.amountDecimal ?? args.input.amountDecimal,
+    attemptCount: 1,
+    requestUrl: args.request.url,
     httpStatus: response.status,
     latencyMs,
     responsePreview: responsePreview(payload),
@@ -182,6 +223,46 @@ async function fetchAndEvaluate(args: {
       ? payloadErrorMessage(payload)
       : errorMessage(payload, response.status),
   };
+}
+
+function normalizeQuoteRequests(
+  requests: QuoteRequest | readonly QuoteRequest[],
+): readonly QuoteRequest[] {
+  if (Array.isArray(requests)) return requests as readonly QuoteRequest[];
+  return [requests as QuoteRequest];
+}
+
+function betterFallback(
+  current: PairProbeResult | null,
+  candidate: PairProbeResult,
+): PairProbeResult {
+  if (!current) return candidate;
+  return fallbackPriority(candidate.status) > fallbackPriority(current.status)
+    ? candidate
+    : current;
+}
+
+function fallbackPriority(status: ProbeStatus): number {
+  switch (status) {
+    case "fail":
+      return 6;
+    case "no_liquidity":
+      return 5;
+    case "unsupported":
+      return 4;
+    case "error":
+      return 3;
+    case "rate_limited":
+      return 2;
+    case "needs_key":
+      return 1;
+    case "pass":
+      return 0;
+  }
+}
+
+function terminalStatus(status: ProbeStatus): boolean {
+  return status === "needs_key" || status === "rate_limited";
 }
 
 async function responseJson(response: Response): Promise<unknown> {
@@ -279,6 +360,9 @@ function skippedResult(
     sourceLabels: [],
     txTarget: null,
     downstreamProvider: null,
+    routeVariant: null,
+    routeAmountUsd: null,
+    attemptCount: null,
     requestUrl: null,
     httpStatus: null,
     latencyMs: null,
@@ -364,11 +448,8 @@ function lifiAdapter(): AggregatorAdapter {
     credentialEnv: ["LIFI_API_KEY"],
     support: { 42220: "supported", 143: "supported" },
     researchNote:
-      "LI.FI chain metadata lists both Celo and Monad; scheduled probes use an API key to avoid public quote limits.",
-    quote: (input, env) =>
-      getRequest(lifiUrl(input), {
-        "x-lifi-api-key": env.LIFI_API_KEY ?? "",
-      }),
+      "LI.FI chain metadata lists both Celo and Monad; scheduled probes use an API key and route-discovery attempts to avoid confusing cheaper non-Mento default routes with missing Mento support.",
+    quote: lifiQuoteRequests,
   };
 }
 
@@ -550,8 +631,12 @@ function excludedAdapter(
   };
 }
 
-function getRequest(url: string, headers?: RequestHeaders): QuoteRequest {
-  return { url, ...(headers && { init: { headers } }) };
+function getRequest(
+  url: string,
+  headers?: RequestHeaders,
+  metadata: Pick<QuoteRequest, "amountDecimal" | "variant"> = {},
+): QuoteRequest {
+  return { url, ...metadata, ...(headers && { init: { headers } }) };
 }
 
 function postRequest(
@@ -569,7 +654,103 @@ function postRequest(
   };
 }
 
-function lifiUrl(input: QuoteProbeInput): string {
+function lifiQuoteRequests(
+  input: QuoteProbeInput,
+  env: NodeJS.ProcessEnv,
+): readonly QuoteRequest[] {
+  const headers = { "x-lifi-api-key": env.LIFI_API_KEY ?? "" };
+  const out: QuoteRequest[] = [
+    getRequest(lifiUrl(input), headers, {
+      amountDecimal: input.amountDecimal,
+      variant: "default",
+    }),
+  ];
+  for (const multiplier of LIFI_ROUTE_DISCOVERY_MULTIPLIERS) {
+    const amount = multipliedAmount(input, multiplier);
+    out.push(
+      lifiDiscoveryRequest({
+        amount,
+        headers,
+        input,
+        routeParams: { preferExchanges: "openocean" },
+        variant: "prefer-openocean",
+      }),
+      lifiDiscoveryRequest({
+        amount,
+        headers,
+        input,
+        routeParams: { allowExchanges: "openocean" },
+        variant: "allow-openocean",
+      }),
+      lifiDiscoveryRequest({
+        amount,
+        headers,
+        input,
+        routeParams: { allowExchanges: "mento" },
+        variant: "allow-mento",
+      }),
+    );
+  }
+  return dedupeRequests(out);
+}
+
+function lifiDiscoveryRequest(args: {
+  amount: Pick<QuoteProbeInput, "amountDecimal" | "amountRaw">;
+  headers: RequestHeaders;
+  input: QuoteProbeInput;
+  routeParams: Record<string, string>;
+  variant: string;
+}): QuoteRequest {
+  return getRequest(
+    lifiUrl({ ...args.input, ...args.amount }, args.routeParams),
+    args.headers,
+    {
+      amountDecimal: args.amount.amountDecimal,
+      variant: args.variant,
+    },
+  );
+}
+
+function dedupeRequests(
+  requests: readonly QuoteRequest[],
+): readonly QuoteRequest[] {
+  const seen = new Set<string>();
+  return requests.filter((request) => {
+    const key = `${request.variant ?? ""}:${request.url}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function multipliedAmount(
+  input: QuoteProbeInput,
+  multiplier: bigint,
+): Pick<QuoteProbeInput, "amountDecimal" | "amountRaw"> {
+  return {
+    amountDecimal: multiplyDecimalString(input.amountDecimal, multiplier),
+    amountRaw: String(BigInt(input.amountRaw) * multiplier),
+  };
+}
+
+function multiplyDecimalString(value: string, multiplier: bigint): string {
+  const sign = value.startsWith("-") ? "-" : "";
+  const unsigned = sign ? value.slice(1) : value;
+  const [whole = "0", fraction = ""] = unsigned.split(".");
+  const scaled = BigInt(`${whole}${fraction}` || "0") * multiplier;
+  const digits = scaled.toString().padStart(fraction.length + 1, "0");
+  if (fraction.length === 0) return `${sign}${digits}`;
+  const wholePart = digits.slice(0, -fraction.length) || "0";
+  const fractionPart = digits.slice(-fraction.length).replace(/0+$/u, "");
+  return fractionPart
+    ? `${sign}${wholePart}.${fractionPart}`
+    : `${sign}${wholePart}`;
+}
+
+function lifiUrl(
+  input: QuoteProbeInput,
+  extraParams: Record<string, string> = {},
+): string {
   const url = new URL("https://li.quest/v1/quote");
   setParams(url, {
     fromChain: String(input.chainId),
@@ -581,6 +762,7 @@ function lifiUrl(input: QuoteProbeInput): string {
     toAddress: input.takerAddress,
     slippage: "0.01",
     integrator: LIFI_INTEGRATOR,
+    ...extraParams,
   });
   return url.toString();
 }

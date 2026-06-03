@@ -183,6 +183,50 @@ describe("probeAdapterPair", () => {
     expect(result.evidence).toEqual([]);
   });
 
+  it("passes when a later quote attempt contains Mento address evidence", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async (url) =>
+        new Response(
+          JSON.stringify(
+            String(url).includes("discovery")
+              ? { transactionRequest: { data: `swap through ${ROUTER}` } }
+              : { route: [{ protocol: "Other" }] },
+          ),
+        ),
+      env: {},
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.requestUrl).toBe("https://example.test/discovery");
+    expect(result.routeVariant).toBe("allow-openocean");
+    expect(result.routeAmountUsd).toBe("1000");
+    expect(result.attemptCount).toBe(2);
+  });
+
   it("keeps no-liquidity and rate-limit responses explicit", async () => {
     const adapter: AggregatorAdapter = {
       id: "public",
@@ -435,7 +479,7 @@ describe("aggregator quote builders", () => {
 
     for (const id of expected) {
       const adapter = AGGREGATOR_ADAPTERS.find((item) => item.id === id);
-      const request = adapter?.quote?.(input, env);
+      const request = firstQuoteRequest(adapter?.quote?.(input, env));
 
       expect(request?.url, id).toContain("http");
       expect(JSON.stringify(request), id).toContain(input.sellToken.address);
@@ -444,25 +488,43 @@ describe("aggregator quote builders", () => {
     const lifiRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "lifi",
     )?.quote?.(input, env);
-    expect(JSON.stringify(lifiRequest?.init?.headers)).toContain(
+    const lifiRequests = quoteRequests(lifiRequest);
+    const lifiDefaultRequest = lifiRequests[0];
+    expect(lifiRequests.length).toBeGreaterThan(1);
+    expect(JSON.stringify(lifiDefaultRequest?.init?.headers)).toContain(
       "x-lifi-api-key",
     );
-    const lifiIntegrator = new URL(lifiRequest?.url ?? "").searchParams.get(
-      "integrator",
-    );
+    const lifiIntegrator = new URL(
+      lifiDefaultRequest?.url ?? "",
+    ).searchParams.get("integrator");
     expect(lifiIntegrator).toBe("mento-probes");
     expect(lifiIntegrator?.length).toBeLessThanOrEqual(23);
+    expect(
+      lifiRequests.some((request) =>
+        request.url.includes("allowExchanges=openocean"),
+      ),
+    ).toBe(true);
+    expect(
+      lifiRequests.some((request) =>
+        request.url.includes("allowExchanges=mento"),
+      ),
+    ).toBe(true);
+    expect(
+      lifiRequests.some((request) => request.amountDecimal === "100000"),
+    ).toBe(true);
 
     const openOceanRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "openocean",
     )?.quote?.(input, env);
-    expect(openOceanRequest?.url).toContain(
+    const openOceanQuoteRequest = firstQuoteRequest(openOceanRequest);
+    expect(openOceanQuoteRequest?.url).toContain(
       "https://open-api-pro.openocean.finance/v4/celo/swap",
     );
-    expect(JSON.stringify(openOceanRequest?.init?.headers)).toContain(
+    expect(JSON.stringify(openOceanQuoteRequest?.init?.headers)).toContain(
       "openocean-key",
     );
-    const openOceanParams = new URL(openOceanRequest?.url ?? "").searchParams;
+    const openOceanParams = new URL(openOceanQuoteRequest?.url ?? "")
+      .searchParams;
     expect(openOceanParams.get("amountDecimals")).toBe(input.amountRaw);
     expect(openOceanParams.get("gasPriceDecimals")).toBe("1000000000");
     expect(openOceanParams.get("enabledDexIds")).toBe("8");
@@ -472,21 +534,26 @@ describe("aggregator quote builders", () => {
     const relayRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "relay",
     )?.quote?.(input, env);
-    expect(relayRequest?.url).toBe("https://api.relay.link/quote/v2");
+    expect(firstQuoteRequest(relayRequest)?.url).toBe(
+      "https://api.relay.link/quote/v2",
+    );
 
     const squidRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "squid",
     )?.quote?.(input, env);
+    const squidQuoteRequest = firstQuoteRequest(squidRequest);
     expect(
-      JSON.parse(String(squidRequest?.init?.body)) as { quoteOnly?: boolean },
+      JSON.parse(String(squidQuoteRequest?.init?.body)) as {
+        quoteOnly?: boolean;
+      },
     ).toMatchObject({ quoteOnly: true });
 
     const kyberRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "kyberswap",
     )?.quote?.(input, env);
-    expect(JSON.stringify(kyberRequest?.init?.headers)).toContain(
-      "x-client-id",
-    );
+    expect(
+      JSON.stringify(firstQuoteRequest(kyberRequest)?.init?.headers),
+    ).toContain("x-client-id");
   });
 
   it("marks 1inch unsupported on Celo and Monad until docs list support", () => {
@@ -535,3 +602,21 @@ describe("aggregator quote builders", () => {
     expect(result.error).toBe("Missing LIFI_API_KEY");
   });
 });
+
+type QuoteRequestFixture = {
+  url: string;
+  init?: RequestInit;
+  amountDecimal?: string;
+  variant?: string;
+};
+
+function quoteRequests(request: unknown): QuoteRequestFixture[] {
+  if (!request) return [];
+  return (
+    Array.isArray(request) ? request : [request]
+  ) as QuoteRequestFixture[];
+}
+
+function firstQuoteRequest(request: unknown): QuoteRequestFixture | undefined {
+  return quoteRequests(request)[0];
+}

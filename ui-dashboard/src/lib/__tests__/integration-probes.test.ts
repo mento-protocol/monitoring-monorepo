@@ -91,6 +91,15 @@ describe("IntegrationProbeSnapshotSchema", () => {
     expect(
       result.data?.aggregators[0]?.chains[0]?.pairs[0]?.httpStatus,
     ).toBeNull();
+    expect(
+      result.data?.aggregators[0]?.chains[0]?.pairs[0]?.routeVariant,
+    ).toBeNull();
+    expect(
+      result.data?.aggregators[0]?.chains[0]?.pairs[0]?.routeAmountUsd,
+    ).toBeNull();
+    expect(
+      result.data?.aggregators[0]?.chains[0]?.pairs[0]?.attemptCount,
+    ).toBeNull();
   });
 
   it("rejects unknown statuses so stale writers do not render silently", () => {

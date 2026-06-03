@@ -35,6 +35,10 @@ pnpm --filter @mento-protocol/integration-probes knip
 - Active stablecoin coverage comes from indexed USDm hub-pair pools when a
   Hasura URL is configured. Contract metadata fallback is for dry-run
   visibility only.
+- LI.FI/Jumper probes use ordered route-discovery attempts after the default
+  quote so cheaper non-Mento venues on small swaps do not mask an available
+  Mento v3 route. These attempts still pass only with Routerv300 or registered
+  pool/VirtualPool address evidence.
 - `integration-probes:latest` expires after 3 days so failed scheduled probes
   degrade the dashboard instead of showing stale health forever. Dated history
   keys expire after 90 days.
