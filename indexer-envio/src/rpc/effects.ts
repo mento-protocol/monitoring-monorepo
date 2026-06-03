@@ -890,7 +890,8 @@ export const vpExchangeIdEffect = createEffect(
   },
 );
 
-// v2StableTotalSupplyEffect's declaration body lives in src/rpc/v2-stables.ts
+// v2StableTotalSupplyEffect and v2StableBalanceOfEffect declaration bodies live
+// in src/rpc/v2-stables.ts
 // alongside the fetcher — keeps the Group A/B/C/D taxonomy clean and avoids
 // growing this file further (already past the 600-line soft cap; pulling
 // more effects into per-domain files like `rpc/v2-stables.ts` is the path
@@ -900,4 +901,7 @@ export const vpExchangeIdEffect = createEffect(
 // depcruise rule restricts handler imports from `rpc/` to `effects.ts`
 // (the Effect API facade). New per-domain effect files surface their
 // declarations through this barrel.
-export { v2StableTotalSupplyEffect } from "./v2-stables.js";
+export {
+  v2StableBalanceOfEffect,
+  v2StableTotalSupplyEffect,
+} from "./v2-stables.js";

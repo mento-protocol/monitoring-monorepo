@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, it } from "vitest";
 import {
+  LOCKING_NTT_STABLES,
+  LOCKING_NTT_STABLE_ADDRESSES,
+  NTT_STABLES,
   V2_STABLES,
   V2_STABLE_ADDRESSES,
+  findLockingNttStableByAddress,
   findV2StableByAddress,
   makeStableSupplyDailySnapshotId,
+  makeStableTokenCustodyDailySnapshotId,
 } from "../src/handlers/v2Stables/config.ts";
 import {
   _resetBrokerAddressCacheForTest,
@@ -13,6 +18,10 @@ import {
 } from "../src/handlers/v2Stables/classifyKind.ts";
 import { flushV2StableDailySnapshot } from "../src/handlers/v2Stables/dailyFlush.ts";
 import { makeV2StableTokenSupply } from "../src/handlers/v2Stables/bootstrap.ts";
+import {
+  flushStableTokenCustodyDailySnapshot,
+  makeStableTokenCustodyState,
+} from "../src/handlers/v2Stables/custodyState.ts";
 import { V3_HUB_USDM_ADDRESS } from "../src/constants.ts";
 
 const MAINNET_CONFIG = readFileSync(
@@ -43,19 +52,33 @@ const EXPECTED_V2_RESERVE_SYMBOLS = [
 const V2_CUSD_USDM_ADDRESS = "0x765de816845861e75a25fca122bb6898b8b1282a";
 
 describe("v2Stables/config — registry derivation", () => {
-  it("exposes 13 entries: 12 V2_RESERVE + 1 V3_HUB_COLLATERAL", () => {
-    assert.equal(V2_STABLES.length, 13);
+  it("exposes Celo supply rows plus Monad NTT supply rows", () => {
+    assert.equal(V2_STABLES.length, 18);
     const v2Reserve = V2_STABLES.filter((s) => s.source === "V2_RESERVE");
     const hub = V2_STABLES.filter((s) => s.source === "V3_HUB_COLLATERAL");
-    assert.equal(v2Reserve.length, 12);
+    const v3Liquity = V2_STABLES.filter((s) => s.source === "V3_LIQUITY");
+    assert.equal(v2Reserve.length, 14);
     assert.equal(hub.length, 1);
+    assert.equal(v3Liquity.length, 3);
     assert.equal(hub[0].address, V3_HUB_USDM_ADDRESS);
     assert.equal(hub[0].symbol, "USDm");
+    const monadSymbols = new Set(
+      V2_STABLES.filter((s) => s.chainId === 143).map((s) => s.symbol),
+    );
+    assert.deepEqual([...monadSymbols].sort(), [
+      "CHFm",
+      "EURm",
+      "GBPm",
+      "JPYm",
+      "USDm",
+    ]);
   });
 
   it("includes every expected V2 reserve symbol from @mento-protocol/contracts", () => {
     const got = new Set(
-      V2_STABLES.filter((s) => s.source === "V2_RESERVE").map((s) => s.symbol),
+      V2_STABLES.filter(
+        (s) => s.chainId === 42220 && s.source === "V2_RESERVE",
+      ).map((s) => s.symbol),
     );
     for (const expected of EXPECTED_V2_RESERVE_SYMBOLS) {
       assert.ok(
@@ -65,9 +88,9 @@ describe("v2Stables/config — registry derivation", () => {
     }
   });
 
-  it("excludes V3 Liquity debt tokens (GBPm/CHFm/JPYm) — supply tracked via systemDebt", () => {
+  it("excludes Celo V3 Liquity debt tokens from V2 reserve supply rows", () => {
     const v2ReserveSymbols = V2_STABLES.filter(
-      (s) => s.source === "V2_RESERVE",
+      (s) => s.chainId === 42220 && s.source === "V2_RESERVE",
     ).map((s) => s.symbol);
     for (const v3Symbol of ["GBPm", "CHFm", "JPYm"]) {
       assert.ok(
@@ -109,49 +132,109 @@ describe("v2Stables/config — registry derivation", () => {
       "V2 cUSD and V3 hub USDm must be distinct on-chain contracts",
     );
   });
+
+  it("pins Wormhole NTT modes and keeps Celo lock/mint debt tokens custody-only", () => {
+    const byKey = new Map(
+      NTT_STABLES.map((s) => [`${s.chainId}:${s.symbol}`, s]),
+    );
+    assert.equal(byKey.get("42220:CHFm")?.bridgeMode, "LOCKING");
+    assert.equal(byKey.get("42220:GBPm")?.bridgeMode, "LOCKING");
+    assert.equal(byKey.get("42220:JPYm")?.bridgeMode, "LOCKING");
+    assert.equal(byKey.get("42220:EURm")?.bridgeMode, "BURNING");
+    assert.equal(byKey.get("42220:USDm")?.bridgeMode, "BURNING");
+    for (const symbol of ["CHFm", "EURm", "GBPm", "JPYm", "USDm"]) {
+      assert.equal(
+        byKey.get(`143:${symbol}`)?.bridgeMode,
+        "BURNING",
+        `${symbol} on Monad should be burn/mint supply, not lock custody.`,
+      );
+    }
+
+    assert.equal(LOCKING_NTT_STABLES.length, 3);
+    for (const locked of LOCKING_NTT_STABLES) {
+      assert.equal(locked.chainId, 42220);
+      assert.equal(
+        findV2StableByAddress(locked.chainId, locked.address),
+        undefined,
+        `${locked.symbol} Celo lock/mint token should not be in supply lookup.`,
+      );
+      assert.equal(
+        findLockingNttStableByAddress(locked.chainId, locked.address)?.symbol,
+        locked.symbol,
+      );
+    }
+  });
 });
 
-// Mainnet-only today. Testnet's V2StableToken block is empty
-// (`address: []`) — no addresses to validate. When testnet V2 stables get
-// wired in a follow-up PR, add a parallel `it("…testnet YAML")` assertion
-// here so the same drift protection covers both chains. Tracked as a
-// gentle reminder rather than blocking PR1.
 describe("v2Stables — YAML drift gate", () => {
-  it("every V2_STABLES address appears under V2StableToken in mainnet YAML", () => {
-    // Locate the V2StableToken block under the Celo (chain 42220) network.
-    const celoStart = MAINNET_CONFIG.indexOf("  - id: 42220");
+  function yamlV2StableAddressesForChain(chainId: number): string[] {
+    const chainStart = MAINNET_CONFIG.indexOf(`  - id: ${chainId}`);
     assert.notEqual(
-      celoStart,
+      chainStart,
       -1,
-      "Celo chain block missing from mainnet YAML",
+      `chain ${chainId} block missing from mainnet YAML`,
     );
-    const monadStart = MAINNET_CONFIG.indexOf("  - id: 143", celoStart);
-    const celoBlock = MAINNET_CONFIG.slice(
-      celoStart,
-      monadStart === -1 ? undefined : monadStart,
-    );
+    const rest = MAINNET_CONFIG.slice(chainStart + 1);
+    const nextChainRelative = rest.search(/\n {2}- id: /);
+    const chainBlock =
+      nextChainRelative === -1
+        ? MAINNET_CONFIG.slice(chainStart)
+        : MAINNET_CONFIG.slice(chainStart, chainStart + 1 + nextChainRelative);
 
-    const v2Block = celoBlock.split("- name: V2StableToken")[1];
+    const v2Block = chainBlock.split("- name: V2StableToken")[1];
     assert.ok(
       v2Block,
-      "V2StableToken contract block missing under Celo in mainnet YAML",
+      `V2StableToken contract block missing under chain ${chainId} in mainnet YAML`,
     );
-    // Stop at the next top-level `- name:` so we don't pick up addresses from
-    // a later block.
-    const yamlAddresses = (
+    return (
       v2Block.split(/\n {6}- name:/)[0].match(/0x[0-9a-fA-F]{40}/g) ?? []
     ).map((a) => a.toLowerCase());
+  }
 
-    assert.equal(
-      yamlAddresses.length,
-      V2_STABLE_ADDRESSES.length,
-      `YAML lists ${yamlAddresses.length} V2StableToken addresses on Celo; registry has ${V2_STABLE_ADDRESSES.length}.`,
-    );
-    const yamlSet = new Set(yamlAddresses);
-    for (const addr of V2_STABLE_ADDRESSES) {
-      assert.ok(
-        yamlSet.has(addr),
-        `Registry address ${addr} missing from YAML — re-run codegen or update one or the other.`,
+  it("every supply and custody address appears under V2StableToken in mainnet YAML", () => {
+    const expectedByChain = new Map<number, Set<string>>();
+    for (const s of V2_STABLES) {
+      let set = expectedByChain.get(s.chainId);
+      if (!set) {
+        set = new Set();
+        expectedByChain.set(s.chainId, set);
+      }
+      set.add(s.address);
+    }
+    for (const s of LOCKING_NTT_STABLES) {
+      let set = expectedByChain.get(s.chainId);
+      if (!set) {
+        set = new Set();
+        expectedByChain.set(s.chainId, set);
+      }
+      set.add(s.address);
+    }
+
+    for (const [chainId, expected] of expectedByChain) {
+      const yamlAddresses = yamlV2StableAddressesForChain(chainId);
+      assert.equal(
+        yamlAddresses.length,
+        expected.size,
+        `YAML lists ${yamlAddresses.length} V2StableToken addresses on chain ${chainId}; registry expects ${expected.size}.`,
+      );
+      const yamlSet = new Set(yamlAddresses);
+      for (const addr of expected) {
+        assert.ok(
+          yamlSet.has(addr),
+          `Registry address ${addr} missing from YAML on chain ${chainId} — re-run codegen or update one or the other.`,
+        );
+      }
+    }
+  });
+
+  it("keeps supply and custody address exports scoped to their responsibilities", () => {
+    assert.equal(V2_STABLE_ADDRESSES.length, 18);
+    assert.equal(LOCKING_NTT_STABLE_ADDRESSES.length, 3);
+    for (const addr of LOCKING_NTT_STABLE_ADDRESSES) {
+      assert.equal(
+        V2_STABLE_ADDRESSES.includes(addr),
+        false,
+        `${addr} is custody-only and must not be treated as a supply-tracked V2_STABLES address.`,
       );
     }
   });
@@ -376,6 +459,132 @@ describe("flushV2StableDailySnapshot — day rollover", () => {
   });
 });
 
+describe("StableTokenCustodyState — lock-custody snapshot helpers", () => {
+  const DAY_BUCKET_2024_05_22 = 1_716_336_000n;
+  const CELO_CHFM_ADDRESS = "0xb55a79f398e759e43c95b979163f30ec87ee131d";
+  const CHFM_MANAGER = "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697";
+
+  function mockCustody(overrides: Partial<MockCustody> = {}): MockCustody {
+    return {
+      id: `42220-${CELO_CHFM_ADDRESS}`,
+      chainId: 42220,
+      tokenAddress: CELO_CHFM_ADDRESS,
+      tokenSymbol: "CHFm",
+      source: "V3_LIQUITY",
+      tokenDecimals: 18,
+      managerAddress: CHFM_MANAGER,
+      lockedSupply: 25_000n * 10n ** 18n,
+      supplyBaselineSeeded: true,
+      currentDayBucket: DAY_BUCKET_2024_05_22,
+      lockedTodayBucket: 2_000n * 10n ** 18n,
+      unlockedTodayBucket: 500n * 10n ** 18n,
+      lastEventBlock: 60_700_000n,
+      lastEventTimestamp: 1_716_400_000n,
+      ...overrides,
+    };
+  }
+
+  it("creates a zeroed unseeded custody state row", () => {
+    const row = makeStableTokenCustodyState({
+      chainId: 42220,
+      tokenAddress: CELO_CHFM_ADDRESS,
+      symbol: "CHFm",
+      decimals: 18,
+      source: "V3_LIQUITY",
+      managerAddress: CHFM_MANAGER,
+      blockNumber: 60_700_000n,
+      blockTimestamp: 1_716_391_800n,
+    });
+    assert.equal(row.id, `42220-${CELO_CHFM_ADDRESS}`);
+    assert.equal(row.tokenAddress, CELO_CHFM_ADDRESS);
+    assert.equal(row.managerAddress, CHFM_MANAGER);
+    assert.equal(row.lockedSupply, 0n);
+    assert.equal(row.supplyBaselineSeeded, false);
+    assert.equal(row.lockedTodayBucket, 0n);
+    assert.equal(row.unlockedTodayBucket, 0n);
+    assert.equal(row.currentDayBucket, DAY_BUCKET_2024_05_22);
+  });
+
+  it("does not flush custody snapshot while event remains in the same UTC day", () => {
+    const saved: Array<{ id: string }> = [];
+    const ctx = {
+      StableTokenCustodyDailySnapshot: {
+        set: (entity: { id: string }) => saved.push(entity),
+      },
+    };
+    const custody = mockCustody();
+    const next = flushStableTokenCustodyDailySnapshot(
+      ctx,
+      custody as never,
+      custody.currentDayBucket + 3600n,
+      60_700_001n,
+    );
+    assert.equal(saved.length, 0);
+    assert.equal(next.lockedTodayBucket, custody.lockedTodayBucket);
+    assert.equal(next.unlockedTodayBucket, custody.unlockedTodayBucket);
+    assert.equal(next.lockedSupply, custody.lockedSupply);
+  });
+
+  it("writes custody snapshot and resets lock/unlock buckets on rollover", () => {
+    type SavedSnapshot = {
+      id: string;
+      chainId: number;
+      tokenAddress: string;
+      tokenSymbol: string;
+      source: string;
+      tokenDecimals: number;
+      managerAddress: string;
+      timestamp: bigint;
+      lockedSupply: bigint;
+      dailyLockedAmount: bigint;
+      dailyUnlockedAmount: bigint;
+      blockNumber: bigint;
+      updatedAtTimestamp: bigint;
+    };
+    const saved: SavedSnapshot[] = [];
+    const ctx = {
+      StableTokenCustodyDailySnapshot: {
+        set: (entity: SavedSnapshot) => saved.push(entity),
+      },
+    };
+    const custody = mockCustody();
+    const tomorrow = custody.currentDayBucket + 86_400n + 100n;
+    const next = flushStableTokenCustodyDailySnapshot(
+      ctx,
+      custody as never,
+      tomorrow,
+      60_710_000n,
+    );
+
+    assert.equal(saved.length, 1);
+    const row = saved[0];
+    assert.equal(
+      row.id,
+      makeStableTokenCustodyDailySnapshotId(
+        custody.chainId,
+        custody.tokenAddress,
+        custody.currentDayBucket,
+      ),
+    );
+    assert.equal(row.chainId, custody.chainId);
+    assert.equal(row.tokenAddress, custody.tokenAddress);
+    assert.equal(row.tokenSymbol, custody.tokenSymbol);
+    assert.equal(row.source, custody.source);
+    assert.equal(row.tokenDecimals, custody.tokenDecimals);
+    assert.equal(row.managerAddress, custody.managerAddress);
+    assert.equal(row.timestamp, custody.currentDayBucket);
+    assert.equal(row.lockedSupply, custody.lockedSupply);
+    assert.equal(row.dailyLockedAmount, custody.lockedTodayBucket);
+    assert.equal(row.dailyUnlockedAmount, custody.unlockedTodayBucket);
+    assert.equal(row.blockNumber, 60_710_000n);
+    assert.equal(row.updatedAtTimestamp, tomorrow);
+    assert.equal(next.currentDayBucket, custody.currentDayBucket + 86_400n);
+    assert.equal(next.lockedTodayBucket, 0n);
+    assert.equal(next.unlockedTodayBucket, 0n);
+    assert.equal(next.lockedSupply, custody.lockedSupply);
+  });
+});
+
 describe("makeV2StableTokenSupply — fresh row shape", () => {
   it("returns supplyBaselineSeeded: false with zeroed accumulators", () => {
     const row = makeV2StableTokenSupply({
@@ -493,6 +702,23 @@ type MockSupply = {
   currentDayBucket: bigint;
   mintedTodayBucket: bigint;
   burnedTodayBucket: bigint;
+  lastEventBlock: bigint;
+  lastEventTimestamp: bigint;
+};
+
+type MockCustody = {
+  id: string;
+  chainId: number;
+  tokenAddress: string;
+  tokenSymbol: string;
+  source: string;
+  tokenDecimals: number;
+  managerAddress: string;
+  lockedSupply: bigint;
+  supplyBaselineSeeded: boolean;
+  currentDayBucket: bigint;
+  lockedTodayBucket: bigint;
+  unlockedTodayBucket: bigint;
   lastEventBlock: bigint;
   lastEventTimestamp: bigint;
 };

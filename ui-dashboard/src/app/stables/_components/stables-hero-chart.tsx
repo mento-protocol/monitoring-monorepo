@@ -11,11 +11,17 @@ import { stockWoWChangePct } from "@/lib/time-series";
 import {
   buildTokenUsdTimeSeries,
   computeChartStartSeconds,
+  groupCustodySnapshotsByToken,
   groupSnapshotsByTokenSource,
   sumTotalUsdSeries,
+  unionCustodySnapshotsWithLatest,
   unionSnapshotsWithLatest,
 } from "../_lib/aggregate";
-import type { RangeKey, StableSupplyDailySnapshot } from "../_lib/types";
+import type {
+  RangeKey,
+  StableSupplyDailySnapshot,
+  StableTokenCustodyDailySnapshot,
+} from "../_lib/types";
 
 type Props = {
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
@@ -26,6 +32,8 @@ type Props = {
   // from the stacked total even though `latestPerToken` knows its
   // current supply.
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
+  custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>;
+  latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   rates: OracleRateMap;
   range: RangeKey;
   onRangeChange: (range: RangeKey) => void;
@@ -44,6 +52,8 @@ type Props = {
 export function StablesHeroChart({
   snapshots,
   latestPerToken,
+  custodySnapshots,
+  latestCustodyPerToken,
   rates,
   range,
   onRangeChange,
@@ -51,16 +61,21 @@ export function StablesHeroChart({
   hasError,
   capped,
 }: Props): React.JSX.Element {
-  // Group snapshots by `{tokenAddress}|{source}` so V2 cUSD-USDm and V3 hub
-  // USDm get distinct stack slices (same symbol "USDm", different addresses).
+  // Group snapshots by `{chainId}|{tokenAddress}|{source}` so Celo and Monad
+  // supplies stay distinct before the stacked total sums them.
   const { breakdown, totalSeries } = useMemo(() => {
     if (snapshots.length === 0 && latestPerToken.length === 0) {
       return { breakdown: [] as BreakdownSeries[], totalSeries: [] };
     }
     const merged = unionSnapshotsWithLatest(snapshots, latestPerToken);
+    const mergedCustody = unionCustodySnapshotsWithLatest(
+      custodySnapshots,
+      latestCustodyPerToken,
+    );
     // Shared discriminator with `_lib/aggregate.ts` so KPI strip and hero
     // chart group V2 cUSD-USDm vs V3 hub USDm identically.
     const grouped = groupSnapshotsByTokenSource(merged);
+    const custodyByToken = groupCustodySnapshotsByToken(mergedCustody);
     // Shared x-axis start across all per-token series. Critical for
     // `range === "all"` — `rangeStartSeconds("all")` returns 0 (epoch),
     // and a naive per-token iteration would generate ~20K days per
@@ -71,12 +86,20 @@ export function StablesHeroChart({
     const breakdownEntries: BreakdownSeries[] = [];
     const allSeries: Array<Array<{ timestamp: number; valueUsd: number }>> = [];
     for (const [key, rows] of grouped) {
-      const series = buildTokenUsdTimeSeries(rows, rates, effectiveStartTs);
-      if (series.length === 0) continue;
       const sample = rows[0]!;
+      const custodyRows =
+        custodyByToken.get(`${sample.chainId}|${sample.tokenAddress}`) ?? [];
+      const series = buildTokenUsdTimeSeries(
+        rows,
+        rates,
+        effectiveStartTs,
+        undefined,
+        custodyRows,
+      );
+      if (series.length === 0) continue;
       breakdownEntries.push({
         id: key,
-        name: displayLabel(sample.tokenSymbol, sample.source),
+        name: `${displayLabel(sample.tokenSymbol, sample.source)} on ${chainLabel(sample.chainId)}`,
         // V2 USDm and V3 hub USDm share `tokenSymbol` but live at
         // distinct addresses; source-aware coloring keeps the stacked
         // chart's two USDm slices visually distinct (otherwise they
@@ -95,7 +118,14 @@ export function StablesHeroChart({
       value: p.valueUsd,
     }));
     return { breakdown: breakdownEntries, totalSeries: totalUsd };
-  }, [snapshots, latestPerToken, rates, range]);
+  }, [
+    snapshots,
+    latestPerToken,
+    custodySnapshots,
+    latestCustodyPerToken,
+    rates,
+    range,
+  ]);
 
   const headline =
     totalSeries.length > 0
@@ -119,7 +149,7 @@ export function StablesHeroChart({
         isLoading={isLoading}
         hasError={hasError}
         hasSnapshotError={false}
-        emptyMessage="No stablecoin supply data yet for this chain."
+        emptyMessage="No stablecoin supply data yet."
       />
       {capped ? (
         <p className="text-xs text-amber-400" role="status">
@@ -129,4 +159,10 @@ export function StablesHeroChart({
       ) : null}
     </div>
   );
+}
+
+function chainLabel(chainId: number): string {
+  if (chainId === 143) return "Monad";
+  if (chainId === 42220) return "Celo";
+  return `Chain ${chainId}`;
 }

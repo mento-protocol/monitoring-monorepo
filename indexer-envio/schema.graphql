@@ -1937,8 +1937,9 @@ enum V2StableSupplyChangeKind {
   OTHER_BURN
 }
 
-# Unified daily supply per (chainId, tokenAddress). 16 tokens covered:
-# 12 V2 reserve-backed + V3 hub USDm collateral + 3 V3 Liquity debt tokens.
+# Unified daily supply per (chainId, tokenAddress). Mainnet coverage:
+# Celo V2 reserve-backed stables + Celo V3 hub USDm collateral + Celo V3
+# Liquity debt tokens + Monad Wormhole NTT stable supplies.
 type StableSupplyDailySnapshot
   @index(fields: ["chainId", "tokenSymbol", "timestamp"])
   @index(fields: ["chainId", "source", "timestamp"])
@@ -2019,4 +2020,48 @@ type V2StableTokenSupply {
   burnedTodayBucket: BigInt!
   lastEventBlock: BigInt!
   lastEventTimestamp: BigInt!
+}
+
+# Running lock-custody state for Wormhole NTT lock/mint deployments.
+# One row per (source chain, tokenAddress) that has NttManager.mode()=LOCKING.
+# Celo CHFm/GBPm/JPYm use this today: Liquity systemDebt is the raw Celo
+# supply, while the NTT manager balance is excluded from circulating/global
+# supply because the same units are minted on Monad.
+type StableTokenCustodyState {
+  id: ID! # "{chainId}-{tokenAddress}"
+  chainId: Int! @index
+  tokenAddress: String!
+  tokenSymbol: String!
+  source: StableSupplySource!
+  tokenDecimals: Int!
+  managerAddress: String!
+  lockedSupply: BigInt!
+  supplyBaselineSeeded: Boolean!
+  currentDayBucket: BigInt!
+  lockedTodayBucket: BigInt!
+  unlockedTodayBucket: BigInt!
+  lastEventBlock: BigInt!
+  lastEventTimestamp: BigInt!
+}
+
+# Sparse daily lock-custody snapshots. Same rolling-flush semantics as
+# StableSupplyDailySnapshot: a row is written on the first observed custody
+# event after a UTC day boundary, and the UI forward-fills lockedSupply across
+# quiet days.
+type StableTokenCustodyDailySnapshot
+  @index(fields: ["chainId", "tokenSymbol", "timestamp"])
+  @index(fields: ["chainId", "tokenAddress", "timestamp"]) {
+  id: ID! # "{chainId}-{tokenAddress}-{day}"
+  chainId: Int! @index
+  tokenAddress: String! @index
+  tokenSymbol: String!
+  source: StableSupplySource!
+  tokenDecimals: Int!
+  managerAddress: String!
+  timestamp: BigInt! @index
+  lockedSupply: BigInt!
+  dailyLockedAmount: BigInt!
+  dailyUnlockedAmount: BigInt!
+  blockNumber: BigInt!
+  updatedAtTimestamp: BigInt!
 }

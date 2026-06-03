@@ -5,8 +5,18 @@ import { BreakdownTile } from "@/components/breakdown-tile";
 import { formatUSD, parseWei } from "@/lib/format";
 import { displayLabel, effectiveOracleRate } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
-import { rollupByToken, winnersAndLosers7d } from "../_lib/aggregate";
-import type { StableSupplyDailySnapshot, TokenAgg } from "../_lib/types";
+import {
+  circulatingSupplyForSnapshot,
+  groupCustodySnapshotsByToken,
+  rollupByToken,
+  unionCustodySnapshotsWithLatest,
+  winnersAndLosers7d,
+} from "../_lib/aggregate";
+import type {
+  StableSupplyDailySnapshot,
+  StableTokenCustodyDailySnapshot,
+  TokenAgg,
+} from "../_lib/types";
 
 // `formatUSD` thresholds (>= 999_950, >= 1_000) miss negative inputs and
 // fall through to `$-5000000.00` instead of `-$5M`. Strip the sign first
@@ -21,9 +31,11 @@ type Props = {
   // the "Total outstanding" headline; the winners/losers tiles need the
   // wider snapshot stream for the 7d baseline comparison.
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
+  latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   // Daily-snapshot stream from useStablesDailySnapshots — feeds the 7d
   // change calculation. Empty array is acceptable (tiles render N/A).
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
+  custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   rates: OracleRateMap;
   isLoading: boolean;
   hasError: boolean;
@@ -31,7 +43,9 @@ type Props = {
 
 export function StablesKpiStrip({
   latestPerToken,
+  latestCustodyPerToken,
   snapshots,
+  custodySnapshots,
   rates,
   isLoading,
   hasError,
@@ -39,16 +53,25 @@ export function StablesKpiStrip({
   // Memoize the rollup + derived totals. SWR polls at 30s; parent re-renders
   // (range pill, hover state) shouldn't re-sort N=1000 snapshots each time.
   const { rollup, biggestExpansion, biggestContraction } = useMemo(() => {
-    const r = rollupByToken(snapshots, rates);
+    const mergedCustody = unionCustodySnapshotsWithLatest(
+      custodySnapshots,
+      latestCustodyPerToken,
+    );
+    const r = rollupByToken(snapshots, rates, undefined, mergedCustody);
     const wl = winnersAndLosers7d(r);
     return {
       rollup: r,
       biggestExpansion: wl.biggestExpansion,
       biggestContraction: wl.biggestContraction,
     };
-  }, [snapshots, rates]);
+  }, [snapshots, custodySnapshots, latestCustodyPerToken, rates]);
 
   const totalUsd = useMemo<number | null>(() => {
+    const mergedCustody = unionCustodySnapshotsWithLatest(
+      custodySnapshots,
+      latestCustodyPerToken,
+    );
+    const custodyByToken = groupCustodySnapshotsByToken(mergedCustody);
     return latestPerToken.reduce<number | null>((acc, row) => {
       // `effectiveOracleRate` defaults USD-pegged stables (USDm, cUSD,
       // ...) to 1.0 when the oracle map doesn't carry an entry —
@@ -57,10 +80,13 @@ export function StablesKpiStrip({
       // rates against USDm pairs and never emits one for USDm itself.
       const rate = effectiveOracleRate(rates, row.tokenSymbol);
       if (rate == null) return acc;
-      const usd = parseWei(row.totalSupply, row.tokenDecimals) * rate;
+      const custodyRows =
+        custodyByToken.get(`${row.chainId}|${row.tokenAddress}`) ?? [];
+      const circulating = circulatingSupplyForSnapshot(row, custodyRows);
+      const usd = parseWei(circulating.toString(), row.tokenDecimals) * rate;
       return (acc ?? 0) + usd;
     }, null);
-  }, [latestPerToken, rates]);
+  }, [latestPerToken, custodySnapshots, latestCustodyPerToken, rates]);
 
   const totalNetChange7dUsd = useMemo<number | null>(() => {
     return Array.from(rollup.values()).reduce<number | null>(
@@ -119,7 +145,9 @@ function MoverTile({
   isLoading: boolean;
   hasError: boolean;
 }): React.JSX.Element {
-  const subtitle = agg ? displayLabel(agg.tokenSymbol, agg.source) : undefined;
+  const subtitle = agg
+    ? `${displayLabel(agg.tokenSymbol, agg.source)} on ${chainLabel(agg.chainId)}`
+    : undefined;
   return (
     <BreakdownTile
       label={label}
@@ -133,4 +161,10 @@ function MoverTile({
       subtitle={subtitle}
     />
   );
+}
+
+function chainLabel(chainId: number): string {
+  if (chainId === 143) return "Monad";
+  if (chainId === 42220) return "Celo";
+  return `Chain ${chainId}`;
 }

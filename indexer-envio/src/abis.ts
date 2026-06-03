@@ -292,6 +292,19 @@ export const ERC20_TOTAL_SUPPLY_ABI = [
   },
 ] as const;
 
+// Used by `fetchV2StableBalanceOf` to seed the NTT lock-custody baseline
+// from on-chain at the block before the first observed manager lock/unlock
+// Transfer event.
+export const ERC20_BALANCE_OF_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
 // ---------------------------------------------------------------------------
 // BiPoolManager — getPoolExchange backfill
 //

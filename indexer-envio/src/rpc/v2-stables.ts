@@ -16,12 +16,13 @@
 // ---------------------------------------------------------------------------
 
 import { createEffect, S } from "envio";
-import { ERC20_TOTAL_SUPPLY_ABI } from "../abis.js";
+import { ERC20_BALANCE_OF_ABI, ERC20_TOTAL_SUPPLY_ABI } from "../abis.js";
 import { readContractWithBlockFallback } from "./block-fallback.js";
 import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client.js";
 import { consoleLogger, type RpcLogger } from "./log.js";
 
 const _testTotalSupply = new Map<string, bigint | null>();
+const _testBalanceOf = new Map<string, bigint | null>();
 
 /** @internal Test-only: pre-set a mock totalSupply for a token at a block.
  *  Pass `null` to simulate an RPC failure (fetch returns null). Key includes
@@ -41,6 +42,29 @@ export function _setMockV2StableTotalSupply(
 /** @internal Test-only: clear all mock totalSupply values. */
 export function _clearMockV2StableTotalSupply(): void {
   _testTotalSupply.clear();
+}
+
+/** @internal Test-only: pre-set a mock ERC20 balanceOf(account) at a block. */
+export function _setMockV2StableBalanceOf({
+  chainId,
+  tokenAddress,
+  account,
+  blockNumber,
+  value,
+}: {
+  chainId: number;
+  tokenAddress: string;
+  account: string;
+  blockNumber: bigint;
+  value: bigint | null;
+}): void {
+  const key = `${chainId}:${tokenAddress.toLowerCase()}:${account.toLowerCase()}:${blockNumber}`;
+  _testBalanceOf.set(key, value);
+}
+
+/** @internal Test-only: clear all mock balanceOf values. */
+export function _clearMockV2StableBalanceOf(): void {
+  _testBalanceOf.clear();
 }
 
 /**
@@ -113,6 +137,63 @@ export async function fetchV2StableTotalSupply(
   }
 }
 
+/**
+ * Returns the on-chain ERC20 balanceOf(account) at the given block, or null
+ * on RPC failure. Used to seed NTT lock-custody state at `event.block - 1`.
+ */
+export async function fetchV2StableBalanceOf(
+  {
+    chainId,
+    tokenAddress,
+    account,
+    blockNumber,
+  }: {
+    chainId: number;
+    tokenAddress: string;
+    account: string;
+    blockNumber: bigint;
+  },
+  log: RpcLogger = consoleLogger,
+): Promise<bigint | null> {
+  const key = `${chainId}:${tokenAddress.toLowerCase()}:${account.toLowerCase()}:${blockNumber}`;
+  const mocked = _testBalanceOf.get(key);
+  if (mocked !== undefined) return mocked;
+  try {
+    const client = getRpcClient(chainId);
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      chainId,
+      client,
+      {
+        address: tokenAddress as `0x${string}`,
+        abi: ERC20_BALANCE_OF_ABI,
+        functionName: "balanceOf",
+        args: [account as `0x${string}`],
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+      log,
+    );
+    if (usedLatestFallback) return null;
+    return result as bigint;
+  } catch (err) {
+    if (isContractNotDeployedError(err)) {
+      log.info?.(
+        `[v2StableBalanceOf] ${tokenAddress}.balanceOf(${account}) on chain ${chainId} returned no data at block ${blockNumber} — pre-deployment block, seeding baseline = 0n.`,
+      );
+      return BigInt(0);
+    }
+    logRpcFailure(
+      chainId,
+      "v2StableBalanceOf",
+      `${tokenAddress}:${account}`,
+      err,
+      blockNumber,
+      log,
+    );
+    return null;
+  }
+}
+
 // Mirrors `isUnsupportedGetterError` in pool-fees.ts. viem's
 // `ContractFunctionExecutionError` wraps the "returned no data" message when
 // the underlying call yields `0x`. For totalSupply on an ERC20 address this
@@ -150,6 +231,33 @@ export const v2StableTotalSupplyEffect = createEffect(
       input.chainId,
       input.tokenAddress,
       input.blockNumber,
+      context.log,
+    );
+    return result;
+  },
+);
+
+export const v2StableBalanceOfEffect = createEffect(
+  {
+    name: "v2StableBalanceOf",
+    input: {
+      chainId: S.int32,
+      tokenAddress: S.string,
+      account: S.string,
+      blockNumber: S.bigint,
+    },
+    output: S.nullable(S.bigint),
+    rateLimit: { calls: 200, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) => {
+    const result = await fetchV2StableBalanceOf(
+      {
+        chainId: input.chainId,
+        tokenAddress: input.tokenAddress,
+        account: input.account,
+        blockNumber: input.blockNumber,
+      },
       context.log,
     );
     return result;

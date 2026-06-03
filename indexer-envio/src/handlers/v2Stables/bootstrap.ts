@@ -108,9 +108,9 @@ export async function getOrCreateV2StableTokenSupply(
  *
  * Note: `v2StableTotalSupplyEffect` is `cache: false` (Group C invariant —
  * see `rpc/v2-stables.ts`), so the value is NOT persisted across batches.
- * The preload's job is purely in-batch dedup: keeps 13 concurrent
- * `V2StableToken.Transfer` events on the same token from firing 13
- * separate RPC calls when their handlers run in parallel.
+ * The preload's job is purely in-batch dedup: keeps concurrent
+ * `V2StableToken.Transfer` events on the same token from firing duplicate
+ * RPC calls when their handlers run in parallel.
  *
  * Steady-state cost: O(1) per token — the first successful baseline call
  * pins `supplyBaselineSeeded: true` and every subsequent preload returns

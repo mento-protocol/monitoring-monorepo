@@ -2,8 +2,8 @@
 // V2StableToken Transfer handler — mint/burn supply tracking.
 //
 // Subscribes ERC20 Transfer events with array-OR filter `from=0x0 OR to=0x0`,
-// limited to the 13 Mento stable addresses listed under `V2StableToken` in
-// config.multichain.mainnet.yaml. Each event:
+// limited to supply-tracked Mento stable addresses listed under
+// `V2StableToken` in config.multichain.mainnet.yaml. Each event:
 //
 //   1. Looks up the running supply entity. First event per token → seeds the
 //      baseline from on-chain `totalSupply(block-1)` via the RPC effect. If
@@ -14,14 +14,12 @@
 //      the today-bucket accumulators.
 //   4. Writes a `V2StableSupplyChangeEvent` row for the per-tx changes table.
 //
-// V3 Liquity debt tokens (GBPm/CHFm/JPYm) are explicitly excluded from the
-// V2 subscription (see config.ts EXCLUDED_FROM_V2). Their supply is derived
-// from `LiquityInstance.systemDebt` via the existing v3 handler. The V3
-// handler will additionally write `StableSupplyDailySnapshot` rows with
-// source=V3_LIQUITY in a follow-up PR (deferred per the plan; until then
-// the /stables UI shows V2_RESERVE + V3_HUB_COLLATERAL rows only for those
-// 13 tokens, and V3_LIQUITY supply comes from a separate LiquityInstance
-// query merged client-side).
+// Celo V3 Liquity debt tokens (GBPm/CHFm/JPYm) are excluded from this
+// Transfer-zero supply path because their Celo supply is derived from
+// LiquityInstance.systemDebt. Their Celo NTT lock/mint manager balances are
+// tracked separately in custody.ts. Monad GBPm/CHFm/JPYm are burn/mint NTT
+// deployments, so their Monad Transfer-zero events are real chain-local supply
+// and are tracked here with source=V3_LIQUITY.
 // ---------------------------------------------------------------------------
 
 import type { V2StableSupplyChangeEvent } from "envio";
@@ -35,7 +33,11 @@ import {
   preloadV2StableTokenSupply,
 } from "./bootstrap.js";
 import { classifyV2StableSupplyChangeKind } from "./classifyKind.js";
-import { findV2StableByAddress } from "./config.js";
+import {
+  findV2StableByAddress,
+  STABLE_TOKEN_CUSTODY_TRANSFER_WHERE_PARAMS,
+} from "./config.js";
+import { handleStableTokenCustodyTransfer } from "./custody.js";
 import { flushV2StableDailySnapshot } from "./dailyFlush.js";
 
 indexer.onEvent(
@@ -43,18 +45,22 @@ indexer.onEvent(
     contract: "V2StableToken",
     event: "Transfer",
     // Array-OR semantics per envio 3.0.0: deliver Transfer events where
-    // EITHER from==0x0 (mint) OR to==0x0 (burn). Other Transfers are
-    // filtered at the HyperSync edge — they never reach the handler.
+    // EITHER from==0x0 (mint), to==0x0 (burn), from==locking NTT manager, or
+    // to==locking NTT manager. Other Transfers are filtered at the HyperSync
+    // edge — they never reach the handler.
     // The `0x${string}` casts narrow ZERO_ADDRESS (typed as plain string in
     // constants.ts) to the SingleOrMultiple<`0x${string}`> envio expects.
     where: () => ({
       params: [
         { from: ZERO_ADDRESS as `0x${string}` },
         { to: ZERO_ADDRESS as `0x${string}` },
+        ...STABLE_TOKEN_CUSTODY_TRANSFER_WHERE_PARAMS,
       ],
     }),
   },
   async ({ event, context }) => {
+    await handleStableTokenCustodyTransfer({ event, context });
+
     const { chainId, srcAddress } = event;
     const tokenAddress = asAddress(srcAddress);
     const info = findV2StableByAddress(chainId, tokenAddress);

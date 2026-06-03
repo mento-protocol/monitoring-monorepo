@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { useNetwork } from "@/components/network-provider";
 import { useGQL } from "@/lib/graphql";
 import {
+  STABLES_CUSTODY_DAILY_SNAPSHOTS,
   STABLES_DAILY_SNAPSHOTS,
+  STABLES_LATEST_CUSTODY_PER_TOKEN,
   STABLES_LATEST_PER_TOKEN,
   STABLES_V2_CHANGES,
 } from "@/lib/queries/stables";
@@ -12,9 +13,11 @@ import { rangeStartSeconds } from "./aggregate";
 import type {
   RangeKey,
   StableSupplyDailySnapshot,
+  StableTokenCustodyDailySnapshot,
   V2StableSupplyChangeEvent,
 } from "./types";
 
+const STABLES_CHAIN_IDS = [42220, 143] as const;
 // Hasura silently caps at 1000; we set explicit limits to be honest.
 const SNAPSHOT_PAGE_LIMIT = 1000;
 const CHANGES_PAGE_LIMIT = 200;
@@ -26,26 +29,25 @@ type DailySnapshotsResult = {
   StableSupplyDailySnapshot: ReadonlyArray<StableSupplyDailySnapshot>;
 };
 type LatestPerTokenResult = DailySnapshotsResult;
+type CustodyDailySnapshotsResult = {
+  StableTokenCustodyDailySnapshot: ReadonlyArray<StableTokenCustodyDailySnapshot>;
+};
+type LatestCustodyPerTokenResult = CustodyDailySnapshotsResult;
 type V2ChangesResult = {
   V2StableSupplyChangeEvent: ReadonlyArray<V2StableSupplyChangeEvent>;
 };
 
 /**
  * Per-token latest supply snapshot (one row per token via distinct_on).
- * Powers the KPI strip "current outstanding" totals + sparkline grid
- * headlines. Lightweight (~16 rows).
+ * Powers the KPI strip current totals + sparkline grid headlines.
  *
- * Defaults to the current network's `chainId` from `useNetwork()` —
- * earlier hardcoded Celo (42220) which silently returned Celo data when
- * the user switched to Monad (prod networks share one multichain Envio
- * endpoint filtered server-side by `chainId`). V2 stables are Celo-only
- * today, so Monad correctly returns empty.
+ * /stables is a global supply view, so it queries every chain that can carry
+ * Mento stable supply instead of following the currently selected network.
  */
 export function useStablesLatestPerToken() {
-  const { network } = useNetwork();
   const { data, error, isLoading } = useGQL<LatestPerTokenResult>(
     STABLES_LATEST_PER_TOKEN,
-    { chainId: network.chainId },
+    { chainIds: STABLES_CHAIN_IDS },
   );
   const snapshots = useMemo(
     () => data?.StableSupplyDailySnapshot ?? [],
@@ -64,8 +66,8 @@ export function useStablesLatestPerToken() {
  * while keeping the baseline reachable.
  *
  * `range` is accepted as a parameter to gate the `capped` warning: under
- * `7d` / `30d` the 1000-row page comfortably covers ~16 tokens × ~30
- * days. `all` may exceed and surface as `capped: true`; PR2.5 follow-up
+ * `7d` / `30d` the 1000-row page comfortably covers the current stable
+ * token set. `all` may exceed and surface as `capped: true`; PR2.5 follow-up
  * adds keyset pagination via the `beforeTimestamp` cursor.
  */
 export function useStablesDailySnapshots(_range: RangeKey) {
@@ -73,11 +75,10 @@ export function useStablesDailySnapshots(_range: RangeKey) {
   // to make it a typed-call-site for future range-aware where-clause
   // filtering. The hook does NOT filter by range today (see header).
   void _range;
-  const { network } = useNetwork();
   const { data, error, isLoading } = useGQL<DailySnapshotsResult>(
     STABLES_DAILY_SNAPSHOTS,
     {
-      chainId: network.chainId,
+      chainIds: STABLES_CHAIN_IDS,
       limit: SNAPSHOT_PAGE_LIMIT,
       beforeTimestamp: TS_CURSOR_INITIAL,
     },
@@ -96,18 +97,51 @@ export function useStablesDailySnapshots(_range: RangeKey) {
   };
 }
 
+export function useStablesLatestCustodyPerToken() {
+  const { data, error, isLoading } = useGQL<LatestCustodyPerTokenResult>(
+    STABLES_LATEST_CUSTODY_PER_TOKEN,
+    { chainIds: STABLES_CHAIN_IDS },
+  );
+  const snapshots = useMemo(
+    () => data?.StableTokenCustodyDailySnapshot ?? [],
+    [data],
+  );
+  return { snapshots, error, isLoading };
+}
+
+export function useStablesCustodyDailySnapshots(_range: RangeKey) {
+  void _range;
+  const { data, error, isLoading } = useGQL<CustodyDailySnapshotsResult>(
+    STABLES_CUSTODY_DAILY_SNAPSHOTS,
+    {
+      chainIds: STABLES_CHAIN_IDS,
+      limit: SNAPSHOT_PAGE_LIMIT,
+      beforeTimestamp: TS_CURSOR_INITIAL,
+    },
+  );
+  const snapshots = useMemo(
+    () => data?.StableTokenCustodyDailySnapshot ?? [],
+    [data],
+  );
+  return {
+    snapshots,
+    error,
+    isLoading,
+    capped: snapshots.length === SNAPSHOT_PAGE_LIMIT,
+  };
+}
+
 /**
  * Per-tx V2 supply changes for the changes table + leaderboard. Filters
  * to the last 7d window (sufficient for the leaderboard; the table can
  * later add date-range pickers via the `sinceTimestamp` arg).
  */
 export function useStablesV2Changes(range: RangeKey = "7d", page: number = 0) {
-  const { network } = useNetwork();
   const sinceTimestamp = rangeStartSeconds(range);
   const { data, error, isLoading } = useGQL<V2ChangesResult>(
     STABLES_V2_CHANGES,
     {
-      chainId: network.chainId,
+      chainIds: STABLES_CHAIN_IDS,
       sinceTimestamp,
       limit: CHANGES_PAGE_LIMIT,
       offset: page * CHANGES_PAGE_LIMIT,

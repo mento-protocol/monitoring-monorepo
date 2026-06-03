@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTokenUsdTimeSeries,
+  circulatingSupplyForSnapshot,
   computeChartStartSeconds,
   rangeStartSeconds,
   rollupByToken,
   sumTotalUsdSeries,
   winnersAndLosers7d,
 } from "./aggregate";
-import type { StableSupplyDailySnapshot } from "./types";
+import type {
+  StableSupplyDailySnapshot,
+  StableTokenCustodyDailySnapshot,
+} from "./types";
 
 // 2024-05-22 00:00:00 UTC. Anchoring tests in the past keeps "7d ago"
 // math consistent regardless of when the suite runs.
@@ -18,9 +22,10 @@ function snapshot(
   overrides: Partial<StableSupplyDailySnapshot> &
     Pick<StableSupplyDailySnapshot, "timestamp" | "totalSupply">,
 ): StableSupplyDailySnapshot {
+  const chainId = overrides.chainId ?? 42220;
   return {
-    id: `42220-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
-    chainId: 42220,
+    id: `${chainId}-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
+    chainId,
     tokenAddress: overrides.tokenAddress ?? "0xa",
     tokenSymbol: overrides.tokenSymbol ?? "USDm",
     source: overrides.source ?? "V2_RESERVE",
@@ -29,6 +34,26 @@ function snapshot(
     totalSupply: overrides.totalSupply,
     dailyMintAmount: overrides.dailyMintAmount ?? "0",
     dailyBurnAmount: overrides.dailyBurnAmount ?? "0",
+  };
+}
+
+function custodySnapshot(
+  overrides: Partial<StableTokenCustodyDailySnapshot> &
+    Pick<StableTokenCustodyDailySnapshot, "timestamp" | "lockedSupply">,
+): StableTokenCustodyDailySnapshot {
+  return {
+    id: `42220-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
+    chainId: overrides.chainId ?? 42220,
+    tokenAddress: overrides.tokenAddress ?? "0xa",
+    tokenSymbol: overrides.tokenSymbol ?? "USDm",
+    source: overrides.source ?? "V2_RESERVE",
+    tokenDecimals: overrides.tokenDecimals ?? 18,
+    managerAddress:
+      overrides.managerAddress ?? "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
+    timestamp: overrides.timestamp,
+    lockedSupply: overrides.lockedSupply,
+    dailyLockedAmount: overrides.dailyLockedAmount ?? "0",
+    dailyUnlockedAmount: overrides.dailyUnlockedAmount ?? "0",
   };
 }
 
@@ -66,7 +91,7 @@ describe("rollupByToken", () => {
     const rollup = rollupByToken(snapshots, rates, NOW_TS);
 
     expect(rollup.size).toBe(2);
-    const usdmAgg = rollup.get(`${usdm}|V2_RESERVE`);
+    const usdmAgg = rollup.get(`42220|${usdm}|V2_RESERVE`);
     expect(usdmAgg).toBeDefined();
     // 7d baseline = 900_000 (7d-ago snapshot); now = 1_100_000 → +200_000
     expect(usdmAgg!.netChange7d).toBe(
@@ -107,8 +132,68 @@ describe("rollupByToken", () => {
     ];
     const rollup = rollupByToken(snapshots, new Map([["USDm", 1]]), NOW_TS);
     expect(rollup.size).toBe(2);
-    expect(rollup.has("0xa|V2_RESERVE")).toBe(true);
-    expect(rollup.has("0xb|V3_HUB_COLLATERAL")).toBe(true);
+    expect(rollup.has("42220|0xa|V2_RESERVE")).toBe(true);
+    expect(rollup.has("42220|0xb|V3_HUB_COLLATERAL")).toBe(true);
+  });
+
+  it("keeps same token address on Celo and Monad as separate rows", () => {
+    const snapshots: StableSupplyDailySnapshot[] = [
+      snapshot({
+        chainId: 42220,
+        tokenAddress: "0xa",
+        timestamp: String(NOW_TS),
+        totalSupply: String(BigInt(100) * BigInt(10) ** BigInt(18)),
+      }),
+      snapshot({
+        chainId: 143,
+        tokenAddress: "0xa",
+        timestamp: String(NOW_TS),
+        totalSupply: String(BigInt(50) * BigInt(10) ** BigInt(18)),
+      }),
+    ];
+    const rollup = rollupByToken(snapshots, new Map([["USDm", 1]]), NOW_TS);
+    expect(rollup.size).toBe(2);
+    expect(rollup.get("42220|0xa|V2_RESERVE")?.latestTotalSupply).toBe(
+      BigInt(100) * BigInt(10) ** BigInt(18),
+    );
+    expect(rollup.get("143|0xa|V2_RESERVE")?.latestTotalSupply).toBe(
+      BigInt(50) * BigInt(10) ** BigInt(18),
+    );
+  });
+
+  it("subtracts lock-custody snapshots from Celo circulating supply", () => {
+    const rawSupply = String(BigInt(300) * BigInt(10) ** BigInt(18));
+    const lockedSupply = String(BigInt(80) * BigInt(10) ** BigInt(18));
+    const row = snapshot({
+      tokenAddress: "0xc",
+      tokenSymbol: "GBPm",
+      source: "V3_LIQUITY",
+      timestamp: String(NOW_TS),
+      totalSupply: rawSupply,
+    });
+    const custody = [
+      custodySnapshot({
+        tokenAddress: "0xc",
+        tokenSymbol: "GBPm",
+        source: "V3_LIQUITY",
+        timestamp: String(NOW_TS),
+        lockedSupply,
+      }),
+    ];
+    expect(circulatingSupplyForSnapshot(row, custody)).toBe(
+      BigInt(220) * BigInt(10) ** BigInt(18),
+    );
+
+    const rollup = rollupByToken(
+      [row],
+      new Map([["GBPm", 1.3]]),
+      NOW_TS,
+      custody,
+    );
+    const agg = rollup.get("42220|0xc|V3_LIQUITY");
+    expect(agg?.latestTotalSupply).toBe(BigInt(220) * BigInt(10) ** BigInt(18));
+    expect(agg?.latestLockedSupply).toBe(BigInt(80) * BigInt(10) ** BigInt(18));
+    expect(agg?.totalSupplyUsdLatest).toBeCloseTo(286, 0);
   });
 });
 
@@ -144,14 +229,14 @@ describe("computeChartStartSeconds", () => {
     const earliest = Number(NOW_TS) - 30 * DAY;
     const grouped = new Map([
       [
-        "0xa|V2_RESERVE",
+        "42220|0xa|V2_RESERVE",
         [
           { timestamp: String(earliest) },
           { timestamp: String(Number(NOW_TS) - 7 * DAY) },
         ] as ReadonlyArray<{ timestamp: string }>,
       ],
       [
-        "0xb|V2_RESERVE",
+        "42220|0xb|V2_RESERVE",
         [{ timestamp: String(Number(NOW_TS) - 14 * DAY) }] as ReadonlyArray<{
           timestamp: string;
         }>,
@@ -272,6 +357,50 @@ describe("buildTokenUsdTimeSeries + sumTotalUsdSeries", () => {
     // The NOW_TS day should reflect the new supply (150).
     const today = series.find((p) => p.timestamp === Number(NOW_TS));
     expect(today?.valueUsd).toBeCloseTo(150, 0);
+  });
+
+  it("forward-fills locked custody independently before subtracting from supply", () => {
+    const gbpm = "0xc";
+    const snapshots: StableSupplyDailySnapshot[] = [
+      snapshot({
+        tokenAddress: gbpm,
+        tokenSymbol: "GBPm",
+        source: "V3_LIQUITY",
+        timestamp: String(Number(NOW_TS) - 3 * DAY),
+        totalSupply: String(BigInt(300) * BigInt(10) ** BigInt(18)),
+      }),
+      snapshot({
+        tokenAddress: gbpm,
+        tokenSymbol: "GBPm",
+        source: "V3_LIQUITY",
+        timestamp: String(NOW_TS),
+        totalSupply: String(BigInt(350) * BigInt(10) ** BigInt(18)),
+      }),
+    ];
+    const custody = [
+      custodySnapshot({
+        tokenAddress: gbpm,
+        tokenSymbol: "GBPm",
+        source: "V3_LIQUITY",
+        timestamp: String(Number(NOW_TS) - 2 * DAY),
+        lockedSupply: String(BigInt(80) * BigInt(10) ** BigInt(18)),
+      }),
+    ];
+    const series = buildTokenUsdTimeSeries(
+      snapshots,
+      new Map([["GBPm", 1]]),
+      rangeStartSeconds("7d", Number(NOW_TS)),
+      Number(NOW_TS),
+      custody,
+    );
+    const beforeLock = series.find(
+      (p) => p.timestamp === Number(NOW_TS) - 3 * DAY,
+    );
+    const afterLock = series.find((p) => p.timestamp === Number(NOW_TS) - DAY);
+    const today = series.find((p) => p.timestamp === Number(NOW_TS));
+    expect(beforeLock?.valueUsd).toBeCloseTo(300, 0);
+    expect(afterLock?.valueUsd).toBeCloseTo(220, 0);
+    expect(today?.valueUsd).toBeCloseTo(270, 0);
   });
 
   it("sums per-token series into a total — timestamps align across tokens", () => {

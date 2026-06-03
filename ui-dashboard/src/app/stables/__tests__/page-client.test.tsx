@@ -11,14 +11,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { StablesPageClient } from "../_components/stables-page-client";
 import type {
   StableSupplyDailySnapshot,
+  StableTokenCustodyDailySnapshot,
   V2StableSupplyChangeEvent,
 } from "../_lib/types";
-
-vi.mock("@/components/network-provider", () => ({
-  useNetwork: () => ({
-    network: { id: "celo-mainnet", chainId: 42220 },
-  }),
-}));
 
 const mockRates = vi.hoisted(() => ({
   merged: new Map<string, number>([["EURm", 1.1]]),
@@ -37,6 +32,10 @@ const mockChanges = vi.hoisted(() => ({
   data: [] as V2StableSupplyChangeEvent[],
   capped: false,
 }));
+const mockCustodySnapshots = vi.hoisted(() => ({
+  data: [] as StableTokenCustodyDailySnapshot[],
+  capped: false,
+}));
 vi.mock("../_lib/use-stables-data", () => ({
   useStablesLatestPerToken: () => ({
     snapshots: mockSnapshots.data,
@@ -48,6 +47,17 @@ vi.mock("../_lib/use-stables-data", () => ({
     error: null,
     isLoading: false,
     capped: mockSnapshots.capped,
+  }),
+  useStablesLatestCustodyPerToken: () => ({
+    snapshots: mockCustodySnapshots.data,
+    error: null,
+    isLoading: false,
+  }),
+  useStablesCustodyDailySnapshots: () => ({
+    snapshots: mockCustodySnapshots.data,
+    error: null,
+    isLoading: false,
+    capped: mockCustodySnapshots.capped,
   }),
   useStablesV2Changes: () => ({
     events: mockChanges.data,
@@ -81,12 +91,14 @@ describe("StablesPageClient — smoke", () => {
     mockSnapshots.capped = false;
     mockChanges.data = [];
     mockChanges.capped = false;
+    mockCustodySnapshots.data = [];
+    mockCustodySnapshots.capped = false;
   });
 
   it("renders the page header on empty data", () => {
     const html = renderToStaticMarkup(<StablesPageClient />);
     expect(html).toContain("Mento stablecoins");
-    expect(html).toContain("Outstanding supply");
+    expect(html).toContain("Circulating supply");
   });
 
   it("renders an empty state when no snapshots exist", () => {
