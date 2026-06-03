@@ -9,13 +9,13 @@ export default defineConfig({
       reporter: ["text", "lcov"],
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/**/*.d.ts"],
-      // Floors: measured 2026-05-18 (stmts 89.96 / branches 83.78 / funcs 86.3 / lines 93.37)
+      // Floors: measured 2026-06-03 (stmts 91.69 / branches 85.50 / funcs 89.69 / lines 94.31)
       // Threshold = floor(current) - 2 to absorb natural variance without ratcheting to 100%.
       thresholds: {
-        statements: 87,
-        branches: 81,
-        functions: 84,
-        lines: 91,
+        statements: 89,
+        branches: 83,
+        functions: 87,
+        lines: 92,
       },
     },
   },

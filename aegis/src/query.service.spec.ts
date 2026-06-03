@@ -1,0 +1,194 @@
+import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
+import { register } from 'prom-client';
+import { createPublicClient, http } from 'viem';
+import { ChainConfig } from './config';
+import { Metric } from './metric';
+import { QueryService } from './query.service';
+
+jest.mock('viem', () => ({
+  createPublicClient: jest.fn(),
+  http: jest.fn((url: string) => ({ url })),
+}));
+
+const mockCreatePublicClient = jest.mocked(createPublicClient);
+const mockHttp = jest.mocked(http);
+
+const readContract = jest.fn();
+const getBalance = jest.fn();
+
+const chain = {
+  id: 'localnet',
+  label: 'Localnet',
+  httpRpcUrl: 'http://localhost:8545',
+  contracts: {
+    BreakerBox: '0x0000000000000000000000000000000000000001',
+  },
+  vars: {
+    FeedId: '0xfeed',
+  },
+} as unknown as ChainConfig;
+
+const makeConfigService = (
+  chains: ChainConfig[] | undefined = [chain],
+  hasChains = true,
+): jest.Mocked<ConfigService> =>
+  ({
+    get: jest.fn((key: string) => {
+      if (key === 'chains') return hasChains ? chains : undefined;
+      return undefined;
+    }),
+  }) as unknown as jest.Mocked<ConfigService>;
+
+const makeMetric = (overrides: Record<string, unknown> = {}): Metric =>
+  ({
+    chain: 'localnet',
+    name: 'BreakerBox_getRateFeedTradingMode',
+    source: {
+      contract: 'BreakerBox',
+      raw: 'BreakerBox.getRateFeedTradingMode(bytes32 rateFeedId)(uint8 mode)',
+      functionAbi: {
+        type: 'function',
+        name: 'getRateFeedTradingMode',
+        stateMutability: 'view',
+        inputs: [{ type: 'bytes32', name: 'rateFeedId' }],
+        outputs: [{ type: 'uint8', name: 'mode' }],
+      },
+    },
+    args: ['FeedId', 'literal'],
+    parse: jest.fn(() => 1),
+    ...overrides,
+  }) as unknown as Metric;
+
+describe('QueryService', () => {
+  beforeEach(() => {
+    register.clear();
+    readContract.mockReset();
+    getBalance.mockReset();
+    mockCreatePublicClient.mockReset();
+    mockHttp.mockClear();
+    mockCreatePublicClient.mockReturnValue({
+      readContract,
+      getBalance,
+    } as unknown as ReturnType<typeof createPublicClient>);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    register.clear();
+  });
+
+  it('creates a public client for each configured chain', () => {
+    new QueryService(makeConfigService());
+
+    expect(mockHttp).toHaveBeenCalledWith('http://localhost:8545');
+    expect(mockCreatePublicClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chain: expect.objectContaining({
+          name: 'localnet',
+        }),
+        transport: { url: 'http://localhost:8545' },
+      }),
+    );
+  });
+
+  it('throws when no chains are configured', () => {
+    expect(() => new QueryService(makeConfigService(undefined, false))).toThrow(
+      'No chains configured',
+    );
+  });
+
+  it('queries contracts with chain variable substitution and parses the result', async () => {
+    readContract.mockResolvedValue(2n);
+    const service = new QueryService(makeConfigService());
+    const metric = makeMetric();
+
+    await expect(service.query(metric)).resolves.toBe(1);
+
+    expect(readContract).toHaveBeenCalledWith({
+      address: '0x0000000000000000000000000000000000000001',
+      abi: [metric.source.functionAbi],
+      functionName: 'getRateFeedTradingMode',
+      args: ['0xfeed', 'literal'],
+    });
+    expect(metric.parse).toHaveBeenCalledWith(
+      2n,
+      'BreakerBox',
+      'getRateFeedTradingMode',
+    );
+  });
+
+  it('queries native balances through getBalance', async () => {
+    getBalance.mockResolvedValue(10n);
+    const service = new QueryService(makeConfigService());
+    const metric = makeMetric({
+      source: {
+        contract: 'Native',
+        raw: 'Native.balanceOf(address account)(uint256 balance)',
+        functionAbi: {
+          type: 'function',
+          name: 'balanceOf',
+          stateMutability: 'view',
+          inputs: [{ type: 'address', name: 'account' }],
+          outputs: [{ type: 'uint256', name: 'balance' }],
+        },
+      },
+      args: ['0x0000000000000000000000000000000000000004'],
+      parse: jest.fn(() => 10),
+    });
+
+    await expect(service.query(metric)).resolves.toBe(10);
+
+    expect(getBalance).toHaveBeenCalledWith({
+      address: '0x0000000000000000000000000000000000000004',
+    });
+    expect(readContract).not.toHaveBeenCalled();
+  });
+
+  it('returns undefined and records an error path when a view call fails', async () => {
+    const error = new Error('rpc unavailable');
+    readContract.mockRejectedValue(error);
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const service = new QueryService(makeConfigService());
+    const metric = makeMetric();
+
+    await expect(service.query(metric)).resolves.toBeUndefined();
+
+    expect(loggerError).toHaveBeenCalledWith(error);
+    expect(metric.parse).not.toHaveBeenCalled();
+  });
+
+  it('throws before querying when the metric chain is unknown', async () => {
+    const service = new QueryService(makeConfigService());
+
+    await expect(
+      service.query(makeMetric({ chain: 'missing-chain' })),
+    ).rejects.toThrow(
+      'Unknown chain missing-chain in metric: BreakerBox_getRateFeedTradingMode',
+    );
+    expect(readContract).not.toHaveBeenCalled();
+  });
+
+  it('throws before querying when the function name is missing', async () => {
+    const service = new QueryService(makeConfigService());
+    const metric = makeMetric({
+      source: {
+        contract: 'BreakerBox',
+        raw: 'BreakerBox.getRateFeedTradingMode()(uint8 mode)',
+        functionAbi: {
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [],
+          outputs: [{ type: 'uint8', name: 'mode' }],
+        },
+      },
+    });
+
+    await expect(service.query(metric)).rejects.toThrow(
+      'Missing function name for metric BreakerBox_getRateFeedTradingMode',
+    );
+    expect(readContract).not.toHaveBeenCalled();
+  });
+});

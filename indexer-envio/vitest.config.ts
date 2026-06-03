@@ -18,15 +18,15 @@ export default defineConfig({
       reporter: ["text", "lcov"],
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/**/*.d.ts", "src/handlers/**/*.ts"],
-      // Floors: measured 2026-05-18 with Envio event-handler registration files
+      // Floors: measured 2026-06-03 with Envio event-handler registration files
       // excluded. Handlers are exercised by integration tests, but their module
       // scope and framework callbacks are not meaningful global unit-coverage
       // inputs. Threshold = floor(current) - 2.
       thresholds: {
-        statements: 44,
-        branches: 37,
-        functions: 56,
-        lines: 45,
+        statements: 70,
+        branches: 62,
+        functions: 76,
+        lines: 72,
       },
     },
   },

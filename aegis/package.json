@@ -35,9 +35,20 @@
   },
   "jest": {
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!**/*.spec.ts",
+      "!**/*.test.ts",
+      "!**/*.d.ts"
     ],
     "coverageDirectory": "../coverage",
+    "coverageThreshold": {
+      "global": {
+        "branches": 77,
+        "functions": 87,
+        "lines": 85,
+        "statements": 85
+      }
+    },
     "moduleFileExtensions": [
       "js",
       "json",

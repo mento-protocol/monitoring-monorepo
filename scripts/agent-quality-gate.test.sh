@@ -529,7 +529,7 @@ assert_order \
   "- pnpm install --frozen-lockfile (workspace package manifest changed)" \
   "- pnpm --filter @mento-protocol/ui-dashboard lint (ui-dashboard changed)"
 assert_order \
-  "- pnpm --filter @mento-protocol/ui-dashboard test (ui-dashboard changed)" \
+  "- pnpm --filter @mento-protocol/ui-dashboard test:coverage (ui-dashboard changed (coverage floor))" \
   "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (ui-dashboard changed)"
 assert_order \
   "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (ui-dashboard changed)" \
@@ -874,7 +874,7 @@ assert_order \
 
 run_gate "indexer-envio/src/bridge.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
-assert_contains "- pnpm --filter @mento-protocol/indexer-envio test (indexer-envio changed)"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage (indexer-envio changed (coverage floor))"
 assert_not_contains "indexer:bridge-only:codegen"
 assert_not_contains "indexer:testnet:codegen"
 # Mainnet codegen now runs as a preflight for every indexer quality command
@@ -964,11 +964,12 @@ assert_order \
 
 run_gate "indexer-envio/config/aggregators.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer config data flow changed)"
-assert_contains "- pnpm --filter @mento-protocol/indexer-envio test (indexer-envio changed)"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage (indexer-envio changed (coverage floor))"
 
 run_gate "metrics-bridge/src/graphql.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics-bridge changed (coverage floor))"
 
 run_gate "metrics-bridge/src/poller.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
@@ -1007,6 +1008,7 @@ run_gate "ui-dashboard/src/lib/gql-retry.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage (ui-dashboard changed (coverage floor))"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (ui-dashboard changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
 assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
@@ -1159,12 +1161,12 @@ assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud 
 run_gate "alerts/infra/onchain-event-handler/src/slack.ts"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"
-assert_contains "- pnpm exec turbo run test --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"
+assert_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage (alerts onchain-event-handler changed (coverage floor))"
 
 run_gate "alerts/infra/onchain-event-handler/src/safe-abi.json"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
-assert_contains "- pnpm exec turbo run test --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
+assert_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage (Safe ABI changed (handler imports it) (coverage floor))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (Safe ABI changed (listener filter uses it at plan time))"
@@ -1218,13 +1220,13 @@ assert_order \
 run_gate ".gcloudignore"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Build ignore file changed)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metrics bridge build context changed)"
-assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test (metrics bridge build context changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics bridge build context changed (coverage floor))"
 
 run_gate "cloudbuild.yaml"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Build config changed)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics bridge build context changed)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metrics bridge build context changed)"
-assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test (metrics bridge build context changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics bridge build context changed (coverage floor))"
 
 run_gate "shared-config/deployment-namespaces.json"
 assert_order \
@@ -1251,6 +1253,7 @@ assert_contains "- pnpm dashboard:build (shared-config exports feed the dashboar
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 
 run_gate "shared-config/src/chains.ts"
+assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:build (shared-config exports feed the dashboard bundle)"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 # The cache key includes shared-config inputs for browser tests, but the local

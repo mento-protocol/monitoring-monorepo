@@ -459,7 +459,7 @@ add_package_quality_commands() {
   fi
   add_turbo_package_task "$package_name" "lint" "$reason"
   add_turbo_package_task "$package_name" "typecheck" "$reason"
-  add_turbo_package_task "$package_name" "test" "$reason"
+  add_command "pnpm --filter $package_name test:coverage" "$reason (coverage floor)"
   add_turbo_package_task "$package_name" "knip" "$reason (knip: unused files/deps/exports)"
   add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
   add_checklist "docs/pr-checklists/code-health.md" "$reason (code-health gates fire on this change)"
