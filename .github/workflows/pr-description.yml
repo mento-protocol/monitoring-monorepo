@@ -1,0 +1,71 @@
+name: PR Description
+
+# Enforces the repo PR-description standard (AGENTS.md "PR description standard"
+# + .github/PULL_REQUEST_TEMPLATE.md): every PR body must lead with
+# `## The Problem` and `## The Solution`, and must not still contain the
+# unfilled template placeholders.
+#
+# REQUIRED-STATUS SAFETY: no workflow-level `paths:` filter — this is meant to
+# run on every PR so it can be a required status (AGENTS.md: required-status
+# workflows MUST NOT use `paths:`). It re-runs on `edited` (so fixing the body
+# clears it) and on `synchronize` (so the status re-attaches to each new head
+# commit). Draft PRs and Dependabot PRs are skipped.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: PR description format
+    # Skip drafts (work-in-progress) and Dependabot (auto-generated bodies).
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Validate PR description
+        # Body is passed via env (never interpolated into the script) to avoid
+        # shell injection from PR content.
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+
+          fail=0
+          missing=""
+
+          if ! grep -qiE '^##[[:space:]]+The Problem([[:space:]]|$)' <<<"$PR_BODY"; then
+            missing="$missing '## The Problem'"
+            fail=1
+          fi
+          if ! grep -qiE '^##[[:space:]]+The Solution([[:space:]]|$)' <<<"$PR_BODY"; then
+            missing="$missing '## The Solution'"
+            fail=1
+          fi
+
+          # Unfilled template placeholders from .github/PULL_REQUEST_TEMPLATE.md.
+          if grep -qE '\[Plain-English problem|\[Simple explanation of how|\[Implementation details, invariants|\[Commands and results' <<<"$PR_BODY"; then
+            echo "::error::PR description still contains unfilled template placeholders — replace the bracketed prompts with real content."
+            fail=1
+          fi
+
+          if [ -z "${PR_BODY//[[:space:]]/}" ]; then
+            echo "::error::PR description is empty."
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::PR description must follow .github/PULL_REQUEST_TEMPLATE.md (see AGENTS.md 'PR description standard'). Missing or invalid:${missing:- placeholders/empty body}. Required: '## The Problem' (max 3 plain-English bullets) then '## The Solution', before any implementation detail."
+            exit 1
+          fi
+
+          echo "PR description OK — The Problem + The Solution present, no placeholders."
