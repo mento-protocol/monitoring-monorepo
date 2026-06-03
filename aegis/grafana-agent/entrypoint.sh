@@ -78,5 +78,8 @@ export GRAFANA_AGENT_ENDPOINT GRAFANA_AGENT_USERNAME GRAFANA_AGENT_PASSWORD
 
 exec /bin/alloy run \
   --server.http.listen-addr=0.0.0.0:8080 \
+  --server.http.enable-pprof=false \
+  --server.http.disable-support-bundle=true \
+  --server.http.ui-path-prefix=/-/alloy \
   --storage.path=/var/lib/alloy/data \
   /etc/alloy/config.alloy

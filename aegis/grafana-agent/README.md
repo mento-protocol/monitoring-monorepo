@@ -13,7 +13,7 @@ binary and committed collector config are Alloy.
 ## Deployment
 
 - `config.alloy` — Alloy runtime config converted from the old Grafana Agent static config. Reads Grafana Cloud BasicAuth credentials with `sys.env(...)`; values are supplied only at container start. **Never contains plaintext secrets.**
-- `entrypoint.sh` — Runs at container start. Calls the GCE metadata server, fetches `grafana-agent-{endpoint,username,password}` from Secret Manager via the App Engine Flex AppSpot SA, exports them as env vars, then exec's Alloy.
+- `entrypoint.sh` — Runs at container start. Calls the GCE metadata server, fetches `grafana-agent-{endpoint,username,password}` from Secret Manager via the App Engine Flex AppSpot SA, exports them as env vars, then exec's Alloy. The Alloy HTTP server still listens on App Engine's required `0.0.0.0:8080`, but pprof and support-bundle endpoints are disabled and the UI is moved off `/` to `/-/alloy`.
 - `Dockerfile` — Image built and deployed to App Engine. Uses the official `grafana/alloy` image, installs `jq` + `curl` for the entrypoint, copies `config.alloy` and `entrypoint.sh` (no secrets in either), and runs as a dedicated non-root user.
 - `cloudbuild.yaml` — Single-step Cloud Build: `gcloud app deploy grafana-agent.yaml`. No secret-rendering step.
 - `grafana-agent.yaml` — App Engine service definition. The service name is retained for the stable `grafana-agent-dot-mento-monitoring.uc.r.appspot.com` URL.
@@ -62,4 +62,4 @@ The seed script refuses to overwrite existing enabled versions. To rotate the va
 2. Somebody executes `pnpm aegis:agent:deploy` from the monorepo root, creating and running a Cloud Build job in `mento-monitoring`.
 3. [CloudBuild] Runs `gcloud app deploy grafana-agent.yaml`. No secrets touch the build VM.
 4. [App engine deploy] Dockerfile is executed; image launches with `entrypoint.sh` as the entrypoint.
-5. [Container start] `entrypoint.sh` fetches the 3 grafana-agent-\* secrets from Secret Manager via the AppSpot SA's metadata-server token, exports them as env vars, then exec's Alloy with `/etc/alloy/config.alloy` and `--storage.path=/var/lib/alloy/data`.
+5. [Container start] `entrypoint.sh` fetches the 3 grafana-agent-\* secrets from Secret Manager via the AppSpot SA's metadata-server token, exports them as env vars, then exec's Alloy with `/etc/alloy/config.alloy`, `--storage.path=/var/lib/alloy/data`, pprof/support-bundle endpoints disabled, and the UI path prefix set to `/-/alloy`.
