@@ -327,6 +327,62 @@ describe("probeAdapterPair", () => {
     expect(calls).toHaveLength(3);
   });
 
+  it("uses the winning LI.FI discovery amount for Fly follow-up quotes", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+    const scaledAmountRaw = "1000000000000000000000";
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url) => {
+        const href = String(url);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          const quoteUrl = new URL(href);
+          const isWinningFlyAttempt =
+            quoteUrl.searchParams.get("allowExchanges") === "fly" &&
+            quoteUrl.searchParams.get("fromAmount") === scaledAmountRaw;
+          return new Response(
+            JSON.stringify(
+              isWinningFlyAttempt
+                ? { tool: "fly" }
+                : { route: [{ protocol: "Other" }], tool: "openocean" },
+            ),
+          );
+        }
+        if (href.startsWith("https://api.fly.trade/aggregator/quote?")) {
+          const quoteUrl = new URL(href);
+          expect(quoteUrl.searchParams.get("sellAmount")).toBe(scaledAmountRaw);
+          return new Response(
+            JSON.stringify({
+              id: "a0f5ff76-93d1-4c17-ad29-519c7be0f59d",
+            }),
+          );
+        }
+        if (
+          href ===
+          "https://api.fly.trade/aggregator/distributions?quoteId=a0f5ff76-93d1-4c17-ad29-519c7be0f59d"
+        ) {
+          return new Response(
+            JSON.stringify({
+              distributions: [
+                { route: [{ protocol: "mento-v3", pool: { address: POOL } }] },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected URL ${href}`);
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.routeVariant).toBe("allow-fly");
+    expect(result.routeAmountUsd).toBe("1000");
+    expect(result.attemptCount).toBe(7);
+  });
+
   it("does not use Fly downstream evidence for non-Fly LI.FI routes", async () => {
     const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
     expect(lifi).toBeDefined();
@@ -1121,6 +1177,7 @@ type QuoteRequestFixture = {
   url: string;
   init?: RequestInit;
   amountDecimal?: string;
+  amountRaw?: string;
   afterResponse?: unknown;
   variant?: string;
 };

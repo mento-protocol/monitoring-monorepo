@@ -791,7 +791,7 @@ async function lifiFlyEvidence(
 
   const quoteRequest = downstreamRequest(
     args.request,
-    flyQuoteUrl(args.input, network),
+    flyQuoteUrl(lifiFollowUpInput(args.input, args.request), network),
   );
   const quotePayload = await fetchDownstreamPayload({
     ...args,
@@ -894,6 +894,18 @@ function downstreamRequest(parent: QuoteRequest, url: string): QuoteRequest {
   return {
     url,
     ...(parent.amountDecimal ? { amountDecimal: parent.amountDecimal } : {}),
+    ...(parent.amountRaw ? { amountRaw: parent.amountRaw } : {}),
     ...(parent.variant ? { variant: parent.variant } : {}),
+  };
+}
+
+function lifiFollowUpInput(
+  input: QuoteProbeInput,
+  request: QuoteRequest,
+): QuoteProbeInput {
+  return {
+    ...input,
+    amountDecimal: request.amountDecimal ?? input.amountDecimal,
+    amountRaw: request.amountRaw ?? input.amountRaw,
   };
 }

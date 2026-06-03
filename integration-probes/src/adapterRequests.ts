@@ -60,6 +60,7 @@ export function lifiQuoteRequests(
       lifiRequestMetadata({
         afterResponse,
         amountDecimal: input.amountDecimal,
+        amountRaw: input.amountRaw,
         variant: "default",
       }),
     ),
@@ -265,6 +266,7 @@ function lifiDiscoveryRequest(args: {
     lifiRequestMetadata({
       afterResponse: args.afterResponse,
       amountDecimal: args.amount.amountDecimal,
+      amountRaw: args.amount.amountRaw,
       variant: args.variant,
     }),
   );
@@ -273,10 +275,12 @@ function lifiDiscoveryRequest(args: {
 function lifiRequestMetadata(args: {
   afterResponse?: QuoteResponseEvidenceHook | undefined;
   amountDecimal: string;
+  amountRaw: string;
   variant: string;
 }): Omit<QuoteRequest, "url" | "init"> {
   return {
     amountDecimal: args.amountDecimal,
+    amountRaw: args.amountRaw,
     variant: args.variant,
     ...(args.afterResponse ? { afterResponse: args.afterResponse } : {}),
   };

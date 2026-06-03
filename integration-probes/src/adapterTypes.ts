@@ -10,6 +10,7 @@ export type QuoteRequest = {
   init?: RequestInit;
   variant?: string;
   amountDecimal?: string;
+  amountRaw?: string;
   afterResponse?: QuoteResponseEvidenceHook;
 };
 
