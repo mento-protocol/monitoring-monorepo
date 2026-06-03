@@ -383,6 +383,54 @@ describe("probeAdapterPair", () => {
     expect(result.attemptCount).toBe(7);
   });
 
+  it("does not pass LI.FI Fly distributions with router-only evidence", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url) => {
+        const href = String(url);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          return new Response(JSON.stringify({ tool: "fly" }));
+        }
+        if (href.startsWith("https://api.fly.trade/aggregator/quote?")) {
+          return new Response(
+            JSON.stringify({
+              id: "71e58343-6b4c-4e80-9b6e-899ae3386161",
+            }),
+          );
+        }
+        if (
+          href ===
+          "https://api.fly.trade/aggregator/distributions?quoteId=71e58343-6b4c-4e80-9b6e-899ae3386161"
+        ) {
+          return new Response(
+            JSON.stringify({
+              distributions: [
+                {
+                  route: [{ protocol: "mento-v3" }],
+                  transactionRequest: { to: ROUTER },
+                },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected URL ${href}`);
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.evidence).toEqual([]);
+    expect(result.sourceLabels).toEqual(["mento-v3"]);
+    expect(result.requestUrl).toContain(
+      "https://api.fly.trade/aggregator/distributions",
+    );
+  });
+
   it("does not use Fly downstream evidence for non-Fly LI.FI routes", async () => {
     const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
     expect(lifi).toBeDefined();

@@ -302,9 +302,12 @@ function probeResultFromPayload(args: {
   statusCode: number;
   latencyMs: number;
   requestUrl: string;
+  evidenceMode?: "router-or-pool" | "pool-only" | undefined;
 }): PairProbeResult {
+  const routerAddresses =
+    args.evidenceMode === "pool-only" ? [] : args.chain.routerAddresses;
   const detected = detectEvidence(args.payload, {
-    routerAddresses: args.chain.routerAddresses,
+    routerAddresses,
     poolAddresses: pairPoolAddresses(args.chain, args.input.pairId),
   });
   const status = statusFromResponse(
@@ -837,6 +840,7 @@ async function lifiFlyEvidence(
       chain: args.chain,
       input: args.input,
       request: distributionRequest,
+      evidenceMode: "pool-only",
       ...distributionPayload,
     }),
   );
