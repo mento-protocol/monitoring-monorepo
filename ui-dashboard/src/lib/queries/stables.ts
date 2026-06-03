@@ -102,6 +102,20 @@ export const STABLES_CUSTODY_DAILY_SNAPSHOTS = `
 
 export const STABLES_LATEST_CUSTODY_PER_TOKEN = `
   query StablesLatestCustodyPerToken($chainIds: [Int!]!) {
+    StableTokenCustodyState(where: { chainId: { _in: $chainIds } }) {
+      id
+      chainId
+      tokenAddress
+      tokenSymbol
+      source
+      tokenDecimals
+      managerAddress
+      lockedSupply
+      currentDayBucket
+      lockedTodayBucket
+      unlockedTodayBucket
+      lastEventTimestamp
+    }
     StableTokenCustodyDailySnapshot(
       where: { chainId: { _in: $chainIds } }
       distinct_on: [chainId, tokenAddress]

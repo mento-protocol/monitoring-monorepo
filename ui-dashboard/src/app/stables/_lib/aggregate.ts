@@ -133,11 +133,19 @@ function lockedSupplyAt(
   timestamp: bigint,
 ): bigint {
   let locked = BigInt(0);
-  for (const row of custodyRows) {
+  for (const row of sortCustodyRowsAsc(custodyRows)) {
     if (BigInt(row.timestamp) > timestamp) break;
     locked = BigInt(row.lockedSupply);
   }
   return locked;
+}
+
+function sortCustodyRowsAsc(
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+): StableTokenCustodyDailySnapshot[] {
+  return [...custodyRows].sort(
+    (a, b) => Number(a.timestamp) - Number(b.timestamp),
+  );
 }
 
 export function circulatingSupplyForSnapshot(
@@ -146,6 +154,23 @@ export function circulatingSupplyForSnapshot(
 ): bigint {
   const rawSupply = BigInt(row.totalSupply);
   const locked = lockedSupplyAt(custodyRows, BigInt(row.timestamp));
+  return rawSupply >= locked ? rawSupply - locked : BigInt(0);
+}
+
+function latestLockedSupplyForToken(
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+): bigint {
+  const sorted = sortCustodyRowsAsc(custodyRows);
+  const latest = sorted[sorted.length - 1];
+  return latest ? BigInt(latest.lockedSupply) : BigInt(0);
+}
+
+export function latestCirculatingSupplyForSnapshot(
+  row: StableSupplyDailySnapshot,
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot> = [],
+): bigint {
+  const rawSupply = BigInt(row.totalSupply);
+  const locked = latestLockedSupplyForToken(custodyRows);
   return rawSupply >= locked ? rawSupply - locked : BigInt(0);
 }
 
@@ -182,11 +207,8 @@ function buildTokenAgg(
     return 0;
   });
   const latest = rows[rows.length - 1]!;
-  const latestLockedSupply = lockedSupplyAt(
-    custodyRows,
-    BigInt(latest.timestamp),
-  );
-  const latestSupply = circulatingSupplyForSnapshot(latest, custodyRows);
+  const latestLockedSupply = latestLockedSupplyForToken(custodyRows);
+  const latestSupply = latestCirculatingSupplyForSnapshot(latest, custodyRows);
   const baselineSupply = pickBaselineSupply(rows, sevenDayCutoff, custodyRows);
   const netChange7d = latestSupply - baselineSupply;
   const change7dPct =

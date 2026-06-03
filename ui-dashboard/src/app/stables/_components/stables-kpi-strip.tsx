@@ -6,8 +6,8 @@ import { formatUSD, parseWei } from "@/lib/format";
 import { displayLabel, effectiveOracleRate } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
 import {
-  circulatingSupplyForSnapshot,
   groupCustodySnapshotsByToken,
+  latestCirculatingSupplyForSnapshot,
   rollupByToken,
   unionCustodySnapshotsWithLatest,
   winnersAndLosers7d,
@@ -28,7 +28,7 @@ function formatSignedUSD(v: number): string {
 
 type Props = {
   // Per-token latest rows (one per token via distinct_on). Sufficient for
-  // the "Total outstanding" headline; the winners/losers tiles need the
+  // the "Circulating supply" headline; the winners/losers tiles need the
   // wider snapshot stream for the 7d baseline comparison.
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
   latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>;
@@ -82,7 +82,7 @@ export function StablesKpiStrip({
       if (rate == null) return acc;
       const custodyRows =
         custodyByToken.get(`${row.chainId}|${row.tokenAddress}`) ?? [];
-      const circulating = circulatingSupplyForSnapshot(row, custodyRows);
+      const circulating = latestCirculatingSupplyForSnapshot(row, custodyRows);
       const usd = parseWei(circulating.toString(), row.tokenDecimals) * rate;
       return (acc ?? 0) + usd;
     }, null);
@@ -99,7 +99,7 @@ export function StablesKpiStrip({
   return (
     <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <BreakdownTile
-        label="Total outstanding"
+        label="Circulating supply"
         total={totalUsd}
         sub24h={null}
         sub7d={null}

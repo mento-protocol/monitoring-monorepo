@@ -2050,6 +2050,7 @@ type StableTokenCustodyState {
 # quiet days.
 type StableTokenCustodyDailySnapshot
   @index(fields: ["chainId", "tokenSymbol", "timestamp"])
+  @index(fields: ["chainId", "source", "timestamp"])
   @index(fields: ["chainId", "tokenAddress", "timestamp"]) {
   id: ID! # "{chainId}-{tokenAddress}-{day}"
   chainId: Int! @index

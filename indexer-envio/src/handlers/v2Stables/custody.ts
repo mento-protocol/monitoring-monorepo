@@ -96,6 +96,8 @@ export async function handleStableTokenCustodyTransfer({
   const to = asAddress(event.params.to);
   const isLock = to === managerAddress;
   const isUnlock = from === managerAddress;
+  // Skip regular transfers and manager-to-manager no-ops; only one side of a
+  // custody-changing transfer can be the NTT manager.
   if (isLock === isUnlock) return;
 
   const blockNumber = BigInt(event.block.number);

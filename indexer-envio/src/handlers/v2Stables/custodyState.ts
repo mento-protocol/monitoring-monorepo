@@ -82,6 +82,8 @@ export function flushStableTokenCustodyDailySnapshot(
     lockedSupply: state.lockedSupply,
     dailyLockedAmount: state.lockedTodayBucket,
     dailyUnlockedAmount: state.unlockedTodayBucket,
+    // Anchor metadata is the flush-trigger event's block, not the previous
+    // day's final block. This matches StableSupplyDailySnapshot semantics.
     blockNumber,
     updatedAtTimestamp: eventTimestamp,
   });

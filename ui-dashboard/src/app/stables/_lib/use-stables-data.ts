@@ -14,6 +14,7 @@ import type {
   RangeKey,
   StableSupplyDailySnapshot,
   StableTokenCustodyDailySnapshot,
+  StableTokenCustodyState,
   V2StableSupplyChangeEvent,
 } from "./types";
 
@@ -32,7 +33,9 @@ type LatestPerTokenResult = DailySnapshotsResult;
 type CustodyDailySnapshotsResult = {
   StableTokenCustodyDailySnapshot: ReadonlyArray<StableTokenCustodyDailySnapshot>;
 };
-type LatestCustodyPerTokenResult = CustodyDailySnapshotsResult;
+type LatestCustodyPerTokenResult = CustodyDailySnapshotsResult & {
+  StableTokenCustodyState: ReadonlyArray<StableTokenCustodyState>;
+};
 type V2ChangesResult = {
   V2StableSupplyChangeEvent: ReadonlyArray<V2StableSupplyChangeEvent>;
 };
@@ -102,11 +105,33 @@ export function useStablesLatestCustodyPerToken() {
     STABLES_LATEST_CUSTODY_PER_TOKEN,
     { chainIds: STABLES_CHAIN_IDS },
   );
-  const snapshots = useMemo(
-    () => data?.StableTokenCustodyDailySnapshot ?? [],
-    [data],
-  );
+  const snapshots = useMemo(() => {
+    const dailyRows = data?.StableTokenCustodyDailySnapshot ?? [];
+    const stateRows = data?.StableTokenCustodyState ?? [];
+    return [
+      ...dailyRows,
+      ...stateRows.map(custodyStateToDailySnapshot),
+    ] satisfies StableTokenCustodyDailySnapshot[];
+  }, [data]);
   return { snapshots, error, isLoading };
+}
+
+function custodyStateToDailySnapshot(
+  state: StableTokenCustodyState,
+): StableTokenCustodyDailySnapshot {
+  return {
+    id: `${state.id}-current-${state.currentDayBucket}`,
+    chainId: state.chainId,
+    tokenAddress: state.tokenAddress,
+    tokenSymbol: state.tokenSymbol,
+    source: state.source,
+    tokenDecimals: state.tokenDecimals,
+    managerAddress: state.managerAddress,
+    timestamp: state.currentDayBucket,
+    lockedSupply: state.lockedSupply,
+    dailyLockedAmount: state.lockedTodayBucket,
+    dailyUnlockedAmount: state.unlockedTodayBucket,
+  };
 }
 
 export function useStablesCustodyDailySnapshots(_range: RangeKey) {

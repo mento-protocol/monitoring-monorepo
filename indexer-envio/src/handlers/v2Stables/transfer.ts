@@ -50,6 +50,9 @@ indexer.onEvent(
     // edge — they never reach the handler.
     // The `0x${string}` casts narrow ZERO_ADDRESS (typed as plain string in
     // constants.ts) to the SingleOrMultiple<`0x${string}`> envio expects.
+    // NTT manager proxies are CREATE3-identical on Celo and Monad, so Monad
+    // burn/mint manager transfers that match these custody params are also
+    // delivered and then dropped by handleStableTokenCustodyTransfer.
     where: () => ({
       params: [
         { from: ZERO_ADDRESS as `0x${string}` },

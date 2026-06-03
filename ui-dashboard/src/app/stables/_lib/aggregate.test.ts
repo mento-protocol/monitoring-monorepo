@@ -3,6 +3,7 @@ import {
   buildTokenUsdTimeSeries,
   circulatingSupplyForSnapshot,
   computeChartStartSeconds,
+  latestCirculatingSupplyForSnapshot,
   rangeStartSeconds,
   rollupByToken,
   sumTotalUsdSeries,
@@ -194,6 +195,76 @@ describe("rollupByToken", () => {
     expect(agg?.latestTotalSupply).toBe(BigInt(220) * BigInt(10) ** BigInt(18));
     expect(agg?.latestLockedSupply).toBe(BigInt(80) * BigInt(10) ** BigInt(18));
     expect(agg?.totalSupplyUsdLatest).toBeCloseTo(286, 0);
+  });
+
+  it("uses the newest custody row for latest totals while preserving historical bucket math", () => {
+    const rawSupply = String(BigInt(300) * BigInt(10) ** BigInt(18));
+    const lockedSupply = String(BigInt(120) * BigInt(10) ** BigInt(18));
+    const row = snapshot({
+      tokenAddress: "0xc",
+      tokenSymbol: "GBPm",
+      source: "V3_LIQUITY",
+      timestamp: String(Number(NOW_TS) - DAY),
+      totalSupply: rawSupply,
+    });
+    const custody = [
+      custodySnapshot({
+        tokenAddress: "0xc",
+        tokenSymbol: "GBPm",
+        source: "V3_LIQUITY",
+        timestamp: String(NOW_TS),
+        lockedSupply,
+      }),
+    ];
+
+    expect(circulatingSupplyForSnapshot(row, custody)).toBe(
+      BigInt(300) * BigInt(10) ** BigInt(18),
+    );
+    expect(latestCirculatingSupplyForSnapshot(row, custody)).toBe(
+      BigInt(180) * BigInt(10) ** BigInt(18),
+    );
+
+    const rollup = rollupByToken(
+      [row],
+      new Map([["GBPm", 1]]),
+      NOW_TS,
+      custody,
+    );
+    const agg = rollup.get("42220|0xc|V3_LIQUITY");
+    expect(agg?.latestTotalSupply).toBe(BigInt(180) * BigInt(10) ** BigInt(18));
+    expect(agg?.latestLockedSupply).toBe(
+      BigInt(120) * BigInt(10) ** BigInt(18),
+    );
+  });
+
+  it("sorts custody rows defensively before timestamp lookups", () => {
+    const row = snapshot({
+      tokenAddress: "0xc",
+      tokenSymbol: "GBPm",
+      source: "V3_LIQUITY",
+      timestamp: String(NOW_TS),
+      totalSupply: String(BigInt(300) * BigInt(10) ** BigInt(18)),
+    });
+    const custody = [
+      custodySnapshot({
+        tokenAddress: "0xc",
+        tokenSymbol: "GBPm",
+        source: "V3_LIQUITY",
+        timestamp: String(Number(NOW_TS) + DAY),
+        lockedSupply: String(BigInt(120) * BigInt(10) ** BigInt(18)),
+      }),
+      custodySnapshot({
+        tokenAddress: "0xc",
+        tokenSymbol: "GBPm",
+        source: "V3_LIQUITY",
+        timestamp: String(Number(NOW_TS) - DAY),
+        lockedSupply: String(BigInt(80) * BigInt(10) ** BigInt(18)),
+      }),
+    ];
+
+    expect(circulatingSupplyForSnapshot(row, custody)).toBe(
+      BigInt(220) * BigInt(10) ** BigInt(18),
+    );
   });
 });
 
