@@ -94,7 +94,7 @@ Terraform stack ownership is registered in [`terraform.stacks.json`](../terrafor
 - All Terraform-managed environment variables (Hasura URLs, Upstash Redis credentials)
 - Custom domain (`monitoring.mento.org`)
 - Upstash Redis database (address labels storage)
-- Monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, and CI WIF/IAM
+- Monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, and CI WIF/IAM
 
 **State is stored remotely** in GCS at `gs://mento-terraform-tfstate-6ed6/monitoring-monorepo/`. No local backup is needed — GCS is the source of truth and has object versioning enabled.
 

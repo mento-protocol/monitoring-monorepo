@@ -1,5 +1,5 @@
 # Grafana Cloud BasicAuth secrets are fetched at runtime by `entrypoint.sh`
-# inside the deployed container — see Dockerfile + entrypoint.sh in this dir.
+# inside the deployed Alloy container — see Dockerfile + entrypoint.sh here.
 # The previous flow rendered secrets into agent.yaml on the Cloud Build VM
 # and shipped the plaintext via `gcloud app deploy`, which retained the
 # rendered file indefinitely in (a) the App Engine source staging bucket

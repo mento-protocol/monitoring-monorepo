@@ -17,7 +17,7 @@ pnpm monorepo with these workspace packages:
 - `ui-dashboard/` — Next.js 16 + Plotly.js monitoring dashboard
 - `metrics-bridge/` — Hasura → Prometheus gauge exporter for v3 alert rules
 - `integration-probes/` — quote-only aggregator and cross-chain router coverage probes
-- `aegis/` — NestJS App Engine service for v2 alerts plus Grafana Agent, dashboards, and alert-rule Terraform
+- `aegis/` — NestJS App Engine service for v2 alerts plus Grafana Alloy collector, dashboards, and alert-rule Terraform
 
 ## Operating Rule (read this before opening PRs)
 
@@ -296,8 +296,8 @@ pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
 pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-monitoring
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
-pnpm aegis:agent:seed-secrets # Seed/rotate Grafana Agent Secret Manager versions
-pnpm aegis:agent:deploy       # Deploy the Grafana Agent App Engine service
+pnpm aegis:agent:seed-secrets # Seed/rotate Alloy remote-write Secret Manager versions
+pnpm aegis:agent:deploy       # Deploy the Grafana Alloy App Engine collector
 pnpm aegis:tf:init / aegis:tf:plan
 # Apply runs in CI on merge to main (aegis-terraform.yml; production gate).
 

@@ -1,0 +1,40 @@
+// Converted from the previous Grafana Agent static-mode config with:
+// alloy v1.16.1 convert --source-format=static <previous agent.yaml>
+//
+// The converter output was reviewed and adjusted so runtime Secret Manager
+// values are read through sys.env instead of static-mode ${VAR} expansion.
+
+prometheus.scrape "aegis_metrics" {
+	targets = [{
+		__address__ = "mento-monitoring.uc.r.appspot.com",
+	}]
+
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+	job_name        = "aegis-metrics"
+	scheme          = "https"
+	scrape_interval = "1m"
+}
+
+prometheus.scrape "metrics_bridge" {
+	targets = [{
+		__address__ = "metrics-bridge-pxlhqhqvxq-ew.a.run.app",
+	}]
+
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+	job_name        = "metrics-bridge"
+	metrics_path    = "/metrics"
+	scrape_interval = "30s"
+	scheme          = "https"
+}
+
+prometheus.remote_write "grafana_cloud" {
+	endpoint {
+		name = "grafana-cloud"
+		url  = sys.env("GRAFANA_AGENT_ENDPOINT")
+
+		basic_auth {
+			username = sys.env("GRAFANA_AGENT_USERNAME")
+			password = sys.env("GRAFANA_AGENT_PASSWORD")
+		}
+	}
+}
