@@ -56,13 +56,13 @@ provider "google" {
   region                      = var.gcp_region
 }
 
-# GitHub provider — used solely to mirror Vercel-managed secrets (e.g.
-# `VERCEL_AUTOMATION_BYPASS_SECRET`) into GitHub Actions secrets on
-# `monitoring-monorepo` so CI workflows can read them. `var.github_token`
-# should be a fine-grained PAT scoped to `mento-protocol/monitoring-monorepo`
-# with Repository → Secrets: Read/write. That matches the narrow PAT
-# `alerts/infra/` already uses and avoids the org-admin scope that an
-# org-level secret would force.
+# GitHub provider — used to manage repo-level GitHub Actions secrets on
+# `monitoring-monorepo` that belong to the platform stack, such as the
+# Vercel automation bypass mirror and integration-probe credentials.
+# `var.github_token` should be a fine-grained PAT scoped to
+# `mento-protocol/monitoring-monorepo` with Repository → Secrets: Read/write.
+# That matches the narrow PAT `alerts/infra/` already uses and avoids the
+# org-admin scope that an org-level secret would force.
 provider "github" {
   owner = var.github_owner
   token = var.github_token

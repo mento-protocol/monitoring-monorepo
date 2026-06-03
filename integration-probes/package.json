@@ -1,0 +1,41 @@
+{
+  "name": "@mento-protocol/integration-probes",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "mento-integration-probes": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "probe": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "node ../scripts/eslint-baseline-diff.mjs check",
+    "lint:baseline:update": "node ../scripts/eslint-baseline-diff.mjs update",
+    "knip": "knip --config knip.json --no-progress",
+    "knip:report": "knip --config knip.json --no-exit-code --no-progress",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@mento-protocol/monitoring-config": "workspace:*"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.19.13",
+    "@vitest/coverage-v8": "^4.1.0",
+    "eslint": "^10.0.2",
+    "eslint-plugin-sonarjs": "4.0.3",
+    "eslint-plugin-unused-imports": "^4.2.0",
+    "globals": "^17.4.0",
+    "knip": "6.12.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -10,13 +10,19 @@ last_verified: 2026-05-20
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, and Workload Identity Federation. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules/global routing, `alerts/infra/` for event-driven delivery) and `aegis/terraform/` (Aegis dashboard + service-health alert).
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Agent bootstrap, Workload Identity Federation, and repo-level GitHub Actions secrets owned by the platform stack. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules/global routing, `alerts/infra/` for event-driven delivery) and `aegis/terraform/` (Aegis dashboard + service-health alert).
 
 ## Operating Rules
 
 - Use `pnpm tf list` to confirm stack ownership before moving resources.
 - Run `pnpm infra:plan` or `pnpm tf plan platform` before any apply.
 - Never run `terraform apply` without explicit human approval.
+- Never set GitHub Actions, Vercel, GCP Secret Manager, Upstash, Grafana, or
+  other platform secrets manually with CLI commands. Secrets owned by this stack
+  must be modeled as Terraform variables/resources and delivered by a
+  human-approved plan/apply. If Terraform cannot manage the secret yet, add the
+  missing IaC path or ask for direction; do not use `gh secret set`,
+  `vercel env add`, or equivalent as an agent workaround.
 - Resource renames/removals need `moved` blocks.
 - Cloud Run services use `/health`, not `/healthz`.
 - Keep `lifecycle.ignore_changes` for images and Cloud Run API bookkeeping fields when rollouts happen through deploy scripts or workflows.
