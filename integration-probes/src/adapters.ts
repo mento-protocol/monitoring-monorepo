@@ -10,6 +10,7 @@ import type {
 
 const DEFAULT_TAKER = "0x000000000000000000000000000000000000dEaD";
 const LIFI_INTEGRATOR = "mento-probes";
+const OPENOCEAN_MENTO_V3_DEX_ID = "8";
 
 type ChainSupport = "supported" | "unsupported" | "unknown";
 
@@ -229,6 +230,7 @@ function routeAbsent(payload: unknown): boolean {
     text.includes("no route") ||
     text.includes("no routes") ||
     text.includes("no liquidity") ||
+    text.includes("no avail liquidity") ||
     text.includes("insufficient liquidity") ||
     text.includes("amount is too small") ||
     text.includes("amount too low") ||
@@ -373,7 +375,7 @@ function openOceanAdapter(): AggregatorAdapter {
     credentialEnv: ["OPENOCEAN_API_KEY"],
     support: { 42220: "supported", 143: "supported" },
     researchNote:
-      "OpenOcean Pro endpoint is keyed and already observed in the repo registry on both chains.",
+      "OpenOcean Pro endpoint is keyed; the probe enables DEX id 8 so the response proves the MentoV3 venue can route the pair.",
     quote: (input, env) =>
       getRequest(openOceanUrl(input), {
         apikey: env.OPENOCEAN_API_KEY!,
@@ -592,10 +594,11 @@ function openOceanUrl(input: QuoteProbeInput): string {
   setParams(url, {
     inTokenAddress: input.sellToken.address,
     outTokenAddress: input.buyToken.address,
-    amount: input.amountDecimal,
+    amountDecimals: input.amountRaw,
     account: input.takerAddress,
     slippage: "1",
-    gasPrice: "1",
+    gasPriceDecimals: "1000000000",
+    enabledDexIds: OPENOCEAN_MENTO_V3_DEX_ID,
   });
   return url.toString();
 }
