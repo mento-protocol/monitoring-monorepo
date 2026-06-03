@@ -126,7 +126,7 @@ const MANUAL_PROTOCOL_ACTORS_BY_CHAIN: Map<number, Set<string>> = (() => {
 /**
  * Returns true if `addr` is a Mento internal address — used to hide
  * rebalancer / treasury / bridge flows from the user-facing volume
- * volume table by default (with a UI toggle to show them separately).
+ * table by default (with a UI toggle to show them separately).
  *
  * Pass `pool` when the address is being classified in a swap context: the
  * pool's `rebalancerAddress` is the dynamic per-pool EOA that wouldn't be

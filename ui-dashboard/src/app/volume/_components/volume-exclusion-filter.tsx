@@ -39,6 +39,7 @@ export function VolumeExclusionFilter({
     if (parsed.addresses.length === 0 && parsed.sources.length === 0) return;
     onChange(mergeVolumeExclusions(exclusions, parsed));
     setDraft("");
+    setInvalidTokens([]);
   };
 
   const removeAddress = (address: string) => {

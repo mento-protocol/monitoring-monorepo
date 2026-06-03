@@ -7,6 +7,7 @@ import {
 
 const CHAIN_CELO = 42220;
 const CHAIN_MONAD = 143;
+const CHAIN_TEST_FIXTURE = 99999;
 
 // Real Celo addresses (lowercased) — must stay in @mento-protocol/contracts.
 const CELO_BROKER = "0x777a8255ca72412f0d706dc03c9d1987306b4cad";
@@ -19,6 +20,7 @@ const CELO_PROTOCOL_FEE_RECIPIENT =
 const MONAD_FPMM_FACTORY = "0xa849b475fe5a4b5c9c3280152c7a1945b907613b";
 const MONAD_RESERVE_V2 = "0x4255cf38e51516766180b33122029a88cb853806";
 const MONAD_NTT_TRANSCEIVER_CHFM = "0x0d05cf3f8d39dc988e69cc1bf37f972eadbdc093";
+const TEST_MANUAL_PROTOCOL_ACTOR = "0x0000000000000000000000000000000000000a11";
 
 // A random non-Mento EOA (one of Vitalik's addresses, not relevant to Mento).
 const NOT_MENTO = "0xab5801a7d398351b8be11c439e05c5b3259aec9b";
@@ -106,6 +108,17 @@ describe("isSystemAddress", () => {
       isProtocolActorEntryPoint(CHAIN_CELO, CELO_BROKER, {
         rebalancerAddress: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
       }),
+      false,
+    );
+  });
+
+  it("flags manual protocol actor overrides by chain", () => {
+    assert.equal(
+      isProtocolActorEntryPoint(CHAIN_TEST_FIXTURE, TEST_MANUAL_PROTOCOL_ACTOR),
+      true,
+    );
+    assert.equal(
+      isProtocolActorEntryPoint(CHAIN_CELO, TEST_MANUAL_PROTOCOL_ACTOR),
       false,
     );
   });
