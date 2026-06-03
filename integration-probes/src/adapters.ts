@@ -179,7 +179,9 @@ async function fetchAndEvaluate(args: {
     };
     if (result.status === "pass") return result;
     fallback = betterFallback(fallback, result);
-    if (terminalStatus(result.status)) return result;
+    if (terminalStatus(result.status)) {
+      return { ...(fallback ?? result), attemptCount };
+    }
   }
   return fallback
     ? { ...fallback, attemptCount }
