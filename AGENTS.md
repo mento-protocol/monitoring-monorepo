@@ -36,6 +36,40 @@ the same PR, and surface the required human-approved plan/apply step. If the
 secret cannot be represented in IaC yet, stop and ask for an IaC path instead of
 using a CLI workaround.
 
+## Spoken Attention Nudge
+
+When you need the user's attention and they are not actively responding, send a
+brief spoken nudge with `sag` in addition to the normal chat message. Default to
+doing this when blocked on a user decision, waiting on approval for a production
+mutation, a long task has finished and needs user follow-up, or plan feedback is
+required before meaningful progress can continue.
+
+Use Charlie's voice and keep the spoken message short and specific. Prefer the
+repo-standard key file path so Codex does not depend on stripped environment
+variables:
+
+```bash
+sag --api-key-file "$HOME/.config/sag/elevenlabs-api-key" -v Charlie "hey, i need your approval to deploy the Alloy collector"
+```
+
+`sag` must run outside Codex's normal sandbox: it needs network access to
+ElevenLabs, a readable ElevenLabs API key, and the local audio device. Codex
+does not reliably inherit shell startup files, and its environment policy strips
+secret-like variables such as `ELEVENLABS_API_KEY`, even when they exist in
+`.zshrc`. Store the key for agent nudges in
+`$HOME/.config/sag/elevenlabs-api-key` with mode `0600`, then invoke `sag` with
+`--api-key-file`. In Codex, request escalated execution for the nudge instead of
+trying to run it inside the workspace sandbox. If `sag` fails, report the
+failure in chat and continue with the visible written request; do not silently
+assume the user heard the nudge.
+
+Do not wire this into the existing SessionEnd hook. The current shared hook
+events do not know whether the agent is genuinely waiting on the user versus
+waiting on CI, bot review, deploy sync, or another external process, so a hook
+would either miss the important decision point or create noisy false alarms.
+Use the manual `sag` call at the moment the agent identifies a real user-input
+blocker.
+
 > **Any PR that adds or changes stateful data flow across layers must ship with explicit invariants, degraded-mode behavior, and interaction tests before opening.**
 
 This repo has already paid the tax for learning this the hard way.
