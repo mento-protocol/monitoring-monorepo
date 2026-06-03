@@ -40,32 +40,30 @@ jobs:
         run: |
           set -euo pipefail
 
-          fail=0
-          missing=""
-
-          if ! grep -qiE '^##[[:space:]]+The Problem([[:space:]]|$)' <<<"$PR_BODY"; then
-            missing="$missing '## The Problem'"
-            fail=1
-          fi
-          if ! grep -qiE '^##[[:space:]]+The Solution([[:space:]]|$)' <<<"$PR_BODY"; then
-            missing="$missing '## The Solution'"
-            fail=1
-          fi
-
-          # Unfilled template placeholders from .github/PULL_REQUEST_TEMPLATE.md.
-          if grep -qE '\[Plain-English problem|\[Simple explanation of how|\[Implementation details, invariants|\[Commands and results' <<<"$PR_BODY"; then
-            echo "::error::PR description still contains unfilled template placeholders — replace the bracketed prompts with real content."
-            fail=1
-          fi
-
+          # 1) Empty body — one clean error, fail fast (before the heading checks
+          #    so we don't also emit "missing The Problem/The Solution").
           if [ -z "${PR_BODY//[[:space:]]/}" ]; then
-            echo "::error::PR description is empty."
-            fail=1
-          fi
-
-          if [ "$fail" -ne 0 ]; then
-            echo "::error::PR description must follow .github/PULL_REQUEST_TEMPLATE.md (see AGENTS.md 'PR description standard'). Missing or invalid:${missing:- placeholders/empty body}. Required: '## The Problem' (max 3 plain-English bullets) then '## The Solution', before any implementation detail."
+            echo "::error::PR description is empty. It must start with '## The Problem' then '## The Solution' (AGENTS.md 'PR description standard')."
             exit 1
           fi
 
-          echo "PR description OK — The Problem + The Solution present, no placeholders."
+          # 2) Unfilled template placeholders from .github/PULL_REQUEST_TEMPLATE.md.
+          if grep -qE '\[Plain-English problem|\[Simple explanation of how|\[Implementation details, invariants|\[Commands and results' <<<"$PR_BODY"; then
+            echo "::error::PR description still contains unfilled template placeholders — replace the bracketed prompts with real content."
+            exit 1
+          fi
+
+          # 3) The FIRST two section headings must be exactly '## The Problem' then
+          #    '## The Solution', in that order, before any other section — the repo
+          #    standard is that descriptions START with these (AGENTS.md "PR
+          #    description standard"). Case-exact (no -i): '## the problem' must
+          #    not pass; reversed order or a leading '## Summary' must not pass.
+          first=$(grep -E '^##[[:space:]]' <<<"$PR_BODY" | sed -n '1p' || true)
+          second=$(grep -E '^##[[:space:]]' <<<"$PR_BODY" | sed -n '2p' || true)
+          if ! grep -qE '^##[[:space:]]+The Problem([[:space:]]|$)' <<<"$first" \
+             || ! grep -qE '^##[[:space:]]+The Solution([[:space:]]|$)' <<<"$second"; then
+            echo "::error::PR description must START with '## The Problem' then '## The Solution' (exact title-case, in that order, before any other section). See AGENTS.md 'PR description standard' / .github/PULL_REQUEST_TEMPLATE.md."
+            exit 1
+          fi
+
+          echo "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders."
