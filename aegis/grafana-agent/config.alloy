@@ -11,6 +11,7 @@ prometheus.scrape "aegis_metrics" {
 
 	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
 	job_name        = "aegis-metrics"
+	scheme          = "https"
 	scrape_interval = "1m"
 }
 
@@ -35,9 +36,5 @@ prometheus.remote_write "grafana_cloud" {
 			username = sys.env("GRAFANA_AGENT_USERNAME")
 			password = sys.env("GRAFANA_AGENT_PASSWORD")
 		}
-
-		queue_config { }
-
-		metadata_config { }
 	}
 }
