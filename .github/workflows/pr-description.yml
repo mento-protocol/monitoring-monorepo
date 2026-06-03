@@ -53,16 +53,18 @@ jobs:
             exit 1
           fi
 
-          # 3) The FIRST two section headings must be exactly '## The Problem' then
-          #    '## The Solution', in that order, before any other section — the repo
-          #    standard is that descriptions START with these (AGENTS.md "PR
-          #    description standard"). Case-exact (no -i): '## the problem' must
-          #    not pass; reversed order or a leading '## Summary' must not pass.
-          first=$(grep -E '^##[[:space:]]' <<<"$PR_BODY" | sed -n '1p' || true)
+          # 3) The description must START with the two mandated sections, exactly
+          #    and in order (AGENTS.md "PR description standard"):
+          #    - the first non-blank, non-HTML-comment line must be exactly
+          #      '## The Problem' (rejects leading prose / a '# Summary' H1 /
+          #      '## The Problem extra' — exact heading line, case-exact);
+          #    - the next H2 heading must be exactly '## The Solution'.
+          firstline=$(grep -vE '^[[:space:]]*$' <<<"$PR_BODY" \
+            | grep -vE '^[[:space:]]*<!--.*-->[[:space:]]*$' | sed -n '1p' || true)
           second=$(grep -E '^##[[:space:]]' <<<"$PR_BODY" | sed -n '2p' || true)
-          if ! grep -qE '^##[[:space:]]+The Problem([[:space:]]|$)' <<<"$first" \
-             || ! grep -qE '^##[[:space:]]+The Solution([[:space:]]|$)' <<<"$second"; then
-            echo "::error::PR description must START with '## The Problem' then '## The Solution' (exact title-case, in that order, before any other section). See AGENTS.md 'PR description standard' / .github/PULL_REQUEST_TEMPLATE.md."
+          if ! grep -qE '^##[[:space:]]+The Problem[[:space:]]*$' <<<"$firstline" \
+             || ! grep -qE '^##[[:space:]]+The Solution[[:space:]]*$' <<<"$second"; then
+            echo "::error::PR description must START with '## The Problem' then '## The Solution' as its first two sections — exact title-case, exact heading lines, in order, with no content before '## The Problem' (HTML comments allowed). See AGENTS.md 'PR description standard' / .github/PULL_REQUEST_TEMPLATE.md."
             exit 1
           fi
 
