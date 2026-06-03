@@ -1,4 +1,30 @@
 import { detectEvidence } from "./evidence.js";
+import {
+  flyDistributionsUrl,
+  flyQuoteId,
+  flyQuoteUrl,
+  getRequest,
+  kyberUrl,
+  LIFI_MAX_QUOTE_REQUESTS_PER_RUN,
+  lifiFlyNetwork,
+  lifiPayloadUsesFly,
+  lifiQuoteRequests,
+  oneInchUrl,
+  openOceanUrl,
+  postRequest,
+  relayBody,
+  rubicBody,
+  socketUrl,
+  squidBody,
+  zeroXUrl,
+} from "./adapterRequests.js";
+import type {
+  QuoteAttemptBudget,
+  QuoteRequest,
+  QuoteResponseEvidenceArgs,
+  QuoteResponseEvidenceHook,
+  TimedPayload,
+} from "./adapterTypes.js";
 import type {
   AggregatorKind,
   ChainProbeConfig,
@@ -9,34 +35,9 @@ import type {
 } from "./types.js";
 
 const DEFAULT_TAKER = "0x000000000000000000000000000000000000dEaD";
-const LIFI_INTEGRATOR = "mento-probes";
-const LIFI_MAX_QUOTE_REQUESTS_PER_RUN = 180;
-const LIFI_ROUTE_DISCOVERY_MULTIPLIERS = [
-  1n,
-  10n,
-  100n,
-  1_000n,
-  10_000n,
-  100_000n,
-] as const;
 const REQUEST_ERROR_ATTEMPT_LIMIT = 2;
-const OPENOCEAN_GAS_PRICE_WEI = "1000000000";
-const OPENOCEAN_MENTO_V3_DEX_ID = "8";
 
 type ChainSupport = "supported" | "unsupported" | "unknown";
-
-type QuoteRequest = {
-  url: string;
-  init?: RequestInit;
-  variant?: string;
-  amountDecimal?: string;
-};
-
-export type QuoteAttemptBudget = {
-  remaining: number;
-};
-
-type RequestHeaders = Record<string, string>;
 
 export type AggregatorAdapter = {
   id: string;
@@ -236,6 +237,7 @@ async function fetchAndEvaluateAttempt(args: {
   input: QuoteProbeInput;
   fetcher: FetchLike;
   request: QuoteRequest;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<PairProbeResult> {
   try {
     return await fetchAndEvaluateRequest(args);
@@ -249,16 +251,67 @@ async function fetchAndEvaluateRequest(args: {
   input: QuoteProbeInput;
   fetcher: FetchLike;
   request: QuoteRequest;
+  quoteBudget?: QuoteAttemptBudget | undefined;
 }): Promise<PairProbeResult> {
+  const response = await fetchTimedPayload({
+    fetcher: args.fetcher,
+    request: args.request,
+  });
+  const primaryResult = probeResultFromPayload({
+    chain: args.chain,
+    input: args.input,
+    request: args.request,
+    ...response,
+  });
+  if (primaryResult.status === "pass" || !args.request.afterResponse) {
+    return primaryResult;
+  }
+  const downstreamResult = await args.request.afterResponse({
+    chain: args.chain,
+    input: args.input,
+    fetcher: args.fetcher,
+    request: args.request,
+    payload: response.payload,
+    primaryResult,
+    quoteBudget: args.quoteBudget,
+  });
+  return downstreamResult ?? primaryResult;
+}
+
+async function fetchTimedPayload(args: {
+  fetcher: FetchLike;
+  request: QuoteRequest;
+}): Promise<TimedPayload> {
   const startedAt = Date.now();
   const response = await args.fetcher(args.request.url, args.request.init);
   const latencyMs = Date.now() - startedAt;
   const payload = await responseJson(response);
-  const detected = detectEvidence(payload, {
+  return {
+    payload,
+    statusCode: response.status,
+    latencyMs,
+    requestUrl: args.request.url,
+  };
+}
+
+function probeResultFromPayload(args: {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  request: QuoteRequest;
+  payload: unknown;
+  statusCode: number;
+  latencyMs: number;
+  requestUrl: string;
+}): PairProbeResult {
+  const detected = detectEvidence(args.payload, {
     routerAddresses: args.chain.routerAddresses,
     poolAddresses: pairPoolAddresses(args.chain, args.input.pairId),
   });
-  const status = statusFromResponse(response.status, detected.passes, payload);
+  const status = statusFromResponse(
+    args.statusCode,
+    detected.passes,
+    args.payload,
+  );
   return {
     pairId: args.input.pairId,
     poolId: poolIdFromPairId(args.input.pairId),
@@ -273,13 +326,13 @@ async function fetchAndEvaluateRequest(args: {
     routeVariant: args.request.variant ?? null,
     routeAmountUsd: args.request.amountDecimal ?? args.input.amountDecimal,
     attemptCount: 1,
-    requestUrl: args.request.url,
-    httpStatus: response.status,
-    latencyMs,
-    responsePreview: responsePreview(payload),
-    error: response.ok
-      ? payloadErrorMessage(payload)
-      : errorMessage(payload, response.status),
+    requestUrl: args.requestUrl,
+    httpStatus: args.statusCode,
+    latencyMs: args.latencyMs,
+    responsePreview: responsePreview(args.payload),
+    error: responseOk(args.statusCode)
+      ? payloadErrorMessage(args.payload)
+      : errorMessage(args.payload, args.statusCode),
   };
 }
 
@@ -353,6 +406,10 @@ function statusFromResponse(
   if (payloadErrorMessage(payload)) return statusFromPayloadError(payload);
   if (passes) return "pass";
   return routeAbsent(payload) ? "no_liquidity" : "fail";
+}
+
+function responseOk(statusCode: number): boolean {
+  return statusCode >= 200 && statusCode < 300;
 }
 
 function statusFromHttpError(
@@ -536,7 +593,8 @@ function lifiAdapter(): AggregatorAdapter {
     maxQuoteRequestsPerRun: LIFI_MAX_QUOTE_REQUESTS_PER_RUN,
     researchNote:
       "LI.FI chain metadata lists both Celo and Monad; scheduled probes use an API key and route-discovery attempts to avoid confusing cheaper non-Mento default routes with missing Mento support.",
-    quote: lifiQuoteRequests,
+    quote: (input, env) =>
+      lifiQuoteRequests(input, env, lifiAfterResponseHook(input)),
   };
 }
 
@@ -718,253 +776,124 @@ function excludedAdapter(
   };
 }
 
-function getRequest(
-  url: string,
-  headers?: RequestHeaders,
-  metadata: Pick<QuoteRequest, "amountDecimal" | "variant"> = {},
-): QuoteRequest {
-  return { url, ...metadata, ...(headers && { init: { headers } }) };
-}
-
-function postRequest(
-  url: string,
-  body: unknown,
-  headers?: RequestHeaders,
-): QuoteRequest {
-  return {
-    url,
-    init: {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify(body),
-    },
-  };
-}
-
-function lifiQuoteRequests(
+function lifiAfterResponseHook(
   input: QuoteProbeInput,
-  env: NodeJS.ProcessEnv,
-): readonly QuoteRequest[] {
-  const headers = { "x-lifi-api-key": env.LIFI_API_KEY ?? "" };
-  const out: QuoteRequest[] = [
-    getRequest(lifiUrl(input), headers, {
-      amountDecimal: input.amountDecimal,
-      variant: "default",
-    }),
-  ];
-  for (const multiplier of LIFI_ROUTE_DISCOVERY_MULTIPLIERS) {
-    const amount = multipliedAmount(input, multiplier);
-    out.push(
-      lifiDiscoveryRequest({
-        amount,
-        headers,
-        input,
-        routeParams: { preferExchanges: "openocean" },
-        variant: "prefer-openocean",
-      }),
-      lifiDiscoveryRequest({
-        amount,
-        headers,
-        input,
-        routeParams: { allowExchanges: "openocean" },
-        variant: "allow-openocean",
+): QuoteResponseEvidenceHook | undefined {
+  return lifiFlyNetwork(input.chainId) ? lifiFlyEvidence : undefined;
+}
+
+async function lifiFlyEvidence(
+  args: QuoteResponseEvidenceArgs,
+): Promise<PairProbeResult | null> {
+  if (!lifiPayloadUsesFly(args.payload)) return null;
+  const network = lifiFlyNetwork(args.input.chainId);
+  if (!network) return null;
+
+  const quoteRequest = downstreamRequest(
+    args.request,
+    flyQuoteUrl(args.input, network),
+  );
+  const quotePayload = await fetchDownstreamPayload({
+    ...args,
+    request: quoteRequest,
+  });
+  if ("result" in quotePayload) return quotePayload.result;
+  if (!responseOk(quotePayload.statusCode)) {
+    return annotateDownstreamResult(
+      args.primaryResult,
+      probeResultFromPayload({
+        chain: args.chain,
+        input: args.input,
+        request: quoteRequest,
+        ...quotePayload,
       }),
     );
   }
-  return dedupeRequests(out);
-}
 
-function lifiDiscoveryRequest(args: {
-  amount: Pick<QuoteProbeInput, "amountDecimal" | "amountRaw">;
-  headers: RequestHeaders;
-  input: QuoteProbeInput;
-  routeParams: Record<string, string>;
-  variant: string;
-}): QuoteRequest {
-  return getRequest(
-    lifiUrl({ ...args.input, ...args.amount }, args.routeParams),
-    args.headers,
-    {
-      amountDecimal: args.amount.amountDecimal,
-      variant: args.variant,
-    },
-  );
-}
-
-function dedupeRequests(
-  requests: readonly QuoteRequest[],
-): readonly QuoteRequest[] {
-  const seen = new Set<string>();
-  return requests.filter((request) => {
-    const key = `${request.variant ?? ""}:${request.url}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function multipliedAmount(
-  input: QuoteProbeInput,
-  multiplier: bigint,
-): Pick<QuoteProbeInput, "amountDecimal" | "amountRaw"> {
-  return {
-    amountDecimal: multiplyDecimalString(input.amountDecimal, multiplier),
-    amountRaw: String(BigInt(input.amountRaw) * multiplier),
-  };
-}
-
-function multiplyDecimalString(value: string, multiplier: bigint): string {
-  const sign = value.startsWith("-") ? "-" : "";
-  const unsigned = sign ? value.slice(1) : value;
-  const [whole = "0", fraction = ""] = unsigned.split(".");
-  const scaled = BigInt(`${whole}${fraction}` || "0") * multiplier;
-  const digits = scaled.toString().padStart(fraction.length + 1, "0");
-  if (fraction.length === 0) return `${sign}${digits}`;
-  const wholePart = digits.slice(0, -fraction.length) || "0";
-  const fractionPart = digits.slice(-fraction.length).replace(/0+$/u, "");
-  return fractionPart
-    ? `${sign}${wholePart}.${fractionPart}`
-    : `${sign}${wholePart}`;
-}
-
-function lifiUrl(
-  input: QuoteProbeInput,
-  extraParams: Record<string, string> = {},
-): string {
-  const url = new URL("https://li.quest/v1/quote");
-  setParams(url, {
-    fromChain: String(input.chainId),
-    toChain: String(input.chainId),
-    fromToken: input.sellToken.address,
-    toToken: input.buyToken.address,
-    fromAmount: input.amountRaw,
-    fromAddress: input.takerAddress,
-    toAddress: input.takerAddress,
-    slippage: "0.01",
-    integrator: LIFI_INTEGRATOR,
-    ...extraParams,
-  });
-  return url.toString();
-}
-
-function openOceanUrl(input: QuoteProbeInput): string {
-  const aliases: Record<number, string> = { 42220: "celo", 143: "monad" };
-  const chain = aliases[input.chainId] ?? String(input.chainId);
-  const url = new URL(
-    `https://open-api-pro.openocean.finance/v4/${chain}/swap`,
-  );
-  setParams(url, {
-    inTokenAddress: input.sellToken.address,
-    outTokenAddress: input.buyToken.address,
-    amountDecimals: input.amountRaw,
-    account: input.takerAddress,
-    slippage: "1",
-    gasPriceDecimals: OPENOCEAN_GAS_PRICE_WEI,
-    enabledDexIds: OPENOCEAN_MENTO_V3_DEX_ID,
-  });
-  return url.toString();
-}
-
-function zeroXUrl(input: QuoteProbeInput): string {
-  const url = new URL("https://api.0x.org/swap/allowance-holder/quote");
-  setParams(url, {
-    chainId: String(input.chainId),
-    sellToken: input.sellToken.address,
-    buyToken: input.buyToken.address,
-    sellAmount: input.amountRaw,
-    taker: input.takerAddress,
-  });
-  return url.toString();
-}
-
-function oneInchUrl(input: QuoteProbeInput): string {
-  const url = new URL(`https://api.1inch.dev/swap/v6.1/${input.chainId}/quote`);
-  setParams(url, {
-    src: input.sellToken.address,
-    dst: input.buyToken.address,
-    amount: input.amountRaw,
-    includeTokensInfo: "true",
-    includeProtocols: "true",
-  });
-  return url.toString();
-}
-
-function socketUrl(input: QuoteProbeInput): string {
-  const url = new URL("https://api.socket.tech/v2/quote");
-  setParams(url, {
-    fromChainId: String(input.chainId),
-    toChainId: String(input.chainId),
-    fromTokenAddress: input.sellToken.address,
-    toTokenAddress: input.buyToken.address,
-    fromAmount: input.amountRaw,
-    userAddress: input.takerAddress,
-    singleTxOnly: "true",
-  });
-  return url.toString();
-}
-
-function kyberUrl(input: QuoteProbeInput): string {
-  const aliases: Record<number, string> = { 143: "monad" };
-  const chain = aliases[input.chainId] ?? String(input.chainId);
-  const url = new URL(
-    `https://aggregator-api.kyberswap.com/${chain}/api/v1/routes`,
-  );
-  setParams(url, {
-    tokenIn: input.sellToken.address,
-    tokenOut: input.buyToken.address,
-    amountIn: input.amountRaw,
-  });
-  return url.toString();
-}
-
-function squidBody(input: QuoteProbeInput): unknown {
-  return {
-    fromChain: String(input.chainId),
-    toChain: String(input.chainId),
-    fromToken: input.sellToken.address,
-    toToken: input.buyToken.address,
-    fromAmount: input.amountRaw,
-    fromAddress: input.takerAddress,
-    toAddress: input.takerAddress,
-    slippage: 1,
-    quoteOnly: true,
-  };
-}
-
-function relayBody(input: QuoteProbeInput): unknown {
-  return {
-    user: input.takerAddress,
-    recipient: input.takerAddress,
-    originChainId: input.chainId,
-    destinationChainId: input.chainId,
-    originCurrency: input.sellToken.address,
-    destinationCurrency: input.buyToken.address,
-    amount: input.amountRaw,
-    tradeType: "EXACT_INPUT",
-  };
-}
-
-function rubicBody(input: QuoteProbeInput): unknown {
-  return {
-    srcTokenBlockchain: rubicChain(input.chainId),
-    dstTokenBlockchain: rubicChain(input.chainId),
-    srcTokenAddress: input.sellToken.address,
-    dstTokenAddress: input.buyToken.address,
-    srcTokenAmount: input.amountDecimal,
-    fromAddress: input.takerAddress,
-    receiver: input.takerAddress,
-    slippage: 0.01,
-    referrer: "mento",
-  };
-}
-
-function rubicChain(chainId: number): string {
-  const aliases: Record<number, string> = { 42220: "CELO", 143: "MONAD" };
-  return aliases[chainId] ?? String(chainId);
-}
-
-function setParams(url: URL, params: Record<string, string>): void {
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
+  const quoteId = flyQuoteId(quotePayload.payload);
+  if (!quoteId) {
+    return annotateDownstreamResult(
+      args.primaryResult,
+      requestErrorResult(
+        args.input,
+        quoteRequest,
+        "Fly quote response did not include a quote id.",
+      ),
+    );
   }
+
+  const distributionRequest = downstreamRequest(
+    args.request,
+    flyDistributionsUrl(quoteId),
+  );
+  const distributionPayload = await fetchDownstreamPayload({
+    ...args,
+    request: distributionRequest,
+  });
+  if ("result" in distributionPayload) return distributionPayload.result;
+  return annotateDownstreamResult(
+    args.primaryResult,
+    probeResultFromPayload({
+      chain: args.chain,
+      input: args.input,
+      request: distributionRequest,
+      ...distributionPayload,
+    }),
+  );
+}
+
+async function fetchDownstreamPayload(args: {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  fetcher: FetchLike;
+  request: QuoteRequest;
+  quoteBudget?: QuoteAttemptBudget | undefined;
+}): Promise<TimedPayload | { result: PairProbeResult }> {
+  if (!consumeQuoteAttempt(args.quoteBudget)) {
+    return {
+      result: {
+        ...quoteBudgetExhaustedResult(args.input, 0),
+        routeAmountUsd: args.request.amountDecimal ?? args.input.amountDecimal,
+        routeVariant: args.request.variant ?? null,
+      },
+    };
+  }
+  try {
+    return await fetchTimedPayload({
+      fetcher: args.fetcher,
+      request: args.request,
+    });
+  } catch (error) {
+    return {
+      result: requestErrorResult(args.input, args.request, error),
+    };
+  }
+}
+
+function annotateDownstreamResult(
+  primary: PairProbeResult,
+  downstream: PairProbeResult,
+): PairProbeResult {
+  return {
+    ...downstream,
+    downstreamProvider:
+      primary.downstreamProvider ?? downstream.downstreamProvider,
+    sourceLabels: mergedStrings(primary.sourceLabels, downstream.sourceLabels),
+    txTarget: primary.txTarget ?? downstream.txTarget,
+  };
+}
+
+function mergedStrings(
+  left: readonly string[],
+  right: readonly string[],
+): string[] {
+  return [...new Set([...left, ...right])].sort();
+}
+
+function downstreamRequest(parent: QuoteRequest, url: string): QuoteRequest {
+  return {
+    url,
+    ...(parent.amountDecimal ? { amountDecimal: parent.amountDecimal } : {}),
+    ...(parent.variant ? { variant: parent.variant } : {}),
+  };
 }

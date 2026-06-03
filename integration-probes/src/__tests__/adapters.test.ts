@@ -11,6 +11,7 @@ import type { ChainProbeConfig, QuoteProbeInput } from "../types.js";
 const ROUTER = "0x1111111111111111111111111111111111111111";
 const POOL = "0x2222222222222222222222222222222222222222";
 const OTHER_POOL = "0x3333333333333333333333333333333333333333";
+const PRIMARY_TARGET = "0x4444444444444444444444444444444444444444";
 
 const input: QuoteProbeInput = {
   chainId: 42220,
@@ -46,6 +47,40 @@ const chain: ChainProbeConfig = {
       poolSource: "test",
       base: input.sellToken,
       quote: input.buyToken,
+    },
+  ],
+};
+
+const monadInput: QuoteProbeInput = {
+  ...input,
+  chainId: 143,
+  pairId: "143:GBPm-USDm:143-0xpool",
+  sellToken: {
+    symbol: "USDm",
+    address: "0xBC69212B8E4d445b2307C9D32dD68E2A4Df00115",
+    decimals: 18,
+  },
+  buyToken: {
+    symbol: "GBPm",
+    address: "0x39bb4E0a204412bB98e821d25e7d955e69d40Fd1",
+    decimals: 18,
+  },
+  amountDecimal: "100",
+  amountRaw: "100000000000000000000",
+};
+
+const monadChain: ChainProbeConfig = {
+  ...chain,
+  chainId: 143,
+  chainLabel: "Monad",
+  chainSlug: "monad",
+  pairs: [
+    {
+      ...chain.pairs[0]!,
+      id: monadInput.pairId,
+      chainId: monadInput.chainId,
+      base: monadInput.buyToken,
+      quote: monadInput.sellToken,
     },
   ],
 };
@@ -226,6 +261,127 @@ describe("probeAdapterPair", () => {
     expect(result.routeVariant).toBe("allow-openocean");
     expect(result.routeAmountUsd).toBe("1000");
     expect(result.attemptCount).toBe(2);
+  });
+
+  it("follows LI.FI Fly routes to Monad Fly distributions for pool evidence", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+    const calls: string[] = [];
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url) => {
+        const href = String(url);
+        calls.push(href);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          return new Response(
+            JSON.stringify({
+              tool: "fly",
+              transactionRequest: { to: PRIMARY_TARGET },
+            }),
+          );
+        }
+        if (href.startsWith("https://api.fly.trade/aggregator/quote?")) {
+          return new Response(
+            JSON.stringify({
+              id: "391cd96d-c4bb-453a-8ab8-2459b5a2f57c",
+              targetAddress: "0x5555555555555555555555555555555555555555",
+            }),
+          );
+        }
+        if (
+          href ===
+          "https://api.fly.trade/aggregator/distributions?quoteId=391cd96d-c4bb-453a-8ab8-2459b5a2f57c"
+        ) {
+          return new Response(
+            JSON.stringify({
+              distributions: [
+                { route: [{ protocol: "mento-v3", pool: { address: POOL } }] },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected URL ${href}`);
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.requestUrl).toContain(
+      "https://api.fly.trade/aggregator/distributions",
+    );
+    expect(result.evidence).toEqual([
+      {
+        path: "$.distributions[0].route[0].pool.address",
+        type: "pool-address",
+        value: POOL,
+      },
+    ]);
+    expect(result.sourceLabels).toEqual(["mento-v3"]);
+    expect(result.downstreamProvider).toBe("fly");
+    expect(result.txTarget).toBe(PRIMARY_TARGET);
+    expect(result.routeVariant).toBe("default");
+    expect(result.attemptCount).toBe(1);
+    expect(calls).toHaveLength(3);
+  });
+
+  it("does not use Fly downstream evidence for non-Fly LI.FI routes", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+    const calls: string[] = [];
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain,
+      input,
+      fetcher: async (url) => {
+        const href = String(url);
+        calls.push(href);
+        return new Response(
+          JSON.stringify({
+            tool: "nordstern",
+            route: [{ protocol: "Nordstern Finance" }],
+          }),
+        );
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.downstreamProvider).toBe("nordstern");
+    expect(calls.length).toBeGreaterThan(1);
+    expect(calls.every((href) => href.startsWith("https://li.quest"))).toBe(
+      true,
+    );
+  });
+
+  it("keeps LI.FI Fly downstream throttles as rate-limited", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url) => {
+        const href = String(url);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          return new Response(JSON.stringify({ tool: "fly" }));
+        }
+        return new Response(JSON.stringify({ message: "slow down" }), {
+          status: 429,
+        });
+      },
+      env: { LIFI_API_KEY: "lifi-key" },
+    });
+
+    expect(result.status).toBe("rate_limited");
+    expect(result.requestUrl).toContain(
+      "https://api.fly.trade/aggregator/quote",
+    );
+    expect(result.error).toBe("HTTP 429: slow down");
   });
 
   it("continues route discovery after a quote attempt throws", async () => {
@@ -832,8 +988,26 @@ describe("aggregator quote builders", () => {
       ),
     ).toBe(false);
     expect(
+      lifiRequests.some((request) =>
+        request.url.includes("allowExchanges=fly"),
+      ),
+    ).toBe(false);
+    expect(
       lifiRequests.some((request) => request.amountDecimal === "100000"),
     ).toBe(true);
+    expect(lifiRequests[0]?.afterResponse).toBeUndefined();
+    const monadLifiRequests = quoteRequests(
+      AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi")?.quote?.(
+        monadInput,
+        env,
+      ),
+    );
+    expect(
+      monadLifiRequests.some((request) =>
+        request.url.includes("allowExchanges=fly"),
+      ),
+    ).toBe(true);
+    expect(monadLifiRequests[0]?.afterResponse).toEqual(expect.any(Function));
     expect(
       AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi")
         ?.maxQuoteRequestsPerRun,
@@ -947,6 +1121,7 @@ type QuoteRequestFixture = {
   url: string;
   init?: RequestInit;
   amountDecimal?: string;
+  afterResponse?: unknown;
   variant?: string;
 };
 

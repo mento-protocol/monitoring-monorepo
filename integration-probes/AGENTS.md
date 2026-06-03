@@ -41,6 +41,10 @@ pnpm --filter @mento-protocol/integration-probes knip
   speculative `allowExchanges` values that are absent from `/v1/tools`. These
   attempts still pass only with Routerv300 or registered pool/VirtualPool
   address evidence.
+- Monad LI.FI quotes can delegate to Fly. When LI.FI returns `tool: "fly"`,
+  follow Fly's quote and distributions APIs and pass only if the distributions
+  response exposes a registered Mento v3 pool address. Celo LI.FI checks do not
+  use Fly fallback evidence; they must return direct Mento address evidence.
 - LI.FI quote attempts are capped at 180 per scheduled run, and repeated
   request/HTTP errors during route discovery are capped at two attempts per
   route, so an aggregator outage or discovery loop cannot starve the scheduled

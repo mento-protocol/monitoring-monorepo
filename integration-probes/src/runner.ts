@@ -6,8 +6,8 @@ import {
   poolIdFromPairId,
   probeAdapterPair,
   type AggregatorAdapter,
-  type QuoteAttemptBudget,
 } from "./adapters.js";
+import type { QuoteAttemptBudget } from "./adapterTypes.js";
 import { buildChainProbeConfigs, buildQuoteInputs } from "./pairs.js";
 import {
   SNAPSHOT_SCHEMA_VERSION,

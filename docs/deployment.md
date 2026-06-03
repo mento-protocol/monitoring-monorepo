@@ -166,6 +166,12 @@ at 180 per scheduled run, and repeated request/HTTP errors are capped at two
 attempts per route, so discovery cannot exhaust the API quota or starve the
 scheduled writer before it publishes degraded results.
 
+Monad LI.FI/Jumper routes can use Fly as the downstream provider. When LI.FI
+returns `tool: "fly"`, the probe follows Fly's quote and distributions APIs and
+uses only registered Mento v3 pool-address evidence from the Fly distributions
+response as a pass. Celo LI.FI/Jumper probes stay on LI.FI response evidence;
+they do not borrow Fly evidence for a chain where LI.FI has not exposed Fly.
+
 ### Address Book & Backup Cron
 
 The dashboard includes a private address book at `/address-book` for labeling wallet addresses with company or entity names. Labels are stored in Upstash Redis and displayed inline throughout the UI. Forensic reports (long-form markdown investigations attached to an address) live in the same Upstash instance under the `reports` hash.
