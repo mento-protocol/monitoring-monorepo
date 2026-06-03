@@ -76,6 +76,8 @@ GRAFANA_AGENT_PASSWORD=$(fetch_secret grafana-agent-password)
 
 export GRAFANA_AGENT_ENDPOINT GRAFANA_AGENT_USERNAME GRAFANA_AGENT_PASSWORD
 
+# Alloy v1.16.1 rejects the older-looking bare --disable-support-bundle flag;
+# use the namespaced server.http flag exposed by `alloy run --help`.
 exec /bin/alloy run \
   --server.http.listen-addr=0.0.0.0:8080 \
   --server.http.enable-pprof=false \
