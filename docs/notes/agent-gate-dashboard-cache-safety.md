@@ -17,8 +17,10 @@ Candidate commands:
 - `pnpm --filter @mento-protocol/ui-dashboard test:browser`
 
 `size-limit` depends on `build` in `turbo.json` because it reads `.next/`
-output. Other cached gate tasks intentionally avoid broad workspace dependency
-pipelines.
+output. Its config measures concrete static assets referenced by Next's build
+manifests, so stale content-hashed files left under `.next/static/` by repeated
+local builds do not inflate the local gate. Other cached gate tasks
+intentionally avoid broad workspace dependency pipelines.
 
 Dashboard build cache outputs include production `.next/**` artifacts but
 exclude `.next/cache/**` and `.next/dev/**`. The dev tree is created by local
