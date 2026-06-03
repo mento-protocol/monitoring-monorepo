@@ -89,8 +89,8 @@ export async function handleRotation(
   }
 
   const email =
-    current.email ??
-    (await dependencies.fetchOncallUserEmail(current.username, config));
+    nonBlank(current.email) ??
+    nonBlank(await dependencies.fetchOncallUserEmail(current.username, config));
   if (!email) {
     throw new Error(
       `No email found for Splunk On-Call user ${current.username}`,
@@ -166,4 +166,9 @@ function announcementClientMsgId(
     `${variant}${hash.slice(18, 20)}`,
     hash.slice(20, 32),
   ].join("-");
+}
+
+function nonBlank(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === "" ? undefined : trimmed;
 }

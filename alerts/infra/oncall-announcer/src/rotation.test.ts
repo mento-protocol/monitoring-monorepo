@@ -138,6 +138,44 @@ describe("handleRotation", () => {
     expect(differentTransitionClientMsgId).not.toBe(firstClientMsgId);
   });
 
+  it("falls back to the user lookup when the current on-call email is blank", async () => {
+    const deps = dependencies({
+      fetchCurrentOncall: vi.fn(async () => ({
+        ...currentOncall,
+        email: " ",
+      })),
+      fetchOncallUserEmail: vi.fn(async () => "chapati@example.com"),
+      lookupSlackUserByEmail: vi.fn(async () => ({
+        id: "UCHAPATI",
+        name: "chapati",
+      })),
+      readRotationState: vi.fn(async () => previousState),
+    });
+
+    const result = await handleRotation(baseConfig(), deps);
+
+    expect(result).toMatchObject({
+      announced: true,
+      changed: true,
+      slackUserId: "UCHAPATI",
+    });
+    expect(deps.fetchOncallUserEmail).toHaveBeenCalledWith(
+      "chapati",
+      expect.any(Object),
+    );
+    expect(deps.lookupSlackUserByEmail).toHaveBeenCalledWith(
+      "chapati@example.com",
+      expect.any(Object),
+    );
+    expect(deps.writeRotationState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "chapati@example.com",
+        slackUserId: "UCHAPATI",
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("does not announce when the Splunk On-Call username is unchanged", async () => {
     const unchangedState = {
       ...previousState,
