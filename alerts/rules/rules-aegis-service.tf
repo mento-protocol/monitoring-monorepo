@@ -11,16 +11,10 @@
 # balances.tf / rules-trading-modes.tf — there are deliberately NO per-rule
 # `notification_settings` blocks. Adding them would double-fire.
 #
-# CROSS-STACK MOVE — this resource must be `terraform import`ed into the
-# alerts-rules state (adopting the EXISTING Grafana object the aegis stack
-# owns today) so the plan is a no-op, BEFORE the aegis stack drops it (#706
-# PR2). The rule bodies below — name, folder, model JSON, conditions, labels,
-# annotations — are copied VERBATIM from the source so the import is 0-diff.
-# The only normalization is `datasource_uid = var.prometheus_datasource_uid`
-# (default "grafanacloud-prom" — value-identical to the source literal) to
-# match this module's convention; the `__expr__` datasources stay literal.
-# The folder stays the Aegis folder (owned by the aegis stack, referenced here
-# as a data source) so the Aegis dashboard keeps pointing at it.
+# CROSS-STACK MOVE — this resource was `terraform import`ed into the
+# alerts-rules state in #706, then removed from the aegis stack state. The
+# folder stays the Aegis folder (owned by the aegis stack, referenced here as a
+# data source) so the Aegis dashboard keeps pointing at it.
 
 resource "grafana_rule_group" "aegis_service_alerts" {
   name             = "Aegis service alerts"
@@ -40,7 +34,20 @@ resource "grafana_rule_group" "aegis_service_alerts" {
       }
 
       datasource_uid = var.prometheus_datasource_uid
-      model          = "{\"disableTextWrap\":false,\"editorMode\":\"code\",\"expr\":\"sum(increase(view_call_query_duration_count{status=\\\"error\\\"}[5m]))\",\"fullMetaSearch\":false,\"includeNullMetadata\":true,\"instant\":true,\"intervalMs\":600000,\"legendFormat\":\"__auto\",\"maxDataPoints\":43200,\"range\":false,\"refId\":\"errorCount\",\"useBackend\":false}"
+      model = jsonencode({
+        disableTextWrap     = false
+        editorMode          = "code"
+        expr                = "sum(increase(view_call_query_duration_count{status=\"error\"}[5m]))"
+        fullMetaSearch      = false
+        includeNullMetadata = true
+        instant             = true
+        intervalMs          = 600000
+        legendFormat        = "__auto"
+        maxDataPoints       = 43200
+        range               = false
+        refId               = "errorCount"
+        useBackend          = false
+      })
     }
     data {
       ref_id = "B"
@@ -51,7 +58,21 @@ resource "grafana_rule_group" "aegis_service_alerts" {
       }
 
       datasource_uid = "__expr__"
-      model          = "{\"conditions\":[{\"evaluator\":{\"params\":[10,0],\"type\":\"gt\"},\"operator\":{\"type\":\"and\"},\"query\":{\"params\":[]},\"reducer\":{\"params\":[],\"type\":\"avg\"},\"type\":\"query\"}],\"datasource\":{\"name\":\"Expression\",\"type\":\"__expr__\",\"uid\":\"__expr__\"},\"expression\":\"errorCount\",\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"B\",\"type\":\"threshold\"}"
+      model = jsonencode({
+        refId         = "B"
+        type          = "threshold"
+        expression    = "errorCount"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          evaluator = { params = [10, 0], type = "gt" }
+          operator  = { type = "and" }
+          query     = { params = [] }
+          reducer   = { params = [], type = "avg" }
+          type      = "query"
+        }]
+        datasource = { name = "Expression", type = "__expr__", uid = "__expr__" }
+      })
     }
 
     no_data_state  = "OK"
@@ -65,7 +86,6 @@ resource "grafana_rule_group" "aegis_service_alerts" {
       service  = "aegis"
       severity = "page"
     }
-    is_paused = false
   }
   rule {
     name      = "Aegis does not report new data"
@@ -80,7 +100,16 @@ resource "grafana_rule_group" "aegis_service_alerts" {
       }
 
       datasource_uid = var.prometheus_datasource_uid
-      model          = "{\"editorMode\":\"code\",\"expr\":\"time() - lastUpdatedAt\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"maxDataPoints\":43200,\"range\":false,\"refId\":\"A\"}"
+      model = jsonencode({
+        refId         = "A"
+        expr          = "time() - lastUpdatedAt"
+        editorMode    = "code"
+        instant       = true
+        intervalMs    = 1000
+        legendFormat  = "__auto"
+        maxDataPoints = 43200
+        range         = false
+      })
     }
     data {
       ref_id = "C"
@@ -91,10 +120,26 @@ resource "grafana_rule_group" "aegis_service_alerts" {
       }
 
       datasource_uid = "__expr__"
-      model          = "{\"conditions\":[{\"evaluator\":{\"params\":[300],\"type\":\"gt\"},\"operator\":{\"type\":\"and\"},\"query\":{\"params\":[\"C\"]},\"reducer\":{\"params\":[],\"type\":\"last\"},\"type\":\"query\"}],\"datasource\":{\"type\":\"__expr__\",\"uid\":\"__expr__\"},\"expression\":\"A\",\"intervalMs\":1000,\"maxDataPoints\":43200,\"refId\":\"C\",\"type\":\"threshold\"}"
+      model = jsonencode({
+        refId         = "C"
+        type          = "threshold"
+        expression    = "A"
+        intervalMs    = 1000
+        maxDataPoints = 43200
+        conditions = [{
+          evaluator = { params = [300], type = "gt" }
+          operator  = { type = "and" }
+          query     = { params = ["C"] }
+          reducer   = { params = [], type = "last" }
+          type      = "query"
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
     }
 
-    no_data_state  = "NoData"
+    # This is the liveness rule: if the heartbeat series disappears entirely,
+    # absence of data is the signal rather than noise.
+    no_data_state  = "Alerting"
     exec_err_state = "Error"
     for            = "5m"
     annotations = {
@@ -105,6 +150,5 @@ resource "grafana_rule_group" "aegis_service_alerts" {
       service  = "aegis"
       severity = "page"
     }
-    is_paused = false
   }
 }
