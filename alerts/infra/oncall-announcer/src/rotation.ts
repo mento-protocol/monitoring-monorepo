@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { AppConfig } from "./config";
 import { logger } from "./logger";
 import {
@@ -29,6 +30,7 @@ export interface RotationDependencies {
     slackUserId: string,
     username: string,
     config: AppConfig,
+    clientMsgId: string,
   ) => Promise<void>;
   readRotationState: (config: AppConfig) => Promise<RotationState | undefined>;
   updateSupportUsergroup: (
@@ -105,6 +107,7 @@ export async function handleRotation(
       slackUser.id,
       current.username,
       config,
+      announcementClientMsgId(current, previous, slackUser.id),
     );
   }
 
@@ -132,4 +135,35 @@ export async function handleRotation(
     previous,
     slackUserId: slackUser.id,
   };
+}
+
+function announcementClientMsgId(
+  current: CurrentOncall,
+  previous: RotationState | undefined,
+  slackUserId: string,
+): string {
+  const hash = createHash("sha256")
+    .update(
+      [
+        "support-engineer-rotation",
+        previous?.victoropsUsername ?? "",
+        current.username,
+        current.teamSlug ?? "",
+        current.escalationPolicySlug ?? "",
+        slackUserId,
+      ].join("\0"),
+    )
+    .digest("hex");
+
+  const variant = ((Number.parseInt(hash.slice(16, 18), 16) & 0x3f) | 0x80)
+    .toString(16)
+    .padStart(2, "0");
+
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    `5${hash.slice(13, 16)}`,
+    `${variant}${hash.slice(18, 20)}`,
+    hash.slice(20, 32),
+  ].join("-");
 }

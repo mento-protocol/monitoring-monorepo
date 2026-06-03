@@ -30,14 +30,15 @@ resource "google_cloudfunctions2_function" "oncall_announcer" {
   }
 
   service_config {
-    available_memory               = "${var.memory_mb}M"
-    timeout_seconds                = var.timeout_seconds
-    max_instance_count             = var.max_instances
-    min_instance_count             = var.min_instances
-    service_account_email          = google_service_account.function_runtime.email
-    environment_variables          = local.all_env_vars
-    ingress_settings               = "ALLOW_ALL"
-    all_traffic_on_latest_revision = true
+    available_memory                 = "${var.memory_mb}M"
+    timeout_seconds                  = var.timeout_seconds
+    max_instance_count               = var.max_instances
+    max_instance_request_concurrency = 1
+    min_instance_count               = var.min_instances
+    service_account_email            = google_service_account.function_runtime.email
+    environment_variables            = local.all_env_vars
+    ingress_settings                 = "ALLOW_ALL"
+    all_traffic_on_latest_revision   = true
 
     secret_environment_variables {
       key        = "SLACK_BOT_TOKEN"

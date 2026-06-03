@@ -68,13 +68,20 @@ describe("Slack API helpers", () => {
   it("posts the on-call announcement to the configured channel", async () => {
     const fetchMock = vi.fn(async () => slackResponse({ ok: true }));
 
-    await postOncallAnnouncement("UCHAPATI", "chapati", config, fetchMock);
+    await postOncallAnnouncement(
+      "UCHAPATI",
+      "chapati",
+      config,
+      "e6f87c4e-fbfd-5887-81e7-7ad2fd6c2a43",
+      fetchMock,
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://slack.com/api/chat.postMessage",
       expect.objectContaining({
         body: JSON.stringify({
           channel: "CENG",
+          client_msg_id: "e6f87c4e-fbfd-5887-81e7-7ad2fd6c2a43",
           text: [
             "New support engineer: <@UCHAPATI> is on duty.",
             "Please monitor alert channels and work through <https://linear.app/mento-labs/team/SUP/all|support issues> as capacity allows.",

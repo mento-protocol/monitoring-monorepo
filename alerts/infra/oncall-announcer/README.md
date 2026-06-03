@@ -11,13 +11,16 @@ Slack.
    `/api-public/v1/oncall/current`.
 2. Reads the last announced username from a private GCS state object.
 3. If the username changed, resolves the Splunk On-Call email to a Slack user
-   with `users.lookupByEmail`, posts a message to `#eng`, and writes the new
-   state.
+   with `users.lookupByEmail`, posts a message to `#eng` with a stable Slack
+   `client_msg_id` for that transition, and writes the new state.
 4. Reconciles the `@support-engineer` Slack usergroup to exactly one member on
    every run.
 
 The default schedule is every 15 minutes. State dedupe prevents duplicate Slack
-messages when the rotation has not changed.
+messages when the rotation has not changed, and the stable Slack
+`client_msg_id` lets Cloud Scheduler retries dedupe an accepted
+`chat.postMessage` call if the state write fails after Slack accepts the
+announcement.
 
 ## Slack Scopes
 

@@ -82,6 +82,7 @@ export async function postOncallAnnouncement(
   slackUserId: string,
   username: string,
   config: AppConfig,
+  clientMsgId: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   const text = [
@@ -97,6 +98,7 @@ export async function postOncallAnnouncement(
     "chat.postMessage",
     {
       channel: config.slack.channelId,
+      client_msg_id: clientMsgId,
       text,
       unfurl_links: false,
       unfurl_media: false,

@@ -89,6 +89,9 @@ describe("handleRotation", () => {
       "UCHAPATI",
       "chapati",
       expect.any(Object),
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      ),
     );
     expect(deps.writeRotationState).toHaveBeenCalledWith(
       {
@@ -101,6 +104,38 @@ describe("handleRotation", () => {
       },
       expect.any(Object),
     );
+  });
+
+  it("uses a stable Slack client message id for the same rotation transition", async () => {
+    async function clientMsgIdFor(
+      previous: RotationState | undefined,
+    ): Promise<string> {
+      const postOncallAnnouncement = vi.fn();
+      const deps = dependencies({
+        fetchCurrentOncall: vi.fn(async () => currentOncall),
+        fetchOncallUserEmail: vi.fn(async () => "chapati@example.com"),
+        lookupSlackUserByEmail: vi.fn(async () => ({
+          id: "UCHAPATI",
+          name: "chapati",
+        })),
+        postOncallAnnouncement,
+        readRotationState: vi.fn(async () => previous),
+      });
+
+      await handleRotation(baseConfig(), deps);
+
+      return postOncallAnnouncement.mock.calls[0][3];
+    }
+
+    const firstClientMsgId = await clientMsgIdFor(previousState);
+    const retryClientMsgId = await clientMsgIdFor(previousState);
+    const differentTransitionClientMsgId = await clientMsgIdFor({
+      ...previousState,
+      victoropsUsername: "another.user",
+    });
+
+    expect(retryClientMsgId).toBe(firstClientMsgId);
+    expect(differentTransitionClientMsgId).not.toBe(firstClientMsgId);
   });
 
   it("does not announce when the Splunk On-Call username is unchanged", async () => {
