@@ -273,7 +273,7 @@ describe("probeAdapterPair", () => {
     expect(result.attemptCount).toBe(2);
   });
 
-  it("keeps the best fallback when a later quote attempt is terminal", async () => {
+  it("surfaces terminal rate limits instead of masking them with fallbacks", async () => {
     const adapter: AggregatorAdapter = {
       id: "multi-attempt",
       label: "Multi Attempt",
@@ -310,10 +310,10 @@ describe("probeAdapterPair", () => {
       env: {},
     });
 
-    expect(result.status).toBe("fail");
-    expect(result.requestUrl).toBe("https://example.test/default");
-    expect(result.routeVariant).toBe("default");
-    expect(result.sourceLabels).toEqual(["Mento"]);
+    expect(result.status).toBe("rate_limited");
+    expect(result.requestUrl).toBe("https://example.test/rate-limited");
+    expect(result.routeVariant).toBe("allow-openocean");
+    expect(result.error).toBe("HTTP 429: slow down");
     expect(result.attemptCount).toBe(2);
   });
 
@@ -450,6 +450,45 @@ describe("probeAdapterPair", () => {
     expect(result.requestUrl).toBe("https://example.test/default");
     expect(result.attemptCount).toBe(1);
     expect(calls).toBe(1);
+  });
+
+  it("keeps the best fallback when the run-level quote budget is exhausted", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "multi-attempt",
+      label: "Multi Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => [
+        {
+          url: "https://example.test/default",
+          amountDecimal: "1",
+          variant: "default",
+        },
+        {
+          url: "https://example.test/discovery",
+          amountDecimal: "1000",
+          variant: "allow-openocean",
+        },
+      ],
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(JSON.stringify({ route: [{ protocol: "Mento" }] })),
+      env: {},
+      quoteBudget: { remaining: 1 },
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.requestUrl).toBe("https://example.test/default");
+    expect(result.routeVariant).toBe("default");
+    expect(result.sourceLabels).toEqual(["Mento"]);
+    expect(result.attemptCount).toBe(1);
   });
 
   it("keeps no-liquidity and rate-limit responses explicit", async () => {

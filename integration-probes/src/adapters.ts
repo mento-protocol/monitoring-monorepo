@@ -195,7 +195,10 @@ async function fetchAndEvaluate(args: {
     if (requestErrored(result)) {
       requestErrorAttempts += 1;
     }
-    if (shouldStopAfterAttempt(result, requestErrorAttempts)) {
+    if (terminalStatus(result.status)) {
+      return result;
+    }
+    if (requestErrorLimitReached(result, requestErrorAttempts)) {
       return { ...(fallback ?? result), attemptCount };
     }
   }
@@ -218,14 +221,13 @@ function quoteBudgetExhaustedResult(
       );
 }
 
-function shouldStopAfterAttempt(
+function requestErrorLimitReached(
   result: PairProbeResult,
   requestErrorAttempts: number,
 ): boolean {
   return (
-    terminalStatus(result.status) ||
-    (requestErrored(result) &&
-      requestErrorAttempts >= REQUEST_ERROR_ATTEMPT_LIMIT)
+    requestErrored(result) &&
+    requestErrorAttempts >= REQUEST_ERROR_ATTEMPT_LIMIT
   );
 }
 
