@@ -401,6 +401,16 @@ indexer.onEvent(
     // them (possibly already-TRIPPED) — recompute halt for the feed's pools.
     const coldStart = breakerConfigs.length === 0 && poolIds.length > 0;
     await syncHaltOnColdStart(context, event.chainId, rateFeedID, coldStart);
+    // Cold-start dependency edges too: feeds that only emit OracleReported
+    // after start_block still need inherited breaker halts applied.
+    await syncDependencyHaltOnColdStart({
+      context,
+      chainId: event.chainId,
+      rateFeedID,
+      blockNumber,
+      blockTimestamp,
+      hasPools: poolIds.length > 0,
+    });
   },
 );
 

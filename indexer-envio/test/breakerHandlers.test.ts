@@ -39,6 +39,7 @@ const CHAIN_ID = 42220;
 const BREAKER_BOX_ADDR = "0x303ed1df62fa067659b586ebee8de0ece824ab39";
 const MD_BREAKER = "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9";
 const FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
+const DEP_FEED = "0xa1a8003936862e7a15092a91898d69fa8bce290c";
 
 const COOLDOWN = 900n; // 15 min — production value
 const THRESHOLD = 4n * 10n ** 22n; // 4% Fixidity
@@ -881,7 +882,6 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     // edges + the dependency's config and re-syncs the inherited halt. FEED's own
     // breaker is OK (beforeEach mock); the DEPENDENCY is tripped, and FEED's pool
     // must end up halted purely via the dependency edge.
-    const DEP_FEED = "0xa1a8003936862e7a15092a91898d69fa8bce290c";
     _setMockBreakerFeedState(CHAIN_ID, MD_BREAKER, DEP_FEED, {
       enabled: true,
       tradingMode: 3, // TRIPPED
@@ -928,6 +928,65 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
       pool?.breakerTripped,
       true,
       "dependent pool inherits the tripped dependency's halt via the MedianUpdated cold-start",
+    );
+  });
+
+  it("SortedOracles.OracleReported cold-starts dependency edges when the median never changes", async () => {
+    // Follow-up for #723: a feed can keep receiving reporter updates without a
+    // MedianUpdated event if the median value stays unchanged. That path must
+    // still load dependency edges set before start_block and apply inherited
+    // breaker halts to dependent pools.
+    _setMockBreakerFeedState(CHAIN_ID, MD_BREAKER, DEP_FEED, {
+      enabled: true,
+      tradingMode: 3, // TRIPPED
+      lastStatusUpdatedAt: 1_700_000_000n,
+      cooldownTime: 0n,
+      rateChangeThreshold: 0n,
+      smoothingFactor: 5n * 10n ** 21n,
+      medianRatesEMA: 1_000_000n,
+      referenceValue: null,
+    });
+    registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, [DEP_FEED]);
+
+    let mockDb = MockDb.createMockDb();
+    const poolId = makePoolId(
+      CHAIN_ID,
+      "0x00000000000000000000000000000000000000d2",
+    );
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        referenceRateFeedID: FEED,
+        breakerTripped: false,
+        invertRateFeedKnown: true,
+        tokenDecimalsKnown: true,
+        oracleExpiry: 1_700_010_000n,
+      }),
+    );
+
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: SortedOracles.OracleReported.createMockEvent({
+        token: FEED,
+        reporter: "0x00000000000000000000000000000000000000aa",
+        value: 1_180_000_000_000_000_000_000_000n,
+        timestamp: 1_700_001_900n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 6,
+          srcAddress: "0xefb84935239dacdecf7c5ba76d8de40b077b7b33",
+          block: { number: 301, timestamp: 1_700_002_000 },
+        },
+      }),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId) as
+      | { breakerTripped: boolean }
+      | undefined;
+    assert.equal(
+      pool?.breakerTripped,
+      true,
+      "dependent pool inherits the tripped dependency's halt via the OracleReported cold-start",
     );
   });
 });
