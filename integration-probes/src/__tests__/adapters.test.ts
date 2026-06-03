@@ -518,6 +518,58 @@ describe("probeAdapterPair", () => {
     expect(result.error).toBe("CELO blockchain temporarily down");
   });
 
+  it("extracts message fields from object error payloads", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "message-error",
+      label: "Message Error",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => ({ url: "https://example.test" }),
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            error: { code: 503, message: "upstream unavailable" },
+          }),
+        ),
+      env: {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("upstream unavailable");
+  });
+
+  it("stringifies object error payloads without a reason or message", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "object-error",
+      label: "Object Error",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => ({ url: "https://example.test" }),
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(JSON.stringify({ error: { code: 503 } })),
+      env: {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe('{"code":503}');
+  });
+
   it("returns unsupported before requiring credentials", async () => {
     const adapter: AggregatorAdapter = {
       id: "unsupported",
@@ -697,6 +749,20 @@ describe("aggregator quote builders", () => {
 
     expect(oneInch?.support[42220]).toBe("unsupported");
     expect(oneInch?.support[143]).toBe("unsupported");
+  });
+
+  it("can still build the parked 1inch quote request", () => {
+    const oneInch = AGGREGATOR_ADAPTERS.find((item) => item.id === "1inch");
+    const request = firstQuoteRequest(
+      oneInch?.quote?.(input, { ONEINCH_API_KEY: "one-inch-key" }),
+    );
+
+    expect(request?.url).toContain(
+      "https://api.1inch.dev/swap/v6.1/42220/quote",
+    );
+    expect(request?.url).toContain(`src=${input.sellToken.address}`);
+    expect(request?.url).toContain(`dst=${input.buyToken.address}`);
+    expect(JSON.stringify(request?.init?.headers)).toContain("one-inch-key");
   });
 
   it("requires an OpenOcean Pro API key before probing OpenOcean", async () => {
