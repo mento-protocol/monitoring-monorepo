@@ -67,13 +67,17 @@ developer machine. Use this fallback order:
 
 ```bash
 msg="hey, i need your feedback on the deploy"
+sent=0
 if command -v sag >/dev/null 2>&1 && [ -r "$HOME/.config/sag/elevenlabs-api-key" ]; then
-  sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "$msg"
-elif command -v say >/dev/null 2>&1; then
-  say "$msg"
-elif command -v spd-say >/dev/null 2>&1; then
-  spd-say "$msg"
-else
+  sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "$msg" && sent=1
+fi
+if [ "$sent" -eq 0 ] && command -v say >/dev/null 2>&1; then
+  say "$msg" && sent=1
+fi
+if [ "$sent" -eq 0 ] && command -v spd-say >/dev/null 2>&1; then
+  spd-say "$msg" && sent=1
+fi
+if [ "$sent" -eq 0 ]; then
   printf 'spoken nudge unavailable; falling back to chat only: %s\n' "$msg" >&2
 fi
 ```
@@ -83,7 +87,10 @@ built-in TTS command; `spd-say` is best-effort only when installed. In Codex,
 request escalated execution for the nudge instead of trying to run it inside the
 workspace sandbox. If every spoken path fails, report the failure in chat and
 continue with the visible written request; do not silently assume the user heard
-the nudge.
+the nudge. Claude command pre-approvals should stay limited to literal,
+low-information nudge messages. Do not pre-approve arbitrary `say`, `spd-say`,
+or `sag` message arguments, because shell substitutions in those arguments could
+disclose local file contents through speech or the ElevenLabs request.
 
 Do not wire this into the existing SessionEnd hook. The current shared hook
 events do not know whether the agent is genuinely waiting on the user versus
