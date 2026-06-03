@@ -1,0 +1,87 @@
+name: PR Description
+
+# Enforces the repo PR-description standard (AGENTS.md "PR description standard"
+# + .github/PULL_REQUEST_TEMPLATE.md): every PR body must lead with
+# `## The Problem` and `## The Solution`, and must not still contain the
+# unfilled template placeholders.
+#
+# REQUIRED-STATUS SAFETY: no workflow-level `paths:` filter — this is meant to
+# run on every PR so it can be a required status (AGENTS.md: required-status
+# workflows MUST NOT use `paths:`). It re-runs on `edited` (so fixing the body
+# clears it) and on `synchronize` (so the status re-attaches to each new head
+# commit). Draft PRs and Dependabot PRs are skipped.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: PR description format
+    # Skip drafts (work-in-progress) and Dependabot (auto-generated bodies).
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Validate PR description
+        # Body is passed via env (never interpolated into the script) to avoid
+        # shell injection from PR content.
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+
+          # 1) Empty body — one clean error, fail fast (before the heading checks
+          #    so we don't also emit "missing The Problem/The Solution").
+          if [ -z "${PR_BODY//[[:space:]]/}" ]; then
+            echo "::error::PR description is empty. It must start with '## The Problem' then '## The Solution' (AGENTS.md 'PR description standard')."
+            exit 1
+          fi
+
+          # 2) Unfilled template placeholders from .github/PULL_REQUEST_TEMPLATE.md.
+          if grep -qE '\[Plain-English problem|\[Simple explanation of how|\[Implementation details, invariants|\[Commands and results' <<<"$PR_BODY"; then
+            echo "::error::PR description still contains unfilled template placeholders — replace the bracketed prompts with real content."
+            exit 1
+          fi
+
+          # 3) The description must START with the two mandated sections, exactly
+          #    and in order (AGENTS.md "PR description standard").
+          #
+          #    For the OPENING check, strip only HTML comments (so the template's
+          #    markdownlint pragma is allowed) — NOT code fences: a leading code
+          #    fence is real content before the headings and must be rejected.
+          comment_stripped=$(awk '
+            comment { if ($0 ~ /-->/) comment = 0; next }
+            /<!--/ && $0 !~ /-->/ { comment = 1; next }
+            $0 ~ /^[[:space:]]*<!--.*-->[[:space:]]*$/ { next }
+            { print }
+          ' <<<"$PR_BODY")
+          # The first non-blank line must be exactly '## The Problem' (rejects
+          # leading prose, a '# Summary' H1, a leading code fence, or
+          # '## The Problem extra'). Case-exact, exact heading line.
+          firstline=$(grep -vE '^[[:space:]]*$' <<<"$comment_stripped" | sed -n '1p' || true)
+          # For the SECOND section, also strip code fences so an example '##' line
+          # inside a fence (after the first heading) isn't taken as the heading.
+          fence_stripped=$(awk '
+            BEGIN { fence = 0 }
+            $0 ~ /^[[:space:]]*(```|~~~)/ { fence = ! fence; next }
+            fence { next }
+            { print }
+          ' <<<"$comment_stripped")
+          second=$(grep -E '^##[[:space:]]' <<<"$fence_stripped" | sed -n '2p' || true)
+          if ! grep -qE '^##[[:space:]]+The Problem[[:space:]]*$' <<<"$firstline" \
+             || ! grep -qE '^##[[:space:]]+The Solution[[:space:]]*$' <<<"$second"; then
+            echo "::error::PR description must START with '## The Problem' then '## The Solution' as its first two sections — exact title-case, exact heading lines, in order, with no content before (only HTML comments may precede '## The Problem'). See AGENTS.md 'PR description standard' / .github/PULL_REQUEST_TEMPLATE.md."
+            exit 1
+          fi
+
+          echo "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders."
