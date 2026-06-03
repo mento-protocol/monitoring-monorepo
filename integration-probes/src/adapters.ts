@@ -351,7 +351,7 @@ function betterFallback(
   candidate: PairProbeResult,
 ): PairProbeResult {
   if (!current) return candidate;
-  return fallbackPriority(candidate.status) > fallbackPriority(current.status)
+  return fallbackPriority(candidate.status) >= fallbackPriority(current.status)
     ? candidate
     : current;
 }
