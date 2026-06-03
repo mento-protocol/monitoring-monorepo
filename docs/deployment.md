@@ -165,6 +165,8 @@ registered pool/VirtualPool address evidence. LI.FI quote attempts are capped
 at 180 per scheduled run, and repeated request/HTTP errors are capped at two
 attempts per route, so discovery cannot exhaust the API quota or starve the
 scheduled writer before it publishes degraded results.
+Budgeted adapters run pair probes serially so downstream evidence follow-ups
+cannot be starved by other in-flight pair probes.
 
 Monad LI.FI/Jumper routes can use Fly as the downstream provider. When LI.FI
 returns `tool: "fly"`, the probe follows Fly's quote and distributions APIs and

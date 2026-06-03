@@ -48,7 +48,9 @@ pnpm --filter @mento-protocol/integration-probes knip
 - LI.FI quote attempts are capped at 180 per scheduled run, and repeated
   request/HTTP errors during route discovery are capped at two attempts per
   route, so an aggregator outage or discovery loop cannot starve the scheduled
-  writer.
+  writer. Budgeted adapters run pair probes serially so downstream follow-up
+  requests, such as LI.FI-to-Fly evidence checks, cannot be starved by other
+  in-flight pair probes.
 - `integration-probes:latest` expires after 3 days so failed scheduled probes
   degrade the dashboard instead of showing stale health forever. Dated history
   keys expire after 90 days.

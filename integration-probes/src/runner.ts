@@ -210,7 +210,8 @@ async function probeChainPairs(args: {
     amountUsd: args.amountUsd,
     takerAddress: PROBE_TAKER_ADDRESS,
   });
-  return mapConcurrent(inputs, args.pairConcurrency, async (input) => {
+  const pairConcurrency = args.quoteBudget ? 1 : args.pairConcurrency;
+  return mapConcurrent(inputs, pairConcurrency, async (input) => {
     try {
       return await probeAdapterPair({ ...args, input });
     } catch (error) {
