@@ -1,0 +1,629 @@
+/**
+ * GraphQL queries for the /volume page.
+ *
+ * Hosted Hasura caps results at 1000 rows per query and disables
+ * `_aggregate` queries (count/sum/avg fields), so all aggregation we need
+ * has to be either pre-rolled in the indexer or summed client-side.
+ *
+ * Hero tiles (total volume / unique traders / top-N concentration) read
+ * the pre-rolled volume snapshots plus a small today-partial direct query.
+ *
+ * The top-50 volume table still reads `TraderDailySnapshot` directly
+ * with `limit: 1000` (the lemma below): top-50 by window-sum is a subset
+ * of top-1000 by single-day volume in any reasonable trader distribution.
+ */
+
+/**
+ * Top trader-day rows by volume in a window. The 1000-row cap is fine for
+ * the top-50 table because a trader who would crack the top-50 by summed
+ * window-volume necessarily has at least one daily row in the top-1000 by
+ * single-day volume. Long-tail $100/day regulars don't displace
+ * top-of-list. (Hero tiles, which sum across ALL traders, read the
+ * pre-rolled volume snapshot instead — see below.)
+ */
+export const TRADER_DAILY_TOP = /* GraphQL */ `
+  query TraderDailyTop(
+    $afterTimestamp: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $limit: Int!
+  ) {
+    TraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $afterTimestamp }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      order_by: { volumeUsdWei: desc }
+      limit: $limit
+    ) {
+      id
+      chainId
+      trader
+      timestamp
+      swapCount
+      uniquePools
+      volumeUsdWei
+      feesPaidUsdWei
+      isSystemAddress
+      aggregatorKeys
+      lastSeenTimestamp
+    }
+  }
+`;
+
+/**
+ * Per-pool breakdown for a single trader over a window. Drives the
+ * volume table's per-row expand and the flow-badge imbalance computation
+ * (which needs each pool's inflow/outflow split to score the trader's
+ * primary pool).
+ *
+ * Ordered by `volumeUsdWei desc` (not `timestamp desc`): a busy trader can
+ * have >1000 pool-day rows in a 30d/all window, and the row that becomes
+ * "primary pool" for the flow badge is the largest-volume pool aggregated
+ * across the window. Ordering by recency would let an old high-volume pool
+ * day fall outside the cap and silently misclassify the trader's flow.
+ */
+export const TRADER_POOL_DAILY_FOR_TRADER = /* GraphQL */ `
+  query TraderPoolDailyForTrader(
+    $chainId: Int!
+    $trader: String!
+    $afterTimestamp: numeric!
+  ) {
+    TraderPoolDailySnapshot(
+      where: {
+        chainId: { _eq: $chainId }
+        trader: { _eq: $trader }
+        timestamp: { _gte: $afterTimestamp }
+      }
+      order_by: [{ volumeUsdWei: desc }, { timestamp: desc }]
+      limit: 1000
+    ) {
+      id
+      chainId
+      trader
+      poolId
+      timestamp
+      swapCount
+      volumeUsdWei
+      inflowToken0UsdWei
+      outflowToken0UsdWei
+      inflowToken1UsdWei
+      outflowToken1UsdWei
+      feesPaidUsdWei
+    }
+  }
+`;
+
+export const TRADER_DAILY_WINDOW_TOP = /* GraphQL */ `
+  query TraderDailyWindowTop(
+    $afterTimestamp: numeric!
+    $beforeTimestamp: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $limit: Int!
+  ) {
+    TraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $afterTimestamp, _lt: $beforeTimestamp }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      trader
+      timestamp
+      swapCount
+      uniquePools
+      volumeUsdWei
+      feesPaidUsdWei
+      isSystemAddress
+      aggregatorKeys
+      lastSeenTimestamp
+    }
+  }
+`;
+
+export const TRADER_POOL_DAILY_TOP = /* GraphQL */ `
+  query TraderPoolDailyTop($afterTimestamp: numeric!, $limit: Int!) {
+    TraderPoolDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      trader
+      poolId
+      timestamp
+      swapCount
+      volumeUsdWei
+      inflowToken0UsdWei
+      outflowToken0UsdWei
+      inflowToken1UsdWei
+      outflowToken1UsdWei
+      feesPaidUsdWei
+    }
+  }
+`;
+
+export const SWAP_EVENT_OUTLIERS = /* GraphQL */ `
+  query SwapEventOutliers($afterTimestamp: numeric!, $limit: Int!) {
+    SwapEvent(
+      where: { blockTimestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { blockTimestamp: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      poolId
+      caller
+      txTo
+      recipient
+      volumeUsdWei
+      txHash
+      blockTimestamp
+    }
+  }
+`;
+
+/**
+ * Pool metadata for resolving poolId → display name. Mento has ~30 pools
+ * total, well under the 1000-row cap. Loaded once and joined client-side.
+ */
+export const POOLS_FOR_VOLUME = /* GraphQL */ `
+  query PoolsForVolume {
+    Pool(limit: 1000) {
+      id
+      chainId
+      token0
+      token1
+    }
+  }
+`;
+
+/**
+ * Pool-day rows in a window, used to drive the per-pool stacked volume
+ * chart on `/volume`. Source: pre-rolled PoolDailyVolumeSnapshot,
+ * not TraderPoolDailySnapshot, so long-window pool charts don't depend on
+ * trader-pool row cardinality.
+ *
+ * `limit` / `offset` are exposed because `PoolDailyVolumeSnapshot`
+ * cardinality is pool × day; 90d/all windows can exceed Hasura's 1000-row
+ * cap even after pre-rolling. The page fetches this with a paginated hook.
+ */
+export const POOL_DAILY_VOLUME = /* GraphQL */ `
+  query PoolDailyVolume(
+    $afterTimestamp: numeric!
+    $limit: Int!
+    $offset: Int!
+  ) {
+    PoolDailyVolumeSnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ timestamp: asc }, { poolId: asc }, { id: asc }]
+      limit: $limit
+      offset: $offset
+    ) {
+      id
+      chainId
+      poolId
+      timestamp
+      swapCount
+      swapCountIncludingSystem
+      volumeUsdWei
+      volumeUsdWeiIncludingSystem
+    }
+  }
+`;
+
+/**
+ * Top v3 aggregator-day rows by volume. Isolated from the trader query so
+ * AggregatorDailySnapshot schema rollout or resync issues degrade only the
+ * aggregator outreach panel, not the primary trader volume table.
+ */
+export const AGGREGATOR_DAILY_TOP = /* GraphQL */ `
+  query AggregatorDailyTop($afterTimestamp: numeric!, $limit: Int!) {
+    AggregatorDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      aggregator
+      lastSeenAggregatorAddress
+      timestamp
+      swapCount
+      swapCountIncludingSystem
+      uniqueTraders
+      uniqueTradersIncludingSystem
+      volumeUsdWei
+      volumeUsdWeiIncludingSystem
+    }
+  }
+`;
+
+export const AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM = /* GraphQL */ `
+  query AggregatorDailyTopIncludingSystem(
+    $afterTimestamp: numeric!
+    $limit: Int!
+  ) {
+    AggregatorDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWeiIncludingSystem: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      aggregator
+      lastSeenAggregatorAddress
+      timestamp
+      swapCount
+      swapCountIncludingSystem
+      uniqueTraders
+      uniqueTradersIncludingSystem
+      volumeUsdWei
+      volumeUsdWeiIncludingSystem
+    }
+  }
+`;
+
+export function aggregatorDailyTopQuery(showSystem: boolean): string {
+  return showSystem
+    ? AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM
+    : AGGREGATOR_DAILY_TOP;
+}
+
+/**
+ * Top legacy-v2 producer-day rows by volume. Source: BrokerTraderDailySnapshot,
+ * which the broker handler only writes when `routedViaV3Router=false` — so
+ * these are *broker-direct* swaps (Mento UI/SDK + third-party aggregators
+ * still routing through the legacy Broker). The volume page's `venue=v2`
+ * tab uses this to surface migration-outreach targets: who's still on v2.
+ *
+ * The entity is keyed by `caller` (tx.from / signer EOA) — aliased to
+ * `trader` in the response so the dashboard's row shape stays uniform with
+ * v3's TraderDailySnapshot. No `feesPaidUsdWei`/`uniquePools` (the v2 entity
+ * doesn't carry them — see schema.graphql comment on BrokerTraderDailySnapshot
+ * for why).
+ */
+export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
+  query BrokerTraderDailyTop(
+    $afterTimestamp: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $limit: Int!
+  ) {
+    BrokerTraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $afterTimestamp }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      trader: caller
+      timestamp
+      swapCount
+      volumeUsdWei
+      isSystemAddress
+      lastSeenTimestamp
+    }
+  }
+`;
+
+/**
+ * Top legacy-v2 aggregator-day rows by volume. The "unknown" bucket here is
+ * the curation backlog: any large unknown row is a router we should classify
+ * in `indexer-envio/config/aggregators.json` and ideally an integrator we
+ * should reach out to about migrating to v3.
+ *
+ * No protocol-actor filter — `aggregator` is already a canonical name; the
+ * `system` value covers Mento internals and is naturally tiny.
+ */
+export const BROKER_AGGREGATOR_DAILY_TOP = /* GraphQL */ `
+  query BrokerAggregatorDailyTop($afterTimestamp: numeric!, $limit: Int!) {
+    BrokerAggregatorDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      aggregator
+      lastSeenAggregatorAddress
+      timestamp
+      swapCount
+      uniqueTraders
+      volumeUsdWei
+    }
+  }
+`;
+
+// ---------------------------------------------------------------------------
+// Pre-rolled hero metrics. `distinct_on: [chainId]` returns the LATEST
+// snapshotDay per chain (most recent finalized hero card); the dashboard
+// adds today's partial from the small TraderDailySnapshot query below.
+// ---------------------------------------------------------------------------
+
+export const VOLUME_WINDOW_LATEST = /* GraphQL */ `
+  query VolumeWindowLatest($windowKey: String!) {
+    volumeWindowSnapshots: VolumeWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      id
+      chainId
+      windowKey
+      snapshotDay
+      windowStartDay
+      totalVolumeUsdWei
+      totalVolumeUsdWeiIncludingSystem
+      totalSwapCount
+      totalSwapCountIncludingSystem
+      uniqueTraders
+      uniqueTradersIncludingSystem
+    }
+  }
+`;
+
+export const BROKER_VOLUME_WINDOW_LATEST = /* GraphQL */ `
+  query BrokerVolumeWindowLatest($windowKey: String!) {
+    brokerVolumeWindowSnapshots: BrokerVolumeWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      id
+      chainId
+      windowKey
+      snapshotDay
+      windowStartDay
+      totalVolumeUsdWei
+      totalVolumeUsdWeiIncludingSystem
+      totalSwapCount
+      totalSwapCountIncludingSystem
+      uniqueTraders
+      uniqueTradersIncludingSystem
+    }
+  }
+`;
+
+// Isolated firstDay slice query — same rationale as POOL_CONFIG_EXT /
+// POOL_BREACH_ROLLUP in queries/pools.ts. Hosted Hasura rejects new
+// columns with "field not found" during the deploy+resync window, so
+// keeping these in a separate query means the hero KPIs survive the
+// rollout and only the DEGRADED-chain catch-up enhancement degrades
+// (chains stay in `degradedChains` until the slice query lands). After
+// the schema is live, normal operation is restored.
+//
+// Joined client-side by chainId in `mergeHeroSnapshot`.
+export const VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
+  query VolumeWindowFirstDayLatest($windowKey: String!) {
+    volumeWindowFirstDaySnapshots: VolumeWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      firstDayVolumeUsdWei
+      firstDayVolumeUsdWeiIncludingSystem
+      firstDaySwapCount
+      firstDaySwapCountIncludingSystem
+      firstDayExclusiveUniqueTraders
+      firstDayExclusiveUniqueTradersIncludingSystem
+    }
+  }
+`;
+
+export const BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
+  query BrokerVolumeWindowFirstDayLatest($windowKey: String!) {
+    brokerVolumeWindowFirstDaySnapshots: BrokerVolumeWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      firstDayVolumeUsdWei
+      firstDayVolumeUsdWeiIncludingSystem
+      firstDaySwapCount
+      firstDaySwapCountIncludingSystem
+      firstDayExclusiveUniqueTraders
+      firstDayExclusiveUniqueTradersIncludingSystem
+    }
+  }
+`;
+
+// Isolated address-list slice for the homepage Traders tile. Lets the UI
+// cross-chain-dedupe via a `Set<string>` instead of naive-summing
+// `uniqueTraders` (which double-counts wallets active on multiple chains).
+// Kept separate from VOLUME_WINDOW_LATEST for the same schema-lag
+// reason as VOLUME_WINDOW_FIRSTDAY_LATEST.
+export const VOLUME_WINDOW_TRADERS_LATEST = /* GraphQL */ `
+  query VolumeWindowTradersLatest($windowKey: String!) {
+    volumeWindowTraderSnapshots: VolumeWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      chainId
+      snapshotDay
+      windowTraders
+    }
+  }
+`;
+
+// Isolated bounded overlap query for exact hero unique-trader counts.
+// The caller passes an `_or` where clause scoped to the active yesterday/today
+// partial traders and each chain's retained snapshot range. The query is
+// distinct on `(chainId, trader, isSystemAddress)` so the hidden-system merge
+// can distinguish "had a non-system historical row" from "sticky-system trader
+// excluded from the snapshot unique count" without polling full cumulative
+// trader arrays.
+export const VOLUME_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
+  query VolumePartialOverlapTraders(
+    $where: TraderDailySnapshot_bool_exp!
+    $limit: Int!
+  ) {
+    volumePartialOverlapTraders: TraderDailySnapshot(
+      where: $where
+      order_by: [
+        { chainId: asc }
+        { trader: asc }
+        { isSystemAddress: asc }
+        { timestamp: desc }
+      ]
+      distinct_on: [chainId, trader, isSystemAddress]
+      limit: $limit
+    ) {
+      chainId
+      trader
+      timestamp
+      isSystemAddress
+    }
+  }
+`;
+
+export const BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
+  query BrokerVolumePartialOverlapTraders(
+    $where: BrokerTraderDailySnapshot_bool_exp!
+    $limit: Int!
+  ) {
+    brokerVolumePartialOverlapTraders: BrokerTraderDailySnapshot(
+      where: $where
+      order_by: [
+        { chainId: asc }
+        { caller: asc }
+        { isSystemAddress: asc }
+        { timestamp: desc }
+      ]
+      distinct_on: [chainId, caller, isSystemAddress]
+      limit: $limit
+    ) {
+      chainId
+      trader: caller
+      timestamp
+      isSystemAddress
+    }
+  }
+`;
+
+/**
+ * Today's partial — added on top of the snapshot's [windowStart, yesterday]
+ * total to keep hero numbers current to the minute. Today's
+ * TraderDailySnapshot rows are bounded by active-traders-today: Mento
+ * peaks well under 200 distinct traders/day across all chains, so the
+ * `limit: 1000` cap is a >5x safety margin. If a single day ever
+ * saturates 1000, the hero volume tile will silently understate (no
+ * cap-hit banner), which is the same blind spot as
+ * BROKER_AGGREGATOR_DAILY_TOP — revisit cap detection then.
+ */
+export const VOLUME_TODAY_TRADERS = /* GraphQL */ `
+  query VolumeTodayTraders(
+    $todayMidnight: numeric!
+    $isSystemAddressIn: [Boolean!]!
+  ) {
+    volumeTodayTraders: TraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $todayMidnight }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      limit: 1000
+    ) {
+      chainId
+      trader
+      volumeUsdWei
+      swapCount
+      isSystemAddress
+    }
+  }
+`;
+
+export const BROKER_VOLUME_TODAY_TRADERS = /* GraphQL */ `
+  query BrokerVolumeTodayTraders(
+    $todayMidnight: numeric!
+    $isSystemAddressIn: [Boolean!]!
+  ) {
+    brokerVolumeTodayTraders: BrokerTraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $todayMidnight }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      limit: 1000
+    ) {
+      chainId
+      trader: caller
+      volumeUsdWei
+      swapCount
+      isSystemAddress
+    }
+  }
+`;
+
+/**
+ * Yesterday's closed-day rows for chains in the DEGRADED state
+ * (snapshotDay = today - 2 UTC days). The dashboard fires this only
+ * when `mergeHeroSnapshot`'s prior pass returned a non-empty
+ * `degradedChains` list, then re-runs the merge with `yesterdayRows`
+ * to perform slice subtraction on the snapshot's first day and
+ * supplement with yesterday's data — eliminating the
+ * pre-first-swap-of-day gap.
+ *
+ * `chainIdIn` bounds the query to the degraded chains only — a
+ * Mento-wide fetch would dwarf the |degradedChains × ~100 traders|
+ * bound that's typical here. With `_eq` on the timestamp the row
+ * count is well under the 1000-row Hasura cap.
+ */
+export const VOLUME_YESTERDAY_TRADERS = /* GraphQL */ `
+  query VolumeYesterdayTraders(
+    $yesterdayMidnight: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $chainIdIn: [Int!]!
+  ) {
+    volumeYesterdayTraders: TraderDailySnapshot(
+      where: {
+        timestamp: { _eq: $yesterdayMidnight }
+        isSystemAddress: { _in: $isSystemAddressIn }
+        chainId: { _in: $chainIdIn }
+      }
+      limit: 1000
+    ) {
+      chainId
+      trader
+      volumeUsdWei
+      swapCount
+      isSystemAddress
+    }
+  }
+`;
+
+export const BROKER_VOLUME_YESTERDAY_TRADERS = /* GraphQL */ `
+  query BrokerVolumeYesterdayTraders(
+    $yesterdayMidnight: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $chainIdIn: [Int!]!
+  ) {
+    brokerVolumeYesterdayTraders: BrokerTraderDailySnapshot(
+      where: {
+        timestamp: { _eq: $yesterdayMidnight }
+        isSystemAddress: { _in: $isSystemAddressIn }
+        chainId: { _in: $chainIdIn }
+      }
+      limit: 1000
+    ) {
+      chainId
+      trader: caller
+      volumeUsdWei
+      swapCount
+      isSystemAddress
+    }
+  }
+`;

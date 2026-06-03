@@ -140,16 +140,12 @@ describe("AuthStatus sign-in href", () => {
     });
 
     await act(async () => {
-      window.history.pushState(
-        window.history.state,
-        "",
-        "/leaderboard?leaderboardWindow=7d",
-      );
+      window.history.pushState(window.history.state, "", "/volume?range=7d");
       await Promise.resolve();
     });
 
     expect(signInLink().getAttribute("href")).toBe(
-      "/sign-in?callbackUrl=%2Fleaderboard%3FleaderboardWindow%3D7d",
+      "/sign-in?callbackUrl=%2Fvolume%3Frange%3D7d",
     );
   });
 
@@ -161,15 +157,11 @@ describe("AuthStatus sign-in href", () => {
     });
 
     await act(async () => {
-      window.history.pushState(
-        window.history.state,
-        "",
-        "/leaderboard?leaderboardWindow=7d",
-      );
+      window.history.pushState(window.history.state, "", "/volume?range=7d");
       await Promise.resolve();
     });
     expect(signInLink().getAttribute("href")).toBe(
-      "/sign-in?callbackUrl=%2Fleaderboard%3FleaderboardWindow%3D7d",
+      "/sign-in?callbackUrl=%2Fvolume%3Frange%3D7d",
     );
 
     await act(async () => {

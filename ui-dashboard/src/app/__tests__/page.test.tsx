@@ -105,11 +105,11 @@ beforeEach(() => {
   );
   vi.mocked(useGQL).mockReturnValue({
     data: {
-      LeaderboardWindowSnapshot: [
+      volumeWindowTraderSnapshots: [
         { chainId: 42220, snapshotDay: yesterdaySec, windowTraders: [] },
         { chainId: 11142220, snapshotDay: yesterdaySec, windowTraders: [] },
       ],
-      TraderDailySnapshot: [],
+      volumeTodayTraders: [],
     },
     error: undefined,
     isLoading: false,
@@ -753,7 +753,7 @@ describe("GlobalPage — Volume chart wiring", () => {
 });
 
 // Traders tile — sources its count from the isolated
-// LEADERBOARD_WINDOW_TRADERS_LATEST query. Cross-chain Set-deduplication
+// VOLUME_WINDOW_TRADERS_LATEST query. Cross-chain Set-deduplication
 // (a wallet active on multiple chains counts once) is the load-bearing
 // invariant for this tile; the existing `uniqueTraders` field on the hero
 // snapshot can't satisfy it because naïve summing double-counts.
@@ -769,7 +769,7 @@ describe("GlobalPage — Traders tile", () => {
     const yesterdaySec = String(todaySec - 86400);
     vi.mocked(useGQL).mockReturnValue({
       data: {
-        LeaderboardWindowSnapshot: [
+        volumeWindowTraderSnapshots: [
           {
             chainId: 42220,
             snapshotDay: yesterdaySec,
@@ -791,7 +791,7 @@ describe("GlobalPage — Traders tile", () => {
             ],
           },
         ],
-        TraderDailySnapshot: [],
+        volumeTodayTraders: [],
       },
       error: undefined,
       isLoading: false,
@@ -829,11 +829,11 @@ describe("GlobalPage — Traders tile", () => {
     );
     vi.mocked(useGQL).mockReturnValue({
       data: {
-        LeaderboardWindowSnapshot: [
+        volumeWindowTraderSnapshots: [
           { chainId: 42220, snapshotDay: yesterdaySec, windowTraders: [] },
           { chainId: 11142220, snapshotDay: yesterdaySec, windowTraders: [] },
         ],
-        TraderDailySnapshot: [],
+        volumeTodayTraders: [],
       },
       error: undefined,
       isLoading: false,
@@ -879,7 +879,7 @@ describe("GlobalPage — Traders tile", () => {
     vi.mocked(useGQL)
       .mockReturnValueOnce({
         data: {
-          LeaderboardWindowSnapshot: [
+          volumeWindowTraderSnapshots: [
             {
               chainId: 42220,
               snapshotDay: yesterdaySec,
@@ -917,10 +917,10 @@ describe("GlobalPage — Traders tile", () => {
     );
     vi.mocked(useGQL).mockReturnValue({
       data: {
-        LeaderboardWindowSnapshot: [
+        volumeWindowTraderSnapshots: [
           { chainId: 42220, snapshotDay: yesterdaySec, windowTraders: [] },
         ],
-        TraderDailySnapshot: [],
+        volumeTodayTraders: [],
       },
       error: undefined,
       isLoading: false,
@@ -936,7 +936,7 @@ describe("GlobalPage — Traders tile", () => {
   // The closed-day snapshot only refreshes at the per-chain UTC-midnight
   // heartbeat, so today's brand-new traders are missing without the
   // today-partial union. This test pins the union: a trader present
-  // ONLY in `TraderDailySnapshot` (today's partial) but absent from
+  // ONLY in `volumeTodayTraders` (today's partial) but absent from
   // every chain's `windowTraders` must still count, and a trader
   // present in both must dedupe to one. `snapshotDay` is set to
   // yesterday's UTC midnight so the stale-chain detection stays off.
@@ -945,7 +945,7 @@ describe("GlobalPage — Traders tile", () => {
     const yesterdaySec = String(todaySec - 86400);
     vi.mocked(useGQL).mockReturnValue({
       data: {
-        LeaderboardWindowSnapshot: [
+        volumeWindowTraderSnapshots: [
           {
             chainId: 42220,
             snapshotDay: yesterdaySec,
@@ -955,7 +955,7 @@ describe("GlobalPage — Traders tile", () => {
             ],
           },
         ],
-        TraderDailySnapshot: [
+        volumeTodayTraders: [
           // Overlaps Celo's TRADER_B from the snapshot — should dedupe.
           {
             chainId: 42220,
@@ -992,14 +992,14 @@ describe("GlobalPage — Traders tile", () => {
     const threeDaysAgo = String(todaySec - 3 * 86400);
     vi.mocked(useGQL).mockReturnValue({
       data: {
-        LeaderboardWindowSnapshot: [
+        volumeWindowTraderSnapshots: [
           {
             chainId: 42220,
             snapshotDay: threeDaysAgo,
             windowTraders: ["0xaaaa000000000000000000000000000000000001"],
           },
         ],
-        TraderDailySnapshot: [],
+        volumeTodayTraders: [],
       },
       error: undefined,
       isLoading: false,
@@ -1026,7 +1026,7 @@ describe("GlobalPage — Traders tile", () => {
     vi.mocked(useGQL)
       .mockReturnValueOnce({
         data: {
-          LeaderboardWindowSnapshot: [
+          volumeWindowTraderSnapshots: [
             {
               chainId: 42220,
               snapshotDay: yesterdaySec,
@@ -1076,14 +1076,14 @@ describe("GlobalPage — Traders tile", () => {
       data: {
         // Only Celo's snapshot row — Monad is configured (passed via
         // networkData below) but missing from the snapshot feed.
-        LeaderboardWindowSnapshot: [
+        volumeWindowTraderSnapshots: [
           {
             chainId: 42220,
             snapshotDay: yesterdaySec,
             windowTraders: ["0xaaaa000000000000000000000000000000000001"],
           },
         ],
-        TraderDailySnapshot: [],
+        volumeTodayTraders: [],
       },
       error: undefined,
       isLoading: false,
@@ -1114,7 +1114,7 @@ describe("GlobalPage — Traders tile", () => {
     );
     vi.mocked(useGQL).mockReturnValue({
       data: {
-        LeaderboardWindowSnapshot: [
+        volumeWindowTraderSnapshots: [
           {
             chainId: 42220,
             snapshotDay: yesterdaySec,
@@ -1130,7 +1130,7 @@ describe("GlobalPage — Traders tile", () => {
             ],
           },
         ],
-        TraderDailySnapshot: [
+        volumeTodayTraders: [
           {
             chainId: 42220,
             trader: "0xbbbb000000000000000000000000000000000002",
@@ -1164,8 +1164,8 @@ describe("GlobalPage — Traders tile", () => {
   it("renders N/A when the snapshot response has no rows at all", () => {
     vi.mocked(useGQL).mockReturnValue({
       data: {
-        LeaderboardWindowSnapshot: [],
-        TraderDailySnapshot: [],
+        volumeWindowTraderSnapshots: [],
+        volumeTodayTraders: [],
       },
       error: undefined,
       isLoading: false,

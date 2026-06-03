@@ -1,5 +1,6 @@
 import { strict as assert } from "assert";
 import {
+  isProtocolActorEntryPoint,
   isSystemAddress,
   _staticSystemAddressesForChain,
 } from "../src/system-addresses.js";
@@ -87,6 +88,25 @@ describe("isSystemAddress", () => {
         rebalancerAddress: fakeRebalancer,
       }),
       true,
+    );
+  });
+
+  it("flags a pool rebalancer tx.to as a protocol actor entry point", () => {
+    const fakeRebalancer = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    assert.equal(
+      isProtocolActorEntryPoint(CHAIN_CELO, fakeRebalancer, {
+        rebalancerAddress: fakeRebalancer,
+      }),
+      true,
+    );
+  });
+
+  it("does not treat direct-entry Broker tx.to as a protocol actor entry point", () => {
+    assert.equal(
+      isProtocolActorEntryPoint(CHAIN_CELO, CELO_BROKER, {
+        rebalancerAddress: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      }),
+      false,
     );
   });
 });

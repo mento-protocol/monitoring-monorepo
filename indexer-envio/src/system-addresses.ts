@@ -1,5 +1,6 @@
 import _contractsJson from "@mento-protocol/contracts/contracts.json" with { type: "json" };
 import nttAddressesRaw from "../config/nttAddresses.json" with { type: "json" };
+import protocolActorsRaw from "../config/protocolActors.json" with { type: "json" };
 import {
   CONTRACT_NAMESPACE_BY_CHAIN,
   type ContractsJson,
@@ -13,6 +14,18 @@ interface NttEntry {
 }
 const NTT_ENTRIES: NttEntry[] = (nttAddressesRaw as { entries: NttEntry[] })
   .entries;
+
+interface ProtocolActorEntry {
+  chainId: number;
+  address: string;
+  label?: string;
+  category?: string;
+}
+const PROTOCOL_ACTOR_ENTRIES: ProtocolActorEntry[] = (
+  protocolActorsRaw as {
+    entries: ProtocolActorEntry[];
+  }
+).entries;
 
 /** Iterate every "contract" type entry in @mento-protocol/contracts for the
  *  given chain. Returns lowercased addresses paired with their raw name (so
@@ -97,10 +110,23 @@ const STATIC_SYSTEM_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
   return out;
 })();
 
+const MANUAL_PROTOCOL_ACTORS_BY_CHAIN: Map<number, Set<string>> = (() => {
+  const out = new Map<number, Set<string>>();
+  for (const entry of PROTOCOL_ACTOR_ENTRIES) {
+    let set = out.get(entry.chainId);
+    if (!set) {
+      set = new Set<string>();
+      out.set(entry.chainId, set);
+    }
+    set.add(entry.address.toLowerCase());
+  }
+  return out;
+})();
+
 /**
  * Returns true if `addr` is a Mento internal address — used to hide
  * rebalancer / treasury / bridge flows from the user-facing volume
- * leaderboard by default (with a UI toggle to show them separately).
+ * volume table by default (with a UI toggle to show them separately).
  *
  * Pass `pool` when the address is being classified in a swap context: the
  * pool's `rebalancerAddress` is the dynamic per-pool EOA that wouldn't be
@@ -121,6 +147,30 @@ export function isSystemAddress(
     return true;
   }
   return false;
+}
+
+/**
+ * Returns true when the transaction entry point itself proves the swap was
+ * initiated by protocol automation. This is intentionally narrower than
+ * `isSystemAddress`: the static system set includes user-facing Broker/Router
+ * contracts, and OR-checking all tx.to values would hide normal users routing
+ * through the Mento UI. Dynamic pool rebalancers and manual overrides are safe
+ * tx.to filters because those contracts are protocol-controlled actors.
+ */
+export function isProtocolActorEntryPoint(
+  chainId: number,
+  addr: string,
+  pool?: { rebalancerAddress: string },
+): boolean {
+  if (!addr) return false;
+  const lower = addr.toLowerCase();
+  if (
+    pool?.rebalancerAddress &&
+    pool.rebalancerAddress.toLowerCase() === lower
+  ) {
+    return true;
+  }
+  return MANUAL_PROTOCOL_ACTORS_BY_CHAIN.get(chainId)?.has(lower) ?? false;
 }
 
 /** Test-only: expose the static set for assertions. */

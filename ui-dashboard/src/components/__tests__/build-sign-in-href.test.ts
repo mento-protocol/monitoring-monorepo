@@ -12,8 +12,8 @@ import { buildSignInHref } from "@/components/auth-status";
 
 describe("buildSignInHref — non-sign-in path (default branch)", () => {
   it("encodes a bare pathname as callbackUrl", () => {
-    expect(buildSignInHref("/leaderboard", "")).toBe(
-      "/sign-in?callbackUrl=%2Fleaderboard",
+    expect(buildSignInHref("/volume", "")).toBe(
+      "/sign-in?callbackUrl=%2Fvolume",
     );
   });
 

@@ -86,13 +86,13 @@ export type NetworkData = {
   fees: ProtocolFeeSummary | null;
   /**
    * Daily-rollup fee snapshots, paginated to all-time history. Source of truth
-   * for ALL fee surfaces on /revenue: KPI tile, chart, leaderboard.
+   * for ALL fee surfaces on /revenue: KPI tile, chart, table.
    */
   feeSnapshots: PoolDailyFeeSnapshot[];
   /**
    * Snapshot fetch failures (paginated `PoolDailyFeeSnapshot` rejected or
    * surfaced a mid-pagination error). Blanks all fee surfaces (tile, chart,
-   * leaderboard) since they all read from snapshots.
+   * table) since they all read from snapshots.
    */
   feeSnapshotsError: SerializableError | null;
   /**
@@ -114,7 +114,7 @@ export type NetworkData = {
   /**
    * Failure of the oracle rates query for this network. With no rates,
    * any non-USD-pegged token (FX) silently mis-prices to "unpriced", so
-   * every fee surface — KPI tile, chart, leaderboard — must gate on this.
+   * every fee surface — KPI tile, chart, table — must gate on this.
    */
   ratesError: SerializableError | null;
   /**

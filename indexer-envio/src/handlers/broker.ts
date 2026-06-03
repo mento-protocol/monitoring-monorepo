@@ -23,7 +23,7 @@ import { UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
 import { getContractAddress } from "../contractAddresses.js";
 import { isSystemAddress } from "../system-addresses.js";
 import { classifyAggregator } from "../aggregators.js";
-import { maybeHeartbeatFlushV2 } from "../leaderboardWindowFlush.js";
+import { maybeHeartbeatFlushV2 } from "../volumeWindowFlush.js";
 import { buildSwapAddressFields } from "../swap.js";
 import { selfHealWrappedExchangeId } from "../pool.js";
 import { feeTokenMetaEffect } from "../rpc/effects.js";
@@ -247,7 +247,7 @@ indexer.onEvent(
     // aggregator → VirtualPool → Broker), the immediate Broker caller is the
     // VirtualPool contract, so `brokerCaller` equals a registered VirtualPool
     // address. The v3 path already counts the sibling `VirtualPool.Swap` via
-    // `applyLeaderboardSnapshots` (see handlers/virtualPool.ts:186); writing
+    // `applyVolumeSnapshots` (see handlers/virtualPool.ts:186); writing
     // v2 rollups for the same tx would attribute v3 flow as legacy-v2
     // producer activity.
     //
@@ -299,7 +299,7 @@ indexer.onEvent(
     };
     context.BrokerSwapEvent.set(swap);
 
-    // Heartbeat the v2 leaderboard window snapshot before any of the
+    // Heartbeat the v2 volume window snapshot before any of the
     // legacy-v2 early-returns below. Every broker.swap is a heartbeat
     // opportunity: even routed/virtual-pool swaps advance the UTC-day
     // cursor so a chain that only sees routed swaps for a stretch still
@@ -334,7 +334,7 @@ indexer.onEvent(
 
     // Legacy-v2 producer rollups. Skip when:
     //   - routedViaV3Router: this Broker.Swap is a sibling of a VirtualPool.Swap
-    //     already counted by the v3 leaderboard. Including it here would
+    //     already counted by the v3 volume. Including it here would
     //     double-count the same caller/aggregator across both venues. The
     //     tx.to Router check alone is not enough: legacy v2 Router calls also
     //     enter at that address but call Broker directly instead of through a
@@ -343,7 +343,7 @@ indexer.onEvent(
     //     double-count concern; `tx.to` is the aggregator router (not
     //     `Routerv300`), so the `routedViaV3Router` guard misses this path.
     //   - volumeUsdWei == 0n: USD value couldn't be derived (neither leg
-    //     pegged). Same skip rule as applyLeaderboardSnapshots — writing 0n
+    //     pegged). Same skip rule as applyVolumeSnapshots — writing 0n
     //     would conflate "uncomputable" with "real zero volume".
     if (routedViaV3Router || brokerCallerIsVirtualPool || volumeUsdWei === 0n) {
       return;

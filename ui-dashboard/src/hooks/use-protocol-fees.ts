@@ -33,7 +33,7 @@ import { SWR_KEY_PROTOCOL_FEES } from "@/lib/swr-keys";
 type ProtocolFeesResult = {
   /**
    * `NetworkData[]`-shaped payload so revenue/page.tsx, FeeOverTimeChart,
-   * and the per-pool leaderboard keep their existing types. Only the fees
+   * and the per-pool table keep their existing types. Only the fees
    * / rate / labels slices are populated — `pools`, `snapshots`,
    * `tradingLimits`, `uniqueLpAddresses`, etc. stay at `blankNetworkData`'s
    * zero defaults.
@@ -57,7 +57,7 @@ async function fetchFeesForNetwork(
   const client = new GraphQLClient(network.hasuraUrl);
 
   // `allSettled` so any single failure doesn't blank the others. A labels-only
-  // failure is non-fatal — the leaderboard falls back to truncated-address
+  // failure is non-fatal — the table falls back to truncated-address
   // labels, so it stays out of the error channels.
   const [ratesResult, labelsResult, snapshotsResult] = await Promise.allSettled(
     [
@@ -99,7 +99,7 @@ async function fetchFeesForNetwork(
   //
   //   ratesError        — oracle rates query rejected. Empty rate map ⇒
   //                       FX-token slots silently mis-price. Affects ALL
-  //                       USD aggregation: tile, chart, AND leaderboard.
+  //                       USD aggregation: tile, chart, AND table.
   //   feeSnapshotsError — `PoolDailyFeeSnapshot` paginated fetch rejected
   //                       OR surfaced a mid-pagination error. Affects all
   //                       three consumers — fees come from snapshots now.
@@ -157,7 +157,7 @@ async function fetchAllProtocolFees(): Promise<NetworkData[]> {
 
 /**
  * Lightweight protocol-fees hook. Fetches only the data /revenue needs —
- * snapshot rollups (chain summary + chart + leaderboard), oracle rates,
+ * snapshot rollups (chain summary + chart + table), oracle rates,
  * and pool labels — instead of `useAllNetworksData` which also pulls
  * paginated daily volume snapshots, trading limits, OLS pools, LP
  * addresses, and the breach rollup. Saves ~6 queries per chain per mount.

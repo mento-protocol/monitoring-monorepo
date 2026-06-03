@@ -33,10 +33,10 @@ export function NavLinks() {
         Bridges
       </Link>
       <Link
-        href="/leaderboard"
+        href="/volume"
         className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
       >
-        Leaderboard
+        Volume
       </Link>
       <Link
         href="/integrations"

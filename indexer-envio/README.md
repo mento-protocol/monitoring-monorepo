@@ -28,20 +28,20 @@ Listens to on-chain events from Mento v3 contracts and writes structured entitie
 
 ### Entities Written
 
-| Entity group                  | Description                                                                                                                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pool state                    | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `TradingLimit`                                                                                                            |
-| Pool activity                 | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
-| Pool rollups                  | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
-| Protocol fees                 | `ProtocolFeeTransfer`                                                                                                                                                           |
-| Legacy v2 / Broker            | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                            |
-| Broker aggregators            | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerLeaderboardWindowSnapshot`                                                                           |
-| BiPoolManager                 | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                |
-| VirtualPools                  | `VirtualPoolLifecycle`                                                                                                                                                          |
-| Open Liquidity Strategy       | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                             |
-| Circuit breakers              | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                            |
-| Bridge flows                  | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
-| Leaderboards and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `LeaderboardWindowSnapshot`                                                                        |
+| Entity group            | Description                                                                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `TradingLimit`                                                                                                            |
+| Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
+| Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
+| Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                           |
+| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                            |
+| Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                |
+| BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                |
+| VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                          |
+| Open Liquidity Strategy | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                             |
+| Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                            |
+| Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
+| Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                             |
 
 ### Pool ID Format
 
@@ -55,6 +55,12 @@ This prevents collisions when the same contract address is deployed on multiple 
 | `config.multichain.mainnet.yaml`     | Celo Mainnet + Monad Mainnet (default/production) |
 | `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                      |
 | `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness              |
+
+`config/protocolActors.json` contains manual protocol-controlled swap
+entry-point overrides for the dashboard volume filter. Pool rebalancers are
+classified automatically from `Pool.rebalancerAddress`; add manual entries only
+for protocol actors that cannot be derived from pool state or the normal
+contract/NTT address metadata.
 
 Deploy branch: `envio` → triggers hosted reindex on push.
 

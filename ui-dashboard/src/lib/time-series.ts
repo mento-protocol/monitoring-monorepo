@@ -20,12 +20,12 @@ export const RANGES: ReadonlyArray<{
 ];
 
 /**
- * Leaderboard-specific ranges: 1M / 3M / All (no 1W — too few datapoints
+ * Volume-specific ranges: 1M / 3M / All (no 1W — too few datapoints
  * to read the per-pool stacked breakdown). Charts that want a different
  * pill set than the default `RANGES` pass this via the chart card's
  * `ranges` prop.
  */
-export const LEADERBOARD_CHART_RANGES: ReadonlyArray<{
+export const VOLUME_CHART_RANGES: ReadonlyArray<{
   key: RangeKey;
   label: string;
 }> = [
@@ -35,12 +35,12 @@ export const LEADERBOARD_CHART_RANGES: ReadonlyArray<{
 ];
 
 /**
- * Leaderboard fallback / single-line chart pill set. Used by the v3+<30d
+ * Volume fallback / single-line chart pill set. Used by the v3+<30d
  * and v2 single-line daily-volume charts: needs to cover every chartRange
  * the page can produce (7d / 30d / 90d / all) so the active pill always
  * matches the page's selected window.
  */
-export const LEADERBOARD_FALLBACK_CHART_RANGES: ReadonlyArray<{
+export const VOLUME_FALLBACK_CHART_RANGES: ReadonlyArray<{
   key: RangeKey;
   label: string;
 }> = [

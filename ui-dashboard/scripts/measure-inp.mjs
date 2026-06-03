@@ -104,9 +104,9 @@ const SURFACES = [
     },
   },
   {
-    name: "leaderboard-time-window",
-    path: "/leaderboard",
-    // Wait for actual leaderboard rows to render — NOT just the time-window
+    name: "volume-time-window",
+    path: "/volume",
+    // Wait for actual volume rows to render — NOT just the time-window
     // group itself, which mounts in the page header before any SWR data is
     // loaded. If we click while the tables are still empty/loading, the
     // measured INP only covers the cheap `window.history.replaceState`
@@ -116,7 +116,7 @@ const SURFACES = [
     // a reliable "rows have loaded" anchor.
     readySelector: 'th[aria-sort] button:has-text("Volume")',
     async interact(page) {
-      // The leaderboard ships with one window active by default; clicking
+      // The volume page ships with one window active by default; clicking
       // a sibling triggers a `window.history.replaceState`-backed re-render
       // via `updateRange` (see `_lib/url-state.ts` — `router.replace` was
       // deliberately avoided here because it measured ~700 ms on the
@@ -129,7 +129,7 @@ const SURFACES = [
       const count = await buttons.count();
       if (count < 2) {
         throw new Error(
-          `leaderboard time-window group has ${count} button(s); expected at least 2`,
+          `volume time-window group has ${count} button(s); expected at least 2`,
         );
       }
       // Find an inactive button (`aria-pressed="false"`) and click it.
@@ -142,18 +142,18 @@ const SURFACES = [
         }
       }
       throw new Error(
-        "leaderboard time-window group has no inactive button to click",
+        "volume time-window group has no inactive button to click",
       );
     },
   },
   {
-    name: "leaderboard-sort",
-    path: "/leaderboard",
+    name: "volume-sort",
+    path: "/volume",
     // The `SortableTh` from `ui-dashboard/src/components/sortable-th.tsx`
     // renders a `<th scope="col" aria-sort>` containing a `<button>` —
-    // we drive sort by clicking that button. `/leaderboard` mounts two
+    // we drive sort by clicking that button. `/volume` mounts two
     // tables that each have a Volume column (the top-traders
-    // `LeaderboardTable` and the `AggregatorBreakdownSection`), so the
+    // `VolumeTable` and the `AggregatorBreakdownSection`), so the
     // selector is anchored to whichever one renders first in document
     // order via `.first()` — both produce an equivalent INP signal for
     // gate purposes, and Playwright's strict-mode locator would

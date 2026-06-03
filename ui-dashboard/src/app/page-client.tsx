@@ -22,19 +22,19 @@ import {
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { useGQL } from "@/lib/graphql";
 import {
-  LEADERBOARD_TODAY_TRADERS,
-  LEADERBOARD_WINDOW_TRADERS_LATEST,
-} from "@/lib/queries/leaderboard";
+  VOLUME_TODAY_TRADERS,
+  VOLUME_WINDOW_TRADERS_LATEST,
+} from "@/lib/queries/volume";
 import {
-  LeaderboardTodayTradersSchema,
-  LeaderboardWindowTradersLatestSchema,
-} from "@/lib/queries/leaderboard-schemas";
+  VolumeTodayTradersSchema,
+  VolumeWindowTradersLatestSchema,
+} from "@/lib/queries/volume-schemas";
 import type { z } from "zod";
 
-type LeaderboardWindowTradersLatest = z.infer<
-  typeof LeaderboardWindowTradersLatestSchema
+type VolumeWindowTradersLatest = z.infer<
+  typeof VolumeWindowTradersLatestSchema
 >;
-type LeaderboardTodayTraders = z.infer<typeof LeaderboardTodayTradersSchema>;
+type VolumeTodayTraders = z.infer<typeof VolumeTodayTradersSchema>;
 
 const SECONDS_PER_DAY = 86_400;
 
@@ -437,13 +437,12 @@ function GlobalContent({
 }
 
 // Homepage Traders KPI tile. Counts unique v3 traders across all chains
-// via the pre-rolled `LeaderboardWindowSnapshot(windowKey: "all")
-// .windowTraders` array (system addresses — rebalancers, OLS, reserve
-// strategy — excluded by default, matching the LPs tile semantics). The
-// address list is unioned client-side so a wallet active on multiple
-// chains counts once. Isolated from LEADERBOARD_WINDOW_LATEST so a
-// Hasura "field not found" during the indexer deploy/resync window
-// degrades only this tile (renders "N/A"), not the rest of the page.
+// via the pre-rolled all-time volume trader list. Protocol actors are
+// excluded by default, matching the LPs tile semantics. The address list
+// is unioned client-side so a wallet active on multiple chains counts
+// once. Isolated from VOLUME_WINDOW_LATEST so a Hasura "field not found"
+// during the indexer deploy/resync window degrades only this tile
+// (renders "N/A"), not the rest of the page.
 //
 // Placed below `GlobalContent` so its declaration doesn't drift the
 // parent's starting line past the eslint baseline-diff proximity window;
@@ -456,14 +455,13 @@ function TradersTile({
   isLoading: boolean;
   networkData: NetworkData[];
 }) {
-  const snapshotGql = useGQL<LeaderboardWindowTradersLatest>(
-    LEADERBOARD_WINDOW_TRADERS_LATEST,
+  const snapshotGql = useGQL<VolumeWindowTradersLatest>(
+    VOLUME_WINDOW_TRADERS_LATEST,
     { windowKey: "all" },
     {
-      schema: LeaderboardWindowTradersLatestSchema,
+      schema: VolumeWindowTradersLatestSchema,
       // The "all" window snapshot only rolls over at the per-chain
-      // UTC-midnight heartbeat (see
-      // indexer-envio/src/leaderboardWindowFlush.ts), so the default
+      // UTC-midnight heartbeat, so the default
       // 30s polling cadence is wildly over-cadenced for this tile. 5min
       // keeps a fresh-after-rollover read without burning the Envio
       // "small" tier quota for a multi-KB address list on every poll.
@@ -481,17 +479,17 @@ function TradersTile({
   // only flushes at the next UTC midnight on the first swap of the new
   // day), so without this merge a wallet whose first-ever v3 swap is
   // today would silently drop out of the all-time count for up to 24h.
-  // Mirrors the leaderboard hero's today-partial union in
+  // Mirrors the volume hero's today-partial union in
   // `useHeroRollup` (`mergeHeroSnapshot`). `useUtcDayKey` resets the
   // today-partial query window at each UTC rollover (see hook
   // definition below for the polling rationale).
   const utcDayKey = useUtcDayKey();
   const todayMidnight = utcDayKey * SECONDS_PER_DAY;
-  const todayGql = useGQL<LeaderboardTodayTraders>(
-    LEADERBOARD_TODAY_TRADERS,
+  const todayGql = useGQL<VolumeTodayTraders>(
+    VOLUME_TODAY_TRADERS,
     { todayMidnight, isSystemAddressIn: [false] },
     {
-      schema: LeaderboardTodayTradersSchema,
+      schema: VolumeTodayTradersSchema,
       refreshInterval: 5 * 60_000,
       timeoutMs: 30_000,
     },
@@ -501,7 +499,7 @@ function TradersTile({
   // them apart:
   //
   //   - `hasMissingOrStaleChain`: a configured chain either has no
-  //     `LeaderboardWindowSnapshot` row at all (heartbeat hasn't fired
+  //     pre-rolled volume snapshot row at all (heartbeat hasn't fired
   //     yet) OR its row's `snapshotDay` lags behind yesterday's UTC
   //     midnight. In either case, closed days for that chain are
   //     absent from `windowTraders` (capped at snapshotDay or empty
@@ -532,7 +530,7 @@ function TradersTile({
   // loop pin both halves to the configured network set.
   const scopedSnapshotRows = useMemo(
     () =>
-      (snapshotGql.data?.LeaderboardWindowSnapshot ?? []).filter((r) =>
+      (snapshotGql.data?.volumeWindowTraderSnapshots ?? []).filter((r) =>
         expectedChainIds.has(r.chainId),
       ),
     [snapshotGql.data, expectedChainIds],
@@ -573,7 +571,7 @@ function TradersTile({
     // "Approximate — today's partial unavailable". Network-scoped to
     // expected chain IDs for the same reason as the snapshot half.
     if (todayGql.data) {
-      for (const row of todayGql.data.TraderDailySnapshot) {
+      for (const row of todayGql.data.volumeTodayTraders) {
         if (!expectedChainIds.has(row.chainId)) continue;
         set.add(row.trader.toLowerCase());
       }
@@ -624,8 +622,8 @@ function TradersTile({
 // Minute-polled UTC-day ticker. Returns an integer day-since-epoch
 // that flips at UTC midnight, so any `useMemo` / `useGQL` variables
 // keyed on it (`todayMidnight`, the today-partial query window)
-// reset every day. Mirrors the leaderboard hero's pattern in
-// `_lib/url-state.ts:useLeaderboardUrlState` — `setTimeout` to
+// reset every day. Mirrors the volume page's pattern in
+// `_lib/url-state.ts:useVolumeUrlState` — `setTimeout` to
 // midnight isn't reliable because backgrounded tabs throttle timers,
 // so we poll. Without this, a wallboard tab left open across
 // midnight would keep querying `TraderDailySnapshot` from the

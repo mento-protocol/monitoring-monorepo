@@ -179,7 +179,7 @@ describe("Broker.Swap handler", () => {
   it("populates `caller` from event.transaction.from and `brokerCaller` from event.params.trader (routed path)", async () => {
     // Routed path: a router contract calls Broker, but the underlying signer
     // (`tx.from`) is the user's EOA. brokerCaller = router; caller = EOA.
-    // The leaderboard must roll up by `caller` so the user — not the router —
+    // The volume must roll up by `caller` so the user — not the router —
     // shows up as the producer.
     const ROUTER_CONTRACT = "0xa1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const USER_EOA = "0xb2BBbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -487,7 +487,7 @@ describe("Broker.Swap handler", () => {
   it("does NOT write trader/aggregator rollups when routedViaV3Router=true (avoids double-count vs v3)", async () => {
     // Same caller, two swaps: one direct, one via the v3 Router. Only the
     // direct row should land in the v2 trader rollup; the router-driven row
-    // is already covered by the v3 leaderboard's TraderDailySnapshot via the
+    // is already covered by the v3 volume table's TraderDailySnapshot via the
     // VirtualPool.Swap sibling that fired in the same tx.
     let mockDb = MockDb.createMockDb();
     mockDb = await seedVirtualPool(mockDb);
@@ -519,8 +519,8 @@ describe("Broker.Swap handler", () => {
 
   it("does NOT write trader/aggregator rollups when brokerCaller is a registered VirtualPool (avoids double-count vs v3 VirtualPool.Swap path)", async () => {
     // Scenario: third-party aggregator → VirtualPool → Broker. The v3
-    // leaderboard already counts the sibling VirtualPool.Swap (via
-    // applyLeaderboardSnapshots in handlers/virtualPool.ts). `tx.to` is the
+    // volume already counts the sibling VirtualPool.Swap (via
+    // applyVolumeSnapshots in handlers/virtualPool.ts). `tx.to` is the
     // aggregator's router (so `routedViaV3Router=false`), but Broker emits
     // `trader = msg.sender = the VirtualPool address`. The handler's Pool
     // lookup on `brokerCaller` should detect the virtual_pool_factory
@@ -568,7 +568,7 @@ describe("Broker.Swap handler", () => {
     // only by `routedViaV3Router=false`; if a VirtualPool-routed swap
     // landed in that bucket it would inflate the legacy-v2 series, since
     // the v3 VirtualPool.Swap sibling is already counted by
-    // applyLeaderboardSnapshots. Cursor flagged this specifically on
+    // applyVolumeSnapshots. Cursor flagged this specifically on
     // PR #363 — see the deploy-ordering / handler scope discussion there.
     const dailyRow = mockDb.entities.BrokerDailySnapshot.get(
       `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-direct-${dayTs}`,
@@ -692,7 +692,7 @@ describe("Broker.Swap handler", () => {
 
   it("classifies an unknown txTo as 'unknown' so unlabelled v2 routers surface for follow-up", async () => {
     // A swap that entered via some random contract not in
-    // contracts.json / aggregators.json. The leaderboard's "unknown" bucket
+    // contracts.json / aggregators.json. The volume table's "unknown" bucket
     // is the curation backlog: anything large here should be triaged into
     // aggregators.json so it gets a readable label.
     const MYSTERY_ROUTER = "0x1234567890abcdef1234567890abcdef12345678";
@@ -777,7 +777,7 @@ describe("Broker.Swap handler", () => {
   it("does NOT write BrokerTraderRouterDayMarker when routedViaV3Router=true", async () => {
     // Mirrors the existing aggregator-marker skip: router-driven swaps that
     // sibling a VirtualPool.Swap are excluded from the v2 producer rollups
-    // (already counted via the v3 leaderboard). The new per-trader-router
+    // (already counted via the v3 volume). The new per-trader-router
     // marker follows the same skip rule.
     let mockDb = MockDb.createMockDb();
     mockDb = await seedVirtualPool(mockDb);
@@ -801,7 +801,7 @@ describe("Broker.Swap handler", () => {
     // Sibling of the existing "does NOT write trader/aggregator rollups
     // when brokerCaller is a registered VirtualPool" test (around line 524).
     // The aggregator → VirtualPool → Broker path has `tx.to = aggregator`
-    // (NOT Routerv300), so `routedViaV3Router=false` — but the v3 leaderboard
+    // (NOT Routerv300), so `routedViaV3Router=false` — but the v3 volume
     // already counts the sibling `VirtualPool.Swap`. Writing a marker here
     // would attribute v3 flow as legacy-v2 trader activity. This test pins
     // the skip symmetry between the two double-count guards.

@@ -56,7 +56,7 @@
     "linePreview": "*/ | export function recordHealthSample( | pool: Pool,"
   },
   {
-    "file": "src/leaderboardWindowSnapshot.ts",
+    "file": "src/volumeWindowSnapshot.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 31 to the 18 allowed.",
     "line": 112,

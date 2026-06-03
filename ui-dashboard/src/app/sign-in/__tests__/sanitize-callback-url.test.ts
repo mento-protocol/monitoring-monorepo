@@ -81,16 +81,12 @@ describe("normalizeCallbackUrl", () => {
   });
 
   it("treats repeated callbackUrl values as missing", () => {
-    expect(normalizeCallbackUrl(["/address-book", "/leaderboard"])).toBe(
-      undefined,
-    );
+    expect(normalizeCallbackUrl(["/address-book", "/volume"])).toBe(undefined);
   });
 
   it("falls back to default for repeated callbackUrl values", () => {
     expect(
-      sanitizeCallbackUrl(
-        normalizeCallbackUrl(["/address-book", "/leaderboard"]),
-      ),
+      sanitizeCallbackUrl(normalizeCallbackUrl(["/address-book", "/volume"])),
     ).toBe("/");
   });
 });
