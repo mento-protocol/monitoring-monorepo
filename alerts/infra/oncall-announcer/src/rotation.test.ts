@@ -131,6 +131,42 @@ describe("handleRotation", () => {
     );
   });
 
+  it("rebuilds corrupt unchanged state without posting a rotation announcement", async () => {
+    const corruptState = {
+      email: "chapati@example.com",
+      escalationPolicySlug: "primary",
+      teamSlug: "mento",
+      updatedAt: "2026-05-27T12:00:00.000Z",
+      victoropsUsername: "chapati",
+    } as unknown as RotationState;
+    const deps = dependencies({
+      fetchCurrentOncall: vi.fn(async () => currentOncall),
+      fetchOncallUserEmail: vi.fn(async () => "chapati@example.com"),
+      lookupSlackUserByEmail: vi.fn(async () => ({ id: "UCHAPATI" })),
+      readRotationState: vi.fn(async () => corruptState),
+    });
+
+    const result = await handleRotation(baseConfig(), deps);
+
+    expect(result).toMatchObject({
+      announced: false,
+      changed: false,
+      slackUserId: "UCHAPATI",
+    });
+    expect(deps.postOncallAnnouncement).not.toHaveBeenCalled();
+    expect(deps.updateSupportUsergroup).toHaveBeenCalledWith(
+      "UCHAPATI",
+      expect.any(Object),
+    );
+    expect(deps.writeRotationState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slackUserId: "UCHAPATI",
+        victoropsUsername: "chapati",
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("can seed first-run state without posting an announcement", async () => {
     const deps = dependencies({
       fetchCurrentOncall: vi.fn(async () => ({

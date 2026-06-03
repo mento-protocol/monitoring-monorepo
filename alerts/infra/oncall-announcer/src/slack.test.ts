@@ -104,7 +104,7 @@ describe("Slack API helpers", () => {
       expect.objectContaining({
         body: JSON.stringify({
           usergroup: "S_SUPPORT",
-          users: "UCHAPATI",
+          users: ["UCHAPATI"],
         }),
         method: "POST",
       }),

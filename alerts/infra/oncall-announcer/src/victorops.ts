@@ -89,7 +89,7 @@ export async function fetchCurrentOncall(
     );
   }
 
-  const user = oncallEntry.users?.[0]?.onCalluser;
+  const user = oncallEntry.users?.[0]?.onCallUser;
   if (!user?.username) {
     throw new SplunkOnCallError("No on-call user found");
   }

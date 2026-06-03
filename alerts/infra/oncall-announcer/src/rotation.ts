@@ -58,17 +58,23 @@ export async function handleRotation(
 ): Promise<RotationResult> {
   const current = await dependencies.fetchCurrentOncall(config);
   const previous = await dependencies.readRotationState(config);
+  const sameVictoropsUser = previous?.victoropsUsername === current.username;
+  const previousSlackUserId =
+    typeof previous?.slackUserId === "string"
+      ? previous.slackUserId
+      : undefined;
 
   if (
-    previous?.victoropsUsername === current.username &&
+    sameVictoropsUser &&
     // Defensive against manually edited or truncated GCS state. If the Slack
     // user ID is missing, rebuild state from Splunk On-Call instead of
     // trusting a typed-but-corrupt object.
-    previous.slackUserId.length > 0
+    previousSlackUserId !== undefined &&
+    previousSlackUserId.length > 0
   ) {
-    await dependencies.updateSupportUsergroup(previous.slackUserId, config);
+    await dependencies.updateSupportUsergroup(previousSlackUserId, config);
     logger.info("On-call engineer unchanged", {
-      slackUserId: previous.slackUserId,
+      slackUserId: previousSlackUserId,
       victoropsUsername: current.username,
     });
     return {
@@ -76,7 +82,7 @@ export async function handleRotation(
       changed: false,
       current,
       previous,
-      slackUserId: previous.slackUserId,
+      slackUserId: previousSlackUserId,
     };
   }
 
@@ -92,7 +98,8 @@ export async function handleRotation(
   const slackUser = await dependencies.lookupSlackUserByEmail(email, config);
   await dependencies.updateSupportUsergroup(slackUser.id, config);
 
-  const shouldAnnounce = previous !== undefined || config.announceOnFirstRun;
+  const shouldAnnounce =
+    !sameVictoropsUser && (previous !== undefined || config.announceOnFirstRun);
   if (shouldAnnounce) {
     await dependencies.postOncallAnnouncement(
       slackUser.id,
@@ -120,7 +127,7 @@ export async function handleRotation(
 
   return {
     announced: shouldAnnounce,
-    changed: previous?.victoropsUsername !== current.username,
+    changed: !sameVictoropsUser,
     current,
     previous,
     slackUserId: slackUser.id,

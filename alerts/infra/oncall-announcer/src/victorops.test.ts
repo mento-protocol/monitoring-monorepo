@@ -42,7 +42,7 @@ describe("fetchCurrentOncall", () => {
             oncallNow: [
               {
                 escalationPolicy: { name: "Other", slug: "other-policy" },
-                users: [{ onCalluser: { username: "other" } }],
+                users: [{ onCallUser: { username: "other" } }],
               },
             ],
           },
@@ -56,7 +56,7 @@ describe("fetchCurrentOncall", () => {
                 },
                 users: [
                   {
-                    onCalluser: {
+                    onCallUser: {
                       email: "chapati@example.com",
                       username: "chapati",
                     },

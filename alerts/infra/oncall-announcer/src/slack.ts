@@ -123,7 +123,7 @@ export async function updateSupportUsergroup(
     "usergroups.users.update",
     {
       usergroup: config.slack.supportUsergroupId,
-      users: slackUserId,
+      users: [slackUserId],
     },
     fetchImpl,
   );

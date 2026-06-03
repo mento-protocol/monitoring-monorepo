@@ -42,7 +42,7 @@ export interface VictorOpsOncallResponse {
         slug?: string;
       };
       users?: Array<{
-        onCalluser?: {
+        onCallUser?: {
           email?: string;
           username?: string;
         };
