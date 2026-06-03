@@ -44,24 +44,25 @@ doing this when blocked on a user decision, waiting on approval for a production
 mutation, a long task has finished and needs user follow-up, or plan feedback is
 required before meaningful progress can continue.
 
-Use Charlie's voice and keep the spoken message short and specific. Prefer the
-repo-standard key file path so Codex does not depend on stripped environment
-variables:
+Use Charlie's voice and keep the spoken message short and specific. Both Codex
+and Claude should prefer the repo-standard key file path so behavior does not
+depend on shell startup files or stripped environment variables:
 
 ```bash
 sag --api-key-file "$HOME/.config/sag/elevenlabs-api-key" -v Charlie "hey, i need your approval to deploy the Alloy collector"
 ```
 
-`sag` must run outside Codex's normal sandbox: it needs network access to
-ElevenLabs, a readable ElevenLabs API key, and the local audio device. Codex
-does not reliably inherit shell startup files, and its environment policy strips
-secret-like variables such as `ELEVENLABS_API_KEY`, even when they exist in
-`.zshrc`. Store the key for agent nudges in
+`sag` needs network access to ElevenLabs, a readable ElevenLabs API key, and the
+local audio device. Store the key for agent nudges in
 `$HOME/.config/sag/elevenlabs-api-key` with mode `0600`, then invoke `sag` with
-`--api-key-file`. In Codex, request escalated execution for the nudge instead of
-trying to run it inside the workspace sandbox. If `sag` fails, report the
-failure in chat and continue with the visible written request; do not silently
-assume the user heard the nudge.
+`--api-key-file`. This is required for Codex because it does not reliably
+inherit shell startup files, and its environment policy strips secret-like
+variables such as `ELEVENLABS_API_KEY`, even when they exist in `.zshrc`. Claude
+may inherit `.zshrc` in local shells, but should still use the same key-file
+command so the two agents behave consistently. In Codex, request escalated
+execution for the nudge instead of trying to run it inside the workspace
+sandbox. If `sag` fails, report the failure in chat and continue with the
+visible written request; do not silently assume the user heard the nudge.
 
 Do not wire this into the existing SessionEnd hook. The current shared hook
 events do not know whether the agent is genuinely waiting on the user versus
