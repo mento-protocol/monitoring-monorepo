@@ -36,6 +36,7 @@ sentry_slack_workspace_name = "Mento Labs"
 #   - chat:write.public       post messages in any public channel without joining
 #   - usergroups:read         list usergroups + members (@eng auto-invite resolves usergroup → user IDs)
 #   - usergroups:write        replace @support-engineer membership on rotation
+#   - users:read              required by Slack together with users:read.email
 #   - users:read.email        resolve the current Splunk On-Call user's Slack account by email
 slack_bot_token = "xoxb-..."
 

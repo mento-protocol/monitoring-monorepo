@@ -86,7 +86,7 @@ sentry_slack_critical_channel_id = "C0AURREPNDU"       # Optional, defaults to c
 # the on-call announcer to manage @support-engineer).
 # Scopes required: channels:read, channels:manage, channels:join,
 # channels:write.invites, chat:write, chat:write.public, usergroups:read,
-# usergroups:write, users:read.email.
+# usergroups:write, users:read, users:read.email.
 slack_bot_token = "xoxb-..."
 
 # Splunk On-Call API credentials for the on-call announcer. A read-only key is

@@ -30,6 +30,7 @@ The shared `slack_bot_token` needs these bot token scopes for this module:
 - `channels:read`
 - `usergroups:read`
 - `usergroups:write`
+- `users:read`
 - `users:read.email`
 
 Existing alerts-infra channel lifecycle also needs the channel-management

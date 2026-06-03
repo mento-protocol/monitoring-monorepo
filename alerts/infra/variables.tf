@@ -80,7 +80,7 @@ variable "sentry_slack_critical_channel_id" {
 }
 
 variable "slack_bot_token" {
-  description = "Slack bot OAuth token (xoxb-...) used by the restapi.slack provider to create + archive alert channels, by Cloud Functions to post via chat.postMessage, and by the on-call announcer to manage @support-engineer. Needs scopes: channels:read, channels:manage, channels:join, channels:write.invites, chat:write, chat:write.public, usergroups:read, usergroups:write, users:read.email. SEPARATE from Sentry's own Slack OAuth app — Sentry posts via its own integration."
+  description = "Slack bot OAuth token (xoxb-...) used by the restapi.slack provider to create + archive alert channels, by Cloud Functions to post via chat.postMessage, and by the on-call announcer to manage @support-engineer. Needs scopes: channels:read, channels:manage, channels:join, channels:write.invites, chat:write, chat:write.public, usergroups:read, usergroups:write, users:read, users:read.email. SEPARATE from Sentry's own Slack OAuth app — Sentry posts via its own integration."
   type        = string
   sensitive   = true
 
