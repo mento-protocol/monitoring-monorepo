@@ -304,8 +304,12 @@ async function measureSurface(browser, surface) {
         // unit-tested.
         const diag = await page.evaluate(
           (emptyPattern) => ({
+            // Prefix-match so the shared skeletons that label themselves
+            // "Loading table" / "Loading metrics" / "Loading chart" (via the
+            // status-role helper in components/skeletons.tsx) are recognized as
+            // loading too, not just the bare "Loading" feedback Skeleton.
             loading: !!document.querySelector(
-              '[role="status"][aria-label="Loading"]',
+              '[role="status"][aria-label^="Loading"]',
             ),
             error: !!document.querySelector('[role="alert"]'),
             empty: new RegExp(emptyPattern, "i").test(document.body.innerText),
