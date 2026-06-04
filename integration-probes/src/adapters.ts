@@ -15,7 +15,9 @@ import {
   relayBody,
   rubicBody,
   socketUrl,
+  SQUID_MAX_QUOTE_REQUESTS_PER_RUN,
   squidBody,
+  SQUID_QUOTE_REQUEST_DELAY_MS,
   zeroXUrl,
 } from "./adapterRequests.js";
 import type {
@@ -38,6 +40,7 @@ const DEFAULT_TAKER = "0x000000000000000000000000000000000000dEaD";
 const REQUEST_ERROR_ATTEMPT_LIMIT = 2;
 
 type ChainSupport = "supported" | "unsupported" | "unknown";
+type BeforeQuoteRequest = () => Promise<void>;
 
 export type AggregatorAdapter = {
   id: string;
@@ -52,6 +55,7 @@ export type AggregatorAdapter = {
     env: NodeJS.ProcessEnv,
   ) => QuoteRequest | readonly QuoteRequest[];
   maxQuoteRequestsPerRun?: number;
+  quoteRequestDelayMs?: number;
   nextStep?: string;
 };
 
@@ -98,6 +102,7 @@ export async function probeAdapterPair(args: {
   fetcher: FetchLike;
   env: NodeJS.ProcessEnv;
   quoteBudget?: QuoteAttemptBudget | undefined;
+  beforeQuoteRequest?: BeforeQuoteRequest | undefined;
 }): Promise<PairProbeResult> {
   const unsupported = unsupportedResult(args.adapter, args.input);
   if (unsupported) return unsupported;
@@ -175,6 +180,7 @@ async function fetchAndEvaluate(args: {
   fetcher: FetchLike;
   env: NodeJS.ProcessEnv;
   quoteBudget?: QuoteAttemptBudget | undefined;
+  beforeQuoteRequest?: BeforeQuoteRequest | undefined;
 }): Promise<PairProbeResult> {
   const requests = normalizeQuoteRequests(
     args.adapter.quote!(args.input, args.env),
@@ -238,6 +244,7 @@ async function fetchAndEvaluateAttempt(args: {
   fetcher: FetchLike;
   request: QuoteRequest;
   quoteBudget?: QuoteAttemptBudget | undefined;
+  beforeQuoteRequest?: BeforeQuoteRequest | undefined;
 }): Promise<PairProbeResult> {
   try {
     return await fetchAndEvaluateRequest(args);
@@ -252,7 +259,9 @@ async function fetchAndEvaluateRequest(args: {
   fetcher: FetchLike;
   request: QuoteRequest;
   quoteBudget?: QuoteAttemptBudget | undefined;
+  beforeQuoteRequest?: BeforeQuoteRequest | undefined;
 }): Promise<PairProbeResult> {
+  await args.beforeQuoteRequest?.();
   const response = await fetchTimedPayload({
     fetcher: args.fetcher,
     request: args.request,
@@ -644,8 +653,10 @@ function squidAdapter(): AggregatorAdapter {
     tier: 2,
     credentialEnv: ["SQUID_INTEGRATOR_ID"],
     support: { 42220: "supported", 143: "unknown" },
+    maxQuoteRequestsPerRun: SQUID_MAX_QUOTE_REQUESTS_PER_RUN,
+    quoteRequestDelayMs: SQUID_QUOTE_REQUEST_DELAY_MS,
     researchNote:
-      "Celo Squid routing is observed in the repo registry; Monad needs quote evidence.",
+      "Celo Squid routing is observed in the repo registry; Monad needs quote evidence. Probes are serialized and paced to avoid 429s from bursty route checks.",
     quote: (input, env) =>
       postRequest(
         "https://apiplus.squidrouter.com/v2/route",

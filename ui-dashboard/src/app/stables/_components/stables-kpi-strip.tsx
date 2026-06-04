@@ -6,11 +6,12 @@ import { formatUSD, parseWei } from "@/lib/format";
 import { displayLabel, effectiveOracleRate } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
 import {
+  custodySnapshotsAlignedToSupplyRows,
   groupCustodySnapshotsByToken,
+  custodyTokenKey,
   latestDailyCirculatingSupply,
   rollupByToken,
   unionSnapshotsWithLatest,
-  unionCustodySnapshotsWithLatest,
   winnersAndLosers7d,
 } from "../_lib/aggregate";
 import type {
@@ -28,14 +29,15 @@ function formatSignedUSD(v: number): string {
 }
 
 type Props = {
-  // Per-token latest rows (one per token via distinct_on). Sufficient for
-  // the "Circulating supply" headline; the winners/losers tiles need the
-  // wider snapshot stream for the 7d baseline comparison.
+  // Per-token current rows. Transfer-tracked tokens come from current
+  // StableTokenSupply state; Celo CDP rows fall back to latest daily snapshots.
+  // Sufficient for the "Circulating supply" headline; the winners/losers tiles
+  // need the wider snapshot stream for the 7d baseline comparison.
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
   latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   // Daily-snapshot stream from useStablesDailySnapshots — feeds the 7d
-  // change calculation. Merged with latestPerToken so KPI deltas do not lag
-  // when the newest row falls outside the first paginated snapshot page.
+  // change calculation. Merged with latestPerToken so KPI deltas use the
+  // current state even when sparse daily snapshots have not rolled over.
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
   custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   rates: OracleRateMap;
@@ -55,11 +57,12 @@ export function StablesKpiStrip({
   // Memoize the rollup + derived totals. SWR polls at 30s; parent re-renders
   // (range pill, hover state) shouldn't re-sort N=1000 snapshots each time.
   const { rollup, biggestExpansion, biggestContraction } = useMemo(() => {
-    const mergedCustody = unionCustodySnapshotsWithLatest(
+    const mergedSnapshots = unionSnapshotsWithLatest(snapshots, latestPerToken);
+    const mergedCustody = custodySnapshotsAlignedToSupplyRows(
+      mergedSnapshots,
       custodySnapshots,
       latestCustodyPerToken,
     );
-    const mergedSnapshots = unionSnapshotsWithLatest(snapshots, latestPerToken);
     const r = rollupByToken(mergedSnapshots, rates, undefined, mergedCustody);
     const wl = winnersAndLosers7d(r);
     return {
@@ -76,7 +79,8 @@ export function StablesKpiStrip({
   ]);
 
   const totalUsd = useMemo<number | null>(() => {
-    const mergedCustody = unionCustodySnapshotsWithLatest(
+    const mergedCustody = custodySnapshotsAlignedToSupplyRows(
+      latestPerToken,
       custodySnapshots,
       latestCustodyPerToken,
     );
@@ -90,7 +94,8 @@ export function StablesKpiStrip({
       const rate = effectiveOracleRate(rates, row.tokenSymbol, row.chainId);
       if (rate == null) return acc;
       const custodyRows =
-        custodyByToken.get(`${row.chainId}|${row.tokenAddress}`) ?? [];
+        custodyByToken.get(custodyTokenKey(row.chainId, row.tokenAddress)) ??
+        [];
       const circulating = latestDailyCirculatingSupply(row, custodyRows);
       const usd = parseWei(circulating.toString(), row.tokenDecimals) * rate;
       return (acc ?? 0) + usd;

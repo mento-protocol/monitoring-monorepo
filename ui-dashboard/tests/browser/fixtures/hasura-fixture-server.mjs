@@ -519,6 +519,10 @@ function handleGraphQL({ query, variables = {} }) {
     }
     case "PoolRebalances":
       return { RebalanceEvent: [] };
+    case "StablesCurrentSupplyPerToken":
+      return {
+        StableTokenSupply: [stableDailySnapshots[1], stableDailySnapshots[3]],
+      };
     case "StablesLatestPerToken":
       return {
         StableSupplyDailySnapshot: [
@@ -528,6 +532,8 @@ function handleGraphQL({ query, variables = {} }) {
       };
     case "StablesDailySnapshots":
       return { StableSupplyDailySnapshot: stableDailySnapshots };
+    case "StablesCurrentCustodyPerToken":
+      return { StableTokenCustodyState: [] };
     case "StablesLatestCustodyPerToken":
     case "StablesCustodyDailySnapshots":
       return { StableTokenCustodyDailySnapshot: [] };

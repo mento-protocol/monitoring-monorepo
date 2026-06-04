@@ -1,6 +1,7 @@
 import type { StableSupplySource, StableSupplyChangeKind } from "@/lib/stables";
 
-// Raw row shape returned by STABLES_DAILY_SNAPSHOTS / STABLES_LATEST_PER_TOKEN.
+// Raw row shape returned by STABLES_DAILY_SNAPSHOTS and the normalized
+// current-state supply feed.
 // `totalSupply` / `dailyMintAmount` / `dailyBurnAmount` are token-native wei
 // serialized as strings by Hasura (numeric → string in JSON to preserve
 // 256-bit precision); parse to bigint via `BigInt(...)` at consumption.
@@ -15,6 +16,7 @@ export type StableSupplyDailySnapshot = {
   totalSupply: string;
   dailyMintAmount: string;
   dailyBurnAmount: string;
+  isCurrentState?: boolean;
 };
 
 export type StableTokenCustodyDailySnapshot = {
@@ -60,8 +62,8 @@ export type TokenAgg = {
   tokenSymbol: string;
   source: StableSupplySource;
   tokenDecimals: number;
-  // Most recent circulating supply after custody subtraction. Daily supply and
-  // daily custody snapshots are forward-filled independently for this headline.
+  // Most recent circulating supply after custody subtraction. Current-state
+  // rows override sparse same-day daily snapshots for this headline.
   latestTotalSupply: bigint;
   latestLockedSupply: bigint;
   latestTimestamp: bigint;
