@@ -3,7 +3,7 @@ import type {
   CurrentOncall,
   VictorOpsOncallResponse,
   VictorOpsUserEntry,
-  VictorOpsUsersResponse,
+  VictorOpsUserResponse,
 } from "./types";
 
 class SplunkOnCallError extends Error {
@@ -118,11 +118,11 @@ export async function fetchOncallUserEmail(
   config: AppConfig,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string | undefined> {
-  const data = await readJson<VictorOpsUsersResponse>(
+  const data = await readJson<VictorOpsUserResponse>(
     config,
-    "/api-public/v1/user",
+    `/api-public/v1/user/${encodeURIComponent(username)}`,
     fetchImpl,
   );
 
-  return data.users?.find((user) => user.username === username)?.email;
+  return data.email;
 }

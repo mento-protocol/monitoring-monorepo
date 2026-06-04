@@ -180,15 +180,52 @@ describe("fetchOncallUserEmail", () => {
   it("finds the email for a VictorOps username", async () => {
     const fetchMock = vi.fn(async () =>
       response({
-        users: [
-          { email: "other@example.com", username: "other" },
-          { email: "chapati@example.com", username: "chapati" },
-        ],
+        email: "chapati@example.com",
+        username: "chapati",
       }),
     );
 
     await expect(
       fetchOncallUserEmail("chapati", config, fetchMock),
     ).resolves.toBe("chapati@example.com");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.victorops.com/api-public/v1/user/chapati",
+      {
+        headers: {
+          "X-VO-Api-Id": "api-id",
+          "X-VO-Api-Key": "api-key",
+        },
+      },
+    );
+  });
+
+  it("encodes VictorOps usernames in the direct lookup path", async () => {
+    const fetchMock = vi.fn(async () =>
+      response({
+        email: "oncall@example.com",
+        username: "first.last+oncall",
+      }),
+    );
+
+    await expect(
+      fetchOncallUserEmail("first.last+oncall", config, fetchMock),
+    ).resolves.toBe("oncall@example.com");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.victorops.com/api-public/v1/user/first.last%2Boncall",
+      {
+        headers: {
+          "X-VO-Api-Id": "api-id",
+          "X-VO-Api-Key": "api-key",
+        },
+      },
+    );
+  });
+
+  it("propagates Splunk On-Call API errors", async () => {
+    const fetchMock = vi.fn(async () => response({}, false));
+
+    await expect(
+      fetchOncallUserEmail("chapati", config, fetchMock),
+    ).rejects.toThrow("Splunk On-Call API error");
   });
 });

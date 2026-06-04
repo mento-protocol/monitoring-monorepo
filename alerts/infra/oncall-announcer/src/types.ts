@@ -57,9 +57,6 @@ export interface VictorOpsOncallResponse {
   }>;
 }
 
-export interface VictorOpsUsersResponse {
-  users?: Array<{
-    email?: string;
-    username?: string;
-  }>;
+export interface VictorOpsUserResponse {
+  email?: string;
 }
