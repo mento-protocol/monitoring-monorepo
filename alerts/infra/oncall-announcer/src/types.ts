@@ -22,6 +22,17 @@ export interface SlackUser {
   realName?: string;
 }
 
+export interface VictorOpsUserEntry {
+  onCallUser?: {
+    email?: string;
+    username?: string;
+  };
+  onCalluser?: {
+    email?: string;
+    username?: string;
+  };
+}
+
 export interface RotationResult {
   announced: boolean;
   changed: boolean;
@@ -41,12 +52,7 @@ export interface VictorOpsOncallResponse {
         name?: string;
         slug?: string;
       };
-      users?: Array<{
-        onCallUser?: {
-          email?: string;
-          username?: string;
-        };
-      }>;
+      users?: VictorOpsUserEntry[];
     }>;
   }>;
 }
