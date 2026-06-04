@@ -21,7 +21,7 @@ const originalNextEnv = existsSync(nextEnvUrl)
 // fixed-port collision; a tiny TOCTOU window remains between close() here and
 // Playwright's bind, but it no longer targets the same two ports every run.
 // An explicit PLAYWRIGHT_*_PORT still wins.
-function findFreePort() {
+function allocatePort() {
   return new Promise((resolve, reject) => {
     const srv = createServer();
     srv.unref();
@@ -33,18 +33,32 @@ function findFreePort() {
   });
 }
 
-const needNextPort = !process.env.PLAYWRIGHT_NEXT_PORT;
-const needFixturePort = !process.env.PLAYWRIGHT_FIXTURE_PORT;
-if (needNextPort || needFixturePort) {
-  // Allocate both simultaneously so the two servers can't be assigned the
-  // same port (sequential allocation could reuse the first port after close).
-  const [nextPort, fixturePort] = await Promise.all([
-    findFreePort(),
-    findFreePort(),
-  ]);
-  if (needNextPort) process.env.PLAYWRIGHT_NEXT_PORT = String(nextPort);
-  if (needFixturePort)
-    process.env.PLAYWRIGHT_FIXTURE_PORT = String(fixturePort);
+// Re-roll if the OS hands back a port we must avoid: an explicitly-set sibling,
+// or the partner port assigned earlier in this pass. The collision is
+// near-impossible (OS ephemeral range vs. a fixed low port) but cheap to rule
+// out, and this is test infra whose whole job is removing flakes.
+async function findFreePort(exclude = []) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const port = await allocatePort();
+    if (!exclude.includes(port)) return port;
+  }
+  throw new Error(`could not find a free port avoiding ${exclude.join(", ")}`);
+}
+
+const explicitNext = process.env.PLAYWRIGHT_NEXT_PORT;
+const explicitFixture = process.env.PLAYWRIGHT_FIXTURE_PORT;
+if (!explicitNext && !explicitFixture) {
+  const nextPort = await findFreePort();
+  process.env.PLAYWRIGHT_NEXT_PORT = String(nextPort);
+  process.env.PLAYWRIGHT_FIXTURE_PORT = String(await findFreePort([nextPort]));
+} else if (!explicitNext) {
+  process.env.PLAYWRIGHT_NEXT_PORT = String(
+    await findFreePort([Number(explicitFixture)]),
+  );
+} else if (!explicitFixture) {
+  process.env.PLAYWRIGHT_FIXTURE_PORT = String(
+    await findFreePort([Number(explicitNext)]),
+  );
 }
 
 function runPlaywright() {
