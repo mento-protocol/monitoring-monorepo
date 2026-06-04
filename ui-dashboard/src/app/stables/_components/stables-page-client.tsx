@@ -109,17 +109,15 @@ function StablesContent(): React.JSX.Element {
         capped={snapshotsCapped || (!custodyDegraded && custodySnapshotsCapped)}
       />
 
-      <StablesChangesSection rates={rates} ratesLoading={ratesLoading} />
+      <StablesChangesSection rates={rates} />
     </div>
   );
 }
 
 function StablesChangesSection({
   rates,
-  ratesLoading,
 }: {
   rates: OracleRateMap;
-  ratesLoading: boolean;
 }): React.JSX.Element {
   const {
     minimumUsdValue: minimumSupplyChangeUsd,
@@ -140,7 +138,7 @@ function StablesChangesSection({
       minimumUsdValue={minimumSupplyChangeUsd}
       onMinimumUsdValueChange={updateMinimumSupplyChangeUsd}
       onMinimumUsdValueReset={resetMinimumSupplyChangeUsd}
-      isLoading={changesLoading || ratesLoading}
+      isLoading={changesLoading}
       hasError={changesError != null}
       capped={changesCapped}
       unpricedEventsCount={changesUnpricedEventsCount}

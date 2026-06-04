@@ -203,11 +203,22 @@ function SupplyChangeThresholdInput({
     setDraft(String(value));
   }, [value]);
 
-  const commitDraft = (nextDraft: string) => {
-    setDraft(nextDraft);
-    if (nextDraft.trim() === "") return;
-    const next = Number(nextDraft);
-    if (Number.isFinite(next) && next >= 0) onChange(next);
+  const updateDraft = (nextDraft: string) => {
+    if (/^\d*(?:\.\d*)?$/.test(nextDraft)) setDraft(nextDraft);
+  };
+
+  const commitDraft = () => {
+    const next = parseThresholdDraft(draft);
+    if (next == null) {
+      setDraft(String(value));
+      return;
+    }
+    setDraft(String(next));
+    if (next !== value) onChange(next);
+  };
+
+  const restoreCommittedValue = () => {
+    setDraft(String(value));
   };
 
   const resetDraft = () => {
@@ -215,10 +226,11 @@ function SupplyChangeThresholdInput({
     onReset();
   };
 
-  const restoreCommittedValue = () => {
-    const next = Number(draft);
-    if (!Number.isFinite(next) || next < 0 || draft.trim() === "") {
-      setDraft(String(value));
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      commitDraft();
+    } else if (event.key === "Escape") {
+      restoreCommittedValue();
     }
   };
 
@@ -235,15 +247,15 @@ function SupplyChangeThresholdInput({
           <span className="pl-2 text-sm text-slate-500">$</span>
           <input
             id="supply-change-min-usd"
-            type="number"
-            min="0"
-            step="any"
+            type="text"
             inputMode="decimal"
+            pattern="[0-9]*[.]?[0-9]*"
             value={draft}
-            onChange={(event) => commitDraft(event.target.value)}
-            onBlur={restoreCommittedValue}
+            onChange={(event) => updateDraft(event.target.value)}
+            onBlur={commitDraft}
+            onKeyDown={handleKeyDown}
             aria-label="Minimum USD-equivalent supply change"
-            className="h-full w-24 bg-transparent px-1.5 text-sm text-slate-100 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            className="h-full w-24 bg-transparent px-1.5 text-sm text-slate-100 outline-none"
           />
         </div>
         <button
@@ -257,6 +269,12 @@ function SupplyChangeThresholdInput({
       </div>
     </div>
   );
+}
+
+function parseThresholdDraft(draft: string): number | null {
+  if (draft === "" || draft === "." || draft.endsWith(".")) return null;
+  const next = Number(draft);
+  return Number.isFinite(next) && next >= 0 ? next : null;
 }
 
 function SupplyChangeRow({

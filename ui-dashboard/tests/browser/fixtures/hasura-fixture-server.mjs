@@ -17,6 +17,8 @@ const ADDRESSES = {
   monadPool: "143-0xb0a0264ce6847f101b76ba36a4a3083ba489f501",
   celoUsdm: "0x765de816845861e75a25fca122bb6898b8b1282a",
   celoUsdc: "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
+  celoGbpm: "0xccf663b1ff11028f0b19058d0f7b674004a40746",
+  celoBrlm: "0x0000000000000000000000000000000000000b71",
   monadAusd: "0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
   monadUsdm: "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
   lp: "0x1111111111111111111111111111111111111111",
@@ -161,6 +163,20 @@ function poolRowsForChain(chainId) {
   return pools.filter((pool) => pool.chainId === Number(chainId));
 }
 
+function oracleRateRowsForChain(chainId) {
+  const rows = poolRowsForChain(chainId);
+  if (Number(chainId) !== 42220) return rows;
+  return [
+    ...rows,
+    {
+      token0: ADDRESSES.celoUsdm,
+      token1: ADDRESSES.celoGbpm,
+      oraclePrice: "1250000000000000000000000",
+      oracleOk: true,
+    },
+  ];
+}
+
 function thresholdRows(rows) {
   return rows.map((pool) => ({
     id: pool.id,
@@ -261,6 +277,108 @@ const liquidityPositions = [
   },
 ];
 
+const stableFixtureNow = Math.floor(Date.parse("2026-04-15T12:00:00Z") / 1000);
+const stableFixtureToday =
+  Math.floor(stableFixtureNow / DAY_SECONDS) * DAY_SECONDS;
+
+function stableSnapshot(id, tokenAddress, tokenSymbol, timestamp, totalSupply) {
+  return {
+    id,
+    chainId: 42220,
+    tokenAddress,
+    tokenSymbol,
+    source: "RESERVE",
+    tokenDecimals: 18,
+    timestamp: String(timestamp),
+    totalSupply,
+    dailyMintAmount: "0",
+    dailyBurnAmount: "0",
+  };
+}
+
+const stableDailySnapshots = [
+  stableSnapshot(
+    "usdm-old",
+    ADDRESSES.celoUsdm,
+    "USDm",
+    stableFixtureToday - DAY_SECONDS,
+    "1000000000000000000000",
+  ),
+  stableSnapshot(
+    "usdm-new",
+    ADDRESSES.celoUsdm,
+    "USDm",
+    stableFixtureToday,
+    "1100000000000000000000",
+  ),
+  stableSnapshot(
+    "gbpm-old",
+    ADDRESSES.celoGbpm,
+    "GBPm",
+    stableFixtureToday - DAY_SECONDS,
+    "400000000000000000000",
+  ),
+  stableSnapshot(
+    "gbpm-new",
+    ADDRESSES.celoGbpm,
+    "GBPm",
+    stableFixtureToday,
+    "500000000000000000000",
+  ),
+];
+
+function stableChange(id, tokenAddress, tokenSymbol, amount, secondsAgo) {
+  return {
+    id,
+    chainId: 42220,
+    tokenAddress,
+    tokenSymbol,
+    tokenDecimals: 18,
+    source: "RESERVE",
+    kind: amount.startsWith("-") ? "RESERVE_BURN" : "RESERVE_MINT",
+    counterparty: ADDRESSES.recipient,
+    caller: ADDRESSES.trader,
+    txTo: ADDRESSES.recipient,
+    isProtocolOwnedCaller: false,
+    amount,
+    txHash: `0x${id.padEnd(64, "0").slice(0, 64)}`,
+    blockNumber: "123",
+    blockTimestamp: String(stableFixtureNow - secondsAgo),
+  };
+}
+
+const stableChanges = [
+  stableChange("dust", ADDRESSES.celoUsdm, "USDm", "9000000000000000", 60),
+  stableChange(
+    "usdm-visible",
+    ADDRESSES.celoUsdm,
+    "USDm",
+    "20000000000000000",
+    120,
+  ),
+  stableChange(
+    "gbpm-half",
+    ADDRESSES.celoGbpm,
+    "GBPm",
+    "500000000000000000",
+    180,
+  ),
+  stableChange(
+    "gbpm-one",
+    ADDRESSES.celoGbpm,
+    "GBPm",
+    "1000000000000000000",
+    240,
+  ),
+  stableChange(
+    "unpriced-brlm",
+    ADDRESSES.celoBrlm,
+    "BRLm",
+    "1000000000000000000",
+    300,
+  ),
+];
+
 function unhandledOperation(op) {
   const message = `Unhandled fixture GraphQL operation: ${op}`;
   process.stderr.write(`${message}\n`);
@@ -282,8 +400,9 @@ function handleGraphQL({ query, variables = {} }) {
   const op = operationName(query ?? "");
   switch (op) {
     case "AllPoolsWithHealth":
-    case "OracleRates":
       return { Pool: poolRowsForChain(variables.chainId) };
+    case "OracleRates":
+      return { Pool: oracleRateRowsForChain(variables.chainId) };
     case "AllPoolsRebalanceThresholdsKnown":
       return { Pool: thresholdRows(poolRowsForChain(variables.chainId)) };
     case "AllPoolsBreachRollup":
@@ -400,6 +519,25 @@ function handleGraphQL({ query, variables = {} }) {
     }
     case "PoolRebalances":
       return { RebalanceEvent: [] };
+    case "StablesLatestPerToken":
+      return {
+        StableSupplyDailySnapshot: [
+          stableDailySnapshots[1],
+          stableDailySnapshots[3],
+        ],
+      };
+    case "StablesDailySnapshots":
+      return { StableSupplyDailySnapshot: stableDailySnapshots };
+    case "StablesLatestCustodyPerToken":
+    case "StablesCustodyDailySnapshots":
+      return { StableTokenCustodyDailySnapshot: [] };
+    case "StablesChanges":
+      return {
+        StableSupplyChangeEvent: stableChanges.slice(
+          variables.offset ?? 0,
+          (variables.offset ?? 0) + (variables.limit ?? stableChanges.length),
+        ),
+      };
     default:
       return unhandledOperation(op);
   }

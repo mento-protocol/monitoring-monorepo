@@ -243,6 +243,62 @@ test.describe("dashboard browser flows", () => {
     ).toBeVisible();
   });
 
+  test("filters stable supply changes by committed USD threshold", async ({
+    page,
+  }) => {
+    await page.goto("/stables");
+
+    await expect(
+      page.getByRole("heading", { name: "Mento stablecoins" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Supply changes" }),
+    ).toBeVisible();
+
+    const input = page.getByLabel("Minimum USD-equivalent supply change");
+    const rows = page.locator("tbody tr");
+
+    await expect(input).toHaveValue("0.01");
+    await expect(
+      page.getByText("Hiding changes below $0.01 equivalent."),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Keeping 1 unpriced event visible."),
+    ).toBeVisible();
+    await expect(rows).toHaveCount(4);
+    await expect(rows.filter({ hasText: "USDm" })).toHaveCount(1);
+    await expect(rows.filter({ hasText: "GBPm" })).toHaveCount(2);
+    await expect(rows.filter({ hasText: "BRLm" })).toHaveCount(1);
+
+    await input.fill("1.");
+
+    await expect(input).toHaveValue("1.");
+    expect(page.url()).not.toContain("minSupplyChangeUsd");
+    await expect(
+      page.getByText("Hiding changes below $0.01 equivalent."),
+    ).toBeVisible();
+    await expect(rows).toHaveCount(4);
+
+    await input.fill("1");
+    await input.press("Enter");
+
+    await expect(page).toHaveURL(/minSupplyChangeUsd=1/);
+    await expect(input).toHaveValue("1");
+    await expect(
+      page.getByText("Hiding changes below $1.00 equivalent."),
+    ).toBeVisible();
+    await expect(rows).toHaveCount(2);
+    await expect(rows.filter({ hasText: "USDm" })).toHaveCount(0);
+    await expect(rows.filter({ hasText: "GBPm" })).toHaveCount(1);
+    await expect(rows.filter({ hasText: "BRLm" })).toHaveCount(1);
+
+    await page.getByRole("button", { name: "Reset" }).click();
+
+    await expect(page).not.toHaveURL(/minSupplyChangeUsd=/);
+    await expect(input).toHaveValue("0.01");
+    await expect(rows).toHaveCount(4);
+  });
+
   test("shows the FX weekend banner after mount without a hydration mismatch", async ({
     page,
   }) => {
