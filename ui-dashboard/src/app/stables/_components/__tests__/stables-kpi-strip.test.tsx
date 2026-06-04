@@ -108,7 +108,7 @@ describe("StablesKpiStrip", () => {
     expect(html).not.toContain("$1M");
   });
 
-  it("renders 24h/7d/30d net-change and percent sub-rows", () => {
+  it("renders absolute $ 24h/7d/30d net-change sub-rows on both total tiles", () => {
     const token = "0xa";
     const snapshots = [
       snapshot({
@@ -145,14 +145,13 @@ describe("StablesKpiStrip", () => {
       />,
     );
 
-    // Circulating supply sub-row: $ net change per window (now − baseline).
+    // Both the "Circulating supply" and "7d net change" tiles show absolute $
+    // net change per window (now − baseline): 24h +$20, 7d +$50, 30d +$100.
     expect(html).toContain("+$20.00");
     expect(html).toContain("+$50.00");
     expect(html).toContain("+$100.00");
-    // 7d net change sub-row: % change over the rollup-basis current supply.
-    expect(html).toContain("+1.9%");
-    expect(html).toContain("+4.8%");
-    expect(html).toContain("+10.0%");
+    // The % sub-row was replaced by absolute $ — no percentages anywhere.
+    expect(html).not.toContain("%");
   });
 
   it("does not subtract live custody from daily fallback supply rows", () => {

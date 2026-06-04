@@ -1,5 +1,7 @@
 // BreakdownTile — shows a "Total" headline value with 24h / 7d / 30d below
 
+import type { ReactNode } from "react";
+
 export function BreakdownTile({
   label,
   total,
@@ -13,6 +15,7 @@ export function BreakdownTile({
   totalPrefix = "",
   href,
   subtitle,
+  badge,
 }: {
   label: string;
   total: number | null;
@@ -29,6 +32,9 @@ export function BreakdownTile({
   totalPrefix?: string | undefined;
   href?: string | undefined;
   subtitle?: string | undefined;
+  /** Optional element rendered on the title row, right-aligned — e.g. a
+   * token/chain pill on the mover tiles. */
+  badge?: ReactNode;
 }) {
   const formatSub = subFormat ?? format;
   const mainValue = isLoading
@@ -49,7 +55,10 @@ export function BreakdownTile({
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
       <div>
-        <p className="text-sm text-slate-400">{label}</p>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-sm text-slate-400">{label}</p>
+          {badge}
+        </div>
         {href ? (
           <a
             href={href}

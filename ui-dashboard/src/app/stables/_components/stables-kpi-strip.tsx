@@ -2,7 +2,9 @@
 
 import { useMemo } from "react";
 import { BreakdownTile } from "@/components/breakdown-tile";
+import { ChainIcon } from "@/components/chain-icon";
 import { formatUSD, parseWei } from "@/lib/format";
+import { networkForChainId } from "@/lib/networks";
 import { displayLabel, effectiveOracleRate } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
 import {
@@ -28,12 +30,6 @@ function formatSignedUSD(v: number): string {
   return `${v >= 0 ? "+" : "-"}${formatUSD(Math.abs(v))}`;
 }
 
-// Signed percent for the "7d net change" sub-row — distinguishes it from the
-// $ net-change sub-row on the "Circulating supply" tile.
-function formatSignedPct(v: number): string {
-  return `${v >= 0 ? "+" : "-"}${Math.abs(v).toFixed(1)}%`;
-}
-
 // Sum a per-window USD net change across the rollup, skipping tokens with no
 // oracle rate (null). Returns null only when no token contributes — mirrors
 // `totalNetChange7dUsd` so the sub-row renders "N/A" on rate-less data.
@@ -45,20 +41,6 @@ function sumWindowUsd(
     const v = pick(agg);
     return v == null ? acc : (acc ?? 0) + v;
   }, null);
-}
-
-// Aggregate % change for a window: net change over the baseline supply, where
-// baseline = current − net change. Computed on the rollup basis (same token set
-// as the numerator) — not the headline `totalUsd`, which is sourced from a
-// different feed. Null when the base is unknown or zero.
-function windowPct(
-  currentUsd: number | null,
-  netChangeUsd: number | null,
-): number | null {
-  if (currentUsd == null || netChangeUsd == null) return null;
-  const baseline = currentUsd - netChangeUsd;
-  if (baseline === 0) return null;
-  return (netChangeUsd / baseline) * 100;
 }
 
 type Props = {
@@ -135,15 +117,15 @@ export function StablesKpiStrip({
     }, null);
   }, [latestPerToken, custodySnapshots, latestCustodyPerToken, rates]);
 
-  // Per-window aggregates feeding both KPI sub-rows. `rollupCurrentUsd` is the
-  // rollup-basis current supply (Σ totalSupplyUsdLatest) — used as the % base
-  // for the "7d net change" tile so numerator and denominator share a token set.
+  // Per-window total net change (USD) feeding the KPI sub-rows. Both the
+  // "Circulating supply" and "7d net change" tiles show absolute $ deltas, so
+  // their sub-rows are identical by design (the 7d slot repeats tile 2's
+  // headline).
   const windows = useMemo(() => {
     return {
       net1dUsd: sumWindowUsd(rollup, (a) => a.netChange1dUsd),
       net7dUsd: sumWindowUsd(rollup, (a) => a.netChange7dUsd),
       net30dUsd: sumWindowUsd(rollup, (a) => a.netChange30dUsd),
-      currentUsd: sumWindowUsd(rollup, (a) => a.totalSupplyUsdLatest),
     };
   }, [rollup]);
 
@@ -165,13 +147,12 @@ export function StablesKpiStrip({
       <BreakdownTile
         label="7d net change"
         total={totalNetChange7dUsd}
-        sub24h={windowPct(windows.currentUsd, windows.net1dUsd)}
-        sub7d={windowPct(windows.currentUsd, windows.net7dUsd)}
-        sub30d={windowPct(windows.currentUsd, windows.net30dUsd)}
+        sub24h={windows.net1dUsd}
+        sub7d={windows.net7dUsd}
+        sub30d={windows.net30dUsd}
         isLoading={isLoading}
         hasError={hasError}
         format={formatSignedUSD}
-        subFormat={formatSignedPct}
       />
       <MoverTile
         label="Biggest expansion (7d)"
@@ -200,9 +181,6 @@ function MoverTile({
   isLoading: boolean;
   hasError: boolean;
 }): React.JSX.Element {
-  const subtitle = agg
-    ? `${displayLabel(agg.tokenSymbol, agg.source)} on ${chainLabel(agg.chainId)}`
-    : undefined;
   return (
     <BreakdownTile
       label={label}
@@ -213,13 +191,22 @@ function MoverTile({
       isLoading={isLoading}
       hasError={hasError}
       format={formatSignedUSD}
-      subtitle={subtitle}
+      badge={agg ? <MoverBadge agg={agg} /> : undefined}
     />
   );
 }
 
-function chainLabel(chainId: number): string {
-  if (chainId === 143) return "Monad";
-  if (chainId === 42220) return "Celo";
-  return `Chain ${chainId}`;
+// Token + chain identity for a mover tile, rendered as a pill on the title row.
+// The chain is conveyed by the branded icon (its `aria-label` names the chain),
+// so the pill stays compact without an explicit "on Celo" suffix.
+function MoverBadge({ agg }: { agg: TokenAgg }): React.JSX.Element {
+  const network = networkForChainId(agg.chainId);
+  return (
+    <span className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/80 px-2 py-0.5 text-xs">
+      {network ? <ChainIcon network={network} size={14} /> : null}
+      <span className="font-medium text-slate-200">
+        {displayLabel(agg.tokenSymbol, agg.source)}
+      </span>
+    </span>
+  );
 }
