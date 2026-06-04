@@ -56,17 +56,18 @@ function StablesContent(): React.JSX.Element {
     capped: changesCapped,
   } = useStablesChanges("7d");
 
+  const custodyDegraded =
+    latestCustodyError != null || custodySnapshotsError != null;
+  const effectiveLatestCustodyPerToken = custodyDegraded
+    ? []
+    : latestCustodyPerToken;
+  const effectiveCustodySnapshots = custodyDegraded ? [] : custodySnapshots;
   const isLoading =
     ratesLoading ||
     latestLoading ||
     snapshotsLoading ||
-    latestCustodyLoading ||
-    custodySnapshotsLoading;
-  const hasError =
-    latestError != null ||
-    snapshotsError != null ||
-    latestCustodyError != null ||
-    custodySnapshotsError != null;
+    (!custodyDegraded && (latestCustodyLoading || custodySnapshotsLoading));
+  const hasError = latestError != null || snapshotsError != null;
 
   return (
     <div className="space-y-8">
@@ -82,9 +83,9 @@ function StablesContent(): React.JSX.Element {
 
       <StablesKpiStrip
         latestPerToken={latestPerToken}
-        latestCustodyPerToken={latestCustodyPerToken}
+        latestCustodyPerToken={effectiveLatestCustodyPerToken}
         snapshots={snapshots}
-        custodySnapshots={custodySnapshots}
+        custodySnapshots={effectiveCustodySnapshots}
         rates={rates}
         isLoading={isLoading}
         hasError={hasError}
@@ -93,8 +94,8 @@ function StablesContent(): React.JSX.Element {
       <StablesSparklineGrid
         snapshots={snapshots}
         latestPerToken={latestPerToken}
-        custodySnapshots={custodySnapshots}
-        latestCustodyPerToken={latestCustodyPerToken}
+        custodySnapshots={effectiveCustodySnapshots}
+        latestCustodyPerToken={effectiveLatestCustodyPerToken}
         rates={rates}
         isLoading={isLoading}
         hasError={hasError}
@@ -103,14 +104,14 @@ function StablesContent(): React.JSX.Element {
       <StablesHeroChart
         snapshots={snapshots}
         latestPerToken={latestPerToken}
-        custodySnapshots={custodySnapshots}
-        latestCustodyPerToken={latestCustodyPerToken}
+        custodySnapshots={effectiveCustodySnapshots}
+        latestCustodyPerToken={effectiveLatestCustodyPerToken}
         rates={rates}
         range={range}
         onRangeChange={setRange}
         isLoading={isLoading}
         hasError={hasError}
-        capped={snapshotsCapped || custodySnapshotsCapped}
+        capped={snapshotsCapped || (!custodyDegraded && custodySnapshotsCapped)}
       />
 
       <StablesChangesTable

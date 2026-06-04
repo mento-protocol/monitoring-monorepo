@@ -88,7 +88,7 @@ export { _clearBootstrapCaches } from "./breakers.js";
 export {
   _setMockStableTotalSupply,
   _clearMockStableTotalSupply,
-} from "./rpc/stables.js";
+} from "./rpc/stable-fetchers.js";
 
 // Fee token test mocks and helpers
 export {

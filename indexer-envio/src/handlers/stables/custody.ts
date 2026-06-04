@@ -19,9 +19,8 @@ import {
   makeStableTokenCustodyId,
 } from "./config.js";
 import {
-  flushStableTokenCustodyDailySnapshot,
+  applyStableTokenCustodyTransferUpdate,
   makeStableTokenCustodyState,
-  setStableTokenCustodyDailySnapshot,
 } from "./custodyState.js";
 
 type StableTokenTransferEvent = {
@@ -144,40 +143,12 @@ export async function handleStableTokenCustodyTransfer({
     };
   }
 
-  state = flushStableTokenCustodyDailySnapshot(
+  applyStableTokenCustodyTransferUpdate({
     context,
     state,
-    blockTimestamp,
+    amount: event.params.value,
+    isLock,
+    eventTimestamp: blockTimestamp,
     blockNumber,
-  );
-
-  const amount = event.params.value;
-  const nextLockedSupply = isLock
-    ? state.lockedSupply + amount
-    : state.lockedSupply >= amount
-      ? state.lockedSupply - amount
-      : 0n;
-  if (!isLock && amount > state.lockedSupply) {
-    context.log.warn?.(
-      `[stables/custody] Unlock amount ${amount} exceeds tracked lockedSupply ${state.lockedSupply} ` +
-        `for ${tokenAddress} on chain ${chainId}; flooring lockedSupply at 0.`,
-    );
-  }
-
-  const nextState = {
-    ...state,
-    lockedSupply: nextLockedSupply,
-    lockedTodayBucket: state.lockedTodayBucket + (isLock ? amount : 0n),
-    unlockedTodayBucket: state.unlockedTodayBucket + (isUnlock ? amount : 0n),
-    lastEventBlock: blockNumber,
-    lastEventTimestamp: blockTimestamp,
-  };
-
-  context.StableTokenCustodyState.set(nextState);
-  setStableTokenCustodyDailySnapshot(
-    context,
-    nextState,
-    blockTimestamp,
-    blockNumber,
-  );
+  });
 }

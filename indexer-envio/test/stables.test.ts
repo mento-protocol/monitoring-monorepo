@@ -19,10 +19,10 @@ import {
 import { flushStableDailySnapshot } from "../src/handlers/stables/dailyFlush.ts";
 import { makeStableTokenSupply } from "../src/handlers/stables/bootstrap.ts";
 import {
+  applyStableTokenCustodyTransferUpdate,
   flushStableTokenCustodyDailySnapshot,
   makeStableTokenCustodyState,
 } from "../src/handlers/stables/custodyState.ts";
-import { handleStableTokenCustodyTransfer } from "../src/handlers/stables/custody.ts";
 import { V3_HUB_USDM_ADDRESS } from "../src/constants.ts";
 
 const MAINNET_CONFIG = readFileSync(
@@ -552,9 +552,7 @@ describe("StableTokenCustodyState — lock-custody snapshot helpers", () => {
     const snapshots: SavedSnapshot[] = [];
     let savedState: SavedState | null = null;
     const ctx = {
-      isPreload: false,
       StableTokenCustodyState: {
-        get: async () => null,
         set: (entity: SavedState) => {
           savedState = entity;
         },
@@ -562,25 +560,24 @@ describe("StableTokenCustodyState — lock-custody snapshot helpers", () => {
       StableTokenCustodyDailySnapshot: {
         set: (entity: SavedSnapshot) => snapshots.push(entity),
       },
-      effect: async () => baseline,
       log: { warn: () => undefined },
     };
+    const state = {
+      ...mockCustody({
+        lockedSupply: baseline,
+        supplyBaselineSeeded: true,
+        lockedTodayBucket: 0n,
+        unlockedTodayBucket: 0n,
+      }),
+    };
 
-    await handleStableTokenCustodyTransfer({
-      event: {
-        chainId: 42220,
-        srcAddress: CELO_CHFM_ADDRESS,
-        params: {
-          from: "0x1111111111111111111111111111111111111111",
-          to: CHFM_MANAGER,
-          value: amount,
-        },
-        block: {
-          number: 60_700_001,
-          timestamp: Number(eventTimestamp),
-        },
-      },
+    applyStableTokenCustodyTransferUpdate({
       context: ctx as never,
+      state: state as never,
+      amount,
+      isLock: true,
+      eventTimestamp,
+      blockNumber: 60_700_001n,
     });
 
     assert.equal(snapshots.length, 1);

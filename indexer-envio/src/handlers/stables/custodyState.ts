@@ -25,6 +25,15 @@ type CustodyContext = {
   };
 };
 
+type CustodyUpdateContext = CustodyContext & {
+  StableTokenCustodyState: {
+    set: (entity: StableTokenCustodyState) => void;
+  };
+  log?: {
+    warn?: (message: string) => void;
+  };
+};
+
 export type MakeStableTokenCustodyStateArgs = {
   chainId: number;
   tokenAddress: string;
@@ -79,6 +88,59 @@ export function flushStableTokenCustodyDailySnapshot(
     lockedTodayBucket: 0n,
     unlockedTodayBucket: 0n,
   };
+}
+
+export function applyStableTokenCustodyTransferUpdate({
+  context,
+  state,
+  amount,
+  isLock,
+  eventTimestamp,
+  blockNumber,
+}: {
+  context: CustodyUpdateContext;
+  state: StableTokenCustodyState;
+  amount: bigint;
+  isLock: boolean;
+  eventTimestamp: bigint;
+  blockNumber: bigint;
+}): StableTokenCustodyState {
+  const flushed = flushStableTokenCustodyDailySnapshot(
+    context,
+    state,
+    eventTimestamp,
+    blockNumber,
+  );
+  const isUnlock = !isLock;
+  const nextLockedSupply = isLock
+    ? flushed.lockedSupply + amount
+    : flushed.lockedSupply >= amount
+      ? flushed.lockedSupply - amount
+      : 0n;
+  if (isUnlock && amount > flushed.lockedSupply) {
+    context.log?.warn?.(
+      `[stables/custody] Unlock amount ${amount} exceeds tracked lockedSupply ${flushed.lockedSupply} ` +
+        `for ${flushed.tokenAddress} on chain ${flushed.chainId}; flooring lockedSupply at 0.`,
+    );
+  }
+
+  const nextState = {
+    ...flushed,
+    lockedSupply: nextLockedSupply,
+    lockedTodayBucket: flushed.lockedTodayBucket + (isLock ? amount : 0n),
+    unlockedTodayBucket: flushed.unlockedTodayBucket + (isUnlock ? amount : 0n),
+    lastEventBlock: blockNumber,
+    lastEventTimestamp: eventTimestamp,
+  };
+
+  context.StableTokenCustodyState.set(nextState);
+  setStableTokenCustodyDailySnapshot(
+    context,
+    nextState,
+    eventTimestamp,
+    blockNumber,
+  );
+  return nextState;
 }
 
 export function setStableTokenCustodyDailySnapshot(

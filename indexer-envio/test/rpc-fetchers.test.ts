@@ -18,7 +18,7 @@ import {
   _clearMockStableTotalSupply,
   _setMockStableTotalSupply,
   fetchStableTotalSupply,
-} from "../src/rpc/stables.ts";
+} from "../src/rpc/stable-fetchers.ts";
 
 const CHAIN_ID = 42220;
 const POOL = "0x00000000000000000000000000000000000000aa";

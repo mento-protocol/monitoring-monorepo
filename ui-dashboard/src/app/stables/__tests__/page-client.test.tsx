@@ -27,42 +27,48 @@ vi.mock("@/hooks/use-oracle-rates", () => ({
 const mockSnapshots = vi.hoisted(() => ({
   data: [] as StableSupplyDailySnapshot[],
   capped: false,
+  error: null as Error | null,
+  isLoading: false,
 }));
 const mockChanges = vi.hoisted(() => ({
   data: [] as StableSupplyChangeEvent[],
   capped: false,
+  error: null as Error | null,
+  isLoading: false,
 }));
 const mockCustodySnapshots = vi.hoisted(() => ({
   data: [] as StableTokenCustodyDailySnapshot[],
   capped: false,
+  error: null as Error | null,
+  isLoading: false,
 }));
 vi.mock("../_lib/use-stables-data", () => ({
   useStablesLatestPerToken: () => ({
     snapshots: mockSnapshots.data,
-    error: null,
-    isLoading: false,
+    error: mockSnapshots.error,
+    isLoading: mockSnapshots.isLoading,
   }),
   useStablesDailySnapshots: () => ({
     snapshots: mockSnapshots.data,
-    error: null,
-    isLoading: false,
+    error: mockSnapshots.error,
+    isLoading: mockSnapshots.isLoading,
     capped: mockSnapshots.capped,
   }),
   useStablesLatestCustodyPerToken: () => ({
     snapshots: mockCustodySnapshots.data,
-    error: null,
-    isLoading: false,
+    error: mockCustodySnapshots.error,
+    isLoading: mockCustodySnapshots.isLoading,
   }),
   useStablesCustodyDailySnapshots: () => ({
     snapshots: mockCustodySnapshots.data,
-    error: null,
-    isLoading: false,
+    error: mockCustodySnapshots.error,
+    isLoading: mockCustodySnapshots.isLoading,
     capped: mockCustodySnapshots.capped,
   }),
   useStablesChanges: () => ({
     events: mockChanges.data,
-    error: null,
-    isLoading: false,
+    error: mockChanges.error,
+    isLoading: mockChanges.isLoading,
     capped: mockChanges.capped,
   }),
 }));
@@ -89,10 +95,16 @@ describe("StablesPageClient — smoke", () => {
   beforeEach(() => {
     mockSnapshots.data = [];
     mockSnapshots.capped = false;
+    mockSnapshots.error = null;
+    mockSnapshots.isLoading = false;
     mockChanges.data = [];
     mockChanges.capped = false;
+    mockChanges.error = null;
+    mockChanges.isLoading = false;
     mockCustodySnapshots.data = [];
     mockCustodySnapshots.capped = false;
+    mockCustodySnapshots.error = null;
+    mockCustodySnapshots.isLoading = false;
   });
 
   it("renders the page header on empty data", () => {
@@ -137,5 +149,21 @@ describe("StablesPageClient — smoke", () => {
     ];
     const html = renderToStaticMarkup(<StablesPageClient />);
     expect(html).toContain("Showing the most recent");
+  });
+
+  it("degrades custody query errors to raw supply instead of failing the page", () => {
+    mockSnapshots.data = [
+      snapshot({
+        timestamp: "1716336000",
+        totalSupply: "1000000000000000000000000",
+      }),
+    ];
+    mockCustodySnapshots.error = new Error("custody table unavailable");
+
+    const html = renderToStaticMarkup(<StablesPageClient />);
+
+    expect(html).toContain("USDm");
+    expect(html).not.toContain("Failed to load per-token data.");
+    expect(html).not.toContain("Failed to load chart data.");
   });
 });
