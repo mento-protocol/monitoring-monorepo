@@ -84,12 +84,15 @@ function mergeCurrentRows<T extends { chainId: number; tokenAddress: string }>(
   return Array.from(byToken.values());
 }
 
-function firstFeedError(
+export function mergedFeedError<T>(
+  mergedRows: ReadonlyArray<T>,
   currentError: Error | null | undefined,
   fallbackError: Error | null | undefined,
 ): Error | null | undefined {
-  // Consumers only use this as a degraded-state flag. If both feeds fail,
-  // showing the current-state error is enough to avoid hiding the failure.
+  if (mergedRows.length > 0) return null;
+  // Once both feeds produce no usable rows, surfacing the current-state error
+  // is enough to avoid hiding the failure while still preserving fallback-only
+  // rows during rollout or schema drift.
   return currentError ?? fallbackError;
 }
 
@@ -126,7 +129,7 @@ export function useStablesLatestPerToken() {
   }, [currentData, fallbackData]);
   return {
     snapshots,
-    error: firstFeedError(currentError, fallbackError),
+    error: mergedFeedError(snapshots, currentError, fallbackError),
     isLoading: currentLoading || fallbackLoading,
   };
 }
@@ -196,7 +199,7 @@ export function useStablesLatestCustodyPerToken() {
   }, [currentData, fallbackData]);
   return {
     snapshots,
-    error: firstFeedError(currentError, fallbackError),
+    error: mergedFeedError(snapshots, currentError, fallbackError),
     isLoading: currentLoading || fallbackLoading,
   };
 }
