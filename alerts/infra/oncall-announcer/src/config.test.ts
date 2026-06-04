@@ -7,7 +7,6 @@ const REQUIRED_ENV = {
   SLACK_SUPPORT_USERGROUP_ID: "S0123ABC456",
   SPLUNK_ON_CALL_API_ID: "api-id",
   SPLUNK_ON_CALL_API_KEY: "api-key",
-  SUPPORT_ISSUES_URL: "https://linear.app/mento-labs/team/SUP/all",
 };
 
 async function importConfig() {
