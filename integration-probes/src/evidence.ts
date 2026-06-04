@@ -6,8 +6,8 @@ const ADDRESS_EXACT_RE = /^0x[a-fA-F0-9]{40}$/;
 const HEX_PAYLOAD_RE = /^0x(?:[a-fA-F0-9]{2})+$/;
 const ABI_ADDRESS_PADDING = "0".repeat(24);
 const MENTO_LABEL_RE = /\bmento\b/i;
-const LABEL_KEYS = new Set([
-  "name",
+const ROUTE_VENUE_KEYS = [
+  "dex",
   "tool",
   "toolName",
   "provider",
@@ -15,7 +15,9 @@ const LABEL_KEYS = new Set([
   "source",
   "label",
   "providerType",
-]);
+] as const;
+const TOKEN_METADATA_PATH_RE =
+  /\.(?:fromToken|toToken|token|token0|token1|coin|coins)\b/;
 const TARGET_KEYS = new Set(["to", "target", "txTarget", "allowanceTarget"]);
 
 export type EvidenceAddressBook = {
@@ -78,9 +80,15 @@ function sourceLabelEvidence(strings: readonly StringAtPath[]): string[] {
 function firstInterestingLabel(
   strings: readonly StringAtPath[],
 ): string | null {
-  for (const item of strings) {
-    if (!LABEL_KEYS.has(item.key)) continue;
-    if (item.value.length > 0 && item.value.length <= 80) return item.value;
+  for (const key of ROUTE_VENUE_KEYS) {
+    const label = strings.find(
+      (item) =>
+        item.key === key &&
+        !TOKEN_METADATA_PATH_RE.test(item.path) &&
+        item.value.length > 0 &&
+        item.value.length <= 80,
+    );
+    if (label) return label.value;
   }
   return null;
 }

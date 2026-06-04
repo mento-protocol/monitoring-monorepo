@@ -97,4 +97,22 @@ describe("detectEvidence", () => {
     expect(result.sourceLabels).toEqual(["Mento"]);
     expect(result.evidence).toEqual([]);
   });
+
+  it("uses route venue fields instead of token names for downstream provider", () => {
+    const result = detectEvidence(
+      {
+        route: {
+          estimate: {
+            toToken: { name: "Mento Swiss Franc" },
+            actions: [{ data: { dex: "Uniswap V3" } }],
+          },
+        },
+      },
+      { routerAddresses: [ROUTER], poolAddresses: [POOL] },
+    );
+
+    expect(result.passes).toBe(false);
+    expect(result.sourceLabels).toEqual(["Mento Swiss Franc"]);
+    expect(result.downstreamProvider).toBe("Uniswap V3");
+  });
 });
