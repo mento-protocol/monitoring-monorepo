@@ -8,11 +8,11 @@ import { tokenColorForSource } from "@/lib/token-colors";
 import {
   buildTokenUsdTimeSeries,
   computeChartStartSeconds,
+  custodySnapshotsAlignedToSupplyRows,
   custodyTokenKey,
   groupCustodySnapshotsByToken,
   groupSnapshotsByTokenSource,
   rollupByToken,
-  unionCustodySnapshotsWithLatest,
   unionSnapshotsWithLatest,
 } from "../_lib/aggregate";
 import { sparklinePoints } from "../_lib/sparkline";
@@ -57,7 +57,8 @@ export function StablesSparklineGrid({
   const cards = useMemo(() => {
     if (snapshots.length === 0 && latestPerToken.length === 0) return [];
     const merged = unionSnapshotsWithLatest(snapshots, latestPerToken);
-    const mergedCustody = unionCustodySnapshotsWithLatest(
+    const mergedCustody = custodySnapshotsAlignedToSupplyRows(
+      merged,
       custodySnapshots,
       latestCustodyPerToken,
     );

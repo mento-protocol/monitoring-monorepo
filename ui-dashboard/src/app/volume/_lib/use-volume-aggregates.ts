@@ -10,7 +10,7 @@ import {
 } from "@/lib/volume";
 import {
   aggregateAggregatorsByWindow,
-  selectAggregatorRowsForSystemToggle,
+  selectAggregatorRowsForActorFilter,
   type AggregatorDailyRow,
 } from "@/lib/volume-aggregators";
 import {
@@ -136,7 +136,7 @@ function useVolumeExclusionModel({
   );
   const selectedV3AggregatorRows = useMemo(
     () =>
-      selectAggregatorRowsForSystemToggle(
+      selectAggregatorRowsForActorFilter(
         v3AggregatorRows,
         includeProtocolActors,
       ),
@@ -154,7 +154,7 @@ function useVolumeExclusionModel({
     () =>
       includeProtocolActors
         ? v2AggregatorRows
-        : v2AggregatorRows.filter((r) => r.aggregator !== "system"),
+        : v2AggregatorRows.filter((r) => r.aggregator !== "protocol"),
     [v2AggregatorRows, includeProtocolActors],
   );
   const filteredV2AggregatorRows = useMemo(

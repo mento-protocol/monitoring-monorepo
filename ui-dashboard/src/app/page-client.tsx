@@ -22,7 +22,6 @@ import {
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { useGQL } from "@/lib/graphql";
 import {
-  LEGACY_VOLUME_WINDOW_TRADERS_LATEST,
   VOLUME_TODAY_TRADERS,
   VOLUME_WINDOW_TRADERS_LATEST,
 } from "@/lib/queries/volume";
@@ -36,11 +35,6 @@ type VolumeWindowTradersLatest = z.infer<
   typeof VolumeWindowTradersLatestSchema
 >;
 type VolumeTodayTraders = z.infer<typeof VolumeTodayTradersSchema>;
-type GqlState<T> = {
-  data: T | undefined;
-  isLoading: boolean;
-  error: unknown;
-};
 
 const SECONDS_PER_DAY = 86_400;
 
@@ -474,7 +468,7 @@ function TradersTile({
   const todayMidnight = utcDayKey * SECONDS_PER_DAY;
   const todayGql = useGQL<VolumeTodayTraders>(
     VOLUME_TODAY_TRADERS,
-    { todayMidnight, isSystemAddressIn: [false] },
+    { todayMidnight, isProtocolActorIn: [false] },
     {
       schema: VolumeTodayTradersSchema,
       refreshInterval: 5 * 60_000,
@@ -606,8 +600,8 @@ function TradersTile({
   return <Tile label="Traders" value={value} subtitle={subtitle} />;
 }
 
-function useVolumeWindowTradersSnapshot(): GqlState<VolumeWindowTradersLatest> {
-  const primarySnapshotGql = useGQL<VolumeWindowTradersLatest>(
+function useVolumeWindowTradersSnapshot() {
+  return useGQL<VolumeWindowTradersLatest>(
     VOLUME_WINDOW_TRADERS_LATEST,
     { windowKey: "all" },
     {
@@ -623,18 +617,6 @@ function useVolumeWindowTradersSnapshot(): GqlState<VolumeWindowTradersLatest> {
       timeoutMs: 30_000,
     },
   );
-  const legacySnapshotGql = useGQL<VolumeWindowTradersLatest>(
-    primarySnapshotGql.error && !primarySnapshotGql.data
-      ? LEGACY_VOLUME_WINDOW_TRADERS_LATEST
-      : null,
-    { windowKey: "all" },
-    {
-      schema: VolumeWindowTradersLatestSchema,
-      refreshInterval: 5 * 60_000,
-      timeoutMs: 30_000,
-    },
-  );
-  return preferPrimaryGqlResult(primarySnapshotGql, legacySnapshotGql);
 }
 
 // Minute-polled UTC-day ticker. Returns an integer day-since-epoch
@@ -662,12 +644,4 @@ function useUtcDayKey(): number {
     return () => window.clearInterval(id);
   }, []);
   return key;
-}
-
-function preferPrimaryGqlResult<T>(
-  primary: GqlState<T>,
-  fallback: GqlState<T>,
-): GqlState<T> {
-  if (primary.data || primary.isLoading || !primary.error) return primary;
-  return fallback;
 }

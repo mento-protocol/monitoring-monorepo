@@ -204,6 +204,7 @@ export const STABLES_CHANGES = `
       counterparty
       caller
       txTo
+      isProtocolOwnedCaller
       amount
       txHash
       blockNumber

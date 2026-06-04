@@ -15,7 +15,7 @@
 
 import { getContractAddress } from "../../contractAddresses.js";
 import { asAddress } from "../../helpers.js";
-import { nttBridgeAddressesForChain } from "../../system-addresses.js";
+import { nttBridgeAddressesForChain } from "../../protocol-actors.js";
 
 export type StableSupplyChangeKind =
   | "RESERVE_MINT"

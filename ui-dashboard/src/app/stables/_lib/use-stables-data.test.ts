@@ -13,4 +13,10 @@ describe("mergedFeedError", () => {
 
     expect(mergedFeedError([], currentError, null)).toBe(currentError);
   });
+
+  it("surfaces fallback errors even when current rows are usable", () => {
+    const fallbackError = new Error("daily fallback unavailable");
+
+    expect(mergedFeedError([{}], null, fallbackError)).toBe(fallbackError);
+  });
 });

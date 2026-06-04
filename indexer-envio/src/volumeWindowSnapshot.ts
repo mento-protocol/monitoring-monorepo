@@ -71,7 +71,7 @@ export interface TraderWindowAggregate {
   trader: string;
   volumeUsdWei: bigint;
   swapCount: number;
-  isSystemAddress: boolean;
+  isProtocolActor: boolean;
   /** Volume contributed on `windowStartDay` only. 0 outside that day. */
   firstDayVolumeUsdWei: bigint;
   /** Swap count on `windowStartDay` only. 0 outside that day. */
@@ -92,7 +92,7 @@ export interface TraderDailyRow {
   timestamp: bigint;
   volumeUsdWei: bigint;
   swapCount: number;
-  isSystemAddress: boolean;
+  isProtocolActor: boolean;
 }
 
 /** Group raw daily-snapshot rows by trader, summed across each window's
@@ -137,10 +137,10 @@ export function aggregatePerWindow(
       if (existing) {
         existing.volumeUsdWei += r.volumeUsdWei;
         existing.swapCount += r.swapCount;
-        // Sticky-true: a trader flagged system on any day stays system in
+        // Sticky-true: a trader flagged as a protocol actor on any day stays a protocol actor in
         // the window aggregate. Mirrors TraderDailySnapshot's per-day rule.
-        existing.isSystemAddress =
-          existing.isSystemAddress || r.isSystemAddress;
+        existing.isProtocolActor =
+          existing.isProtocolActor || r.isProtocolActor;
         if (isFirstDay) {
           existing.firstDayVolumeUsdWei += r.volumeUsdWei;
           existing.firstDaySwapCount += r.swapCount;
@@ -152,7 +152,7 @@ export function aggregatePerWindow(
           trader: r.trader,
           volumeUsdWei: r.volumeUsdWei,
           swapCount: r.swapCount,
-          isSystemAddress: r.isSystemAddress,
+          isProtocolActor: r.isProtocolActor,
           firstDayVolumeUsdWei: isFirstDay ? r.volumeUsdWei : 0n,
           firstDaySwapCount: isFirstDay ? r.swapCount : 0,
           // For windows without a first-day boundary (`all` / `24h`),
@@ -183,7 +183,7 @@ export interface BuildSnapshotArgs {
  *  is identical (see schema.graphql). `aggregatePerWindow` already dedupes
  *  per-trader, so each entry in `aggregates` is one unique trader. The
  *  primary `total*` fields exclude protocol actors to match the dashboard's
- *  default "Include protocol actors = off" view; sibling `*IncludingSystem`
+ *  default "Include protocol actors = off" view; sibling `*IncludingProtocolActors`
  *  fields keep the all-up totals for the toggle-on case.
  *
  *  The `firstDay*` fields ship the snapshot's `windowStartDay` slice so
@@ -198,39 +198,39 @@ export function buildVolumeWindowSnapshot(
   args: BuildSnapshotArgs,
 ): VolumeWindowSnapshot {
   let totalVolumeUsdWei = 0n;
-  let totalVolumeUsdWeiIncludingSystem = 0n;
+  let totalVolumeUsdWeiIncludingProtocolActors = 0n;
   let totalSwapCount = 0;
-  let totalSwapCountIncludingSystem = 0;
-  let nonSystemCount = 0;
+  let totalSwapCountIncludingProtocolActors = 0;
+  let organicTraderCount = 0;
   let firstDayVolumeUsdWei = 0n;
-  let firstDayVolumeUsdWeiIncludingSystem = 0n;
+  let firstDayVolumeUsdWeiIncludingProtocolActors = 0n;
   let firstDaySwapCount = 0;
-  let firstDaySwapCountIncludingSystem = 0;
+  let firstDaySwapCountIncludingProtocolActors = 0;
   let firstDayExclusiveUniqueTraders = 0;
-  let firstDayExclusiveUniqueTradersIncludingSystem = 0;
+  let firstDayExclusiveUniqueTradersIncludingProtocolActors = 0;
   const firstDayExclusiveTraders: string[] = [];
-  const firstDayExclusiveTradersIncludingSystem: string[] = [];
+  const firstDayExclusiveTradersIncludingProtocolActors: string[] = [];
   const windowTraders: string[] = [];
-  const windowTradersIncludingSystem: string[] = [];
+  const windowTradersIncludingProtocolActors: string[] = [];
   for (const a of args.aggregates) {
-    totalVolumeUsdWeiIncludingSystem += a.volumeUsdWei;
-    totalSwapCountIncludingSystem += a.swapCount;
-    firstDayVolumeUsdWeiIncludingSystem += a.firstDayVolumeUsdWei;
-    firstDaySwapCountIncludingSystem += a.firstDaySwapCount;
+    totalVolumeUsdWeiIncludingProtocolActors += a.volumeUsdWei;
+    totalSwapCountIncludingProtocolActors += a.swapCount;
+    firstDayVolumeUsdWeiIncludingProtocolActors += a.firstDayVolumeUsdWei;
+    firstDaySwapCountIncludingProtocolActors += a.firstDaySwapCount;
     // Explicit lowercase pins the schema's "Sorted lowercase" invariant
     // at this layer rather than implicitly relying on upstream handlers
     // (TraderDailySnapshot.trader is set from `tx.from` via the
     // lowercased `asAddress` helper today, but the indexer is the right
     // boundary to enforce the invariant the schema documents).
-    windowTradersIncludingSystem.push(a.trader.toLowerCase());
+    windowTradersIncludingProtocolActors.push(a.trader.toLowerCase());
     if (!a.activeOutsideFirstDay) {
-      firstDayExclusiveUniqueTradersIncludingSystem += 1;
-      firstDayExclusiveTradersIncludingSystem.push(a.trader);
+      firstDayExclusiveUniqueTradersIncludingProtocolActors += 1;
+      firstDayExclusiveTradersIncludingProtocolActors.push(a.trader);
     }
-    if (!a.isSystemAddress) {
+    if (!a.isProtocolActor) {
       totalVolumeUsdWei += a.volumeUsdWei;
       totalSwapCount += a.swapCount;
-      nonSystemCount += 1;
+      organicTraderCount += 1;
       firstDayVolumeUsdWei += a.firstDayVolumeUsdWei;
       firstDaySwapCount += a.firstDaySwapCount;
       windowTraders.push(a.trader.toLowerCase());
@@ -241,9 +241,9 @@ export function buildVolumeWindowSnapshot(
     }
   }
   firstDayExclusiveTraders.sort();
-  firstDayExclusiveTradersIncludingSystem.sort();
+  firstDayExclusiveTradersIncludingProtocolActors.sort();
   windowTraders.sort();
-  windowTradersIncludingSystem.sort();
+  windowTradersIncludingProtocolActors.sort();
   return {
     id: `${args.chainId}-${args.windowKey}-${args.snapshotDay}`,
     chainId: args.chainId,
@@ -251,21 +251,21 @@ export function buildVolumeWindowSnapshot(
     snapshotDay: args.snapshotDay,
     windowStartDay: args.windowStartDay,
     totalVolumeUsdWei,
-    totalVolumeUsdWeiIncludingSystem,
+    totalVolumeUsdWeiIncludingProtocolActors,
     totalSwapCount,
-    totalSwapCountIncludingSystem,
-    uniqueTraders: nonSystemCount,
-    uniqueTradersIncludingSystem: args.aggregates.length,
+    totalSwapCountIncludingProtocolActors,
+    uniqueTraders: organicTraderCount,
+    uniqueTradersIncludingProtocolActors: args.aggregates.length,
     firstDayVolumeUsdWei,
-    firstDayVolumeUsdWeiIncludingSystem,
+    firstDayVolumeUsdWeiIncludingProtocolActors,
     firstDaySwapCount,
-    firstDaySwapCountIncludingSystem,
+    firstDaySwapCountIncludingProtocolActors,
     firstDayExclusiveUniqueTraders,
-    firstDayExclusiveUniqueTradersIncludingSystem,
+    firstDayExclusiveUniqueTradersIncludingProtocolActors,
     firstDayExclusiveTraders,
-    firstDayExclusiveTradersIncludingSystem,
+    firstDayExclusiveTradersIncludingProtocolActors,
     windowTraders,
-    windowTradersIncludingSystem,
+    windowTradersIncludingProtocolActors,
     blockNumber: args.blockNumber,
     updatedAtTimestamp: args.updatedAtTimestamp,
   };

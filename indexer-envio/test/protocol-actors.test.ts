@@ -1,9 +1,9 @@
 import { strict as assert } from "assert";
 import {
   isProtocolActorEntryPoint,
-  isSystemAddress,
-  _staticSystemAddressesForChain,
-} from "../src/system-addresses.js";
+  isProtocolOwnedAddress,
+  _protocolOwnedAddressesForChain,
+} from "../src/protocol-actors.js";
 
 const CHAIN_CELO = 42220;
 const CHAIN_MONAD = 143;
@@ -27,53 +27,56 @@ const TEST_MANUAL_PROTOCOL_ACTOR = "0x0000000000000000000000000000000000000a11";
 // A random non-Mento EOA (one of Vitalik's addresses, not relevant to Mento).
 const NOT_MENTO = "0xab5801a7d398351b8be11c439e05c5b3259aec9b";
 
-describe("isSystemAddress", () => {
-  it("flags the Celo Broker as a system address", () => {
-    assert.equal(isSystemAddress(CHAIN_CELO, CELO_BROKER), true);
+describe("isProtocolOwnedAddress", () => {
+  it("flags the Celo Broker as a protocol-owned address", () => {
+    assert.equal(isProtocolOwnedAddress(CHAIN_CELO, CELO_BROKER), true);
   });
 
   it("flags the Celo BiPoolManager + Reserve + ProtocolFeeRecipient", () => {
-    assert.equal(isSystemAddress(CHAIN_CELO, CELO_BIPOOLMANAGER), true);
-    assert.equal(isSystemAddress(CHAIN_CELO, CELO_RESERVE), true);
+    assert.equal(isProtocolOwnedAddress(CHAIN_CELO, CELO_BIPOOLMANAGER), true);
+    assert.equal(isProtocolOwnedAddress(CHAIN_CELO, CELO_RESERVE), true);
     assert.equal(
-      isSystemAddress(CHAIN_CELO, CELO_PROTOCOL_FEE_RECIPIENT),
+      isProtocolOwnedAddress(CHAIN_CELO, CELO_PROTOCOL_FEE_RECIPIENT),
       true,
     );
   });
 
-  it("flags Monad system contracts (FPMMFactory, ReserveV2)", () => {
-    assert.equal(isSystemAddress(CHAIN_MONAD, MONAD_FPMM_FACTORY), true);
-    assert.equal(isSystemAddress(CHAIN_MONAD, MONAD_RESERVE_V2), true);
+  it("flags Monad protocol contracts (FPMMFactory, ReserveV2)", () => {
+    assert.equal(isProtocolOwnedAddress(CHAIN_MONAD, MONAD_FPMM_FACTORY), true);
+    assert.equal(isProtocolOwnedAddress(CHAIN_MONAD, MONAD_RESERVE_V2), true);
   });
 
   it("flags Monad NTT transceiver proxies from nttAddresses.json", () => {
     assert.equal(
-      isSystemAddress(CHAIN_MONAD, MONAD_NTT_TRANSCEIVER_CHFM),
+      isProtocolOwnedAddress(CHAIN_MONAD, MONAD_NTT_TRANSCEIVER_CHFM),
       true,
     );
   });
 
   it("is case-insensitive on the input address", () => {
-    assert.equal(isSystemAddress(CHAIN_CELO, CELO_BROKER.toUpperCase()), true);
+    assert.equal(
+      isProtocolOwnedAddress(CHAIN_CELO, CELO_BROKER.toUpperCase()),
+      true,
+    );
   });
 
   it("returns false for an unrelated EOA", () => {
-    assert.equal(isSystemAddress(CHAIN_CELO, NOT_MENTO), false);
-    assert.equal(isSystemAddress(CHAIN_MONAD, NOT_MENTO), false);
+    assert.equal(isProtocolOwnedAddress(CHAIN_CELO, NOT_MENTO), false);
+    assert.equal(isProtocolOwnedAddress(CHAIN_MONAD, NOT_MENTO), false);
   });
 
   it("returns false for empty string", () => {
-    assert.equal(isSystemAddress(CHAIN_CELO, ""), false);
+    assert.equal(isProtocolOwnedAddress(CHAIN_CELO, ""), false);
   });
 
   it("returns false for unknown chainId (defensive: no entries → false)", () => {
-    assert.equal(isSystemAddress(99999, CELO_BROKER), false);
+    assert.equal(isProtocolOwnedAddress(99999, CELO_BROKER), false);
   });
 
   it("flags a per-pool rebalancer EOA when pool is provided", () => {
     const fakeRebalancer = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
     assert.equal(
-      isSystemAddress(CHAIN_CELO, fakeRebalancer, {
+      isProtocolOwnedAddress(CHAIN_CELO, fakeRebalancer, {
         rebalancerAddress: fakeRebalancer,
       }),
       true,
@@ -82,13 +85,13 @@ describe("isSystemAddress", () => {
 
   it("does not flag a rebalancer-shaped address when pool is missing", () => {
     const fakeRebalancer = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
-    assert.equal(isSystemAddress(CHAIN_CELO, fakeRebalancer), false);
+    assert.equal(isProtocolOwnedAddress(CHAIN_CELO, fakeRebalancer), false);
   });
 
   it("rebalancer comparison is case-insensitive", () => {
     const fakeRebalancer = "0xDEADBEEFdeadbeefdeadbeefdeadbeefDEADBEEF";
     assert.equal(
-      isSystemAddress(CHAIN_CELO, fakeRebalancer.toLowerCase(), {
+      isProtocolOwnedAddress(CHAIN_CELO, fakeRebalancer.toLowerCase(), {
         rebalancerAddress: fakeRebalancer,
       }),
       true,
@@ -133,39 +136,39 @@ describe("isSystemAddress", () => {
   });
 });
 
-describe("_staticSystemAddressesForChain", () => {
+describe("_protocolOwnedAddressesForChain", () => {
   it("Celo set includes >5 contracts", () => {
-    const set = _staticSystemAddressesForChain(CHAIN_CELO);
+    const set = _protocolOwnedAddressesForChain(CHAIN_CELO);
     assert.ok(
       set.size > 5,
-      `expected >5 Celo system contracts, got ${set.size}`,
+      `expected >5 Celo protocol contracts, got ${set.size}`,
     );
   });
 
   it("Monad set includes >5 contracts", () => {
-    const set = _staticSystemAddressesForChain(CHAIN_MONAD);
+    const set = _protocolOwnedAddressesForChain(CHAIN_MONAD);
     assert.ok(
       set.size > 5,
-      `expected >5 Monad system contracts, got ${set.size}`,
+      `expected >5 Monad protocol contracts, got ${set.size}`,
     );
   });
 
-  it("Testnet chains (Alfajores 11142220, Monad testnet 10143) are seeded so testnet runs get correct system-flow filtering", () => {
+  it("Testnet chains (Alfajores 11142220, Monad testnet 10143) are seeded so testnet runs get correct protocol-flow filtering", () => {
     // Source of truth: config/deployment-namespaces.json. Both testnet chains
     // ship in @mento-protocol/contracts under the testnet-v2-rc5 namespace.
-    const alfajoresSet = _staticSystemAddressesForChain(11142220);
-    const monadTestnetSet = _staticSystemAddressesForChain(10143);
+    const alfajoresSet = _protocolOwnedAddressesForChain(11142220);
+    const monadTestnetSet = _protocolOwnedAddressesForChain(10143);
     assert.ok(
       alfajoresSet.size > 0,
-      `expected non-empty Alfajores system set, got ${alfajoresSet.size}`,
+      `expected non-empty Alfajores protocol-owned set, got ${alfajoresSet.size}`,
     );
     assert.ok(
       monadTestnetSet.size > 0,
-      `expected non-empty Monad-testnet system set, got ${monadTestnetSet.size}`,
+      `expected non-empty Monad-testnet protocol-owned set, got ${monadTestnetSet.size}`,
     );
   });
 
   it("unknown chain returns empty set", () => {
-    assert.equal(_staticSystemAddressesForChain(99999).size, 0);
+    assert.equal(_protocolOwnedAddressesForChain(99999).size, 0);
   });
 });

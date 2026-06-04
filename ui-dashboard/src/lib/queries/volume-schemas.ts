@@ -28,7 +28,7 @@ const VolumePartialTraderRowSchema = z.object({
   trader: z.string(),
   volumeUsdWei: z.string(),
   swapCount: z.number(),
-  isSystemAddress: z.boolean(),
+  isProtocolActor: z.boolean(),
 });
 
 /** Fields shared by VOLUME_WINDOW_FIRSTDAY_LATEST variants. */
@@ -36,11 +36,11 @@ const VolumeWindowFirstDayRowSchema = z.object({
   chainId: z.number(),
   snapshotDay: z.string(),
   firstDayVolumeUsdWei: z.string(),
-  firstDayVolumeUsdWeiIncludingSystem: z.string(),
+  firstDayVolumeUsdWeiIncludingProtocolActors: z.string(),
   firstDaySwapCount: z.number(),
-  firstDaySwapCountIncludingSystem: z.number(),
+  firstDaySwapCountIncludingProtocolActors: z.number(),
   firstDayExclusiveUniqueTraders: z.number(),
-  firstDayExclusiveUniqueTradersIncludingSystem: z.number(),
+  firstDayExclusiveUniqueTradersIncludingProtocolActors: z.number(),
 });
 
 /** Fields shared by VOLUME_WINDOW_LATEST variants. */
@@ -51,11 +51,11 @@ const VolumeWindowRowSchema = z.object({
   snapshotDay: z.string(),
   windowStartDay: z.string(),
   totalVolumeUsdWei: z.string(),
-  totalVolumeUsdWeiIncludingSystem: z.string(),
+  totalVolumeUsdWeiIncludingProtocolActors: z.string(),
   totalSwapCount: z.number(),
-  totalSwapCountIncludingSystem: z.number(),
+  totalSwapCountIncludingProtocolActors: z.number(),
   uniqueTraders: z.number(),
-  uniqueTradersIncludingSystem: z.number(),
+  uniqueTradersIncludingProtocolActors: z.number(),
 });
 
 /** Fields shared by VOLUME_PARTIAL_OVERLAP_TRADERS variants. */
@@ -63,7 +63,7 @@ const VolumePartialOverlapRowSchema = z.object({
   chainId: z.number(),
   trader: z.string(),
   timestamp: z.string(),
-  isSystemAddress: z.boolean(),
+  isProtocolActor: z.boolean(),
 });
 
 // ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ const TraderDailyRowSchema = z.object({
   uniquePools: z.number(),
   volumeUsdWei: z.string(),
   feesPaidUsdWei: z.string(),
-  isSystemAddress: z.boolean(),
+  isProtocolActor: z.boolean(),
   aggregatorKeys: z.array(z.string()).default([]),
   lastSeenTimestamp: z.string(),
 });
@@ -167,9 +167,9 @@ const PoolDailyVolumeRowSchema = z.object({
   poolId: z.string(),
   timestamp: z.string(),
   swapCount: z.number(),
-  swapCountIncludingSystem: z.number(),
+  swapCountIncludingProtocolActors: z.number(),
   volumeUsdWei: z.string(),
-  volumeUsdWeiIncludingSystem: z.string(),
+  volumeUsdWeiIncludingProtocolActors: z.string(),
 });
 
 export const PoolDailyVolumeSchema = z.object({
@@ -177,7 +177,7 @@ export const PoolDailyVolumeSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// AGGREGATOR_DAILY_TOP / AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM
+// AGGREGATOR_DAILY_TOP / AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS
 // ---------------------------------------------------------------------------
 
 const AggregatorDailyRowSchema = z.object({
@@ -187,14 +187,14 @@ const AggregatorDailyRowSchema = z.object({
   lastSeenAggregatorAddress: z.string(),
   timestamp: z.string(),
   swapCount: z.number(),
-  swapCountIncludingSystem: z.number(),
+  swapCountIncludingProtocolActors: z.number(),
   uniqueTraders: z.number(),
-  uniqueTradersIncludingSystem: z.number(),
+  uniqueTradersIncludingProtocolActors: z.number(),
   volumeUsdWei: z.string(),
-  volumeUsdWeiIncludingSystem: z.string(),
+  volumeUsdWeiIncludingProtocolActors: z.string(),
 });
 
-// Used for both AGGREGATOR_DAILY_TOP and AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM
+// Used for both AGGREGATOR_DAILY_TOP and AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS
 // queries — they select the same fields from AggregatorDailySnapshot and differ
 // only in their WHERE/ORDER_BY clause, not the response shape.
 export const AggregatorDailyTopSchema = z.object({
@@ -213,7 +213,7 @@ const BrokerTraderDailyRowSchema = z.object({
   timestamp: z.string(),
   swapCount: z.number(),
   volumeUsdWei: z.string(),
-  isSystemAddress: z.boolean(),
+  isProtocolActor: z.boolean(),
   lastSeenTimestamp: z.string(),
 });
 

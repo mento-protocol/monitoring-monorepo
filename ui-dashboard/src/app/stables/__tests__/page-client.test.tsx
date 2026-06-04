@@ -82,7 +82,7 @@ function snapshot(
   overrides: Partial<StableSupplyDailySnapshot> &
     Pick<StableSupplyDailySnapshot, "timestamp" | "totalSupply">,
 ): StableSupplyDailySnapshot {
-  return {
+  const row: StableSupplyDailySnapshot = {
     id: `42220-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
     chainId: 42220,
     tokenAddress: overrides.tokenAddress ?? "0xa",
@@ -94,6 +94,10 @@ function snapshot(
     dailyMintAmount: overrides.dailyMintAmount ?? "0",
     dailyBurnAmount: overrides.dailyBurnAmount ?? "0",
   };
+  if (overrides.isCurrentState !== undefined) {
+    row.isCurrentState = overrides.isCurrentState;
+  }
+  return row;
 }
 
 function custodySnapshot(
@@ -183,6 +187,7 @@ describe("StablesPageClient — smoke", () => {
       snapshot({
         timestamp: "1716336000",
         totalSupply: "1000000000000000000000000",
+        isCurrentState: true,
       }),
     ];
     mockLatestCustodyPerToken.error = new Error(
@@ -225,6 +230,7 @@ describe("StablesPageClient — smoke", () => {
       snapshot({
         timestamp: "1716336000",
         totalSupply: "1000000000000000000000000",
+        isCurrentState: true,
       }),
     ];
     mockLatestCustodyPerToken.data = [

@@ -79,7 +79,7 @@ function useVolumePageModel({
   utcDayKey,
   updateRange,
 }: VolumeUrlState) {
-  const isSystemAddressIn = useMemo(
+  const isProtocolActorIn = useMemo(
     () => (includeProtocolActors ? [false, true] : [false]),
     [includeProtocolActors],
   );
@@ -88,7 +88,7 @@ function useVolumePageModel({
     venue,
     cutoff,
     includeProtocolActors,
-    isSystemAddressIn,
+    isProtocolActorIn,
     showChart,
   });
   const rows = readVolumeRows(queries);
@@ -107,7 +107,7 @@ function useVolumePageModel({
   });
   const poolMeta = usePoolMeta(rows.poolRows);
   const poolChart = usePoolChartViewModel({
-    showSystem: includeProtocolActors,
+    includeProtocolActors: includeProtocolActors,
     poolVolumeRows: rows.poolVolumeRows,
     poolMeta,
     cutoff,
@@ -125,8 +125,8 @@ function useVolumePageModel({
   const hero = useHeroRollup({
     venue,
     range,
-    showSystem: includeProtocolActors,
-    isSystemAddressIn,
+    includeProtocolActors: includeProtocolActors,
+    isProtocolActorIn,
     utcDayKey,
     kpiSource,
   });
@@ -136,7 +136,7 @@ function useVolumePageModel({
     hero.isLoading || hero.hasError ? "" : formatUSD(hero.totalVolume);
 
   return {
-    isSystemAddressIn,
+    isProtocolActorIn,
     showChart,
     rows,
     aggregates,
@@ -154,13 +154,13 @@ function useVolumeQueries({
   venue,
   cutoff,
   includeProtocolActors,
-  isSystemAddressIn,
+  isProtocolActorIn,
   showChart,
 }: {
   venue: VolumeUrlState["venue"];
   cutoff: number;
   includeProtocolActors: boolean;
-  isSystemAddressIn: ReadonlyArray<boolean>;
+  isProtocolActorIn: ReadonlyArray<boolean>;
   showChart: boolean;
 }) {
   // Each venue's queries are gated to its tab so we don't burn Envio quota
@@ -170,7 +170,7 @@ function useVolumeQueries({
     venue === "v3" ? TRADER_DAILY_TOP : null,
     {
       afterTimestamp: cutoff,
-      isSystemAddressIn,
+      isProtocolActorIn,
       limit: ENVIO_MAX_ROWS,
     },
     { timeoutMs: 8_000, schema: TraderDailyTopSchema },
@@ -195,7 +195,7 @@ function useVolumeQueries({
     BrokerTraderDailySnapshot: BrokerTraderDailyRow[];
   }>(
     venue === "v2" ? BROKER_TRADER_DAILY_TOP : null,
-    { afterTimestamp: cutoff, isSystemAddressIn, limit: ENVIO_MAX_ROWS },
+    { afterTimestamp: cutoff, isProtocolActorIn, limit: ENVIO_MAX_ROWS },
     { timeoutMs: 8_000, schema: BrokerTraderDailyTopSchema },
   );
   const v2AggregatorsResult = useGQL<{

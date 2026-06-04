@@ -23,8 +23,8 @@ import { UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
 import { getContractAddress } from "../contractAddresses.js";
 import {
   isProtocolActorEntryPoint,
-  isSystemAddress,
-} from "../system-addresses.js";
+  isProtocolOwnedAddress,
+} from "../protocol-actors.js";
 import { classifyAggregator } from "../aggregators.js";
 import { maybeHeartbeatFlushV2 } from "../volumeWindowFlush.js";
 import { buildSwapAddressFields } from "../swap.js";
@@ -104,8 +104,8 @@ async function writeBrokerProducerRollups(args: {
     blockTimestamp,
     volumeUsdWei,
   } = args;
-  const callerIsSystem =
-    isSystemAddress(chainId, caller) ||
+  const callerIsProtocolActor =
+    isProtocolOwnedAddress(chainId, caller) ||
     isProtocolActorEntryPoint(chainId, txTo);
   const callerDayId = `${chainId}-${caller}-${dayTs}`;
   const aggregator = classifyBrokerEntryPoint(chainId, txTo);
@@ -130,9 +130,9 @@ async function writeBrokerProducerRollups(args: {
     timestamp: dayTs,
     swapCount: (existingCallerDay?.swapCount ?? 0) + 1,
     volumeUsdWei: (existingCallerDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
-    isSystemAddress: existingCallerDay
-      ? existingCallerDay.isSystemAddress || callerIsSystem
-      : callerIsSystem,
+    isProtocolActor: existingCallerDay
+      ? existingCallerDay.isProtocolActor || callerIsProtocolActor
+      : callerIsProtocolActor,
     lastSeenTimestamp: blockTimestamp,
   });
 
@@ -362,18 +362,18 @@ indexer.onEvent(
     //
     // We deliberately check ONLY `caller` (signer EOA) plus the narrow
     // protocol-actor entry-point set, not every `brokerCaller`.
-    // Mento's `system-addresses` set includes both true protocol-internal
+    // Mento's `protocol-owned addresses` set includes both true protocol-internal
     // contracts (Reserve, MigrationMultisig, ReserveLiquidityStrategy) AND
     // user-facing routers that wrap normal swaps (MentoRouter v1/v2,
     // Routerv300). OR-checking `brokerCaller` would correctly catch a
     // hypothetical Safe-initiated treasury swap (where the Safe is the
     // brokerCaller and the owner EOA is the caller) — but it would also
     // wrongly hide every user who routes through MentoRouter, since the
-    // Router contract is in the same flat system-addresses list. The
+    // Router contract is in the same flat protocol-owned addresses list. The
     // false-positive cost (hiding real users) outweighs the missed-Safe
     // edge case; if the Safe-treasury path becomes load-bearing we can
-    // either split system-addresses into "internal" vs "router" tiers, or
-    // register the Safe owner EOAs in system-addresses directly. For now
+    // either split protocol-owned addresses into "internal" vs "router" tiers, or
+    // register the Safe owner EOAs in protocol-owned addresses directly. For now
     // signer-EOA matching is the safer rule — codex flagged the OR-form
     // as a P1 false-positive on PR #363.
     await writeBrokerProducerRollups({

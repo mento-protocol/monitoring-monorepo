@@ -35,7 +35,6 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
-  LEGACY_VOLUME_WINDOW_LATEST,
   VOLUME_PARTIAL_OVERLAP_TRADERS,
   VOLUME_TODAY_TRADERS,
   VOLUME_WINDOW_FIRSTDAY_LATEST,
@@ -102,11 +101,11 @@ function snapshot(
     snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
     windowStartDay: String(TWO_DAYS_AGO_MIDNIGHT - 5 * SECONDS_PER_DAY),
     totalVolumeUsdWei: "1000000000000000000000",
-    totalVolumeUsdWeiIncludingSystem: "1000000000000000000000",
+    totalVolumeUsdWeiIncludingProtocolActors: "1000000000000000000000",
     totalSwapCount: 50,
-    totalSwapCountIncludingSystem: 50,
+    totalSwapCountIncludingProtocolActors: 50,
     uniqueTraders: 10,
-    uniqueTradersIncludingSystem: 10,
+    uniqueTradersIncludingProtocolActors: 10,
     ...overrides,
   };
 }
@@ -117,11 +116,11 @@ function firstDaySlice(
   return {
     snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
     firstDayVolumeUsdWei: "100000000000000000000",
-    firstDayVolumeUsdWeiIncludingSystem: "100000000000000000000",
+    firstDayVolumeUsdWeiIncludingProtocolActors: "100000000000000000000",
     firstDaySwapCount: 5,
-    firstDaySwapCountIncludingSystem: 5,
+    firstDaySwapCountIncludingProtocolActors: 5,
     firstDayExclusiveUniqueTraders: 1,
-    firstDayExclusiveUniqueTradersIncludingSystem: 1,
+    firstDayExclusiveUniqueTradersIncludingProtocolActors: 1,
     ...overrides,
   };
 }
@@ -135,7 +134,7 @@ function yesterdayRow(
     trader,
     volumeUsdWei,
     swapCount: 1,
-    isSystemAddress: false,
+    isProtocolActor: false,
   };
 }
 
@@ -149,8 +148,8 @@ function Probe({ resultRef }: { resultRef: { current: HookResult | null } }) {
   resultRef.current = useHeroRollup({
     venue: "v3",
     range: "7d",
-    showSystem: false,
-    isSystemAddressIn: [false],
+    includeProtocolActors: false,
+    isProtocolActorIn: [false],
     utcDayKey: 0,
     kpiSource: [],
   });
@@ -192,31 +191,6 @@ function render(): { current: HookResult | null } {
 // ---------------------------------------------------------------------------
 
 describe("useHeroRollup orchestration", () => {
-  it("falls back to the previous snapshot entity name when the renamed hero query errors", () => {
-    gqlResponses.set(VOLUME_WINDOW_LATEST, {
-      data: undefined,
-      isLoading: false,
-      error: new Error("field VolumeWindowSnapshot not found"),
-    });
-    gqlResponses.set(LEGACY_VOLUME_WINDOW_LATEST, {
-      data: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },
-      isLoading: false,
-      error: undefined,
-    });
-    gqlResponses.set(VOLUME_TODAY_TRADERS, {
-      data: { volumeTodayTraders: [] },
-      isLoading: false,
-      error: undefined,
-    });
-
-    const ref = render();
-    const result = ref.current;
-    expect(result).not.toBeNull();
-    expect(lastVariables.has(LEGACY_VOLUME_WINDOW_LATEST)).toBe(true);
-    expect(result!.hasError).toBe(false);
-    expect(result!.totalVolume).toBeCloseTo(1000, 4);
-  });
-
   it("phase 1: primary snapshot + today resolved, firstDay + yesterday still loading → degraded banner stays up, tiles render", () => {
     // Snapshot is at T-2 → degraded state. Today's partial is empty
     // (no swap yet today, which is exactly when this matters).

@@ -6,12 +6,12 @@ import { formatUSD, parseWei } from "@/lib/format";
 import { displayLabel, effectiveOracleRate } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
 import {
+  custodySnapshotsAlignedToSupplyRows,
   groupCustodySnapshotsByToken,
   custodyTokenKey,
   latestDailyCirculatingSupply,
   rollupByToken,
   unionSnapshotsWithLatest,
-  unionCustodySnapshotsWithLatest,
   winnersAndLosers7d,
 } from "../_lib/aggregate";
 import type {
@@ -57,11 +57,12 @@ export function StablesKpiStrip({
   // Memoize the rollup + derived totals. SWR polls at 30s; parent re-renders
   // (range pill, hover state) shouldn't re-sort N=1000 snapshots each time.
   const { rollup, biggestExpansion, biggestContraction } = useMemo(() => {
-    const mergedCustody = unionCustodySnapshotsWithLatest(
+    const mergedSnapshots = unionSnapshotsWithLatest(snapshots, latestPerToken);
+    const mergedCustody = custodySnapshotsAlignedToSupplyRows(
+      mergedSnapshots,
       custodySnapshots,
       latestCustodyPerToken,
     );
-    const mergedSnapshots = unionSnapshotsWithLatest(snapshots, latestPerToken);
     const r = rollupByToken(mergedSnapshots, rates, undefined, mergedCustody);
     const wl = winnersAndLosers7d(r);
     return {
@@ -78,7 +79,8 @@ export function StablesKpiStrip({
   ]);
 
   const totalUsd = useMemo<number | null>(() => {
-    const mergedCustody = unionCustodySnapshotsWithLatest(
+    const mergedCustody = custodySnapshotsAlignedToSupplyRows(
+      latestPerToken,
       custodySnapshots,
       latestCustodyPerToken,
     );

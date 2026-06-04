@@ -435,7 +435,7 @@ describe("Broker.Swap handler", () => {
           timestamp: bigint;
           swapCount: number;
           volumeUsdWei: bigint;
-          isSystemAddress: boolean;
+          isProtocolActor: boolean;
           lastSeenTimestamp: bigint;
         }
       | undefined;
@@ -444,21 +444,21 @@ describe("Broker.Swap handler", () => {
     assert.equal(row!.caller, SIGNER_EOA.toLowerCase());
     assert.equal(row!.swapCount, 2);
     assert.equal(row!.volumeUsdWei, 1_500n * 10n ** 18n);
-    assert.equal(row!.isSystemAddress, false);
+    assert.equal(row!.isProtocolActor, false);
     // lastSeenTimestamp tracks the most recent swap's block timestamp
     // (not the day bucket) for sub-day "Last active" precision.
     assert.equal(row!.lastSeenTimestamp, 1_700_000_500n);
   });
 
-  it("does NOT flag isSystemAddress on brokerCaller-side match (avoids hiding MentoRouter users as system volume)", async () => {
+  it("does NOT flag isProtocolActor on brokerCaller-side match (avoids hiding MentoRouter users as protocol actor volume)", async () => {
     // Codex P1 finding on PR #363: an earlier draft of this PR OR-ed the
-    // `isSystemAddress` check across both `caller` and `brokerCaller`. That
+    // `isProtocolActor` check across both `caller` and `brokerCaller`. That
     // looks correct in isolation but it pulls double duty against the flat
-    // system-addresses set, which includes user-facing routers (MentoRouter
+    // protocol-owned addresses set, which includes user-facing routers (MentoRouter
     // v1/v2, Routerv300) alongside true protocol-internal addresses
     // (Reserve, MigrationMultisig). For a normal user routing via
-    // MentoRouter, `brokerCaller = MentoRouter` (in system-addresses) while
-    // `caller = user EOA` (not). OR-checking would hide the user as system
+    // MentoRouter, `brokerCaller = MentoRouter` (in protocol-owned addresses) while
+    // `caller = user EOA` (not). OR-checking would hide the user as protocol actor
     // volume — false positive. The current rule is signer-EOA-only.
     const RESERVE = "0x9380fA34Fd9e4Fd14c06305fd7B6199089eD4eb9"; // Celo Reserve from @mento-protocol/contracts
     const NORMAL_EOA = "0xc1cccccccccccccccccccccccccccccccccccccc";
@@ -467,25 +467,25 @@ describe("Broker.Swap handler", () => {
       blockNumber: 100,
       blockTimestamp: 1_700_000_000,
       logIndex: 0,
-      brokerCaller: RESERVE, // IS in system-addresses
-      txFrom: NORMAL_EOA, // NOT in system-addresses
+      brokerCaller: RESERVE, // IS in protocol-owned addresses
+      txFrom: NORMAL_EOA, // NOT in protocol-owned addresses
     });
 
     const dayTs = dayBucket(1_700_000_000n);
     const id = `${CHAIN_CELO}-${NORMAL_EOA.toLowerCase()}-${dayTs}`;
     const row = mockDb.entities.BrokerTraderDailySnapshot.get(id) as
-      | { caller: string; isSystemAddress: boolean }
+      | { caller: string; isProtocolActor: boolean }
       | undefined;
     assert.isOk(row, "BrokerTraderDailySnapshot row missing");
     assert.equal(row!.caller, NORMAL_EOA.toLowerCase());
     assert.equal(
-      row!.isSystemAddress,
+      row!.isProtocolActor,
       false,
-      "isSystemAddress must check ONLY caller (signer EOA); checking brokerCaller too would wrongly hide MentoRouter users",
+      "isProtocolActor must check ONLY caller (signer EOA); checking brokerCaller too would wrongly hide MentoRouter users",
     );
   });
 
-  it("flags v2 signer rows as system when tx.to is a protocol actor entry point", async () => {
+  it("flags v2 signer rows as protocol actor when tx.to is a protocol actor entry point", async () => {
     const NORMAL_EOA = "0xc2cccccccccccccccccccccccccccccccccccccc";
     let mockDb = MockDb.createMockDb();
     mockDb = await fireSwap(mockDb, {
@@ -499,11 +499,11 @@ describe("Broker.Swap handler", () => {
     const dayTs = dayBucket(1_700_000_000n);
     const id = `${CHAIN_CELO}-${NORMAL_EOA.toLowerCase()}-${dayTs}`;
     const row = mockDb.entities.BrokerTraderDailySnapshot.get(id) as
-      | { caller: string; isSystemAddress: boolean }
+      | { caller: string; isProtocolActor: boolean }
       | undefined;
     assert.isOk(row, "BrokerTraderDailySnapshot row missing");
     assert.equal(row!.caller, NORMAL_EOA.toLowerCase());
-    assert.equal(row!.isSystemAddress, true);
+    assert.equal(row!.isProtocolActor, true);
   });
 
   it("does NOT write trader/aggregator rollups when routedViaV3Router=true (avoids double-count vs v3)", async () => {
@@ -638,7 +638,7 @@ describe("Broker.Swap handler", () => {
         "mento-router-v2",
         "mento-router-v3",
         "direct",
-        "system",
+        "protocol",
       ] as const
     ).every(
       (name) =>

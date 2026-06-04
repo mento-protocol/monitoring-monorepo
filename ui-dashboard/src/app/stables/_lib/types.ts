@@ -16,6 +16,7 @@ export type StableSupplyDailySnapshot = {
   totalSupply: string;
   dailyMintAmount: string;
   dailyBurnAmount: string;
+  isCurrentState?: boolean;
 };
 
 export type StableTokenCustodyDailySnapshot = {
@@ -43,8 +44,7 @@ export type StableSupplyChangeEvent = {
   counterparty: string;
   caller: string;
   txTo: string;
-  // Optional until every deployed indexer endpoint exposes this marker.
-  isSystemCaller?: boolean;
+  isProtocolOwnedCaller: boolean;
   amount: string;
   txHash: string;
   blockNumber: string;

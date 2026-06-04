@@ -33,17 +33,10 @@ export function VolumePageHeader({ urlState }: { urlState: VolumeUrlState }) {
           range={urlState.range}
           updateRange={urlState.updateRange}
         />
-        <label className="inline-flex items-center gap-2 text-xs text-slate-400 select-none cursor-pointer">
-          <input
-            type="checkbox"
-            checked={urlState.includeProtocolActors}
-            onChange={(event) =>
-              urlState.updateIncludeProtocolActors(event.target.checked)
-            }
-            className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-800 text-indigo-500 focus:ring-indigo-400"
-          />
-          Include protocol actors
-        </label>
+        <ActorToggleGroup
+          includeProtocolActors={urlState.includeProtocolActors}
+          updateIncludeProtocolActors={urlState.updateIncludeProtocolActors}
+        />
       </div>
     </header>
   );
@@ -96,6 +89,33 @@ function RangeToggleGroup({
           onClick={() => updateRange(r.key)}
         />
       ))}
+    </div>
+  );
+}
+
+function ActorToggleGroup({
+  includeProtocolActors,
+  updateIncludeProtocolActors,
+}: {
+  includeProtocolActors: boolean;
+  updateIncludeProtocolActors: VolumeUrlState["updateIncludeProtocolActors"];
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Protocol actors"
+      className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5"
+    >
+      <SegmentButton
+        active={!includeProtocolActors}
+        label="Organic"
+        onClick={() => updateIncludeProtocolActors(false)}
+      />
+      <SegmentButton
+        active={includeProtocolActors}
+        label="All"
+        onClick={() => updateIncludeProtocolActors(true)}
+      />
     </div>
   );
 }
@@ -320,7 +340,7 @@ export function VolumeVenueSection({
       filteredTraderRows={aggregates.filteredTraderRows}
       traders={aggregates.aggregated}
       pools={model.poolMeta}
-      systemAddressFilter={model.isSystemAddressIn}
+      protocolActorFilter={model.isProtocolActorIn}
       exclusions={exclusions}
       tableState={{
         isLoading: status.tableIsLoading,

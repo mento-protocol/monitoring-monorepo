@@ -13,7 +13,7 @@ function snapshot(
   overrides: Partial<StableSupplyDailySnapshot> &
     Pick<StableSupplyDailySnapshot, "timestamp" | "totalSupply">,
 ): StableSupplyDailySnapshot {
-  return {
+  const row: StableSupplyDailySnapshot = {
     id: `42220-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
     chainId: overrides.chainId ?? 42220,
     tokenAddress: overrides.tokenAddress ?? "0xa",
@@ -25,6 +25,10 @@ function snapshot(
     dailyMintAmount: overrides.dailyMintAmount ?? "0",
     dailyBurnAmount: overrides.dailyBurnAmount ?? "0",
   };
+  if (overrides.isCurrentState !== undefined) {
+    row.isCurrentState = overrides.isCurrentState;
+  }
+  return row;
 }
 
 function custodySnapshot(
@@ -80,6 +84,7 @@ describe("StablesKpiStrip", () => {
       tokenAddress: "0xAa",
       timestamp: String(NOW_TS),
       totalSupply: "1000000000000000000000000",
+      isCurrentState: true,
     });
     const locked = custodySnapshot({
       tokenAddress: "0xaa",
@@ -101,5 +106,33 @@ describe("StablesKpiStrip", () => {
 
     expect(html).toContain("$750K");
     expect(html).not.toContain("$1M");
+  });
+
+  it("does not subtract live custody from daily fallback supply rows", () => {
+    const latest = snapshot({
+      tokenAddress: "0xAa",
+      timestamp: String(NOW_TS),
+      totalSupply: "1000000000000000000000000",
+    });
+    const liveCustody = custodySnapshot({
+      tokenAddress: "0xaa",
+      timestamp: String(NOW_TS),
+      lockedSupply: "250000000000000000000000",
+    });
+
+    const html = renderToStaticMarkup(
+      <StablesKpiStrip
+        latestPerToken={[latest]}
+        latestCustodyPerToken={[liveCustody]}
+        snapshots={[]}
+        custodySnapshots={[]}
+        rates={new Map()}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+
+    expect(html).toContain("$1M");
+    expect(html).not.toContain("$750K");
   });
 });

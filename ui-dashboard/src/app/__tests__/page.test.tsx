@@ -90,16 +90,6 @@ function render(networkData: NetworkData[], isLoading = false): string {
   return renderToStaticMarkup(<GlobalPage />);
 }
 
-function gqlNoopResponse(): SWRResponse {
-  return {
-    data: undefined,
-    error: undefined,
-    isLoading: false,
-    isValidating: false,
-    mutate: vi.fn(),
-  } as unknown as SWRResponse;
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   capturedProps = null;
@@ -902,7 +892,6 @@ describe("GlobalPage — Traders tile", () => {
         isValidating: false,
         mutate: vi.fn(),
       } as unknown as SWRResponse)
-      .mockReturnValueOnce(gqlNoopResponse())
       .mockReturnValueOnce({
         data: undefined,
         error: undefined,
@@ -1028,8 +1017,8 @@ describe("GlobalPage — Traders tile", () => {
   // first-ever v3 swap is today is silently dropped. Tile must surface
   // the partial state so the count isn't read as exact. Mocks the
   // snapshot result on first call and a today-partial ERROR on the
-  // third — `mockReturnValueOnce` chains in call order: snapshot, unused
-  // fallback snapshot, then today-partial.
+  // second — `mockReturnValueOnce` chains in call order: snapshot,
+  // then today-partial.
   it("flags the tile as approximate when the today-partial query errors", () => {
     const yesterdaySec = String(
       Math.floor(Date.now() / 1000 / 86400) * 86400 - 86400,
@@ -1053,7 +1042,6 @@ describe("GlobalPage — Traders tile", () => {
         isValidating: false,
         mutate: vi.fn(),
       } as unknown as SWRResponse)
-      .mockReturnValueOnce(gqlNoopResponse())
       .mockReturnValueOnce({
         data: undefined,
         error: new Error("Hasura timeout"),

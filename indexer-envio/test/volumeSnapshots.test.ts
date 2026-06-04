@@ -189,7 +189,7 @@ describe("applyVolumeSnapshots", () => {
     assert.deepEqual(td.poolIds, [POOL_ID_1]);
     assert.equal(td.volumeUsdWei, 1_000n * ONE_USD);
     assert.equal(td.feesPaidUsdWei, (1_000n * ONE_USD * 30n) / 10_000n); // 3.0 USD
-    assert.equal(td.isSystemAddress, false);
+    assert.equal(td.isProtocolActor, false);
     assert.equal(td.lastSeenTimestamp, DAY_2026_05_04 + 3600n);
 
     // TraderPoolDailySnapshot
@@ -211,9 +211,9 @@ describe("applyVolumeSnapshots", () => {
     );
     assert.ok(pd);
     assert.equal(pd.swapCount, 1);
-    assert.equal(pd.swapCountIncludingSystem, 1);
+    assert.equal(pd.swapCountIncludingProtocolActors, 1);
     assert.equal(pd.volumeUsdWei, 1_000n * ONE_USD);
-    assert.equal(pd.volumeUsdWeiIncludingSystem, 1_000n * ONE_USD);
+    assert.equal(pd.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
 
     // AggregatorDailySnapshot — txTo was Squid
     const ad = store.AggregatorDailySnapshot.get(
@@ -223,11 +223,11 @@ describe("applyVolumeSnapshots", () => {
     assert.equal(ad.aggregator, "squid");
     assert.equal(ad.lastSeenAggregatorAddress, SQUID);
     assert.equal(ad.swapCount, 1);
-    assert.equal(ad.swapCountIncludingSystem, 1);
+    assert.equal(ad.swapCountIncludingProtocolActors, 1);
     assert.equal(ad.uniqueTraders, 1);
-    assert.equal(ad.uniqueTradersIncludingSystem, 1);
+    assert.equal(ad.uniqueTradersIncludingProtocolActors, 1);
     assert.equal(ad.volumeUsdWei, 1_000n * ONE_USD);
-    assert.equal(ad.volumeUsdWeiIncludingSystem, 1_000n * ONE_USD);
+    assert.equal(ad.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
 
     // Markers exist
     assert.equal(store.TraderPoolDayMarker.size, 1);
@@ -264,9 +264,9 @@ describe("applyVolumeSnapshots", () => {
       `${CHAIN}-squid-${DAY_2026_05_04}`,
     )!;
     assert.equal(ad.swapCount, 2);
-    assert.equal(ad.swapCountIncludingSystem, 2);
+    assert.equal(ad.swapCountIncludingProtocolActors, 2);
     assert.equal(ad.uniqueTraders, 1, "same trader both swaps");
-    assert.equal(ad.uniqueTradersIncludingSystem, 1);
+    assert.equal(ad.uniqueTradersIncludingProtocolActors, 1);
   });
 
   it("swaps in 2 different pools: uniquePools increments to 2", async () => {
@@ -329,11 +329,11 @@ describe("applyVolumeSnapshots", () => {
       `${CHAIN}-squid-${DAY_2026_05_04}`,
     )!;
     assert.equal(ad.swapCount, 2);
-    assert.equal(ad.swapCountIncludingSystem, 2);
+    assert.equal(ad.swapCountIncludingProtocolActors, 2);
     assert.equal(ad.uniqueTraders, 2);
-    assert.equal(ad.uniqueTradersIncludingSystem, 2);
+    assert.equal(ad.uniqueTradersIncludingProtocolActors, 2);
     assert.equal(ad.volumeUsdWei, 200n * ONE_USD);
-    assert.equal(ad.volumeUsdWeiIncludingSystem, 200n * ONE_USD);
+    assert.equal(ad.volumeUsdWeiIncludingProtocolActors, 200n * ONE_USD);
 
     // Two distinct TraderDailySnapshot rows, one per trader.
     assert.equal(store.TraderDailySnapshot.size, 2);
@@ -406,7 +406,7 @@ describe("applyVolumeSnapshots", () => {
     );
   });
 
-  it("rebalancer EOA on Pool: trader is flagged isSystemAddress=true", async () => {
+  it("rebalancer EOA on Pool: trader is flagged isProtocolActor=true", async () => {
     const { context, store } = makeContext();
     const rebalancerEoa = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
     const pool = fakePool({ rebalancerAddress: rebalancerEoa });
@@ -427,23 +427,23 @@ describe("applyVolumeSnapshots", () => {
     const td = store.TraderDailySnapshot.get(
       `${CHAIN}-${rebalancerEoa}-${DAY_2026_05_04}`,
     )!;
-    assert.equal(td.isSystemAddress, true);
+    assert.equal(td.isProtocolActor, true);
     const ad = store.AggregatorDailySnapshot.get(
       `${CHAIN}-squid-${DAY_2026_05_04}`,
     )!;
     assert.equal(ad.swapCount, 0);
-    assert.equal(ad.swapCountIncludingSystem, 1);
+    assert.equal(ad.swapCountIncludingProtocolActors, 1);
     assert.equal(ad.uniqueTraders, 0);
-    assert.equal(ad.uniqueTradersIncludingSystem, 1);
+    assert.equal(ad.uniqueTradersIncludingProtocolActors, 1);
     assert.equal(ad.volumeUsdWei, 0n);
-    assert.equal(ad.volumeUsdWeiIncludingSystem, 1_000n * ONE_USD);
+    assert.equal(ad.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
     const pd = store.PoolDailyVolumeSnapshot.get(
       `${CHAIN}-${POOL_ID_1}-${DAY_2026_05_04}`,
     )!;
     assert.equal(pd.swapCount, 0);
-    assert.equal(pd.swapCountIncludingSystem, 1);
+    assert.equal(pd.swapCountIncludingProtocolActors, 1);
     assert.equal(pd.volumeUsdWei, 0n);
-    assert.equal(pd.volumeUsdWeiIncludingSystem, 1_000n * ONE_USD);
+    assert.equal(pd.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
   });
 
   it("pool rebalancer txTo flags the signer row as protocol volume", async () => {
@@ -468,14 +468,14 @@ describe("applyVolumeSnapshots", () => {
     const td = store.TraderDailySnapshot.get(
       `${CHAIN}-${keeper}-${DAY_2026_05_04}`,
     )!;
-    assert.equal(td.isSystemAddress, true);
+    assert.equal(td.isProtocolActor, true);
     const ad = store.AggregatorDailySnapshot.get(
-      `${CHAIN}-system-${DAY_2026_05_04}`,
+      `${CHAIN}-protocol-${DAY_2026_05_04}`,
     )!;
     assert.equal(ad.swapCount, 0);
-    assert.equal(ad.swapCountIncludingSystem, 1);
+    assert.equal(ad.swapCountIncludingProtocolActors, 1);
     assert.equal(ad.volumeUsdWei, 0n);
-    assert.equal(ad.volumeUsdWeiIncludingSystem, 1_000n * ONE_USD);
+    assert.equal(ad.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
   });
 
   it("direct-entry Broker txTo does not hide the signer as protocol volume", async () => {
@@ -501,17 +501,17 @@ describe("applyVolumeSnapshots", () => {
     const td = store.TraderDailySnapshot.get(
       `${CHAIN}-${trader}-${DAY_2026_05_04}`,
     )!;
-    assert.equal(td.isSystemAddress, false);
+    assert.equal(td.isProtocolActor, false);
     const ad = store.AggregatorDailySnapshot.get(
       `${CHAIN}-direct-${DAY_2026_05_04}`,
     )!;
     assert.equal(ad.swapCount, 1);
-    assert.equal(ad.swapCountIncludingSystem, 1);
+    assert.equal(ad.swapCountIncludingProtocolActors, 1);
     assert.equal(ad.volumeUsdWei, 1_000n * ONE_USD);
-    assert.equal(ad.volumeUsdWeiIncludingSystem, 1_000n * ONE_USD);
+    assert.equal(ad.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
   });
 
-  it("isSystemAddress is sticky across multiple swaps in a day", async () => {
+  it("isProtocolActor is sticky across multiple swaps in a day", async () => {
     const { context, store } = makeContext();
     const rebalancerEoa = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
     const pool = fakePool({ rebalancerAddress: rebalancerEoa });
@@ -554,7 +554,7 @@ describe("applyVolumeSnapshots", () => {
       `${CHAIN}-${rebalancerEoa}-${DAY_2026_05_04}`,
     )!;
     assert.equal(
-      td.isSystemAddress,
+      td.isProtocolActor,
       true,
       "sticky: once flagged, stays flagged for the day",
     );
@@ -565,15 +565,18 @@ describe("applyVolumeSnapshots", () => {
       `${CHAIN}-squid-${DAY_2026_05_04}`,
     )!;
     assert.equal(ad.swapCount, 0);
-    assert.equal(ad.swapCountIncludingSystem, 2);
+    assert.equal(ad.swapCountIncludingProtocolActors, 2);
     assert.equal(ad.volumeUsdWei, 0n);
-    assert.equal(ad.volumeUsdWeiIncludingSystem, 200n * ONE_USD);
+    assert.equal(ad.volumeUsdWeiIncludingProtocolActors, 200n * ONE_USD);
 
     const firstPoolDay = store.PoolDailyVolumeSnapshot.get(
       `${CHAIN}-${POOL_ID_1}-${DAY_2026_05_04}`,
     )!;
     assert.equal(firstPoolDay.volumeUsdWei, 0n);
-    assert.equal(firstPoolDay.volumeUsdWeiIncludingSystem, 100n * ONE_USD);
+    assert.equal(
+      firstPoolDay.volumeUsdWeiIncludingProtocolActors,
+      100n * ONE_USD,
+    );
 
     const secondPoolDay = store.PoolDailyVolumeSnapshot.get(
       `${CHAIN}-${POOL_ID_2}-${DAY_2026_05_04}`,
@@ -581,12 +584,15 @@ describe("applyVolumeSnapshots", () => {
     assert.equal(
       secondPoolDay.volumeUsdWei,
       0n,
-      "later same-day swaps stay system once the trader-day flag is sticky",
+      "later same-day swaps stay protocol actors once the trader-day flag is sticky",
     );
-    assert.equal(secondPoolDay.volumeUsdWeiIncludingSystem, 100n * ONE_USD);
+    assert.equal(
+      secondPoolDay.volumeUsdWeiIncludingProtocolActors,
+      100n * ONE_USD,
+    );
   });
 
-  it("aggregator rollup subtracts prior same-day volume when a trader flips system", async () => {
+  it("aggregator rollup subtracts prior same-day volume when a trader flips protocol actor", async () => {
     const { context, store } = makeContext();
     const normalPool = fakePool({
       id: POOL_ID_1,
@@ -629,9 +635,9 @@ describe("applyVolumeSnapshots", () => {
     assert.equal(squid.swapCount, 0);
     assert.equal(squid.uniqueTraders, 0);
     assert.equal(squid.volumeUsdWei, 0n);
-    assert.equal(squid.swapCountIncludingSystem, 1);
-    assert.equal(squid.uniqueTradersIncludingSystem, 1);
-    assert.equal(squid.volumeUsdWeiIncludingSystem, 100n * ONE_USD);
+    assert.equal(squid.swapCountIncludingProtocolActors, 1);
+    assert.equal(squid.uniqueTradersIncludingProtocolActors, 1);
+    assert.equal(squid.volumeUsdWeiIncludingProtocolActors, 100n * ONE_USD);
 
     const lifi = store.AggregatorDailySnapshot.get(
       `${CHAIN}-lifi-${DAY_2026_05_04}`,
@@ -639,12 +645,12 @@ describe("applyVolumeSnapshots", () => {
     assert.equal(lifi.swapCount, 0);
     assert.equal(lifi.uniqueTraders, 0);
     assert.equal(lifi.volumeUsdWei, 0n);
-    assert.equal(lifi.swapCountIncludingSystem, 1);
-    assert.equal(lifi.uniqueTradersIncludingSystem, 1);
-    assert.equal(lifi.volumeUsdWeiIncludingSystem, 25n * ONE_USD);
+    assert.equal(lifi.swapCountIncludingProtocolActors, 1);
+    assert.equal(lifi.uniqueTradersIncludingProtocolActors, 1);
+    assert.equal(lifi.volumeUsdWeiIncludingProtocolActors, 25n * ONE_USD);
   });
 
-  it("pool daily rollup subtracts prior same-day pool volume when a trader flips system", async () => {
+  it("pool daily rollup subtracts prior same-day pool volume when a trader flips protocol actor", async () => {
     const { context, store } = makeContext();
     const normalPool = fakePool({
       id: POOL_ID_1,
@@ -684,7 +690,7 @@ describe("applyVolumeSnapshots", () => {
     const td = store.TraderDailySnapshot.get(
       `${CHAIN}-${TRADER_A}-${DAY_2026_05_04}`,
     )!;
-    assert.equal(td.isSystemAddress, true);
+    assert.equal(td.isProtocolActor, true);
     assert.deepEqual(td.poolIds, [POOL_ID_1, POOL_ID_2]);
 
     const normalPoolDay = store.PoolDailyVolumeSnapshot.get(
@@ -693,19 +699,25 @@ describe("applyVolumeSnapshots", () => {
     assert.equal(
       normalPoolDay.volumeUsdWei,
       0n,
-      "prior primary volume is removed once the trader-day becomes system",
+      "prior primary volume is removed once the trader-day becomes protocol actor",
     );
     assert.equal(normalPoolDay.swapCount, 0);
-    assert.equal(normalPoolDay.volumeUsdWeiIncludingSystem, 100n * ONE_USD);
-    assert.equal(normalPoolDay.swapCountIncludingSystem, 1);
+    assert.equal(
+      normalPoolDay.volumeUsdWeiIncludingProtocolActors,
+      100n * ONE_USD,
+    );
+    assert.equal(normalPoolDay.swapCountIncludingProtocolActors, 1);
 
     const systemPoolDay = store.PoolDailyVolumeSnapshot.get(
       `${CHAIN}-${POOL_ID_2}-${DAY_2026_05_04}`,
     )!;
     assert.equal(systemPoolDay.volumeUsdWei, 0n);
     assert.equal(systemPoolDay.swapCount, 0);
-    assert.equal(systemPoolDay.volumeUsdWeiIncludingSystem, 25n * ONE_USD);
-    assert.equal(systemPoolDay.swapCountIncludingSystem, 1);
+    assert.equal(
+      systemPoolDay.volumeUsdWeiIncludingProtocolActors,
+      25n * ONE_USD,
+    );
+    assert.equal(systemPoolDay.swapCountIncludingProtocolActors, 1);
   });
 
   it("missing caller (empty string) is dropped — no entities created", async () => {

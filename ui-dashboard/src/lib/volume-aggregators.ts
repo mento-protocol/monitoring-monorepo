@@ -9,11 +9,11 @@ export type AggregatorDailyRow = {
   lastSeenAggregatorAddress: string;
   timestamp: string;
   swapCount: number;
-  swapCountIncludingSystem: number;
+  swapCountIncludingProtocolActors: number;
   uniqueTraders: number;
-  uniqueTradersIncludingSystem: number;
+  uniqueTradersIncludingProtocolActors: number;
   volumeUsdWei: string;
-  volumeUsdWeiIncludingSystem: string;
+  volumeUsdWeiIncludingProtocolActors: string;
 };
 
 export type AggregatorDailyRowBase = Pick<
@@ -58,21 +58,21 @@ const TOP_N_AGGREGATORS = 7;
 const OTHER_KEY = "__other__";
 const ZERO = BigInt(0);
 
-export function selectAggregatorRowsForSystemToggle(
+export function selectAggregatorRowsForActorFilter(
   rows: readonly AggregatorDailyRow[],
-  showSystem: boolean,
+  includeProtocolActors: boolean,
 ): AggregatorDailyRowBase[] {
-  if (!showSystem) {
+  if (!includeProtocolActors) {
     return rows.filter(
-      (row) => row.aggregator !== "system" && hasPrimaryActivity(row),
+      (row) => row.aggregator !== "protocol" && hasPrimaryActivity(row),
     );
   }
 
   return rows.map((row) => ({
     ...row,
-    swapCount: row.swapCountIncludingSystem,
-    uniqueTraders: row.uniqueTradersIncludingSystem,
-    volumeUsdWei: row.volumeUsdWeiIncludingSystem,
+    swapCount: row.swapCountIncludingProtocolActors,
+    uniqueTraders: row.uniqueTradersIncludingProtocolActors,
+    volumeUsdWei: row.volumeUsdWeiIncludingProtocolActors,
   }));
 }
 

@@ -11,11 +11,11 @@ import { stockWoWChangePct } from "@/lib/time-series";
 import {
   buildTokenUsdTimeSeries,
   computeChartStartSeconds,
+  custodySnapshotsAlignedToSupplyRows,
   custodyTokenKey,
   groupCustodySnapshotsByToken,
   groupSnapshotsByTokenSource,
   sumTotalUsdSeries,
-  unionCustodySnapshotsWithLatest,
   unionSnapshotsWithLatest,
 } from "../_lib/aggregate";
 import type {
@@ -68,7 +68,8 @@ export function StablesHeroChart({
       return { breakdown: [] as BreakdownSeries[], totalSeries: [] };
     }
     const merged = unionSnapshotsWithLatest(snapshots, latestPerToken);
-    const mergedCustody = unionCustodySnapshotsWithLatest(
+    const mergedCustody = custodySnapshotsAlignedToSupplyRows(
+      merged,
       custodySnapshots,
       latestCustodyPerToken,
     );
