@@ -297,23 +297,36 @@ async function measureSurface(browser, surface) {
       // (#775). Loading skeleton still up → slow data fetch/render; ErrorBox
       // → the indexer's GraphQL endpoint is erroring; EmptyBox → the window
       // legitimately has no rows. Still fails closed regardless.
-      const diag = await page.evaluate(() => ({
-        loading: !!document.querySelector(
-          '[role="status"][aria-label="Loading"]',
-        ),
-        error: !!document.querySelector('[role="alert"]'),
-        empty:
-          /no traders (matched|left)|no v[23] aggregator (activity|volume)/i.test(
-            document.body.innerText,
+      //
+      // This classification is best-effort: if the page itself died during the
+      // wait (`Target closed`, crash, GC), `page.evaluate` throws too. Guard it
+      // so the secondary failure can't erase the primary timeout — that error
+      // is the more useful signal, so we always rethrow it, annotated either
+      // with the terminal state or with why the classification was unavailable.
+      let cause;
+      try {
+        const diag = await page.evaluate(() => ({
+          loading: !!document.querySelector(
+            '[role="status"][aria-label="Loading"]',
           ),
-      }));
-      const cause = diag.error
-        ? "data backend erroring (ErrorBox / role=alert present)"
-        : diag.loading
-          ? "still loading after timeout (slow data fetch/render — likely preview cold-start)"
-          : diag.empty
-            ? "no data (EmptyBox present — window legitimately empty)"
-            : "unknown (no loading/error/empty marker found)";
+          error: !!document.querySelector('[role="alert"]'),
+          empty:
+            /no traders (matched|left)|no v[23] aggregator (activity|volume)/i.test(
+              document.body.innerText,
+            ),
+        }));
+        cause = diag.error
+          ? "data backend erroring (ErrorBox / role=alert present)"
+          : diag.loading
+            ? "still loading after timeout (slow data fetch/render — likely preview cold-start)"
+            : diag.empty
+              ? "no data (EmptyBox present — window legitimately empty)"
+              : "unknown (no loading/error/empty marker found)";
+      } catch (diagErr) {
+        const diagMsg =
+          diagErr instanceof Error ? diagErr.message : String(diagErr);
+        cause = `unavailable (page closed/crashed before it could be classified: ${diagMsg})`;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`${msg} — terminal state: ${cause}`);
     }
