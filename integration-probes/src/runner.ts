@@ -23,6 +23,8 @@ import {
 const DEFAULT_ADAPTER_CONCURRENCY = 3;
 const DEFAULT_PAIR_CONCURRENCY = 4;
 
+type BeforeQuoteRequest = () => Promise<void>;
+
 export type RunProbeOptions = {
   amountUsd?: string | undefined;
   hasuraUrl?: string | undefined;
@@ -161,10 +163,12 @@ async function probeAdapters(args: {
     args.adapterConcurrency,
     async (adapter) => {
       const quoteBudget = quoteAttemptBudget(adapter);
+      const beforeQuoteRequest = quoteRequestPacer(adapter);
       const chains = await probeAdapterChains({
         ...args,
         adapter,
         quoteBudget,
+        beforeQuoteRequest,
       });
       return {
         id: adapter.id,
@@ -187,6 +191,7 @@ async function probeAdapterChains(args: {
   fetcher: FetchLike;
   pairConcurrency: number;
   quoteBudget?: QuoteAttemptBudget | undefined;
+  beforeQuoteRequest?: BeforeQuoteRequest | undefined;
 }): Promise<ChainProbeResult[]> {
   const out: ChainProbeResult[] = [];
   for (const chain of args.chains) {
@@ -204,13 +209,15 @@ async function probeChainPairs(args: {
   fetcher: FetchLike;
   pairConcurrency: number;
   quoteBudget?: QuoteAttemptBudget | undefined;
+  beforeQuoteRequest?: BeforeQuoteRequest | undefined;
 }): Promise<PairProbeResult[]> {
   const inputs = buildQuoteInputs({
     chain: args.chain,
     amountUsd: args.amountUsd,
     takerAddress: PROBE_TAKER_ADDRESS,
   });
-  const pairConcurrency = args.quoteBudget ? 1 : args.pairConcurrency;
+  const pairConcurrency =
+    args.quoteBudget || args.beforeQuoteRequest ? 1 : args.pairConcurrency;
   return mapConcurrent(inputs, pairConcurrency, async (input) => {
     try {
       return await probeAdapterPair({ ...args, input });
@@ -225,6 +232,36 @@ function quoteAttemptBudget(
 ): QuoteAttemptBudget | undefined {
   if (adapter.maxQuoteRequestsPerRun === undefined) return undefined;
   return { remaining: adapter.maxQuoteRequestsPerRun };
+}
+
+function quoteRequestPacer(
+  adapter: AggregatorAdapter,
+): BeforeQuoteRequest | undefined {
+  const delayMs = normalizeDelayMs(adapter.quoteRequestDelayMs);
+  if (delayMs === 0) return undefined;
+
+  let requests = 0;
+  let gate = Promise.resolve();
+  return async () => {
+    const wait = gate.then(async () => {
+      if (requests > 0) await sleep(delayMs);
+      requests += 1;
+    });
+    gate = wait.catch(() => {});
+    await wait;
+  };
+}
+
+function normalizeDelayMs(value: number | undefined): number {
+  if (value === undefined) return 0;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error("Probe request delay must be a non-negative integer");
+  }
+  return value;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function chainResult(

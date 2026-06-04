@@ -8,6 +8,8 @@ import type { QuoteProbeInput } from "./types.js";
 const LIFI_INTEGRATOR = "mento-probes";
 export const LIFI_MAX_QUOTE_REQUESTS_PER_RUN = 180;
 export const LIFI_FLY_EXCHANGE = "fly";
+export const SQUID_MAX_QUOTE_REQUESTS_PER_RUN = 80;
+export const SQUID_QUOTE_REQUEST_DELAY_MS = 2_500;
 
 const LIFI_FLY_CHAIN_ID = 143;
 const LIFI_FLY_NETWORKS: Partial<Record<number, string>> = {
