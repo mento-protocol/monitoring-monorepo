@@ -40,6 +40,13 @@
 import { chromium } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import {
+  classifyTerminalState,
+  EMPTY_VOLUME_MARKER_PATTERN,
+  resolveReadyTimeout,
+  unavailableTerminalState,
+  VOLUME_READY_TIMEOUT_MS,
+} from "./measure-inp-lib.mjs";
 
 const PREVIEW_URL = process.env.PREVIEW_URL;
 const BYPASS_HEADERS_JSON = process.env.BYPASS_HEADERS_JSON;
@@ -78,18 +85,6 @@ const webVitalsIife = resolve(
   "dist",
   "web-vitals.iife.js",
 );
-
-// How long to wait for a surface's readiness anchor before failing. Most
-// surfaces settle in well under this. `/volume` overrides it (see below):
-// it fires the heaviest query waterfall on the page (top-traders +
-// aggregator + broker + pools snapshots, then client-side re-aggregation),
-// and on a cold preview deployment hit by a contended CI runner the sorted
-// "Volume" header can take longer than the default to render. A warm-backend
-// readiness ceiling measured at 20× CPU + Slow 4G is ~12s, so the override
-// leaves headroom for preview cold-start latency without masking a genuine
-// hang (a true stall still trips the override and fails closed). Issue #775.
-const DEFAULT_READY_TIMEOUT_MS = 20_000;
-const VOLUME_READY_TIMEOUT_MS = 45_000;
 
 // One surface = one navigation + interaction sequence + INP read. Each
 // runs in a fresh chromium context so prior interactions can't pollute
@@ -284,10 +279,9 @@ async function measureSurface(browser, surface) {
       );
     });
 
-    const readyTimeout = surface.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS;
     try {
       await page.waitForSelector(surface.readySelector, {
-        timeout: readyTimeout,
+        timeout: resolveReadyTimeout(surface),
       });
     } catch (err) {
       // The bare "Timeout 20000ms exceeded" can't tell slow-render from
@@ -305,27 +299,24 @@ async function measureSurface(browser, surface) {
       // with the terminal state or with why the classification was unavailable.
       let cause;
       try {
-        const diag = await page.evaluate(() => ({
-          loading: !!document.querySelector(
-            '[role="status"][aria-label="Loading"]',
-          ),
-          error: !!document.querySelector('[role="alert"]'),
-          empty:
-            /no traders (matched|left)|no v[23] aggregator (activity|volume)/i.test(
-              document.body.innerText,
+        // The empty-marker regex is injected from the lib (page.evaluate can't
+        // close over a module import) so the pattern stays single-sourced and
+        // unit-tested.
+        const diag = await page.evaluate(
+          (emptyPattern) => ({
+            loading: !!document.querySelector(
+              '[role="status"][aria-label="Loading"]',
             ),
-        }));
-        cause = diag.error
-          ? "data backend erroring (ErrorBox / role=alert present)"
-          : diag.loading
-            ? "still loading after timeout (slow data fetch/render — likely preview cold-start)"
-            : diag.empty
-              ? "no data (EmptyBox present — window legitimately empty)"
-              : "unknown (no loading/error/empty marker found)";
+            error: !!document.querySelector('[role="alert"]'),
+            empty: new RegExp(emptyPattern, "i").test(document.body.innerText),
+          }),
+          EMPTY_VOLUME_MARKER_PATTERN,
+        );
+        cause = classifyTerminalState(diag);
       } catch (diagErr) {
         const diagMsg =
           diagErr instanceof Error ? diagErr.message : String(diagErr);
-        cause = `unavailable (page closed/crashed before it could be classified: ${diagMsg})`;
+        cause = unavailableTerminalState(diagMsg);
       }
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`${msg} — terminal state: ${cause}`);
