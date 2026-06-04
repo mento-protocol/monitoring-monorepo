@@ -4,7 +4,9 @@ import type { NextRequest } from "next/server";
 // The middleware does `export default auth(callback)`.
 // We mock `auth` to capture that inner callback so we can test the auth
 // routing logic directly, without running NextAuth's own session resolution.
-type AuthReq = NextRequest & { auth: { user: { email: string } } | null };
+type AuthReq = NextRequest & {
+  auth: { user: { email: string }; error?: "RefreshTokenError" } | null;
+};
 type MiddlewareCallback = (req: AuthReq) => Response | undefined;
 
 let authCallback: MiddlewareCallback | undefined;
@@ -60,13 +62,18 @@ beforeEach(async () => {
 
 function makeReq(
   path: string,
-  opts: { method?: string; authenticated?: boolean; email?: string } = {},
+  opts: {
+    method?: string;
+    authenticated?: boolean;
+    email?: string;
+    error?: "RefreshTokenError";
+  } = {},
 ): AuthReq {
-  const { method = "GET", authenticated = false, email } = opts;
+  const { method = "GET", authenticated = false, email, error } = opts;
   const url = new URL(path, "http://localhost");
   const resolvedEmail = email ?? (authenticated ? "alice@mentolabs.xyz" : null);
   return {
-    auth: resolvedEmail ? { user: { email: resolvedEmail } } : null,
+    auth: resolvedEmail ? { user: { email: resolvedEmail }, error } : null,
     method,
     nextUrl: url,
   } as unknown as AuthReq;
@@ -187,6 +194,33 @@ describe("middleware auth routing", () => {
     expect(res).toBeDefined();
     expect(res!.status).toBe(302);
     expect(res!.headers.get("location") ?? "").toContain("/sign-in");
+  });
+
+  it("redirects an errored (revoked refresh token) session on /address-book", () => {
+    // The Google refresh probe failed with invalid_grant (offboarded account).
+    // Even though the JWT carries a valid @mentolabs.xyz email, the edge must
+    // treat the session as unauthenticated — matches getAuthSession().
+    const res = authCallback!(
+      makeReq("/address-book", {
+        authenticated: true,
+        error: "RefreshTokenError",
+      }),
+    );
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(302);
+    expect(res!.headers.get("location") ?? "").toContain("/sign-in");
+  });
+
+  it("returns 401 for an errored (revoked refresh token) session on PUT /api/address-labels", () => {
+    const res = authCallback!(
+      makeReq("/api/address-labels", {
+        method: "PUT",
+        authenticated: true,
+        error: "RefreshTokenError",
+      }),
+    );
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(401);
   });
 
   it("rejects a lookalike suffix like @mentolabs.xyz.evil.com", () => {
