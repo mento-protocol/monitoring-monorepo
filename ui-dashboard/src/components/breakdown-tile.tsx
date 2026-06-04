@@ -1,5 +1,7 @@
 // BreakdownTile — shows a "Total" headline value with 24h / 7d / 30d below
 
+import type { ReactNode } from "react";
+
 export function BreakdownTile({
   label,
   total,
@@ -9,9 +11,11 @@ export function BreakdownTile({
   isLoading,
   hasError,
   format,
+  subFormat,
   totalPrefix = "",
   href,
   subtitle,
+  badge,
 }: {
   label: string;
   total: number | null;
@@ -21,11 +25,18 @@ export function BreakdownTile({
   isLoading: boolean;
   hasError: boolean;
   format: (v: number) => string;
+  /** Formatter for the 24h/7d/30d sub-values when they carry different units
+   * than the headline (e.g. a % change under a $ total). Defaults to `format`. */
+  subFormat?: ((v: number) => string) | undefined;
   /** Prefix for the headline value only (e.g. "≈ "), not applied to sub-values */
   totalPrefix?: string | undefined;
   href?: string | undefined;
   subtitle?: string | undefined;
+  /** Optional element rendered on the title row, right-aligned — e.g. a
+   * token/chain pill on the mover tiles. */
+  badge?: ReactNode;
 }) {
+  const formatSub = subFormat ?? format;
   const mainValue = isLoading
     ? "…"
     : total === null
@@ -44,7 +55,10 @@ export function BreakdownTile({
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
       <div>
-        <p className="text-sm text-slate-400">{label}</p>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-sm text-slate-400">{label}</p>
+          {badge}
+        </div>
         {href ? (
           <a
             href={href}
@@ -66,7 +80,7 @@ export function BreakdownTile({
               <span key={s.label}>
                 <span className="text-slate-500">{s.label}</span>{" "}
                 <span className="text-slate-400">
-                  {s.value === null ? "N/A" : format(s.value)}
+                  {s.value === null ? "N/A" : formatSub(s.value)}
                 </span>
               </span>
             ))}

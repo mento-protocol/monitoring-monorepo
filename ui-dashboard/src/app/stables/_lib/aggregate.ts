@@ -14,6 +14,13 @@ import type {
 
 const SECONDS_PER_DAY = BigInt(86_400);
 const SECONDS_PER_DAY_NUMBER = 86_400;
+// Day-aligned baseline cutoffs for the KPI sub-row windows.
+type WindowCutoffs = {
+  oneDay: bigint;
+  sevenDay: bigint;
+  thirtyDay: bigint;
+};
+
 const USD_THRESHOLD_SCALE_DECIMALS = 12;
 const USD_THRESHOLD_SCALE = BigInt(10) ** BigInt(USD_THRESHOLD_SCALE_DECIMALS);
 export const DEFAULT_SUPPLY_CHANGE_MIN_USD = 0.01;
@@ -130,7 +137,18 @@ export function rollupByToken(
   // reports an 8-day delta during most of the day. Aligns with the
   // chart's `rangeStartSeconds` math.
   const dayStartNow = (nowSeconds / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  const sevenDayCutoff = dayStartNow - BigInt(7) * SECONDS_PER_DAY;
+  // 24h / 7d / 30d baseline cutoffs share the same day-aligned anchor. The KPI
+  // sub-rows read fixed windows off the full (non-range-scoped) snapshot stream
+  // — if `useStablesDailySnapshots` ever starts filtering by range, these
+  // windows would silently lose their baselines. The windows also assume the
+  // 1000-row page reaches each cutoff: a token whose baseline falls off a
+  // capped page reverts to a since-earliest-retained delta (verified safe at
+  // ~20 tokens × 30d ≈ 600 rows; revisit with the PR2.5 keyset pagination).
+  const windowCutoffs: WindowCutoffs = {
+    oneDay: dayStartNow - BigInt(1) * SECONDS_PER_DAY,
+    sevenDay: dayStartNow - BigInt(7) * SECONDS_PER_DAY,
+    thirtyDay: dayStartNow - BigInt(30) * SECONDS_PER_DAY,
+  };
   const grouped = groupSnapshotsByTokenSource(snapshots);
   const custodyByToken = groupCustodySnapshotsByToken(custodySnapshots);
   const out = new Map<string, TokenAgg>();
@@ -140,7 +158,7 @@ export function rollupByToken(
       custodyByToken.get(
         custodyTokenKey(sample.chainId, sample.tokenAddress),
       ) ?? [];
-    out.set(key, buildTokenAgg(key, rows, rates, sevenDayCutoff, custodyRows));
+    out.set(key, buildTokenAgg(key, rows, rates, windowCutoffs, custodyRows));
   }
   return out;
 }
@@ -308,18 +326,29 @@ export function latestDailyCirculatingSupply(
 
 function pickBaselineSupply(
   rows: ReadonlyArray<StableSupplyDailySnapshot>,
-  sevenDayCutoff: bigint,
+  cutoff: bigint,
   custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
 ): bigint {
   // Walk sorted-ASC rows; the last one whose timestamp is ≤ cutoff is the
-  // 7d baseline. Fall back to the earliest row when everything is recent
+  // baseline. Fall back to the earliest row when everything is recent
   // (so a brand-new token's first observed snapshot stays the baseline).
   let baseline: StableSupplyDailySnapshot | undefined;
   for (const r of rows) {
-    if (BigInt(r.timestamp) > sevenDayCutoff) break;
+    if (BigInt(r.timestamp) > cutoff) break;
     baseline = r;
   }
-  if (baseline) return circulatingSupplyForSnapshot(baseline, custodyRows);
+  if (baseline) {
+    // Circulating supply *as of the cutoff*. Raw supply is unchanged since the
+    // baseline row (it's the last supply row ≤ cutoff), but custody must be read
+    // at the cutoff — a lock/unlock that happened between the baseline row and
+    // the cutoff would otherwise leak into the window delta (e.g. a 20-day-old
+    // NTT lock surfacing as a spurious negative in the 24h sub-row).
+    const rawSupply = BigInt(baseline.totalSupply);
+    const locked = lockedSupplyAt(custodyRows, cutoff);
+    return rawSupply >= locked ? rawSupply - locked : BigInt(0);
+  }
+  // No supply row at/before the cutoff (young or truncated token): use the
+  // earliest known row as a since-inception baseline, custody at its own time.
   const first = rows[0];
   return first ? circulatingSupplyForSnapshot(first, custodyRows) : BigInt(0);
 }
@@ -328,7 +357,7 @@ function buildTokenAgg(
   key: string,
   rows: StableSupplyDailySnapshot[],
   rates: OracleRateMap,
-  sevenDayCutoff: bigint,
+  cutoffs: WindowCutoffs,
   custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
 ): TokenAgg {
   rows.sort((a, b) => {
@@ -343,8 +372,16 @@ function buildTokenAgg(
   const latestCustody = latestLockedSupplyForDailyRows(custodyRows);
   const latestLockedSupply = latestCustody.lockedSupply;
   const latestSupply = latestDailyCirculatingSupply(latest, custodyRows);
-  const baselineSupply = pickBaselineSupply(rows, sevenDayCutoff, custodyRows);
+  const baselineSupply = pickBaselineSupply(
+    rows,
+    cutoffs.sevenDay,
+    custodyRows,
+  );
   const netChange7d = latestSupply - baselineSupply;
+  const netChange1d =
+    latestSupply - pickBaselineSupply(rows, cutoffs.oneDay, custodyRows);
+  const netChange30d =
+    latestSupply - pickBaselineSupply(rows, cutoffs.thirtyDay, custodyRows);
   const change7dPct =
     baselineSupply === BigInt(0)
       ? null
@@ -376,7 +413,9 @@ function buildTokenAgg(
     totalSupplyUsdLatest: usd(latestSupply),
     change7dPct,
     netChange7d,
+    netChange1dUsd: usd(netChange1d),
     netChange7dUsd: usd(netChange7d),
+    netChange30dUsd: usd(netChange30d),
   };
 }
 

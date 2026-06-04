@@ -72,7 +72,12 @@ export type TokenAgg = {
   totalSupplyUsdLatest: number | null;
   change7dPct: number | null;
   netChange7d: bigint;
+  // Net circulating-supply change in USD over the 24h / 7d / 30d rolling
+  // windows, feeding the KPI-strip sub-rows. Each uses the same day-aligned
+  // baseline math as `netChange7d` (see `buildTokenAgg`).
+  netChange1dUsd: number | null;
   netChange7dUsd: number | null;
+  netChange30dUsd: number | null;
 };
 
 // Range vocabulary — matches `@/lib/time-series` `RangeKey` exactly. Earlier

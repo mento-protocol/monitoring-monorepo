@@ -108,6 +108,52 @@ describe("StablesKpiStrip", () => {
     expect(html).not.toContain("$1M");
   });
 
+  it("renders absolute $ 24h/7d/30d net-change sub-rows on both total tiles", () => {
+    const token = "0xa";
+    const snapshots = [
+      snapshot({
+        tokenAddress: token,
+        timestamp: String(NOW_TS - 30 * DAY),
+        totalSupply: "1000000000000000000000",
+      }),
+      snapshot({
+        tokenAddress: token,
+        timestamp: String(NOW_TS - 7 * DAY),
+        totalSupply: "1050000000000000000000",
+      }),
+      snapshot({
+        tokenAddress: token,
+        timestamp: String(NOW_TS - DAY),
+        totalSupply: "1080000000000000000000",
+      }),
+    ];
+    const latest = snapshot({
+      tokenAddress: token,
+      timestamp: String(NOW_TS),
+      totalSupply: "1100000000000000000000",
+    });
+
+    const html = renderToStaticMarkup(
+      <StablesKpiStrip
+        latestPerToken={[latest]}
+        latestCustodyPerToken={[]}
+        snapshots={snapshots}
+        custodySnapshots={[]}
+        rates={new Map()}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+
+    // Both the "Circulating supply" and "7d net change" tiles show absolute $
+    // net change per window (now − baseline): 24h +$20, 7d +$50, 30d +$100.
+    expect(html).toContain("+$20.00");
+    expect(html).toContain("+$50.00");
+    expect(html).toContain("+$100.00");
+    // The % sub-row was replaced by absolute $ — no percentages anywhere.
+    expect(html).not.toContain("%");
+  });
+
   it("does not subtract live custody from daily fallback supply rows", () => {
     const latest = snapshot({
       tokenAddress: "0xAa",

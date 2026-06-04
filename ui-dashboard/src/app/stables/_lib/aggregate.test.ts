@@ -326,7 +326,80 @@ describe("rollupByToken", () => {
     const rollup = rollupByToken(snapshots, new Map(), NOW_TS);
     const agg = Array.from(rollup.values())[0]!;
     expect(agg.totalSupplyUsdLatest).toBeNull();
+    expect(agg.netChange1dUsd).toBeNull();
     expect(agg.netChange7dUsd).toBeNull();
+    expect(agg.netChange30dUsd).toBeNull();
+  });
+
+  it("computes 24h / 7d / 30d net change from day-aligned baselines", () => {
+    const usdm = "0xa";
+    const snapshots: StableSupplyDailySnapshot[] = [
+      snapshot({
+        tokenAddress: usdm,
+        timestamp: String(Number(NOW_TS) - 30 * DAY),
+        totalSupply: String(BigInt(1_000_000) * BigInt(10) ** BigInt(18)),
+      }),
+      snapshot({
+        tokenAddress: usdm,
+        timestamp: String(Number(NOW_TS) - 7 * DAY),
+        totalSupply: String(BigInt(1_050_000) * BigInt(10) ** BigInt(18)),
+      }),
+      snapshot({
+        tokenAddress: usdm,
+        timestamp: String(Number(NOW_TS) - 1 * DAY),
+        totalSupply: String(BigInt(1_080_000) * BigInt(10) ** BigInt(18)),
+      }),
+      snapshot({
+        tokenAddress: usdm,
+        timestamp: String(NOW_TS),
+        totalSupply: String(BigInt(1_100_000) * BigInt(10) ** BigInt(18)),
+      }),
+    ];
+    const rollup = rollupByToken(snapshots, new Map([["USDm", 1.0]]), NOW_TS);
+    const agg = rollup.get(`42220|${usdm}|RESERVE`)!;
+    // baselines: 24h=1.08M, 7d=1.05M, 30d=1.00M; now=1.10M
+    expect(agg.netChange1dUsd).toBeCloseTo(20_000, 0);
+    expect(agg.netChange7dUsd).toBeCloseTo(50_000, 0);
+    expect(agg.netChange30dUsd).toBeCloseTo(100_000, 0);
+  });
+
+  it("attributes a custody lock to the window it occurred in, not earlier ones", () => {
+    // Raw supply last changed 60d ago and is flat since; an NTT lock of 100
+    // happened 20d ago. The lock must show only in the 30d delta — the 24h and
+    // 7d baselines must read custody *at their cutoffs* (lock already applied),
+    // not at the 60d-old supply row (which predates the lock).
+    const usdm = "0xa";
+    const snapshots: StableSupplyDailySnapshot[] = [
+      snapshot({
+        tokenAddress: usdm,
+        timestamp: String(Number(NOW_TS) - 60 * DAY),
+        totalSupply: String(BigInt(1_000) * BigInt(10) ** BigInt(18)),
+      }),
+      snapshot({
+        tokenAddress: usdm,
+        timestamp: String(NOW_TS),
+        totalSupply: String(BigInt(1_000) * BigInt(10) ** BigInt(18)),
+        isCurrentState: true,
+      }),
+    ];
+    const custody: StableTokenCustodyDailySnapshot[] = [
+      custodySnapshot({
+        tokenAddress: usdm,
+        timestamp: String(Number(NOW_TS) - 20 * DAY),
+        lockedSupply: String(BigInt(100) * BigInt(10) ** BigInt(18)),
+      }),
+    ];
+    const rollup = rollupByToken(
+      snapshots,
+      new Map([["USDm", 1.0]]),
+      NOW_TS,
+      custody,
+    );
+    const agg = rollup.get(`42220|${usdm}|RESERVE`)!;
+    // latest circulating = 1000 − 100 = 900.
+    expect(agg.netChange1dUsd).toBeCloseTo(0, 6); // lock outside 24h window
+    expect(agg.netChange7dUsd).toBeCloseTo(0, 6); // lock outside 7d window
+    expect(agg.netChange30dUsd).toBeCloseTo(-100, 6); // lock inside 30d window
   });
 
   it("keeps Celo cUSD-USDm and V3 hub USDm as separate rows (same symbol, distinct addresses)", () => {
