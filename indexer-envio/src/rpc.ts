@@ -101,6 +101,14 @@ export {
   fetchBreakerFeedState,
   fetchRateFeedDependencies,
 } from "./rpc/breakers.js";
+export {
+  _setMockStableTotalSupply,
+  _clearMockStableTotalSupply,
+  _setMockStableBalanceOf,
+  _clearMockStableBalanceOf,
+  fetchStableTotalSupply,
+  fetchStableBalanceOf,
+} from "./rpc/stable-fetchers.js";
 
 // ---------------------------------------------------------------------------
 // Oracle DB query helpers (used by SortedOracles handlers)

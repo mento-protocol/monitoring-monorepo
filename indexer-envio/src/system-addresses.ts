@@ -72,7 +72,7 @@ const ALL_INDEXED_CHAIN_IDS: number[] = Object.keys(
  */
 // Per-chain NTT-bridge address index. Built first so it can be reused by
 // both `STATIC_SYSTEM_ADDRESSES_BY_CHAIN` (union into the system set) and
-// `nttBridgeAddressesForChain` (exposed for the V2 stable `classifyKind`
+// `nttBridgeAddressesForChain` (exposed for the stable `classifyKind`
 // helper). Single source of truth — a third caller would import the same
 // helper, not re-parse NTT_ENTRIES.
 const NTT_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
@@ -201,7 +201,7 @@ export function _staticSystemAddressesForChain(chainId: number): Set<string> {
 }
 
 /** Returns the set of NTT-bridge addresses for the given chain (helpers,
- *  managers, transceivers). Used by V2 stable handler's tx.to-based
+ *  managers, transceivers). Used by the stable handler's tx.to-based
  *  classification to tag mints/burns as BRIDGE_*. Returns an empty Set when
  *  the chain has no NTT entries. */
 export function nttBridgeAddressesForChain(chainId: number): Set<string> {

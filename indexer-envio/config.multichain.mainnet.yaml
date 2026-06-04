@@ -202,13 +202,12 @@ contracts:
     events:
       - event: Transfer
 
-  # V2 Mento stablecoins (USDm/EURm/BRLm/...) + V3 hub USDm collateral.
-  # Subscribes Transfer with `from=0x0 OR to=0x0` for mint/burn tracking;
-  # supply rollups feed the /stables dashboard page.
-  # Address list lives under each chain's `contracts:` block. V3 Liquity
-  # debt tokens (GBPm/CHFm/JPYm) are NOT in this set — their supply is
-  # derived from LiquityInstance.systemDebt via the existing v3 handler.
-  - name: V2StableToken
+  # Mento stablecoins. The Transfer-zero handler tracks mint/burn supply for
+  # addresses in STABLES. The custody handler also listens on this contract
+  # for lock/mint NTT manager transfers and filters to LOCK_AND_MINT_NTT_STABLES.
+  # Address list lives under each chain's `contracts:` block and is drift-
+  # checked by test/stables.test.ts.
+  - name: StableToken
     abi_file_path: abis/ERC20.json
     handler: src/EventHandlers.ts
     events:
@@ -360,15 +359,17 @@ chains:
           - 0x094C0cD42f21289AD7279285dD3793CD8C998916 # JPYm
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
-      - name: V2StableToken
-        # 12 V2 reserve-backed stables from @mento-protocol/contracts mainnet
+      - name: StableToken
+        # 12 reserve-backed stables from @mento-protocol/contracts mainnet
         # namespace + V3 hub USDm collateral (hand-listed; package still maps
-        # the bare "USDm" key to V2 cUSD per liquity/config.ts:28-33).
-        # Must stay in sync with V2_STABLES in src/handlers/v2Stables/config.ts —
-        # the test in test/v2Stables.test.ts asserts both sets match.
+        # the bare "USDm" key to Celo cUSD per liquity/config.ts:28-33).
+        # The final three Celo entries are lock/mint NTT custody-only CDP
+        # tokens: their raw Celo supply is derived from Liquity systemDebt, and
+        # this ERC20 subscription only tracks transfers into/out of the NTT
+        # managers so the dashboard can subtract locked supply.
         address:
-          - 0x765de816845861e75a25fca122bb6898b8b1282a # USDm (V2 cUSD)
-          - 0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73 # EURm (V2 cEUR)
+          - 0x765de816845861e75a25fca122bb6898b8b1282a # USDm (Celo cUSD)
+          - 0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73 # EURm (Celo cEUR)
           - 0xe8537a3d056da446677b9e9d6c5db704eaab4787 # BRLm
           - 0x7175504c455076f15c04a2f90a8e352281f492f9 # AUDm
           - 0xff4ab19391af240c311c54200a492233052b6325 # CADm
@@ -380,6 +381,9 @@ chains:
           - 0x73f93dcc49cb8a239e2032663e9475dd5ef29a08 # XOFm
           - 0x4c35853a3b4e647fd266f4de678dcc8fec410bf6 # ZARm
           - 0x106cc9ff5a2c488780635be8afc07c68522b7ea5 # V3 hub USDm (collateral)
+          - 0xb55a79f398e759e43c95b979163f30ec87ee131d # CHFm (NTT lock custody)
+          - 0xccf663b1ff11028f0b19058d0f7b674004a40746 # GBPm (NTT lock custody)
+          - 0xc45ecf20f3cd864b32d9794d6f76814ae8892e20 # JPYm (NTT lock custody)
       - name: BreakerBox
         address:
           - 0x303ED1df62Fa067659B586EbEe8De0EcE824Ab39
@@ -426,8 +430,16 @@ chains:
           - "0x6f92C745346057a61b259579256159458a0a6A92" # TransparentUpgradeableProxy:SortedOracles
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
-      - name: V2StableToken
-        address: [] # V2 reserve-backed stables are Celo-only
+      - name: StableToken
+        # Monad Wormhole NTT stable supplies. All five Monad managers are
+        # NttManager.mode()=BURNING, so Transfer-zero events reflect real
+        # chain-local supply and can be added to Celo circulating supply.
+        address:
+          - 0xbc69212b8e4d445b2307c9d32dd68e2a4df00115 # USDm
+          - 0x39bb4e0a204412bb98e821d25e7d955e69d40fd1 # GBPm
+          - 0x4d502d735b4c574b487ed641ae87ceae884731c7 # EURm
+          - 0xf64e91ffef7ef43aa314f0bc2ac39f770797990c # CHFm
+          - 0x22f6a6752800eab67b84748fefc3cc658384af72 # JPYm
       - name: OpenLiquidityStrategy
         address:
           # CREATE2 deterministic — same address as Celo.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
@@ -18,9 +19,20 @@ type Props = {
    * when absent.
    */
   chainId?: number | undefined;
+  /** Routes signed-in users to this app's address detail page instead of the explorer. */
+  addressBookWhenAuthenticated?: boolean | undefined;
+  className?: string | undefined;
+  containerClassName?: string | undefined;
 };
 
-export function AddressLink({ address, readOnly = false, chainId }: Props) {
+export function AddressLink({
+  address,
+  readOnly = false,
+  chainId,
+  addressBookWhenAuthenticated = false,
+  className,
+  containerClassName,
+}: Props) {
   const { network: contextNetwork } = useNetwork();
   const { getName, hasName, isCustom, getEntry } = useAddressLabels();
   const { data: session } = useSession();
@@ -40,21 +52,47 @@ export function AddressLink({ address, readOnly = false, chainId }: Props) {
   const labeled = hasName(address, chainId);
   const custom = isCustom(address);
   const resolved = getEntry(address);
+  const addressBookHref =
+    addressBookWhenAuthenticated && session
+      ? `/address-book/${address.toLowerCase()}`
+      : null;
+  const linkTitle = labeled ? `${label} · ${address}` : address;
+  const containerClasses = [
+    "group inline-flex items-center gap-1",
+    containerClassName,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const linkClasses = [
+    "hover:text-indigo-300 transition-colors",
+    labeled ? "font-medium text-indigo-400" : "font-mono text-slate-300",
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <>
-      <span className="group inline-flex items-center gap-1">
-        <a
-          href={explorerAddressUrl(resolvedNetwork, address)}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={address}
-          className={`hover:text-indigo-300 transition-colors ${
-            labeled ? "font-medium text-indigo-400" : "font-mono text-slate-300"
-          }`}
-        >
-          {label}
-        </a>
+      <span className={containerClasses}>
+        {addressBookHref ? (
+          <Link
+            href={addressBookHref}
+            title={linkTitle}
+            className={linkClasses}
+          >
+            {label}
+          </Link>
+        ) : (
+          <a
+            href={explorerAddressUrl(resolvedNetwork, address)}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={linkTitle}
+            className={linkClasses}
+          >
+            {label}
+          </a>
+        )}
 
         {canEdit && (
           <button

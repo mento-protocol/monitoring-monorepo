@@ -17,7 +17,21 @@ export type StableSupplyDailySnapshot = {
   dailyBurnAmount: string;
 };
 
-export type V2StableSupplyChangeEvent = {
+export type StableTokenCustodyDailySnapshot = {
+  id: string;
+  chainId: number;
+  tokenAddress: string;
+  tokenSymbol: string;
+  source: StableSupplySource;
+  tokenDecimals: number;
+  managerAddress: string;
+  timestamp: string;
+  lockedSupply: string;
+  dailyLockedAmount: string;
+  dailyUnlockedAmount: string;
+};
+
+export type StableSupplyChangeEvent = {
   id: string;
   chainId: number;
   tokenAddress: string;
@@ -38,16 +52,18 @@ export type V2StableSupplyChangeEvent = {
 // Per-token aggregate computed by `rollupByToken` — feeds the sparkline grid,
 // KPI tiles, and hero chart.
 export type TokenAgg = {
-  // Discriminator key: `{tokenAddress}|{source}` — V2 cUSD-USDm and V3 hub
-  // USDm share the symbol "USDm" but live at distinct addresses, so a
-  // (symbol-only) key would collapse them.
+  // Discriminator key: `{chainId}|{tokenAddress}|{source}`. The same Mento
+  // token can exist on Celo and Monad, so chainId is part of the identity.
   key: string;
+  chainId: number;
   tokenAddress: string;
   tokenSymbol: string;
   source: StableSupplySource;
   tokenDecimals: number;
-  // Most recent snapshot row (may be N days old per sparse semantics).
+  // Most recent circulating supply after custody subtraction. Daily supply and
+  // daily custody snapshots are forward-filled independently for this headline.
   latestTotalSupply: bigint;
+  latestLockedSupply: bigint;
   latestTimestamp: bigint;
   // Computed at rollup time over the active range. UI uses these directly
   // — no client-side aggregation in the render path.

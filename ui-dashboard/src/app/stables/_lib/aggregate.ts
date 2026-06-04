@@ -4,13 +4,18 @@
 import { parseWei } from "@/lib/format";
 import { effectiveOracleRate } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
-import type { RangeKey, StableSupplyDailySnapshot, TokenAgg } from "./types";
+import type {
+  RangeKey,
+  StableSupplyDailySnapshot,
+  StableTokenCustodyDailySnapshot,
+  TokenAgg,
+} from "./types";
 
 const SECONDS_PER_DAY = BigInt(86_400);
 const SECONDS_PER_DAY_NUMBER = 86_400;
 
 /**
- * Group snapshots by `{tokenAddress}|{source}` and pre-compute the per-token
+ * Group snapshots by `{chainId}|{tokenAddress}|{source}` and pre-compute the per-token
  * aggregates the UI consumes: latest supply, 7d change, USD-normalized
  * snapshot. Returns a Map keyed by the discriminator so the caller can
  * iterate stably for the sparkline grid.
@@ -23,6 +28,7 @@ export function rollupByToken(
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>,
   rates: OracleRateMap,
   nowSeconds: bigint = BigInt(Math.floor(Date.now() / 1000)),
+  custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot> = [],
 ): Map<string, TokenAgg> {
   // 7d baseline cutoff: floor `nowSeconds` to its UTC day first, then
   // step back 7 days. Without the floor, mid-day calls land at
@@ -33,9 +39,13 @@ export function rollupByToken(
   const dayStartNow = (nowSeconds / SECONDS_PER_DAY) * SECONDS_PER_DAY;
   const sevenDayCutoff = dayStartNow - BigInt(7) * SECONDS_PER_DAY;
   const grouped = groupSnapshotsByTokenSource(snapshots);
+  const custodyByToken = groupCustodySnapshotsByToken(custodySnapshots);
   const out = new Map<string, TokenAgg>();
   for (const [key, rows] of grouped) {
-    out.set(key, buildTokenAgg(key, rows, rates, sevenDayCutoff));
+    const sample = rows[0]!;
+    const custodyRows =
+      custodyByToken.get(custodyKey(sample.chainId, sample.tokenAddress)) ?? [];
+    out.set(key, buildTokenAgg(key, rows, rates, sevenDayCutoff, custodyRows));
   }
   return out;
 }
@@ -60,18 +70,27 @@ export function unionSnapshotsWithLatest(
   return Array.from(byId.values());
 }
 
+export function unionCustodySnapshotsWithLatest(
+  snapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+  latestPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+): StableTokenCustodyDailySnapshot[] {
+  const byId = new Map<string, StableTokenCustodyDailySnapshot>();
+  for (const r of snapshots) byId.set(r.id, r);
+  for (const r of latestPerToken) if (!byId.has(r.id)) byId.set(r.id, r);
+  return Array.from(byId.values());
+}
+
 /**
- * Group snapshots by `{tokenAddress}|{source}`. Exported so the hero chart
- * can reuse the same discriminator key — V2 cUSD-USDm and V3 hub USDm
- * share the symbol "USDm" but live at distinct addresses, and the rollup
- * + chart must group them identically.
+ * Group snapshots by `{chainId}|{tokenAddress}|{source}`. Exported so the
+ * hero chart can reuse the same discriminator key — chain-local supplies on
+ * Celo and Monad must stay separate before the USD stack sums them.
  */
 export function groupSnapshotsByTokenSource(
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>,
 ): Map<string, StableSupplyDailySnapshot[]> {
   const grouped = new Map<string, StableSupplyDailySnapshot[]>();
   for (const row of snapshots) {
-    const key = `${row.tokenAddress}|${row.source}`;
+    const key = tokenSourceKey(row);
     let arr = grouped.get(key);
     if (!arr) {
       arr = [];
@@ -82,9 +101,88 @@ export function groupSnapshotsByTokenSource(
   return grouped;
 }
 
+export function groupCustodySnapshotsByToken(
+  snapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+): Map<string, StableTokenCustodyDailySnapshot[]> {
+  const grouped = new Map<string, StableTokenCustodyDailySnapshot[]>();
+  for (const row of snapshots) {
+    const key = custodyKey(row.chainId, row.tokenAddress);
+    let arr = grouped.get(key);
+    if (!arr) {
+      arr = [];
+      grouped.set(key, arr);
+    }
+    arr.push(row);
+  }
+  for (const arr of grouped.values()) {
+    arr.sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+  }
+  return grouped;
+}
+
+function tokenSourceKey(row: StableSupplyDailySnapshot): string {
+  return `${row.chainId}|${row.tokenAddress}|${row.source}`;
+}
+
+function custodyKey(chainId: number, tokenAddress: string): string {
+  return `${chainId}|${tokenAddress}`;
+}
+
+function lockedSupplyAt(
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+  timestamp: bigint,
+): bigint {
+  let locked = BigInt(0);
+  for (const row of sortCustodyRowsAsc(custodyRows)) {
+    if (BigInt(row.timestamp) > timestamp) break;
+    locked = BigInt(row.lockedSupply);
+  }
+  return locked;
+}
+
+function latestLockedSupplyForDailyRows(
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+): { lockedSupply: bigint; timestamp: bigint | null } {
+  const sorted = sortCustodyRowsAsc(custodyRows);
+  const latest = sorted[sorted.length - 1];
+  return latest
+    ? {
+        lockedSupply: BigInt(latest.lockedSupply),
+        timestamp: BigInt(latest.timestamp),
+      }
+    : { lockedSupply: BigInt(0), timestamp: null };
+}
+
+function sortCustodyRowsAsc(
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+): StableTokenCustodyDailySnapshot[] {
+  return [...custodyRows].sort(
+    (a, b) => Number(a.timestamp) - Number(b.timestamp),
+  );
+}
+
+export function circulatingSupplyForSnapshot(
+  row: StableSupplyDailySnapshot,
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot> = [],
+): bigint {
+  const rawSupply = BigInt(row.totalSupply);
+  const locked = lockedSupplyAt(custodyRows, BigInt(row.timestamp));
+  return rawSupply >= locked ? rawSupply - locked : BigInt(0);
+}
+
+export function latestDailyCirculatingSupply(
+  row: StableSupplyDailySnapshot,
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot> = [],
+): bigint {
+  const rawSupply = BigInt(row.totalSupply);
+  const { lockedSupply } = latestLockedSupplyForDailyRows(custodyRows);
+  return rawSupply >= lockedSupply ? rawSupply - lockedSupply : BigInt(0);
+}
+
 function pickBaselineSupply(
   rows: ReadonlyArray<StableSupplyDailySnapshot>,
   sevenDayCutoff: bigint,
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
 ): bigint {
   // Walk sorted-ASC rows; the last one whose timestamp is ≤ cutoff is the
   // 7d baseline. Fall back to the earliest row when everything is recent
@@ -94,8 +192,9 @@ function pickBaselineSupply(
     if (BigInt(r.timestamp) > sevenDayCutoff) break;
     baseline = r;
   }
-  if (baseline) return BigInt(baseline.totalSupply);
-  return BigInt(rows[0]?.totalSupply ?? "0");
+  if (baseline) return circulatingSupplyForSnapshot(baseline, custodyRows);
+  const first = rows[0];
+  return first ? circulatingSupplyForSnapshot(first, custodyRows) : BigInt(0);
 }
 
 function buildTokenAgg(
@@ -103,6 +202,7 @@ function buildTokenAgg(
   rows: StableSupplyDailySnapshot[],
   rates: OracleRateMap,
   sevenDayCutoff: bigint,
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
 ): TokenAgg {
   rows.sort((a, b) => {
     const ta = BigInt(a.timestamp);
@@ -112,8 +212,11 @@ function buildTokenAgg(
     return 0;
   });
   const latest = rows[rows.length - 1]!;
-  const latestSupply = BigInt(latest.totalSupply);
-  const baselineSupply = pickBaselineSupply(rows, sevenDayCutoff);
+  const latestTimestamp = BigInt(latest.timestamp);
+  const latestCustody = latestLockedSupplyForDailyRows(custodyRows);
+  const latestLockedSupply = latestCustody.lockedSupply;
+  const latestSupply = latestDailyCirculatingSupply(latest, custodyRows);
+  const baselineSupply = pickBaselineSupply(rows, sevenDayCutoff, custodyRows);
   const netChange7d = latestSupply - baselineSupply;
   const change7dPct =
     baselineSupply === BigInt(0)
@@ -125,18 +228,24 @@ function buildTokenAgg(
   // non-USDm rates against USDm pairs, so USDm itself never gets an
   // entry. Without the default, USDm tiles and stacked-area slices
   // render null on healthy data.
-  const rate = effectiveOracleRate(rates, latest.tokenSymbol);
+  const rate = effectiveOracleRate(rates, latest.tokenSymbol, latest.chainId);
   const usd = (raw: bigint): number | null =>
     rate == null ? null : parseWei(raw.toString(), latest.tokenDecimals) * rate;
 
   return {
     key,
+    chainId: latest.chainId,
     tokenAddress: latest.tokenAddress,
     tokenSymbol: latest.tokenSymbol,
     source: latest.source,
     tokenDecimals: latest.tokenDecimals,
     latestTotalSupply: latestSupply,
-    latestTimestamp: BigInt(latest.timestamp),
+    latestLockedSupply,
+    latestTimestamp:
+      latestCustody.timestamp !== null &&
+      latestCustody.timestamp > latestTimestamp
+        ? latestCustody.timestamp
+        : latestTimestamp,
     totalSupplyUsdLatest: usd(latestSupply),
     change7dPct,
     netChange7d,
@@ -177,15 +286,20 @@ export function buildTokenUsdTimeSeries(
   rates: OracleRateMap,
   effectiveStartTs: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
+  custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot> = [],
 ): Array<{ timestamp: number; valueUsd: number }> {
   if (snapshots.length === 0) return [];
   const symbol = snapshots[0]!.tokenSymbol;
-  const rate = effectiveOracleRate(rates, symbol);
+  const chainId = snapshots[0]!.chainId;
+  const rate = effectiveOracleRate(rates, symbol, chainId);
   if (rate == null) return [];
 
   // Sort ASC over the FULL set (including pre-window). Don't mutate the
   // input — readonly inputs from upstream rollups would surprise-mutate.
   const sorted = [...snapshots].sort(
+    (a, b) => Number(a.timestamp) - Number(b.timestamp),
+  );
+  const sortedCustody = [...custodySnapshots].sort(
     (a, b) => Number(a.timestamp) - Number(b.timestamp),
   );
 
@@ -196,13 +310,22 @@ export function buildTokenUsdTimeSeries(
   // Walk pre-window rows to seed the baseline. The last row at or before
   // effectiveStartTs holds the supply we forward-fill from.
   let cursor = 0;
+  let custodyCursor = 0;
   let lastSupply = BigInt(0);
+  let lastLockedSupply = BigInt(0);
   while (
     cursor < sorted.length &&
     Number(sorted[cursor]!.timestamp) < effectiveStartTs
   ) {
     lastSupply = BigInt(sorted[cursor]!.totalSupply);
     cursor++;
+  }
+  while (
+    custodyCursor < sortedCustody.length &&
+    Number(sortedCustody[custodyCursor]!.timestamp) < effectiveStartTs
+  ) {
+    lastLockedSupply = BigInt(sortedCustody[custodyCursor]!.lockedSupply);
+    custodyCursor++;
   }
 
   const out: Array<{ timestamp: number; valueUsd: number }> = [];
@@ -215,9 +338,20 @@ export function buildTokenUsdTimeSeries(
       lastSupply = BigInt(sorted[cursor]!.totalSupply);
       cursor++;
     }
+    while (
+      custodyCursor < sortedCustody.length &&
+      Number(sortedCustody[custodyCursor]!.timestamp) <= d
+    ) {
+      lastLockedSupply = BigInt(sortedCustody[custodyCursor]!.lockedSupply);
+      custodyCursor++;
+    }
+    const circulatingSupply =
+      lastSupply >= lastLockedSupply
+        ? lastSupply - lastLockedSupply
+        : BigInt(0);
     out.push({
       timestamp: d,
-      valueUsd: parseWei(lastSupply.toString(), decimals) * rate,
+      valueUsd: parseWei(circulatingSupply.toString(), decimals) * rate,
     });
   }
   return out;

@@ -182,12 +182,12 @@ contracts:
     events:
       - event: Transfer
 
-  # V2StableToken — see config.multichain.mainnet.yaml for the rationale.
-  # Mirrored here so EventHandlers.ts's `indexer.onEvent("V2StableToken",
+  # StableToken — see config.multichain.mainnet.yaml for the rationale.
+  # Mirrored here so EventHandlers.ts's `indexer.onEvent("StableToken",
   # ...)` registration binds successfully under testnet codegen too. Address
-  # list is empty on testnet for now — V2 stable support shipped on mainnet
+  # list is empty on testnet for now — stable support shipped on mainnet
   # first; add testnet addresses when the surface is needed.
-  - name: V2StableToken
+  - name: StableToken
     abi_file_path: abis/ERC20.json
     handler: src/EventHandlers.ts
     events:
@@ -317,8 +317,8 @@ chains:
         address: []
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
-      - name: V2StableToken
-        address: [] # V2 stable supply tracking not yet wired on testnet
+      - name: StableToken
+        address: [] # Stable supply tracking not yet wired on testnet
       - name: BreakerBox
         address:
           - 0x578bD46003B9D3fd4c3C3f47c98B329562a6a1dE
@@ -358,8 +358,8 @@ chains:
           - "0x85ed9ac57827132B8F60938F3165BC139E1F53cd"
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
-      - name: V2StableToken
-        address: [] # V2 reserve-backed stables are Celo-only
+      - name: StableToken
+        address: [] # reserve-backed stables are Celo-only
       - name: OpenLiquidityStrategy
         address:
           - 0xCCd2aD0603a08EBc14D223a983171ef18192e8c9

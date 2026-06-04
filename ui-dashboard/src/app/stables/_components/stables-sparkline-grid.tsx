@@ -8,12 +8,18 @@ import { tokenColorForSource } from "@/lib/token-colors";
 import {
   buildTokenUsdTimeSeries,
   computeChartStartSeconds,
+  groupCustodySnapshotsByToken,
   groupSnapshotsByTokenSource,
   rollupByToken,
+  unionCustodySnapshotsWithLatest,
   unionSnapshotsWithLatest,
 } from "../_lib/aggregate";
 import { sparklinePoints } from "../_lib/sparkline";
-import type { StableSupplyDailySnapshot, TokenAgg } from "../_lib/types";
+import type {
+  StableSupplyDailySnapshot,
+  StableTokenCustodyDailySnapshot,
+  TokenAgg,
+} from "../_lib/types";
 
 /**
  * Per-token sparkline grid — overview-card layer between the KPI strip
@@ -28,6 +34,8 @@ import type { StableSupplyDailySnapshot, TokenAgg } from "../_lib/types";
 type Props = {
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
+  custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>;
+  latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   rates: OracleRateMap;
   isLoading: boolean;
   hasError: boolean;
@@ -36,6 +44,8 @@ type Props = {
 export function StablesSparklineGrid({
   snapshots,
   latestPerToken,
+  custodySnapshots,
+  latestCustodyPerToken,
   rates,
   isLoading,
   hasError,
@@ -46,9 +56,14 @@ export function StablesSparklineGrid({
   const cards = useMemo(() => {
     if (snapshots.length === 0 && latestPerToken.length === 0) return [];
     const merged = unionSnapshotsWithLatest(snapshots, latestPerToken);
+    const mergedCustody = unionCustodySnapshotsWithLatest(
+      custodySnapshots,
+      latestCustodyPerToken,
+    );
 
-    const rollup = rollupByToken(merged, rates);
+    const rollup = rollupByToken(merged, rates, undefined, mergedCustody);
     const grouped = groupSnapshotsByTokenSource(merged);
+    const custodyByToken = groupCustodySnapshotsByToken(mergedCustody);
     // Sparkline window: 30 days. Use the same caller-side start helper
     // so the per-card sparkline x-axis aligns with the hero chart's.
     const startTs = computeChartStartSeconds(grouped, "30d");
@@ -56,7 +71,15 @@ export function StablesSparklineGrid({
     const out: Array<{ agg: TokenAgg; sparkline: number[] }> = [];
     for (const agg of rollup.values()) {
       const rows = grouped.get(agg.key) ?? [];
-      const series = buildTokenUsdTimeSeries(rows, rates, startTs);
+      const custodyRows =
+        custodyByToken.get(`${agg.chainId}|${agg.tokenAddress}`) ?? [];
+      const series = buildTokenUsdTimeSeries(
+        rows,
+        rates,
+        startTs,
+        undefined,
+        custodyRows,
+      );
       out.push({ agg, sparkline: series.map((p) => p.valueUsd) });
     }
     // Largest USD supply first; tokens without USD (rate=null) sink.
@@ -66,7 +89,13 @@ export function StablesSparklineGrid({
       return bv - av;
     });
     return out;
-  }, [snapshots, latestPerToken, rates]);
+  }, [
+    snapshots,
+    latestPerToken,
+    custodySnapshots,
+    latestCustodyPerToken,
+    rates,
+  ]);
 
   if (isLoading) {
     return (
@@ -114,7 +143,7 @@ function SparklineCard({
   agg: TokenAgg;
   sparkline: number[];
 }): React.JSX.Element {
-  const label = displayLabel(agg.tokenSymbol, agg.source);
+  const label = `${displayLabel(agg.tokenSymbol, agg.source)} on ${chainLabel(agg.chainId)}`;
   const color = tokenColorForSource(agg.tokenSymbol, agg.source);
   const usd =
     agg.totalSupplyUsdLatest != null
@@ -164,6 +193,12 @@ function SparklineCard({
       </div>
     </article>
   );
+}
+
+function chainLabel(chainId: number): string {
+  if (chainId === 143) return "Monad";
+  if (chainId === 42220) return "Celo";
+  return `Chain ${chainId}`;
 }
 
 function MiniSparkline({

@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------------------
 
 const PALETTE: Record<string, string> = {
-  // Reserve-backed (V2) + V3 hub stables.
+  // Reserve-backed + V3 hub stables.
   USDm: "#34d399", // emerald-400 — USD anchor / "expansion green"
   EURm: "#60a5fa", // blue-400 — EU
   BRLm: "#a78bfa", // violet-400 — BR
@@ -62,11 +62,11 @@ function tokenColor(symbol: string): string {
 }
 
 // Source overrides: when the same symbol maps to two on-chain contracts
-// distinguished by `source` (today only V3 hub USDm vs V2 cUSD-USDm), the
+// distinguished by `source` (today only V3 hub USDm vs Celo cUSD-USDm), the
 // V3 variant gets a darker green so the stacked chart's two USDm slices
 // don't visually merge.
 const SOURCE_OVERRIDES: Record<string, string> = {
-  // "USDm" V3_HUB_COLLATERAL → green-500 (vs V2 emerald-400 #34d399).
+  // "USDm" V3_HUB_COLLATERAL → green-500 (vs reserve emerald-400 #34d399).
   "USDm:V3_HUB_COLLATERAL": "#22c55e",
 };
 
@@ -74,7 +74,7 @@ const SOURCE_OVERRIDES: Record<string, string> = {
  * Returns a stack-distinct color for the (symbol, source) pair. Falls
  * back to `tokenColor(symbol)` when there's no source override. Used by
  * the /stables hero chart's stacked area where the same `tokenSymbol`
- * can map to two distinct on-chain rows (V2 cUSD-USDm + V3 hub USDm).
+ * can map to two distinct on-chain rows (Celo cUSD-USDm + V3 hub USDm).
  * Calling site picks `tokenColorForSource(symbol, source)` — the chart's
  * `BreakdownSeries.color` consumes the result directly.
  */

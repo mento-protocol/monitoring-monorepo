@@ -277,7 +277,7 @@ export const ERC20_DECIMALS_ABI = [
   },
 ] as const;
 
-// Used by `fetchV2StableTotalSupply` to seed the V2 stable supply baseline
+// Used by `fetchStableTotalSupply` to seed the stable supply baseline
 // from on-chain at the block before the first observed Transfer event.
 // Inline minimal ABI rather than vendoring a full StableToken ABI for the
 // same reason as ERC20_DECIMALS_ABI above — keeps the read site type-safe
@@ -287,6 +287,19 @@ export const ERC20_TOTAL_SUPPLY_ABI = [
     type: "function",
     name: "totalSupply",
     inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
+// Used by `fetchStableBalanceOf` to seed the NTT lock-custody baseline
+// from on-chain at the block before the first observed manager lock/unlock
+// Transfer event.
+export const ERC20_BALANCE_OF_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    inputs: [{ name: "account", type: "address" }],
     outputs: [{ name: "", type: "uint256" }],
     stateMutability: "view",
   },

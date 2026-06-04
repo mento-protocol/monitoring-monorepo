@@ -28,8 +28,8 @@ type OracleRatesSlice = {
 export type OracleRatesResult = {
   /** Per-network rate map, one entry per configured network (empty on error). */
   byNetwork: OracleRatesSlice[];
-  /** Union of per-network rate maps. First-wins on symbol collision — matches
-   *  how the previous bridge/pool-detail code folded networkData[].rates. */
+  /** Union of per-network rate maps. Symbol keys are first-wins for legacy
+   *  callers; chain-qualified keys (`${chainId}:${symbol}`) remain distinct. */
   merged: OracleRateMap;
   /** True while the first fetch is in-flight (no fallback data yet). */
   isLoading: boolean;

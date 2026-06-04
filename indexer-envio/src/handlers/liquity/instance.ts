@@ -137,7 +137,7 @@ export function flushLiquitySnapshots(
     });
 
     // Write the V3_LIQUITY row of `StableSupplyDailySnapshot` so the
-    // /stables page sees GBPm/CHFm/JPYm alongside V2_RESERVE +
+    // /stables page sees GBPm/CHFm/JPYm alongside RESERVE +
     // V3_HUB_COLLATERAL. Source of truth for the symbol/address/
     // decimals tuple is `LIQUITY_MARKETS` (config.ts), looked up by
     // the instance's collateralId. If a future market is registered

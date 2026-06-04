@@ -651,20 +651,6 @@
     "linePreview": " | function extractRevertData(err: unknown): Hex | null { | if (err && typeof err === \"object\") {"
   },
   {
-    "file": "src/lib/tokens.ts",
-    "ruleId": "complexity",
-    "message": "Function 'buildOracleRateMap' has a complexity of 16. Maximum allowed is 15.",
-    "line": 58,
-    "linePreview": "*/ | export function buildOracleRateMap( | pools: ReadonlyArray<OracleRatePool>,"
-  },
-  {
-    "file": "src/lib/tokens.ts",
-    "ruleId": "complexity",
-    "message": "Function 'poolTvlUSD' has a complexity of 17. Maximum allowed is 15.",
-    "line": 237,
-    "linePreview": "*/ | export function poolTvlUSD( | pool: {"
-  },
-  {
     "file": "src/lib/use-roving-tab-index.ts",
     "ruleId": "complexity",
     "message": "Function 'handleKeyDown' has a complexity of 17. Maximum allowed is 15.",
