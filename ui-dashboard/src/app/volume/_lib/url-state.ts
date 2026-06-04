@@ -51,7 +51,9 @@ function readRangeFromParams(params: URLSearchParams): VolumeRangeKey {
 }
 
 function readActorFilterFromParams(params: URLSearchParams): ActorFilter {
-  return params.get("actors") === "all" ? "all" : DEFAULT_ACTOR_FILTER;
+  return params.get("actors") === "all" || params.get("system") === "1"
+    ? "all"
+    : DEFAULT_ACTOR_FILTER;
 }
 
 function readVenueFromParams(params: URLSearchParams): Venue {
@@ -114,6 +116,7 @@ function writeVolumeUrl({
   const params = new URLSearchParams(window.location.search);
   if (range === DEFAULT_RANGE) params.delete("range");
   else params.set("range", range);
+  params.delete("system");
   if (actorFilter === DEFAULT_ACTOR_FILTER) params.delete("actors");
   else params.set("actors", actorFilter);
   writeParamList(params, "exclude", exclusions.addresses);
