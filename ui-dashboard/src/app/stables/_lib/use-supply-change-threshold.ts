@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   DEFAULT_SUPPLY_CHANGE_MIN_USD,
+  sanitizeSupplyChangeMinUsd,
   SUPPLY_CHANGE_MIN_USD_QUERY_PARAM,
 } from "./aggregate";
 
@@ -17,9 +18,7 @@ function parseMinimumUsdValue(params: URLSearchParams): number {
   const raw = params.get(SUPPLY_CHANGE_MIN_USD_QUERY_PARAM);
   if (raw == null) return DEFAULT_SUPPLY_CHANGE_MIN_USD;
   const next = Number(raw.trim());
-  return Number.isFinite(next) && next >= 0
-    ? next
-    : DEFAULT_SUPPLY_CHANGE_MIN_USD;
+  return sanitizeMinimumUsdValue(next);
 }
 
 function writeMinimumUsdValueUrl(next: number) {
@@ -37,9 +36,7 @@ function writeMinimumUsdValueUrl(next: number) {
 }
 
 function sanitizeMinimumUsdValue(next: number): number {
-  return Number.isFinite(next) && next >= 0
-    ? next
-    : DEFAULT_SUPPLY_CHANGE_MIN_USD;
+  return sanitizeSupplyChangeMinUsd(next);
 }
 
 export function useSupplyChangeThreshold(): SupplyChangeThresholdState {

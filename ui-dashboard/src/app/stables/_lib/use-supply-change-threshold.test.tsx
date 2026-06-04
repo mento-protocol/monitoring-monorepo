@@ -7,6 +7,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_SUPPLY_CHANGE_MIN_USD } from "./aggregate";
 
 let mockSearchParams = new URLSearchParams();
 
@@ -24,8 +25,8 @@ function HookWrapper({ resultRef }: { resultRef: ResultRef }) {
   return null;
 }
 
-let container: HTMLElement;
-let root: Root;
+let container: HTMLElement | null = null;
+let root: Root | null = null;
 
 function setup(url = "/stables") {
   window.history.replaceState(window.history.state, "", url);
@@ -38,16 +39,19 @@ function setup(url = "/stables") {
 function renderHook(): ResultRef {
   const ref: ResultRef = { current: null };
   act(() => {
-    root.render(<HookWrapper resultRef={ref} />);
+    root?.render(<HookWrapper resultRef={ref} />);
   });
   return ref;
 }
 
 function teardown() {
+  if (!root || !container) return;
   act(() => {
-    root.unmount();
+    root?.unmount();
   });
   container.remove();
+  root = null;
+  container = null;
 }
 
 beforeEach(() => {
@@ -98,6 +102,16 @@ describe("useSupplyChangeThreshold", () => {
 
     expect(ref.current?.minimumUsdValue).toBe(0.01);
     expect(window.location.search).toBe("?foo=1");
+  });
+
+  it("canonicalizes oversized threshold params on mount", () => {
+    setup("/stables?minSupplyChangeUsd=1e21&foo=1");
+    const ref = renderHook();
+
+    expect(ref.current?.minimumUsdValue).toBe(MAX_SUPPLY_CHANGE_MIN_USD);
+    expect(window.location.search).toBe(
+      `?minSupplyChangeUsd=${MAX_SUPPLY_CHANGE_MIN_USD}&foo=1`,
+    );
   });
 
   it("syncs state from browser back-forward popstate", () => {

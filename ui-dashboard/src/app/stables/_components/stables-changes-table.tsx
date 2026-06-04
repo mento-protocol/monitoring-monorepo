@@ -163,7 +163,7 @@ function ChangesHeader({
           onReset={onMinimumUsdValueReset}
         />
         <div className="text-left sm:text-right">
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500" role="status">
             Hiding changes below {thresholdLabel} equivalent.
           </p>
           {unpricedEventsCount > 0 ? (

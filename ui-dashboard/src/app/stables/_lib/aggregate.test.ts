@@ -6,6 +6,7 @@ import {
   DEFAULT_SUPPLY_CHANGE_MIN_USD,
   formatSupplyChangeUsdThreshold,
   isVisibleSupplyChangeEvent,
+  MAX_SUPPLY_CHANGE_MIN_USD,
   rangeStartSeconds,
   rollupByToken,
   sumTotalUsdSeries,
@@ -180,6 +181,36 @@ describe("supply-change display threshold", () => {
       "$0.01",
     );
     expect(formatSupplyChangeUsdThreshold(1000)).toBe("$1,000.00");
+  });
+
+  it("clamps huge USD thresholds before BigInt scaling", () => {
+    expect(() =>
+      isVisibleSupplyChangeEvent(
+        {
+          amount: "1000000000000000000",
+          chainId: 42220,
+          tokenDecimals: 18,
+          tokenSymbol: "USDm",
+        },
+        new Map(),
+        1e21,
+      ),
+    ).not.toThrow();
+    expect(
+      isVisibleSupplyChangeEvent(
+        {
+          amount: "1000000000000000000",
+          chainId: 42220,
+          tokenDecimals: 18,
+          tokenSymbol: "USDm",
+        },
+        new Map(),
+        1e21,
+      ),
+    ).toBe(false);
+    expect(formatSupplyChangeUsdThreshold(1e21)).toBe(
+      formatSupplyChangeUsdThreshold(MAX_SUPPLY_CHANGE_MIN_USD),
+    );
   });
 });
 

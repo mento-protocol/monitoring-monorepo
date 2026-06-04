@@ -17,6 +17,7 @@ const SECONDS_PER_DAY_NUMBER = 86_400;
 const USD_THRESHOLD_SCALE_DECIMALS = 12;
 const USD_THRESHOLD_SCALE = BigInt(10) ** BigInt(USD_THRESHOLD_SCALE_DECIMALS);
 export const DEFAULT_SUPPLY_CHANGE_MIN_USD = 0.01;
+export const MAX_SUPPLY_CHANGE_MIN_USD = 1_000_000_000_000_000_000;
 export const SUPPLY_CHANGE_MIN_USD_QUERY_PARAM = "minSupplyChangeUsd";
 
 /**
@@ -43,13 +44,14 @@ export function isVisibleSupplyChangeEvent(
   rates: OracleRateMap,
   minimumUsdValue = DEFAULT_SUPPLY_CHANGE_MIN_USD,
 ): boolean {
-  if (minimumUsdValue <= 0) return true;
+  const safeMinimumUsdValue = sanitizeSupplyChangeMinUsd(minimumUsdValue);
+  if (safeMinimumUsdValue <= 0) return true;
   const rate = effectiveOracleRate(rates, event.tokenSymbol, event.chainId);
   if (rate == null) return true;
   const minimumRaw = minimumSupplyChangeRawForUsd(
     event.tokenDecimals,
     rate,
-    minimumUsdValue,
+    safeMinimumUsdValue,
   );
   if (minimumRaw == null) return true;
   const amount = BigInt(event.amount);
@@ -57,11 +59,14 @@ export function isVisibleSupplyChangeEvent(
   return absAmount >= minimumRaw;
 }
 
+export function sanitizeSupplyChangeMinUsd(value: number): number {
+  if (!Number.isFinite(value) || value < 0)
+    return DEFAULT_SUPPLY_CHANGE_MIN_USD;
+  return Math.min(value, MAX_SUPPLY_CHANGE_MIN_USD);
+}
+
 export function formatSupplyChangeUsdThreshold(value: number): string {
-  const safeValue =
-    Number.isFinite(value) && value >= 0
-      ? value
-      : DEFAULT_SUPPLY_CHANGE_MIN_USD;
+  const safeValue = sanitizeSupplyChangeMinUsd(value);
   return `$${safeValue.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 6,
@@ -88,7 +93,9 @@ function minimumSupplyChangeRawForUsd(
 
 function nonNegativeNumberToScaledBigInt(value: number): bigint | null {
   if (!Number.isFinite(value) || value < 0) return null;
-  const fixed = value.toFixed(USD_THRESHOLD_SCALE_DECIMALS);
+  const fixed = Math.min(value, MAX_SUPPLY_CHANGE_MIN_USD).toFixed(
+    USD_THRESHOLD_SCALE_DECIMALS,
+  );
   const [whole = "0", fraction = ""] = fixed.split(".");
   return (
     BigInt(whole) * USD_THRESHOLD_SCALE +
