@@ -1238,6 +1238,9 @@ describe("aggregator quote builders", () => {
       },
     ).toMatchObject({ quoteOnly: true });
     expect(JSON.stringify(squidQuoteRequest?.init?.headers)).toContain(
+      "x-integrator-id",
+    );
+    expect(JSON.stringify(squidQuoteRequest?.init?.headers)).toContain(
       "squid-id",
     );
 
