@@ -178,10 +178,11 @@ export function useStablesChanges(range: RangeKey = "7d", page: number = 0) {
     shouldFetchThirdPage,
   );
   const pages = [firstPage, secondPage, thirdPage] as const;
-  const { events, capped } = buildVisibleChangesResult(pages);
+  const pageError = firstEnabledPageError(pages);
+  const { events, capped } = buildVisibleChangesResult(pages, pageError);
   return {
     events,
-    error: firstEnabledPageError(pages),
+    error: visibleChangesError(firstPage, events, pageError),
     isLoading: pages.some(
       (candidate) => candidate.enabled && candidate.isLoading,
     ),
@@ -233,17 +234,22 @@ function shouldFetchNextChangePage(
   );
 }
 
-function buildVisibleChangesResult(pages: ReadonlyArray<ChangePageState>): {
+function buildVisibleChangesResult(
+  pages: ReadonlyArray<ChangePageState>,
+  pageError: unknown,
+): {
   events: ReadonlyArray<StableSupplyChangeEvent>;
   capped: boolean;
 } {
   const visibleEvents = pages.flatMap((candidate) => candidate.visibleEvents);
   const lastFetchedRawEvents = lastEnabledPage(pages)?.rawEvents ?? [];
+  const events = visibleEvents.slice(0, CHANGES_DISPLAY_LIMIT);
   return {
-    events: visibleEvents.slice(0, CHANGES_DISPLAY_LIMIT),
+    events,
     capped:
       visibleEvents.length > CHANGES_DISPLAY_LIMIT ||
-      lastFetchedRawEvents.length === CHANGES_QUERY_PAGE_LIMIT,
+      lastFetchedRawEvents.length === CHANGES_QUERY_PAGE_LIMIT ||
+      (events.length > 0 && pageError != null),
   };
 }
 
@@ -262,4 +268,14 @@ function firstEnabledPageError(pages: ReadonlyArray<ChangePageState>): unknown {
     if (candidate.enabled && candidate.error != null) return candidate.error;
   }
   return null;
+}
+
+function visibleChangesError(
+  firstPage: ChangePageState,
+  events: ReadonlyArray<StableSupplyChangeEvent>,
+  pageError: unknown,
+): unknown {
+  if (firstPage.error != null) return firstPage.error;
+  if (events.length > 0) return null;
+  return pageError;
 }
