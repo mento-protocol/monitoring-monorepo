@@ -152,7 +152,7 @@ export const STABLES_CHANGES = `
       counterparty
       caller
       txTo
-      isSystemCaller
+      isProtocolOwnedCaller
       amount
       txHash
       blockNumber

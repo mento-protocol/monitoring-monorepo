@@ -24,13 +24,13 @@
 export const TRADER_DAILY_TOP = /* GraphQL */ `
   query TraderDailyTop(
     $afterTimestamp: numeric!
-    $isSystemAddressIn: [Boolean!]!
+    $isProtocolActorIn: [Boolean!]!
     $limit: Int!
   ) {
     TraderDailySnapshot(
       where: {
         timestamp: { _gte: $afterTimestamp }
-        isSystemAddress: { _in: $isSystemAddressIn }
+        isProtocolActor: { _in: $isProtocolActorIn }
       }
       order_by: { volumeUsdWei: desc }
       limit: $limit
@@ -43,7 +43,7 @@ export const TRADER_DAILY_TOP = /* GraphQL */ `
       uniquePools
       volumeUsdWei
       feesPaidUsdWei
-      isSystemAddress
+      isProtocolActor
       aggregatorKeys
       lastSeenTimestamp
     }
@@ -97,13 +97,13 @@ export const TRADER_DAILY_WINDOW_TOP = /* GraphQL */ `
   query TraderDailyWindowTop(
     $afterTimestamp: numeric!
     $beforeTimestamp: numeric!
-    $isSystemAddressIn: [Boolean!]!
+    $isProtocolActorIn: [Boolean!]!
     $limit: Int!
   ) {
     TraderDailySnapshot(
       where: {
         timestamp: { _gte: $afterTimestamp, _lt: $beforeTimestamp }
-        isSystemAddress: { _in: $isSystemAddressIn }
+        isProtocolActor: { _in: $isProtocolActorIn }
       }
       order_by: [{ volumeUsdWei: desc }, { id: asc }]
       limit: $limit
@@ -116,7 +116,7 @@ export const TRADER_DAILY_WINDOW_TOP = /* GraphQL */ `
       uniquePools
       volumeUsdWei
       feesPaidUsdWei
-      isSystemAddress
+      isProtocolActor
       aggregatorKeys
       lastSeenTimestamp
     }
@@ -208,9 +208,9 @@ export const POOL_DAILY_VOLUME = /* GraphQL */ `
       poolId
       timestamp
       swapCount
-      swapCountIncludingSystem
+      swapCountIncludingProtocolActors
       volumeUsdWei
-      volumeUsdWeiIncludingSystem
+      volumeUsdWeiIncludingProtocolActors
     }
   }
 `;
@@ -233,23 +233,23 @@ export const AGGREGATOR_DAILY_TOP = /* GraphQL */ `
       lastSeenAggregatorAddress
       timestamp
       swapCount
-      swapCountIncludingSystem
+      swapCountIncludingProtocolActors
       uniqueTraders
-      uniqueTradersIncludingSystem
+      uniqueTradersIncludingProtocolActors
       volumeUsdWei
-      volumeUsdWeiIncludingSystem
+      volumeUsdWeiIncludingProtocolActors
     }
   }
 `;
 
-export const AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM = /* GraphQL */ `
-  query AggregatorDailyTopIncludingSystem(
+export const AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS = /* GraphQL */ `
+  query AggregatorDailyTopIncludingProtocolActors(
     $afterTimestamp: numeric!
     $limit: Int!
   ) {
     AggregatorDailySnapshot(
       where: { timestamp: { _gte: $afterTimestamp } }
-      order_by: [{ volumeUsdWeiIncludingSystem: desc }, { id: asc }]
+      order_by: [{ volumeUsdWeiIncludingProtocolActors: desc }, { id: asc }]
       limit: $limit
     ) {
       id
@@ -258,18 +258,20 @@ export const AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM = /* GraphQL */ `
       lastSeenAggregatorAddress
       timestamp
       swapCount
-      swapCountIncludingSystem
+      swapCountIncludingProtocolActors
       uniqueTraders
-      uniqueTradersIncludingSystem
+      uniqueTradersIncludingProtocolActors
       volumeUsdWei
-      volumeUsdWeiIncludingSystem
+      volumeUsdWeiIncludingProtocolActors
     }
   }
 `;
 
-export function aggregatorDailyTopQuery(showSystem: boolean): string {
-  return showSystem
-    ? AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM
+export function aggregatorDailyTopQuery(
+  includeProtocolActors: boolean,
+): string {
+  return includeProtocolActors
+    ? AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS
     : AGGREGATOR_DAILY_TOP;
 }
 
@@ -289,13 +291,13 @@ export function aggregatorDailyTopQuery(showSystem: boolean): string {
 export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
   query BrokerTraderDailyTop(
     $afterTimestamp: numeric!
-    $isSystemAddressIn: [Boolean!]!
+    $isProtocolActorIn: [Boolean!]!
     $limit: Int!
   ) {
     BrokerTraderDailySnapshot(
       where: {
         timestamp: { _gte: $afterTimestamp }
-        isSystemAddress: { _in: $isSystemAddressIn }
+        isProtocolActor: { _in: $isProtocolActorIn }
       }
       order_by: [{ volumeUsdWei: desc }, { id: asc }]
       limit: $limit
@@ -306,7 +308,7 @@ export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
       timestamp
       swapCount
       volumeUsdWei
-      isSystemAddress
+      isProtocolActor
       lastSeenTimestamp
     }
   }
@@ -319,7 +321,7 @@ export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
  * should reach out to about migrating to v3.
  *
  * No protocol-actor filter — `aggregator` is already a canonical name; the
- * `system` value covers Mento internals and is naturally tiny.
+ * `protocol` value covers Mento internals and is naturally tiny.
  */
 export const BROKER_AGGREGATOR_DAILY_TOP = /* GraphQL */ `
   query BrokerAggregatorDailyTop($afterTimestamp: numeric!, $limit: Int!) {
@@ -360,11 +362,11 @@ export const VOLUME_WINDOW_LATEST = /* GraphQL */ `
       snapshotDay
       windowStartDay
       totalVolumeUsdWei
-      totalVolumeUsdWeiIncludingSystem
+      totalVolumeUsdWeiIncludingProtocolActors
       totalSwapCount
-      totalSwapCountIncludingSystem
+      totalSwapCountIncludingProtocolActors
       uniqueTraders
-      uniqueTradersIncludingSystem
+      uniqueTradersIncludingProtocolActors
     }
   }
 `;
@@ -383,60 +385,11 @@ export const BROKER_VOLUME_WINDOW_LATEST = /* GraphQL */ `
       snapshotDay
       windowStartDay
       totalVolumeUsdWei
-      totalVolumeUsdWeiIncludingSystem
+      totalVolumeUsdWeiIncludingProtocolActors
       totalSwapCount
-      totalSwapCountIncludingSystem
+      totalSwapCountIncludingProtocolActors
       uniqueTraders
-      uniqueTradersIncludingSystem
-    }
-  }
-`;
-
-// Compatibility fallback for dashboards deployed before the hosted indexer
-// schema has promoted the renamed volume snapshot entities. GraphQL aliases
-// preserve the new response shape while reading the previous entity names.
-export const LEGACY_VOLUME_WINDOW_LATEST = /* GraphQL */ `
-  query LegacyVolumeWindowLatest($windowKey: String!) {
-    volumeWindowSnapshots: LeaderboardWindowSnapshot(
-      where: { windowKey: { _eq: $windowKey } }
-      order_by: [{ chainId: asc }, { snapshotDay: desc }]
-      distinct_on: [chainId]
-      limit: 100
-    ) {
-      id
-      chainId
-      windowKey
-      snapshotDay
-      windowStartDay
-      totalVolumeUsdWei
-      totalVolumeUsdWeiIncludingSystem
-      totalSwapCount
-      totalSwapCountIncludingSystem
-      uniqueTraders
-      uniqueTradersIncludingSystem
-    }
-  }
-`;
-
-export const LEGACY_BROKER_VOLUME_WINDOW_LATEST = /* GraphQL */ `
-  query LegacyBrokerVolumeWindowLatest($windowKey: String!) {
-    brokerVolumeWindowSnapshots: BrokerLeaderboardWindowSnapshot(
-      where: { windowKey: { _eq: $windowKey } }
-      order_by: [{ chainId: asc }, { snapshotDay: desc }]
-      distinct_on: [chainId]
-      limit: 100
-    ) {
-      id
-      chainId
-      windowKey
-      snapshotDay
-      windowStartDay
-      totalVolumeUsdWei
-      totalVolumeUsdWeiIncludingSystem
-      totalSwapCount
-      totalSwapCountIncludingSystem
-      uniqueTraders
-      uniqueTradersIncludingSystem
+      uniqueTradersIncludingProtocolActors
     }
   }
 `;
@@ -461,11 +414,11 @@ export const VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
       chainId
       snapshotDay
       firstDayVolumeUsdWei
-      firstDayVolumeUsdWeiIncludingSystem
+      firstDayVolumeUsdWeiIncludingProtocolActors
       firstDaySwapCount
-      firstDaySwapCountIncludingSystem
+      firstDaySwapCountIncludingProtocolActors
       firstDayExclusiveUniqueTraders
-      firstDayExclusiveUniqueTradersIncludingSystem
+      firstDayExclusiveUniqueTradersIncludingProtocolActors
     }
   }
 `;
@@ -481,51 +434,11 @@ export const BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
       chainId
       snapshotDay
       firstDayVolumeUsdWei
-      firstDayVolumeUsdWeiIncludingSystem
+      firstDayVolumeUsdWeiIncludingProtocolActors
       firstDaySwapCount
-      firstDaySwapCountIncludingSystem
+      firstDaySwapCountIncludingProtocolActors
       firstDayExclusiveUniqueTraders
-      firstDayExclusiveUniqueTradersIncludingSystem
-    }
-  }
-`;
-
-export const LEGACY_VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
-  query LegacyVolumeWindowFirstDayLatest($windowKey: String!) {
-    volumeWindowFirstDaySnapshots: LeaderboardWindowSnapshot(
-      where: { windowKey: { _eq: $windowKey } }
-      order_by: [{ chainId: asc }, { snapshotDay: desc }]
-      distinct_on: [chainId]
-      limit: 100
-    ) {
-      chainId
-      snapshotDay
-      firstDayVolumeUsdWei
-      firstDayVolumeUsdWeiIncludingSystem
-      firstDaySwapCount
-      firstDaySwapCountIncludingSystem
-      firstDayExclusiveUniqueTraders
-      firstDayExclusiveUniqueTradersIncludingSystem
-    }
-  }
-`;
-
-export const LEGACY_BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST = /* GraphQL */ `
-  query LegacyBrokerVolumeWindowFirstDayLatest($windowKey: String!) {
-    brokerVolumeWindowFirstDaySnapshots: BrokerLeaderboardWindowSnapshot(
-      where: { windowKey: { _eq: $windowKey } }
-      order_by: [{ chainId: asc }, { snapshotDay: desc }]
-      distinct_on: [chainId]
-      limit: 100
-    ) {
-      chainId
-      snapshotDay
-      firstDayVolumeUsdWei
-      firstDayVolumeUsdWeiIncludingSystem
-      firstDaySwapCount
-      firstDaySwapCountIncludingSystem
-      firstDayExclusiveUniqueTraders
-      firstDayExclusiveUniqueTradersIncludingSystem
+      firstDayExclusiveUniqueTradersIncludingProtocolActors
     }
   }
 `;
@@ -550,26 +463,11 @@ export const VOLUME_WINDOW_TRADERS_LATEST = /* GraphQL */ `
   }
 `;
 
-export const LEGACY_VOLUME_WINDOW_TRADERS_LATEST = /* GraphQL */ `
-  query LegacyVolumeWindowTradersLatest($windowKey: String!) {
-    volumeWindowTraderSnapshots: LeaderboardWindowSnapshot(
-      where: { windowKey: { _eq: $windowKey } }
-      order_by: [{ chainId: asc }, { snapshotDay: desc }]
-      distinct_on: [chainId]
-      limit: 100
-    ) {
-      chainId
-      snapshotDay
-      windowTraders
-    }
-  }
-`;
-
 // Isolated bounded overlap query for exact hero unique-trader counts.
 // The caller passes an `_or` where clause scoped to the active yesterday/today
 // partial traders and each chain's retained snapshot range. The query is
-// distinct on `(chainId, trader, isSystemAddress)` so the hidden-system merge
-// can distinguish "had a non-system historical row" from "sticky-system trader
+// distinct on `(chainId, trader, isProtocolActor)` so the organic merge
+// can distinguish "had an organic historical row" from "sticky-protocol trader
 // excluded from the snapshot unique count" without polling full cumulative
 // trader arrays.
 export const VOLUME_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
@@ -582,16 +480,16 @@ export const VOLUME_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
       order_by: [
         { chainId: asc }
         { trader: asc }
-        { isSystemAddress: asc }
+        { isProtocolActor: asc }
         { timestamp: desc }
       ]
-      distinct_on: [chainId, trader, isSystemAddress]
+      distinct_on: [chainId, trader, isProtocolActor]
       limit: $limit
     ) {
       chainId
       trader
       timestamp
-      isSystemAddress
+      isProtocolActor
     }
   }
 `;
@@ -606,16 +504,16 @@ export const BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
       order_by: [
         { chainId: asc }
         { caller: asc }
-        { isSystemAddress: asc }
+        { isProtocolActor: asc }
         { timestamp: desc }
       ]
-      distinct_on: [chainId, caller, isSystemAddress]
+      distinct_on: [chainId, caller, isProtocolActor]
       limit: $limit
     ) {
       chainId
       trader: caller
       timestamp
-      isSystemAddress
+      isProtocolActor
     }
   }
 `;
@@ -633,12 +531,12 @@ export const BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
 export const VOLUME_TODAY_TRADERS = /* GraphQL */ `
   query VolumeTodayTraders(
     $todayMidnight: numeric!
-    $isSystemAddressIn: [Boolean!]!
+    $isProtocolActorIn: [Boolean!]!
   ) {
     volumeTodayTraders: TraderDailySnapshot(
       where: {
         timestamp: { _gte: $todayMidnight }
-        isSystemAddress: { _in: $isSystemAddressIn }
+        isProtocolActor: { _in: $isProtocolActorIn }
       }
       limit: 1000
     ) {
@@ -646,7 +544,7 @@ export const VOLUME_TODAY_TRADERS = /* GraphQL */ `
       trader
       volumeUsdWei
       swapCount
-      isSystemAddress
+      isProtocolActor
     }
   }
 `;
@@ -654,12 +552,12 @@ export const VOLUME_TODAY_TRADERS = /* GraphQL */ `
 export const BROKER_VOLUME_TODAY_TRADERS = /* GraphQL */ `
   query BrokerVolumeTodayTraders(
     $todayMidnight: numeric!
-    $isSystemAddressIn: [Boolean!]!
+    $isProtocolActorIn: [Boolean!]!
   ) {
     brokerVolumeTodayTraders: BrokerTraderDailySnapshot(
       where: {
         timestamp: { _gte: $todayMidnight }
-        isSystemAddress: { _in: $isSystemAddressIn }
+        isProtocolActor: { _in: $isProtocolActorIn }
       }
       limit: 1000
     ) {
@@ -667,7 +565,7 @@ export const BROKER_VOLUME_TODAY_TRADERS = /* GraphQL */ `
       trader: caller
       volumeUsdWei
       swapCount
-      isSystemAddress
+      isProtocolActor
     }
   }
 `;
@@ -689,13 +587,13 @@ export const BROKER_VOLUME_TODAY_TRADERS = /* GraphQL */ `
 export const VOLUME_YESTERDAY_TRADERS = /* GraphQL */ `
   query VolumeYesterdayTraders(
     $yesterdayMidnight: numeric!
-    $isSystemAddressIn: [Boolean!]!
+    $isProtocolActorIn: [Boolean!]!
     $chainIdIn: [Int!]!
   ) {
     volumeYesterdayTraders: TraderDailySnapshot(
       where: {
         timestamp: { _eq: $yesterdayMidnight }
-        isSystemAddress: { _in: $isSystemAddressIn }
+        isProtocolActor: { _in: $isProtocolActorIn }
         chainId: { _in: $chainIdIn }
       }
       limit: 1000
@@ -704,7 +602,7 @@ export const VOLUME_YESTERDAY_TRADERS = /* GraphQL */ `
       trader
       volumeUsdWei
       swapCount
-      isSystemAddress
+      isProtocolActor
     }
   }
 `;
@@ -712,13 +610,13 @@ export const VOLUME_YESTERDAY_TRADERS = /* GraphQL */ `
 export const BROKER_VOLUME_YESTERDAY_TRADERS = /* GraphQL */ `
   query BrokerVolumeYesterdayTraders(
     $yesterdayMidnight: numeric!
-    $isSystemAddressIn: [Boolean!]!
+    $isProtocolActorIn: [Boolean!]!
     $chainIdIn: [Int!]!
   ) {
     brokerVolumeYesterdayTraders: BrokerTraderDailySnapshot(
       where: {
         timestamp: { _eq: $yesterdayMidnight }
-        isSystemAddress: { _in: $isSystemAddressIn }
+        isProtocolActor: { _in: $isProtocolActorIn }
         chainId: { _in: $chainIdIn }
       }
       limit: 1000
@@ -727,7 +625,7 @@ export const BROKER_VOLUME_YESTERDAY_TRADERS = /* GraphQL */ `
       trader: caller
       volumeUsdWei
       swapCount
-      isSystemAddress
+      isProtocolActor
     }
   }
 `;

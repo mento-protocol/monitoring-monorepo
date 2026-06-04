@@ -326,7 +326,7 @@ export type TraderDailyRow = {
   uniquePools: number;
   volumeUsdWei: string;
   feesPaidUsdWei: string;
-  isSystemAddress: boolean;
+  isProtocolActor: boolean;
   aggregatorKeys: string[];
   lastSeenTimestamp: string;
 };
@@ -360,7 +360,7 @@ export type TraderWindowRow = {
   uniquePoolsApprox: number;
   volumeUsdWei: bigint;
   feesPaidUsdWei: bigint;
-  isSystemAddress: boolean;
+  isProtocolActor: boolean;
   lastSeenTimestamp: number;
 };
 
@@ -398,7 +398,7 @@ export type BrokerTraderDailyRow = {
   timestamp: string;
   swapCount: number;
   volumeUsdWei: string;
-  isSystemAddress: boolean;
+  isProtocolActor: boolean;
   lastSeenTimestamp: string;
 };
 
@@ -408,7 +408,7 @@ export type BrokerTraderWindowRow = {
   trader: string;
   swapCount: number;
   volumeUsdWei: bigint;
-  isSystemAddress: boolean;
+  isProtocolActor: boolean;
   lastSeenTimestamp: number;
 };
 
@@ -457,17 +457,17 @@ const BROKER_VIA_DISPLAY_NAMES: Record<string, string> = {
   "mento-router-v3": "Mento Router v3",
   openocean: "OpenOcean Router",
   squid: "Squid Router",
-  system: "Mento system",
+  protocol: "Mento protocol",
   unknown: "Unknown router",
 };
 
 /** Aggregator names that are Mento-first-party entry points (Broker, native
- *  routers, system contracts). Used by the volume page to render these with
+ *  routers, protocol contracts). Used by the volume page to render these with
  *  a neutral pill instead of the indigo "third-party aggregator" pill.
  *  Co-located with `BROKER_VIA_DISPLAY_NAMES` so adding a new first-party
  *  label is a single-place edit. */
 export const FIRST_PARTY_BROKER_VIAS: ReadonlySet<string> = new Set([
-  "system",
+  "protocol",
   "direct",
   "broker",
   "mento-router-v2",
@@ -500,7 +500,7 @@ export function aggregateTradersByWindow(
       );
       existing.volumeUsdWei += BigInt(r.volumeUsdWei);
       existing.feesPaidUsdWei += BigInt(r.feesPaidUsdWei);
-      existing.isSystemAddress = existing.isSystemAddress || r.isSystemAddress;
+      existing.isProtocolActor = existing.isProtocolActor || r.isProtocolActor;
       if (lastSeen > existing.lastSeenTimestamp) {
         existing.lastSeenTimestamp = lastSeen;
       }
@@ -512,7 +512,7 @@ export function aggregateTradersByWindow(
         uniquePoolsApprox: r.uniquePools,
         volumeUsdWei: BigInt(r.volumeUsdWei),
         feesPaidUsdWei: BigInt(r.feesPaidUsdWei),
-        isSystemAddress: r.isSystemAddress,
+        isProtocolActor: r.isProtocolActor,
         lastSeenTimestamp: lastSeen,
       });
     }
@@ -588,7 +588,7 @@ export function aggregateBrokerTradersByWindow(
     if (existing) {
       existing.swapCount += r.swapCount;
       existing.volumeUsdWei += BigInt(r.volumeUsdWei);
-      existing.isSystemAddress = existing.isSystemAddress || r.isSystemAddress;
+      existing.isProtocolActor = existing.isProtocolActor || r.isProtocolActor;
       if (lastSeen > existing.lastSeenTimestamp) {
         existing.lastSeenTimestamp = lastSeen;
       }
@@ -598,7 +598,7 @@ export function aggregateBrokerTradersByWindow(
         trader: r.trader,
         swapCount: r.swapCount,
         volumeUsdWei: BigInt(r.volumeUsdWei),
-        isSystemAddress: r.isSystemAddress,
+        isProtocolActor: r.isProtocolActor,
         lastSeenTimestamp: lastSeen,
       });
     }

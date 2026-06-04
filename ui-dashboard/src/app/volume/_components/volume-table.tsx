@@ -257,7 +257,7 @@ function TraderRow({
           <span className="inline-flex items-center gap-1.5">
             {network && <ChainIcon network={network} />}
             <AddressLink address={trader.trader} chainId={trader.chainId} />
-            {trader.isSystemAddress && <ProtocolActorChip />}
+            {trader.isProtocolActor && <ProtocolActorChip />}
           </span>
         </Td>
         <Td align="right" mono>

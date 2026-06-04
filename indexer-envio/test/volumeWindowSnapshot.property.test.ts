@@ -14,11 +14,11 @@
  *  6. aggregatePerWindow: out-of-range rows are always dropped
  *  7. aggregatePerWindow: volumeUsdWei accumulation matches manual sum per trader
  *  8. aggregatePerWindow: swapCount accumulation matches manual sum per trader
- *  9. aggregatePerWindow: isSystemAddress is sticky-true (OR-accumulation)
- * 10. buildVolumeWindowSnapshot: totalVolumeUsdWei = sum of non-system aggregates
- * 11. buildVolumeWindowSnapshot: uniqueTraders <= uniqueTradersIncludingSystem
+ *  9. aggregatePerWindow: isProtocolActor is sticky-true (OR-accumulation)
+ * 10. buildVolumeWindowSnapshot: totalVolumeUsdWei = sum of organic aggregates
+ * 11. buildVolumeWindowSnapshot: uniqueTraders <= uniqueTradersIncludingProtocolActors
  * 12. buildVolumeWindowSnapshot: firstDayExclusiveUniqueTraders <= uniqueTraders
- * 13. buildVolumeWindowSnapshot: totalVolumeUsdWei <= totalVolumeUsdWeiIncludingSystem
+ * 13. buildVolumeWindowSnapshot: totalVolumeUsdWei <= totalVolumeUsdWeiIncludingProtocolActors
  * 14. buildVolumeWindowSnapshot: id has deterministic format
  * 15. maybeHeartbeatFlushV3: never decreases lastFlushedDay
  * 16. maybeHeartbeatFlushV3: written snapshot count = closed days × WINDOW_KEYS length
@@ -83,7 +83,7 @@ function arbRow(timestamp: bigint): fc.Arbitrary<TraderDailyRow> {
     timestamp: fc.constant(timestamp),
     volumeUsdWei: arbAmount,
     swapCount: arbSwapCount,
-    isSystemAddress: fc.boolean(),
+    isProtocolActor: fc.boolean(),
   });
 }
 
@@ -93,7 +93,7 @@ function arbAggregate(): fc.Arbitrary<TraderWindowAggregate> {
     trader: arbAddress(),
     volumeUsdWei: arbAmount,
     swapCount: arbSwapCount,
-    isSystemAddress: fc.boolean(),
+    isProtocolActor: fc.boolean(),
     firstDayVolumeUsdWei: fc.constant(0n),
     firstDaySwapCount: fc.constant(0),
     activeOutsideFirstDay: fc.constant(true),
@@ -243,7 +243,7 @@ describe("aggregatePerWindow — out-of-range rows dropped", () => {
             timestamp: snapshotDay + SECONDS_PER_DAY,
             volumeUsdWei: vol,
             swapCount: 1,
-            isSystemAddress: false,
+            isProtocolActor: false,
           };
           const grouped = aggregatePerWindow([futureRow], CHAIN, snapshotDay);
           for (const w of WINDOW_KEYS) {
@@ -271,7 +271,7 @@ describe("aggregatePerWindow — out-of-range rows dropped", () => {
             timestamp: snapshotDay,
             volumeUsdWei: vol,
             swapCount: 1,
-            isSystemAddress: false,
+            isProtocolActor: false,
           };
           const grouped = aggregatePerWindow(
             [wrongChainRow],
@@ -319,7 +319,7 @@ describe("aggregatePerWindow — per-trader accumulation", () => {
               timestamp: ts1,
               volumeUsdWei: vol1,
               swapCount: swaps1,
-              isSystemAddress: false,
+              isProtocolActor: false,
             },
             {
               chainId: CHAIN,
@@ -327,7 +327,7 @@ describe("aggregatePerWindow — per-trader accumulation", () => {
               timestamp: ts2,
               volumeUsdWei: vol2,
               swapCount: swaps2,
-              isSystemAddress: false,
+              isProtocolActor: false,
             },
           ];
           const grouped = aggregatePerWindow(rows, CHAIN, snapshotDay);
@@ -354,10 +354,10 @@ describe("aggregatePerWindow — per-trader accumulation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 9. aggregatePerWindow: isSystemAddress is sticky-true
+// 9. aggregatePerWindow: isProtocolActor is sticky-true
 // ---------------------------------------------------------------------------
-describe("aggregatePerWindow — isSystemAddress sticky-true", () => {
-  it("if any day marks a trader system, the aggregate is marked system", () => {
+describe("aggregatePerWindow — isProtocolActor sticky-true", () => {
+  it("if any day marks a trader as a protocol actor, the aggregate is marked protocol actor", () => {
     fc.assert(
       fc.property(
         arbDayTimestamp,
@@ -372,7 +372,7 @@ describe("aggregatePerWindow — isSystemAddress sticky-true", () => {
               timestamp: ts1,
               volumeUsdWei: 1n,
               swapCount: 1,
-              isSystemAddress: true,
+              isProtocolActor: true,
             },
             {
               chainId: CHAIN,
@@ -380,16 +380,16 @@ describe("aggregatePerWindow — isSystemAddress sticky-true", () => {
               timestamp: snapshotDay,
               volumeUsdWei: 1n,
               swapCount: 1,
-              isSystemAddress: false,
+              isProtocolActor: false,
             },
           ];
           const grouped = aggregatePerWindow(rows, CHAIN, snapshotDay);
           const allAgg = grouped["all"].find((a) => a.trader === trader);
           assert(allAgg, "trader must appear in 'all' window");
           assert.equal(
-            allAgg.isSystemAddress,
+            allAgg.isProtocolActor,
             true,
-            "isSystemAddress must be sticky-true",
+            "isProtocolActor must be sticky-true",
           );
         },
       ),
@@ -398,10 +398,10 @@ describe("aggregatePerWindow — isSystemAddress sticky-true", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 10. buildVolumeWindowSnapshot: totalVolumeUsdWei = sum of non-system
+// 10. buildVolumeWindowSnapshot: totalVolumeUsdWei = sum of organic
 // ---------------------------------------------------------------------------
 describe("buildVolumeWindowSnapshot — volume sum invariant", () => {
-  it("totalVolumeUsdWei equals the sum of volumeUsdWei for non-system aggregates", () => {
+  it("totalVolumeUsdWei equals the sum of volumeUsdWei for organic aggregates", () => {
     fc.assert(
       fc.property(
         arbDayTimestamp,
@@ -417,12 +417,12 @@ describe("buildVolumeWindowSnapshot — volume sum invariant", () => {
             updatedAtTimestamp: 1n,
           });
           const expectedVol = aggregates
-            .filter((a) => !a.isSystemAddress)
+            .filter((a) => !a.isProtocolActor)
             .reduce((acc, a) => acc + a.volumeUsdWei, 0n);
           assert.equal(
             snap.totalVolumeUsdWei,
             expectedVol,
-            "totalVolumeUsdWei must exclude system addresses",
+            "totalVolumeUsdWei must exclude protocol-owned addresses",
           );
         },
       ),
@@ -431,10 +431,10 @@ describe("buildVolumeWindowSnapshot — volume sum invariant", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 11. buildVolumeWindowSnapshot: uniqueTraders <= uniqueTradersIncludingSystem
+// 11. buildVolumeWindowSnapshot: uniqueTraders <= uniqueTradersIncludingProtocolActors
 // ---------------------------------------------------------------------------
 describe("buildVolumeWindowSnapshot — trader count ordering", () => {
-  it("uniqueTraders is always <= uniqueTradersIncludingSystem", () => {
+  it("uniqueTraders is always <= uniqueTradersIncludingProtocolActors", () => {
     fc.assert(
       fc.property(
         arbDayTimestamp,
@@ -450,8 +450,8 @@ describe("buildVolumeWindowSnapshot — trader count ordering", () => {
             updatedAtTimestamp: 1n,
           });
           assert(
-            snap.uniqueTraders <= snap.uniqueTradersIncludingSystem,
-            `uniqueTraders (${snap.uniqueTraders}) > uniqueTradersIncludingSystem (${snap.uniqueTradersIncludingSystem})`,
+            snap.uniqueTraders <= snap.uniqueTradersIncludingProtocolActors,
+            `uniqueTraders (${snap.uniqueTraders}) > uniqueTradersIncludingProtocolActors (${snap.uniqueTradersIncludingProtocolActors})`,
           );
         },
       ),
@@ -472,7 +472,7 @@ describe("buildVolumeWindowSnapshot — exclusive count bounded by unique count"
             trader: arbAddress(),
             volumeUsdWei: arbAmount,
             swapCount: arbSwapCount,
-            isSystemAddress: fc.constant(false), // only non-system for simplicity
+            isProtocolActor: fc.constant(false), // only organic for simplicity
             firstDayVolumeUsdWei: fc.constant(0n),
             firstDaySwapCount: fc.constant(0),
             activeOutsideFirstDay: fc.boolean(),
@@ -503,7 +503,7 @@ describe("buildVolumeWindowSnapshot — exclusive count bounded by unique count"
 // 13. buildVolumeWindowSnapshot: primary volume <= includingSystem volume
 // ---------------------------------------------------------------------------
 describe("buildVolumeWindowSnapshot — primary volume <= includingSystem volume", () => {
-  it("totalVolumeUsdWei is always <= totalVolumeUsdWeiIncludingSystem", () => {
+  it("totalVolumeUsdWei is always <= totalVolumeUsdWeiIncludingProtocolActors", () => {
     fc.assert(
       fc.property(
         arbDayTimestamp,
@@ -519,7 +519,8 @@ describe("buildVolumeWindowSnapshot — primary volume <= includingSystem volume
             updatedAtTimestamp: 1n,
           });
           assert(
-            snap.totalVolumeUsdWei <= snap.totalVolumeUsdWeiIncludingSystem,
+            snap.totalVolumeUsdWei <=
+              snap.totalVolumeUsdWeiIncludingProtocolActors,
             "primary volume exceeds includingSystem volume",
           );
         },

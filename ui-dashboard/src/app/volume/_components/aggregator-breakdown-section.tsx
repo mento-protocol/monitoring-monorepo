@@ -63,7 +63,7 @@ export function AggregatorBreakdownSection({
         <TableSectionTitle
           className="mb-0"
           label={`About ${venueLabel} aggregator table`}
-          info={`${venueLabel} route view: groups volume by the transaction entry point, such as direct Mento routes, known aggregators, clusters, system contracts, or unknown routers.`}
+          info={`${venueLabel} route view: groups volume by the transaction entry point, such as direct Mento routes, known aggregators, clusters, protocol contracts, or unknown routers.`}
         >
           {venueLabel} volume by aggregator / entry-point ({rangeLabel})
         </TableSectionTitle>

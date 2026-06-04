@@ -23,7 +23,7 @@ function trader(overrides: Partial<TraderDailyRow>): TraderDailyRow {
     uniquePools: 1,
     volumeUsdWei: "100",
     feesPaidUsdWei: "1",
-    isSystemAddress: false,
+    isProtocolActor: false,
     lastSeenTimestamp: "1700000000",
     ...overrides,
     aggregatorKeys: overrides.aggregatorKeys ?? [],
@@ -40,7 +40,7 @@ function brokerTrader(
     timestamp: "1700000000",
     swapCount: 1,
     volumeUsdWei: "100",
-    isSystemAddress: false,
+    isProtocolActor: false,
     lastSeenTimestamp: "1700000000",
     ...overrides,
   };

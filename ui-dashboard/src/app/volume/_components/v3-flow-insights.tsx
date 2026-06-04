@@ -62,7 +62,7 @@ export function V3FlowInsights({
   traderRows,
   traders,
   pools,
-  systemAddressFilter,
+  protocolActorFilter,
   exclusions,
   tableState,
 }: {
@@ -72,7 +72,7 @@ export function V3FlowInsights({
   traderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
   pools: PoolMeta;
-  systemAddressFilter: ReadonlyArray<boolean>;
+  protocolActorFilter: ReadonlyArray<boolean>;
   exclusions: VolumeExclusionState;
   tableState: FlowTableState;
 }) {
@@ -81,7 +81,7 @@ export function V3FlowInsights({
     cutoff,
     traderRows,
     traders,
-    systemAddressFilter,
+    protocolActorFilter,
     exclusions,
     isTraderCapHit: tableState.isCapHit,
   });
@@ -130,7 +130,7 @@ function useV3FlowInsightModel({
   cutoff,
   traderRows,
   traders,
-  systemAddressFilter,
+  protocolActorFilter,
   exclusions,
   isTraderCapHit,
 }: {
@@ -138,7 +138,7 @@ function useV3FlowInsightModel({
   cutoff: number;
   traderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
-  systemAddressFilter: ReadonlyArray<boolean>;
+  protocolActorFilter: ReadonlyArray<boolean>;
   exclusions: VolumeExclusionState;
   isTraderCapHit: boolean;
 }) {
@@ -150,7 +150,7 @@ function useV3FlowInsightModel({
     useV3FlowInsightQueries({
       previousBounds,
       cutoff,
-      systemAddressFilter,
+      protocolActorFilter,
     });
   const allowedTraderDayKeys = useMemo(
     () => buildAllowedTraderDayKeys(traderRows),
@@ -226,14 +226,14 @@ function useV3FlowInsightModel({
 function useV3FlowInsightQueries({
   previousBounds,
   cutoff,
-  systemAddressFilter,
+  protocolActorFilter,
 }: {
   previousBounds:
     | ReturnType<typeof previousVolumeWindowBounds>
     | null
     | undefined;
   cutoff: number;
-  systemAddressFilter: ReadonlyArray<boolean>;
+  protocolActorFilter: ReadonlyArray<boolean>;
 }) {
   const previousTradersResult = useGQL<{
     TraderDailySnapshot: TraderDailyRow[];
@@ -243,7 +243,7 @@ function useV3FlowInsightQueries({
       ? {
           afterTimestamp: previousBounds.afterTimestamp,
           beforeTimestamp: previousBounds.beforeTimestamp,
-          isSystemAddressIn: systemAddressFilter,
+          isProtocolActorIn: protocolActorFilter,
           limit: ENVIO_MAX_ROWS,
         }
       : undefined,

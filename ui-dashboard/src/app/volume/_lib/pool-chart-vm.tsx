@@ -48,7 +48,7 @@ function poolDisplayName(
  * carry it inline.
  */
 export function usePoolChartViewModel(args: {
-  showSystem: boolean;
+  includeProtocolActors: boolean;
   poolVolumeRows: readonly PoolDailyVolumeRow[];
   poolMeta: ReadonlyMap<string, PoolMetaEntry>;
   cutoff: number;
@@ -58,7 +58,8 @@ export function usePoolChartViewModel(args: {
   chartBreakdown: ChartBreakdownEntry[];
   topPoolsListEntries: TopPoolsListEntry[];
 } {
-  const { showSystem, poolVolumeRows, poolMeta, cutoff, utcDayKey } = args;
+  const { includeProtocolActors, poolVolumeRows, poolMeta, cutoff, utcDayKey } =
+    args;
 
   // UTC-day window so the chart's x-axis stays contiguous when a day had
   // zero volume protocol-wide. `cutoff` is already aligned to UTC midnight.
@@ -75,10 +76,10 @@ export function usePoolChartViewModel(args: {
     return aggregatePoolDailyVolume(
       poolVolumeRows,
       (poolId) => poolDisplayName(poolId, poolMeta),
-      showSystem,
+      includeProtocolActors,
       windowRange,
     );
-  }, [poolVolumeRows, poolMeta, showSystem, windowRange]);
+  }, [poolVolumeRows, poolMeta, includeProtocolActors, windowRange]);
 
   // Decorate breakdown with chain text labels for the legend / tooltip.
   // Chain icons were dropped — at 12px they conflated cross-chain pairs

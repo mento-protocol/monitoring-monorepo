@@ -85,7 +85,7 @@ function trader(overrides: Partial<TraderWindowRow>): TraderWindowRow {
     uniquePoolsApprox: 1,
     volumeUsdWei: usdWei(1),
     feesPaidUsdWei: usdWei(0),
-    isSystemAddress: false,
+    isProtocolActor: false,
     lastSeenTimestamp: CUTOFF,
     ...overrides,
   };
@@ -99,7 +99,7 @@ function v2Trader(
     trader: "0xtrader",
     swapCount: 1,
     volumeUsdWei: usdWei(1),
-    isSystemAddress: false,
+    isProtocolActor: false,
     lastSeenTimestamp: CUTOFF,
     ...overrides,
   };

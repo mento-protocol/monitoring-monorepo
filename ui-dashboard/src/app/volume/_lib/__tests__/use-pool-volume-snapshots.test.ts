@@ -22,9 +22,9 @@ function row(id: string): PoolDailyVolumeRow {
     poolId: `42220-0x${id.padStart(40, "0")}`,
     timestamp: "1778457600",
     swapCount: 1,
-    swapCountIncludingSystem: 1,
+    swapCountIncludingProtocolActors: 1,
     volumeUsdWei: "1000000000000000000",
-    volumeUsdWeiIncludingSystem: "1000000000000000000",
+    volumeUsdWeiIncludingProtocolActors: "1000000000000000000",
   };
 }
 

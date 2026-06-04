@@ -1,10 +1,10 @@
 import aggregatorsRaw from "../config/aggregators.json" with { type: "json" };
 import { CONTRACT_NAMESPACE_BY_CHAIN } from "./contractAddresses.js";
 import {
-  isSystemAddress,
+  isProtocolOwnedAddress,
   isProtocolActorEntryPoint,
   iterateContractAddresses,
-} from "./system-addresses.js";
+} from "./protocol-actors.js";
 
 interface AggregatorEntry {
   name: string;
@@ -119,7 +119,7 @@ const DIRECT_ENTRY_BY_CHAIN: Map<number, Set<string>> = (() => {
  *    (`"squid"`, `"lifi"`, `"0x"`, `"openocean"`) AND `"cluster-<id>"` labels
  *    for multi-contract operators identified by shared deployer EOA.
  * 2. Mento `Broker` / `Router*` OR the pool's own address → `"direct"`.
- * 3. Other Mento internal contract (rebalancer, NTT manager, etc.) → `"system"`.
+ * 3. Other Mento internal contract (rebalancer, NTT manager, etc.) → `"protocol"`.
  * 4. Otherwise → `"unknown"`. These should be inspected periodically and either
  *    promoted to a known aggregator / cluster (add to `aggregators.json`) or
  *    left as a long tail of unlabelled custom routers / MEV bots.
@@ -142,8 +142,8 @@ export function classifyAggregator(
   if (DIRECT_ENTRY_BY_CHAIN.get(chainId)?.has(lower)) return "direct";
   if (poolAddress && lower === poolAddress.toLowerCase()) return "direct";
 
-  if (isProtocolActorEntryPoint(chainId, lower, pool)) return "system";
-  if (isSystemAddress(chainId, lower)) return "system";
+  if (isProtocolActorEntryPoint(chainId, lower, pool)) return "protocol";
+  if (isProtocolOwnedAddress(chainId, lower)) return "protocol";
 
   return "unknown";
 }

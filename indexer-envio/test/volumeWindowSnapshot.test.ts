@@ -44,7 +44,7 @@ function row(
     chainId: CHAIN,
     volumeUsdWei: 100n * ONE_USD,
     swapCount: 1,
-    isSystemAddress: false,
+    isProtocolActor: false,
     ...overrides,
   };
 }
@@ -58,7 +58,7 @@ function agg(
   return {
     volumeUsdWei: 0n,
     swapCount: 0,
-    isSystemAddress: false,
+    isProtocolActor: false,
     firstDayVolumeUsdWei: 0n,
     firstDaySwapCount: 0,
     activeOutsideFirstDay: true,
@@ -115,10 +115,10 @@ describe("buildVolumeWindowSnapshot", () => {
     assert.equal(snap.totalVolumeUsdWei, 0n);
     assert.equal(snap.totalSwapCount, 0);
     assert.equal(snap.uniqueTraders, 0);
-    assert.equal(snap.uniqueTradersIncludingSystem, 0);
+    assert.equal(snap.uniqueTradersIncludingProtocolActors, 0);
   });
 
-  it("primary totals exclude system; *IncludingSystem variants keep all", () => {
+  it("primary totals exclude protocol actors; *IncludingProtocolActors variants keep all", () => {
     const snap = buildVolumeWindowSnapshot({
       chainId: CHAIN,
       windowKey: "24h",
@@ -129,28 +129,35 @@ describe("buildVolumeWindowSnapshot", () => {
           trader: TRADER_A,
           volumeUsdWei: 100n * ONE_USD,
           swapCount: 2,
-          isSystemAddress: false,
+          isProtocolActor: false,
         }),
         agg({
           trader: TRADER_B,
           volumeUsdWei: 50n * ONE_USD,
           swapCount: 1,
-          isSystemAddress: true,
+          isProtocolActor: true,
         }),
       ],
       blockNumber: 1n,
       updatedAtTimestamp: 1n,
     });
-    assert.equal(snap.totalVolumeUsdWei, 100n * ONE_USD, "system excluded");
-    assert.equal(snap.totalVolumeUsdWeiIncludingSystem, 150n * ONE_USD);
-    assert.equal(snap.totalSwapCount, 2, "system swaps excluded");
-    assert.equal(snap.totalSwapCountIncludingSystem, 3);
+    assert.equal(
+      snap.totalVolumeUsdWei,
+      100n * ONE_USD,
+      "protocol actors excluded",
+    );
+    assert.equal(snap.totalVolumeUsdWeiIncludingProtocolActors, 150n * ONE_USD);
+    assert.equal(snap.totalSwapCount, 2, "protocol actor swaps excluded");
+    assert.equal(snap.totalSwapCountIncludingProtocolActors, 3);
     assert.equal(snap.uniqueTraders, 1);
-    assert.equal(snap.uniqueTradersIncludingSystem, 2);
-    // windowTraders mirrors the count split: A (non-system) only in
-    // primary; both A and B in *IncludingSystem. Sorted ascending.
+    assert.equal(snap.uniqueTradersIncludingProtocolActors, 2);
+    // windowTraders mirrors the count split: A (organic) only in
+    // primary; both A and B in *IncludingProtocolActors. Sorted ascending.
     assert.deepEqual(snap.windowTraders, [TRADER_A]);
-    assert.deepEqual(snap.windowTradersIncludingSystem, [TRADER_A, TRADER_B]);
+    assert.deepEqual(snap.windowTradersIncludingProtocolActors, [
+      TRADER_A,
+      TRADER_B,
+    ]);
   });
 
   it("windowTraders is empty when aggregates are empty", () => {
@@ -164,12 +171,12 @@ describe("buildVolumeWindowSnapshot", () => {
       updatedAtTimestamp: 1n,
     });
     assert.deepEqual(snap.windowTraders, []);
-    assert.deepEqual(snap.windowTradersIncludingSystem, []);
+    assert.deepEqual(snap.windowTradersIncludingProtocolActors, []);
   });
 
-  it("windowTraders length matches uniqueTraders / IncludingSystem counts", () => {
-    // Two non-system + one system trader. The address lists should
-    // satisfy `length === <count>` for both system-filter branches —
+  it("windowTraders length matches uniqueTraders / IncludingProtocolActors counts", () => {
+    // Two organic + one protocol actor trader. The address lists should
+    // satisfy `length === <count>` for both actor-filter branches —
     // this is the invariant the homepage Traders tile relies on for
     // cross-chain Set-deduplication.
     //
@@ -181,21 +188,21 @@ describe("buildVolumeWindowSnapshot", () => {
       snapshotDay: DAY_2026_05_07,
       windowStartDay: 0n,
       aggregates: [
-        agg({ trader: TRADER_C, isSystemAddress: true }),
-        agg({ trader: TRADER_B, isSystemAddress: false }),
-        agg({ trader: TRADER_A, isSystemAddress: false }),
+        agg({ trader: TRADER_C, isProtocolActor: true }),
+        agg({ trader: TRADER_B, isProtocolActor: false }),
+        agg({ trader: TRADER_A, isProtocolActor: false }),
       ],
       blockNumber: 1n,
       updatedAtTimestamp: 1n,
     });
     assert.equal(snap.windowTraders.length, snap.uniqueTraders);
     assert.equal(
-      snap.windowTradersIncludingSystem.length,
-      snap.uniqueTradersIncludingSystem,
+      snap.windowTradersIncludingProtocolActors.length,
+      snap.uniqueTradersIncludingProtocolActors,
     );
     // Deterministic order — addresses are sorted ascending (input was reversed).
     assert.deepEqual(snap.windowTraders, [TRADER_A, TRADER_B]);
-    assert.deepEqual(snap.windowTradersIncludingSystem, [
+    assert.deepEqual(snap.windowTradersIncludingProtocolActors, [
       TRADER_A,
       TRADER_B,
       TRADER_C,
@@ -221,18 +228,18 @@ describe("buildVolumeWindowSnapshot", () => {
       updatedAtTimestamp: 1n,
     });
     assert.equal(snap.firstDayVolumeUsdWei, 0n);
-    assert.equal(snap.firstDayVolumeUsdWeiIncludingSystem, 0n);
+    assert.equal(snap.firstDayVolumeUsdWeiIncludingProtocolActors, 0n);
     assert.equal(snap.firstDaySwapCount, 0);
-    assert.equal(snap.firstDaySwapCountIncludingSystem, 0);
+    assert.equal(snap.firstDaySwapCountIncludingProtocolActors, 0);
     assert.equal(snap.firstDayExclusiveUniqueTraders, 0);
-    assert.equal(snap.firstDayExclusiveUniqueTradersIncludingSystem, 0);
+    assert.equal(snap.firstDayExclusiveUniqueTradersIncludingProtocolActors, 0);
   });
 
-  it("firstDay slice + exclusive-trader count: system split mirrors total*", () => {
-    // Two non-system traders + one system. Trader A is active only on
+  it("firstDay slice + exclusive-trader count: protocol-actor split mirrors total*", () => {
+    // Two organic traders + one protocol actor. Trader A is active only on
     // day 1 (firstDayExclusive). Trader B is active across the whole
     // window (volume ≥ firstDay slice). System trader C is active only
-    // on day 1 too — counts toward the *IncludingSystem sibling but
+    // on day 1 too — counts toward the *IncludingProtocolActors sibling but
     // NOT the primary firstDayExclusiveUniqueTraders.
     const snap = buildVolumeWindowSnapshot({
       chainId: CHAIN,
@@ -244,7 +251,7 @@ describe("buildVolumeWindowSnapshot", () => {
           trader: TRADER_A,
           volumeUsdWei: 30n * ONE_USD,
           swapCount: 1,
-          isSystemAddress: false,
+          isProtocolActor: false,
           firstDayVolumeUsdWei: 30n * ONE_USD,
           firstDaySwapCount: 1,
           activeOutsideFirstDay: false,
@@ -253,7 +260,7 @@ describe("buildVolumeWindowSnapshot", () => {
           trader: TRADER_B,
           volumeUsdWei: 100n * ONE_USD,
           swapCount: 5,
-          isSystemAddress: false,
+          isProtocolActor: false,
           firstDayVolumeUsdWei: 20n * ONE_USD,
           firstDaySwapCount: 1,
           activeOutsideFirstDay: true,
@@ -262,7 +269,7 @@ describe("buildVolumeWindowSnapshot", () => {
           trader: TRADER_C,
           volumeUsdWei: 7n * ONE_USD,
           swapCount: 1,
-          isSystemAddress: true,
+          isProtocolActor: true,
           firstDayVolumeUsdWei: 7n * ONE_USD,
           firstDaySwapCount: 1,
           activeOutsideFirstDay: false,
@@ -271,18 +278,21 @@ describe("buildVolumeWindowSnapshot", () => {
       blockNumber: 1n,
       updatedAtTimestamp: 1n,
     });
-    // Primary (system excluded): A + B contribute. A's $30 + B's $20 first-day = $50.
+    // Primary (protocol actors excluded): A + B contribute. A's $30 + B's $20 first-day = $50.
     assert.equal(snap.firstDayVolumeUsdWei, 50n * ONE_USD);
     assert.equal(snap.firstDaySwapCount, 2);
     // Only A is exclusive on day 1 (no other-day activity).
     assert.equal(snap.firstDayExclusiveUniqueTraders, 1);
     assert.deepEqual(snap.firstDayExclusiveTraders, [TRADER_A]);
-    // *IncludingSystem: also fold in system trader C's $7.
-    assert.equal(snap.firstDayVolumeUsdWeiIncludingSystem, 57n * ONE_USD);
-    assert.equal(snap.firstDaySwapCountIncludingSystem, 3);
-    // C also exclusive on day 1 → system-included count is 2.
-    assert.equal(snap.firstDayExclusiveUniqueTradersIncludingSystem, 2);
-    assert.deepEqual(snap.firstDayExclusiveTradersIncludingSystem, [
+    // *IncludingProtocolActors: also fold in protocol actor trader C's $7.
+    assert.equal(
+      snap.firstDayVolumeUsdWeiIncludingProtocolActors,
+      57n * ONE_USD,
+    );
+    assert.equal(snap.firstDaySwapCountIncludingProtocolActors, 3);
+    // C also exclusive on day 1 → protocol-actor-included count is 2.
+    assert.equal(snap.firstDayExclusiveUniqueTradersIncludingProtocolActors, 2);
+    assert.deepEqual(snap.firstDayExclusiveTradersIncludingProtocolActors, [
       TRADER_A,
       TRADER_C,
     ]);
@@ -385,24 +395,24 @@ describe("aggregatePerWindow", () => {
     assert.equal(grouped["7d"][0].swapCount, 3);
   });
 
-  it("isSystemAddress is sticky-true across days", () => {
+  it("isProtocolActor is sticky-true across days", () => {
     const grouped = aggregatePerWindow(
       [
         row({
           trader: TRADER_A,
           timestamp: DAY_2026_05_07,
-          isSystemAddress: false,
+          isProtocolActor: false,
         }),
         row({
           trader: TRADER_A,
           timestamp: DAY_2026_05_06,
-          isSystemAddress: true,
+          isProtocolActor: true,
         }),
       ],
       CHAIN,
       DAY_2026_05_07,
     );
-    assert.equal(grouped["7d"][0].isSystemAddress, true);
+    assert.equal(grouped["7d"][0].isProtocolActor, true);
   });
 
   it('"all" window has no lower bound — includes ancient rows', () => {
@@ -582,7 +592,7 @@ describe("aggregatePerWindow — firstDay slice", () => {
       updatedAtTimestamp: 1n,
     });
     assert.equal(snap.firstDayVolumeUsdWei, 0n);
-    assert.equal(snap.firstDayVolumeUsdWeiIncludingSystem, 0n);
+    assert.equal(snap.firstDayVolumeUsdWeiIncludingProtocolActors, 0n);
     assert.equal(snap.firstDaySwapCount, 0);
     assert.equal(snap.firstDayExclusiveUniqueTraders, 0);
   });
@@ -612,11 +622,11 @@ describe("aggregatePerWindow — firstDay slice", () => {
     assert.equal(snap.firstDayExclusiveUniqueTraders, 0);
   });
 
-  it("mixed system/non-system on first day: primary excludes system; *IncludingSystem includes them", () => {
-    // TRADER_A: non-system, day-1 only → contributes to both primary
-    // and *IncludingSystem first-day fields.
-    // TRADER_B: system, day-1 only → contributes only to
-    // *IncludingSystem first-day fields.
+  it("mixed protocol-actor/organic on first day: primary excludes protocol actors; *IncludingProtocolActors includes them", () => {
+    // TRADER_A: organic, day-1 only → contributes to both primary
+    // and *IncludingProtocolActors first-day fields.
+    // TRADER_B: protocol actor, day-1 only → contributes only to
+    // *IncludingProtocolActors first-day fields.
     const grouped = aggregatePerWindow(
       [
         row({
@@ -624,14 +634,14 @@ describe("aggregatePerWindow — firstDay slice", () => {
           timestamp: DAY_FIRST_OF_7D,
           volumeUsdWei: 25n * ONE_USD,
           swapCount: 1,
-          isSystemAddress: false,
+          isProtocolActor: false,
         }),
         row({
           trader: TRADER_B,
           timestamp: DAY_FIRST_OF_7D,
           volumeUsdWei: 100n * ONE_USD,
           swapCount: 5,
-          isSystemAddress: true,
+          isProtocolActor: true,
         }),
       ],
       CHAIN,
@@ -647,11 +657,14 @@ describe("aggregatePerWindow — firstDay slice", () => {
       updatedAtTimestamp: 1n,
     });
     assert.equal(snap.firstDayVolumeUsdWei, 25n * ONE_USD);
-    assert.equal(snap.firstDayVolumeUsdWeiIncludingSystem, 125n * ONE_USD);
+    assert.equal(
+      snap.firstDayVolumeUsdWeiIncludingProtocolActors,
+      125n * ONE_USD,
+    );
     assert.equal(snap.firstDaySwapCount, 1);
-    assert.equal(snap.firstDaySwapCountIncludingSystem, 6);
+    assert.equal(snap.firstDaySwapCountIncludingProtocolActors, 6);
     assert.equal(snap.firstDayExclusiveUniqueTraders, 1);
-    assert.equal(snap.firstDayExclusiveUniqueTradersIncludingSystem, 2);
+    assert.equal(snap.firstDayExclusiveUniqueTradersIncludingProtocolActors, 2);
   });
 });
 
@@ -693,7 +706,7 @@ function fakeTraderDay(
   trader: string,
   timestamp: bigint,
   volumeUsd: bigint,
-  isSystem = false,
+  isProtocolActor = false,
 ): TraderDailySnapshot {
   return {
     id: `${CHAIN}-${trader}-${timestamp}`,
@@ -706,7 +719,7 @@ function fakeTraderDay(
     poolIds: [`${CHAIN}-0xpool`],
     volumeUsdWei: volumeUsd * ONE_USD,
     feesPaidUsdWei: 0n,
-    isSystemAddress: isSystem,
+    isProtocolActor,
     lastSeenTimestamp: timestamp,
   };
 }
@@ -927,7 +940,7 @@ function fakeBrokerTraderDay(
   caller: string,
   timestamp: bigint,
   volumeUsd: bigint,
-  isSystem = false,
+  isProtocolActor = false,
 ): BrokerTraderDailySnapshot {
   return {
     id: `${CHAIN}-${caller}-${timestamp}`,
@@ -936,7 +949,7 @@ function fakeBrokerTraderDay(
     timestamp,
     swapCount: 1,
     volumeUsdWei: volumeUsd * ONE_USD,
-    isSystemAddress: isSystem,
+    isProtocolActor,
     lastSeenTimestamp: timestamp,
   };
 }

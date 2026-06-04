@@ -31,7 +31,7 @@ tldr: roving `tabIndex` follows FOCUS not `selected` (track `focusedIndex` local
 
 ### Multi-chain coverage
 
-- Anywhere indexer code iterates over indexed chains, derive the chain list from `Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)` (in `indexer-envio/src/contractAddresses.ts`), **never** a hardcoded `[42220, 143]`. The same compiled handlers run against `config.multichain.testnet.yaml` (chains 11142220, 10143), so a hardcoded mainnet list silently breaks testnet classification (system addresses misclassified, direct-entry routers fall through to "unknown"). This regressed in PR #311 (`isSystemAddress` / `classifyAggregator`) and PR #316 (cluster direct entries).
+- Anywhere indexer code iterates over indexed chains, derive the chain list from `Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)` (in `indexer-envio/src/contractAddresses.ts`), **never** a hardcoded `[42220, 143]`. The same compiled handlers run against `config.multichain.testnet.yaml` (chains 11142220, 10143), so a hardcoded mainnet list silently breaks testnet classification (protocol-owned addresses misclassified, direct-entry routers fall through to "unknown"). This regressed in PR #311 (`isProtocolOwnedAddress` / `classifyAggregator`) and PR #316 (cluster direct entries).
 
 ### Config-name → metadata cross-reference tests
 

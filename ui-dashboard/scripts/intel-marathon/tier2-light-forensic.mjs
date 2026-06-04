@@ -195,7 +195,7 @@ async function fetchTopTraders(limit) {
     try {
       const q = `query Q($limit: Int!) {
         rows: ${table}(
-          where: { isSystemAddress: { _eq: false } }
+          where: { isProtocolActor: { _eq: false } }
           order_by: { volumeUsdWei: desc }
           limit: $limit
         ) {
