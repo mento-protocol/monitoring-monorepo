@@ -251,7 +251,7 @@ function V2TraderRow({
         <span className="inline-flex items-center gap-1.5">
           {network && <ChainIcon network={network} />}
           <AddressLink address={row.trader} chainId={row.chainId} />
-          {row.isSystemAddress && <ProtocolActorChip />}
+          {row.isProtocolActor && <ProtocolActorChip />}
         </span>
       </Td>
       <Td>

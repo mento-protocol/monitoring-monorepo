@@ -10,8 +10,8 @@ import type {
 import { applyFeeBps } from "./usd.js";
 import {
   isProtocolActorEntryPoint,
-  isSystemAddress,
-} from "./system-addresses.js";
+  isProtocolOwnedAddress,
+} from "./protocol-actors.js";
 import { classifyAggregator } from "./aggregators.js";
 import { dayBucket, extractAddressFromPoolId } from "./helpers.js";
 import {
@@ -100,7 +100,7 @@ interface SnapContext {
   aggTraderDayMarkerId: string;
   volumeUsdWei: bigint;
   feesPaidUsdWei: bigint;
-  callerIsSystem: boolean;
+  callerIsProtocolActor: boolean;
   inflowToken0: bigint;
   outflowToken0: bigint;
   inflowToken1: bigint;
@@ -117,8 +117,8 @@ interface ExistingEntries {
 }
 
 interface TraderDaySnapshotState {
-  traderDayBecameSystem: boolean;
-  traderDayIsSystem: boolean;
+  traderDayBecameProtocolActor: boolean;
+  traderDayIsProtocolActor: boolean;
   aggregatorKeys: string[];
   poolIds: string[];
 }
@@ -194,7 +194,7 @@ export async function applyVolumeSnapshots(
     context,
     snap,
     existing.aggTraderMarker,
-    traderDayState.traderDayIsSystem,
+    traderDayState.traderDayIsProtocolActor,
   );
 
   // Heartbeat: flush VolumeWindowSnapshot rows for any closed UTC days
@@ -252,8 +252,8 @@ function buildSnapContext(args: ApplyVolumeSnapshotsArgs): SnapContext {
     aggTraderDayMarkerId: `${chainId}-${aggregator}-${caller}-${dayKey}`,
     volumeUsdWei,
     feesPaidUsdWei: applyFeeBps(volumeUsdWei, feeBpsTotal),
-    callerIsSystem:
-      isSystemAddress(chainId, caller, pool) ||
+    callerIsProtocolActor:
+      isProtocolOwnedAddress(chainId, caller, pool) ||
       isProtocolActorEntryPoint(chainId, txTo, pool),
     // Direction-split USD-wei. In standard Uniswap-V2 swaps exactly one of
     // {In, Out} per side is non-zero; the other check is the "callback flow"
@@ -305,7 +305,7 @@ const EMPTY_TRADER_DAY = {
   poolIds: [] as readonly string[],
   volumeUsdWei: 0n,
   feesPaidUsdWei: 0n,
-  isSystemAddress: false,
+  isProtocolActor: false,
 };
 
 function upsertTraderDailySnapshot(
@@ -315,9 +315,12 @@ function upsertTraderDailySnapshot(
   traderPoolFirstTouch: boolean,
 ): TraderDaySnapshotState {
   const prev = existing ?? EMPTY_TRADER_DAY;
-  const traderDayIsSystem = prev.isSystemAddress || snap.callerIsSystem;
-  const traderDayBecameSystem =
-    existing !== undefined && !prev.isSystemAddress && snap.callerIsSystem;
+  const traderDayIsProtocolActor =
+    prev.isProtocolActor || snap.callerIsProtocolActor;
+  const traderDayBecameProtocolActor =
+    existing !== undefined &&
+    !prev.isProtocolActor &&
+    snap.callerIsProtocolActor;
   const aggregatorKeys = appendUnique(prev.aggregatorKeys, snap.aggregator);
   const poolIds = appendUnique(prev.poolIds, snap.poolId);
 
@@ -332,14 +335,19 @@ function upsertTraderDailySnapshot(
     poolIds,
     volumeUsdWei: prev.volumeUsdWei + snap.volumeUsdWei,
     feesPaidUsdWei: prev.feesPaidUsdWei + snap.feesPaidUsdWei,
-    // Sticky once true: a trader flagged as system at any point in a day
-    // stays system for the full day's snapshot. Rebalancer EOAs that swap
+    // Sticky once true: a trader flagged as protocol actor at any point in a day
+    // stays a protocol actor for the full day's snapshot. Rebalancer EOAs that swap
     // once via a third-party router would otherwise toggle.
-    isSystemAddress: traderDayIsSystem,
+    isProtocolActor: traderDayIsProtocolActor,
     lastSeenTimestamp: snap.blockTimestamp,
   });
 
-  return { traderDayBecameSystem, traderDayIsSystem, aggregatorKeys, poolIds };
+  return {
+    traderDayBecameProtocolActor,
+    traderDayIsProtocolActor,
+    aggregatorKeys,
+    poolIds,
+  };
 }
 
 const EMPTY_TRADER_POOL_DAY = {
@@ -382,9 +390,9 @@ interface PoolDailyContext {
 
 const EMPTY_POOL_DAY = {
   swapCount: 0,
-  swapCountIncludingSystem: 0,
+  swapCountIncludingProtocolActors: 0,
   volumeUsdWei: 0n,
-  volumeUsdWeiIncludingSystem: 0n,
+  volumeUsdWeiIncludingProtocolActors: 0n,
 };
 
 async function upsertPoolDailyVolumeSnapshot(
@@ -393,10 +401,10 @@ async function upsertPoolDailyVolumeSnapshot(
   ctx: PoolDailyContext,
 ) {
   // The chart-facing pool/day rollup, so the dashboard no longer has to scan
-  // trader-pool rows and intersect with the trader-day system-address
-  // allowlist. If the trader flips into day-sticky system classification,
+  // trader-pool rows and intersect with the trader-day protocol-owned address
+  // allowlist. If the trader flips into day-sticky protocol-actor classification,
   // remove their earlier same-day pool contributions from the primary branch.
-  const corrections = ctx.traderDayState.traderDayBecameSystem
+  const corrections = ctx.traderDayState.traderDayBecameProtocolActor
     ? await collectPoolPrimaryCorrections(context, snap, ctx)
     : new Map<string, { swapCount: number; volumeUsdWei: bigint }>();
 
@@ -405,7 +413,7 @@ async function upsertPoolDailyVolumeSnapshot(
     swapCount: 0,
     volumeUsdWei: 0n,
   };
-  const isSystem = ctx.traderDayState.traderDayIsSystem;
+  const isSystem = ctx.traderDayState.traderDayIsProtocolActor;
   const primarySwapBase = subtractCount(
     prev.swapCount,
     currentCorrection.swapCount,
@@ -421,10 +429,10 @@ async function upsertPoolDailyVolumeSnapshot(
     poolId: snap.poolId,
     timestamp: snap.day,
     swapCount: primarySwapBase + (isSystem ? 0 : 1),
-    swapCountIncludingSystem: prev.swapCountIncludingSystem + 1,
+    swapCountIncludingProtocolActors: prev.swapCountIncludingProtocolActors + 1,
     volumeUsdWei: primaryVolumeBase + (isSystem ? 0n : snap.volumeUsdWei),
-    volumeUsdWeiIncludingSystem:
-      prev.volumeUsdWeiIncludingSystem + snap.volumeUsdWei,
+    volumeUsdWeiIncludingProtocolActors:
+      prev.volumeUsdWeiIncludingProtocolActors + snap.volumeUsdWei,
     blockNumber: snap.blockNumber,
     updatedAtTimestamp: snap.blockTimestamp,
   });
@@ -503,13 +511,13 @@ interface AggregatorCorrection {
 
 const EMPTY_AGG_DAY = {
   swapCount: 0,
-  swapCountIncludingSystem: 0,
+  swapCountIncludingProtocolActors: 0,
   uniqueTraders: 0,
-  uniqueTradersIncludingSystem: 0,
+  uniqueTradersIncludingProtocolActors: 0,
   volumeUsdWei: 0n,
-  volumeUsdWeiIncludingSystem: 0n,
+  volumeUsdWeiIncludingProtocolActors: 0n,
   feesPaidUsdWei: 0n,
-  feesPaidUsdWeiIncludingSystem: 0n,
+  feesPaidUsdWeiIncludingProtocolActors: 0n,
 };
 
 const EMPTY_AGG_CORRECTION: AggregatorCorrection = {
@@ -524,17 +532,17 @@ async function upsertAggregatorDailySnapshot(
   snap: SnapContext,
   ctx: AggregatorDailyContext,
 ) {
-  // Primary fields exclude system callers; *IncludingSystem siblings preserve
-  // the toggle path. If this swap made the trader-day sticky-system, subtract
+  // Primary fields exclude protocol actors callers; *IncludingProtocolActors siblings preserve
+  // the toggle path. If this swap made the trader-day sticky-protocol, subtract
   // all earlier same-day aggregator contributions from primary fields before
   // applying the current event.
-  const corrections = ctx.traderDayState.traderDayBecameSystem
+  const corrections = ctx.traderDayState.traderDayBecameProtocolActor
     ? await collectAggregatorPrimaryCorrections(context, snap, ctx)
     : new Map<string, AggregatorCorrection>();
 
   const prev = ctx.existing ?? EMPTY_AGG_DAY;
   const correction = corrections.get(snap.aggregator) ?? EMPTY_AGG_CORRECTION;
-  const isSystem = ctx.traderDayState.traderDayIsSystem;
+  const isSystem = ctx.traderDayState.traderDayIsProtocolActor;
   const firstTouch = ctx.aggTraderFirstTouch;
 
   const primarySwapBase = subtractCount(prev.swapCount, correction.swapCount);
@@ -562,16 +570,16 @@ async function upsertAggregatorDailySnapshot(
     lastSeenAggregatorAddress: snap.txTo,
     timestamp: snap.day,
     swapCount: primarySwapBase + (isSystem ? 0 : 1),
-    swapCountIncludingSystem: prev.swapCountIncludingSystem + 1,
+    swapCountIncludingProtocolActors: prev.swapCountIncludingProtocolActors + 1,
     uniqueTraders: primaryUniqueBase + (!isSystem && firstTouch ? 1 : 0),
-    uniqueTradersIncludingSystem:
-      prev.uniqueTradersIncludingSystem + (firstTouch ? 1 : 0),
+    uniqueTradersIncludingProtocolActors:
+      prev.uniqueTradersIncludingProtocolActors + (firstTouch ? 1 : 0),
     volumeUsdWei: primaryVolumeBase + (isSystem ? 0n : snap.volumeUsdWei),
-    volumeUsdWeiIncludingSystem:
-      prev.volumeUsdWeiIncludingSystem + snap.volumeUsdWei,
+    volumeUsdWeiIncludingProtocolActors:
+      prev.volumeUsdWeiIncludingProtocolActors + snap.volumeUsdWei,
     feesPaidUsdWei: primaryFeesBase + (isSystem ? 0n : snap.feesPaidUsdWei),
-    feesPaidUsdWeiIncludingSystem:
-      prev.feesPaidUsdWeiIncludingSystem + snap.feesPaidUsdWei,
+    feesPaidUsdWeiIncludingProtocolActors:
+      prev.feesPaidUsdWeiIncludingProtocolActors + snap.feesPaidUsdWei,
   });
 }
 
@@ -593,7 +601,7 @@ async function collectAggregatorPrimaryCorrections(
     }),
   );
   for (const { touchedAggregator, marker } of touchedAggMarkers) {
-    if (!marker || marker.isSystemAddress) continue;
+    if (!marker || marker.isProtocolActor) continue;
     corrections.set(touchedAggregator, {
       swapCount: marker.swapCount,
       uniqueTraders: 1,
@@ -641,14 +649,14 @@ const EMPTY_AGG_TRADER_MARKER = {
   swapCount: 0,
   volumeUsdWei: 0n,
   feesPaidUsdWei: 0n,
-  isSystemAddress: false,
+  isProtocolActor: false,
 };
 
 function upsertAggregatorTraderDayMarker(
   context: VolumeContext,
   snap: SnapContext,
   existing: AggregatorTraderDayMarker | undefined,
-  traderDayIsSystem: boolean,
+  traderDayIsProtocolActor: boolean,
 ) {
   const prev = existing ?? EMPTY_AGG_TRADER_MARKER;
   context.AggregatorTraderDayMarker.set({
@@ -660,6 +668,6 @@ function upsertAggregatorTraderDayMarker(
     swapCount: prev.swapCount + 1,
     volumeUsdWei: prev.volumeUsdWei + snap.volumeUsdWei,
     feesPaidUsdWei: prev.feesPaidUsdWei + snap.feesPaidUsdWei,
-    isSystemAddress: prev.isSystemAddress || traderDayIsSystem,
+    isProtocolActor: prev.isProtocolActor || traderDayIsProtocolActor,
   });
 }

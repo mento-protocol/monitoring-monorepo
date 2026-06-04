@@ -502,7 +502,7 @@ type BrokerTraderDailySnapshot
   timestamp: BigInt! @index # UTC day bucket
   swapCount: Int!
   volumeUsdWei: BigInt!
-  isSystemAddress: Boolean! @index
+  isProtocolActor: Boolean! @index
   # Block timestamp of the caller's most recent v2-direct swap within this
   # day. Drives "Last active" at sub-day precision (the day bucket alone would
   # show every active caller as "today").
@@ -844,15 +844,15 @@ type VolumeWindowSnapshot
   windowKey: String! @index # "24h" | "7d" | "30d" | "90d" | "all"
   snapshotDay: BigInt! @index # UTC-midnight day this row was flushed at
   windowStartDay: BigInt! # see volumeWindowSnapshot.ts:windowStartDay
-  # Totals exclude isSystemAddress=true rows (matches the dashboard's
-  # default "Include protocol actors = off" view); the *IncludingSystem
-  # variants are used when the toggle is on.
+  # Totals exclude isProtocolActor=true rows (matches the dashboard's
+  # default "Include protocol actors = off" view); the *IncludingProtocolActors
+  # variants are used when the page includes protocol actors.
   totalVolumeUsdWei: BigInt! @config(precision: 78)
-  totalVolumeUsdWeiIncludingSystem: BigInt! @config(precision: 78)
+  totalVolumeUsdWeiIncludingProtocolActors: BigInt! @config(precision: 78)
   totalSwapCount: Int!
-  totalSwapCountIncludingSystem: Int!
+  totalSwapCountIncludingProtocolActors: Int!
   uniqueTraders: Int!
-  uniqueTradersIncludingSystem: Int!
+  uniqueTradersIncludingProtocolActors: Int!
   # First-day slice: contribution of `windowStartDay` (the snapshot's
   # oldest day) to the totals above. Lets the dashboard perform "drop
   # first day, add yesterday + today" slice subtraction when a chain is
@@ -866,18 +866,18 @@ type VolumeWindowSnapshot
   # and `24h` (snapshot range is empty by construction). Populated for
   # the rolling windows `7d` / `30d` / `90d`.
   firstDayVolumeUsdWei: BigInt! @config(precision: 78)
-  firstDayVolumeUsdWeiIncludingSystem: BigInt! @config(precision: 78)
+  firstDayVolumeUsdWeiIncludingProtocolActors: BigInt! @config(precision: 78)
   firstDaySwapCount: Int!
-  firstDaySwapCountIncludingSystem: Int!
+  firstDaySwapCountIncludingProtocolActors: Int!
   # Count of traders whose ENTIRE window activity falls on the first
   # day (`windowStartDay`) only — no rows in `(windowStartDay,
   # snapshotDay]`. Subtracting this from `uniqueTraders` yields the
   # trader count for `[windowStartDay+1, snapshotDay]`, which is
   # exactly what the slice-subtraction merge needs.
   firstDayExclusiveUniqueTraders: Int!
-  firstDayExclusiveUniqueTradersIncludingSystem: Int!
+  firstDayExclusiveUniqueTradersIncludingProtocolActors: Int!
   firstDayExclusiveTraders: [String!]!
-  firstDayExclusiveTradersIncludingSystem: [String!]!
+  firstDayExclusiveTradersIncludingProtocolActors: [String!]!
   # Full list of distinct trader addresses in the window — lets the
   # dashboard cross-chain-dedupe via a `Set<string>` union (used by the
   # homepage "Traders" tile, where naively summing `uniqueTraders` across
@@ -895,7 +895,7 @@ type VolumeWindowSnapshot
   # array adds <10KB per snapshot row, with multi-decade headroom before
   # the GraphQL response becomes large.
   windowTraders: [String!]!
-  windowTradersIncludingSystem: [String!]!
+  windowTradersIncludingProtocolActors: [String!]!
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
 }
@@ -911,25 +911,25 @@ type BrokerVolumeWindowSnapshot
   snapshotDay: BigInt! @index
   windowStartDay: BigInt!
   totalVolumeUsdWei: BigInt! @config(precision: 78)
-  totalVolumeUsdWeiIncludingSystem: BigInt! @config(precision: 78)
+  totalVolumeUsdWeiIncludingProtocolActors: BigInt! @config(precision: 78)
   totalSwapCount: Int!
-  totalSwapCountIncludingSystem: Int!
+  totalSwapCountIncludingProtocolActors: Int!
   uniqueTraders: Int!
-  uniqueTradersIncludingSystem: Int!
+  uniqueTradersIncludingProtocolActors: Int!
   # First-day slice — see VolumeWindowSnapshot for semantics.
   firstDayVolumeUsdWei: BigInt! @config(precision: 78)
-  firstDayVolumeUsdWeiIncludingSystem: BigInt! @config(precision: 78)
+  firstDayVolumeUsdWeiIncludingProtocolActors: BigInt! @config(precision: 78)
   firstDaySwapCount: Int!
-  firstDaySwapCountIncludingSystem: Int!
+  firstDaySwapCountIncludingProtocolActors: Int!
   firstDayExclusiveUniqueTraders: Int!
-  firstDayExclusiveUniqueTradersIncludingSystem: Int!
+  firstDayExclusiveUniqueTradersIncludingProtocolActors: Int!
   firstDayExclusiveTraders: [String!]!
-  firstDayExclusiveTradersIncludingSystem: [String!]!
+  firstDayExclusiveTradersIncludingProtocolActors: [String!]!
   # See VolumeWindowSnapshot.windowTraders for semantics. Kept in
   # symmetry so the shared `buildVolumeWindowSnapshot` returns a
   # single shape that satisfies both entity types.
   windowTraders: [String!]!
-  windowTradersIncludingSystem: [String!]!
+  windowTradersIncludingProtocolActors: [String!]!
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
 }
@@ -1787,16 +1787,16 @@ type TraderDailySnapshot @index(fields: ["chainId", "trader", "timestamp"]) {
   uniquePools: Int!
   # Aggregator names this trader touched on this UTC day. Used to keep
   # AggregatorDailySnapshot's primary fields consistent with the day-sticky
-  # isSystemAddress flag if a trader flips into system classification after
-  # earlier same-day non-system swaps.
+  # isProtocolActor flag if a trader flips into protocol-actor classification
+  # after earlier same-day organic swaps.
   aggregatorKeys: [String!]!
   # Pools this trader touched on this UTC day. Used to keep pool/day rollups
-  # consistent with the day-sticky isSystemAddress flag if a trader flips into
-  # system classification after earlier same-day non-system swaps.
+  # consistent with the day-sticky isProtocolActor flag if a trader flips into
+  # protocol-actor classification after earlier same-day organic swaps.
   poolIds: [String!]!
   volumeUsdWei: BigInt!
   feesPaidUsdWei: BigInt!
-  isSystemAddress: Boolean! @index
+  isProtocolActor: Boolean! @index
   # Block timestamp of the trader's most recent swap within this day — drives
   # the volume table's "Last active" column at sub-day precision (the day bucket
   # alone would show every active trader as "today").
@@ -1830,12 +1830,12 @@ type PoolDailyVolumeSnapshot {
   chainId: Int!
   poolId: String! @index
   timestamp: BigInt! @index
-  # Primary fields exclude system-address swaps and drive the dashboard's
-  # default view. The *IncludingSystem siblings back the page-level toggle.
+  # Primary fields exclude protocol-actor swaps and drive the dashboard's
+  # default view. The *IncludingProtocolActors siblings back the page-level mode.
   swapCount: Int!
-  swapCountIncludingSystem: Int!
+  swapCountIncludingProtocolActors: Int!
   volumeUsdWei: BigInt! @config(precision: 78)
-  volumeUsdWeiIncludingSystem: BigInt! @config(precision: 78)
+  volumeUsdWeiIncludingProtocolActors: BigInt! @config(precision: 78)
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
 }
@@ -1845,10 +1845,10 @@ type AggregatorDailySnapshot {
   chainId: Int!
   # Canonical name from classifyAggregator(). Values currently produced:
   # "squid" | "lifi" | "0x" | "openocean" | "cluster-<first-16-hex-of-deployer-EOA>" |
-  # "direct" | "system" | "unknown".
+  # "direct" | "protocol" | "unknown".
   # "direct" = txTo is the Mento Broker / Router (user used Mento UI/SDK)
   # or the swap went directly to the pool with no router mediation.
-  # "system" = txTo is a known Mento internal contract (rebalancer, NTT, etc.).
+  # "protocol" = txTo is a known Mento internal contract (rebalancer, NTT, etc.).
   # "cluster-*" = txTo is one of multiple contracts deployed by the same EOA
   # (e.g. an MEV / MM operator running a fleet); see `$clusters` block in
   # indexer-envio/config/aggregators.json for the deployer EOA + explorer URL.
@@ -1861,21 +1861,21 @@ type AggregatorDailySnapshot {
   # across days if multiple routers map to the same canonical name.
   lastSeenAggregatorAddress: String!
   timestamp: BigInt! @index
-  # Primary fields exclude system-address callers and drive the dashboard's
-  # default view. The *IncludingSystem siblings back the page-level toggle.
+  # Primary fields exclude protocol-actor callers and drive the dashboard's
+  # default view. The *IncludingProtocolActors siblings back the page-level mode.
   swapCount: Int!
-  swapCountIncludingSystem: Int!
+  swapCountIncludingProtocolActors: Int!
   uniqueTraders: Int!
-  uniqueTradersIncludingSystem: Int!
+  uniqueTradersIncludingProtocolActors: Int!
   volumeUsdWei: BigInt!
-  volumeUsdWeiIncludingSystem: BigInt!
+  volumeUsdWeiIncludingProtocolActors: BigInt!
   feesPaidUsdWei: BigInt!
-  feesPaidUsdWeiIncludingSystem: BigInt!
+  feesPaidUsdWeiIncludingProtocolActors: BigInt!
 }
 
 # Marker entities used to dedupe first-touch increments of `uniqueTraders` and
 # keep enough per-trader contribution state to correct AggregatorDailySnapshot
-# primary fields if a trader flips into day-sticky system classification.
+# primary fields if a trader flips into day-sticky protocol-actor classification.
 type AggregatorTraderDayMarker {
   id: ID! # "{chainId}-{aggregator}-{trader}-{day}"
   chainId: Int!
@@ -1885,7 +1885,7 @@ type AggregatorTraderDayMarker {
   swapCount: Int!
   volumeUsdWei: BigInt!
   feesPaidUsdWei: BigInt!
-  isSystemAddress: Boolean!
+  isProtocolActor: Boolean!
 }
 
 type TraderPoolDayMarker {
@@ -1991,7 +1991,7 @@ type V2StableSupplyChangeEvent
   counterparty: String! @index
   caller: String! @index # tx.from — the EOA that signed (volume key)
   txTo: String! # tx.to — used to classify `kind`; "" for contract-creation tx
-  isSystemCaller: Boolean! # isSystemAddress(chainId, caller) snapshot
+  isProtocolOwnedCaller: Boolean! # isProtocolOwnedAddress(chainId, caller) snapshot
   # Signed token-native wei: + for mint, - for burn.
   amount: BigInt!
   txHash: String!

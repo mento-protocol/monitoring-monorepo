@@ -7,9 +7,9 @@ export type PoolDailyVolumeRow = {
   poolId: string;
   timestamp: string;
   swapCount: number;
-  swapCountIncludingSystem: number;
+  swapCountIncludingProtocolActors: number;
   volumeUsdWei: string;
-  volumeUsdWeiIncludingSystem: string;
+  volumeUsdWeiIncludingProtocolActors: string;
 };
 
 /** A series ready for `TimeSeriesChartCard` `breakdown`. `key` is the
@@ -54,7 +54,7 @@ const OTHER_KEY = "__other__";
 export function aggregatePoolDailyVolume(
   rows: readonly PoolDailyVolumeRow[],
   poolLabel: (poolId: string) => string,
-  showSystem = false,
+  includeProtocolActors = false,
   /**
    * UTC-day window the chart covers, as `[cutoffSec, todayMidnightSec]`.
    * When provided, the output series is zero-filled across every UTC
@@ -95,7 +95,9 @@ export function aggregatePoolDailyVolume(
     const day = Number(r.timestamp);
     days.add(day);
     const wei = BigInt(
-      showSystem ? r.volumeUsdWeiIncludingSystem : r.volumeUsdWei,
+      includeProtocolActors
+        ? r.volumeUsdWeiIncludingProtocolActors
+        : r.volumeUsdWei,
     );
     if (wei === BigInt(0)) continue;
     const k = `${r.poolId}|${day}`;

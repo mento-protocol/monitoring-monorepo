@@ -29,7 +29,7 @@ import { ZERO_ADDRESS } from "../../constants.js";
 import { asAddress, eventId } from "../../helpers.js";
 import { indexer } from "../../indexer.js";
 import { v2StableTotalSupplyEffect } from "../../rpc/effects.js";
-import { isSystemAddress } from "../../system-addresses.js";
+import { isProtocolOwnedAddress } from "../../protocol-actors.js";
 import {
   getOrCreateV2StableTokenSupply,
   preloadV2StableTokenSupply,
@@ -167,7 +167,8 @@ indexer.onEvent(
       counterparty,
       caller,
       txTo: txTo ?? "",
-      isSystemCaller: caller !== "" && isSystemAddress(chainId, caller),
+      isProtocolOwnedCaller:
+        caller !== "" && isProtocolOwnedAddress(chainId, caller),
       amount: signedDelta,
       txHash: event.transaction.hash,
       blockNumber,

@@ -22,7 +22,7 @@ import { SECONDS_PER_DAY } from "@/lib/time-series";
 /** Wire shape of the v3/v2 window snapshot entities
  *  rows from the primary query. Both v3 and v2 GraphQL queries return the
  *  same fields. The primary total* fields exclude protocol actors; the
- *  *IncludingSystem siblings feed the "Include protocol actors" toggle.
+ *  *IncludingProtocolActors siblings feed the "Include protocol actors" toggle.
  *
  *  The `firstDay*` slice ships in a SEPARATE isolated query
  *  (`VOLUME_WINDOW_FIRSTDAY_LATEST`) — see
@@ -36,11 +36,11 @@ export type VolumeWindowRow = {
   snapshotDay: string;
   windowStartDay: string;
   totalVolumeUsdWei: string;
-  totalVolumeUsdWeiIncludingSystem: string;
+  totalVolumeUsdWeiIncludingProtocolActors: string;
   totalSwapCount: number;
-  totalSwapCountIncludingSystem: number;
+  totalSwapCountIncludingProtocolActors: number;
   uniqueTraders: number;
-  uniqueTradersIncludingSystem: number;
+  uniqueTradersIncludingProtocolActors: number;
 };
 
 /** Wire shape of the isolated first-day slice query
@@ -56,32 +56,32 @@ export type VolumeWindowFirstDayRow = {
   chainId: number;
   snapshotDay: string;
   firstDayVolumeUsdWei: string;
-  firstDayVolumeUsdWeiIncludingSystem: string;
+  firstDayVolumeUsdWeiIncludingProtocolActors: string;
   firstDaySwapCount: number;
-  firstDaySwapCountIncludingSystem: number;
+  firstDaySwapCountIncludingProtocolActors: number;
   firstDayExclusiveUniqueTraders: number;
-  firstDayExclusiveUniqueTradersIncludingSystem: number;
+  firstDayExclusiveUniqueTradersIncludingProtocolActors: number;
 };
 
 /** Bounded historical-overlap row for partial-day traders. The query is
- *  distinct on `(chainId, trader, isSystemAddress)`, so it returns at most
+ *  distinct on `(chainId, trader, isProtocolActor)`, so it returns at most
  *  two rows per active yesterday/today trader and avoids polling full
  *  cumulative snapshot trader arrays. */
 export type VolumePartialOverlapRow = {
   chainId: number;
   trader: string;
   timestamp: string;
-  isSystemAddress: boolean;
+  isProtocolActor: boolean;
 };
 
 /** Wire shape of today's partial trader-day rows. v3 and v2 share this
- *  minimal subset (we only need volume + swap count + system flag). */
+ *  minimal subset (we only need volume + swap count + protocol-actor flag). */
 export type VolumeTodayTraderRow = {
   chainId: number;
   trader: string;
   volumeUsdWei: string;
   swapCount: number;
-  isSystemAddress: boolean;
+  isProtocolActor: boolean;
 };
 
 export type HeroSnapshotTotals = {
@@ -150,7 +150,7 @@ export type VolumePartialOverlapQueryInput = {
 };
 
 // Hasura caps query responses at 1000 rows. The overlap query can return
-// one non-system and one system row per active partial trader, so exact mode
+// one organic and one protocol-actor row per active partial trader, so exact mode
 // stops at 500 active keys and falls back above that.
 const MAX_PARTIAL_OVERLAP_QUERY_ROWS = 1000;
 const MAX_PARTIAL_OVERLAP_KEYS = MAX_PARTIAL_OVERLAP_QUERY_ROWS / 2;
@@ -161,9 +161,9 @@ function traderKey(chainId: number, trader: string): string {
 
 function buildHistoricalOverlapKeys(
   rows: ReadonlyArray<VolumePartialOverlapRow>,
-  showSystem: boolean,
+  includeProtocolActors: boolean,
 ): Set<string> {
-  if (showSystem) {
+  if (includeProtocolActors) {
     return new Set(rows.map((row) => traderKey(row.chainId, row.trader)));
   }
 
@@ -177,7 +177,7 @@ function buildHistoricalOverlapKeys(
       seenNonSystem: false,
       seenSystem: false,
     };
-    if (row.isSystemAddress) {
+    if (row.isProtocolActor) {
       status.seenSystem = true;
     } else {
       status.seenNonSystem = true;
@@ -187,8 +187,8 @@ function buildHistoricalOverlapKeys(
 
   const overlapKeys = new Set<string>();
   for (const [key, status] of statusByKey) {
-    // Snapshot uniqueTraders is sticky-system: any system day excludes that
-    // trader from the hidden-system count, even if another day was non-system.
+    // Snapshot uniqueTraders is sticky-protocol: any protocol-actor day excludes
+    // that trader from the organic count, even if another day was organic.
     if (status.seenNonSystem && !status.seenSystem) {
       overlapKeys.add(key);
     }
@@ -199,12 +199,12 @@ function buildHistoricalOverlapKeys(
 function addPartialRowsByChain(
   rows: ReadonlyArray<VolumeTodayTraderRow> | undefined,
   staleChainSet: ReadonlySet<number>,
-  showSystem: boolean,
+  includeProtocolActors: boolean,
   out: Map<number, Set<string>>,
 ): void {
   for (const row of rows ?? []) {
     if (staleChainSet.has(row.chainId)) continue;
-    if (!showSystem && row.isSystemAddress) continue;
+    if (!includeProtocolActors && row.isProtocolActor) continue;
     const traders = out.get(row.chainId);
     if (traders) {
       traders.add(row.trader);
@@ -220,7 +220,7 @@ export function buildHeroPartialOverlapQueryInput(args: {
   todayRows: ReadonlyArray<VolumeTodayTraderRow> | undefined;
   firstDayRows?: ReadonlyArray<VolumeWindowFirstDayRow> | undefined;
   yesterdayRows?: ReadonlyArray<VolumeTodayTraderRow> | undefined;
-  showSystem: boolean;
+  includeProtocolActors: boolean;
   todayMidnightSeconds: number;
   traderField?: "trader" | "caller";
 }): VolumePartialOverlapQueryInput | null | undefined {
@@ -264,13 +264,13 @@ export function buildHeroPartialOverlapQueryInput(args: {
   addPartialRowsByChain(
     args.todayRows,
     staleChains,
-    args.showSystem,
+    args.includeProtocolActors,
     partialRowsByChain,
   );
   addPartialRowsByChain(
     args.yesterdayRows,
     staleChains,
-    args.showSystem,
+    args.includeProtocolActors,
     partialRowsByChain,
   );
 
@@ -297,15 +297,15 @@ export function buildHeroPartialOverlapQueryInput(args: {
  * Sum hero-tile totals across all chains, combining the pre-rolled
  * [windowStart, yesterday] snapshot with today's partial.
  *
- * `showSystem` selects between the snapshot's primary fields (system
- * excluded — matches the dashboard's default view and the table's
- * filter) and the *IncludingSystem variants. Today's rows are
- * pre-filtered by the `isSystemAddressIn` query variable, so the
- * showSystem branch only filters out anything that snuck through.
+ * `includeProtocolActors` selects between the snapshot's primary fields
+ * (protocol actors excluded — matches the dashboard's default view and the
+ * table filter) and the *IncludingProtocolActors variants. Today's rows are
+ * pre-filtered by the `isProtocolActorIn` query variable, so the
+ * includeProtocolActors branch only filters out anything that snuck through.
  *
  * The unique-trader count uses a bounded historical-overlap query for
- * yesterday/today partial traders when it has landed. During schema rollout,
- * query failure, or a large active-partial set it falls back to the legacy
+ * yesterday/today partial traders when it has landed. During query failure
+ * or a large active-partial set it falls back to the approximate
  * count-based path, which adds snapshot + yesterday + today counts without
  * cross-source de-duping.
  *
@@ -411,7 +411,7 @@ export function mergeHeroSnapshot(args: {
    *  fires `VOLUME_YESTERDAY_TRADERS` only when `degradedChains`
    *  from a prior pass is non-empty; `undefined` otherwise. */
   yesterdayRows?: ReadonlyArray<VolumeTodayTraderRow> | undefined;
-  showSystem: boolean;
+  includeProtocolActors: boolean;
   todayMidnightSeconds: number;
 }): HeroSnapshotTotals {
   // Stale: snapshot strictly older than two-days-ago midnight (≥3 UTC
@@ -434,7 +434,7 @@ export function mergeHeroSnapshot(args: {
     if (isStaleableWindow(row.windowKey)) {
       const snapDay = Number(row.snapshotDay);
       if (snapDay < staleCutoffSeconds) {
-        // Skip stale rows entirely — applies to both showSystem branches
+        // Skip stale rows entirely — applies to both includeProtocolActors branches
         // because staleness is independent of protocol-actor filtering.
         staleChains.push(row.chainId);
         continue;
@@ -448,10 +448,10 @@ export function mergeHeroSnapshot(args: {
         degradedSnapshotByChain.set(row.chainId, row);
       }
     }
-    if (args.showSystem) {
-      totalVolumeUsdWei += BigInt(row.totalVolumeUsdWeiIncludingSystem);
-      totalSwapCount += row.totalSwapCountIncludingSystem;
-      uniqueFromSnapshot += row.uniqueTradersIncludingSystem;
+    if (args.includeProtocolActors) {
+      totalVolumeUsdWei += BigInt(row.totalVolumeUsdWeiIncludingProtocolActors);
+      totalSwapCount += row.totalSwapCountIncludingProtocolActors;
+      uniqueFromSnapshot += row.uniqueTradersIncludingProtocolActors;
     } else {
       totalVolumeUsdWei += BigInt(row.totalVolumeUsdWei);
       totalSwapCount += row.totalSwapCount;
@@ -466,7 +466,7 @@ export function mergeHeroSnapshot(args: {
   const todayTraders = new Set<string>();
   for (const row of args.todayRows ?? []) {
     if (staleChainSet.has(row.chainId)) continue;
-    if (!args.showSystem && row.isSystemAddress) continue;
+    if (!args.includeProtocolActors && row.isProtocolActor) continue;
     totalVolumeUsdWei += BigInt(row.volumeUsdWei);
     totalSwapCount += row.swapCount;
     const key = traderKey(row.chainId, row.trader);
@@ -494,11 +494,11 @@ export function mergeHeroSnapshot(args: {
     ? buildFirstDaySnapshotKeyMap(args.firstDayRows)
     : null;
   if (args.yesterdayRows !== undefined && firstDayBySnapshotKey !== null) {
-    // Bucket yesterday's rows by chainId (and apply the system filter)
+    // Bucket yesterday's rows by chainId (and apply the actor filter)
     // once, so the per-chain loop is O(degradedChains.length).
     const yesterdayByChain = new Map<number, VolumeTodayTraderRow[]>();
     for (const row of args.yesterdayRows) {
-      if (!args.showSystem && row.isSystemAddress) continue;
+      if (!args.includeProtocolActors && row.isProtocolActor) continue;
       const list = yesterdayByChain.get(row.chainId);
       if (list) {
         list.push(row);
@@ -523,18 +523,18 @@ export function mergeHeroSnapshot(args: {
         remainingDegradedChains.push(chainId);
         continue;
       }
-      // Slice subtraction off the snapshot. Use the same showSystem
+      // Slice subtraction off the snapshot. Use the same includeProtocolActors
       // branch the snapshot was added under so the units match. Even
       // when yesterday has zero rows for this chain, subtracting the
       // first-day slice is correct: it slides the window forward by
       // one day with a zero contribution from yesterday.
-      if (args.showSystem) {
+      if (args.includeProtocolActors) {
         totalVolumeUsdWei -= BigInt(
-          firstDay.firstDayVolumeUsdWeiIncludingSystem,
+          firstDay.firstDayVolumeUsdWeiIncludingProtocolActors,
         );
-        totalSwapCount -= firstDay.firstDaySwapCountIncludingSystem;
+        totalSwapCount -= firstDay.firstDaySwapCountIncludingProtocolActors;
         uniqueFromSnapshot -=
-          firstDay.firstDayExclusiveUniqueTradersIncludingSystem;
+          firstDay.firstDayExclusiveUniqueTradersIncludingProtocolActors;
       } else {
         totalVolumeUsdWei -= BigInt(firstDay.firstDayVolumeUsdWei);
         totalSwapCount -= firstDay.firstDaySwapCount;
@@ -564,7 +564,10 @@ export function mergeHeroSnapshot(args: {
   const overlapKeys =
     args.partialOverlapRows === undefined
       ? null
-      : buildHistoricalOverlapKeys(args.partialOverlapRows, args.showSystem);
+      : buildHistoricalOverlapKeys(
+          args.partialOverlapRows,
+          args.includeProtocolActors,
+        );
   const exactNewPartialTraders =
     overlapKeys === null
       ? null

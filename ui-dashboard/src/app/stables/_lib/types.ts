@@ -28,7 +28,7 @@ export type V2StableSupplyChangeEvent = {
   counterparty: string;
   caller: string;
   txTo: string;
-  isSystemCaller: boolean;
+  isProtocolOwnedCaller: boolean;
   amount: string;
   txHash: string;
   blockNumber: string;

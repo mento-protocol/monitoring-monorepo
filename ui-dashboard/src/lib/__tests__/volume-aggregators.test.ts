@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateAggregatorsByWindow,
   buildAggregatorDailyVolumeBreakdown,
-  selectAggregatorRowsForSystemToggle,
+  selectAggregatorRowsForActorFilter,
   type AggregatorDailyRow,
 } from "../volume-aggregators";
 import {
   AGGREGATOR_DAILY_TOP,
-  AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM,
+  AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS,
   aggregatorDailyTopQuery,
 } from "../queries/volume";
 
@@ -22,11 +22,11 @@ function row(overrides: Partial<AggregatorDailyRow>): AggregatorDailyRow {
     lastSeenAggregatorAddress: "0xrouter",
     timestamp: "1000",
     swapCount: 1,
-    swapCountIncludingSystem: 1,
+    swapCountIncludingProtocolActors: 1,
     uniqueTraders: 1,
-    uniqueTradersIncludingSystem: 1,
+    uniqueTradersIncludingProtocolActors: 1,
     volumeUsdWei: USD(1),
-    volumeUsdWeiIncludingSystem: USD(1),
+    volumeUsdWeiIncludingProtocolActors: USD(1),
     ...overrides,
   };
 }
@@ -60,25 +60,25 @@ describe("aggregateAggregatorsByWindow", () => {
   });
 });
 
-describe("selectAggregatorRowsForSystemToggle", () => {
-  it("drops hidden-system rows whose primary fields were zeroed", () => {
-    const selected = selectAggregatorRowsForSystemToggle(
+describe("selectAggregatorRowsForActorFilter", () => {
+  it("drops organic rows whose primary fields were zeroed", () => {
+    const selected = selectAggregatorRowsForActorFilter(
       [
         row({ id: "visible", aggregator: "squid", volumeUsdWei: USD(5) }),
         row({
-          id: "system-bucket",
-          aggregator: "system",
+          id: "protocol-bucket",
+          aggregator: "protocol",
           volumeUsdWei: USD(10),
         }),
         row({
-          id: "system-via-router",
+          id: "protocol-via-router",
           aggregator: "squid",
           swapCount: 0,
           uniqueTraders: 0,
           volumeUsdWei: "0",
-          swapCountIncludingSystem: 3,
-          uniqueTradersIncludingSystem: 2,
-          volumeUsdWeiIncludingSystem: USD(99),
+          swapCountIncludingProtocolActors: 3,
+          uniqueTradersIncludingProtocolActors: 2,
+          volumeUsdWeiIncludingProtocolActors: USD(99),
         }),
       ],
       false,
@@ -87,16 +87,16 @@ describe("selectAggregatorRowsForSystemToggle", () => {
     expect(selected.map((r) => r.volumeUsdWei)).toEqual([USD(5)]);
   });
 
-  it("maps including-system fields when protocol actors are included", () => {
-    const selected = selectAggregatorRowsForSystemToggle(
+  it("maps including-protocol fields when protocol actors are included", () => {
+    const selected = selectAggregatorRowsForActorFilter(
       [
         row({
           swapCount: 0,
           uniqueTraders: 0,
           volumeUsdWei: "0",
-          swapCountIncludingSystem: 3,
-          uniqueTradersIncludingSystem: 2,
-          volumeUsdWeiIncludingSystem: USD(99),
+          swapCountIncludingProtocolActors: 3,
+          uniqueTradersIncludingProtocolActors: 2,
+          volumeUsdWeiIncludingProtocolActors: USD(99),
         }),
       ],
       true,
@@ -111,16 +111,16 @@ describe("selectAggregatorRowsForSystemToggle", () => {
 });
 
 describe("aggregatorDailyTopQuery", () => {
-  it("orders by the displayed volume for the active system toggle", () => {
+  it("orders by the displayed volume for the active actor filter", () => {
     expect(aggregatorDailyTopQuery(false)).toBe(AGGREGATOR_DAILY_TOP);
     expect(aggregatorDailyTopQuery(false)).toContain(
       "order_by: [{ volumeUsdWei: desc }, { id: asc }]",
     );
     expect(aggregatorDailyTopQuery(true)).toBe(
-      AGGREGATOR_DAILY_TOP_INCLUDING_SYSTEM,
+      AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS,
     );
     expect(aggregatorDailyTopQuery(true)).toContain(
-      "order_by: [{ volumeUsdWeiIncludingSystem: desc }, { id: asc }]",
+      "order_by: [{ volumeUsdWeiIncludingProtocolActors: desc }, { id: asc }]",
     );
   });
 });

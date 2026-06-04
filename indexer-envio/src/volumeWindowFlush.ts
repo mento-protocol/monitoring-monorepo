@@ -151,7 +151,7 @@ export async function flushV2VolumeWindowSnapshots(args: {
     timestamp: r.timestamp,
     volumeUsdWei: r.volumeUsdWei,
     swapCount: r.swapCount,
-    isSystemAddress: r.isSystemAddress,
+    isProtocolActor: r.isProtocolActor,
   }));
   const grouped = aggregatePerWindow(
     sharedRows,

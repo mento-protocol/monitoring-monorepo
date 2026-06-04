@@ -53,7 +53,7 @@ function trader(
     swapCount: 1,
     uniquePools: 1,
     feesPaidUsdWei: ZERO_WEI,
-    isSystemAddress: false,
+    isProtocolActor: false,
     lastSeenTimestamp: partial.timestamp,
     ...partial,
     aggregatorKeys: partial.aggregatorKeys ?? [],
@@ -195,25 +195,25 @@ describe("aggregateTradersByWindow", () => {
     expect(result[1]!.uniquePoolsApprox).toBe(2);
   });
 
-  it("propagates isSystemAddress=true if any row is system", () => {
+  it("propagates isProtocolActor=true if any row is system", () => {
     const rows: TraderDailyRow[] = [
       trader({
         chainId: 42220,
         trader: "0xa",
         timestamp: "100",
         volumeUsdWei: USD(10),
-        isSystemAddress: false,
+        isProtocolActor: false,
       }),
       trader({
         chainId: 42220,
         trader: "0xa",
         timestamp: "200",
         volumeUsdWei: USD(20),
-        isSystemAddress: true,
+        isProtocolActor: true,
       }),
     ];
     const result = aggregateTradersByWindow(rows);
-    expect(result[0]!.isSystemAddress).toBe(true);
+    expect(result[0]!.isProtocolActor).toBe(true);
   });
 
   it("tracks max lastSeenTimestamp across the window", () => {
@@ -371,7 +371,7 @@ describe("volume insights", () => {
       swapCount: 1,
       uniquePoolsApprox: 1,
       feesPaidUsdWei: BigInt(0),
-      isSystemAddress: false,
+      isProtocolActor: false,
       lastSeenTimestamp: 1,
       ...partial,
     };
@@ -709,7 +709,7 @@ describe("aggregatePoolDailyVolume", () => {
     poolId: string,
     timestamp: string,
     volumeUsd: number,
-    volumeUsdIncludingSystem = volumeUsd,
+    volumeUsdIncludingProtocolActors = volumeUsd,
   ) {
     return {
       id: `${chainId}-${poolId}-${timestamp}`,
@@ -717,9 +717,12 @@ describe("aggregatePoolDailyVolume", () => {
       poolId,
       timestamp,
       swapCount: volumeUsd > 0 ? 1 : 0,
-      swapCountIncludingSystem: volumeUsdIncludingSystem > 0 ? 1 : 0,
+      swapCountIncludingProtocolActors:
+        volumeUsdIncludingProtocolActors > 0 ? 1 : 0,
       volumeUsdWei: usd(volumeUsd),
-      volumeUsdWeiIncludingSystem: usd(volumeUsdIncludingSystem),
+      volumeUsdWeiIncludingProtocolActors: usd(
+        volumeUsdIncludingProtocolActors,
+      ),
     };
   }
 
@@ -798,9 +801,9 @@ describe("aggregatePoolDailyVolume", () => {
     expect(r.breakdown[0]!.name).toBe("USDC/USDm");
   });
 
-  it("uses primary volume by default and *IncludingSystem volume when toggled on", () => {
+  it("uses primary volume by default and *IncludingProtocolActors volume when toggled on", () => {
     // The pool-day rollup carries both branches. System-off reads the
-    // primary field; system-on reads the including-system sibling.
+    // primary field; protocol-on reads the including-protocol sibling.
     const rows = [
       row(42220, "0xA", day(1), 100, 150),
       row(42220, "0xB", day(1), 0, 50),
@@ -862,7 +865,7 @@ describe("aggregatePoolDailyVolume", () => {
     expect(r.breakdown[1]!.key).toBe(r.poolRanking[1]!.poolId);
   });
 
-  it("returns empty series when system-off volume is zero for every row", () => {
+  it("returns empty series when protocol-off volume is zero for every row", () => {
     const rows = [row(42220, "0xA", day(1), 0, 100)];
     const r = aggregatePoolDailyVolume(rows, noLabel, false, {
       fromSec: Number(day(1)),
@@ -887,7 +890,7 @@ function brokerTrader(
   return {
     id: `${partial.chainId}-${partial.trader}-${partial.timestamp}`,
     swapCount: 1,
-    isSystemAddress: false,
+    isProtocolActor: false,
     lastSeenTimestamp: partial.timestamp,
     ...partial,
   };
@@ -956,24 +959,24 @@ describe("aggregateBrokerTradersByWindow", () => {
     expect(out).toHaveLength(2);
   });
 
-  it("sticky-true: a trader flagged isSystem on any day stays system in the window", () => {
+  it("sticky-true: a trader flagged isSystem on any day stays a protocol actor in the window", () => {
     const rows = [
       brokerTrader({
         chainId: 42220,
         trader: "0xa",
         timestamp: "1000",
         volumeUsdWei: USD(100),
-        isSystemAddress: false,
+        isProtocolActor: false,
       }),
       brokerTrader({
         chainId: 42220,
         trader: "0xa",
         timestamp: "2000",
         volumeUsdWei: USD(100),
-        isSystemAddress: true,
+        isProtocolActor: true,
       }),
     ];
-    expect(aggregateBrokerTradersByWindow(rows)[0]!.isSystemAddress).toBe(true);
+    expect(aggregateBrokerTradersByWindow(rows)[0]!.isProtocolActor).toBe(true);
   });
 
   it("sorts by volume desc with stable (chainId, trader) tiebreaker", () => {
@@ -1288,16 +1291,16 @@ describe("mergeHeroSnapshot", () => {
       windowKey: "7d",
       snapshotDay,
       windowStartDay: String(Number(snapshotDay) - 6 * SECONDS_PER_DAY),
-      // Default the *IncludingSystem siblings to match the primary fields
+      // Default the *IncludingProtocolActors siblings to match the primary fields
       // — most tests don't exercise the toggle, so picking either branch
       // yields the same numbers.
-      totalVolumeUsdWeiIncludingSystem:
-        overrides.totalVolumeUsdWeiIncludingSystem ??
+      totalVolumeUsdWeiIncludingProtocolActors:
+        overrides.totalVolumeUsdWeiIncludingProtocolActors ??
         overrides.totalVolumeUsdWei,
       totalSwapCount: 0,
-      totalSwapCountIncludingSystem: overrides.totalSwapCount ?? 0,
+      totalSwapCountIncludingProtocolActors: overrides.totalSwapCount ?? 0,
       uniqueTraders: 0,
-      uniqueTradersIncludingSystem: overrides.uniqueTraders ?? 0,
+      uniqueTradersIncludingProtocolActors: overrides.uniqueTraders ?? 0,
       ...overrides,
     };
   }
@@ -1311,18 +1314,18 @@ describe("mergeHeroSnapshot", () => {
     return {
       snapshotDay,
       firstDayVolumeUsdWei: "0",
-      firstDayVolumeUsdWeiIncludingSystem:
-        overrides.firstDayVolumeUsdWeiIncludingSystem ??
+      firstDayVolumeUsdWeiIncludingProtocolActors:
+        overrides.firstDayVolumeUsdWeiIncludingProtocolActors ??
         overrides.firstDayVolumeUsdWei ??
         "0",
       firstDaySwapCount: 0,
-      firstDaySwapCountIncludingSystem:
-        overrides.firstDaySwapCountIncludingSystem ??
+      firstDaySwapCountIncludingProtocolActors:
+        overrides.firstDaySwapCountIncludingProtocolActors ??
         overrides.firstDaySwapCount ??
         0,
       firstDayExclusiveUniqueTraders: 0,
-      firstDayExclusiveUniqueTradersIncludingSystem:
-        overrides.firstDayExclusiveUniqueTradersIncludingSystem ??
+      firstDayExclusiveUniqueTradersIncludingProtocolActors:
+        overrides.firstDayExclusiveUniqueTradersIncludingProtocolActors ??
         overrides.firstDayExclusiveUniqueTraders ??
         0,
       ...overrides,
@@ -1336,7 +1339,7 @@ describe("mergeHeroSnapshot", () => {
   ): VolumePartialOverlapRow {
     return {
       timestamp: String(YESTERDAY_MIDNIGHT),
-      isSystemAddress: false,
+      isProtocolActor: false,
       ...overrides,
     };
   }
@@ -1349,7 +1352,7 @@ describe("mergeHeroSnapshot", () => {
   ): VolumeTodayTraderRow {
     return {
       swapCount: 1,
-      isSystemAddress: false,
+      isProtocolActor: false,
       ...overrides,
     };
   }
@@ -1359,7 +1362,7 @@ describe("mergeHeroSnapshot", () => {
       mergeHeroSnapshot({
         snapshotRows: undefined,
         todayRows: undefined,
-        showSystem: false,
+        includeProtocolActors: false,
         todayMidnightSeconds: TODAY_MIDNIGHT,
       }),
     ).toEqual({
@@ -1382,7 +1385,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1000)));
@@ -1406,13 +1409,13 @@ describe("mergeHeroSnapshot", () => {
         today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
       ],
       partialOverlapRows: [overlap({ chainId: 42220, trader: "0xa" })],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.uniqueTraders).toBe(3);
   });
 
-  it("does not de-dupe hidden-system partial traders excluded from snapshot unique count", () => {
+  it("does not de-dupe organic partial traders excluded from snapshot unique count", () => {
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
@@ -1430,10 +1433,10 @@ describe("mergeHeroSnapshot", () => {
         overlap({
           chainId: 42220,
           trader: "0xsticky",
-          isSystemAddress: true,
+          isProtocolActor: true,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
 
@@ -1454,7 +1457,7 @@ describe("mergeHeroSnapshot", () => {
         today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
         today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.uniqueTraders).toBe(4);
@@ -1474,7 +1477,7 @@ describe("mergeHeroSnapshot", () => {
         today({ chainId: 42220, trader: "0xc", volumeUsdWei: USD(10) }),
       ],
       partialOverlapRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.uniqueTraders).toBe(3);
@@ -1512,7 +1515,7 @@ describe("mergeHeroSnapshot", () => {
         overlap({ chainId: 42220, trader: "0xb" }),
         overlap({ chainId: 42220, trader: "0xc" }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.uniqueTraders).toBe(4);
@@ -1544,7 +1547,7 @@ describe("mergeHeroSnapshot", () => {
         today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
       ],
       partialOverlapRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
 
@@ -1577,10 +1580,10 @@ describe("mergeHeroSnapshot", () => {
           chainId: 42220,
           trader: "0xsys",
           volumeUsdWei: USD(10),
-          isSystemAddress: true,
+          isProtocolActor: true,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
 
@@ -1616,7 +1619,7 @@ describe("mergeHeroSnapshot", () => {
           volumeUsdWei: USD(1),
         }),
       ),
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
 
@@ -1635,7 +1638,7 @@ describe("mergeHeroSnapshot", () => {
       todayRows: [
         today({ chainId: 42220, trader: "0xa", volumeUsdWei: USD(10) }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
       traderField: "caller",
     });
@@ -1674,7 +1677,7 @@ describe("mergeHeroSnapshot", () => {
           swapCount: 3,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(150)));
@@ -1701,7 +1704,7 @@ describe("mergeHeroSnapshot", () => {
           swapCount: 2,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1050)));
@@ -1710,26 +1713,26 @@ describe("mergeHeroSnapshot", () => {
     expect(out.uniqueTraders).toBe(11);
   });
 
-  it("showSystem=true uses *IncludingSystem fields from snapshot", () => {
+  it("includeProtocolActors=true uses *IncludingProtocolActors fields from snapshot", () => {
     const row = snap({
       chainId: 42220,
       totalVolumeUsdWei: USD(100),
-      totalVolumeUsdWeiIncludingSystem: USD(150),
+      totalVolumeUsdWeiIncludingProtocolActors: USD(150),
       totalSwapCount: 5,
-      totalSwapCountIncludingSystem: 8,
+      totalSwapCountIncludingProtocolActors: 8,
       uniqueTraders: 5,
-      uniqueTradersIncludingSystem: 12,
+      uniqueTradersIncludingProtocolActors: 12,
     });
     const off = mergeHeroSnapshot({
       snapshotRows: [row],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     const on = mergeHeroSnapshot({
       snapshotRows: [row],
       todayRows: [],
-      showSystem: true,
+      includeProtocolActors: true,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(off.totalVolumeUsdWei).toBe(BigInt(USD(100)));
@@ -1740,7 +1743,7 @@ describe("mergeHeroSnapshot", () => {
     expect(on.uniqueTraders).toBe(12);
   });
 
-  it("showSystem=false filters system traders out of today's partial", () => {
+  it("includeProtocolActors=false filters protocol actor traders out of today's partial", () => {
     const out = mergeHeroSnapshot({
       snapshotRows: [],
       todayRows: [
@@ -1748,16 +1751,16 @@ describe("mergeHeroSnapshot", () => {
           chainId: 42220,
           trader: "0xa",
           volumeUsdWei: USD(100),
-          isSystemAddress: false,
+          isProtocolActor: false,
         }),
         today({
           chainId: 42220,
           trader: "0xb",
           volumeUsdWei: USD(999),
-          isSystemAddress: true,
+          isProtocolActor: true,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(100)));
@@ -1781,7 +1784,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1500)));
@@ -1812,7 +1815,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1000)));
@@ -1836,7 +1839,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1000)));
@@ -1855,7 +1858,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     // Stale row's totals must not contribute to hero numbers.
@@ -1884,7 +1887,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1000)));
@@ -1893,22 +1896,22 @@ describe("mergeHeroSnapshot", () => {
     expect(out.staleChains).toEqual([10143]);
   });
 
-  it("staleness filter applies under showSystem=true (uses *IncludingSystem fields, still skips stale)", () => {
+  it("staleness filter applies under includeProtocolActors=true (uses *IncludingProtocolActors fields, still skips stale)", () => {
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
           chainId: 10143,
           snapshotDay: String(THREE_DAYS_AGO_MIDNIGHT),
           totalVolumeUsdWei: USD(500),
-          totalVolumeUsdWeiIncludingSystem: USD(800),
+          totalVolumeUsdWeiIncludingProtocolActors: USD(800),
           totalSwapCount: 20,
-          totalSwapCountIncludingSystem: 35,
+          totalSwapCountIncludingProtocolActors: 35,
           uniqueTraders: 4,
-          uniqueTradersIncludingSystem: 8,
+          uniqueTradersIncludingProtocolActors: 8,
         }),
       ],
       todayRows: [],
-      showSystem: true,
+      includeProtocolActors: true,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(0));
@@ -1934,7 +1937,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(750)));
@@ -1961,7 +1964,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(2000)));
@@ -1995,7 +1998,7 @@ describe("mergeHeroSnapshot", () => {
           swapCount: 1,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(40)));
@@ -2022,7 +2025,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(0));
@@ -2053,7 +2056,7 @@ describe("mergeHeroSnapshot", () => {
           swapCount: 2,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(0));
@@ -2081,7 +2084,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
@@ -2113,7 +2116,7 @@ describe("mergeHeroSnapshot", () => {
           swapCount: 2,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(550)));
@@ -2149,7 +2152,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     // Fresh + degraded snapshot volumes contribute; stale dropped.
@@ -2206,7 +2209,7 @@ describe("mergeHeroSnapshot", () => {
           swapCount: 2,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     // Volume: snapshot 700 - firstDay 120 + yesterday (80+40) = 700.
@@ -2246,7 +2249,7 @@ describe("mergeHeroSnapshot", () => {
       ],
       todayRows: [],
       yesterdayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     // Volume: 500 - 100 (first-day) + 0 (no yesterday) = 400.
@@ -2294,7 +2297,7 @@ describe("mergeHeroSnapshot", () => {
           swapCount: 1,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     // 10143 supplemented with empty per-chain rows: 500 - 100 = 400.
@@ -2360,7 +2363,7 @@ describe("mergeHeroSnapshot", () => {
           swapCount: 4,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     // Fresh: 800. 10143 sliced: 300 - 50 + 70 = 320.
@@ -2374,9 +2377,9 @@ describe("mergeHeroSnapshot", () => {
     expect(out.staleChains).toEqual([]);
   });
 
-  it("slice subtraction uses *IncludingSystem fields when showSystem=true", () => {
-    // showSystem=true reads the *IncludingSystem totals; the
-    // first-day subtraction MUST also use the *IncludingSystem
+  it("slice subtraction uses *IncludingProtocolActors fields when includeProtocolActors=true", () => {
+    // includeProtocolActors=true reads the *IncludingProtocolActors totals; the
+    // first-day subtraction MUST also use the *IncludingProtocolActors
     // first-day fields, otherwise the units diverge.
     const out = mergeHeroSnapshot({
       snapshotRows: [
@@ -2384,11 +2387,11 @@ describe("mergeHeroSnapshot", () => {
           chainId: 10143,
           snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           totalVolumeUsdWei: USD(500),
-          totalVolumeUsdWeiIncludingSystem: USD(900),
+          totalVolumeUsdWeiIncludingProtocolActors: USD(900),
           totalSwapCount: 20,
-          totalSwapCountIncludingSystem: 50,
+          totalSwapCountIncludingProtocolActors: 50,
           uniqueTraders: 4,
-          uniqueTradersIncludingSystem: 9,
+          uniqueTradersIncludingProtocolActors: 9,
         }),
       ],
       firstDayRows: [
@@ -2396,11 +2399,11 @@ describe("mergeHeroSnapshot", () => {
           chainId: 10143,
           snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           firstDayVolumeUsdWei: USD(80),
-          firstDayVolumeUsdWeiIncludingSystem: USD(150),
+          firstDayVolumeUsdWeiIncludingProtocolActors: USD(150),
           firstDaySwapCount: 4,
-          firstDaySwapCountIncludingSystem: 10,
+          firstDaySwapCountIncludingProtocolActors: 10,
           firstDayExclusiveUniqueTraders: 1,
-          firstDayExclusiveUniqueTradersIncludingSystem: 3,
+          firstDayExclusiveUniqueTradersIncludingProtocolActors: 3,
         }),
       ],
       todayRows: [],
@@ -2410,20 +2413,20 @@ describe("mergeHeroSnapshot", () => {
           trader: "0xa",
           volumeUsdWei: USD(100),
           swapCount: 5,
-          isSystemAddress: false,
+          isProtocolActor: false,
         }),
         today({
           chainId: 10143,
           trader: "0xsys",
           volumeUsdWei: USD(40),
           swapCount: 3,
-          isSystemAddress: true,
+          isProtocolActor: true,
         }),
       ],
-      showSystem: true,
+      includeProtocolActors: true,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
-    // *IncludingSystem branch: 900 - 150 + (100 + 40) = 890.
+    // *IncludingProtocolActors branch: 900 - 150 + (100 + 40) = 890.
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(890)));
     // Swaps: 50 - 10 + (5+3) = 48.
     expect(out.totalSwapCount).toBe(48);
@@ -2432,18 +2435,18 @@ describe("mergeHeroSnapshot", () => {
     expect(out.degradedChains).toEqual([]);
   });
 
-  it("slice subtraction uses primary fields when showSystem=false; system rows in yesterday filtered out", () => {
+  it("slice subtraction uses primary fields when includeProtocolActors=false; protocol actor rows in yesterday filtered out", () => {
     const out = mergeHeroSnapshot({
       snapshotRows: [
         snap({
           chainId: 10143,
           snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           totalVolumeUsdWei: USD(500),
-          totalVolumeUsdWeiIncludingSystem: USD(900),
+          totalVolumeUsdWeiIncludingProtocolActors: USD(900),
           totalSwapCount: 20,
-          totalSwapCountIncludingSystem: 50,
+          totalSwapCountIncludingProtocolActors: 50,
           uniqueTraders: 4,
-          uniqueTradersIncludingSystem: 9,
+          uniqueTradersIncludingProtocolActors: 9,
         }),
       ],
       firstDayRows: [
@@ -2451,11 +2454,11 @@ describe("mergeHeroSnapshot", () => {
           chainId: 10143,
           snapshotDay: String(TWO_DAYS_AGO_MIDNIGHT),
           firstDayVolumeUsdWei: USD(80),
-          firstDayVolumeUsdWeiIncludingSystem: USD(150),
+          firstDayVolumeUsdWeiIncludingProtocolActors: USD(150),
           firstDaySwapCount: 4,
-          firstDaySwapCountIncludingSystem: 10,
+          firstDaySwapCountIncludingProtocolActors: 10,
           firstDayExclusiveUniqueTraders: 1,
-          firstDayExclusiveUniqueTradersIncludingSystem: 3,
+          firstDayExclusiveUniqueTradersIncludingProtocolActors: 3,
         }),
       ],
       todayRows: [],
@@ -2465,17 +2468,17 @@ describe("mergeHeroSnapshot", () => {
           trader: "0xa",
           volumeUsdWei: USD(100),
           swapCount: 5,
-          isSystemAddress: false,
+          isProtocolActor: false,
         }),
         today({
           chainId: 10143,
           trader: "0xsys",
           volumeUsdWei: USD(40),
           swapCount: 3,
-          isSystemAddress: true,
+          isProtocolActor: true,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     // Primary branch: 500 - 80 + 100 (system row filtered) = 520.
@@ -2513,7 +2516,7 @@ describe("mergeHeroSnapshot", () => {
       ],
       todayRows: [],
       // yesterdayRows omitted entirely.
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(500)));
@@ -2545,7 +2548,7 @@ describe("mergeHeroSnapshot", () => {
           swapCount: 2,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     // Snapshot untouched, chain still degraded.
@@ -2576,7 +2579,7 @@ describe("mergeHeroSnapshot", () => {
         }),
       ],
       todayRows: [],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     };
     const undefinedPass = mergeHeroSnapshot(baseArgs);
@@ -2589,9 +2592,9 @@ describe("mergeHeroSnapshot", () => {
     expect(emptyPass.degradedChains).toEqual([]);
   });
 
-  it("showSystem=false + only-system yesterday rows: filtered out, but slice still subtracts (zero non-system contribution)", () => {
+  it("includeProtocolActors=false + only-protocol yesterday rows: filtered out, but slice still subtracts (zero organic contribution)", () => {
     // The only yesterday rows are protocol-actor; with
-    // `showSystem=false` they're filtered before the per-chain
+    // `includeProtocolActors=false` they're filtered before the per-chain
     // bucket. The first-day slice still subtracts (authoritative
     // empty) and the chain drops from degraded.
     const out = mergeHeroSnapshot({
@@ -2620,10 +2623,10 @@ describe("mergeHeroSnapshot", () => {
           trader: "0xsys",
           volumeUsdWei: USD(40),
           swapCount: 3,
-          isSystemAddress: true,
+          isProtocolActor: true,
         }),
       ],
-      showSystem: false,
+      includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
     // 500 - 80 (first-day primary) + 0 (system row filtered out) = 420.

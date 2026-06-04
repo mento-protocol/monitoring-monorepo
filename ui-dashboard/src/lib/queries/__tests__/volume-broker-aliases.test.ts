@@ -53,7 +53,7 @@ describe("v2 broker volume queries — caller→trader alias", () => {
   it("BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS uses caller for filters and aliases it", () => {
     expect(BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS).toContain("{ caller: asc }");
     expect(BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS).toContain(
-      "distinct_on: [chainId, caller, isSystemAddress]",
+      "distinct_on: [chainId, caller, isProtocolActor]",
     );
     expect(BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS).toContain("trader: caller");
     expect(BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS).not.toContain(
@@ -62,7 +62,7 @@ describe("v2 broker volume queries — caller→trader alias", () => {
   });
 });
 
-describe("volume hero rollout-safe isolated queries", () => {
+describe("volume hero isolated queries", () => {
   it("first-day slice queries select only scalar fields used by the merge", () => {
     for (const query of [
       VOLUME_WINDOW_FIRSTDAY_LATEST,
@@ -70,17 +70,17 @@ describe("volume hero rollout-safe isolated queries", () => {
     ]) {
       expect(query).not.toContain("\n      firstDayExclusiveTraders\n");
       expect(query).not.toContain(
-        "\n      firstDayExclusiveTradersIncludingSystem\n",
+        "\n      firstDayExclusiveTradersIncludingProtocolActors\n",
       );
     }
   });
 
-  it("partial-overlap queries include system status for sticky-system de-dupe", () => {
+  it("partial-overlap queries include protocol actor status for sticky de-dupe", () => {
     for (const query of [
       VOLUME_PARTIAL_OVERLAP_TRADERS,
       BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS,
     ]) {
-      expect(query).toContain("isSystemAddress");
+      expect(query).toContain("isProtocolActor");
     }
   });
 });

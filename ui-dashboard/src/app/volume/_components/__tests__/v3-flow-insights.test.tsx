@@ -48,7 +48,7 @@ function renderInsights(
         traderRows={[]}
         traders={[]}
         pools={new Map()}
-        systemAddressFilter={[false]}
+        protocolActorFilter={[false]}
         exclusions={{ addresses: [], sources: [] }}
         tableState={{ isLoading: false, hasError: false, isCapHit: false }}
         {...props}

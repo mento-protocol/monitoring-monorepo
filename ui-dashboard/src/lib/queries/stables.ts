@@ -100,7 +100,7 @@ export const STABLES_V2_CHANGES = `
       counterparty
       caller
       txTo
-      isSystemCaller
+      isProtocolOwnedCaller
       amount
       txHash
       blockNumber

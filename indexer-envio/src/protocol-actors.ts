@@ -50,14 +50,14 @@ export function iterateContractAddresses(
 
 /** Every chainId we know how to look up — covers mainnet + testnet so the
  *  same handlers compiled against `config.multichain.testnet.yaml` get
- *  correct system-address coverage on Alfajores (11142220) and Monad
+ *  correct protocol-owned address coverage on Alfajores (11142220) and Monad
  *  testnet (10143). Source of truth: `config/deployment-namespaces.json`. */
 const ALL_INDEXED_CHAIN_IDS: number[] = Object.keys(
   CONTRACT_NAMESPACE_BY_CHAIN,
 ).map(Number);
 
 /**
- * Per-chain set of "Mento system" addresses. Includes:
+ * Per-chain set of "Mento protocol" addresses. Includes:
  * - Every contract entry from `@mento-protocol/contracts` (Broker, Reserve,
  *   BiPoolManager, Router, FactoryRegistry, governance multisigs, etc.).
  *   Most are contracts that won't appear as a `tx.from` caller, but the few
@@ -67,11 +67,11 @@ const ALL_INDEXED_CHAIN_IDS: number[] = Object.keys(
  *   `config/nttAddresses.json` for cross-chain liquidity flows.
  *
  * Per-pool rebalancer EOAs are NOT in this static set — they're stored on
- * `Pool.rebalancerAddress` and checked dynamically in `isSystemAddress(...)`
+ * `Pool.rebalancerAddress` and checked dynamically in `isProtocolOwnedAddress(...)`
  * via the optional `pool` argument.
  */
 // Per-chain NTT-bridge address index. Built first so it can be reused by
-// both `STATIC_SYSTEM_ADDRESSES_BY_CHAIN` (union into the system set) and
+// both `PROTOCOL_OWNED_ADDRESSES_BY_CHAIN` (union into the protocol-owned set) and
 // `nttBridgeAddressesForChain` (exposed for the V2 stable `classifyKind`
 // helper). Single source of truth — a third caller would import the same
 // helper, not re-parse NTT_ENTRIES.
@@ -90,7 +90,7 @@ const NTT_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
   return out;
 })();
 
-const STATIC_SYSTEM_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
+const PROTOCOL_OWNED_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
   const out = new Map<number, Set<string>>();
 
   // Collect from `@mento-protocol/contracts` for every indexed chain
@@ -147,14 +147,14 @@ const MANUAL_PROTOCOL_ACTORS_BY_CHAIN: Map<number, Set<string>> = (() => {
  * pool's `rebalancerAddress` is the dynamic per-pool EOA that wouldn't be
  * in the static contracts.json set.
  */
-export function isSystemAddress(
+export function isProtocolOwnedAddress(
   chainId: number,
   addr: string,
   pool?: { rebalancerAddress: string },
 ): boolean {
   if (!addr) return false;
   const lower = addr.toLowerCase();
-  if (STATIC_SYSTEM_ADDRESSES_BY_CHAIN.get(chainId)?.has(lower)) return true;
+  if (PROTOCOL_OWNED_ADDRESSES_BY_CHAIN.get(chainId)?.has(lower)) return true;
   if (
     pool?.rebalancerAddress &&
     pool.rebalancerAddress.toLowerCase() === lower
@@ -167,7 +167,7 @@ export function isSystemAddress(
 /**
  * Returns true when the transaction entry point itself proves the swap was
  * initiated by protocol automation. This is intentionally narrower than
- * `isSystemAddress`: the static system set includes user-facing Broker/Router
+ * `isProtocolOwnedAddress`: the protocol-owned set includes user-facing Broker/Router
  * contracts, and OR-checking those direct entry points would hide normal users
  * routing through the Mento UI. Dynamic pool rebalancers, manual overrides,
  * and non-user-facing static contracts are safe tx.to filters because those
@@ -187,7 +187,7 @@ export function isProtocolActorEntryPoint(
     return true;
   }
   if (
-    STATIC_SYSTEM_ADDRESSES_BY_CHAIN.get(chainId)?.has(lower) &&
+    PROTOCOL_OWNED_ADDRESSES_BY_CHAIN.get(chainId)?.has(lower) &&
     !USER_ENTRY_POINT_ADDRESSES_BY_CHAIN.get(chainId)?.has(lower)
   ) {
     return true;
@@ -196,8 +196,8 @@ export function isProtocolActorEntryPoint(
 }
 
 /** Test-only: expose the static set for assertions. */
-export function _staticSystemAddressesForChain(chainId: number): Set<string> {
-  return STATIC_SYSTEM_ADDRESSES_BY_CHAIN.get(chainId) ?? new Set();
+export function _protocolOwnedAddressesForChain(chainId: number): Set<string> {
+  return PROTOCOL_OWNED_ADDRESSES_BY_CHAIN.get(chainId) ?? new Set();
 }
 
 /** Returns the set of NTT-bridge addresses for the given chain (helpers,

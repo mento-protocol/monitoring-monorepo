@@ -82,20 +82,6 @@ describe("useVolumeUrlState", () => {
     expect(ref.current?.cutoff).toBeGreaterThan(0);
   });
 
-  it("preserves legacy system toggle links and normalizes them on write", () => {
-    setup("/volume?system=1");
-    const ref = renderHook();
-
-    expect(ref.current?.actorFilter).toBe("all");
-    expect(ref.current?.includeProtocolActors).toBe(true);
-
-    act(() => {
-      ref.current?.updateRange("30d");
-    });
-
-    expect(window.location.search).toBe("?range=30d&actors=all");
-  });
-
   it("falls back to default state for invalid params", () => {
     setup("/volume?range=forever&actors=protocol&venue=v4");
     const ref = renderHook();

@@ -50,9 +50,9 @@ function row(
     chainId: Number(overrides.poolId.split("-", 1)[0]),
     timestamp,
     swapCount: 1,
-    swapCountIncludingSystem: 1,
+    swapCountIncludingProtocolActors: 1,
     volumeUsdWei: usdWei(0),
-    volumeUsdWeiIncludingSystem: usdWei(0),
+    volumeUsdWeiIncludingProtocolActors: usdWei(0),
     ...overrides,
     poolId: overrides.poolId,
   };
@@ -60,19 +60,19 @@ function row(
 
 function HookWrapper({
   resultRef,
-  showSystem,
+  includeProtocolActors,
   rows,
   cutoff,
   utcDayKey,
 }: {
   resultRef: ResultRef;
-  showSystem: boolean;
+  includeProtocolActors: boolean;
   rows: readonly PoolDailyVolumeRow[];
   cutoff: number;
   utcDayKey: number;
 }) {
   resultRef.current = usePoolChartViewModel({
-    showSystem,
+    includeProtocolActors,
     poolVolumeRows: rows,
     poolMeta: new Map([
       [CELO_POOL.toLowerCase(), { token0: "USDC", token1: "USDm" }],
@@ -94,12 +94,12 @@ function setup() {
 }
 
 function renderVm({
-  showSystem = false,
+  includeProtocolActors = false,
   rows,
   cutoff = DAY - SECONDS_PER_DAY,
   utcDayKey = 1,
 }: {
-  showSystem?: boolean;
+  includeProtocolActors?: boolean;
   rows: readonly PoolDailyVolumeRow[];
   cutoff?: number;
   utcDayKey?: number;
@@ -109,7 +109,7 @@ function renderVm({
     root.render(
       <HookWrapper
         resultRef={ref}
-        showSystem={showSystem}
+        includeProtocolActors={includeProtocolActors}
         rows={rows}
         cutoff={cutoff}
         utcDayKey={utcDayKey}
@@ -140,12 +140,12 @@ describe("usePoolChartViewModel", () => {
         row({
           poolId: CELO_POOL,
           volumeUsdWei: usdWei(100),
-          volumeUsdWeiIncludingSystem: usdWei(150),
+          volumeUsdWeiIncludingProtocolActors: usdWei(150),
         }),
         row({
           poolId: MONAD_POOL,
           volumeUsdWei: usdWei(25),
-          volumeUsdWeiIncludingSystem: usdWei(25),
+          volumeUsdWeiIncludingProtocolActors: usdWei(25),
         }),
       ],
     });
@@ -174,19 +174,19 @@ describe("usePoolChartViewModel", () => {
     ).toContain("Monad");
   });
 
-  it("switches between user-only and including-system pool volume", () => {
+  it("switches between user-only and including-protocol-actors pool volume", () => {
     const rows = [
       row({
         poolId: CELO_POOL,
         volumeUsdWei: usdWei(100),
-        volumeUsdWeiIncludingSystem: usdWei(150),
+        volumeUsdWeiIncludingProtocolActors: usdWei(150),
       }),
     ];
 
-    const userOnly = renderVm({ rows, showSystem: false });
+    const userOnly = renderVm({ rows, includeProtocolActors: false });
     expect(userOnly.current?.topPoolsListEntries[0]?.totalUsd).toBe(100);
 
-    const withSystem = renderVm({ rows, showSystem: true });
+    const withSystem = renderVm({ rows, includeProtocolActors: true });
     expect(withSystem.current?.topPoolsListEntries[0]?.totalUsd).toBe(150);
   });
 
@@ -196,7 +196,7 @@ describe("usePoolChartViewModel", () => {
         row({
           poolId: CELO_POOL,
           volumeUsdWei: usdWei(0),
-          volumeUsdWeiIncludingSystem: usdWei(0),
+          volumeUsdWeiIncludingProtocolActors: usdWei(0),
         }),
       ],
     });

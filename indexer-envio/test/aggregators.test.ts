@@ -23,7 +23,7 @@ const ZEROX_AH_MONAD = "0x0000000000001ff3684f28c67538d4d072c22734";
 const CELO_BROKER = "0x777a8255ca72412f0d706dc03c9d1987306b4cad";
 const ROUTER_BOTH = "0x4861840c2efb2b98312b0ae34d86fd73e8f9b6f6"; // same on both
 
-// Other Mento system contracts (from contracts.json).
+// Other Mento protocol contracts (from contracts.json).
 const CELO_BIPOOLMANAGER = "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901";
 const MONAD_FPMM_FACTORY = "0xa849b475fe5a4b5c9c3280152c7a1945b907613b";
 
@@ -63,20 +63,26 @@ describe("classifyAggregator", () => {
     assert.equal(classifyAggregator(CHAIN_CELO, poolAddr), "unknown");
   });
 
-  it("classifies a pool rebalancer entry point as 'system'", () => {
+  it("classifies a pool rebalancer entry point as 'protocol'", () => {
     const poolAddr = "0xabcdef0123456789abcdef0123456789abcdef01";
     const rebalancer = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
     assert.equal(
       classifyAggregator(CHAIN_CELO, rebalancer, poolAddr, {
         rebalancerAddress: rebalancer,
       }),
-      "system",
+      "protocol",
     );
   });
 
-  it("classifies other Mento system contracts as 'system'", () => {
-    assert.equal(classifyAggregator(CHAIN_CELO, CELO_BIPOOLMANAGER), "system");
-    assert.equal(classifyAggregator(CHAIN_MONAD, MONAD_FPMM_FACTORY), "system");
+  it("classifies other Mento protocol contracts as 'protocol'", () => {
+    assert.equal(
+      classifyAggregator(CHAIN_CELO, CELO_BIPOOLMANAGER),
+      "protocol",
+    );
+    assert.equal(
+      classifyAggregator(CHAIN_MONAD, MONAD_FPMM_FACTORY),
+      "protocol",
+    );
   });
 
   it("returns 'unknown' for unlabeled addresses", () => {

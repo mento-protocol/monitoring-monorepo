@@ -45,7 +45,7 @@ const minimalTraderDailyRow = {
   uniquePools: 2,
   volumeUsdWei: "1000000000000000000000",
   feesPaidUsdWei: "500000000000000000",
-  isSystemAddress: false,
+  isProtocolActor: false,
   lastSeenTimestamp: "1700000000",
 };
 
@@ -74,9 +74,9 @@ describe("TraderDailyTopSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("fails when isSystemAddress is missing", () => {
+  it("fails when isProtocolActor is missing", () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { isSystemAddress: _omit, ...row } = minimalTraderDailyRow;
+    const { isProtocolActor: _omit, ...row } = minimalTraderDailyRow;
     const result = TraderDailyTopSchema.safeParse({
       TraderDailySnapshot: [row],
     });
@@ -116,11 +116,11 @@ const minimalWindowRow = {
   snapshotDay: "100",
   windowStartDay: "93",
   totalVolumeUsdWei: "9000000000000000000000",
-  totalVolumeUsdWeiIncludingSystem: "9500000000000000000000",
+  totalVolumeUsdWeiIncludingProtocolActors: "9500000000000000000000",
   totalSwapCount: 500,
-  totalSwapCountIncludingSystem: 520,
+  totalSwapCountIncludingProtocolActors: 520,
   uniqueTraders: 42,
-  uniqueTradersIncludingSystem: 45,
+  uniqueTradersIncludingProtocolActors: 45,
 };
 
 describe("VolumeWindowLatestSchema", () => {
@@ -303,9 +303,9 @@ describe("PoolDailyVolumeSchema smoke test", () => {
           poolId: "0xpool",
           timestamp: "1700000000",
           swapCount: 10,
-          swapCountIncludingSystem: 12,
+          swapCountIncludingProtocolActors: 12,
           volumeUsdWei: "1000",
-          volumeUsdWeiIncludingSystem: "1100",
+          volumeUsdWeiIncludingProtocolActors: "1100",
         },
       ],
     });
@@ -324,11 +324,11 @@ describe("AggregatorDailyTopSchema smoke test", () => {
           lastSeenAggregatorAddress: "0xrouter",
           timestamp: "1700000000",
           swapCount: 50,
-          swapCountIncludingSystem: 51,
+          swapCountIncludingProtocolActors: 51,
           uniqueTraders: 10,
-          uniqueTradersIncludingSystem: 11,
+          uniqueTradersIncludingProtocolActors: 11,
           volumeUsdWei: "9999",
-          volumeUsdWeiIncludingSystem: "10001",
+          volumeUsdWeiIncludingProtocolActors: "10001",
         },
       ],
     });
@@ -348,7 +348,7 @@ describe("BrokerTraderDailyTopSchema smoke test", () => {
           timestamp: "1700000000",
           swapCount: 5,
           volumeUsdWei: "1000",
-          isSystemAddress: false,
+          isProtocolActor: false,
           lastSeenTimestamp: "1700000000",
         },
       ],
@@ -368,7 +368,7 @@ describe("BrokerTraderDailyTopSchema smoke test", () => {
           timestamp: "1700000000",
           swapCount: 5,
           volumeUsdWei: "1000",
-          isSystemAddress: false,
+          isProtocolActor: false,
           lastSeenTimestamp: "1700000000",
         },
       ],
@@ -403,11 +403,11 @@ describe("VolumeWindowFirstDayLatestSchema smoke test", () => {
       chainId: 42220,
       snapshotDay: "100",
       firstDayVolumeUsdWei: "1000",
-      firstDayVolumeUsdWeiIncludingSystem: "1100",
+      firstDayVolumeUsdWeiIncludingProtocolActors: "1100",
       firstDaySwapCount: 10,
-      firstDaySwapCountIncludingSystem: 11,
+      firstDaySwapCountIncludingProtocolActors: 11,
       firstDayExclusiveUniqueTraders: 3,
-      firstDayExclusiveUniqueTradersIncludingSystem: 4,
+      firstDayExclusiveUniqueTradersIncludingProtocolActors: 4,
     };
     expect(
       VolumeWindowFirstDayLatestSchema.safeParse({
@@ -469,7 +469,7 @@ describe("VolumeTodayTradersSchema smoke test", () => {
     trader: "0xtrader",
     volumeUsdWei: "1000",
     swapCount: 2,
-    isSystemAddress: false,
+    isProtocolActor: false,
   };
   it("passes for v3 today traders", () => {
     expect(
@@ -504,7 +504,7 @@ describe("VolumePartialOverlapTradersSchema smoke test", () => {
     chainId: 42220,
     trader: "0xtrader",
     timestamp: "1700000000",
-    isSystemAddress: false,
+    isProtocolActor: false,
   };
   it("passes for v3", () => {
     expect(
@@ -520,9 +520,9 @@ describe("VolumePartialOverlapTradersSchema smoke test", () => {
       }).success,
     ).toBe(true);
   });
-  it("fails when isSystemAddress is missing", () => {
+  it("fails when isProtocolActor is missing", () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { isSystemAddress: _omit, ...rowNoSystem } = overlapRow;
+    const { isProtocolActor: _omit, ...rowNoSystem } = overlapRow;
     expect(
       VolumePartialOverlapTradersSchema.safeParse({
         volumePartialOverlapTraders: [rowNoSystem],
