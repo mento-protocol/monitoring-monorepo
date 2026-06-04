@@ -11,6 +11,7 @@ import { stockWoWChangePct } from "@/lib/time-series";
 import {
   buildTokenUsdTimeSeries,
   computeChartStartSeconds,
+  custodyTokenKey,
   groupCustodySnapshotsByToken,
   groupSnapshotsByTokenSource,
   sumTotalUsdSeries,
@@ -87,7 +88,9 @@ export function StablesHeroChart({
     for (const [key, rows] of grouped) {
       const sample = rows[0]!;
       const custodyRows =
-        custodyByToken.get(`${sample.chainId}|${sample.tokenAddress}`) ?? [];
+        custodyByToken.get(
+          custodyTokenKey(sample.chainId, sample.tokenAddress),
+        ) ?? [];
       const series = buildTokenUsdTimeSeries(
         rows,
         rates,

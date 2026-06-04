@@ -8,6 +8,7 @@ import { tokenColorForSource } from "@/lib/token-colors";
 import {
   buildTokenUsdTimeSeries,
   computeChartStartSeconds,
+  custodyTokenKey,
   groupCustodySnapshotsByToken,
   groupSnapshotsByTokenSource,
   rollupByToken,
@@ -72,7 +73,8 @@ export function StablesSparklineGrid({
     for (const agg of rollup.values()) {
       const rows = grouped.get(agg.key) ?? [];
       const custodyRows =
-        custodyByToken.get(`${agg.chainId}|${agg.tokenAddress}`) ?? [];
+        custodyByToken.get(custodyTokenKey(agg.chainId, agg.tokenAddress)) ??
+        [];
       const series = buildTokenUsdTimeSeries(
         rows,
         rates,

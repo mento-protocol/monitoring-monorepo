@@ -56,31 +56,29 @@ function StablesContent(): React.JSX.Element {
     capped: changesCapped,
   } = useStablesChanges("7d");
 
-  const custodyDegraded =
-    (latestCustodyError != null && latestCustodyPerToken.length === 0) ||
-    (custodySnapshotsError != null && custodySnapshots.length === 0);
-  const effectiveLatestCustodyPerToken = custodyDegraded
+  const latestCustodyUnavailable =
+    latestCustodyError != null && latestCustodyPerToken.length === 0;
+  const custodySnapshotsUnavailable =
+    custodySnapshotsError != null && custodySnapshots.length === 0;
+  const effectiveLatestCustodyPerToken = latestCustodyUnavailable
     ? []
     : latestCustodyPerToken;
-  const effectiveCustodySnapshots = custodyDegraded ? [] : custodySnapshots;
+  const effectiveCustodySnapshots = custodySnapshotsUnavailable
+    ? []
+    : custodySnapshots;
+  const chartCapped =
+    snapshotsCapped || (!custodySnapshotsUnavailable && custodySnapshotsCapped);
   const isLoading =
     ratesLoading ||
     latestLoading ||
     snapshotsLoading ||
-    (!custodyDegraded && (latestCustodyLoading || custodySnapshotsLoading));
+    (!latestCustodyUnavailable && latestCustodyLoading) ||
+    (!custodySnapshotsUnavailable && custodySnapshotsLoading);
   const hasError = latestError != null || snapshotsError != null;
 
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="text-3xl font-semibold text-slate-100">
-          Mento stablecoins
-        </h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Circulating supply of Mento-issued stablecoins across Celo and Monad,
-          excluding Celo NTT lock custody from global totals.
-        </p>
-      </header>
+      <StablesHeader />
 
       <StablesKpiStrip
         latestPerToken={latestPerToken}
@@ -112,7 +110,7 @@ function StablesContent(): React.JSX.Element {
         onRangeChange={setRange}
         isLoading={isLoading}
         hasError={hasError}
-        capped={snapshotsCapped || (!custodyDegraded && custodySnapshotsCapped)}
+        capped={chartCapped}
       />
 
       <StablesChangesTable
@@ -122,5 +120,19 @@ function StablesContent(): React.JSX.Element {
         capped={changesCapped}
       />
     </div>
+  );
+}
+
+function StablesHeader(): React.JSX.Element {
+  return (
+    <header>
+      <h1 className="text-3xl font-semibold text-slate-100">
+        Mento stablecoins
+      </h1>
+      <p className="mt-1 text-sm text-slate-400">
+        Circulating supply of Mento-issued stablecoins across Celo and Monad,
+        excluding Celo NTT lock custody from global totals.
+      </p>
+    </header>
   );
 }

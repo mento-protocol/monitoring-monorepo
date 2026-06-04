@@ -36,6 +36,11 @@ const mockChanges = vi.hoisted(() => ({
   error: null as Error | null,
   isLoading: false,
 }));
+const mockLatestCustodyPerToken = vi.hoisted(() => ({
+  data: [] as StableTokenCustodyDailySnapshot[],
+  error: null as Error | null,
+  isLoading: false,
+}));
 const mockCustodySnapshots = vi.hoisted(() => ({
   data: [] as StableTokenCustodyDailySnapshot[],
   capped: false,
@@ -55,9 +60,9 @@ vi.mock("../_lib/use-stables-data", () => ({
     capped: mockSnapshots.capped,
   }),
   useStablesLatestCustodyPerToken: () => ({
-    snapshots: mockCustodySnapshots.data,
-    error: mockCustodySnapshots.error,
-    isLoading: mockCustodySnapshots.isLoading,
+    snapshots: mockLatestCustodyPerToken.data,
+    error: mockLatestCustodyPerToken.error,
+    isLoading: mockLatestCustodyPerToken.isLoading,
   }),
   useStablesCustodyDailySnapshots: () => ({
     snapshots: mockCustodySnapshots.data,
@@ -120,6 +125,9 @@ describe("StablesPageClient — smoke", () => {
     mockChanges.capped = false;
     mockChanges.error = null;
     mockChanges.isLoading = false;
+    mockLatestCustodyPerToken.data = [];
+    mockLatestCustodyPerToken.error = null;
+    mockLatestCustodyPerToken.isLoading = false;
     mockCustodySnapshots.data = [];
     mockCustodySnapshots.capped = false;
     mockCustodySnapshots.error = null;
@@ -177,6 +185,9 @@ describe("StablesPageClient — smoke", () => {
         totalSupply: "1000000000000000000000000",
       }),
     ];
+    mockLatestCustodyPerToken.error = new Error(
+      "current custody table unavailable",
+    );
     mockCustodySnapshots.error = new Error("custody table unavailable");
 
     const html = renderToStaticMarkup(<StablesPageClient />);
@@ -186,20 +197,43 @@ describe("StablesPageClient — smoke", () => {
     expect(html).not.toContain("Failed to load chart data.");
   });
 
-  it("keeps available custody fallback rows when one custody query errors", () => {
+  it("keeps daily custody fallback rows when current custody errors empty", () => {
     mockSnapshots.data = [
       snapshot({
         timestamp: "1716336000",
         totalSupply: "1000000000000000000000000",
       }),
     ];
+    mockLatestCustodyPerToken.error = new Error(
+      "current custody table unavailable",
+    );
     mockCustodySnapshots.data = [
       custodySnapshot({
         timestamp: "1716336000",
         lockedSupply: "250000000000000000000000",
       }),
     ];
-    mockCustodySnapshots.error = new Error("current custody table unavailable");
+
+    const html = renderToStaticMarkup(<StablesPageClient />);
+
+    expect(html).toContain("$750K");
+    expect(html).not.toContain("$1M");
+  });
+
+  it("keeps current custody rows when daily custody errors empty", () => {
+    mockSnapshots.data = [
+      snapshot({
+        timestamp: "1716336000",
+        totalSupply: "1000000000000000000000000",
+      }),
+    ];
+    mockLatestCustodyPerToken.data = [
+      custodySnapshot({
+        timestamp: "1716336000",
+        lockedSupply: "250000000000000000000000",
+      }),
+    ];
+    mockCustodySnapshots.error = new Error("daily custody table unavailable");
 
     const html = renderToStaticMarkup(<StablesPageClient />);
 

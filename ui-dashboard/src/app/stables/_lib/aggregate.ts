@@ -44,7 +44,9 @@ export function rollupByToken(
   for (const [key, rows] of grouped) {
     const sample = rows[0]!;
     const custodyRows =
-      custodyByToken.get(custodyKey(sample.chainId, sample.tokenAddress)) ?? [];
+      custodyByToken.get(
+        custodyTokenKey(sample.chainId, sample.tokenAddress),
+      ) ?? [];
     out.set(key, buildTokenAgg(key, rows, rates, sevenDayCutoff, custodyRows));
   }
   return out;
@@ -108,7 +110,7 @@ export function groupCustodySnapshotsByToken(
 ): Map<string, StableTokenCustodyDailySnapshot[]> {
   const grouped = new Map<string, StableTokenCustodyDailySnapshot[]>();
   for (const row of snapshots) {
-    const key = custodyKey(row.chainId, row.tokenAddress);
+    const key = custodyTokenKey(row.chainId, row.tokenAddress);
     let arr = grouped.get(key);
     if (!arr) {
       arr = [];
@@ -126,7 +128,7 @@ function tokenSourceKey(row: StableSupplyDailySnapshot): string {
   return `${row.chainId}|${row.tokenAddress.toLowerCase()}|${row.source}`;
 }
 
-function custodyKey(chainId: number, tokenAddress: string): string {
+export function custodyTokenKey(chainId: number, tokenAddress: string): string {
   return `${chainId}|${tokenAddress.toLowerCase()}`;
 }
 
@@ -135,7 +137,7 @@ function supplySnapshotKey(row: StableSupplyDailySnapshot): string {
 }
 
 function custodySnapshotKey(row: StableTokenCustodyDailySnapshot): string {
-  return `${custodyKey(row.chainId, row.tokenAddress)}|${row.source}|${
+  return `${custodyTokenKey(row.chainId, row.tokenAddress)}|${row.source}|${
     row.timestamp
   }`;
 }
