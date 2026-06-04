@@ -8,10 +8,11 @@ import { tokenColorForSource } from "@/lib/token-colors";
 import {
   buildTokenUsdTimeSeries,
   computeChartStartSeconds,
+  custodySnapshotsAlignedToSupplyRows,
+  custodyTokenKey,
   groupCustodySnapshotsByToken,
   groupSnapshotsByTokenSource,
   rollupByToken,
-  unionCustodySnapshotsWithLatest,
   unionSnapshotsWithLatest,
 } from "../_lib/aggregate";
 import { sparklinePoints } from "../_lib/sparkline";
@@ -50,13 +51,14 @@ export function StablesSparklineGrid({
   isLoading,
   hasError,
 }: Props): React.JSX.Element {
-  // Merge snapshots + latestPerToken so tokens whose history is older
-  // than the 1000-row page still appear (same baseline-floor pattern as
-  // the hero chart).
+  // Merge snapshots + latestPerToken so tokens whose history is older than
+  // the 1000-row page still appear and same-day current state overrides sparse
+  // daily rows (same baseline-floor pattern as the hero chart).
   const cards = useMemo(() => {
     if (snapshots.length === 0 && latestPerToken.length === 0) return [];
     const merged = unionSnapshotsWithLatest(snapshots, latestPerToken);
-    const mergedCustody = unionCustodySnapshotsWithLatest(
+    const mergedCustody = custodySnapshotsAlignedToSupplyRows(
+      merged,
       custodySnapshots,
       latestCustodyPerToken,
     );
@@ -72,7 +74,8 @@ export function StablesSparklineGrid({
     for (const agg of rollup.values()) {
       const rows = grouped.get(agg.key) ?? [];
       const custodyRows =
-        custodyByToken.get(`${agg.chainId}|${agg.tokenAddress}`) ?? [];
+        custodyByToken.get(custodyTokenKey(agg.chainId, agg.tokenAddress)) ??
+        [];
       const series = buildTokenUsdTimeSeries(
         rows,
         rates,

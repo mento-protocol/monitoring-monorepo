@@ -11,10 +11,11 @@ import { stockWoWChangePct } from "@/lib/time-series";
 import {
   buildTokenUsdTimeSeries,
   computeChartStartSeconds,
+  custodySnapshotsAlignedToSupplyRows,
+  custodyTokenKey,
   groupCustodySnapshotsByToken,
   groupSnapshotsByTokenSource,
   sumTotalUsdSeries,
-  unionCustodySnapshotsWithLatest,
   unionSnapshotsWithLatest,
 } from "../_lib/aggregate";
 import type {
@@ -25,12 +26,11 @@ import type {
 
 type Props = {
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
-  // Latest snapshot per `(tokenAddress, source)` from
-  // `useStablesLatestPerToken` — used as a baseline floor for tokens
-  // whose history is paginated out of `snapshots` once the 1000-row
-  // cap hits. Without it, a token with no in-range snapshot disappears
-  // from the stacked total even though `latestPerToken` knows its
-  // current supply.
+  // Current row per `(tokenAddress, source)` from `useStablesLatestPerToken` —
+  // used as a baseline floor for tokens whose history is paginated out of
+  // `snapshots` once the 1000-row cap hits. Without it, a token with no
+  // in-range snapshot disappears from the stacked total even though
+  // `latestPerToken` knows its current supply.
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
   custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>;
@@ -68,7 +68,8 @@ export function StablesHeroChart({
       return { breakdown: [] as BreakdownSeries[], totalSeries: [] };
     }
     const merged = unionSnapshotsWithLatest(snapshots, latestPerToken);
-    const mergedCustody = unionCustodySnapshotsWithLatest(
+    const mergedCustody = custodySnapshotsAlignedToSupplyRows(
+      merged,
       custodySnapshots,
       latestCustodyPerToken,
     );
@@ -88,7 +89,9 @@ export function StablesHeroChart({
     for (const [key, rows] of grouped) {
       const sample = rows[0]!;
       const custodyRows =
-        custodyByToken.get(`${sample.chainId}|${sample.tokenAddress}`) ?? [];
+        custodyByToken.get(
+          custodyTokenKey(sample.chainId, sample.tokenAddress),
+        ) ?? [];
       const series = buildTokenUsdTimeSeries(
         rows,
         rates,

@@ -8,6 +8,8 @@ import {
   rangeStartSeconds,
   rollupByToken,
   sumTotalUsdSeries,
+  unionCustodySnapshotsWithLatest,
+  unionSnapshotsWithLatest,
   winnersAndLosers7d,
 } from "./aggregate";
 import type {
@@ -26,7 +28,9 @@ function snapshot(
 ): StableSupplyDailySnapshot {
   const chainId = overrides.chainId ?? 42220;
   return {
-    id: `${chainId}-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
+    id:
+      overrides.id ??
+      `${chainId}-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
     chainId,
     tokenAddress: overrides.tokenAddress ?? "0xa",
     tokenSymbol: overrides.tokenSymbol ?? "USDm",
@@ -43,9 +47,12 @@ function custodySnapshot(
   overrides: Partial<StableTokenCustodyDailySnapshot> &
     Pick<StableTokenCustodyDailySnapshot, "timestamp" | "lockedSupply">,
 ): StableTokenCustodyDailySnapshot {
+  const chainId = overrides.chainId ?? 42220;
   return {
-    id: `42220-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
-    chainId: overrides.chainId ?? 42220,
+    id:
+      overrides.id ??
+      `${chainId}-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
+    chainId,
     tokenAddress: overrides.tokenAddress ?? "0xa",
     tokenSymbol: overrides.tokenSymbol ?? "USDm",
     source: overrides.source ?? "RESERVE",
@@ -99,6 +106,63 @@ describe("supply-change display threshold", () => {
 });
 
 describe("rollupByToken", () => {
+  it("lets current supply rows replace stale same-day daily snapshots", () => {
+    const staleDaily = snapshot({
+      id: `${143}-0xJpY-${NOW_TS}`,
+      tokenAddress: "0xJpY",
+      tokenSymbol: "JPYm",
+      chainId: 143,
+      timestamp: String(NOW_TS),
+      totalSupply: String(BigInt(1_400) * BigInt(10) ** BigInt(18)),
+    });
+    const current = snapshot({
+      id: `${143}-0xjpy-current-state`,
+      tokenAddress: "0xjpy",
+      tokenSymbol: "JPYm",
+      chainId: 143,
+      timestamp: String(NOW_TS),
+      totalSupply: String(BigInt(4_761_281) * BigInt(10) ** BigInt(18)),
+    });
+
+    const merged = unionSnapshotsWithLatest([staleDaily], [current]);
+    const rollup = rollupByToken(
+      merged,
+      new Map([["143:JPYm", 0.00625]]),
+      NOW_TS,
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(rollup.get("143|0xjpy|RESERVE")?.latestTotalSupply).toBe(
+      BigInt(4_761_281) * BigInt(10) ** BigInt(18),
+    );
+  });
+
+  it("lets current custody rows replace stale same-day custody snapshots", () => {
+    const staleDaily = custodySnapshot({
+      id: `${42220}-0xC-${NOW_TS}`,
+      tokenAddress: "0xc",
+      tokenSymbol: "GBPm",
+      source: "V3_LIQUITY",
+      timestamp: String(NOW_TS),
+      lockedSupply: String(BigInt(80) * BigInt(10) ** BigInt(18)),
+    });
+    const current = custodySnapshot({
+      id: `${42220}-0xc-current-state`,
+      tokenAddress: "0xC",
+      tokenSymbol: "GBPm",
+      source: "V3_LIQUITY",
+      timestamp: String(NOW_TS),
+      lockedSupply: String(BigInt(120) * BigInt(10) ** BigInt(18)),
+    });
+
+    const merged = unionCustodySnapshotsWithLatest([staleDaily], [current]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.lockedSupply).toBe(
+      String(BigInt(120) * BigInt(10) ** BigInt(18)),
+    );
+  });
+
   it("groups by (tokenAddress, source) and computes 7d net change", () => {
     const usdm = "0xa";
     const eurm = "0xb";
