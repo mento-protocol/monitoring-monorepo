@@ -79,6 +79,18 @@ const webVitalsIife = resolve(
   "web-vitals.iife.js",
 );
 
+// How long to wait for a surface's readiness anchor before failing. Most
+// surfaces settle in well under this. `/volume` overrides it (see below):
+// it fires the heaviest query waterfall on the page (top-traders +
+// aggregator + broker + pools snapshots, then client-side re-aggregation),
+// and on a cold preview deployment hit by a contended CI runner the sorted
+// "Volume" header can take longer than the default to render. A warm-backend
+// readiness ceiling measured at 20× CPU + Slow 4G is ~12s, so the override
+// leaves headroom for preview cold-start latency without masking a genuine
+// hang (a true stall still trips the override and fails closed). Issue #775.
+const DEFAULT_READY_TIMEOUT_MS = 20_000;
+const VOLUME_READY_TIMEOUT_MS = 45_000;
+
 // One surface = one navigation + interaction sequence + INP read. Each
 // runs in a fresh chromium context so prior interactions can't pollute
 // the next surface's `onINP` observer.
@@ -115,6 +127,7 @@ const SURFACES = [
     // Volume `SortableTh` only mounts once the table has columns, so it's
     // a reliable "rows have loaded" anchor.
     readySelector: 'th[aria-sort] button:has-text("Volume")',
+    readyTimeout: VOLUME_READY_TIMEOUT_MS,
     async interact(page) {
       // The volume page ships with one window active by default; clicking
       // a sibling triggers a `window.history.replaceState`-backed re-render
@@ -159,6 +172,7 @@ const SURFACES = [
     // gate purposes, and Playwright's strict-mode locator would
     // otherwise throw on the multi-match.
     readySelector: 'th[aria-sort] button:has-text("Volume")',
+    readyTimeout: VOLUME_READY_TIMEOUT_MS,
     async interact(page) {
       // Click the Volume column header to toggle sort. The
       // `useTableSort` hook re-derives the sorted list on each click, so
@@ -270,7 +284,39 @@ async function measureSurface(browser, surface) {
       );
     });
 
-    await page.waitForSelector(surface.readySelector, { timeout: 20_000 });
+    const readyTimeout = surface.readyTimeout ?? DEFAULT_READY_TIMEOUT_MS;
+    try {
+      await page.waitForSelector(surface.readySelector, {
+        timeout: readyTimeout,
+      });
+    } catch (err) {
+      // The bare "Timeout 20000ms exceeded" can't tell slow-render from
+      // empty/error data — both look identical and each needs a different
+      // fix. Classify the terminal state the page actually settled into so
+      // the next failure self-diagnoses instead of forcing a re-investigation
+      // (#775). Loading skeleton still up → slow data fetch/render; ErrorBox
+      // → the indexer's GraphQL endpoint is erroring; EmptyBox → the window
+      // legitimately has no rows. Still fails closed regardless.
+      const diag = await page.evaluate(() => ({
+        loading: !!document.querySelector(
+          '[role="status"][aria-label="Loading"]',
+        ),
+        error: !!document.querySelector('[role="alert"]'),
+        empty:
+          /no traders (matched|left)|no v[23] aggregator (activity|volume)/i.test(
+            document.body.innerText,
+          ),
+      }));
+      const cause = diag.error
+        ? "data backend erroring (ErrorBox / role=alert present)"
+        : diag.loading
+          ? "still loading after timeout (slow data fetch/render — likely preview cold-start)"
+          : diag.empty
+            ? "no data (EmptyBox present — window legitimately empty)"
+            : "unknown (no loading/error/empty marker found)";
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`${msg} — terminal state: ${cause}`);
+    }
     await surface.interact(page);
 
     // Settle window: let the browser paint and deliver every
