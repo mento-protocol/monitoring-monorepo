@@ -2,6 +2,7 @@ import type { AppConfig } from "./config";
 import type {
   CurrentOncall,
   VictorOpsOncallResponse,
+  VictorOpsUserEntry,
   VictorOpsUsersResponse,
 } from "./types";
 
@@ -89,7 +90,9 @@ export async function fetchCurrentOncall(
     );
   }
 
-  const user = oncallEntry.users?.[0]?.onCallUser;
+  const user = oncallEntry.users?.[0]
+    ? currentUserFromEntry(oncallEntry.users[0])
+    : undefined;
   if (!user?.username) {
     throw new SplunkOnCallError("No on-call user found");
   }
@@ -102,6 +105,12 @@ export async function fetchCurrentOncall(
     teamSlug: teamEntry.team?.slug,
     username: user.username,
   };
+}
+
+function currentUserFromEntry(
+  userEntry: VictorOpsUserEntry,
+): { email?: string; username?: string } | undefined {
+  return userEntry.onCallUser ?? userEntry.onCalluser;
 }
 
 export async function fetchOncallUserEmail(

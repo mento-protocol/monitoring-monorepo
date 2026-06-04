@@ -112,6 +112,68 @@ describe("fetchCurrentOncall", () => {
       "No on-call user found",
     );
   });
+
+  it("accepts the legacy VictorOps onCalluser response field", async () => {
+    const fetchMock = vi.fn(async () =>
+      response({
+        teamsOnCall: [
+          {
+            team: { name: "Mento", slug: "mento-team" },
+            oncallNow: [
+              {
+                escalationPolicy: {
+                  name: "Primary",
+                  slug: "primary-policy",
+                },
+                users: [
+                  {
+                    onCalluser: {
+                      email: "legacy@example.com",
+                      username: "legacy-user",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    await expect(fetchCurrentOncall(config, fetchMock)).resolves.toEqual({
+      email: "legacy@example.com",
+      escalationPolicyName: "Primary",
+      escalationPolicySlug: "primary-policy",
+      teamName: "Mento",
+      teamSlug: "mento-team",
+      username: "legacy-user",
+    });
+  });
+
+  it("fails clearly when user entry has no recognized on-call field", async () => {
+    const fetchMock = vi.fn(async () =>
+      response({
+        teamsOnCall: [
+          {
+            team: { name: "Mento", slug: "mento-team" },
+            oncallNow: [
+              {
+                escalationPolicy: {
+                  name: "Primary",
+                  slug: "primary-policy",
+                },
+                users: [{}],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    await expect(fetchCurrentOncall(config, fetchMock)).rejects.toThrow(
+      "No on-call user found",
+    );
+  });
 });
 
 describe("fetchOncallUserEmail", () => {
