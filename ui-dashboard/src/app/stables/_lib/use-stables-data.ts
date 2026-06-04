@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
+import type { OracleRateMap } from "@/lib/tokens";
 import {
   STABLES_CURRENT_CUSTODY_PER_TOKEN,
   STABLES_CURRENT_SUPPLY_PER_TOKEN,
@@ -11,7 +12,12 @@ import {
   STABLES_LATEST_PER_TOKEN,
   STABLES_CHANGES,
 } from "@/lib/queries/stables";
-import { isVisibleSupplyChangeEvent, rangeStartSeconds } from "./aggregate";
+import {
+  DEFAULT_SUPPLY_CHANGE_MIN_USD,
+  isVisibleSupplyChangeEvent,
+  rangeStartSeconds,
+  supplyChangeUsdValue,
+} from "./aggregate";
 import type {
   RangeKey,
   StableSupplyDailySnapshot,
@@ -25,6 +31,7 @@ const SNAPSHOT_PAGE_LIMIT = 1000;
 const CHANGES_QUERY_PAGE_LIMIT = 400;
 const CHANGES_DISPLAY_LIMIT = 200;
 const CHANGES_MAX_QUERY_PAGES = 3;
+const EMPTY_ORACLE_RATES: OracleRateMap = new Map();
 // Numeric.MAX cursor (~year 2286 in Unix-seconds); `_lt: <this>` returns
 // the first page from the top of the desc-ordered snapshot table.
 const TS_CURSOR_INITIAL = "9999999999";
@@ -50,6 +57,7 @@ type ChangePageState = {
   enabled: boolean;
   rawEvents: ReadonlyArray<StableSupplyChangeEvent>;
   visibleEvents: ReadonlyArray<StableSupplyChangeEvent>;
+  unpricedVisibleEventIds: ReadonlySet<string>;
   error: unknown;
   isLoading: boolean;
 };
@@ -241,16 +249,29 @@ export function useStablesCustodyDailySnapshots(_range: RangeKey) {
  * Per-tx supply changes for the changes table + ranked table. Filters
  * to the last 7d window (sufficient for the ranked table; the table can
  * later add date-range pickers via the `sinceTimestamp` arg), then hides
- * sub-display dust rows that would render as 0.00 at table precision.
+ * rows below the user-selected USD-equivalent value threshold. Unpriced
+ * rows degrade open and remain visible because missing oracle data must
+ * not silently suppress supply events.
  *
  * A single raw page can be dust-heavy, so the hook conditionally fetches
  * additional raw pages until it has enough visible rows, exhausts the current
  * window, or reaches the bounded query budget above.
  */
-export function useStablesChanges(range: RangeKey = "7d", page: number = 0) {
+export function useStablesChanges(
+  range: RangeKey = "7d",
+  page: number = 0,
+  rates: OracleRateMap = EMPTY_ORACLE_RATES,
+  minimumUsdValue: number = DEFAULT_SUPPLY_CHANGE_MIN_USD,
+) {
   const sinceTimestamp = rangeStartSeconds(range);
   const baseOffset = page * CHANGES_QUERY_PAGE_LIMIT * CHANGES_MAX_QUERY_PAGES;
-  const firstPage = useStablesChangesPage(sinceTimestamp, baseOffset, true);
+  const firstPage = useStablesChangesPage(
+    sinceTimestamp,
+    baseOffset,
+    true,
+    rates,
+    minimumUsdValue,
+  );
   const shouldFetchSecondPage = shouldFetchNextChangePage(
     firstPage,
     firstPage.visibleEvents.length,
@@ -259,6 +280,8 @@ export function useStablesChanges(range: RangeKey = "7d", page: number = 0) {
     sinceTimestamp,
     baseOffset + CHANGES_QUERY_PAGE_LIMIT,
     shouldFetchSecondPage,
+    rates,
+    minimumUsdValue,
   );
   const visibleEventsAfterSecond =
     firstPage.visibleEvents.length + secondPage.visibleEvents.length;
@@ -270,15 +293,21 @@ export function useStablesChanges(range: RangeKey = "7d", page: number = 0) {
     sinceTimestamp,
     baseOffset + CHANGES_QUERY_PAGE_LIMIT * 2,
     shouldFetchThirdPage,
+    rates,
+    minimumUsdValue,
   );
   const pages = [firstPage, secondPage, thirdPage] as const;
   const pageError = firstEnabledPageError(pages);
-  const { events, capped } = buildVisibleChangesResult(pages, pageError);
+  const { events, capped, unpricedEventsCount } = buildVisibleChangesResult(
+    pages,
+    pageError,
+  );
   return {
     events,
     error: visibleChangesError(firstPage, events, pageError),
     isLoading: visibleChangesLoading(pages, events),
     capped,
+    unpricedEventsCount,
   };
 }
 
@@ -286,6 +315,8 @@ function useStablesChangesPage(
   sinceTimestamp: number,
   offset: number,
   enabled: boolean,
+  rates: OracleRateMap,
+  minimumUsdValue: number,
 ): ChangePageState {
   const response = useGQL<ChangesResult>(
     enabled ? STABLES_CHANGES : null,
@@ -303,13 +334,24 @@ function useStablesChangesPage(
     [response.data],
   );
   const visibleEvents = useMemo(
-    () => rawEvents.filter(isVisibleSupplyChangeEvent),
-    [rawEvents],
+    () =>
+      rawEvents.filter((event) =>
+        isVisibleSupplyChangeEvent(event, rates, minimumUsdValue),
+      ),
+    [minimumUsdValue, rates, rawEvents],
   );
+  const unpricedVisibleEventIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const event of visibleEvents) {
+      if (supplyChangeUsdValue(event, rates) == null) ids.add(event.id);
+    }
+    return ids;
+  }, [rates, visibleEvents]);
   return {
     enabled,
     rawEvents,
     visibleEvents,
+    unpricedVisibleEventIds,
     error: response.error,
     isLoading: response.isLoading,
   };
@@ -332,10 +374,12 @@ function buildVisibleChangesResult(
 ): {
   events: ReadonlyArray<StableSupplyChangeEvent>;
   capped: boolean;
+  unpricedEventsCount: number;
 } {
   const visibleEvents = pages.flatMap((candidate) => candidate.visibleEvents);
   const lastFetchedRawEvents = lastEnabledPage(pages)?.rawEvents ?? [];
   const events = visibleEvents.slice(0, CHANGES_DISPLAY_LIMIT);
+  const unpricedEventsCount = countVisibleUnpricedEvents(pages, events);
   const hasPendingEnabledPage = pages.some(
     (candidate) => candidate.enabled && candidate.isLoading,
   );
@@ -346,7 +390,31 @@ function buildVisibleChangesResult(
       lastFetchedRawEvents.length === CHANGES_QUERY_PAGE_LIMIT ||
       (events.length > 0 && hasPendingEnabledPage) ||
       (events.length > 0 && pageError != null),
+    unpricedEventsCount,
   };
+}
+
+function countVisibleUnpricedEvents(
+  pages: ReadonlyArray<ChangePageState>,
+  events: ReadonlyArray<StableSupplyChangeEvent>,
+): number {
+  if (events.length === 0) return 0;
+  let remaining = events.length;
+  let count = 0;
+  for (const page of pages) {
+    if (remaining <= 0) break;
+    const pageVisibleCount = page.visibleEvents.length;
+    const includedFromPage = Math.min(remaining, pageVisibleCount);
+    if (includedFromPage === pageVisibleCount) {
+      count += page.unpricedVisibleEventIds.size;
+    } else {
+      count += page.visibleEvents
+        .slice(0, includedFromPage)
+        .filter((event) => page.unpricedVisibleEventIds.has(event.id)).length;
+    }
+    remaining -= includedFromPage;
+  }
+  return count;
 }
 
 function lastEnabledPage(
