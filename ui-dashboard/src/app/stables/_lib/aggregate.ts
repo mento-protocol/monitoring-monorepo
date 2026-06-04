@@ -68,7 +68,10 @@ export function rollupByToken(
   // 24h / 7d / 30d baseline cutoffs share the same day-aligned anchor. The KPI
   // sub-rows read fixed windows off the full (non-range-scoped) snapshot stream
   // — if `useStablesDailySnapshots` ever starts filtering by range, these
-  // windows would silently lose their baselines.
+  // windows would silently lose their baselines. The windows also assume the
+  // 1000-row page reaches each cutoff: a token whose baseline falls off a
+  // capped page reverts to a since-earliest-retained delta (verified safe at
+  // ~20 tokens × 30d ≈ 600 rows; revisit with the PR2.5 keyset pagination).
   const windowCutoffs: WindowCutoffs = {
     oneDay: dayStartNow - BigInt(1) * SECONDS_PER_DAY,
     sevenDay: dayStartNow - BigInt(7) * SECONDS_PER_DAY,
