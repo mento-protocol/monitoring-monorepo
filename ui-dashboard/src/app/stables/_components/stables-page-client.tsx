@@ -4,9 +4,11 @@ import { Suspense, useState } from "react";
 import { useOracleRates } from "@/hooks/use-oracle-rates";
 import type { RangeKey } from "../_lib/types";
 import {
+  useStablesCustodyDailySnapshots,
   useStablesDailySnapshots,
+  useStablesLatestCustodyPerToken,
   useStablesLatestPerToken,
-  useStablesV2Changes,
+  useStablesChanges,
 } from "../_lib/use-stables-data";
 import { StablesChangesTable } from "./stables-changes-table";
 import { StablesHeroChart } from "./stables-hero-chart";
@@ -37,13 +39,34 @@ function StablesContent(): React.JSX.Element {
     capped: snapshotsCapped,
   } = useStablesDailySnapshots(range);
   const {
+    snapshots: latestCustodyPerToken,
+    error: latestCustodyError,
+    isLoading: latestCustodyLoading,
+  } = useStablesLatestCustodyPerToken();
+  const {
+    snapshots: custodySnapshots,
+    error: custodySnapshotsError,
+    isLoading: custodySnapshotsLoading,
+    capped: custodySnapshotsCapped,
+  } = useStablesCustodyDailySnapshots(range);
+  const {
     events: changeEvents,
     error: changesError,
     isLoading: changesLoading,
     capped: changesCapped,
-  } = useStablesV2Changes("7d");
+  } = useStablesChanges("7d");
 
-  const isLoading = ratesLoading || latestLoading || snapshotsLoading;
+  const custodyDegraded =
+    latestCustodyError != null || custodySnapshotsError != null;
+  const effectiveLatestCustodyPerToken = custodyDegraded
+    ? []
+    : latestCustodyPerToken;
+  const effectiveCustodySnapshots = custodyDegraded ? [] : custodySnapshots;
+  const isLoading =
+    ratesLoading ||
+    latestLoading ||
+    snapshotsLoading ||
+    (!custodyDegraded && (latestCustodyLoading || custodySnapshotsLoading));
   const hasError = latestError != null || snapshotsError != null;
 
   return (
@@ -53,15 +76,16 @@ function StablesContent(): React.JSX.Element {
           Mento stablecoins
         </h1>
         <p className="mt-1 text-sm text-slate-400">
-          Outstanding supply of Mento-issued stablecoins (USDm, EURm, GBPm,
-          BRLm, …) tracked across V2 Reserve mints/burns, V3 hub USDm bridge
-          flows, and V3 Liquity CDP debt.
+          Circulating supply of Mento-issued stablecoins across Celo and Monad,
+          excluding Celo NTT lock custody from global totals.
         </p>
       </header>
 
       <StablesKpiStrip
         latestPerToken={latestPerToken}
+        latestCustodyPerToken={effectiveLatestCustodyPerToken}
         snapshots={snapshots}
+        custodySnapshots={effectiveCustodySnapshots}
         rates={rates}
         isLoading={isLoading}
         hasError={hasError}
@@ -70,6 +94,8 @@ function StablesContent(): React.JSX.Element {
       <StablesSparklineGrid
         snapshots={snapshots}
         latestPerToken={latestPerToken}
+        custodySnapshots={effectiveCustodySnapshots}
+        latestCustodyPerToken={effectiveLatestCustodyPerToken}
         rates={rates}
         isLoading={isLoading}
         hasError={hasError}
@@ -78,12 +104,14 @@ function StablesContent(): React.JSX.Element {
       <StablesHeroChart
         snapshots={snapshots}
         latestPerToken={latestPerToken}
+        custodySnapshots={effectiveCustodySnapshots}
+        latestCustodyPerToken={effectiveLatestCustodyPerToken}
         rates={rates}
         range={range}
         onRangeChange={setRange}
         isLoading={isLoading}
         hasError={hasError}
-        capped={snapshotsCapped}
+        capped={snapshotsCapped || (!custodyDegraded && custodySnapshotsCapped)}
       />
 
       <StablesChangesTable

@@ -12,8 +12,8 @@ describe("displayLabel", () => {
     expect(displayLabel("USDm", "V3_HUB_COLLATERAL")).toBe("USDm · v3");
   });
 
-  it("passes V2 USDm through unchanged", () => {
-    expect(displayLabel("USDm", "V2_RESERVE")).toBe("USDm");
+  it("passes reserve USDm through unchanged", () => {
+    expect(displayLabel("USDm", "RESERVE")).toBe("USDm");
   });
 
   it("does NOT add the · v3 suffix for non-USDm symbols even on V3_HUB_COLLATERAL", () => {
@@ -23,8 +23,8 @@ describe("displayLabel", () => {
     expect(displayLabel("EURm", "V3_HUB_COLLATERAL")).toBe("EURm");
   });
 
-  it("applies the cEUR → EURm legacy alias on V2_RESERVE", () => {
-    expect(displayLabel("cEUR", "V2_RESERVE")).toBe("EURm");
+  it("applies the cEUR → EURm legacy alias on RESERVE", () => {
+    expect(displayLabel("cEUR", "RESERVE")).toBe("EURm");
   });
 
   it("V3_LIQUITY tokens pass through unchanged (GBPm/CHFm/JPYm aren't aliased)", () => {
@@ -54,11 +54,29 @@ describe("effectiveOracleRate", () => {
     expect(effectiveOracleRate(rates, "EURm")).toBe(1.1);
   });
 
+  it("prefers a chain-qualified oracle rate when present", () => {
+    const rates = new Map([
+      ["EURm", 1.1],
+      ["143:EURm", 1.08],
+    ]);
+    expect(effectiveOracleRate(rates, "EURm", 143)).toBe(1.08);
+  });
+
+  it("does not fall back to another chain's unqualified rate for chain-scoped lookups", () => {
+    const rates = new Map([["EURm", 1.1]]);
+    expect(effectiveOracleRate(rates, "EURm", 143)).toBeNull();
+  });
+
   it("defaults USDm to 1.0 when the oracle map has no entry", () => {
     // `useOracleRates`/`buildOracleRateMap` derives non-USDm rates from
     // USDm pairs and never emits USDm itself, so this fallback is
     // required for USDm to participate in the total + stacked chart.
     expect(effectiveOracleRate(new Map(), "USDm")).toBe(1);
+  });
+
+  it("defaults chain-scoped USD-pegged symbols to 1.0 without a chain rate", () => {
+    expect(effectiveOracleRate(new Map(), "USDm", 143)).toBe(1);
+    expect(effectiveOracleRate(new Map(), "USDC", 143)).toBe(1);
   });
 
   it("defaults other USD-pegged symbols to 1.0", () => {
@@ -79,15 +97,15 @@ describe("effectiveOracleRate", () => {
   });
 });
 
-describe("V2StableSupplyChangeEvent.tokenDecimals → formatWei contract", () => {
+describe("StableSupplyChangeEvent.tokenDecimals → formatWei contract", () => {
   // The changes table feeds `event.tokenDecimals` (denormalized from
-  // V2_STABLES.decimals indexer-side) into `formatWei`. Today every V2
+  // STABLES.decimals indexer-side) into `formatWei`. tracked
   // stable is 18-decimal; this test locks the contract for any future
   // non-18 Mento stable (e.g. a 6-dp USDC-bridged variant). Without it,
   // a regression that hardcoded 18 again would silently underrender
   // by 10^N for non-18 stables — exactly the bug this denormalization
   // exists to prevent.
-  it("formats 1 token at 18 decimals (current V2 stables)", () => {
+  it("formats 1 token at 18 decimals (current tracked stables)", () => {
     expect(formatWei("1000000000000000000", 18, 2)).toBe("1.00");
   });
 

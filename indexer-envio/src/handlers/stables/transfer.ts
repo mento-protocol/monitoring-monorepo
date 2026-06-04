@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
-// V2StableToken Transfer handler — mint/burn supply tracking.
+// StableToken Transfer handler — mint/burn supply tracking.
 //
 // Subscribes ERC20 Transfer events with array-OR filter `from=0x0 OR to=0x0`,
-// limited to the 13 Mento stable addresses listed under `V2StableToken` in
-// config.multichain.mainnet.yaml. Each event:
+// limited to supply-tracked Mento stable addresses listed under
+// `StableToken` in config.multichain.mainnet.yaml. Each event:
 //
 //   1. Looks up the running supply entity. First event per token → seeds the
 //      baseline from on-chain `totalSupply(block-1)` via the RPC effect. If
@@ -12,52 +12,61 @@
 //      day's `StableSupplyDailySnapshot` with the accumulated buckets).
 //   3. Applies the signed delta (+ for mint, − for burn) to totalSupply and
 //      the today-bucket accumulators.
-//   4. Writes a `V2StableSupplyChangeEvent` row for the per-tx changes table.
+//   4. Writes a `StableSupplyChangeEvent` row for the per-tx changes table.
 //
-// V3 Liquity debt tokens (GBPm/CHFm/JPYm) are explicitly excluded from the
-// V2 subscription (see config.ts EXCLUDED_FROM_V2). Their supply is derived
-// from `LiquityInstance.systemDebt` via the existing v3 handler. The V3
-// handler will additionally write `StableSupplyDailySnapshot` rows with
-// source=V3_LIQUITY in a follow-up PR (deferred per the plan; until then
-// the /stables UI shows V2_RESERVE + V3_HUB_COLLATERAL rows only for those
-// 13 tokens, and V3_LIQUITY supply comes from a separate LiquityInstance
-// query merged client-side).
+// Celo V3 Liquity debt tokens (GBPm/CHFm/JPYm) are excluded from this
+// Transfer-zero supply path because their Celo supply is derived from
+// LiquityInstance.systemDebt. Their Celo NTT lock/mint manager balances are
+// tracked separately in custody.ts. Monad GBPm/CHFm/JPYm are burn/mint NTT
+// deployments, so their Monad Transfer-zero events are real chain-local supply
+// and are tracked here with source=V3_LIQUITY.
 // ---------------------------------------------------------------------------
 
-import type { V2StableSupplyChangeEvent } from "envio";
+import type { StableSupplyChangeEvent } from "envio";
 import { ZERO_ADDRESS } from "../../constants.js";
 import { asAddress, eventId } from "../../helpers.js";
 import { indexer } from "../../indexer.js";
-import { v2StableTotalSupplyEffect } from "../../rpc/effects.js";
 import { isProtocolOwnedAddress } from "../../protocol-actors.js";
+import { stableTotalSupplyEffect } from "../../rpc/effects.js";
 import {
-  getOrCreateV2StableTokenSupply,
-  preloadV2StableTokenSupply,
+  getOrCreateStableTokenSupply,
+  preloadStableTokenSupply,
 } from "./bootstrap.js";
-import { classifyV2StableSupplyChangeKind } from "./classifyKind.js";
-import { findV2StableByAddress } from "./config.js";
-import { flushV2StableDailySnapshot } from "./dailyFlush.js";
+import { classifyStableSupplyChangeKind } from "./classifyKind.js";
+import {
+  findStableByAddress,
+  STABLE_TOKEN_CUSTODY_TRANSFER_WHERE_PARAMS,
+} from "./config.js";
+import { handleStableTokenCustodyTransfer } from "./custody.js";
+import { flushStableDailySnapshot } from "./dailyFlush.js";
 
 indexer.onEvent(
   {
-    contract: "V2StableToken",
+    contract: "StableToken",
     event: "Transfer",
     // Array-OR semantics per envio 3.0.0: deliver Transfer events where
-    // EITHER from==0x0 (mint) OR to==0x0 (burn). Other Transfers are
-    // filtered at the HyperSync edge — they never reach the handler.
+    // EITHER from==0x0 (mint), to==0x0 (burn), from==lock/mint NTT manager, or
+    // to==lock/mint NTT manager. Other Transfers are filtered at the HyperSync
+    // edge — they never reach the handler.
     // The `0x${string}` casts narrow ZERO_ADDRESS (typed as plain string in
     // constants.ts) to the SingleOrMultiple<`0x${string}`> envio expects.
+    // NTT manager proxies are CREATE3-identical on Celo and Monad, so Monad
+    // burn/mint manager transfers that match these custody params are also
+    // delivered and then dropped by handleStableTokenCustodyTransfer.
     where: () => ({
       params: [
         { from: ZERO_ADDRESS as `0x${string}` },
         { to: ZERO_ADDRESS as `0x${string}` },
+        ...STABLE_TOKEN_CUSTODY_TRANSFER_WHERE_PARAMS,
       ],
     }),
   },
   async ({ event, context }) => {
+    await handleStableTokenCustodyTransfer({ event, context });
+
     const { chainId, srcAddress } = event;
     const tokenAddress = asAddress(srcAddress);
-    const info = findV2StableByAddress(chainId, tokenAddress);
+    const info = findStableByAddress(chainId, tokenAddress);
     // YAML-listed token not in our registry would be a deploy-time bug; bail
     // without writing rather than persist a half-typed row.
     if (!info) return;
@@ -80,7 +89,7 @@ indexer.onEvent(
     const blockTimestamp = BigInt(event.block.timestamp);
 
     if (context.isPreload) {
-      await preloadV2StableTokenSupply(
+      await preloadStableTokenSupply(
         context,
         chainId,
         tokenAddress,
@@ -89,7 +98,7 @@ indexer.onEvent(
       return;
     }
 
-    let supply = await getOrCreateV2StableTokenSupply(
+    let supply = await getOrCreateStableTokenSupply(
       context,
       chainId,
       tokenAddress,
@@ -100,21 +109,21 @@ indexer.onEvent(
 
     // First Transfer per token: seed baseline from on-chain
     // totalSupply(block-1). Failure throws → Envio retries the event. We
-    // can't silently return null here: that would drop the V2StableSupply-
-    // ChangeEvent row + day-bucket contribution for this exact event,
+    // can't silently return null here: that would drop the
+    // StableSupplyChangeEvent row + day-bucket contribution for this exact event,
     // while a later event would self-heal `totalSupply` (because the next
     // baseline call would capture this event's delta in its block). The
     // running supply would recover; the event log would not. Throwing
     // forces a clean retry of the original event when RPC recovers.
     if (!supply.supplyBaselineSeeded) {
-      const baseline = await context.effect(v2StableTotalSupplyEffect, {
+      const baseline = await context.effect(stableTotalSupplyEffect, {
         chainId,
         tokenAddress,
         blockNumber: blockNumber - 1n,
       });
       if (baseline === null) {
         throw new Error(
-          `[v2Stables] totalSupply baseline failed for ${tokenAddress} on chain ${chainId} at block ${blockNumber - 1n}. ` +
+          `[stables] totalSupply baseline failed for ${tokenAddress} on chain ${chainId} at block ${blockNumber - 1n}. ` +
             `Retrying. Persistent failure halts ingestion until RPC recovers — investigate the chain's RPC endpoint.`,
         );
       }
@@ -125,7 +134,7 @@ indexer.onEvent(
       };
     }
 
-    supply = flushV2StableDailySnapshot(
+    supply = flushStableDailySnapshot(
       context,
       supply,
       blockTimestamp,
@@ -142,7 +151,7 @@ indexer.onEvent(
       lastEventBlock: blockNumber,
       lastEventTimestamp: blockTimestamp,
     };
-    context.V2StableTokenSupply.set(supply);
+    context.StableTokenSupply.set(supply);
 
     const counterparty = isMint
       ? asAddress(event.params.to)
@@ -154,9 +163,9 @@ indexer.onEvent(
     // routes such an event through OTHER_* without halting the indexer.
     const caller = asAddress(event.transaction.from ?? "");
     const txTo = event.transaction.to ? asAddress(event.transaction.to) : null;
-    const kind = classifyV2StableSupplyChangeKind(chainId, txTo, isMint);
+    const kind = classifyStableSupplyChangeKind(chainId, txTo, isMint);
 
-    const changeRow: V2StableSupplyChangeEvent = {
+    const changeRow: StableSupplyChangeEvent = {
       id: eventId(chainId, event.block.number, event.logIndex),
       chainId,
       tokenAddress,
@@ -174,6 +183,6 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     };
-    context.V2StableSupplyChangeEvent.set(changeRow);
+    context.StableSupplyChangeEvent.set(changeRow);
   },
 );

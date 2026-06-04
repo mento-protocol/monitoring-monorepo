@@ -420,19 +420,31 @@ function OutlierPanel({
         <PanelMessage message="No outlier swaps in this window." />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full min-w-[34rem] table-fixed text-xs">
             <thead>
               <tr className="border-b border-slate-800 text-slate-500">
-                <th scope="col" className="py-2 pr-3 text-left font-medium">
+                <th
+                  scope="col"
+                  className="w-[34%] py-2 pr-3 text-left font-medium whitespace-nowrap"
+                >
                   Trader
                 </th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">
+                <th
+                  scope="col"
+                  className="w-[28%] px-3 py-2 text-left font-medium whitespace-nowrap"
+                >
                   Pool
                 </th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">
+                <th
+                  scope="col"
+                  className="w-[19%] px-3 py-2 text-right font-medium whitespace-nowrap"
+                >
                   Volume
                 </th>
-                <th scope="col" className="py-2 pl-3 text-right font-medium">
+                <th
+                  scope="col"
+                  className="w-[19%] py-2 pl-3 text-right font-medium whitespace-nowrap"
+                >
                   Tx
                 </th>
               </tr>
@@ -579,21 +591,32 @@ function OutlierTableRow({
   const txUrl = network ? explorerTxUrl(network, row.txHash) : null;
   return (
     <tr className="border-b border-slate-800/40 last:border-b-0">
-      <td className="py-2 pr-3 text-slate-300">
-        <AddressLink address={row.caller} chainId={row.chainId} />
+      <td className="min-w-0 overflow-hidden py-2 pr-3 text-slate-300 whitespace-nowrap">
+        <AddressLink
+          address={row.caller}
+          chainId={row.chainId}
+          readOnly
+          addressBookWhenAuthenticated
+          containerClassName="w-full min-w-0 whitespace-nowrap"
+          className="block max-w-full truncate whitespace-nowrap"
+        />
       </td>
-      <td className="px-3 py-2 text-slate-300">{label}</td>
+      <td className="px-3 py-2 text-slate-300">
+        <span className="block truncate" title={label}>
+          {label}
+        </span>
+      </td>
       <td className="px-3 py-2 text-right font-mono text-slate-300">
         <OutlierVolume value={row.volumeUsdWei} />
       </td>
-      <td className="py-2 pl-3 text-right">
+      <td className="py-2 pl-3 text-right whitespace-nowrap">
         {txUrl ? (
           <a
             href={txUrl}
             target="_blank"
             rel="noopener noreferrer"
             title={`${row.txHash} · ${relativeTime(row.blockTimestamp)}`}
-            className="font-mono text-indigo-300 hover:text-indigo-200"
+            className="inline-block whitespace-nowrap font-mono text-indigo-300 hover:text-indigo-200"
           >
             {row.txHash.slice(0, 6)}…{row.txHash.slice(-4)}
           </a>

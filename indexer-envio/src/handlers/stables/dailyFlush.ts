@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// V2 stable daily-flush logic.
+// Stable daily-flush logic.
 //
 // Mirrors the rolling-flush pattern from src/handlers/liquity/instance.ts —
 // on the first event of a new UTC day, write out the previous day's
@@ -8,7 +8,7 @@
 // responsibility; this helper only handles the rollover.
 // ---------------------------------------------------------------------------
 
-import type { StableSupplyDailySnapshot, V2StableTokenSupply } from "envio";
+import type { StableSupplyDailySnapshot, StableTokenSupply } from "envio";
 import { dayBucket } from "../../helpers.js";
 import { makeStableSupplyDailySnapshotId } from "./config.js";
 
@@ -23,18 +23,18 @@ type DailyFlushContext = {
 /**
  * Flush the previous day's daily snapshot if `eventTimestamp` crosses into a
  * new UTC day. Returns the supply entity with day buckets reset; caller must
- * `context.V2StableTokenSupply.set(returned)` to persist.
+ * `context.StableTokenSupply.set(returned)` to persist.
  *
  * NOTE: the running `totalSupply` field on the entity is NOT mutated here —
  * it's already up-to-date from prior delta application. We only reset the
  * today-buckets (mintedTodayBucket, burnedTodayBucket, currentDayBucket).
  */
-export function flushV2StableDailySnapshot(
+export function flushStableDailySnapshot(
   context: DailyFlushContext,
-  supply: V2StableTokenSupply,
+  supply: StableTokenSupply,
   eventTimestamp: bigint,
   blockNumber: bigint,
-): V2StableTokenSupply {
+): StableTokenSupply {
   const eventDay = dayBucket(eventTimestamp);
   if (supply.currentDayBucket >= eventDay) {
     return supply; // same day — no flush

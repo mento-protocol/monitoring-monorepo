@@ -29,7 +29,7 @@ import "./handlers/sortedOracles.js";
 import "./handlers/virtualPool.js";
 import "./handlers/biPoolManager.js";
 import "./handlers/feeToken.js";
-import "./handlers/v2Stables/transfer.js";
+import "./handlers/stables/transfer.js";
 import "./handlers/openLiquidityStrategy.js";
 import "./handlers/liquity/collateralRegistry.js";
 import "./handlers/liquity/bootstrapHandler.js";
@@ -86,9 +86,9 @@ export {
 export { _clearBootstrapCaches } from "./breakers.js";
 
 export {
-  _setMockV2StableTotalSupply,
-  _clearMockV2StableTotalSupply,
-} from "./rpc/v2-stables.js";
+  _setMockStableTotalSupply,
+  _clearMockStableTotalSupply,
+} from "./rpc/stable-fetchers.js";
 
 // Fee token test mocks and helpers
 export {

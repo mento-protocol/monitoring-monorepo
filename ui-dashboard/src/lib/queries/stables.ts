@@ -1,21 +1,21 @@
 // GraphQL queries for the /stables dashboard page. Targets entities added in
-// the parallel indexer PR (`StableSupplyDailySnapshot`, `V2StableSupplyChangeEvent`)
+// the parallel indexer PR (`StableSupplyDailySnapshot`, `StableSupplyChangeEvent`)
 // — until that PR is deployed + re-synced, these queries return empty arrays.
 //
 // Pagination uses keyset on `(timestamp desc, id desc)` to break Hasura's
-// 1000-row cap for the `All` range (~16 tokens × 365 days = ~5840 rows worst
-// case). The query takes an optional `beforeTimestamp` cursor; pass the last
+// 1000-row cap for the `All` range across Celo + Monad stable rows. The query
+// takes an optional `beforeTimestamp` cursor; pass the last
 // page's earliest `timestamp` to fetch the next page.
 
 export const STABLES_DAILY_SNAPSHOTS = `
   query StablesDailySnapshots(
-    $chainId: Int!
+    $chainIds: [Int!]!
     $limit: Int!
     $beforeTimestamp: numeric!
   ) {
     StableSupplyDailySnapshot(
       where: {
-        chainId: { _eq: $chainId }
+        chainId: { _in: $chainIds }
         timestamp: { _lt: $beforeTimestamp }
       }
       order_by: [{ timestamp: desc }, { id: desc }]
@@ -41,20 +41,21 @@ export const STABLES_DAILY_SNAPSHOTS = `
 // necessarily today's — UI surfaces stale dates accordingly.
 //
 // Hasura `distinct_on` is supported (verified via existing protocol-fees
-// queries) and keeps the row count bounded to ~16 per chain.
+// queries) and keeps the row count bounded.
 //
 // Invariant: each (chainId, tokenAddress) maps to exactly one `source`
-// today — V2 cUSD-USDm and V3 hub USDm live at DISTINCT addresses
+// today — Celo cUSD-USDm and V3 hub USDm live at DISTINCT addresses
 // (`0x765de8…` vs `0x106cc…`), and no other Mento stable has a sibling
-// source. So `distinct_on: tokenAddress` returns the same set as the
-// rollup's `(tokenAddress, source)` grouping. Indexer-side: enforced by
-// `v2Stables/config.ts:_byAddress` (no duplicate-address keys).
+// source on the same chain. So `distinct_on: [chainId, tokenAddress]`
+// returns the same set as the rollup's `(chainId, tokenAddress, source)`
+// grouping. Indexer-side: enforced by `stables/config.ts:_byAddress`
+// (no duplicate-address keys).
 export const STABLES_LATEST_PER_TOKEN = `
-  query StablesLatestPerToken($chainId: Int!) {
+  query StablesLatestPerToken($chainIds: [Int!]!) {
     StableSupplyDailySnapshot(
-      where: { chainId: { _eq: $chainId } }
-      distinct_on: tokenAddress
-      order_by: [{ tokenAddress: asc }, { timestamp: desc }]
+      where: { chainId: { _in: $chainIds } }
+      distinct_on: [chainId, tokenAddress]
+      order_by: [{ chainId: asc }, { tokenAddress: asc }, { timestamp: desc }]
     ) {
       id
       chainId
@@ -70,20 +71,71 @@ export const STABLES_LATEST_PER_TOKEN = `
   }
 `;
 
+export const STABLES_CUSTODY_DAILY_SNAPSHOTS = `
+  query StablesCustodyDailySnapshots(
+    $chainIds: [Int!]!
+    $limit: Int!
+    $beforeTimestamp: numeric!
+  ) {
+    StableTokenCustodyDailySnapshot(
+      where: {
+        chainId: { _in: $chainIds }
+        timestamp: { _lt: $beforeTimestamp }
+      }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      tokenAddress
+      tokenSymbol
+      source
+      tokenDecimals
+      managerAddress
+      timestamp
+      lockedSupply
+      dailyLockedAmount
+      dailyUnlockedAmount
+    }
+  }
+`;
+
+export const STABLES_LATEST_CUSTODY_PER_TOKEN = `
+  query StablesLatestCustodyPerToken($chainIds: [Int!]!) {
+    StableTokenCustodyDailySnapshot(
+      where: { chainId: { _in: $chainIds } }
+      distinct_on: [chainId, tokenAddress]
+      order_by: [{ chainId: asc }, { tokenAddress: asc }, { timestamp: desc }]
+    ) {
+      id
+      chainId
+      tokenAddress
+      tokenSymbol
+      source
+      tokenDecimals
+      managerAddress
+      timestamp
+      lockedSupply
+      dailyLockedAmount
+      dailyUnlockedAmount
+    }
+  }
+`;
+
 // Per-tx supply changes for the /stables changes table + ranked table. The
 // V3 streams (TroveOperationEvent / RedemptionEvent / LiquidationEvent) merge
 // in on the client side — those carry source-specific fields that don't
-// normalize cleanly into V2StableSupplyChangeEvent.
-export const STABLES_V2_CHANGES = `
-  query StablesV2Changes(
-    $chainId: Int!
+// normalize cleanly into StableSupplyChangeEvent.
+export const STABLES_CHANGES = `
+  query StablesChanges(
+    $chainIds: [Int!]!
     $sinceTimestamp: numeric!
     $limit: Int!
     $offset: Int!
   ) {
-    V2StableSupplyChangeEvent(
+    StableSupplyChangeEvent(
       where: {
-        chainId: { _eq: $chainId }
+        chainId: { _in: $chainIds }
         blockTimestamp: { _gte: $sinceTimestamp }
       }
       order_by: [{ blockTimestamp: desc }, { id: desc }]

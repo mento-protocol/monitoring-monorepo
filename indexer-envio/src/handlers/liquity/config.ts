@@ -42,7 +42,7 @@ export type LiquityMarketConfig = {
 type Sym = "GBPm" | "CHFm" | "JPYm";
 // Re-export under the historical name so this file's existing call sites stay
 // readable. The canonical source is `V3_HUB_USDM_ADDRESS` in `constants.ts`
-// — also imported by `handlers/v2Stables/config.ts` so the two hardcodes can
+// — also imported by `handlers/stables/config.ts` so the two hardcodes can
 // never drift.
 const V3_COLL_TOKEN_USDM = V3_HUB_USDM_ADDRESS;
 

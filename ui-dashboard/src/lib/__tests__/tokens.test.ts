@@ -292,6 +292,7 @@ describe("buildOracleRateMap", () => {
     ];
     const rates = buildOracleRateMap(pools, mainnet);
     expect(rates.get("KESm")).toBeCloseTo(0.5, 8);
+    expect(rates.get("42220:KESm")).toBeCloseTo(0.5, 8);
     expect(rates.has("USDm")).toBe(false);
   });
 
@@ -430,6 +431,8 @@ describe("buildOracleRateMap", () => {
     const rates = buildOracleRateMap(pools, mainnet);
     expect(rates.get("EURm")).toBeCloseTo(0.5, 8);
     expect(rates.get("cEUR")).toBeCloseTo(0.5, 8);
+    expect(rates.get("42220:EURm")).toBeCloseTo(0.5, 8);
+    expect(rates.get("42220:cEUR")).toBeCloseTo(0.5, 8);
   });
 
   it("includes pool when oracleOk is undefined (documents current behavior)", () => {
