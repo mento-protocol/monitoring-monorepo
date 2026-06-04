@@ -65,6 +65,19 @@ function classifyBrokerEntryPoint(chainId: number, txTo: string): string {
   return classifyAggregator(chainId, txTo);
 }
 
+function appendUnique(values: readonly string[], value: string): string[] {
+  return values.includes(value) ? [...values] : [...values, value];
+}
+
+function subtractCount(value: number, delta: number): number {
+  return Math.max(0, value - delta);
+}
+
+function subtractWei(value: bigint, delta: bigint): bigint {
+  const next = value - delta;
+  return next > 0n ? next : 0n;
+}
+
 async function maybeHealBrokerCallerPool(
   context: EvmOnEventContext,
   pool: Pool | undefined,
@@ -84,6 +97,288 @@ async function preloadBrokerSwapInputs(args: {
     args.context.BrokerExchangeDailySnapshot.get(args.exchangeSnapshotId),
     args.context.Pool.get(args.brokerCallerPoolId),
   ]);
+}
+
+const EMPTY_BROKER_TRADER_DAY = {
+  swapCount: 0,
+  aggregatorKeys: [] as readonly string[],
+  volumeUsdWei: 0n,
+  isProtocolActor: false,
+};
+
+const EMPTY_BROKER_AGG_DAY = {
+  swapCount: 0,
+  swapCountIncludingProtocolActors: 0,
+  uniqueTraders: 0,
+  uniqueTradersIncludingProtocolActors: 0,
+  volumeUsdWei: 0n,
+  volumeUsdWeiIncludingProtocolActors: 0n,
+};
+
+const EMPTY_BROKER_AGG_CORRECTION = {
+  swapCount: 0,
+  uniqueTraders: 0,
+  volumeUsdWei: 0n,
+};
+
+type BrokerTraderDayState = {
+  callerDayBecameProtocolActor: boolean;
+  callerDayIsProtocolActor: boolean;
+  aggregatorKeys: readonly string[];
+};
+
+export type BrokerAggregatorMarkerLike = {
+  swapCount?: number;
+  volumeUsdWei?: bigint;
+  isProtocolActor?: boolean;
+};
+
+export type BrokerAggregatorCorrection = {
+  swapCount: number;
+  uniqueTraders: number;
+  volumeUsdWei: bigint;
+};
+
+type BrokerTraderDayLike = {
+  swapCount: number;
+  aggregatorKeys?: readonly string[];
+  volumeUsdWei: bigint;
+  isProtocolActor: boolean;
+};
+
+type BrokerAggregatorDayLike = {
+  swapCount: number;
+  swapCountIncludingProtocolActors?: number;
+  uniqueTraders: number;
+  uniqueTradersIncludingProtocolActors?: number;
+  volumeUsdWei: bigint;
+  volumeUsdWeiIncludingProtocolActors?: bigint;
+};
+
+function correctionFromBrokerAggregatorMarker(
+  marker: BrokerAggregatorMarkerLike | undefined,
+): BrokerAggregatorCorrection | undefined {
+  if (!marker || marker.isProtocolActor !== false) return undefined;
+  if (
+    typeof marker.swapCount !== "number" ||
+    typeof marker.volumeUsdWei !== "bigint"
+  ) {
+    return undefined;
+  }
+  return {
+    swapCount: marker.swapCount,
+    uniqueTraders: 1,
+    volumeUsdWei: marker.volumeUsdWei,
+  };
+}
+
+export const _testHooks = {
+  correctionFromBrokerAggregatorMarker,
+};
+
+async function collectBrokerAggregatorPrimaryCorrections(
+  context: EvmOnEventContext,
+  args: {
+    chainId: number;
+    caller: string;
+    dayTs: bigint;
+    aggregator: string;
+    aggregatorKeys: readonly string[];
+    existingAggCallerMarker: BrokerAggregatorMarkerLike | undefined;
+  },
+): Promise<Map<string, BrokerAggregatorCorrection>> {
+  const corrections = new Map<string, BrokerAggregatorCorrection>();
+  const touchedMarkers = await Promise.all(
+    args.aggregatorKeys.map(async (touchedAggregator) => {
+      const marker =
+        touchedAggregator === args.aggregator
+          ? args.existingAggCallerMarker
+          : await context.BrokerAggregatorTraderDayMarker.get(
+              `${args.chainId}-${touchedAggregator}-${args.caller}-${args.dayTs}`,
+            );
+      return { touchedAggregator, marker };
+    }),
+  );
+
+  for (const { touchedAggregator, marker } of touchedMarkers) {
+    const correction = correctionFromBrokerAggregatorMarker(marker);
+    if (!correction) continue;
+    corrections.set(touchedAggregator, correction);
+  }
+
+  const touchedAggDays = await Promise.all(
+    Array.from(corrections, async ([touchedAggregator]) => {
+      if (touchedAggregator === args.aggregator) return { touchedAggregator };
+      const touchedAggDay = await context.BrokerAggregatorDailySnapshot.get(
+        `${args.chainId}-${touchedAggregator}-${args.dayTs}`,
+      );
+      return { touchedAggregator, touchedAggDay };
+    }),
+  );
+
+  for (const { touchedAggregator, touchedAggDay } of touchedAggDays) {
+    if (touchedAggregator === args.aggregator) continue;
+    if (!touchedAggDay) continue;
+    const correction = corrections.get(touchedAggregator);
+    if (!correction) continue;
+    context.BrokerAggregatorDailySnapshot.set({
+      ...touchedAggDay,
+      swapCount: subtractCount(touchedAggDay.swapCount, correction.swapCount),
+      uniqueTraders: subtractCount(
+        touchedAggDay.uniqueTraders,
+        correction.uniqueTraders,
+      ),
+      volumeUsdWei: subtractWei(
+        touchedAggDay.volumeUsdWei,
+        correction.volumeUsdWei,
+      ),
+    });
+  }
+
+  return corrections;
+}
+
+function upsertBrokerTraderDailySnapshot(
+  context: EvmOnEventContext,
+  args: {
+    chainId: number;
+    caller: string;
+    callerDayId: string;
+    dayTs: bigint;
+    blockTimestamp: bigint;
+    volumeUsdWei: bigint;
+    aggregator: string;
+    callerIsProtocolActor: boolean;
+    existingCallerDay: BrokerTraderDayLike | undefined;
+  },
+): BrokerTraderDayState {
+  const prevCallerDay = args.existingCallerDay ?? EMPTY_BROKER_TRADER_DAY;
+  const callerDayIsProtocolActor =
+    prevCallerDay.isProtocolActor || args.callerIsProtocolActor;
+  const callerDayBecameProtocolActor =
+    args.existingCallerDay !== undefined &&
+    !prevCallerDay.isProtocolActor &&
+    args.callerIsProtocolActor;
+  const aggregatorKeys = appendUnique(
+    prevCallerDay.aggregatorKeys ?? [],
+    args.aggregator,
+  );
+
+  context.BrokerTraderDailySnapshot.set({
+    id: args.callerDayId,
+    chainId: args.chainId,
+    caller: args.caller,
+    timestamp: args.dayTs,
+    swapCount: prevCallerDay.swapCount + 1,
+    aggregatorKeys,
+    volumeUsdWei: prevCallerDay.volumeUsdWei + args.volumeUsdWei,
+    isProtocolActor: callerDayIsProtocolActor,
+    lastSeenTimestamp: args.blockTimestamp,
+  });
+
+  return {
+    callerDayBecameProtocolActor,
+    callerDayIsProtocolActor,
+    aggregatorKeys,
+  };
+}
+
+async function upsertBrokerAggregatorDailySnapshot(
+  context: EvmOnEventContext,
+  args: {
+    chainId: number;
+    caller: string;
+    txTo: string;
+    dayTs: bigint;
+    volumeUsdWei: bigint;
+    aggregator: string;
+    aggDayId: string;
+    aggCallerFirstTouch: boolean;
+    existingAggDay: BrokerAggregatorDayLike | undefined;
+    existingAggCallerMarker: BrokerAggregatorMarkerLike | undefined;
+    traderDayState: BrokerTraderDayState;
+  },
+): Promise<void> {
+  const corrections = args.traderDayState.callerDayBecameProtocolActor
+    ? await collectBrokerAggregatorPrimaryCorrections(context, {
+        chainId: args.chainId,
+        caller: args.caller,
+        dayTs: args.dayTs,
+        aggregator: args.aggregator,
+        aggregatorKeys: args.traderDayState.aggregatorKeys,
+        existingAggCallerMarker: args.existingAggCallerMarker,
+      })
+    : new Map<string, BrokerAggregatorCorrection>();
+  const prevAggDay = args.existingAggDay ?? EMPTY_BROKER_AGG_DAY;
+  const correction =
+    corrections.get(args.aggregator) ?? EMPTY_BROKER_AGG_CORRECTION;
+  const primarySwapBase = subtractCount(
+    prevAggDay.swapCount,
+    correction.swapCount,
+  );
+  const primaryUniqueBase = subtractCount(
+    prevAggDay.uniqueTraders,
+    correction.uniqueTraders,
+  );
+  const primaryVolumeBase = subtractWei(
+    prevAggDay.volumeUsdWei,
+    correction.volumeUsdWei,
+  );
+  const prevSwapCountIncludingProtocolActors =
+    prevAggDay.swapCountIncludingProtocolActors ?? prevAggDay.swapCount;
+  const prevUniqueTradersIncludingProtocolActors =
+    prevAggDay.uniqueTradersIncludingProtocolActors ?? prevAggDay.uniqueTraders;
+  const prevVolumeUsdWeiIncludingProtocolActors =
+    prevAggDay.volumeUsdWeiIncludingProtocolActors ?? prevAggDay.volumeUsdWei;
+  const callerDayIsProtocolActor = args.traderDayState.callerDayIsProtocolActor;
+
+  context.BrokerAggregatorDailySnapshot.set({
+    id: args.aggDayId,
+    chainId: args.chainId,
+    aggregator: args.aggregator,
+    lastSeenAggregatorAddress: args.txTo,
+    timestamp: args.dayTs,
+    swapCount: primarySwapBase + (callerDayIsProtocolActor ? 0 : 1),
+    swapCountIncludingProtocolActors: prevSwapCountIncludingProtocolActors + 1,
+    uniqueTraders:
+      primaryUniqueBase +
+      (!callerDayIsProtocolActor && args.aggCallerFirstTouch ? 1 : 0),
+    uniqueTradersIncludingProtocolActors:
+      prevUniqueTradersIncludingProtocolActors +
+      (args.aggCallerFirstTouch ? 1 : 0),
+    volumeUsdWei:
+      primaryVolumeBase + (callerDayIsProtocolActor ? 0n : args.volumeUsdWei),
+    volumeUsdWeiIncludingProtocolActors:
+      prevVolumeUsdWeiIncludingProtocolActors + args.volumeUsdWei,
+  });
+}
+
+function upsertBrokerAggregatorTraderDayMarker(
+  context: EvmOnEventContext,
+  args: {
+    chainId: number;
+    caller: string;
+    dayTs: bigint;
+    volumeUsdWei: bigint;
+    aggregator: string;
+    aggCallerMarkerId: string;
+    existingAggCallerMarker: BrokerAggregatorMarkerLike | undefined;
+    callerDayIsProtocolActor: boolean;
+  },
+): void {
+  context.BrokerAggregatorTraderDayMarker.set({
+    id: args.aggCallerMarkerId,
+    chainId: args.chainId,
+    aggregator: args.aggregator,
+    caller: args.caller,
+    timestamp: args.dayTs,
+    swapCount: (args.existingAggCallerMarker?.swapCount ?? 0) + 1,
+    volumeUsdWei:
+      (args.existingAggCallerMarker?.volumeUsdWei ?? 0n) + args.volumeUsdWei,
+    isProtocolActor:
+      (args.existingAggCallerMarker?.isProtocolActor ?? false) ||
+      args.callerDayIsProtocolActor,
+  });
 }
 
 async function writeBrokerProducerRollups(args: {
@@ -123,23 +418,20 @@ async function writeBrokerProducerRollups(args: {
     context.BrokerAggregatorDailySnapshot.get(aggDayId),
     context.BrokerTraderRouterDayMarker.get(traderRouterMarkerId),
   ]);
-  context.BrokerTraderDailySnapshot.set({
-    id: callerDayId,
+
+  const traderDayState = upsertBrokerTraderDailySnapshot(context, {
     chainId,
     caller,
-    timestamp: dayTs,
-    swapCount: (existingCallerDay?.swapCount ?? 0) + 1,
-    volumeUsdWei: (existingCallerDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
-    isProtocolActor: existingCallerDay
-      ? existingCallerDay.isProtocolActor || callerIsProtocolActor
-      : callerIsProtocolActor,
-    lastSeenTimestamp: blockTimestamp,
+    callerDayId,
+    dayTs,
+    blockTimestamp,
+    volumeUsdWei,
+    aggregator,
+    callerIsProtocolActor,
+    existingCallerDay,
   });
 
   const aggCallerFirstTouch = existingAggCallerMarker === undefined;
-  if (aggCallerFirstTouch) {
-    context.BrokerAggregatorTraderDayMarker.set({ id: aggCallerMarkerId });
-  }
   if (existingTraderRouterMarker === undefined) {
     context.BrokerTraderRouterDayMarker.set({
       id: traderRouterMarkerId,
@@ -150,16 +442,30 @@ async function writeBrokerProducerRollups(args: {
       timestamp: dayTs,
     });
   }
-  context.BrokerAggregatorDailySnapshot.set({
-    id: aggDayId,
+
+  await upsertBrokerAggregatorDailySnapshot(context, {
     chainId,
+    caller,
+    txTo,
+    dayTs,
+    volumeUsdWei,
     aggregator,
-    lastSeenAggregatorAddress: txTo,
-    timestamp: dayTs,
-    swapCount: (existingAggDay?.swapCount ?? 0) + 1,
-    uniqueTraders:
-      (existingAggDay?.uniqueTraders ?? 0) + (aggCallerFirstTouch ? 1 : 0),
-    volumeUsdWei: (existingAggDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
+    aggDayId,
+    aggCallerFirstTouch,
+    existingAggDay,
+    existingAggCallerMarker,
+    traderDayState,
+  });
+
+  upsertBrokerAggregatorTraderDayMarker(context, {
+    chainId,
+    caller,
+    dayTs,
+    volumeUsdWei,
+    aggregator,
+    aggCallerMarkerId,
+    existingAggCallerMarker,
+    callerDayIsProtocolActor: traderDayState.callerDayIsProtocolActor,
   });
 }
 

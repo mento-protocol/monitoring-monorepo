@@ -379,6 +379,29 @@ const stableChanges = [
   ),
 ];
 
+function volumeDay() {
+  return Math.floor(nowSeconds() / DAY_SECONDS) * DAY_SECONDS;
+}
+
+function brokerAggregatorDailySnapshots() {
+  const timestamp = String(volumeDay());
+  return [
+    {
+      id: `42220-squid-${timestamp}`,
+      chainId: 42220,
+      aggregator: "squid",
+      lastSeenAggregatorAddress: "0xce16f69375520ab01377ce7b88f5ba8c48f8d666",
+      timestamp,
+      swapCount: 0,
+      swapCountIncludingProtocolActors: 1,
+      uniqueTraders: 0,
+      uniqueTradersIncludingProtocolActors: 1,
+      volumeUsdWei: "0",
+      volumeUsdWeiIncludingProtocolActors: "1000000000000000000000",
+    },
+  ];
+}
+
 function unhandledOperation(op) {
   const message = `Unhandled fixture GraphQL operation: ${op}`;
   process.stderr.write(`${message}\n`);
@@ -399,6 +422,51 @@ function rowsByPoolIds(poolIds) {
 function handleGraphQL({ query, variables = {} }) {
   const op = operationName(query ?? "");
   switch (op) {
+    case "PoolsForVolume":
+      return {
+        Pool: pools.map(({ id, chainId, token0, token1 }) => ({
+          id,
+          chainId,
+          token0,
+          token1,
+        })),
+      };
+    case "TraderDailyTop":
+      return { TraderDailySnapshot: [] };
+    case "PoolDailyVolume":
+      return { PoolDailyVolumeSnapshot: [] };
+    case "AggregatorDailyTop":
+    case "AggregatorDailyTopIncludingProtocolActors":
+      return { AggregatorDailySnapshot: [] };
+    case "BrokerTraderDailyTop":
+      return { BrokerTraderDailySnapshot: [] };
+    case "BrokerAggregatorDailyTop":
+    case "BrokerAggregatorDailyTopIncludingProtocolActors":
+      return {
+        BrokerAggregatorDailySnapshot: brokerAggregatorDailySnapshots(),
+      };
+    case "VolumeWindowLatest":
+      return { volumeWindowSnapshots: [] };
+    case "BrokerVolumeWindowLatest":
+      return { brokerVolumeWindowSnapshots: [] };
+    case "VolumeWindowFirstDayLatest":
+      return { volumeWindowFirstDaySnapshots: [] };
+    case "BrokerVolumeWindowFirstDayLatest":
+      return { brokerVolumeWindowFirstDaySnapshots: [] };
+    case "VolumeWindowTradersLatest":
+      return { volumeWindowTraderSnapshots: [] };
+    case "VolumePartialOverlapTraders":
+      return { volumePartialOverlapTraders: [] };
+    case "BrokerVolumePartialOverlapTraders":
+      return { brokerVolumePartialOverlapTraders: [] };
+    case "VolumeTodayTraders":
+      return { volumeTodayTraders: [] };
+    case "BrokerVolumeTodayTraders":
+      return { brokerVolumeTodayTraders: [] };
+    case "VolumeYesterdayTraders":
+      return { volumeYesterdayTraders: [] };
+    case "BrokerVolumeYesterdayTraders":
+      return { brokerVolumeYesterdayTraders: [] };
     case "AllPoolsWithHealth":
       return { Pool: poolRowsForChain(variables.chainId) };
     case "OracleRates":

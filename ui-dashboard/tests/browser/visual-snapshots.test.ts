@@ -264,6 +264,7 @@ test.describe("visual snapshots", () => {
       "AggregatorDailyTopIncludingProtocolActors",
       "BrokerTraderDailyTop",
       "BrokerAggregatorDailyTop",
+      "BrokerAggregatorDailyTopIncludingProtocolActors",
       "VolumeWindowLatest",
       "BrokerVolumeWindowLatest",
       "VolumeWindowFirstDayLatest",

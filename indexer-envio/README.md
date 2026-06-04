@@ -56,11 +56,11 @@ This prevents collisions when the same contract address is deployed on multiple 
 | `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                      |
 | `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness              |
 
-`config/protocolActors.json` contains manual protocol-controlled swap
-entry-point overrides for the dashboard volume filter. Pool rebalancers are
-classified automatically from `Pool.rebalancerAddress`; add manual entries only
-for protocol actors that cannot be derived from pool state or the normal
-contract/NTT address metadata.
+`config/protocolActors.json` contains manual protocol-controlled caller and
+entry-point overrides for the dashboard volume filter. Pool liquidity-strategy
+contracts are classified automatically from `Pool.rebalancerAddress`; add
+manual entries only for protocol actors that cannot be derived from pool state
+or the normal contract/NTT address metadata.
 
 Deploy branch: `envio` → triggers hosted reindex on push.
 

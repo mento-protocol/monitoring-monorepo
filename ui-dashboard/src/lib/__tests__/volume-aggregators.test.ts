@@ -8,7 +8,10 @@ import {
 import {
   AGGREGATOR_DAILY_TOP,
   AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS,
+  BROKER_AGGREGATOR_DAILY_TOP,
+  BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS,
   aggregatorDailyTopQuery,
+  brokerAggregatorDailyTopQuery,
 } from "../queries/volume";
 
 const USD = (n: number) =>
@@ -120,6 +123,23 @@ describe("aggregatorDailyTopQuery", () => {
       AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS,
     );
     expect(aggregatorDailyTopQuery(true)).toContain(
+      "order_by: [{ volumeUsdWeiIncludingProtocolActors: desc }, { id: asc }]",
+    );
+  });
+});
+
+describe("brokerAggregatorDailyTopQuery", () => {
+  it("orders by the displayed broker aggregator volume for the active actor filter", () => {
+    expect(brokerAggregatorDailyTopQuery(false)).toBe(
+      BROKER_AGGREGATOR_DAILY_TOP,
+    );
+    expect(brokerAggregatorDailyTopQuery(false)).toContain(
+      "order_by: [{ volumeUsdWei: desc }, { id: asc }]",
+    );
+    expect(brokerAggregatorDailyTopQuery(true)).toBe(
+      BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS,
+    );
+    expect(brokerAggregatorDailyTopQuery(true)).toContain(
       "order_by: [{ volumeUsdWeiIncludingProtocolActors: desc }, { id: asc }]",
     );
   });

@@ -908,7 +908,10 @@ function brokerAggregator(
     id: `${partial.chainId}-${partial.aggregator}-${partial.timestamp}`,
     lastSeenAggregatorAddress: "0x0000000000000000000000000000000000000000",
     swapCount: 1,
+    swapCountIncludingProtocolActors: 1,
     uniqueTraders: 1,
+    uniqueTradersIncludingProtocolActors: 1,
+    volumeUsdWeiIncludingProtocolActors: partial.volumeUsdWei,
     ...partial,
   };
 }

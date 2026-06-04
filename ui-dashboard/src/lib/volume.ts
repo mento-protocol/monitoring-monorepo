@@ -16,7 +16,7 @@ import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { parseWei, weiToUsd as formatWeiToUsd } from "@/lib/format";
 import {
   aggregateAggregatorsByWindow,
-  type AggregatorDailyRowBase,
+  type AggregatorDailyRow,
   type AggregatorWindowRow,
 } from "@/lib/volume-aggregators";
 import {
@@ -412,9 +412,7 @@ export type BrokerTraderWindowRow = {
   lastSeenTimestamp: number;
 };
 
-export type BrokerAggregatorDailyRow = AggregatorDailyRowBase & {
-  id: string;
-};
+export type BrokerAggregatorDailyRow = AggregatorDailyRow;
 export type BrokerAggregatorWindowRow = AggregatorWindowRow;
 
 /** Per-(trader, tx.to, day) row returned by `BrokerTraderRouterDayMarker`. */

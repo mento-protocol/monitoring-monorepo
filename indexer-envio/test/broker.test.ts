@@ -8,6 +8,7 @@ import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
 } from "../src/EventHandlers.ts";
+import { _testHooks as brokerTestHooks } from "../src/handlers/broker.ts";
 import { dayBucket, makePoolId } from "../src/helpers.ts";
 import { getContractAddress } from "../src/contractAddresses.ts";
 
@@ -48,6 +49,8 @@ const BROKER_PROXY = "0x777A8255cA72412f0d706dc03C9D1987306B4CaD";
 // brokerCaller (Router direct-to-Broker vs VirtualPool).
 const V3_ROUTER = "0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6";
 const OPEN_LIQUIDITY_STRATEGY = "0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f";
+const SQUID_ROUTER = "0xce16f69375520ab01377ce7b88f5ba8c48f8d666";
+const MENTO_REBALANCER_EOA = "0xaa8299fc6a685b5f9ce9bda8d0b3ea3d54731976";
 const VIRTUAL_POOL_ADDR =
   "0x00000000000000000000000000000000000000aa".toLowerCase();
 
@@ -504,6 +507,147 @@ describe("Broker.Swap handler", () => {
     assert.isOk(row, "BrokerTraderDailySnapshot row missing");
     assert.equal(row!.caller, NORMAL_EOA.toLowerCase());
     assert.equal(row!.isProtocolActor, true);
+  });
+
+  it("flags v2 signer rows as protocol actor when caller is the manual Mento rebalancer", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      txTo: SQUID_ROUTER,
+      brokerCaller: SQUID_ROUTER,
+      txFrom: MENTO_REBALANCER_EOA,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const id = `${CHAIN_CELO}-${MENTO_REBALANCER_EOA}-${dayTs}`;
+    const row = mockDb.entities.BrokerTraderDailySnapshot.get(id) as
+      | { caller: string; isProtocolActor: boolean; aggregatorKeys: string[] }
+      | undefined;
+    assert.isOk(row, "BrokerTraderDailySnapshot row missing");
+    assert.equal(row!.caller, MENTO_REBALANCER_EOA);
+    assert.equal(row!.isProtocolActor, true);
+    assert.deepEqual(row!.aggregatorKeys, ["squid"]);
+
+    const aggRow = mockDb.entities.BrokerAggregatorDailySnapshot.get(
+      `${CHAIN_CELO}-squid-${dayTs}`,
+    ) as
+      | {
+          swapCount: number;
+          swapCountIncludingProtocolActors: number;
+          uniqueTraders: number;
+          uniqueTradersIncludingProtocolActors: number;
+          volumeUsdWei: bigint;
+          volumeUsdWeiIncludingProtocolActors: bigint;
+        }
+      | undefined;
+    assert.isOk(aggRow, "BrokerAggregatorDailySnapshot row missing");
+    assert.equal(aggRow!.swapCount, 0);
+    assert.equal(aggRow!.swapCountIncludingProtocolActors, 1);
+    assert.equal(aggRow!.uniqueTraders, 0);
+    assert.equal(aggRow!.uniqueTradersIncludingProtocolActors, 1);
+    assert.equal(aggRow!.volumeUsdWei, 0n);
+    assert.equal(
+      aggRow!.volumeUsdWeiIncludingProtocolActors,
+      1_000n * 10n ** 18n,
+    );
+  });
+
+  it("subtracts prior v2 aggregator primary volume when a caller day flips protocol actor", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      txTo: SQUID_ROUTER,
+      brokerCaller: SQUID_ROUTER,
+    });
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 101,
+      blockTimestamp: 1_700_000_500,
+      logIndex: 0,
+      txTo: OPEN_LIQUIDITY_STRATEGY,
+      brokerCaller: OPEN_LIQUIDITY_STRATEGY,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const traderRow = mockDb.entities.BrokerTraderDailySnapshot.get(
+      `${CHAIN_CELO}-${SIGNER_EOA.toLowerCase()}-${dayTs}`,
+    ) as { isProtocolActor: boolean; aggregatorKeys: string[] } | undefined;
+    assert.isOk(traderRow, "BrokerTraderDailySnapshot row missing");
+    assert.equal(traderRow!.isProtocolActor, true);
+    assert.deepEqual(traderRow!.aggregatorKeys, ["squid", "protocol"]);
+
+    const squid = mockDb.entities.BrokerAggregatorDailySnapshot.get(
+      `${CHAIN_CELO}-squid-${dayTs}`,
+    ) as
+      | {
+          swapCount: number;
+          swapCountIncludingProtocolActors: number;
+          uniqueTraders: number;
+          uniqueTradersIncludingProtocolActors: number;
+          volumeUsdWei: bigint;
+          volumeUsdWeiIncludingProtocolActors: bigint;
+        }
+      | undefined;
+    assert.isOk(squid, "Squid BrokerAggregatorDailySnapshot row missing");
+    assert.equal(squid!.swapCount, 0);
+    assert.equal(squid!.swapCountIncludingProtocolActors, 1);
+    assert.equal(squid!.uniqueTraders, 0);
+    assert.equal(squid!.uniqueTradersIncludingProtocolActors, 1);
+    assert.equal(squid!.volumeUsdWei, 0n);
+    assert.equal(
+      squid!.volumeUsdWeiIncludingProtocolActors,
+      1_000n * 10n ** 18n,
+    );
+
+    const protocol = mockDb.entities.BrokerAggregatorDailySnapshot.get(
+      `${CHAIN_CELO}-protocol-${dayTs}`,
+    ) as
+      | {
+          swapCount: number;
+          swapCountIncludingProtocolActors: number;
+          uniqueTraders: number;
+          uniqueTradersIncludingProtocolActors: number;
+          volumeUsdWei: bigint;
+          volumeUsdWeiIncludingProtocolActors: bigint;
+        }
+      | undefined;
+    assert.isOk(protocol, "Protocol BrokerAggregatorDailySnapshot row missing");
+    assert.equal(protocol!.swapCount, 0);
+    assert.equal(protocol!.swapCountIncludingProtocolActors, 1);
+    assert.equal(protocol!.uniqueTraders, 0);
+    assert.equal(protocol!.uniqueTradersIncludingProtocolActors, 1);
+    assert.equal(protocol!.volumeUsdWei, 0n);
+    assert.equal(
+      protocol!.volumeUsdWeiIncludingProtocolActors,
+      1_000n * 10n ** 18n,
+    );
+  });
+
+  it("ignores old v2 aggregator markers that lack primary contribution fields", () => {
+    assert.isUndefined(
+      brokerTestHooks.correctionFromBrokerAggregatorMarker({}),
+    );
+    assert.isUndefined(
+      brokerTestHooks.correctionFromBrokerAggregatorMarker({
+        swapCount: 1,
+        isProtocolActor: false,
+      }),
+    );
+    assert.deepEqual(
+      brokerTestHooks.correctionFromBrokerAggregatorMarker({
+        swapCount: 2,
+        volumeUsdWei: 3_000n,
+        isProtocolActor: false,
+      }),
+      {
+        swapCount: 2,
+        uniqueTraders: 1,
+        volumeUsdWei: 3_000n,
+      },
+    );
   });
 
   it("does NOT write trader/aggregator rollups when routedViaV3Router=true (avoids double-count vs v3)", async () => {

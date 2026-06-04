@@ -232,8 +232,11 @@ const BrokerAggregatorDailyRowSchema = z.object({
   lastSeenAggregatorAddress: z.string(),
   timestamp: z.string(),
   swapCount: z.number(),
+  swapCountIncludingProtocolActors: z.number(),
   uniqueTraders: z.number(),
+  uniqueTradersIncludingProtocolActors: z.number(),
   volumeUsdWei: z.string(),
+  volumeUsdWeiIncludingProtocolActors: z.string(),
 });
 
 export const BrokerAggregatorDailyTopSchema = z.object({

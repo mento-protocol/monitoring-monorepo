@@ -5,11 +5,11 @@ import { useGQL } from "@/lib/graphql";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { formatUSD } from "@/lib/format";
 import {
-  BROKER_AGGREGATOR_DAILY_TOP,
   BROKER_TRADER_DAILY_TOP,
   POOLS_FOR_VOLUME,
   TRADER_DAILY_TOP,
   aggregatorDailyTopQuery,
+  brokerAggregatorDailyTopQuery,
 } from "@/lib/queries/volume";
 import {
   AggregatorDailyTopSchema,
@@ -201,7 +201,9 @@ function useVolumeQueries({
   const v2AggregatorsResult = useGQL<{
     BrokerAggregatorDailySnapshot: BrokerAggregatorDailyRow[];
   }>(
-    venue === "v2" ? BROKER_AGGREGATOR_DAILY_TOP : null,
+    venue === "v2"
+      ? brokerAggregatorDailyTopQuery(includeProtocolActors)
+      : null,
     { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
     { timeoutMs: 8_000, schema: BrokerAggregatorDailyTopSchema },
   );
