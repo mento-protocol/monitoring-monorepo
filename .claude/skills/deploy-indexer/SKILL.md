@@ -196,6 +196,20 @@ matching dashboard build is live. It also makes the rollback story muddier.
 
 ## Phase 3 — Promote
 
+Before any promotion path, classify rollout compatibility against the deployed
+dashboard(s), not just the source branch:
+
+- **Additive fields/entities/data only:** continue. Promote after merge as soon
+  as possible, ideally before the matching production dashboard deployment
+  serves traffic.
+- **Field/entity removals or renames consumed by old or new dashboard code:**
+  stop unless the PR or user request already documents a
+  backward-compatible/two-phase rollout, or an explicit coordinated
+  cutover/rollback plan. If that plan is absent, surface the split-brain risk
+  and ask for the rollout decision before running the promote command.
+- **Pure backfill/no schema contract change:** continue after confirming the
+  deployment is caught up; verify the affected dashboard pages after promote.
+
 Before promoting, capture the **current** prod commit so the final summary
 can print a paste-ready rollback command:
 
