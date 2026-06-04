@@ -10,7 +10,7 @@ export async function GET(): Promise<NextResponse> {
   // (revoked/offboarded Google account). Middleware already gates this path,
   // but this export dumps every label + forensic report, so it re-checks
   // in-route rather than trusting the matcher alone.
-  if (!session || session.error) {
+  if (!session || session.error === "RefreshTokenError") {
     return NextResponse.json(
       { error: "Authentication required" },
       { status: 401 },

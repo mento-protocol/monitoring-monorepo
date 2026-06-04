@@ -14,6 +14,16 @@ export const ALLOWED_DOMAIN = "@mentolabs.xyz";
 // react-doctor-disable-next-line react-doctor/no-secrets-in-client-code
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
+// Refresh probes run on session resolution (incl. edge middleware), so the
+// fetch is bounded; a hung Google endpoint must not stall protected routes.
+const GOOGLE_TOKEN_TIMEOUT_MS = 8_000;
+
+// Throttle the refresh-failure Sentry capture. During a Google outage every
+// active user's expired-token probe would otherwise emit an event; the per-user
+// 5-min back-off bounds it per session, and this caps it per warm instance.
+const REFRESH_ERROR_CAPTURE_INTERVAL_MS = 5 * 60 * 1_000;
+let lastRefreshErrorCaptureMs = 0;
+
 // Probe Google with the stored refresh token to confirm the account is still
 // active, rolling `expires_at` forward. Mutates and returns the token. Three
 // outcomes:
@@ -40,6 +50,7 @@ async function refreshGoogleAccessToken(token: JWT): Promise<JWT> {
     const response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      signal: AbortSignal.timeout(GOOGLE_TOKEN_TIMEOUT_MS),
       body: new URLSearchParams({
         client_id: process.env.AUTH_GOOGLE_ID ?? "",
         client_secret: process.env.AUTH_GOOGLE_SECRET ?? "",
@@ -72,9 +83,14 @@ async function refreshGoogleAccessToken(token: JWT): Promise<JWT> {
     delete token.error;
     return token;
   } catch (error) {
-    // Transient/network/misconfig — keep the session alive, retry in 5 min.
-    Sentry.captureException(error, { tags: { source: "nextauth-refresh" } });
-    token.expires_at = Math.floor(Date.now() / 1000) + 5 * 60;
+    // Transient/network/timeout/misconfig — keep the session alive, retry in
+    // 5 min. Throttle the Sentry capture so an outage can't flood it.
+    const now = Date.now();
+    if (now - lastRefreshErrorCaptureMs > REFRESH_ERROR_CAPTURE_INTERVAL_MS) {
+      lastRefreshErrorCaptureMs = now;
+      Sentry.captureException(error, { tags: { source: "nextauth-refresh" } });
+    }
+    token.expires_at = Math.floor(now / 1000) + 5 * 60;
     return token;
   }
 }

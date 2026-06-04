@@ -204,6 +204,19 @@ describe("jwt callback — Google re-validation", () => {
     expect(token.error).toBeUndefined();
   });
 
+  it("on sign-in with a refresh token but no expires_at, falls back to now+1h", async () => {
+    const before = nowSec();
+    const token = (await callJwt({
+      token: {},
+      account: { provider: "google", refresh_token: "rt_1" },
+      profile: { email: "alice@mentolabs.xyz" },
+    })) as JWT;
+    expect(token.refresh_token).toBe("rt_1");
+    expect(token.error).toBeUndefined();
+    expect(token.expires_at).toBeGreaterThanOrEqual(before + 3600);
+    expect(token.expires_at).toBeLessThanOrEqual(nowSec() + 3600);
+  });
+
   it("on sign-in with no refresh token, marks the session errored", async () => {
     const token = (await callJwt({
       token: {},
