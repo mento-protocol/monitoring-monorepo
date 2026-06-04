@@ -15,6 +15,10 @@ function isAddressBookPath(path: string) {
   );
 }
 
+function isIntegrationsPath(path: string) {
+  return path === "/integrations" || path.startsWith("/integrations/");
+}
+
 function isProtectedAddressLabelsApi(path: string) {
   // /backup and /restore authenticate via CRON_SECRET (or session) in
   // the route handler itself, so middleware exempts them — otherwise the
@@ -72,7 +76,7 @@ export default auth((req) => {
 
   // 2. Auth checks (protected paths only)
   const path = req.nextUrl.pathname;
-  const isProtectedPage = isAddressBookPath(path);
+  const isProtectedPage = isAddressBookPath(path) || isIntegrationsPath(path);
   const isProtectedApi = isProtectedAddressLabelsApi(path);
 
   if (isProtectedPage || isProtectedApi) {

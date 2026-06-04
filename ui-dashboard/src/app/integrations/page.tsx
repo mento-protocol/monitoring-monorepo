@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { ALLOWED_DOMAIN, getAuthSession } from "@/auth";
 import { EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import {
   getIntegrationProbeSnapshot,
@@ -6,7 +8,10 @@ import {
 } from "@/lib/integration-probes";
 import { IntegrationProbesTable } from "./_components/integration-probes-table";
 
-export const revalidate = 60;
+// Signed-in-only page (see middleware + the in-page guard below). Auth is
+// per-request, so this can't be ISR-cached — `force-dynamic` instead of the
+// previous `revalidate = 60`, matching the entities page.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Aggregator Integrations | Mento Analytics",
@@ -15,6 +20,11 @@ export const metadata: Metadata = {
 };
 
 export default async function IntegrationsPage() {
+  // Defense-in-depth: middleware already redirects unauthenticated users to
+  // /sign-in, but guard in-route too rather than trusting the matcher alone.
+  const session = await getAuthSession();
+  if (!session?.user?.email?.toLowerCase().endsWith(ALLOWED_DOMAIN)) notFound();
+
   const { snapshot, error } = await getIntegrationProbeSnapshot();
   return (
     <div className="space-y-8">
