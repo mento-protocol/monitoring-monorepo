@@ -9,6 +9,9 @@ export const ALLOWED_DOMAIN = "@mentolabs.xyz";
 
 // Google's OAuth 2.0 token endpoint, from
 // https://accounts.google.com/.well-known/openid-configuration
+// This is a public URL, not a secret — the rule's name-heuristic trips on
+// "TOKEN" in the identifier.
+// react-doctor-disable-next-line react-doctor/no-secrets-in-client-code
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
 // Probe Google with the stored refresh token to confirm the account is still
