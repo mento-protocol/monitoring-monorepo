@@ -105,6 +105,11 @@ variable "project_service_account_email" {
   default     = null
 }
 
+variable "cloudbuild_builder_dependency" {
+  description = "Opaque dependency token for the shared Cloud Build builder IAM grant."
+  type        = string
+}
+
 variable "runtime" {
   description = "Cloud Function runtime (e.g., nodejs22, nodejs20)"
   type        = string

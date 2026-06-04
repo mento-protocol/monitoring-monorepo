@@ -15,7 +15,7 @@ Use it instead of inferring ownership from directory names.
 | ----------------- | ------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
 | `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, CI WIF/IAM                                | Manual plan; human-approved local apply                           |
 | `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules + the Aegis service-health rule group, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings | PR plan; `main` apply through the `production` GitHub Environment |
-| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Function, Sentry bridge, Slack channel lifecycle, related GCP resources                                                                  | PR plan; `main` apply through the `production` GitHub Environment |
+| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources                          | PR plan; `main` apply through the `production` GitHub Environment |
 | `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                 | PR plan; `main` apply through the `production` GitHub Environment |
 
 ## Commands
@@ -104,6 +104,9 @@ Local gitignored tfvars files must follow the same ownership:
 
 - `alerts/rules/terraform.tfvars`: Grafana token, Slack bot token, and Splunk
   On-Call webhook URL.
+- `alerts/infra/terraform.tfvars`: Sentry token, Slack bot token, QuickNode
+  credentials, GitHub PAT, and Splunk On-Call API ID/key plus Slack channel
+  and usergroup IDs for the on-call announcer.
 - `aegis/terraform/terraform.tfvars`: only `grafana_service_account_token`.
 
 Verify ownership and drift with:

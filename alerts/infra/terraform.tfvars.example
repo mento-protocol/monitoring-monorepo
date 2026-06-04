@@ -35,7 +35,36 @@ sentry_slack_workspace_name = "Mento Labs"
 #   - chat:write              post messages in channels the bot is a member of
 #   - chat:write.public       post messages in any public channel without joining
 #   - usergroups:read         list usergroups + members (@eng auto-invite resolves usergroup → user IDs)
+#   - usergroups:write        replace @support-engineer membership on rotation
+#   - users:read              required by Slack together with users:read.email
+#   - users:read.email        resolve the current Splunk On-Call user's Slack account by email
 slack_bot_token = "xoxb-..."
+
+# Splunk On-Call API credentials for the support-engineer rotation announcer.
+# A read-only key is sufficient: the function calls /oncall/current and /user,
+# then posts to Slack and updates @support-engineer with the Slack bot token.
+# Leave both empty to keep the announcer disabled until the first credential
+# bootstrap; setting both values enables the Cloud Function, scheduler,
+# @support-engineer membership management, and GitHub secret sync.
+splunk_on_call_api_id  = "your-splunk-on-call-api-id"
+splunk_on_call_api_key = "your-splunk-on-call-api-key"
+
+# Optional: constrain selection when /oncall/current returns multiple teams or
+# escalation policies. Empty values preserve the original announcer behavior:
+# first team, first current schedule, first user.
+# splunk_on_call_team_slug = "mento"
+# splunk_on_call_escalation_policy_slug = "primary"
+
+# Required when the announcer is enabled: Slack channel ID for #eng.
+oncall_slack_channel_id = "C0123ABC456"
+
+# Required when the announcer is enabled: Slack usergroup ID for
+# @support-engineer. Create the usergroup in Slack once, then paste its ID here.
+oncall_support_usergroup_id = "S0123ABC456"
+
+# Optional: poll every 15 minutes by default; state dedupe means only rotations
+# post Slack messages.
+# oncall_rotation_check_schedule = "*/15 * * * *"
 
 #####################
 # Google Cloud Configuration

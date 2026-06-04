@@ -23,6 +23,7 @@ module "project_factory" {
   activate_apis = [
     "cloudfunctions.googleapis.com",
     "cloudbuild.googleapis.com",
+    "cloudscheduler.googleapis.com",
     "storage.googleapis.com",
     "logging.googleapis.com",
     "run.googleapis.com",              # Required for Cloud Functions Gen2
@@ -50,6 +51,18 @@ resource "google_service_account" "project_sa" {
   depends_on = [module.project_factory]
 }
 
+# Allow the shared Cloud Build service account to build Cloud Functions and
+# write build logs. Keep this project-level IAM grant at the root because both
+# Cloud Function modules use the same build identity.
+resource "google_project_iam_member" "cloudbuild_builder" {
+  project = local.project_id
+  role    = "roles/cloudbuild.builds.builder"
+  # checkov:skip=CKV_GCP_49:The cloudbuild builder role is required for the dedicated Cloud Functions build service account.
+  member = "serviceAccount:${google_service_account.project_sa.email}"
+
+  depends_on = [module.project_factory]
+}
+
 ###########
 # Modules #
 ###########
@@ -61,6 +74,11 @@ resource "google_service_account" "project_sa" {
 moved {
   from = module.sentry_alerts
   to   = module.sentry_bridge
+}
+
+moved {
+  from = module.onchain_event_handler.google_project_iam_member.cloudbuild_builder
+  to   = google_project_iam_member.cloudbuild_builder
 }
 
 # Create Slack channels for on-chain alerts and events.
@@ -98,6 +116,7 @@ module "onchain_event_handler" {
 
   # Project service account email (created explicitly above)
   project_service_account_email = google_service_account.project_sa.email
+  cloudbuild_builder_dependency = google_project_iam_member.cloudbuild_builder.id
 
   quicknode_signing_secret = var.quicknode_signing_secret
 
@@ -148,6 +167,88 @@ module "onchain_event_listeners" {
   depends_on = [module.onchain_event_handler]
 }
 
+#####################
+# On-call Announcer #
+#####################
+
+locals {
+  oncall_announcer_api_id_configured  = nonsensitive(var.splunk_on_call_api_id) != ""
+  oncall_announcer_api_key_configured = nonsensitive(var.splunk_on_call_api_key) != ""
+  oncall_announcer_enabled = (
+    local.oncall_announcer_api_id_configured
+    && local.oncall_announcer_api_key_configured
+  )
+  oncall_announcer_partially_configured = (
+    local.oncall_announcer_api_id_configured
+    != local.oncall_announcer_api_key_configured
+  )
+  oncall_announcer_missing_channel_id = (
+    local.oncall_announcer_enabled
+    && var.oncall_slack_channel_id == ""
+  )
+  oncall_announcer_missing_usergroup_id = (
+    local.oncall_announcer_enabled
+    && var.oncall_support_usergroup_id == ""
+  )
+  oncall_announcer_invalid_config = (
+    local.oncall_announcer_partially_configured
+    || local.oncall_announcer_missing_channel_id
+    || local.oncall_announcer_missing_usergroup_id
+  )
+  oncall_slack_channel_id = var.oncall_slack_channel_id
+}
+
+resource "terraform_data" "oncall_announcer_config_guard" {
+  count = local.oncall_announcer_invalid_config ? 1 : 0
+
+  input = "invalid"
+
+  lifecycle {
+    precondition {
+      condition     = !local.oncall_announcer_invalid_config
+      error_message = "Set both splunk_on_call_api_id and splunk_on_call_api_key, or leave both empty to keep the on-call announcer disabled. When enabled, set oncall_slack_channel_id and oncall_support_usergroup_id explicitly."
+    }
+  }
+}
+
+locals {
+  support_engineer_usergroup_id = (
+    !local.oncall_announcer_enabled
+    ? ""
+    : var.oncall_support_usergroup_id
+  )
+}
+
+module "oncall_announcer" {
+  count = local.oncall_announcer_enabled ? 1 : 0
+
+  source = "./oncall-announcer"
+
+  project_id                    = local.project_id
+  region                        = var.region
+  common_labels                 = local.common_labels
+  project_service_account_email = google_service_account.project_sa.email
+  cloudbuild_builder_dependency = google_project_iam_member.cloudbuild_builder.id
+
+  announce_on_first_run                 = var.oncall_announce_on_first_run
+  schedule                              = var.oncall_rotation_check_schedule
+  slack_bot_token                       = var.slack_bot_token
+  slack_channel_id                      = local.oncall_slack_channel_id
+  slack_support_usergroup_id            = local.support_engineer_usergroup_id
+  splunk_on_call_api_base_url           = var.splunk_on_call_api_base_url
+  splunk_on_call_api_id                 = var.splunk_on_call_api_id
+  splunk_on_call_api_key                = var.splunk_on_call_api_key
+  splunk_on_call_escalation_policy_slug = var.splunk_on_call_escalation_policy_slug
+  splunk_on_call_team_slug              = var.splunk_on_call_team_slug
+  support_issues_url                    = var.oncall_support_issues_url
+
+  depends_on = [
+    module.project_factory,
+    terraform_data.oncall_announcer_config_guard,
+    google_service_account.project_sa
+  ]
+}
+
 #####################################################################
 # GitHub Actions secrets — TF_VAR_* values for the alerts-infra
 # workflow's plan/apply jobs (.github/workflows/alerts-infra.yml).
@@ -177,7 +278,7 @@ locals {
   # from a separate map keyed by the same names. Splitting these keeps the
   # iteration surface non-sensitive while the actual secret values flow
   # only through the resource's `value` field.
-  alerts_infra_ci_secret_names = toset([
+  alerts_infra_ci_base_secret_names = toset([
     "TF_VAR_SENTRY_AUTH_TOKEN",
     "TF_VAR_BILLING_ACCOUNT",
     "TF_VAR_QUICKNODE_API_KEY",
@@ -201,14 +302,28 @@ locals {
     # new one fully propagates).
     "TF_VAR_GITHUB_TOKEN",
   ])
+  alerts_infra_ci_oncall_secret_names = local.oncall_announcer_enabled ? toset([
+    "TF_VAR_ONCALL_SLACK_CHANNEL_ID",
+    "TF_VAR_ONCALL_SUPPORT_USERGROUP_ID",
+    "TF_VAR_SPLUNK_ON_CALL_API_ID",
+    "TF_VAR_SPLUNK_ON_CALL_API_KEY",
+  ]) : toset([])
+  alerts_infra_ci_secret_names = setunion(
+    local.alerts_infra_ci_base_secret_names,
+    local.alerts_infra_ci_oncall_secret_names,
+  )
 
   alerts_infra_ci_secret_values = {
-    TF_VAR_SENTRY_AUTH_TOKEN        = var.sentry_auth_token
-    TF_VAR_BILLING_ACCOUNT          = var.billing_account
-    TF_VAR_QUICKNODE_API_KEY        = var.quicknode_api_key
-    TF_VAR_QUICKNODE_SIGNING_SECRET = var.quicknode_signing_secret
-    TF_VAR_SLACK_BOT_TOKEN          = var.slack_bot_token
-    TF_VAR_GITHUB_TOKEN             = var.github_token
+    TF_VAR_SENTRY_AUTH_TOKEN           = var.sentry_auth_token
+    TF_VAR_BILLING_ACCOUNT             = var.billing_account
+    TF_VAR_QUICKNODE_API_KEY           = var.quicknode_api_key
+    TF_VAR_QUICKNODE_SIGNING_SECRET    = var.quicknode_signing_secret
+    TF_VAR_ONCALL_SLACK_CHANNEL_ID     = var.oncall_slack_channel_id
+    TF_VAR_ONCALL_SUPPORT_USERGROUP_ID = var.oncall_support_usergroup_id
+    TF_VAR_SPLUNK_ON_CALL_API_ID       = var.splunk_on_call_api_id
+    TF_VAR_SPLUNK_ON_CALL_API_KEY      = var.splunk_on_call_api_key
+    TF_VAR_SLACK_BOT_TOKEN             = var.slack_bot_token
+    TF_VAR_GITHUB_TOKEN                = var.github_token
   }
 }
 

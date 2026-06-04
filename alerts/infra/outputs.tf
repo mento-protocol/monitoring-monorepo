@@ -33,6 +33,20 @@ output "google_cloud" {
   }
 }
 
+output "oncall_announcer" {
+  description = "Splunk On-Call to Slack rotation announcer resources"
+  value = {
+    enabled               = local.oncall_announcer_enabled
+    function_logs         = local.oncall_announcer_enabled ? "https://console.cloud.google.com/run/detail/${module.oncall_announcer[0].function_location}/${module.oncall_announcer[0].function_name}/observability/logs?project=${local.project_id}" : null
+    function_name         = local.oncall_announcer_enabled ? module.oncall_announcer[0].function_name : null
+    function_url          = local.oncall_announcer_enabled ? module.oncall_announcer[0].function_url : null
+    scheduler_job_name    = local.oncall_announcer_enabled ? module.oncall_announcer[0].scheduler_job_name : null
+    slack_channel_id      = local.oncall_slack_channel_id
+    support_usergroup_id  = local.support_engineer_usergroup_id
+    rotation_state_bucket = local.oncall_announcer_enabled ? module.oncall_announcer[0].rotation_state_bucket : null
+  }
+}
+
 #####################
 # QuickNode & Cloud Function Outputs
 #####################

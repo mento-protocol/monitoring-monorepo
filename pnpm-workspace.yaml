@@ -6,6 +6,7 @@ packages:
   - integration-probes
   - aegis
   - alerts/infra/onchain-event-handler
+  - alerts/infra/oncall-announcer
 
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
