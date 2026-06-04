@@ -553,6 +553,7 @@ function VolumePageView({
         isLoading={hero.isLoading}
         hasError={hero.hasError}
       />
+      <VolumeChartArea urlState={urlState} model={model} />
       <VolumeKpiTiles
         hero={hero}
         range={urlState.range}
@@ -560,7 +561,6 @@ function VolumePageView({
         tableIsLoading={status.tableIsLoading}
         tableHasError={status.tableHasError}
       />
-      <VolumeChartArea urlState={urlState} model={model} />
       <VolumeVenueSection urlState={urlState} model={model} />
     </div>
   );

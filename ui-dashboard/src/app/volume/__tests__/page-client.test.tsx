@@ -63,7 +63,9 @@ vi.mock("../_lib/use-hero-rollup", () => ({
 }));
 
 vi.mock("@/components/time-series-chart-card", () => ({
-  TimeSeriesChartCard: () => <div data-testid="chart" />,
+  TimeSeriesChartCard: ({ title }: { title: string }) => (
+    <div data-testid="chart">{title}</div>
+  ),
 }));
 
 vi.mock("../_components/hero-data-quality-banners", () => ({
@@ -86,7 +88,7 @@ import { VolumeClient } from "../page-client";
 
 function renderVolume(venue: "v3" | "v2") {
   volumeState.venue = venue;
-  renderToStaticMarkup(<VolumeClient />);
+  return renderToStaticMarkup(<VolumeClient />);
 }
 
 function optionsFor(query: string) {
@@ -123,5 +125,15 @@ describe("VolumeClient useGQL wiring", () => {
     expect(optionsFor(BROKER_AGGREGATOR_DAILY_TOP)).toMatchObject({
       timeoutMs: 8_000,
     });
+  });
+
+  it("renders the daily volume chart before summary KPI tiles", () => {
+    const html = renderVolume("v3");
+
+    expect(html.indexOf("Daily traded volume")).toBeGreaterThanOrEqual(0);
+    expect(html.indexOf("Total volume")).toBeGreaterThanOrEqual(0);
+    expect(html.indexOf("Daily traded volume")).toBeLessThan(
+      html.indexOf("Total volume"),
+    );
   });
 });
