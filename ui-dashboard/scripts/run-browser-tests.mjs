@@ -17,8 +17,10 @@ const originalNextEnv = existsSync(nextEnvUrl)
 // webServer outlives its own teardown and races the next run (e.g. the
 // pre-push gate launching right after an interactive `pnpm test:browser`):
 // `reuseExistingServer: false` makes Playwright hard-fail with
-// "port is already used" instead of waiting. Ephemeral ports remove the
-// collision entirely. An explicit PLAYWRIGHT_*_PORT still wins.
+// "port is already used" instead of waiting. OS-assigned ports remove that
+// fixed-port collision; a tiny TOCTOU window remains between close() here and
+// Playwright's bind, but it no longer targets the same two ports every run.
+// An explicit PLAYWRIGHT_*_PORT still wins.
 function findFreePort() {
   return new Promise((resolve, reject) => {
     const srv = createServer();
