@@ -7,16 +7,19 @@ global:
     RelayerSignerBRLUSD: '0x7a82bfDeC85bF54B240065CdC20A811BF56528C8'
     RelayerSignerCADUSD: '0x857ad1CeE80c3e72f2d8e558B773E63dAB8185fe'
     RelayerSignerCELOAUD: '0x2821d073C30876187198f573Bf544200ff95bf7e'
+    RelayerSignerCELOBRL: '0xB05D41364da60DD3be963db64712bd5acC08b809'
     RelayerSignerCELOCAD: '0x0faBAd32E6cb81CC20756E65b4df7B2553CFf4eE'
     RelayerSignerCELOCHF: '0x658f09B516801Eb390d150EB601dD11428A03028'
     RelayerSignerCELOETH: '0x55A93586a5535d1B8E10f2eB5C76b33E558F19e3'
     RelayerSignerCELOCOP: '0xd8dfB551157B0B80D41787C08885e09F994B7cC5'
+    RelayerSignerCELOEUR: '0xD343C1E7aF6e4C0010b4E2ce113FD8898385bb31'
     RelayerSignerCELOGBP: '0x7924EaC31d10682aa3049E957E3bB72bA3FF4730'
     RelayerSignerCELOGHS: '0x43C9190F712C1f3c923f02073499A97cf8a9348b'
     RelayerSignerCELOJPY: '0x9174bc946D0a4274ed221C75F66128174BdFB099'
     RelayerSignerCELOKES: '0x34cD259E3e92B9FFEA38E8c84665A1Ca289bfB32'
     RelayerSignerCELONGN: '0x5008F97b7713e2166041375a316990868F92B3d2'
     RelayerSignerCELOPHP: '0xCCD3D48D6a5340156d85DC5A43743e65Bd4a6E51'
+    RelayerSignerCELOUSD: '0x7E43bBD97e3447d0DD8ef2C6946e1b1e87bDb87F'
     RelayerSignerCELOXOF: '0xB3B87B49De2C5012467505cAb551773023B89aEB'
     RelayerSignerCELOZAR: '0x17C8c519CD32abDE464D4FA19c7461A399eE2c5a'
     RelayerSignerCHFUSD: '0x75bB7BC38Bb886D86B6cBaBfC334B807F6926b7d'
@@ -536,16 +539,19 @@ metrics:
       - [RelayerSignerBRLUSD]
       - [RelayerSignerCADUSD]
       - [RelayerSignerCELOAUD]
+      - [RelayerSignerCELOBRL]
       - [RelayerSignerCELOCAD]
       - [RelayerSignerCELOCHF]
       - [RelayerSignerCELOETH]
       - [RelayerSignerCELOCOP]
+      - [RelayerSignerCELOEUR]
       - [RelayerSignerCELOGBP]
       - [RelayerSignerCELOGHS]
       - [RelayerSignerCELOJPY]
       - [RelayerSignerCELOKES]
       - [RelayerSignerCELONGN]
       - [RelayerSignerCELOPHP]
+      - [RelayerSignerCELOUSD]
       - [RelayerSignerCELOXOF]
       - [RelayerSignerCELOZAR]
       - [RelayerSignerCHFUSD]
