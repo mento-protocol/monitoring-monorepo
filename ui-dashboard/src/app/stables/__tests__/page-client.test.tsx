@@ -12,7 +12,7 @@ import { StablesPageClient } from "../_components/stables-page-client";
 import type {
   StableSupplyDailySnapshot,
   StableTokenCustodyDailySnapshot,
-  V2StableSupplyChangeEvent,
+  StableSupplyChangeEvent,
 } from "../_lib/types";
 
 const mockRates = vi.hoisted(() => ({
@@ -29,7 +29,7 @@ const mockSnapshots = vi.hoisted(() => ({
   capped: false,
 }));
 const mockChanges = vi.hoisted(() => ({
-  data: [] as V2StableSupplyChangeEvent[],
+  data: [] as StableSupplyChangeEvent[],
   capped: false,
 }));
 const mockCustodySnapshots = vi.hoisted(() => ({
@@ -59,7 +59,7 @@ vi.mock("../_lib/use-stables-data", () => ({
     isLoading: false,
     capped: mockCustodySnapshots.capped,
   }),
-  useStablesV2Changes: () => ({
+  useStablesChanges: () => ({
     events: mockChanges.data,
     error: null,
     isLoading: false,
@@ -76,7 +76,7 @@ function snapshot(
     chainId: 42220,
     tokenAddress: overrides.tokenAddress ?? "0xa",
     tokenSymbol: overrides.tokenSymbol ?? "USDm",
-    source: overrides.source ?? "V2_RESERVE",
+    source: overrides.source ?? "RESERVE",
     tokenDecimals: overrides.tokenDecimals ?? 18,
     timestamp: overrides.timestamp,
     totalSupply: overrides.totalSupply,

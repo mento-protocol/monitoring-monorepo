@@ -140,6 +140,19 @@ function lockedSupplyAt(
   return locked;
 }
 
+function latestLockedSupplyForDailyRows(
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+): { lockedSupply: bigint; timestamp: bigint | null } {
+  const sorted = sortCustodyRowsAsc(custodyRows);
+  const latest = sorted[sorted.length - 1];
+  return latest
+    ? {
+        lockedSupply: BigInt(latest.lockedSupply),
+        timestamp: BigInt(latest.timestamp),
+      }
+    : { lockedSupply: BigInt(0), timestamp: null };
+}
+
 function sortCustodyRowsAsc(
   custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
 ): StableTokenCustodyDailySnapshot[] {
@@ -155,6 +168,15 @@ export function circulatingSupplyForSnapshot(
   const rawSupply = BigInt(row.totalSupply);
   const locked = lockedSupplyAt(custodyRows, BigInt(row.timestamp));
   return rawSupply >= locked ? rawSupply - locked : BigInt(0);
+}
+
+export function latestDailyCirculatingSupply(
+  row: StableSupplyDailySnapshot,
+  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot> = [],
+): bigint {
+  const rawSupply = BigInt(row.totalSupply);
+  const { lockedSupply } = latestLockedSupplyForDailyRows(custodyRows);
+  return rawSupply >= lockedSupply ? rawSupply - lockedSupply : BigInt(0);
 }
 
 function pickBaselineSupply(
@@ -191,8 +213,9 @@ function buildTokenAgg(
   });
   const latest = rows[rows.length - 1]!;
   const latestTimestamp = BigInt(latest.timestamp);
-  const latestLockedSupply = lockedSupplyAt(custodyRows, latestTimestamp);
-  const latestSupply = circulatingSupplyForSnapshot(latest, custodyRows);
+  const latestCustody = latestLockedSupplyForDailyRows(custodyRows);
+  const latestLockedSupply = latestCustody.lockedSupply;
+  const latestSupply = latestDailyCirculatingSupply(latest, custodyRows);
   const baselineSupply = pickBaselineSupply(rows, sevenDayCutoff, custodyRows);
   const netChange7d = latestSupply - baselineSupply;
   const change7dPct =
@@ -218,7 +241,11 @@ function buildTokenAgg(
     tokenDecimals: latest.tokenDecimals,
     latestTotalSupply: latestSupply,
     latestLockedSupply,
-    latestTimestamp,
+    latestTimestamp:
+      latestCustody.timestamp !== null &&
+      latestCustody.timestamp > latestTimestamp
+        ? latestCustody.timestamp
+        : latestTimestamp,
     totalSupplyUsdLatest: usd(latestSupply),
     change7dPct,
     netChange7d,

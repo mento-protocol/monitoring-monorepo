@@ -207,7 +207,7 @@ contracts:
   # for lock/mint NTT manager transfers and filters to LOCK_AND_MINT_NTT_STABLES.
   # Address list lives under each chain's `contracts:` block and is drift-
   # checked by test/stables.test.ts.
-  - name: V2StableToken
+  - name: StableToken
     abi_file_path: abis/ERC20.json
     handler: src/EventHandlers.ts
     events:
@@ -359,17 +359,17 @@ chains:
           - 0x094C0cD42f21289AD7279285dD3793CD8C998916 # JPYm
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
-      - name: V2StableToken
-        # 12 V2 reserve-backed stables from @mento-protocol/contracts mainnet
+      - name: StableToken
+        # 12 reserve-backed stables from @mento-protocol/contracts mainnet
         # namespace + V3 hub USDm collateral (hand-listed; package still maps
-        # the bare "USDm" key to V2 cUSD per liquity/config.ts:28-33).
+        # the bare "USDm" key to Celo cUSD per liquity/config.ts:28-33).
         # The final three Celo entries are lock/mint NTT custody-only CDP
         # tokens: their raw Celo supply is derived from Liquity systemDebt, and
         # this ERC20 subscription only tracks transfers into/out of the NTT
         # managers so the dashboard can subtract locked supply.
         address:
-          - 0x765de816845861e75a25fca122bb6898b8b1282a # USDm (V2 cUSD)
-          - 0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73 # EURm (V2 cEUR)
+          - 0x765de816845861e75a25fca122bb6898b8b1282a # USDm (Celo cUSD)
+          - 0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73 # EURm (Celo cEUR)
           - 0xe8537a3d056da446677b9e9d6c5db704eaab4787 # BRLm
           - 0x7175504c455076f15c04a2f90a8e352281f492f9 # AUDm
           - 0xff4ab19391af240c311c54200a492233052b6325 # CADm
@@ -430,7 +430,7 @@ chains:
           - "0x6f92C745346057a61b259579256159458a0a6A92" # TransparentUpgradeableProxy:SortedOracles
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
-      - name: V2StableToken
+      - name: StableToken
         # Monad Wormhole NTT stable supplies. All five Monad managers are
         # NttManager.mode()=BURNING, so Transfer-zero events reflect real
         # chain-local supply and can be added to Celo circulating supply.

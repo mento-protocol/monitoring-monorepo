@@ -3,7 +3,7 @@
 //
 // The indexer writes brand-named symbols (`USDm`/`EURm`/`GBPm`/...) so the
 // UI doesn't normally need to alias. The one exception is the two distinct
-// on-chain USDm contracts: V2 cUSD-USDm (`0x765de8…`) and V3 hub USDm
+// on-chain USDm contracts: Celo cUSD-USDm (`0x765de8…`) and V3 hub USDm
 // (`0x106cc…`). Both come over with `tokenSymbol: "USDm"` but different
 // `source` enum values. `displayLabel(symbol, source)` adds a `· v3` suffix
 // to the hub variant so the legend stays unambiguous.
@@ -16,10 +16,7 @@ import {
   type OracleRateMap,
 } from "./tokens";
 
-export type StableSupplySource =
-  | "V2_RESERVE"
-  | "V3_HUB_COLLATERAL"
-  | "V3_LIQUITY";
+export type StableSupplySource = "RESERVE" | "V3_HUB_COLLATERAL" | "V3_LIQUITY";
 
 export type StableSupplyChangeKind =
   | "RESERVE_MINT"
@@ -29,8 +26,8 @@ export type StableSupplyChangeKind =
   | "OTHER_MINT"
   | "OTHER_BURN";
 
-// Internal helper — applies the v2→v3 legacy alias table. Today the only
-// mapping is cEUR → EURm (V2 cUSD is already brand-named "USDm" in the
+// Internal helper — applies the brand legacy alias table. Today the only
+// mapping is cEUR → EURm (Celo cUSD is already brand-named "USDm" in the
 // contracts package). Future renames land in `LEGACY_ALIASES_PUBLIC`.
 function applyLegacyAlias(indexerSymbol: string): string {
   for (const [from, to] of LEGACY_ALIASES_PUBLIC) {
@@ -41,7 +38,7 @@ function applyLegacyAlias(indexerSymbol: string): string {
 
 /**
  * Legend-ready label distinguishing the two USDm contracts. Other tokens
- * pass through (with v2→v3 legacy alias applied). The "· v3" suffix is
+ * pass through (with brand legacy alias applied). The "· v3" suffix is
  * short and avoids confusing "USDm V3" (which would imply a v3-of-the-
  * USDm-contract semantic).
  */

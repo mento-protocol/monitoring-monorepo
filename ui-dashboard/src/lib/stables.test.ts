@@ -12,8 +12,8 @@ describe("displayLabel", () => {
     expect(displayLabel("USDm", "V3_HUB_COLLATERAL")).toBe("USDm · v3");
   });
 
-  it("passes V2 USDm through unchanged", () => {
-    expect(displayLabel("USDm", "V2_RESERVE")).toBe("USDm");
+  it("passes reserve USDm through unchanged", () => {
+    expect(displayLabel("USDm", "RESERVE")).toBe("USDm");
   });
 
   it("does NOT add the · v3 suffix for non-USDm symbols even on V3_HUB_COLLATERAL", () => {
@@ -23,8 +23,8 @@ describe("displayLabel", () => {
     expect(displayLabel("EURm", "V3_HUB_COLLATERAL")).toBe("EURm");
   });
 
-  it("applies the cEUR → EURm legacy alias on V2_RESERVE", () => {
-    expect(displayLabel("cEUR", "V2_RESERVE")).toBe("EURm");
+  it("applies the cEUR → EURm legacy alias on RESERVE", () => {
+    expect(displayLabel("cEUR", "RESERVE")).toBe("EURm");
   });
 
   it("V3_LIQUITY tokens pass through unchanged (GBPm/CHFm/JPYm aren't aliased)", () => {
@@ -87,9 +87,9 @@ describe("effectiveOracleRate", () => {
   });
 });
 
-describe("V2StableSupplyChangeEvent.tokenDecimals → formatWei contract", () => {
+describe("StableSupplyChangeEvent.tokenDecimals → formatWei contract", () => {
   // The changes table feeds `event.tokenDecimals` (denormalized from
-  // STABLES.decimals indexer-side) into `formatWei`. Today every V2
+  // STABLES.decimals indexer-side) into `formatWei`. tracked
   // stable is 18-decimal; this test locks the contract for any future
   // non-18 Mento stable (e.g. a 6-dp USDC-bridged variant). Without it,
   // a regression that hardcoded 18 again would silently underrender

@@ -1911,11 +1911,11 @@ type TraderPoolDayMarker {
 
 # Source discriminator for the unified daily-supply / running-supply tables.
 enum StableSupplySource {
-  # V2 reserve-backed stables (12 tokens: USDm/EURm/BRLm/...). Mint/burn
+  # reserve-backed stables (12 tokens: USDm/EURm/BRLm/...). Mint/burn
   # via Mento Reserve through Broker.swap or via NTT bridge.
-  V2_RESERVE
+  RESERVE
   # V3 hub USDm collateral (`0x106cc…`) — a distinct on-chain contract from
-  # V2 cUSD-USDm. Mint primarily via NTT bridge.
+  # Celo cUSD-USDm. Mint primarily via NTT bridge.
   V3_HUB_COLLATERAL
   # V3 Liquity Bold debt tokens (GBPm/CHFm/JPYm). Mint via CDP borrow; burn
   # via repay / redemption / liquidation. Supply derived from
@@ -1923,9 +1923,9 @@ enum StableSupplySource {
   V3_LIQUITY
 }
 
-# Classification of a V2 Transfer-with-zero event by `tx.to`. See
+# Classification of a StableToken Transfer-with-zero event by `tx.to`. See
 # `src/handlers/stables/classifyKind.ts` for the routing logic.
-enum V2StableSupplyChangeKind {
+enum StableSupplyChangeKind {
   RESERVE_MINT
   RESERVE_BURN
   BRIDGE_MINT
@@ -1938,7 +1938,7 @@ enum V2StableSupplyChangeKind {
 }
 
 # Unified daily supply per (chainId, tokenAddress). Mainnet coverage:
-# Celo V2 reserve-backed stables + Celo V3 hub USDm collateral + Celo V3
+# Celo reserve-backed stables + Celo V3 hub USDm collateral + Celo V3
 # Liquity debt tokens + Monad Wormhole NTT stable supplies.
 type StableSupplyDailySnapshot
   @index(fields: ["chainId", "tokenSymbol", "timestamp"])
@@ -1952,7 +1952,7 @@ type StableSupplyDailySnapshot
   tokenDecimals: Int! # denormalized; UI doesn't need to join
   timestamp: BigInt! @index # UTC day bucket (ts / 86400 * 86400)
   totalSupply: BigInt! # token-native wei, end-of-day
-  # Gross daily flows. For V2_RESERVE + V3_HUB_COLLATERAL: derived from
+  # Gross daily flows. For RESERVE + V3_HUB_COLLATERAL: derived from
   # Transfer-with-zero events. For V3_LIQUITY: derived from per-day
   # mint/burn accumulators on `LiquityInstance` (updated by
   # `applySystemDebtDelta` on trove ops AND by the DefaultPool delta
@@ -1968,11 +1968,11 @@ type StableSupplyDailySnapshot
   updatedAtTimestamp: BigInt!
 }
 
-# Per-tx supply change for V2 reserve-backed stables + V3 hub USDm collateral.
+# Per-tx supply change for reserve-backed stables + V3 hub USDm collateral.
 # V3 Liquity debt token mint/burn is tracked via the existing
 # TroveOperationEvent / RedemptionEvent / LiquidationEvent entities — the
 # /stables UI merges those four streams client-side.
-type V2StableSupplyChangeEvent
+type StableSupplyChangeEvent
   @index(fields: ["tokenAddress", "blockTimestamp"])
   @index(fields: ["chainId", "caller"]) {
   id: ID! # eventId(chainId, blockNumber, logIndex)
@@ -1980,12 +1980,12 @@ type V2StableSupplyChangeEvent
   tokenAddress: String! @index
   tokenSymbol: String!
   # Denormalized from STABLES registry so the UI changes-table can
-  # render token amounts without hardcoding 18. Every V2 stable in the
+  # render token amounts without hardcoding 18. Every stable in the
   # registry today is 18 decimals; surfacing the field per-row removes
   # the hardcode and stays safe for any future non-18 Mento stable.
   tokenDecimals: Int!
   source: StableSupplySource!
-  kind: V2StableSupplyChangeKind!
+  kind: StableSupplyChangeKind!
   # The non-zero side of the Transfer:
   # - kind=*_MINT  → counterparty = Transfer.to (recipient gets fresh supply)
   # - kind=*_BURN  → counterparty = Transfer.from (sender loses supply)
@@ -2004,7 +2004,7 @@ type V2StableSupplyChangeEvent
 # Holds the rolling-day accumulators + the supply-baseline-seeded flag so
 # we don't re-fetch totalSupply() once we've established it. Subsequent
 # events derive from deltas and never re-call RPC.
-type V2StableTokenSupply {
+type StableTokenSupply {
   id: ID! # "{chainId}-{tokenAddress}"
   chainId: Int! @index
   tokenAddress: String!

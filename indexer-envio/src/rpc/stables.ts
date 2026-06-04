@@ -113,7 +113,7 @@ export async function fetchStableTotalSupply(
     // when the underlying eth_call returns `0x` — for ERC20 `totalSupply`
     // specifically that can only mean the address has no bytecode at the
     // queried block (every real ERC20 implements the function). For our 13
-    // V2 stables this is unreachable in practice (all deployed pre-
+    // stables this is unreachable in practice (all deployed pre-
     // `start_block`), but the safe-baseline path matters if a future
     // token is added to the registry at its deploy block: throwing here
     // would halt ingestion forever because the retry hits the same pre-

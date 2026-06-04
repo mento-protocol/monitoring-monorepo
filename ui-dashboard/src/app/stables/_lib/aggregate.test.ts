@@ -28,7 +28,7 @@ function snapshot(
     chainId,
     tokenAddress: overrides.tokenAddress ?? "0xa",
     tokenSymbol: overrides.tokenSymbol ?? "USDm",
-    source: overrides.source ?? "V2_RESERVE",
+    source: overrides.source ?? "RESERVE",
     tokenDecimals: overrides.tokenDecimals ?? 18,
     timestamp: overrides.timestamp,
     totalSupply: overrides.totalSupply,
@@ -46,7 +46,7 @@ function custodySnapshot(
     chainId: overrides.chainId ?? 42220,
     tokenAddress: overrides.tokenAddress ?? "0xa",
     tokenSymbol: overrides.tokenSymbol ?? "USDm",
-    source: overrides.source ?? "V2_RESERVE",
+    source: overrides.source ?? "RESERVE",
     tokenDecimals: overrides.tokenDecimals ?? 18,
     managerAddress:
       overrides.managerAddress ?? "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
@@ -91,7 +91,7 @@ describe("rollupByToken", () => {
     const rollup = rollupByToken(snapshots, rates, NOW_TS);
 
     expect(rollup.size).toBe(2);
-    const usdmAgg = rollup.get(`42220|${usdm}|V2_RESERVE`);
+    const usdmAgg = rollup.get(`42220|${usdm}|RESERVE`);
     expect(usdmAgg).toBeDefined();
     // 7d baseline = 900_000 (7d-ago snapshot); now = 1_100_000 → +200_000
     expect(usdmAgg!.netChange7d).toBe(
@@ -115,11 +115,11 @@ describe("rollupByToken", () => {
     expect(agg.netChange7dUsd).toBeNull();
   });
 
-  it("keeps V2 cUSD-USDm and V3 hub USDm as separate rows (same symbol, distinct addresses)", () => {
+  it("keeps Celo cUSD-USDm and V3 hub USDm as separate rows (same symbol, distinct addresses)", () => {
     const snapshots: StableSupplyDailySnapshot[] = [
       snapshot({
         tokenAddress: "0xa",
-        source: "V2_RESERVE",
+        source: "RESERVE",
         timestamp: String(NOW_TS),
         totalSupply: String(BigInt(100) * BigInt(10) ** BigInt(18)),
       }),
@@ -132,7 +132,7 @@ describe("rollupByToken", () => {
     ];
     const rollup = rollupByToken(snapshots, new Map([["USDm", 1]]), NOW_TS);
     expect(rollup.size).toBe(2);
-    expect(rollup.has("42220|0xa|V2_RESERVE")).toBe(true);
+    expect(rollup.has("42220|0xa|RESERVE")).toBe(true);
     expect(rollup.has("42220|0xb|V3_HUB_COLLATERAL")).toBe(true);
   });
 
@@ -153,10 +153,10 @@ describe("rollupByToken", () => {
     ];
     const rollup = rollupByToken(snapshots, new Map([["USDm", 1]]), NOW_TS);
     expect(rollup.size).toBe(2);
-    expect(rollup.get("42220|0xa|V2_RESERVE")?.latestTotalSupply).toBe(
+    expect(rollup.get("42220|0xa|RESERVE")?.latestTotalSupply).toBe(
       BigInt(100) * BigInt(10) ** BigInt(18),
     );
-    expect(rollup.get("143|0xa|V2_RESERVE")?.latestTotalSupply).toBe(
+    expect(rollup.get("143|0xa|RESERVE")?.latestTotalSupply).toBe(
       BigInt(50) * BigInt(10) ** BigInt(18),
     );
   });
@@ -185,11 +185,12 @@ describe("rollupByToken", () => {
     ]);
     const rollup = rollupByToken(snapshots, rates, NOW_TS);
     expect(
-      rollup.get("42220|0xcelo|V2_RESERVE")?.totalSupplyUsdLatest,
+      rollup.get("42220|0xcelo|RESERVE")?.totalSupplyUsdLatest,
     ).toBeCloseTo(110, 0);
-    expect(
-      rollup.get("143|0xmonad|V2_RESERVE")?.totalSupplyUsdLatest,
-    ).toBeCloseTo(120, 0);
+    expect(rollup.get("143|0xmonad|RESERVE")?.totalSupplyUsdLatest).toBeCloseTo(
+      120,
+      0,
+    );
   });
 
   it("subtracts lock-custody snapshots from Celo circulating supply", () => {
@@ -227,7 +228,7 @@ describe("rollupByToken", () => {
     expect(agg?.totalSupplyUsdLatest).toBeCloseTo(286, 0);
   });
 
-  it("does not subtract newer custody from an older latest supply snapshot", () => {
+  it("uses newer daily custody for latest rollups without changing point-in-time snapshots", () => {
     const rawSupply = String(BigInt(300) * BigInt(10) ** BigInt(18));
     const lockedSupply = String(BigInt(120) * BigInt(10) ** BigInt(18));
     const row = snapshot({
@@ -258,8 +259,11 @@ describe("rollupByToken", () => {
       custody,
     );
     const agg = rollup.get("42220|0xc|V3_LIQUITY");
-    expect(agg?.latestTotalSupply).toBe(BigInt(300) * BigInt(10) ** BigInt(18));
-    expect(agg?.latestLockedSupply).toBe(BigInt(0));
+    expect(agg?.latestTotalSupply).toBe(BigInt(180) * BigInt(10) ** BigInt(18));
+    expect(agg?.latestLockedSupply).toBe(
+      BigInt(120) * BigInt(10) ** BigInt(18),
+    );
+    expect(agg?.latestTimestamp).toBe(NOW_TS);
   });
 
   it("sorts custody rows defensively before timestamp lookups", () => {
@@ -325,14 +329,14 @@ describe("computeChartStartSeconds", () => {
     const earliest = Number(NOW_TS) - 30 * DAY;
     const grouped = new Map([
       [
-        "42220|0xa|V2_RESERVE",
+        "42220|0xa|RESERVE",
         [
           { timestamp: String(earliest) },
           { timestamp: String(Number(NOW_TS) - 7 * DAY) },
         ] as ReadonlyArray<{ timestamp: string }>,
       ],
       [
-        "42220|0xb|V2_RESERVE",
+        "42220|0xb|RESERVE",
         [{ timestamp: String(Number(NOW_TS) - 14 * DAY) }] as ReadonlyArray<{
           timestamp: string;
         }>,

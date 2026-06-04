@@ -8,7 +8,7 @@ import {
   useStablesDailySnapshots,
   useStablesLatestCustodyPerToken,
   useStablesLatestPerToken,
-  useStablesV2Changes,
+  useStablesChanges,
 } from "../_lib/use-stables-data";
 import { StablesChangesTable } from "./stables-changes-table";
 import { StablesHeroChart } from "./stables-hero-chart";
@@ -54,7 +54,7 @@ function StablesContent(): React.JSX.Element {
     error: changesError,
     isLoading: changesLoading,
     capped: changesCapped,
-  } = useStablesV2Changes("7d");
+  } = useStablesChanges("7d");
 
   const isLoading =
     ratesLoading ||

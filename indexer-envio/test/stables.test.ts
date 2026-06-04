@@ -29,11 +29,11 @@ const MAINNET_CONFIG = readFileSync(
   "utf8",
 );
 
-// Expected V2 stable symbols. If @mento-protocol/contracts drops or renames
-// one of these, the EXPECTED_V2_RESERVE_SYMBOLS invariant in config.ts will
+// Expected stable symbols. If @mento-protocol/contracts drops or renames
+// one of these, the EXPECTED_RESERVE_STABLE_SYMBOLS invariant in config.ts will
 // throw at module load — but we also enumerate here so the test fails with
 // a clearer message than a stack trace from a top-level throw.
-const EXPECTED_V2_RESERVE_SYMBOLS = [
+const EXPECTED_RESERVE_STABLE_SYMBOLS = [
   "USDm",
   "EURm",
   "BRLm",
@@ -49,15 +49,15 @@ const EXPECTED_V2_RESERVE_SYMBOLS = [
 ] as const;
 
 // V3 hub USDm address is imported from constants.ts (single source of truth).
-const V2_CUSD_USDM_ADDRESS = "0x765de816845861e75a25fca122bb6898b8b1282a";
+const CELO_CUSD_USDM_ADDRESS = "0x765de816845861e75a25fca122bb6898b8b1282a";
 
 describe("stables/config — registry derivation", () => {
   it("exposes Celo supply rows plus Monad NTT supply rows", () => {
     assert.equal(STABLES.length, 18);
-    const v2Reserve = STABLES.filter((s) => s.source === "V2_RESERVE");
+    const reserve = STABLES.filter((s) => s.source === "RESERVE");
     const hub = STABLES.filter((s) => s.source === "V3_HUB_COLLATERAL");
     const v3Liquity = STABLES.filter((s) => s.source === "V3_LIQUITY");
-    assert.equal(v2Reserve.length, 14);
+    assert.equal(reserve.length, 14);
     assert.equal(hub.length, 1);
     assert.equal(v3Liquity.length, 3);
     assert.equal(hub[0].address, V3_HUB_USDM_ADDRESS);
@@ -74,33 +74,33 @@ describe("stables/config — registry derivation", () => {
     ]);
   });
 
-  it("includes every expected V2 reserve symbol from @mento-protocol/contracts", () => {
+  it("includes every expected reserve symbol from @mento-protocol/contracts", () => {
     const got = new Set(
-      STABLES.filter(
-        (s) => s.chainId === 42220 && s.source === "V2_RESERVE",
-      ).map((s) => s.symbol),
+      STABLES.filter((s) => s.chainId === 42220 && s.source === "RESERVE").map(
+        (s) => s.symbol,
+      ),
     );
-    for (const expected of EXPECTED_V2_RESERVE_SYMBOLS) {
+    for (const expected of EXPECTED_RESERVE_STABLE_SYMBOLS) {
       assert.ok(
         got.has(expected),
-        `Expected V2 reserve symbol ${expected} missing from STABLES — package drift?`,
+        `Expected reserve symbol ${expected} missing from STABLES — package drift?`,
       );
     }
   });
 
-  it("excludes Celo V3 Liquity debt tokens from V2 reserve supply rows", () => {
-    const v2ReserveSymbols = STABLES.filter(
-      (s) => s.chainId === 42220 && s.source === "V2_RESERVE",
+  it("excludes Celo V3 Liquity debt tokens from reserve supply rows", () => {
+    const reserveSymbols = STABLES.filter(
+      (s) => s.chainId === 42220 && s.source === "RESERVE",
     ).map((s) => s.symbol);
     for (const v3Symbol of ["GBPm", "CHFm", "JPYm"]) {
       assert.ok(
-        !v2ReserveSymbols.includes(v3Symbol),
-        `${v3Symbol} should NOT be in V2_RESERVE — V3 Liquity debt tokens use the systemDebt path.`,
+        !reserveSymbols.includes(v3Symbol),
+        `${v3Symbol} should NOT be in RESERVE — V3 Liquity debt tokens use the systemDebt path.`,
       );
     }
   });
 
-  it("every STABLES entry exposes `decimals` (denormalized to V2StableSupplyChangeEvent.tokenDecimals)", () => {
+  it("every STABLES entry exposes `decimals` (denormalized to StableSupplyChangeEvent.tokenDecimals)", () => {
     // The Transfer handler writes `info.decimals` to every supply-change
     // event row; the UI changes-table reads it instead of hardcoding 18.
     // A missing/non-integer decimals would silently render with NaN,
@@ -110,7 +110,7 @@ describe("stables/config — registry derivation", () => {
       assert.equal(
         typeof s.decimals,
         "number",
-        `${s.symbol} (${s.address}) missing decimals — would corrupt V2StableSupplyChangeEvent.tokenDecimals`,
+        `${s.symbol} (${s.address}) missing decimals — would corrupt StableSupplyChangeEvent.tokenDecimals`,
       );
       assert.ok(
         Number.isInteger(s.decimals) && s.decimals >= 0 && s.decimals <= 30,
@@ -119,17 +119,17 @@ describe("stables/config — registry derivation", () => {
     }
   });
 
-  it("V2 cUSD-USDm and V3 hub USDm are tracked as separate rows", () => {
-    const v2Cusd = findStableByAddress(42220, V2_CUSD_USDM_ADDRESS);
+  it("Celo cUSD-USDm and V3 hub USDm are tracked as separate rows", () => {
+    const cusdUsdm = findStableByAddress(42220, CELO_CUSD_USDM_ADDRESS);
     const v3Hub = findStableByAddress(42220, V3_HUB_USDM_ADDRESS);
-    assert.ok(v2Cusd, "V2 cUSD-USDm not in registry");
+    assert.ok(cusdUsdm, "Celo cUSD-USDm not in registry");
     assert.ok(v3Hub, "V3 hub USDm not in registry");
-    assert.equal(v2Cusd.source, "V2_RESERVE");
+    assert.equal(cusdUsdm.source, "RESERVE");
     assert.equal(v3Hub.source, "V3_HUB_COLLATERAL");
     assert.notEqual(
-      v2Cusd.address,
+      cusdUsdm.address,
       v3Hub.address,
-      "V2 cUSD and V3 hub USDm must be distinct on-chain contracts",
+      "Celo cUSD and V3 hub USDm must be distinct on-chain contracts",
     );
   });
 
@@ -168,7 +168,7 @@ describe("stables/config — registry derivation", () => {
 });
 
 describe("stables — YAML drift gate", () => {
-  function yamlV2StableAddressesForChain(chainId: number): string[] {
+  function yamlStableAddressesForChain(chainId: number): string[] {
     const chainStart = MAINNET_CONFIG.indexOf(`  - id: ${chainId}`);
     assert.notEqual(
       chainStart,
@@ -182,17 +182,18 @@ describe("stables — YAML drift gate", () => {
         ? MAINNET_CONFIG.slice(chainStart)
         : MAINNET_CONFIG.slice(chainStart, chainStart + 1 + nextChainRelative);
 
-    const v2Block = chainBlock.split("- name: V2StableToken")[1];
+    const stableTokenBlock = chainBlock.split("- name: StableToken")[1];
     assert.ok(
-      v2Block,
-      `V2StableToken contract block missing under chain ${chainId} in mainnet YAML`,
+      stableTokenBlock,
+      `StableToken contract block missing under chain ${chainId} in mainnet YAML`,
     );
     return (
-      v2Block.split(/\n {6}- name:/)[0].match(/0x[0-9a-fA-F]{40}/g) ?? []
+      stableTokenBlock.split(/\n {6}- name:/)[0].match(/0x[0-9a-fA-F]{40}/g) ??
+      []
     ).map((a) => a.toLowerCase());
   }
 
-  it("every supply and custody address appears under V2StableToken in mainnet YAML", () => {
+  it("every supply and custody address appears under StableToken in mainnet YAML", () => {
     const expectedByChain = new Map<number, Set<string>>();
     for (const s of STABLES) {
       let set = expectedByChain.get(s.chainId);
@@ -212,11 +213,11 @@ describe("stables — YAML drift gate", () => {
     }
 
     for (const [chainId, expected] of expectedByChain) {
-      const yamlAddresses = yamlV2StableAddressesForChain(chainId);
+      const yamlAddresses = yamlStableAddressesForChain(chainId);
       assert.equal(
         yamlAddresses.length,
         expected.size,
-        `YAML lists ${yamlAddresses.length} V2StableToken addresses on chain ${chainId}; registry expects ${expected.size}.`,
+        `YAML lists ${yamlAddresses.length} StableToken addresses on chain ${chainId}; registry expects ${expected.size}.`,
       );
       const yamlSet = new Set(yamlAddresses);
       for (const addr of expected) {
@@ -335,7 +336,7 @@ describe("flushStableDailySnapshot — day rollover", () => {
       chainId: 42220,
       tokenAddress: "0x765de816845861e75a25fca122bb6898b8b1282a",
       tokenSymbol: "USDm",
-      source: "V2_RESERVE",
+      source: "RESERVE",
       tokenDecimals: 18,
       totalSupply: 1_000_000n * 10n ** 18n,
       supplyBaselineSeeded: true,
@@ -590,18 +591,18 @@ describe("makeStableTokenSupply — fresh row shape", () => {
   it("returns supplyBaselineSeeded: false with zeroed accumulators", () => {
     const row = makeStableTokenSupply({
       chainId: 42220,
-      tokenAddress: V2_CUSD_USDM_ADDRESS,
+      tokenAddress: CELO_CUSD_USDM_ADDRESS,
       symbol: "USDm",
       decimals: 18,
-      source: "V2_RESERVE",
+      source: "RESERVE",
       blockNumber: 60_700_000n,
       blockTimestamp: 1_716_400_000n,
     });
-    assert.equal(row.id, `42220-${V2_CUSD_USDM_ADDRESS}`);
+    assert.equal(row.id, `42220-${CELO_CUSD_USDM_ADDRESS}`);
     assert.equal(row.chainId, 42220);
-    assert.equal(row.tokenAddress, V2_CUSD_USDM_ADDRESS);
+    assert.equal(row.tokenAddress, CELO_CUSD_USDM_ADDRESS);
     assert.equal(row.tokenSymbol, "USDm");
-    assert.equal(row.source, "V2_RESERVE");
+    assert.equal(row.source, "RESERVE");
     assert.equal(row.tokenDecimals, 18);
     assert.equal(row.totalSupply, 0n);
     assert.equal(row.supplyBaselineSeeded, false);
@@ -619,10 +620,10 @@ describe("makeStableTokenSupply — fresh row shape", () => {
     const expectedDay = 1_716_336_000n; // 2024-05-22 00:00:00 UTC
     const row = makeStableTokenSupply({
       chainId: 42220,
-      tokenAddress: V2_CUSD_USDM_ADDRESS,
+      tokenAddress: CELO_CUSD_USDM_ADDRESS,
       symbol: "USDm",
       decimals: 18,
-      source: "V2_RESERVE",
+      source: "RESERVE",
       blockNumber: 60_700_000n,
       blockTimestamp,
     });
@@ -654,7 +655,7 @@ describe("schema → TS enum drift gate", () => {
     // TS union value set — kept hand-listed so a future schema addition
     // requires updating BOTH places (drift then surfaces here, not at
     // runtime when the handler writes an unknown enum value).
-    const tsValues = new Set(["V2_RESERVE", "V3_HUB_COLLATERAL", "V3_LIQUITY"]);
+    const tsValues = new Set(["RESERVE", "V3_HUB_COLLATERAL", "V3_LIQUITY"]);
     assert.deepEqual(
       [...schemaValues].sort(),
       [...tsValues].sort(),
@@ -662,8 +663,8 @@ describe("schema → TS enum drift gate", () => {
     );
   });
 
-  it("V2StableSupplyChangeKind TS union matches schema enum values exactly", () => {
-    const schemaValues = parseEnumValues("V2StableSupplyChangeKind");
+  it("StableSupplyChangeKind TS union matches schema enum values exactly", () => {
+    const schemaValues = parseEnumValues("StableSupplyChangeKind");
     const tsValues = new Set([
       "RESERVE_MINT",
       "RESERVE_BURN",
@@ -675,7 +676,7 @@ describe("schema → TS enum drift gate", () => {
     assert.deepEqual(
       [...schemaValues].sort(),
       [...tsValues].sort(),
-      `Schema enum V2StableSupplyChangeKind drifted from TS union. Update both.`,
+      `Schema enum StableSupplyChangeKind drifted from TS union. Update both.`,
     );
   });
 });
@@ -683,7 +684,7 @@ describe("schema → TS enum drift gate", () => {
 // Handler integration tests (via Envio's createTestIndexer harness) for the
 // load-bearing transfer.ts path — baseline-seed mint, baseline-seed burn,
 // throw-on-RPC-failure retry, pre-deployment-block 0n-seed — are tracked
-// as a follow-up. The V2StableToken contract is registered in
+// as a follow-up. The StableToken contract is registered in
 // indexerTestHarness.ts in this PR; the mock-event + effect-mock-routing
 // wiring across createTestIndexer's runtime needs more harness work than
 // this PR can absorb. The helper tests above (dailyFlush field

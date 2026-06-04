@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
-// V2StableToken Transfer handler — mint/burn supply tracking.
+// StableToken Transfer handler — mint/burn supply tracking.
 //
 // Subscribes ERC20 Transfer events with array-OR filter `from=0x0 OR to=0x0`,
 // limited to supply-tracked Mento stable addresses listed under
-// `V2StableToken` in config.multichain.mainnet.yaml. Each event:
+// `StableToken` in config.multichain.mainnet.yaml. Each event:
 //
 //   1. Looks up the running supply entity. First event per token → seeds the
 //      baseline from on-chain `totalSupply(block-1)` via the RPC effect. If
@@ -12,7 +12,7 @@
 //      day's `StableSupplyDailySnapshot` with the accumulated buckets).
 //   3. Applies the signed delta (+ for mint, − for burn) to totalSupply and
 //      the today-bucket accumulators.
-//   4. Writes a `V2StableSupplyChangeEvent` row for the per-tx changes table.
+//   4. Writes a `StableSupplyChangeEvent` row for the per-tx changes table.
 //
 // Celo V3 Liquity debt tokens (GBPm/CHFm/JPYm) are excluded from this
 // Transfer-zero supply path because their Celo supply is derived from
@@ -22,7 +22,7 @@
 // and are tracked here with source=V3_LIQUITY.
 // ---------------------------------------------------------------------------
 
-import type { V2StableSupplyChangeEvent } from "envio";
+import type { StableSupplyChangeEvent } from "envio";
 import { ZERO_ADDRESS } from "../../constants.js";
 import { asAddress, eventId } from "../../helpers.js";
 import { indexer } from "../../indexer.js";
@@ -42,7 +42,7 @@ import { flushStableDailySnapshot } from "./dailyFlush.js";
 
 indexer.onEvent(
   {
-    contract: "V2StableToken",
+    contract: "StableToken",
     event: "Transfer",
     // Array-OR semantics per envio 3.0.0: deliver Transfer events where
     // EITHER from==0x0 (mint), to==0x0 (burn), from==lock/mint NTT manager, or
@@ -109,8 +109,8 @@ indexer.onEvent(
 
     // First Transfer per token: seed baseline from on-chain
     // totalSupply(block-1). Failure throws → Envio retries the event. We
-    // can't silently return null here: that would drop the V2StableSupply-
-    // ChangeEvent row + day-bucket contribution for this exact event,
+    // can't silently return null here: that would drop the
+    // StableSupplyChangeEvent row + day-bucket contribution for this exact event,
     // while a later event would self-heal `totalSupply` (because the next
     // baseline call would capture this event's delta in its block). The
     // running supply would recover; the event log would not. Throwing
@@ -151,7 +151,7 @@ indexer.onEvent(
       lastEventBlock: blockNumber,
       lastEventTimestamp: blockTimestamp,
     };
-    context.V2StableTokenSupply.set(supply);
+    context.StableTokenSupply.set(supply);
 
     const counterparty = isMint
       ? asAddress(event.params.to)
@@ -165,7 +165,7 @@ indexer.onEvent(
     const txTo = event.transaction.to ? asAddress(event.transaction.to) : null;
     const kind = classifyStableSupplyChangeKind(chainId, txTo, isMint);
 
-    const changeRow: V2StableSupplyChangeEvent = {
+    const changeRow: StableSupplyChangeEvent = {
       id: eventId(chainId, event.block.number, event.logIndex),
       chainId,
       tokenAddress,
@@ -182,6 +182,6 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     };
-    context.V2StableSupplyChangeEvent.set(changeRow);
+    context.StableSupplyChangeEvent.set(changeRow);
   },
 );

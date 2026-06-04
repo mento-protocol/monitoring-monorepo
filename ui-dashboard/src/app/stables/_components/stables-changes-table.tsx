@@ -10,17 +10,17 @@ import {
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 import { displayLabel, isMintKind, kindLabel } from "@/lib/stables";
 import { explorerTxUrl } from "@/lib/tokens";
-import type { V2StableSupplyChangeEvent } from "../_lib/types";
+import type { StableSupplyChangeEvent } from "../_lib/types";
 
 type Props = {
-  events: ReadonlyArray<V2StableSupplyChangeEvent>;
+  events: ReadonlyArray<StableSupplyChangeEvent>;
   isLoading: boolean;
   hasError: boolean;
   capped: boolean;
 };
 
 /**
- * V2 supply-changes table — every Transfer-with-zero on the subscribed
+ * supply-changes table — every Transfer-with-zero on the subscribed
  * stables, labeled by kind (RESERVE_MINT / BRIDGE_BURN / etc) and linked
  * to the on-chain tx + caller address.
  *
@@ -54,7 +54,7 @@ export function StablesChangesTable({
     return (
       <Card>
         <p className="text-sm text-slate-500">
-          No V2 supply changes in the selected window.
+          No supply changes in the selected window.
         </p>
       </Card>
     );
@@ -97,7 +97,7 @@ export function StablesChangesTable({
 function SupplyChangeRow({
   event,
 }: {
-  event: V2StableSupplyChangeEvent;
+  event: StableSupplyChangeEvent;
 }): React.JSX.Element {
   // Discriminate via the `kind` enum (authoritative) rather than the
   // leading minus sign on `amount` — a zero-value burn (rare, but legal)

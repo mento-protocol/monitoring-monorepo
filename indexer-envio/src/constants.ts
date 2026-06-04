@@ -8,7 +8,7 @@ export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 /** V3 hub USDm collateral on Celo — distinct on-chain contract from V2
  *  cUSD-USDm (`0x765de8…`). Hardcoded here because `@mento-protocol/contracts`
- *  still maps the bare "USDm" key to V2 cUSD; once the upstream package
+ *  still maps the bare "USDm" key to Celo cUSD; once the upstream package
  *  republishes USDm at this address, this constant + the two import sites
  *  (`handlers/liquity/config.ts`, `handlers/stables/config.ts`) + the
  *  matching ALLOWLIST entry in `scripts/checkYamlAddresses.mjs` all become

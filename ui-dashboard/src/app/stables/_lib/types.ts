@@ -31,7 +31,7 @@ export type StableTokenCustodyDailySnapshot = {
   dailyUnlockedAmount: string;
 };
 
-export type V2StableSupplyChangeEvent = {
+export type StableSupplyChangeEvent = {
   id: string;
   chainId: number;
   tokenAddress: string;
@@ -60,8 +60,8 @@ export type TokenAgg = {
   tokenSymbol: string;
   source: StableSupplySource;
   tokenDecimals: number;
-  // Most recent circulating supply after custody subtraction (may be N days
-  // old per sparse semantics).
+  // Most recent circulating supply after custody subtraction. Daily supply and
+  // daily custody snapshots are forward-filled independently for this headline.
   latestTotalSupply: bigint;
   latestLockedSupply: bigint;
   latestTimestamp: bigint;

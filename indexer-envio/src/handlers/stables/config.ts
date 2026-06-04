@@ -10,21 +10,21 @@ import { asAddress } from "../../helpers.js";
 // ---------------------------------------------------------------------------
 // Mento stablecoin registry for the /stables dashboard page.
 //
-// Subscribes Transfer(from=0, to=0) events on each token via the V2StableToken
+// Subscribes Transfer(from=0, to=0) events on each token via the StableToken
 // contract entry in `config.multichain.mainnet.yaml`. For each event the
-// handler writes a StableSupplyDailySnapshot + V2StableSupplyChangeEvent row
+// handler writes a StableSupplyDailySnapshot + StableSupplyChangeEvent row
 // using the canonical `source` discriminator below.
 //
 // Three discriminators:
-//   V2_RESERVE          — reserve-backed stables that mint/burn via Broker or
+//   RESERVE          — reserve-backed stables that mint/burn via Broker or
 //                         Wormhole NTT. 12 Celo tokens are brand-named in
-//                         @mento-protocol/contracts (USDm aliases the V2 cUSD
+//                         @mento-protocol/contracts (USDm aliases the Celo cUSD
 //                         address 0x765de8…). Monad EURm/USDm are generated
 //                         from the NTT manifest and tracked the same way.
 //   V3_HUB_COLLATERAL   — the V3 hub USDm at 0x106cc… (a distinct contract
-//                         from V2 cUSD-USDm). Hand-typed below because the
+//                         from Celo cUSD-USDm). Hand-typed below because the
 //                         contracts package's bare `USDm` key still resolves
-//                         to V2 cUSD — see indexer-envio/src/handlers/liquity/
+//                         to Celo cUSD — see indexer-envio/src/handlers/liquity/
 //                         config.ts:28-33 for the same rationale.
 //   V3_LIQUITY          — Bold-style CDP debt tokens (GBPm/CHFm/JPYm). Celo
 //                         supply is derived from LiquityInstance.systemDebt in
@@ -40,10 +40,7 @@ import { asAddress } from "../../helpers.js";
 // counting the same units that exist as minted Monad supply.
 // ---------------------------------------------------------------------------
 
-export type StableSupplySource =
-  | "V2_RESERVE"
-  | "V3_HUB_COLLATERAL"
-  | "V3_LIQUITY";
+export type StableSupplySource = "RESERVE" | "V3_HUB_COLLATERAL" | "V3_LIQUITY";
 
 export type StableInfo = {
   chainId: number;
@@ -57,7 +54,7 @@ const CELO_CHAIN_ID = 42220;
 const MONAD_CHAIN_ID = 143;
 
 // V3 Liquity Bold debt tokens — supply tracked via LiquityInstance.systemDebt,
-// not via the Celo V2 Transfer-zero subscription.
+// not via the Celo StableToken Transfer-zero subscription.
 const LIQUITY_DEBT_SYMBOLS = new Set(["GBPm", "CHFm", "JPYm"]);
 // External bridged stables — not Mento-issued.
 const EXTERNAL_STABLES = new Set(["USDC", "USDT", "axlUSDC", "axlEUROC"]);
@@ -67,7 +64,7 @@ const NATIVE_GAS = new Set(["CELO"]);
 // Sanity check at module load. If @mento-protocol/contracts drops or renames
 // one of these symbols, throw immediately rather than silently producing an
 // incomplete registry on the next sync.
-const EXPECTED_V2_RESERVE_SYMBOLS: ReadonlyArray<string> = [
+const EXPECTED_RESERVE_STABLE_SYMBOLS: ReadonlyArray<string> = [
   "USDm",
   "EURm",
   "BRLm",
@@ -122,7 +119,7 @@ const NTT_BRIDGE_MODE_BY_TOKEN = new Map<string, NttBridgeMode>([
 
 const nttEntries = (nttAddresses as { entries: NttAddressEntry[] }).entries;
 
-// V3 hub USDm — distinct on-chain contract from V2 cUSD-USDm. The address
+// V3 hub USDm — distinct on-chain contract from Celo cUSD-USDm. The address
 // constant lives in `src/constants.ts` and is also imported by
 // `handlers/liquity/config.ts`; single-source so the two hardcodes can never
 // drift.
@@ -136,7 +133,7 @@ const V3_HUB_USDM_INFO: StableInfo = {
 
 const sourceForNttStable = (entry: NttAddressEntry): StableSupplySource => {
   if (LIQUITY_DEBT_SYMBOLS.has(entry.tokenSymbol)) return "V3_LIQUITY";
-  return "V2_RESERVE";
+  return "RESERVE";
 };
 
 const buildNttStables = (): ReadonlyArray<NttStableInfo> => {
@@ -184,7 +181,7 @@ const buildStables = (): ReadonlyArray<StableInfo> => {
       address: info.address.toLowerCase(),
       symbol: name,
       decimals: info.decimals,
-      source: "V2_RESERVE",
+      source: "RESERVE",
     });
   }
 
@@ -215,25 +212,25 @@ export const LOCK_AND_MINT_NTT_STABLES: ReadonlyArray<NttStableInfo> =
 
 export const STABLES: ReadonlyArray<StableInfo> = buildStables();
 
-// Invariant check: every EXPECTED V2 reserve symbol resolved successfully.
+// Invariant check: every EXPECTED reserve symbol resolved successfully.
 // If the package drops one, throw at module load so the indexer fails fast
 // rather than silently under-tracking a token.
 {
-  const v2ReserveSymbols = new Set(
+  const reserveSymbols = new Set(
     STABLES.filter(
-      (s) => s.chainId === CELO_CHAIN_ID && s.source === "V2_RESERVE",
+      (s) => s.chainId === CELO_CHAIN_ID && s.source === "RESERVE",
     ).map((s) => s.symbol),
   );
-  for (const expected of EXPECTED_V2_RESERVE_SYMBOLS) {
-    if (!v2ReserveSymbols.has(expected)) {
+  for (const expected of EXPECTED_RESERVE_STABLE_SYMBOLS) {
+    if (!reserveSymbols.has(expected)) {
       throw new Error(
-        `[stables/config] Expected V2 reserve stable ${expected} missing from ` +
+        `[stables/config] Expected reserve stable ${expected} missing from ` +
           `@mento-protocol/contracts (chain ${CELO_CHAIN_ID}). Update ` +
-          `EXPECTED_V2_RESERVE_SYMBOLS or bump the contracts package.`,
+          `EXPECTED_RESERVE_STABLE_SYMBOLS or bump the contracts package.`,
       );
     }
   }
-  // Also sanity-check that V2 cUSD-USDm and the hardcoded V3 hub USDm are
+  // Also sanity-check that Celo cUSD-USDm and the hardcoded V3 hub USDm are
   // at DISTINCT on-chain addresses. The two USDm entries must differ — if
   // the upstream package starts publishing USDm at the V3 hub address
   // (`0x106cc…`), the length check below alone would pass with two
@@ -243,7 +240,7 @@ export const STABLES: ReadonlyArray<StableInfo> = buildStables();
   const usdmEntries = STABLES.filter((s) => s.symbol === "USDm");
   if (usdmEntries.length !== 3) {
     throw new Error(
-      `[stables/config] Expected exactly 3 USDm entries (Celo V2 cUSD-USDm + Celo V3 hub USDm + Monad USDm), found ${usdmEntries.length}. ` +
+      `[stables/config] Expected exactly 3 USDm entries (Celo cUSD-USDm + Celo V3 hub USDm + Monad USDm), found ${usdmEntries.length}. ` +
         `If @mento-protocol/contracts now ships USDm at ${V3_HUB_USDM_ADDRESS}, remove V3_HUB_USDM_INFO from this file.`,
     );
   }
@@ -252,7 +249,7 @@ export const STABLES: ReadonlyArray<StableInfo> = buildStables();
   );
   if (celoUsdmEntries.length !== 2) {
     throw new Error(
-      `[stables/config] Expected exactly 2 Celo USDm entries (V2 cUSD-USDm + V3 hub USDm), found ${celoUsdmEntries.length}.`,
+      `[stables/config] Expected exactly 2 Celo USDm entries (Celo cUSD-USDm + V3 hub USDm), found ${celoUsdmEntries.length}.`,
     );
   }
   const [firstUsdm, secondUsdm] = celoUsdmEntries;

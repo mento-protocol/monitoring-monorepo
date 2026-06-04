@@ -1,5 +1,5 @@
 // GraphQL queries for the /stables dashboard page. Targets entities added in
-// the parallel indexer PR (`StableSupplyDailySnapshot`, `V2StableSupplyChangeEvent`)
+// the parallel indexer PR (`StableSupplyDailySnapshot`, `StableSupplyChangeEvent`)
 // — until that PR is deployed + re-synced, these queries return empty arrays.
 //
 // Pagination uses keyset on `(timestamp desc, id desc)` to break Hasura's
@@ -44,7 +44,7 @@ export const STABLES_DAILY_SNAPSHOTS = `
 // queries) and keeps the row count bounded.
 //
 // Invariant: each (chainId, tokenAddress) maps to exactly one `source`
-// today — V2 cUSD-USDm and V3 hub USDm live at DISTINCT addresses
+// today — Celo cUSD-USDm and V3 hub USDm live at DISTINCT addresses
 // (`0x765de8…` vs `0x106cc…`), and no other Mento stable has a sibling
 // source on the same chain. So `distinct_on: [chainId, tokenAddress]`
 // returns the same set as the rollup's `(chainId, tokenAddress, source)`
@@ -125,15 +125,15 @@ export const STABLES_LATEST_CUSTODY_PER_TOKEN = `
 // Per-tx supply changes for the /stables changes table + leaderboard. The
 // V3 streams (TroveOperationEvent / RedemptionEvent / LiquidationEvent) merge
 // in on the client side — those carry source-specific fields that don't
-// normalize cleanly into V2StableSupplyChangeEvent.
-export const STABLES_V2_CHANGES = `
-  query StablesV2Changes(
+// normalize cleanly into StableSupplyChangeEvent.
+export const STABLES_CHANGES = `
+  query StablesChanges(
     $chainIds: [Int!]!
     $sinceTimestamp: numeric!
     $limit: Int!
     $offset: Int!
   ) {
-    V2StableSupplyChangeEvent(
+    StableSupplyChangeEvent(
       where: {
         chainId: { _in: $chainIds }
         blockTimestamp: { _gte: $sinceTimestamp }

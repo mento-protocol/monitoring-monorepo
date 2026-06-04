@@ -73,7 +73,7 @@ export function StablesHeroChart({
       latestCustodyPerToken,
     );
     // Shared discriminator with `_lib/aggregate.ts` so KPI strip and hero
-    // chart group V2 cUSD-USDm vs V3 hub USDm identically.
+    // chart group Celo cUSD-USDm vs V3 hub USDm identically.
     const grouped = groupSnapshotsByTokenSource(merged);
     const custodyByToken = groupCustodySnapshotsByToken(mergedCustody);
     // Shared x-axis start across all per-token series. Critical for
@@ -100,7 +100,7 @@ export function StablesHeroChart({
       breakdownEntries.push({
         id: key,
         name: `${displayLabel(sample.tokenSymbol, sample.source)} on ${chainLabel(sample.chainId)}`,
-        // V2 USDm and V3 hub USDm share `tokenSymbol` but live at
+        // reserve USDm and V3 hub USDm share `tokenSymbol` but live at
         // distinct addresses; source-aware coloring keeps the stacked
         // chart's two USDm slices visually distinct (otherwise they
         // merge into a single emerald block).

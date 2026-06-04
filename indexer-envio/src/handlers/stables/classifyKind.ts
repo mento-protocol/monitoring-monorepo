@@ -17,7 +17,7 @@ import { getContractAddress } from "../../contractAddresses.js";
 import { asAddress } from "../../helpers.js";
 import { nttBridgeAddressesForChain } from "../../system-addresses.js";
 
-export type V2StableSupplyChangeKind =
+export type StableSupplyChangeKind =
   | "RESERVE_MINT"
   | "RESERVE_BURN"
   | "BRIDGE_MINT"
@@ -51,7 +51,7 @@ export function classifyStableSupplyChangeKind(
   chainId: number,
   txTo: string | null | undefined,
   isMint: boolean,
-): V2StableSupplyChangeKind {
+): StableSupplyChangeKind {
   if (!txTo) return isMint ? "OTHER_MINT" : "OTHER_BURN";
   const lower = asAddress(txTo);
   const broker = getBrokerAddress(chainId);

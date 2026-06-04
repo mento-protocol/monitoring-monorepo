@@ -7,14 +7,14 @@ import {
   STABLES_DAILY_SNAPSHOTS,
   STABLES_LATEST_CUSTODY_PER_TOKEN,
   STABLES_LATEST_PER_TOKEN,
-  STABLES_V2_CHANGES,
+  STABLES_CHANGES,
 } from "@/lib/queries/stables";
 import { rangeStartSeconds } from "./aggregate";
 import type {
   RangeKey,
   StableSupplyDailySnapshot,
   StableTokenCustodyDailySnapshot,
-  V2StableSupplyChangeEvent,
+  StableSupplyChangeEvent,
 } from "./types";
 
 const STABLES_CHAIN_IDS = [42220, 143] as const;
@@ -33,8 +33,8 @@ type CustodyDailySnapshotsResult = {
   StableTokenCustodyDailySnapshot: ReadonlyArray<StableTokenCustodyDailySnapshot>;
 };
 type LatestCustodyPerTokenResult = CustodyDailySnapshotsResult;
-type V2ChangesResult = {
-  V2StableSupplyChangeEvent: ReadonlyArray<V2StableSupplyChangeEvent>;
+type ChangesResult = {
+  StableSupplyChangeEvent: ReadonlyArray<StableSupplyChangeEvent>;
 };
 
 /**
@@ -71,7 +71,7 @@ export function useStablesLatestPerToken() {
  * adds keyset pagination via the `beforeTimestamp` cursor.
  */
 export function useStablesDailySnapshots(_range: RangeKey) {
-  // `_range` is accepted for API symmetry with `useStablesV2Changes` and
+  // `_range` is accepted for API symmetry with `useStablesChanges` and
   // to make it a typed-call-site for future range-aware where-clause
   // filtering. The hook does NOT filter by range today (see header).
   void _range;
@@ -102,9 +102,9 @@ export function useStablesLatestCustodyPerToken() {
     STABLES_LATEST_CUSTODY_PER_TOKEN,
     { chainIds: STABLES_CHAIN_IDS },
   );
-  // Keep this daily-snapshot anchored. The latest supply feed is also daily
-  // snapshots, so mixing live custody state with stale same-day supply can
-  // understate circulating supply until the next supply flush.
+  // Keep this daily-snapshot anchored. The aggregate helpers can forward-fill
+  // daily supply and custody independently, but they must not mix live custody
+  // state with a daily supply feed.
   const snapshots = useMemo(
     () => data?.StableTokenCustodyDailySnapshot ?? [],
     [data],
@@ -135,22 +135,19 @@ export function useStablesCustodyDailySnapshots(_range: RangeKey) {
 }
 
 /**
- * Per-tx V2 supply changes for the changes table + leaderboard. Filters
+ * Per-tx supply changes for the changes table + leaderboard. Filters
  * to the last 7d window (sufficient for the leaderboard; the table can
  * later add date-range pickers via the `sinceTimestamp` arg).
  */
-export function useStablesV2Changes(range: RangeKey = "7d", page: number = 0) {
+export function useStablesChanges(range: RangeKey = "7d", page: number = 0) {
   const sinceTimestamp = rangeStartSeconds(range);
-  const { data, error, isLoading } = useGQL<V2ChangesResult>(
-    STABLES_V2_CHANGES,
-    {
-      chainIds: STABLES_CHAIN_IDS,
-      sinceTimestamp,
-      limit: CHANGES_PAGE_LIMIT,
-      offset: page * CHANGES_PAGE_LIMIT,
-    },
-  );
-  const events = useMemo(() => data?.V2StableSupplyChangeEvent ?? [], [data]);
+  const { data, error, isLoading } = useGQL<ChangesResult>(STABLES_CHANGES, {
+    chainIds: STABLES_CHAIN_IDS,
+    sinceTimestamp,
+    limit: CHANGES_PAGE_LIMIT,
+    offset: page * CHANGES_PAGE_LIMIT,
+  });
+  const events = useMemo(() => data?.StableSupplyChangeEvent ?? [], [data]);
   return {
     events,
     error,

@@ -114,7 +114,7 @@ const ALLOWLIST = new Map([
     "0x6d4c4b663541bf21015afb22669b0e1bbb3e2b1c",
     { chainId: 10143, reason: "FPMM testnet instance" },
   ],
-  // V3 hub USDm collateral — distinct on-chain contract from V2 cUSD-USDm.
+  // V3 hub USDm collateral — distinct on-chain contract from Celo cUSD-USDm.
   // Address constant lives at src/constants.ts:V3_HUB_USDM_ADDRESS (imported
   // by handlers/liquity/config.ts AND handlers/stables/config.ts) — kept
   // duplicated here because this script is .mjs and can't import .ts. If
