@@ -38,6 +38,18 @@ describe("GET /api/address-labels/export", () => {
     expect(getLabels).not.toHaveBeenCalled();
   });
 
+  it("returns 401 when the session carries a RefreshTokenError (revoked account)", async () => {
+    (auth as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "test@mentolabs.xyz" },
+      error: "RefreshTokenError",
+    });
+    const res = await GET();
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toBe("Authentication required");
+    expect(getLabels).not.toHaveBeenCalled();
+  });
+
   it("returns 403 when authenticated outside the maintainer Workspace", async () => {
     (auth as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { email: "intruder@example.com" },
