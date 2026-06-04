@@ -50,9 +50,9 @@ export function StablesSparklineGrid({
   isLoading,
   hasError,
 }: Props): React.JSX.Element {
-  // Merge snapshots + latestPerToken so tokens whose history is older
-  // than the 1000-row page still appear (same baseline-floor pattern as
-  // the hero chart).
+  // Merge snapshots + latestPerToken so tokens whose history is older than
+  // the 1000-row page still appear and same-day current state overrides sparse
+  // daily rows (same baseline-floor pattern as the hero chart).
   const cards = useMemo(() => {
     if (snapshots.length === 0 && latestPerToken.length === 0) return [];
     const merged = unionSnapshotsWithLatest(snapshots, latestPerToken);

@@ -35,10 +35,35 @@ export const STABLES_DAILY_SNAPSHOTS = `
   }
 `;
 
-// Latest snapshot per (chainId, tokenAddress) — used for the KPI strip's
-// "current outstanding" totals + per-token sparkline-grid headlines. The
-// indexer's sparse-day semantics mean this returns the LATEST row, not
-// necessarily today's — UI surfaces stale dates accordingly.
+// Current running supply per (chainId, tokenAddress) — used for the KPI
+// strip's "current outstanding" totals + per-token sparkline-grid headlines.
+// Daily snapshots are sparse and only flush on later events crossing a UTC
+// day; this state table is updated on every observed mint/burn event.
+//
+// Field aliases normalize the state row into the same shape as
+// StableSupplyDailySnapshot so callers can merge it with the historical
+// daily stream. `timestamp` is the current UTC day bucket, not the last event
+// timestamp, because chart helpers consume day-bucketed rows.
+export const STABLES_CURRENT_SUPPLY_PER_TOKEN = `
+  query StablesCurrentSupplyPerToken($chainIds: [Int!]!) {
+    StableTokenSupply(where: { chainId: { _in: $chainIds } }) {
+      id
+      chainId
+      tokenAddress
+      tokenSymbol
+      source
+      tokenDecimals
+      timestamp: currentDayBucket
+      totalSupply
+      dailyMintAmount: mintedTodayBucket
+      dailyBurnAmount: burnedTodayBucket
+    }
+  }
+`;
+
+// Latest daily snapshot per (chainId, tokenAddress). Used as a fallback for
+// supply rows that do not have StableTokenSupply state, currently Celo
+// V3_LIQUITY rows derived from LiquityInstance.systemDebt.
 //
 // Hasura `distinct_on` is supported (verified via existing protocol-fees
 // queries) and keeps the row count bounded.
@@ -67,6 +92,24 @@ export const STABLES_LATEST_PER_TOKEN = `
       totalSupply
       dailyMintAmount
       dailyBurnAmount
+    }
+  }
+`;
+
+export const STABLES_CURRENT_CUSTODY_PER_TOKEN = `
+  query StablesCurrentCustodyPerToken($chainIds: [Int!]!) {
+    StableTokenCustodyState(where: { chainId: { _in: $chainIds } }) {
+      id
+      chainId
+      tokenAddress
+      tokenSymbol
+      source
+      tokenDecimals
+      managerAddress
+      timestamp: currentDayBucket
+      lockedSupply
+      dailyLockedAmount: lockedTodayBucket
+      dailyUnlockedAmount: unlockedTodayBucket
     }
   }
 `;

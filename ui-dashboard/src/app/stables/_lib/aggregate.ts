@@ -56,9 +56,11 @@ export function rollupByToken(
  * than the retained 1000-row page would otherwise drop out of the
  * stacked total + sparkline grid; this floor keeps them present.
  *
- * De-dupes on row id, so when both feeds carry the same row it
- * collapses cleanly. Both `StablesHeroChart` and `StablesSparklineGrid`
- * call this — single source so they can't drift on collision precedence.
+ * De-dupes on row id with latest-row precedence. Current-state rows are
+ * normalized to the same day id as their historical counterpart, and they must
+ * overwrite the sparse daily row so current totals do not lag until the next
+ * rollover event. Both `StablesHeroChart` and `StablesSparklineGrid` call
+ * this — single source so they can't drift on collision precedence.
  */
 export function unionSnapshotsWithLatest(
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>,
@@ -66,7 +68,7 @@ export function unionSnapshotsWithLatest(
 ): StableSupplyDailySnapshot[] {
   const byId = new Map<string, StableSupplyDailySnapshot>();
   for (const r of snapshots) byId.set(r.id, r);
-  for (const r of latestPerToken) if (!byId.has(r.id)) byId.set(r.id, r);
+  for (const r of latestPerToken) byId.set(r.id, r);
   return Array.from(byId.values());
 }
 
@@ -76,7 +78,7 @@ export function unionCustodySnapshotsWithLatest(
 ): StableTokenCustodyDailySnapshot[] {
   const byId = new Map<string, StableTokenCustodyDailySnapshot>();
   for (const r of snapshots) byId.set(r.id, r);
-  for (const r of latestPerToken) if (!byId.has(r.id)) byId.set(r.id, r);
+  for (const r of latestPerToken) byId.set(r.id, r);
   return Array.from(byId.values());
 }
 

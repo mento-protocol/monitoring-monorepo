@@ -28,14 +28,15 @@ function formatSignedUSD(v: number): string {
 }
 
 type Props = {
-  // Per-token latest rows (one per token via distinct_on). Sufficient for
-  // the "Circulating supply" headline; the winners/losers tiles need the
-  // wider snapshot stream for the 7d baseline comparison.
+  // Per-token current rows. Transfer-tracked tokens come from current
+  // StableTokenSupply state; Celo CDP rows fall back to latest daily snapshots.
+  // Sufficient for the "Circulating supply" headline; the winners/losers tiles
+  // need the wider snapshot stream for the 7d baseline comparison.
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
   latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   // Daily-snapshot stream from useStablesDailySnapshots — feeds the 7d
-  // change calculation. Merged with latestPerToken so KPI deltas do not lag
-  // when the newest row falls outside the first paginated snapshot page.
+  // change calculation. Merged with latestPerToken so KPI deltas use the
+  // current state even when sparse daily snapshots have not rolled over.
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
   custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   rates: OracleRateMap;

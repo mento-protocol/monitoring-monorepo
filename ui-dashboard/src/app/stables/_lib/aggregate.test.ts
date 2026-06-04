@@ -6,6 +6,8 @@ import {
   rangeStartSeconds,
   rollupByToken,
   sumTotalUsdSeries,
+  unionCustodySnapshotsWithLatest,
+  unionSnapshotsWithLatest,
   winnersAndLosers7d,
 } from "./aggregate";
 import type {
@@ -58,6 +60,53 @@ function custodySnapshot(
 }
 
 describe("rollupByToken", () => {
+  it("lets current supply rows replace stale same-day daily snapshots", () => {
+    const staleDaily = snapshot({
+      tokenAddress: "0xjpy",
+      tokenSymbol: "JPYm",
+      chainId: 143,
+      timestamp: String(NOW_TS),
+      totalSupply: String(BigInt(1_400) * BigInt(10) ** BigInt(18)),
+    });
+    const current = snapshot({
+      ...staleDaily,
+      totalSupply: String(BigInt(4_761_281) * BigInt(10) ** BigInt(18)),
+    });
+
+    const merged = unionSnapshotsWithLatest([staleDaily], [current]);
+    const rollup = rollupByToken(
+      merged,
+      new Map([["143:JPYm", 0.00625]]),
+      NOW_TS,
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(rollup.get("143|0xjpy|RESERVE")?.latestTotalSupply).toBe(
+      BigInt(4_761_281) * BigInt(10) ** BigInt(18),
+    );
+  });
+
+  it("lets current custody rows replace stale same-day custody snapshots", () => {
+    const staleDaily = custodySnapshot({
+      tokenAddress: "0xc",
+      tokenSymbol: "GBPm",
+      source: "V3_LIQUITY",
+      timestamp: String(NOW_TS),
+      lockedSupply: String(BigInt(80) * BigInt(10) ** BigInt(18)),
+    });
+    const current = custodySnapshot({
+      ...staleDaily,
+      lockedSupply: String(BigInt(120) * BigInt(10) ** BigInt(18)),
+    });
+
+    const merged = unionCustodySnapshotsWithLatest([staleDaily], [current]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.lockedSupply).toBe(
+      String(BigInt(120) * BigInt(10) ** BigInt(18)),
+    );
+  });
+
   it("groups by (tokenAddress, source) and computes 7d net change", () => {
     const usdm = "0xa";
     const eurm = "0xb";

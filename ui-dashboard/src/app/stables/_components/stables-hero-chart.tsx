@@ -25,12 +25,11 @@ import type {
 
 type Props = {
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
-  // Latest snapshot per `(tokenAddress, source)` from
-  // `useStablesLatestPerToken` — used as a baseline floor for tokens
-  // whose history is paginated out of `snapshots` once the 1000-row
-  // cap hits. Without it, a token with no in-range snapshot disappears
-  // from the stacked total even though `latestPerToken` knows its
-  // current supply.
+  // Current row per `(tokenAddress, source)` from `useStablesLatestPerToken` —
+  // used as a baseline floor for tokens whose history is paginated out of
+  // `snapshots` once the 1000-row cap hits. Without it, a token with no
+  // in-range snapshot disappears from the stacked total even though
+  // `latestPerToken` knows its current supply.
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
   custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>;
