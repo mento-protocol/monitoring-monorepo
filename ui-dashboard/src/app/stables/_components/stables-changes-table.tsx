@@ -10,6 +10,7 @@ import {
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 import { displayLabel, isMintKind, kindLabel } from "@/lib/stables";
 import { explorerTxUrl } from "@/lib/tokens";
+import { SUPPLY_CHANGE_FILTER_THRESHOLD_LABEL } from "../_lib/aggregate";
 import type { StableSupplyChangeEvent } from "../_lib/types";
 
 type Props = {
@@ -54,7 +55,8 @@ export function StablesChangesTable({
     return (
       <Card>
         <p className="text-sm text-slate-500">
-          No supply changes in the selected window.
+          No supply changes at or above {SUPPLY_CHANGE_FILTER_THRESHOLD_LABEL}{" "}
+          in {capped ? "the most recent fetched rows" : "the selected window"}.
         </p>
       </Card>
     );
@@ -62,14 +64,19 @@ export function StablesChangesTable({
 
   return (
     <Card>
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-4 flex items-start justify-between gap-3">
         <h2 className="text-lg font-semibold text-slate-100">Supply changes</h2>
-        {capped ? (
-          <p className="text-xs text-amber-400" role="status">
-            Showing the most recent {events.length} events — older entries may
-            be truncated.
+        <div className="text-right">
+          <p className="text-xs text-slate-500">
+            Hiding changes below {SUPPLY_CHANGE_FILTER_THRESHOLD_LABEL}.
           </p>
-        ) : null}
+          {capped ? (
+            <p className="text-xs text-amber-400" role="status">
+              Showing the most recent {events.length} events — older entries may
+              be truncated.
+            </p>
+          ) : null}
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
