@@ -65,7 +65,9 @@ export function rollupByToken(
   for (const [key, rows] of grouped) {
     const sample = rows[0]!;
     const custodyRows =
-      custodyByToken.get(custodyKey(sample.chainId, sample.tokenAddress)) ?? [];
+      custodyByToken.get(
+        custodyTokenKey(sample.chainId, sample.tokenAddress),
+      ) ?? [];
     out.set(key, buildTokenAgg(key, rows, rates, sevenDayCutoff, custodyRows));
   }
   return out;
@@ -77,28 +79,50 @@ export function rollupByToken(
  * than the retained 1000-row page would otherwise drop out of the
  * stacked total + sparkline grid; this floor keeps them present.
  *
- * De-dupes on row id, so when both feeds carry the same row it
- * collapses cleanly. Both `StablesHeroChart` and `StablesSparklineGrid`
- * call this — single source so they can't drift on collision precedence.
+ * De-dupes on `(chainId, tokenAddress, source, timestamp)` with latest-row
+ * precedence. Current-state rows must overwrite the sparse daily row for the
+ * same token/day so current totals do not lag until the next rollover event.
+ * Both `StablesHeroChart` and `StablesSparklineGrid` call this — single source
+ * so they can't drift on collision precedence.
  */
 export function unionSnapshotsWithLatest(
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>,
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>,
 ): StableSupplyDailySnapshot[] {
-  const byId = new Map<string, StableSupplyDailySnapshot>();
-  for (const r of snapshots) byId.set(r.id, r);
-  for (const r of latestPerToken) if (!byId.has(r.id)) byId.set(r.id, r);
-  return Array.from(byId.values());
+  const bySnapshot = new Map<string, StableSupplyDailySnapshot>();
+  for (const r of snapshots) bySnapshot.set(supplySnapshotKey(r), r);
+  for (const r of latestPerToken) bySnapshot.set(supplySnapshotKey(r), r);
+  return Array.from(bySnapshot.values());
 }
 
 export function unionCustodySnapshotsWithLatest(
   snapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>,
   latestPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>,
 ): StableTokenCustodyDailySnapshot[] {
-  const byId = new Map<string, StableTokenCustodyDailySnapshot>();
-  for (const r of snapshots) byId.set(r.id, r);
-  for (const r of latestPerToken) if (!byId.has(r.id)) byId.set(r.id, r);
-  return Array.from(byId.values());
+  const bySnapshot = new Map<string, StableTokenCustodyDailySnapshot>();
+  for (const r of snapshots) bySnapshot.set(custodySnapshotKey(r), r);
+  for (const r of latestPerToken) bySnapshot.set(custodySnapshotKey(r), r);
+  return Array.from(bySnapshot.values());
+}
+
+export function custodySnapshotsAlignedToSupplyRows(
+  supplyRows: ReadonlyArray<StableSupplyDailySnapshot>,
+  custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+  latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+): StableTokenCustodyDailySnapshot[] {
+  const currentSupplyTokens = new Set<string>();
+  for (const row of supplyRows) {
+    if (row.isCurrentState === true) {
+      currentSupplyTokens.add(custodyTokenKey(row.chainId, row.tokenAddress));
+    }
+  }
+  const liveCustodyForLiveSupply = latestCustodyPerToken.filter((row) =>
+    currentSupplyTokens.has(custodyTokenKey(row.chainId, row.tokenAddress)),
+  );
+  return unionCustodySnapshotsWithLatest(
+    custodySnapshots,
+    liveCustodyForLiveSupply,
+  );
 }
 
 /**
@@ -127,7 +151,7 @@ export function groupCustodySnapshotsByToken(
 ): Map<string, StableTokenCustodyDailySnapshot[]> {
   const grouped = new Map<string, StableTokenCustodyDailySnapshot[]>();
   for (const row of snapshots) {
-    const key = custodyKey(row.chainId, row.tokenAddress);
+    const key = custodyTokenKey(row.chainId, row.tokenAddress);
     let arr = grouped.get(key);
     if (!arr) {
       arr = [];
@@ -142,11 +166,21 @@ export function groupCustodySnapshotsByToken(
 }
 
 function tokenSourceKey(row: StableSupplyDailySnapshot): string {
-  return `${row.chainId}|${row.tokenAddress}|${row.source}`;
+  return `${row.chainId}|${row.tokenAddress.toLowerCase()}|${row.source}`;
 }
 
-function custodyKey(chainId: number, tokenAddress: string): string {
-  return `${chainId}|${tokenAddress}`;
+export function custodyTokenKey(chainId: number, tokenAddress: string): string {
+  return `${chainId}|${tokenAddress.toLowerCase()}`;
+}
+
+function supplySnapshotKey(row: StableSupplyDailySnapshot): string {
+  return `${tokenSourceKey(row)}|${row.timestamp}`;
+}
+
+function custodySnapshotKey(row: StableTokenCustodyDailySnapshot): string {
+  return `${custodyTokenKey(row.chainId, row.tokenAddress)}|${row.source}|${
+    row.timestamp
+  }`;
 }
 
 function lockedSupplyAt(

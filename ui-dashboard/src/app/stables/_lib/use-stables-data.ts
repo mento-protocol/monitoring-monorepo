@@ -3,6 +3,8 @@
 import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
 import {
+  STABLES_CURRENT_CUSTODY_PER_TOKEN,
+  STABLES_CURRENT_SUPPLY_PER_TOKEN,
   STABLES_CUSTODY_DAILY_SNAPSHOTS,
   STABLES_DAILY_SNAPSHOTS,
   STABLES_LATEST_CUSTODY_PER_TOKEN,
@@ -30,9 +32,15 @@ const TS_CURSOR_INITIAL = "9999999999";
 type DailySnapshotsResult = {
   StableSupplyDailySnapshot: ReadonlyArray<StableSupplyDailySnapshot>;
 };
+type CurrentSupplyResult = {
+  StableTokenSupply: ReadonlyArray<StableSupplyDailySnapshot>;
+};
 type LatestPerTokenResult = DailySnapshotsResult;
 type CustodyDailySnapshotsResult = {
   StableTokenCustodyDailySnapshot: ReadonlyArray<StableTokenCustodyDailySnapshot>;
+};
+type CurrentCustodyResult = {
+  StableTokenCustodyState: ReadonlyArray<StableTokenCustodyDailySnapshot>;
 };
 type LatestCustodyPerTokenResult = CustodyDailySnapshotsResult;
 type ChangesResult = {
@@ -46,23 +54,95 @@ type ChangePageState = {
   isLoading: boolean;
 };
 
+function tokenKey(row: {
+  chainId: number;
+  tokenAddress: string;
+  source?: string;
+}): string {
+  return `${row.chainId}|${row.tokenAddress.toLowerCase()}|${row.source ?? ""}`;
+}
+
+function normalizeSupplyCurrentRows(
+  rows: ReadonlyArray<StableSupplyDailySnapshot>,
+): StableSupplyDailySnapshot[] {
+  return rows.map((row) => ({
+    ...row,
+    id: `${row.chainId}-${row.tokenAddress.toLowerCase()}-${row.timestamp}`,
+    tokenAddress: row.tokenAddress.toLowerCase(),
+    isCurrentState: true,
+  }));
+}
+
+function normalizeCustodyCurrentRows(
+  rows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
+): StableTokenCustodyDailySnapshot[] {
+  return rows.map((row) => ({
+    ...row,
+    id: `${row.chainId}-${row.tokenAddress.toLowerCase()}-${row.timestamp}`,
+    tokenAddress: row.tokenAddress.toLowerCase(),
+    managerAddress: row.managerAddress.toLowerCase(),
+  }));
+}
+
+function mergeCurrentRows<T extends { chainId: number; tokenAddress: string }>(
+  current: ReadonlyArray<T>,
+  fallback: ReadonlyArray<T>,
+): T[] {
+  const byToken = new Map<string, T>();
+  for (const row of fallback) byToken.set(tokenKey(row), row);
+  for (const row of current) byToken.set(tokenKey(row), row);
+  return Array.from(byToken.values());
+}
+
+export function mergedFeedError<T>(
+  mergedRows: ReadonlyArray<T>,
+  currentError: Error | null | undefined,
+  fallbackError: Error | null | undefined,
+): Error | null | undefined {
+  if (fallbackError != null) return fallbackError;
+  if (mergedRows.length > 0) return null;
+  // Once both feeds produce no usable rows, surfacing the current-state error
+  // is enough to avoid hiding the failure while still preserving fallback rows
+  // during current-state rollout or schema drift.
+  return currentError;
+}
+
 /**
- * Per-token latest supply snapshot (one row per token via distinct_on).
- * Powers the KPI strip current totals + sparkline grid headlines.
+ * Per-token current supply rows. Transfer-tracked tokens use
+ * StableTokenSupply state so current totals do not wait for sparse daily
+ * snapshot rollover. Latest daily snapshots remain as fallback rows for Celo
+ * V3_LIQUITY, which is derived from LiquityInstance.systemDebt.
  *
  * /stables is a global supply view, so it queries every chain that can carry
  * Mento stable supply instead of following the currently selected network.
  */
 export function useStablesLatestPerToken() {
-  const { data, error, isLoading } = useGQL<LatestPerTokenResult>(
-    STABLES_LATEST_PER_TOKEN,
-    { chainIds: STABLES_CHAIN_IDS },
-  );
-  const snapshots = useMemo(
-    () => data?.StableSupplyDailySnapshot ?? [],
-    [data],
-  );
-  return { snapshots, error, isLoading };
+  const {
+    data: currentData,
+    error: currentError,
+    isLoading: currentLoading,
+  } = useGQL<CurrentSupplyResult>(STABLES_CURRENT_SUPPLY_PER_TOKEN, {
+    chainIds: STABLES_CHAIN_IDS,
+  });
+  const {
+    data: fallbackData,
+    error: fallbackError,
+    isLoading: fallbackLoading,
+  } = useGQL<LatestPerTokenResult>(STABLES_LATEST_PER_TOKEN, {
+    chainIds: STABLES_CHAIN_IDS,
+  });
+  const snapshots = useMemo(() => {
+    const current = normalizeSupplyCurrentRows(
+      currentData?.StableTokenSupply ?? [],
+    );
+    const fallback = fallbackData?.StableSupplyDailySnapshot ?? [];
+    return mergeCurrentRows(current, fallback);
+  }, [currentData, fallbackData]);
+  return {
+    snapshots,
+    error: mergedFeedError(snapshots, currentError, fallbackError),
+    isLoading: currentLoading || fallbackLoading,
+  };
 }
 
 /**
@@ -107,18 +187,32 @@ export function useStablesDailySnapshots(_range: RangeKey) {
 }
 
 export function useStablesLatestCustodyPerToken() {
-  const { data, error, isLoading } = useGQL<LatestCustodyPerTokenResult>(
-    STABLES_LATEST_CUSTODY_PER_TOKEN,
-    { chainIds: STABLES_CHAIN_IDS },
-  );
-  // Keep this daily-snapshot anchored. The aggregate helpers can forward-fill
-  // daily supply and custody independently, but they must not mix live custody
-  // state with a daily supply feed.
-  const snapshots = useMemo(
-    () => data?.StableTokenCustodyDailySnapshot ?? [],
-    [data],
-  );
-  return { snapshots, error, isLoading };
+  const {
+    data: currentData,
+    error: currentError,
+    isLoading: currentLoading,
+  } = useGQL<CurrentCustodyResult>(STABLES_CURRENT_CUSTODY_PER_TOKEN, {
+    chainIds: STABLES_CHAIN_IDS,
+  });
+  const {
+    data: fallbackData,
+    error: fallbackError,
+    isLoading: fallbackLoading,
+  } = useGQL<LatestCustodyPerTokenResult>(STABLES_LATEST_CUSTODY_PER_TOKEN, {
+    chainIds: STABLES_CHAIN_IDS,
+  });
+  const snapshots = useMemo(() => {
+    const current = normalizeCustodyCurrentRows(
+      currentData?.StableTokenCustodyState ?? [],
+    );
+    const fallback = fallbackData?.StableTokenCustodyDailySnapshot ?? [];
+    return mergeCurrentRows(current, fallback);
+  }, [currentData, fallbackData]);
+  return {
+    snapshots,
+    error: mergedFeedError(snapshots, currentError, fallbackError),
+    isLoading: currentLoading || fallbackLoading,
+  };
 }
 
 export function useStablesCustodyDailySnapshots(_range: RangeKey) {
