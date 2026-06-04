@@ -6,7 +6,11 @@ import { getAllReports } from "@/lib/address-reports";
 
 export async function GET(): Promise<NextResponse> {
   const session = await auth();
-  if (!session) {
+  // Reject both missing sessions and ones flagged with a RefreshTokenError
+  // (revoked/offboarded Google account). Middleware already gates this path,
+  // but this export dumps every label + forensic report, so it re-checks
+  // in-route rather than trusting the matcher alone.
+  if (!session || session.error === "RefreshTokenError") {
     return NextResponse.json(
       { error: "Authentication required" },
       { status: 401 },

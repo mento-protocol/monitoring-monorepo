@@ -7,6 +7,7 @@ import { NetworkProvider } from "@/components/network-provider";
 import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NavLinks } from "@/components/nav-links";
 import { AuthStatus } from "@/components/auth-status";
+import { SessionErrorGuard } from "@/components/session-error-guard";
 import { SwrProvider } from "@/components/swr-provider";
 import { Analytics } from "@vercel/analytics/next";
 import { serverEnv, clientEnv } from "@/env";
@@ -52,6 +53,7 @@ export default async function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
       >
         <SessionProvider session={session}>
+          <SessionErrorGuard />
           <SwrProvider>
             <Suspense>
               <NetworkProvider>

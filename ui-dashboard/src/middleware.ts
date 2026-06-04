@@ -81,7 +81,11 @@ export default auth((req) => {
     }
 
     const email = req.auth?.user?.email?.toLowerCase();
-    const isAuthorized = !!email?.endsWith(ALLOWED_DOMAIN);
+    // A failed Google refresh probe (revoked/offboarded account) marks the
+    // session errored. Treat it as unauthenticated even though the JWT and
+    // email are still present — matches getAuthSession()'s server-side check.
+    const hasRefreshError = req.auth?.error === "RefreshTokenError";
+    const isAuthorized = !hasRefreshError && !!email?.endsWith(ALLOWED_DOMAIN);
 
     if (!isAuthorized && isProtectedPage) {
       const signInUrl = new URL("/sign-in", req.nextUrl.origin);
