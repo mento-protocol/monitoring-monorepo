@@ -22,6 +22,7 @@ const STABLES_CHAIN_IDS = [42220, 143] as const;
 const SNAPSHOT_PAGE_LIMIT = 1000;
 const CHANGES_QUERY_PAGE_LIMIT = 400;
 const CHANGES_DISPLAY_LIMIT = 200;
+const CHANGES_MAX_QUERY_PAGES = 3;
 // Numeric.MAX cursor (~year 2286 in Unix-seconds); `_lt: <this>` returns
 // the first page from the top of the desc-ordered snapshot table.
 const TS_CURSOR_INITIAL = "9999999999";
@@ -36,6 +37,13 @@ type CustodyDailySnapshotsResult = {
 type LatestCustodyPerTokenResult = CustodyDailySnapshotsResult;
 type ChangesResult = {
   StableSupplyChangeEvent: ReadonlyArray<StableSupplyChangeEvent>;
+};
+type ChangePageState = {
+  enabled: boolean;
+  rawEvents: ReadonlyArray<StableSupplyChangeEvent>;
+  visibleEvents: ReadonlyArray<StableSupplyChangeEvent>;
+  error: unknown;
+  isLoading: boolean;
 };
 
 /**
@@ -140,33 +148,118 @@ export function useStablesCustodyDailySnapshots(_range: RangeKey) {
  * to the last 7d window (sufficient for the ranked table; the table can
  * later add date-range pickers via the `sinceTimestamp` arg), then hides
  * sub-display dust rows that would render as 0.00 at table precision.
+ *
+ * A single raw page can be dust-heavy, so the hook conditionally fetches
+ * additional raw pages until it has enough visible rows, exhausts the current
+ * window, or reaches the bounded query budget above.
  */
 export function useStablesChanges(range: RangeKey = "7d", page: number = 0) {
   const sinceTimestamp = rangeStartSeconds(range);
-  const { data, error, isLoading } = useGQL<ChangesResult>(STABLES_CHANGES, {
-    chainIds: STABLES_CHAIN_IDS,
+  const baseOffset = page * CHANGES_QUERY_PAGE_LIMIT * CHANGES_MAX_QUERY_PAGES;
+  const firstPage = useStablesChangesPage(sinceTimestamp, baseOffset, true);
+  const shouldFetchSecondPage = shouldFetchNextChangePage(
+    firstPage,
+    firstPage.visibleEvents.length,
+  );
+  const secondPage = useStablesChangesPage(
     sinceTimestamp,
-    limit: CHANGES_QUERY_PAGE_LIMIT,
-    offset: page * CHANGES_QUERY_PAGE_LIMIT,
-  });
-  const rawEvents = useMemo(() => data?.StableSupplyChangeEvent ?? [], [data]);
-  const events = useMemo(() => {
-    const visibleEvents = rawEvents.filter(isVisibleSupplyChangeEvent);
-    return visibleEvents.slice(0, CHANGES_DISPLAY_LIMIT);
-  }, [rawEvents]);
-  const capped = useMemo(() => {
-    if (rawEvents.length === CHANGES_QUERY_PAGE_LIMIT) return true;
-    let visibleCount = 0;
-    for (const event of rawEvents) {
-      if (isVisibleSupplyChangeEvent(event)) visibleCount += 1;
-      if (visibleCount > CHANGES_DISPLAY_LIMIT) return true;
-    }
-    return false;
-  }, [rawEvents]);
+    baseOffset + CHANGES_QUERY_PAGE_LIMIT,
+    shouldFetchSecondPage,
+  );
+  const visibleEventsAfterSecond =
+    firstPage.visibleEvents.length + secondPage.visibleEvents.length;
+  const shouldFetchThirdPage = shouldFetchNextChangePage(
+    secondPage,
+    visibleEventsAfterSecond,
+  );
+  const thirdPage = useStablesChangesPage(
+    sinceTimestamp,
+    baseOffset + CHANGES_QUERY_PAGE_LIMIT * 2,
+    shouldFetchThirdPage,
+  );
+  const pages = [firstPage, secondPage, thirdPage] as const;
+  const { events, capped } = buildVisibleChangesResult(pages);
   return {
     events,
-    error,
-    isLoading,
+    error: firstEnabledPageError(pages),
+    isLoading: pages.some(
+      (candidate) => candidate.enabled && candidate.isLoading,
+    ),
     capped,
   };
+}
+
+function useStablesChangesPage(
+  sinceTimestamp: number,
+  offset: number,
+  enabled: boolean,
+): ChangePageState {
+  const response = useGQL<ChangesResult>(
+    enabled ? STABLES_CHANGES : null,
+    enabled
+      ? {
+          chainIds: STABLES_CHAIN_IDS,
+          sinceTimestamp,
+          limit: CHANGES_QUERY_PAGE_LIMIT,
+          offset,
+        }
+      : undefined,
+  );
+  const rawEvents = useMemo(
+    () => response.data?.StableSupplyChangeEvent ?? [],
+    [response.data],
+  );
+  const visibleEvents = useMemo(
+    () => rawEvents.filter(isVisibleSupplyChangeEvent),
+    [rawEvents],
+  );
+  return {
+    enabled,
+    rawEvents,
+    visibleEvents,
+    error: response.error,
+    isLoading: response.isLoading,
+  };
+}
+
+function shouldFetchNextChangePage(
+  page: ChangePageState,
+  visibleEventsCount: number,
+): boolean {
+  return (
+    page.enabled &&
+    page.rawEvents.length === CHANGES_QUERY_PAGE_LIMIT &&
+    visibleEventsCount < CHANGES_DISPLAY_LIMIT
+  );
+}
+
+function buildVisibleChangesResult(pages: ReadonlyArray<ChangePageState>): {
+  events: ReadonlyArray<StableSupplyChangeEvent>;
+  capped: boolean;
+} {
+  const visibleEvents = pages.flatMap((candidate) => candidate.visibleEvents);
+  const lastFetchedRawEvents = lastEnabledPage(pages)?.rawEvents ?? [];
+  return {
+    events: visibleEvents.slice(0, CHANGES_DISPLAY_LIMIT),
+    capped:
+      visibleEvents.length > CHANGES_DISPLAY_LIMIT ||
+      lastFetchedRawEvents.length === CHANGES_QUERY_PAGE_LIMIT,
+  };
+}
+
+function lastEnabledPage(
+  pages: ReadonlyArray<ChangePageState>,
+): ChangePageState | null {
+  for (let index = pages.length - 1; index >= 0; index -= 1) {
+    const candidate = pages[index];
+    if (candidate?.enabled) return candidate;
+  }
+  return null;
+}
+
+function firstEnabledPageError(pages: ReadonlyArray<ChangePageState>): unknown {
+  for (const candidate of pages) {
+    if (candidate.enabled && candidate.error != null) return candidate.error;
+  }
+  return null;
 }

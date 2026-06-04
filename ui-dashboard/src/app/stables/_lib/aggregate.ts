@@ -14,6 +14,8 @@ import type {
 
 const SECONDS_PER_DAY = BigInt(86_400);
 const SECONDS_PER_DAY_NUMBER = 86_400;
+// Companion label for the table UI — keep in sync with
+// minimumVisibleSupplyChangeRaw (0.01 = 1/100 of one token).
 export const SUPPLY_CHANGE_FILTER_THRESHOLD_LABEL = "0.01 token";
 
 /**
