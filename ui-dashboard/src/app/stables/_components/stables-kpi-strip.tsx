@@ -155,13 +155,13 @@ export function StablesKpiStrip({
         format={formatSignedUSD}
       />
       <MoverTile
-        label="Biggest expansion (7d)"
+        label="Biggest expansion"
         agg={biggestExpansion}
         isLoading={isLoading}
         hasError={hasError}
       />
       <MoverTile
-        label="Biggest contraction (7d)"
+        label="Biggest contraction"
         agg={biggestContraction}
         isLoading={isLoading}
         hasError={hasError}
