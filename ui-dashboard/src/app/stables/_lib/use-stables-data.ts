@@ -183,9 +183,7 @@ export function useStablesChanges(range: RangeKey = "7d", page: number = 0) {
   return {
     events,
     error: visibleChangesError(firstPage, events, pageError),
-    isLoading: pages.some(
-      (candidate) => candidate.enabled && candidate.isLoading,
-    ),
+    isLoading: visibleChangesLoading(pages, events),
     capped,
   };
 }
@@ -244,11 +242,15 @@ function buildVisibleChangesResult(
   const visibleEvents = pages.flatMap((candidate) => candidate.visibleEvents);
   const lastFetchedRawEvents = lastEnabledPage(pages)?.rawEvents ?? [];
   const events = visibleEvents.slice(0, CHANGES_DISPLAY_LIMIT);
+  const hasPendingEnabledPage = pages.some(
+    (candidate) => candidate.enabled && candidate.isLoading,
+  );
   return {
     events,
     capped:
       visibleEvents.length > CHANGES_DISPLAY_LIMIT ||
       lastFetchedRawEvents.length === CHANGES_QUERY_PAGE_LIMIT ||
+      (events.length > 0 && hasPendingEnabledPage) ||
       (events.length > 0 && pageError != null),
   };
 }
@@ -278,4 +280,12 @@ function visibleChangesError(
   if (firstPage.error != null) return firstPage.error;
   if (events.length > 0) return null;
   return pageError;
+}
+
+function visibleChangesLoading(
+  pages: ReadonlyArray<ChangePageState>,
+  events: ReadonlyArray<StableSupplyChangeEvent>,
+): boolean {
+  if (events.length > 0) return false;
+  return pages.some((candidate) => candidate.enabled && candidate.isLoading);
 }

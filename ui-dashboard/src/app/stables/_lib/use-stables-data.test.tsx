@@ -241,4 +241,50 @@ describe("useStablesChanges", () => {
     expect(result.error).toBeNull();
     expect(result.capped).toBe(true);
   });
+
+  it("renders visible first-page rows while a follow-up page is loading", () => {
+    mockUseGQL.mockImplementation((query: string | null, variables) => {
+      if (query === null) {
+        return {
+          data: undefined,
+          error: null,
+          isLoading: false,
+        };
+      }
+      const offset = (variables as { offset: number }).offset;
+      if (offset === 400) {
+        return {
+          data: undefined,
+          error: null,
+          isLoading: true,
+        };
+      }
+      return {
+        data: {
+          StableSupplyChangeEvent: [
+            changeEvent({
+              id: "visible-first-page",
+              amount: "10000000000000000",
+            }),
+            ...Array.from({ length: 399 }, (_, index) =>
+              changeEvent({
+                id: `dust-${index}`,
+                amount: "1",
+              }),
+            ),
+          ],
+        },
+        error: null,
+        isLoading: false,
+      };
+    });
+
+    const result = renderHook();
+
+    expect(result.events.map((event) => event.id)).toEqual([
+      "visible-first-page",
+    ]);
+    expect(result.isLoading).toBe(false);
+    expect(result.capped).toBe(true);
+  });
 });
