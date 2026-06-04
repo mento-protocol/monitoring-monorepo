@@ -66,6 +66,27 @@ export function flushStableTokenCustodyDailySnapshot(
   const eventDay = dayBucket(eventTimestamp);
   if (state.currentDayBucket >= eventDay) return state;
 
+  setStableTokenCustodyDailySnapshot(
+    context,
+    state,
+    eventTimestamp,
+    blockNumber,
+  );
+
+  return {
+    ...state,
+    currentDayBucket: eventDay,
+    lockedTodayBucket: 0n,
+    unlockedTodayBucket: 0n,
+  };
+}
+
+export function setStableTokenCustodyDailySnapshot(
+  context: CustodyContext,
+  state: StableTokenCustodyState,
+  eventTimestamp: bigint,
+  blockNumber: bigint,
+): void {
   context.StableTokenCustodyDailySnapshot.set({
     id: makeStableTokenCustodyDailySnapshotId(
       state.chainId,
@@ -82,16 +103,10 @@ export function flushStableTokenCustodyDailySnapshot(
     lockedSupply: state.lockedSupply,
     dailyLockedAmount: state.lockedTodayBucket,
     dailyUnlockedAmount: state.unlockedTodayBucket,
-    // Anchor metadata is the flush-trigger event's block, not the previous
-    // day's final block. This matches StableSupplyDailySnapshot semantics.
+    // For rollover rows this is the flush-trigger event's block, not the
+    // previous day's final block. For current-day upserts, it is the custody
+    // event that refreshed the row.
     blockNumber,
     updatedAtTimestamp: eventTimestamp,
   });
-
-  return {
-    ...state,
-    currentDayBucket: eventDay,
-    lockedTodayBucket: 0n,
-    unlockedTodayBucket: 0n,
-  };
 }

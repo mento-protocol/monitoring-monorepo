@@ -2044,10 +2044,9 @@ type StableTokenCustodyState {
   lastEventTimestamp: BigInt!
 }
 
-# Sparse daily lock-custody snapshots. Same rolling-flush semantics as
-# StableSupplyDailySnapshot: a row is written on the first observed custody
-# event after a UTC day boundary, and the UI forward-fills lockedSupply across
-# quiet days.
+# Sparse daily lock-custody snapshots. Rollover writes the previous observed
+# day, and each custody-changing transfer upserts the current event-day row so
+# the UI has an initial lockedSupply to forward-fill across quiet days.
 type StableTokenCustodyDailySnapshot
   @index(fields: ["chainId", "tokenSymbol", "timestamp"])
   @index(fields: ["chainId", "source", "timestamp"])

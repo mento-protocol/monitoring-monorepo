@@ -22,6 +22,7 @@ import {
   flushStableTokenCustodyDailySnapshot,
   makeStableTokenCustodyState,
 } from "../src/handlers/stables/custodyState.ts";
+import { handleStableTokenCustodyTransfer } from "../src/handlers/stables/custody.ts";
 import { V3_HUB_USDM_ADDRESS } from "../src/constants.ts";
 
 const MAINNET_CONFIG = readFileSync(
@@ -525,6 +526,76 @@ describe("StableTokenCustodyState — lock-custody snapshot helpers", () => {
     assert.equal(next.lockedTodayBucket, custody.lockedTodayBucket);
     assert.equal(next.unlockedTodayBucket, custody.unlockedTodayBucket);
     assert.equal(next.lockedSupply, custody.lockedSupply);
+  });
+
+  it("upserts an event-day custody snapshot after the first same-day lock", async () => {
+    type SavedSnapshot = {
+      id: string;
+      chainId: number;
+      tokenAddress: string;
+      timestamp: bigint;
+      lockedSupply: bigint;
+      dailyLockedAmount: bigint;
+      dailyUnlockedAmount: bigint;
+      blockNumber: bigint;
+      updatedAtTimestamp: bigint;
+    };
+    type SavedState = {
+      lockedSupply: bigint;
+      lockedTodayBucket: bigint;
+      unlockedTodayBucket: bigint;
+    };
+
+    const baseline = 10_000n * 10n ** 18n;
+    const amount = 2_500n * 10n ** 18n;
+    const eventTimestamp = DAY_BUCKET_2024_05_22 + 3_600n;
+    const snapshots: SavedSnapshot[] = [];
+    let savedState: SavedState | null = null;
+    const ctx = {
+      isPreload: false,
+      StableTokenCustodyState: {
+        get: async () => null,
+        set: (entity: SavedState) => {
+          savedState = entity;
+        },
+      },
+      StableTokenCustodyDailySnapshot: {
+        set: (entity: SavedSnapshot) => snapshots.push(entity),
+      },
+      effect: async () => baseline,
+      log: { warn: () => undefined },
+    };
+
+    await handleStableTokenCustodyTransfer({
+      event: {
+        chainId: 42220,
+        srcAddress: CELO_CHFM_ADDRESS,
+        params: {
+          from: "0x1111111111111111111111111111111111111111",
+          to: CHFM_MANAGER,
+          value: amount,
+        },
+        block: {
+          number: 60_700_001,
+          timestamp: Number(eventTimestamp),
+        },
+      },
+      context: ctx as never,
+    });
+
+    assert.equal(snapshots.length, 1);
+    const row = snapshots[0];
+    assert.equal(row.chainId, 42220);
+    assert.equal(row.tokenAddress, CELO_CHFM_ADDRESS);
+    assert.equal(row.timestamp, DAY_BUCKET_2024_05_22);
+    assert.equal(row.lockedSupply, baseline + amount);
+    assert.equal(row.dailyLockedAmount, amount);
+    assert.equal(row.dailyUnlockedAmount, 0n);
+    assert.equal(row.blockNumber, 60_700_001n);
+    assert.equal(row.updatedAtTimestamp, eventTimestamp);
+    assert.equal(savedState?.lockedSupply, baseline + amount);
+    assert.equal(savedState?.lockedTodayBucket, amount);
+    assert.equal(savedState?.unlockedTodayBucket, 0n);
   });
 
   it("writes custody snapshot and resets lock/unlock buckets on rollover", () => {

@@ -21,6 +21,7 @@ import {
 import {
   flushStableTokenCustodyDailySnapshot,
   makeStableTokenCustodyState,
+  setStableTokenCustodyDailySnapshot,
 } from "./custodyState.js";
 
 type StableTokenTransferEvent = {
@@ -163,12 +164,20 @@ export async function handleStableTokenCustodyTransfer({
     );
   }
 
-  context.StableTokenCustodyState.set({
+  const nextState = {
     ...state,
     lockedSupply: nextLockedSupply,
     lockedTodayBucket: state.lockedTodayBucket + (isLock ? amount : 0n),
     unlockedTodayBucket: state.unlockedTodayBucket + (isUnlock ? amount : 0n),
     lastEventBlock: blockNumber,
     lastEventTimestamp: blockTimestamp,
-  });
+  };
+
+  context.StableTokenCustodyState.set(nextState);
+  setStableTokenCustodyDailySnapshot(
+    context,
+    nextState,
+    blockTimestamp,
+    blockNumber,
+  );
 }

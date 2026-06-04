@@ -62,11 +62,21 @@ describe("effectiveOracleRate", () => {
     expect(effectiveOracleRate(rates, "EURm", 143)).toBe(1.08);
   });
 
+  it("does not fall back to another chain's unqualified rate for chain-scoped lookups", () => {
+    const rates = new Map([["EURm", 1.1]]);
+    expect(effectiveOracleRate(rates, "EURm", 143)).toBeNull();
+  });
+
   it("defaults USDm to 1.0 when the oracle map has no entry", () => {
     // `useOracleRates`/`buildOracleRateMap` derives non-USDm rates from
     // USDm pairs and never emits USDm itself, so this fallback is
     // required for USDm to participate in the total + stacked chart.
     expect(effectiveOracleRate(new Map(), "USDm")).toBe(1);
+  });
+
+  it("defaults chain-scoped USD-pegged symbols to 1.0 without a chain rate", () => {
+    expect(effectiveOracleRate(new Map(), "USDm", 143)).toBe(1);
+    expect(effectiveOracleRate(new Map(), "USDC", 143)).toBe(1);
   });
 
   it("defaults other USD-pegged symbols to 1.0", () => {

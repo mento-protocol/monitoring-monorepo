@@ -86,7 +86,7 @@ describe("rollupByToken", () => {
     ];
     const rates = new Map([
       ["USDm", 1.0],
-      ["EURm", 1.1],
+      ["42220:EURm", 1.1],
     ]);
     const rollup = rollupByToken(snapshots, rates, NOW_TS);
 
@@ -218,7 +218,7 @@ describe("rollupByToken", () => {
 
     const rollup = rollupByToken(
       [row],
-      new Map([["GBPm", 1.3]]),
+      new Map([["42220:GBPm", 1.3]]),
       NOW_TS,
       custody,
     );
@@ -254,7 +254,7 @@ describe("rollupByToken", () => {
 
     const rollup = rollupByToken(
       [row],
-      new Map([["GBPm", 1]]),
+      new Map([["42220:GBPm", 1]]),
       NOW_TS,
       custody,
     );
@@ -408,8 +408,8 @@ describe("winnersAndLosers7d", () => {
     ];
     const rates = new Map([
       ["USDm", 1],
-      ["EURm", 1.1],
-      ["GBPm", 1.3],
+      ["42220:EURm", 1.1],
+      ["42220:GBPm", 1.3],
     ]);
     const rollup = rollupByToken(snapshots, rates, NOW_TS);
     const { biggestExpansion, biggestContraction } = winnersAndLosers7d(rollup);
@@ -488,7 +488,7 @@ describe("buildTokenUsdTimeSeries + sumTotalUsdSeries", () => {
     ];
     const series = buildTokenUsdTimeSeries(
       snapshots,
-      new Map([["GBPm", 1]]),
+      new Map([["42220:GBPm", 1]]),
       rangeStartSeconds("7d", Number(NOW_TS)),
       Number(NOW_TS),
       custody,

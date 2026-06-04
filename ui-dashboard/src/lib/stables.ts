@@ -69,6 +69,8 @@ export function effectiveOracleRate(
   if (chainId != null) {
     const chainDirect = rates.get(oracleRateKey(chainId, symbol));
     if (chainDirect != null) return chainDirect;
+    if (USD_PEGGED_SYMBOLS_PUBLIC.has(symbol)) return 1;
+    return null;
   }
   const direct = rates.get(symbol);
   if (direct != null) return direct;
