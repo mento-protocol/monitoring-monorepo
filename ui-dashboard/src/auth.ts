@@ -42,11 +42,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // lives in the cookie and is verified with the stable AUTH_SECRET, which a
   // new deployment doesn't change.
   // Tradeoff: with stateless JWTs there is no server-side revocation, so an
-  // offboarded user's un-expired cookie keeps working until it ages out —
-  // disabling their Google account does not cut access early, since the JWT
-  // self-validates and isn't re-checked against Google until expiry. If that
-  // window becomes unacceptable, add a revocation check (e.g. an Upstash
-  // deny-set read in the jwt callback) rather than shortening maxAge.
+  // offboarded user's cookie keeps working with no early cutoff — and because
+  // an active session is re-minted every `updateAge` without re-checking Google
+  // (the jwt callback returns the token unchanged), an actively-used token
+  // extends indefinitely. The 30-day expiry only catches a fully-idle account;
+  // disabling their Google login does not cut access early, since the JWT
+  // self-validates and isn't re-checked against Google. If that window matters,
+  // add a revocation check (e.g. an Upstash deny-set read in the jwt callback)
+  // rather than shortening maxAge.
   session: {
     strategy: "jwt",
     maxAge: 30 * 24 * 60 * 60,
