@@ -5,23 +5,23 @@ import {
   LOCK_AND_MINT_NTT_STABLES,
   LOCK_AND_MINT_NTT_STABLE_ADDRESSES,
   NTT_STABLES,
-  V2_STABLES,
-  V2_STABLE_ADDRESSES,
+  STABLES,
+  STABLE_ADDRESSES,
   findLockAndMintNttStableByAddress,
-  findV2StableByAddress,
+  findStableByAddress,
   makeStableSupplyDailySnapshotId,
   makeStableTokenCustodyDailySnapshotId,
-} from "../src/handlers/v2Stables/config.ts";
+} from "../src/handlers/stables/config.ts";
 import {
   _resetBrokerAddressCacheForTest,
-  classifyV2StableSupplyChangeKind,
-} from "../src/handlers/v2Stables/classifyKind.ts";
-import { flushV2StableDailySnapshot } from "../src/handlers/v2Stables/dailyFlush.ts";
-import { makeV2StableTokenSupply } from "../src/handlers/v2Stables/bootstrap.ts";
+  classifyStableSupplyChangeKind,
+} from "../src/handlers/stables/classifyKind.ts";
+import { flushStableDailySnapshot } from "../src/handlers/stables/dailyFlush.ts";
+import { makeStableTokenSupply } from "../src/handlers/stables/bootstrap.ts";
 import {
   flushStableTokenCustodyDailySnapshot,
   makeStableTokenCustodyState,
-} from "../src/handlers/v2Stables/custodyState.ts";
+} from "../src/handlers/stables/custodyState.ts";
 import { V3_HUB_USDM_ADDRESS } from "../src/constants.ts";
 
 const MAINNET_CONFIG = readFileSync(
@@ -51,19 +51,19 @@ const EXPECTED_V2_RESERVE_SYMBOLS = [
 // V3 hub USDm address is imported from constants.ts (single source of truth).
 const V2_CUSD_USDM_ADDRESS = "0x765de816845861e75a25fca122bb6898b8b1282a";
 
-describe("v2Stables/config — registry derivation", () => {
+describe("stables/config — registry derivation", () => {
   it("exposes Celo supply rows plus Monad NTT supply rows", () => {
-    assert.equal(V2_STABLES.length, 18);
-    const v2Reserve = V2_STABLES.filter((s) => s.source === "V2_RESERVE");
-    const hub = V2_STABLES.filter((s) => s.source === "V3_HUB_COLLATERAL");
-    const v3Liquity = V2_STABLES.filter((s) => s.source === "V3_LIQUITY");
+    assert.equal(STABLES.length, 18);
+    const v2Reserve = STABLES.filter((s) => s.source === "V2_RESERVE");
+    const hub = STABLES.filter((s) => s.source === "V3_HUB_COLLATERAL");
+    const v3Liquity = STABLES.filter((s) => s.source === "V3_LIQUITY");
     assert.equal(v2Reserve.length, 14);
     assert.equal(hub.length, 1);
     assert.equal(v3Liquity.length, 3);
     assert.equal(hub[0].address, V3_HUB_USDM_ADDRESS);
     assert.equal(hub[0].symbol, "USDm");
     const monadSymbols = new Set(
-      V2_STABLES.filter((s) => s.chainId === 143).map((s) => s.symbol),
+      STABLES.filter((s) => s.chainId === 143).map((s) => s.symbol),
     );
     assert.deepEqual([...monadSymbols].sort(), [
       "CHFm",
@@ -76,20 +76,20 @@ describe("v2Stables/config — registry derivation", () => {
 
   it("includes every expected V2 reserve symbol from @mento-protocol/contracts", () => {
     const got = new Set(
-      V2_STABLES.filter(
+      STABLES.filter(
         (s) => s.chainId === 42220 && s.source === "V2_RESERVE",
       ).map((s) => s.symbol),
     );
     for (const expected of EXPECTED_V2_RESERVE_SYMBOLS) {
       assert.ok(
         got.has(expected),
-        `Expected V2 reserve symbol ${expected} missing from V2_STABLES — package drift?`,
+        `Expected V2 reserve symbol ${expected} missing from STABLES — package drift?`,
       );
     }
   });
 
   it("excludes Celo V3 Liquity debt tokens from V2 reserve supply rows", () => {
-    const v2ReserveSymbols = V2_STABLES.filter(
+    const v2ReserveSymbols = STABLES.filter(
       (s) => s.chainId === 42220 && s.source === "V2_RESERVE",
     ).map((s) => s.symbol);
     for (const v3Symbol of ["GBPm", "CHFm", "JPYm"]) {
@@ -100,13 +100,13 @@ describe("v2Stables/config — registry derivation", () => {
     }
   });
 
-  it("every V2_STABLES entry exposes `decimals` (denormalized to V2StableSupplyChangeEvent.tokenDecimals)", () => {
+  it("every STABLES entry exposes `decimals` (denormalized to V2StableSupplyChangeEvent.tokenDecimals)", () => {
     // The Transfer handler writes `info.decimals` to every supply-change
     // event row; the UI changes-table reads it instead of hardcoding 18.
     // A missing/non-integer decimals would silently render with NaN,
     // turning every row's amount into the literal string "NaN". Catch
     // it at module-load via this registry-shape assertion.
-    for (const s of V2_STABLES) {
+    for (const s of STABLES) {
       assert.equal(
         typeof s.decimals,
         "number",
@@ -120,8 +120,8 @@ describe("v2Stables/config — registry derivation", () => {
   });
 
   it("V2 cUSD-USDm and V3 hub USDm are tracked as separate rows", () => {
-    const v2Cusd = findV2StableByAddress(42220, V2_CUSD_USDM_ADDRESS);
-    const v3Hub = findV2StableByAddress(42220, V3_HUB_USDM_ADDRESS);
+    const v2Cusd = findStableByAddress(42220, V2_CUSD_USDM_ADDRESS);
+    const v3Hub = findStableByAddress(42220, V3_HUB_USDM_ADDRESS);
     assert.ok(v2Cusd, "V2 cUSD-USDm not in registry");
     assert.ok(v3Hub, "V3 hub USDm not in registry");
     assert.equal(v2Cusd.source, "V2_RESERVE");
@@ -154,7 +154,7 @@ describe("v2Stables/config — registry derivation", () => {
     for (const locked of LOCK_AND_MINT_NTT_STABLES) {
       assert.equal(locked.chainId, 42220);
       assert.equal(
-        findV2StableByAddress(locked.chainId, locked.address),
+        findStableByAddress(locked.chainId, locked.address),
         undefined,
         `${locked.symbol} Celo lock/mint token should not be in supply lookup.`,
       );
@@ -167,7 +167,7 @@ describe("v2Stables/config — registry derivation", () => {
   });
 });
 
-describe("v2Stables — YAML drift gate", () => {
+describe("stables — YAML drift gate", () => {
   function yamlV2StableAddressesForChain(chainId: number): string[] {
     const chainStart = MAINNET_CONFIG.indexOf(`  - id: ${chainId}`);
     assert.notEqual(
@@ -194,7 +194,7 @@ describe("v2Stables — YAML drift gate", () => {
 
   it("every supply and custody address appears under V2StableToken in mainnet YAML", () => {
     const expectedByChain = new Map<number, Set<string>>();
-    for (const s of V2_STABLES) {
+    for (const s of STABLES) {
       let set = expectedByChain.get(s.chainId);
       if (!set) {
         set = new Set();
@@ -229,19 +229,19 @@ describe("v2Stables — YAML drift gate", () => {
   });
 
   it("keeps supply and custody address exports scoped to their responsibilities", () => {
-    assert.equal(V2_STABLE_ADDRESSES.length, 18);
+    assert.equal(STABLE_ADDRESSES.length, 18);
     assert.equal(LOCK_AND_MINT_NTT_STABLE_ADDRESSES.length, 3);
     for (const addr of LOCK_AND_MINT_NTT_STABLE_ADDRESSES) {
       assert.equal(
-        V2_STABLE_ADDRESSES.includes(addr),
+        STABLE_ADDRESSES.includes(addr),
         false,
-        `${addr} is custody-only and must not be treated as a supply-tracked V2_STABLES address.`,
+        `${addr} is custody-only and must not be treated as a supply-tracked STABLES address.`,
       );
     }
   });
 });
 
-describe("classifyV2StableSupplyChangeKind", () => {
+describe("classifyStableSupplyChangeKind", () => {
   beforeEach(() => {
     _resetBrokerAddressCacheForTest();
   });
@@ -250,11 +250,11 @@ describe("classifyV2StableSupplyChangeKind", () => {
     // Broker address from @mento-protocol/contracts mainnet Celo.
     const broker = "0x777a8255ca72412f0d706dc03c9d1987306b4cad";
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, broker, true),
+      classifyStableSupplyChangeKind(42220, broker, true),
       "RESERVE_MINT",
     );
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, broker, false),
+      classifyStableSupplyChangeKind(42220, broker, false),
       "RESERVE_BURN",
     );
   });
@@ -262,11 +262,11 @@ describe("classifyV2StableSupplyChangeKind", () => {
   it("NTT manager proxy tx.to maps to BRIDGE_*", () => {
     const usdmManager = "0xa4096343485a44c0f8d05ae6da311c18d63e38bc";
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, usdmManager, true),
+      classifyStableSupplyChangeKind(42220, usdmManager, true),
       "BRIDGE_MINT",
     );
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, usdmManager, false),
+      classifyStableSupplyChangeKind(42220, usdmManager, false),
       "BRIDGE_BURN",
     );
   });
@@ -275,7 +275,7 @@ describe("classifyV2StableSupplyChangeKind", () => {
     // USDm helper on Celo — the address user-initiated bridges usually hit.
     const usdmHelper = "0x37316334108c816f9862bab52347a0aab7551127";
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, usdmHelper, true),
+      classifyStableSupplyChangeKind(42220, usdmHelper, true),
       "BRIDGE_MINT",
     );
   });
@@ -283,7 +283,7 @@ describe("classifyV2StableSupplyChangeKind", () => {
   it("NTT transceiver tx.to maps to BRIDGE_*", () => {
     const usdmTransceiver = "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b";
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, usdmTransceiver, false),
+      classifyStableSupplyChangeKind(42220, usdmTransceiver, false),
       "BRIDGE_BURN",
     );
   });
@@ -291,22 +291,22 @@ describe("classifyV2StableSupplyChangeKind", () => {
   it("Unknown tx.to maps to OTHER_*", () => {
     const random = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, random, true),
+      classifyStableSupplyChangeKind(42220, random, true),
       "OTHER_MINT",
     );
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, random, false),
+      classifyStableSupplyChangeKind(42220, random, false),
       "OTHER_BURN",
     );
   });
 
   it("null/undefined tx.to maps to OTHER_*", () => {
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, null, true),
+      classifyStableSupplyChangeKind(42220, null, true),
       "OTHER_MINT",
     );
     assert.equal(
-      classifyV2StableSupplyChangeKind(42220, undefined, false),
+      classifyStableSupplyChangeKind(42220, undefined, false),
       "OTHER_BURN",
     );
   });
@@ -317,13 +317,13 @@ describe("classifyV2StableSupplyChangeKind", () => {
     // tx.to MUST fall through to OTHER_*, not RESERVE_*.
     const celoBroker = "0x777a8255ca72412f0d706dc03c9d1987306b4cad";
     assert.equal(
-      classifyV2StableSupplyChangeKind(143, celoBroker, true),
+      classifyStableSupplyChangeKind(143, celoBroker, true),
       "OTHER_MINT",
     );
   });
 });
 
-describe("flushV2StableDailySnapshot — day rollover", () => {
+describe("flushStableDailySnapshot — day rollover", () => {
   // 2024-05-22 00:00:00 UTC. Test value is anchored in the past so the
   // "rollover by +86_400" math doesn't accidentally land past the wall-
   // clock now for someone reading the test in the future.
@@ -357,7 +357,7 @@ describe("flushV2StableDailySnapshot — day rollover", () => {
     };
     const supply = mockSupply();
     const sameDay = supply.currentDayBucket + 3600n; // +1 hour, still same UTC day
-    const next = flushV2StableDailySnapshot(
+    const next = flushStableDailySnapshot(
       ctx,
       supply as never,
       sameDay,
@@ -393,7 +393,7 @@ describe("flushV2StableDailySnapshot — day rollover", () => {
     };
     const supply = mockSupply();
     const tomorrow = supply.currentDayBucket + 86_400n + 100n;
-    const next = flushV2StableDailySnapshot(
+    const next = flushStableDailySnapshot(
       ctx,
       supply as never,
       tomorrow,
@@ -448,7 +448,7 @@ describe("flushV2StableDailySnapshot — day rollover", () => {
     };
     const supply = mockSupply();
     const threeDaysLater = supply.currentDayBucket + 3n * 86_400n + 12_345n;
-    const next = flushV2StableDailySnapshot(
+    const next = flushStableDailySnapshot(
       ctx,
       supply as never,
       threeDaysLater,
@@ -586,9 +586,9 @@ describe("StableTokenCustodyState — lock-custody snapshot helpers", () => {
   });
 });
 
-describe("makeV2StableTokenSupply — fresh row shape", () => {
+describe("makeStableTokenSupply — fresh row shape", () => {
   it("returns supplyBaselineSeeded: false with zeroed accumulators", () => {
-    const row = makeV2StableTokenSupply({
+    const row = makeStableTokenSupply({
       chainId: 42220,
       tokenAddress: V2_CUSD_USDM_ADDRESS,
       symbol: "USDm",
@@ -617,7 +617,7 @@ describe("makeV2StableTokenSupply — fresh row shape", () => {
     // event then returns no-op (currentDayBucket >= eventDay).
     const blockTimestamp = 1_716_391_800n; // 2024-05-22 15:30:00 UTC
     const expectedDay = 1_716_336_000n; // 2024-05-22 00:00:00 UTC
-    const row = makeV2StableTokenSupply({
+    const row = makeStableTokenSupply({
       chainId: 42220,
       tokenAddress: V2_CUSD_USDM_ADDRESS,
       symbol: "USDm",
@@ -688,7 +688,7 @@ describe("schema → TS enum drift gate", () => {
 // wiring across createTestIndexer's runtime needs more harness work than
 // this PR can absorb. The helper tests above (dailyFlush field
 // assertions, classifyKind helper/transceiver/chain-dispatch cases,
-// makeV2StableTokenSupply pure-function tests, schema↔TS enum drift gate)
+// makeStableTokenSupply pure-function tests, schema↔TS enum drift gate)
 // cover what's testable without the full harness.
 
 type MockSupply = {

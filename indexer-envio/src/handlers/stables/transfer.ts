@@ -26,19 +26,19 @@ import type { V2StableSupplyChangeEvent } from "envio";
 import { ZERO_ADDRESS } from "../../constants.js";
 import { asAddress, eventId } from "../../helpers.js";
 import { indexer } from "../../indexer.js";
-import { v2StableTotalSupplyEffect } from "../../rpc/effects.js";
+import { stableTotalSupplyEffect } from "../../rpc/effects.js";
 import { isSystemAddress } from "../../system-addresses.js";
 import {
-  getOrCreateV2StableTokenSupply,
-  preloadV2StableTokenSupply,
+  getOrCreateStableTokenSupply,
+  preloadStableTokenSupply,
 } from "./bootstrap.js";
-import { classifyV2StableSupplyChangeKind } from "./classifyKind.js";
+import { classifyStableSupplyChangeKind } from "./classifyKind.js";
 import {
-  findV2StableByAddress,
+  findStableByAddress,
   STABLE_TOKEN_CUSTODY_TRANSFER_WHERE_PARAMS,
 } from "./config.js";
 import { handleStableTokenCustodyTransfer } from "./custody.js";
-import { flushV2StableDailySnapshot } from "./dailyFlush.js";
+import { flushStableDailySnapshot } from "./dailyFlush.js";
 
 indexer.onEvent(
   {
@@ -66,7 +66,7 @@ indexer.onEvent(
 
     const { chainId, srcAddress } = event;
     const tokenAddress = asAddress(srcAddress);
-    const info = findV2StableByAddress(chainId, tokenAddress);
+    const info = findStableByAddress(chainId, tokenAddress);
     // YAML-listed token not in our registry would be a deploy-time bug; bail
     // without writing rather than persist a half-typed row.
     if (!info) return;
@@ -89,7 +89,7 @@ indexer.onEvent(
     const blockTimestamp = BigInt(event.block.timestamp);
 
     if (context.isPreload) {
-      await preloadV2StableTokenSupply(
+      await preloadStableTokenSupply(
         context,
         chainId,
         tokenAddress,
@@ -98,7 +98,7 @@ indexer.onEvent(
       return;
     }
 
-    let supply = await getOrCreateV2StableTokenSupply(
+    let supply = await getOrCreateStableTokenSupply(
       context,
       chainId,
       tokenAddress,
@@ -116,14 +116,14 @@ indexer.onEvent(
     // running supply would recover; the event log would not. Throwing
     // forces a clean retry of the original event when RPC recovers.
     if (!supply.supplyBaselineSeeded) {
-      const baseline = await context.effect(v2StableTotalSupplyEffect, {
+      const baseline = await context.effect(stableTotalSupplyEffect, {
         chainId,
         tokenAddress,
         blockNumber: blockNumber - 1n,
       });
       if (baseline === null) {
         throw new Error(
-          `[v2Stables] totalSupply baseline failed for ${tokenAddress} on chain ${chainId} at block ${blockNumber - 1n}. ` +
+          `[stables] totalSupply baseline failed for ${tokenAddress} on chain ${chainId} at block ${blockNumber - 1n}. ` +
             `Retrying. Persistent failure halts ingestion until RPC recovers — investigate the chain's RPC endpoint.`,
         );
       }
@@ -134,7 +134,7 @@ indexer.onEvent(
       };
     }
 
-    supply = flushV2StableDailySnapshot(
+    supply = flushStableDailySnapshot(
       context,
       supply,
       blockTimestamp,
@@ -163,7 +163,7 @@ indexer.onEvent(
     // routes such an event through OTHER_* without halting the indexer.
     const caller = asAddress(event.transaction.from ?? "");
     const txTo = event.transaction.to ? asAddress(event.transaction.to) : null;
-    const kind = classifyV2StableSupplyChangeKind(chainId, txTo, isMint);
+    const kind = classifyStableSupplyChangeKind(chainId, txTo, isMint);
 
     const changeRow: V2StableSupplyChangeEvent = {
       id: eventId(chainId, event.block.number, event.logIndex),

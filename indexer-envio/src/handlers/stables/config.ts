@@ -35,7 +35,7 @@ import { asAddress } from "../../helpers.js";
 //
 // Celo CHFm/GBPm/JPYm are lock/mint NTT tokens. Their Celo token supply is
 // already covered by Liquity systemDebt, so they are intentionally excluded
-// from V2_STABLES and tracked by the custody handler only. The dashboard
+// from STABLES and tracked by the custody handler only. The dashboard
 // subtracts their NTT manager balances from Celo supply to avoid double
 // counting the same units that exist as minted Monad supply.
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ export type StableSupplySource =
   | "V3_HUB_COLLATERAL"
   | "V3_LIQUITY";
 
-export type V2StableInfo = {
+export type StableInfo = {
   chainId: number;
   address: string; // lowercased
   symbol: string; // Mento brand name (USDm/EURm/BRLm/...)
@@ -53,12 +53,12 @@ export type V2StableInfo = {
   source: StableSupplySource;
 };
 
-const V2_STABLE_CHAIN_ID = 42220;
+const CELO_CHAIN_ID = 42220;
 const MONAD_CHAIN_ID = 143;
 
 // V3 Liquity Bold debt tokens — supply tracked via LiquityInstance.systemDebt,
 // not via the Celo V2 Transfer-zero subscription.
-const EXCLUDED_FROM_V2 = new Set(["GBPm", "CHFm", "JPYm"]);
+const LIQUITY_DEBT_SYMBOLS = new Set(["GBPm", "CHFm", "JPYm"]);
 // External bridged stables — not Mento-issued.
 const EXTERNAL_STABLES = new Set(["USDC", "USDT", "axlUSDC", "axlEUROC"]);
 // Native gas tokens — never appear as a Mento stable.
@@ -100,7 +100,7 @@ type NttAddressEntry = {
   nttManagerProxy: string;
 };
 
-export type NttStableInfo = V2StableInfo & {
+export type NttStableInfo = StableInfo & {
   bridgeMode: NttBridgeMode;
   nttManagerAddress: string;
 };
@@ -126,8 +126,8 @@ const nttEntries = (nttAddresses as { entries: NttAddressEntry[] }).entries;
 // constant lives in `src/constants.ts` and is also imported by
 // `handlers/liquity/config.ts`; single-source so the two hardcodes can never
 // drift.
-const V3_HUB_USDM_INFO: V2StableInfo = {
-  chainId: V2_STABLE_CHAIN_ID,
+const V3_HUB_USDM_INFO: StableInfo = {
+  chainId: CELO_CHAIN_ID,
   address: V3_HUB_USDM_ADDRESS,
   symbol: "USDm",
   decimals: 18,
@@ -135,7 +135,7 @@ const V3_HUB_USDM_INFO: V2StableInfo = {
 };
 
 const sourceForNttStable = (entry: NttAddressEntry): StableSupplySource => {
-  if (EXCLUDED_FROM_V2.has(entry.tokenSymbol)) return "V3_LIQUITY";
+  if (LIQUITY_DEBT_SYMBOLS.has(entry.tokenSymbol)) return "V3_LIQUITY";
   return "V2_RESERVE";
 };
 
@@ -149,7 +149,7 @@ const buildNttStables = (): ReadonlyArray<NttStableInfo> => {
     );
     if (!bridgeMode) {
       throw new Error(
-        `[v2Stables/config] Missing NTT bridge mode for ${entry.tokenSymbol} ${tokenAddress} on chain ${entry.chainId}. ` +
+        `[stables/config] Missing NTT bridge mode for ${entry.tokenSymbol} ${tokenAddress} on chain ${entry.chainId}. ` +
           `Verify NttManager.mode() and update NTT_BRIDGE_MODE_BY_TOKEN.`,
       );
     }
@@ -166,21 +166,21 @@ const buildNttStables = (): ReadonlyArray<NttStableInfo> => {
   return out;
 };
 
-const buildV2Stables = (): ReadonlyArray<V2StableInfo> => {
-  const ns = CONTRACT_NAMESPACE_BY_CHAIN[String(V2_STABLE_CHAIN_ID)];
+const buildStables = (): ReadonlyArray<StableInfo> => {
+  const ns = CONTRACT_NAMESPACE_BY_CHAIN[String(CELO_CHAIN_ID)];
   const entries =
-    ns && (_contractsJson as ContractsJson)[String(V2_STABLE_CHAIN_ID)]?.[ns];
+    ns && (_contractsJson as ContractsJson)[String(CELO_CHAIN_ID)]?.[ns];
   if (!entries) return [];
 
-  const out: V2StableInfo[] = [];
+  const out: StableInfo[] = [];
   for (const [name, info] of Object.entries(entries)) {
     if (info.type !== "token") continue;
-    if (EXCLUDED_FROM_V2.has(name)) continue;
+    if (LIQUITY_DEBT_SYMBOLS.has(name)) continue;
     if (EXTERNAL_STABLES.has(name)) continue;
     if (NATIVE_GAS.has(name)) continue;
     if (typeof info.decimals !== "number") continue; // skip malformed
     out.push({
-      chainId: V2_STABLE_CHAIN_ID,
+      chainId: CELO_CHAIN_ID,
       address: info.address.toLowerCase(),
       symbol: name,
       decimals: info.decimals,
@@ -213,22 +213,22 @@ export const NTT_STABLES: ReadonlyArray<NttStableInfo> = buildNttStables();
 export const LOCK_AND_MINT_NTT_STABLES: ReadonlyArray<NttStableInfo> =
   NTT_STABLES.filter((s) => s.bridgeMode === "LOCKING");
 
-export const V2_STABLES: ReadonlyArray<V2StableInfo> = buildV2Stables();
+export const STABLES: ReadonlyArray<StableInfo> = buildStables();
 
 // Invariant check: every EXPECTED V2 reserve symbol resolved successfully.
 // If the package drops one, throw at module load so the indexer fails fast
 // rather than silently under-tracking a token.
 {
   const v2ReserveSymbols = new Set(
-    V2_STABLES.filter(
-      (s) => s.chainId === V2_STABLE_CHAIN_ID && s.source === "V2_RESERVE",
+    STABLES.filter(
+      (s) => s.chainId === CELO_CHAIN_ID && s.source === "V2_RESERVE",
     ).map((s) => s.symbol),
   );
   for (const expected of EXPECTED_V2_RESERVE_SYMBOLS) {
     if (!v2ReserveSymbols.has(expected)) {
       throw new Error(
-        `[v2Stables/config] Expected V2 reserve stable ${expected} missing from ` +
-          `@mento-protocol/contracts (chain ${V2_STABLE_CHAIN_ID}). Update ` +
+        `[stables/config] Expected V2 reserve stable ${expected} missing from ` +
+          `@mento-protocol/contracts (chain ${CELO_CHAIN_ID}). Update ` +
           `EXPECTED_V2_RESERVE_SYMBOLS or bump the contracts package.`,
       );
     }
@@ -240,58 +240,58 @@ export const V2_STABLES: ReadonlyArray<V2StableInfo> = buildV2Stables();
   // duplicate-address rows, and `_byAddress` would silently collapse them
   // (last-write-wins). Asserting distinctness here fails loud at module
   // load so an operator removes V3_HUB_USDM_INFO before deploy.
-  const usdmEntries = V2_STABLES.filter((s) => s.symbol === "USDm");
+  const usdmEntries = STABLES.filter((s) => s.symbol === "USDm");
   if (usdmEntries.length !== 3) {
     throw new Error(
-      `[v2Stables/config] Expected exactly 3 USDm entries (Celo V2 cUSD-USDm + Celo V3 hub USDm + Monad USDm), found ${usdmEntries.length}. ` +
+      `[stables/config] Expected exactly 3 USDm entries (Celo V2 cUSD-USDm + Celo V3 hub USDm + Monad USDm), found ${usdmEntries.length}. ` +
         `If @mento-protocol/contracts now ships USDm at ${V3_HUB_USDM_ADDRESS}, remove V3_HUB_USDM_INFO from this file.`,
     );
   }
   const celoUsdmEntries = usdmEntries.filter(
-    (s) => s.chainId === V2_STABLE_CHAIN_ID,
+    (s) => s.chainId === CELO_CHAIN_ID,
   );
   if (celoUsdmEntries.length !== 2) {
     throw new Error(
-      `[v2Stables/config] Expected exactly 2 Celo USDm entries (V2 cUSD-USDm + V3 hub USDm), found ${celoUsdmEntries.length}.`,
+      `[stables/config] Expected exactly 2 Celo USDm entries (V2 cUSD-USDm + V3 hub USDm), found ${celoUsdmEntries.length}.`,
     );
   }
   const [firstUsdm, secondUsdm] = celoUsdmEntries;
   if (firstUsdm && secondUsdm && firstUsdm.address === secondUsdm.address) {
     throw new Error(
-      `[v2Stables/config] Both Celo USDm entries resolved to the same address ${firstUsdm.address}. ` +
+      `[stables/config] Both Celo USDm entries resolved to the same address ${firstUsdm.address}. ` +
         `@mento-protocol/contracts likely republished USDm at the V3 hub address — remove V3_HUB_USDM_INFO from this file.`,
     );
   }
   const monadSymbols = new Set(
-    V2_STABLES.filter((s) => s.chainId === MONAD_CHAIN_ID).map((s) => s.symbol),
+    STABLES.filter((s) => s.chainId === MONAD_CHAIN_ID).map((s) => s.symbol),
   );
   for (const expected of EXPECTED_MONAD_NTT_SYMBOLS) {
     if (!monadSymbols.has(expected)) {
       throw new Error(
-        `[v2Stables/config] Expected Monad NTT stable ${expected} missing from config/nttAddresses.json.`,
+        `[stables/config] Expected Monad NTT stable ${expected} missing from config/nttAddresses.json.`,
       );
     }
   }
   for (const lockAndMint of LOCK_AND_MINT_NTT_STABLES) {
-    if (lockAndMint.chainId !== V2_STABLE_CHAIN_ID) {
+    if (lockAndMint.chainId !== CELO_CHAIN_ID) {
       throw new Error(
-        `[v2Stables/config] Unexpected lock/mint NTT token ${lockAndMint.symbol} on chain ${lockAndMint.chainId}. ` +
+        `[stables/config] Unexpected lock/mint NTT token ${lockAndMint.symbol} on chain ${lockAndMint.chainId}. ` +
           `Dashboard custody subtraction only handles source-chain locked balances.`,
       );
     }
   }
   // Belt-and-braces: assert no duplicate (chainId, address) keys overall.
   // `_byAddress` below silently collapses duplicates; the test in
-  // test/v2Stables.test.ts catches drift at YAML time, but a registry-side
+  // test/stables.test.ts catches drift at YAML time, but a registry-side
   // collision should fail at module load with a clearer error than the
   // downstream map-build losing a row.
   const seenKeys = new Set<string>();
-  for (const s of V2_STABLES) {
+  for (const s of STABLES) {
     const key = `${s.chainId}-${s.address}`;
     if (seenKeys.has(key)) {
       throw new Error(
-        `[v2Stables/config] Duplicate (chainId, address) entry in V2_STABLES: ${key}. ` +
-          `Check EXCLUDED_FROM_V2 / EXTERNAL_STABLES / NATIVE_GAS filters and the hardcoded V3_HUB_USDM_INFO.`,
+        `[stables/config] Duplicate (chainId, address) entry in STABLES: ${key}. ` +
+          `Check LIQUITY_DEBT_SYMBOLS / EXTERNAL_STABLES / NATIVE_GAS filters and the hardcoded V3_HUB_USDM_INFO.`,
       );
     }
     seenKeys.add(key);
@@ -300,19 +300,18 @@ export const V2_STABLES: ReadonlyArray<V2StableInfo> = buildV2Stables();
 
 // Address-keyed lookup used by the Transfer handler. Key shape mirrors the
 // other indexer maps: `{chainId}-{lowercaseAddress}`.
-const _byAddress = new Map<string, V2StableInfo>(
-  V2_STABLES.map((s) => [`${s.chainId}-${s.address}`, s]),
+const _byAddress = new Map<string, StableInfo>(
+  STABLES.map((s) => [`${s.chainId}-${s.address}`, s]),
 );
 
 const _lockAndMintNttByAddress = new Map<string, NttStableInfo>(
   LOCK_AND_MINT_NTT_STABLES.map((s) => [`${s.chainId}-${s.address}`, s]),
 );
 
-export const findV2StableByAddress = (
+export const findStableByAddress = (
   chainId: number,
   address: string,
-): V2StableInfo | undefined =>
-  _byAddress.get(`${chainId}-${asAddress(address)}`);
+): StableInfo | undefined => _byAddress.get(`${chainId}-${asAddress(address)}`);
 
 export const findLockAndMintNttStableByAddress = (
   chainId: number,
@@ -320,8 +319,8 @@ export const findLockAndMintNttStableByAddress = (
 ): NttStableInfo | undefined =>
   _lockAndMintNttByAddress.get(`${chainId}-${asAddress(address)}`);
 
-// All lowercased addresses, for the YAML drift gate test in v2Stables.test.ts.
-export const V2_STABLE_ADDRESSES: ReadonlyArray<string> = V2_STABLES.map(
+// All lowercased addresses, for the YAML drift gate test in stables.test.ts.
+export const STABLE_ADDRESSES: ReadonlyArray<string> = STABLES.map(
   (s) => s.address,
 );
 
@@ -336,7 +335,7 @@ export const STABLE_TOKEN_CUSTODY_TRANSFER_WHERE_PARAMS: ReadonlyArray<
 ]);
 
 // Stable identifier for the running-supply entity. Same shape as makePoolId.
-export const makeV2StableSupplyId = (
+export const makeStableSupplyId = (
   chainId: number,
   tokenAddress: string,
 ): string => `${chainId}-${asAddress(tokenAddress)}`;

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// V2 stable Transfer-with-zero classifier.
+// Stable Transfer-with-zero classifier.
 //
 // Maps `tx.to` to a coarse mint/burn pathway so the /stables UI can break
 // down "where did this supply come from / go" without inspecting tx receipts.
@@ -47,7 +47,7 @@ const getBrokerAddress = (chainId: number): string | null => {
  * the protocol side, distinct from the Transfer's `from`/`to` which are the
  * token-side counterparties). null/undefined falls through to OTHER_*.
  */
-export function classifyV2StableSupplyChangeKind(
+export function classifyStableSupplyChangeKind(
   chainId: number,
   txTo: string | null | undefined,
   isMint: boolean,

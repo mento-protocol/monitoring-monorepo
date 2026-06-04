@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// V2 stable supply — totalSupply() RPC fetcher + effect declaration.
+// Stable supply — totalSupply() RPC fetcher + effect declaration.
 //
 // Co-locating the effect with its fetcher (instead of in `effects.ts`) keeps
 // the central effects file under the 600-line soft cap and stays out of the
@@ -8,7 +8,7 @@
 // `cache: false` forever to survive Celo archive-block reorgs without
 // silently corrupting persisted cache values.
 //
-// Used exactly once per (chainId, tokenAddress) by the V2 stable Transfer
+// Used exactly once per (chainId, tokenAddress) by the stable Transfer
 // handler to seed the per-token supply baseline on the first observed
 // Transfer-with-zero event. Subsequent supply changes are derived from
 // Transfer deltas in the handler — this fetcher is the once-per-token entry
@@ -27,9 +27,9 @@ const _testBalanceOf = new Map<string, bigint | null>();
 /** @internal Test-only: pre-set a mock totalSupply for a token at a block.
  *  Pass `null` to simulate an RPC failure (fetch returns null). Key includes
  *  the block number so a single test can seed pre-event and post-event values
- *  separately if needed. Used by `test/v2Stables.test.ts` baseline-seed
+ *  separately if needed. Used by `test/stables.test.ts` baseline-seed
  *  scenarios. */
-export function _setMockV2StableTotalSupply(
+export function _setMockStableTotalSupply(
   chainId: number,
   tokenAddress: string,
   blockNumber: bigint,
@@ -40,12 +40,12 @@ export function _setMockV2StableTotalSupply(
 }
 
 /** @internal Test-only: clear all mock totalSupply values. */
-export function _clearMockV2StableTotalSupply(): void {
+export function _clearMockStableTotalSupply(): void {
   _testTotalSupply.clear();
 }
 
 /** @internal Test-only: pre-set a mock ERC20 balanceOf(account) at a block. */
-export function _setMockV2StableBalanceOf({
+export function _setMockStableBalanceOf({
   chainId,
   tokenAddress,
   account,
@@ -63,7 +63,7 @@ export function _setMockV2StableBalanceOf({
 }
 
 /** @internal Test-only: clear all mock balanceOf values. */
-export function _clearMockV2StableBalanceOf(): void {
+export function _clearMockStableBalanceOf(): void {
   _testBalanceOf.clear();
 }
 
@@ -79,7 +79,7 @@ export function _clearMockV2StableBalanceOf(): void {
  * forever — see block-fallback.ts:56-64 and the matching guard in
  * pool-fees.ts:205).
  */
-export async function fetchV2StableTotalSupply(
+export async function fetchStableTotalSupply(
   chainId: number,
   tokenAddress: string,
   blockNumber: bigint,
@@ -115,19 +115,19 @@ export async function fetchV2StableTotalSupply(
     // queried block (every real ERC20 implements the function). For our 13
     // V2 stables this is unreachable in practice (all deployed pre-
     // `start_block`), but the safe-baseline path matters if a future
-    // stable is added to the registry at its deploy block: throwing here
+    // token is added to the registry at its deploy block: throwing here
     // would halt ingestion forever because the retry hits the same pre-
     // deployment block. Returning `0n` lets the handler seed the baseline
     // correctly (token didn't exist → supply was 0).
     if (isContractNotDeployedError(err)) {
       log.info?.(
-        `[v2StableTotalSupply] ${tokenAddress} on chain ${chainId} returned no data at block ${blockNumber} — pre-deployment block, seeding baseline = 0n.`,
+        `[stableTotalSupply] ${tokenAddress} on chain ${chainId} returned no data at block ${blockNumber} — pre-deployment block, seeding baseline = 0n.`,
       );
       return BigInt(0);
     }
     logRpcFailure(
       chainId,
-      "v2StableTotalSupply",
+      "stableTotalSupply",
       tokenAddress,
       err,
       blockNumber,
@@ -141,7 +141,7 @@ export async function fetchV2StableTotalSupply(
  * Returns the on-chain ERC20 balanceOf(account) at the given block, or null
  * on RPC failure. Used to seed NTT lock-custody state at `event.block - 1`.
  */
-export async function fetchV2StableBalanceOf(
+export async function fetchStableBalanceOf(
   {
     chainId,
     tokenAddress,
@@ -178,13 +178,13 @@ export async function fetchV2StableBalanceOf(
   } catch (err) {
     if (isContractNotDeployedError(err)) {
       log.info?.(
-        `[v2StableBalanceOf] ${tokenAddress}.balanceOf(${account}) on chain ${chainId} returned no data at block ${blockNumber} — pre-deployment block, seeding baseline = 0n.`,
+        `[stableBalanceOf] ${tokenAddress}.balanceOf(${account}) on chain ${chainId} returned no data at block ${blockNumber} — pre-deployment block, seeding baseline = 0n.`,
       );
       return BigInt(0);
     }
     logRpcFailure(
       chainId,
-      "v2StableBalanceOf",
+      "stableBalanceOf",
       `${tokenAddress}:${account}`,
       err,
       blockNumber,
@@ -214,20 +214,20 @@ function isContractNotDeployedError(err: unknown): boolean {
 // reads on reindex are the only safe behavior.
 //
 // On RPC failure or `usedLatestFallback`, the fetcher returns null. The
-// handler treats null as "retry" — see src/handlers/v2Stables/transfer.ts.
+// handler treats null as "retry" — see src/handlers/stables/transfer.ts.
 // (The outer `cache: false` already covers null results too; no
 // per-branch `context.cache = false` needed.)
 // ---------------------------------------------------------------------------
-export const v2StableTotalSupplyEffect = createEffect(
+export const stableTotalSupplyEffect = createEffect(
   {
-    name: "v2StableTotalSupply",
+    name: "stableTotalSupply",
     input: { chainId: S.int32, tokenAddress: S.string, blockNumber: S.bigint },
     output: S.nullable(S.bigint),
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
   async ({ input, context }) => {
-    const result = await fetchV2StableTotalSupply(
+    const result = await fetchStableTotalSupply(
       input.chainId,
       input.tokenAddress,
       input.blockNumber,
@@ -237,9 +237,9 @@ export const v2StableTotalSupplyEffect = createEffect(
   },
 );
 
-export const v2StableBalanceOfEffect = createEffect(
+export const stableBalanceOfEffect = createEffect(
   {
-    name: "v2StableBalanceOf",
+    name: "stableBalanceOf",
     input: {
       chainId: S.int32,
       tokenAddress: S.string,
@@ -251,7 +251,7 @@ export const v2StableBalanceOfEffect = createEffect(
     cache: false,
   },
   async ({ input, context }) => {
-    const result = await fetchV2StableBalanceOf(
+    const result = await fetchStableBalanceOf(
       {
         chainId: input.chainId,
         tokenAddress: input.tokenAddress,

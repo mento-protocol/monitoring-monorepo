@@ -29,8 +29,15 @@ const USD_PEGGED_SYMBOLS = new Set([
 export const USD_PEGGED_SYMBOLS_PUBLIC: ReadonlySet<string> =
   USD_PEGGED_SYMBOLS;
 
-/** Maps token symbol → USD-per-1-token rate, derived from pool oracle prices. */
+/**
+ * Maps token symbol → USD-per-1-token rate, derived from pool oracle prices.
+ * Per-chain callers can read `${chainId}:${symbol}` via oracleRateKey().
+ */
 export type OracleRateMap = Map<string, number>;
+
+export function oracleRateKey(chainId: number, symbol: string): string {
+  return `${chainId}:${symbol}`;
+}
 
 /** Minimum `Pool` shape `buildOracleRateMap` needs. Exported so callers that
  *  fetch a slim per-chain query (e.g. ORACLE_RATES) can type their result
@@ -50,6 +57,54 @@ const LEGACY_ALIASES: ReadonlyArray<[string, string]> = [["cEUR", "EURm"]];
 export const LEGACY_ALIASES_PUBLIC: ReadonlyArray<readonly [string, string]> =
   LEGACY_ALIASES;
 
+function setOracleRate(
+  rates: OracleRateMap,
+  chainId: number,
+  symbol: string,
+  rate: number,
+): void {
+  rates.set(symbol, rate);
+  rates.set(oracleRateKey(chainId, symbol), rate);
+}
+
+function usdRateFromOraclePrice(
+  oraclePrice: string | undefined,
+): number | null {
+  if (!oraclePrice || oraclePrice === "0") return null;
+  const feedVal = Number(oraclePrice) / 1e24;
+  return Number.isFinite(feedVal) && feedVal > 0 ? feedVal : null;
+}
+
+function validOracleRate(pool: OracleRatePool): number | null {
+  if (pool.oracleOk === false) return null;
+  return usdRateFromOraclePrice(pool.oraclePrice);
+}
+
+function pricedUsdPairSymbol(
+  network: Network,
+  pool: OracleRatePool,
+): string | null {
+  const sym0 = tokenSymbol(network, pool.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool.token1 ?? null);
+  if (USDM_SYMBOLS.has(sym0) && !USDM_SYMBOLS.has(sym1)) return sym1;
+  if (USDM_SYMBOLS.has(sym1) && !USDM_SYMBOLS.has(sym0)) return sym0;
+  return null;
+}
+
+function addLegacyOracleAliases(rates: OracleRateMap, chainId: number): void {
+  for (const [legacy, current] of LEGACY_ALIASES) {
+    const rate = rates.get(current);
+    if (rate !== undefined && !rates.has(legacy)) {
+      rates.set(legacy, rate);
+    }
+    const chainRate = rates.get(oracleRateKey(chainId, current));
+    const legacyChainKey = oracleRateKey(chainId, legacy);
+    if (chainRate !== undefined && !rates.has(legacyChainKey)) {
+      rates.set(legacyChainKey, chainRate);
+    }
+  }
+}
+
 /**
  * Builds a symbol→USD rate map from pools that have a USDm leg.
  * For each pool with one USDm token and a valid oraclePrice,
@@ -61,25 +116,13 @@ export function buildOracleRateMap(
 ): OracleRateMap {
   const rates: OracleRateMap = new Map();
   for (const pool of pools) {
-    if (!pool.oraclePrice || pool.oraclePrice === "0") continue;
-    if (pool.oracleOk === false) continue;
-    const sym0 = tokenSymbol(network, pool.token0 ?? null);
-    const sym1 = tokenSymbol(network, pool.token1 ?? null);
-    const feedVal = Number(pool.oraclePrice) / 1e24;
-    if (!isFinite(feedVal) || feedVal <= 0) continue;
-
-    if (USDM_SYMBOLS.has(sym0) && !USDM_SYMBOLS.has(sym1)) {
-      rates.set(sym1, feedVal);
-    } else if (USDM_SYMBOLS.has(sym1) && !USDM_SYMBOLS.has(sym0)) {
-      rates.set(sym0, feedVal);
-    }
+    const rate = validOracleRate(pool);
+    if (rate == null) continue;
+    const pricedSymbol = pricedUsdPairSymbol(network, pool);
+    if (pricedSymbol == null) continue;
+    setOracleRate(rates, network.chainId, pricedSymbol, rate);
   }
-  for (const [legacy, current] of LEGACY_ALIASES) {
-    const rate = rates.get(current);
-    if (rate !== undefined && !rates.has(legacy)) {
-      rates.set(legacy, rate);
-    }
-  }
+  addLegacyOracleAliases(rates, network.chainId);
 
   return rates;
 }
@@ -206,6 +249,49 @@ export function canValueTvl(
   return canPricePool(pool, network, rates);
 }
 
+type PoolTvlInput = {
+  reserves0?: string | undefined;
+  reserves1?: string | undefined;
+  token0Decimals?: number | undefined;
+  token1Decimals?: number | undefined;
+  tokenDecimalsKnown?: boolean | undefined;
+  oraclePrice?: string | undefined;
+  token0?: string | null | undefined;
+  token1?: string | null | undefined;
+};
+
+type PoolTvlPricing = {
+  sym0: string;
+  sym1: string;
+  r0: number;
+  r1: number;
+  feedVal: number;
+};
+
+function poolTvlFromUsdLeg({
+  sym0,
+  sym1,
+  r0,
+  r1,
+  feedVal,
+}: PoolTvlPricing): number | null {
+  if (USDM_SYMBOLS.has(sym0)) return r0 + r1 * feedVal;
+  if (USDM_SYMBOLS.has(sym1)) return r0 * feedVal + r1;
+  return null;
+}
+
+function poolTvlViaOracleRates(
+  { sym0, sym1, r0, r1, feedVal }: PoolTvlPricing,
+  rates?: OracleRateMap,
+): number | null {
+  if (!rates) return null;
+  const usd0 = tokenToUSD(sym0, 1, rates);
+  if (usd0 !== null) return (r0 + r1 * feedVal) * usd0;
+  const usd1 = tokenToUSD(sym1, 1, rates);
+  if (usd1 !== null) return (r0 * feedVal + r1) * usd1;
+  return null;
+}
+
 /**
  * Computes the TVL of a pool in USD using the oracle price and token reserves.
  *
@@ -235,43 +321,19 @@ export function canValueTvl(
  *       (poolTvlUSD(a) ?? Number.NEGATIVE_INFINITY))
  */
 export function poolTvlUSD(
-  pool: {
-    reserves0?: string | undefined;
-    reserves1?: string | undefined;
-    token0Decimals?: number | undefined;
-    token1Decimals?: number | undefined;
-    tokenDecimalsKnown?: boolean | undefined;
-    oraclePrice?: string | undefined;
-    token0?: string | null | undefined;
-    token1?: string | null | undefined;
-  },
+  pool: PoolTvlInput,
   network: Network,
   rates?: OracleRateMap,
 ): number | null {
   if (pool.tokenDecimalsKnown !== true) return null;
-  if (!pool.oraclePrice || pool.oraclePrice === "0") return 0;
-  if (!pool.reserves0 && !pool.reserves1) return 0;
+  const feedVal = usdRateFromOraclePrice(pool.oraclePrice);
+  if (feedVal == null) return 0;
   const r0 = parseWei(pool.reserves0 ?? "0", pool.token0Decimals ?? 18);
   const r1 = parseWei(pool.reserves1 ?? "0", pool.token1Decimals ?? 18);
-  const feedVal = Number(pool.oraclePrice) / 1e24;
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
-  if (USDM_SYMBOLS.has(sym0)) {
-    return r0 + r1 * feedVal;
-  }
-  if (USDM_SYMBOLS.has(sym1)) {
-    return r0 * feedVal + r1;
-  }
-  // Neither leg is USDm — try to convert via oracle rate map.
-  if (rates) {
-    const usd0 = tokenToUSD(sym0, 1, rates);
-    if (usd0 !== null) {
-      return (r0 + r1 * feedVal) * usd0;
-    }
-    const usd1 = tokenToUSD(sym1, 1, rates);
-    if (usd1 !== null) {
-      return (r0 * feedVal + r1) * usd1;
-    }
-  }
-  return 0;
+  const pricing = { sym0, sym1, r0, r1, feedVal };
+  return (
+    poolTvlFromUsdLeg(pricing) ?? poolTvlViaOracleRates(pricing, rates) ?? 0
+  );
 }

@@ -640,14 +640,14 @@
     "file": "src/lib/global-pool-entries.ts",
     "ruleId": "complexity",
     "message": "Function 'buildGlobalPoolEntries' has a complexity of 22. Maximum allowed is 15.",
-    "line": 78,
+    "line": 77,
     "linePreview": "*/ | export function buildGlobalPoolEntries( | networkData: NetworkData[],"
   },
   {
     "file": "src/lib/global-pool-entries.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 41 to the 18 allowed.",
-    "line": 78,
+    "line": 77,
     "linePreview": "*/ | export function buildGlobalPoolEntries( | networkData: NetworkData[],"
   },
   {
@@ -724,7 +724,7 @@
     "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
-    "line": 193,
+    "line": 197,
     "linePreview": "*/ | async function fetchPaginatedRows<TRow, TVars>(args: { | client: GraphQLClient;"
   },
   {
@@ -789,20 +789,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed.",
     "line": 346,
     "linePreview": " | function extractRevertData(err: unknown): Hex | null { | if (err && typeof err === \"object\") {"
-  },
-  {
-    "file": "src/lib/tokens.ts",
-    "ruleId": "complexity",
-    "message": "Function 'buildOracleRateMap' has a complexity of 16. Maximum allowed is 15.",
-    "line": 58,
-    "linePreview": "*/ | export function buildOracleRateMap( | pools: ReadonlyArray<OracleRatePool>,"
-  },
-  {
-    "file": "src/lib/tokens.ts",
-    "ruleId": "complexity",
-    "message": "Function 'poolTvlUSD' has a complexity of 17. Maximum allowed is 15.",
-    "line": 237,
-    "linePreview": "*/ | export function poolTvlUSD( | pool: {"
   },
   {
     "file": "src/lib/use-roving-tab-index.ts",

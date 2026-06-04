@@ -12,6 +12,7 @@
 import {
   LEGACY_ALIASES_PUBLIC,
   USD_PEGGED_SYMBOLS_PUBLIC,
+  oracleRateKey,
   type OracleRateMap,
 } from "./tokens";
 
@@ -66,7 +67,12 @@ export function displayLabel(
 export function effectiveOracleRate(
   rates: OracleRateMap,
   symbol: string,
+  chainId?: number,
 ): number | null {
+  if (chainId != null) {
+    const chainDirect = rates.get(oracleRateKey(chainId, symbol));
+    if (chainDirect != null) return chainDirect;
+  }
   const direct = rates.get(symbol);
   if (direct != null) return direct;
   if (USD_PEGGED_SYMBOLS_PUBLIC.has(symbol)) return 1;

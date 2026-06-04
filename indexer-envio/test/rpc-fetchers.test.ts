@@ -15,10 +15,10 @@ import {
   fetchTradingLimits,
 } from "../src/rpc.ts";
 import {
-  _clearMockV2StableTotalSupply,
-  _setMockV2StableTotalSupply,
-  fetchV2StableTotalSupply,
-} from "../src/rpc/v2-stables.ts";
+  _clearMockStableTotalSupply,
+  _setMockStableTotalSupply,
+  fetchStableTotalSupply,
+} from "../src/rpc/stables.ts";
 
 const CHAIN_ID = 42220;
 const POOL = "0x00000000000000000000000000000000000000aa";
@@ -50,14 +50,14 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
   beforeEach(() => {
     _clearRpcClients();
     _clearBreakerMocks();
-    _clearMockV2StableTotalSupply();
+    _clearMockStableTotalSupply();
   });
 
   afterAll(() => {
     _testHooks.delayFn = originalDelayFn;
     _clearRpcClients();
     _clearBreakerMocks();
-    _clearMockV2StableTotalSupply();
+    _clearMockStableTotalSupply();
   });
 
   it("fetchReserves returns null instead of accepting latest-block reserves", async () => {
@@ -251,16 +251,16 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
     });
   });
 
-  it("fetchV2StableTotalSupply uses the exact block mock before RPC", async () => {
-    _setMockV2StableTotalSupply(CHAIN_ID, TOKEN, BLOCK, 123n);
+  it("fetchStableTotalSupply uses the exact block mock before RPC", async () => {
+    _setMockStableTotalSupply(CHAIN_ID, TOKEN, BLOCK, 123n);
 
     assert.equal(
-      await fetchV2StableTotalSupply(CHAIN_ID, TOKEN, BLOCK, noopLogger),
+      await fetchStableTotalSupply(CHAIN_ID, TOKEN, BLOCK, noopLogger),
       123n,
     );
   });
 
-  it("fetchV2StableTotalSupply rejects latest fallback baselines", async () => {
+  it("fetchStableTotalSupply rejects latest fallback baselines", async () => {
     _setRpcClientForTests(CHAIN_ID, {
       readContract: async (args) => {
         const call = args as ReadContractArgs;
@@ -269,7 +269,7 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
       },
     });
 
-    const result = await fetchV2StableTotalSupply(
+    const result = await fetchStableTotalSupply(
       CHAIN_ID,
       TOKEN,
       BLOCK,
@@ -279,7 +279,7 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
     assert.equal(result, null);
   });
 
-  it("fetchV2StableTotalSupply treats pre-deployment no-data as a zero baseline", async () => {
+  it("fetchStableTotalSupply treats pre-deployment no-data as a zero baseline", async () => {
     const info: string[] = [];
     const logger = {
       ...noopLogger,
@@ -293,12 +293,7 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
       },
     });
 
-    const result = await fetchV2StableTotalSupply(
-      CHAIN_ID,
-      TOKEN,
-      BLOCK,
-      logger,
-    );
+    const result = await fetchStableTotalSupply(CHAIN_ID, TOKEN, BLOCK, logger);
 
     assert.equal(result, 0n);
     assert.ok(info.some((line) => line.includes("pre-deployment block")));

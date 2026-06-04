@@ -54,6 +54,14 @@ describe("effectiveOracleRate", () => {
     expect(effectiveOracleRate(rates, "EURm")).toBe(1.1);
   });
 
+  it("prefers a chain-qualified oracle rate when present", () => {
+    const rates = new Map([
+      ["EURm", 1.1],
+      ["143:EURm", 1.08],
+    ]);
+    expect(effectiveOracleRate(rates, "EURm", 143)).toBe(1.08);
+  });
+
   it("defaults USDm to 1.0 when the oracle map has no entry", () => {
     // `useOracleRates`/`buildOracleRateMap` derives non-USDm rates from
     // USDm pairs and never emits USDm itself, so this fallback is
@@ -81,13 +89,13 @@ describe("effectiveOracleRate", () => {
 
 describe("V2StableSupplyChangeEvent.tokenDecimals → formatWei contract", () => {
   // The changes table feeds `event.tokenDecimals` (denormalized from
-  // V2_STABLES.decimals indexer-side) into `formatWei`. Today every V2
+  // STABLES.decimals indexer-side) into `formatWei`. Today every V2
   // stable is 18-decimal; this test locks the contract for any future
   // non-18 Mento stable (e.g. a 6-dp USDC-bridged variant). Without it,
   // a regression that hardcoded 18 again would silently underrender
   // by 10^N for non-18 stables — exactly the bug this denormalization
   // exists to prevent.
-  it("formats 1 token at 18 decimals (current V2 stables)", () => {
+  it("formats 1 token at 18 decimals (current tracked stables)", () => {
     expect(formatWei("1000000000000000000", 18, 2)).toBe("1.00");
   });
 

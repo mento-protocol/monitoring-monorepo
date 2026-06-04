@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
-// V2 stable supply bootstrap.
+// Stable supply bootstrap.
 //
 // Lazily creates the `V2StableTokenSupply` running-state row on first
 // Transfer-zero event per (chainId, tokenAddress). Baseline `totalSupply` is
-// seeded from the RPC `v2StableTotalSupplyEffect` at `block - 1` so we capture
+// seeded from the RPC `stableTotalSupplyEffect` at `block - 1` so we capture
 // the exact pre-event supply, then deltas accumulate forward.
 //
-// Preload-mode hook: `preloadV2StableTokenSupply` pre-fetches the running
+// Preload-mode hook: `preloadStableTokenSupply` pre-fetches the running
 // entity + the RPC baseline if not yet seeded, mirroring `feeToken.ts`'s
 // preload pattern. Preload returns early without writes; the steady-state
 // handler does the write on its post-preload pass.
@@ -14,8 +14,8 @@
 
 import type { EvmOnEventContext, V2StableTokenSupply } from "envio";
 import { dayBucket } from "../../helpers.js";
-import { findV2StableByAddress, makeV2StableSupplyId } from "./config.js";
-import { v2StableTotalSupplyEffect } from "../../rpc/effects.js";
+import { findStableByAddress, makeStableSupplyId } from "./config.js";
+import { stableTotalSupplyEffect } from "../../rpc/effects.js";
 
 // Use Envio's published context type so the effect caller, entity stores,
 // and isPreload predicate are correctly typed. The locally-narrowed
@@ -30,7 +30,7 @@ type BootstrapContext = EvmOnEventContext;
  * day so the first day-flush only fires once a real day boundary crosses
  * (avoiding a spurious flush at supply=0 on the very first event).
  */
-export type MakeV2StableTokenSupplyArgs = {
+export type MakeStableTokenSupplyArgs = {
   chainId: number;
   tokenAddress: string;
   symbol: string;
@@ -40,8 +40,8 @@ export type MakeV2StableTokenSupplyArgs = {
   blockTimestamp: bigint;
 };
 
-export function makeV2StableTokenSupply(
-  args: MakeV2StableTokenSupplyArgs,
+export function makeStableTokenSupply(
+  args: MakeStableTokenSupplyArgs,
 ): V2StableTokenSupply {
   const {
     chainId,
@@ -53,7 +53,7 @@ export function makeV2StableTokenSupply(
     blockTimestamp,
   } = args;
   return {
-    id: makeV2StableSupplyId(chainId, tokenAddress),
+    id: makeStableSupplyId(chainId, tokenAddress),
     chainId,
     tokenAddress,
     tokenSymbol: symbol,
@@ -75,21 +75,21 @@ export function makeV2StableTokenSupply(
  * (defensive — the handler's `where` filter already gates address, but a
  * stale YAML deploy could let an event through).
  */
-export async function getOrCreateV2StableTokenSupply(
+export async function getOrCreateStableTokenSupply(
   context: BootstrapContext,
   chainId: number,
   tokenAddress: string,
   blockNumber: bigint,
   blockTimestamp: bigint,
 ): Promise<V2StableTokenSupply | undefined> {
-  const info = findV2StableByAddress(chainId, tokenAddress);
+  const info = findStableByAddress(chainId, tokenAddress);
   if (!info) return undefined;
 
-  const id = makeV2StableSupplyId(chainId, tokenAddress);
+  const id = makeStableSupplyId(chainId, tokenAddress);
   const existing = await context.V2StableTokenSupply.get(id);
   if (existing) return existing;
 
-  return makeV2StableTokenSupply({
+  return makeStableTokenSupply({
     chainId,
     tokenAddress,
     symbol: info.symbol,
@@ -106,8 +106,8 @@ export async function getOrCreateV2StableTokenSupply(
  * the lookup. Safe no-op when called multiple times for the same
  * (chainId, tokenAddress) within a batch.
  *
- * Note: `v2StableTotalSupplyEffect` is `cache: false` (Group C invariant —
- * see `rpc/v2-stables.ts`), so the value is NOT persisted across batches.
+ * Note: `stableTotalSupplyEffect` is `cache: false` (Group C invariant —
+ * see `rpc/stables.ts`), so the value is NOT persisted across batches.
  * The preload's job is purely in-batch dedup: keeps concurrent
  * `V2StableToken.Transfer` events on the same token from firing duplicate
  * RPC calls when their handlers run in parallel.
@@ -117,19 +117,19 @@ export async function getOrCreateV2StableTokenSupply(
  * early at the existing-supply check. For a token in PERSISTENT RPC
  * failure, however, the entity stays unseeded and every Transfer-zero
  * event's preload pass fires another archive call. Bounded by the
- * chain's rate-limit budget (200/s per `v2StableTotalSupplyEffect`
+ * chain's rate-limit budget (200/s per `stableTotalSupplyEffect`
  * config). Worth knowing during outage triage.
  */
-export async function preloadV2StableTokenSupply(
+export async function preloadStableTokenSupply(
   context: BootstrapContext,
   chainId: number,
   tokenAddress: string,
   blockNumber: bigint,
 ): Promise<void> {
-  const id = makeV2StableSupplyId(chainId, tokenAddress);
+  const id = makeStableSupplyId(chainId, tokenAddress);
   const existing = await context.V2StableTokenSupply.get(id);
   if (existing?.supplyBaselineSeeded) return;
-  await context.effect(v2StableTotalSupplyEffect, {
+  await context.effect(stableTotalSupplyEffect, {
     chainId,
     tokenAddress,
     blockNumber: blockNumber - 1n,

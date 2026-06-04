@@ -221,7 +221,7 @@ function buildTokenAgg(
   // non-USDm rates against USDm pairs, so USDm itself never gets an
   // entry. Without the default, USDm tiles and stacked-area slices
   // render null on healthy data.
-  const rate = effectiveOracleRate(rates, latest.tokenSymbol);
+  const rate = effectiveOracleRate(rates, latest.tokenSymbol, latest.chainId);
   const usd = (raw: bigint): number | null =>
     rate == null ? null : parseWei(raw.toString(), latest.tokenDecimals) * rate;
 
@@ -279,7 +279,8 @@ export function buildTokenUsdTimeSeries(
 ): Array<{ timestamp: number; valueUsd: number }> {
   if (snapshots.length === 0) return [];
   const symbol = snapshots[0]!.tokenSymbol;
-  const rate = effectiveOracleRate(rates, symbol);
+  const chainId = snapshots[0]!.chainId;
+  const rate = effectiveOracleRate(rates, symbol, chainId);
   if (rate == null) return [];
 
   // Sort ASC over the FULL set (including pre-window). Don't mutate the

@@ -48,7 +48,7 @@ export const STABLES_DAILY_SNAPSHOTS = `
 // (`0x765de8…` vs `0x106cc…`), and no other Mento stable has a sibling
 // source on the same chain. So `distinct_on: [chainId, tokenAddress]`
 // returns the same set as the rollup's `(chainId, tokenAddress, source)`
-// grouping. Indexer-side: enforced by `v2Stables/config.ts:_byAddress`
+// grouping. Indexer-side: enforced by `stables/config.ts:_byAddress`
 // (no duplicate-address keys).
 export const STABLES_LATEST_PER_TOKEN = `
   query StablesLatestPerToken($chainIds: [Int!]!) {

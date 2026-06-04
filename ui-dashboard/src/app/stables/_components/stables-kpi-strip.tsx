@@ -78,7 +78,7 @@ export function StablesKpiStrip({
       // without this fallback, USDm (the largest stable) silently
       // drops out of the headline total since useOracleRates derives
       // rates against USDm pairs and never emits one for USDm itself.
-      const rate = effectiveOracleRate(rates, row.tokenSymbol);
+      const rate = effectiveOracleRate(rates, row.tokenSymbol, row.chainId);
       if (rate == null) return acc;
       const custodyRows =
         custodyByToken.get(`${row.chainId}|${row.tokenAddress}`) ?? [];

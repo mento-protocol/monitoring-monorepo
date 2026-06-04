@@ -1895,7 +1895,7 @@ type TraderPoolDayMarker {
 # ---------------------------------------------------------------------------
 # Mento stablecoin supply tracking — feeds the /stables dashboard page.
 #
-# V2 handler (src/handlers/v2Stables/transfer.ts) writes from Transfer-with-
+# Stable handler (src/handlers/stables/transfer.ts) writes from Transfer-with-
 # zero-address events on each subscribed Mento stable. V3 handler
 # (src/handlers/liquity/instance.ts) writes parallel V3_LIQUITY rows at each
 # daily flush in a follow-up PR (per the plan, PR1 ships V3 systemDebt-derived
@@ -1924,7 +1924,7 @@ enum StableSupplySource {
 }
 
 # Classification of a V2 Transfer-with-zero event by `tx.to`. See
-# `src/handlers/v2Stables/classifyKind.ts` for the routing logic.
+# `src/handlers/stables/classifyKind.ts` for the routing logic.
 enum V2StableSupplyChangeKind {
   RESERVE_MINT
   RESERVE_BURN
@@ -1979,7 +1979,7 @@ type V2StableSupplyChangeEvent
   chainId: Int! @index
   tokenAddress: String! @index
   tokenSymbol: String!
-  # Denormalized from V2_STABLES registry so the UI changes-table can
+  # Denormalized from STABLES registry so the UI changes-table can
   # render token amounts without hardcoding 18. Every V2 stable in the
   # registry today is 18 decimals; surfacing the field per-row removes
   # the hardcode and stays safe for any future non-18 Mento stable.

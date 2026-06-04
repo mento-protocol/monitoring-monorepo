@@ -318,7 +318,7 @@ chains:
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
       - name: V2StableToken
-        address: [] # V2 stable supply tracking not yet wired on testnet
+        address: [] # Stable supply tracking not yet wired on testnet
       - name: BreakerBox
         address:
           - 0x578bD46003B9D3fd4c3C3f47c98B329562a6a1dE

@@ -203,10 +203,10 @@ contracts:
       - event: Transfer
 
   # Mento stablecoins. The Transfer-zero handler tracks mint/burn supply for
-  # addresses in V2_STABLES. The custody handler also listens on this contract
+  # addresses in STABLES. The custody handler also listens on this contract
   # for lock/mint NTT manager transfers and filters to LOCK_AND_MINT_NTT_STABLES.
   # Address list lives under each chain's `contracts:` block and is drift-
-  # checked by test/v2Stables.test.ts.
+  # checked by test/stables.test.ts.
   - name: V2StableToken
     abi_file_path: abis/ERC20.json
     handler: src/EventHandlers.ts

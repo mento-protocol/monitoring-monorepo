@@ -13,7 +13,7 @@
 
 import type { EvmOnEventContext, StableTokenCustodyState } from "envio";
 import { asAddress } from "../../helpers.js";
-import { v2StableBalanceOfEffect } from "../../rpc/effects.js";
+import { stableBalanceOfEffect } from "../../rpc/effects.js";
 import {
   findLockAndMintNttStableByAddress,
   makeStableTokenCustodyId,
@@ -47,7 +47,7 @@ async function preloadStableTokenCustodyState(
   const id = makeStableTokenCustodyId(chainId, tokenAddress);
   const existing = await context.StableTokenCustodyState.get(id);
   if (existing?.supplyBaselineSeeded) return;
-  await context.effect(v2StableBalanceOfEffect, {
+  await context.effect(stableBalanceOfEffect, {
     chainId,
     tokenAddress,
     account: managerAddress,
@@ -124,7 +124,7 @@ export async function handleStableTokenCustodyTransfer({
   if (!state) return;
 
   if (!state.supplyBaselineSeeded) {
-    const baseline = await context.effect(v2StableBalanceOfEffect, {
+    const baseline = await context.effect(stableBalanceOfEffect, {
       chainId,
       tokenAddress,
       account: managerAddress,
@@ -132,7 +132,7 @@ export async function handleStableTokenCustodyTransfer({
     });
     if (baseline === null) {
       throw new Error(
-        `[v2Stables/custody] balanceOf baseline failed for ${tokenAddress}.balanceOf(${managerAddress}) ` +
+        `[stables/custody] balanceOf baseline failed for ${tokenAddress}.balanceOf(${managerAddress}) ` +
           `on chain ${chainId} at block ${blockNumber - 1n}. Retrying until RPC recovers.`,
       );
     }
@@ -158,7 +158,7 @@ export async function handleStableTokenCustodyTransfer({
       : 0n;
   if (!isLock && amount > state.lockedSupply) {
     context.log.warn?.(
-      `[v2Stables/custody] Unlock amount ${amount} exceeds tracked lockedSupply ${state.lockedSupply} ` +
+      `[stables/custody] Unlock amount ${amount} exceeds tracked lockedSupply ${state.lockedSupply} ` +
         `for ${tokenAddress} on chain ${chainId}; flooring lockedSupply at 0.`,
     );
   }

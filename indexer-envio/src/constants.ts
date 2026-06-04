@@ -10,7 +10,7 @@ export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
  *  cUSD-USDm (`0x765de8…`). Hardcoded here because `@mento-protocol/contracts`
  *  still maps the bare "USDm" key to V2 cUSD; once the upstream package
  *  republishes USDm at this address, this constant + the two import sites
- *  (`handlers/liquity/config.ts`, `handlers/v2Stables/config.ts`) + the
+ *  (`handlers/liquity/config.ts`, `handlers/stables/config.ts`) + the
  *  matching ALLOWLIST entry in `scripts/checkYamlAddresses.mjs` all become
  *  dead code that can be cleaned up in one PR. Single-source so the address
  *  doesn't drift across modules. */

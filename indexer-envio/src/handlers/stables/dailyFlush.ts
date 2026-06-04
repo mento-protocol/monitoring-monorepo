@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// V2 stable daily-flush logic.
+// Stable daily-flush logic.
 //
 // Mirrors the rolling-flush pattern from src/handlers/liquity/instance.ts —
 // on the first event of a new UTC day, write out the previous day's
@@ -29,7 +29,7 @@ type DailyFlushContext = {
  * it's already up-to-date from prior delta application. We only reset the
  * today-buckets (mintedTodayBucket, burnedTodayBucket, currentDayBucket).
  */
-export function flushV2StableDailySnapshot(
+export function flushStableDailySnapshot(
   context: DailyFlushContext,
   supply: V2StableTokenSupply,
   eventTimestamp: bigint,

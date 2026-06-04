@@ -162,6 +162,37 @@ describe("rollupByToken", () => {
     );
   });
 
+  it("uses chain-qualified oracle rates for same-symbol Celo and Monad rows", () => {
+    const snapshots: StableSupplyDailySnapshot[] = [
+      snapshot({
+        chainId: 42220,
+        tokenAddress: "0xcelo",
+        tokenSymbol: "EURm",
+        timestamp: String(NOW_TS),
+        totalSupply: String(BigInt(100) * BigInt(10) ** BigInt(18)),
+      }),
+      snapshot({
+        chainId: 143,
+        tokenAddress: "0xmonad",
+        tokenSymbol: "EURm",
+        timestamp: String(NOW_TS),
+        totalSupply: String(BigInt(100) * BigInt(10) ** BigInt(18)),
+      }),
+    ];
+    const rates = new Map([
+      ["EURm", 9],
+      ["42220:EURm", 1.1],
+      ["143:EURm", 1.2],
+    ]);
+    const rollup = rollupByToken(snapshots, rates, NOW_TS);
+    expect(
+      rollup.get("42220|0xcelo|V2_RESERVE")?.totalSupplyUsdLatest,
+    ).toBeCloseTo(110, 0);
+    expect(
+      rollup.get("143|0xmonad|V2_RESERVE")?.totalSupplyUsdLatest,
+    ).toBeCloseTo(120, 0);
+  });
+
   it("subtracts lock-custody snapshots from Celo circulating supply", () => {
     const rawSupply = String(BigInt(300) * BigInt(10) ** BigInt(18));
     const lockedSupply = String(BigInt(80) * BigInt(10) ** BigInt(18));
@@ -472,6 +503,30 @@ describe("buildTokenUsdTimeSeries + sumTotalUsdSeries", () => {
     expect(beforeLock?.valueUsd).toBeCloseTo(300, 0);
     expect(afterLock?.valueUsd).toBeCloseTo(220, 0);
     expect(today?.valueUsd).toBeCloseTo(270, 0);
+  });
+
+  it("uses the token chain for USD time-series oracle conversion", () => {
+    const snapshots: StableSupplyDailySnapshot[] = [
+      snapshot({
+        chainId: 143,
+        tokenAddress: "0xmonad",
+        tokenSymbol: "EURm",
+        timestamp: String(NOW_TS),
+        totalSupply: String(BigInt(100) * BigInt(10) ** BigInt(18)),
+      }),
+    ];
+    const series = buildTokenUsdTimeSeries(
+      snapshots,
+      new Map([
+        ["EURm", 9],
+        ["42220:EURm", 1.1],
+        ["143:EURm", 1.2],
+      ]),
+      rangeStartSeconds("7d", Number(NOW_TS)),
+      Number(NOW_TS),
+    );
+    const today = series.find((p) => p.timestamp === Number(NOW_TS));
+    expect(today?.valueUsd).toBeCloseTo(120, 0);
   });
 
   it("sums per-token series into a total — timestamps align across tokens", () => {
