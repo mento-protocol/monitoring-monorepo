@@ -2,6 +2,7 @@ import aggregatorsRaw from "../config/aggregators.json" with { type: "json" };
 import { CONTRACT_NAMESPACE_BY_CHAIN } from "./contractAddresses.js";
 import {
   isSystemAddress,
+  isProtocolActorEntryPoint,
   iterateContractAddresses,
 } from "./system-addresses.js";
 
@@ -12,7 +13,7 @@ interface AggregatorEntry {
 }
 
 /** Metadata for a cluster-prefixed aggregator name (`cluster-<deployer-prefix>`).
- *  Surfaces the deployer EOA + explorer URL so the leaderboard's UI can render
+ *  Surfaces the deployer EOA + explorer URL so the volume UI can render
  *  an info-icon tooltip explaining the grouping signal and link to the deployer
  *  for follow-up research. Pure on-chain fact: shared deployer; no inference
  *  about the operator's identity. */
@@ -111,7 +112,7 @@ const DIRECT_ENTRY_BY_CHAIN: Map<number, Set<string>> = (() => {
 
 /**
  * Classify a swap's `tx.to` (entry-point contract) into a canonical bucket
- * for the leaderboard's aggregator-flow analysis.
+ * for the volume aggregator-flow analysis.
  *
  * Resolution order (most specific wins):
  * 1. Known aggregator router → its name. Includes both branded aggregators
@@ -130,6 +131,7 @@ export function classifyAggregator(
   chainId: number,
   txTo: string,
   poolAddress?: string,
+  pool?: { rebalancerAddress: string },
 ): string {
   if (!txTo) return "unknown";
   const lower = txTo.toLowerCase();
@@ -140,13 +142,14 @@ export function classifyAggregator(
   if (DIRECT_ENTRY_BY_CHAIN.get(chainId)?.has(lower)) return "direct";
   if (poolAddress && lower === poolAddress.toLowerCase()) return "direct";
 
+  if (isProtocolActorEntryPoint(chainId, lower, pool)) return "system";
   if (isSystemAddress(chainId, lower)) return "system";
 
   return "unknown";
 }
 
 /** Look up cluster metadata (deployer EOA + explorer URL + note) by cluster
- *  name. Used by the leaderboard's UI to render an info-icon tooltip on
+ *  name. Used by the volume UI to render an info-icon tooltip on
  *  cluster-labeled rows. Returns `undefined` for non-cluster names like
  *  `"squid"` / `"direct"` / `"unknown"`. */
 export function getClusterMetadata(

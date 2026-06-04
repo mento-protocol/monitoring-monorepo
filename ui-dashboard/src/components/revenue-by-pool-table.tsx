@@ -193,7 +193,7 @@ export function RevenueByPoolTable({
     defaultKey: "fees7d",
     defaultDir: "desc",
     validKeys: SORT_KEYS,
-    paramPrefix: "leaderboard",
+    paramPrefix: "revenue",
   });
 
   const sorted = useMemo(

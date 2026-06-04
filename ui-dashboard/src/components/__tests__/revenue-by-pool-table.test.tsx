@@ -11,7 +11,7 @@
 /**
  * Tests for `RevenueByPoolTable` against the snapshot-based aggregator.
  * Per-window truncation badges (PR #306) were retired in PR-snapshot-2 once
- * the leaderboard switched off raw transfers — snapshot pagination covers
+ * the table switched off raw transfers — snapshot pagination covers
  * all-time history, so the only remaining `≈` flag is genuine pricing gaps
  * (UNKNOWN tokens or missing FX rates).
  *

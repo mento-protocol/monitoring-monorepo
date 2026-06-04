@@ -21,6 +21,12 @@ export function NavLinks() {
         Pools
       </Link>
       <Link
+        href="/volume"
+        className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+      >
+        Volume
+      </Link>
+      <Link
         href="/stables"
         className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
       >
@@ -31,12 +37,6 @@ export function NavLinks() {
         className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
       >
         Bridges
-      </Link>
-      <Link
-        href="/leaderboard"
-        className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-      >
-        Leaderboard
       </Link>
       <Link
         href="/integrations"

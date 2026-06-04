@@ -6,7 +6,7 @@
 
 Two coupled deliverables:
 
-1. **ROADMAP refresh.** `docs/ROADMAP.md` was last updated 2026-04-24. Roughly 60 PRs have merged since then — Envio v3 migration, Lever 4 series (rebalance state derivation + BiPoolExchange + Pool Config + decimal-trust gates), leaderboard volume rollups + v2/v3 attribution, Slack/deviation-alert refinements, ratchet linting series (6 PRs), Clawpatch baseline, react-doctor 80→100, browser interaction tests, and infra hygiene (mutation testing, supply-chain gate, agent quality gate). The file's "Done" lists and "Next" hint are stale. Refreshing it before the Liquity work lands keeps the roadmap honest and means the next reader (or future agent) doesn't have to reverse-engineer recent state from git log.
+1. **ROADMAP refresh.** `docs/ROADMAP.md` was last updated 2026-04-24. Roughly 60 PRs have merged since then — Envio v3 migration, Lever 4 series (rebalance state derivation + BiPoolExchange + Pool Config + decimal-trust gates), volume rollups + v2/v3 attribution, Slack/deviation-alert refinements, ratchet linting series (6 PRs), Clawpatch baseline, react-doctor 80→100, browser interaction tests, and infra hygiene (mutation testing, supply-chain gate, agent quality gate). The file's "Done" lists and "Next" hint are stale. Refreshing it before the Liquity work lands keeps the roadmap honest and means the next reader (or future agent) doesn't have to reverse-engineer recent state from git log.
 
 2. **Liquity v2 CDP indexing + dashboard.** Backlog item flagged in `docs/ROADMAP.md:151-155`, `SPEC.md` §5.5, and `docs/BACKLOG.md:18-25`. Verification against `@mento-protocol/contracts@0.8.0` (see "Mento contracts verification" section below) revealed **three live Liquity instances on Celo mainnet** (GBPm + CHFm + JPYm), not the single GBPm instance BACKLOG implied. Each mints its own debt token against USDm collateral. We have zero indexer or dashboard visibility today. This plan adds the indexer entities + handlers for all three instances, then `/cdps` + `/cdps/[symbol]` routes with system KPIs + ICR distribution + trove/depositor tables + interest-rate brackets + CDP-pool linkage, all in **one deploy-sequenced PR**. `service=cdps` alert rules ship as a follow-up PR after sync.
 
@@ -117,7 +117,7 @@ Adopt all of these except `mightBeLeveraged`, which depends on receipt-log scann
 Liquity's official subgraph has **no StabilityPool data source**. Depositor state, gains, and totals are read on-chain by the UI. Our plan diverges here because we need SP totals for headroom alerting + dashboard tiles, but the depositor table scope should be reconsidered:
 
 - Index `StabilityPoolBoldBalanceUpdated` / `StabilityPoolCollBalanceUpdated` for total deposits / collateral in SP (cheap, needed for headroom).
-- Index `DepositUpdated` for a last-touched depositor table — but ONLY if we want this view on day 1. Defer if it's not load-bearing for the initial alert use case; users can read on-chain via the Liquity UI today. A current depositor leaderboard needs the accumulator math called out below.
+- Index `DepositUpdated` for a last-touched depositor table — but ONLY if we want this view on day 1. Defer if it's not load-bearing for the initial alert use case; users can read on-chain via the Liquity UI today. A current depositor ranking needs the accumulator math called out below.
 - **Recommendation**: ship last-touched per-depositor tracking on day 1 — the alert-only use case wouldn't justify a `/cdps` route, and the dashboard's value-add over upstream's UI is the system-level + depositor activity view together. Cost is ~50 extra entity-row inserts on busy weeks.
 
 ### `spMinBufferGbpm` — likely a Mento-specific concept
@@ -290,7 +290,7 @@ Insert these bullets in the existing Done indexer section (after line 34):
 - **Median-jump lineage** — `lastMedianPrice` / `lastMedianAt` / `medianLive` / `prevMedianPrice` / `lastOracleJumpBps` on Pool; unblocks Oracle Jump Exceeds Swap Fee alert
 - **BreakerBox event indexing** — `BreakerAdded` / `BreakerStatusUpdated` / `BreakerTripped` / `TradingModeUpdated` and per-breaker config events; foundation for the Breaker tile follow-up
 - **`rebalanceReward` indexed** — closes the Pool Config panel's last missing fee field (PR #222)
-- **Leaderboard volume rollups** — daily aggregator + v3 aggregator flows + v2 trader route attribution + virtual-pool exchange volume rollup (PRs #390 / #391 / #395 / #415)
+- **Volume rollups** — daily aggregator + v3 aggregator flows + v2 trader route attribution + virtual-pool exchange volume rollup (PRs #390 / #391 / #395 / #415)
 - **Indexer perf** — preloaded trading-limit reads + grouped swap effects; block-depth-aware rate-limit fallback dispatch; medium-tier caching + revert-signature retry coverage (PRs #353 / #356 / #413 / #417)
 - **`pnpm --filter @mento-protocol/indexer-envio generate:abis`** — refresh vendored Mento ABIs from `@mento-protocol/contracts/abis/` (already mentioned in BACKLOG; surface here too)
 
@@ -301,7 +301,7 @@ Insert after line 62 (`Chain icon prefix`):
 - **Pool Config panel** — consolidated thresholds tile (rebalance threshold, LP/protocol fees, rebalance reward, oracle expiry, trading-limit windows, rebalancer address) (PR #222)
 - **Pool detail Phase 2** — v2 BiPoolExchange wrapper view on VirtualPool detail pages (Lever 4)
 - **Untrusted-decimals trust gates** — pool amount tabs / homepage volume views gate on `tokenDecimalsKnown` to prevent rendering bogus USD figures (Lever 4 PR 1.5–1.7)
-- **Volume leaderboard rollups + flow insights** — homepage Trader/Router/Source breakdowns (PRs #390 / #391 / #395)
+- **Volume rollups + flow insights** — homepage Trader/Router/Source breakdowns (PRs #390 / #391 / #395)
 - **WAI-ARIA keyboard contracts** — radiogroup + tablist patterns; shared roving tabindex helper (PRs #350 / #377)
 - **react-doctor at 100** — score driven 80→100 with the full backlog closed; CI now runs react-doctor as a PR-only diff gate (PRs #367 / #371 / #382)
 - **Browser interaction test suite** — dashboard end-to-end smoke via Playwright (PR #403)
@@ -516,7 +516,7 @@ type PendingRedemption @index(fields: ["collateralId", "txHash"]) {
   blockNumber: BigInt!
 }
 
-# Per-address aggregate (depositor leaderboard, trove count).
+# Per-address aggregate (depositor ranking, trove count).
 type BorrowerInfo {
   id: ID! # "{chainId}-{address}"
   chainId: Int! @index
@@ -1083,7 +1083,7 @@ Test cases:
 - **Redistribution snapshot math**: a liquidation persists latest total redistribution accumulators on `LiquityInstance` while an untouched active trove has stale `debt/coll`; rollup/current-ICR helpers use those latest totals minus the trove's redistribution snapshots to include pending DefaultPool gains before sorting percentiles or the riskiest table, without scanning event history.
 - **TCR sentinel**: market-specific price null → tcrBps = -1; debt=0 → tcrBps = -1; happy path matches floor(coll·price/debt·10000).
 - **Headroom**: spDeposits=1000e18, minBoldInSp=200e18 → spHeadroom=800e18; systemParamsLoaded=false → spHeadroom=-1.
-- **Stability Pool depositor state**: `DepositUpdated` writes `lastTouchedDeposit`; UI copy and query names must not call it a current depositor leaderboard unless accumulator math (`depositLossSinceLastOperation`, `P_Updated`, `S_Updated`, etc.) is implemented and tested.
+- **Stability Pool depositor state**: `DepositUpdated` writes `lastTouchedDeposit`; UI copy and query names must not call it a current depositor ranking unless accumulator math (`depositLossSinceLastOperation`, `P_Updated`, `S_Updated`, etc.) is implemented and tested.
 - **Percentile computation**: 10 troves with known ICRs [110, 120, 130, 140, 150, 160, 170, 180, 190, 200] → p1=110, p5=110, p50=155 (or whichever sort + nearest convention chosen — pin in test).
 - **Rollup ICR freshness**: persisted `Trove.icrBps` values are stale, but the rollup recomputes current debt + current price at the bucket timestamp before sorting percentiles and computing below-MCR fraction bps.
 - **Trove table ICR freshness**: the riskiest-trove table sorts by the current-ICR rollup/query source, not by stale persisted `Trove.icrBps`; if no server-side current-ICR source exists, the client fetches all active troves, recomputes current ICR, sorts, and only then paginates.

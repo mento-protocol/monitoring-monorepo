@@ -151,7 +151,7 @@ export const ORACLE_RATES = `
 
 // Pool label lookup — `id` (multichain `${chainId}-${address}`) plus the
 // minimum fields needed to render `poolName()` and the FPMM/Virtual badge on
-// the per-pool revenue leaderboard. No `oracleOk` filter: paused FX pools
+// the per-pool revenue table. No `oracleOk` filter: paused FX pools
 // must still resolve to readable labels for their historical fee transfers.
 // Explicit `limit: 1000` matches the hosted Hasura silent cap so the literal
 // reflects the real ceiling (per chain, pool count is well under that today).

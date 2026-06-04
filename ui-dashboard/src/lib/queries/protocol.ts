@@ -3,7 +3,7 @@
 // consumers can also import directly from this module.
 //
 // PR-snapshot-3 retired `PROTOCOL_FEE_TRANSFERS_ALL`. All fee surfaces —
-// chain-level KPI tile, fee chart, and per-pool leaderboard — now read
+// chain-level KPI tile, fee chart, and per-pool table — now read
 // from `POOL_DAILY_FEE_SNAPSHOTS_PAGE`.
 
 /**

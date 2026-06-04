@@ -70,7 +70,7 @@ export const STABLES_LATEST_PER_TOKEN = `
   }
 `;
 
-// Per-tx supply changes for the /stables changes table + leaderboard. The
+// Per-tx supply changes for the /stables changes table + ranked table. The
 // V3 streams (TroveOperationEvent / RedemptionEvent / LiquidationEvent) merge
 // in on the client side — those carry source-specific fields that don't
 // normalize cleanly into V2StableSupplyChangeEvent.

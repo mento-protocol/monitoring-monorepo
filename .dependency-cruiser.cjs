@@ -245,15 +245,15 @@ module.exports = {
       },
     },
     {
-      name: "dashboard-route-private-leaderboard",
+      name: "dashboard-route-private-volume",
       severity: "error",
       comment:
-        "ui-dashboard/src/app/leaderboard/_components/ is private to the leaderboard route. No code outside app/leaderboard/ — including lib/, components/, or other routes — may import from it.",
+        "ui-dashboard/src/app/volume/_components/ is private to the volume route. No code outside app/volume/ — including lib/, components/, or other routes — may import from it.",
       from: {
         path: "^ui-dashboard/src/",
-        pathNot: "^ui-dashboard/src/app/leaderboard/",
+        pathNot: "^ui-dashboard/src/app/volume/",
       },
-      to: { path: "^ui-dashboard/src/app/leaderboard/_components/" },
+      to: { path: "^ui-dashboard/src/app/volume/_components/" },
     },
     {
       name: "dashboard-route-private-address-book-root",

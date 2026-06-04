@@ -3,21 +3,21 @@
     "file": "src/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'bootstrapFeedBreakerConfigs' has too many parameters (5). Maximum allowed is 4.",
-    "line": 208,
-    "linePreview": " | export async function bootstrapFeedBreakerConfigs( | context: EvmOnEventContext,"
+    "line": 214,
+    "linePreview": "// caching their own work as done while a dependency stayed unhydrated. | export async function bootstrapFeedBreakerConfigs( | context: EvmOnEventContext,"
   },
   {
     "file": "src/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'ensureBreaker' has too many parameters (5). Maximum allowed is 4.",
-    "line": 71,
+    "line": 72,
     "linePreview": "* Caller passes the event block number (used as the bootstrap block). */ | export async function ensureBreaker( | context: EvmOnEventContext,"
   },
   {
     "file": "src/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'ensureBreakerConfig' has too many parameters (5). Maximum allowed is 4.",
-    "line": 120,
+    "line": 121,
     "linePreview": "* from the loaded state. Returns null if RPC bootstrap fails. */ | export async function ensureBreakerConfig( | context: EvmOnEventContext,"
   },
   {
@@ -52,28 +52,21 @@
     "file": "src/healthScore.ts",
     "ruleId": "max-params",
     "message": "Function 'recordHealthSample' has too many parameters (5). Maximum allowed is 4.",
-    "line": 315,
+    "line": 319,
     "linePreview": "*/ | export function recordHealthSample( | pool: Pool,"
-  },
-  {
-    "file": "src/leaderboardWindowSnapshot.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 31 to the 18 allowed.",
-    "line": 112,
-    "linePreview": "*  has an empty inclusive range. */ | export function aggregatePerWindow( | rows: ReadonlyArray<TraderDailyRow>,"
   },
   {
     "file": "src/pool.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 57. Maximum allowed is 15.",
-    "line": 284,
+    "line": 314,
     "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
   },
   {
     "file": "src/pool.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
-    "line": 284,
+    "line": 314,
     "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
   },
   {
@@ -143,7 +136,7 @@
     "file": "src/rpc.ts",
     "ruleId": "max-params",
     "message": "Async function 'updatePoolsOracleExpiry' has too many parameters (5). Maximum allowed is 4.",
-    "line": 126,
+    "line": 130,
     "linePreview": " | export async function updatePoolsOracleExpiry( | context: EvmOnEventContext,"
   },
   {
@@ -157,49 +150,49 @@
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-params",
     "message": "Async function 'readContractWithBlockFallback' has too many parameters (6). Maximum allowed is 4.",
-    "line": 157,
+    "line": 186,
     "linePreview": "*/ | export async function readContractWithBlockFallback( | chainId: number,"
   },
   {
     "file": "src/rpc/block-fallback.ts",
     "ruleId": "max-params",
     "message": "Method 'logRpcFailure' has too many parameters (5). Maximum allowed is 4.",
-    "line": 114,
+    "line": 143,
     "linePreview": "isRateLimitError: (err: unknown): boolean => isRateLimitError(err), | logRpcFailure: ( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "complexity",
     "message": "Async function 'fetchBreakerFeedState' has a complexity of 16. Maximum allowed is 15.",
-    "line": 392,
+    "line": 421,
     "linePreview": "* (sentinel 0) or skip. */ | export async function fetchBreakerFeedState( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'fetchBreakerDefaults' has too many lines (96). Maximum allowed is 80.",
-    "line": 280,
+    "line": 309,
     "linePreview": "* (revert-safe — MarketHours has neither and falls back to 0). */ | export async function fetchBreakerDefaults( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'fetchBreakerFeedState' has too many lines (170). Maximum allowed is 80.",
-    "line": 392,
+    "line": 421,
     "linePreview": "* (sentinel 0) or skip. */ | export async function fetchBreakerFeedState( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'fetchBreakerDefaults' has too many parameters (5). Maximum allowed is 4.",
-    "line": 280,
+    "line": 309,
     "linePreview": "* (revert-safe — MarketHours has neither and falls back to 0). */ | export async function fetchBreakerDefaults( | chainId: number,"
   },
   {
     "file": "src/rpc/breakers.ts",
     "ruleId": "max-params",
     "message": "Async function 'fetchBreakerFeedState' has too many parameters (6). Maximum allowed is 4.",
-    "line": 392,
+    "line": 421,
     "linePreview": "* (sentinel 0) or skip. */ | export async function fetchBreakerFeedState( | chainId: number,"
   },
   {
@@ -220,7 +213,7 @@
     "file": "src/rpc/http-test-mocks.ts",
     "ruleId": "complexity",
     "message": "Function 'handleRpcCall' has a complexity of 16. Maximum allowed is 15.",
-    "line": 162,
+    "line": 185,
     "linePreview": " | function handleRpcCall(chainId: number, request: JsonRpcRequest): object { | const id = request.id;"
   },
   {
@@ -241,7 +234,7 @@
     "file": "src/rpc/pool-state.ts",
     "ruleId": "max-params",
     "message": "Async function 'fetchTradingLimits' has too many parameters (5). Maximum allowed is 4.",
-    "line": 465,
+    "line": 483,
     "linePreview": " | export async function fetchTradingLimits( | chainId: number,"
   },
   {

@@ -112,7 +112,7 @@ export function useTableSort<K extends string>({
   // Next's `useSearchParams` here: it returns the snapshot from the route's
   // last RSC payload, which is stale relative to our own `replaceState`
   // writes. A remount triggered by an in-page state change (e.g. the
-  // `/leaderboard` venue toggle unmounting + remounting the table) needs
+  // `/volume` venue toggle unmounting + remounting the table) needs
   // the *current* URL params, not the stale snapshot. Fall back to
   // `searchParams` only on the SSR pass.
   const [state, setState] = useState<SortState<K>>(() => {

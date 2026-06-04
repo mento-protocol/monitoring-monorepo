@@ -138,7 +138,7 @@ indexer.onEvent(
     // corresponding `PoolDailyFeeSnapshot` rows for those past days. The
     // raw-row backfill alone leaves the daily rollup permanently understated
     // when an UNKNOWN token resolves on a later day, which would make the
-    // dashboard's leaderboard wrong once it switches off the raw-transfer
+    // dashboard's volume wrong once it switches off the raw-transfer
     // path. `mergeFeeSnapshot` heal-mode is idempotent on a slot-by-slot
     // basis, so iterating per stale transfer is safe — repeated heals for
     // the same (pool, day, token) tuple are no-ops after the first.

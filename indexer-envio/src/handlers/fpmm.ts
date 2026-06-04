@@ -14,7 +14,7 @@ import {
 import { poolTradingLimitsEffect } from "../rpc/effects.js";
 import { preloadPoolCache, upsertPool, upsertSnapshot } from "../pool.js";
 import { buildSwapTraderFields } from "../swap.js";
-import { applyLeaderboardSnapshots } from "../leaderboardSnapshots.js";
+import { applyVolumeSnapshots } from "../volumeSnapshots.js";
 
 // ---------------------------------------------------------------------------
 // FPMM.Swap
@@ -188,7 +188,7 @@ indexer.onEvent(
 
     context.SwapEvent.set(swap);
 
-    await applyLeaderboardSnapshots({
+    await applyVolumeSnapshots({
       context,
       chainId: event.chainId,
       poolId,
