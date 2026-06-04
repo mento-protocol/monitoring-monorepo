@@ -45,8 +45,12 @@ type ChangesResult = {
   StableSupplyChangeEvent: ReadonlyArray<StableSupplyChangeEvent>;
 };
 
-function tokenKey(row: { chainId: number; tokenAddress: string }): string {
-  return `${row.chainId}|${row.tokenAddress.toLowerCase()}`;
+function tokenKey(row: {
+  chainId: number;
+  tokenAddress: string;
+  source?: string;
+}): string {
+  return `${row.chainId}|${row.tokenAddress.toLowerCase()}|${row.source ?? ""}`;
 }
 
 function normalizeSupplyCurrentRows(
@@ -78,6 +82,15 @@ function mergeCurrentRows<T extends { chainId: number; tokenAddress: string }>(
   for (const row of fallback) byToken.set(tokenKey(row), row);
   for (const row of current) byToken.set(tokenKey(row), row);
   return Array.from(byToken.values());
+}
+
+function firstFeedError(
+  currentError: Error | null | undefined,
+  fallbackError: Error | null | undefined,
+): Error | null | undefined {
+  // Consumers only use this as a degraded-state flag. If both feeds fail,
+  // showing the current-state error is enough to avoid hiding the failure.
+  return currentError ?? fallbackError;
 }
 
 /**
@@ -113,7 +126,7 @@ export function useStablesLatestPerToken() {
   }, [currentData, fallbackData]);
   return {
     snapshots,
-    error: currentError ?? fallbackError,
+    error: firstFeedError(currentError, fallbackError),
     isLoading: currentLoading || fallbackLoading,
   };
 }
@@ -183,7 +196,7 @@ export function useStablesLatestCustodyPerToken() {
   }, [currentData, fallbackData]);
   return {
     snapshots,
-    error: currentError ?? fallbackError,
+    error: firstFeedError(currentError, fallbackError),
     isLoading: currentLoading || fallbackLoading,
   };
 }

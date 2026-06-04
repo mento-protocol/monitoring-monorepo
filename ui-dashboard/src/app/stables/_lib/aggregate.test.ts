@@ -26,7 +26,9 @@ function snapshot(
 ): StableSupplyDailySnapshot {
   const chainId = overrides.chainId ?? 42220;
   return {
-    id: `${chainId}-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
+    id:
+      overrides.id ??
+      `${chainId}-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
     chainId,
     tokenAddress: overrides.tokenAddress ?? "0xa",
     tokenSymbol: overrides.tokenSymbol ?? "USDm",
@@ -43,9 +45,12 @@ function custodySnapshot(
   overrides: Partial<StableTokenCustodyDailySnapshot> &
     Pick<StableTokenCustodyDailySnapshot, "timestamp" | "lockedSupply">,
 ): StableTokenCustodyDailySnapshot {
+  const chainId = overrides.chainId ?? 42220;
   return {
-    id: `42220-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
-    chainId: overrides.chainId ?? 42220,
+    id:
+      overrides.id ??
+      `${chainId}-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
+    chainId,
     tokenAddress: overrides.tokenAddress ?? "0xa",
     tokenSymbol: overrides.tokenSymbol ?? "USDm",
     source: overrides.source ?? "RESERVE",
@@ -62,14 +67,19 @@ function custodySnapshot(
 describe("rollupByToken", () => {
   it("lets current supply rows replace stale same-day daily snapshots", () => {
     const staleDaily = snapshot({
-      tokenAddress: "0xjpy",
+      id: `${143}-0xJpY-${NOW_TS}`,
+      tokenAddress: "0xJpY",
       tokenSymbol: "JPYm",
       chainId: 143,
       timestamp: String(NOW_TS),
       totalSupply: String(BigInt(1_400) * BigInt(10) ** BigInt(18)),
     });
     const current = snapshot({
-      ...staleDaily,
+      id: `${143}-0xjpy-current-state`,
+      tokenAddress: "0xjpy",
+      tokenSymbol: "JPYm",
+      chainId: 143,
+      timestamp: String(NOW_TS),
       totalSupply: String(BigInt(4_761_281) * BigInt(10) ** BigInt(18)),
     });
 
@@ -88,6 +98,7 @@ describe("rollupByToken", () => {
 
   it("lets current custody rows replace stale same-day custody snapshots", () => {
     const staleDaily = custodySnapshot({
+      id: `${42220}-0xC-${NOW_TS}`,
       tokenAddress: "0xc",
       tokenSymbol: "GBPm",
       source: "V3_LIQUITY",
@@ -95,7 +106,11 @@ describe("rollupByToken", () => {
       lockedSupply: String(BigInt(80) * BigInt(10) ** BigInt(18)),
     });
     const current = custodySnapshot({
-      ...staleDaily,
+      id: `${42220}-0xc-current-state`,
+      tokenAddress: "0xC",
+      tokenSymbol: "GBPm",
+      source: "V3_LIQUITY",
+      timestamp: String(NOW_TS),
       lockedSupply: String(BigInt(120) * BigInt(10) ** BigInt(18)),
     });
 

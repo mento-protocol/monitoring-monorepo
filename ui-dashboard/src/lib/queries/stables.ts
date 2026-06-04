@@ -46,7 +46,10 @@ export const STABLES_DAILY_SNAPSHOTS = `
 // timestamp, because chart helpers consume day-bucketed rows.
 export const STABLES_CURRENT_SUPPLY_PER_TOKEN = `
   query StablesCurrentSupplyPerToken($chainIds: [Int!]!) {
-    StableTokenSupply(where: { chainId: { _in: $chainIds } }) {
+    StableTokenSupply(
+      where: { chainId: { _in: $chainIds } }
+      order_by: [{ chainId: asc }, { tokenAddress: asc }]
+    ) {
       id
       chainId
       tokenAddress
@@ -96,9 +99,15 @@ export const STABLES_LATEST_PER_TOKEN = `
   }
 `;
 
+// Current custody state is one row per (chainId, tokenAddress): the indexer
+// schema keys StableTokenCustodyState as "{chainId}-{tokenAddress}". The
+// explicit ordering keeps the UI merge deterministic; no distinct_on is needed.
 export const STABLES_CURRENT_CUSTODY_PER_TOKEN = `
   query StablesCurrentCustodyPerToken($chainIds: [Int!]!) {
-    StableTokenCustodyState(where: { chainId: { _in: $chainIds } }) {
+    StableTokenCustodyState(
+      where: { chainId: { _in: $chainIds } }
+      order_by: [{ chainId: asc }, { tokenAddress: asc }]
+    ) {
       id
       chainId
       tokenAddress
@@ -195,7 +204,6 @@ export const STABLES_CHANGES = `
       counterparty
       caller
       txTo
-      isSystemCaller
       amount
       txHash
       blockNumber

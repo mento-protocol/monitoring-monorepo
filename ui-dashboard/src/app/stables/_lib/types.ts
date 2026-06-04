@@ -43,7 +43,8 @@ export type StableSupplyChangeEvent = {
   counterparty: string;
   caller: string;
   txTo: string;
-  isSystemCaller: boolean;
+  // Optional until every deployed indexer endpoint exposes this marker.
+  isSystemCaller?: boolean;
   amount: string;
   txHash: string;
   blockNumber: string;

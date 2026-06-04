@@ -128,7 +128,7 @@ function SupplyChangeRow({
         {formatted}
       </td>
       <td className="py-3 pr-4 text-slate-300">
-        {event.isSystemCaller ? (
+        {event.isSystemCaller === true ? (
           <span className="text-slate-500" title="System contract">
             {truncateAddress(event.caller)}
           </span>
