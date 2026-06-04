@@ -201,7 +201,7 @@ export function buildVolumeWindowSnapshot(
   let totalVolumeUsdWeiIncludingProtocolActors = 0n;
   let totalSwapCount = 0;
   let totalSwapCountIncludingProtocolActors = 0;
-  let nonSystemCount = 0;
+  let organicTraderCount = 0;
   let firstDayVolumeUsdWei = 0n;
   let firstDayVolumeUsdWeiIncludingProtocolActors = 0n;
   let firstDaySwapCount = 0;
@@ -230,7 +230,7 @@ export function buildVolumeWindowSnapshot(
     if (!a.isProtocolActor) {
       totalVolumeUsdWei += a.volumeUsdWei;
       totalSwapCount += a.swapCount;
-      nonSystemCount += 1;
+      organicTraderCount += 1;
       firstDayVolumeUsdWei += a.firstDayVolumeUsdWei;
       firstDaySwapCount += a.firstDaySwapCount;
       windowTraders.push(a.trader.toLowerCase());
@@ -254,7 +254,7 @@ export function buildVolumeWindowSnapshot(
     totalVolumeUsdWeiIncludingProtocolActors,
     totalSwapCount,
     totalSwapCountIncludingProtocolActors,
-    uniqueTraders: nonSystemCount,
+    uniqueTraders: organicTraderCount,
     uniqueTradersIncludingProtocolActors: args.aggregates.length,
     firstDayVolumeUsdWei,
     firstDayVolumeUsdWeiIncludingProtocolActors,

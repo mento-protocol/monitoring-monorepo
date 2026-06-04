@@ -706,7 +706,7 @@ function fakeTraderDay(
   trader: string,
   timestamp: bigint,
   volumeUsd: bigint,
-  isSystem = false,
+  isProtocolActor = false,
 ): TraderDailySnapshot {
   return {
     id: `${CHAIN}-${trader}-${timestamp}`,
@@ -719,7 +719,7 @@ function fakeTraderDay(
     poolIds: [`${CHAIN}-0xpool`],
     volumeUsdWei: volumeUsd * ONE_USD,
     feesPaidUsdWei: 0n,
-    isProtocolActor: isSystem,
+    isProtocolActor,
     lastSeenTimestamp: timestamp,
   };
 }
@@ -940,7 +940,7 @@ function fakeBrokerTraderDay(
   caller: string,
   timestamp: bigint,
   volumeUsd: bigint,
-  isSystem = false,
+  isProtocolActor = false,
 ): BrokerTraderDailySnapshot {
   return {
     id: `${CHAIN}-${caller}-${timestamp}`,
@@ -949,7 +949,7 @@ function fakeBrokerTraderDay(
     timestamp,
     swapCount: 1,
     volumeUsdWei: volumeUsd * ONE_USD,
-    isProtocolActor: isSystem,
+    isProtocolActor,
     lastSeenTimestamp: timestamp,
   };
 }

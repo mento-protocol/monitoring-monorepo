@@ -413,7 +413,7 @@ async function upsertPoolDailyVolumeSnapshot(
     swapCount: 0,
     volumeUsdWei: 0n,
   };
-  const isSystem = ctx.traderDayState.traderDayIsProtocolActor;
+  const isProtocolActor = ctx.traderDayState.traderDayIsProtocolActor;
   const primarySwapBase = subtractCount(
     prev.swapCount,
     currentCorrection.swapCount,
@@ -428,9 +428,10 @@ async function upsertPoolDailyVolumeSnapshot(
     chainId: snap.chainId,
     poolId: snap.poolId,
     timestamp: snap.day,
-    swapCount: primarySwapBase + (isSystem ? 0 : 1),
+    swapCount: primarySwapBase + (isProtocolActor ? 0 : 1),
     swapCountIncludingProtocolActors: prev.swapCountIncludingProtocolActors + 1,
-    volumeUsdWei: primaryVolumeBase + (isSystem ? 0n : snap.volumeUsdWei),
+    volumeUsdWei:
+      primaryVolumeBase + (isProtocolActor ? 0n : snap.volumeUsdWei),
     volumeUsdWeiIncludingProtocolActors:
       prev.volumeUsdWeiIncludingProtocolActors + snap.volumeUsdWei,
     blockNumber: snap.blockNumber,
@@ -542,7 +543,7 @@ async function upsertAggregatorDailySnapshot(
 
   const prev = ctx.existing ?? EMPTY_AGG_DAY;
   const correction = corrections.get(snap.aggregator) ?? EMPTY_AGG_CORRECTION;
-  const isSystem = ctx.traderDayState.traderDayIsProtocolActor;
+  const isProtocolActor = ctx.traderDayState.traderDayIsProtocolActor;
   const firstTouch = ctx.aggTraderFirstTouch;
 
   const primarySwapBase = subtractCount(prev.swapCount, correction.swapCount);
@@ -569,15 +570,17 @@ async function upsertAggregatorDailySnapshot(
     aggregator: snap.aggregator,
     lastSeenAggregatorAddress: snap.txTo,
     timestamp: snap.day,
-    swapCount: primarySwapBase + (isSystem ? 0 : 1),
+    swapCount: primarySwapBase + (isProtocolActor ? 0 : 1),
     swapCountIncludingProtocolActors: prev.swapCountIncludingProtocolActors + 1,
-    uniqueTraders: primaryUniqueBase + (!isSystem && firstTouch ? 1 : 0),
+    uniqueTraders: primaryUniqueBase + (!isProtocolActor && firstTouch ? 1 : 0),
     uniqueTradersIncludingProtocolActors:
       prev.uniqueTradersIncludingProtocolActors + (firstTouch ? 1 : 0),
-    volumeUsdWei: primaryVolumeBase + (isSystem ? 0n : snap.volumeUsdWei),
+    volumeUsdWei:
+      primaryVolumeBase + (isProtocolActor ? 0n : snap.volumeUsdWei),
     volumeUsdWeiIncludingProtocolActors:
       prev.volumeUsdWeiIncludingProtocolActors + snap.volumeUsdWei,
-    feesPaidUsdWei: primaryFeesBase + (isSystem ? 0n : snap.feesPaidUsdWei),
+    feesPaidUsdWei:
+      primaryFeesBase + (isProtocolActor ? 0n : snap.feesPaidUsdWei),
     feesPaidUsdWeiIncludingProtocolActors:
       prev.feesPaidUsdWeiIncludingProtocolActors + snap.feesPaidUsdWei,
   });

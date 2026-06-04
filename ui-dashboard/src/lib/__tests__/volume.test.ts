@@ -195,7 +195,7 @@ describe("aggregateTradersByWindow", () => {
     expect(result[1]!.uniquePoolsApprox).toBe(2);
   });
 
-  it("propagates isProtocolActor=true if any row is system", () => {
+  it("propagates isProtocolActor=true if any row is protocol-owned", () => {
     const rows: TraderDailyRow[] = [
       trader({
         chainId: 42220,
@@ -959,7 +959,7 @@ describe("aggregateBrokerTradersByWindow", () => {
     expect(out).toHaveLength(2);
   });
 
-  it("sticky-true: a trader flagged isSystem on any day stays a protocol actor in the window", () => {
+  it("sticky-true: a trader flagged as a protocol actor on any day stays a protocol actor in the window", () => {
     const rows = [
       brokerTrader({
         chainId: 42220,
@@ -2481,7 +2481,7 @@ describe("mergeHeroSnapshot", () => {
       includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
-    // Primary branch: 500 - 80 + 100 (system row filtered) = 520.
+    // Primary branch: 500 - 80 + 100 (protocol-actor row filtered) = 520.
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(520)));
     // Swaps: 20 - 4 + 5 = 21.
     expect(out.totalSwapCount).toBe(21);
@@ -2629,7 +2629,7 @@ describe("mergeHeroSnapshot", () => {
       includeProtocolActors: false,
       todayMidnightSeconds: TODAY_MIDNIGHT,
     });
-    // 500 - 80 (first-day primary) + 0 (system row filtered out) = 420.
+    // 500 - 80 (first-day primary) + 0 (protocol-actor row filtered out) = 420.
     expect(out.totalVolumeUsdWei).toBe(BigInt(USD(420)));
     expect(out.totalSwapCount).toBe(16);
     expect(out.uniqueTraders).toBe(3);
