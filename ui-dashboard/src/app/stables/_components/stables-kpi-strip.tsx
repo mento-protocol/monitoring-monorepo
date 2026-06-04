@@ -9,6 +9,7 @@ import {
   groupCustodySnapshotsByToken,
   latestDailyCirculatingSupply,
   rollupByToken,
+  unionSnapshotsWithLatest,
   unionCustodySnapshotsWithLatest,
   winnersAndLosers7d,
 } from "../_lib/aggregate";
@@ -33,7 +34,8 @@ type Props = {
   latestPerToken: ReadonlyArray<StableSupplyDailySnapshot>;
   latestCustodyPerToken: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   // Daily-snapshot stream from useStablesDailySnapshots — feeds the 7d
-  // change calculation. Empty array is acceptable (tiles render N/A).
+  // change calculation. Merged with latestPerToken so KPI deltas do not lag
+  // when the newest row falls outside the first paginated snapshot page.
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>;
   custodySnapshots: ReadonlyArray<StableTokenCustodyDailySnapshot>;
   rates: OracleRateMap;
@@ -57,14 +59,21 @@ export function StablesKpiStrip({
       custodySnapshots,
       latestCustodyPerToken,
     );
-    const r = rollupByToken(snapshots, rates, undefined, mergedCustody);
+    const mergedSnapshots = unionSnapshotsWithLatest(snapshots, latestPerToken);
+    const r = rollupByToken(mergedSnapshots, rates, undefined, mergedCustody);
     const wl = winnersAndLosers7d(r);
     return {
       rollup: r,
       biggestExpansion: wl.biggestExpansion,
       biggestContraction: wl.biggestContraction,
     };
-  }, [snapshots, custodySnapshots, latestCustodyPerToken, rates]);
+  }, [
+    snapshots,
+    latestPerToken,
+    custodySnapshots,
+    latestCustodyPerToken,
+    rates,
+  ]);
 
   const totalUsd = useMemo<number | null>(() => {
     const mergedCustody = unionCustodySnapshotsWithLatest(
