@@ -91,6 +91,25 @@ function snapshot(
   };
 }
 
+function custodySnapshot(
+  overrides: Partial<StableTokenCustodyDailySnapshot> &
+    Pick<StableTokenCustodyDailySnapshot, "timestamp" | "lockedSupply">,
+): StableTokenCustodyDailySnapshot {
+  return {
+    id: `42220-${overrides.tokenAddress ?? "0xa"}-${overrides.timestamp}`,
+    chainId: 42220,
+    tokenAddress: overrides.tokenAddress ?? "0xa",
+    tokenSymbol: overrides.tokenSymbol ?? "USDm",
+    source: overrides.source ?? "RESERVE",
+    tokenDecimals: overrides.tokenDecimals ?? 18,
+    managerAddress: overrides.managerAddress ?? "0xlock",
+    timestamp: overrides.timestamp,
+    lockedSupply: overrides.lockedSupply,
+    dailyLockedAmount: overrides.dailyLockedAmount ?? "0",
+    dailyUnlockedAmount: overrides.dailyUnlockedAmount ?? "0",
+  };
+}
+
 describe("StablesPageClient — smoke", () => {
   beforeEach(() => {
     mockSnapshots.data = [];
@@ -165,5 +184,26 @@ describe("StablesPageClient — smoke", () => {
     expect(html).toContain("USDm");
     expect(html).not.toContain("Failed to load per-token data.");
     expect(html).not.toContain("Failed to load chart data.");
+  });
+
+  it("keeps available custody fallback rows when one custody query errors", () => {
+    mockSnapshots.data = [
+      snapshot({
+        timestamp: "1716336000",
+        totalSupply: "1000000000000000000000000",
+      }),
+    ];
+    mockCustodySnapshots.data = [
+      custodySnapshot({
+        timestamp: "1716336000",
+        lockedSupply: "250000000000000000000000",
+      }),
+    ];
+    mockCustodySnapshots.error = new Error("current custody table unavailable");
+
+    const html = renderToStaticMarkup(<StablesPageClient />);
+
+    expect(html).toContain("$750K");
+    expect(html).not.toContain("$1M");
   });
 });

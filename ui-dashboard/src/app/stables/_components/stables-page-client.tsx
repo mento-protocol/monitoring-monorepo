@@ -57,7 +57,8 @@ function StablesContent(): React.JSX.Element {
   } = useStablesChanges("7d");
 
   const custodyDegraded =
-    latestCustodyError != null || custodySnapshotsError != null;
+    (latestCustodyError != null && latestCustodyPerToken.length === 0) ||
+    (custodySnapshotsError != null && custodySnapshots.length === 0);
   const effectiveLatestCustodyPerToken = custodyDegraded
     ? []
     : latestCustodyPerToken;
