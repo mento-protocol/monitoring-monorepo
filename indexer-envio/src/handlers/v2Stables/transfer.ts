@@ -45,8 +45,8 @@ indexer.onEvent(
     contract: "V2StableToken",
     event: "Transfer",
     // Array-OR semantics per envio 3.0.0: deliver Transfer events where
-    // EITHER from==0x0 (mint), to==0x0 (burn), from==locking NTT manager, or
-    // to==locking NTT manager. Other Transfers are filtered at the HyperSync
+    // EITHER from==0x0 (mint), to==0x0 (burn), from==lock/mint NTT manager, or
+    // to==lock/mint NTT manager. Other Transfers are filtered at the HyperSync
     // edge — they never reach the handler.
     // The `0x${string}` casts narrow ZERO_ADDRESS (typed as plain string in
     // constants.ts) to the SingleOrMultiple<`0x${string}`> envio expects.

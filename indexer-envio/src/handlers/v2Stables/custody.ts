@@ -15,7 +15,7 @@ import type { EvmOnEventContext, StableTokenCustodyState } from "envio";
 import { asAddress } from "../../helpers.js";
 import { v2StableBalanceOfEffect } from "../../rpc/effects.js";
 import {
-  findLockingNttStableByAddress,
+  findLockAndMintNttStableByAddress,
   makeStableTokenCustodyId,
 } from "./config.js";
 import {
@@ -62,7 +62,7 @@ async function getOrCreateStableTokenCustodyState(
   blockNumber: bigint,
   blockTimestamp: bigint,
 ): Promise<StableTokenCustodyState | undefined> {
-  const info = findLockingNttStableByAddress(chainId, tokenAddress);
+  const info = findLockAndMintNttStableByAddress(chainId, tokenAddress);
   if (!info) return undefined;
   const id = makeStableTokenCustodyId(chainId, tokenAddress);
   const existing = await context.StableTokenCustodyState.get(id);
@@ -88,7 +88,7 @@ export async function handleStableTokenCustodyTransfer({
 }): Promise<void> {
   const { chainId, srcAddress } = event;
   const tokenAddress = asAddress(srcAddress);
-  const info = findLockingNttStableByAddress(chainId, tokenAddress);
+  const info = findLockAndMintNttStableByAddress(chainId, tokenAddress);
   if (!info) return;
 
   const managerAddress = info.nttManagerAddress;

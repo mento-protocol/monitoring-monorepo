@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, it } from "vitest";
 import {
-  LOCKING_NTT_STABLES,
-  LOCKING_NTT_STABLE_ADDRESSES,
+  LOCK_AND_MINT_NTT_STABLES,
+  LOCK_AND_MINT_NTT_STABLE_ADDRESSES,
   NTT_STABLES,
   V2_STABLES,
   V2_STABLE_ADDRESSES,
-  findLockingNttStableByAddress,
+  findLockAndMintNttStableByAddress,
   findV2StableByAddress,
   makeStableSupplyDailySnapshotId,
   makeStableTokenCustodyDailySnapshotId,
@@ -150,8 +150,8 @@ describe("v2Stables/config — registry derivation", () => {
       );
     }
 
-    assert.equal(LOCKING_NTT_STABLES.length, 3);
-    for (const locked of LOCKING_NTT_STABLES) {
+    assert.equal(LOCK_AND_MINT_NTT_STABLES.length, 3);
+    for (const locked of LOCK_AND_MINT_NTT_STABLES) {
       assert.equal(locked.chainId, 42220);
       assert.equal(
         findV2StableByAddress(locked.chainId, locked.address),
@@ -159,7 +159,8 @@ describe("v2Stables/config — registry derivation", () => {
         `${locked.symbol} Celo lock/mint token should not be in supply lookup.`,
       );
       assert.equal(
-        findLockingNttStableByAddress(locked.chainId, locked.address)?.symbol,
+        findLockAndMintNttStableByAddress(locked.chainId, locked.address)
+          ?.symbol,
         locked.symbol,
       );
     }
@@ -201,7 +202,7 @@ describe("v2Stables — YAML drift gate", () => {
       }
       set.add(s.address);
     }
-    for (const s of LOCKING_NTT_STABLES) {
+    for (const s of LOCK_AND_MINT_NTT_STABLES) {
       let set = expectedByChain.get(s.chainId);
       if (!set) {
         set = new Set();
@@ -229,8 +230,8 @@ describe("v2Stables — YAML drift gate", () => {
 
   it("keeps supply and custody address exports scoped to their responsibilities", () => {
     assert.equal(V2_STABLE_ADDRESSES.length, 18);
-    assert.equal(LOCKING_NTT_STABLE_ADDRESSES.length, 3);
-    for (const addr of LOCKING_NTT_STABLE_ADDRESSES) {
+    assert.equal(LOCK_AND_MINT_NTT_STABLE_ADDRESSES.length, 3);
+    for (const addr of LOCK_AND_MINT_NTT_STABLE_ADDRESSES) {
       assert.equal(
         V2_STABLE_ADDRESSES.includes(addr),
         false,

@@ -210,7 +210,7 @@ const buildV2Stables = (): ReadonlyArray<V2StableInfo> => {
 
 export const NTT_STABLES: ReadonlyArray<NttStableInfo> = buildNttStables();
 
-export const LOCKING_NTT_STABLES: ReadonlyArray<NttStableInfo> =
+export const LOCK_AND_MINT_NTT_STABLES: ReadonlyArray<NttStableInfo> =
   NTT_STABLES.filter((s) => s.bridgeMode === "LOCKING");
 
 export const V2_STABLES: ReadonlyArray<V2StableInfo> = buildV2Stables();
@@ -272,10 +272,10 @@ export const V2_STABLES: ReadonlyArray<V2StableInfo> = buildV2Stables();
       );
     }
   }
-  for (const locking of LOCKING_NTT_STABLES) {
-    if (locking.chainId !== V2_STABLE_CHAIN_ID) {
+  for (const lockAndMint of LOCK_AND_MINT_NTT_STABLES) {
+    if (lockAndMint.chainId !== V2_STABLE_CHAIN_ID) {
       throw new Error(
-        `[v2Stables/config] Unexpected lock/mint NTT token ${locking.symbol} on chain ${locking.chainId}. ` +
+        `[v2Stables/config] Unexpected lock/mint NTT token ${lockAndMint.symbol} on chain ${lockAndMint.chainId}. ` +
           `Dashboard custody subtraction only handles source-chain locked balances.`,
       );
     }
@@ -304,8 +304,8 @@ const _byAddress = new Map<string, V2StableInfo>(
   V2_STABLES.map((s) => [`${s.chainId}-${s.address}`, s]),
 );
 
-const _lockingNttByAddress = new Map<string, NttStableInfo>(
-  LOCKING_NTT_STABLES.map((s) => [`${s.chainId}-${s.address}`, s]),
+const _lockAndMintNttByAddress = new Map<string, NttStableInfo>(
+  LOCK_AND_MINT_NTT_STABLES.map((s) => [`${s.chainId}-${s.address}`, s]),
 );
 
 export const findV2StableByAddress = (
@@ -314,23 +314,23 @@ export const findV2StableByAddress = (
 ): V2StableInfo | undefined =>
   _byAddress.get(`${chainId}-${asAddress(address)}`);
 
-export const findLockingNttStableByAddress = (
+export const findLockAndMintNttStableByAddress = (
   chainId: number,
   address: string,
 ): NttStableInfo | undefined =>
-  _lockingNttByAddress.get(`${chainId}-${asAddress(address)}`);
+  _lockAndMintNttByAddress.get(`${chainId}-${asAddress(address)}`);
 
 // All lowercased addresses, for the YAML drift gate test in v2Stables.test.ts.
 export const V2_STABLE_ADDRESSES: ReadonlyArray<string> = V2_STABLES.map(
   (s) => s.address,
 );
 
-export const LOCKING_NTT_STABLE_ADDRESSES: ReadonlyArray<string> =
-  LOCKING_NTT_STABLES.map((s) => s.address);
+export const LOCK_AND_MINT_NTT_STABLE_ADDRESSES: ReadonlyArray<string> =
+  LOCK_AND_MINT_NTT_STABLES.map((s) => s.address);
 
 export const STABLE_TOKEN_CUSTODY_TRANSFER_WHERE_PARAMS: ReadonlyArray<
   { from: `0x${string}` } | { to: `0x${string}` }
-> = LOCKING_NTT_STABLES.flatMap((s) => [
+> = LOCK_AND_MINT_NTT_STABLES.flatMap((s) => [
   { from: s.nttManagerAddress as `0x${string}` },
   { to: s.nttManagerAddress as `0x${string}` },
 ]);
