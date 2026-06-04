@@ -167,14 +167,19 @@ If the risky behavior is interactive, a static markup assertion is not enough.
 
 ## 6. PR description requirements
 
-Before opening the PR, start with the repo-wide description standard:
+Before opening the PR, start with the repo-wide description standard's exact
+heading lines:
 
-### The Problem
+```markdown
+## The Problem
+```
 
 - Maximum three bullets.
 - Explain the user/operator/reviewer problem in plain English.
 
-### The Solution
+```markdown
+## The Solution
+```
 
 - Explain in simple terms how the PR solves that problem.
 

@@ -243,15 +243,19 @@ baselines, and Terraform.
 
 ## PR description standard
 
-Every PR description must start with these sections, in this order:
+Every PR description must start with these exact heading lines, in this order:
 
-### The Problem
+```markdown
+## The Problem
+```
 
 - Maximum three bullets.
 - State the user/operator/reviewer problem in plain English.
 - Avoid implementation details unless they are needed to understand the impact.
 
-### The Solution
+```markdown
+## The Solution
+```
 
 - Explain in simple terms how the PR solves that problem.
 - Keep this understandable before reading the diff.

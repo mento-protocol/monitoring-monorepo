@@ -97,6 +97,16 @@ variable "openocean_api_key" {
   default     = ""
 }
 
+variable "squid_integrator_id" {
+  description = <<-EOT
+    Squid integrator id for the scheduled integration-probes workflow.
+    Mirrors into the repo-level Actions secret `SQUID_INTEGRATOR_ID`.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ── Auth (Google OAuth / NextAuth) ─────────────────────────────────────────
 
 variable "auth_google_id" {

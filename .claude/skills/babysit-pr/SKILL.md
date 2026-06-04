@@ -56,9 +56,15 @@ item required.
 - Merge conflict: fetch the base branch, merge or rebase once according to the
   repo's current workflow, resolve, run focused validation, commit, and push.
 - Unreplied review comment or unresolved thread: fetch every feedback surface,
-  triage each finding, implement valid fixes, and reply to every comment. Use
-  the root `AGENTS.md` reply templates. Do not resolve a thread without a
-  reply first.
+  triage each finding, implement valid fixes, and reply to every comment. In
+  Codex, inspect `pnpm pr:ready-state --pr <number> --json` first as a triage
+  shortcut for the currently reported blockers: its `unresolvedReviewThreads[]`
+  and `unrepliedRootReviewComments[]` entries often include the full comment
+  body, URL, path, line, and id needed to understand the finding before making
+  raw `gh api` calls. This does **not** replace the required full feedback
+  sweep across review comments, review bodies, top-level comments, threads,
+  check annotations, and failing check logs before all-clear. Use the root
+  `AGENTS.md` reply templates. Do not resolve a thread without a reply first.
 - Codex current-head approval missing or in flight: wait for the existing
   signal. Do not post duplicate `@codex review` requests while the probe says a
   current-head request is `requested`, `in_flight`, or `approved`.

@@ -75,6 +75,15 @@ vi.mock("../_lib/use-stables-data", () => ({
     error: mockChanges.error,
     isLoading: mockChanges.isLoading,
     capped: mockChanges.capped,
+    unpricedEventsCount: 0,
+  }),
+}));
+
+vi.mock("../_lib/use-supply-change-threshold", () => ({
+  useSupplyChangeThreshold: () => ({
+    minimumUsdValue: 0.01,
+    updateMinimumUsdValue: () => undefined,
+    resetMinimumUsdValue: () => undefined,
   }),
 }));
 
@@ -119,8 +128,33 @@ function custodySnapshot(
   };
 }
 
+function changeEvent(
+  overrides: Partial<StableSupplyChangeEvent> = {},
+): StableSupplyChangeEvent {
+  return {
+    id: overrides.id ?? "change-1",
+    chainId: overrides.chainId ?? 42220,
+    tokenAddress: overrides.tokenAddress ?? "0xusd",
+    tokenSymbol: overrides.tokenSymbol ?? "USDm",
+    tokenDecimals: overrides.tokenDecimals ?? 18,
+    source: overrides.source ?? "RESERVE",
+    kind: overrides.kind ?? "RESERVE_MINT",
+    counterparty: overrides.counterparty ?? "0xcounterparty",
+    caller: overrides.caller ?? "0xcaller",
+    txTo: overrides.txTo ?? "0xto",
+    isProtocolOwnedCaller: overrides.isProtocolOwnedCaller ?? true,
+    amount: overrides.amount ?? "1000000000000000000",
+    txHash: overrides.txHash ?? "0xtx",
+    blockNumber: overrides.blockNumber ?? "1",
+    blockTimestamp: overrides.blockTimestamp ?? "1780617600",
+  };
+}
+
 describe("StablesPageClient — smoke", () => {
   beforeEach(() => {
+    mockRates.merged = new Map<string, number>([["EURm", 1.1]]);
+    mockRates.isLoading = false;
+    mockRates.error = null;
     mockSnapshots.data = [];
     mockSnapshots.capped = false;
     mockSnapshots.error = null;
@@ -200,6 +234,17 @@ describe("StablesPageClient — smoke", () => {
     expect(html).toContain("USDm");
     expect(html).not.toContain("Failed to load per-token data.");
     expect(html).not.toContain("Failed to load chart data.");
+  });
+
+  it("keeps supply changes visible while oracle rates are loading", () => {
+    mockRates.isLoading = true;
+    mockChanges.data = [changeEvent()];
+
+    const html = renderToStaticMarkup(<StablesPageClient />);
+
+    expect(html).toContain("Supply changes");
+    expect(html).toContain("USDm");
+    expect(html).not.toContain("Loading supply changes");
   });
 
   it("keeps daily custody fallback rows when current custody errors empty", () => {

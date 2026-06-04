@@ -201,7 +201,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `OPENOCEAN_API_KEY`             | Optional OpenOcean Pro quote API key                             |
 | `ZEROX_API_KEY`                 | Optional 0x quote API key                                        |
 | `ONEINCH_API_KEY`               | Optional 1inch quote API key                                     |
-| `SQUID_INTEGRATOR_ID`           | Optional Squid integrator id                                     |
+| `SQUID_INTEGRATOR_ID`           | Squid integrator id; probes return `needs_key` without it        |
 | `SOCKET_API_KEY`                | Optional Socket quote API key                                    |
 | `RANGO_API_KEY`                 | Optional Rango quote API key                                     |
 | `OKX_DEX_API_KEY`               | Optional OKX DEX API key                                         |
