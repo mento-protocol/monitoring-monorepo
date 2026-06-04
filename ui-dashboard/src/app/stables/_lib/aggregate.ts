@@ -7,12 +7,31 @@ import type { OracleRateMap } from "@/lib/tokens";
 import type {
   RangeKey,
   StableSupplyDailySnapshot,
+  StableSupplyChangeEvent,
   StableTokenCustodyDailySnapshot,
   TokenAgg,
 } from "./types";
 
 const SECONDS_PER_DAY = BigInt(86_400);
 const SECONDS_PER_DAY_NUMBER = 86_400;
+export const SUPPLY_CHANGE_FILTER_THRESHOLD_LABEL = "0.01 token";
+
+/**
+ * The changes table renders amounts at two decimals. Hide sub-cent dust rows
+ * and keep rows whose token-native absolute amount is at least 0.01.
+ */
+export function minimumVisibleSupplyChangeRaw(tokenDecimals: number): bigint {
+  const scale = BigInt(10) ** BigInt(tokenDecimals);
+  return (scale + BigInt(99)) / BigInt(100);
+}
+
+export function isVisibleSupplyChangeEvent(
+  event: Pick<StableSupplyChangeEvent, "amount" | "tokenDecimals">,
+): boolean {
+  const amount = BigInt(event.amount);
+  const absAmount = amount < BigInt(0) ? -amount : amount;
+  return absAmount >= minimumVisibleSupplyChangeRaw(event.tokenDecimals);
+}
 
 /**
  * Group snapshots by `{chainId}|{tokenAddress}|{source}` and pre-compute the per-token

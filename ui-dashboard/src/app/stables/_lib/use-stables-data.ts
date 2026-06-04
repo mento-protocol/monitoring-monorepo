@@ -9,7 +9,7 @@ import {
   STABLES_LATEST_PER_TOKEN,
   STABLES_CHANGES,
 } from "@/lib/queries/stables";
-import { rangeStartSeconds } from "./aggregate";
+import { isVisibleSupplyChangeEvent, rangeStartSeconds } from "./aggregate";
 import type {
   RangeKey,
   StableSupplyDailySnapshot,
@@ -20,7 +20,8 @@ import type {
 const STABLES_CHAIN_IDS = [42220, 143] as const;
 // Hasura silently caps at 1000; we set explicit limits to be honest.
 const SNAPSHOT_PAGE_LIMIT = 1000;
-const CHANGES_PAGE_LIMIT = 200;
+const CHANGES_QUERY_PAGE_LIMIT = 400;
+const CHANGES_DISPLAY_LIMIT = 200;
 // Numeric.MAX cursor (~year 2286 in Unix-seconds); `_lt: <this>` returns
 // the first page from the top of the desc-ordered snapshot table.
 const TS_CURSOR_INITIAL = "9999999999";
@@ -137,21 +138,35 @@ export function useStablesCustodyDailySnapshots(_range: RangeKey) {
 /**
  * Per-tx supply changes for the changes table + ranked table. Filters
  * to the last 7d window (sufficient for the ranked table; the table can
- * later add date-range pickers via the `sinceTimestamp` arg).
+ * later add date-range pickers via the `sinceTimestamp` arg), then hides
+ * sub-display dust rows that would render as 0.00 at table precision.
  */
 export function useStablesChanges(range: RangeKey = "7d", page: number = 0) {
   const sinceTimestamp = rangeStartSeconds(range);
   const { data, error, isLoading } = useGQL<ChangesResult>(STABLES_CHANGES, {
     chainIds: STABLES_CHAIN_IDS,
     sinceTimestamp,
-    limit: CHANGES_PAGE_LIMIT,
-    offset: page * CHANGES_PAGE_LIMIT,
+    limit: CHANGES_QUERY_PAGE_LIMIT,
+    offset: page * CHANGES_QUERY_PAGE_LIMIT,
   });
-  const events = useMemo(() => data?.StableSupplyChangeEvent ?? [], [data]);
+  const rawEvents = useMemo(() => data?.StableSupplyChangeEvent ?? [], [data]);
+  const events = useMemo(() => {
+    const visibleEvents = rawEvents.filter(isVisibleSupplyChangeEvent);
+    return visibleEvents.slice(0, CHANGES_DISPLAY_LIMIT);
+  }, [rawEvents]);
+  const capped = useMemo(() => {
+    if (rawEvents.length === CHANGES_QUERY_PAGE_LIMIT) return true;
+    let visibleCount = 0;
+    for (const event of rawEvents) {
+      if (isVisibleSupplyChangeEvent(event)) visibleCount += 1;
+      if (visibleCount > CHANGES_DISPLAY_LIMIT) return true;
+    }
+    return false;
+  }, [rawEvents]);
   return {
     events,
     error,
     isLoading,
-    capped: events.length === CHANGES_PAGE_LIMIT,
+    capped,
   };
 }

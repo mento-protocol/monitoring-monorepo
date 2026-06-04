@@ -3,6 +3,8 @@ import {
   buildTokenUsdTimeSeries,
   circulatingSupplyForSnapshot,
   computeChartStartSeconds,
+  isVisibleSupplyChangeEvent,
+  minimumVisibleSupplyChangeRaw,
   rangeStartSeconds,
   rollupByToken,
   sumTotalUsdSeries,
@@ -56,6 +58,45 @@ function custodySnapshot(
     dailyUnlockedAmount: overrides.dailyUnlockedAmount ?? "0",
   };
 }
+
+describe("supply-change display threshold", () => {
+  it("filters rows below 0.01 token", () => {
+    expect(minimumVisibleSupplyChangeRaw(18)).toBe(BigInt("10000000000000000"));
+    expect(
+      isVisibleSupplyChangeEvent({
+        amount: "9999999999999999",
+        tokenDecimals: 18,
+      }),
+    ).toBe(false);
+    expect(
+      isVisibleSupplyChangeEvent({
+        amount: "10000000000000000",
+        tokenDecimals: 18,
+      }),
+    ).toBe(true);
+  });
+
+  it("applies the same absolute threshold to burns", () => {
+    expect(
+      isVisibleSupplyChangeEvent({
+        amount: "-10000000000000000",
+        tokenDecimals: 18,
+      }),
+    ).toBe(true);
+    expect(
+      isVisibleSupplyChangeEvent({
+        amount: "-9999999999999999",
+        tokenDecimals: 18,
+      }),
+    ).toBe(false);
+  });
+
+  it("ceil-rounds the raw threshold for low-decimal token shapes", () => {
+    expect(minimumVisibleSupplyChangeRaw(6)).toBe(BigInt(10_000));
+    expect(minimumVisibleSupplyChangeRaw(2)).toBe(BigInt(1));
+    expect(minimumVisibleSupplyChangeRaw(0)).toBe(BigInt(1));
+  });
+});
 
 describe("rollupByToken", () => {
   it("groups by (tokenAddress, source) and computes 7d net change", () => {
