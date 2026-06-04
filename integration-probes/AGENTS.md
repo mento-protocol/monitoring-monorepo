@@ -51,6 +51,9 @@ pnpm --filter @mento-protocol/integration-probes knip
   writer. Budgeted adapters run pair probes serially so downstream follow-up
   requests, such as LI.FI-to-Fly evidence checks, cannot be starved by other
   in-flight pair probes.
+- Squid quote probes are capped and paced between requests because bursty
+  route checks can trigger 429s. Do not remove or lower the request delay
+  without live route evidence that the scheduled probe remains healthy.
 - `integration-probes:latest` expires after 3 days so failed scheduled probes
   degrade the dashboard instead of showing stale health forever. Dated history
   keys expire after 90 days.

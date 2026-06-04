@@ -1228,9 +1228,10 @@ describe("aggregator quote builders", () => {
       "https://api.relay.link/quote/v2",
     );
 
-    const squidRequest = AGGREGATOR_ADAPTERS.find(
-      (item) => item.id === "squid",
-    )?.quote?.(input, env);
+    const squid = AGGREGATOR_ADAPTERS.find((item) => item.id === "squid");
+    expect(squid?.maxQuoteRequestsPerRun).toBe(80);
+    expect(squid?.quoteRequestDelayMs).toBe(2500);
+    const squidRequest = squid?.quote?.(input, env);
     const squidQuoteRequest = firstQuoteRequest(squidRequest);
     expect(
       JSON.parse(String(squidQuoteRequest?.init?.body)) as {
