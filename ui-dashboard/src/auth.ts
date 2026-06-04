@@ -23,6 +23,15 @@ const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 //                       (`invalid_client`, a bad secret): do NOT evict the user
 //                       — back off and re-probe in 5 min, so a Google blip or a
 //                       deploy with a broken secret can't log out everyone.
+//
+// Accepted tradeoff (this is intentionally fail-OPEN on non-`invalid_grant`
+// errors): during a sustained Google token-endpoint outage, a just-offboarded
+// user keeps access until Google recovers (then `invalid_grant` fires and cuts
+// them off), bounded only by the 30-day idle maxAge. We accept this because
+// failing CLOSED would be worse: that same endpoint backs sign-in, so denying
+// on transient errors would lock out the whole company with no recovery path,
+// turning every Google blip or bad-secret deploy into a full outage. Sustained
+// failures surface via the Sentry capture below (tag `nextauth-refresh`).
 async function refreshGoogleAccessToken(token: JWT): Promise<JWT> {
   try {
     const response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
