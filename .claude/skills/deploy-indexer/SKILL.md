@@ -22,10 +22,11 @@ take a commit SHA — the underlying `pnpm deploy:indexer` script always pushes
 
 The default flow is "merge PR → deploy from main". For an indexer change with
 a fresh schema or new event coverage, the dashboard's new UI starts depending
-on the new schema/data the moment the PR merges — but the indexer takes
-~30–60 min to build + re-sync from `start_block`. During that window the UI
-queries the OLD indexer (still in `prod`) for fields that don't yet exist,
-breaking pages until the new deployment is promoted.
+on the new schema/data as soon as the matching production dashboard deployment
+serves traffic — but the indexer takes ~30–60 min to build + re-sync from
+`start_block`. During that window the new UI can query the OLD indexer (still
+in `prod`) for fields that don't yet exist, breaking pages until the new
+deployment is promoted.
 
 To avoid that gap, this skill supports **pre-merge deploys** from any branch:
 push a feature branch to `envio` ahead of merging, let the indexer sync to
@@ -35,7 +36,13 @@ not have to track `main`.
 
 When deploying pre-merge, you typically want to NOT promote yet (the PR
 isn't merged; the new schema isn't live in the codebase). Pass `--no-promote`
-to stop after sync; promote separately once the PR merges.
+to stop after sync; promote separately once the PR merges. For additive
+schema/data changes that the new dashboard will consume, promote as soon as the
+PR lands, ideally before the matching dashboard deployment serves traffic. If
+the PR removes or renames GraphQL fields/entities consumed by either the
+currently deployed dashboard or the new dashboard, there is no universally safe
+one-shot timing: require a backward-compatible/two-phase rollout, or an
+explicit coordinated cutover/rollback plan, before promotion.
 
 ## Phase 0 — Preflight
 
@@ -54,7 +61,7 @@ In parallel:
 - `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — count `data.deployments[]` before pushing. The mento hosted indexer can only keep three live deployments. If three entries already exist, Envio has no room to create another deployment: keep the `prod_status == "prod"` deployment and delete, or ask the user to delete, an obsolete non-prod deployment before pushing a fresh SHA.
 - Parse the user's arguments for the boolean flags `--no-promote` and `--no-verify`; capture as `NO_PROMOTE` and `NO_VERIFY`. Any non-flag token (e.g. a stray SHA) is an error — surface and stop, since the underlying script doesn't accept one.
 - `git rev-parse --short=7 HEAD` — capture as `TARGET_COMMIT`. **Use `--short=7` explicitly**, not bare `--short`: Envio's API stores `commit_hash` truncated to exactly 7 chars, and `startswith(target)` matches on that — an 8-char short SHA (which is what `git rev-parse --short` returns once a repo's `core.abbrev` ticks up past 7) silently matches zero rows in the babysit + promote-verify queries. The deploy always uses `HEAD`; to deploy a different commit, the user must check it out first.
-- If `BRANCH != main`: **default `NO_PROMOTE=true`** (fail-closed), and surface the branch name + commit short sha clearly. Override the default only when the user's request explicitly says "promote" / "go live" / similar — never on a bare `/deploy-indexer` from a feature branch. The reasoning: pre-merge deploys exist precisely because the dashboard codebase doesn't yet query the new schema; promoting before merge is almost always wrong, so make it explicit-opt-in instead of confirm-to-skip.
+- If `BRANCH != main`: **default `NO_PROMOTE=true`** (fail-closed), and surface the branch name + commit short sha clearly. Override the default only when the user's request explicitly says "promote" / "go live" / similar — never on a bare `/deploy-indexer` from a feature branch. Even with explicit promote wording, classify the schema rollout first: additive fields/entities can be promoted after merge and before the new dashboard serves traffic; removals/renames consumed by either old or new dashboard code require a backward-compatible/two-phase rollout or an explicit coordinated cutover/rollback plan. The reasoning: pre-merge deploys exist precisely because the dashboard codebase doesn't yet query the new schema; promoting before merge is almost always wrong, so make it explicit-opt-in instead of confirm-to-skip.
 
 If preflight fails, surface the specific cause and stop. Do not push.
 
@@ -62,7 +69,7 @@ If preflight fails, surface the specific cause and stop. Do not push.
 
 The request MAY contain these flags (in any order):
 
-- `--no-promote` — push + sync, but skip Phase 3 (promote) and everything after. Use for pre-merge deploys where the new schema isn't live in the codebase yet. Promote separately with `npx envio-cloud deployment promote mento <commit> mento-protocol -y` once the PR merges.
+- `--no-promote` — push + sync, but skip Phase 3 (promote) and everything after. Use for pre-merge deploys where the new schema isn't live in the codebase yet. For additive fields/entities, promote separately with `npx envio-cloud deployment promote mento <commit> mento-protocol -y` once the PR merges, ideally before the matching dashboard deployment serves traffic. For removals/renames, do not promote until a compatibility or cutover plan is confirmed.
 - `--no-verify` — skip Phase 5. Use when you want the deploy + DNS wait to complete unattended.
 
 The deployed commit is always the current `HEAD` — there's no SHA argument. To
@@ -171,20 +178,37 @@ and continue through the DNS wait + verify path for idempotency.
 
 **If `--no-promote` was passed, stop here.** Print a summary listing the
 synced commit and the paste-ready promote command for the user to run later
-(typically right after the PR merges):
+(typically right after the PR merges for additive fields/entities; not for
+removals/renames until a compatibility or cutover plan is confirmed):
 
 ```text
 Pre-merge deploy complete. Commit <TARGET_COMMIT> is fully synced and ready.
-Promote when the PR lands with:
+For additive fields/entities, promote after the PR lands and before the matching dashboard deployment serves traffic:
   npx envio-cloud deployment promote mento <TARGET_COMMIT> mento-protocol -y
+For removals/renames, do not promote until compatibility or a coordinated cutover/rollback plan is confirmed.
 ```
 
 Do NOT continue to Phase 3 / 4 / 5. The new schema isn't live in the
 dashboard codebase yet, so promoting now would point the static URL at a
-schema the deployed UI doesn't query — no harm, but also no benefit, and it
-makes the rollback story muddier.
+schema the deployed UI may not query correctly. For additions this may be
+mostly pointless; for removals/renames it can break production pages until the
+matching dashboard build is live. It also makes the rollback story muddier.
 
 ## Phase 3 — Promote
+
+Before any promotion path, classify rollout compatibility against the deployed
+dashboard(s), not just the source branch:
+
+- **Additive fields/entities/data only:** continue. Promote after merge as soon
+  as possible, ideally before the matching production dashboard deployment
+  serves traffic.
+- **Field/entity removals or renames consumed by old or new dashboard code:**
+  stop unless the PR or user request already documents a
+  backward-compatible/two-phase rollout, or an explicit coordinated
+  cutover/rollback plan. If that plan is absent, surface the split-brain risk
+  and ask for the rollout decision before running the promote command.
+- **Pure backfill/no schema contract change:** continue after confirming the
+  deployment is caught up; verify the affected dashboard pages after promote.
 
 Before promoting, capture the **current** prod commit so the final summary
 can print a paste-ready rollback command:
@@ -312,10 +336,10 @@ short-circuit; the verification is the value on a re-run.
 
 ## Common pre-merge workflow
 
-1. You're working on a feature branch with both indexer changes (new schema entity, new event coverage, new field) and dashboard changes that consume them.
+1. You're working on a feature branch with additive indexer changes (new schema entity, new event coverage, new field) and dashboard changes that consume them.
 2. Before opening the PR (or while it's in review), run `/deploy-indexer --no-promote` from the feature branch checkout — pushes the branch tip to `envio`, builds, syncs to caught-up. ~30–60 min.
 3. The PR review proceeds normally. The new deployment exists in `envio-cloud` but isn't `prod` yet, so the live dashboard keeps querying the old indexer.
-4. PR merges to `main`. Now run `/deploy-indexer` (without `--no-promote`) from `main` — preflight passes, push is fast (or a no-op if `envio` is already at the commit you're about to push, i.e. SHA-identical to step 2's tip), babysit returns immediately ("already promoted"), promote flips `prod`, DNS waits 5 min, verify passes. The new schema goes live without the usual 30–60 min indexer-lag window.
+4. PR merges to `main`. Now run `/deploy-indexer` (without `--no-promote`) from `main` immediately, ideally before the matching production dashboard deployment serves traffic — preflight passes, push is fast (or a no-op if `envio` is already at the commit you're about to push, i.e. SHA-identical to step 2's tip), babysit returns immediately ("already promoted"), promote flips `prod`, DNS waits 5 min, verify passes. The new schema goes live without the usual 30–60 min indexer-lag window.
 5. The fast path in step 4 only holds when the commit you push from `main` is byte-identical to what was already on `envio`. Squash-merge produces a new SHA, so the prior `envio` tip becomes irrelevant and you eat a fresh build + sync. To preserve commit identity through merge: use a merge commit or rebase-merge for branches that were pre-deployed, OR pre-deploy from the merge-base just before merging so the eventual `main` tip matches.
 
 ## Rules
@@ -326,4 +350,4 @@ short-circuit; the verification is the value on a re-run.
 - **Always wait the full 5 min** for DNS switchover before verifying — bypassing produces flaky verify results.
 - **Pass the resolved short SHA explicitly** to status and verification steps — don't rely on "latest", since a concurrent deploy by someone else could shift it.
 - **Don't open a PR** to verify the deploy. This skill is a plumbing chain, not a code-review path. The PR (if any) was merged before this skill ran; the deploy is a separate concern.
-- **Default to `--no-promote` when deploying from a non-`main` branch** unless the user explicitly asked to promote. Promoting a feature-branch schema before its dashboard code is live in production wastes a sync (you'd re-promote on merge) and creates an ambiguous rollback target.
+- **Default to `--no-promote` when deploying from a non-`main` branch** unless the user explicitly asked to promote. Additive feature-branch schema changes should be promoted after merge, ideally before the matching dashboard deployment serves traffic. Removals/renames need a backward-compatible/two-phase rollout or an explicit coordinated cutover/rollback plan. Promoting from the feature branch also creates an ambiguous rollback target.
