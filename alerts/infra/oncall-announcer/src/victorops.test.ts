@@ -220,4 +220,12 @@ describe("fetchOncallUserEmail", () => {
       },
     );
   });
+
+  it("propagates Splunk On-Call API errors", async () => {
+    const fetchMock = vi.fn(async () => response({}, false));
+
+    await expect(
+      fetchOncallUserEmail("chapati", config, fetchMock),
+    ).rejects.toThrow("Splunk On-Call API error");
+  });
 });

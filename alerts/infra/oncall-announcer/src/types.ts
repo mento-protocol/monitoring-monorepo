@@ -59,5 +59,4 @@ export interface VictorOpsOncallResponse {
 
 export interface VictorOpsUserResponse {
   email?: string;
-  username?: string;
 }
