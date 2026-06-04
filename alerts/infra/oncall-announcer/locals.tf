@@ -18,7 +18,6 @@ locals {
     splunk_on_call_api_base_url           = var.splunk_on_call_api_base_url
     splunk_on_call_escalation_policy_slug = var.splunk_on_call_escalation_policy_slug
     splunk_on_call_team_slug              = var.splunk_on_call_team_slug
-    support_issues_url                    = var.support_issues_url
   }))
   source_hash = md5(join("", concat(
     [
@@ -37,6 +36,5 @@ locals {
     SPLUNK_ON_CALL_API_BASE_URL           = var.splunk_on_call_api_base_url
     SPLUNK_ON_CALL_ESCALATION_POLICY_SLUG = var.splunk_on_call_escalation_policy_slug
     SPLUNK_ON_CALL_TEAM_SLUG              = var.splunk_on_call_team_slug
-    SUPPORT_ISSUES_URL                    = var.support_issues_url
   }
 }

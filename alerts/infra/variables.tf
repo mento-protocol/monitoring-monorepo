@@ -117,17 +117,6 @@ variable "oncall_slack_channel_id" {
   }
 }
 
-variable "oncall_support_issues_url" {
-  description = "Support issue board linked from the Slack on-call rotation announcement."
-  type        = string
-  default     = "https://linear.app/mento-labs/team/SUP/all?layout=board&ordering=priority&grouping=workflowState&subGrouping=none&showCompletedIssues=all&showSubIssues=true&showTriageIssues=false"
-
-  validation {
-    condition     = can(regex("^https://", var.oncall_support_issues_url))
-    error_message = "oncall_support_issues_url must be an https URL."
-  }
-}
-
 variable "oncall_support_usergroup_id" {
   description = "Slack usergroup ID for @support-engineer. Required when the on-call announcer is enabled."
   type        = string

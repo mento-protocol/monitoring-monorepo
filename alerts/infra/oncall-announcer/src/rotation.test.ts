@@ -26,7 +26,6 @@ function baseConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       bucket: "state-bucket",
       object: "current-oncall.json",
     },
-    supportIssuesUrl: "https://linear.app/mento-labs/team/SUP/all",
     ...overrides,
   };
 }

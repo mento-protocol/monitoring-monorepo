@@ -20,7 +20,6 @@ const config: AppConfig = {
     bucket: "state-bucket",
     object: "current-oncall.json",
   },
-  supportIssuesUrl: "https://linear.app/mento-labs/team/SUP/all",
 };
 
 function response(body: unknown, ok = true): Response {

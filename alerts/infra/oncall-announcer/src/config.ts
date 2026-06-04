@@ -12,7 +12,6 @@ interface Env {
   SPLUNK_ON_CALL_API_KEY: string;
   SPLUNK_ON_CALL_ESCALATION_POLICY_SLUG?: string;
   SPLUNK_ON_CALL_TEAM_SLUG?: string;
-  SUPPORT_ISSUES_URL: string;
 }
 
 const schema: JSONSchemaType<Env> = {
@@ -24,7 +23,6 @@ const schema: JSONSchemaType<Env> = {
     "SLACK_SUPPORT_USERGROUP_ID",
     "SPLUNK_ON_CALL_API_ID",
     "SPLUNK_ON_CALL_API_KEY",
-    "SUPPORT_ISSUES_URL",
   ],
   properties: {
     ANNOUNCE_ON_FIRST_RUN: { type: "string", nullable: true },
@@ -41,7 +39,6 @@ const schema: JSONSchemaType<Env> = {
       nullable: true,
     },
     SPLUNK_ON_CALL_TEAM_SLUG: { type: "string", nullable: true },
-    SUPPORT_ISSUES_URL: { type: "string", minLength: 1 },
   },
 };
 
@@ -90,7 +87,6 @@ export interface AppConfig {
     bucket: string;
     object: string;
   };
-  supportIssuesUrl: string;
 }
 
 const config: AppConfig = {
@@ -115,7 +111,6 @@ const config: AppConfig = {
     bucket: env.ONCALL_STATE_BUCKET,
     object: optionalValue(env.ONCALL_STATE_OBJECT) ?? "current-oncall.json",
   },
-  supportIssuesUrl: env.SUPPORT_ISSUES_URL,
 };
 
 export default config;

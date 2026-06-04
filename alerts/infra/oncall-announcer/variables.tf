@@ -144,12 +144,6 @@ variable "splunk_on_call_team_slug" {
   default     = ""
 }
 
-variable "support_issues_url" {
-  description = "Support issue board linked from the Slack rotation announcement."
-  type        = string
-  default     = "https://linear.app/mento-labs/team/SUP/all?layout=board&ordering=priority&grouping=workflowState&subGrouping=none&showCompletedIssues=all&showSubIssues=true&showTriageIssues=false"
-}
-
 variable "timeout_seconds" {
   description = "Cloud Function timeout in seconds"
   type        = number

@@ -240,7 +240,6 @@ module "oncall_announcer" {
   splunk_on_call_api_key                = var.splunk_on_call_api_key
   splunk_on_call_escalation_policy_slug = var.splunk_on_call_escalation_policy_slug
   splunk_on_call_team_slug              = var.splunk_on_call_team_slug
-  support_issues_url                    = var.oncall_support_issues_url
 
   depends_on = [
     module.project_factory,

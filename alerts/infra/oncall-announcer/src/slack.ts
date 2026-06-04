@@ -87,9 +87,7 @@ export async function postOncallAnnouncement(
 ): Promise<void> {
   const text = [
     `New support engineer: <@${slackUserId}> is on duty.`,
-    `Please monitor alert channels and work through <${sanitizeSlackUrl(
-      config.supportIssuesUrl,
-    )}|support issues> as capacity allows.`,
+    "Please monitor all alert channels this week.",
   ].join("\n");
 
   await slackRequest(
@@ -129,8 +127,4 @@ export async function updateSupportUsergroup(
     },
     fetchImpl,
   );
-}
-
-function sanitizeSlackUrl(value: string): string {
-  return value.replace(/</g, "%3C").replace(/>/g, "%3E");
 }

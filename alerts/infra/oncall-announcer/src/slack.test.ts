@@ -22,7 +22,6 @@ const config: AppConfig = {
     bucket: "state-bucket",
     object: "current-oncall.json",
   },
-  supportIssuesUrl: "https://linear.app/mento-labs/team/SUP/all",
 };
 
 function slackResponse(body: unknown, ok = true): Response {
@@ -84,7 +83,7 @@ describe("Slack API helpers", () => {
           client_msg_id: "e6f87c4e-fbfd-5887-81e7-7ad2fd6c2a43",
           text: [
             "New support engineer: <@UCHAPATI> is on duty.",
-            "Please monitor alert channels and work through <https://linear.app/mento-labs/team/SUP/all|support issues> as capacity allows.",
+            "Please monitor all alert channels this week.",
           ].join("\n"),
           unfurl_links: false,
           unfurl_media: false,
