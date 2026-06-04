@@ -254,18 +254,29 @@ export function latestDailyCirculatingSupply(
 
 function pickBaselineSupply(
   rows: ReadonlyArray<StableSupplyDailySnapshot>,
-  sevenDayCutoff: bigint,
+  cutoff: bigint,
   custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
 ): bigint {
   // Walk sorted-ASC rows; the last one whose timestamp is ≤ cutoff is the
-  // 7d baseline. Fall back to the earliest row when everything is recent
+  // baseline. Fall back to the earliest row when everything is recent
   // (so a brand-new token's first observed snapshot stays the baseline).
   let baseline: StableSupplyDailySnapshot | undefined;
   for (const r of rows) {
-    if (BigInt(r.timestamp) > sevenDayCutoff) break;
+    if (BigInt(r.timestamp) > cutoff) break;
     baseline = r;
   }
-  if (baseline) return circulatingSupplyForSnapshot(baseline, custodyRows);
+  if (baseline) {
+    // Circulating supply *as of the cutoff*. Raw supply is unchanged since the
+    // baseline row (it's the last supply row ≤ cutoff), but custody must be read
+    // at the cutoff — a lock/unlock that happened between the baseline row and
+    // the cutoff would otherwise leak into the window delta (e.g. a 20-day-old
+    // NTT lock surfacing as a spurious negative in the 24h sub-row).
+    const rawSupply = BigInt(baseline.totalSupply);
+    const locked = lockedSupplyAt(custodyRows, cutoff);
+    return rawSupply >= locked ? rawSupply - locked : BigInt(0);
+  }
+  // No supply row at/before the cutoff (young or truncated token): use the
+  // earliest known row as a since-inception baseline, custody at its own time.
   const first = rows[0];
   return first ? circulatingSupplyForSnapshot(first, custodyRows) : BigInt(0);
 }
