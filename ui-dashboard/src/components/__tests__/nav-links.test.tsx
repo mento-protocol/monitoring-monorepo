@@ -44,4 +44,19 @@ describe("NavLinks", () => {
     expect(html).toContain("/revenue");
     expect(html).toContain("Mento Analytics");
   });
+
+  it("places Volume after Pools and before Stables", () => {
+    mockUseSession.mockReturnValue({ data: null });
+    const html = renderToStaticMarkup(<NavLinks />);
+    const hrefs = Array.from(
+      html.matchAll(/href="([^"]+)"/g),
+      (match) => match[1],
+    );
+
+    expect(hrefs).toEqual(
+      expect.arrayContaining(["/pools", "/volume", "/stables"]),
+    );
+    expect(hrefs.indexOf("/volume")).toBe(hrefs.indexOf("/pools") + 1);
+    expect(hrefs.indexOf("/stables")).toBe(hrefs.indexOf("/volume") + 1);
+  });
 });

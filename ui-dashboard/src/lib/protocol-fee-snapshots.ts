@@ -1,6 +1,6 @@
 /**
  * Per-pool aggregation over `PoolDailyFeeSnapshot` rows. Replaces the older
- * `aggregateProtocolFeesByPool` (raw transfers) for the /revenue leaderboard.
+ * `aggregateProtocolFeesByPool` (raw transfers) for the /revenue table.
  *
  * Hybrid USD pricing matches the indexer:
  * - USD-pegged tokens (cUSD, USDC, USDm, …) are pre-summed indexer-side into
@@ -10,7 +10,7 @@
  *   and are priced dashboard-side via the live oracle rate map.
  *
  * Window inclusion is full-day (`dayStartTimestamp >= now - windowSeconds`).
- * No partial-day weighting — keeps the leaderboard aligned with how users
+ * No partial-day weighting — keeps the table aligned with how users
  * read "last 24h", and matches the chain-level fee-over-time chart's UTC-day
  * buckets.
  */

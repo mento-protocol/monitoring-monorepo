@@ -1,7 +1,7 @@
 {
   "$comment": "Per-chain aggregator/router contract addresses → canonical name. All addresses lowercased. Verified on-chain via celoscan / monadscan (bytecode + tx history) on 2026-05-04 (cluster-7dc08ec28f299c06 expanded 2026-05-08). Adding a new aggregator: lookup canonical address in the project's docs, verify on the explorer, add here. Removing an entry retroactively re-classifies historical AggregatorDailySnapshot rows as 'unknown' — handle via re-sync.",
   "$clusters": {
-    "$comment": "Multi-contract operators on a single deployer EOA. Naming convention: `cluster-<first-16-hex-of-deployer-EOA>` (16 hex chars = 64 bits, collision-free in practice for the foreseeable cluster count). Tag each contract in the per-chain block below with the same `name: cluster-...`. The cluster label is purely a fact about on-chain deploy provenance — no inference about the operator's identity (MEV / MM / arb / etc.) — added so the leaderboard's UI can group volume by operator and link to the deployer for follow-up research. The `chainId` field on each cluster entry is informational (where the contracts have been observed); it does NOT constrain placement and a cross-chain deployer would extend the cluster's contract list across multiple per-chain blocks. Adding a cluster: 1) confirm two or more in-our-data contracts share a deployer EOA via celoscan, 2) add the cluster entry here, 3) tag each contract address with the cluster name in the per-chain block.",
+    "$comment": "Multi-contract operators on a single deployer EOA. Naming convention: `cluster-<first-16-hex-of-deployer-EOA>` (16 hex chars = 64 bits, collision-free in practice for the foreseeable cluster count). Tag each contract in the per-chain block below with the same `name: cluster-...`. The cluster label is purely a fact about on-chain deploy provenance — no inference about the operator's identity (MEV / MM / arb / etc.) — added so the volume UI can group volume by operator and link to the deployer for follow-up research. The `chainId` field on each cluster entry is informational (where the contracts have been observed); it does NOT constrain placement and a cross-chain deployer would extend the cluster's contract list across multiple per-chain blocks. Adding a cluster: 1) confirm two or more in-our-data contracts share a deployer EOA via celoscan, 2) add the cluster entry here, 3) tag each contract address with the cluster name in the per-chain block.",
     "cluster-7dc08ec28f299c06": {
       "chainId": 42220,
       "deployer": "0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
@@ -13,7 +13,7 @@
     "0xbe729350f8cdfc19db6866e8579841188ee57f67": {
       "name": "mento-router-v2",
       "source": "https://celoscan.io/address/0xBE729350F8CdFC19DB6866e8579841188eE57f67",
-      "$note": "Original verified MentoRouter on Celo (deployed 2024-05-29). Not in @mento-protocol/contracts — that package only ships the active deployment (Routerv300 at 0x4861840…). Lives here because we still see traffic via this address from the legacy Mento UI / older SDK builds; without this entry it'd land in the v2 leaderboard's `unknown` bucket."
+      "$note": "Original verified MentoRouter on Celo (deployed 2024-05-29). Not in @mento-protocol/contracts — that package only ships the active deployment (Routerv300 at 0x4861840…). Lives here because we still see traffic via this address from the legacy Mento UI / older SDK builds; without this entry it'd land in the v2 volume table's `unknown` bucket."
     },
     "0xce16f69375520ab01377ce7b88f5ba8c48f8d666": {
       "name": "squid",

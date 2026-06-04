@@ -14,6 +14,7 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 │   ├── sentry-bridge/      # Sentry JS error monitoring (Sentry → Slack bridge)
 │   └── slack-channels/     # Slack channels for on-chain multisig events
 ├── onchain-event-listeners/ # QuickNode webhook management for on-chain events
+├── oncall-announcer/        # Splunk On-Call rotation announcements to Slack
 └── onchain-event-handler/   # Cloud Function for processing webhooks (TS + TF paired)
 ```
 
@@ -31,6 +32,9 @@ graph LR
     C -->|4. Format messages| C
     C -->|chat.postMessage| D[Slack<br/>Web API]
     D -->|Messages| E[Slack Channels<br/>alerts/events]
+    F[Cloud Scheduler] -->|HTTP POST<br/>OIDC| G[Cloud Function<br/>oncall-announcer]
+    G -->|GET /oncall/current| H[Splunk On-Call]
+    G -->|chat.postMessage<br/>usergroups.users.update| I[Slack<br/>#eng + @support-engineer]
 ```
 
 ### Component Overview
@@ -38,7 +42,8 @@ graph LR
 1. **QuickNode Webhooks**: Monitor blockchain events for configured multisig addresses
 2. **Cloud Function**: Processes webhooks, verifies signatures, formats messages
 3. **Slack Channels**: Receives formatted alerts and event notifications
-4. **Terraform**: Manages all infrastructure as code
+4. **On-call Announcer**: Polls Splunk On-Call, posts rotations to `#eng`, and keeps `@support-engineer` membership to the current engineer
+5. **Terraform**: Manages all infrastructure as code
 
 ### Security
 
@@ -51,7 +56,7 @@ graph LR
 
 - **Terraform** >= 1.10.0
 - **GCP account** with billing enabled
-- **Slack bot** with channel-management and chat scopes
+- **Slack bot** with channel-management, chat, usergroup membership, and email lookup scopes
 - **Sentry account** (for JS error monitoring)
 - **QuickNode account** (for blockchain monitoring)
 
@@ -77,9 +82,26 @@ sentry_slack_critical_channel_id = "C0AURREPNDU"       # Optional, defaults to c
 # overrides, but cannot prove arbitrary custom name/ID pairs match.
 
 # Slack Configuration (used by Terraform to create + archive Sentry and
-# on-chain event channels, and by the Cloud Function to post on-chain events).
-# Scopes required: channels:read, channels:manage, channels:join, chat:write.
+# on-chain event channels, by Cloud Functions to post Slack messages, and by
+# the on-call announcer to manage @support-engineer).
+# Scopes required: channels:read, channels:manage, channels:join,
+# channels:write.invites, chat:write, chat:write.public, usergroups:read,
+# usergroups:write, users:read, users:read.email.
 slack_bot_token = "xoxb-..."
+
+# Splunk On-Call API credentials for the on-call announcer. A read-only key is
+# sufficient. Leave both empty to keep the announcer disabled until the first
+# credential bootstrap; setting both values enables the Cloud Function,
+# scheduler, @support-engineer membership management, and GitHub secret sync.
+splunk_on_call_api_id  = "your-splunk-on-call-api-id"
+splunk_on_call_api_key = "your-splunk-on-call-api-key"
+
+# Required when the announcer is enabled: Slack channel ID for #eng.
+oncall_slack_channel_id = "C0123ABC456"
+
+# Required when the announcer is enabled: Slack usergroup ID for
+# @support-engineer. Create the usergroup in Slack once, then paste its ID here.
+oncall_support_usergroup_id = "S0123ABC456"
 
 # GCP Configuration
 project_name     = "alerts"              # Optional, defaults to "alerts"
@@ -194,6 +216,17 @@ multisigs = {
 - Validates webhook signatures
 - All multisigs share the same two Slack channels
 
+### On-call Announcer
+
+- Runs from Cloud Scheduler every 15 minutes by default
+- Polls Splunk On-Call `/api-public/v1/oncall/current`
+- Resolves the current Splunk On-Call user email to a Slack user ID with `users.lookupByEmail`
+- Posts one Slack message to `#eng` only when the on-call username changes
+- Replaces `@support-engineer` membership with exactly that Slack user on every run
+- Stores last-seen state in a private GCS bucket to suppress duplicate announcements
+- Uses the configured `@support-engineer` Slack usergroup ID and replaces its
+  membership with exactly the current on-call Slack user
+
 ### QuickNode Webhooks
 
 - One webhook per chain
@@ -260,6 +293,7 @@ This shows REST API requests/responses for troubleshooting.
 
 - [`channels/sentry-bridge/README.md`](channels/sentry-bridge/README.md) - Sentry → Slack bridge module
 - [`channels/slack-channels/README.md`](channels/slack-channels/README.md) - Slack channels for on-chain event notifications
+- [`oncall-announcer/README.md`](oncall-announcer/README.md) - Splunk On-Call rotation announcer
 - [`onchain-event-listeners/README.md`](onchain-event-listeners/README.md) - QuickNode webhook module for on-chain events
 - [`onchain-event-handler/README.md`](onchain-event-handler/README.md) - Cloud Function module
 

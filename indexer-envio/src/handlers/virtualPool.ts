@@ -18,7 +18,7 @@ import {
   DEFAULT_ORACLE_FIELDS,
 } from "../pool.js";
 import { buildSwapTraderFields } from "../swap.js";
-import { applyLeaderboardSnapshots } from "../leaderboardSnapshots.js";
+import { applyVolumeSnapshots } from "../volumeSnapshots.js";
 import { tokenDecimalsScalingEffect } from "../rpc/effects.js";
 import {
   buildRebalanceOutcome,
@@ -218,7 +218,7 @@ indexer.onEvent(
 
     context.SwapEvent.set(swap);
 
-    await applyLeaderboardSnapshots({
+    await applyVolumeSnapshots({
       context,
       chainId: event.chainId,
       poolId,

@@ -74,7 +74,7 @@ export type ProtocolFeeSummary = {
 /**
  * Aggregates `PoolDailyFeeSnapshot` rows into chain-level USD totals across
  * 24h / 7d / 30d / all-time. Window inclusion is full-day
- * (`s.timestamp >= now - windowSeconds`) — matches the leaderboard and chart
+ * (`s.timestamp >= now - windowSeconds`) — matches the table and chart
  * conventions.
  */
 export function aggregateProtocolFees(

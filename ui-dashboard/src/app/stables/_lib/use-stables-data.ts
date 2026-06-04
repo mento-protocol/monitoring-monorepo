@@ -135,8 +135,8 @@ export function useStablesCustodyDailySnapshots(_range: RangeKey) {
 }
 
 /**
- * Per-tx supply changes for the changes table + leaderboard. Filters
- * to the last 7d window (sufficient for the leaderboard; the table can
+ * Per-tx supply changes for the changes table + ranked table. Filters
+ * to the last 7d window (sufficient for the ranked table; the table can
  * later add date-range pickers via the `sinceTimestamp` arg).
  */
 export function useStablesChanges(range: RangeKey = "7d", page: number = 0) {

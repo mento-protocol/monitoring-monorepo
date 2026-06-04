@@ -333,7 +333,7 @@ async function fetchAllBrokerDailySnapshotPages(
  * `PoolDailyFeeSnapshot.id = "{chainId}-{poolAddress}-{dayTs}"` is unique by
  * construction. Exported because the slim `useProtocolFees` hook fetches its
  * own snapshots — the homepage path in `fetchNetworkData` doesn't render the
- * leaderboard so it leaves `feeSnapshots` empty.
+ * per-pool revenue table so it leaves `feeSnapshots` empty.
  */
 export async function fetchAllFeeSnapshotPages(
   client: GraphQLClient,

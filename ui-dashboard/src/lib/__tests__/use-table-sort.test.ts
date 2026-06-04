@@ -38,8 +38,8 @@ import type { UseTableSortResult } from "@/lib/use-table-sort";
 type TestKey = "pool" | "tvl" | "volume24h";
 const VALID_KEYS: ReadonlySet<TestKey> = new Set(["pool", "tvl", "volume24h"]);
 
-type LeaderboardKey = "pool" | "fees7d" | "fees24h";
-const LEADERBOARD_KEYS: ReadonlySet<LeaderboardKey> = new Set([
+type VolumeKey = "pool" | "fees7d" | "fees24h";
+const VOLUME_SORT_KEYS: ReadonlySet<VolumeKey> = new Set([
   "pool",
   "fees7d",
   "fees24h",
@@ -70,20 +70,16 @@ function HookWrapper({
   return null;
 }
 
-interface LeaderboardResultRef {
-  current: UseTableSortResult<LeaderboardKey> | null;
+interface VolumeResultRef {
+  current: UseTableSortResult<VolumeKey> | null;
 }
 
-function LeaderboardHookWrapper({
-  resultRef,
-}: {
-  resultRef: LeaderboardResultRef;
-}) {
-  const result = useTableSort<LeaderboardKey>({
+function VolumeHookWrapper({ resultRef }: { resultRef: VolumeResultRef }) {
+  const result = useTableSort<VolumeKey>({
     defaultKey: "fees7d",
     defaultDir: "desc",
-    validKeys: LEADERBOARD_KEYS,
-    paramPrefix: "leaderboard",
+    validKeys: VOLUME_SORT_KEYS,
+    paramPrefix: "volume",
   });
   resultRef.current = result;
   return null;
@@ -159,12 +155,10 @@ describe("useTableSort — defaults applied when URL has no params", () => {
 
 describe("useTableSort — URL param round-trips", () => {
   it("reads Sort and Dir params with prefix", () => {
-    setup(new URLSearchParams("leaderboardSort=fees24h&leaderboardDir=asc"));
-    const ref: LeaderboardResultRef = { current: null };
+    setup(new URLSearchParams("volumeSort=fees24h&volumeDir=asc"));
+    const ref: VolumeResultRef = { current: null };
     act(() => {
-      root.render(
-        React.createElement(LeaderboardHookWrapper, { resultRef: ref }),
-      );
+      root.render(React.createElement(VolumeHookWrapper, { resultRef: ref }));
     });
     expect(ref.current?.sortKey).toBe("fees24h");
     expect(ref.current?.sortDir).toBe("asc");
@@ -467,12 +461,12 @@ describe("useTableSort — two hooks with different paramPrefix don't interfere"
   let container2: HTMLElement;
   let root2: Root;
   let ref: ResultRef;
-  let ref2: LeaderboardResultRef;
+  let ref2: VolumeResultRef;
 
   it("reads from separate prefix-scoped params independently", () => {
     setup(
       new URLSearchParams(
-        "leaderboardSort=fees24h&leaderboardDir=asc&poolsSort=pool&poolsDir=asc",
+        "volumeSort=fees24h&volumeDir=asc&poolsSort=pool&poolsDir=asc",
       ),
     );
     container2 = document.createElement("div");
@@ -482,9 +476,7 @@ describe("useTableSort — two hooks with different paramPrefix don't interfere"
     ref2 = { current: null };
 
     act(() => {
-      root.render(
-        React.createElement(LeaderboardHookWrapper, { resultRef: ref2 }),
-      );
+      root.render(React.createElement(VolumeHookWrapper, { resultRef: ref2 }));
       root2.render(
         React.createElement(HookWrapper, {
           prefix: "pools",
@@ -505,7 +497,7 @@ describe("useTableSort — two hooks with different paramPrefix don't interfere"
   });
 
   it("handleSort on one prefix preserves the other prefix's params in the URL", () => {
-    setup(new URLSearchParams("leaderboardSort=fees24h&leaderboardDir=asc"));
+    setup(new URLSearchParams("volumeSort=fees24h&volumeDir=asc"));
     ref = { current: null };
 
     act(() => {
@@ -519,8 +511,8 @@ describe("useTableSort — two hooks with different paramPrefix don't interfere"
     });
 
     // Other prefix's params survive untouched
-    expect(window.location.search).toContain("leaderboardSort=fees24h");
-    expect(window.location.search).toContain("leaderboardDir=asc");
+    expect(window.location.search).toContain("volumeSort=fees24h");
+    expect(window.location.search).toContain("volumeDir=asc");
     // Our prefix's params now reflect the click
     expect(window.location.search).toContain("poolsSort=volume24h");
     expect(window.location.search).toContain("poolsDir=desc");

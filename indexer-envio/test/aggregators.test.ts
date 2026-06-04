@@ -63,6 +63,17 @@ describe("classifyAggregator", () => {
     assert.equal(classifyAggregator(CHAIN_CELO, poolAddr), "unknown");
   });
 
+  it("classifies a pool rebalancer entry point as 'system'", () => {
+    const poolAddr = "0xabcdef0123456789abcdef0123456789abcdef01";
+    const rebalancer = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    assert.equal(
+      classifyAggregator(CHAIN_CELO, rebalancer, poolAddr, {
+        rebalancerAddress: rebalancer,
+      }),
+      "system",
+    );
+  });
+
   it("classifies other Mento system contracts as 'system'", () => {
     assert.equal(classifyAggregator(CHAIN_CELO, CELO_BIPOOLMANAGER), "system");
     assert.equal(classifyAggregator(CHAIN_MONAD, MONAD_FPMM_FACTORY), "system");
@@ -200,7 +211,7 @@ describe("cluster classification", () => {
   it("every cluster-* name in per-chain entries has a matching $clusters block entry", () => {
     // Catches typos like `cluster-7dc08ec28f299c07` (off-by-one) in
     // aggregators.json — without this test, classifyAggregator would happily
-    // return the bad name and the leaderboard's PR-3 tooltip would silently
+    // return the bad name and the volume PR-3 tooltip would silently
     // break (getClusterMetadata returns undefined).
     const knownClusters = new Set(_allClusterNames());
     const chainsWithAggregators = Object.keys(CONTRACT_NAMESPACE_BY_CHAIN).map(

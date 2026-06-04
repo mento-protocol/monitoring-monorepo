@@ -80,7 +80,7 @@ variable "sentry_slack_critical_channel_id" {
 }
 
 variable "slack_bot_token" {
-  description = "Slack bot OAuth token (xoxb-...) used by the restapi.slack provider to create + archive alert channels and by the on-chain event handler to post via chat.postMessage. Needs scopes: channels:read, channels:manage, channels:join, chat:write. SEPARATE from Sentry's own Slack OAuth app — Sentry posts via its own integration."
+  description = "Slack bot OAuth token (xoxb-...) used by the restapi.slack provider to create + archive alert channels, by Cloud Functions to post via chat.postMessage, and by the on-call announcer to manage @support-engineer. Needs scopes: channels:read, channels:manage, channels:join, channels:write.invites, chat:write, chat:write.public, usergroups:read, usergroups:write, users:read, users:read.email. SEPARATE from Sentry's own Slack OAuth app — Sentry posts via its own integration."
   type        = string
   sensitive   = true
 
@@ -88,6 +88,92 @@ variable "slack_bot_token" {
     condition     = startswith(var.slack_bot_token, "xoxb-")
     error_message = "slack_bot_token must be a Slack bot OAuth token starting with 'xoxb-'."
   }
+}
+
+#####################
+# On-call Announcer
+#####################
+
+variable "oncall_announce_on_first_run" {
+  description = "Whether the first on-call announcer run after deployment should post the current on-call engineer to Slack. When false, the first run only seeds state and reconciles @support-engineer."
+  type        = bool
+  default     = true
+}
+
+variable "oncall_rotation_check_schedule" {
+  description = "Cloud Scheduler cron expression for polling Splunk On-Call. The function stores last-seen state and only posts when the on-call username changes."
+  type        = string
+  default     = "*/15 * * * *"
+}
+
+variable "oncall_slack_channel_id" {
+  description = "Slack channel ID for on-call rotation announcements. Required when the on-call announcer is enabled."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.oncall_slack_channel_id == "" || can(regex("^[CG][A-Z0-9]{8,}$", var.oncall_slack_channel_id))
+    error_message = "oncall_slack_channel_id must be empty or a Slack channel ID such as C0123ABC456."
+  }
+}
+
+variable "oncall_support_issues_url" {
+  description = "Support issue board linked from the Slack on-call rotation announcement."
+  type        = string
+  default     = "https://linear.app/mento-labs/team/SUP/all?layout=board&ordering=priority&grouping=workflowState&subGrouping=none&showCompletedIssues=all&showSubIssues=true&showTriageIssues=false"
+
+  validation {
+    condition     = can(regex("^https://", var.oncall_support_issues_url))
+    error_message = "oncall_support_issues_url must be an https URL."
+  }
+}
+
+variable "oncall_support_usergroup_id" {
+  description = "Slack usergroup ID for @support-engineer. Required when the on-call announcer is enabled."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.oncall_support_usergroup_id == "" || can(regex("^S[A-Z0-9]{8,}$", var.oncall_support_usergroup_id))
+    error_message = "oncall_support_usergroup_id must be empty or a Slack usergroup ID such as S0123ABC456."
+  }
+}
+
+variable "splunk_on_call_api_base_url" {
+  description = "Base URL for the Splunk On-Call public API. The historical VictorOps API host remains the canonical endpoint."
+  type        = string
+  default     = "https://api.victorops.com"
+
+  validation {
+    condition     = can(regex("^https://", var.splunk_on_call_api_base_url))
+    error_message = "splunk_on_call_api_base_url must be an https URL."
+  }
+}
+
+variable "splunk_on_call_api_id" {
+  description = "Splunk On-Call API ID used for X-VO-Api-Id by the on-call announcer. Leave empty with splunk_on_call_api_key to keep the announcer disabled until credentials are bootstrapped."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "splunk_on_call_api_key" {
+  description = "Splunk On-Call API key used for X-VO-Api-Key by the on-call announcer. A read-only key is sufficient. Leave empty with splunk_on_call_api_id to keep the announcer disabled until credentials are bootstrapped."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "splunk_on_call_escalation_policy_slug" {
+  description = "Optional Splunk On-Call escalation policy slug to select when the chosen team has multiple current schedules."
+  type        = string
+  default     = ""
+}
+
+variable "splunk_on_call_team_slug" {
+  description = "Optional Splunk On-Call team slug to select. When empty, the announcer preserves the standalone announcer's original behavior and uses the first team returned by /oncall/current."
+  type        = string
+  default     = ""
 }
 
 #####################

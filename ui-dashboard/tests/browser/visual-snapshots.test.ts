@@ -18,7 +18,7 @@
  * 2. /pool/<celo>        – pool detail, LPs tab (default)
  * 3. /pool/<celo>?tab=swaps – pool detail, Swaps tab
  * 4. /bridge-flows       – bridge flows page (empty-state; bridge queries mocked)
- * 5. /leaderboard        – leaderboard page (empty-state; leaderboard queries mocked)
+ * 5. /volume             – volume page (empty-state; volume queries mocked)
  */
 
 import { expect, test, type Page } from "@playwright/test";
@@ -37,7 +37,7 @@ function extractOperationName(postData: string | null): string | null {
   return postData.match(/\bquery\s+([A-Za-z0-9_]+)/)?.[1] ?? null;
 }
 
-// Maps each unhandled bridge / leaderboard operation to the minimal empty-data
+// Maps each unhandled bridge / volume operation to the minimal empty-data
 // shape its consumer expects. Using `{}` causes runtime errors when the client
 // destructures fields (e.g. `data?.BridgeTransfer.length`).
 const EMPTY_RESPONSE_BY_OP: Record<string, Record<string, unknown>> = {
@@ -48,31 +48,31 @@ const EMPTY_RESPONSE_BY_OP: Record<string, Record<string, unknown>> = {
   BridgeDeliveredRecent: { BridgeTransfer: [] },
   BridgeDailySnapshot: { BridgeDailySnapshot: [] },
   BridgeTopBridgers: { BridgeBridger: [] },
-  // Leaderboard operations — keys must match the GraphQL root field name in
-  // each query (i.e. the identifier immediately after the opening `{`).
+  // Volume operations — keys must match each query's response key, including
+  // aliases used to hide persisted backend entity names.
   TraderDailyTop: { TraderDailySnapshot: [] },
   TraderPoolDailyForTrader: { TraderPoolDailySnapshot: [] },
   TraderDailyWindowTop: { TraderDailySnapshot: [] },
   TraderPoolDailyTop: { TraderPoolDailySnapshot: [] },
   SwapEventOutliers: { SwapEvent: [] },
-  PoolsForLeaderboard: { Pool: [] },
+  PoolsForVolume: { Pool: [] },
   PoolDailyVolume: { PoolDailyVolumeSnapshot: [] },
   AggregatorDailyTop: { AggregatorDailySnapshot: [] },
   AggregatorDailyTopIncludingSystem: { AggregatorDailySnapshot: [] },
   BrokerTraderDailyTop: { BrokerTraderDailySnapshot: [] },
   BrokerAggregatorDailyTop: { BrokerAggregatorDailySnapshot: [] },
-  LeaderboardWindowLatest: { LeaderboardWindowSnapshot: [] },
-  BrokerLeaderboardWindowLatest: { BrokerLeaderboardWindowSnapshot: [] },
-  LeaderboardWindowFirstDayLatest: { LeaderboardWindowSnapshot: [] },
-  BrokerLeaderboardWindowFirstDayLatest: {
-    BrokerLeaderboardWindowSnapshot: [],
+  VolumeWindowLatest: { volumeWindowSnapshots: [] },
+  BrokerVolumeWindowLatest: { brokerVolumeWindowSnapshots: [] },
+  VolumeWindowFirstDayLatest: { volumeWindowFirstDaySnapshots: [] },
+  BrokerVolumeWindowFirstDayLatest: {
+    brokerVolumeWindowFirstDaySnapshots: [],
   },
-  LeaderboardPartialOverlapTraders: { TraderDailySnapshot: [] },
-  BrokerLeaderboardPartialOverlapTraders: { BrokerTraderDailySnapshot: [] },
-  LeaderboardTodayTraders: { TraderDailySnapshot: [] },
-  BrokerLeaderboardTodayTraders: { BrokerTraderDailySnapshot: [] },
-  LeaderboardYesterdayTraders: { TraderDailySnapshot: [] },
-  BrokerLeaderboardYesterdayTraders: { BrokerTraderDailySnapshot: [] },
+  VolumePartialOverlapTraders: { volumePartialOverlapTraders: [] },
+  BrokerVolumePartialOverlapTraders: { brokerVolumePartialOverlapTraders: [] },
+  VolumeTodayTraders: { volumeTodayTraders: [] },
+  BrokerVolumeTodayTraders: { brokerVolumeTodayTraders: [] },
+  VolumeYesterdayTraders: { volumeYesterdayTraders: [] },
+  BrokerVolumeYesterdayTraders: { brokerVolumeYesterdayTraders: [] },
   BrokerAggregatorTraderDayMarkersById: { BrokerAggregatorTraderDayMarker: [] },
 };
 
@@ -249,8 +249,8 @@ test.describe("visual snapshots", () => {
     });
   });
 
-  test("leaderboard page", async ({ page }) => {
-    // Return empty data for all leaderboard-specific operations so the page
+  test("volume page", async ({ page }) => {
+    // Return empty data for all volume-specific operations so the page
     // renders the loaded empty state rather than a spinner or error.
     await mockEmptyGraphQLOps(page, [
       "TraderDailyTop",
@@ -258,35 +258,35 @@ test.describe("visual snapshots", () => {
       "TraderDailyWindowTop",
       "TraderPoolDailyTop",
       "SwapEventOutliers",
-      "PoolsForLeaderboard",
+      "PoolsForVolume",
       "PoolDailyVolume",
       "AggregatorDailyTop",
       "AggregatorDailyTopIncludingSystem",
       "BrokerTraderDailyTop",
       "BrokerAggregatorDailyTop",
-      "LeaderboardWindowLatest",
-      "BrokerLeaderboardWindowLatest",
-      "LeaderboardWindowFirstDayLatest",
-      "BrokerLeaderboardWindowFirstDayLatest",
-      "LeaderboardPartialOverlapTraders",
-      "BrokerLeaderboardPartialOverlapTraders",
-      "LeaderboardTodayTraders",
-      "BrokerLeaderboardTodayTraders",
-      "LeaderboardYesterdayTraders",
-      "BrokerLeaderboardYesterdayTraders",
+      "VolumeWindowLatest",
+      "BrokerVolumeWindowLatest",
+      "VolumeWindowFirstDayLatest",
+      "BrokerVolumeWindowFirstDayLatest",
+      "VolumePartialOverlapTraders",
+      "BrokerVolumePartialOverlapTraders",
+      "VolumeTodayTraders",
+      "BrokerVolumeTodayTraders",
+      "VolumeYesterdayTraders",
+      "BrokerVolumeYesterdayTraders",
       "BrokerAggregatorTraderDayMarkersById",
     ]);
 
-    await page.goto("/leaderboard");
+    await page.goto("/volume");
 
     await expect(
-      page.getByRole("heading", { name: /leaderboard/i }),
+      page.getByRole("heading", { name: "Volume", exact: true }),
     ).toBeVisible();
 
     await page.waitForLoadState("networkidle");
     await freezeAnimations(page);
 
-    await expect(page).toHaveScreenshot("leaderboard.png", {
+    await expect(page).toHaveScreenshot("volume.png", {
       maxDiffPixelRatio: 0.03, // cross-platform font anti-aliasing; see pools-list comment
       mask: timestampMasks(page),
       fullPage: false,

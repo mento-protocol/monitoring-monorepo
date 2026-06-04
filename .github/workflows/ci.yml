@@ -140,6 +140,7 @@ jobs:
               - .github/workflows/ci.yml
             alerts:
               - alerts/infra/onchain-event-handler/**
+              - alerts/infra/oncall-announcer/**
               - alerts/infra/scripts/**
               # Listener filter feeds into the handler — a regression like
               # dropping blockHash from the QuickNode filter would silently
@@ -244,7 +245,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.ui == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       checks: write
       contents: read
@@ -486,7 +487,7 @@ jobs:
         if: always()
 
   alerts:
-    name: Quality Checks (alerts-onchain-event-handler)
+    name: Quality Checks (alerts Cloud Functions)
     needs: changes
     if: needs.changes.outputs.alerts == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -504,17 +505,34 @@ jobs:
       - name: Install handler deploy dependencies
         working-directory: alerts/infra/onchain-event-handler
         run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+      # Same package-local install for the on-call announcer Cloud Function
+      # source root.
+      - name: Install on-call announcer deploy dependencies
+        working-directory: alerts/infra/oncall-announcer
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
       - name: Typecheck (onchain-event-handler)
         working-directory: alerts/infra/onchain-event-handler
+        run: pnpm run typecheck
+      - name: Typecheck (oncall-announcer)
+        working-directory: alerts/infra/oncall-announcer
         run: pnpm run typecheck
       - name: Lint
         working-directory: alerts/infra/onchain-event-handler
         run: pnpm run lint
+      - name: Lint (oncall-announcer)
+        working-directory: alerts/infra/oncall-announcer
+        run: pnpm run lint
       - name: Knip
         working-directory: alerts/infra/onchain-event-handler
         run: pnpm run knip
+      - name: Knip (oncall-announcer)
+        working-directory: alerts/infra/oncall-announcer
+        run: pnpm run knip
       - name: Test with coverage
         working-directory: alerts/infra/onchain-event-handler
+        run: pnpm run test:coverage
+      - name: Test with coverage (oncall-announcer)
+        working-directory: alerts/infra/oncall-announcer
         run: pnpm run test:coverage
       # Verify event-hashes.json is in sync with safe-abi.json. The handler
       # computes Safe event topic hashes at runtime from safe-abi.json
@@ -544,6 +562,12 @@ jobs:
           fail_ci_if_error: false
           flags: alerts-onchain-event-handler
           directory: alerts/infra/onchain-event-handler/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        with:
+          fail_ci_if_error: false
+          flags: alerts-oncall-announcer
+          directory: alerts/infra/oncall-announcer/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

@@ -83,7 +83,7 @@ interface TimeSeriesChartCardProps {
   /**
    * Plot area height in pixels. Defaults to `ROW_CHART_HEIGHT_PX` (200).
    * Charts that want more vertical real estate can override — the
-   * leaderboard's per-pool stacked chart uses ~340 to let peaks reach
+   * volume page's per-pool stacked chart uses ~340 to let peaks reach
    * close to the headline figure instead of bottoming out in 1/3 of
    * the available card height.
    */
@@ -100,7 +100,7 @@ interface TimeSeriesChartCardProps {
    *   uses Plotly autorange so trace toggling can re-fit, so this
    *   value is *not* read by the y-axis math. It still controls the
    *   outer card bottom padding — values < 0.1 tighten the gap
-   *   between the legend row and the card edge (the leaderboard chart
+   *   between the legend row and the card edge (the volume chart
    *   passes 0 for this reason).
    */
   yAxisTopPadding?: number;
@@ -116,7 +116,7 @@ interface TimeSeriesChartCardProps {
   /**
    * Custom range pill set, defaulting to the global `RANGES`
    * (`1W / 1M / All`). Charts with a different cadence — e.g. the
-   * leaderboard's per-pool stacked chart, which drops 1W in favor of
+   * volume page's per-pool stacked chart, which drops 1W in favor of
    * 3M — pass their own array here.
    */
   ranges?: ReadonlyArray<{ key: RangeKey; label: string }>;
@@ -170,7 +170,7 @@ export function TimeSeriesChartCard({
   const crossFadeEnabled =
     isStacked && !useCustomLegend && breakdownCount >= 1 && breakdownCount <= 3;
   // Custom-legend visibility state. Keyed by `BreakdownSeries.id` (a
-  // stable identity supplied by the caller — the leaderboard passes the
+  // stable identity supplied by the caller — the volume page passes the
   // poolId) so user intent ("hide USDC/USDm Monad") survives both
   // breakdown reshuffles (cursor finding on 88147ad) AND the rank-based
   // color/name churn that can happen after a range switch (codex finding

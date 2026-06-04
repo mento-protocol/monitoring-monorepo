@@ -73,7 +73,7 @@ export async function selfHealTokenDecimals(
   // VPs were previously skipped because they don't go through the local
   // priceDifference recompute path. But `buildSwapTraderFields` still uses
   // `token0Decimals` / `token1Decimals` to compute `volumeUsdWei` and
-  // leaderboard snapshots — a non-18-decimal USD leg would stay mis-scaled
+  // volume snapshots — a non-18-decimal USD leg would stay mis-scaled
   // for a VP with a deploy-time decimal blip. Cache:true effect, so the
   // RPC pair fires once per VP across the run regardless of how many
   // events touch it.
@@ -221,7 +221,7 @@ export async function selfHealWrappedExchangeId(
   // can't run, and the swap handler immediately persists
   // `SwapEvent.volumeUsdWei` from default 18/18 decimals → mis-scaled
   // forever (the later reverse-link backfill only updates the Pool
-  // row, not historical SwapEvent / leaderboard rows). RPC-fetch the
+  // row, not historical SwapEvent / volume rows). RPC-fetch the
   // struct via the same effect `BiPoolManager.ExchangeCreated` uses
   // and materialize a row keyed on the bytecode-extracted
   // exchangeProvider/exchangeId. Skip on RPC failure (transient) and

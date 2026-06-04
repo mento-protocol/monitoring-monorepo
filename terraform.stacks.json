@@ -59,7 +59,7 @@
       "id": "alerts-delivery",
       "name": "Alerts Delivery",
       "path": "alerts/infra",
-      "description": "Event-driven alert delivery: QuickNode webhooks, Cloud Function, Sentry bridge, Slack channel lifecycle, and related GCP resources.",
+      "description": "Event-driven alert delivery: QuickNode webhooks, Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, and related GCP resources.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",
