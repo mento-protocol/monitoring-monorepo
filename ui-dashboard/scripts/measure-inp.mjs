@@ -40,6 +40,13 @@
 import { chromium } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import {
+  classifyTerminalState,
+  EMPTY_VOLUME_MARKER_PATTERN,
+  resolveReadyTimeout,
+  unavailableTerminalState,
+  VOLUME_READY_TIMEOUT_MS,
+} from "./measure-inp-lib.mjs";
 
 const PREVIEW_URL = process.env.PREVIEW_URL;
 const BYPASS_HEADERS_JSON = process.env.BYPASS_HEADERS_JSON;
@@ -115,6 +122,7 @@ const SURFACES = [
     // Volume `SortableTh` only mounts once the table has columns, so it's
     // a reliable "rows have loaded" anchor.
     readySelector: 'th[aria-sort] button:has-text("Volume")',
+    readyTimeout: VOLUME_READY_TIMEOUT_MS,
     async interact(page) {
       // The volume page ships with one window active by default; clicking
       // a sibling triggers a `window.history.replaceState`-backed re-render
@@ -159,6 +167,7 @@ const SURFACES = [
     // gate purposes, and Playwright's strict-mode locator would
     // otherwise throw on the multi-match.
     readySelector: 'th[aria-sort] button:has-text("Volume")',
+    readyTimeout: VOLUME_READY_TIMEOUT_MS,
     async interact(page) {
       // Click the Volume column header to toggle sort. The
       // `useTableSort` hook re-derives the sorted list on each click, so
@@ -270,7 +279,52 @@ async function measureSurface(browser, surface) {
       );
     });
 
-    await page.waitForSelector(surface.readySelector, { timeout: 20_000 });
+    try {
+      await page.waitForSelector(surface.readySelector, {
+        timeout: resolveReadyTimeout(surface),
+      });
+    } catch (err) {
+      // The bare "Timeout 20000ms exceeded" can't tell slow-render from
+      // empty/error data — both look identical and each needs a different
+      // fix. Classify the terminal state the page actually settled into so
+      // the next failure self-diagnoses instead of forcing a re-investigation
+      // (#775). Loading skeleton still up → slow data fetch/render; ErrorBox
+      // → the indexer's GraphQL endpoint is erroring; EmptyBox → the window
+      // legitimately has no rows. Still fails closed regardless.
+      //
+      // This classification is best-effort: if the page itself died during the
+      // wait (`Target closed`, crash, GC), `page.evaluate` throws too. Guard it
+      // so the secondary failure can't erase the primary timeout — that error
+      // is the more useful signal, so we always rethrow it, annotated either
+      // with the terminal state or with why the classification was unavailable.
+      let cause;
+      try {
+        // The empty-marker regex is injected from the lib (page.evaluate can't
+        // close over a module import) so the pattern stays single-sourced and
+        // unit-tested.
+        const diag = await page.evaluate(
+          (emptyPattern) => ({
+            // Prefix-match so the shared skeletons that label themselves
+            // "Loading table" / "Loading metrics" / "Loading chart" (via the
+            // status-role helper in components/skeletons.tsx) are recognized as
+            // loading too, not just the bare "Loading" feedback Skeleton.
+            loading: !!document.querySelector(
+              '[role="status"][aria-label^="Loading"]',
+            ),
+            error: !!document.querySelector('[role="alert"]'),
+            empty: new RegExp(emptyPattern, "i").test(document.body.innerText),
+          }),
+          EMPTY_VOLUME_MARKER_PATTERN,
+        );
+        cause = classifyTerminalState(diag);
+      } catch (diagErr) {
+        const diagMsg =
+          diagErr instanceof Error ? diagErr.message : String(diagErr);
+        cause = unavailableTerminalState(diagMsg);
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`${msg} — terminal state: ${cause}`);
+    }
     await surface.interact(page);
 
     // Settle window: let the browser paint and deliver every
