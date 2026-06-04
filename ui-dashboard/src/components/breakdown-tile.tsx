@@ -9,6 +9,7 @@ export function BreakdownTile({
   isLoading,
   hasError,
   format,
+  subFormat,
   totalPrefix = "",
   href,
   subtitle,
@@ -21,11 +22,15 @@ export function BreakdownTile({
   isLoading: boolean;
   hasError: boolean;
   format: (v: number) => string;
+  /** Formatter for the 24h/7d/30d sub-values when they carry different units
+   * than the headline (e.g. a % change under a $ total). Defaults to `format`. */
+  subFormat?: ((v: number) => string) | undefined;
   /** Prefix for the headline value only (e.g. "≈ "), not applied to sub-values */
   totalPrefix?: string | undefined;
   href?: string | undefined;
   subtitle?: string | undefined;
 }) {
+  const formatSub = subFormat ?? format;
   const mainValue = isLoading
     ? "…"
     : total === null
@@ -66,7 +71,7 @@ export function BreakdownTile({
               <span key={s.label}>
                 <span className="text-slate-500">{s.label}</span>{" "}
                 <span className="text-slate-400">
-                  {s.value === null ? "N/A" : format(s.value)}
+                  {s.value === null ? "N/A" : formatSub(s.value)}
                 </span>
               </span>
             ))}

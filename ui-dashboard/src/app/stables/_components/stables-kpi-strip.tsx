@@ -28,6 +28,39 @@ function formatSignedUSD(v: number): string {
   return `${v >= 0 ? "+" : "-"}${formatUSD(Math.abs(v))}`;
 }
 
+// Signed percent for the "7d net change" sub-row — distinguishes it from the
+// $ net-change sub-row on the "Circulating supply" tile.
+function formatSignedPct(v: number): string {
+  return `${v >= 0 ? "+" : "-"}${Math.abs(v).toFixed(1)}%`;
+}
+
+// Sum a per-window USD net change across the rollup, skipping tokens with no
+// oracle rate (null). Returns null only when no token contributes — mirrors
+// `totalNetChange7dUsd` so the sub-row renders "N/A" on rate-less data.
+function sumWindowUsd(
+  rollup: ReadonlyMap<string, TokenAgg>,
+  pick: (agg: TokenAgg) => number | null,
+): number | null {
+  return Array.from(rollup.values()).reduce<number | null>((acc, agg) => {
+    const v = pick(agg);
+    return v == null ? acc : (acc ?? 0) + v;
+  }, null);
+}
+
+// Aggregate % change for a window: net change over the baseline supply, where
+// baseline = current − net change. Computed on the rollup basis (same token set
+// as the numerator) — not the headline `totalUsd`, which is sourced from a
+// different feed. Null when the base is unknown or zero.
+function windowPct(
+  currentUsd: number | null,
+  netChangeUsd: number | null,
+): number | null {
+  if (currentUsd == null || netChangeUsd == null) return null;
+  const baseline = currentUsd - netChangeUsd;
+  if (baseline === 0) return null;
+  return (netChangeUsd / baseline) * 100;
+}
+
 type Props = {
   // Per-token current rows. Transfer-tracked tokens come from current
   // StableTokenSupply state; Celo CDP rows fall back to latest daily snapshots.
@@ -102,35 +135,43 @@ export function StablesKpiStrip({
     }, null);
   }, [latestPerToken, custodySnapshots, latestCustodyPerToken, rates]);
 
-  const totalNetChange7dUsd = useMemo<number | null>(() => {
-    return Array.from(rollup.values()).reduce<number | null>(
-      (acc, agg) =>
-        agg.netChange7dUsd == null ? acc : (acc ?? 0) + agg.netChange7dUsd,
-      null,
-    );
+  // Per-window aggregates feeding both KPI sub-rows. `rollupCurrentUsd` is the
+  // rollup-basis current supply (Σ totalSupplyUsdLatest) — used as the % base
+  // for the "7d net change" tile so numerator and denominator share a token set.
+  const windows = useMemo(() => {
+    return {
+      net1dUsd: sumWindowUsd(rollup, (a) => a.netChange1dUsd),
+      net7dUsd: sumWindowUsd(rollup, (a) => a.netChange7dUsd),
+      net30dUsd: sumWindowUsd(rollup, (a) => a.netChange30dUsd),
+      currentUsd: sumWindowUsd(rollup, (a) => a.totalSupplyUsdLatest),
+    };
   }, [rollup]);
+
+  const totalNetChange7dUsd = windows.net7dUsd;
 
   return (
     <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <BreakdownTile
         label="Circulating supply"
         total={totalUsd}
-        sub24h={null}
-        sub7d={null}
-        sub30d={null}
+        sub24h={windows.net1dUsd}
+        sub7d={windows.net7dUsd}
+        sub30d={windows.net30dUsd}
         isLoading={isLoading}
         hasError={hasError}
         format={(v) => formatUSD(v)}
+        subFormat={formatSignedUSD}
       />
       <BreakdownTile
         label="7d net change"
         total={totalNetChange7dUsd}
-        sub24h={null}
-        sub7d={null}
-        sub30d={null}
+        sub24h={windowPct(windows.currentUsd, windows.net1dUsd)}
+        sub7d={windowPct(windows.currentUsd, windows.net7dUsd)}
+        sub30d={windowPct(windows.currentUsd, windows.net30dUsd)}
         isLoading={isLoading}
         hasError={hasError}
         format={formatSignedUSD}
+        subFormat={formatSignedPct}
       />
       <MoverTile
         label="Biggest expansion (7d)"
@@ -166,9 +207,9 @@ function MoverTile({
     <BreakdownTile
       label={label}
       total={agg?.netChange7dUsd ?? null}
-      sub24h={null}
-      sub7d={null}
-      sub30d={null}
+      sub24h={agg?.netChange1dUsd ?? null}
+      sub7d={agg?.netChange7dUsd ?? null}
+      sub30d={agg?.netChange30dUsd ?? null}
       isLoading={isLoading}
       hasError={hasError}
       format={formatSignedUSD}
