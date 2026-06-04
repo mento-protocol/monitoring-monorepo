@@ -106,3 +106,13 @@ resource "github_actions_secret" "integration_probe_openocean_api_key" {
   secret_name = "OPENOCEAN_API_KEY"
   value       = var.openocean_api_key
 }
+
+resource "github_actions_secret" "integration_probe_squid_integrator_id" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.squid_integrator_id == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "SQUID_INTEGRATOR_ID"
+  value       = var.squid_integrator_id
+}

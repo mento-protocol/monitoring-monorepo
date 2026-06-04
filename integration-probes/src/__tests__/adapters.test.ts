@@ -1237,6 +1237,9 @@ describe("aggregator quote builders", () => {
         quoteOnly?: boolean;
       },
     ).toMatchObject({ quoteOnly: true });
+    expect(JSON.stringify(squidQuoteRequest?.init?.headers)).toContain(
+      "squid-id",
+    );
 
     const kyberRequest = AGGREGATOR_ADAPTERS.find(
       (item) => item.id === "kyberswap",

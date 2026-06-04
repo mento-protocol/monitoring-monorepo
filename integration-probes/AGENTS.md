@@ -68,3 +68,5 @@ pnpm --filter @mento-protocol/integration-probes knip
   `OKX_DEX_PASSPHRASE`.
 - `LIFI_API_KEY` authenticates LI.FI/Jumper quote probes with
   `x-lifi-api-key`; keep it server-side and Terraform-managed.
+- `SQUID_INTEGRATOR_ID` authenticates Squid quote probes with
+  `x-integrator-id`; keep it server-side and Terraform-managed.
