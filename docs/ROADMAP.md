@@ -58,7 +58,7 @@ Last updated: 2026-05-18
 - [x] **Error boundaries + loading skeletons** — route-level error handling
 - [x] **SWR backoff + 429 retry gating** — visibility/online-aware polling, reduced Envio rate-limit pressure
 - [x] **Google Auth** (NextAuth.js) — restricted to `@mentolabs.xyz` accounts
-- [x] **Auth hardening** — verify Google `hd` + `email_verified`, middleware-enforced allowlist, 1h JWT
+- [x] **Auth hardening** — verify Google `hd` + `email_verified`, middleware-enforced allowlist, sliding JWT session
 - [x] **Security** — full CSP + HSTS headers; unauthenticated label endpoints retired; Plotly XSS escape; RSC label-leak guard; callback-URL sanitizer
 - [x] **Chain icon prefix** — chain identifier on pool IDs in multichain view
 - [x] **CDPs dashboard routes** — `/cdps` market overview and `/cdps/[symbol]` detail views backed by Liquity v2 GraphQL queries
