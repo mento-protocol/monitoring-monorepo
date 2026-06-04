@@ -31,21 +31,6 @@ export type StableTokenCustodyDailySnapshot = {
   dailyUnlockedAmount: string;
 };
 
-export type StableTokenCustodyState = {
-  id: string;
-  chainId: number;
-  tokenAddress: string;
-  tokenSymbol: string;
-  source: StableSupplySource;
-  tokenDecimals: number;
-  managerAddress: string;
-  lockedSupply: string;
-  currentDayBucket: string;
-  lockedTodayBucket: string;
-  unlockedTodayBucket: string;
-  lastEventTimestamp: string;
-};
-
 export type V2StableSupplyChangeEvent = {
   id: string;
   chainId: number;

@@ -3,7 +3,6 @@ import {
   buildTokenUsdTimeSeries,
   circulatingSupplyForSnapshot,
   computeChartStartSeconds,
-  latestCirculatingSupplyForSnapshot,
   rangeStartSeconds,
   rollupByToken,
   sumTotalUsdSeries,
@@ -228,7 +227,7 @@ describe("rollupByToken", () => {
     expect(agg?.totalSupplyUsdLatest).toBeCloseTo(286, 0);
   });
 
-  it("uses the newest custody row for latest totals while preserving historical bucket math", () => {
+  it("does not subtract newer custody from an older latest supply snapshot", () => {
     const rawSupply = String(BigInt(300) * BigInt(10) ** BigInt(18));
     const lockedSupply = String(BigInt(120) * BigInt(10) ** BigInt(18));
     const row = snapshot({
@@ -251,9 +250,6 @@ describe("rollupByToken", () => {
     expect(circulatingSupplyForSnapshot(row, custody)).toBe(
       BigInt(300) * BigInt(10) ** BigInt(18),
     );
-    expect(latestCirculatingSupplyForSnapshot(row, custody)).toBe(
-      BigInt(180) * BigInt(10) ** BigInt(18),
-    );
 
     const rollup = rollupByToken(
       [row],
@@ -262,10 +258,8 @@ describe("rollupByToken", () => {
       custody,
     );
     const agg = rollup.get("42220|0xc|V3_LIQUITY");
-    expect(agg?.latestTotalSupply).toBe(BigInt(180) * BigInt(10) ** BigInt(18));
-    expect(agg?.latestLockedSupply).toBe(
-      BigInt(120) * BigInt(10) ** BigInt(18),
-    );
+    expect(agg?.latestTotalSupply).toBe(BigInt(300) * BigInt(10) ** BigInt(18));
+    expect(agg?.latestLockedSupply).toBe(BigInt(0));
   });
 
   it("sorts custody rows defensively before timestamp lookups", () => {

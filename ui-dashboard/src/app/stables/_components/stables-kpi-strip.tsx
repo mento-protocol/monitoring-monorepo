@@ -6,8 +6,8 @@ import { formatUSD, parseWei } from "@/lib/format";
 import { displayLabel, effectiveOracleRate } from "@/lib/stables";
 import type { OracleRateMap } from "@/lib/tokens";
 import {
+  circulatingSupplyForSnapshot,
   groupCustodySnapshotsByToken,
-  latestCirculatingSupplyForSnapshot,
   rollupByToken,
   unionCustodySnapshotsWithLatest,
   winnersAndLosers7d,
@@ -82,7 +82,7 @@ export function StablesKpiStrip({
       if (rate == null) return acc;
       const custodyRows =
         custodyByToken.get(`${row.chainId}|${row.tokenAddress}`) ?? [];
-      const circulating = latestCirculatingSupplyForSnapshot(row, custodyRows);
+      const circulating = circulatingSupplyForSnapshot(row, custodyRows);
       const usd = parseWei(circulating.toString(), row.tokenDecimals) * rate;
       return (acc ?? 0) + usd;
     }, null);

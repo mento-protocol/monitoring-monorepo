@@ -157,23 +157,6 @@ export function circulatingSupplyForSnapshot(
   return rawSupply >= locked ? rawSupply - locked : BigInt(0);
 }
 
-function latestLockedSupplyForToken(
-  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot>,
-): bigint {
-  const sorted = sortCustodyRowsAsc(custodyRows);
-  const latest = sorted[sorted.length - 1];
-  return latest ? BigInt(latest.lockedSupply) : BigInt(0);
-}
-
-export function latestCirculatingSupplyForSnapshot(
-  row: StableSupplyDailySnapshot,
-  custodyRows: ReadonlyArray<StableTokenCustodyDailySnapshot> = [],
-): bigint {
-  const rawSupply = BigInt(row.totalSupply);
-  const locked = latestLockedSupplyForToken(custodyRows);
-  return rawSupply >= locked ? rawSupply - locked : BigInt(0);
-}
-
 function pickBaselineSupply(
   rows: ReadonlyArray<StableSupplyDailySnapshot>,
   sevenDayCutoff: bigint,
@@ -207,8 +190,9 @@ function buildTokenAgg(
     return 0;
   });
   const latest = rows[rows.length - 1]!;
-  const latestLockedSupply = latestLockedSupplyForToken(custodyRows);
-  const latestSupply = latestCirculatingSupplyForSnapshot(latest, custodyRows);
+  const latestTimestamp = BigInt(latest.timestamp);
+  const latestLockedSupply = lockedSupplyAt(custodyRows, latestTimestamp);
+  const latestSupply = circulatingSupplyForSnapshot(latest, custodyRows);
   const baselineSupply = pickBaselineSupply(rows, sevenDayCutoff, custodyRows);
   const netChange7d = latestSupply - baselineSupply;
   const change7dPct =
@@ -234,7 +218,7 @@ function buildTokenAgg(
     tokenDecimals: latest.tokenDecimals,
     latestTotalSupply: latestSupply,
     latestLockedSupply,
-    latestTimestamp: BigInt(latest.timestamp),
+    latestTimestamp,
     totalSupplyUsdLatest: usd(latestSupply),
     change7dPct,
     netChange7d,
