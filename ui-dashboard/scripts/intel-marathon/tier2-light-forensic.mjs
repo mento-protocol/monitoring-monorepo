@@ -663,7 +663,9 @@ async function main() {
           ...derived.tags,
         ]);
         const newEntry = {
-          name: existingEntry?.name || derived.name || "(unknown)",
+          // Tags-only entries keep an empty name (rendered as "—"); never
+          // stuff a junk "(unknown)" placeholder over the visible address.
+          name: existingEntry?.name || derived.name || "",
           tags: Array.from(mergedTags)
             .slice(0, 20)
             .map((t) => String(t).slice(0, 50)),
