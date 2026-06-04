@@ -146,10 +146,12 @@ pnpm integrations:probe --adapter openocean,relay --chain 42220 --pair-limit 1 -
 
 `INTEGRATION_PROBES_HASURA_URL` can override `NEXT_PUBLIC_HASURA_URL` for pool
 discovery. `LIFI_API_KEY` authenticates LI.FI/Jumper quote probes with the
-`x-lifi-api-key` header so scheduled runs avoid public quote limits, and
-`OPENOCEAN_API_KEY` enables the OpenOcean Pro endpoint for OpenOcean checks.
-Both are managed by the platform Terraform stack from `lifi_api_key` and
-`openocean_api_key`. The same platform stack mirrors
+`x-lifi-api-key` header so scheduled runs avoid public quote limits,
+`OPENOCEAN_API_KEY` enables the OpenOcean Pro endpoint for OpenOcean checks,
+and `SQUID_INTEGRATOR_ID` identifies Mento's Squid quote probes through the
+`x-integrator-id` header. These are managed by the platform Terraform stack
+from `lifi_api_key`, `openocean_api_key`, and `squid_integrator_id`. The same
+platform stack mirrors
 `INTEGRATION_PROBES_HASURA_URL`, `UPSTASH_REDIS_REST_URL`, and
 `UPSTASH_REDIS_REST_TOKEN` into repo-level GitHub Actions secrets so scheduled
 writers use the same Terraform-owned runtime as the dashboard. Adapter

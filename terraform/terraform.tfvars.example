@@ -49,6 +49,11 @@ upstash_api_key = "..."
 # `count`-gated so `terraform apply` succeeds without it.
 # openocean_api_key = "..."
 
+# Squid integrator id for the scheduled integration-probes workflow.
+# Leave empty until provisioned; the GitHub Actions secret resource is
+# `count`-gated so `terraform apply` succeeds without it.
+# squid_integrator_id = "..."
+
 # ── Arkham Intelligence ───────────────────────────────────────────────────────
 # API key for the nightly /api/arkham/enrich cron that tags Mento counterparties.
 # Apply for access at https://intel.arkm.com/api — gated, no self-serve signup.
