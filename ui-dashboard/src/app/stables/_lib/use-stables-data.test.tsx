@@ -34,7 +34,7 @@ function changeEvent(
     counterparty: overrides.counterparty ?? "0xcounterparty",
     caller: overrides.caller ?? "0xcaller",
     txTo: overrides.txTo ?? "0xto",
-    isSystemCaller: overrides.isSystemCaller ?? false,
+    isProtocolOwnedCaller: overrides.isProtocolOwnedCaller ?? false,
     amount: overrides.amount,
     txHash: overrides.txHash ?? `0x${overrides.id}`,
     blockNumber: overrides.blockNumber ?? "123",

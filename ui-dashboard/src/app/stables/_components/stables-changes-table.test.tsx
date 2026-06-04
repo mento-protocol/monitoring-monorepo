@@ -38,7 +38,7 @@ describe("StablesChangesTable", () => {
             counterparty: "0xcounterparty",
             caller: "0xcaller",
             txTo: "0xto",
-            isSystemCaller: true,
+            isProtocolOwnedCaller: true,
             amount: "1000000000000000000",
             txHash: "0xtx",
             blockNumber: "1",
