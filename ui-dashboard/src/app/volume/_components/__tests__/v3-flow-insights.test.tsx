@@ -162,6 +162,7 @@ describe("V3FlowInsights", () => {
           volumeUsdWei: "100000000000000000000",
           feesPaidUsdWei: "0",
           isSystemAddress: false,
+          aggregatorKeys: [],
           lastSeenTimestamp: timestamp,
         },
       ],
