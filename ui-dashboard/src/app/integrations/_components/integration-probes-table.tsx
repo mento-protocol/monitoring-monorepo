@@ -7,6 +7,15 @@ import type {
 import { IntegrationStatusBadge } from "./integration-status-badge";
 
 const CHAIN_ORDER = [42220, 143];
+const PREVIEW_VENUE_KEYS = [
+  "dex",
+  "tool",
+  "toolName",
+  "provider",
+  "protocol",
+  "source",
+  "providerType",
+] as const;
 
 export function IntegrationProbesTable({
   snapshot,
@@ -154,17 +163,31 @@ function evidenceText(pair: IntegrationProbeChain["pairs"][number]): string {
       .map((item) => `${item.type}: ${item.value}`)
       .join(" | ");
   }
+  if (pair.status === "fail") {
+    const venue = selectedVenue(pair);
+    const parts = [
+      "no Mento v3 router/pool address evidence",
+      venue ? `selected venue: ${venue}` : null,
+      pair.txTarget ? `tx target: ${pair.txTarget}` : null,
+      pair.sourceLabels.length > 0
+        ? `labels: ${pair.sourceLabels.join(", ")}`
+        : null,
+    ].filter((part): part is string => part !== null);
+    return parts.join("; ");
+  }
+  if (pair.error) return pair.error;
   if (pair.sourceLabels.length > 0) {
     return `label only: ${pair.sourceLabels.join(", ")}`;
   }
-  return pair.error ?? pair.downstreamProvider ?? "no address evidence";
+  return selectedVenue(pair) ?? "no address evidence";
 }
 
 function metaText(pair: IntegrationProbeChain["pairs"][number]): string {
+  const venue = selectedVenue(pair);
   const parts = [
     pair.httpStatus === null ? null : `HTTP ${pair.httpStatus}`,
     pair.latencyMs === null ? null : `${pair.latencyMs}ms`,
-    pair.downstreamProvider ? `provider ${pair.downstreamProvider}` : null,
+    venue ? `venue ${venue}` : null,
     pair.routeVariant ? `variant ${pair.routeVariant}` : null,
     pair.routeAmountUsd ? `amount ${pair.routeAmountUsd}` : null,
     pair.attemptCount && pair.attemptCount > 1
@@ -172,6 +195,43 @@ function metaText(pair: IntegrationProbeChain["pairs"][number]): string {
       : null,
   ].filter((part): part is string => part !== null);
   return parts.length > 0 ? parts.join(" | ") : "quote not requested";
+}
+
+function selectedVenue(
+  pair: IntegrationProbeChain["pairs"][number],
+): string | null {
+  if (
+    pair.downstreamProvider &&
+    !isSourceOnlyVenue(pair, pair.downstreamProvider)
+  ) {
+    return pair.downstreamProvider;
+  }
+  return venueFromPreview(pair);
+}
+
+function venueFromPreview(
+  pair: IntegrationProbeChain["pairs"][number],
+): string | null {
+  const preview = pair.responsePreview;
+  if (!preview) return null;
+  for (const key of PREVIEW_VENUE_KEYS) {
+    const venue = previewVenueValue(preview, key);
+    if (!venue || isSourceOnlyVenue(pair, venue)) continue;
+    return venue;
+  }
+  return null;
+}
+
+function previewVenueValue(preview: string, key: string): string | null {
+  const match = preview.match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`));
+  return match?.[1] ?? null;
+}
+
+function isSourceOnlyVenue(
+  pair: IntegrationProbeChain["pairs"][number],
+  venue: string,
+): boolean {
+  return pair.status === "fail" && pair.sourceLabels.includes(venue);
 }
 
 function kindLabel(kind: IntegrationProbeAggregator["kind"]): string {
