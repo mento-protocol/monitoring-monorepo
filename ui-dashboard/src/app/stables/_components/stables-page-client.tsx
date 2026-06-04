@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useOracleRates } from "@/hooks/use-oracle-rates";
+import type { OracleRateMap } from "@/lib/tokens";
 import type { RangeKey } from "../_lib/types";
 import {
   useStablesCustodyDailySnapshots,
@@ -10,6 +11,7 @@ import {
   useStablesLatestPerToken,
   useStablesChanges,
 } from "../_lib/use-stables-data";
+import { useSupplyChangeThreshold } from "../_lib/use-supply-change-threshold";
 import { StablesChangesTable } from "./stables-changes-table";
 import { StablesHeroChart } from "./stables-hero-chart";
 import { StablesKpiStrip } from "./stables-kpi-strip";
@@ -49,13 +51,6 @@ function StablesContent(): React.JSX.Element {
     isLoading: custodySnapshotsLoading,
     capped: custodySnapshotsCapped,
   } = useStablesCustodyDailySnapshots(range);
-  const {
-    events: changeEvents,
-    error: changesError,
-    isLoading: changesLoading,
-    capped: changesCapped,
-  } = useStablesChanges("7d");
-
   const custodyDegraded =
     latestCustodyError != null || custodySnapshotsError != null;
   const effectiveLatestCustodyPerToken = custodyDegraded
@@ -114,12 +109,41 @@ function StablesContent(): React.JSX.Element {
         capped={snapshotsCapped || (!custodyDegraded && custodySnapshotsCapped)}
       />
 
-      <StablesChangesTable
-        events={changeEvents}
-        isLoading={changesLoading}
-        hasError={changesError != null}
-        capped={changesCapped}
-      />
+      <StablesChangesSection rates={rates} ratesLoading={ratesLoading} />
     </div>
+  );
+}
+
+function StablesChangesSection({
+  rates,
+  ratesLoading,
+}: {
+  rates: OracleRateMap;
+  ratesLoading: boolean;
+}): React.JSX.Element {
+  const {
+    minimumUsdValue: minimumSupplyChangeUsd,
+    updateMinimumUsdValue: updateMinimumSupplyChangeUsd,
+    resetMinimumUsdValue: resetMinimumSupplyChangeUsd,
+  } = useSupplyChangeThreshold();
+  const {
+    events: changeEvents,
+    error: changesError,
+    isLoading: changesLoading,
+    capped: changesCapped,
+    unpricedEventsCount: changesUnpricedEventsCount,
+  } = useStablesChanges("7d", 0, rates, minimumSupplyChangeUsd);
+
+  return (
+    <StablesChangesTable
+      events={changeEvents}
+      minimumUsdValue={minimumSupplyChangeUsd}
+      onMinimumUsdValueChange={updateMinimumSupplyChangeUsd}
+      onMinimumUsdValueReset={resetMinimumSupplyChangeUsd}
+      isLoading={changesLoading || ratesLoading}
+      hasError={changesError != null}
+      capped={changesCapped}
+      unpricedEventsCount={changesUnpricedEventsCount}
+    />
   );
 }

@@ -70,6 +70,15 @@ vi.mock("../_lib/use-stables-data", () => ({
     error: mockChanges.error,
     isLoading: mockChanges.isLoading,
     capped: mockChanges.capped,
+    unpricedEventsCount: 0,
+  }),
+}));
+
+vi.mock("../_lib/use-supply-change-threshold", () => ({
+  useSupplyChangeThreshold: () => ({
+    minimumUsdValue: 0.01,
+    updateMinimumUsdValue: () => undefined,
+    resetMinimumUsdValue: () => undefined,
   }),
 }));
 

@@ -13,6 +13,11 @@ import { useStablesChanges } from "./use-stables-data";
 
 type ChangesResult = ReturnType<typeof useStablesChanges>;
 type GqlCall = [string | null, Record<string, unknown> | undefined];
+type RenderHookOptions = {
+  page?: number;
+  rates?: Map<string, number>;
+  minimumUsdValue?: number;
+};
 
 function changeEvent(
   overrides: Partial<StableSupplyChangeEvent> &
@@ -37,11 +42,15 @@ function changeEvent(
   };
 }
 
-function renderHook(page = 0): ChangesResult {
+function renderHook({
+  page = 0,
+  rates = new Map(),
+  minimumUsdValue = 0.01,
+}: RenderHookOptions = {}): ChangesResult {
   const ref: { current: ChangesResult | null } = { current: null };
 
   function HookProbe(): null {
-    ref.current = useStablesChanges("7d", page);
+    ref.current = useStablesChanges("7d", page, rates, minimumUsdValue);
     return null;
   }
 
@@ -63,7 +72,7 @@ describe("useStablesChanges", () => {
     }));
   });
 
-  it("queries a larger raw page and hides rows below table display precision", () => {
+  it("queries a larger raw page and hides rows below the USD threshold", () => {
     mockUseGQL.mockImplementation((query: string | null) => ({
       data:
         query === null
@@ -83,13 +92,27 @@ describe("useStablesChanges", () => {
                   amount: "-10000000000000000",
                   kind: "RESERVE_BURN",
                 }),
+                changeEvent({
+                  id: "jpy-below",
+                  amount: "1",
+                  tokenDecimals: 0,
+                  tokenSymbol: "JPYm",
+                }),
+                changeEvent({
+                  id: "jpy-visible",
+                  amount: "2",
+                  tokenDecimals: 0,
+                  tokenSymbol: "JPYm",
+                }),
               ],
             },
       error: null,
       isLoading: false,
     }));
 
-    const result = renderHook();
+    const result = renderHook({
+      rates: new Map([["42220:JPYm", 0.0067]]),
+    });
 
     expect(mockUseGQL).toHaveBeenCalledWith(
       STABLES_CHANGES,
@@ -103,8 +126,34 @@ describe("useStablesChanges", () => {
     expect(result.events.map((event) => event.id)).toEqual([
       "visible-mint",
       "visible-burn",
+      "jpy-visible",
     ]);
     expect(result.capped).toBe(false);
+    expect(result.unpricedEventsCount).toBe(0);
+  });
+
+  it("keeps unpriced rows visible and reports them as degraded", () => {
+    mockUseGQL.mockImplementation((query: string | null) => ({
+      data:
+        query === null
+          ? undefined
+          : {
+              StableSupplyChangeEvent: [
+                changeEvent({
+                  id: "unpriced",
+                  amount: "1",
+                  tokenSymbol: "BRLm",
+                }),
+              ],
+            },
+      error: null,
+      isLoading: false,
+    }));
+
+    const result = renderHook();
+
+    expect(result.events.map((event) => event.id)).toEqual(["unpriced"]);
+    expect(result.unpricedEventsCount).toBe(1);
   });
 
   it("continues fetching raw pages until enough visible rows are available", () => {
@@ -182,7 +231,7 @@ describe("useStablesChanges", () => {
       isLoading: false,
     }));
 
-    const result = renderHook(1);
+    const result = renderHook({ page: 1 });
 
     expect(mockUseGQL).toHaveBeenCalledWith(
       STABLES_CHANGES,

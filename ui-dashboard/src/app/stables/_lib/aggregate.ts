@@ -14,25 +14,90 @@ import type {
 
 const SECONDS_PER_DAY = BigInt(86_400);
 const SECONDS_PER_DAY_NUMBER = 86_400;
-// Companion label for the table UI — keep in sync with
-// minimumVisibleSupplyChangeRaw (0.01 = 1/100 of one token).
-export const SUPPLY_CHANGE_FILTER_THRESHOLD_LABEL = "0.01 token";
+const USD_THRESHOLD_SCALE_DECIMALS = 12;
+const USD_THRESHOLD_SCALE = BigInt(10) ** BigInt(USD_THRESHOLD_SCALE_DECIMALS);
+export const DEFAULT_SUPPLY_CHANGE_MIN_USD = 0.01;
+export const SUPPLY_CHANGE_MIN_USD_QUERY_PARAM = "minSupplyChangeUsd";
 
 /**
- * The changes table renders amounts at two decimals. Hide sub-cent dust rows
- * and keep rows whose token-native absolute amount is at least 0.01.
+ * Stable supply-change filtering is USD-normalized so a "1 token" threshold
+ * does not mean wildly different economic values for USDm vs JPYm.
  */
-export function minimumVisibleSupplyChangeRaw(tokenDecimals: number): bigint {
-  const scale = BigInt(10) ** BigInt(tokenDecimals);
-  return (scale + BigInt(99)) / BigInt(100);
+export function supplyChangeUsdValue(
+  event: Pick<
+    StableSupplyChangeEvent,
+    "amount" | "chainId" | "tokenDecimals" | "tokenSymbol"
+  >,
+  rates: OracleRateMap,
+): number | null {
+  const rate = effectiveOracleRate(rates, event.tokenSymbol, event.chainId);
+  if (rate == null) return null;
+  return Math.abs(parseWei(event.amount, event.tokenDecimals)) * rate;
 }
 
 export function isVisibleSupplyChangeEvent(
-  event: Pick<StableSupplyChangeEvent, "amount" | "tokenDecimals">,
+  event: Pick<
+    StableSupplyChangeEvent,
+    "amount" | "chainId" | "tokenDecimals" | "tokenSymbol"
+  >,
+  rates: OracleRateMap,
+  minimumUsdValue = DEFAULT_SUPPLY_CHANGE_MIN_USD,
 ): boolean {
+  if (minimumUsdValue <= 0) return true;
+  const rate = effectiveOracleRate(rates, event.tokenSymbol, event.chainId);
+  if (rate == null) return true;
+  const minimumRaw = minimumSupplyChangeRawForUsd(
+    event.tokenDecimals,
+    rate,
+    minimumUsdValue,
+  );
+  if (minimumRaw == null) return true;
   const amount = BigInt(event.amount);
   const absAmount = amount < BigInt(0) ? -amount : amount;
-  return absAmount >= minimumVisibleSupplyChangeRaw(event.tokenDecimals);
+  return absAmount >= minimumRaw;
+}
+
+export function formatSupplyChangeUsdThreshold(value: number): string {
+  const safeValue =
+    Number.isFinite(value) && value >= 0
+      ? value
+      : DEFAULT_SUPPLY_CHANGE_MIN_USD;
+  return `$${safeValue.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+  })}`;
+}
+
+function minimumSupplyChangeRawForUsd(
+  tokenDecimals: number,
+  usdRate: number,
+  minimumUsdValue: number,
+): bigint | null {
+  const thresholdScaled = nonNegativeNumberToScaledBigInt(minimumUsdValue);
+  const rateScaled = nonNegativeNumberToScaledBigInt(usdRate);
+  if (
+    thresholdScaled == null ||
+    rateScaled == null ||
+    rateScaled === BigInt(0)
+  ) {
+    return null;
+  }
+  const tokenScale = BigInt(10) ** BigInt(tokenDecimals);
+  return ceilDiv(thresholdScaled * tokenScale, rateScaled);
+}
+
+function nonNegativeNumberToScaledBigInt(value: number): bigint | null {
+  if (!Number.isFinite(value) || value < 0) return null;
+  const fixed = value.toFixed(USD_THRESHOLD_SCALE_DECIMALS);
+  const [whole = "0", fraction = ""] = fixed.split(".");
+  return (
+    BigInt(whole) * USD_THRESHOLD_SCALE +
+    BigInt(fraction.padEnd(USD_THRESHOLD_SCALE_DECIMALS, "0"))
+  );
+}
+
+function ceilDiv(numerator: bigint, denominator: bigint): bigint {
+  return (numerator + denominator - BigInt(1)) / denominator;
 }
 
 /**

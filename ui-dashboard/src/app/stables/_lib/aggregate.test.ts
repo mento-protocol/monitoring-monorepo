@@ -3,11 +3,13 @@ import {
   buildTokenUsdTimeSeries,
   circulatingSupplyForSnapshot,
   computeChartStartSeconds,
+  DEFAULT_SUPPLY_CHANGE_MIN_USD,
+  formatSupplyChangeUsdThreshold,
   isVisibleSupplyChangeEvent,
-  minimumVisibleSupplyChangeRaw,
   rangeStartSeconds,
   rollupByToken,
   sumTotalUsdSeries,
+  supplyChangeUsdValue,
   winnersAndLosers7d,
 } from "./aggregate";
 import type {
@@ -60,41 +62,117 @@ function custodySnapshot(
 }
 
 describe("supply-change display threshold", () => {
-  it("filters rows below 0.01 token", () => {
-    expect(minimumVisibleSupplyChangeRaw(18)).toBe(BigInt("10000000000000000"));
+  it("filters rows below the default USD-equivalent threshold", () => {
+    const rates = new Map([["USDm", 1]]);
+
     expect(
-      isVisibleSupplyChangeEvent({
-        amount: "9999999999999999",
-        tokenDecimals: 18,
-      }),
+      isVisibleSupplyChangeEvent(
+        {
+          amount: "9999999999999999",
+          chainId: 42220,
+          tokenDecimals: 18,
+          tokenSymbol: "USDm",
+        },
+        rates,
+      ),
     ).toBe(false);
     expect(
-      isVisibleSupplyChangeEvent({
-        amount: "10000000000000000",
-        tokenDecimals: 18,
-      }),
+      isVisibleSupplyChangeEvent(
+        {
+          amount: "10000000000000000",
+          chainId: 42220,
+          tokenDecimals: 18,
+          tokenSymbol: "USDm",
+        },
+        rates,
+      ),
     ).toBe(true);
   });
 
   it("applies the same absolute threshold to burns", () => {
+    const rates = new Map([["USDm", 1]]);
+
     expect(
-      isVisibleSupplyChangeEvent({
-        amount: "-10000000000000000",
-        tokenDecimals: 18,
-      }),
+      isVisibleSupplyChangeEvent(
+        {
+          amount: "-10000000000000000",
+          chainId: 42220,
+          tokenDecimals: 18,
+          tokenSymbol: "USDm",
+        },
+        rates,
+      ),
     ).toBe(true);
     expect(
-      isVisibleSupplyChangeEvent({
-        amount: "-9999999999999999",
-        tokenDecimals: 18,
-      }),
+      isVisibleSupplyChangeEvent(
+        {
+          amount: "-9999999999999999",
+          chainId: 42220,
+          tokenDecimals: 18,
+          tokenSymbol: "USDm",
+        },
+        rates,
+      ),
     ).toBe(false);
   });
 
-  it("ceil-rounds the raw threshold for low-decimal token shapes", () => {
-    expect(minimumVisibleSupplyChangeRaw(6)).toBe(BigInt(10_000));
-    expect(minimumVisibleSupplyChangeRaw(2)).toBe(BigInt(1));
-    expect(minimumVisibleSupplyChangeRaw(0)).toBe(BigInt(1));
+  it("normalizes FX-token rows before comparing the threshold", () => {
+    const rates = new Map([["42220:JPYm", 0.0067]]);
+
+    expect(
+      supplyChangeUsdValue(
+        {
+          amount: "1",
+          chainId: 42220,
+          tokenDecimals: 0,
+          tokenSymbol: "JPYm",
+        },
+        rates,
+      ),
+    ).toBeCloseTo(0.0067, 8);
+    expect(
+      isVisibleSupplyChangeEvent(
+        {
+          amount: "1",
+          chainId: 42220,
+          tokenDecimals: 0,
+          tokenSymbol: "JPYm",
+        },
+        rates,
+      ),
+    ).toBe(false);
+    expect(
+      isVisibleSupplyChangeEvent(
+        {
+          amount: "2",
+          chainId: 42220,
+          tokenDecimals: 0,
+          tokenSymbol: "JPYm",
+        },
+        rates,
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps unpriced rows visible instead of silently hiding them", () => {
+    expect(
+      isVisibleSupplyChangeEvent(
+        {
+          amount: "1",
+          chainId: 42220,
+          tokenDecimals: 18,
+          tokenSymbol: "BRLm",
+        },
+        new Map(),
+      ),
+    ).toBe(true);
+  });
+
+  it("formats the default threshold for table copy", () => {
+    expect(formatSupplyChangeUsdThreshold(DEFAULT_SUPPLY_CHANGE_MIN_USD)).toBe(
+      "$0.01",
+    );
+    expect(formatSupplyChangeUsdThreshold(1000)).toBe("$1,000.00");
   });
 });
 
