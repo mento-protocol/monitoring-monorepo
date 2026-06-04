@@ -141,10 +141,10 @@ describe("auth signIn callback", () => {
 });
 
 describe("session config", () => {
-  it("uses a 1-hour JWT maxAge to bound stale-session risk", async () => {
+  it("uses a sliding 30-day JWT session so deploys/active use don't force re-login", async () => {
     await loadAuthWithEnv();
     expect(capturedConfig.session?.strategy).toBe("jwt");
-    expect(capturedConfig.session?.maxAge).toBe(60 * 60);
-    expect(capturedConfig.session?.updateAge).toBe(10 * 60);
+    expect(capturedConfig.session?.maxAge).toBe(30 * 24 * 60 * 60);
+    expect(capturedConfig.session?.updateAge).toBe(24 * 60 * 60);
   });
 });

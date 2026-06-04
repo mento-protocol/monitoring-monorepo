@@ -35,18 +35,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
 
-  // Short session lifetime bounds how long a disabled-but-still-JWT-carrying
-  // ex-employee retains access. On an active request, NextAuth re-mints the
-  // token every `updateAge`, extending exp to +maxAge — so active users stay
-  // signed in, but idle accounts age out within the hour. A hard revocation
-  // list would be even stronger; this is the low-cost first step.
-  // Note: an offboarded user whose JWT was just re-minted still has up to
-  // `updateAge` (10 min) of residual access until the next re-mint fails.
-  // That's the inherent cost of stateless JWTs without server-side revocation.
+  // Sliding 30-day session. On an active request NextAuth re-mints the token
+  // (at most once per `updateAge`), extending exp to now + maxAge — so anyone
+  // using the dashboard regularly stays signed in indefinitely, and only fully
+  // idle sessions age out after 30 days. Deploys do NOT log users out: the JWT
+  // lives in the cookie and is verified with the stable AUTH_SECRET, which a
+  // new deployment doesn't change.
+  // Tradeoff: with stateless JWTs there is no server-side revocation, so an
+  // offboarded user's cookie keeps working with no early cutoff — and because
+  // an active session is re-minted every `updateAge` without re-checking Google
+  // (the jwt callback returns the token unchanged), an actively-used token
+  // extends indefinitely. The 30-day expiry only catches a fully-idle account;
+  // disabling their Google login does not cut access early, since the JWT
+  // self-validates and isn't re-checked against Google. If that window matters,
+  // add a revocation check (e.g. an Upstash deny-set read in the jwt callback)
+  // rather than shortening maxAge.
   session: {
     strategy: "jwt",
-    maxAge: 60 * 60,
-    updateAge: 10 * 60,
+    maxAge: 30 * 24 * 60 * 60,
+    updateAge: 24 * 60 * 60,
   },
 
   pages: {
