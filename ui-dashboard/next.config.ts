@@ -11,6 +11,15 @@ const nextConfig: NextConfig = {
     // in instrumentation-client.ts; do not add a fallback here.
     NEXT_PUBLIC_VERCEL_ENV: process.env.VERCEL_ENV ?? "",
   },
+  async redirects() {
+    return [
+      {
+        source: "/leaderboard",
+        destination: "/volume",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {

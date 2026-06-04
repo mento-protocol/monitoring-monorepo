@@ -63,104 +63,6 @@
     "linePreview": " | function Card({ data }: { data: BridgeFlowsOgData | null }) { | // null → \"—\" (snapshot query failed); 0 → \"$0\" (genuinely no bridge"
   },
   {
-    "file": "src/app/leaderboard/_components/aggregator-breakdown-section.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'AggregatorTable' has too many lines (144). Maximum allowed is 100.",
-    "line": 121,
-    "linePreview": " | function AggregatorTable({ | aggregators,"
-  },
-  {
-    "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'TraderRow' has a complexity of 16. Maximum allowed is 15.",
-    "line": 180,
-    "linePreview": " | function TraderRow({ | rank,"
-  },
-  {
-    "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'ExpandedBreakdown' has too many lines (115). Maximum allowed is 100.",
-    "line": 323,
-    "linePreview": " | function ExpandedBreakdown({ | rows,"
-  },
-  {
-    "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'LeaderboardTable' has too many lines (132). Maximum allowed is 100.",
-    "line": 36,
-    "linePreview": " | export function LeaderboardTable({ | cutoff,"
-  },
-  {
-    "file": "src/app/leaderboard/_components/leaderboard-table.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'TraderRow' has too many lines (133). Maximum allowed is 100.",
-    "line": 180,
-    "linePreview": " | function TraderRow({ | rank,"
-  },
-  {
-    "file": "src/app/leaderboard/_components/v3-flow-insights.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'V3FlowInsights' has a complexity of 21. Maximum allowed is 15.",
-    "line": 48,
-    "linePreview": " | export function V3FlowInsights({ | range,"
-  },
-  {
-    "file": "src/app/leaderboard/_components/v3-flow-insights.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'V3FlowInsights' has too many lines (152). Maximum allowed is 100.",
-    "line": 48,
-    "linePreview": " | export function V3FlowInsights({ | range,"
-  },
-  {
-    "file": "src/app/leaderboard/_lib/url-state.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'useLeaderboardUrlState' has too many lines (111). Maximum allowed is 100.",
-    "line": 52,
-    "linePreview": "*/ | export function useLeaderboardUrlState(): { | range: LeaderboardRangeKey;"
-  },
-  {
-    "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
-    "ruleId": "complexity",
-    "message": "Function 'useHeroRollup' has a complexity of 40. Maximum allowed is 15.",
-    "line": 70,
-    "linePreview": "*/ | export function useHeroRollup({ | venue,"
-  },
-  {
-    "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'useHeroRollup' has too many lines (213). Maximum allowed is 100.",
-    "line": 70,
-    "linePreview": "*/ | export function useHeroRollup({ | venue,"
-  },
-  {
-    "file": "src/app/leaderboard/_lib/use-hero-rollup.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 26 to the 18 allowed.",
-    "line": 70,
-    "linePreview": "*/ | export function useHeroRollup({ | venue,"
-  },
-  {
-    "file": "src/app/leaderboard/page-client.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'LeaderboardClient' has a complexity of 61. Maximum allowed is 15.",
-    "line": 73,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function LeaderboardClient() { | const {"
-  },
-  {
-    "file": "src/app/leaderboard/page-client.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'LeaderboardClient' has too many lines (406). Maximum allowed is 100.",
-    "line": 73,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function LeaderboardClient() { | const {"
-  },
-  {
-    "file": "src/app/leaderboard/page-client.tsx",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 46 to the 18 allowed.",
-    "line": 73,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/no-giant-component | export function LeaderboardClient() { | const {"
-  },
-  {
     "file": "src/app/opengraph-image.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'Card' has too many lines (158). Maximum allowed is 100.",
@@ -640,14 +542,14 @@
     "file": "src/lib/global-pool-entries.ts",
     "ruleId": "complexity",
     "message": "Function 'buildGlobalPoolEntries' has a complexity of 22. Maximum allowed is 15.",
-    "line": 78,
+    "line": 77,
     "linePreview": "*/ | export function buildGlobalPoolEntries( | networkData: NetworkData[],"
   },
   {
     "file": "src/lib/global-pool-entries.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 41 to the 18 allowed.",
-    "line": 78,
+    "line": 77,
     "linePreview": "*/ | export function buildGlobalPoolEntries( | networkData: NetworkData[],"
   },
   {
@@ -679,52 +581,10 @@
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
-    "file": "src/lib/leaderboard-hero.ts",
-    "ruleId": "complexity",
-    "message": "Function 'buildHeroPartialOverlapQueryInput' has a complexity of 18. Maximum allowed is 15.",
-    "line": 217,
-    "linePreview": " | export function buildHeroPartialOverlapQueryInput(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/leaderboard-hero.ts",
-    "ruleId": "complexity",
-    "message": "Function 'mergeHeroSnapshot' has a complexity of 30. Maximum allowed is 15.",
-    "line": 394,
-    "linePreview": "*/ | export function mergeHeroSnapshot(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/leaderboard-hero.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'mergeHeroSnapshot' has too many lines (123). Maximum allowed is 100.",
-    "line": 394,
-    "linePreview": "*/ | export function mergeHeroSnapshot(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/leaderboard-hero.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 23 to the 18 allowed.",
-    "line": 217,
-    "linePreview": " | export function buildHeroPartialOverlapQueryInput(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/leaderboard-hero.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 55 to the 18 allowed.",
-    "line": 394,
-    "linePreview": "*/ | export function mergeHeroSnapshot(args: { | snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;"
-  },
-  {
-    "file": "src/lib/leaderboard-pool.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'aggregatePoolDailyVolume' has too many lines (106). Maximum allowed is 100.",
-    "line": 53,
-    "linePreview": "*/ | export function aggregatePoolDailyVolume( | rows: readonly PoolDailyVolumeRow[],"
-  },
-  {
     "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
-    "line": 193,
+    "line": 197,
     "linePreview": "*/ | async function fetchPaginatedRows<TRow, TVars>(args: { | client: GraphQLClient;"
   },
   {

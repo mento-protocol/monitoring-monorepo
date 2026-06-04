@@ -352,7 +352,7 @@ export type LiquidityPosition = {
 /**
  * Daily rollup of pool-level protocol fee transfers, one row per
  * (chainId, poolAddress, UTC day). Source of truth for every fee surface
- * on /revenue (KPI tile, chart, per-pool leaderboard) — pool×day
+ * on /revenue (KPI tile, chart, per-pool table) — pool×day
  * cardinality stays within a few thousand rows even at all-time scale,
  * so we paginate the full history cleanly. See
  * `indexer-envio/schema.graphql` → `PoolDailyFeeSnapshot`.

@@ -924,7 +924,7 @@ describe("BiPoolManager handlers", () => {
       // must RPC-seed the row (via `poolExchangeEffect`) before
       // `buildSwapTraderFields` consumes the pool. Without this, the
       // first SwapEvent.volumeUsdWei is mis-scaled at 18/18 decimals
-      // and historical leaderboard rows lock the wrong values forever
+      // and historical volume rows lock the wrong values forever
       // (the later reverse-link backfill only touches Pool, not
       // SwapEvent).
       //

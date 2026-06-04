@@ -72,7 +72,7 @@ export function buildSwapTraderFields(
   // Gate USD valuation on `tokenDecimalsKnown` when present. A
   // non-18-decimal USD leg computed against the schema-default 18/18
   // would persist a `volumeUsdWei` off by `10^(18 - real_dec)` (e.g.
-  // 1e12 for USDC), permanently skewing leaderboard / aggregator
+  // 1e12 for USDC), permanently skewing volume / aggregator
   // rollups for that swap. Emit `0n` (uncomputable) until self-heal
   // lands real decimals — the sample is dropped from rollups but not
   // falsified. SwapEvent rows are not recomputed post-heal, so the

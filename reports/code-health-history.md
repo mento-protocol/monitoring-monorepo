@@ -14,7 +14,7 @@ CodeScene-style signals derived from git history. Strictly advisory; no merge ga
 |   2 | 25,521 |      47 |  543 | `ui-dashboard/src/lib/types.ts`                                          |
 |   3 | 23,368 |      23 | 1016 | `ui-dashboard/src/hooks/__tests__/use-all-networks-data.test.ts`         |
 |   4 | 22,165 |      31 |  715 | `ui-dashboard/src/app/__tests__/page.test.tsx`                           |
-|   5 | 21,768 |       8 | 2721 | `ui-dashboard/src/lib/__tests__/leaderboard.test.ts`                     |
+|   5 | 21,768 |       8 | 2721 | `ui-dashboard/src/lib/__tests__/volume.test.ts`                          |
 |   6 | 21,200 |      20 | 1060 | `ui-dashboard/src/lib/__tests__/health.test.ts`                          |
 |   7 | 19,040 |      35 |  544 | `indexer-envio/src/pool.ts`                                              |
 |   8 | 18,036 |      12 | 1503 | `metrics-bridge/test/metrics.test.ts`                                    |
@@ -52,7 +52,7 @@ Filters: co-changes ≥ 5, co-change rate ≥ 40%.
 
 |   # | Share | Commits |  LOC | Top author | File                                                                     |
 | --: | ----: | ------: | ---: | ---------- | ------------------------------------------------------------------------ |
-|   1 |  100% |       8 | 2721 | chapati    | `ui-dashboard/src/lib/__tests__/leaderboard.test.ts`                     |
+|   1 |  100% |       8 | 2721 | chapati    | `ui-dashboard/src/lib/__tests__/volume.test.ts`                          |
 |   2 |  100% |       3 | 1769 | chapati    | `ui-dashboard/src/app/bridge-flows/__tests__/page.test.tsx`              |
 |   3 |  100% |       3 | 1682 | chapati    | `ui-dashboard/src/components/__tests__/breach-history-panel.test.tsx`    |
 |   4 |  100% |      12 | 1503 | chapati    | `metrics-bridge/test/metrics.test.ts`                                    |
@@ -60,7 +60,7 @@ Filters: co-changes ≥ 5, co-change rate ≥ 40%.
 |   6 |  100% |       7 | 1202 | chapati    | `ui-dashboard/src/app/address-book/__tests__/AddressBookClient.test.tsx` |
 |   7 |  100% |       6 | 1119 | chapati    | `indexer-envio/test/deviationBreach.test.ts`                             |
 |   8 |  100% |       5 | 1092 | chapati    | `indexer-envio/test/poolDailyFeeSnapshot.test.ts`                        |
-|   9 |  100% |       8 | 1030 | chapati    | `indexer-envio/test/leaderboardWindowSnapshot.test.ts`                   |
+|   9 |  100% |       8 | 1030 | chapati    | `indexer-envio/test/volumeWindowSnapshot.test.ts`                        |
 |  10 |  100% |       8 |  939 | chapati    | `metrics-bridge/test/rebalance-probe.test.ts`                            |
 
 ## Knowledge spread (180d, ≥5 distinct contributors)

@@ -6,7 +6,7 @@ import type { TimeSeriesPoint } from "@/lib/time-series";
 export type BreakdownSeries = {
   /**
    * Optional stable identity for the series — survives reshuffling of
-   * `name` and `color` (color is rank-assigned in the leaderboard's pool
+   * `name` and `color` (color is rank-assigned in the volume page's pool
    * palette, name can collide cross-chain after dropping the "· Celo"
    * suffix). Used by the custom legend to track per-trace visibility
    * without index- or color-keyed drift. When omitted the chart card
@@ -18,7 +18,7 @@ export type BreakdownSeries = {
   series: TimeSeriesPoint[];
   /**
    * Optional decorative element shown next to `name` in the legend AND
-   * the custom hover tooltip. The leaderboard's per-pool chart uses
+   * the custom hover tooltip. The volume page's per-pool chart uses
    * this to inline a chain badge (Celo / Monad text label).
    *
    * Whenever ANY breakdown series provides this, Plotly's built-in

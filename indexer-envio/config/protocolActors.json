@@ -1,0 +1,11 @@
+{
+  "$comment": "Manual protocol-actor address overrides for the volume page. Dynamic pool rebalancers are classified from Pool.rebalancerAddress automatically; add real-chain entries only for protocol-controlled contracts that are not in contracts.json/nttAddresses.json or when tx.to should hide the signer from user-volume views. Chain 99999 is a test fixture for the manual override lookup path.",
+  "entries": [
+    {
+      "chainId": 99999,
+      "address": "0x0000000000000000000000000000000000000a11",
+      "label": "test-protocol-actor",
+      "category": "test-fixture"
+    }
+  ]
+}

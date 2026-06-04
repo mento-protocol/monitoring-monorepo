@@ -150,7 +150,7 @@ function render(): Record<string, string> {
 describe("RevenueByPoolTable — URL-driven sort wiring", () => {
   it("aria-sort on the active header matches the URL state", () => {
     mockSearchParams = new URLSearchParams(
-      "leaderboardSort=fees24h&leaderboardDir=asc",
+      "revenueSort=fees24h&revenueDir=asc",
     );
     const sort = render();
     expect(sort["24h"]).toBe("ascending");
@@ -166,7 +166,7 @@ describe("RevenueByPoolTable — URL-driven sort wiring", () => {
     expect(sort["24h"]).toBe("none");
   });
 
-  it("uses the leaderboard prefix (not pools) — wrong prefix would break this", () => {
+  it("uses the revenue prefix (not pools) — wrong prefix would break this", () => {
     mockSearchParams = new URLSearchParams("poolsSort=fees24h&poolsDir=asc");
     const sort = render();
     expect(sort["7d"]).toBe("descending");

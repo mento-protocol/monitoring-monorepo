@@ -105,7 +105,7 @@ If the widget composes multiple state phases (loading, supplemented, errored), t
 - [ ] Side-query errors degrade only the side feature, not the primary.
 - [ ] Gated queries do NOT fire when the gate condition is false.
 
-**Why:** PR #352 cursor finding — `mergeHeroSnapshot` was unit-tested in isolation, but the cross-query state machine in `useHeroRollup` (first-pass merge → gate decision → second-pass merge with supplemental data) had no coverage. See `ui-dashboard/src/app/leaderboard/_lib/__tests__/use-hero-rollup.test.tsx` for the established hook-test pattern (jsdom + `react-dom/client` + `act` + a `Probe` component, mock `@/lib/graphql`'s `useGQL` per query string).
+**Why:** PR #352 cursor finding — `mergeHeroSnapshot` was unit-tested in isolation, but the cross-query state machine in `useHeroRollup` (first-pass merge → gate decision → second-pass merge with supplemental data) had no coverage. See `ui-dashboard/src/app/volume/_lib/__tests__/use-hero-rollup.test.tsx` for the established hook-test pattern (jsdom + `react-dom/client` + `act` + a `Probe` component, mock `@/lib/graphql`'s `useGQL` per query string).
 
 ---
 

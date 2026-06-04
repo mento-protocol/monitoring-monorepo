@@ -100,7 +100,7 @@ function RevenueContent() {
   } = useCdpBorrowingRevenue();
 
   const anyNetworkError = networkData.some((n) => n.error !== null);
-  // Tile + chart + leaderboard all read from snapshots since PR-snapshot-3.
+  // Tile + chart + table all read from snapshots since PR-snapshot-3.
   // Either rates or snapshot fetch failure blanks the fee surfaces.
   const anyFeesError = networkData.some(
     (n) =>
