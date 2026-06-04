@@ -38,12 +38,14 @@ export function NavLinks() {
       >
         Bridges
       </Link>
-      <Link
-        href="/integrations"
-        className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-      >
-        Integrations
-      </Link>
+      {session && (
+        <Link
+          href="/integrations"
+          className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+        >
+          Integrations
+        </Link>
+      )}
       <Link
         href="/cdps"
         className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"

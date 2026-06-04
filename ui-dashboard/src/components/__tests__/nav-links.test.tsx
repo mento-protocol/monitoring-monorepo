@@ -19,20 +19,24 @@ vi.mock("next-auth/react", () => ({
 }));
 
 describe("NavLinks", () => {
-  it("shows Addresses link when user is authenticated", () => {
+  it("shows Addresses and Integrations links when user is authenticated", () => {
     mockUseSession.mockReturnValue({
       data: { user: { email: "alice@mentolabs.xyz" } },
     });
     const html = renderToStaticMarkup(<NavLinks />);
     expect(html).toContain("Addresses");
     expect(html).toContain("/address-book");
+    expect(html).toContain("Integrations");
+    expect(html).toContain("/integrations");
   });
 
-  it("hides Addresses link when user is not authenticated", () => {
+  it("hides Addresses and Integrations links when user is not authenticated", () => {
     mockUseSession.mockReturnValue({ data: null });
     const html = renderToStaticMarkup(<NavLinks />);
     expect(html).not.toContain("Addresses");
     expect(html).not.toContain("/address-book");
+    expect(html).not.toContain("Integrations");
+    expect(html).not.toContain("/integrations");
   });
 
   it("always shows Pools, Revenue, and home links regardless of auth", () => {

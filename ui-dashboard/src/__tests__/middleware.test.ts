@@ -121,6 +121,36 @@ describe("middleware auth routing", () => {
     expect(res!.headers.get("content-security-policy")).toBeDefined();
   });
 
+  it("redirects unauthenticated /integrations to /sign-in", () => {
+    const res = authCallback!(makeReq("/integrations"));
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(302);
+    const location = res!.headers.get("location") ?? "";
+    expect(location).toContain("/sign-in");
+    expect(location).toContain("callbackUrl=%2Fintegrations");
+  });
+
+  it("allows authenticated /integrations through (returns 200 with CSP)", () => {
+    const res = authCallback!(
+      makeReq("/integrations", { authenticated: true }),
+    );
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(200);
+    expect(res!.headers.get("content-security-policy")).toBeDefined();
+  });
+
+  it("redirects an errored (revoked) session on /integrations", () => {
+    const res = authCallback!(
+      makeReq("/integrations", {
+        authenticated: true,
+        error: "RefreshTokenError",
+      }),
+    );
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(302);
+    expect(res!.headers.get("location") ?? "").toContain("/sign-in");
+  });
+
   it("returns 401 for unauthenticated PUT /api/address-labels", () => {
     const res = authCallback!(
       makeReq("/api/address-labels", { method: "PUT" }),
