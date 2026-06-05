@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { getAuthSession } from "@/auth";
 import { VolumeClient } from "./page-client";
 
 export const metadata = {
@@ -7,10 +8,12 @@ export const metadata = {
     "Top traders on Mento by USD volume — sorted by 24h, 7d, 30d, or all-time, with per-pool flow breakdown.",
 };
 
-export default function VolumePage() {
+export default async function VolumePage() {
+  const session = await getAuthSession();
+
   return (
     <Suspense>
-      <VolumeClient />
+      <VolumeClient canUseVolumeFilters={!!session} />
     </Suspense>
   );
 }

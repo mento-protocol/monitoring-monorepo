@@ -37,6 +37,7 @@ export function V3VolumeSection({
   traders,
   pools,
   protocolActorFilter,
+  canUseVolumeFilters,
   exclusions,
   tableState,
   aggregators,
@@ -50,6 +51,7 @@ export function V3VolumeSection({
   traders: readonly TraderWindowRow[];
   pools: PoolMeta;
   protocolActorFilter: ReadonlyArray<boolean>;
+  canUseVolumeFilters: boolean;
   exclusions: VolumeExclusionState;
   tableState: V3TableState;
   aggregators: readonly AggregatorWindowRow[];
@@ -76,7 +78,7 @@ export function V3VolumeSection({
       <section>
         <TableSectionTitle
           label="About top traders table"
-          info="Ranks signer wallets by v3 Mento pool and VirtualPool USD volume in this window. Protocol actors are excluded unless included."
+          info={v3TraderTableInfo(canUseVolumeFilters)}
         >
           Top traders ({rangeLabel})
         </TableSectionTitle>
@@ -84,6 +86,7 @@ export function V3VolumeSection({
           cutoff={cutoff}
           traders={traders}
           pools={pools}
+          emptyMessage={volumeEmptyMessage(canUseVolumeFilters)}
           isLoading={tableState.isLoading}
           hasError={tableState.hasError}
           hasExploratoryExclusions={tableState.hasExploratoryExclusions}
@@ -100,4 +103,18 @@ export function V3VolumeSection({
       />
     </>
   );
+}
+
+function v3TraderTableInfo(canUseVolumeFilters: boolean): string {
+  if (!canUseVolumeFilters) {
+    return "Ranks signer wallets and protocol actors by total v3 Mento pool and VirtualPool USD volume in this window.";
+  }
+  return "Ranks signer wallets by v3 Mento pool and VirtualPool USD volume in this window. Protocol actors are excluded unless included.";
+}
+
+function volumeEmptyMessage(canUseVolumeFilters: boolean): string {
+  if (!canUseVolumeFilters) {
+    return "No traders matched this window. Try widening the range.";
+  }
+  return "No traders matched this window. Try widening the range or including protocol actors.";
 }

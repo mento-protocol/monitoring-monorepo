@@ -37,6 +37,7 @@ export function VolumeTable({
   cutoff,
   traders,
   pools,
+  emptyMessage,
   isLoading,
   hasError,
   hasExploratoryExclusions,
@@ -47,6 +48,7 @@ export function VolumeTable({
   cutoff: number;
   traders: readonly TraderWindowRow[];
   pools: ReadonlyMap<string, { token0: string | null; token1: string | null }>;
+  emptyMessage: string;
   isLoading: boolean;
   hasError: boolean;
   hasExploratoryExclusions: boolean;
@@ -106,7 +108,7 @@ export function VolumeTable({
         message={
           hasExploratoryExclusions
             ? "No traders left after exploratory exclusions. Clear exclusions or widen the range."
-            : "No traders matched this window. Try widening the range or including protocol actors."
+            : emptyMessage
         }
       />
     );

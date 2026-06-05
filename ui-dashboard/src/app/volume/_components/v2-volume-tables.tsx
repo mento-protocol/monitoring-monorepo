@@ -73,12 +73,14 @@ function useV2TraderVia({
 export function V2VolumeTraderTable({
   cutoff,
   traders,
+  emptyMessage,
   isLoading,
   hasError,
   hasExploratoryExclusions,
 }: {
   cutoff: number;
   traders: readonly BrokerTraderWindowRow[];
+  emptyMessage: string;
   isLoading: boolean;
   hasError: boolean;
   hasExploratoryExclusions: boolean;
@@ -127,7 +129,7 @@ export function V2VolumeTraderTable({
         message={
           hasExploratoryExclusions
             ? "No legacy-v2 traders left after exploratory exclusions. Clear exclusions or widen the range."
-            : "No legacy-v2 traders in this window. Either v2 volume has stopped, or try widening the range / including protocol actors."
+            : emptyMessage
         }
       />
     );

@@ -1,5 +1,6 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import { cache } from "react";
 import type { JWT } from "next-auth/jwt";
 import * as Sentry from "@sentry/nextjs";
 
@@ -225,7 +226,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
 });
 
-export async function getAuthSession() {
+export const getAuthSession = cache(async function getAuthSession() {
   const session = await auth();
   // A failed Google refresh probe (offboarded / revoked account) invalidates
   // the session even though the JWT itself is still cryptographically valid.
@@ -233,7 +234,7 @@ export async function getAuthSession() {
   return session?.user?.email?.toLowerCase().endsWith(ALLOWED_DOMAIN)
     ? session
     : null;
-}
+});
 
 // Module augmentation is co-located here (rather than in auth.d.ts) so it
 // reliably merges with next-auth's types: a sibling `auth.d.ts` is treated as

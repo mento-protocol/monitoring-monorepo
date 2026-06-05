@@ -19,9 +19,7 @@ export function VolumePageHeader({ urlState }: { urlState: VolumeUrlState }) {
           Volume
         </h1>
         <p className="mt-1 text-sm text-slate-400">
-          {urlState.venue === "v3"
-            ? "Top traders on Mento by USD volume. Protocol actors are excluded by default."
-            : "Top legacy-v2 traders on Mento by USD volume. Protocol actors are excluded by default."}
+          {volumeHeaderSubtitle(urlState)}
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
@@ -33,13 +31,26 @@ export function VolumePageHeader({ urlState }: { urlState: VolumeUrlState }) {
           range={urlState.range}
           updateRange={urlState.updateRange}
         />
-        <ActorToggleGroup
-          includeProtocolActors={urlState.includeProtocolActors}
-          updateIncludeProtocolActors={urlState.updateIncludeProtocolActors}
-        />
+        {urlState.canUseVolumeFilters && (
+          <ActorToggleGroup
+            includeProtocolActors={urlState.includeProtocolActors}
+            updateIncludeProtocolActors={urlState.updateIncludeProtocolActors}
+          />
+        )}
       </div>
     </header>
   );
+}
+
+function volumeHeaderSubtitle(urlState: VolumeUrlState): string {
+  if (!urlState.canUseVolumeFilters) {
+    return urlState.venue === "v3"
+      ? "Top traders on Mento by total USD volume."
+      : "Top legacy-v2 traders on Mento by total USD volume.";
+  }
+  return urlState.venue === "v3"
+    ? "Top traders on Mento by USD volume. Protocol actors are excluded by default."
+    : "Top legacy-v2 traders on Mento by USD volume. Protocol actors are excluded by default.";
 }
 
 function VenueToggleGroup({
@@ -321,6 +332,7 @@ export function VolumeVenueSection({
       <V2VolumeSection
         rangeLabel={rangeLabel(range)}
         cutoff={cutoff}
+        canUseVolumeFilters={urlState.canUseVolumeFilters}
         v2Aggregated={aggregates.v2Aggregated}
         v2AggregatorAggregated={aggregates.v2AggregatorAggregated}
         hasExploratoryExclusions={aggregates.hasExploratoryExclusions}
@@ -341,6 +353,7 @@ export function VolumeVenueSection({
       traders={aggregates.aggregated}
       pools={model.poolMeta}
       protocolActorFilter={model.isProtocolActorIn}
+      canUseVolumeFilters={urlState.canUseVolumeFilters}
       exclusions={exclusions}
       tableState={{
         isLoading: status.tableIsLoading,

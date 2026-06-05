@@ -22,8 +22,14 @@ import { useVolumeUrlState, type Venue } from "../url-state";
 type UrlStateResult = ReturnType<typeof useVolumeUrlState>;
 type ResultRef = { current: UrlStateResult | null };
 
-function HookWrapper({ resultRef }: { resultRef: ResultRef }) {
-  resultRef.current = useVolumeUrlState();
+function HookWrapper({
+  resultRef,
+  canUseVolumeFilters,
+}: {
+  resultRef: ResultRef;
+  canUseVolumeFilters: boolean;
+}) {
+  resultRef.current = useVolumeUrlState({ canUseVolumeFilters });
   return null;
 }
 
@@ -38,10 +44,12 @@ function setup(url = "/volume") {
   root = createRoot(container);
 }
 
-function renderHook(): ResultRef {
+function renderHook(canUseVolumeFilters = true): ResultRef {
   const ref: ResultRef = { current: null };
   act(() => {
-    root.render(<HookWrapper resultRef={ref} />);
+    root.render(
+      <HookWrapper resultRef={ref} canUseVolumeFilters={canUseVolumeFilters} />,
+    );
   });
   return ref;
 }
@@ -80,6 +88,41 @@ describe("useVolumeUrlState", () => {
     });
     expect(ref.current?.venue).toBe("v2");
     expect(ref.current?.cutoff).toBeGreaterThan(0);
+  });
+
+  it("locks external users to all volume and strips private filter params", () => {
+    setup(
+      "/volume?foo=1&range=30d&actors=organic&exclude=0x00000000000000000000000000000000000000aa&excludeSources=cluster-abc",
+    );
+    const ref = renderHook(false);
+
+    expect(ref.current?.canUseVolumeFilters).toBe(false);
+    expect(ref.current?.actorFilter).toBe("all");
+    expect(ref.current?.includeProtocolActors).toBe(true);
+    expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
+    expect(window.location.search).toBe("?foo=1&range=30d");
+
+    act(() => {
+      ref.current?.updateIncludeProtocolActors(false);
+    });
+    expect(ref.current?.actorFilter).toBe("all");
+    expect(ref.current?.includeProtocolActors).toBe(true);
+    expect(window.location.search).toBe("?foo=1&range=30d");
+
+    act(() => {
+      ref.current?.updateExclusions({
+        addresses: ["0x00000000000000000000000000000000000000bb"],
+        sources: ["cluster-def"],
+      });
+    });
+    expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
+    expect(window.location.search).toBe("?foo=1&range=30d");
+
+    act(() => {
+      ref.current?.updateVenue("v2");
+    });
+    expect(ref.current?.venue).toBe("v2");
+    expect(window.location.search).toBe("?foo=1&range=30d&venue=v2");
   });
 
   it("falls back to default state for invalid params", () => {
@@ -167,6 +210,28 @@ describe("useVolumeUrlState", () => {
     expect(ref.current?.includeProtocolActors).toBe(false);
     expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
     expect(ref.current?.venue).toBe("v3");
+  });
+
+  it("keeps external users locked to all volume across popstate", () => {
+    setup("/volume?actors=all");
+    const ref = renderHook(false);
+
+    expect(window.location.search).toBe("");
+
+    window.history.replaceState(
+      window.history.state,
+      "",
+      "/volume?actors=organic&venue=v2&exclude=0x00000000000000000000000000000000000000aa&excludeSources=cluster-abc",
+    );
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    expect(ref.current?.actorFilter).toBe("all");
+    expect(ref.current?.includeProtocolActors).toBe(true);
+    expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
+    expect(ref.current?.venue).toBe("v2");
+    expect(window.location.search).toBe("?venue=v2");
   });
 
   it("refreshes the UTC day key at midnight so cutoffs can recompute", () => {
