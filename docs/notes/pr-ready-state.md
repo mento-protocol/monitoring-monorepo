@@ -26,6 +26,8 @@ Required blockers:
 
 - Closed-unmerged PRs. Merged PRs are terminal-ready and short-circuit the
   expensive readiness sweep because there is nothing left to fix or wait on.
+  Closed-unmerged PRs report only the terminal `state` blocker; review gates are
+  non-required because no Codex or reviewer action can unblock a closed PR.
 - Required check runs or status contexts that are failing, pending, queued, or
   missing from the branch-protection rollup.
 - Branch-protection context lookup failures caused by unreadable or
@@ -164,6 +166,9 @@ Field expectations:
   protection so post-merge babysitting exits quickly and does not mistake
   GitHub's post-merge `mergeable: UNKNOWN` for a blocker.
 - `pr.mergedAt` / `pr.closedAt`: terminal timestamps when GitHub provides them.
+- Terminal closed PR summaries may use gate state `not_applicable` for gates
+  that are normally required on open PRs. Agents should act on the terminal
+  `state` blocker instead of requesting more review.
 - `required.blockers[]`: only required blockers. Every item needs `kind`,
   `name`, `state`, `required: true`, and a URL when GitHub provides one.
 - `optional.items[]`: advisory signals worth reporting separately. Every item

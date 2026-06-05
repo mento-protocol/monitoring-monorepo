@@ -17,6 +17,8 @@ import {
 } from "./pr-ready-state-core.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 
+const GH_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
+
 function runGh(args) {
   return new Promise((resolve, reject) => {
     const child = spawn("gh", args, {
@@ -24,19 +26,44 @@ function runGh(args) {
     });
     let stdout = "";
     let stderr = "";
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let failed = false;
+
+    function fail(message) {
+      if (failed) return;
+      failed = true;
+      child.kill();
+      reject(new Error(message));
+    }
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
+      stdoutBytes += Buffer.byteLength(chunk);
+      if (stdoutBytes > GH_OUTPUT_MAX_BYTES) {
+        fail(
+          `gh ${args.join(" ")} stdout exceeded ${GH_OUTPUT_MAX_BYTES} byte limit`,
+        );
+        return;
+      }
       stdout += chunk;
     });
     child.stderr.on("data", (chunk) => {
+      stderrBytes += Buffer.byteLength(chunk);
+      if (stderrBytes > GH_OUTPUT_MAX_BYTES) {
+        fail(
+          `gh ${args.join(" ")} stderr exceeded ${GH_OUTPUT_MAX_BYTES} byte limit`,
+        );
+        return;
+      }
       stderr += chunk;
     });
     child.on("error", (err) => {
-      reject(new Error(`gh ${args.join(" ")} failed: ${err.message}`));
+      fail(`gh ${args.join(" ")} failed: ${err.message}`);
     });
     child.on("close", (status) => {
+      if (failed) return;
       if (status !== 0) {
         reject(
           new Error(

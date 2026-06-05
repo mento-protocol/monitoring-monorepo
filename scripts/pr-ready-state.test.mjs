@@ -1336,6 +1336,9 @@ test("summarizes merged pull requests as terminal ready", () => {
   assertEqual(summary.summary, "Pull request is already merged.");
   assertEqual(summary.pr.state, "MERGED");
   assertEqual(summary.pr.mergedAt, "2026-06-05T11:08:01Z");
+  assertEqual(summary.gates.codexDescriptionApproval.required, true);
+  assertEqual(summary.gates.codexDescriptionApproval.state, "present");
+  assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
 });
 
 test("summarizes closed unmerged pull requests as terminal blocked", () => {
@@ -1351,6 +1354,11 @@ test("summarizes closed unmerged pull requests as terminal blocked", () => {
   assertEqual(summary.required.blockers[0].state, "CLOSED");
   assertEqual(summary.summary, "Pull request is closed without merging.");
   assertEqual(summary.pr.closedAt, "2026-06-05T11:08:01Z");
+  assertEqual(summary.gates.codexDescriptionApproval.ready, true);
+  assertEqual(summary.gates.codexDescriptionApproval.required, false);
+  assertEqual(summary.gates.codexDescriptionApproval.state, "not_applicable");
+  assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
+  assertEqual(summary.gates.reviewCommentReplies.required, false);
 });
 
 test("human output names the readiness verdict and codex reaction gate", () => {

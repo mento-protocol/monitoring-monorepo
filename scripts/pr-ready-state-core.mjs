@@ -370,24 +370,24 @@ function emptyStatusChecks() {
 function terminalGates({ merged }) {
   return {
     codexDescriptionApproval: {
-      ready: merged,
-      required: true,
-      state: merged ? "present" : "missing",
+      ready: true,
+      required: merged,
+      state: merged ? "present" : "not_applicable",
     },
     codexReviewSignal: {
-      ready: merged,
+      ready: true,
       required: false,
-      state: merged ? "approved" : "missing",
-      fallbackAction: merged ? "wait" : "request_review_once_after_grace",
+      state: merged ? "approved" : "not_applicable",
+      fallbackAction: "wait",
     },
     reviewCommentReplies: {
       ready: true,
-      required: true,
+      required: merged,
       unrepliedCount: 0,
     },
     reviewThreads: {
       ready: true,
-      required: true,
+      required: merged,
       unresolvedCount: 0,
     },
   };
