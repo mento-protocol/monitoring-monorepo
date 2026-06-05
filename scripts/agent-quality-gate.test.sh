@@ -62,9 +62,24 @@ run_gate_cache_key() {
   local path
   {
     printf 'base=%s\n' "origin/test"
+    printf 'repoState=%s\n' "$(run_gate_repo_state_key)"
     for path in "$@"; do
       printf 'path=%s\n' "$path"
     done
+  } | cksum | awk '{ print $1 "-" $2 }'
+}
+
+run_gate_repo_state_key() {
+  {
+    git diff --no-ext-diff --binary
+    git diff --cached --no-ext-diff --binary
+    git ls-files --others --exclude-standard |
+      while IFS= read -r path; do
+        printf 'untracked=%s\n' "$path"
+        if [[ -f "$path" ]]; then
+          cksum "./$path"
+        fi
+      done
   } | cksum | awk '{ print $1 "-" $2 }'
 }
 

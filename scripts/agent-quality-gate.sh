@@ -250,6 +250,8 @@ has_command() {
   return 1
 }
 
+# The package.json script and direct shell entrypoint are the same regression
+# suite; keep them as one mapped command when both are touched.
 command_dedupe_key() {
   local command="$1"
   case "$command" in

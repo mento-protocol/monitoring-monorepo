@@ -909,6 +909,9 @@ export function parseArgs(argv) {
   if (!prArg || rest.length > 0) {
     throw new Error(usage());
   }
+  if (untilReady && !watch) {
+    throw new Error("--until-ready requires --watch");
+  }
   return { json, compact, watch, untilReady, prArg, repoArg };
 }
 

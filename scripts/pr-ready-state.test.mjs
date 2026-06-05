@@ -164,6 +164,13 @@ test("parses watch until-ready mode without changing other flags", () => {
   });
 });
 
+test("rejects until-ready outside watch mode", () => {
+  assertThrows(
+    () => parseArgs(["123", "--until-ready"]),
+    "--until-ready requires --watch",
+  );
+});
+
 test("rejects missing flag values at the CLI boundary", () => {
   assertThrows(
     () => parseArgs(["--repo", "--pr", "123"]),
