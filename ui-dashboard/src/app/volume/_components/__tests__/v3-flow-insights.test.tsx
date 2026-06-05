@@ -14,6 +14,7 @@ const mockGqlState = vi.hoisted(() => ({
     TraderDailySnapshot: [] as unknown[],
     TraderPoolDailySnapshot: [] as unknown[],
   },
+  addressNames: new Map<string, string>(),
 }));
 
 vi.mock("@/lib/graphql", () => ({
@@ -47,7 +48,7 @@ vi.mock("@/components/address-link", () => ({
       data-link-class={className ?? ""}
       data-container-class={containerClassName ?? ""}
     >
-      {address}
+      {mockGqlState.addressNames.get(address.toLowerCase()) ?? address}
     </span>
   ),
 }));
@@ -60,6 +61,10 @@ type Handle = {
   container: HTMLElement;
   root: Root;
 };
+
+function usdWei(amount: string): string {
+  return (BigInt(amount) * BigInt("1000000000000000000")).toString();
+}
 
 function renderInsights(
   props: Partial<Parameters<typeof V3FlowInsights>[0]> = {},
@@ -102,6 +107,7 @@ describe("V3FlowInsights", () => {
       TraderDailySnapshot: [],
       TraderPoolDailySnapshot: [],
     };
+    mockGqlState.addressNames.clear();
   });
 
   afterEach(() => {
@@ -127,7 +133,7 @@ describe("V3FlowInsights", () => {
     expect(text).not.toContain("No outlier swaps in this window.");
   });
 
-  it("renders compact outlier trader and tx cells", () => {
+  it("links outlier volume values to txs without a separate tx column", () => {
     const trader = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const txHash =
       "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -141,7 +147,7 @@ describe("V3FlowInsights", () => {
           caller: trader,
           txTo: "0x2222222222222222222222222222222222222222",
           recipient: "0x3333333333333333333333333333333333333333",
-          volumeUsdWei: "100000000000000000000",
+          volumeUsdWei: usdWei("100"),
           txHash,
           blockTimestamp: timestamp,
         },
@@ -159,7 +165,7 @@ describe("V3FlowInsights", () => {
           timestamp,
           swapCount: 1,
           uniquePools: 1,
-          volumeUsdWei: "100000000000000000000",
+          volumeUsdWei: usdWei("100"),
           feesPaidUsdWei: "0",
           isProtocolActor: false,
           aggregatorKeys: [],
@@ -177,10 +183,102 @@ describe("V3FlowInsights", () => {
     expect(traderLink?.dataset.linkClass).toContain("truncate");
     expect(traderLink?.dataset.linkClass).toContain("whitespace-nowrap");
 
+    const headers = Array.from(handle.container.querySelectorAll("th")).map(
+      (th) => th.textContent,
+    );
+    expect(headers).not.toContain("Tx");
+
     const txLink = Array.from(handle.container.querySelectorAll("a")).find(
       (link) => link.getAttribute("href")?.endsWith(`/tx/${txHash}`),
     );
-    expect(txLink?.className).toContain("whitespace-nowrap");
-    expect(txLink?.closest("td")?.className).toContain("whitespace-nowrap");
+    expect(txLink?.textContent).toContain("$");
+    expect(txLink?.textContent).not.toContain(txHash.slice(0, 6));
+    expect(txLink?.getAttribute("aria-label")).toContain("outlier swap volume");
+    expect(txLink?.className).toContain("max-w-full");
+    expect(txLink?.className).toContain("truncate");
+    expect(txLink?.closest("table")?.className).not.toContain("min-w");
+    expect(txLink?.closest("table")?.parentElement?.className).not.toContain(
+      "overflow-x-auto",
+    );
+  });
+
+  it("constrains long resolved trader names and high outlier volumes", () => {
+    const trader = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const txHash =
+      "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const timestamp = "1700000000";
+    const longName =
+      "Very Long Institutional Counterparty Name With Operational Desk Routing And Rebalancing Label That Should Never Crowd Out Volume";
+    const highVolume = usdWei("123456789012345678901234");
+    mockGqlState.addressNames.set(trader, longName);
+    mockGqlState.data = {
+      SwapEvent: [
+        {
+          id: "swap-1",
+          chainId: 42220,
+          poolId: "0x1111111111111111111111111111111111111111",
+          caller: trader,
+          txTo: "0x2222222222222222222222222222222222222222",
+          recipient: "0x3333333333333333333333333333333333333333",
+          volumeUsdWei: highVolume,
+          txHash,
+          blockTimestamp: timestamp,
+        },
+      ],
+      TraderDailySnapshot: [],
+      TraderPoolDailySnapshot: [],
+    };
+
+    handle = renderInsights({
+      traderRows: [
+        {
+          id: "day-1",
+          chainId: 42220,
+          trader,
+          timestamp,
+          swapCount: 1,
+          uniquePools: 1,
+          volumeUsdWei: highVolume,
+          feesPaidUsdWei: "0",
+          isProtocolActor: false,
+          aggregatorKeys: [],
+          lastSeenTimestamp: timestamp,
+        },
+      ],
+    });
+
+    const outlierHeading = Array.from(
+      handle.container.querySelectorAll("h3"),
+    ).find((heading) => heading.textContent === "Outlier swaps");
+    const outlierTable = outlierHeading?.parentElement?.querySelector("table");
+    const outlierTraderLink = outlierTable?.querySelector<HTMLElement>(
+      '[data-testid="address-link"]',
+    );
+    const outlierTxLink = outlierTable?.querySelector<HTMLAnchorElement>(
+      `a[href$="/tx/${txHash}"]`,
+    );
+    const traderCell = outlierTraderLink?.closest("td");
+    const volumeCell = outlierTxLink?.closest("td");
+
+    expect(outlierTraderLink?.textContent).toBe(longName);
+    expect(traderCell?.className).toContain("w-[42%]");
+    expect(traderCell?.className).toContain("max-w-0");
+    expect(traderCell?.className).toContain("overflow-hidden");
+    expect(outlierTraderLink?.dataset.containerClass).toContain("min-w-0");
+    expect(outlierTraderLink?.dataset.containerClass).toContain(
+      "overflow-hidden",
+    );
+    expect(outlierTraderLink?.dataset.linkClass).toContain("min-w-0");
+    expect(outlierTraderLink?.dataset.linkClass).toContain("truncate");
+    expect(volumeCell?.className).toContain("w-[24%]");
+    expect(volumeCell?.className).toContain("max-w-0");
+    expect(volumeCell?.className).toContain("overflow-hidden");
+    expect(outlierTxLink?.className).toContain("max-w-full");
+    expect(outlierTxLink?.className).toContain("truncate");
+    expect(outlierTxLink?.textContent).toContain("$");
+    expect(outlierTxLink?.title).toContain(txHash);
+    expect(outlierTxLink).not.toBeNull();
+    const visibleVolume = outlierTxLink?.textContent ?? "";
+    expect(outlierTxLink?.title).toContain(visibleVolume);
   });
 });

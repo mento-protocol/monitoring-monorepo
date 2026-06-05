@@ -63,8 +63,8 @@ export function useVolumeAggregates({
     [filteredTraderRows],
   );
   const dailyVolume = useMemo(
-    () => aggregateDailyVolume(filteredTraderRows),
-    [filteredTraderRows],
+    () => aggregateDailyVolume(traderRows),
+    [traderRows],
   );
   const unfilteredAggregated = useMemo(
     () => aggregateTradersByWindow(traderRows),
@@ -87,8 +87,8 @@ export function useVolumeAggregates({
     [filteredV2AggregatorRows],
   );
   const v2DailyVolume = useMemo(
-    () => aggregateDailyVolume(filteredV2TraderRows),
-    [filteredV2TraderRows],
+    () => aggregateDailyVolume(v2TraderRows),
+    [v2TraderRows],
   );
   return {
     hasExploratoryExclusions,

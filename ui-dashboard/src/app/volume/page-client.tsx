@@ -37,7 +37,6 @@ import {
   VolumePageHeader,
   VolumeVenueSection,
 } from "./_components/volume-page-sections";
-import { VolumeExclusionFilter } from "./_components/volume-exclusion-filter";
 import { usePoolChartViewModel } from "./_lib/pool-chart-vm";
 import { useHeroRollup } from "./_lib/use-hero-rollup";
 import {
@@ -439,22 +438,10 @@ function VolumePageView({
   urlState: VolumeUrlState;
   model: VolumePageModel;
 }) {
-  const { hero, status, aggregates } = model;
-  const displayedExclusions = volumeExclusionsForVenue(
-    urlState.venue,
-    urlState.exclusions,
-  );
+  const { hero, status } = model;
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8 space-y-6">
       <VolumePageHeader urlState={urlState} />
-      {urlState.canUseVolumeFilters && (
-        <VolumeExclusionFilter
-          exclusions={displayedExclusions}
-          allowSourceExclusions={urlState.venue === "v3"}
-          sourceOptions={aggregates.sourceOptions}
-          onChange={urlState.updateExclusions}
-        />
-      )}
       <HeroDataQualityBanners
         staleChains={hero.staleChains}
         degradedChains={hero.degradedChains}

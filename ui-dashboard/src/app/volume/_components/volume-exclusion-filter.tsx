@@ -124,8 +124,8 @@ function ExclusionSummary({
       </div>
       <p className="max-w-3xl text-xs text-slate-500">
         {allowSourceExclusions
-          ? "Applies to loaded top-window rows with matching trader addresses or source attribution. Canonical hero totals and pool snapshots stay unfiltered."
-          : "Applies to loaded top-window rows with matching trader addresses. Canonical hero totals and pool snapshots stay unfiltered."}
+          ? "Applies to analysis tables and charts with matching trader addresses or source attribution. Top-line totals and the headline volume chart stay unfiltered."
+          : "Applies to analysis tables and charts with matching trader addresses. Top-line totals and the headline volume chart stay unfiltered."}
       </p>
       <ExclusionChips
         exclusions={exclusions}

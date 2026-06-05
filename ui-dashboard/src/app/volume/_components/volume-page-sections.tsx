@@ -8,9 +8,11 @@ import {
   VOLUME_FALLBACK_CHART_RANGES,
 } from "@/lib/time-series";
 import type { VolumePageModel, VolumeUrlState } from "../page-client";
+import { volumeExclusionsForVenue } from "../_lib/use-volume-aggregates";
 import { TopPoolsList } from "./top-pools-list";
 import { V2VolumeSection } from "./v2-volume-section";
 import { V3VolumeSection } from "./v3-volume-section";
+import { VolumeExclusionFilter } from "./volume-exclusion-filter";
 
 export function VolumePageHeader({ urlState }: { urlState: VolumeUrlState }) {
   return (
@@ -347,47 +349,80 @@ export function VolumeVenueSection({
 }) {
   const { range, cutoff, exclusions } = urlState;
   const { aggregates, status } = model;
+  const analysisFilters = (
+    <VolumeAnalysisFilters urlState={urlState} model={model} />
+  );
   if (urlState.venue === "v2") {
     return (
-      <V2VolumeSection
-        rangeLabel={rangeLabel(range)}
-        cutoff={cutoff}
-        canUseVolumeFilters={urlState.canUseVolumeFilters}
-        v2Aggregated={aggregates.v2Aggregated}
-        v2AggregatorAggregated={aggregates.v2AggregatorAggregated}
-        hasExploratoryExclusions={aggregates.hasExploratoryExclusions}
-        tableIsLoading={status.tableIsLoading}
-        tableHasError={status.tableHasError}
-        v2AggIsLoading={status.v2AggIsLoading}
-        v2AggHasError={status.v2AggHasError}
-        isV2AggregatorCapHit={status.isV2AggregatorCapHit}
-      />
+      <>
+        {analysisFilters}
+        <V2VolumeSection
+          rangeLabel={rangeLabel(range)}
+          cutoff={cutoff}
+          canUseVolumeFilters={urlState.canUseVolumeFilters}
+          v2Aggregated={aggregates.v2Aggregated}
+          v2AggregatorAggregated={aggregates.v2AggregatorAggregated}
+          hasExploratoryExclusions={aggregates.hasExploratoryExclusions}
+          tableIsLoading={status.tableIsLoading}
+          tableHasError={status.tableHasError}
+          v2AggIsLoading={status.v2AggIsLoading}
+          v2AggHasError={status.v2AggHasError}
+          isV2AggregatorCapHit={status.isV2AggregatorCapHit}
+        />
+      </>
     );
   }
   return (
-    <V3VolumeSection
-      rangeLabel={rangeLabel(range)}
-      range={range}
-      cutoff={cutoff}
-      filteredTraderRows={aggregates.filteredTraderRows}
-      traders={aggregates.aggregated}
-      pools={model.poolMeta}
-      protocolActorFilter={model.isProtocolActorIn}
-      canUseVolumeFilters={urlState.canUseVolumeFilters}
-      exclusions={exclusions}
-      tableState={{
-        isLoading: status.tableIsLoading,
-        hasError: status.tableHasError,
-        isCapHit: status.isTableCapHit,
-        hasExploratoryExclusions: aggregates.hasExploratoryExclusions,
-      }}
-      aggregators={aggregates.v3AggregatorAggregated}
-      aggregatorState={{
-        isLoading: status.v3AggIsLoading,
-        hasError: status.v3AggHasError,
-        isCapHit: status.isV3AggregatorCapHit,
-      }}
-      chart={v3SourceChart(urlState, model)}
+    <>
+      {analysisFilters}
+      <V3VolumeSection
+        rangeLabel={rangeLabel(range)}
+        range={range}
+        cutoff={cutoff}
+        filteredTraderRows={aggregates.filteredTraderRows}
+        traders={aggregates.aggregated}
+        pools={model.poolMeta}
+        protocolActorFilter={model.isProtocolActorIn}
+        canUseVolumeFilters={urlState.canUseVolumeFilters}
+        exclusions={exclusions}
+        tableState={{
+          isLoading: status.tableIsLoading,
+          hasError: status.tableHasError,
+          isCapHit: status.isTableCapHit,
+          hasExploratoryExclusions: aggregates.hasExploratoryExclusions,
+        }}
+        aggregators={aggregates.v3AggregatorAggregated}
+        aggregatorState={{
+          isLoading: status.v3AggIsLoading,
+          hasError: status.v3AggHasError,
+          isCapHit: status.isV3AggregatorCapHit,
+        }}
+        chart={v3SourceChart(urlState, model)}
+      />
+    </>
+  );
+}
+
+function VolumeAnalysisFilters({
+  urlState,
+  model,
+}: {
+  urlState: VolumeUrlState;
+  model: VolumePageModel;
+}) {
+  if (!urlState.canUseVolumeFilters) return null;
+
+  const displayedExclusions = volumeExclusionsForVenue(
+    urlState.venue,
+    urlState.exclusions,
+  );
+
+  return (
+    <VolumeExclusionFilter
+      exclusions={displayedExclusions}
+      allowSourceExclusions={urlState.venue === "v3"}
+      sourceOptions={model.aggregates.sourceOptions}
+      onChange={urlState.updateExclusions}
     />
   );
 }

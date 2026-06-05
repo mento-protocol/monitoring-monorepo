@@ -207,4 +207,18 @@ describe("VolumeClient useGQL wiring", () => {
       html.indexOf("Total volume"),
     );
   });
+
+  it("renders exploratory exclusions below top-line volume and before analysis", () => {
+    const html = renderVolume("v3");
+
+    expect(html.indexOf("Total volume")).toBeGreaterThanOrEqual(0);
+    expect(html.indexOf("Exploratory exclusions")).toBeGreaterThanOrEqual(0);
+    expect(html.indexOf('data-testid="v3-section"')).toBeGreaterThanOrEqual(0);
+    expect(html.indexOf("Total volume")).toBeLessThan(
+      html.indexOf("Exploratory exclusions"),
+    );
+    expect(html.indexOf("Exploratory exclusions")).toBeLessThan(
+      html.indexOf('data-testid="v3-section"'),
+    );
+  });
 });
