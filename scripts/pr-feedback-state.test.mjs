@@ -382,6 +382,38 @@ test("does not block on bot comments tied to another head commit", () => {
   assertEqual(summary.counts.topLevelBotComments, 1);
 });
 
+test("does not treat contract-shaped hex tokens as commit references", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    pr: {
+      ...readyState.pr,
+      headRefOid: "b".repeat(40),
+      headUpdatedAt: "2026-06-05T16:30:00Z",
+    },
+    required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [
+      {
+        id: 456,
+        author: "cursor[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: `High Severity\n<!-- BUGBOT_BUG_ID: example -->\nContract ${"a".repeat(40)} is affected.`,
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, false);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 1);
+  assertEqual(summary.counts.topLevelBotComments, 1);
+});
+
 test("does not block on actionable bot comments when head freshness is unknown", () => {
   const summary = summarizeFeedbackState({
     ...readyState,

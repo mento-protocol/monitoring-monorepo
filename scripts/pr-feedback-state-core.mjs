@@ -7,9 +7,13 @@ function commentTimestamp(comment) {
 }
 
 function referencedCommitShas(comment) {
-  return Array.from(
-    String(comment.body ?? "").matchAll(/\b[0-9a-f]{40}\b/gi),
-    ([match]) => match.toLowerCase(),
+  const body = String(comment.body ?? "");
+  const patterns = [
+    /\bcommit(?:\s+sha|sha|_sha|id|_id)?["':=\s-]+([0-9a-f]{40})\b/gi,
+    /\/(?:blob|commit|commits|tree)\/([0-9a-f]{40})\b/gi,
+  ];
+  return patterns.flatMap((pattern) =>
+    Array.from(body.matchAll(pattern), ([, sha]) => sha.toLowerCase()),
   );
 }
 
