@@ -149,7 +149,9 @@ discovery. `LIFI_API_KEY` authenticates LI.FI/Jumper quote probes with the
 `x-lifi-api-key` header so scheduled runs avoid public quote limits,
 `OPENOCEAN_API_KEY` enables the OpenOcean Pro endpoint for OpenOcean checks,
 and `SQUID_INTEGRATOR_ID` identifies Mento's Squid quote probes through the
-`x-integrator-id` header. These are managed by the platform Terraform stack
+`x-integrator-id` header. Squid Celo probes also read Uniswap V3 pool balances
+through `SQUID_CELO_RPC_URL` when set, defaulting to Forno, to size discovery
+amounts after the default quote. These are managed by the platform Terraform stack
 from `lifi_api_key`, `openocean_api_key`, and `squid_integrator_id`. The same
 platform stack mirrors
 `INTEGRATION_PROBES_HASURA_URL`, `UPSTASH_REDIS_REST_URL`, and

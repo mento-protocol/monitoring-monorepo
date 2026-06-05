@@ -54,6 +54,10 @@ pnpm --filter @mento-protocol/integration-probes knip
 - Squid quote probes are capped and paced between requests because bursty
   route checks can trigger 429s. Do not remove or lower the request delay
   without live route evidence that the scheduled probe remains healthy.
+- Squid Celo probes use Mento reserve metadata plus the current official
+  Uniswap V3 Celo pool sell-side balance, when RPC is available, to size a
+  small discovery ladder after the default quote. This is only for amount
+  selection; a pass still requires Mento v3 router or registered pool evidence.
 - `integration-probes:latest` expires after 3 days so failed scheduled probes
   degrade the dashboard instead of showing stale health forever. Dated history
   keys expire after 90 days.
@@ -73,3 +77,5 @@ pnpm --filter @mento-protocol/integration-probes knip
   `x-lifi-api-key`; keep it server-side and Terraform-managed.
 - `SQUID_INTEGRATOR_ID` authenticates Squid quote probes with
   `x-integrator-id`; keep it server-side and Terraform-managed.
+- `SQUID_CELO_RPC_URL` optionally overrides the default Forno Celo RPC used for
+  Squid Uniswap-liquidity discovery sizing. It is not a credential.

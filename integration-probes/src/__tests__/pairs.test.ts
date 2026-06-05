@@ -28,6 +28,8 @@ describe("hubPairsFromPoolRows", () => {
     expect(pairs[0]?.poolAddress).toBe(
       "0x3333333333333333333333333333333333333333",
     );
+    expect(pairs[0]?.baseReserveRaw).toBe("1");
+    expect(pairs[0]?.quoteReserveRaw).toBe("1");
   });
 
   it("omits drained and non-USDm pools", () => {
@@ -82,6 +84,10 @@ describe("buildQuoteInputs", () => {
       "usdm-to-base",
     ]);
     expect(inputs[0]?.amountRaw).toBe("1000000000000000000");
+    expect(inputs[0]?.sellReserveRaw).toBe("1");
+    expect(inputs[0]?.buyReserveRaw).toBe("1");
+    expect(inputs[1]?.sellReserveRaw).toBe("1");
+    expect(inputs[1]?.buyReserveRaw).toBe("1");
   });
 });
 

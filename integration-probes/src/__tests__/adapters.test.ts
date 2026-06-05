@@ -263,6 +263,40 @@ describe("probeAdapterPair", () => {
     expect(result.attemptCount).toBe(2);
   });
 
+  it("awaits async adapter quote builders", async () => {
+    const adapter: AggregatorAdapter = {
+      id: "async-attempt",
+      label: "Async Attempt",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: async () => [
+        {
+          url: "https://example.test/async",
+          amountDecimal: "250",
+          variant: "async-discovery",
+        },
+      ],
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({ route: [{ pool: `swap through ${POOL}` }] }),
+        ),
+      env: {},
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.requestUrl).toBe("https://example.test/async");
+    expect(result.routeVariant).toBe("async-discovery");
+    expect(result.routeAmountUsd).toBe("250");
+  });
+
   it("follows LI.FI Fly routes to Monad Fly distributions for pool evidence", async () => {
     const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
     expect(lifi).toBeDefined();
@@ -1229,7 +1263,7 @@ describe("aggregator quote builders", () => {
     );
 
     const squid = AGGREGATOR_ADAPTERS.find((item) => item.id === "squid");
-    expect(squid?.maxQuoteRequestsPerRun).toBe(80);
+    expect(squid?.maxQuoteRequestsPerRun).toBe(160);
     expect(squid?.quoteRequestDelayMs).toBe(2500);
     const squidRequest = squid?.quote?.(input, env);
     const squidQuoteRequest = firstQuoteRequest(squidRequest);

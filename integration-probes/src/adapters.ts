@@ -17,6 +17,7 @@ import {
   socketUrl,
   SQUID_MAX_QUOTE_REQUESTS_PER_RUN,
   squidBody,
+  squidQuoteRequests,
   SQUID_QUOTE_REQUEST_DELAY_MS,
   zeroXUrl,
 } from "./adapterRequests.js";
@@ -41,6 +42,14 @@ const REQUEST_ERROR_ATTEMPT_LIMIT = 2;
 
 type ChainSupport = "supported" | "unsupported" | "unknown";
 type BeforeQuoteRequest = () => Promise<void>;
+type QuoteBuildContext = {
+  chain: ChainProbeConfig;
+  fetcher: FetchLike;
+};
+type QuoteBuildResult =
+  | QuoteRequest
+  | readonly QuoteRequest[]
+  | Promise<QuoteRequest | readonly QuoteRequest[]>;
 
 export type AggregatorAdapter = {
   id: string;
@@ -53,7 +62,8 @@ export type AggregatorAdapter = {
   quote?: (
     input: QuoteProbeInput,
     env: NodeJS.ProcessEnv,
-  ) => QuoteRequest | readonly QuoteRequest[];
+    context?: QuoteBuildContext,
+  ) => QuoteBuildResult;
   maxQuoteRequestsPerRun?: number;
   quoteRequestDelayMs?: number;
   nextStep?: string;
@@ -183,7 +193,10 @@ async function fetchAndEvaluate(args: {
   beforeQuoteRequest?: BeforeQuoteRequest | undefined;
 }): Promise<PairProbeResult> {
   const requests = normalizeQuoteRequests(
-    args.adapter.quote!(args.input, args.env),
+    await args.adapter.quote!(args.input, args.env, {
+      chain: args.chain,
+      fetcher: args.fetcher,
+    }),
   );
   let fallback: PairProbeResult | null = null;
   let attemptCount = 0;
@@ -657,14 +670,16 @@ function squidAdapter(): AggregatorAdapter {
     quoteRequestDelayMs: SQUID_QUOTE_REQUEST_DELAY_MS,
     researchNote:
       "Celo Squid routing is observed in the repo registry; Monad needs quote evidence. Probes are serialized and paced to avoid 429s from bursty route checks.",
-    quote: (input, env) =>
-      postRequest(
-        "https://apiplus.squidrouter.com/v2/route",
-        squidBody(input),
-        {
-          "x-integrator-id": env.SQUID_INTEGRATOR_ID!,
-        },
-      ),
+    quote: (input, env, context) =>
+      context
+        ? squidQuoteRequests(input, env, context.chain, context.fetcher)
+        : postRequest(
+            "https://apiplus.squidrouter.com/v2/route",
+            squidBody(input),
+            {
+              "x-integrator-id": env.SQUID_INTEGRATOR_ID!,
+            },
+          ),
   };
 }
 

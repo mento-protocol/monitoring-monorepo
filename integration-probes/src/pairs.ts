@@ -196,6 +196,8 @@ function pairFromPoolRow(chainId: number, row: PoolRow): HubPair | null {
       poolSource: row.source,
       base: token1,
       quote: token0,
+      baseReserveRaw: row.reserves1,
+      quoteReserveRaw: row.reserves0,
     });
   }
   if (token1.symbol === USDM && token0.symbol !== USDM) {
@@ -206,6 +208,8 @@ function pairFromPoolRow(chainId: number, row: PoolRow): HubPair | null {
       poolSource: row.source,
       base: token0,
       quote: token1,
+      baseReserveRaw: row.reserves0,
+      quoteReserveRaw: row.reserves1,
     });
   }
   return null;
@@ -218,6 +222,8 @@ function makePair(args: {
   poolSource: string;
   base: TokenProbe;
   quote: TokenProbe;
+  baseReserveRaw?: string | undefined;
+  quoteReserveRaw?: string | undefined;
 }): HubPair {
   return {
     id: `${args.chainId}:${args.base.symbol}-${USDM}:${args.poolId}`,
@@ -227,6 +233,8 @@ function makePair(args: {
     poolSource: args.poolSource,
     base: args.base,
     quote: args.quote,
+    baseReserveRaw: args.baseReserveRaw,
+    quoteReserveRaw: args.quoteReserveRaw,
   };
 }
 
@@ -271,6 +279,10 @@ function quoteInput(
 ): QuoteProbeInput {
   const sellToken = direction === "base-to-usdm" ? pair.base : pair.quote;
   const buyToken = direction === "base-to-usdm" ? pair.quote : pair.base;
+  const sellReserveRaw =
+    direction === "base-to-usdm" ? pair.baseReserveRaw : pair.quoteReserveRaw;
+  const buyReserveRaw =
+    direction === "base-to-usdm" ? pair.quoteReserveRaw : pair.baseReserveRaw;
   return {
     chainId: pair.chainId,
     pairId: pair.id,
@@ -279,6 +291,8 @@ function quoteInput(
     buyToken,
     amountDecimal: amountUsd,
     amountRaw: decimalAmountToRaw(amountUsd, sellToken.decimals),
+    sellReserveRaw,
+    buyReserveRaw,
     takerAddress,
   };
 }

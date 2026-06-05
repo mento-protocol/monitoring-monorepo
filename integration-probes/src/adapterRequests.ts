@@ -3,12 +3,13 @@ import type {
   QuoteResponseEvidenceHook,
   RequestHeaders,
 } from "./adapterTypes.js";
-import type { QuoteProbeInput } from "./types.js";
+import type { ChainProbeConfig, FetchLike, QuoteProbeInput } from "./types.js";
+import { squidLiquidityAmountCandidates } from "./squidLiquidity.js";
 
 const LIFI_INTEGRATOR = "mento-probes";
 export const LIFI_MAX_QUOTE_REQUESTS_PER_RUN = 180;
-export const LIFI_FLY_EXCHANGE = "fly";
-export const SQUID_MAX_QUOTE_REQUESTS_PER_RUN = 80;
+const LIFI_FLY_EXCHANGE = "fly";
+export const SQUID_MAX_QUOTE_REQUESTS_PER_RUN = 160;
 export const SQUID_QUOTE_REQUEST_DELAY_MS = 2_500;
 
 const LIFI_FLY_CHAIN_ID = 143;
@@ -38,9 +39,11 @@ export function postRequest(
   url: string,
   body: unknown,
   headers?: RequestHeaders,
+  metadata: Omit<QuoteRequest, "url" | "init"> = {},
 ): QuoteRequest {
   return {
     url,
+    ...metadata,
     init: {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
@@ -225,6 +228,48 @@ export function squidBody(input: QuoteProbeInput): unknown {
     slippage: 1,
     quoteOnly: true,
   };
+}
+
+export async function squidQuoteRequests(
+  input: QuoteProbeInput,
+  env: NodeJS.ProcessEnv,
+  chain: ChainProbeConfig,
+  fetcher: FetchLike,
+): Promise<readonly QuoteRequest[]> {
+  const headers = {
+    "x-integrator-id": env.SQUID_INTEGRATOR_ID!,
+  };
+  const defaultRequest = postRequest(
+    "https://apiplus.squidrouter.com/v2/route",
+    squidBody(input),
+    headers,
+    {
+      amountDecimal: input.amountDecimal,
+      amountRaw: input.amountRaw,
+      variant: "default",
+    },
+  );
+  const candidates = await squidLiquidityAmountCandidates({
+    input,
+    chain,
+    fetcher,
+    env,
+  });
+  return dedupeRequests([
+    defaultRequest,
+    ...candidates.map((candidate) =>
+      postRequest(
+        "https://apiplus.squidrouter.com/v2/route",
+        squidBody({
+          ...input,
+          amountDecimal: candidate.amountDecimal,
+          amountRaw: candidate.amountRaw,
+        }),
+        headers,
+        candidate,
+      ),
+    ),
+  ]);
 }
 
 export function relayBody(input: QuoteProbeInput): unknown {
