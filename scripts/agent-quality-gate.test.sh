@@ -1397,6 +1397,145 @@ assert_contains "- ok "
 assert_not_contains "expected fixture failure that should stay quiet"
 assert_not_contains "successful command noise that should stay quiet"
 
+parallel_quality_repo="$(mktemp -d)"
+(
+  cd "$parallel_quality_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+marker="${PARALLEL_MARKER:?}"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  if [[ -f "$marker" ]]; then
+    exit 0
+  fi
+  sleep 0.05
+done
+echo "parallel marker was not created while trunk was running"
+exit 1
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+: > "${PARALLEL_MARKER:?}"
+sleep 0.1
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  PARALLEL_MARKER="$parallel_quality_repo/parallel-marker" \
+    PATH="$parallel_quality_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 4 \
+      > "$output_file" 2>&1
+)
+rm -rf "$parallel_quality_repo"
+assert_contains "Running quality commands with parallelism 4."
+assert_contains "+ ./tools/trunk check scripts/agent-prewarm.mjs"
+assert_contains "+ pnpm lint:scripts"
+assert_contains "+ pnpm agent:prewarm:test"
+assert_contains "All mapped commands passed."
+assert_not_contains "parallel marker was not created"
+
+quality_setup_repo="$(mktemp -d)"
+(
+  cd "$quality_setup_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin shared-config/src tools
+  printf 'export const fixture = true;\n' > shared-config/src/config.ts
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  "--filter @mento-protocol/monitoring-config build")
+    sleep 0.2
+    : > "${BUILD_MARKER:?}"
+    ;;
+  "--filter @mento-protocol/ui-dashboard typecheck")
+    if [[ ! -f "${BUILD_MARKER:?}" ]]; then
+      echo "consumer typecheck started before shared-config build"
+      exit 1
+    fi
+    ;;
+esac
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'shared-config/src/config.ts\n' > changed-paths.txt
+  BUILD_MARKER="$quality_setup_repo/build-marker" \
+    PATH="$quality_setup_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 8 \
+      > "$output_file" 2>&1
+)
+rm -rf "$quality_setup_repo"
+assert_contains "+ pnpm --filter @mento-protocol/monitoring-config build"
+grep -Fq -- "+ pnpm --filter @mento-protocol/ui-dashboard typecheck" "$output_file" ||
+  fail "expected direct shared-config consumer typecheck to run"
+assert_contains "All mapped commands passed."
+assert_not_contains "consumer typecheck started before shared-config build"
+
+dashboard_serial_repo="$(mktemp -d)"
+(
+  cd "$dashboard_serial_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin tools ui-dashboard/src/app
+  printf 'export default function Page() { return null; }\n' > ui-dashboard/src/app/page.tsx
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  exec\ turbo\ run\ test:browser*|exec\ turbo\ run\ size-limit*)
+    if ! mkdir "${DASHBOARD_NEXT_LOCK:?}"; then
+      echo "dashboard .next command overlapped"
+      exit 1
+    fi
+    sleep 0.2
+    rmdir "$DASHBOARD_NEXT_LOCK"
+    ;;
+esac
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'ui-dashboard/src/app/page.tsx\n' > changed-paths.txt
+  DASHBOARD_NEXT_LOCK="$dashboard_serial_repo/next-lock" \
+    PATH="$dashboard_serial_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 8 \
+      > "$output_file" 2>&1
+)
+rm -rf "$dashboard_serial_repo"
+assert_contains "+ pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+assert_contains "+ pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+assert_contains "All mapped commands passed."
+assert_not_contains "dashboard .next command overlapped"
+
 fresh_stamp_repo="$(mktemp -d)"
 (
   cd "$fresh_stamp_repo"

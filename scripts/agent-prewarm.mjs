@@ -1,8 +1,11 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const usage = `Usage: scripts/agent-prewarm.mjs [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--dry-run] [--allow-package-script-changes]
+const maxCapturedBytes = 20 * 1024 * 1024;
+const defaultParallelism = 2;
+
+const usage = `Usage: scripts/agent-prewarm.mjs [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--dry-run] [--allow-package-script-changes] [--parallel <n>]
 
 Prewarm Turbo's local cache for the Turbo-backed commands already mapped by
 the agent quality gate. The helper only runs commands shaped as:
@@ -21,6 +24,8 @@ Options:
   --allow-package-script-changes
                  With run mode, acknowledge package manifest/script changes
                  before executing Turbo-backed package scripts.
+  --parallel <n> Execute up to n Turbo commands concurrently. Default: 2.
+                 Can also be set with AGENT_PREWARM_PARALLELISM.
   -h, --help     Show this help.
 `;
 
@@ -46,6 +51,30 @@ export function extractTurboPrewarmCommands(gateOutput) {
   }
 
   return commands;
+}
+
+export function isDashboardNextWorkspaceCommand(command) {
+  return (
+    command ===
+      "pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw" ||
+    command ===
+      "pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+  );
+}
+
+export function splitPrewarmCommands(commands) {
+  const serialCommands = [];
+  const parallelCommands = [];
+
+  for (const command of commands) {
+    if (isDashboardNextWorkspaceCommand(command)) {
+      serialCommands.push(command);
+    } else {
+      parallelCommands.push(command);
+    }
+  }
+
+  return { serialCommands, parallelCommands };
 }
 
 export function hasPackageScriptRisk(gateOutput) {
@@ -81,10 +110,21 @@ export function hasPackageScriptRisk(gateOutput) {
   return false;
 }
 
+export function parseParallelism(value, label = "--parallel") {
+  if (!/^[0-9]+$/.test(value) || Number(value) < 1) {
+    throw new Error(`${label} requires a positive integer`);
+  }
+  return Number(value);
+}
+
 function parseArgs(argv) {
   const forwardedArgs = [];
   let mode = "run";
   let allowPackageScriptChanges = false;
+  let parallelism = parseParallelism(
+    process.env.AGENT_PREWARM_PARALLELISM ?? String(defaultParallelism),
+    "AGENT_PREWARM_PARALLELISM",
+  );
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -106,15 +146,37 @@ function parseArgs(argv) {
       case "--allow-package-script-changes":
         allowPackageScriptChanges = true;
         break;
+      case "--parallel":
+      case "--jobs": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new Error(`${arg} requires a value`);
+        }
+        parallelism = parseParallelism(value, arg);
+        index += 1;
+        break;
+      }
       case "-h":
       case "--help":
-        return { help: true, mode, forwardedArgs, allowPackageScriptChanges };
+        return {
+          help: true,
+          mode,
+          forwardedArgs,
+          allowPackageScriptChanges,
+          parallelism,
+        };
       default:
         throw new Error(`unknown argument: ${arg}`);
     }
   }
 
-  return { help: false, mode, forwardedArgs, allowPackageScriptChanges };
+  return {
+    help: false,
+    mode,
+    forwardedArgs,
+    allowPackageScriptChanges,
+    parallelism,
+  };
 }
 
 function runGate(forwardedArgs) {
@@ -129,7 +191,117 @@ function runGate(forwardedArgs) {
   );
 }
 
-function main() {
+function createCollector() {
+  let bytes = 0;
+  let truncated = false;
+  const chunks = [];
+
+  return {
+    append(chunk) {
+      if (bytes >= maxCapturedBytes) {
+        truncated = true;
+        return;
+      }
+
+      const remaining = maxCapturedBytes - bytes;
+      if (chunk.length > remaining) {
+        chunks.push(chunk.subarray(0, remaining));
+        bytes += remaining;
+        truncated = true;
+        return;
+      }
+
+      chunks.push(chunk);
+      bytes += chunk.length;
+    },
+    text() {
+      const suffix = truncated ? "\n[output truncated after 20 MiB]\n" : "";
+      return `${Buffer.concat(chunks).toString("utf8")}${suffix}`;
+    },
+  };
+}
+
+function formatDuration(milliseconds) {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
+}
+
+function runCommand(command) {
+  const stdout = createCollector();
+  const stderr = createCollector();
+  const startedAt = Date.now();
+
+  return new Promise((resolve) => {
+    const child = spawn(command, {
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    child.stdout.on("data", (chunk) => stdout.append(chunk));
+    child.stderr.on("data", (chunk) => stderr.append(chunk));
+
+    child.on("error", (error) => {
+      resolve({
+        command,
+        error,
+        status: 1,
+        elapsedMs: Date.now() - startedAt,
+        stdout: stdout.text(),
+        stderr: stderr.text(),
+      });
+    });
+
+    child.on("close", (status, signal) => {
+      resolve({
+        command,
+        signal,
+        status: status ?? 1,
+        elapsedMs: Date.now() - startedAt,
+        stdout: stdout.text(),
+        stderr: stderr.text(),
+      });
+    });
+  });
+}
+
+export function runCommandsParallel(commands, parallelism) {
+  const results = new Array(commands.length);
+  let nextIndex = 0;
+  let active = 0;
+
+  return new Promise((resolve, reject) => {
+    if (commands.length === 0) {
+      resolve([]);
+      return;
+    }
+
+    const launch = () => {
+      while (active < parallelism && nextIndex < commands.length) {
+        const commandIndex = nextIndex;
+        const command = commands[commandIndex];
+        nextIndex += 1;
+        active += 1;
+
+        runCommand(command)
+          .then((result) => {
+            results[commandIndex] = result;
+            active -= 1;
+            if (nextIndex >= commands.length && active === 0) {
+              resolve(results);
+              return;
+            }
+            launch();
+          })
+          .catch(reject);
+      }
+    };
+
+    launch();
+  });
+}
+
+async function main() {
   let parsed;
   try {
     parsed = parseArgs(process.argv.slice(2));
@@ -194,15 +366,23 @@ function main() {
     return 2;
   }
 
-  let failures = 0;
+  console.log();
+  console.log(`Running Turbo commands with parallelism ${parsed.parallelism}.`);
   for (const command of commands) {
-    console.log();
     console.log(`+ ${command}`);
-    const result = spawnSync(command, {
-      shell: true,
-      stdio: "inherit",
-    });
+  }
 
+  // Keep dashboard .next writers/readers out of the prewarm parallel pool:
+  // test:browser starts a dev server, while size-limit runs build first.
+  const { serialCommands, parallelCommands } = splitPrewarmCommands(commands);
+  let failures = 0;
+  const serialResults = await runCommandsParallel(serialCommands, 1);
+  const parallelResults = await runCommandsParallel(
+    parallelCommands,
+    parsed.parallelism,
+  );
+  const results = [...serialResults, ...parallelResults];
+  for (const result of results) {
     if (result.error) {
       console.error(`Failed to run command: ${result.error.message}`);
       failures += 1;
@@ -210,8 +390,22 @@ function main() {
     }
 
     if (result.status !== 0) {
+      console.error();
+      console.error(
+        `Command failed after ${formatDuration(result.elapsedMs)}: ${result.command}`,
+      );
+      if (result.stdout) process.stderr.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      if (result.signal) {
+        console.error(`Command terminated by signal: ${result.signal}`);
+      }
       failures += 1;
+      continue;
     }
+
+    // Successful Turbo output is intentionally suppressed here. Parallel runs
+    // otherwise interleave progress logs; failures replay captured output.
+    console.log(`✓ ${result.command} (${formatDuration(result.elapsedMs)})`);
   }
 
   if (failures > 0) {
@@ -226,5 +420,12 @@ function main() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exit(main());
+  main()
+    .then((exitCode) => {
+      process.exit(exitCode);
+    })
+    .catch((error) => {
+      console.error(error);
+      process.exit(1);
+    });
 }
