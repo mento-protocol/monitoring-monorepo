@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { shouldEnableSentry, stripAuthHeaders } from "../sentry.shared";
+import {
+  filterAndStripSentryEvent,
+  shouldEnableSentry,
+  stripAuthHeaders,
+} from "../sentry.shared";
 
 // Minimal test harness: stripAuthHeaders takes an ErrorEvent | TransactionEvent
 // and mutates/returns it. For unit-test purposes we can cast a loose object to
@@ -7,6 +11,11 @@ import { shouldEnableSentry, stripAuthHeaders } from "../sentry.shared";
 function scrub<T extends object>(event: T): T {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return stripAuthHeaders(event as any) as T;
+}
+
+function filter<T extends object>(event: T): T | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return filterAndStripSentryEvent(event as any) as T | null;
 }
 
 describe("stripAuthHeaders — request headers", () => {
@@ -155,5 +164,105 @@ describe("stripAuthHeaders — breadcrumb redaction", () => {
     expect(scrubbed.breadcrumbs[0]!.data.url).toBe(
       "https://api.example.com/feed",
     );
+  });
+});
+
+describe("filterAndStripSentryEvent — loopback requests", () => {
+  it("drops localhost request URLs", () => {
+    expect(
+      filter({ request: { url: "http://localhost:3000/api/pools" } }),
+    ).toBeNull();
+  });
+
+  it("drops 127.0.0.1 request URLs", () => {
+    expect(
+      filter({ request: { url: "http://127.0.0.1:3000/api/pools" } }),
+    ).toBeNull();
+  });
+
+  it("drops other 127.0.0.0/8 request URLs", () => {
+    expect(
+      filter({ request: { url: "http://127.0.0.2:3000/api/pools" } }),
+    ).toBeNull();
+  });
+
+  it("drops IPv6 loopback request URLs", () => {
+    expect(
+      filter({ request: { url: "http://[::1]:3000/api/pools" } }),
+    ).toBeNull();
+  });
+
+  it("drops full-form IPv6 loopback request URLs", () => {
+    expect(
+      filter({
+        request: { url: "http://[0:0:0:0:0:0:0:1]:3000/api/pools" },
+      }),
+    ).toBeNull();
+  });
+
+  it("drops localhost subdomain request URLs", () => {
+    expect(
+      filter({ request: { url: "http://preview.localhost:3000/api/pools" } }),
+    ).toBeNull();
+  });
+
+  it("drops relative request URLs when the host header is loopback", () => {
+    expect(
+      filter({
+        request: {
+          url: "/api/pools",
+          headers: { host: "127.0.0.1:3000" },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("drops relative request URLs when the forwarded host header is loopback", () => {
+    expect(
+      filter({
+        request: {
+          url: "/api/pools",
+          headers: { "x-forwarded-host": "preview.localhost:3000" },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("drops events with a loopback Origin header", () => {
+    expect(
+      filter({
+        request: {
+          url: "https://monitoring.mento.org/api/pools",
+          headers: { Origin: "http://127.0.0.1:3000" },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("drops events with a loopback Referer header", () => {
+    expect(
+      filter({
+        request: {
+          url: "https://monitoring.mento.org/api/pools",
+          headers: { Referer: "http://localhost:3000/pools?debug=1" },
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps public request URLs and still strips auth data", () => {
+    const filtered = filter({
+      request: {
+        url: "https://monitoring.mento.org/api/auth/callback?code=abc",
+        headers: { cookie: "session=abc", host: "monitoring.mento.org" },
+      },
+    });
+
+    expect(filtered).toEqual({
+      request: {
+        url: "https://monitoring.mento.org/api/auth/callback",
+        headers: { host: "monitoring.mento.org" },
+      },
+    });
   });
 });

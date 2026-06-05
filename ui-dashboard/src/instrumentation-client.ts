@@ -1,8 +1,8 @@
 import * as Sentry from "@sentry/nextjs";
 import {
+  filterAndStripSentryEvent,
   resolveTracesSampleRate,
   shouldEnableSentry,
-  stripAuthHeaders,
 } from "../sentry.shared";
 import { clientEnv } from "./env";
 
@@ -16,8 +16,8 @@ if (shouldEnableSentry(clientEnv.NEXT_PUBLIC_VERCEL_ENV)) {
     replaysSessionSampleRate: 0.1,
     replaysOnErrorSampleRate: 1.0,
     sendDefaultPii: false,
-    beforeSend: stripAuthHeaders,
-    beforeSendTransaction: stripAuthHeaders,
+    beforeSend: filterAndStripSentryEvent,
+    beforeSendTransaction: filterAndStripSentryEvent,
     integrations: [Sentry.replayIntegration()],
   });
 }

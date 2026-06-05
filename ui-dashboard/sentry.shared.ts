@@ -5,6 +5,110 @@ type TransactionEvent = Parameters<
   NonNullable<Options["beforeSendTransaction"]>
 >[0];
 
+type RequestHeaders = Record<string, unknown>;
+
+function normalizeHostname(hostname: string): string {
+  let normalized = hostname.trim().toLowerCase();
+  if (normalized.startsWith("[") && normalized.endsWith("]")) {
+    normalized = normalized.slice(1, -1);
+  }
+  while (normalized.endsWith(".")) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized;
+}
+
+function hostnameFromHostHeader(host: string): string {
+  const trimmed = host.trim();
+  const bracketedIpv6 = trimmed.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketedIpv6) return bracketedIpv6[1] ?? trimmed;
+
+  const firstColon = trimmed.indexOf(":");
+  const lastColon = trimmed.lastIndexOf(":");
+  if (firstColon !== -1 && firstColon === lastColon) {
+    return trimmed.slice(0, firstColon);
+  }
+  return trimmed;
+}
+
+function isIpv4Loopback(hostname: string): boolean {
+  const parts = hostname.split(".");
+  if (parts.length !== 4) return false;
+
+  const octets = parts.map((part) => {
+    if (!/^\d+$/.test(part)) return Number.NaN;
+    return Number(part);
+  });
+
+  return (
+    octets[0] === 127 &&
+    octets.every(
+      (octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255,
+    )
+  );
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = normalizeHostname(hostname);
+  return (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized === "::1" ||
+    normalized === "0:0:0:0:0:0:0:1" ||
+    isIpv4Loopback(normalized)
+  );
+}
+
+function isLoopbackUrl(url: string): boolean {
+  try {
+    return isLoopbackHostname(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function getHeader(headers: RequestHeaders | undefined, name: string) {
+  if (!headers) return undefined;
+  const lowerName = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() !== lowerName) continue;
+    if (typeof value === "string") return value;
+    if (typeof value === "number") return String(value);
+    if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  }
+  return undefined;
+}
+
+function isLoopbackHostHeader(headers: RequestHeaders | undefined): boolean {
+  for (const headerName of ["host", "x-forwarded-host"]) {
+    const header = getHeader(headers, headerName);
+    if (header && isLoopbackHostname(hostnameFromHostHeader(header))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isLoopbackOriginHeader(headers: RequestHeaders | undefined): boolean {
+  for (const headerName of ["origin", "referer"]) {
+    const header = getHeader(headers, headerName);
+    if (header && isLoopbackUrl(header)) return true;
+  }
+  return false;
+}
+
+function isLoopbackRequestEvent(event: ErrorEvent | TransactionEvent): boolean {
+  if (
+    typeof event.request?.url === "string" &&
+    isLoopbackUrl(event.request.url)
+  ) {
+    return true;
+  }
+
+  const headers = event.request?.headers as RequestHeaders | undefined;
+  return isLoopbackHostHeader(headers) || isLoopbackOriginHeader(headers);
+}
+
 // Redact URL credentials + query strings from any URL embedded in free-form
 // text (typically exception messages or breadcrumb descriptions). Host +
 // path are preserved so "which provider failed" stays debuggable, but
@@ -70,6 +174,13 @@ export function stripAuthHeaders<T extends ErrorEvent | TransactionEvent>(
   return event;
 }
 
+export function filterAndStripSentryEvent<
+  T extends ErrorEvent | TransactionEvent,
+>(event: T): T | null {
+  if (isLoopbackRequestEvent(event)) return null;
+  return stripAuthHeaders(event);
+}
+
 // Sample 20% of traces in production to stay within Sentry quota at scale;
 // keep 100% on preview + local where traffic is low and full fidelity is
 // useful for debugging. Tune once we have real volume data.
@@ -98,7 +209,7 @@ export function getServerSentryOptions(): Options {
     environment: process.env.VERCEL_ENV ?? "development",
     tracesSampleRate: resolveTracesSampleRate(process.env.VERCEL_ENV),
     sendDefaultPii: false,
-    beforeSend: stripAuthHeaders,
-    beforeSendTransaction: stripAuthHeaders,
+    beforeSend: filterAndStripSentryEvent,
+    beforeSendTransaction: filterAndStripSentryEvent,
   };
 }
