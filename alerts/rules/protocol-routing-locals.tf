@@ -107,6 +107,9 @@ locals {
   # relayer log labels and alert copy use slash-form pairs (`CHF/USD`). Match
   # both label shapes so FX weekend mute policies keep working if the exporter
   # or Grafana alert instance carries either representation.
+  # The split assumes the quote leg is a 3-letter FX/feed suffix. For 6-char
+  # feeds (`CHFUSD`) that yields `CHF/USD`; for 7-char CELO feeds the first
+  # capture backtracks to 4 chars (`CELO/PHP`) before the end anchor can match.
   weekend_disabled_feed_label_variants = distinct(flatten([
     for feed in local.weekend_disabled_feeds : [
       feed,
