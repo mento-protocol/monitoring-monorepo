@@ -20,6 +20,25 @@ const EvidenceSchema = z.object({
   path: z.string(),
 });
 
+const VolumeSignalSchema = z
+  .object({
+    window: z.literal("30d"),
+    category: z.enum([
+      "dex-aggregator",
+      "bridge-aggregator",
+      "direct-bridge",
+      "official-stats",
+    ]),
+    valueUsd: z.number().nullable(),
+    sourceLabel: z.string(),
+    sourceUrl: z.string().nullable(),
+    sourceProtocol: z.string().nullable(),
+    note: z.string().nullable(),
+  })
+  .nullable()
+  .optional()
+  .transform((value) => value ?? null);
+
 const NullableNumberSchema = z
   .number()
   .nullable()
@@ -68,6 +87,7 @@ const AggregatorSchema = z.object({
   label: z.string(),
   kind: z.enum(["dex", "cross_chain", "meta", "excluded"]),
   tier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  volumeSignal: VolumeSignalSchema,
   credentialEnv: z.array(z.string()),
   researchNote: z.string(),
   chains: z.array(ChainResultSchema),

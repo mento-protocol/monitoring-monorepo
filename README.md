@@ -303,7 +303,9 @@ Aggregator integration snapshots are produced by the scheduled
 `Integration Probes` GitHub Actions workflow and rendered at
 `/integrations`. Chain statuses are `pass` only for full active USDm hub-pair
 coverage and `partial` when some pair directions pass but others still lack
-Mento v3 address evidence. Run the same quote-only check manually with:
+Mento v3 address evidence. Aggregator rows also include a 30d public volume
+signal when a stable source such as DefiLlama exposes one; the signal is context,
+not a health gate. Run the same quote-only check manually with:
 
 ```bash
 pnpm integrations:probe

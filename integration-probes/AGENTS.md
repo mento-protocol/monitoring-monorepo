@@ -63,6 +63,15 @@ pnpm --filter @mento-protocol/integration-probes knip
 - Adapter order is dashboard display order. Keep LI.FI, Squid, and OpenOcean
   first by operator priority, then sort remaining adapters by current public
   30d aggregator/bridge volume where available.
+- Adapter tiers are manually assigned priority buckets, not automatic volume
+  ranks. Tier 1 requires current Celo support plus strategic/operator priority;
+  aggregators that do not support Celo must not be Tier 1. Tier 2 covers
+  meaningful candidates, high-volume venues missing Celo support, or incomplete
+  integrations. Tier 3 is parked, excluded, or exploratory coverage.
+- Volume signals are 30d public USD figures for dashboard context only. Prefer
+  DefiLlama DEX aggregator or bridge-aggregator data when available, record the
+  source category, and degrade to a null value rather than scraping fragile
+  frontend-only stats.
 - `integration-probes:latest` expires after 3 days so failed scheduled probes
   degrade the dashboard instead of showing stale health forever. Dated history
   keys expire after 90 days.

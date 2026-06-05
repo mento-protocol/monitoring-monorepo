@@ -138,7 +138,10 @@ also be run manually with `workflow_dispatch`. `integration-probes:latest`
 expires after 3 days so missed scheduled probes surface as stale/missing
 dashboard data; dated history keys expire after 90 days. Chain statuses are
 `pass` only when every active USDm hub-pair direction passes and `partial` when
-at least one direction passes but full coverage is still missing.
+at least one direction passes but full coverage is still missing. Snapshots also
+carry a 30d public volume signal for each aggregator when a stable public source
+is available; this signal is rendered as context on `/integrations` and does not
+affect health status.
 
 ```bash
 pnpm integrations:probe

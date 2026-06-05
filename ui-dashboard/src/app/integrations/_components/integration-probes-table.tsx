@@ -29,6 +29,7 @@ export function IntegrationProbesTable({
           <Th>Aggregator</Th>
           <Th>Tier</Th>
           <Th>Type</Th>
+          <Th>Volume Signal</Th>
           <Th>Celo</Th>
           <Th>Monad</Th>
           <Th>Next Step</Th>
@@ -69,6 +70,9 @@ function AggregatorRows({
         </Td>
         <Td mono>{String(aggregator.tier)}</Td>
         <Td>{kindLabel(aggregator.kind)}</Td>
+        <Td>
+          <VolumeSignalCell signal={aggregator.volumeSignal} />
+        </Td>
         {CHAIN_ORDER.map((chainId) => (
           <Td key={chainId}>
             <ChainCell chain={chainsById.get(chainId)} />
@@ -81,7 +85,7 @@ function AggregatorRows({
         </Td>
       </tr>
       <tr className="border-b border-slate-800/50 bg-slate-950/30">
-        <td colSpan={6} className="px-2 sm:px-4 py-2">
+        <td colSpan={7} className="px-2 sm:px-4 py-2">
           <details className="group">
             <summary className="cursor-pointer text-xs font-medium text-slate-400 hover:text-indigo-300">
               Pair evidence
@@ -95,6 +99,35 @@ function AggregatorRows({
         </td>
       </tr>
     </>
+  );
+}
+
+function VolumeSignalCell({
+  signal,
+}: {
+  signal: IntegrationProbeAggregator["volumeSignal"];
+}) {
+  if (!signal) return <span className="text-slate-500">-</span>;
+  const category = volumeCategoryLabel(signal.category);
+  if (signal.valueUsd === null) {
+    return (
+      <div className="max-w-[11rem]" title={signal.note ?? undefined}>
+        <div className="font-mono text-xs text-slate-500">-</div>
+        <div className="mt-1 text-[10px] text-slate-500">
+          {category} · unavailable
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-[11rem]" title={volumeTitle(signal)}>
+      <div className="font-mono text-xs text-slate-200">
+        {formatUsdCompact(signal.valueUsd)} {signal.window}
+      </div>
+      <div className="mt-1 text-[10px] text-slate-500">
+        {category} · {volumeSourceLabel(signal)}
+      </div>
+    </div>
   );
 }
 
@@ -145,6 +178,50 @@ function ChainEvidence({ chain }: { chain: IntegrationProbeChain }) {
       </div>
     </div>
   );
+}
+
+function volumeTitle(
+  signal: NonNullable<IntegrationProbeAggregator["volumeSignal"]>,
+): string {
+  return [signal.sourceLabel, signal.sourceProtocol, signal.note]
+    .filter((part): part is string => part !== null && part.length > 0)
+    .join(" · ");
+}
+
+function volumeSourceLabel(
+  signal: NonNullable<IntegrationProbeAggregator["volumeSignal"]>,
+): string {
+  return signal.sourceLabel.startsWith("DefiLlama")
+    ? "DefiLlama"
+    : signal.sourceLabel;
+}
+
+function volumeCategoryLabel(
+  category: NonNullable<IntegrationProbeAggregator["volumeSignal"]>["category"],
+): string {
+  switch (category) {
+    case "bridge-aggregator":
+      return "Bridge agg";
+    case "dex-aggregator":
+      return "DEX agg";
+    case "direct-bridge":
+      return "Direct bridge";
+    case "official-stats":
+      return "Official stats";
+  }
+}
+
+function formatUsdCompact(value: number): string {
+  const units = [
+    { divisor: 1_000_000_000, suffix: "B" },
+    { divisor: 1_000_000, suffix: "M" },
+    { divisor: 1_000, suffix: "K" },
+  ] as const;
+  const match = units.find((unit) => Math.abs(value) >= unit.divisor);
+  if (!match) return `$${Math.round(value).toLocaleString("en-US")}`;
+  const scaled = value / match.divisor;
+  const formatted = scaled.toFixed(1);
+  return `$${formatted.replace(/\.0$/, "")}${match.suffix}`;
 }
 
 function prioritizedPairs(
