@@ -591,15 +591,18 @@ export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
   if (!normalizedHeadSha) return null;
 
   let headCommitIndex = -1;
+  let headCommitTimestamp = null;
   for (const [index, item] of timelineItems.entries()) {
     if (
       item?.event === "committed" &&
       String(item.sha ?? "").toLowerCase() === normalizedHeadSha
     ) {
       headCommitIndex = index;
+      headCommitTimestamp = timelineEventTimestamp(item);
     }
   }
   if (headCommitIndex < 0) return null;
+  if (headCommitTimestamp) return headCommitTimestamp;
 
   for (const item of timelineItems.slice(headCommitIndex + 1)) {
     const timestamp = timelineEventTimestamp(item);

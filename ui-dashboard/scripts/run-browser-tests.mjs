@@ -147,9 +147,14 @@ async function startFixtureServerForProductionBuild() {
     },
   );
 
-  await waitForUrl(`${fixtureUrl}/health`, { child });
-  browserTestEnv.PLAYWRIGHT_REUSE_FIXTURE_SERVER = "true";
-  return child;
+  try {
+    await waitForUrl(`${fixtureUrl}/health`, { child });
+    browserTestEnv.PLAYWRIGHT_REUSE_FIXTURE_SERVER = "true";
+    return child;
+  } catch (error) {
+    await stopProcess(child);
+    throw error;
+  }
 }
 
 async function buildProductionApp() {

@@ -414,6 +414,41 @@ test("does not treat contract-shaped hex tokens as commit references", () => {
   assertEqual(summary.counts.topLevelBotComments, 1);
 });
 
+test("does not block on bot review bodies tied to an older commit", () => {
+  const currentHead = "b".repeat(40);
+  const oldHead = "a".repeat(40);
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    pr: {
+      ...readyState.pr,
+      headRefOid: currentHead,
+      headUpdatedAt: "2026-06-05T16:30:00Z",
+    },
+    required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [
+      {
+        id: "review-1",
+        author: "chatgpt-codex-connector[bot]",
+        commitOid: oldHead,
+        createdAt: "2026-06-05T16:31:00Z",
+        body: "| # | Severity | Issue |\n| 1 | [P2] | Fix this |",
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 0);
+  assertEqual(summary.counts.topLevelBotComments, 1);
+});
+
 test("does not block on actionable bot comments when head freshness is unknown", () => {
   const summary = summarizeFeedbackState({
     ...readyState,
@@ -592,6 +627,39 @@ test("blocks on current-head priority review bot summaries", () => {
         id: 456,
         author: "claude[bot]",
         updatedAt: "2026-06-05T16:31:00Z",
+        body: "| # | Severity | Issue |\n| 1 | [P2] | Fix this |",
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, false);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 1);
+});
+
+test("blocks on bot review bodies tied to the current commit", () => {
+  const currentHead = "b".repeat(40);
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    pr: {
+      ...readyState.pr,
+      headRefOid: currentHead,
+      headUpdatedAt: "2026-06-05T16:30:00Z",
+    },
+    required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [
+      {
+        id: "review-1",
+        author: "chatgpt-codex-connector[bot]",
+        commitOid: currentHead,
+        createdAt: "2026-06-05T16:31:00Z",
         body: "| # | Severity | Issue |\n| 1 | [P2] | Fix this |",
       },
     ],

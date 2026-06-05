@@ -19,6 +19,9 @@ function referencedCommitShas(comment) {
 
 function isCurrentHeadComment(comment, pr) {
   const headSha = String(pr?.headRefOid ?? "").toLowerCase();
+  const reviewCommitSha = String(comment.commitOid ?? "").toLowerCase();
+  if (headSha && reviewCommitSha) return reviewCommitSha === headSha;
+
   const commitShas = referencedCommitShas(comment);
   if (headSha && commitShas.length > 0) {
     return commitShas.includes(headSha);

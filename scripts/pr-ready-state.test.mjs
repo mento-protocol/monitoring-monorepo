@@ -794,6 +794,7 @@ test("filters top-level review bodies down to bots with body text", () => {
       body: "automated review body",
       url: "https://github.com/example/review-1",
       state: "COMMENTED",
+      commit: { oid: "head-sha" },
       author: { login: "chatgpt-codex-connector[bot]", type: "Bot" },
     },
     {
@@ -812,6 +813,7 @@ test("filters top-level review bodies down to bots with body text", () => {
   assertEqual(bots.length, 1);
   assertEqual(bots[0].author, "chatgpt-codex-connector[bot]");
   assertEqual(bots[0].state, "COMMENTED");
+  assertEqual(bots[0].commitOid, "head-sha");
 });
 
 test("requires chatgpt-codex-connector +1 reaction exactly", () => {
@@ -1114,6 +1116,27 @@ test("uses first timestamped timeline item after current head commit for freshne
       observedAt: "2026-05-21T13:24:00Z",
     }),
     "2026-05-21T13:22:30Z",
+  );
+});
+
+test("uses current head commit timeline timestamp when available", () => {
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems: [
+        {
+          event: "committed",
+          sha: "new-head",
+          created_at: "2026-05-21T13:22:00Z",
+        },
+        {
+          event: "commented",
+          created_at: "2026-05-21T13:23:00Z",
+        },
+      ],
+      observedAt: "2026-05-21T13:24:00Z",
+    }),
+    "2026-05-21T13:22:00Z",
   );
 });
 
