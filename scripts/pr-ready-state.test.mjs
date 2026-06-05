@@ -14,6 +14,7 @@ import {
   classifyCodexReviewSignal,
   isCodexReviewRequestBody,
   summarizeReadyState,
+  summarizeTerminalReadyState,
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
@@ -1321,6 +1322,45 @@ test("summarizes ready state when all blocking surfaces are clean", () => {
   assertEqual(summary.statusChecks.skipped.length, 1);
 });
 
+test("summarizes merged pull requests as terminal ready", () => {
+  const summary = summarizeTerminalReadyState({
+    ...basePr,
+    state: "MERGED",
+    mergeable: "UNKNOWN",
+    mergedAt: "2026-06-05T11:08:01Z",
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.required.ready, true);
+  assertEqual(summary.required.blockers.length, 0);
+  assertEqual(summary.summary, "Pull request is already merged.");
+  assertEqual(summary.pr.state, "MERGED");
+  assertEqual(summary.pr.mergedAt, "2026-06-05T11:08:01Z");
+  assertEqual(summary.gates.codexDescriptionApproval.required, true);
+  assertEqual(summary.gates.codexDescriptionApproval.state, "present");
+  assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
+});
+
+test("summarizes closed unmerged pull requests as terminal blocked", () => {
+  const summary = summarizeTerminalReadyState({
+    ...basePr,
+    state: "CLOSED",
+    closedAt: "2026-06-05T11:08:01Z",
+  });
+
+  assertEqual(summary.ready, false);
+  assertEqual(summary.required.ready, false);
+  assertEqual(summary.required.blockers[0].kind, "state");
+  assertEqual(summary.required.blockers[0].state, "CLOSED");
+  assertEqual(summary.summary, "Pull request is closed without merging.");
+  assertEqual(summary.pr.closedAt, "2026-06-05T11:08:01Z");
+  assertEqual(summary.gates.codexDescriptionApproval.ready, true);
+  assertEqual(summary.gates.codexDescriptionApproval.required, false);
+  assertEqual(summary.gates.codexDescriptionApproval.state, "not_applicable");
+  assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
+  assertEqual(summary.gates.reviewCommentReplies.required, false);
+});
+
 test("human output names the readiness verdict and codex reaction gate", () => {
   const output = formatHuman(
     summarizeReadyState({
@@ -1348,6 +1388,7 @@ test("compact output includes only readiness counters and Codex signal state", (
   );
 
   assert(output.includes("PR #123 BLOCKED"), output);
+  assert(output.includes("state=UNKNOWN"), output);
   assert(output.includes("required_blockers=1"), output);
   assert(output.includes("codex_approval=missing"), output);
   assert(output.includes("codex_signal=missing"), output);
