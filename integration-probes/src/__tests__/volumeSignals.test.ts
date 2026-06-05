@@ -12,6 +12,7 @@ describe("volumeSignalsForAdapters", () => {
         adapter("okx"),
         adapter("lifi"),
         adapter("socket"),
+        adapter("rubic"),
         adapter("squid"),
         adapter("relay"),
       ],
@@ -23,6 +24,7 @@ describe("volumeSignalsForAdapters", () => {
               protocols: [
                 { name: "Jumper (LI.FI powered)", total30d: 683_152_039 },
                 { name: "Bungee", total30d: 198_370_000 },
+                { name: "Rubic", total30d: 27_440_000 },
               ],
             }),
           );
@@ -65,6 +67,12 @@ describe("volumeSignalsForAdapters", () => {
     expect(signals.get("socket")).toMatchObject({
       valueUsd: 198_370_000,
       sourceProtocol: "Bungee",
+    });
+    expect(signals.get("rubic")).toMatchObject({
+      category: "bridge-aggregator",
+      valueUsd: 27_440_000,
+      sourceUrl: "https://defillama.com/protocols/bridge-aggregators",
+      sourceProtocol: "Rubic",
     });
     expect(signals.get("squid")).toMatchObject({
       window: "30d",

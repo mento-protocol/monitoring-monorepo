@@ -69,7 +69,7 @@ const VOLUME_SOURCES: Record<string, VolumeSource> = {
   odos: defillama("dex-aggregators", "ODOS"),
   socket: defillama("bridge-aggregators", "Bungee", "bridge-aggregator"),
   rango: defillama("bridge-aggregators", "Rango", "bridge-aggregator"),
-  rubic: defillama("dex-aggregators", "Rubic"),
+  rubic: defillama("bridge-aggregators", "Rubic", "bridge-aggregator"),
   debridge: unavailable(
     "direct-bridge",
     "deBridge public docs",
