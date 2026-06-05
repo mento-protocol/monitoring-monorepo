@@ -17,6 +17,7 @@ import {
   socketUrl,
   SQUID_MAX_QUOTE_REQUESTS_PER_RUN,
   squidBody,
+  squidQuoteRequests,
   SQUID_QUOTE_REQUEST_DELAY_MS,
   zeroXUrl,
 } from "./adapterRequests.js";
@@ -41,6 +42,14 @@ const REQUEST_ERROR_ATTEMPT_LIMIT = 2;
 
 type ChainSupport = "supported" | "unsupported" | "unknown";
 type BeforeQuoteRequest = () => Promise<void>;
+type QuoteBuildContext = {
+  chain: ChainProbeConfig;
+  fetcher: FetchLike;
+};
+type QuoteBuildResult =
+  | QuoteRequest
+  | readonly QuoteRequest[]
+  | Promise<QuoteRequest | readonly QuoteRequest[]>;
 
 export type AggregatorAdapter = {
   id: string;
@@ -53,7 +62,8 @@ export type AggregatorAdapter = {
   quote?: (
     input: QuoteProbeInput,
     env: NodeJS.ProcessEnv,
-  ) => QuoteRequest | readonly QuoteRequest[];
+    context?: QuoteBuildContext,
+  ) => QuoteBuildResult;
   maxQuoteRequestsPerRun?: number;
   quoteRequestDelayMs?: number;
   nextStep?: string;
@@ -182,13 +192,21 @@ async function fetchAndEvaluate(args: {
   quoteBudget?: QuoteAttemptBudget | undefined;
   beforeQuoteRequest?: BeforeQuoteRequest | undefined;
 }): Promise<PairProbeResult> {
+  if (!hasQuoteAttempt(args.quoteBudget)) {
+    return quoteBudgetExhaustedResult(args.input, 0);
+  }
   const requests = normalizeQuoteRequests(
-    args.adapter.quote!(args.input, args.env),
+    await args.adapter.quote!(args.input, args.env, {
+      chain: args.chain,
+      fetcher: args.fetcher,
+    }),
   );
   let fallback: PairProbeResult | null = null;
   let attemptCount = 0;
   let requestErrorAttempts = 0;
-  for (const request of requests) {
+  const queue = [...requests];
+  for (let index = 0; index < queue.length; index += 1) {
+    const request = queue[index]!;
     if (!consumeQuoteAttempt(args.quoteBudget)) {
       return quoteBudgetExhaustedResult(args.input, attemptCount);
     }
@@ -208,10 +226,31 @@ async function fetchAndEvaluate(args: {
     if (requestErrorLimitReached(result, requestErrorAttempts)) {
       return result;
     }
+    await appendFailureDiscoveryRequests({ ...args, request, result, queue });
   }
   return fallback
     ? { ...fallback, attemptCount }
     : skippedResult(args.input, "error", "No quote requests built.");
+}
+
+async function appendFailureDiscoveryRequests(args: {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  fetcher: FetchLike;
+  request: QuoteRequest;
+  result: PairProbeResult;
+  queue: QuoteRequest[];
+  quoteBudget?: QuoteAttemptBudget | undefined;
+}): Promise<void> {
+  if (!args.request.afterFailure || !hasQuoteAttempt(args.quoteBudget)) return;
+  const discoveredRequests = await args.request.afterFailure({
+    chain: args.chain,
+    input: args.input,
+    fetcher: args.fetcher,
+    request: args.request,
+    primaryResult: args.result,
+  });
+  args.queue.push(...normalizeQuoteRequests(discoveredRequests));
 }
 
 function quoteBudgetExhaustedResult(
@@ -397,6 +436,10 @@ function consumeQuoteAttempt(budget: QuoteAttemptBudget | undefined): boolean {
   if (budget.remaining <= 0) return false;
   budget.remaining -= 1;
   return true;
+}
+
+function hasQuoteAttempt(budget: QuoteAttemptBudget | undefined): boolean {
+  return !budget || budget.remaining > 0;
 }
 
 async function responseJson(response: Response): Promise<unknown> {
@@ -657,14 +700,16 @@ function squidAdapter(): AggregatorAdapter {
     quoteRequestDelayMs: SQUID_QUOTE_REQUEST_DELAY_MS,
     researchNote:
       "Celo Squid routing is observed in the repo registry; Monad needs quote evidence. Probes are serialized and paced to avoid 429s from bursty route checks.",
-    quote: (input, env) =>
-      postRequest(
-        "https://apiplus.squidrouter.com/v2/route",
-        squidBody(input),
-        {
-          "x-integrator-id": env.SQUID_INTEGRATOR_ID!,
-        },
-      ),
+    quote: (input, env, context) =>
+      context
+        ? squidQuoteRequests(input, env)
+        : postRequest(
+            "https://apiplus.squidrouter.com/v2/route",
+            squidBody(input),
+            {
+              "x-integrator-id": env.SQUID_INTEGRATOR_ID!,
+            },
+          ),
   };
 }
 

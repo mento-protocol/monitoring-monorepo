@@ -12,6 +12,7 @@ export type QuoteRequest = {
   amountDecimal?: string;
   amountRaw?: string;
   afterResponse?: QuoteResponseEvidenceHook;
+  afterFailure?: QuoteFailureDiscoveryHook;
 };
 
 export type QuoteAttemptBudget = {
@@ -24,6 +25,10 @@ export type QuoteResponseEvidenceHook = (
   args: QuoteResponseEvidenceArgs,
 ) => Promise<PairProbeResult | null>;
 
+type QuoteFailureDiscoveryHook = (
+  args: QuoteFailureDiscoveryArgs,
+) => Promise<readonly QuoteRequest[]>;
+
 export type QuoteResponseEvidenceArgs = {
   chain: ChainProbeConfig;
   input: QuoteProbeInput;
@@ -32,6 +37,14 @@ export type QuoteResponseEvidenceArgs = {
   payload: unknown;
   primaryResult: PairProbeResult;
   quoteBudget?: QuoteAttemptBudget | undefined;
+};
+
+type QuoteFailureDiscoveryArgs = {
+  chain: ChainProbeConfig;
+  input: QuoteProbeInput;
+  fetcher: FetchLike;
+  request: QuoteRequest;
+  primaryResult: PairProbeResult;
 };
 
 export type TimedPayload = {

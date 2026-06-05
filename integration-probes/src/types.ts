@@ -38,6 +38,8 @@ export type HubPair = {
   poolSource: string;
   base: TokenProbe;
   quote: TokenProbe;
+  baseReserveRaw?: string | undefined;
+  quoteReserveRaw?: string | undefined;
 };
 
 type PairDirection = "base-to-usdm" | "usdm-to-base";
@@ -50,6 +52,8 @@ export type QuoteProbeInput = {
   buyToken: TokenProbe;
   amountDecimal: string;
   amountRaw: string;
+  sellReserveRaw?: string | undefined;
+  buyReserveRaw?: string | undefined;
   takerAddress: string;
 };
 
