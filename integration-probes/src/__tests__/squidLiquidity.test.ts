@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { squidQuoteRequests } from "../adapterRequests.js";
-import type { ChainProbeConfig, FetchLike, QuoteProbeInput } from "../types.js";
+import type {
+  ChainProbeConfig,
+  FetchLike,
+  PairProbeResult,
+  QuoteProbeInput,
+} from "../types.js";
 
 const SELL = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const BUY = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -48,7 +53,7 @@ const chain: ChainProbeConfig = {
 
 describe("squidQuoteRequests", () => {
   it("builds a liquidity-aware Celo discovery ladder from Uniswap depth", async () => {
-    const requests = await squidQuoteRequests(
+    const requests = await squidRequestsAfterDefaultFailure(
       input,
       { SQUID_INTEGRATOR_ID: "squid-id" },
       chain,
@@ -78,7 +83,7 @@ describe("squidQuoteRequests", () => {
   });
 
   it("falls back to Mento reserve sizing when Uniswap depth is unavailable", async () => {
-    const requests = await squidQuoteRequests(
+    const requests = await squidRequestsAfterDefaultFailure(
       input,
       { SQUID_INTEGRATOR_ID: "squid-id" },
       chain,
@@ -102,7 +107,7 @@ describe("squidQuoteRequests", () => {
   });
 
   it("does not call Celo RPC for non-Celo ladders", async () => {
-    const requests = await squidQuoteRequests(
+    const requests = await squidRequestsAfterDefaultFailure(
       {
         ...input,
         chainId: 143,
@@ -129,7 +134,7 @@ describe("squidQuoteRequests", () => {
   });
 
   it("uses the first-hop sell depth from an active via-USDT path", async () => {
-    const requests = await squidQuoteRequests(
+    const requests = await squidRequestsAfterDefaultFailure(
       input,
       { SQUID_INTEGRATOR_ID: "squid-id" },
       chainWithUsdt(),
@@ -154,6 +159,49 @@ describe("squidQuoteRequests", () => {
     ).toBe(true);
   });
 });
+
+async function squidRequestsAfterDefaultFailure(
+  input: QuoteProbeInput,
+  env: NodeJS.ProcessEnv,
+  chain: ChainProbeConfig,
+  fetcher: FetchLike,
+): Promise<ReturnType<typeof squidQuoteRequests>> {
+  const defaultRequests = squidQuoteRequests(input, env);
+  const defaultRequest = defaultRequests[0]!;
+  expect(defaultRequests).toHaveLength(1);
+  expect(defaultRequest.afterFailure).toEqual(expect.any(Function));
+  const discoveredRequests = await defaultRequest.afterFailure!({
+    chain,
+    input,
+    fetcher,
+    request: defaultRequest,
+    primaryResult: failedPrimaryResult(input),
+  });
+  return [...defaultRequests, ...discoveredRequests];
+}
+
+function failedPrimaryResult(input: QuoteProbeInput): PairProbeResult {
+  return {
+    pairId: input.pairId,
+    poolId: "42220-0xpool",
+    direction: input.direction,
+    sellSymbol: input.sellToken.symbol,
+    buySymbol: input.buyToken.symbol,
+    status: "fail",
+    evidence: [],
+    sourceLabels: [],
+    txTarget: null,
+    downstreamProvider: null,
+    routeVariant: "default",
+    routeAmountUsd: input.amountDecimal,
+    attemptCount: 1,
+    requestUrl: "https://apiplus.squidrouter.com/v2/route",
+    httpStatus: 200,
+    latencyMs: 1,
+    responsePreview: "{}",
+    error: null,
+  };
+}
 
 function uniswapRpcFetcher(poolSellBalanceRaw: string): FetchLike {
   return async (_input, init) => {

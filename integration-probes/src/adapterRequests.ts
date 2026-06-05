@@ -230,7 +230,35 @@ export function squidBody(input: QuoteProbeInput): unknown {
   };
 }
 
-export async function squidQuoteRequests(
+export function squidQuoteRequests(
+  input: QuoteProbeInput,
+  env: NodeJS.ProcessEnv,
+): readonly QuoteRequest[] {
+  const headers = {
+    "x-integrator-id": env.SQUID_INTEGRATOR_ID!,
+  };
+  return [
+    postRequest(
+      "https://apiplus.squidrouter.com/v2/route",
+      squidBody(input),
+      headers,
+      {
+        amountDecimal: input.amountDecimal,
+        amountRaw: input.amountRaw,
+        variant: "default",
+        afterFailure: (args) =>
+          squidDiscoveryQuoteRequests(
+            args.input,
+            env,
+            args.chain,
+            args.fetcher,
+          ),
+      },
+    ),
+  ];
+}
+
+async function squidDiscoveryQuoteRequests(
   input: QuoteProbeInput,
   env: NodeJS.ProcessEnv,
   chain: ChainProbeConfig,
@@ -239,25 +267,14 @@ export async function squidQuoteRequests(
   const headers = {
     "x-integrator-id": env.SQUID_INTEGRATOR_ID!,
   };
-  const defaultRequest = postRequest(
-    "https://apiplus.squidrouter.com/v2/route",
-    squidBody(input),
-    headers,
-    {
-      amountDecimal: input.amountDecimal,
-      amountRaw: input.amountRaw,
-      variant: "default",
-    },
-  );
   const candidates = await squidLiquidityAmountCandidates({
     input,
     chain,
     fetcher,
     env,
   });
-  return dedupeRequests([
-    defaultRequest,
-    ...candidates.map((candidate) =>
+  return dedupeRequests(
+    candidates.map((candidate) =>
       postRequest(
         "https://apiplus.squidrouter.com/v2/route",
         squidBody({
@@ -269,7 +286,7 @@ export async function squidQuoteRequests(
         candidate,
       ),
     ),
-  ]);
+  );
 }
 
 export function relayBody(input: QuoteProbeInput): unknown {

@@ -130,7 +130,7 @@ function mentoReserveSeeds(sellReserveRaw: bigint | null): AmountSeed[] {
 }
 
 function amountWithinCap(seed: AmountSeed, capRaw: bigint | null): boolean {
-  return seed.amountRaw > 0n && (capRaw === null || seed.amountRaw <= capRaw);
+  return capRaw === null || seed.amountRaw <= capRaw;
 }
 
 function ratioAmount(
@@ -249,6 +249,7 @@ async function pathSellDepthRaw(args: {
       sellToken: intermediate,
     }),
   ]);
+  // The second-hop depth is only a liveness check; returned depth stays in SELL units.
   return secondHopDepth > 0n ? firstHopDepth : 0n;
 }
 
@@ -259,22 +260,23 @@ async function bestPoolSellDepthRaw(args: {
   tokenB: TokenProbe;
   sellToken: TokenProbe;
 }): Promise<bigint> {
-  let best = 0n;
-  for (const fee of UNISWAP_FEE_TIERS) {
-    const pool = await uniswapPoolAddress(args, fee);
-    if (pool === null) continue;
-    const [liquidity, sellBalance] = await Promise.all([
-      readUint256(args.fetcher, args.rpcUrl, pool, SELECTOR_LIQUIDITY),
-      readUint256(
-        args.fetcher,
-        args.rpcUrl,
-        args.sellToken.address,
-        balanceOfCall(pool),
-      ),
-    ]);
-    if (liquidity > 0n && sellBalance > best) best = sellBalance;
-  }
-  return best;
+  const depths = await Promise.all(
+    UNISWAP_FEE_TIERS.map(async (fee) => {
+      const pool = await uniswapPoolAddress(args, fee);
+      if (pool === null) return 0n;
+      const [liquidity, sellBalance] = await Promise.all([
+        readUint256(args.fetcher, args.rpcUrl, pool, SELECTOR_LIQUIDITY),
+        readUint256(
+          args.fetcher,
+          args.rpcUrl,
+          args.sellToken.address,
+          balanceOfCall(pool),
+        ),
+      ]);
+      return liquidity > 0n ? sellBalance : 0n;
+    }),
+  );
+  return depths.reduce((best, depth) => (depth > best ? depth : best), 0n);
 }
 
 async function uniswapPoolAddress(
@@ -303,7 +305,7 @@ async function readUint256(
   data: string,
 ): Promise<bigint> {
   const result = await ethCall(fetcher, rpcUrl, to, data);
-  return BigInt(result);
+  return BigInt(result === "0x" ? "0x0" : result);
 }
 
 async function ethCall(

@@ -297,6 +297,70 @@ describe("probeAdapterPair", () => {
     expect(result.routeAmountUsd).toBe("250");
   });
 
+  it("does not build async quote requests after a shared budget is exhausted", async () => {
+    let builtRequests = false;
+    const adapter: AggregatorAdapter = {
+      id: "async-budgeted",
+      label: "Async Budgeted",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: async () => {
+        builtRequests = true;
+        return { url: "https://example.test/should-not-build" };
+      },
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () => {
+        throw new Error("should not fetch");
+      },
+      env: {},
+      quoteBudget: { remaining: 0 },
+    });
+
+    expect(result.status).toBe("rate_limited");
+    expect(result.attemptCount).toBe(0);
+    expect(builtRequests).toBe(false);
+  });
+
+  it("does not run failure discovery after the final budgeted attempt", async () => {
+    let builtDiscovery = false;
+    const adapter: AggregatorAdapter = {
+      id: "lazy-budgeted",
+      label: "Lazy Budgeted",
+      kind: "dex",
+      tier: 1,
+      support: { 42220: "supported" },
+      researchNote: "test",
+      quote: () => ({
+        url: "https://example.test/default",
+        afterFailure: async () => {
+          builtDiscovery = true;
+          return [{ url: "https://example.test/discovery" }];
+        },
+      }),
+    };
+
+    const result = await probeAdapterPair({
+      adapter,
+      chain,
+      input,
+      fetcher: async () =>
+        new Response(JSON.stringify({ route: [{ protocol: "Other" }] })),
+      env: {},
+      quoteBudget: { remaining: 1 },
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.attemptCount).toBe(1);
+    expect(builtDiscovery).toBe(false);
+  });
+
   it("follows LI.FI Fly routes to Monad Fly distributions for pool evidence", async () => {
     const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
     expect(lifi).toBeDefined();
