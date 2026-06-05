@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import {
   extractTurboPrewarmCommands,
   hasPackageScriptRisk,
+  parseParallelism,
+  runCommandsParallel,
 } from "./agent-prewarm.mjs";
 
 const gateOutput = `Agent quality gate
@@ -62,6 +64,31 @@ Mapped safe local commands:
 - pnpm pr:ready-state:test (PR ready-state helper changed)
 `),
   false,
+);
+
+assert.equal(parseParallelism("1"), 1);
+assert.equal(parseParallelism("4"), 4);
+assert.throws(() => parseParallelism("0"), /positive integer/);
+assert.throws(() => parseParallelism("auto"), /positive integer/);
+
+const parallelResults = await runCommandsParallel(
+  [
+    'node -e "setTimeout(() => process.exit(0), 50)"',
+    'node -e "setTimeout(() => process.exit(0), 10)"',
+  ],
+  2,
+);
+assert.deepEqual(
+  parallelResults.map((result) => result.status),
+  [0, 0],
+);
+assert.equal(
+  parallelResults[0].command,
+  'node -e "setTimeout(() => process.exit(0), 50)"',
+);
+assert.equal(
+  parallelResults[1].command,
+  'node -e "setTimeout(() => process.exit(0), 10)"',
 );
 
 console.log("agent prewarm tests passed");

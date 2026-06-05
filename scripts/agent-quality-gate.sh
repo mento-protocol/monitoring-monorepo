@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh]
+Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh] [--parallel <n>]
 
 Maps changed paths to the local commands and PR checklists an agent should run
 before opening or updating a PR. Defaults to dry-run.
@@ -25,6 +25,10 @@ Options:
                  used the same base, changed paths, command plan, gate
                  implementation, and validated file content. Intended for the
                  pre-push hook only.
+  --parallel <n> With --run, execute independent quality commands with up to
+                 n concurrent jobs. Default: 2. Fail-fast mode stays
+                 sequential so it still stops before starting the next mapped
+                 command.
   -h, --help     Show this help.
 
 Environment:
@@ -35,6 +39,8 @@ Environment:
                       when set to 1 or true.
   AGENT_QUALITY_FAIL_FAST
                       Same behavior as --fail-fast when set to 1 or true.
+  AGENT_QUALITY_PARALLELISM
+                      Same behavior as --parallel.
 USAGE
 }
 
@@ -45,6 +51,7 @@ changed_paths_input_file=""
 allow_package_script_changes="${AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES:-}"
 fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
 skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
+quality_parallelism="${AGENT_QUALITY_PARALLELISM:-2}"
 if [[ -z "$allow_package_script_changes" ]]; then
   allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
 fi
@@ -99,6 +106,14 @@ while [[ $# -gt 0 ]]; do
       skip_if_fresh="true"
       shift
       ;;
+    --parallel|--jobs)
+      quality_parallelism="${2:-}"
+      if [[ -z "$quality_parallelism" ]]; then
+        echo "error: $1 requires a positive integer" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -110,6 +125,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ ! "$quality_parallelism" =~ ^[0-9]+$ || "$quality_parallelism" -lt 1 ]]; then
+  echo "error: --parallel requires a positive integer" >&2
+  exit 2
+fi
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -1559,21 +1579,213 @@ run_mapped_command() {
   return "$exit_code"
 }
 
-for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}" \
-  "${codegen_commands[@]+"${codegen_commands[@]}"}" \
-  "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}" \
-  "${quality_commands[@]+"${quality_commands[@]}"}"; do
-  command="${entry%%|*}"
-  if ! run_mapped_command "$command"; then
-    failures=$((failures + 1))
-    if [[ "$fail_fast" == "1" || "$fail_fast" == "true" ]]; then
-      echo
-      echo "Stopping after first failed mapped command (--fail-fast)." >&2
-      print_command_summary
-      exit 1
+run_mapped_command_to_files() {
+  local command="$1"
+  local output_file="$2"
+  local status_file="$3"
+  local elapsed_file="$4"
+  local start_ts
+  local end_ts
+  local elapsed
+  local exit_code
+
+  start_ts="$(date +%s)"
+  set +e
+  bash -c "$command" > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  end_ts="$(date +%s)"
+  elapsed=$((end_ts - start_ts))
+
+  printf '%s\n' "$exit_code" > "$status_file"
+  printf '%s\n' "$elapsed" > "$elapsed_file"
+}
+
+is_quality_setup_command() {
+  local command="$1"
+  case "$command" in
+    "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium")
+      return 0
+      ;;
+    "pnpm --filter @mento-protocol/monitoring-config build")
+      return 0
+      ;;
+    TF_DATA_DIR=*terraform\ -chdir=*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+run_mapped_entries_sequential() {
+  local entry
+  local command
+  shift
+
+  for entry in "$@"; do
+    command="${entry%%|*}"
+    if ! run_mapped_command "$command"; then
+      failures=$((failures + 1))
+      if [[ "$fail_fast" == "1" || "$fail_fast" == "true" ]]; then
+        echo
+        echo "Stopping after first failed mapped command (--fail-fast)." >&2
+        print_command_summary
+        exit 1
+      fi
     fi
+  done
+}
+
+run_mapped_entries_parallel() {
+  local phase="$1"
+  local max_parallel="$2"
+  shift 2
+  local entries=("$@")
+  local total="${#entries[@]}"
+  local next_index=0
+  local completed=0
+  local active_pids=()
+  local active_commands=()
+  local active_output_files=()
+  local active_status_files=()
+  local active_elapsed_files=()
+  local next_active_pids=()
+  local next_active_commands=()
+  local next_active_output_files=()
+  local next_active_status_files=()
+  local next_active_elapsed_files=()
+  local running_pids=()
+  local entry
+  local command
+  local output_file
+  local status_file
+  local elapsed_file
+  local pid
+  local i
+  local status
+  local elapsed
+
+  if [[ "$total" -eq 0 ]]; then
+    return
   fi
-done
+
+  if [[ "$max_parallel" -le 1 || "$total" -le 1 ]]; then
+    run_mapped_entries_sequential "$phase" "${entries[@]}"
+    return
+  fi
+
+  echo
+  echo "Running ${phase} commands with parallelism ${max_parallel}."
+
+  while [[ "$completed" -lt "$total" ]]; do
+    while [[ "$next_index" -lt "$total" && "${#active_pids[@]}" -lt "$max_parallel" ]]; do
+      entry="${entries[$next_index]}"
+      command="${entry%%|*}"
+      output_file="$(make_tmpfile)"
+      status_file="$(make_tmpfile)"
+      elapsed_file="$(make_tmpfile)"
+
+      echo
+      echo "+ ${command}"
+      run_mapped_command_to_files "$command" "$output_file" "$status_file" "$elapsed_file" &
+      pid="$!"
+
+      active_pids+=("$pid")
+      active_commands+=("$command")
+      active_output_files+=("$output_file")
+      active_status_files+=("$status_file")
+      active_elapsed_files+=("$elapsed_file")
+
+      next_index=$((next_index + 1))
+    done
+
+    running_pids=()
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && running_pids+=("$pid")
+    done < <(jobs -pr || true)
+    next_active_pids=()
+    next_active_commands=()
+    next_active_output_files=()
+    next_active_status_files=()
+    next_active_elapsed_files=()
+
+    for i in "${!active_pids[@]}"; do
+      pid="${active_pids[$i]}"
+      if list_contains_word "$pid" "${running_pids[@]+"${running_pids[@]}"}"; then
+        next_active_pids+=("$pid")
+        next_active_commands+=("${active_commands[$i]}")
+        next_active_output_files+=("${active_output_files[$i]}")
+        next_active_status_files+=("${active_status_files[$i]}")
+        next_active_elapsed_files+=("${active_elapsed_files[$i]}")
+        continue
+      fi
+
+      if ! wait "$pid"; then
+        :
+      fi
+
+      command="${active_commands[$i]}"
+      output_file="${active_output_files[$i]}"
+      status_file="${active_status_files[$i]}"
+      elapsed_file="${active_elapsed_files[$i]}"
+      status="$(cat "$status_file" 2>/dev/null || echo 127)"
+      elapsed="$(cat "$elapsed_file" 2>/dev/null || echo 0)"
+
+      if [[ "$status" -eq 0 ]]; then
+        record_command_summary "ok" "$elapsed" "$command"
+        echo "✓ ${command} ($(format_duration "$elapsed"))"
+      else
+        failures=$((failures + 1))
+        record_command_summary "fail" "$elapsed" "$command"
+        echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
+        filter_expected_output < "$output_file" >&2
+      fi
+
+      rm -f "$output_file" "$status_file" "$elapsed_file"
+      completed=$((completed + 1))
+    done
+
+    active_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
+    active_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
+    active_output_files=("${next_active_output_files[@]+"${next_active_output_files[@]}"}")
+    active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
+    active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
+
+    if [[ ${#active_pids[@]} -gt 0 ]]; then
+      sleep 0.1
+    fi
+  done
+}
+
+run_quality_phase() {
+  local setup_entries=()
+  local parallel_entries=()
+  local entry
+  local command
+
+  if [[ "$fail_fast" == "1" || "$fail_fast" == "true" || "$quality_parallelism" -le 1 ]]; then
+    run_mapped_entries_sequential "quality" "${quality_commands[@]+"${quality_commands[@]}"}"
+    return
+  fi
+
+  for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
+    command="${entry%%|*}"
+    if is_quality_setup_command "$command"; then
+      setup_entries+=("$entry")
+    else
+      parallel_entries+=("$entry")
+    fi
+  done
+
+  run_mapped_entries_sequential "quality setup" "${setup_entries[@]+"${setup_entries[@]}"}"
+  run_mapped_entries_parallel "quality" "$quality_parallelism" "${parallel_entries[@]+"${parallel_entries[@]}"}"
+}
+
+run_mapped_entries_sequential "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
+run_mapped_entries_sequential "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"
+run_mapped_entries_sequential "post-codegen" "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"
+run_quality_phase
 
 print_command_summary
 

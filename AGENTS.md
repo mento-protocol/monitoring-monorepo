@@ -185,7 +185,12 @@ tests instead of the package-script refusal path. Existing changed paths run
 targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, and package-manager or package-manifest changes still run
 full-repo Trunk locally. CI also runs a required full-repo Trunk check on every
-PR.
+PR. Normal `--run` mode executes independent quality-phase commands with
+bounded parallelism (`--parallel <n>`, default `2`, or
+`AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
+Terraform init/validate chains, Playwright browser install, and shared-config
+build setup remain ordered. `--fail-fast` stays sequential so it still stops
+before starting the next mapped command.
 
 For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
 the structured closeout review after the mapped gate and before pushing:
@@ -211,7 +216,10 @@ pnpm agent:prewarm --base origin/main
 It is a no-op when the gate maps no relevant Turbo commands. Like the run mode
 gate, prewarm refuses to execute Turbo-backed package scripts when package
 manifests, lockfiles, `.npmrc`, or pnpmfile changed unless you first review the
-script/lifecycle diff and pass `--allow-package-script-changes`.
+script/lifecycle diff and pass `--allow-package-script-changes`. Prewarm runs
+Turbo commands with bounded parallelism too (`--parallel <n>`, default `2`, or
+`AGENT_PREWARM_PARALLELISM`) and captures each command's output separately so
+concurrent logs do not interleave.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
 `--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped
