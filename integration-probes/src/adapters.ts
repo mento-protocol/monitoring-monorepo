@@ -142,7 +142,7 @@ export function aggregatePairStatus(
   const statuses = new Set(results.map((result) => result.status));
   if (statuses.size === 1) return results[0]!.status;
   if (statuses.has("rate_limited")) return "rate_limited";
-  if (statuses.has("needs_key")) return "needs_key";
+  if (statuses.has("needs_key") && statuses.has("pass")) return "needs_key";
   if (statuses.has("pass")) return "partial";
   return "fail";
 }

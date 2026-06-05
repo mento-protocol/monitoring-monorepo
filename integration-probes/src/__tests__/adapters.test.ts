@@ -1226,6 +1226,9 @@ describe("aggregatePairStatus", () => {
       ]),
     ).toBe("needs_key");
     expect(
+      aggregatePairStatus([{ status: "needs_key" }, { status: "fail" }]),
+    ).toBe("fail");
+    expect(
       aggregatePairStatus([{ status: "error" }, { status: "error" }]),
     ).toBe("error");
     expect(aggregatePairStatus([])).toBe("error");
