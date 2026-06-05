@@ -141,18 +141,10 @@ export function aggregatePairStatus(
   if (results.length === 0) return "error";
   const statuses = new Set(results.map((result) => result.status));
   if (statuses.size === 1) return results[0]!.status;
-  if (statuses.has("needs_key") && onlyStatuses(statuses, "pass", "needs_key"))
-    return "needs_key";
   if (statuses.has("rate_limited")) return "rate_limited";
+  if (statuses.has("needs_key")) return "needs_key";
   if (statuses.has("pass")) return "partial";
   return "fail";
-}
-
-function onlyStatuses(
-  statuses: ReadonlySet<ProbeStatus>,
-  ...allowed: ProbeStatus[]
-): boolean {
-  return [...statuses].every((status) => allowed.includes(status));
 }
 
 export function blockingReason(status: ProbeStatus): string | null {
@@ -411,7 +403,7 @@ function fallbackPriority(status: ProbeStatus): number {
       return 2;
     case "needs_key":
       return 1;
-    case "partial":
+    case "partial": // Chain-level aggregate only; pair probes never emit this.
     case "pass":
       return 0;
   }
