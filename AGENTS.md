@@ -188,7 +188,7 @@ targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, and package-manager or package-manifest changes still run
 full-repo Trunk locally. CI also runs a required full-repo Trunk check on every
 PR. Normal `--run` mode executes independent quality-phase commands with
-bounded parallelism (`--parallel <n>`, default `2`, or
+bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
 `AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
 Terraform init/validate chains, Playwright browser install, and shared-config
 build setup remain ordered. Dashboard `test:browser` and build-backed
@@ -230,11 +230,13 @@ The Trunk pre-push hook delegates to this same path-aware gate with
 `--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped
 command instead of burning through the rest of the suite, and it reuses a
 recent successful manual gate run when the fetched base commit, mapped command
-plan, gate implementation, changed paths, and validated file content are
-unchanged. For a push that intentionally changes package scripts or
-package-manager config, review the script/lifecycle diff first, then
-temporarily set `agent.qualityGate.allowPackageScriptChanges=true` in local git
-config for that push.
+plan, gate implementation, changed paths, validated file content, package-risk
+state, and package-script acknowledgement are unchanged. For a push that
+intentionally changes package scripts or package-manager config, review the
+script/lifecycle diff first, then temporarily set
+`agent.qualityGate.allowPackageScriptChanges=true` in local git config for that
+push; a just-passed acknowledged manual gate can then satisfy the pre-push
+`--skip-if-fresh` check.
 
 Package-local gate tasks for `lint`, `typecheck`, `knip`, dashboard size-limit,
 local dashboard browser tests, and dashboard React Doctor checks run through
@@ -305,8 +307,13 @@ pnpm --silent pr:feedback-state --pr <number> --json
 For an interactive low-noise watch, use:
 
 ```bash
-pnpm pr:ready-state --pr <number> --watch --compact
+pnpm pr:ready-state --pr <number> --watch --compact --until-ready
 ```
+
+`--until-ready` preserves the same polling output but exits 0 once the PR is
+ready or merged, exits nonzero if the PR closes unmerged, and otherwise keeps
+polling. Omit it only when you intentionally want the watch to run until manual
+interruption.
 
 Use the command's required-only result as the readiness source of truth. The raw
 GitHub status rollup and required review gates decide readiness; advisory bot

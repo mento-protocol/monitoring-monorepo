@@ -26,9 +26,9 @@ Options:
                  implementation, and validated file content. Intended for the
                  pre-push hook only.
   --parallel <n> With --run, execute independent quality commands with up to
-                 n concurrent jobs. Default: 2. Fail-fast mode stays
-                 sequential so it still stops before starting the next mapped
-                 command.
+                 n concurrent jobs. Default: auto, capped at 4. Fail-fast mode
+                 stays sequential so it still stops before starting the next
+                 mapped command.
   -h, --help     Show this help.
 
 Environment:
@@ -40,7 +40,7 @@ Environment:
   AGENT_QUALITY_FAIL_FAST
                       Same behavior as --fail-fast when set to 1 or true.
   AGENT_QUALITY_PARALLELISM
-                      Same behavior as --parallel.
+                      Same behavior as --parallel. Use auto for the default.
 USAGE
 }
 
@@ -51,7 +51,7 @@ changed_paths_input_file=""
 allow_package_script_changes="${AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES:-}"
 fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
 skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
-quality_parallelism="${AGENT_QUALITY_PARALLELISM:-2}"
+quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 if [[ -z "$allow_package_script_changes" ]]; then
   allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
 fi
@@ -125,6 +125,26 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+auto_quality_parallelism() {
+  local cpu_count
+  cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  if [[ ! "$cpu_count" =~ ^[0-9]+$ || "$cpu_count" -lt 1 ]]; then
+    cpu_count="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+  fi
+  if [[ ! "$cpu_count" =~ ^[0-9]+$ || "$cpu_count" -lt 1 ]]; then
+    cpu_count=2
+  fi
+  if [[ "$cpu_count" -gt 4 ]]; then
+    echo 4
+  else
+    echo "$cpu_count"
+  fi
+}
+
+if [[ "$quality_parallelism" == "auto" ]]; then
+  quality_parallelism="$(auto_quality_parallelism)"
+fi
 
 if [[ ! "$quality_parallelism" =~ ^[0-9]+$ || "$quality_parallelism" -lt 1 ]]; then
   echo "error: --parallel requires a positive integer" >&2
@@ -220,10 +240,26 @@ has_command() {
   local command="$1"
   shift
   local entry
+  local command_key
+  local entry_key
+  command_key="$(command_dedupe_key "$command")"
   for entry in "$@"; do
-    [[ "${entry%%|*}" == "$command" ]] && return 0
+    entry_key="$(command_dedupe_key "${entry%%|*}")"
+    [[ "$entry_key" == "$command_key" ]] && return 0
   done
   return 1
+}
+
+command_dedupe_key() {
+  local command="$1"
+  case "$command" in
+    "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
+      echo "agent-quality-gate.test"
+      ;;
+    *)
+      echo "$command"
+      ;;
+  esac
 }
 
 has_preflight_command() {
@@ -1459,7 +1495,7 @@ if [[ "$mode" == "dry-run" ]]; then
 fi
 
 if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
-  if [[ "$package_script_risk_changed" != true ]] && is_fresh_success_stamp; then
+  if is_fresh_success_stamp; then
     echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."
     exit 0
   fi

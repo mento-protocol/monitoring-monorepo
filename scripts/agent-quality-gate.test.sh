@@ -6,6 +6,8 @@ cd "$repo_root"
 
 paths_file="$(mktemp)"
 output_file="$(mktemp)"
+gate_cache_dir="$(mktemp -d)"
+turbo_facts_file="$(mktemp)"
 codex_hooks_backup="$(mktemp)"
 claude_settings_backup="$(mktemp)"
 untracked_skill_artifact=".claude/skills/.agent-quality-gate-test.tmp"
@@ -17,7 +19,7 @@ restore_hook_configs() {
   cp "$claude_settings_backup" .claude/settings.json
 }
 
-trap 'restore_hook_configs; rm -f "$paths_file" "$output_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup"' EXIT
+trap 'restore_hook_configs; rm -rf "$gate_cache_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup"' EXIT
 
 fail() {
   echo "agent-quality-gate test failed: $*" >&2
@@ -34,11 +36,36 @@ run_gate() {
     printf '%s\n' "$path" >> "$paths_file"
   done
 
+  local cache_key
+  local cache_output_file
+  local cache_paths_file
+  cache_key="$(run_gate_cache_key "$@")"
+  cache_output_file="$gate_cache_dir/$cache_key.output"
+  cache_paths_file="$gate_cache_dir/$cache_key.paths"
+  if [[ -f "$cache_output_file" && -f "$cache_paths_file" ]] &&
+    cmp -s "$paths_file" "$cache_paths_file"; then
+    cp "$cache_output_file" "$output_file"
+    return
+  fi
+
   AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
     scripts/agent-quality-gate.sh \
     --changed-paths-file "$paths_file" \
     --base origin/test \
     > "$output_file"
+
+  cp "$paths_file" "$cache_paths_file"
+  cp "$output_file" "$cache_output_file"
+}
+
+run_gate_cache_key() {
+  local path
+  {
+    printf 'base=%s\n' "origin/test"
+    for path in "$@"; do
+      printf 'path=%s\n' "$path"
+    done
+  } | cksum | awk '{ print $1 "-" $2 }'
 }
 
 run_gate_expect_failure() {
@@ -202,16 +229,7 @@ assert_turbo_task_has_input() {
   local task_name="$1"
   local expected_input="$2"
 
-  node - "$task_name" "$expected_input" <<'NODE' ||
-const fs = require("node:fs");
-const [taskName, expectedInput] = process.argv.slice(2);
-const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
-const inputs = config.tasks?.[taskName]?.inputs ?? [];
-if (!inputs.includes(expectedInput)) {
-  console.error(`missing input ${expectedInput} for turbo task ${taskName}`);
-  process.exit(1);
-}
-NODE
+  grep -Fxq -- "input	${task_name}	${expected_input}" "$turbo_facts_file" ||
     fail "expected turbo task $task_name to include input: $expected_input"
 }
 
@@ -219,16 +237,7 @@ assert_turbo_task_lacks_input() {
   local task_name="$1"
   local unexpected_input="$2"
 
-  node - "$task_name" "$unexpected_input" <<'NODE' ||
-const fs = require("node:fs");
-const [taskName, unexpectedInput] = process.argv.slice(2);
-const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
-const inputs = config.tasks?.[taskName]?.inputs ?? [];
-if (inputs.includes(unexpectedInput)) {
-  console.error(`unexpected input ${unexpectedInput} for turbo task ${taskName}`);
-  process.exit(1);
-}
-NODE
+  ! grep -Fxq -- "input	${task_name}	${unexpected_input}" "$turbo_facts_file" ||
     fail "expected turbo task $task_name not to include input: $unexpected_input"
 }
 
@@ -236,16 +245,7 @@ assert_turbo_task_has_env() {
   local task_name="$1"
   local expected_env="$2"
 
-  node - "$task_name" "$expected_env" <<'NODE' ||
-const fs = require("node:fs");
-const [taskName, expectedEnv] = process.argv.slice(2);
-const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
-const env = config.tasks?.[taskName]?.env ?? [];
-if (!env.includes(expectedEnv)) {
-  console.error(`missing env ${expectedEnv} for turbo task ${taskName}`);
-  process.exit(1);
-}
-NODE
+  grep -Fxq -- "env	${task_name}	${expected_env}" "$turbo_facts_file" ||
     fail "expected turbo task $task_name to include env: $expected_env"
 }
 
@@ -253,32 +253,45 @@ assert_turbo_task_has_output() {
   local task_name="$1"
   local expected_output="$2"
 
-  node - "$task_name" "$expected_output" <<'NODE' ||
-const fs = require("node:fs");
-const [taskName, expectedOutput] = process.argv.slice(2);
-const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
-const outputs = config.tasks?.[taskName]?.outputs ?? [];
-if (!outputs.includes(expectedOutput)) {
-  console.error(`missing output ${expectedOutput} for turbo task ${taskName}`);
-  process.exit(1);
-}
-NODE
+  grep -Fxq -- "output	${task_name}	${expected_output}" "$turbo_facts_file" ||
     fail "expected turbo task $task_name to include output: $expected_output"
+}
+
+assert_turbo_task_depends_on() {
+  local task_name="$1"
+  local expected_dependency="$2"
+
+  grep -Fxq -- "dependsOn	${task_name}	${expected_dependency}" "$turbo_facts_file" ||
+    fail "expected turbo task $task_name to depend on: $expected_dependency"
 }
 
 assert_turbo_task_absent() {
   local task_name="$1"
 
-  node - "$task_name" <<'NODE' ||
+  ! grep -Fxq -- "task	${task_name}" "$turbo_facts_file" ||
+    fail "expected turbo task to be absent: $task_name"
+}
+
+write_turbo_facts() {
+  node - <<'NODE' > "$turbo_facts_file"
 const fs = require("node:fs");
-const [taskName] = process.argv.slice(2);
 const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
-if (Object.prototype.hasOwnProperty.call(config.tasks ?? {}, taskName)) {
-  console.error(`unexpected turbo task ${taskName}`);
-  process.exit(1);
+for (const [taskName, taskConfig] of Object.entries(config.tasks ?? {})) {
+  console.log(`task\t${taskName}`);
+  for (const input of taskConfig.inputs ?? []) {
+    console.log(`input\t${taskName}\t${input}`);
+  }
+  for (const env of taskConfig.env ?? []) {
+    console.log(`env\t${taskName}\t${env}`);
+  }
+  for (const output of taskConfig.outputs ?? []) {
+    console.log(`output\t${taskName}\t${output}`);
+  }
+  for (const dependency of taskConfig.dependsOn ?? []) {
+    console.log(`dependsOn\t${taskName}\t${dependency}`);
+  }
 }
 NODE
-    fail "expected turbo task to be absent: $task_name"
 }
 
 assert_order() {
@@ -315,6 +328,8 @@ assert_script_occurrences 1 "command -v shasum"
 assert_script_occurrences 0 "shasum -a 256 | awk"
 assert_script_occurrences 0 'shasum -a 256 "$1"'
 
+write_turbo_facts
+
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/src/**'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/*.json'
 assert_turbo_task_has_input "build" "postcss.config.*"
@@ -333,16 +348,7 @@ assert_turbo_task_has_output "build" "!.next/dev/**"
 assert_turbo_task_has_input "size-limit" ".next/**"
 assert_turbo_task_has_input "size-limit" "!.next/cache/**"
 assert_turbo_task_has_input "size-limit" "!.next/dev/**"
-node - <<'NODE' ||
-const fs = require("node:fs");
-const config = JSON.parse(fs.readFileSync("turbo.json", "utf8"));
-const dependsOn = config.tasks?.["size-limit"]?.dependsOn ?? [];
-if (!dependsOn.includes("build")) {
-  console.error("size-limit must depend on build because it reads .next output");
-  process.exit(1);
-}
-NODE
-  fail "expected turbo size-limit task to depend on build"
+assert_turbo_task_depends_on "size-limit" "build"
 node - <<'NODE' ||
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -705,6 +711,48 @@ assert_not_contains "- pnpm agent:quality-gate:test"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
+
+dedupe_quality_gate_alias_repo="$(mktemp -d)"
+(
+  cd "$dedupe_quality_gate_alias_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p scripts
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "scripts": {
+    "agent:quality-gate": "./scripts/agent-quality-gate.sh",
+    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:autoreview": "./scripts/agent-autoreview.sh",
+    "agent:prewarm": "node scripts/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
+    "pr:ready-state": "node scripts/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "lockfile:lint": "node scripts/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
+  }
+}
+JSON
+  printf '#!/usr/bin/env bash\n' > scripts/agent-quality-gate.sh
+  git add .
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.scripts["agent:quality-gate:test"] = "bash scripts/agent-quality-gate.test.sh --fixture";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  printf 'echo updated\n' >> scripts/agent-quality-gate.sh
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$dedupe_quality_gate_alias_repo"
+assert_occurrences 1 "- bash scripts/agent-quality-gate.test.sh"
+assert_not_contains "- pnpm agent:quality-gate:test"
 
 lockfile_script_repo="$(mktemp -d)"
 (
@@ -1457,6 +1505,45 @@ assert_contains "+ pnpm agent:prewarm:test"
 assert_contains "All mapped commands passed."
 assert_not_contains "parallel marker was not created"
 
+auto_parallel_quality_repo="$(mktemp -d)"
+(
+  cd "$auto_parallel_quality_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/getconf <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "_NPROCESSORS_ONLN" ]]; then
+  echo 8
+  exit 0
+fi
+exit 1
+STUB
+  chmod +x bin/getconf bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  PATH="$auto_parallel_quality_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      > "$output_file" 2>&1
+)
+rm -rf "$auto_parallel_quality_repo"
+assert_contains "Running quality commands with parallelism 4."
+assert_contains "All mapped commands passed."
+
 quality_setup_repo="$(mktemp -d)"
 (
   cd "$quality_setup_repo"
@@ -1583,6 +1670,55 @@ STUB
     fail "fresh gate stamp did not skip duplicate run"
 )
 rm -rf "$fresh_stamp_repo"
+assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
+package_risk_fresh_stamp_repo="$(mktemp -d)"
+(
+  cd "$package_risk_fresh_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin tools
+  printf 'fixture\n' > README.md
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$counter_file"
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'packages/fixture/package.json\n' > changed-paths.txt
+  COUNTER_FILE="$package_risk_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    PATH="$package_risk_fresh_stamp_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --allow-package-script-changes \
+      > "$output_file" 2>&1
+  COUNTER_FILE="$package_risk_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    PATH="$package_risk_fresh_stamp_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --skip-if-fresh \
+      --allow-package-script-changes \
+      >> "$output_file" 2>&1
+  [[ "$(cat "$package_risk_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
+    fail "fresh gate stamp did not skip duplicate package-risk run"
+)
+rm -rf "$package_risk_fresh_stamp_repo"
 assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 stale_stamp_repo="$(mktemp -d)"

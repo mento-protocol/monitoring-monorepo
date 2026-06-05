@@ -863,7 +863,7 @@ export async function fetchReadyState({ prArg, repoArg }) {
 }
 
 function usage() {
-  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n       pnpm pr:ready-state --help\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch]\n\nNote: --watch --json emits newline-delimited JSON, one summary per poll.\n`;
+  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]\n       pnpm pr:ready-state --help\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]\n\nNote: --watch --json emits newline-delimited JSON, one summary per poll. --until-ready only affects watch mode.\n`;
 }
 
 function readFlagValue(rest, flag) {
@@ -887,6 +887,7 @@ export function parseArgs(argv) {
       json: false,
       compact: false,
       watch: false,
+      untilReady: false,
       prArg: null,
       repoArg: null,
     };
@@ -895,8 +896,9 @@ export function parseArgs(argv) {
   const json = argv.includes("--json");
   const compact = argv.includes("--compact");
   const watch = argv.includes("--watch");
+  const untilReady = argv.includes("--until-ready");
   const rest = argv.filter(
-    (arg) => !["--json", "--compact", "--watch"].includes(arg),
+    (arg) => !["--json", "--compact", "--watch", "--until-ready"].includes(arg),
   );
   const repoArg = readFlagValue(rest, "--repo");
   let prArg = readFlagValue(rest, "--pr");
@@ -907,7 +909,7 @@ export function parseArgs(argv) {
   if (!prArg || rest.length > 0) {
     throw new Error(usage());
   }
-  return { json, compact, watch, prArg, repoArg };
+  return { json, compact, watch, untilReady, prArg, repoArg };
 }
 
 export function renderSummary(summary, { json, compact, watch = false }) {
@@ -916,15 +918,23 @@ export function renderSummary(summary, { json, compact, watch = false }) {
   return formatHuman(summary);
 }
 
+export function watchLoopExitCode(summary, { untilReady = false } = {}) {
+  if (!untilReady) return null;
+
+  const state = String(summary?.pr?.state ?? "").toUpperCase();
+  if (summary?.ready === true || state === "MERGED") return 0;
+  if (state === "CLOSED") return 1;
+  return null;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function main() {
   try {
-    const { help, json, compact, watch, prArg, repoArg } = parseArgs(
-      process.argv.slice(2),
-    );
+    const { help, json, compact, watch, untilReady, prArg, repoArg } =
+      parseArgs(process.argv.slice(2));
     if (help) {
       process.stdout.write(usage());
       return;
@@ -934,6 +944,11 @@ async function main() {
       try {
         const summary = await fetchReadyState({ prArg, repoArg });
         process.stdout.write(renderSummary(summary, { json, compact, watch }));
+        const exitCode = watchLoopExitCode(summary, { untilReady });
+        if (watch && exitCode !== null) {
+          process.exitCode = exitCode;
+          return;
+        }
       } catch (err) {
         if (!watch) throw err;
         const message = err instanceof Error ? err.message : String(err);
