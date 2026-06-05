@@ -725,6 +725,7 @@ compact_turbo_quality_commands() {
   local group_index
   local existing_packages
   local existing_reasons
+  local existing_package_array
   local kind
   local value
   local package_filters
@@ -740,7 +741,8 @@ compact_turbo_quality_commands() {
 
       if group_index="$(find_turbo_task_index "$task")"; then
         existing_packages="${turbo_group_packages[$group_index]}"
-        if ! list_contains_word "$package_name" $existing_packages; then
+        read -r -a existing_package_array <<< "$existing_packages"
+        if ! list_contains_word "$package_name" "${existing_package_array[@]}"; then
           turbo_group_packages[$group_index]="${existing_packages} ${package_name}"
         fi
 
@@ -772,7 +774,8 @@ compact_turbo_quality_commands() {
 
     group_index="$(find_turbo_task_index "$value")"
     package_filters=""
-    for package in ${turbo_group_packages[$group_index]}; do
+    read -r -a existing_package_array <<< "${turbo_group_packages[$group_index]}"
+    for package in "${existing_package_array[@]}"; do
       package_filters+=" --filter=${package}"
     done
     quality_commands+=("pnpm exec turbo run ${value}${package_filters} --cache=local:rw|${turbo_group_reasons[$group_index]}")
