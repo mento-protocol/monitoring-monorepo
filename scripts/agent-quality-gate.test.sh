@@ -1491,6 +1491,51 @@ grep -Fq -- "+ pnpm --filter @mento-protocol/ui-dashboard typecheck" "$output_fi
 assert_contains "All mapped commands passed."
 assert_not_contains "consumer typecheck started before shared-config build"
 
+dashboard_serial_repo="$(mktemp -d)"
+(
+  cd "$dashboard_serial_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin tools ui-dashboard/src/app
+  printf 'export default function Page() { return null; }\n' > ui-dashboard/src/app/page.tsx
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  exec\ turbo\ run\ test:browser*|exec\ turbo\ run\ size-limit*)
+    if ! mkdir "${DASHBOARD_NEXT_LOCK:?}"; then
+      echo "dashboard .next command overlapped"
+      exit 1
+    fi
+    sleep 0.2
+    rmdir "$DASHBOARD_NEXT_LOCK"
+    ;;
+esac
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'ui-dashboard/src/app/page.tsx\n' > changed-paths.txt
+  DASHBOARD_NEXT_LOCK="$dashboard_serial_repo/next-lock" \
+    PATH="$dashboard_serial_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 8 \
+      > "$output_file" 2>&1
+)
+rm -rf "$dashboard_serial_repo"
+assert_contains "+ pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+assert_contains "+ pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+assert_contains "All mapped commands passed."
+assert_not_contains "dashboard .next command overlapped"
+
 fresh_stamp_repo="$(mktemp -d)"
 (
   cd "$fresh_stamp_repo"

@@ -53,6 +53,30 @@ export function extractTurboPrewarmCommands(gateOutput) {
   return commands;
 }
 
+export function isDashboardNextWorkspaceCommand(command) {
+  return (
+    command ===
+      "pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw" ||
+    command ===
+      "pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+  );
+}
+
+export function splitPrewarmCommands(commands) {
+  const serialCommands = [];
+  const parallelCommands = [];
+
+  for (const command of commands) {
+    if (isDashboardNextWorkspaceCommand(command)) {
+      serialCommands.push(command);
+    } else {
+      parallelCommands.push(command);
+    }
+  }
+
+  return { serialCommands, parallelCommands };
+}
+
 export function hasPackageScriptRisk(gateOutput) {
   let inChangedPaths = false;
 
@@ -348,8 +372,16 @@ async function main() {
     console.log(`+ ${command}`);
   }
 
+  // Keep dashboard .next writers/readers out of the prewarm parallel pool:
+  // test:browser starts a dev server, while size-limit runs build first.
+  const { serialCommands, parallelCommands } = splitPrewarmCommands(commands);
   let failures = 0;
-  const results = await runCommandsParallel(commands, parsed.parallelism);
+  const serialResults = await runCommandsParallel(serialCommands, 1);
+  const parallelResults = await runCommandsParallel(
+    parallelCommands,
+    parsed.parallelism,
+  );
+  const results = [...serialResults, ...parallelResults];
   for (const result of results) {
     if (result.error) {
       console.error(`Failed to run command: ${result.error.message}`);

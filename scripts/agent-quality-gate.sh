@@ -1625,6 +1625,23 @@ is_quality_setup_command() {
   return 1
 }
 
+is_quality_serial_command() {
+  local command="$1"
+  # Dashboard browser tests start a Next dev server while size-limit runs a
+  # build-backed Turbo task. Both touch ui-dashboard/.next, so keep them
+  # mutually exclusive instead of letting the parallel pool overlap them.
+  case "$command" in
+    "pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw")
+      return 0
+      ;;
+    "pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw")
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
 run_mapped_entries_sequential() {
   local entry
   local command
@@ -1771,6 +1788,7 @@ run_mapped_entries_parallel() {
 
 run_quality_phase() {
   local setup_entries=()
+  local serial_entries=()
   local parallel_entries=()
   local entry
   local command
@@ -1784,12 +1802,15 @@ run_quality_phase() {
     command="${entry%%|*}"
     if is_quality_setup_command "$command"; then
       setup_entries+=("$entry")
+    elif is_quality_serial_command "$command"; then
+      serial_entries+=("$entry")
     else
       parallel_entries+=("$entry")
     fi
   done
 
   run_mapped_entries_sequential "quality setup" "${setup_entries[@]+"${setup_entries[@]}"}"
+  run_mapped_entries_sequential "quality serialized" "${serial_entries[@]+"${serial_entries[@]}"}"
   run_mapped_entries_parallel "quality" "$quality_parallelism" "${parallel_entries[@]+"${parallel_entries[@]}"}"
 }
 

@@ -189,8 +189,10 @@ PR. Normal `--run` mode executes independent quality-phase commands with
 bounded parallelism (`--parallel <n>`, default `2`, or
 `AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
 Terraform init/validate chains, Playwright browser install, and shared-config
-build setup remain ordered. `--fail-fast` stays sequential so it still stops
-before starting the next mapped command.
+build setup remain ordered. Dashboard `test:browser` and build-backed
+`size-limit` also stay serialized because both touch `ui-dashboard/.next`.
+`--fail-fast` stays sequential so it still stops before starting the next mapped
+command.
 
 For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
 the structured closeout review after the mapped gate and before pushing:
@@ -219,7 +221,8 @@ manifests, lockfiles, `.npmrc`, or pnpmfile changed unless you first review the
 script/lifecycle diff and pass `--allow-package-script-changes`. Prewarm runs
 Turbo commands with bounded parallelism too (`--parallel <n>`, default `2`, or
 `AGENT_PREWARM_PARALLELISM`) and captures each command's output separately so
-concurrent logs do not interleave.
+concurrent logs do not interleave. The same dashboard `.next` serialization rule
+applies to prewarm.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
 `--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped
