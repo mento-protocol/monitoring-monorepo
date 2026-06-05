@@ -19,6 +19,7 @@ import {
   type PairProbeResult,
   type ProbeChainId,
 } from "./types.js";
+import { volumeSignalsForAdapters } from "./volumeSignals.js";
 
 const DEFAULT_ADAPTER_CONCURRENCY = 3;
 const DEFAULT_PAIR_CONCURRENCY = 4;
@@ -61,12 +62,14 @@ export async function runIntegrationProbes(
     options.adapterIds,
   );
   const chains = limitPairs(chainConfigs.chains, options.pairLimit);
+  const volumeSignals = await volumeSignalsForAdapters({ adapters, fetcher });
   const aggregators = await probeAdapters({
     adapters,
     chains,
     amountUsd,
     env,
     fetcher,
+    volumeSignals,
     adapterConcurrency: normalizeConcurrency(
       options.adapterConcurrency,
       DEFAULT_ADAPTER_CONCURRENCY,
@@ -155,6 +158,7 @@ async function probeAdapters(args: {
   amountUsd: string;
   env: NodeJS.ProcessEnv;
   fetcher: FetchLike;
+  volumeSignals: ReadonlyMap<string, AggregatorProbeResult["volumeSignal"]>;
   adapterConcurrency: number;
   pairConcurrency: number;
 }): Promise<AggregatorProbeResult[]> {
@@ -175,6 +179,7 @@ async function probeAdapters(args: {
         label: adapter.label,
         kind: adapter.kind,
         tier: adapter.tier,
+        volumeSignal: args.volumeSignals.get(adapter.id) ?? null,
         credentialEnv: [...(adapter.credentialEnv ?? [])],
         researchNote: adapter.researchNote,
         chains,

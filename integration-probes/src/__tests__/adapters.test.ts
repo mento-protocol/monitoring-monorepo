@@ -1256,6 +1256,13 @@ describe("aggregator quote builders", () => {
     ]);
   });
 
+  it("keeps adapters without Celo support out of tier 1", () => {
+    for (const adapter of AGGREGATOR_ADAPTERS) {
+      if (adapter.tier !== 1) continue;
+      expect(adapter.support[42220], adapter.id).toBe("supported");
+    }
+  });
+
   it("builds configured quote requests for v1 live adapters", () => {
     const env = {
       LIFI_API_KEY: "lifi-key",

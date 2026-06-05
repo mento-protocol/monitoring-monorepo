@@ -10,6 +10,8 @@ describe("IntegrationProbesTable", () => {
     );
 
     expect(html).toContain("OpenOcean");
+    expect(html).toContain("$327.9M 30d");
+    expect(html).toContain("DEX agg · DefiLlama");
     expect(html).toContain("Pass");
     expect(html).toContain("Partial");
     expect(html).toContain("Needs key");
@@ -159,6 +161,15 @@ function fixtureSnapshot(): IntegrationProbeSnapshot {
         label: "OpenOcean",
         kind: "dex",
         tier: 2,
+        volumeSignal: {
+          window: "30d",
+          category: "dex-aggregator",
+          valueUsd: 327_881_227,
+          sourceLabel: "DefiLlama DEX aggregators",
+          sourceUrl: "https://api.llama.fi/overview/aggregators",
+          sourceProtocol: "OpenOcean",
+          note: null,
+        },
         credentialEnv: [],
         researchNote: "fixture",
         chains: [
@@ -171,6 +182,7 @@ function fixtureSnapshot(): IntegrationProbeSnapshot {
         label: "CoW Swap",
         kind: "excluded",
         tier: 3,
+        volumeSignal: null,
         credentialEnv: [],
         researchNote: "fixture",
         chains: [

@@ -7,6 +7,11 @@ export const PROBE_CHAIN_IDS = [42220, 143] as const;
 export type ProbeChainId = (typeof PROBE_CHAIN_IDS)[number];
 
 export type AggregatorKind = "dex" | "cross_chain" | "meta" | "excluded";
+export type VolumeSignalCategory =
+  | "dex-aggregator"
+  | "bridge-aggregator"
+  | "direct-bridge"
+  | "official-stats";
 export type ProbeStatus =
   | "pass"
   | "partial"
@@ -93,11 +98,22 @@ export type ChainProbeResult = {
   pairs: PairProbeResult[];
 };
 
+export type VolumeSignal = {
+  window: "30d";
+  category: VolumeSignalCategory;
+  valueUsd: number | null;
+  sourceLabel: string;
+  sourceUrl: string | null;
+  sourceProtocol: string | null;
+  note: string | null;
+};
+
 export type AggregatorProbeResult = {
   id: string;
   label: string;
   kind: AggregatorKind;
   tier: 1 | 2 | 3;
+  volumeSignal: VolumeSignal | null;
   credentialEnv: string[];
   researchNote: string;
   chains: ChainProbeResult[];

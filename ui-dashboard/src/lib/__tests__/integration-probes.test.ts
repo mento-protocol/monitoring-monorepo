@@ -29,6 +29,53 @@ describe("IntegrationProbeSnapshotSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts aggregator volume signals", () => {
+    const result = IntegrationProbeSnapshotSchema.safeParse({
+      schemaVersion: 1,
+      generatedAt: "2026-06-01T00:00:00.000Z",
+      amountUsd: "1",
+      takerAddress: "0x000000000000000000000000000000000000dEaD",
+      pairSource: {
+        kind: "hasura",
+        hasuraUrlConfigured: true,
+        note: "fixture",
+      },
+      chains: [],
+      aggregators: [
+        {
+          id: "fixture",
+          label: "Fixture",
+          kind: "dex",
+          tier: 1,
+          volumeSignal: {
+            window: "30d",
+            category: "dex-aggregator",
+            valueUsd: 123,
+            sourceLabel: "DefiLlama DEX aggregators",
+            sourceUrl: "https://api.llama.fi/overview/aggregators",
+            sourceProtocol: "Fixture",
+            note: null,
+          },
+          credentialEnv: [],
+          researchNote: "fixture",
+          chains: [],
+        },
+      ],
+      summary: {
+        aggregators: 1,
+        chainChecks: 0,
+        passingChainChecks: 0,
+        partialChainChecks: 0,
+        failingChainChecks: 0,
+        needsKeyChainChecks: 0,
+        unsupportedChainChecks: 0,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data?.aggregators[0]?.volumeSignal?.valueUsd).toBe(123);
+  });
+
   it("defaults live-debug pair fields for older v1 snapshots", () => {
     const result = IntegrationProbeSnapshotSchema.safeParse({
       schemaVersion: 1,
@@ -89,6 +136,7 @@ describe("IntegrationProbeSnapshotSchema", () => {
     });
 
     expect(result.success).toBe(true);
+    expect(result.data?.aggregators[0]?.volumeSignal).toBeNull();
     expect(result.data?.summary.partialChainChecks).toBe(0);
     expect(
       result.data?.aggregators[0]?.chains[0]?.pairs[0]?.httpStatus,
