@@ -384,12 +384,24 @@ function terraformEnvNames(workflowPath) {
   return names;
 }
 
-function assertDriftWorkflowEnvCoversAutoAppliedStackVars() {
-  const stackWorkflowPaths = [
-    ".github/workflows/alerts-rules.yml",
-    ".github/workflows/alerts-infra.yml",
-    ".github/workflows/aegis-terraform.yml",
-  ];
+function autoAppliedStackWorkflowPaths(stacks) {
+  return [
+    ...new Set(
+      stacks
+        .filter(
+          (stack) => stack.ci?.apply === "push-main-production-environment",
+        )
+        .flatMap((stack) =>
+          (stack.changedPathPatterns ?? []).filter((pattern) =>
+            pattern.startsWith(".github/workflows/"),
+          ),
+        ),
+    ),
+  ].sort();
+}
+
+function assertDriftWorkflowEnvCoversAutoAppliedStackVars(stacks) {
+  const stackWorkflowPaths = autoAppliedStackWorkflowPaths(stacks);
   const requiredNames = new Set();
 
   for (const workflowPath of stackWorkflowPaths) {
@@ -438,7 +450,7 @@ for (const stack of registry.stacks) {
   );
 }
 
-assertDriftWorkflowEnvCoversAutoAppliedStackVars();
+assertDriftWorkflowEnvCoversAutoAppliedStackVars(registry.stacks);
 
 const tempDir = mkdtempSync(path.join(tmpdir(), "tf-stacks-test-"));
 try {
