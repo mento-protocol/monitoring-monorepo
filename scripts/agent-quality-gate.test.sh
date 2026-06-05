@@ -65,8 +65,13 @@ run_gate_expect_failure() {
 assert_contains() {
   local expected="$1"
   expected="$(normalize_expected_command "$expected")"
-  grep -Fq -- "$expected" "$output_file" ||
-    fail "expected output to contain: $expected"
+  if grep -Fq -- "$expected" "$output_file"; then
+    return
+  fi
+  if [[ -n "$(turbo_filter_line_number "$expected")" ]]; then
+    return
+  fi
+  fail "expected output to contain: $expected"
 }
 
 assert_occurrences() {
@@ -118,8 +123,43 @@ NODE
 
 line_number() {
   local needle="$1"
+  local turbo_line
   needle="$(normalize_expected_command "$needle")"
-  grep -nF -- "$needle" "$output_file" | head -n 1 | cut -d: -f1
+  if grep -Fq -- "$needle" "$output_file"; then
+    grep -nF -- "$needle" "$output_file" | head -n 1 | cut -d: -f1
+    return
+  fi
+  turbo_line="$(turbo_filter_line_number "$needle")"
+  if [[ -n "$turbo_line" ]]; then
+    echo "$turbo_line"
+  fi
+}
+
+turbo_filter_line_number() {
+  local normalized="$1"
+  local rest
+  local task_name
+  local package_name
+  local reason=""
+
+  case "$normalized" in
+    "- pnpm exec turbo run "*" --filter=@mento-protocol/"*" --cache=local:rw"*)
+      rest="${normalized#- pnpm exec turbo run }"
+      task_name="${rest%% *}"
+      rest="${normalized#* --filter=}"
+      package_name="${rest%% *}"
+      if [[ "$normalized" == *" ("*")" ]]; then
+        reason="${normalized#* (}"
+        reason="${reason%)}"
+      fi
+      awk \
+        -v task="$task_name" \
+        -v package_filter="--filter=${package_name}" \
+        -v reason="$reason" \
+        'index($0, "- pnpm exec turbo run " task " ") && index($0, package_filter " ") && index($0, " --cache=local:rw") && (reason == "" || index($0, reason)) { print NR; exit }' \
+        "$output_file"
+      ;;
+  esac
 }
 
 normalize_expected_command() {
@@ -580,6 +620,12 @@ run_gate ".npmrc"
 assert_contains "- pnpm install --frozen-lockfile (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (package manager config changed)"
+assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed)"
+assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed)"
+assert_contains "- pnpm exec turbo run knip --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed (knip: unused files/deps/exports))"
+assert_occurrences 1 "- pnpm exec turbo run lint --filter="
+assert_occurrences 1 "- pnpm exec turbo run typecheck --filter="
+assert_occurrences 1 "- pnpm exec turbo run knip --filter="
 # Workspace-wide triggers (npmrc, root pkg.json, ci.yml) intentionally do
 # NOT run the dashboard playwright suite — chromium --single-process mode
 # (required in sandbox) is flaky on keyboard/route-heavy tests, and CI's
@@ -1011,11 +1057,10 @@ assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React 
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage (ui-dashboard changed (coverage floor))"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (ui-dashboard changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
-assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
 assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 assert_occurrences 1 "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
-assert_occurrences 1 "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
 assert_occurrences 1 "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
+assert_not_contains_mapped "- pnpm dashboard:build"
 
 run_gate "ui-dashboard/react-doctor.config.json"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
@@ -1033,19 +1078,15 @@ assert_not_contains_mapped "- pnpm dashboard:build"
 assert_not_contains_mapped "- pnpm dashboard:size-limit"
 
 run_gate "ui-dashboard/postcss.config.mjs"
-assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
 assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 
 run_gate "ui-dashboard/next.config.ts"
-assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
 assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 
 run_gate "ui-dashboard/sentry.shared.ts"
-assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
 assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 
 run_gate "ui-dashboard/src/instrumentation-client.ts"
-assert_contains "- pnpm dashboard:build (ui-dashboard bundle inputs changed)"
 assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 
 run_gate "ui-dashboard/src/lib/weekend.ts"
@@ -1249,12 +1290,10 @@ assert_order \
 assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
   "- pnpm --filter @mento-protocol/indexer-envio typecheck (shared-config vendored indexer fixture changed)"
-assert_contains "- pnpm dashboard:build (shared-config exports feed the dashboard bundle)"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 
 run_gate "shared-config/src/chains.ts"
 assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
-assert_contains "- pnpm dashboard:build (shared-config exports feed the dashboard bundle)"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
