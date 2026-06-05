@@ -668,5 +668,5 @@ function outlierVolumeLabel(value: string): string | null {
 }
 
 function shortTxHash(txHash: string): string {
-  return `${txHash.slice(0, 6)}...${txHash.slice(-4)}`;
+  return `${txHash.slice(0, 6)}…${txHash.slice(-4)}`;
 }

@@ -138,6 +138,8 @@ describe("useVolumeAggregates", () => {
     expect(model.v2Aggregated).toHaveLength(1);
     expect(model.v2Aggregated[0]?.trader).toBe(USER);
     expect(model.v2Aggregated[0]?.volumeUsdWei).toBe(BigInt(usdWei(70)));
+    // v2 analysis rows exclude EXCLUDED (70 USD), while the headline chart
+    // remains canonical and includes USER + EXCLUDED (100 USD).
     expect(model.v2DailyVolume).toEqual([
       { timestamp: Number(DAY), value: 100 },
     ]);
