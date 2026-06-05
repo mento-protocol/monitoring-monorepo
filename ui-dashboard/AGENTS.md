@@ -71,7 +71,9 @@ run `pnpm exec playwright install chromium` once first.
 Use `pnpm test:browser:production` when the verification target should match a
 built app (`next build` plus `next start`) instead of dev mode. It allocates the
 same fixture ports up front, bakes the fixture GraphQL URL into the production
-build, and then runs the same Playwright suite against `next start`.
+build, and then runs the same Playwright suite against `next start`. Use
+`PLAYWRIGHT_NEXT_START_TIMEOUT_MS` to tune the production `next start` timeout;
+`PLAYWRIGHT_NEXT_TIMEOUT_MS` remains the dev-server timeout knob.
 
 ## React Doctor
 

@@ -23,9 +23,12 @@ function parseFeedbackArgs(argv) {
     throw new Error(`${unsupported[0]} is not supported\n${usage()}`);
   }
 
-  const parsed = parseArgs(
-    argv.includes("--json") ? argv : [...argv, "--json"],
-  );
+  let parsed;
+  try {
+    parsed = parseArgs(argv.includes("--json") ? argv : [...argv, "--json"]);
+  } catch {
+    throw new Error(usage());
+  }
   return {
     help: false,
     watch: parsed.watch,

@@ -93,6 +93,8 @@ async function buildProductionApp() {
   browserTestEnv.PLAYWRIGHT_NEXT_COMMAND =
     browserTestEnv.PLAYWRIGHT_NEXT_COMMAND ??
     "pnpm start --hostname 127.0.0.1 --port {port}";
+  browserTestEnv.PLAYWRIGHT_NEXT_TIMEOUT_MS =
+    process.env.PLAYWRIGHT_NEXT_START_TIMEOUT_MS ?? "120000";
   const code = await runCommand("pnpm", ["build"], { env: browserTestEnv });
   if (code !== 0) return code;
   return 0;

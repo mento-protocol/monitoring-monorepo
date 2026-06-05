@@ -85,6 +85,13 @@ const readyState = {
         required: true,
         url: "https://github.example/pr",
       },
+      {
+        kind: "gate",
+        name: "Deployment freeze",
+        state: "active",
+        required: true,
+        url: "https://github.example/freeze",
+      },
     ],
   },
   gates: {
@@ -130,6 +137,102 @@ test("summarizes only feedback blockers and counts", () => {
     unrepliedRootReviewComments: 1,
     topLevelBotComments: 1,
   });
+});
+
+test("includes requested-change review blockers in feedback blockers", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    required: {
+      ready: false,
+      blockers: [
+        {
+          kind: "review",
+          name: "Review required",
+          state: "CHANGES_REQUESTED",
+          required: true,
+        },
+      ],
+    },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [],
+  });
+
+  assertEqual(summary.ready, false);
+  assertDeepEqual(
+    summary.requiredFeedbackBlockers.map((blocker) => blocker.kind),
+    ["review"],
+  );
+});
+
+test("does not treat unrelated gate blockers as feedback blockers", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    required: {
+      ready: false,
+      blockers: [
+        {
+          kind: "gate",
+          name: "Deployment freeze",
+          state: "active",
+          required: true,
+        },
+      ],
+    },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [],
+  });
+
+  assertEqual(summary.ready, true);
+  assertDeepEqual(summary.requiredFeedbackBlockers, []);
+});
+
+test("does not block feedback on a non-required unready feedback gate", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    required: { ready: false, blockers: [] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: false, required: false },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [],
+  });
+
+  assertEqual(summary.ready, true);
+  assertDeepEqual(summary.requiredFeedbackBlockers, []);
+});
+
+test("defaults missing gates to clear when feedback surfaces are empty", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    required: { ready: false, blockers: [] },
+    gates: undefined,
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [],
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.gates.codexDescriptionApproval, null);
+  assertEqual(summary.gates.reviewCommentReplies, null);
+  assertEqual(summary.gates.reviewThreads, null);
 });
 
 test("marks feedback clear when feedback gates are clear", () => {
@@ -188,6 +291,13 @@ test("parses pr arguments through the shared ready-state parser", () => {
 
 test("rejects compact output because feedback state is JSON-only", () => {
   assertThrows(() => parseFeedbackArgs(["791", "--compact"]), "not supported");
+});
+
+test("shows feedback-state usage for invalid arguments", () => {
+  assertThrows(
+    () => parseFeedbackArgs(["791", "--unknown"]),
+    "Usage: pnpm pr:feedback-state",
+  );
 });
 
 test("renders compact JSON for watch mode", () => {

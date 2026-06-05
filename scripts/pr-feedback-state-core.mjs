@@ -1,9 +1,22 @@
+function gateReady(gate) {
+  return gate?.required === false || Boolean(gate?.ready ?? true);
+}
+
 export function summarizeFeedbackState(readyState) {
   const gates = readyState.gates ?? {};
   const requiredBlockers = readyState.required?.blockers ?? [];
-  const feedbackBlockers = requiredBlockers.filter((blocker) =>
-    ["review-thread", "review-comment", "gate"].includes(blocker.kind),
-  );
+  const feedbackBlockers = requiredBlockers.filter((blocker) => {
+    if (["review-thread", "review-comment"].includes(blocker.kind)) {
+      return true;
+    }
+    if (blocker.kind === "review") {
+      return ["CHANGES_REQUESTED", "REVIEW_REQUIRED"].includes(blocker.state);
+    }
+    return (
+      blocker.kind === "gate" &&
+      blocker.name === "Codex PR-description approval"
+    );
+  });
   const unresolvedReviewThreads = readyState.unresolvedReviewThreads ?? [];
   const unrepliedRootReviewComments =
     readyState.unrepliedRootReviewComments ?? [];
@@ -15,9 +28,9 @@ export function summarizeFeedbackState(readyState) {
   const ready =
     feedbackBlockers.length === 0 &&
     feedbackSurfacesReady &&
-    Boolean(gates.reviewThreads?.ready ?? true) &&
-    Boolean(gates.reviewCommentReplies?.ready ?? true) &&
-    Boolean(gates.codexDescriptionApproval?.ready ?? true);
+    gateReady(gates.reviewThreads) &&
+    gateReady(gates.reviewCommentReplies) &&
+    gateReady(gates.codexDescriptionApproval);
 
   return {
     ready,
