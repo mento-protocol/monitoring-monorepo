@@ -180,9 +180,29 @@ describe("filterAndStripSentryEvent — loopback requests", () => {
     ).toBeNull();
   });
 
+  it("drops other 127.0.0.0/8 request URLs", () => {
+    expect(
+      filter({ request: { url: "http://127.0.0.2:3000/api/pools" } }),
+    ).toBeNull();
+  });
+
   it("drops IPv6 loopback request URLs", () => {
     expect(
       filter({ request: { url: "http://[::1]:3000/api/pools" } }),
+    ).toBeNull();
+  });
+
+  it("drops full-form IPv6 loopback request URLs", () => {
+    expect(
+      filter({
+        request: { url: "http://[0:0:0:0:0:0:0:1]:3000/api/pools" },
+      }),
+    ).toBeNull();
+  });
+
+  it("drops localhost subdomain request URLs", () => {
+    expect(
+      filter({ request: { url: "http://preview.localhost:3000/api/pools" } }),
     ).toBeNull();
   });
 
@@ -197,12 +217,12 @@ describe("filterAndStripSentryEvent — loopback requests", () => {
     ).toBeNull();
   });
 
-  it("drops events whose first forwarded source IP is loopback", () => {
+  it("drops relative request URLs when the forwarded host header is loopback", () => {
     expect(
       filter({
         request: {
-          url: "https://monitoring.mento.org/api/pools",
-          headers: { "x-forwarded-for": "127.0.0.1, 203.0.113.10" },
+          url: "/api/pools",
+          headers: { "x-forwarded-host": "preview.localhost:3000" },
         },
       }),
     ).toBeNull();

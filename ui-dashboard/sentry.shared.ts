@@ -89,17 +89,8 @@ function isLoopbackHostHeader(headers: RequestHeaders | undefined): boolean {
   return false;
 }
 
-function isLoopbackSourceIp(headers: RequestHeaders | undefined): boolean {
-  for (const headerName of ["x-forwarded-for", "x-real-ip", "client-ip"]) {
-    const header = getHeader(headers, headerName);
-    const firstHop = header?.split(",")[0]?.trim();
-    if (firstHop && isLoopbackHostname(firstHop)) return true;
-  }
-  return false;
-}
-
 function isLoopbackOriginHeader(headers: RequestHeaders | undefined): boolean {
-  for (const headerName of ["origin", "referer", "referrer"]) {
+  for (const headerName of ["origin", "referer"]) {
     const header = getHeader(headers, headerName);
     if (header && isLoopbackUrl(header)) return true;
   }
@@ -115,11 +106,7 @@ function isLoopbackRequestEvent(event: ErrorEvent | TransactionEvent): boolean {
   }
 
   const headers = event.request?.headers as RequestHeaders | undefined;
-  return (
-    isLoopbackHostHeader(headers) ||
-    isLoopbackSourceIp(headers) ||
-    isLoopbackOriginHeader(headers)
-  );
+  return isLoopbackHostHeader(headers) || isLoopbackOriginHeader(headers);
 }
 
 // Redact URL credentials + query strings from any URL embedded in free-form
