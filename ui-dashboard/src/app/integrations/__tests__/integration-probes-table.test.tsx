@@ -166,7 +166,7 @@ function fixtureSnapshot(): IntegrationProbeSnapshot {
           category: "dex-aggregator",
           valueUsd: 327_881_227,
           sourceLabel: "DefiLlama DEX aggregators",
-          sourceUrl: "https://api.llama.fi/overview/aggregators",
+          sourceUrl: "https://defillama.com/protocols/dex-aggregators",
           sourceProtocol: "OpenOcean",
           note: null,
         },

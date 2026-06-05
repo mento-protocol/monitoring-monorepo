@@ -35,6 +35,16 @@ const DEFILLAMA_ENDPOINT_URLS: Record<DefillamaEndpoint, string> = {
   "bridge-aggregators": DEFILLAMA_BRIDGE_AGGREGATORS_URL,
 };
 
+const DEFILLAMA_UI_URLS: Record<DefillamaEndpoint, string> = {
+  "dex-aggregators": "https://defillama.com/protocols/dex-aggregators",
+  "bridge-aggregators": "https://defillama.com/protocols/bridge-aggregators",
+};
+
+type DefillamaProtocolResult = {
+  volumes: Map<string, number>;
+  errorNote: string | null;
+};
+
 const VOLUME_SOURCES: Record<string, VolumeSource> = {
   lifi: defillama("bridge-aggregators", "Jumper (LI.FI powered)"),
   squid: unavailable(
@@ -83,12 +93,15 @@ export async function volumeSignalsForAdapters(args: {
   const [dexProtocols, bridgeProtocols] = await Promise.all([
     endpoints.has("dex-aggregators")
       ? fetchDefillamaProtocols(args.fetcher, "dex-aggregators")
-      : Promise.resolve(new Map<string, number>()),
+      : Promise.resolve(emptyDefillamaResult()),
     endpoints.has("bridge-aggregators")
       ? fetchDefillamaProtocols(args.fetcher, "bridge-aggregators")
-      : Promise.resolve(new Map<string, number>()),
+      : Promise.resolve(emptyDefillamaResult()),
   ]);
-  const protocolsByEndpoint: Record<DefillamaEndpoint, Map<string, number>> = {
+  const protocolsByEndpoint: Record<
+    DefillamaEndpoint,
+    DefillamaProtocolResult
+  > = {
     "dex-aggregators": dexProtocols,
     "bridge-aggregators": bridgeProtocols,
   };
@@ -134,7 +147,7 @@ function uniqueDefillamaEndpoints(
 
 function signalForSource(
   source: VolumeSource | undefined,
-  protocolsByEndpoint: Record<DefillamaEndpoint, Map<string, number>>,
+  protocolsByEndpoint: Record<DefillamaEndpoint, DefillamaProtocolResult>,
 ): VolumeSignal | null {
   if (!source) return null;
   if (source.kind === "unavailable") {
@@ -149,18 +162,19 @@ function signalForSource(
     };
   }
 
-  const valueUsd =
-    protocolsByEndpoint[source.endpoint].get(source.protocolName) ?? null;
+  const endpointResult = protocolsByEndpoint[source.endpoint];
+  const valueUsd = endpointResult.volumes.get(source.protocolName) ?? null;
   return {
     window: "30d",
     category: source.category,
     valueUsd,
     sourceLabel: DEFILLAMA_SOURCE_LABELS[source.endpoint],
-    sourceUrl: DEFILLAMA_ENDPOINT_URLS[source.endpoint],
+    sourceUrl: DEFILLAMA_UI_URLS[source.endpoint],
     sourceProtocol: source.protocolName,
     note:
       valueUsd === null
-        ? `No 30d value found for ${source.protocolName}.`
+        ? (endpointResult.errorNote ??
+          `No 30d value found for ${source.protocolName}.`)
         : null,
   };
 }
@@ -168,14 +182,26 @@ function signalForSource(
 async function fetchDefillamaProtocols(
   fetcher: FetchLike,
   endpoint: DefillamaEndpoint,
-): Promise<Map<string, number>> {
+): Promise<DefillamaProtocolResult> {
   try {
     const response = await fetcher(DEFILLAMA_ENDPOINT_URLS[endpoint]);
-    if (!response.ok) return new Map();
-    return protocolVolumes(await response.json());
+    if (!response.ok) {
+      return {
+        volumes: new Map(),
+        errorNote: `${DEFILLAMA_SOURCE_LABELS[endpoint]} returned HTTP ${response.status}.`,
+      };
+    }
+    return { volumes: protocolVolumes(await response.json()), errorNote: null };
   } catch {
-    return new Map();
+    return {
+      volumes: new Map(),
+      errorNote: `${DEFILLAMA_SOURCE_LABELS[endpoint]} fetch failed.`,
+    };
   }
+}
+
+function emptyDefillamaResult(): DefillamaProtocolResult {
+  return { volumes: new Map(), errorNote: null };
 }
 
 function protocolVolumes(payload: unknown): Map<string, number> {

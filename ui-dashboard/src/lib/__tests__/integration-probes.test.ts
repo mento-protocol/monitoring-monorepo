@@ -52,7 +52,7 @@ describe("IntegrationProbeSnapshotSchema", () => {
             category: "dex-aggregator",
             valueUsd: 123,
             sourceLabel: "DefiLlama DEX aggregators",
-            sourceUrl: "https://api.llama.fi/overview/aggregators",
+            sourceUrl: "https://defillama.com/protocols/dex-aggregators",
             sourceProtocol: "Fixture",
             note: null,
           },

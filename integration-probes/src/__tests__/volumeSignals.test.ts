@@ -36,12 +36,14 @@ describe("volumeSignalsForAdapters", () => {
       window: "30d",
       category: "dex-aggregator",
       valueUsd: 327_881_227,
+      sourceUrl: "https://defillama.com/protocols/dex-aggregators",
       sourceProtocol: "OpenOcean",
     });
     expect(signals.get("lifi")).toMatchObject({
       window: "30d",
       category: "bridge-aggregator",
       valueUsd: 683_152_039,
+      sourceUrl: "https://defillama.com/protocols/bridge-aggregators",
       sourceProtocol: "Jumper (LI.FI powered)",
     });
     expect(signals.get("squid")).toMatchObject({
@@ -69,6 +71,18 @@ describe("volumeSignalsForAdapters", () => {
       note: "No 30d value found for OpenOcean.",
     });
     expect(signals.get("fixture")).toBeNull();
+  });
+
+  it("surfaces DefiLlama HTTP failures in the volume signal note", async () => {
+    const signals = await volumeSignalsForAdapters({
+      adapters: [adapter("openocean")],
+      fetcher: async () => new Response("rate limited", { status: 429 }),
+    });
+
+    expect(signals.get("openocean")).toMatchObject({
+      valueUsd: null,
+      note: "DefiLlama DEX aggregators returned HTTP 429.",
+    });
   });
 });
 
