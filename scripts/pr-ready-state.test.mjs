@@ -1140,6 +1140,23 @@ test("uses current head commit timeline timestamp when available", () => {
   );
 });
 
+test("uses earlier head status observation when timeline timestamp is later", () => {
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems: [
+        {
+          event: "committed",
+          sha: "new-head",
+          created_at: "2026-05-21T13:25:00Z",
+        },
+      ],
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    "2026-05-21T13:23:00Z",
+  );
+});
+
 test("falls back to check observation time when timeline has no post-head timestamp", () => {
   assertEqual(
     fetchHeadUpdatedAt({

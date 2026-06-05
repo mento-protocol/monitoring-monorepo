@@ -612,10 +612,9 @@ export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
 }
 
 export function fetchHeadUpdatedAt({ headSha, timelineItems, observedAt }) {
-  return (
-    headUpdatedAtFromTimeline(timelineItems, headSha) ??
-    validIsoTimestamp(observedAt) ??
-    null
+  return minIsoTimestamp(
+    headUpdatedAtFromTimeline(timelineItems, headSha),
+    validIsoTimestamp(observedAt),
   );
 }
 
