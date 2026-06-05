@@ -121,8 +121,13 @@ jobs:
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
       TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
+      TF_VAR_terraform_service_account: org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com
       TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
       TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
+      TF_VAR_splunk_on_call_api_id: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_ID }}
+      TF_VAR_splunk_on_call_api_key: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_KEY }}
+      TF_VAR_oncall_slack_channel_id: ${{ secrets.TF_VAR_ONCALL_SLACK_CHANNEL_ID }}
+      TF_VAR_oncall_support_usergroup_id: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
       TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     defaults:
       run:

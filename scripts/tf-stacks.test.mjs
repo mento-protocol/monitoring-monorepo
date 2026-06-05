@@ -372,6 +372,43 @@ function assert(condition, message) {
   }
 }
 
+function terraformEnvNames(workflowPath) {
+  const contents = readFileSync(path.join(repoRoot, workflowPath), "utf8");
+  const names = new Set();
+  const terraformEnvLine = /^\s+(TF_VAR_[A-Za-z0-9_]+):\s+.+$/gmu;
+
+  for (const match of contents.matchAll(terraformEnvLine)) {
+    names.add(match[1]);
+  }
+
+  return names;
+}
+
+function assertDriftWorkflowEnvCoversAutoAppliedStackVars() {
+  const stackWorkflowPaths = [
+    ".github/workflows/alerts-rules.yml",
+    ".github/workflows/alerts-infra.yml",
+    ".github/workflows/aegis-terraform.yml",
+  ];
+  const requiredNames = new Set();
+
+  for (const workflowPath of stackWorkflowPaths) {
+    for (const name of terraformEnvNames(workflowPath)) {
+      requiredNames.add(name);
+    }
+  }
+
+  const driftNames = terraformEnvNames(".github/workflows/terraform-drift.yml");
+  const missingNames = [...requiredNames]
+    .filter((name) => !driftNames.has(name))
+    .sort();
+
+  assert(
+    missingNames.length === 0,
+    `terraform-drift.yml is missing TF_VAR_* values used by auto-applied stack workflows: ${missingNames.join(", ")}`,
+  );
+}
+
 const registry = JSON.parse(run(["list", "--json"]));
 const stackIds = registry.stacks.map((stack) => stack.id);
 const requiredStackIds = [
@@ -400,6 +437,8 @@ for (const stack of registry.stacks) {
     `${stack.id} must react to wrapper edits`,
   );
 }
+
+assertDriftWorkflowEnvCoversAutoAppliedStackVars();
 
 const tempDir = mkdtempSync(path.join(tmpdir(), "tf-stacks-test-"));
 try {
