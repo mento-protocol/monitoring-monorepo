@@ -55,6 +55,73 @@ REACT_DOCTOR_BASE_REF=origin/main pnpm react-doctor:diff  # Diff gate used by th
 pnpm dashboard:react-doctor:diff  # CI-equivalent diff scan from repo root
 ```
 
+## Local Dev Server And Auth States
+
+For UI work, verify both public and authenticated states when the changed
+surface behaves differently by session. Examples: nav links, address-label edit
+affordances, `/address-book`, `/entities`, `/integrations`, and `/volume`
+Organic/All controls.
+
+Use a fixed localhost port so the user can inspect the exact URL you verified:
+
+```bash
+cd ui-dashboard
+AUTH_SECRET=local-dev-dashboard-auth-secret-do-not-use-in-prod \
+AUTH_GOOGLE_ID=local-dev-google-id \
+AUTH_GOOGLE_SECRET=local-dev-google-secret \
+pnpm dev --hostname 127.0.0.1 --port 3210
+```
+
+The required local data env is:
+
+- `NEXT_PUBLIC_HASURA_URL` for hosted multichain Hasura data.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` when address labels,
+  reports, entities, or authenticated editing surfaces need real data.
+- `AUTH_SECRET`, `AUTH_GOOGLE_ID`, and `AUTH_GOOGLE_SECRET` for local Auth.js
+  session handling. Placeholder Google values are fine for agent-side simulated
+  sessions; they only need to be non-empty so protected middleware is active.
+
+Other Vercel vars, Blob vars, cron secrets, and automation-bypass secrets are
+not needed for ordinary localhost UI review unless the task directly touches
+that route.
+
+Logged-out verification:
+
+- Use an isolated browser context, or clear both `authjs.session-token` and
+  `__Secure-authjs.session-token` cookies for `127.0.0.1`.
+- Expect public pages to show `Sign in`.
+- Expect protected pages (`/address-book`, `/entities`, `/integrations`) to
+  redirect to `/sign-in?callbackUrl=...` when auth env is configured.
+
+Logged-in verification:
+
+1. Start the dev server with the same `AUTH_SECRET` value used below.
+2. Mint a local Auth.js JWT with `next-auth/jwt` from `ui-dashboard/`:
+
+```bash
+AUTH_SECRET=local-dev-dashboard-auth-secret-do-not-use-in-prod node --input-type=module -e 'import { encode } from "next-auth/jwt"; const secret = process.env.AUTH_SECRET; if (!secret) throw new Error("AUTH_SECRET is required"); const token = await encode({ secret, salt: "authjs.session-token", token: { email: "dev@mentolabs.xyz", refresh_token: "local-dev", expires_at: Math.floor(Date.now() / 1000) + 3600 }, maxAge: 30 * 24 * 60 * 60 }); console.log(token);'
+```
+
+3. In Chrome DevTools MCP, set the cookie on the localhost page, replacing
+   `<TOKEN>` with the command output:
+
+```js
+document.cookie =
+  "authjs.session-token=<TOKEN>; Path=/; SameSite=Lax; Max-Age=2592000";
+location.reload();
+```
+
+4. Expect the nav to show `dev@mentolabs.xyz` and `Sign out`. Authenticated-only
+   routes should render instead of redirecting, and authenticated-only controls
+   should be visible.
+
+Never use production OAuth secrets just to simulate local login. If a task needs
+the real OAuth callback flow, say that explicitly and verify it separately.
+
+Interactive `next dev` can rewrite `ui-dashboard/next-env.d.ts` to import
+`./.next/dev/types/routes.d.ts`. Before committing, restore it to
+`./.next/types/routes.d.ts` if the dev server dirtied the worktree.
+
 ## Browser Interaction Tests
 
 `pnpm test:browser` starts the real Next.js app plus

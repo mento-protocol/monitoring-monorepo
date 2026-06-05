@@ -114,6 +114,22 @@ pnpm indexer:testnet:codegen && pnpm indexer:testnet:dev
 pnpm dashboard:dev
 ```
 
+For deterministic browser review, run the dashboard package directly on a fixed
+port and verify both auth states when the UI differs for signed-in users:
+
+```bash
+cd ui-dashboard
+AUTH_SECRET=local-dev-dashboard-auth-secret-do-not-use-in-prod \
+AUTH_GOOGLE_ID=local-dev-google-id \
+AUTH_GOOGLE_SECRET=local-dev-google-secret \
+pnpm dev --hostname 127.0.0.1 --port 3210
+```
+
+Open <http://127.0.0.1:3210>. Use no Auth.js session cookie for logged-out
+checks. To simulate a signed-in `@mentolabs.xyz` user locally, mint an
+`authjs.session-token` with `next-auth/jwt` using the same `AUTH_SECRET`; the
+exact agent workflow lives in [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md).
+
 ### Run Aegis
 
 ```bash
@@ -189,6 +205,9 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL` | Optional upstream URL override for local mainnet Hasura proxy (default `http://localhost:8080/v1/graphql`) |
 | `UPSTASH_REDIS_REST_URL`                 | Address labels storage (Upstash Redis)                                                                     |
 | `UPSTASH_REDIS_REST_TOKEN`               | Address labels Redis auth token                                                                            |
+| `AUTH_SECRET`                            | Auth.js JWT secret; required for local simulated login and real OAuth sessions                             |
+| `AUTH_GOOGLE_ID`                         | Google OAuth client id; non-empty placeholder is enough for local simulated login                          |
+| `AUTH_GOOGLE_SECRET`                     | Google OAuth client secret; non-empty placeholder is enough for local simulated login                      |
 | `BLOB_STORE_ID`                          | Vercel Blob OIDC store id for daily label backups (set by the Vercel store integration)                    |
 | `BLOB_WEBHOOK_PUBLIC_KEY`                | Vercel Blob OIDC public key (set by the Vercel store integration)                                          |
 

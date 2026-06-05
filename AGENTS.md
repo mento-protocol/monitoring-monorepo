@@ -360,7 +360,7 @@ pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Se
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
 # Dashboard
-pnpm dashboard:dev            # Dev server
+pnpm dashboard:dev            # Dev server; see ui-dashboard/AGENTS.md for logged-in/out localhost verification
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)
 pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture-driven browser interaction + visual snapshot tests
@@ -444,7 +444,7 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 ## Environment
 
 - Indexer needs Docker for local dev (Postgres + Hasura containers)
-- Dashboard needs `NEXT_PUBLIC_HASURA_URL` env var for local dev; run `vercel env pull ui-dashboard/.env.local` to pull from the linked project
+- Dashboard localhost UI review needs `NEXT_PUBLIC_HASURA_URL`; real address-label/authenticated surfaces also need `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and local Auth.js placeholders (`AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`). See `ui-dashboard/AGENTS.md` for the logged-in/logged-out verification workflow and local session-cookie recipe.
 - Production env vars are managed by Terraform except Vercel Blob OIDC variables, which are managed by the Vercel store integration — see `terraform/terraform.tfvars.example`
 - See root README.md for full env var documentation
 
@@ -454,7 +454,7 @@ Repo-tracked under `.claude/commands/`. Each `.md` file is the body Claude Code 
 
 | Command                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/verify-ui`                         | Drive chrome-devtools MCP through the dashboard's pages with token-budget guidance and per-page acceptance checks (KPI presence, chart wiring, interaction smoke tests, responsive layouts). Defaults to `localhost:3000`; pass `prod` to verify against `monitoring.mento.org`.                                                                                                                                                                                                                                                                          |
+| `/verify-ui`                         | Drive chrome-devtools MCP through the dashboard's pages with token-budget guidance and per-page acceptance checks (KPI presence, chart wiring, interaction smoke tests, responsive layouts). Defaults to a localhost dev server; pass `prod` to verify against `monitoring.mento.org`. For session-dependent surfaces, verify both logged-out and locally simulated logged-in states per `ui-dashboard/AGENTS.md`.                                                                                                                                        |
 | `/autoreview [args]`                 | Run the shared structured closeout review helper (`pnpm agent:autoreview`) from Claude Code. Defaults to Codex as the review engine; pass `--engine claude` only when Claude review is explicitly wanted.                                                                                                                                                                                                                                                                                                                                                 |
 | `/babysit-indexer-deploy [<commit>]` | Arm a `Monitor` that polls Envio's deployment registry every 45s internally but only emits on state change (`REGISTERED` / `READY_TO_PROMOTE` / `BUILD_FAILED` / `SYNC_DEADLINE` / `ERROR`). Prompts for `pnpm deploy:indexer:promote <commit>` once every chain is caught up — never auto-promotes. Bails after 30min of 404s (build likely failed) or 90min of stagnation. Defaults to `git rev-parse --short origin/envio` when no commit is passed. Replaces the prior `/loop 5m` cron version, which produced ~12 idle macOS notifications per sync. |
 
