@@ -140,6 +140,7 @@ function fixtureSnapshot(
       aggregators: 0,
       chainChecks: 0,
       passingChainChecks: 0,
+      partialChainChecks: 0,
       failingChainChecks: 0,
       needsKeyChainChecks: 0,
       unsupportedChainChecks: 0,

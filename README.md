@@ -282,7 +282,9 @@ pnpm infra:apply    # apply platform changes after review
 
 Aggregator integration snapshots are produced by the scheduled
 `Integration Probes` GitHub Actions workflow and rendered at
-`/integrations`. Run the same quote-only check manually with:
+`/integrations`. Chain statuses are `pass` only for full active USDm hub-pair
+coverage and `partial` when some pair directions pass but others still lack
+Mento v3 address evidence. Run the same quote-only check manually with:
 
 ```bash
 pnpm integrations:probe

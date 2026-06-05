@@ -8,6 +8,10 @@ const STATUS_STYLES: Record<
     label: "Pass",
     className: "bg-emerald-500/20 text-emerald-300",
   },
+  partial: {
+    label: "Partial",
+    className: "bg-yellow-500/20 text-yellow-200",
+  },
   fail: {
     label: "Fail",
     className: "bg-red-500/20 text-red-300",

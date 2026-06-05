@@ -28,6 +28,8 @@ pnpm --filter @mento-protocol/integration-probes knip
 
 - Never mark a route `pass` from a source label alone. A pass requires
   Routerv300 or registered v3 pool/VirtualPool address evidence.
+- Chain-level coverage is `partial` when at least one pair direction passes
+  but the chain does not have full active USDm hub-pair coverage.
 - Missing adapter credentials must return `needs_key`, not `fail`.
 - Unsupported chain coverage must return `unsupported`, not `fail`.
 - Quote probes are read-only. Do not add funded canary swaps without a new
@@ -58,6 +60,9 @@ pnpm --filter @mento-protocol/integration-probes knip
   Uniswap V3 Celo pool sell-side balance, when RPC is available, to size a
   small discovery ladder after the default quote. This is only for amount
   selection; a pass still requires Mento v3 router or registered pool evidence.
+- Adapter order is dashboard display order. Keep LI.FI, Squid, and OpenOcean
+  first by operator priority, then sort remaining adapters by current public
+  30d aggregator/bridge volume where available.
 - `integration-probes:latest` expires after 3 days so failed scheduled probes
   degrade the dashboard instead of showing stale health forever. Dated history
   keys expire after 90 days.

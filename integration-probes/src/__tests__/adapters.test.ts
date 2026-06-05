@@ -1210,11 +1210,24 @@ describe("aggregatePairStatus", () => {
     );
     expect(aggregatePairStatus([{ status: "needs_key" }])).toBe("needs_key");
     expect(aggregatePairStatus([{ status: "pass" }, { status: "fail" }])).toBe(
-      "fail",
+      "partial",
+    );
+    expect(aggregatePairStatus([{ status: "pass" }, { status: "error" }])).toBe(
+      "partial",
     );
     expect(
       aggregatePairStatus([{ status: "pass" }, { status: "needs_key" }]),
     ).toBe("needs_key");
+    expect(
+      aggregatePairStatus([
+        { status: "pass" },
+        { status: "needs_key" },
+        { status: "error" },
+      ]),
+    ).toBe("needs_key");
+    expect(
+      aggregatePairStatus([{ status: "needs_key" }, { status: "fail" }]),
+    ).toBe("fail");
     expect(
       aggregatePairStatus([{ status: "error" }, { status: "error" }]),
     ).toBe("error");
@@ -1223,6 +1236,26 @@ describe("aggregatePairStatus", () => {
 });
 
 describe("aggregator quote builders", () => {
+  it("keeps the dashboard adapter order aligned with operator priority and public volume", () => {
+    expect(AGGREGATOR_ADAPTERS.map((adapter) => adapter.id)).toEqual([
+      "lifi",
+      "squid",
+      "openocean",
+      "kyberswap",
+      "okx",
+      "1inch",
+      "0x",
+      "cow-swap",
+      "paraswap",
+      "relay",
+      "odos",
+      "socket",
+      "rango",
+      "rubic",
+      "debridge",
+    ]);
+  });
+
   it("builds configured quote requests for v1 live adapters", () => {
     const env = {
       LIFI_API_KEY: "lifi-key",

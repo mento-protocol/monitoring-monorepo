@@ -5,6 +5,7 @@ const INTEGRATION_PROBES_LATEST_KEY = "integration-probes:latest";
 
 const StatusSchema = z.enum([
   "pass",
+  "partial",
   "fail",
   "unsupported",
   "needs_key",
@@ -115,6 +116,7 @@ export const IntegrationProbeSnapshotSchema = z.object({
     aggregators: z.number(),
     chainChecks: z.number(),
     passingChainChecks: z.number(),
+    partialChainChecks: z.number().optional().default(0),
     failingChainChecks: z.number(),
     needsKeyChainChecks: z.number(),
     unsupportedChainChecks: z.number(),
