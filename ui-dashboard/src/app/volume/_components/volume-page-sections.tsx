@@ -121,12 +121,13 @@ function ActorToggleGroup({
       <SegmentButton
         active={!includeProtocolActors}
         label="Organic"
-        tooltip="Organic shows external trader volume only. All also includes Mento protocol/internal flows."
+        tooltip="Organic shows external trader volume only. Excluding internal & rebalancing flows."
         onClick={() => updateIncludeProtocolActors(false)}
       />
       <SegmentButton
         active={includeProtocolActors}
         label="All"
+        tooltip="All shows all volume incl. internal & rebalancing flows."
         onClick={() => updateIncludeProtocolActors(true)}
       />
     </div>
