@@ -39,7 +39,7 @@ export function summarizeFeedbackState(readyState) {
       return true;
     }
     if (blocker.kind === "review") {
-      return ["CHANGES_REQUESTED", "REVIEW_REQUIRED"].includes(blocker.state);
+      return blocker.state === "CHANGES_REQUESTED";
     }
     return (
       blocker.kind === "gate" &&

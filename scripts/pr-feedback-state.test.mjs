@@ -172,6 +172,35 @@ test("includes requested-change review blockers in feedback blockers", () => {
   );
 });
 
+test("does not treat missing review approval as feedback cleanup", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    required: {
+      ready: false,
+      blockers: [
+        {
+          kind: "review",
+          name: "Review required",
+          state: "REVIEW_REQUIRED",
+          required: true,
+        },
+      ],
+    },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [],
+  });
+
+  assertEqual(summary.ready, true);
+  assertDeepEqual(summary.requiredFeedbackBlockers, []);
+});
+
 test("does not treat unrelated gate blockers as feedback blockers", () => {
   const summary = summarizeFeedbackState({
     ...readyState,
