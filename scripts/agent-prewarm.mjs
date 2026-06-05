@@ -246,7 +246,7 @@ export function runCommandsParallel(commands, parallelism) {
   let nextIndex = 0;
   let active = 0;
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     if (commands.length === 0) {
       resolve([]);
       return;
@@ -259,15 +259,17 @@ export function runCommandsParallel(commands, parallelism) {
         nextIndex += 1;
         active += 1;
 
-        runCommand(command).then((result) => {
-          results[commandIndex] = result;
-          active -= 1;
-          if (nextIndex >= commands.length && active === 0) {
-            resolve(results);
-            return;
-          }
-          launch();
-        });
+        runCommand(command)
+          .then((result) => {
+            results[commandIndex] = result;
+            active -= 1;
+            if (nextIndex >= commands.length && active === 0) {
+              resolve(results);
+              return;
+            }
+            launch();
+          })
+          .catch(reject);
       }
     };
 
@@ -369,6 +371,8 @@ async function main() {
       continue;
     }
 
+    // Successful Turbo output is intentionally suppressed here. Parallel runs
+    // otherwise interleave progress logs; failures replay captured output.
     console.log(`✓ ${result.command} (${formatDuration(result.elapsedMs)})`);
   }
 

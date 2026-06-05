@@ -1469,6 +1469,10 @@ fi
 
 failures=0
 command_summaries=()
+supports_wait_n=false
+if help wait 2>/dev/null | grep -q -- "-n"; then
+  supports_wait_n=true
+fi
 
 format_duration() {
   local seconds="$1"
@@ -1603,6 +1607,9 @@ run_mapped_command_to_files() {
 
 is_quality_setup_command() {
   local command="$1"
+  # These commands have side effects that later quality checks depend on, so
+  # they must finish before the independent quality pool starts. Keep this list
+  # in sync with new setup-style commands added by the path mapper above.
   case "$command" in
     "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium")
       return 0
@@ -1621,6 +1628,8 @@ is_quality_setup_command() {
 run_mapped_entries_sequential() {
   local entry
   local command
+  # $1 is the phase label, accepted for call-site symmetry with the parallel
+  # runner. Sequential execution does not need to print the phase.
   shift
 
   for entry in "$@"; do
@@ -1752,7 +1761,9 @@ run_mapped_entries_parallel() {
     active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
     active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
 
-    if [[ ${#active_pids[@]} -gt 0 ]]; then
+    if [[ ${#active_pids[@]} -gt 0 && "$supports_wait_n" == true ]]; then
+      wait -n 2>/dev/null || true
+    elif [[ ${#active_pids[@]} -gt 0 ]]; then
       sleep 0.1
     fi
   done
