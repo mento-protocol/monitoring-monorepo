@@ -295,8 +295,8 @@ pnpm pr:ready-state --pr <number> --json
 ```
 
 For feedback-only sweeps where the agent needs unresolved threads, unreplied
-root review comments, top-level bot comments, and Codex review gates without
-shelling out to ad hoc `gh api` calls, use:
+root review comments, blocking top-level bot feedback, and Codex review gates
+without shelling out to ad hoc `gh api` calls, use:
 
 ```bash
 pnpm pr:feedback-state --pr <number> --json

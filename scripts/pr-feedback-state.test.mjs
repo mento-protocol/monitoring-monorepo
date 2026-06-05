@@ -135,6 +135,7 @@ test("summarizes only feedback blockers and counts", () => {
     requiredFeedbackBlockers: 2,
     unresolvedReviewThreads: 1,
     unrepliedRootReviewComments: 1,
+    blockingTopLevelBotComments: 0,
     topLevelBotComments: 1,
   });
 });
@@ -254,9 +255,13 @@ test("marks feedback clear when feedback gates are clear", () => {
   assertEqual(summary.summary, "Feedback gates are clear.");
 });
 
-test("does not mark feedback clear while top-level bot comments remain", () => {
+test("does not mark feedback clear while current-head review bot feedback remains", () => {
   const summary = summarizeFeedbackState({
     ...readyState,
+    pr: {
+      ...readyState.pr,
+      headUpdatedAt: "2026-06-05T16:30:00Z",
+    },
     required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
     gates: {
       ...readyState.gates,
@@ -266,11 +271,81 @@ test("does not mark feedback clear while top-level bot comments remain", () => {
     },
     unresolvedReviewThreads: [],
     unrepliedRootReviewComments: [],
-    topLevelBotComments: [{ id: 456 }],
+    topLevelBotComments: [
+      {
+        id: 456,
+        author: "cursor[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: "Medium Severity\n<!-- BUGBOT_BUG_ID: example -->",
+      },
+    ],
   });
 
   assertEqual(summary.ready, false);
   assertEqual(summary.summary, "Feedback surfaces need attention.");
+  assertEqual(summary.counts.blockingTopLevelBotComments, 1);
+  assertEqual(summary.counts.topLevelBotComments, 1);
+});
+
+test("does not block on stale top-level bot review comments", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    pr: {
+      ...readyState.pr,
+      headUpdatedAt: "2026-06-05T16:30:00Z",
+    },
+    required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [
+      {
+        id: 456,
+        author: "claude[bot]",
+        updatedAt: "2026-06-05T16:15:00Z",
+        body: "Findings: stale review summary",
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 0);
+  assertEqual(summary.counts.topLevelBotComments, 1);
+});
+
+test("does not block on current-head informational bot comments", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    pr: {
+      ...readyState.pr,
+      headUpdatedAt: "2026-06-05T16:30:00Z",
+    },
+    required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [
+      {
+        id: 456,
+        author: "vercel[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: "The latest updates on your projects.",
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 0);
   assertEqual(summary.counts.topLevelBotComments, 1);
 });
 

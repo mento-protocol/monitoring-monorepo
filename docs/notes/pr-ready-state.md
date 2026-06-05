@@ -65,8 +65,9 @@ protection.
 `--json`. Human formatting is allowed as the default for interactive use. Use
 `--watch --compact` for low-noise foreground babysitting. `pnpm
 pr:feedback-state` is the feedback-only projection for unresolved threads,
-unreplied root review comments, top-level bot comments, and Codex gates; it is
-intended to replace ad hoc read-only `gh api` scraping during review sweeps.
+unreplied root review comments, blocking top-level bot feedback, contextual
+top-level bot comments, and Codex gates; it is intended to replace ad hoc
+read-only `gh api` scraping during review sweeps.
 
 Suggested invocation:
 
@@ -212,8 +213,9 @@ Field expectations:
    `pnpm pr:ready-state --pr <number> --watch --compact`.
 6. If feedback-state `ready` is false, inspect and handle
    `requiredFeedbackBlockers`, `unresolvedReviewThreads`,
-   `unrepliedRootReviewComments`, `topLevelBotComments`, and any non-ready
-   required feedback `gates`.
+   `unrepliedRootReviewComments`, `blockingTopLevelBotComments`, and any
+   non-ready required feedback `gates`. Also scan `topLevelBotComments` as
+   context; deployment/status bot comments may be informational.
 7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
    required `gates`.
 8. Report optional lag separately, especially Cursor Bugbot lag.
