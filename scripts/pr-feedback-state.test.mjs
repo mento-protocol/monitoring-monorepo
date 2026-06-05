@@ -591,7 +591,7 @@ test("rejects compact output because feedback state is JSON-only", () => {
 test("shows feedback-state usage for invalid arguments", () => {
   assertThrows(
     () => parseFeedbackArgs(["791", "--unknown"]),
-    "Usage: pnpm pr:feedback-state",
+    "Usage: pnpm --silent pr:feedback-state",
   );
 });
 

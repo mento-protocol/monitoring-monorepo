@@ -73,13 +73,15 @@ Suggested invocation:
 
 ```bash
 pnpm pr:ready-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--compact] [--watch]
-pnpm pr:feedback-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--watch]
+pnpm --silent pr:feedback-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--watch]
 ```
 
 `--watch --json` emits one JSON summary per poll, separated by newlines. Use
 `--watch --compact` for human babysitting and reserve JSON output for machine
-consumers that can parse newline-delimited JSON. `pr:feedback-state` always
-prints JSON; in watch mode it emits one compact JSON object per poll.
+consumers that can parse newline-delimited JSON. Use `pnpm --silent` for
+feedback-state machine consumers so pnpm does not prepend its run-script
+banner. The `pr:feedback-state` Node entry point always prints JSON; in watch
+mode it emits one compact JSON object per poll.
 
 Expected top-level fields:
 
@@ -207,7 +209,7 @@ Field expectations:
    a repo adapter for the global `~/.agents/skills/autoreview` skill. Verify
    accepted findings before editing; if review-triggered fixes change code,
    rerun focused checks and autoreview once for that fixed batch.
-5. Run `pnpm pr:feedback-state --pr <number> --json` for a feedback-only sweep,
+5. Run `pnpm --silent pr:feedback-state --pr <number> --json` for a feedback-only sweep,
    or `pnpm pr:ready-state --pr <number> --json` for the final readiness
    source of truth. For a foreground wait loop, use
    `pnpm pr:ready-state --pr <number> --watch --compact`.

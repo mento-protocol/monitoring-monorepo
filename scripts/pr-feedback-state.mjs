@@ -5,11 +5,13 @@ import { fetchReadyState, parseArgs } from "./pr-ready-state.mjs";
 import { summarizeFeedbackState } from "./pr-feedback-state-core.mjs";
 
 function usage() {
-  return `Usage: pnpm pr:feedback-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--watch]
-       pnpm pr:feedback-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--watch]
-       pnpm pr:feedback-state --help
+  return `Usage: pnpm --silent pr:feedback-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--watch]
+       pnpm --silent pr:feedback-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--watch]
+       pnpm --silent pr:feedback-state --help
 
-Note: output is always JSON. --watch emits one compact JSON object per poll.
+Note: the Node entry point always emits JSON. Use pnpm --silent when invoking
+through pnpm so stdout does not include pnpm's run-script banner. --watch emits
+one compact JSON object per poll.
 `;
 }
 

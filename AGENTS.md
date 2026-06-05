@@ -299,7 +299,7 @@ root review comments, blocking top-level bot feedback, and Codex review gates
 without shelling out to ad hoc `gh api` calls, use:
 
 ```bash
-pnpm pr:feedback-state --pr <number> --json
+pnpm --silent pr:feedback-state --pr <number> --json
 ```
 
 For an interactive low-noise watch, use:

@@ -577,11 +577,41 @@ function validIsoTimestamp(value) {
   return Number.isFinite(Date.parse(value ?? "")) ? value : null;
 }
 
-export function fetchHeadUpdatedAt({ headCommit }) {
-  const commit = headCommit?.commit ?? {};
+function timelineEventTimestamp(item) {
   return (
-    validIsoTimestamp(commit.committer?.date) ??
-    validIsoTimestamp(commit.author?.date) ??
+    validIsoTimestamp(item?.created_at) ??
+    validIsoTimestamp(item?.submitted_at) ??
+    validIsoTimestamp(item?.updated_at) ??
+    null
+  );
+}
+
+export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
+  const normalizedHeadSha = String(headSha ?? "").toLowerCase();
+  if (!normalizedHeadSha) return null;
+
+  let headCommitIndex = -1;
+  for (const [index, item] of timelineItems.entries()) {
+    if (
+      item?.event === "committed" &&
+      String(item.sha ?? "").toLowerCase() === normalizedHeadSha
+    ) {
+      headCommitIndex = index;
+    }
+  }
+  if (headCommitIndex < 0) return null;
+
+  for (const item of timelineItems.slice(headCommitIndex + 1)) {
+    const timestamp = timelineEventTimestamp(item);
+    if (timestamp) return timestamp;
+  }
+  return null;
+}
+
+export function fetchHeadUpdatedAt({ headSha, timelineItems, observedAt }) {
+  return (
+    headUpdatedAtFromTimeline(timelineItems, headSha) ??
+    validIsoTimestamp(observedAt) ??
     null
   );
 }
@@ -761,9 +791,6 @@ export async function fetchReadyState({ prArg, repoArg }) {
     repo,
     headSha: pr.headRefOid,
   });
-  const headCommitPromise = ghApiJsonResult(repo, [
-    `repos/${path}/commits/${pr.headRefOid}`,
-  ]);
   const issueCommentsPromise = ghApiJsonPages(repo, [
     `repos/${path}/issues/${number}/comments`,
   ]);
@@ -784,15 +811,20 @@ export async function fetchReadyState({ prArg, repoArg }) {
     baseRef: pr.baseRefName,
     statusCheckRollup: pr.statusCheckRollup ?? [],
   });
+  const timelinePromise = ghApiJsonPagesResult(repo, [
+    "-H",
+    "Accept: application/vnd.github+json",
+    `repos/${path}/issues/${number}/timeline`,
+  ]);
 
   const [
-    { sourceMap },
+    { sourceMap, observedAt },
     issueComments,
     reactions,
     reviewComments,
     reviewThreads,
     requiredStatusContexts,
-    headCommitResult,
+    timelineResult,
   ] = await Promise.all([
     statusSourcePromise,
     issueCommentsWithReactionsPromise,
@@ -800,10 +832,12 @@ export async function fetchReadyState({ prArg, repoArg }) {
     reviewCommentsPromise,
     reviewThreadsPromise,
     requiredStatusContextsPromise,
-    headCommitPromise,
+    timelinePromise,
   ]);
   const headUpdatedAt = fetchHeadUpdatedAt({
-    headCommit: headCommitResult.ok ? headCommitResult.value : null,
+    headSha: pr.headRefOid,
+    timelineItems: timelineResult.ok ? timelineResult.value : [],
+    observedAt,
   });
   const annotatedPr = {
     ...pr,
