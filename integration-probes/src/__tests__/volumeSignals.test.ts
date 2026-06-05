@@ -8,7 +8,10 @@ describe("volumeSignalsForAdapters", () => {
     const signals = await volumeSignalsForAdapters({
       adapters: [
         adapter("openocean"),
+        adapter("kyberswap"),
+        adapter("okx"),
         adapter("lifi"),
+        adapter("socket"),
         adapter("squid"),
         adapter("relay"),
       ],
@@ -19,13 +22,18 @@ describe("volumeSignalsForAdapters", () => {
             JSON.stringify({
               protocols: [
                 { name: "Jumper (LI.FI powered)", total30d: 683_152_039 },
+                { name: "Bungee", total30d: 198_370_000 },
               ],
             }),
           );
         }
         return new Response(
           JSON.stringify({
-            protocols: [{ name: "OpenOcean", total30d: 327_881_227 }],
+            protocols: [
+              { name: "OpenOcean", total30d: 327_881_227 },
+              { name: "KyberSwap", total30d: 6_970_000_000 },
+              { name: "OKX DEX", total30d: 5_275_000_000 },
+            ],
           }),
         );
       },
@@ -39,12 +47,24 @@ describe("volumeSignalsForAdapters", () => {
       sourceUrl: "https://defillama.com/protocols/dex-aggregators",
       sourceProtocol: "OpenOcean",
     });
+    expect(signals.get("kyberswap")).toMatchObject({
+      valueUsd: 6_970_000_000,
+      sourceProtocol: "KyberSwap",
+    });
+    expect(signals.get("okx")).toMatchObject({
+      valueUsd: 5_275_000_000,
+      sourceProtocol: "OKX DEX",
+    });
     expect(signals.get("lifi")).toMatchObject({
       window: "30d",
       category: "bridge-aggregator",
       valueUsd: 683_152_039,
       sourceUrl: "https://defillama.com/protocols/bridge-aggregators",
       sourceProtocol: "Jumper (LI.FI powered)",
+    });
+    expect(signals.get("socket")).toMatchObject({
+      valueUsd: 198_370_000,
+      sourceProtocol: "Bungee",
     });
     expect(signals.get("squid")).toMatchObject({
       window: "30d",

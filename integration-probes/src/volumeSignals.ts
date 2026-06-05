@@ -54,8 +54,8 @@ const VOLUME_SOURCES: Record<string, VolumeSource> = {
     "Official stats page exposes a 30D view, but no stable public 30d API value is configured.",
   ),
   openocean: defillama("dex-aggregators", "OpenOcean"),
-  kyberswap: defillama("dex-aggregators", "KyberSwap Aggregator"),
-  okx: defillama("dex-aggregators", "OKX Swap"),
+  kyberswap: defillama("dex-aggregators", "KyberSwap"),
+  okx: defillama("dex-aggregators", "OKX DEX"),
   "1inch": defillama("dex-aggregators", "1inch"),
   "0x": defillama("dex-aggregators", "0x Aggregator"),
   "cow-swap": defillama("dex-aggregators", "CoWSwap"),
@@ -67,11 +67,7 @@ const VOLUME_SOURCES: Record<string, VolumeSource> = {
     "No stable public 30d API value is configured; Relay reports public all-time settled volume.",
   ),
   odos: defillama("dex-aggregators", "ODOS"),
-  socket: defillama(
-    "bridge-aggregators",
-    "Bungee Bridge Aggregator",
-    "bridge-aggregator",
-  ),
+  socket: defillama("bridge-aggregators", "Bungee", "bridge-aggregator"),
   rango: defillama("bridge-aggregators", "Rango", "bridge-aggregator"),
   rubic: defillama("dex-aggregators", "Rubic"),
   debridge: unavailable(
