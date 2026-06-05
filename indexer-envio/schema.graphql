@@ -501,6 +501,11 @@ type BrokerTraderDailySnapshot
   caller: String! @index
   timestamp: BigInt! @index # UTC day bucket
   swapCount: Int!
+  # V2 route names this caller touched on this UTC day. Used to keep
+  # BrokerAggregatorDailySnapshot's primary fields consistent with the
+  # day-sticky isProtocolActor flag if a caller flips into protocol-actor
+  # classification after earlier same-day organic Broker swaps.
+  aggregatorKeys: [String!]!
   volumeUsdWei: BigInt!
   isProtocolActor: Boolean! @index
   # Block timestamp of the caller's most recent v2-direct swap within this
@@ -521,17 +526,31 @@ type BrokerAggregatorDailySnapshot {
   aggregator: String!
   lastSeenAggregatorAddress: String!
   timestamp: BigInt! @index
+  # Primary fields exclude protocol-actor callers and drive the dashboard's
+  # default view. The *IncludingProtocolActors siblings back the page-level mode.
   swapCount: Int!
+  swapCountIncludingProtocolActors: Int!
   uniqueTraders: Int!
+  uniqueTradersIncludingProtocolActors: Int!
   volumeUsdWei: BigInt!
+  volumeUsdWeiIncludingProtocolActors: BigInt!
 }
 
-# Existence-only marker: dedupes first-touch increments of
-# BrokerAggregatorDailySnapshot.uniqueTraders. Mirrors AggregatorTraderDayMarker.
+# Per-(aggregator, caller, day) marker: dedupes first-touch increments of
+# BrokerAggregatorDailySnapshot.uniqueTraders and carries the caller's route
+# contribution so the primary fields can be corrected if that caller-day flips
+# into protocol-actor classification. Mirrors AggregatorTraderDayMarker.
 # Keyed by `caller` (tx.from / signer EOA) so uniqueTraders counts distinct
 # signer EOAs per day, not distinct msg.sender contracts.
 type BrokerAggregatorTraderDayMarker {
   id: ID! # "{chainId}-{aggregator}-{caller}-{day}"
+  chainId: Int!
+  aggregator: String!
+  caller: String!
+  timestamp: BigInt!
+  swapCount: Int!
+  volumeUsdWei: BigInt!
+  isProtocolActor: Boolean!
 }
 
 # Per-(trader, tx.to, day) marker for v2 volume Via attribution at raw

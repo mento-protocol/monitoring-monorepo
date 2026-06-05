@@ -1,6 +1,12 @@
 {
-  "$comment": "Manual protocol-actor address overrides for the volume page. Dynamic pool rebalancers are classified from Pool.rebalancerAddress automatically; add real-chain entries only for protocol-controlled contracts that are not in contracts.json/nttAddresses.json or when tx.to should hide the signer from user-volume views. Chain 99999 is a test fixture for the manual override lookup path.",
+  "$comment": "Manual protocol-actor address overrides for the volume page. Entries classify both signer/caller matches and tx.to entry-point matches as non-organic protocol volume. For EOA entries, tx.to classification is mostly defensive; it is operationally meaningful for contract entries. Dynamic pool liquidity-strategy contracts are classified from Pool.rebalancerAddress automatically; add real-chain entries only for protocol-controlled actors that are not in contracts.json/nttAddresses.json or cannot be derived from pool state. Chain 99999 is a test fixture for the manual override lookup path.",
   "entries": [
+    {
+      "chainId": 42220,
+      "address": "0xaa8299FC6A685B5f9Ce9bdA8d0B3ea3D54731976",
+      "label": "mento-rebalancer",
+      "category": "rebalancer"
+    },
     {
       "chainId": 99999,
       "address": "0x0000000000000000000000000000000000000a11",

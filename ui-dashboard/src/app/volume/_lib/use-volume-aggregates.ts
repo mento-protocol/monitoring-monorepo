@@ -152,9 +152,10 @@ function useVolumeExclusionModel({
   );
   const selectedV2AggregatorRows = useMemo(
     () =>
-      includeProtocolActors
-        ? v2AggregatorRows
-        : v2AggregatorRows.filter((r) => r.aggregator !== "protocol"),
+      selectAggregatorRowsForActorFilter(
+        v2AggregatorRows,
+        includeProtocolActors,
+      ),
     [v2AggregatorRows, includeProtocolActors],
   );
   const filteredV2AggregatorRows = useMemo(

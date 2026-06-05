@@ -320,8 +320,8 @@ export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
  * in `indexer-envio/config/aggregators.json` and ideally an integrator we
  * should reach out to about migrating to v3.
  *
- * No protocol-actor filter — `aggregator` is already a canonical name; the
- * `protocol` value covers Mento internals and is naturally tiny.
+ * Primary fields exclude protocol actors and drive the default organic view.
+ * The *IncludingProtocolActors siblings back the page-level actor toggle.
  */
 export const BROKER_AGGREGATOR_DAILY_TOP = /* GraphQL */ `
   query BrokerAggregatorDailyTop($afterTimestamp: numeric!, $limit: Int!) {
@@ -336,11 +336,47 @@ export const BROKER_AGGREGATOR_DAILY_TOP = /* GraphQL */ `
       lastSeenAggregatorAddress
       timestamp
       swapCount
+      swapCountIncludingProtocolActors
       uniqueTraders
+      uniqueTradersIncludingProtocolActors
       volumeUsdWei
+      volumeUsdWeiIncludingProtocolActors
     }
   }
 `;
+
+export const BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS = /* GraphQL */ `
+  query BrokerAggregatorDailyTopIncludingProtocolActors(
+    $afterTimestamp: numeric!
+    $limit: Int!
+  ) {
+    BrokerAggregatorDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWeiIncludingProtocolActors: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      aggregator
+      lastSeenAggregatorAddress
+      timestamp
+      swapCount
+      swapCountIncludingProtocolActors
+      uniqueTraders
+      uniqueTradersIncludingProtocolActors
+      volumeUsdWei
+      volumeUsdWeiIncludingProtocolActors
+    }
+  }
+`;
+
+export function brokerAggregatorDailyTopQuery(
+  includeProtocolActors: boolean,
+): string {
+  return includeProtocolActors
+    ? BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS
+    : BROKER_AGGREGATOR_DAILY_TOP;
+}
 
 // ---------------------------------------------------------------------------
 // Pre-rolled hero metrics. `distinct_on: [chainId]` returns the LATEST

@@ -388,8 +388,11 @@ describe("BrokerAggregatorDailyTopSchema smoke test", () => {
           lastSeenAggregatorAddress: "0xunknown",
           timestamp: "1700000000",
           swapCount: 3,
+          swapCountIncludingProtocolActors: 4,
           uniqueTraders: 2,
+          uniqueTradersIncludingProtocolActors: 3,
           volumeUsdWei: "500",
+          volumeUsdWeiIncludingProtocolActors: "600",
         },
       ],
     });

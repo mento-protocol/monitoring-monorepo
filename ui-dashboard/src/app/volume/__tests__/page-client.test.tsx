@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   BROKER_AGGREGATOR_DAILY_TOP,
+  BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS,
   BROKER_TRADER_DAILY_TOP,
   POOLS_FOR_VOLUME,
   TRADER_DAILY_TOP,
@@ -10,6 +11,7 @@ import {
 const mockUseGQL = vi.hoisted(() => vi.fn());
 const volumeState = vi.hoisted(() => ({
   venue: "v3" as "v3" | "v2",
+  includeProtocolActors: false,
 }));
 
 vi.mock("@/lib/graphql", () => ({
@@ -19,8 +21,8 @@ vi.mock("@/lib/graphql", () => ({
 vi.mock("../_lib/url-state", () => ({
   useVolumeUrlState: () => ({
     range: "7d",
-    actorFilter: "organic",
-    includeProtocolActors: false,
+    actorFilter: volumeState.includeProtocolActors ? "all" : "organic",
+    includeProtocolActors: volumeState.includeProtocolActors,
     exclusions: { addresses: [], sources: [] },
     venue: volumeState.venue,
     cutoff: 1_700_000_000,
@@ -86,8 +88,9 @@ vi.mock("../_components/v3-volume-section", () => ({
 
 import { VolumeClient } from "../page-client";
 
-function renderVolume(venue: "v3" | "v2") {
+function renderVolume(venue: "v3" | "v2", includeProtocolActors = false) {
   volumeState.venue = venue;
+  volumeState.includeProtocolActors = includeProtocolActors;
   return renderToStaticMarkup(<VolumeClient />);
 }
 
@@ -123,6 +126,16 @@ describe("VolumeClient useGQL wiring", () => {
       timeoutMs: 8_000,
     });
     expect(optionsFor(BROKER_AGGREGATOR_DAILY_TOP)).toMatchObject({
+      timeoutMs: 8_000,
+    });
+  });
+
+  it("switches the v2 aggregator query ordering with the actor filter", () => {
+    renderVolume("v2", true);
+
+    expect(
+      optionsFor(BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS),
+    ).toMatchObject({
       timeoutMs: 8_000,
     });
   });

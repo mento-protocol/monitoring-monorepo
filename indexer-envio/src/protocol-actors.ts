@@ -65,10 +65,13 @@ const ALL_INDEXED_CHAIN_IDS: number[] = Object.keys(
  *   may be implementation contracts in the registry) are filtered cheaply.
  * - Wormhole-NTT helper / nttManager / transceiver proxies from
  *   `config/nttAddresses.json` for cross-chain liquidity flows.
+ * - Manual protocol actors from `config/protocolActors.json` for signer EOAs
+ *   or entry-point contracts that are not discoverable from the normal
+ *   contract metadata.
  *
- * Per-pool rebalancer EOAs are NOT in this static set — they're stored on
- * `Pool.rebalancerAddress` and checked dynamically in `isProtocolOwnedAddress(...)`
- * via the optional `pool` argument.
+ * Per-pool liquidity-strategy contracts are stored on `Pool.rebalancerAddress`
+ * and checked dynamically in `isProtocolOwnedAddress(...)` via the optional
+ * `pool` argument.
  */
 // Per-chain NTT-bridge address index. Built first so it can be reused by
 // both `PROTOCOL_OWNED_ADDRESSES_BY_CHAIN` (union into the protocol-owned set) and
@@ -144,8 +147,8 @@ const MANUAL_PROTOCOL_ACTORS_BY_CHAIN: Map<number, Set<string>> = (() => {
  * table by default (with a UI toggle to show them separately).
  *
  * Pass `pool` when the address is being classified in a swap context: the
- * pool's `rebalancerAddress` is the dynamic per-pool EOA that wouldn't be
- * in the static contracts.json set.
+ * pool's `rebalancerAddress` is the dynamic per-pool liquidity-strategy
+ * contract that may not be in the static contracts.json set.
  */
 export function isProtocolOwnedAddress(
   chainId: number,
@@ -155,6 +158,7 @@ export function isProtocolOwnedAddress(
   if (!addr) return false;
   const lower = addr.toLowerCase();
   if (PROTOCOL_OWNED_ADDRESSES_BY_CHAIN.get(chainId)?.has(lower)) return true;
+  if (MANUAL_PROTOCOL_ACTORS_BY_CHAIN.get(chainId)?.has(lower)) return true;
   if (
     pool?.rebalancerAddress &&
     pool.rebalancerAddress.toLowerCase() === lower
@@ -169,9 +173,9 @@ export function isProtocolOwnedAddress(
  * initiated by protocol automation. This is intentionally narrower than
  * `isProtocolOwnedAddress`: the protocol-owned set includes user-facing Broker/Router
  * contracts, and OR-checking those direct entry points would hide normal users
- * routing through the Mento UI. Dynamic pool rebalancers, manual overrides,
- * and non-user-facing static contracts are safe tx.to filters because those
- * contracts are protocol-controlled actors.
+ * routing through the Mento UI. Dynamic pool liquidity strategies, manual
+ * overrides, and non-user-facing static contracts are safe tx.to filters
+ * because those contracts are protocol-controlled actors.
  */
 export function isProtocolActorEntryPoint(
   chainId: number,
