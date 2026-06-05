@@ -7,7 +7,7 @@ const usage = `Usage: scripts/agent-prewarm.mjs [--base <ref>] [--head <ref>] [-
 Prewarm Turbo's local cache for the Turbo-backed commands already mapped by
 the agent quality gate. The helper only runs commands shaped as:
 
-  pnpm exec turbo run <task> --filter=<package> --cache=local:rw
+  pnpm exec turbo run <task> --filter=<package> [--filter=<package> ...] --cache=local:rw
 
 It deliberately ignores deploy, Terraform, mutation, codegen, install, and
 other non-Turbo commands.
@@ -38,7 +38,7 @@ export function extractTurboPrewarmCommands(gateOutput) {
     if (line.trim() === "") break;
 
     const match = line.match(
-      /^- ((?:[A-Z0-9_]+=[^\s()]+ )*pnpm exec turbo run [^()]+ --filter=@mento-protocol\/[^\s()]+ --cache=local:rw)(?: \(.+\))?$/,
+      /^- ((?:[A-Z0-9_]+=[^\s()]+ )*pnpm exec turbo run [^()]+(?: --filter=@mento-protocol\/[^\s()]+)+ --cache=local:rw)(?: \(.+\))?$/,
     );
     if (match && !commands.includes(match[1])) {
       commands.push(match[1]);

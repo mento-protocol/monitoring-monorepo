@@ -3,18 +3,20 @@
 Status: implemented by `chore/agent-gate-dashboard-turbo`.
 
 This note defines the conservative input surface and regression tests required
-for caching dashboard build or browser-test commands in the agent quality gate.
+for caching dashboard size-limit or browser-test commands in the agent quality
+gate.
 The Turbo worker PR established the repo's canonical local cache runner and
-command mapping shape; dashboard build, size-limit, and browser-test local
-agent-gate commands now use that runner with the input surface below.
+command mapping shape; dashboard size-limit and browser-test local agent-gate
+commands now use that runner with the input surface below. Dashboard build runs
+as the Turbo dependency of size-limit instead of as a separate local gate
+command.
 
 ## Scope
 
 Candidate commands:
 
-- `pnpm dashboard:build`
-- `pnpm dashboard:size-limit` when it consumes the build output
-- `pnpm --filter @mento-protocol/ui-dashboard test:browser`
+- `pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw`
+- `pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw`
 
 `size-limit` depends on `build` in `turbo.json` because it reads `.next/`
 output. Its config measures concrete static assets referenced by Next's build
@@ -107,28 +109,22 @@ silently reuse an incompatible cached result.
 Add these tests next to the Turbo worker's command-mapping tests, not by
 rewriting the quality-gate dispatcher.
 
-1. `shared-config/src/chains.ts` invalidates both dashboard build and browser
-   tests.
+1. `shared-config/src/chains.ts` invalidates dashboard size-limit, its build
+   dependency, and browser tests.
 
    This is the mandatory guard for the previously unsafe naive Turbo prototype:
    changing `shared-config/src/chains.ts` did not invalidate
    `ui-dashboard` tests. The test should fail if the cache key only includes
    direct `ui-dashboard/**` inputs or only package dependency declarations.
 
-2. `shared-config/fx-calendar.json` invalidates dashboard build and browser
-   tests.
+2. `shared-config/fx-calendar.json` invalidates dashboard size-limit, its build
+   dependency, and browser tests.
 
    This covers JSON exports consumed by `ui-dashboard/src/lib/weekend.ts` and
    the existing Playwright deterministic-weekend fixtures.
 
 3. `ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs` invalidates
-   browser tests but does not force a dashboard build-only cache miss.
-
-   Current gate note: this path does map to `pnpm dashboard:build` today because
-   the shell `case` pattern `ui-dashboard/*.mjs` also matches nested `.mjs`
-   paths. If PR 3 changes that routing, do it as an explicit narrow fix with a
-   regression test; otherwise keep routing as-is and still keep the build cache
-   key separate from browser fixture inputs.
+   browser tests but does not force a dashboard size-limit/build cache miss.
 
 4. `ui-dashboard/playwright.config.ts` invalidates browser tests but does not
    force a dashboard build-only cache miss.
@@ -149,12 +145,13 @@ Current agent-gate behavior:
 
 - Direct `ui-dashboard/*` changes map to dashboard package checks,
   Playwright Chromium install, browser tests, and React Doctor checks. The
-  build/size-limit routing is bundle-affecting paths only. Browser fixtures and
-  Playwright config invalidate browser-test cache entries without forcing an
-  unrelated dashboard build cache miss.
+  size-limit routing is bundle-affecting paths only, with Turbo running
+  dashboard build through the `size-limit -> build` task dependency. Browser
+  fixtures and Playwright config invalidate browser-test cache entries without
+  forcing an unrelated dashboard build cache miss.
 - `shared-config/*` changes map to shared-config package checks, shared-config
-  build, dashboard and metrics-bridge typechecks, plus dashboard build and
-  size-limit.
+  build, dashboard and metrics-bridge typechecks, plus dashboard size-limit
+  with its build dependency.
 - `shared-config/*` changes do not currently map to local browser tests. The
   browser-test cache key still must include shared-config inputs so a manual or
   future mapped `test:browser` invocation cannot hit stale dashboard metadata.

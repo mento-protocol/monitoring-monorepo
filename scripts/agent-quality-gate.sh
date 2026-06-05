@@ -489,7 +489,8 @@ add_ui_mutation_baseline() {
 
 add_ui_size_limit() {
   local reason="$1"
-  add_turbo_dashboard_task "build" "$reason"
+  # `size-limit` depends on `build` in turbo.json, so one Turbo invocation
+  # preserves the build guarantee without paying for a separate scheduler run.
   add_turbo_dashboard_task "size-limit" "$reason"
 }
 
@@ -679,6 +680,102 @@ sort_codegen_commands() {
   codegen_commands=()
   for entry in "${sorted[@]+"${sorted[@]}"}"; do
     codegen_commands+=("$entry")
+  done
+}
+
+find_turbo_task_index() {
+  local task="$1"
+  local index
+  for index in "${!turbo_group_tasks[@]}"; do
+    if [[ "${turbo_group_tasks[$index]}" == "$task" ]]; then
+      echo "$index"
+      return 0
+    fi
+  done
+  return 1
+}
+
+list_contains_word() {
+  local needle="$1"
+  local word
+  shift
+  for word in "$@"; do
+    [[ "$word" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+reason_list_contains() {
+  local reasons="$1"
+  local reason="$2"
+  [[ "; ${reasons}; " == *"; ${reason}; "* ]]
+}
+
+compact_turbo_quality_commands() {
+  local compacted_kinds=()
+  local compacted_values=()
+  local turbo_group_tasks=()
+  local turbo_group_packages=()
+  local turbo_group_reasons=()
+  local entry
+  local command
+  local reason
+  local task
+  local package_name
+  local group_index
+  local existing_packages
+  local existing_reasons
+  local kind
+  local value
+  local package_filters
+  local package
+
+  for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
+    command="${entry%%|*}"
+    reason="${entry#*|}"
+
+    if [[ "$command" =~ ^pnpm\ exec\ turbo\ run\ ([^[:space:]]+)\ --filter=(@mento-protocol/[^[:space:]]+)\ --cache=local:rw$ ]]; then
+      task="${BASH_REMATCH[1]}"
+      package_name="${BASH_REMATCH[2]}"
+
+      if group_index="$(find_turbo_task_index "$task")"; then
+        existing_packages="${turbo_group_packages[$group_index]}"
+        if ! list_contains_word "$package_name" $existing_packages; then
+          turbo_group_packages[$group_index]="${existing_packages} ${package_name}"
+        fi
+
+        existing_reasons="${turbo_group_reasons[$group_index]}"
+        if ! reason_list_contains "$existing_reasons" "$reason"; then
+          turbo_group_reasons[$group_index]="${existing_reasons}; ${reason}"
+        fi
+      else
+        turbo_group_tasks+=("$task")
+        turbo_group_packages+=("$package_name")
+        turbo_group_reasons+=("$reason")
+        compacted_kinds+=("turbo")
+        compacted_values+=("$task")
+      fi
+    else
+      compacted_kinds+=("plain")
+      compacted_values+=("$entry")
+    fi
+  done
+
+  quality_commands=()
+  for index in "${!compacted_kinds[@]}"; do
+    kind="${compacted_kinds[$index]}"
+    value="${compacted_values[$index]}"
+    if [[ "$kind" == "plain" ]]; then
+      quality_commands+=("$value")
+      continue
+    fi
+
+    group_index="$(find_turbo_task_index "$value")"
+    package_filters=""
+    for package in ${turbo_group_packages[$group_index]}; do
+      package_filters+=" --filter=${package}"
+    done
+    quality_commands+=("pnpm exec turbo run ${value}${package_filters} --cache=local:rw|${turbo_group_reasons[$group_index]}")
   done
 }
 
@@ -1178,6 +1275,7 @@ done < "$changed_paths_file"
 
 add_trunk_check_command
 sort_codegen_commands
+compact_turbo_quality_commands
 
 hash_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
