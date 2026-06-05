@@ -169,8 +169,8 @@ describe("VolumeClient useGQL wiring", () => {
       "Top legacy-v2 traders on Mento by total USD volume",
     );
     expect(html).not.toContain('aria-label="Protocol actors"');
-    expect(html).not.toContain("Organic shows external trader volume only");
-    expect(html).not.toContain("All shows all volume incl.");
+    expect(html).not.toContain("Filter out internal");
+    expect(html).not.toContain("Shows all volume incl.");
     expect(html).not.toContain("Exploratory exclusions");
     expect(variablesFor(BROKER_TRADER_DAILY_TOP)).toMatchObject({
       isProtocolActorIn: [false, true],
@@ -187,12 +187,10 @@ describe("VolumeClient useGQL wiring", () => {
 
     expect(html).toContain('aria-label="Protocol actors"');
     expect(html).toContain("Organic");
-    expect(html).toContain(
-      "Organic shows external trader volume only. Excluding internal &amp; rebalancing flows.",
-    );
+    expect(html).toContain("Filter out internal &amp; rebalancing flows.");
     expect(html).toContain("All");
     expect(html).toContain(
-      "All shows all volume incl. internal &amp; rebalancing flows.",
+      "Shows all volume incl. internal &amp; rebalancing flows.",
     );
     expect(html).toContain("Exploratory exclusions");
     expect(variablesFor(TRADER_DAILY_TOP)).toMatchObject({
