@@ -169,7 +169,7 @@ function SegmentButton({
         <span
           id={tooltipId}
           role="tooltip"
-          className="absolute right-0 top-full z-30 w-64 pt-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          className="pointer-events-none absolute right-0 top-full z-30 w-64 pt-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
         >
           <span className="block rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-left text-xs font-normal leading-relaxed text-slate-200 shadow-lg">
             {tooltip}
