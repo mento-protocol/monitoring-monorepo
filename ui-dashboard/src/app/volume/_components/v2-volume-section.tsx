@@ -33,7 +33,6 @@ export function V2VolumeSection({
   canUseVolumeFilters,
   v2Aggregated,
   v2AggregatorAggregated,
-  hasExploratoryExclusions,
   tableIsLoading,
   tableHasError,
   v2AggIsLoading,
@@ -49,7 +48,6 @@ export function V2VolumeSection({
   canUseVolumeFilters: boolean;
   v2Aggregated: readonly BrokerTraderWindowRow[];
   v2AggregatorAggregated: readonly BrokerAggregatorWindowRow[];
-  hasExploratoryExclusions: boolean;
   /** Trader-table loading/error: `BrokerTraderDailySnapshot` query. */
   tableIsLoading: boolean;
   tableHasError: boolean;
@@ -78,7 +76,6 @@ export function V2VolumeSection({
           emptyMessage={v2EmptyMessage(canUseVolumeFilters)}
           isLoading={tableIsLoading}
           hasError={tableHasError}
-          hasExploratoryExclusions={hasExploratoryExclusions}
         />
       </section>
       <AggregatorBreakdownSection

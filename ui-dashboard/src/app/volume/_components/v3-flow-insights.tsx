@@ -17,10 +17,6 @@ import {
   type TraderWindowRow,
 } from "@/lib/volume";
 import {
-  filterTraderRowsByVolumeExclusions,
-  type VolumeExclusionState,
-} from "@/lib/volume-exclusions";
-import {
   buildCorridorRows,
   buildTraderCohortSummary,
   filterSwapOutliers,
@@ -63,7 +59,6 @@ export function V3FlowInsights({
   traders,
   pools,
   protocolActorFilter,
-  exclusions,
   tableState,
 }: {
   range: VolumeRangeKey;
@@ -73,7 +68,6 @@ export function V3FlowInsights({
   traders: readonly TraderWindowRow[];
   pools: PoolMeta;
   protocolActorFilter: ReadonlyArray<boolean>;
-  exclusions: VolumeExclusionState;
   tableState: FlowTableState;
 }) {
   const model = useV3FlowInsightModel({
@@ -82,7 +76,6 @@ export function V3FlowInsights({
     traderRows,
     traders,
     protocolActorFilter,
-    exclusions,
     isTraderCapHit: tableState.isCapHit,
   });
 
@@ -131,7 +124,6 @@ function useV3FlowInsightModel({
   traderRows,
   traders,
   protocolActorFilter,
-  exclusions,
   isTraderCapHit,
 }: {
   range: VolumeRangeKey;
@@ -139,7 +131,6 @@ function useV3FlowInsightModel({
   traderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
   protocolActorFilter: ReadonlyArray<boolean>;
-  exclusions: VolumeExclusionState;
   isTraderCapHit: boolean;
 }) {
   const previousBounds = useMemo(
@@ -159,12 +150,9 @@ function useV3FlowInsightModel({
   const previousTraders = useMemo(
     () =>
       aggregateTradersByWindow(
-        filterTraderRowsByVolumeExclusions(
-          previousTradersResult.data?.TraderDailySnapshot ?? [],
-          exclusions,
-        ),
+        previousTradersResult.data?.TraderDailySnapshot ?? [],
       ),
-    [previousTradersResult.data, exclusions],
+    [previousTradersResult.data],
   );
   const cohortSummary = useMemo(
     () =>
@@ -419,33 +407,27 @@ function OutlierPanel({
       ) : rows.length === 0 ? (
         <PanelMessage message="No outlier swaps in this window." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[34rem] table-fixed text-xs">
+        <div>
+          <table className="w-full table-fixed text-xs">
             <thead>
               <tr className="border-b border-slate-800 text-slate-500">
                 <th
                   scope="col"
-                  className="w-[34%] py-2 pr-3 text-left font-medium whitespace-nowrap"
+                  className="w-[42%] py-2 pr-3 text-left font-medium whitespace-nowrap"
                 >
                   Trader
                 </th>
                 <th
                   scope="col"
-                  className="w-[28%] px-3 py-2 text-left font-medium whitespace-nowrap"
+                  className="w-[34%] px-3 py-2 text-left font-medium whitespace-nowrap"
                 >
                   Pool
                 </th>
                 <th
                   scope="col"
-                  className="w-[19%] px-3 py-2 text-right font-medium whitespace-nowrap"
+                  className="w-[24%] py-2 pl-3 text-right font-medium whitespace-nowrap"
                 >
                   Volume
-                </th>
-                <th
-                  scope="col"
-                  className="w-[19%] py-2 pl-3 text-right font-medium whitespace-nowrap"
-                >
-                  Tx
                 </th>
               </tr>
             </thead>
@@ -591,38 +573,28 @@ function OutlierTableRow({
   const txUrl = network ? explorerTxUrl(network, row.txHash) : null;
   return (
     <tr className="border-b border-slate-800/40 last:border-b-0">
-      <td className="min-w-0 overflow-hidden py-2 pr-3 text-slate-300 whitespace-nowrap">
+      <td className="w-[42%] max-w-0 min-w-0 overflow-hidden py-2 pr-3 text-slate-300 whitespace-nowrap">
         <AddressLink
           address={row.caller}
           chainId={row.chainId}
           readOnly
           addressBookWhenAuthenticated
-          containerClassName="w-full min-w-0 whitespace-nowrap"
-          className="block max-w-full truncate whitespace-nowrap"
+          containerClassName="w-full min-w-0 overflow-hidden whitespace-nowrap"
+          className="block min-w-0 max-w-full truncate whitespace-nowrap"
         />
       </td>
-      <td className="px-3 py-2 text-slate-300">
+      <td className="w-[34%] max-w-0 min-w-0 overflow-hidden px-3 py-2 text-slate-300">
         <span className="block truncate" title={label}>
           {label}
         </span>
       </td>
-      <td className="px-3 py-2 text-right font-mono text-slate-300">
-        <OutlierVolume value={row.volumeUsdWei} />
-      </td>
-      <td className="py-2 pl-3 text-right whitespace-nowrap">
-        {txUrl ? (
-          <a
-            href={txUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={`${row.txHash} · ${relativeTime(row.blockTimestamp)}`}
-            className="inline-block whitespace-nowrap font-mono text-indigo-300 hover:text-indigo-200"
-          >
-            {row.txHash.slice(0, 6)}…{row.txHash.slice(-4)}
-          </a>
-        ) : (
-          <span className="text-slate-500">—</span>
-        )}
+      <td className="w-[24%] max-w-0 min-w-0 overflow-hidden py-2 pl-3 text-right font-mono text-slate-300">
+        <OutlierVolumeLink
+          value={row.volumeUsdWei}
+          txUrl={txUrl}
+          txHash={row.txHash}
+          blockTimestamp={row.blockTimestamp}
+        />
       </td>
     </tr>
   );
@@ -647,11 +619,42 @@ function directionText(
       : "Into token1";
 }
 
-function OutlierVolume({ value }: { value: string }) {
-  const parsed = parseUsdWei(value);
-  return parsed === null ? (
-    <span className="text-slate-500">—</span>
-  ) : (
-    <>{formatUSD(weiToUsd(parsed))}</>
+function OutlierVolumeLink({
+  value,
+  txUrl,
+  txHash,
+  blockTimestamp,
+}: {
+  value: string;
+  txUrl: string | null;
+  txHash: string;
+  blockTimestamp: string;
+}) {
+  const label = outlierVolumeLabel(value);
+  if (!label) return <span className="text-slate-500">—</span>;
+  if (!txUrl) {
+    return <span className="inline-block max-w-full truncate">{label}</span>;
+  }
+
+  return (
+    <a
+      href={txUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`${label} · ${txHash} · ${relativeTime(blockTimestamp)}`}
+      aria-label={`View transaction ${shortTxHash(txHash)} for outlier swap volume ${label}`}
+      className="inline-block max-w-full truncate whitespace-nowrap text-indigo-300 hover:text-indigo-200"
+    >
+      {label}
+    </a>
   );
+}
+
+function outlierVolumeLabel(value: string): string | null {
+  const parsed = parseUsdWei(value);
+  return parsed === null ? null : formatUSD(weiToUsd(parsed));
+}
+
+function shortTxHash(txHash: string): string {
+  return `${txHash.slice(0, 6)}…${txHash.slice(-4)}`;
 }

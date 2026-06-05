@@ -31,7 +31,7 @@ const SORT_KEYS = ["volume", "swaps", "pools", "fees", "lastSeen"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
 const VALID_KEYS = new Set<SortKey>(SORT_KEYS);
 
-const PAGE_LIMIT = 50;
+const PAGE_LIMIT = 20;
 
 export function VolumeTable({
   cutoff,
@@ -40,7 +40,6 @@ export function VolumeTable({
   emptyMessage,
   isLoading,
   hasError,
-  hasExploratoryExclusions,
 }: {
   /** Same cutoff timestamp the parent query uses. Passed in (rather than
    * recomputed in `TraderRow`) so per-row breakdown queries flush their
@@ -51,7 +50,6 @@ export function VolumeTable({
   emptyMessage: string;
   isLoading: boolean;
   hasError: boolean;
-  hasExploratoryExclusions: boolean;
 }) {
   const { sortKey, sortDir, handleSort } = useTableSort<SortKey>({
     defaultKey: "volume",
@@ -103,15 +101,7 @@ export function VolumeTable({
   }
 
   if (sorted.length === 0) {
-    return (
-      <EmptyBox
-        message={
-          hasExploratoryExclusions
-            ? "No traders left after exploratory exclusions. Clear exclusions or widen the range."
-            : emptyMessage
-        }
-      />
-    );
+    return <EmptyBox message={emptyMessage} />;
   }
 
   return (
@@ -223,7 +213,7 @@ function TraderRow({
   const [expanded, setExpanded] = useState(false);
   const network = networkForChainId(trader.chainId);
   // Only fetch the pool breakdown after the user opens the row — paying for
-  // 50 sub-queries upfront would defeat the point of paginated fetches.
+  // 20 sub-queries upfront would defeat the point of paginated fetches.
   const breakdown = useGQL<{
     TraderPoolDailySnapshot: TraderPoolDailyRow[];
   }>(

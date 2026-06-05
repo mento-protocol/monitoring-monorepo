@@ -6,7 +6,6 @@ import type {
   TraderWindowRow,
 } from "@/lib/volume";
 import type { AggregatorWindowRow } from "@/lib/volume-aggregators";
-import type { VolumeExclusionState } from "@/lib/volume-exclusions";
 import { VolumeTable } from "./volume-table";
 import {
   AggregatorBreakdownSection,
@@ -20,7 +19,6 @@ type V3TableState = {
   isLoading: boolean;
   hasError: boolean;
   isCapHit: boolean;
-  hasExploratoryExclusions: boolean;
 };
 
 type V3AggregatorState = {
@@ -38,7 +36,6 @@ export function V3VolumeSection({
   pools,
   protocolActorFilter,
   canUseVolumeFilters,
-  exclusions,
   tableState,
   aggregators,
   aggregatorState,
@@ -52,7 +49,6 @@ export function V3VolumeSection({
   pools: PoolMeta;
   protocolActorFilter: ReadonlyArray<boolean>;
   canUseVolumeFilters: boolean;
-  exclusions: VolumeExclusionState;
   tableState: V3TableState;
   aggregators: readonly AggregatorWindowRow[];
   aggregatorState: V3AggregatorState;
@@ -68,7 +64,6 @@ export function V3VolumeSection({
         traders={traders}
         pools={pools}
         protocolActorFilter={protocolActorFilter}
-        exclusions={exclusions}
         tableState={{
           isLoading: tableState.isLoading,
           hasError: tableState.hasError,
@@ -89,7 +84,6 @@ export function V3VolumeSection({
           emptyMessage={volumeEmptyMessage(canUseVolumeFilters)}
           isLoading={tableState.isLoading}
           hasError={tableState.hasError}
-          hasExploratoryExclusions={tableState.hasExploratoryExclusions}
         />
       </section>
       <AggregatorBreakdownSection

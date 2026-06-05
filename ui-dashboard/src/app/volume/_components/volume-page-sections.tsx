@@ -345,50 +345,51 @@ export function VolumeVenueSection({
   urlState: VolumeUrlState;
   model: VolumePageModel;
 }) {
-  const { range, cutoff, exclusions } = urlState;
+  const { range, cutoff } = urlState;
   const { aggregates, status } = model;
   if (urlState.venue === "v2") {
     return (
-      <V2VolumeSection
-        rangeLabel={rangeLabel(range)}
-        cutoff={cutoff}
-        canUseVolumeFilters={urlState.canUseVolumeFilters}
-        v2Aggregated={aggregates.v2Aggregated}
-        v2AggregatorAggregated={aggregates.v2AggregatorAggregated}
-        hasExploratoryExclusions={aggregates.hasExploratoryExclusions}
-        tableIsLoading={status.tableIsLoading}
-        tableHasError={status.tableHasError}
-        v2AggIsLoading={status.v2AggIsLoading}
-        v2AggHasError={status.v2AggHasError}
-        isV2AggregatorCapHit={status.isV2AggregatorCapHit}
-      />
+      <>
+        <V2VolumeSection
+          rangeLabel={rangeLabel(range)}
+          cutoff={cutoff}
+          canUseVolumeFilters={urlState.canUseVolumeFilters}
+          v2Aggregated={aggregates.v2Aggregated}
+          v2AggregatorAggregated={aggregates.v2AggregatorAggregated}
+          tableIsLoading={status.tableIsLoading}
+          tableHasError={status.tableHasError}
+          v2AggIsLoading={status.v2AggIsLoading}
+          v2AggHasError={status.v2AggHasError}
+          isV2AggregatorCapHit={status.isV2AggregatorCapHit}
+        />
+      </>
     );
   }
   return (
-    <V3VolumeSection
-      rangeLabel={rangeLabel(range)}
-      range={range}
-      cutoff={cutoff}
-      filteredTraderRows={aggregates.filteredTraderRows}
-      traders={aggregates.aggregated}
-      pools={model.poolMeta}
-      protocolActorFilter={model.isProtocolActorIn}
-      canUseVolumeFilters={urlState.canUseVolumeFilters}
-      exclusions={exclusions}
-      tableState={{
-        isLoading: status.tableIsLoading,
-        hasError: status.tableHasError,
-        isCapHit: status.isTableCapHit,
-        hasExploratoryExclusions: aggregates.hasExploratoryExclusions,
-      }}
-      aggregators={aggregates.v3AggregatorAggregated}
-      aggregatorState={{
-        isLoading: status.v3AggIsLoading,
-        hasError: status.v3AggHasError,
-        isCapHit: status.isV3AggregatorCapHit,
-      }}
-      chart={v3SourceChart(urlState, model)}
-    />
+    <>
+      <V3VolumeSection
+        rangeLabel={rangeLabel(range)}
+        range={range}
+        cutoff={cutoff}
+        filteredTraderRows={aggregates.filteredTraderRows}
+        traders={aggregates.aggregated}
+        pools={model.poolMeta}
+        protocolActorFilter={model.isProtocolActorIn}
+        canUseVolumeFilters={urlState.canUseVolumeFilters}
+        tableState={{
+          isLoading: status.tableIsLoading,
+          hasError: status.tableHasError,
+          isCapHit: status.isTableCapHit,
+        }}
+        aggregators={aggregates.v3AggregatorAggregated}
+        aggregatorState={{
+          isLoading: status.v3AggIsLoading,
+          hasError: status.v3AggHasError,
+          isCapHit: status.isV3AggregatorCapHit,
+        }}
+        chart={v3SourceChart(urlState, model)}
+      />
+    </>
   );
 }
 

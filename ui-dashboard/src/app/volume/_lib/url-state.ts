@@ -11,24 +11,17 @@ import {
 import { useSearchParams } from "next/navigation";
 import { rangeCutoffSeconds, type VolumeRangeKey } from "@/lib/volume";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
-import {
-  normalizeVolumeExclusionAddress,
-  normalizeVolumeExclusionSource,
-  type VolumeExclusionState,
-} from "@/lib/volume-exclusions";
 
 export type Venue = "v3" | "v2";
 type ActorFilter = "organic" | "all";
 type VolumeUrlSnapshot = {
   range: VolumeRangeKey;
   actorFilter: ActorFilter;
-  exclusions: VolumeExclusionState;
   venue: Venue;
 };
 type VolumeUrlSetters = {
   setRange: Dispatch<SetStateAction<VolumeRangeKey>>;
   setActorFilter: Dispatch<SetStateAction<ActorFilter>>;
-  setExclusions: Dispatch<SetStateAction<VolumeExclusionState>>;
   setVenue: Dispatch<SetStateAction<Venue>>;
 };
 type VolumeUrlActionInputs = VolumeUrlSetters &
@@ -43,13 +36,11 @@ type VolumeUrlStateResult = {
   range: VolumeRangeKey;
   actorFilter: ActorFilter;
   includeProtocolActors: boolean;
-  exclusions: VolumeExclusionState;
   venue: Venue;
   cutoff: number;
   utcDayKey: number;
   updateRange: (next: VolumeRangeKey) => void;
   updateIncludeProtocolActors: (next: boolean) => void;
-  updateExclusions: (next: VolumeExclusionState) => void;
   updateVenue: (next: Venue) => void;
 };
 
@@ -80,53 +71,8 @@ function readVenueFromParams(params: URLSearchParams): Venue {
   return raw && VALID_VENUES.has(raw as Venue) ? (raw as Venue) : "v3";
 }
 
-function readExclusionsFromParams(
-  params: URLSearchParams,
-): VolumeExclusionState {
-  return {
-    addresses: readParamList(
-      params,
-      "exclude",
-      normalizeVolumeExclusionAddress,
-    ),
-    sources: readParamList(
-      params,
-      "excludeSources",
-      normalizeVolumeExclusionSource,
-    ),
-  };
-}
-
-function readParamList(
-  params: URLSearchParams,
-  key: string,
-  normalize: (value: string) => string | null,
-): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const value of params.getAll(key)) {
-    for (const token of value.split(",")) {
-      const normalized = normalize(token);
-      if (normalized && !seen.has(normalized)) {
-        seen.add(normalized);
-        out.push(normalized);
-      }
-    }
-  }
-  return out;
-}
-
-function writeParamList(
-  params: URLSearchParams,
-  key: string,
-  values: readonly string[],
-) {
-  params.delete(key);
-  if (values.length > 0) params.set(key, values.join(","));
-}
-
 function writeVolumeUrl(
-  { range, actorFilter, exclusions, venue }: VolumeUrlSnapshot,
+  { range, actorFilter, venue }: VolumeUrlSnapshot,
   canUseVolumeFilters: boolean,
 ) {
   if (typeof window === "undefined") return;
@@ -140,13 +86,8 @@ function writeVolumeUrl(
   } else {
     params.set("actors", actorFilter);
   }
-  if (canUseVolumeFilters) {
-    writeParamList(params, "exclude", exclusions.addresses);
-    writeParamList(params, "excludeSources", exclusions.sources);
-  } else {
-    params.delete("exclude");
-    params.delete("excludeSources");
-  }
+  params.delete("exclude");
+  params.delete("excludeSources");
   if (venue === "v3") params.delete("venue");
   else params.set("venue", venue);
   replaceVolumeUrlSearch(params);
@@ -160,8 +101,7 @@ function replaceVolumeUrlSearch(params: URLSearchParams) {
 }
 
 /**
- * URL-backed state for the volume page (range / actor filter / venue /
- * exploratory exclusions).
+ * URL-backed state for the volume page (range / actor filter / venue).
  *
  * Reads happen via `useSearchParams` on initial mount; writes go through
  * `window.history.replaceState` (NOT `router.replace`) — the App Router's
@@ -198,11 +138,6 @@ export function useVolumeUrlState({
   const [actorFilter, setActorFilter] = useState<ActorFilter>(() =>
     canUseVolumeFilters ? readActorFilterFromParams(initialReadParams) : "all",
   );
-  const [exclusions, setExclusions] = useState<VolumeExclusionState>(() =>
-    canUseVolumeFilters
-      ? readExclusionsFromParams(initialReadParams)
-      : { addresses: [], sources: [] },
-  );
   const [venue, setVenue] = useState<Venue>(() =>
     readVenueFromParams(initialReadParams),
   );
@@ -211,11 +146,9 @@ export function useVolumeUrlState({
     canUseVolumeFilters,
     range,
     actorFilter,
-    exclusions,
     venue,
     setRange,
     setActorFilter,
-    setExclusions,
     setVenue,
   });
 
@@ -223,19 +156,15 @@ export function useVolumeUrlState({
     canUseVolumeFilters,
     setRange,
     setActorFilter,
-    setExclusions,
     setVenue,
   });
-  useLockedVolumeFilterCanonicalization({ canUseVolumeFilters });
+  useVolumeFilterCanonicalization({ canUseVolumeFilters });
   const utcDayKey = useUtcDayKey();
   // Re-derive the public result as a final defense: state initialization and
   // action guards already lock anonymous users to total volume.
   const effectiveActorFilter: ActorFilter = canUseVolumeFilters
     ? actorFilter
     : "all";
-  const effectiveExclusions: VolumeExclusionState = canUseVolumeFilters
-    ? exclusions
-    : { addresses: [], sources: [] };
 
   // `utcDayKey` is a dep so the cutoff re-derives at midnight even though
   // it's not referenced inside — `rangeCutoffSeconds` calls `Date.now()`
@@ -247,7 +176,6 @@ export function useVolumeUrlState({
     range,
     actorFilter: effectiveActorFilter,
     includeProtocolActors: effectiveActorFilter === "all",
-    exclusions: effectiveExclusions,
     venue,
     cutoff,
     utcDayKey,
@@ -259,18 +187,13 @@ function useVolumeUrlActions({
   canUseVolumeFilters,
   range,
   actorFilter,
-  exclusions,
   venue,
   setRange,
   setActorFilter,
-  setExclusions,
   setVenue,
 }: VolumeUrlActionInputs): Pick<
   VolumeUrlStateResult,
-  | "updateRange"
-  | "updateIncludeProtocolActors"
-  | "updateExclusions"
-  | "updateVenue"
+  "updateRange" | "updateIncludeProtocolActors" | "updateVenue"
 > {
   const writeUrl = useCallback(
     (next: VolumeUrlSnapshot) => {
@@ -282,9 +205,9 @@ function useVolumeUrlActions({
   const updateRange = useCallback(
     (next: VolumeRangeKey) => {
       setRange(next);
-      writeUrl({ range: next, actorFilter, exclusions, venue });
+      writeUrl({ range: next, actorFilter, venue });
     },
-    [actorFilter, exclusions, venue, writeUrl, setRange],
+    [actorFilter, venue, writeUrl, setRange],
   );
   const updateIncludeProtocolActors = useCallback(
     (next: boolean) => {
@@ -292,47 +215,26 @@ function useVolumeUrlActions({
       // volume filters are available, so normal UI calls do not hit this path.
       if (!canUseVolumeFilters) {
         setActorFilter("all");
-        writeUrl({ range, actorFilter: "all", exclusions, venue });
+        writeUrl({ range, actorFilter: "all", venue });
         return;
       }
       const nextActorFilter: ActorFilter = next ? "all" : "organic";
       setActorFilter(nextActorFilter);
-      writeUrl({ range, actorFilter: nextActorFilter, exclusions, venue });
+      writeUrl({ range, actorFilter: nextActorFilter, venue });
     },
-    [canUseVolumeFilters, exclusions, range, venue, writeUrl, setActorFilter],
-  );
-  const updateExclusions = useCallback(
-    (next: VolumeExclusionState) => {
-      // Defense-in-depth: the exclusions panel is only rendered when private
-      // volume filters are available, so normal UI calls do not hit this path.
-      if (!canUseVolumeFilters) {
-        const emptyExclusions = { addresses: [], sources: [] };
-        setExclusions(emptyExclusions);
-        writeUrl({
-          range,
-          actorFilter: "all",
-          exclusions: emptyExclusions,
-          venue,
-        });
-        return;
-      }
-      setExclusions(next);
-      writeUrl({ range, actorFilter, exclusions: next, venue });
-    },
-    [actorFilter, canUseVolumeFilters, range, venue, writeUrl, setExclusions],
+    [canUseVolumeFilters, range, venue, writeUrl, setActorFilter],
   );
   const updateVenue = useCallback(
     (next: Venue) => {
       setVenue(next);
-      writeUrl({ range, actorFilter, exclusions, venue: next });
+      writeUrl({ range, actorFilter, venue: next });
     },
-    [actorFilter, exclusions, range, writeUrl, setVenue],
+    [actorFilter, range, writeUrl, setVenue],
   );
 
   return {
     updateRange,
     updateIncludeProtocolActors,
-    updateExclusions,
     updateVenue,
   };
 }
@@ -341,7 +243,6 @@ function useVolumePopstateSync({
   canUseVolumeFilters,
   setRange,
   setActorFilter,
-  setExclusions,
   setVenue,
 }: VolumeUrlSetters & { canUseVolumeFilters: boolean }) {
   // Browser back/forward fires `popstate`. `replaceState` itself doesn't,
@@ -365,35 +266,31 @@ function useVolumePopstateSync({
           : "all";
         return prev === next ? prev : next;
       });
-      setExclusions((prev) => {
-        const next = canUseVolumeFilters
-          ? readExclusionsFromParams(params)
-          : { addresses: [], sources: [] };
-        return exclusionsEqual(prev, next) ? prev : next;
-      });
       setVenue((prev) => {
         const next = readVenueFromParams(params);
         return prev === next ? prev : next;
       });
-      if (!canUseVolumeFilters) stripVolumeFilterParamsFromCurrentUrl();
+      if (canUseVolumeFilters) stripRetiredVolumeFilterParamsFromCurrentUrl();
+      else stripLockedVolumeFilterParamsFromCurrentUrl();
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [canUseVolumeFilters, setActorFilter, setExclusions, setRange, setVenue]);
+  }, [canUseVolumeFilters, setActorFilter, setRange, setVenue]);
 }
 
-function useLockedVolumeFilterCanonicalization({
+function useVolumeFilterCanonicalization({
   canUseVolumeFilters,
 }: {
   canUseVolumeFilters: boolean;
 }) {
   useEffect(() => {
-    if (typeof window === "undefined" || canUseVolumeFilters) return;
-    stripVolumeFilterParamsFromCurrentUrl();
+    if (typeof window === "undefined") return;
+    if (canUseVolumeFilters) stripRetiredVolumeFilterParamsFromCurrentUrl();
+    else stripLockedVolumeFilterParamsFromCurrentUrl();
   }, [canUseVolumeFilters]);
 }
 
-function stripVolumeFilterParamsFromCurrentUrl() {
+function stripLockedVolumeFilterParamsFromCurrentUrl() {
   const params = new URLSearchParams(window.location.search);
   const changed =
     params.has("actors") ||
@@ -401,6 +298,15 @@ function stripVolumeFilterParamsFromCurrentUrl() {
     params.has("excludeSources");
   if (!changed) return;
   params.delete("actors");
+  params.delete("exclude");
+  params.delete("excludeSources");
+  replaceVolumeUrlSearch(params);
+}
+
+function stripRetiredVolumeFilterParamsFromCurrentUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const changed = params.has("exclude") || params.has("excludeSources");
+  if (!changed) return;
   params.delete("exclude");
   params.delete("excludeSources");
   replaceVolumeUrlSearch(params);
@@ -425,15 +331,4 @@ function useUtcDayKey(): number {
     return () => window.clearInterval(id);
   }, []);
   return utcDayKey;
-}
-
-function exclusionsEqual(
-  a: VolumeExclusionState,
-  b: VolumeExclusionState,
-): boolean {
-  return listEqual(a.addresses, b.addresses) && listEqual(a.sources, b.sources);
-}
-
-function listEqual(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
