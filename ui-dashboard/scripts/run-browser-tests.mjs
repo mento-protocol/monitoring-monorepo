@@ -61,13 +61,120 @@ if (!explicitNext && !explicitFixture) {
   );
 }
 
+const args = process.argv.slice(2);
+const productionIndex = args.indexOf("--production");
+const production = productionIndex !== -1;
+if (production) args.splice(productionIndex, 1);
+
+const fixtureUrl = `http://127.0.0.1:${process.env.PLAYWRIGHT_FIXTURE_PORT}`;
+const browserTestEnv = {
+  ...process.env,
+  NEXT_PUBLIC_HASURA_URL: `${fixtureUrl}/graphql`,
+  NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
+  NEXT_TELEMETRY_DISABLED: "1",
+};
+
+function runCommand(command, args, { env = process.env } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      env,
+      shell: process.platform === "win32",
+      stdio: "inherit",
+    });
+
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      resolve(code ?? 1);
+    });
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForUrl(url, { child, timeoutMs = 15_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let childExitCode = null;
+  child?.once("exit", (code) => {
+    childExitCode = code ?? 1;
+  });
+
+  while (Date.now() < deadline) {
+    if (childExitCode !== null) {
+      throw new Error(
+        `fixture server exited before becoming healthy (exit ${childExitCode})`,
+      );
+    }
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch {
+      // Keep polling until the server starts or the timeout expires.
+    }
+    await sleep(250);
+  }
+
+  throw new Error(`timed out waiting for ${url}`);
+}
+
+async function stopProcess(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+
+  await new Promise((resolve) => {
+    const timeout = setTimeout(resolve, 2_000);
+    timeout.unref();
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    child.kill();
+  });
+}
+
+async function startFixtureServerForProductionBuild() {
+  const child = spawn(
+    "node",
+    [
+      "tests/browser/fixtures/hasura-fixture-server.mjs",
+      "--port",
+      process.env.PLAYWRIGHT_FIXTURE_PORT,
+    ],
+    {
+      env: browserTestEnv,
+      shell: process.platform === "win32",
+      stdio: "inherit",
+    },
+  );
+
+  try {
+    await waitForUrl(`${fixtureUrl}/health`, { child });
+    browserTestEnv.PLAYWRIGHT_REUSE_FIXTURE_SERVER = "true";
+    return child;
+  } catch (error) {
+    await stopProcess(child);
+    throw error;
+  }
+}
+
+async function buildProductionApp() {
+  browserTestEnv.PLAYWRIGHT_NEXT_COMMAND =
+    browserTestEnv.PLAYWRIGHT_NEXT_COMMAND ??
+    "pnpm start --hostname 127.0.0.1 --port {port}";
+  browserTestEnv.PLAYWRIGHT_NEXT_TIMEOUT_MS =
+    process.env.PLAYWRIGHT_NEXT_START_TIMEOUT_MS ?? "120000";
+  const code = await runCommand("pnpm", ["build"], { env: browserTestEnv });
+  if (code !== 0) return code;
+  return 0;
+}
+
 function runPlaywright() {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "playwright",
-      ["test", "--config=playwright.config.ts", ...process.argv.slice(2)],
+      ["test", "--config=playwright.config.ts", ...args],
       {
-        env: process.env,
+        env: browserTestEnv,
         shell: process.platform === "win32",
         stdio: "inherit",
       },
@@ -81,9 +188,20 @@ function runPlaywright() {
 }
 
 let exitCode = 1;
+let productionFixtureServer = null;
 try {
-  exitCode = await runPlaywright();
+  if (production) {
+    productionFixtureServer = await startFixtureServerForProductionBuild();
+    exitCode = await buildProductionApp();
+  }
+  if (exitCode === 0 || !production) {
+    exitCode = await runPlaywright();
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  exitCode = 1;
 } finally {
+  await stopProcess(productionFixtureServer);
   if (originalNextEnv !== null) {
     await writeFile(nextEnvUrl, originalNextEnv);
   }

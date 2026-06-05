@@ -21,6 +21,7 @@ import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
   fetchHeadUpdatedAt,
+  headUpdatedAtFromTimeline,
   parseArgs,
   renderSummary,
   repoFromPullRequestUrl,
@@ -793,6 +794,7 @@ test("filters top-level review bodies down to bots with body text", () => {
       body: "automated review body",
       url: "https://github.com/example/review-1",
       state: "COMMENTED",
+      commit: { oid: "head-sha" },
       author: { login: "chatgpt-codex-connector[bot]", type: "Bot" },
     },
     {
@@ -811,6 +813,7 @@ test("filters top-level review bodies down to bots with body text", () => {
   assertEqual(bots.length, 1);
   assertEqual(bots[0].author, "chatgpt-codex-connector[bot]");
   assertEqual(bots[0].state, "COMMENTED");
+  assertEqual(bots[0].commitOid, "head-sha");
 });
 
 test("requires chatgpt-codex-connector +1 reaction exactly", () => {
@@ -1080,16 +1083,133 @@ test("watch JSON output is one compact JSON object per line", () => {
   assertDeepEqual(JSON.parse(output), summary);
 });
 
-test("uses check observation time for approval freshness", () => {
+test("uses first timestamped timeline item after current head commit for freshness", () => {
   assertEqual(
     fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems: [
+        {
+          event: "commented",
+          created_at: "2026-05-21T13:20:00Z",
+        },
+        {
+          event: "committed",
+          sha: "old-head",
+        },
+        {
+          event: "commented",
+          created_at: "2026-05-21T13:21:00Z",
+        },
+        {
+          event: "committed",
+          sha: "new-head",
+        },
+        {
+          event: "reviewed",
+          submitted_at: "2026-05-21T13:22:30Z",
+        },
+        {
+          event: "commented",
+          created_at: "2026-05-21T13:23:00Z",
+        },
+      ],
+      observedAt: "2026-05-21T13:24:00Z",
+    }),
+    "2026-05-21T13:22:30Z",
+  );
+});
+
+test("uses current head commit timeline timestamp when available", () => {
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems: [
+        {
+          event: "committed",
+          sha: "new-head",
+          created_at: "2026-05-21T13:22:00Z",
+        },
+        {
+          event: "commented",
+          created_at: "2026-05-21T13:23:00Z",
+        },
+      ],
+      observedAt: "2026-05-21T13:24:00Z",
+    }),
+    "2026-05-21T13:22:00Z",
+  );
+});
+
+test("uses earlier head status observation when timeline timestamp is later", () => {
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems: [
+        {
+          event: "committed",
+          sha: "new-head",
+          created_at: "2026-05-21T13:25:00Z",
+        },
+      ],
       observedAt: "2026-05-21T13:23:00Z",
     }),
     "2026-05-21T13:23:00Z",
   );
 });
 
-test("treats review requests before check observation as stale", () => {
+test("falls back to check observation time when timeline has no post-head timestamp", () => {
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems: [
+        {
+          event: "committed",
+          sha: "new-head",
+        },
+      ],
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    "2026-05-21T13:23:00Z",
+  );
+});
+
+test("does not derive head freshness from commit metadata", () => {
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems: [
+        {
+          event: "committed",
+          sha: "new-head",
+          committed_at: "2026-05-21T13:22:00Z",
+        },
+      ],
+      observedAt: null,
+    }),
+    null,
+  );
+});
+
+test("returns null when the current head is absent from the timeline", () => {
+  assertEqual(
+    headUpdatedAtFromTimeline(
+      [
+        {
+          event: "committed",
+          sha: "old-head",
+        },
+        {
+          event: "commented",
+          created_at: "2026-05-21T13:23:00Z",
+        },
+      ],
+      "new-head",
+    ),
+    null,
+  );
+});
+
+test("treats review requests before head freshness as stale", () => {
   assertEqual(
     classifyCodexReviewSignal({
       headUpdatedAt: Date.parse("2026-05-21T13:23:00Z"),

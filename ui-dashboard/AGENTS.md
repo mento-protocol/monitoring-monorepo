@@ -48,6 +48,7 @@ pnpm build   # Production build
 pnpm start   # Start production server
 pnpm lint    # Run ESLint
 pnpm test:browser  # Fixture-driven Playwright browser interaction tests
+pnpm test:browser:production  # Build-backed fixture browser tests via next start
 pnpm test:mutation  # Targeted StrykerJS baseline for src/lib/weekend.ts
 pnpm react-doctor  # Full react-doctor scan (also: `pnpm dashboard:react-doctor` from repo root)
 pnpm react-doctor:score  # Full react-doctor score gate; must end at 100
@@ -133,6 +134,14 @@ because the covered risks are App Router navigation, URL state, hydration, CSP,
 SWR request behavior, and real browser focus. The agent quality gate installs
 Playwright Chromium before running this command; for direct fresh-checkout runs,
 run `pnpm exec playwright install chromium` once first.
+
+Use `pnpm test:browser:production` when the verification target should match a
+built app (`next build` plus `next start`) instead of dev mode. It allocates the
+same fixture ports up front, starts the Hasura fixture before `next build`,
+bakes the live fixture GraphQL URL into the production build, and then runs the
+same Playwright suite against `next start` while reusing that fixture server.
+Use `PLAYWRIGHT_NEXT_START_TIMEOUT_MS` to tune the production `next start`
+timeout; `PLAYWRIGHT_NEXT_TIMEOUT_MS` remains the dev-server timeout knob.
 
 ## React Doctor
 

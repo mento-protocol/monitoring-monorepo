@@ -442,6 +442,9 @@ assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/turbo.json'
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_PORT"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_FIXTURE_PORT"
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_COMMAND"
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_TIMEOUT_MS"
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_REUSE_FIXTURE_SERVER"
 assert_turbo_task_has_env "test:browser" "CI"
 assert_turbo_task_has_env "test:browser" "NEXT_TELEMETRY_DISABLED"
 assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_HASURA_URL"
@@ -546,6 +549,8 @@ validator_repo="$(mktemp -d)"
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
@@ -668,6 +673,8 @@ package_json_repo="$(mktemp -d)"
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
@@ -690,6 +697,7 @@ assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
@@ -714,6 +722,8 @@ lockfile_script_repo="$(mktemp -d)"
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
@@ -736,6 +746,7 @@ assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
@@ -759,6 +770,8 @@ pr_ready_state_script_repo="$(mktemp -d)"
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
@@ -781,6 +794,7 @@ assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"

@@ -63,17 +63,25 @@ protection.
 
 `pnpm pr:ready-state` must expose a stable JSON shape for agent loops via
 `--json`. Human formatting is allowed as the default for interactive use. Use
-`--watch --compact` for low-noise foreground babysitting.
+`--watch --compact` for low-noise foreground babysitting. `pnpm
+pr:feedback-state` is the feedback-only projection for unresolved threads,
+unreplied root review comments, blocking top-level bot feedback, contextual
+top-level bot comments, and Codex gates; it is intended to replace ad hoc
+read-only `gh api` scraping during review sweeps.
 
 Suggested invocation:
 
 ```bash
 pnpm pr:ready-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--compact] [--watch]
+pnpm --silent pr:feedback-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--watch]
 ```
 
 `--watch --json` emits one JSON summary per poll, separated by newlines. Use
 `--watch --compact` for human babysitting and reserve JSON output for machine
-consumers that can parse newline-delimited JSON.
+consumers that can parse newline-delimited JSON. Use `pnpm --silent` for
+feedback-state machine consumers so pnpm does not prepend its run-script
+banner. The `pr:feedback-state` Node entry point always prints JSON; in watch
+mode it emits one compact JSON object per poll.
 
 Expected top-level fields:
 
@@ -201,12 +209,20 @@ Field expectations:
    a repo adapter for the global `~/.agents/skills/autoreview` skill. Verify
    accepted findings before editing; if review-triggered fixes change code,
    rerun focused checks and autoreview once for that fixed batch.
-5. Run `pnpm pr:ready-state --pr <number> --json`. For a foreground wait loop,
-   use `pnpm pr:ready-state --pr <number> --watch --compact`.
-6. If `ready` is false, fix or wait only on `required.blockers` and required
-   `gates`.
-7. Report optional lag separately, especially Cursor Bugbot lag.
-8. Signal all-clear only after `ready` is true for the current head.
+5. Run `pnpm --silent pr:feedback-state --pr <number> --json` for a feedback-only sweep,
+   or `pnpm pr:ready-state --pr <number> --json` for the final readiness
+   source of truth. For a foreground wait loop, use
+   `pnpm pr:ready-state --pr <number> --watch --compact`.
+6. If feedback-state `ready` is false, inspect and handle
+   `requiredFeedbackBlockers`, `unresolvedReviewThreads`,
+   `unrepliedRootReviewComments`, `blockingTopLevelBotComments`, and any
+   non-ready required feedback `gates`. Also scan `topLevelBotComments` as
+   context; deployment/status bot comments may be informational.
+7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
+   required `gates`.
+8. Report optional lag separately, especially Cursor Bugbot lag.
+9. Signal all-clear only after final ready-state `ready` is true for the
+   current head.
 
 Claude Code and Codex intentionally use the same command and readiness fields.
 Differences between Claude `Monitor` wiring and Codex polling should stay

@@ -573,8 +573,49 @@ export function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
   });
 }
 
-export function fetchHeadUpdatedAt({ observedAt }) {
-  return observedAt ?? null;
+function validIsoTimestamp(value) {
+  return Number.isFinite(Date.parse(value ?? "")) ? value : null;
+}
+
+function timelineEventTimestamp(item) {
+  return (
+    validIsoTimestamp(item?.created_at) ??
+    validIsoTimestamp(item?.submitted_at) ??
+    validIsoTimestamp(item?.updated_at) ??
+    null
+  );
+}
+
+export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
+  const normalizedHeadSha = String(headSha ?? "").toLowerCase();
+  if (!normalizedHeadSha) return null;
+
+  let headCommitIndex = -1;
+  let headCommitTimestamp = null;
+  for (const [index, item] of timelineItems.entries()) {
+    if (
+      item?.event === "committed" &&
+      String(item.sha ?? "").toLowerCase() === normalizedHeadSha
+    ) {
+      headCommitIndex = index;
+      headCommitTimestamp = timelineEventTimestamp(item);
+    }
+  }
+  if (headCommitIndex < 0) return null;
+  if (headCommitTimestamp) return headCommitTimestamp;
+
+  for (const item of timelineItems.slice(headCommitIndex + 1)) {
+    const timestamp = timelineEventTimestamp(item);
+    if (timestamp) return timestamp;
+  }
+  return null;
+}
+
+export function fetchHeadUpdatedAt({ headSha, timelineItems, observedAt }) {
+  return minIsoTimestamp(
+    headUpdatedAtFromTimeline(timelineItems, headSha),
+    validIsoTimestamp(observedAt),
+  );
 }
 
 async function fetchReviewThreads({ repo, number }) {
@@ -706,7 +747,7 @@ async function fetchRequiredStatusContexts({
   };
 }
 
-async function fetchReadyState({ prArg, repoArg }) {
+export async function fetchReadyState({ prArg, repoArg }) {
   const prViewArgs = [
     "pr",
     "view",
@@ -772,6 +813,11 @@ async function fetchReadyState({ prArg, repoArg }) {
     baseRef: pr.baseRefName,
     statusCheckRollup: pr.statusCheckRollup ?? [],
   });
+  const timelinePromise = ghApiJsonPagesResult(repo, [
+    "-H",
+    "Accept: application/vnd.github+json",
+    `repos/${path}/issues/${number}/timeline`,
+  ]);
 
   const [
     { sourceMap, observedAt },
@@ -780,6 +826,7 @@ async function fetchReadyState({ prArg, repoArg }) {
     reviewComments,
     reviewThreads,
     requiredStatusContexts,
+    timelineResult,
   ] = await Promise.all([
     statusSourcePromise,
     issueCommentsWithReactionsPromise,
@@ -787,8 +834,11 @@ async function fetchReadyState({ prArg, repoArg }) {
     reviewCommentsPromise,
     reviewThreadsPromise,
     requiredStatusContextsPromise,
+    timelinePromise,
   ]);
   const headUpdatedAt = fetchHeadUpdatedAt({
+    headSha: pr.headRefOid,
+    timelineItems: timelineResult.ok ? timelineResult.value : [],
     observedAt,
   });
   const annotatedPr = {

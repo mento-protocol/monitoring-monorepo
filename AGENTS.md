@@ -177,11 +177,13 @@ execute until you review package scripts/lifecycle hooks and pass
 edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:quality-gate:test`, `scripts.agent:prewarm`,
 `scripts.agent:prewarm:test`, `scripts.agent:context-check`,
-`scripts.agent:autoreview`, `scripts.pr:ready-state`, `scripts.pr:ready-state:test`,
+`scripts.agent:autoreview`, `scripts.pr:feedback-state`,
+`scripts.pr:feedback-state:test`, `scripts.pr:ready-state`,
+`scripts.pr:ready-state:test`,
 `scripts.tf`, `scripts.tf:test`, `scripts.lockfile:lint`, or
 `scripts.lockfile:lint:test`; the gate treats that as tooling-only and runs an
-entrypoint validator plus the gate/prewarm/PR-ready/Terraform-stack regression
-tests instead of the package-script refusal path. Existing changed paths run
+entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
+regression tests instead of the package-script refusal path. Existing changed paths run
 targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, and package-manager or package-manifest changes still run
 full-repo Trunk locally. CI also runs a required full-repo Trunk check on every
@@ -292,6 +294,14 @@ run the shared readiness probe:
 pnpm pr:ready-state --pr <number> --json
 ```
 
+For feedback-only sweeps where the agent needs unresolved threads, unreplied
+root review comments, blocking top-level bot feedback, and Codex review gates
+without shelling out to ad hoc `gh api` calls, use:
+
+```bash
+pnpm --silent pr:feedback-state --pr <number> --json
+```
+
 For an interactive low-noise watch, use:
 
 ```bash
@@ -364,6 +374,7 @@ pnpm dashboard:dev            # Dev server; see ui-dashboard/AGENTS.md for logge
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)
 pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture-driven browser interaction + visual snapshot tests
+pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Build-backed fixture browser tests via next start
 pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Re-baseline visual snapshots after a legitimate UI change
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
 pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge rebalance probe logic

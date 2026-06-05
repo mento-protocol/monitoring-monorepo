@@ -281,6 +281,7 @@ export function findTopLevelBotReviewComments(reviews = []) {
       url: review.url ?? null,
       createdAt: review.submittedAt ?? null,
       updatedAt: null,
+      commitOid: review.commit?.oid ?? null,
       state: review.state ?? null,
       body: review.body ?? "",
     }));
