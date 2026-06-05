@@ -117,6 +117,12 @@ describe("useVolumeUrlState", () => {
     });
     expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
     expect(window.location.search).toBe("?foo=1&range=30d");
+
+    act(() => {
+      ref.current?.updateVenue("v2");
+    });
+    expect(ref.current?.venue).toBe("v2");
+    expect(window.location.search).toBe("?foo=1&range=30d&venue=v2");
   });
 
   it("falls back to default state for invalid params", () => {

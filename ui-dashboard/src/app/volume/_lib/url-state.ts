@@ -228,6 +228,8 @@ export function useVolumeUrlState({
   });
   useLockedVolumeFilterCanonicalization({ canUseVolumeFilters });
   const utcDayKey = useUtcDayKey();
+  // Re-derive the public result as a final defense: state initialization and
+  // action guards already lock anonymous users to total volume.
   const effectiveActorFilter: ActorFilter = canUseVolumeFilters
     ? actorFilter
     : "all";
@@ -286,6 +288,8 @@ function useVolumeUrlActions({
   );
   const updateIncludeProtocolActors = useCallback(
     (next: boolean) => {
+      // Defense-in-depth: the actor toggle is only rendered when private
+      // volume filters are available, so normal UI calls do not hit this path.
       if (!canUseVolumeFilters) {
         setActorFilter("all");
         writeUrl({ range, actorFilter: "all", exclusions, venue });
@@ -299,6 +303,8 @@ function useVolumeUrlActions({
   );
   const updateExclusions = useCallback(
     (next: VolumeExclusionState) => {
+      // Defense-in-depth: the exclusions panel is only rendered when private
+      // volume filters are available, so normal UI calls do not hit this path.
       if (!canUseVolumeFilters) {
         const emptyExclusions = { addresses: [], sources: [] };
         setExclusions(emptyExclusions);
