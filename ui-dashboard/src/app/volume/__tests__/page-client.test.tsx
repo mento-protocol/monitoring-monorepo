@@ -19,19 +19,29 @@ vi.mock("@/lib/graphql", () => ({
 }));
 
 vi.mock("../_lib/url-state", () => ({
-  useVolumeUrlState: () => ({
-    range: "7d",
-    actorFilter: volumeState.includeProtocolActors ? "all" : "organic",
-    includeProtocolActors: volumeState.includeProtocolActors,
-    exclusions: { addresses: [], sources: [] },
-    venue: volumeState.venue,
-    cutoff: 1_700_000_000,
-    utcDayKey: 20_000,
-    updateRange: vi.fn(),
-    updateIncludeProtocolActors: vi.fn(),
-    updateExclusions: vi.fn(),
-    updateVenue: vi.fn(),
-  }),
+  useVolumeUrlState: ({
+    canUseVolumeFilters,
+  }: {
+    canUseVolumeFilters: boolean;
+  }) => {
+    const includeProtocolActors = canUseVolumeFilters
+      ? volumeState.includeProtocolActors
+      : true;
+    return {
+      canUseVolumeFilters,
+      range: "7d",
+      actorFilter: includeProtocolActors ? "all" : "organic",
+      includeProtocolActors,
+      exclusions: { addresses: [], sources: [] },
+      venue: volumeState.venue,
+      cutoff: 1_700_000_000,
+      utcDayKey: 20_000,
+      updateRange: vi.fn(),
+      updateIncludeProtocolActors: vi.fn(),
+      updateExclusions: vi.fn(),
+      updateVenue: vi.fn(),
+    };
+  },
 }));
 
 vi.mock("../_lib/use-pool-volume-snapshots", () => ({
@@ -88,16 +98,28 @@ vi.mock("../_components/v3-volume-section", () => ({
 
 import { VolumeClient } from "../page-client";
 
-function renderVolume(venue: "v3" | "v2", includeProtocolActors = false) {
+function renderVolume(
+  venue: "v3" | "v2",
+  includeProtocolActors = false,
+  canUseVolumeFilters = true,
+) {
   volumeState.venue = venue;
   volumeState.includeProtocolActors = includeProtocolActors;
-  return renderToStaticMarkup(<VolumeClient />);
+  return renderToStaticMarkup(
+    <VolumeClient canUseVolumeFilters={canUseVolumeFilters} />,
+  );
 }
 
 function optionsFor(query: string) {
   const call = mockUseGQL.mock.calls.find(([document]) => document === query);
   expect(call, `missing useGQL call for ${query}`).toBeDefined();
   return call ? call[call.length - 1] : undefined;
+}
+
+function variablesFor(query: string) {
+  const call = mockUseGQL.mock.calls.find(([document]) => document === query);
+  expect(call, `missing useGQL call for ${query}`).toBeDefined();
+  return call ? call[1] : undefined;
 }
 
 describe("VolumeClient useGQL wiring", () => {
@@ -137,6 +159,36 @@ describe("VolumeClient useGQL wiring", () => {
       optionsFor(BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS),
     ).toMatchObject({
       timeoutMs: 8_000,
+    });
+  });
+
+  it("forces external users onto all volume and hides private filters", () => {
+    const html = renderVolume("v2", false, false);
+
+    expect(html).toContain(
+      "Top legacy-v2 traders on Mento by total USD volume",
+    );
+    expect(html).not.toContain('aria-label="Protocol actors"');
+    expect(html).not.toContain("Exploratory exclusions");
+    expect(variablesFor(BROKER_TRADER_DAILY_TOP)).toMatchObject({
+      isProtocolActorIn: [false, true],
+    });
+    expect(
+      optionsFor(BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS),
+    ).toMatchObject({
+      timeoutMs: 8_000,
+    });
+  });
+
+  it("keeps the private volume filters available for logged-in users", () => {
+    const html = renderVolume("v3", false, true);
+
+    expect(html).toContain('aria-label="Protocol actors"');
+    expect(html).toContain("Organic");
+    expect(html).toContain("All");
+    expect(html).toContain("Exploratory exclusions");
+    expect(variablesFor(TRADER_DAILY_TOP)).toMatchObject({
+      isProtocolActorIn: [false],
     });
   });
 

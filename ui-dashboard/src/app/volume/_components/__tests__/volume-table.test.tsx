@@ -185,6 +185,7 @@ function renderVolumeTable(
         pools={
           new Map([[POOL_ID.toLowerCase(), { token0: "USDC", token1: "USDm" }]])
         }
+        emptyMessage="No traders matched this window. Try widening the range or including protocol actors."
         isLoading={false}
         hasError={false}
         hasExploratoryExclusions={false}
@@ -203,6 +204,7 @@ function renderV2Table(
       <V2VolumeTraderTable
         cutoff={CUTOFF}
         traders={[]}
+        emptyMessage="No legacy-v2 traders in this window. Either v2 volume has stopped, or try widening the range / including protocol actors."
         isLoading={false}
         hasError={false}
         hasExploratoryExclusions={false}

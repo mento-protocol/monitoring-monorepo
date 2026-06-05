@@ -30,6 +30,7 @@ import { TableSectionTitle } from "./table-section-title";
 export function V2VolumeSection({
   rangeLabel,
   cutoff,
+  canUseVolumeFilters,
   v2Aggregated,
   v2AggregatorAggregated,
   hasExploratoryExclusions,
@@ -45,6 +46,7 @@ export function V2VolumeSection({
   rangeLabel: string;
   /** Same UTC-day cutoff used by the trader query; bounds the Via marker query. */
   cutoff: number;
+  canUseVolumeFilters: boolean;
   v2Aggregated: readonly BrokerTraderWindowRow[];
   v2AggregatorAggregated: readonly BrokerAggregatorWindowRow[];
   hasExploratoryExclusions: boolean;
@@ -73,6 +75,7 @@ export function V2VolumeSection({
         <V2VolumeTraderTable
           cutoff={cutoff}
           traders={v2Aggregated}
+          emptyMessage={v2EmptyMessage(canUseVolumeFilters)}
           isLoading={tableIsLoading}
           hasError={tableHasError}
           hasExploratoryExclusions={hasExploratoryExclusions}
@@ -88,4 +91,11 @@ export function V2VolumeSection({
       />
     </>
   );
+}
+
+function v2EmptyMessage(canUseVolumeFilters: boolean): string {
+  if (!canUseVolumeFilters) {
+    return "No legacy-v2 traders in this window. Either v2 volume has stopped, or try widening the range.";
+  }
+  return "No legacy-v2 traders in this window. Either v2 volume has stopped, or try widening the range / including protocol actors.";
 }

@@ -61,8 +61,12 @@ type PoolRow = {
 // stacked bars of varying widths that look noisy).
 const RANGES_WITH_CHART = new Set<VolumeRangeKey>(["30d", "90d", "all"]);
 
-export function VolumeClient() {
-  const urlState = useVolumeUrlState();
+export function VolumeClient({
+  canUseVolumeFilters,
+}: {
+  canUseVolumeFilters: boolean;
+}) {
+  const urlState = useVolumeUrlState({ canUseVolumeFilters });
   const model = useVolumePageModel(urlState);
   return <VolumePageView urlState={urlState} model={model} />;
 }
@@ -443,12 +447,14 @@ function VolumePageView({
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8 space-y-6">
       <VolumePageHeader urlState={urlState} />
-      <VolumeExclusionFilter
-        exclusions={displayedExclusions}
-        allowSourceExclusions={urlState.venue === "v3"}
-        sourceOptions={aggregates.sourceOptions}
-        onChange={urlState.updateExclusions}
-      />
+      {urlState.canUseVolumeFilters && (
+        <VolumeExclusionFilter
+          exclusions={displayedExclusions}
+          allowSourceExclusions={urlState.venue === "v3"}
+          sourceOptions={aggregates.sourceOptions}
+          onChange={urlState.updateExclusions}
+        />
+      )}
       <HeroDataQualityBanners
         staleChains={hero.staleChains}
         degradedChains={hero.degradedChains}
