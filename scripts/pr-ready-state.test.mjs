@@ -29,6 +29,7 @@ import {
   requiredStatusContextsFromRules,
   requiredStatusContextsFromRulesResult,
   splitRepo,
+  watchLoopExitCode,
   workflowPathsFromRules,
 } from "./pr-ready-state.mjs";
 
@@ -146,9 +147,28 @@ test("parses explicit help without requiring a PR argument", () => {
     json: false,
     compact: false,
     watch: false,
+    untilReady: false,
     prArg: null,
     repoArg: null,
   });
+});
+
+test("parses watch until-ready mode without changing other flags", () => {
+  assertDeepEqual(parseArgs(["123", "--watch", "--compact", "--until-ready"]), {
+    json: false,
+    compact: true,
+    watch: true,
+    untilReady: true,
+    prArg: "123",
+    repoArg: undefined,
+  });
+});
+
+test("rejects until-ready outside watch mode", () => {
+  assertThrows(
+    () => parseArgs(["123", "--until-ready"]),
+    "--until-ready requires --watch",
+  );
 });
 
 test("rejects missing flag values at the CLI boundary", () => {
@@ -1081,6 +1101,62 @@ test("watch JSON output is one compact JSON object per line", () => {
 
   assertEqual(output.split("\n").length, 2);
   assertDeepEqual(JSON.parse(output), summary);
+});
+
+test("until-ready watch decision preserves default watch polling", () => {
+  assertEqual(
+    watchLoopExitCode(
+      {
+        ready: true,
+        pr: { state: "OPEN" },
+      },
+      { untilReady: false },
+    ),
+    null,
+  );
+});
+
+test("until-ready watch decision exits on ready, merged, or closed-unmerged states", () => {
+  assertEqual(
+    watchLoopExitCode(
+      {
+        ready: false,
+        pr: { state: "OPEN" },
+      },
+      { untilReady: true },
+    ),
+    null,
+  );
+  assertEqual(
+    watchLoopExitCode(
+      {
+        ready: true,
+        pr: { state: "OPEN" },
+      },
+      { untilReady: true },
+    ),
+    0,
+  );
+  assertEqual(
+    watchLoopExitCode(
+      {
+        ready: false,
+        pr: { state: "MERGED" },
+      },
+      { untilReady: true },
+    ),
+    0,
+  );
+  assertEqual(
+    watchLoopExitCode(
+      {
+        ready: false,
+        pr: { state: "CLOSED" },
+      },
+      { untilReady: true },
+    ),
+    1,
+  );
 });
 
 test("uses first timestamped timeline item after current head commit for freshness", () => {

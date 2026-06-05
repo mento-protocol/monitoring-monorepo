@@ -72,7 +72,7 @@ read-only `gh api` scraping during review sweeps.
 Suggested invocation:
 
 ```bash
-pnpm pr:ready-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--compact] [--watch]
+pnpm pr:ready-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]
 pnpm --silent pr:feedback-state [<number-or-url>] [--pr <number-or-url>] [--repo <[host/]owner/name>] [--json] [--watch]
 ```
 
@@ -81,7 +81,11 @@ pnpm --silent pr:feedback-state [<number-or-url>] [--pr <number-or-url>] [--repo
 consumers that can parse newline-delimited JSON. Use `pnpm --silent` for
 feedback-state machine consumers so pnpm does not prepend its run-script
 banner. The `pr:feedback-state` Node entry point always prints JSON; in watch
-mode it emits one compact JSON object per poll.
+mode it emits one compact JSON object per poll. Add `--until-ready` to
+`pr:ready-state --watch` when the foreground loop should exit automatically:
+it exits 0 once the summary is ready or the PR is merged, exits nonzero for a
+closed-unmerged PR, and otherwise keeps polling. Without `--until-ready`, watch
+mode keeps the existing behavior and runs until interrupted.
 
 Expected top-level fields:
 
@@ -212,7 +216,7 @@ Field expectations:
 5. Run `pnpm --silent pr:feedback-state --pr <number> --json` for a feedback-only sweep,
    or `pnpm pr:ready-state --pr <number> --json` for the final readiness
    source of truth. For a foreground wait loop, use
-   `pnpm pr:ready-state --pr <number> --watch --compact`.
+   `pnpm pr:ready-state --pr <number> --watch --compact --until-ready`.
 6. If feedback-state `ready` is false, inspect and handle
    `requiredFeedbackBlockers`, `unresolvedReviewThreads`,
    `unrepliedRootReviewComments`, `blockingTopLevelBotComments`, and any
