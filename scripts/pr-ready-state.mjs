@@ -6,37 +6,53 @@
  * can stay offline and fixture-driven.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
   checkDisplayName,
   isCodexReviewRequestBody,
   summarizeReadyState,
+  summarizeTerminalReadyState,
 } from "./pr-ready-state-core.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 
 function runGh(args) {
-  const result = spawnSync("gh", args, {
-    encoding: "utf8",
-    maxBuffer: 20 * 1024 * 1024,
+  return new Promise((resolve, reject) => {
+    const child = spawn("gh", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (err) => {
+      reject(new Error(`gh ${args.join(" ")} failed: ${err.message}`));
+    });
+    child.on("close", (status) => {
+      if (status !== 0) {
+        reject(
+          new Error(
+            `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}`,
+          ),
+        );
+        return;
+      }
+
+      resolve(stdout);
+    });
   });
-
-  if (result.error) {
-    throw new Error(`gh ${args.join(" ")} failed: ${result.error.message}`);
-  }
-
-  if (result.status !== 0) {
-    throw new Error(
-      `gh ${args.join(" ")} failed with exit ${result.status}:\n${result.stderr}`,
-    );
-  }
-
-  return result.stdout;
 }
 
-function ghJson(args) {
-  const stdout = runGh(args);
+async function ghJson(args) {
+  const stdout = await runGh(args);
   return stdout.trim() ? JSON.parse(stdout) : null;
 }
 
@@ -49,33 +65,22 @@ function ghApiArgs(repo, args) {
   return ghArgs;
 }
 
-function ghApiJsonPages(repo, args) {
-  const parsed = ghJson([...ghApiArgs(repo, args), "--paginate", "--slurp"]);
+async function ghApiJsonPages(repo, args) {
+  const parsed = await ghJson([
+    ...ghApiArgs(repo, args),
+    "--paginate",
+    "--slurp",
+  ]);
   if (!Array.isArray(parsed)) return [];
   return parsed.flatMap((page) => (Array.isArray(page) ? page : [page]));
 }
 
-function ghApiJsonResult(repo, args) {
-  const result = spawnSync("gh", ghApiArgs(repo, args), {
-    encoding: "utf8",
-    maxBuffer: 20 * 1024 * 1024,
-  });
-
-  if (result.error) {
-    return { ok: false, error: result.error.message };
-  }
-
-  if (result.status !== 0) {
-    return {
-      ok: false,
-      error: result.stderr.trim() || `exit ${result.status}`,
-    };
-  }
-
+async function ghApiJsonResult(repo, args) {
   try {
+    const stdout = await runGh(ghApiArgs(repo, args));
     return {
       ok: true,
-      value: result.stdout.trim() ? JSON.parse(result.stdout) : null,
+      value: stdout.trim() ? JSON.parse(stdout) : null,
     };
   } catch (err) {
     return {
@@ -85,29 +90,14 @@ function ghApiJsonResult(repo, args) {
   }
 }
 
-function ghApiJsonPagesResult(repo, args) {
-  const result = spawnSync(
-    "gh",
-    [...ghApiArgs(repo, args), "--paginate", "--slurp"],
-    {
-      encoding: "utf8",
-      maxBuffer: 20 * 1024 * 1024,
-    },
-  );
-
-  if (result.error) {
-    return { ok: false, error: result.error.message };
-  }
-
-  if (result.status !== 0) {
-    return {
-      ok: false,
-      error: result.stderr.trim() || `exit ${result.status}`,
-    };
-  }
-
+async function ghApiJsonPagesResult(repo, args) {
   try {
-    const parsed = result.stdout.trim() ? JSON.parse(result.stdout) : [];
+    const stdout = await runGh([
+      ...ghApiArgs(repo, args),
+      "--paginate",
+      "--slurp",
+    ]);
+    const parsed = stdout.trim() ? JSON.parse(stdout) : [];
     return {
       ok: true,
       value: Array.isArray(parsed)
@@ -442,13 +432,11 @@ function minIsoTimestamp(current, candidate) {
   return Date.parse(candidate) < Date.parse(current) ? candidate : current;
 }
 
-function fetchStatusSourceMap({ repo, headSha }) {
+async function fetchStatusSourceMap({ repo, headSha }) {
   const path = repoPath(repo);
-  const checkRunsResult = ghApiJsonPagesResult(repo, [
-    `repos/${path}/commits/${headSha}/check-runs`,
-  ]);
-  const statusesResult = ghApiJsonPagesResult(repo, [
-    `repos/${path}/commits/${headSha}/statuses`,
+  const [checkRunsResult, statusesResult] = await Promise.all([
+    ghApiJsonPagesResult(repo, [`repos/${path}/commits/${headSha}/check-runs`]),
+    ghApiJsonPagesResult(repo, [`repos/${path}/commits/${headSha}/statuses`]),
   ]);
 
   const sourceMap = new Map();
@@ -487,8 +475,8 @@ function fetchStatusSourceMap({ repo, headSha }) {
   return { sourceMap, observedAt };
 }
 
-function fetchWorkflowNameByPath(repo, pathKey = repoPath(repo)) {
-  const result = ghApiJsonPagesResult(repo, [
+async function fetchWorkflowNameByPath(repo, pathKey = repoPath(repo)) {
+  const result = await ghApiJsonPagesResult(repo, [
     `repos/${repoPath(repo)}/actions/workflows?per_page=100`,
   ]);
   const byPath = new Map();
@@ -506,7 +494,7 @@ function fetchWorkflowNameByPath(repo, pathKey = repoPath(repo)) {
   return { byPath, error: null };
 }
 
-function fetchWorkflowNamesForRules(repo, rules) {
+async function fetchWorkflowNamesForRules(repo, rules) {
   const fallbackRepoPath = repoPath(repo);
   const byPath = new Map();
   const unresolvedSources = unresolvedWorkflowSourcesFromRules(
@@ -521,12 +509,16 @@ function fetchWorkflowNamesForRules(repo, rules) {
     };
   }
 
-  for (const sourcePath of workflowRepoPathsFromRules(
-    rules,
-    fallbackRepoPath,
-  )) {
-    const sourceRepo = repoFromPath(sourcePath, repo.host);
-    const result = fetchWorkflowNameByPath(sourceRepo, sourcePath);
+  const results = await Promise.all(
+    workflowRepoPathsFromRules(rules, fallbackRepoPath).map(
+      async (sourcePath) => {
+        const sourceRepo = repoFromPath(sourcePath, repo.host);
+        return fetchWorkflowNameByPath(sourceRepo, sourcePath);
+      },
+    ),
+  );
+
+  for (const result of results) {
     if (result.error) return { byPath: new Map(), error: result.error };
     for (const [key, value] of result.byPath.entries()) {
       byPath.set(key, value);
@@ -558,7 +550,7 @@ export function fetchHeadUpdatedAt({ observedAt }) {
   return observedAt ?? null;
 }
 
-function fetchReviewThreads({ repo, number }) {
+async function fetchReviewThreads({ repo, number }) {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -610,7 +602,7 @@ function fetchReviewThreads({ repo, number }) {
       args.push("-f", `cursor=${cursor}`);
     }
 
-    const data = ghJson(args);
+    const data = await ghJson(args);
 
     const page = data?.data?.repository?.pullRequest?.reviewThreads;
     if (!page) return threads;
@@ -620,36 +612,38 @@ function fetchReviewThreads({ repo, number }) {
   }
 }
 
-function attachCodexRequestReactions({ repo, issueComments }) {
-  return issueComments.map((comment) => {
-    if (!isCodexReviewRequestBody(comment.body)) return comment;
-    const result = ghApiJsonPagesResult(repo, [
-      "-H",
-      "Accept: application/vnd.github+json",
-      `repos/${repoPath(repo)}/issues/comments/${comment.id}/reactions`,
-    ]);
-    if (!result.ok) return comment;
+async function attachCodexRequestReactions({ repo, issueComments }) {
+  return Promise.all(
+    issueComments.map(async (comment) => {
+      if (!isCodexReviewRequestBody(comment.body)) return comment;
+      const result = await ghApiJsonPagesResult(repo, [
+        "-H",
+        "Accept: application/vnd.github+json",
+        `repos/${repoPath(repo)}/issues/comments/${comment.id}/reactions`,
+      ]);
+      if (!result.ok) return comment;
 
-    return {
-      ...comment,
-      reactions: result.value,
-    };
-  });
+      return {
+        ...comment,
+        reactions: result.value,
+      };
+    }),
+  );
 }
 
-function fetchRequiredStatusContexts({
+async function fetchRequiredStatusContexts({
   repo,
   baseRef,
   statusCheckRollup = [],
 }) {
   const encodedBaseRef = encodeURIComponent(baseRef);
-  const result = ghApiJsonResult(repo, [
+  const result = await ghApiJsonResult(repo, [
     `repos/${repoPath(repo)}/branches/${encodedBaseRef}/protection/required_status_checks`,
   ]);
 
   if (!result.ok) {
     if (result.error.includes("Branch not protected (HTTP 404)")) {
-      const rulesResult = ghApiJsonPagesResult(repo, [
+      const rulesResult = await ghApiJsonPagesResult(repo, [
         `repos/${repoPath(repo)}/rules/branches/${encodedBaseRef}`,
       ]);
 
@@ -662,7 +656,7 @@ function fetchRequiredStatusContexts({
 
       const workflowNameByPath = workflowPathsFromRules(rulesResult.value ?? [])
         .length
-        ? fetchWorkflowNamesForRules(repo, rulesResult.value ?? [])
+        ? await fetchWorkflowNamesForRules(repo, rulesResult.value ?? [])
         : { byPath: new Map(), error: null };
 
       return requiredStatusContextsFromRulesResult(rulesResult.value ?? [], {
@@ -685,7 +679,7 @@ function fetchRequiredStatusContexts({
   };
 }
 
-function fetchReadyState({ prArg, repoArg }) {
+async function fetchReadyState({ prArg, repoArg }) {
   const prViewArgs = [
     "pr",
     "view",
@@ -698,12 +692,15 @@ function fetchReadyState({ prArg, repoArg }) {
       "headRefOid",
       "isDraft",
       "mergeable",
+      "mergedAt",
       "number",
       "reviewDecision",
       "reviews",
+      "state",
       "statusCheckRollup",
       "title",
       "url",
+      "closedAt",
     ].join(","),
   ];
 
@@ -711,7 +708,7 @@ function fetchReadyState({ prArg, repoArg }) {
     prViewArgs.push("--repo", repoArg);
   }
 
-  const pr = ghJson(prViewArgs);
+  const pr = await ghJson(prViewArgs);
 
   const number = pr?.number;
   if (!number) {
@@ -720,10 +717,50 @@ function fetchReadyState({ prArg, repoArg }) {
 
   const repo = repoFromPullRequestUrl(pr.url) ?? splitRepo(repoArg);
   const path = repoPath(repo);
-  const { sourceMap, observedAt } = fetchStatusSourceMap({
+  if (["MERGED", "CLOSED"].includes(String(pr.state ?? "").toUpperCase())) {
+    return summarizeTerminalReadyState(pr);
+  }
+
+  const statusSourcePromise = fetchStatusSourceMap({
     repo,
     headSha: pr.headRefOid,
   });
+  const issueCommentsPromise = ghApiJsonPages(repo, [
+    `repos/${path}/issues/${number}/comments`,
+  ]);
+  const issueCommentsWithReactionsPromise = issueCommentsPromise.then(
+    (issueComments) => attachCodexRequestReactions({ repo, issueComments }),
+  );
+  const reactionsPromise = ghApiJsonPages(repo, [
+    "-H",
+    "Accept: application/vnd.github+json",
+    `repos/${path}/issues/${number}/reactions`,
+  ]);
+  const reviewCommentsPromise = ghApiJsonPages(repo, [
+    `repos/${path}/pulls/${number}/comments`,
+  ]);
+  const reviewThreadsPromise = fetchReviewThreads({ repo, number });
+  const requiredStatusContextsPromise = fetchRequiredStatusContexts({
+    repo,
+    baseRef: pr.baseRefName,
+    statusCheckRollup: pr.statusCheckRollup ?? [],
+  });
+
+  const [
+    { sourceMap, observedAt },
+    issueComments,
+    reactions,
+    reviewComments,
+    reviewThreads,
+    requiredStatusContexts,
+  ] = await Promise.all([
+    statusSourcePromise,
+    issueCommentsWithReactionsPromise,
+    reactionsPromise,
+    reviewCommentsPromise,
+    reviewThreadsPromise,
+    requiredStatusContextsPromise,
+  ]);
   const headUpdatedAt = fetchHeadUpdatedAt({
     observedAt,
   });
@@ -735,27 +772,6 @@ function fetchReadyState({ prArg, repoArg }) {
       sourceMap,
     ),
   };
-
-  const issueComments = attachCodexRequestReactions({
-    repo,
-    issueComments: ghApiJsonPages(repo, [
-      `repos/${path}/issues/${number}/comments`,
-    ]),
-  });
-  const reactions = ghApiJsonPages(repo, [
-    "-H",
-    "Accept: application/vnd.github+json",
-    `repos/${path}/issues/${number}/reactions`,
-  ]);
-  const reviewComments = ghApiJsonPages(repo, [
-    `repos/${path}/pulls/${number}/comments`,
-  ]);
-  const reviewThreads = fetchReviewThreads({ repo, number });
-  const requiredStatusContexts = fetchRequiredStatusContexts({
-    repo,
-    baseRef: pr.baseRefName,
-    statusCheckRollup: annotatedPr.statusCheckRollup ?? [],
-  });
 
   return summarizeReadyState({
     pr: annotatedPr,
@@ -839,7 +855,7 @@ async function main() {
 
     for (;;) {
       try {
-        const summary = fetchReadyState({ prArg, repoArg });
+        const summary = await fetchReadyState({ prArg, repoArg });
         process.stdout.write(renderSummary(summary, { json, compact, watch }));
       } catch (err) {
         if (!watch) throw err;

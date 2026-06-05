@@ -19,6 +19,7 @@ export function formatHuman(summary) {
     `PR #${pr.number}: ${summary.ready ? "READY" : "NOT READY"} - ${pr.title}`,
   );
   lines.push(`URL: ${pr.url}`);
+  if (pr.state) lines.push(`State: ${pr.state}`);
   lines.push(`Head: ${pr.headRefName} @ ${pr.headRefOid}`);
   lines.push(`Base: ${pr.baseRefName}`);
   lines.push(
@@ -125,6 +126,7 @@ export function formatCompact(summary) {
   return [
     `PR #${summary.pr.number} ${summary.ready ? "READY" : "BLOCKED"}`,
     `head=${summary.pr.headRefOid}`,
+    `state=${summary.pr.state ?? "UNKNOWN"}`,
     `mergeable=${summary.pr.mergeable ?? "UNKNOWN"}`,
     `required_blockers=${summary.required.blockers.length}`,
     `pending_checks=${blockerNames(pendingRequiredChecks)}`,

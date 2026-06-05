@@ -339,6 +339,60 @@ function currentHeadUpdatedAt(pr) {
   return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt);
 }
 
+function summaryPr(pr, headUpdatedAt = currentHeadUpdatedAt(pr)) {
+  return {
+    number: pr.number,
+    url: pr.url,
+    title: pr.title,
+    state: pr.state ?? null,
+    isDraft: Boolean(pr.isDraft),
+    headRefName: pr.headRefName,
+    headRefOid: pr.headRefOid,
+    baseRefName: pr.baseRefName,
+    mergeable: pr.mergeable ?? null,
+    reviewDecision: pr.reviewDecision ?? null,
+    headUpdatedAt:
+      headUpdatedAt === null ? null : new Date(headUpdatedAt).toISOString(),
+    mergedAt: pr.mergedAt ?? null,
+    closedAt: pr.closedAt ?? null,
+  };
+}
+
+function emptyStatusChecks() {
+  return {
+    pass: [],
+    fail: [],
+    pending: [],
+    skipped: [],
+  };
+}
+
+function terminalGates({ merged }) {
+  return {
+    codexDescriptionApproval: {
+      ready: merged,
+      required: true,
+      state: merged ? "present" : "missing",
+    },
+    codexReviewSignal: {
+      ready: merged,
+      required: false,
+      state: merged ? "approved" : "missing",
+      fallbackAction: merged ? "wait" : "request_review_once_after_grace",
+    },
+    reviewCommentReplies: {
+      ready: true,
+      required: true,
+      unrepliedCount: 0,
+    },
+    reviewThreads: {
+      ready: true,
+      required: true,
+      unresolvedCount: 0,
+    },
+  };
+}
+
 function reviewCommitOid(review) {
   return (
     review.commit?.oid ??
@@ -423,6 +477,46 @@ export function classifyCodexReviewSignal({
   if (hasCurrentRequest) return "requested";
   if (hasHistoricalSignal) return "stale";
   return "missing";
+}
+
+export function summarizeTerminalReadyState(pr) {
+  const state = normalizeStatusValue(pr.state);
+  const merged = state === "MERGED";
+  const requiredBlockers = merged
+    ? []
+    : [
+        {
+          kind: "state",
+          name: "Pull request is closed",
+          state: pr.state ?? "CLOSED",
+          required: true,
+          url: pr.url,
+        },
+      ];
+
+  return {
+    ready: merged,
+    required: {
+      ready: merged,
+      blockers: requiredBlockers,
+    },
+    optional: {
+      ready: true,
+      items: [],
+    },
+    gates: terminalGates({ merged }),
+    summary: merged
+      ? "Pull request is already merged."
+      : "Pull request is closed without merging.",
+    pr: summaryPr(pr),
+    statusChecks: emptyStatusChecks(),
+    requiredStatusContexts: [],
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [],
+    codexApprovalReaction: merged,
+    codexReviewSignal: merged ? "approved" : "missing",
+  };
 }
 
 export function summarizeReadyState({
@@ -604,19 +698,7 @@ export function summarizeReadyState({
     optional,
     gates,
     summary,
-    pr: {
-      number: pr.number,
-      url: pr.url,
-      title: pr.title,
-      isDraft: Boolean(pr.isDraft),
-      headRefName: pr.headRefName,
-      headRefOid: pr.headRefOid,
-      baseRefName: pr.baseRefName,
-      mergeable: pr.mergeable ?? null,
-      reviewDecision: pr.reviewDecision ?? null,
-      headUpdatedAt:
-        headUpdatedAt === null ? null : new Date(headUpdatedAt).toISOString(),
-    },
+    pr: summaryPr(pr, headUpdatedAt),
     statusChecks,
     requiredStatusContexts,
     unresolvedReviewThreads,

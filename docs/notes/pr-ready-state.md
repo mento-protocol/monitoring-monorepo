@@ -2,7 +2,7 @@
 title: PR Ready State
 status: active
 owner: eng
-last_verified: 2026-05-21
+last_verified: 2026-06-05
 ---
 
 # PR Ready State
@@ -24,6 +24,8 @@ them required for the current PR.
 
 Required blockers:
 
+- Closed-unmerged PRs. Merged PRs are terminal-ready and short-circuit the
+  expensive readiness sweep because there is nothing left to fix or wait on.
 - Required check runs or status contexts that are failing, pending, queued, or
   missing from the branch-protection rollup.
 - Branch-protection context lookup failures caused by unreadable or
@@ -80,13 +82,16 @@ Expected top-level fields:
     "number": 123,
     "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/123",
     "title": "Tighten PR readiness checks",
+    "state": "OPEN",
     "isDraft": false,
     "headRefName": "chore/pr-ready-state",
     "headRefOid": "abcdef1",
     "headUpdatedAt": "2026-05-21T13:22:23.000Z",
     "baseRefName": "main",
     "mergeable": "MERGEABLE",
-    "reviewDecision": "APPROVED"
+    "reviewDecision": "APPROVED",
+    "mergedAt": null,
+    "closedAt": null
   },
   "required": {
     "ready": false,
@@ -149,9 +154,16 @@ Expected top-level fields:
 Field expectations:
 
 - `ready`: `true` only when every required blocker is clear. Optional lag must
-  not flip this to `false`.
+  not flip this to `false`. A PR whose `pr.state` is `MERGED` is terminal-ready;
+  a PR whose `pr.state` is `CLOSED` without merge is terminal-blocked with a
+  `state` blocker.
 - `required.ready`: mirrors the required-only decision and should be the value
   agents use for all-clear.
+- `pr.state`: GitHub's PR state (`OPEN`, `MERGED`, or `CLOSED`). The probe uses
+  this before fetching comments, reactions, check sources, and branch
+  protection so post-merge babysitting exits quickly and does not mistake
+  GitHub's post-merge `mergeable: UNKNOWN` for a blocker.
+- `pr.mergedAt` / `pr.closedAt`: terminal timestamps when GitHub provides them.
 - `required.blockers[]`: only required blockers. Every item needs `kind`,
   `name`, `state`, `required: true`, and a URL when GitHub provides one.
 - `optional.items[]`: advisory signals worth reporting separately. Every item
