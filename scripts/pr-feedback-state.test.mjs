@@ -60,6 +60,7 @@ const readyState = {
     number: 791,
     url: "https://github.com/mento-protocol/monitoring-monorepo/pull/791",
     title: "chore: speed up agent commands",
+    headRefOid: "b".repeat(40),
   },
   required: {
     ready: false,
@@ -345,6 +346,104 @@ test("does not block on stale top-level bot review comments", () => {
   assertEqual(summary.ready, true);
   assertEqual(summary.counts.blockingTopLevelBotComments, 0);
   assertEqual(summary.counts.topLevelBotComments, 1);
+});
+
+test("does not block on bot comments tied to another head commit", () => {
+  const currentHead = "b".repeat(40);
+  const oldHead = "a".repeat(40);
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    pr: {
+      ...readyState.pr,
+      headRefOid: currentHead,
+      headUpdatedAt: "2026-06-05T16:30:00Z",
+    },
+    required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [
+      {
+        id: 456,
+        author: "cursor[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: `High Severity\n<!-- BUGBOT_BUG_ID: example -->\nReviewed for commit ${oldHead}.`,
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 0);
+  assertEqual(summary.counts.topLevelBotComments, 1);
+});
+
+test("does not block on actionable bot comments when head freshness is unknown", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    pr: {
+      ...readyState.pr,
+      headRefOid: "b".repeat(40),
+      headUpdatedAt: null,
+    },
+    required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [
+      {
+        id: 456,
+        author: "cursor[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: "High Severity\n<!-- BUGBOT_BUG_ID: example -->",
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 0);
+  assertEqual(summary.counts.topLevelBotComments, 1);
+});
+
+test("blocks on actionable bot comments that name the current head without a freshness timestamp", () => {
+  const currentHead = "b".repeat(40);
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    pr: {
+      ...readyState.pr,
+      headRefOid: currentHead,
+      headUpdatedAt: null,
+    },
+    required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [
+      {
+        id: 456,
+        author: "cursor[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: `High Severity\n<!-- BUGBOT_BUG_ID: example -->\nReviewed for commit ${currentHead}.`,
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, false);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 1);
 });
 
 test("does not block on current-head informational bot comments", () => {

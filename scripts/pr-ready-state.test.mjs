@@ -1080,16 +1080,31 @@ test("watch JSON output is one compact JSON object per line", () => {
   assertDeepEqual(JSON.parse(output), summary);
 });
 
-test("uses check observation time for approval freshness", () => {
+test("uses head commit metadata for approval freshness", () => {
   assertEqual(
     fetchHeadUpdatedAt({
-      observedAt: "2026-05-21T13:23:00Z",
+      headCommit: {
+        commit: {
+          author: { date: "2026-05-21T13:22:00Z" },
+          committer: { date: "2026-05-21T13:23:00Z" },
+        },
+      },
     }),
     "2026-05-21T13:23:00Z",
   );
 });
 
-test("treats review requests before check observation as stale", () => {
+test("does not use check observation time as head freshness fallback", () => {
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headCommit: null,
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    null,
+  );
+});
+
+test("treats review requests before head freshness as stale", () => {
   assertEqual(
     classifyCodexReviewSignal({
       headUpdatedAt: Date.parse("2026-05-21T13:23:00Z"),

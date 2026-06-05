@@ -6,9 +6,22 @@ function commentTimestamp(comment) {
   return Date.parse(comment.updatedAt ?? comment.createdAt ?? "");
 }
 
-function isCurrentHeadComment(comment, headUpdatedAt) {
-  const headTimestamp = Date.parse(headUpdatedAt ?? "");
-  if (!Number.isFinite(headTimestamp)) return true;
+function referencedCommitShas(comment) {
+  return Array.from(
+    String(comment.body ?? "").matchAll(/\b[0-9a-f]{40}\b/gi),
+    ([match]) => match.toLowerCase(),
+  );
+}
+
+function isCurrentHeadComment(comment, pr) {
+  const headSha = String(pr?.headRefOid ?? "").toLowerCase();
+  const commitShas = referencedCommitShas(comment);
+  if (headSha && commitShas.length > 0) {
+    return commitShas.includes(headSha);
+  }
+
+  const headTimestamp = Date.parse(pr?.headUpdatedAt ?? "");
+  if (!Number.isFinite(headTimestamp)) return false;
   const timestamp = commentTimestamp(comment);
   return Number.isFinite(timestamp) && timestamp >= headTimestamp;
 }
@@ -52,7 +65,7 @@ export function summarizeFeedbackState(readyState) {
   const topLevelBotComments = readyState.topLevelBotComments ?? [];
   const blockingTopLevelBotComments = topLevelBotComments.filter(
     (comment) =>
-      isCurrentHeadComment(comment, readyState.pr?.headUpdatedAt) &&
+      isCurrentHeadComment(comment, readyState.pr) &&
       isActionableReviewBotComment(comment),
   );
   const feedbackSurfacesReady =

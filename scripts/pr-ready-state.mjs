@@ -573,8 +573,17 @@ export function annotateStatusCheckSources(statusCheckRollup, sourceMap) {
   });
 }
 
-export function fetchHeadUpdatedAt({ observedAt }) {
-  return observedAt ?? null;
+function validIsoTimestamp(value) {
+  return Number.isFinite(Date.parse(value ?? "")) ? value : null;
+}
+
+export function fetchHeadUpdatedAt({ headCommit }) {
+  const commit = headCommit?.commit ?? {};
+  return (
+    validIsoTimestamp(commit.committer?.date) ??
+    validIsoTimestamp(commit.author?.date) ??
+    null
+  );
 }
 
 async function fetchReviewThreads({ repo, number }) {
@@ -752,6 +761,9 @@ export async function fetchReadyState({ prArg, repoArg }) {
     repo,
     headSha: pr.headRefOid,
   });
+  const headCommitPromise = ghApiJsonResult(repo, [
+    `repos/${path}/commits/${pr.headRefOid}`,
+  ]);
   const issueCommentsPromise = ghApiJsonPages(repo, [
     `repos/${path}/issues/${number}/comments`,
   ]);
@@ -774,12 +786,13 @@ export async function fetchReadyState({ prArg, repoArg }) {
   });
 
   const [
-    { sourceMap, observedAt },
+    { sourceMap },
     issueComments,
     reactions,
     reviewComments,
     reviewThreads,
     requiredStatusContexts,
+    headCommitResult,
   ] = await Promise.all([
     statusSourcePromise,
     issueCommentsWithReactionsPromise,
@@ -787,9 +800,10 @@ export async function fetchReadyState({ prArg, repoArg }) {
     reviewCommentsPromise,
     reviewThreadsPromise,
     requiredStatusContextsPromise,
+    headCommitPromise,
   ]);
   const headUpdatedAt = fetchHeadUpdatedAt({
-    observedAt,
+    headCommit: headCommitResult.ok ? headCommitResult.value : null,
   });
   const annotatedPr = {
     ...pr,
