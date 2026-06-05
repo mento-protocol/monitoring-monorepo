@@ -156,7 +156,7 @@ turbo_filter_line_number() {
         -v task="$task_name" \
         -v package_filter="--filter=${package_name}" \
         -v reason="$reason" \
-        'index($0, "- pnpm exec turbo run " task " ") && index($0, package_filter) && index($0, " --cache=local:rw") && (reason == "" || index($0, reason)) { print NR; exit }' \
+        'index($0, "- pnpm exec turbo run " task " ") && index($0, package_filter " ") && index($0, " --cache=local:rw") && (reason == "" || index($0, reason)) { print NR; exit }' \
         "$output_file"
       ;;
   esac
