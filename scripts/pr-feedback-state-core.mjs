@@ -39,9 +39,27 @@ function isReviewBotComment(comment) {
 
 function isActionableReviewBotComment(comment) {
   if (!isReviewBotComment(comment)) return false;
-  return /BUGBOT_BUG_ID|changes requested|fail|error|P[0-3]|severity/i.test(
-    String(comment.body ?? ""),
-  );
+  const body = String(comment.body ?? "");
+
+  if (/BUGBOT_BUG_ID/.test(body)) return true;
+  if (
+    /\bchanges requested\b/i.test(body) &&
+    !/\bno\s+changes requested\b/i.test(body)
+  ) {
+    return true;
+  }
+  if (/(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b)/.test(body)) return true;
+  if (/\*\*\s*(?:Critical|High|Medium|Low)\s+Severity\s*\*\*/i.test(body)) {
+    return true;
+  }
+  if (
+    /\b(?:error|errors|fail|fails|failed|failure|failures)\b/i.test(body) &&
+    !/\b(?:no|zero|0)\s+(?:errors?|fails?|failed|failures?)\b/i.test(body)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export function summarizeFeedbackState(readyState) {

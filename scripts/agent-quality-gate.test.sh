@@ -442,6 +442,9 @@ assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "test:browser" '$TURBO_ROOT$/turbo.json'
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_PORT"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_FIXTURE_PORT"
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_COMMAND"
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_TIMEOUT_MS"
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_REUSE_FIXTURE_SERVER"
 assert_turbo_task_has_env "test:browser" "CI"
 assert_turbo_task_has_env "test:browser" "NEXT_TELEMETRY_DISABLED"
 assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_HASURA_URL"

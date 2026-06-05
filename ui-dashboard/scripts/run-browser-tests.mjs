@@ -89,6 +89,69 @@ function runCommand(command, args, { env = process.env } = {}) {
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForUrl(url, { child, timeoutMs = 15_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let childExitCode = null;
+  child?.once("exit", (code) => {
+    childExitCode = code ?? 1;
+  });
+
+  while (Date.now() < deadline) {
+    if (childExitCode !== null) {
+      throw new Error(
+        `fixture server exited before becoming healthy (exit ${childExitCode})`,
+      );
+    }
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch {
+      // Keep polling until the server starts or the timeout expires.
+    }
+    await sleep(250);
+  }
+
+  throw new Error(`timed out waiting for ${url}`);
+}
+
+async function stopProcess(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+
+  await new Promise((resolve) => {
+    const timeout = setTimeout(resolve, 2_000);
+    timeout.unref();
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    child.kill();
+  });
+}
+
+async function startFixtureServerForProductionBuild() {
+  const child = spawn(
+    "node",
+    [
+      "tests/browser/fixtures/hasura-fixture-server.mjs",
+      "--port",
+      process.env.PLAYWRIGHT_FIXTURE_PORT,
+    ],
+    {
+      env: browserTestEnv,
+      shell: process.platform === "win32",
+      stdio: "inherit",
+    },
+  );
+
+  await waitForUrl(`${fixtureUrl}/health`, { child });
+  browserTestEnv.PLAYWRIGHT_REUSE_FIXTURE_SERVER = "true";
+  return child;
+}
+
 async function buildProductionApp() {
   browserTestEnv.PLAYWRIGHT_NEXT_COMMAND =
     browserTestEnv.PLAYWRIGHT_NEXT_COMMAND ??
@@ -120,14 +183,20 @@ function runPlaywright() {
 }
 
 let exitCode = 1;
+let productionFixtureServer = null;
 try {
   if (production) {
+    productionFixtureServer = await startFixtureServerForProductionBuild();
     exitCode = await buildProductionApp();
   }
   if (exitCode === 0 || !production) {
     exitCode = await runPlaywright();
   }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  exitCode = 1;
 } finally {
+  await stopProcess(productionFixtureServer);
   if (originalNextEnv !== null) {
     await writeFile(nextEnvUrl, originalNextEnv);
   }

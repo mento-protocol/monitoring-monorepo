@@ -5,6 +5,8 @@ const nextPort = Number(process.env.PLAYWRIGHT_NEXT_PORT ?? 3210);
 const fixturePort = Number(process.env.PLAYWRIGHT_FIXTURE_PORT ?? 3211);
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 const nextUrl = `http://127.0.0.1:${nextPort}`;
+const reuseFixtureServer =
+  process.env.PLAYWRIGHT_REUSE_FIXTURE_SERVER === "true";
 const nextCommand =
   process.env.PLAYWRIGHT_NEXT_COMMAND?.replaceAll("{port}", String(nextPort)) ??
   `pnpm dev --hostname 127.0.0.1 --port ${nextPort}`;
@@ -78,7 +80,7 @@ export default defineConfig({
     {
       command: `node tests/browser/fixtures/hasura-fixture-server.mjs --port ${fixturePort}`,
       url: `${fixtureUrl}/health`,
-      reuseExistingServer: false,
+      reuseExistingServer: reuseFixtureServer,
       timeout: 15_000,
     },
     {
