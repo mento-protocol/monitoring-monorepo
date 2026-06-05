@@ -26,7 +26,7 @@ function isReviewBotComment(comment) {
 
 function isActionableReviewBotComment(comment) {
   if (!isReviewBotComment(comment)) return false;
-  return /BUGBOT_BUG_ID|changes requested|finding|findings|fail|error|P[0-3]|severity/i.test(
+  return /BUGBOT_BUG_ID|changes requested|fail|error|P[0-3]|severity/i.test(
     String(comment.body ?? ""),
   );
 }

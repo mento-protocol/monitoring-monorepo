@@ -378,6 +378,37 @@ test("does not block on current-head informational bot comments", () => {
   assertEqual(summary.counts.topLevelBotComments, 1);
 });
 
+test("does not block on current-head clean review bot summaries", () => {
+  const summary = summarizeFeedbackState({
+    ...readyState,
+    pr: {
+      ...readyState.pr,
+      headUpdatedAt: "2026-06-05T16:30:00Z",
+    },
+    required: { ready: false, blockers: [{ kind: "check", name: "ci" }] },
+    gates: {
+      ...readyState.gates,
+      codexDescriptionApproval: { ready: true },
+      reviewCommentReplies: { ready: true, unrepliedCount: 0 },
+      reviewThreads: { ready: true, unresolvedCount: 0 },
+    },
+    unresolvedReviewThreads: [],
+    unrepliedRootReviewComments: [],
+    topLevelBotComments: [
+      {
+        id: 456,
+        author: "chatgpt-codex-connector[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: "No findings. Patch is correct.",
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 0);
+  assertEqual(summary.counts.topLevelBotComments, 1);
+});
+
 test("parses pr arguments through the shared ready-state parser", () => {
   assertDeepEqual(parseFeedbackArgs(["--pr", "791", "--json"]), {
     help: false,
