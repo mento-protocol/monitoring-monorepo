@@ -61,13 +61,50 @@ if (!explicitNext && !explicitFixture) {
   );
 }
 
+const args = process.argv.slice(2);
+const productionIndex = args.indexOf("--production");
+const production = productionIndex !== -1;
+if (production) args.splice(productionIndex, 1);
+
+const fixtureUrl = `http://127.0.0.1:${process.env.PLAYWRIGHT_FIXTURE_PORT}`;
+const browserTestEnv = {
+  ...process.env,
+  NEXT_PUBLIC_HASURA_URL: `${fixtureUrl}/graphql`,
+  NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
+  NEXT_TELEMETRY_DISABLED: "1",
+};
+
+function runCommand(command, args, { env = process.env } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      env,
+      shell: process.platform === "win32",
+      stdio: "inherit",
+    });
+
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      resolve(code ?? 1);
+    });
+  });
+}
+
+async function buildProductionApp() {
+  browserTestEnv.PLAYWRIGHT_NEXT_COMMAND =
+    browserTestEnv.PLAYWRIGHT_NEXT_COMMAND ??
+    "pnpm start --hostname 127.0.0.1 --port {port}";
+  const code = await runCommand("pnpm", ["build"], { env: browserTestEnv });
+  if (code !== 0) return code;
+  return 0;
+}
+
 function runPlaywright() {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "playwright",
-      ["test", "--config=playwright.config.ts", ...process.argv.slice(2)],
+      ["test", "--config=playwright.config.ts", ...args],
       {
-        env: process.env,
+        env: browserTestEnv,
         shell: process.platform === "win32",
         stdio: "inherit",
       },
@@ -82,7 +119,12 @@ function runPlaywright() {
 
 let exitCode = 1;
 try {
-  exitCode = await runPlaywright();
+  if (production) {
+    exitCode = await buildProductionApp();
+  }
+  if (exitCode === 0 || !production) {
+    exitCode = await runPlaywright();
+  }
 } finally {
   if (originalNextEnv !== null) {
     await writeFile(nextEnvUrl, originalNextEnv);

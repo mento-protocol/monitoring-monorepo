@@ -5,6 +5,10 @@ const nextPort = Number(process.env.PLAYWRIGHT_NEXT_PORT ?? 3210);
 const fixturePort = Number(process.env.PLAYWRIGHT_FIXTURE_PORT ?? 3211);
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 const nextUrl = `http://127.0.0.1:${nextPort}`;
+const nextCommand =
+  process.env.PLAYWRIGHT_NEXT_COMMAND?.replaceAll("{port}", String(nextPort)) ??
+  `pnpm dev --hostname 127.0.0.1 --port ${nextPort}`;
+const nextTimeout = Number(process.env.PLAYWRIGHT_NEXT_TIMEOUT_MS ?? 120_000);
 
 /**
  * Probe the active Claude Code bash sandbox by attempting a write to /tmp,
@@ -78,7 +82,7 @@ export default defineConfig({
       timeout: 15_000,
     },
     {
-      command: `pnpm dev --hostname 127.0.0.1 --port ${nextPort}`,
+      command: nextCommand,
       env: {
         NEXT_PUBLIC_HASURA_URL: `${fixtureUrl}/graphql`,
         NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
@@ -86,7 +90,7 @@ export default defineConfig({
       },
       url: nextUrl,
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: nextTimeout,
     },
   ],
 });

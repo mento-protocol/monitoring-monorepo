@@ -13,6 +13,8 @@ const expectedScripts = {
   "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
   "agent:context-check": "node scripts/check-agent-context.mjs",
   "agent:autoreview": "./scripts/agent-autoreview.sh",
+  "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
+  "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
   "pr:ready-state": "node scripts/pr-ready-state.mjs",
   "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
   "tf": "node scripts/tf-stacks.mjs",

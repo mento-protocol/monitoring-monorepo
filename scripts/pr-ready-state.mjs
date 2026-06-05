@@ -706,7 +706,7 @@ async function fetchRequiredStatusContexts({
   };
 }
 
-async function fetchReadyState({ prArg, repoArg }) {
+export async function fetchReadyState({ prArg, repoArg }) {
   const prViewArgs = [
     "pr",
     "view",
