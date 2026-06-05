@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Tile } from "@/components/feedback";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { formatUSD } from "@/lib/format";
@@ -120,11 +121,13 @@ function ActorToggleGroup({
       <SegmentButton
         active={!includeProtocolActors}
         label="Organic"
+        tooltip="Filter out internal & rebalancing flows."
         onClick={() => updateIncludeProtocolActors(false)}
       />
       <SegmentButton
         active={includeProtocolActors}
         label="All"
+        tooltip="Shows all volume incl. internal & rebalancing flows."
         onClick={() => updateIncludeProtocolActors(true)}
       />
     </div>
@@ -134,30 +137,47 @@ function ActorToggleGroup({
 function SegmentButton({
   active,
   label,
+  tooltip,
   className = "",
   onClick,
 }: {
   active: boolean;
   label: string;
+  tooltip?: string;
   className?: string;
   onClick: () => void;
 }) {
+  const tooltipId = useId();
   const stateClass = active
     ? " bg-slate-700 text-white shadow-sm"
     : " text-slate-400 hover:text-slate-200";
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={
-        "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
-        className +
-        stateClass
-      }
-    >
-      {label}
-    </button>
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        aria-pressed={active}
+        aria-describedby={tooltip ? tooltipId : undefined}
+        onClick={onClick}
+        className={
+          "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+          className +
+          stateClass
+        }
+      >
+        {label}
+      </button>
+      {tooltip && (
+        <span
+          id={tooltipId}
+          role="tooltip"
+          className="pointer-events-none absolute right-0 top-full z-30 w-64 pt-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+        >
+          <span className="block rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-left text-xs font-normal leading-relaxed text-slate-200 shadow-lg">
+            {tooltip}
+          </span>
+        </span>
+      )}
+    </span>
   );
 }
 
