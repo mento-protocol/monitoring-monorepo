@@ -21,7 +21,7 @@ import { useBrokerViaMarkers } from "../_lib/use-broker-via-markers";
 import { AggregatorLabel } from "./aggregator-breakdown-section";
 import { ProtocolActorChip } from "./protocol-actor-chip";
 
-const PAGE_LIMIT = 50;
+const PAGE_LIMIT = 20;
 
 // ─── Trader table ─────────────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ function useV2TraderVia({
       ? "Via attribution is shown for bounded time windows only. All-time marker history can exceed the query cap."
       : undefined;
   // Keep the Via side query scoped to the rows actually rendered. Sort changes
-  // can change the visible top-50 slice, so attribution follows `visibleRows`
+  // can change the visible top-20 slice, so attribution follows `visibleRows`
   // instead of fetching markers for every aggregated trader in the response.
   const callers = useMemo(() => {
     if (isLoading || hasError || unavailableReason) return null;
@@ -76,14 +76,12 @@ export function V2VolumeTraderTable({
   emptyMessage,
   isLoading,
   hasError,
-  hasExploratoryExclusions,
 }: {
   cutoff: number;
   traders: readonly BrokerTraderWindowRow[];
   emptyMessage: string;
   isLoading: boolean;
   hasError: boolean;
-  hasExploratoryExclusions: boolean;
 }) {
   const { sortKey, sortDir, handleSort } = useTableSort<TraderSortKey>({
     defaultKey: "volume",
@@ -124,15 +122,7 @@ export function V2VolumeTraderTable({
   }
   if (isLoading) return <Skeleton rows={10} />;
   if (visibleRows.length === 0) {
-    return (
-      <EmptyBox
-        message={
-          hasExploratoryExclusions
-            ? "No legacy-v2 traders left after exploratory exclusions. Clear exclusions or widen the range."
-            : emptyMessage
-        }
-      />
-    );
+    return <EmptyBox message={emptyMessage} />;
   }
 
   // The degraded-Via banner mirrors the aggregator-table cap-hit pattern so

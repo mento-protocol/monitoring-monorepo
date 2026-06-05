@@ -39,10 +39,7 @@ import {
 } from "./_components/volume-page-sections";
 import { usePoolChartViewModel } from "./_lib/pool-chart-vm";
 import { useHeroRollup } from "./_lib/use-hero-rollup";
-import {
-  useVolumeAggregates,
-  volumeExclusionsForVenue,
-} from "./_lib/use-volume-aggregates";
+import { useVolumeAggregates } from "./_lib/use-volume-aggregates";
 import { useVolumeUrlState } from "./_lib/url-state";
 import { usePoolVolumeSnapshots } from "./_lib/use-pool-volume-snapshots";
 
@@ -76,7 +73,6 @@ export type VolumePageModel = ReturnType<typeof useVolumePageModel>;
 function useVolumePageModel({
   range,
   includeProtocolActors,
-  exclusions,
   venue,
   cutoff,
   utcDayKey,
@@ -95,13 +91,7 @@ function useVolumePageModel({
     showChart,
   });
   const rows = readVolumeRows(queries);
-  const effectiveExclusions = useMemo(
-    () => volumeExclusionsForVenue(venue, exclusions),
-    [venue, exclusions],
-  );
   const aggregates = useVolumeAggregates({
-    exclusions: effectiveExclusions,
-    venue,
     includeProtocolActors,
     traderRows: rows.traderRows,
     v2TraderRows: rows.v2TraderRows,
@@ -312,7 +302,7 @@ function buildVolumeStatus({
   const tableIsLoading = volumeTableIsLoading({ venue, queries });
   const tableHasError = volumeTableHasError({ venue, queries });
   // Hero and table data are sourced from independent queries; a snapshot
-  // failure must NOT blank the chart or top-50 table (and vice versa).
+  // failure must NOT blank the chart or trader table (and vice versa).
   // Per docs/pr-checklists/swr-polling-hasura.md: new schema fields ship
   // in isolated queries that degrade independently.
   const v2AggIsLoading = v2AggregatorsResult.isLoading;
@@ -331,7 +321,7 @@ function buildVolumeStatus({
   // regardless of any cap — they read the pre-rolled snapshot + today's
   // small partial, neither of which is cap-bound (PR #328).
   //
-  // Top-10 concentration's NUMERATOR sums the top-50 table query's rows;
+  // Top-10 concentration's NUMERATOR sums the trader query's window rows;
   // when that query caps, a top-10 trader whose long-tail single-day rows
   // fall outside the cap has an undercounted window-sum, biasing the
   // concentration ratio low. Badge that one tile with `(≈)`.

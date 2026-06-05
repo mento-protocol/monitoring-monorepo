@@ -69,8 +69,6 @@ function HookWrapper({
   v2TraderRows: readonly BrokerTraderDailyRow[];
 }) {
   resultRef.current = useVolumeAggregates({
-    exclusions: { addresses: [EXCLUDED], sources: [] },
-    venue: "v3",
     includeProtocolActors: false,
     traderRows,
     v2TraderRows,
@@ -118,7 +116,7 @@ function renderVm({
 }
 
 describe("useVolumeAggregates", () => {
-  it("keeps headline daily volume unfiltered while analysis rows honor exclusions", () => {
+  it("keeps headline daily volume and analysis rows on the same actor-filtered data", () => {
     const model = renderVm({
       traderRows: [
         trader({ trader: USER, volumeUsdWei: usdWei(100) }),
@@ -130,16 +128,15 @@ describe("useVolumeAggregates", () => {
       ],
     });
 
-    expect(model.aggregated).toHaveLength(1);
-    expect(model.aggregated[0]?.trader).toBe(USER);
-    expect(model.aggregated[0]?.volumeUsdWei).toBe(BigInt(usdWei(100)));
+    expect(model.aggregated).toHaveLength(2);
+    expect(model.aggregated.map((row) => row.trader)).toEqual([USER, EXCLUDED]);
     expect(model.dailyVolume).toEqual([{ timestamp: Number(DAY), value: 150 }]);
 
-    expect(model.v2Aggregated).toHaveLength(1);
-    expect(model.v2Aggregated[0]?.trader).toBe(USER);
-    expect(model.v2Aggregated[0]?.volumeUsdWei).toBe(BigInt(usdWei(70)));
-    // v2 analysis rows exclude EXCLUDED (70 USD), while the headline chart
-    // remains canonical and includes USER + EXCLUDED (100 USD).
+    expect(model.v2Aggregated).toHaveLength(2);
+    expect(model.v2Aggregated.map((row) => row.trader)).toEqual([
+      USER,
+      EXCLUDED,
+    ]);
     expect(model.v2DailyVolume).toEqual([
       { timestamp: Number(DAY), value: 100 },
     ]);

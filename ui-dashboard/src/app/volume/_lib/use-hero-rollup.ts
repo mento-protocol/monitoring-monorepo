@@ -58,7 +58,7 @@ type HeroV2Data = { brokerVolumeWindowSnapshots: VolumeWindowRow[] };
  *     `utcDayKey`);
  *   - `mergeHeroSnapshot` (totals + stale/degraded chain detection) and
  *     the `top10Concentration` denominator share. The numerator's
- *     top-50 source comes from the parent (`kpiSource`) — this hook
+ *     trader-query source comes from the parent (`kpiSource`) — this hook
  *     intentionally doesn't pull in the trader/aggregator queries.
  *
  * Lives in its own file so `page-client.tsx` stays under the 600-line
@@ -80,7 +80,7 @@ export function useHeroRollup({
   includeProtocolActors: boolean;
   isProtocolActorIn: ReadonlyArray<boolean>;
   utcDayKey: number;
-  /** Source list for top-10 concentration's numerator (top-50 paginated
+  /** Source list for top-10 concentration's numerator (paginated
    *  per-day query). The parent owns this query; the hook only consumes
    *  the resulting rows so the table query and the hero query can degrade
    *  independently. */
@@ -304,7 +304,7 @@ export function useHeroRollup({
   );
 
   // Tiles + chart load when the hero snapshot AND its today-partial both
-  // land. The top-50 table loads independently from the existing
+  // land. The trader table loads independently from the existing
   // TraderDailySnapshot query (which is fast — capped at 1000 by design).
   const isLoading =
     venue === "v3"

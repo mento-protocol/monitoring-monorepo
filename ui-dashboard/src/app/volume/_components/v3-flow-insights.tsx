@@ -17,10 +17,6 @@ import {
   type TraderWindowRow,
 } from "@/lib/volume";
 import {
-  filterTraderRowsByVolumeExclusions,
-  type VolumeExclusionState,
-} from "@/lib/volume-exclusions";
-import {
   buildCorridorRows,
   buildTraderCohortSummary,
   filterSwapOutliers,
@@ -63,7 +59,6 @@ export function V3FlowInsights({
   traders,
   pools,
   protocolActorFilter,
-  exclusions,
   tableState,
 }: {
   range: VolumeRangeKey;
@@ -73,7 +68,6 @@ export function V3FlowInsights({
   traders: readonly TraderWindowRow[];
   pools: PoolMeta;
   protocolActorFilter: ReadonlyArray<boolean>;
-  exclusions: VolumeExclusionState;
   tableState: FlowTableState;
 }) {
   const model = useV3FlowInsightModel({
@@ -82,7 +76,6 @@ export function V3FlowInsights({
     traderRows,
     traders,
     protocolActorFilter,
-    exclusions,
     isTraderCapHit: tableState.isCapHit,
   });
 
@@ -131,7 +124,6 @@ function useV3FlowInsightModel({
   traderRows,
   traders,
   protocolActorFilter,
-  exclusions,
   isTraderCapHit,
 }: {
   range: VolumeRangeKey;
@@ -139,7 +131,6 @@ function useV3FlowInsightModel({
   traderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
   protocolActorFilter: ReadonlyArray<boolean>;
-  exclusions: VolumeExclusionState;
   isTraderCapHit: boolean;
 }) {
   const previousBounds = useMemo(
@@ -159,12 +150,9 @@ function useV3FlowInsightModel({
   const previousTraders = useMemo(
     () =>
       aggregateTradersByWindow(
-        filterTraderRowsByVolumeExclusions(
-          previousTradersResult.data?.TraderDailySnapshot ?? [],
-          exclusions,
-        ),
+        previousTradersResult.data?.TraderDailySnapshot ?? [],
       ),
-    [previousTradersResult.data, exclusions],
+    [previousTradersResult.data],
   );
   const cohortSummary = useMemo(
     () =>

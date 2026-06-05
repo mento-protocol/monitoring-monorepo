@@ -188,7 +188,6 @@ function renderVolumeTable(
         emptyMessage="No traders matched this window. Try widening the range or including protocol actors."
         isLoading={false}
         hasError={false}
-        hasExploratoryExclusions={false}
         {...props}
       />,
     );
@@ -207,7 +206,6 @@ function renderV2Table(
         emptyMessage="No legacy-v2 traders in this window. Either v2 volume has stopped, or try widening the range / including protocol actors."
         isLoading={false}
         hasError={false}
-        hasExploratoryExclusions={false}
         {...props}
       />,
     );
@@ -276,6 +274,25 @@ describe("VolumeTable", () => {
     });
     expect(bodyRows(handle!.container)[0]?.textContent).toContain("0xbbb");
     expect(window.location.search).toBe("?volumeSort=swaps&volumeDir=asc");
+  });
+
+  it("caps visible v3 top traders at 20 rows", () => {
+    const traders = Array.from({ length: 25 }, (_, index) => {
+      const rank = index + 1;
+      return trader({
+        trader: `0x${rank.toString(16).padStart(40, "0")}`,
+        volumeUsdWei: usdWei(rank),
+      });
+    });
+
+    renderVolumeTable(handle!, { traders });
+
+    const rows = bodyRows(handle!.container);
+    expect(rows).toHaveLength(20);
+    expect(rows[0]?.textContent).toContain(`0x${"19".padStart(40, "0")}`);
+    expect(handle!.container.textContent).not.toContain(
+      `0x${"01".padStart(40, "0")}`,
+    );
   });
 
   it("fetches and renders a per-trader pool breakdown only after expansion", () => {
@@ -353,6 +370,26 @@ describe("V2VolumeTraderTable", () => {
     });
     expect(bodyRows(handle!.container)[0]?.textContent).toContain("0xaaa");
     expect(window.location.search).toBe("?v2traderSort=swaps&v2traderDir=desc");
+  });
+
+  it("caps visible v2 top traders and Via attribution at 20 rows", () => {
+    const traders = Array.from({ length: 25 }, (_, index) => {
+      const rank = index + 1;
+      return v2Trader({
+        trader: `0x${rank.toString(16).padStart(40, "0")}`,
+        volumeUsdWei: usdWei(rank),
+      });
+    });
+
+    renderV2Table(handle!, { traders });
+
+    const rows = bodyRows(handle!.container);
+    expect(rows).toHaveLength(20);
+    const [callers, cutoff] = mockUseBrokerViaMarkers.mock.lastCall ?? [];
+    expect(cutoff).toBe(CUTOFF);
+    expect(callers).toHaveLength(20);
+    expect(callers).toContain(`0x${"19".padStart(40, "0")}`);
+    expect(callers).not.toContain(`0x${"01".padStart(40, "0")}`);
   });
 
   it("surfaces bounded-window Via degradation for all-time v2 views", () => {

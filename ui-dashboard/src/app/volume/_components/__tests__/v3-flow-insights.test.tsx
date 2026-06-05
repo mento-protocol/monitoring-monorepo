@@ -82,7 +82,6 @@ function renderInsights(
         traders={[]}
         pools={new Map()}
         protocolActorFilter={[false]}
-        exclusions={{ addresses: [], sources: [] }}
         tableState={{ isLoading: false, hasError: false, isCapHit: false }}
         {...props}
       />,

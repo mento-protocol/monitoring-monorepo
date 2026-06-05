@@ -32,13 +32,11 @@ vi.mock("../_lib/url-state", () => ({
       range: "7d",
       actorFilter: includeProtocolActors ? "all" : "organic",
       includeProtocolActors,
-      exclusions: { addresses: [], sources: [] },
       venue: volumeState.venue,
       cutoff: 1_700_000_000,
       utcDayKey: 20_000,
       updateRange: vi.fn(),
       updateIncludeProtocolActors: vi.fn(),
-      updateExclusions: vi.fn(),
       updateVenue: vi.fn(),
     };
   },
@@ -192,7 +190,7 @@ describe("VolumeClient useGQL wiring", () => {
     expect(html).toContain(
       "Shows all volume incl. internal &amp; rebalancing flows.",
     );
-    expect(html).toContain("Exploratory exclusions");
+    expect(html).not.toContain("Exploratory exclusions");
     expect(variablesFor(TRADER_DAILY_TOP)).toMatchObject({
       isProtocolActorIn: [false],
     });
@@ -208,17 +206,14 @@ describe("VolumeClient useGQL wiring", () => {
     );
   });
 
-  it("renders exploratory exclusions below top-line volume and before analysis", () => {
+  it("keeps analysis sections directly below top-line volume", () => {
     const html = renderVolume("v3");
 
     expect(html.indexOf("Total volume")).toBeGreaterThanOrEqual(0);
-    expect(html.indexOf("Exploratory exclusions")).toBeGreaterThanOrEqual(0);
     expect(html.indexOf('data-testid="v3-section"')).toBeGreaterThanOrEqual(0);
     expect(html.indexOf("Total volume")).toBeLessThan(
-      html.indexOf("Exploratory exclusions"),
-    );
-    expect(html.indexOf("Exploratory exclusions")).toBeLessThan(
       html.indexOf('data-testid="v3-section"'),
     );
+    expect(html).not.toContain("Exploratory exclusions");
   });
 });

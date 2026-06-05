@@ -82,12 +82,9 @@ describe("useVolumeUrlState", () => {
     expect(ref.current?.range).toBe("90d");
     expect(ref.current?.actorFilter).toBe("all");
     expect(ref.current?.includeProtocolActors).toBe(true);
-    expect(ref.current?.exclusions).toEqual({
-      addresses: ["0x00000000000000000000000000000000000000aa"],
-      sources: ["cluster-abc"],
-    });
     expect(ref.current?.venue).toBe("v2");
     expect(ref.current?.cutoff).toBeGreaterThan(0);
+    expect(window.location.search).toBe("?range=90d&actors=all&venue=v2");
   });
 
   it("locks external users to all volume and strips private filter params", () => {
@@ -99,7 +96,6 @@ describe("useVolumeUrlState", () => {
     expect(ref.current?.canUseVolumeFilters).toBe(false);
     expect(ref.current?.actorFilter).toBe("all");
     expect(ref.current?.includeProtocolActors).toBe(true);
-    expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
     expect(window.location.search).toBe("?foo=1&range=30d");
 
     act(() => {
@@ -107,15 +103,6 @@ describe("useVolumeUrlState", () => {
     });
     expect(ref.current?.actorFilter).toBe("all");
     expect(ref.current?.includeProtocolActors).toBe(true);
-    expect(window.location.search).toBe("?foo=1&range=30d");
-
-    act(() => {
-      ref.current?.updateExclusions({
-        addresses: ["0x00000000000000000000000000000000000000bb"],
-        sources: ["cluster-def"],
-      });
-    });
-    expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
     expect(window.location.search).toBe("?foo=1&range=30d");
 
     act(() => {
@@ -132,7 +119,6 @@ describe("useVolumeUrlState", () => {
     expect(ref.current?.range).toBe("7d");
     expect(ref.current?.actorFilter).toBe("organic");
     expect(ref.current?.includeProtocolActors).toBe(false);
-    expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
     expect(ref.current?.venue).toBe("v3");
   });
 
@@ -153,45 +139,22 @@ describe("useVolumeUrlState", () => {
     expect(window.location.search).toBe("?foo=1&range=30d&actors=all");
 
     act(() => {
-      ref.current?.updateExclusions({
-        addresses: ["0x00000000000000000000000000000000000000aa"],
-        sources: ["cluster-abc"],
-      });
-    });
-    expect(window.location.search).toBe(
-      "?foo=1&range=30d&actors=all&exclude=0x00000000000000000000000000000000000000aa&excludeSources=cluster-abc",
-    );
-
-    act(() => {
       ref.current?.updateVenue("v2");
     });
-    expect(window.location.search).toBe(
-      "?foo=1&range=30d&actors=all&exclude=0x00000000000000000000000000000000000000aa&excludeSources=cluster-abc&venue=v2",
-    );
+    expect(window.location.search).toBe("?foo=1&range=30d&actors=all&venue=v2");
 
     act(() => {
       ref.current?.updateRange("7d");
     });
-    expect(window.location.search).toBe(
-      "?foo=1&actors=all&venue=v2&exclude=0x00000000000000000000000000000000000000aa&excludeSources=cluster-abc",
-    );
+    expect(window.location.search).toBe("?foo=1&actors=all&venue=v2");
 
     act(() => {
       ref.current?.updateIncludeProtocolActors(false);
     });
-    expect(window.location.search).toBe(
-      "?foo=1&venue=v2&exclude=0x00000000000000000000000000000000000000aa&excludeSources=cluster-abc",
-    );
+    expect(window.location.search).toBe("?foo=1&venue=v2");
 
     act(() => {
       ref.current?.updateVenue("v3");
-    });
-    expect(window.location.search).toBe(
-      "?foo=1&exclude=0x00000000000000000000000000000000000000aa&excludeSources=cluster-abc",
-    );
-
-    act(() => {
-      ref.current?.updateExclusions({ addresses: [], sources: [] });
     });
     expect(window.location.search).toBe("?foo=1");
   });
@@ -208,7 +171,6 @@ describe("useVolumeUrlState", () => {
     expect(ref.current?.range).toBe("7d");
     expect(ref.current?.actorFilter).toBe("organic");
     expect(ref.current?.includeProtocolActors).toBe(false);
-    expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
     expect(ref.current?.venue).toBe("v3");
   });
 
@@ -229,7 +191,6 @@ describe("useVolumeUrlState", () => {
 
     expect(ref.current?.actorFilter).toBe("all");
     expect(ref.current?.includeProtocolActors).toBe(true);
-    expect(ref.current?.exclusions).toEqual({ addresses: [], sources: [] });
     expect(ref.current?.venue).toBe("v2");
     expect(window.location.search).toBe("?venue=v2");
   });
