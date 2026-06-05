@@ -352,6 +352,8 @@ function nextStepFor(
     return firstError ?? "Configure adapter credentials.";
   if (status === "unsupported")
     return firstError ?? "Confirm chain support with the aggregator.";
+  if (status === "partial")
+    return "Inspect failing route evidence for pairs that still lack Mento v3 address evidence.";
   if (status === "fail")
     return "Inspect route evidence and ask aggregator to route through Mento v3.";
   return firstError ?? "Inspect raw probe response.";
@@ -365,6 +367,8 @@ function summarizeSnapshot(
     aggregators: aggregators.length,
     chainChecks: chains.length,
     passingChainChecks: chains.filter((chain) => chain.status === "pass")
+      .length,
+    partialChainChecks: chains.filter((chain) => chain.status === "partial")
       .length,
     failingChainChecks: chains.filter((chain) => chain.status === "fail")
       .length,

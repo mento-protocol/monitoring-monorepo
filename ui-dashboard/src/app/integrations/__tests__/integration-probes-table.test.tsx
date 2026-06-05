@@ -11,6 +11,7 @@ describe("IntegrationProbesTable", () => {
 
     expect(html).toContain("OpenOcean");
     expect(html).toContain("Pass");
+    expect(html).toContain("Partial");
     expect(html).toContain("Needs key");
     expect(html).toContain("Unsupported");
     expect(html).toContain("router-address");
@@ -161,7 +162,7 @@ function fixtureSnapshot(): IntegrationProbeSnapshot {
         credentialEnv: [],
         researchNote: "fixture",
         chains: [
-          chainFixture(42220, "Celo", "pass"),
+          partialChainFixture(42220, "Celo"),
           chainFixture(143, "Monad", "needs_key"),
         ],
       },
@@ -181,7 +182,8 @@ function fixtureSnapshot(): IntegrationProbeSnapshot {
     summary: {
       aggregators: 2,
       chainChecks: 4,
-      passingChainChecks: 1,
+      passingChainChecks: 0,
+      partialChainChecks: 1,
       failingChainChecks: 0,
       needsKeyChainChecks: 1,
       unsupportedChainChecks: 2,
@@ -210,6 +212,37 @@ function chainFixture(
         status,
         sellSymbol: "EURm",
         error: passing ? null : "fixture",
+      }),
+    ],
+  };
+}
+
+function partialChainFixture(
+  chainId: number,
+  chainLabel: string,
+): IntegrationProbeSnapshot["aggregators"][number]["chains"][number] {
+  return {
+    chainId,
+    chainSlug: chainLabel.toLowerCase().replace(" ", "-"),
+    chainLabel,
+    status: "partial",
+    pairCoverage: { passed: 1, total: 2 },
+    blockingReason: "fixture partial",
+    nextStep: "inspect failing route",
+    pairs: [
+      pairFixture({
+        chainId,
+        poolId: `${chainId}-0xpartialpass`,
+        status: "pass",
+        sellSymbol: "CHFm",
+        error: null,
+      }),
+      pairFixture({
+        chainId,
+        poolId: `${chainId}-0xpartialfail`,
+        status: "fail",
+        sellSymbol: "GBPm",
+        error: "missing evidence",
       }),
     ],
   };

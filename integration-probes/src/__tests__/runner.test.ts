@@ -144,6 +144,36 @@ describe("runIntegrationProbes", () => {
     expect(snapshot.aggregators[0]?.chains[0]?.pairs[0]?.poolId).toBe(POOL);
   });
 
+  it("marks a chain partial when only some pair directions pass", async () => {
+    const snapshot = await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [mixedCoverageAdapter()],
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(
+            JSON.stringify({ data: { Pool: [poolRow(POOL, "EURm")] } }),
+          );
+        }
+        return new Response(
+          String(input).includes("base-to-usdm")
+            ? JSON.stringify({ transactionRequest: { to: ROUTER_V300 } })
+            : JSON.stringify({ route: [{ protocol: "Other" }] }),
+        );
+      },
+    });
+
+    const chain = snapshot.aggregators[0]?.chains[0];
+    expect(chain?.status).toBe("partial");
+    expect(chain?.pairCoverage).toEqual({ passed: 1, total: 2 });
+    expect(chain?.blockingReason).toBe(
+      "Some USDm hub routes passed, but full pair coverage is not healthy.",
+    );
+    expect(snapshot.summary.partialChainChecks).toBe(1);
+    expect(snapshot.summary.failingChainChecks).toBe(0);
+  });
+
   it("bounds pair probe concurrency", async () => {
     const rowA = poolRow(POOL, "EURm");
     const rowB = poolRow(
@@ -348,6 +378,15 @@ function passingAdapter(): AggregatorAdapter {
     support: { 42220: "supported", 143: "supported" },
     researchNote: "fixture",
     quote: () => ({ url: "https://quote.test" }),
+  };
+}
+
+function mixedCoverageAdapter(): AggregatorAdapter {
+  return {
+    ...passingAdapter(),
+    id: "mixed",
+    label: "Mixed",
+    quote: (input) => ({ url: `https://mixed.test/${input.direction}` }),
   };
 }
 

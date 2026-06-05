@@ -9,6 +9,7 @@ export type ProbeChainId = (typeof PROBE_CHAIN_IDS)[number];
 export type AggregatorKind = "dex" | "cross_chain" | "meta" | "excluded";
 export type ProbeStatus =
   | "pass"
+  | "partial"
   | "fail"
   | "unsupported"
   | "needs_key"
@@ -127,6 +128,7 @@ export type IntegrationProbeSnapshot = {
     aggregators: number;
     chainChecks: number;
     passingChainChecks: number;
+    partialChainChecks: number;
     failingChainChecks: number;
     needsKeyChainChecks: number;
     unsupportedChainChecks: number;

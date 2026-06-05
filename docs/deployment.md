@@ -136,7 +136,9 @@ from Upstash key `integration-probes:latest`. The scheduled
 `.github/workflows/integration-probes.yml` workflow refreshes it daily and can
 also be run manually with `workflow_dispatch`. `integration-probes:latest`
 expires after 3 days so missed scheduled probes surface as stale/missing
-dashboard data; dated history keys expire after 90 days.
+dashboard data; dated history keys expire after 90 days. Chain statuses are
+`pass` only when every active USDm hub-pair direction passes and `partial` when
+at least one direction passes but full coverage is still missing.
 
 ```bash
 pnpm integrations:probe

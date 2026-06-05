@@ -68,6 +68,11 @@ function IntegrationsContent({
           subtitle="chain checks"
         />
         <Tile
+          label="Partial"
+          value={String(snapshot.summary.partialChainChecks)}
+          subtitle="some routes pass"
+        />
+        <Tile
           label="Needs Key"
           value={String(snapshot.summary.needsKeyChainChecks)}
         />

@@ -19,6 +19,7 @@ describe("IntegrationProbeSnapshotSchema", () => {
         aggregators: 0,
         chainChecks: 0,
         passingChainChecks: 0,
+        partialChainChecks: 0,
         failingChainChecks: 0,
         needsKeyChainChecks: 0,
         unsupportedChainChecks: 0,
@@ -88,6 +89,7 @@ describe("IntegrationProbeSnapshotSchema", () => {
     });
 
     expect(result.success).toBe(true);
+    expect(result.data?.summary.partialChainChecks).toBe(0);
     expect(
       result.data?.aggregators[0]?.chains[0]?.pairs[0]?.httpStatus,
     ).toBeNull();

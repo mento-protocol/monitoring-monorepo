@@ -73,16 +73,12 @@ export const PROBE_TAKER_ADDRESS = DEFAULT_TAKER;
 
 export const AGGREGATOR_ADAPTERS: AggregatorAdapter[] = [
   lifiAdapter(),
-  openOceanAdapter(),
-  zeroXAdapter(),
   squidAdapter(),
-  socketAdapter(),
-  rubicAdapter(),
-  relayAdapter(),
-  oneInchAdapter(),
+  openOceanAdapter(),
   kyberAdapter(),
   okxAdapter(),
-  rangoAdapter(),
+  oneInchAdapter(),
+  zeroXAdapter(),
   excludedAdapter(
     "cow-swap",
     "CoW Swap",
@@ -93,11 +89,15 @@ export const AGGREGATOR_ADAPTERS: AggregatorAdapter[] = [
     "ParaSwap / Velora",
     "Current supported-chain docs do not list Celo or Monad.",
   ),
+  relayAdapter(),
   excludedAdapter(
     "odos",
     "Odos",
     "Public chain metadata currently lists neither Celo nor Monad.",
   ),
+  socketAdapter(),
+  rangoAdapter(),
+  rubicAdapter(),
   excludedAdapter(
     "debridge",
     "deBridge",
@@ -139,35 +139,28 @@ export function aggregatePairStatus(
   results: readonly Pick<PairProbeResult, "status">[],
 ): ProbeStatus {
   if (results.length === 0) return "error";
-  if (results.every((result) => result.status === "pass")) return "pass";
-  if (results.every((result) => result.status === "unsupported")) {
-    return "unsupported";
-  }
-  if (results.every((result) => result.status === "needs_key")) {
+  const statuses = new Set(results.map((result) => result.status));
+  if (statuses.size === 1) return results[0]!.status;
+  if (statuses.has("needs_key") && onlyStatuses(statuses, "pass", "needs_key"))
     return "needs_key";
-  }
-  if (
-    results.some((result) => result.status === "needs_key") &&
-    results.every((result) => ["pass", "needs_key"].includes(result.status))
-  ) {
-    return "needs_key";
-  }
-  if (results.some((result) => result.status === "rate_limited")) {
-    return "rate_limited";
-  }
-  if (results.every((result) => result.status === "no_liquidity")) {
-    return "no_liquidity";
-  }
-  if (results.every((result) => result.status === "error")) {
-    return "error";
-  }
+  if (statuses.has("rate_limited")) return "rate_limited";
+  if (statuses.has("pass")) return "partial";
   return "fail";
+}
+
+function onlyStatuses(
+  statuses: ReadonlySet<ProbeStatus>,
+  ...allowed: ProbeStatus[]
+): boolean {
+  return [...statuses].every((status) => allowed.includes(status));
 }
 
 export function blockingReason(status: ProbeStatus): string | null {
   switch (status) {
     case "pass":
       return null;
+    case "partial":
+      return "Some USDm hub routes passed, but full pair coverage is not healthy.";
     case "unsupported":
       return "Aggregator does not currently advertise support for this chain.";
     case "needs_key":
@@ -418,6 +411,7 @@ function fallbackPriority(status: ProbeStatus): number {
       return 2;
     case "needs_key":
       return 1;
+    case "partial":
     case "pass":
       return 0;
   }
