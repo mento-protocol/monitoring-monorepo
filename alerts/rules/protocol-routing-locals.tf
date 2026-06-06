@@ -103,8 +103,23 @@ locals {
     "ZARUSD"
   ]
 
-  # Create a regex pattern for the weekend-disabled feeds
-  weekend_disabled_feeds_pattern = join("|", local.weekend_disabled_feeds)
+  # Aegis historically published `rateFeed` as compact IDs (`CHFUSD`) but the
+  # relayer log labels and alert copy use slash-form pairs (`CHF/USD`). Match
+  # both label shapes so FX weekend mute policies keep working if the exporter
+  # or Grafana alert instance carries either representation.
+  # The split assumes the quote leg is a 3-letter FX/feed suffix. For 6-char
+  # feeds (`CHFUSD`) that yields `CHF/USD`; for 7-char CELO feeds the first
+  # capture backtracks to 4 chars (`CELO/PHP`) before the end anchor can match.
+  weekend_disabled_feed_label_variants = distinct(flatten([
+    for feed in local.weekend_disabled_feeds : [
+      feed,
+      replace(feed, "/^([A-Z]{3,}?)([A-Z]{3})$/", "$1/$2"),
+    ]
+  ]))
+
+  # Regex pattern for weekend-disabled feeds. Anchored so similarly named
+  # future feeds cannot accidentally inherit FX market-close suppression.
+  weekend_disabled_feeds_pattern = "^(${join("|", local.weekend_disabled_feed_label_variants)})$"
 
   # Per-feed Celo relayer signer wallets. Used by the Slack stale-price alert
   # template to link "<pair> relayer on Celo" to the signer's celoscan page.
