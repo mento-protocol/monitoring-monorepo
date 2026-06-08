@@ -18,7 +18,7 @@ interface CdpStabilityPoolTvlChartProps {
   /** Current spDeposits from LiquityInstance; appended as the latest point. */
   currentSpDeposits: string | null | undefined;
   /** Strategy reserve target left in the SP after CDP rebalances. */
-  minBoldAfterRebalance?: string | null | undefined;
+  minBoldAfterRebalance: string;
   /** Debt-token symbol (GBPm, EURm, …) used for the chart unit. */
   symbol: string;
   isLoading: boolean;

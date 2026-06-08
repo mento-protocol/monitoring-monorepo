@@ -117,6 +117,10 @@ describe("buildRebalanceReserveReference", () => {
   it("omits the reserve marker when the system parameter is missing", () => {
     expect(buildRebalanceReserveReference(null, "GBPm")).toBeNull();
   });
+
+  it("omits the reserve marker when the system parameter is zero", () => {
+    expect(buildRebalanceReserveReference("0", "GBPm")).toBeNull();
+  });
 });
 
 describe("CdpStabilityPoolTvlChart", () => {
