@@ -2091,6 +2091,12 @@ assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 run_gate "scripts/lockfile-lint.test.mjs"
 assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 
+run_gate "scripts/agent-autoreview.sh"
+assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
+
+run_gate "scripts/agent-autoreview.test.sh"
+assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
+
 # Other root-script changes only need the standalone scripts ESLint.
 run_gate "scripts/code-health-history.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"

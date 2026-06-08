@@ -1,7 +1,9 @@
 # Auto Review
 
-Run the global structured closeout review helper. Default engine is Codex;
-pass `--engine claude` when the user explicitly asks for Claude review.
+Run the global structured closeout review helper. Normal shells default to the
+Codex review engine; active Codex sandbox sessions default to the helper's
+local deterministic engine unless an engine is passed explicitly. Pass
+`--engine claude` when the user explicitly asks for Claude review.
 
 Arguments: `$ARGUMENTS`
 
