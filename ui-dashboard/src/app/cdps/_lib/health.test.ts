@@ -18,6 +18,7 @@ const collateral = (overrides: Partial<CdpCollateral> = {}): CdpCollateral => ({
   stabilityPool: "0x0",
   minDebt: "1000000000000000000000",
   minBoldInSp: "1000000000000000000",
+  minBoldAfterRebalance: "5000000000000000000000",
   systemParamsLoaded: true,
   mcrBps: 11000,
   ccrBps: 13500,

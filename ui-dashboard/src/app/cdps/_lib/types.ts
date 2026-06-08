@@ -9,6 +9,7 @@ export type CdpCollateral = {
   stabilityPool: string;
   minDebt: string;
   minBoldInSp: string;
+  minBoldAfterRebalance: string;
   systemParamsLoaded: boolean;
   mcrBps: number;
   ccrBps: number;

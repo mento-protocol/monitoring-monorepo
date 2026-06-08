@@ -8,7 +8,12 @@ import {
   PLOTLY_CONFIG,
   ROW_CHART_HEIGHT_PX,
 } from "@/lib/plot";
-import { RANGES, type RangeKey, type TimeSeriesPoint } from "@/lib/time-series";
+import {
+  RANGES,
+  dateTickFormatForSeries,
+  type RangeKey,
+  type TimeSeriesPoint,
+} from "@/lib/time-series";
 import {
   CustomLegend,
   CustomSortedTooltip,
@@ -49,6 +54,8 @@ const Plot = dynamic(() => import("react-plotly.js"), {
 
 /** `stacked` suppresses the dedicated total trace (top of stack = total). */
 type BreakdownMode = "lines" | "stacked";
+
+const EMPTY_Y_AXIS_REFERENCE_VALUES: readonly number[] = [];
 
 interface TimeSeriesChartCardProps {
   title: string;
@@ -122,6 +129,8 @@ interface TimeSeriesChartCardProps {
   ranges?: ReadonlyArray<{ key: RangeKey; label: string }>;
   /** Plotly layout shapes, e.g. FX weekend closure bands. */
   shapes?: Plotly.Layout["shapes"];
+  annotations?: Plotly.Layout["annotations"];
+  yAxisReferenceValues?: readonly number[];
 }
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
@@ -150,6 +159,8 @@ export function TimeSeriesChartCard({
   customSortedHover = false,
   ranges = RANGES,
   shapes,
+  annotations,
+  yAxisReferenceValues = EMPTY_Y_AXIS_REFERENCE_VALUES,
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
@@ -216,6 +227,7 @@ export function TimeSeriesChartCard({
       new Date(point.timestamp * 1000).toISOString(),
     );
     const ys = series.map((point) => point.value);
+    const tickformat = dateTickFormatForSeries(series);
     const totalTrace = isStacked
       ? null
       : {
@@ -279,7 +291,7 @@ export function TimeSeriesChartCard({
     // Use reduce rather than `Math.min(...arr)` — the spread form throws
     // RangeError above ~100k elements, which becomes reachable if hourly
     // bucketing or many chains land here later.
-    const allYs = [...ys, ...breakdownYs];
+    const allYs = [...ys, ...breakdownYs, ...yAxisReferenceValues];
     const ymin =
       allYs.length > 0 ? allYs.reduce((a, b) => Math.min(a, b), Infinity) : 0;
     const ymax =
@@ -310,7 +322,7 @@ export function TimeSeriesChartCard({
           // Flat single-line tick label; without this Plotly draws a
           // secondary year label under each primary tick that gets clipped
           // to a dashed-looking fragment by the tight bottom margin.
-          tickformat: "%b %d",
+          tickformat,
           fixedrange: true,
           // Hairline spike on breakdown charts only — single-trace consumers
           // (bridge / pool detail) keep Plotly's default-no-spike behavior.
@@ -345,6 +357,7 @@ export function TimeSeriesChartCard({
         },
         showlegend: showPlotlyLegend,
         ...(shapes ? { shapes } : {}),
+        ...(annotations ? { annotations } : {}),
         ...(showPlotlyLegend
           ? {
               legend: {
@@ -388,6 +401,8 @@ export function TimeSeriesChartCard({
     customLegendHidden,
     customLegendKey,
     shapes,
+    annotations,
+    yAxisReferenceValues,
   ]);
 
   // Cross-fade in stacked mode: pre-render every visibility combo (2^N

@@ -253,6 +253,7 @@ function CdpDetailContent({
       <CdpStabilityPoolTvlChart
         snapshots={snapshots}
         currentSpDeposits={instance?.spDeposits}
+        minBoldAfterRebalance={collateral.minBoldAfterRebalance}
         symbol={collateral.symbol}
         isLoading={snapshotsLoading}
         hasError={snapshotsError}
