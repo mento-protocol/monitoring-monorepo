@@ -24,6 +24,11 @@ Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for i
 - **QuickNode state-management hack** in `alerts/infra/onchain-event-listeners/main.tf` is scoped to the current chain via `var.chain_key`. Renaming the `module "onchain_event_listeners"` block in `alerts/infra/main.tf` would silently break the state-rm grep.
 - **Cloud Function lockfiles**: Cloud Build deploys `alerts/infra/onchain-event-handler/` and `alerts/infra/oncall-announcer/` as standalone source roots, so keep each package-local `pnpm-lock.yaml` in sync when its deps change. Regenerate with `cd <function-dir> && pnpm install --lockfile-only --lockfile-dir .`. Each package-local `pnpm-workspace.yaml` mirrors the root release-age guard and carries standalone Cloud Build overrides; keep it in the function source hash. CI installs from package-local locks before function checks, and supply-chain CI audits/lints root plus both function lockfiles.
 - **Slack delivery is the active path.** `alerts/rules/` owns Grafana Slack contact points plus Splunk routing for page-severity protocol and Aegis service-health alerts. `alerts/infra/`: Sentry alerts go to Slack via `sentry-bridge`; on-chain multisig events route to Slack via `slack-channels` + the Cloud Function; Splunk On-Call rotations route to Slack via `oncall-announcer` and reconcile @support-engineer.
+- **Annotation queries must stay evaluable.** In Grafana alert rules,
+  annotation/helper queries can propagate `NoData` through the whole rule even
+  when the base alert query is firing. Do not let annotation-only series
+  disappear while the base alert can still fire; prefer a label-matched
+  fallback or sentinel series, then branch Slack templates on the sentinel.
 
 ## Verification
 
