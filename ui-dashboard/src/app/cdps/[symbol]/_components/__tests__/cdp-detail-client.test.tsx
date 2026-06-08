@@ -661,6 +661,11 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain(
       "Showing 1,000 fetched troves",
     );
+    expect(handle!.container.textContent).toContain(
+      "Redemption ranks are hidden because the full open-trove set is not loaded.",
+    );
+    const firstRankCell = handle!.container.querySelector("tbody tr td");
+    expect(firstRankCell?.textContent).toBe("—");
     expect(handle!.container.textContent).toContain("1,000 total");
   });
 });

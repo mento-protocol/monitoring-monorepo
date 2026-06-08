@@ -44,6 +44,71 @@ export function CdpTroveTable({
   const [activeTab, setActiveTab] = useState<TroveTab>("open");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const tableRows = useTroveTableRows({
+    activeTab,
+    search,
+    page,
+    openTroves,
+    allTroves,
+    interestBatches,
+  });
+
+  const selectTab = (next: TroveTab) => {
+    setActiveTab(next);
+    setPage(1);
+  };
+  const updateSearch = (next: string) => {
+    setSearch(next);
+    setPage(1);
+  };
+
+  return (
+    <section>
+      <TroveTableHeader
+        activeTab={activeTab}
+        search={search}
+        onSelectTab={selectTab}
+        onSearch={updateSearch}
+      />
+      <div
+        role="tabpanel"
+        id={trovePanelId(activeTab)}
+        aria-labelledby={troveTabId(activeTab)}
+      >
+        {tableRows.sourceRows.length === 0 ? (
+          <EmptyBox message={tableRows.emptyMessage} />
+        ) : (
+          <TroveTableResults
+            collateral={collateral}
+            visibleRows={tableRows.visibleRows}
+            emptyMessage={tableRows.emptyMessage}
+            page={tableRows.clampedPage}
+            total={tableRows.filteredRows.length}
+            capped={tableRows.activeCapped}
+            rankSuppressed={tableRows.rankSuppressed}
+            onPageChange={setPage}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function useTroveTableRows({
+  activeTab,
+  search,
+  page,
+  openTroves,
+  allTroves,
+  interestBatches,
+}: {
+  activeTab: TroveTab;
+  search: string;
+  page: number;
+  openTroves: CdpTrove[];
+  allTroves: CdpTrove[];
+  interestBatches: CdpInterestBatch[];
+}) {
   const batchById = useMemo(
     () =>
       new Map<string, CdpInterestBatch>(
@@ -51,9 +116,13 @@ export function CdpTroveTable({
       ),
     [interestBatches],
   );
+  const openCapped = openTroves.length >= CDP_TROVES_DETAIL_LIMIT;
   const openRows = useMemo(
-    () => buildRankedOpenRows(openTroves, batchById),
-    [openTroves, batchById],
+    () =>
+      buildRankedOpenRows(openTroves, batchById, {
+        rankingEnabled: !openCapped,
+      }),
+    [openTroves, batchById, openCapped],
   );
   const rankByTroveId = useMemo(
     () =>
@@ -80,7 +149,6 @@ export function CdpTroveTable({
   );
   const clampedPage = Math.max(1, Math.min(page, totalPages));
   const start = (clampedPage - 1) * TROVE_PAGE_SIZE;
-  const visibleRows = filteredRows.slice(start, start + TROVE_PAGE_SIZE);
   const activeCapped =
     (activeTab === "open" ? openTroves.length : allTroves.length) >=
     CDP_TROVES_DETAIL_LIMIT;
@@ -90,44 +158,15 @@ export function CdpTroveTable({
       ? "No open troves indexed yet."
       : "No troves indexed yet.";
 
-  const selectTab = (next: TroveTab) => {
-    setActiveTab(next);
-    setPage(1);
+  return {
+    sourceRows,
+    filteredRows,
+    visibleRows: filteredRows.slice(start, start + TROVE_PAGE_SIZE),
+    clampedPage,
+    activeCapped,
+    rankSuppressed: activeTab === "open" && openCapped,
+    emptyMessage,
   };
-  const updateSearch = (next: string) => {
-    setSearch(next);
-    setPage(1);
-  };
-
-  return (
-    <section>
-      <TroveTableHeader
-        activeTab={activeTab}
-        search={search}
-        onSelectTab={selectTab}
-        onSearch={updateSearch}
-      />
-      <div
-        role="tabpanel"
-        id={trovePanelId(activeTab)}
-        aria-labelledby={troveTabId(activeTab)}
-      >
-        {sourceRows.length === 0 ? (
-          <EmptyBox message={emptyMessage} />
-        ) : (
-          <TroveTableResults
-            collateral={collateral}
-            visibleRows={visibleRows}
-            emptyMessage={emptyMessage}
-            page={clampedPage}
-            total={filteredRows.length}
-            capped={activeCapped}
-            onPageChange={setPage}
-          />
-        )}
-      </div>
-    </section>
-  );
 }
 
 function TroveTableHeader({
@@ -187,6 +226,7 @@ function TroveTableResults({
   page,
   total,
   capped,
+  rankSuppressed,
   onPageChange,
 }: {
   collateral: CdpCollateral;
@@ -195,6 +235,7 @@ function TroveTableResults({
   page: number;
   total: number;
   capped: boolean;
+  rankSuppressed: boolean;
   onPageChange: (page: number) => void;
 }) {
   return (
@@ -238,7 +279,10 @@ function TroveTableResults({
       {capped && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing {CDP_TROVES_DETAIL_LIMIT.toLocaleString()} fetched troves for
-          this view — search and rank cover fetched rows only.
+          this view — search covers fetched rows only.
+          {rankSuppressed
+            ? " Redemption ranks are hidden because the full open-trove set is not loaded."
+            : " Ranks cover fetched rows only."}
         </p>
       )}
     </>
@@ -340,8 +384,10 @@ function InterestValue({ row }: { row: TroveDisplayRow }) {
 function buildRankedOpenRows(
   troves: CdpTrove[],
   batchById: ReadonlyMap<string, CdpInterestBatch>,
+  { rankingEnabled = true }: { rankingEnabled?: boolean } = {},
 ): TroveDisplayRow[] {
   const rows = troves.map((trove) => displayRowForTrove(trove, batchById));
+  if (!rankingEnabled) return rows;
   rows.sort(compareRedemptionPriorityRows);
   const rateCounts = new Map<string, number>();
   for (const row of rows) {
