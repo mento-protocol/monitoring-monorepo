@@ -10,6 +10,7 @@ export function setPendingBatchMembershipOperation(
         troveId: string;
         operation: number;
         annualInterestRate: bigint;
+        interestBatchId: string | undefined;
         timestamp: bigint;
         blockNumber: bigint;
       }) => void;
@@ -22,6 +23,7 @@ export function setPendingBatchMembershipOperation(
     troveId: string;
     operation: number;
     annualInterestRate: bigint;
+    interestBatchId: string | undefined;
     timestamp: bigint;
     blockNumber: bigint;
   },
@@ -38,6 +40,7 @@ export function setPendingBatchMembershipOperation(
     troveId: args.troveId,
     operation: args.operation,
     annualInterestRate: args.annualInterestRate,
+    interestBatchId: args.interestBatchId,
     timestamp: args.timestamp,
     blockNumber: args.blockNumber,
   });

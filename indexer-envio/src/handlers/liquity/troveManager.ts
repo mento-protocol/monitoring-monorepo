@@ -70,7 +70,11 @@ type TroveManagerPreloadContext = Parameters<typeof preloadSystemParams>[0] &
   LiquityPriceContext & {
     PendingBatchMembershipOperation: {
       get: (id: string) => Promise<PendingBatchMembershipOperation | undefined>;
+      getWhere: (args: {
+        txHash: { _eq: string };
+      }) => Promise<PendingBatchMembershipOperation[]>;
       set: (entity: PendingBatchMembershipOperation) => void;
+      deleteUnsafe: (id: string) => void;
     };
     PendingRedemption: {
       get: (id: string) => Promise<PendingRedemption | undefined>;
@@ -123,6 +127,17 @@ function isPendingBatchReplayRow(
   );
 }
 
+function isPendingBatchRemovalForBatch(
+  pending: PendingBatchMembershipOperation,
+  args: { collateralId: string; batchId: string },
+): boolean {
+  return (
+    pending.collateralId === args.collateralId &&
+    pending.operation === OP.REMOVE_FROM_BATCH &&
+    pending.interestBatchId === args.batchId
+  );
+}
+
 async function preloadInterestRateBracketDebt(
   context: TroveManagerPreloadContext,
   args: {
@@ -156,11 +171,12 @@ async function preloadTroveAndMarket(
   market: Parameters<typeof preloadSystemParams>[1],
   collateralId: string,
   troveId: string,
-): Promise<void> {
-  await Promise.all([
+): Promise<Trove | undefined> {
+  const [, trove] = await Promise.all([
     preloadLiquityMarket(context, market),
     context.Trove.get(makeTroveId(collateralId, troveId)),
   ]);
+  return trove;
 }
 
 async function preloadTroveOperation(
@@ -177,7 +193,7 @@ async function preloadTroveOperation(
     blockTimestamp: bigint;
   },
 ): Promise<void> {
-  await preloadTroveAndMarket(
+  const trove = await preloadTroveAndMarket(
     context,
     args.market,
     args.collateralId,
@@ -192,6 +208,7 @@ async function preloadTroveOperation(
     setPendingBatchMembershipOperation(context, {
       ...args,
       operation: args.operation,
+      interestBatchId: trove?.interestBatchId,
       timestamp: args.blockTimestamp,
     });
   }
@@ -215,6 +232,10 @@ async function preloadBatchReplay(args: {
   const pendingRows = await args.context.PendingBatchedTroveUpdate.getWhere({
     txHash: { _eq: args.txHash },
   });
+  const pendingBatchOps =
+    await args.context.PendingBatchMembershipOperation.getWhere({
+      txHash: { _eq: args.txHash },
+    });
   const relevantRows = pendingRows.filter((pending) =>
     isPendingBatchReplayRow(pending, args),
   );
@@ -267,6 +288,16 @@ async function preloadBatchReplay(args: {
         });
       }
     }),
+    ...pendingBatchOps
+      .filter((pending) =>
+        isPendingBatchRemovalForBatch(pending, {
+          collateralId: args.collateralId,
+          batchId: `${args.collateralId}-${args.batchManager}`,
+        }),
+      )
+      .map((pending) =>
+        args.context.PendingBatchMembershipOperation.get(pending.id),
+      ),
   ]);
 }
 
@@ -445,6 +476,7 @@ indexer.onEvent(
         troveId: trove.troveId,
         operation: op,
         annualInterestRate: event.params._annualInterestRate,
+        interestBatchId: trove.interestBatchId,
         timestamp: blockTimestamp,
         blockNumber,
       });
@@ -608,9 +640,6 @@ indexer.onEvent(
     if (pendingRedemption !== undefined) {
       context.PendingRedemption.deleteUnsafe(pendingId);
     }
-    if (removesFromBatch(pendingBatchOperation)) {
-      context.PendingBatchMembershipOperation.deleteUnsafe(pendingId);
-    }
     context.LiquityInstance.set(
       touchLiquityInstance(instance, blockNumber, blockTimestamp),
     );
@@ -721,6 +750,10 @@ indexer.onEvent(
     const pendingRows = await context.PendingBatchedTroveUpdate.getWhere({
       txHash: { _eq: event.transaction.hash },
     });
+    const pendingBatchOps =
+      await context.PendingBatchMembershipOperation.getWhere({
+        txHash: { _eq: event.transaction.hash },
+      });
     const relevantRows = pendingRows.filter((pending) =>
       isPendingBatchReplayRow(pending, {
         collateralId,
@@ -751,6 +784,24 @@ indexer.onEvent(
         collateral,
         instance,
       });
+    }
+    const replayedPendingIds = new Set(
+      relevantRows.map((pending) =>
+        pendingTroveKey(
+          event.chainId,
+          event.transaction.hash,
+          collateralId,
+          pending.troveId,
+        ),
+      ),
+    );
+    for (const pending of pendingBatchOps) {
+      if (
+        !replayedPendingIds.has(pending.id) &&
+        isPendingBatchRemovalForBatch(pending, { collateralId, batchId })
+      ) {
+        context.PendingBatchMembershipOperation.deleteUnsafe(pending.id);
+      }
     }
 
     context.LiquityInstance.set({
