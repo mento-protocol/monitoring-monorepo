@@ -108,6 +108,7 @@ locals {
   # series so Grafana can apply before the bridge revision that publishes
   # `mento_pool_oracle_live_timestamp`.
   oracle_live_timestamp_compat_promql = "(mento_pool_oracle_live_timestamp or max without (last_oracle_update_url) (mento_pool_oracle_timestamp))"
+  oracle_expiry_compat_promql         = "max without (last_oracle_update_url) (mento_pool_oracle_expiry)"
   fx_oracle_pause_promql = format(
     "(mento_pool_oracle_live_timestamp{pair!~\"%s\",pair=~\".+/.+\"} or max without (last_oracle_update_url) (mento_pool_oracle_timestamp{pair!~\"%s\",pair=~\".+/.+\"})) and on() %s",
     local.usd_pegged_pair_regex,
@@ -122,8 +123,9 @@ locals {
   # suppression match avoids re-evaluating the division twice per tick.
   # Referenced by the warning + critical rules in rules-fpmms.tf.
   fx_gated_liveness_ratio_promql = format(
-    "((time() - %s) / ignoring(last_oracle_update_url) (mento_pool_oracle_expiry > 0)) unless on(chain_id, pool_id, pair) (%s)",
+    "((time() - %s) / ignoring(last_oracle_update_url) (%s > 0)) unless on(chain_id, pool_id, pair) (%s)",
     local.oracle_live_timestamp_compat_promql,
+    local.oracle_expiry_compat_promql,
     local.fx_oracle_pause_promql,
   )
 
