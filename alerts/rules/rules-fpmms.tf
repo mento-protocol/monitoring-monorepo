@@ -32,8 +32,8 @@ resource "grafana_rule_group" "fpmms_oracle" {
 
     annotations = {
       title            = "Oracle Update Delayed"
-      summary          = "The pool oracle has not published a new price within its {{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}{{ humanizeDuration $values.OracleExpiry.Value }}{{ else }}expected{{ end }} update window."
-      last_update      = "{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}age unavailable{{ else }}never reported{{ end }}"
+      summary          = "The pool oracle has not published a new price within its ${local.oracle_update_window_duration_annotation} update window."
+      last_update      = "{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }}${local.oracle_live_age_duration_annotation} ago{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}age unavailable{{ else }}never reported{{ end }}"
       resolved_title   = "Oracle Update Recovered"
       resolved_summary = "The pool oracle is publishing recent prices again."
     }
@@ -89,7 +89,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = format("time() - %s", local.oracle_live_timestamp_compat_promql)
+        expr    = local.oracle_live_age_promql
         instant = true
       })
     }
@@ -106,6 +106,25 @@ resource "grafana_rule_group" "fpmms_oracle" {
         expr    = local.oracle_expiry_compat_promql
         instant = true
       })
+    }
+
+    dynamic "data" {
+      for_each = merge(local.oracle_expiry_duration_part_promql, local.oracle_age_duration_part_promql)
+      iterator = duration_part
+
+      content {
+        ref_id         = duration_part.key
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = local.instant_query_range_seconds
+          to   = 0
+        }
+        model = jsonencode({
+          refId   = duration_part.key
+          expr    = duration_part.value
+          instant = true
+        })
+      }
     }
 
     data {
@@ -334,8 +353,8 @@ resource "grafana_rule_group" "fpmms_oracle" {
     # derivation has drifted from the on-chain expiry check.
     annotations = {
       title            = "Oracle Down"
-      summary          = "The pool oracle is far past its {{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}{{ humanizeDuration $values.OracleExpiry.Value }}{{ else }}expected{{ end }} update window."
-      last_update      = "{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}age unavailable{{ else }}never reported{{ end }}"
+      summary          = "The pool oracle is far past its ${local.oracle_update_window_duration_annotation} update window."
+      last_update      = "{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }}${local.oracle_live_age_duration_annotation} ago{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}age unavailable{{ else }}never reported{{ end }}"
       resolved_title   = "Oracle Back Up"
       resolved_summary = "The pool oracle is back inside its update window."
     }
@@ -385,7 +404,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = format("time() - %s", local.oracle_live_timestamp_compat_promql)
+        expr    = local.oracle_live_age_promql
         instant = true
       })
     }
@@ -402,6 +421,25 @@ resource "grafana_rule_group" "fpmms_oracle" {
         expr    = local.oracle_expiry_compat_promql
         instant = true
       })
+    }
+
+    dynamic "data" {
+      for_each = merge(local.oracle_expiry_duration_part_promql, local.oracle_age_duration_part_promql)
+      iterator = duration_part
+
+      content {
+        ref_id         = duration_part.key
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = local.instant_query_range_seconds
+          to   = 0
+        }
+        model = jsonencode({
+          refId   = duration_part.key
+          expr    = duration_part.value
+          instant = true
+        })
+      }
     }
 
     data {
