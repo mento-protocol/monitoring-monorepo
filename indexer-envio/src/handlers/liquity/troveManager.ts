@@ -265,11 +265,12 @@ async function preloadBatchReplay(args: {
       if (trove === undefined) return;
       const leavesBatch = op?.operation === OP.REMOVE_FROM_BATCH;
       const entersBatch = trove.interestBatchId === undefined && !leavesBatch;
-      const nextDebt =
+      const batchShareDebt =
         args.totalDebtShares === 0n
           ? 0n
           : (args.nextBatchDebt * pending.batchDebtShares) /
             args.totalDebtShares;
+      const nextDebt = leavesBatch ? trove.debt : batchShareDebt;
       if (entersBatch) {
         await preloadInterestRateBracketDebt(args.context, {
           collateralId: args.collateralId,
@@ -278,7 +279,7 @@ async function preloadBatchReplay(args: {
           prevDebt: trove.debt,
           nextDebt: 0n,
         });
-      } else if (leavesBatch) {
+      } else if (leavesBatch && trove.interestBatchId !== undefined) {
         await preloadInterestRateBracketDebt(args.context, {
           collateralId: args.collateralId,
           prevRate: 0n,

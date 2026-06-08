@@ -140,10 +140,6 @@ export async function replayBatchedTroveUpdate(
     txHash: args.txHash,
   });
   const prevTroveState = { status: trove.status, debt: trove.debt };
-  const nextDebt =
-    args.totalDebtShares === 0n
-      ? 0n
-      : (args.batchDebt * pending.batchDebtShares) / args.totalDebtShares;
   const pendingId = pendingTroveKey(
     args.chainId,
     args.txHash,
@@ -158,6 +154,11 @@ export async function replayBatchedTroveUpdate(
     context.PendingBatchMembershipOperation.deleteUnsafe(op.id);
   }
   const leavesBatch = op?.operation === OP.REMOVE_FROM_BATCH;
+  const batchShareDebt =
+    args.totalDebtShares === 0n
+      ? 0n
+      : (args.batchDebt * pending.batchDebtShares) / args.totalDebtShares;
+  const nextDebt = leavesBatch ? trove.debt : batchShareDebt;
   const entersBatch = trove.interestBatchId === undefined && !leavesBatch;
   const movesLeaveDebt = leavesBatch && trove.interestBatchId !== undefined;
   await moveBatchMembershipBracketDebt(context, {

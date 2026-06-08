@@ -1098,7 +1098,7 @@ describe("Liquity CDP helpers", () => {
       },
     };
 
-    await replayBatchedTroveUpdate(context as never, {
+    const nextInstance = await replayBatchedTroveUpdate(context as never, {
       chainId,
       txHash,
       collateralId,
@@ -1127,11 +1127,143 @@ describe("Liquity CDP helpers", () => {
     });
 
     const updated = troves.get(`${collateralId}-${troveId}`);
+    assert.equal(updated?.debt, 1_100n);
     assert.equal(updated?.interestBatchId, undefined);
     assert.equal(updated?.batchDebtShares, 0n);
     assert.equal(updated?.interestRate, 5n * 10n ** 16n);
+    assert.equal(nextInstance.systemDebt, 1_100n);
     assert.equal(pendingBatchOps.has(pendingId), false);
     assert.equal(brackets.size, 0);
+  });
+
+  it("preserves trove debt when replaying a remove-from-batch exit", async () => {
+    const chainId = 42220;
+    const txHash =
+      "0x00000000000000000000000000000000000000000000000000000000000000ad";
+    const collateralId = "42220-0xabc";
+    const troveId = "0x1";
+    const pendingId = pendingTroveKey(chainId, txHash, collateralId, troveId);
+    const batchId = `${collateralId}-0xbatch`;
+    const individualRate = 5n * 10n ** 16n;
+    const troves = new Map<string, Record<string, unknown>>([
+      [
+        `${collateralId}-${troveId}`,
+        {
+          id: `${collateralId}-${troveId}`,
+          chainId,
+          collateralId,
+          troveId,
+          owner: "0x0000000000000000000000000000000000000000",
+          previousOwner: "0x0000000000000000000000000000000000000000",
+          status: TROVE_STATUS.ACTIVE,
+          debt: 1_100n,
+          coll: 5_000n,
+          stake: 5_000n,
+          snapshotOfTotalCollRedist: 0n,
+          snapshotOfTotalDebtRedist: 0n,
+          interestRate: 0n,
+          interestBatchId: batchId,
+          batchDebtShares: 10n,
+          icrBps: 0,
+          liquidatedColl: undefined,
+          liquidatedDebt: undefined,
+          collSurplus: undefined,
+          priceAtLiquidation: undefined,
+          redemptionCount: 0,
+          redeemedColl: 0n,
+          redeemedDebt: 0n,
+          redemptionFeePaidCum: 0n,
+          openedAt: 1n,
+          openedAtBlock: 1n,
+          openedTxHash: "0xopen",
+          closedAt: undefined,
+          closedAtBlock: undefined,
+          closedTxHash: undefined,
+          lastUserActionAt: 1n,
+          lastUpdatedAt: 1n,
+          lastUpdatedBlock: 1n,
+        },
+      ],
+    ]);
+    const pendingBatchOps = new Set([pendingId]);
+    const pendingBatchedUpdates = new Set([pendingId]);
+    const brackets = new Map<string, Record<string, unknown>>();
+    const context = {
+      Trove: {
+        get: async (id: string) => troves.get(id),
+        set: (entity: Record<string, unknown>) =>
+          troves.set(String(entity.id), entity),
+      },
+      BorrowerInfo: { get: async () => undefined, set: () => undefined },
+      InterestRateBracket: {
+        get: async (id: string) => brackets.get(id),
+        set: (entity: Record<string, unknown>) =>
+          brackets.set(String(entity.id), entity),
+      },
+      PendingBatchMembershipOperation: {
+        get: async (id: string) =>
+          pendingBatchOps.has(id)
+            ? {
+                id,
+                collateralId,
+                txHash,
+                troveId,
+                operation: OP.REMOVE_FROM_BATCH,
+                annualInterestRate: individualRate,
+                interestBatchId: batchId,
+                timestamp: 2n,
+                blockNumber: 2n,
+              }
+            : undefined,
+        deleteUnsafe: (id: string) => pendingBatchOps.delete(id),
+      },
+      PendingBatchedTroveUpdate: {
+        deleteUnsafe: (id: string) => pendingBatchedUpdates.delete(id),
+      },
+      PendingRedemption: {
+        get: async () => undefined,
+        deleteUnsafe: () => undefined,
+      },
+    };
+
+    const nextInstance = await replayBatchedTroveUpdate(context as never, {
+      chainId,
+      txHash,
+      collateralId,
+      batchId,
+      pending: {
+        id: pendingId,
+        troveId,
+        batchDebtShares: 10n,
+        coll: 4_900n,
+        stake: 4_900n,
+        snapshotOfTotalCollRedist: 0n,
+        snapshotOfTotalDebtRedist: 0n,
+      },
+      blockNumber: 3n,
+      blockTimestamp: 3n,
+      batchDebt: 900n,
+      totalDebtShares: 10n,
+      annualInterestRate: 4n * 10n ** 16n,
+      price: null,
+      collateral: { minDebt: 1n, systemParamsLoaded: true },
+      instance: {
+        ...makeLiquityInstance(collateralId, chainId, 1n),
+        activeTroveCount: 1,
+        systemDebt: 1_100n,
+      },
+    });
+
+    const updated = troves.get(`${collateralId}-${troveId}`);
+    assert.equal(updated?.debt, 1_100n);
+    assert.equal(updated?.interestBatchId, undefined);
+    assert.equal(updated?.batchDebtShares, 0n);
+    assert.equal(updated?.interestRate, individualRate);
+    assert.equal(nextInstance.systemDebt, 1_100n);
+    assert.equal(pendingBatchOps.has(pendingId), false);
+    assert.equal(pendingBatchedUpdates.has(pendingId), false);
+    const bracket = brackets.get(`${collateralId}-${individualRate}`);
+    assert.equal(bracket?.totalDebt, 1_100n);
   });
 
   it("clears pending redemption markers after batched trove replay", async () => {
