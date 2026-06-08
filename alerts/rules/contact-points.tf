@@ -221,7 +221,7 @@ locals {
     *Previous Oracle Price:* {{ .Annotations.previous_oracle_price }}
     {{ end -}}
     {{ if .Annotations.last_update -}}
-    *Last update:* {{ .Annotations.last_update }}
+    *Last Update:* {{ .Annotations.last_update }}
     {{ end -}}
     {{ if .Annotations.breach_started -}}
     *Started:* {{ .Annotations.breach_started }}

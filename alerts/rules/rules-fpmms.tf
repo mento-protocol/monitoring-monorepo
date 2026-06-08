@@ -237,6 +237,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
+      title            = "Oracle Not Usable"
       summary          = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last live update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
       resolved_title   = "Oracle back up"
       resolved_summary = "Swaps should no longer revert."
@@ -328,6 +329,9 @@ resource "grafana_rule_group" "fpmms_oracle" {
     exec_err_state = "Error"
     no_data_state  = "OK"
 
+    # Diagnostic retained out of Slack copy: if this fires while the live
+    # Oracle Down rule stays quiet, check whether the indexer's oracleOk
+    # derivation has drifted from the on-chain expiry check.
     annotations = {
       title            = "Oracle Down"
       summary          = "The pool oracle is far past its {{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}{{ humanizeDuration $values.OracleExpiry.Value }}{{ else }}expected{{ end }} update window."
