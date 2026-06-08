@@ -698,9 +698,23 @@ describe("CdpDetailClient", () => {
                 trove({
                   id: `trove-${i}`,
                   troveId: String(i + 1),
-                  owner: `0x${String(i).padStart(40, "0")}`,
+                  owner:
+                    i === 0
+                      ? "0xhigherdirect"
+                      : i === 1
+                        ? "0xlowbatch"
+                        : `0x${String(i).padStart(40, "0")}`,
+                  interestRate:
+                    i === 0 ? rateBps(300) : i === 1 ? "0" : rateBps(500),
+                  interestBatchId: i === 1 ? "batch-low" : null,
                 }),
             ),
+            interestBatches: [
+              interestBatch({
+                id: "batch-low",
+                annualInterestRate: rateBps(200),
+              }),
+            ],
             depositors: [],
             cdpPools: [],
           }),
@@ -726,6 +740,10 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain(
       "Redemption ranks are hidden because the full open-trove set is not loaded.",
     );
+    const rows = troveRowText(handle!);
+    expect(rows[0]).toContain("0xlowbatch");
+    expect(rows[0]).toContain("Batch");
+    expect(rows[1]).toContain("0xhigherdirect");
     const firstRankCell = handle!.container.querySelector("tbody tr td");
     expect(firstRankCell?.textContent).toBe("—");
     expect(handle!.container.textContent).toContain("1,000 total");

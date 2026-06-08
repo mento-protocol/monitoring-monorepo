@@ -416,8 +416,8 @@ function buildRankedOpenRows(
   { rankingEnabled = true }: { rankingEnabled?: boolean } = {},
 ): TroveDisplayRow[] {
   const rows = troves.map((trove) => displayRowForTrove(trove, batchById));
-  if (!rankingEnabled) return rows;
   rows.sort(compareRedemptionPriorityRows);
+  if (!rankingEnabled) return rows;
   const rateCounts = new Map<string, number>();
   for (const row of rows) {
     if (row.effectiveRate == null) continue;
