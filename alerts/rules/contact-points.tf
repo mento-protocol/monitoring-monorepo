@@ -15,7 +15,7 @@ resource "grafana_contact_point" "slack_critical" {
     # keeps Slack's push/preview text small and unobtrusive; the prominent
     # human-readable title is rendered as the first line of the body, where
     # mrkdwn links are honoured (see local.slack_body_template).
-    title = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }}"
+    title = "{{ if eq .Status \"firing\" }}🚨{{ else }}✅{{ end }}"
     text  = local.slack_body_template
   }
 }
@@ -39,7 +39,7 @@ resource "grafana_contact_point" "slack_critical_transition" {
     token                   = var.slack_bot_token
     recipient               = var.slack_channel_critical
     disable_resolve_message = true
-    title                   = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }}"
+    title                   = "{{ if eq .Status \"firing\" }}🚨{{ else }}✅{{ end }}"
     text                    = local.slack_body_template
   }
 }
@@ -125,6 +125,8 @@ locals {
   #
   # Layout (pool-scoped, e.g. fpmms rules):
   #   1. Bold linked title: `*<pool details URL|alertname — pair · chain>*`.
+  #      Rules can override the display title with `title`; resolved messages
+  #      can override it with `resolved_title`.
   #      Acts as the prominent visual title because Grafana's attachment.title
   #      links to grafana.com and that link target is not configurable from
   #      the terraform provider.
@@ -155,6 +157,8 @@ locals {
   #      message, reserves, rebalance-blocked reason, then start time.
   #      Rebalancer alerts may add Last Rebalance / Root Cause rows when the
   #      rule exposes those annotations.
+  #      Rules may also add a `last_update` row when freshness is the primary
+  #      signal.
   #   5. Metadata row: start time plus resolved time when applicable. The
   #      per-row `View alert` link was removed — Grafana's attachment title
   #      still links to grafana.com via the (unconfigurable) `title_link`, so
@@ -168,7 +172,7 @@ locals {
   #   6. *Alert ID* — Grafana's `.Fingerprint`, a deterministic hash of the
   #      alert's label set. The same value is rendered on the firing and the
   #      resolved message, so an operator scrolling Slack can match a ✅
-  #      "resolved" post back to the 🔴 "fired" post that opened the breach.
+  #      "resolved" post back to the firing post that opened the breach.
   #      Especially useful for deviation breaches where the same pool can
   #      churn through multiple fire/resolve cycles in a day.
   #
@@ -180,6 +184,7 @@ locals {
     {{ range .Alerts -}}
     {{ $isResolved := eq .Status "resolved" -}}
     {{ $title := .Labels.alertname -}}
+    {{ if .Annotations.title -}}{{ $title = .Annotations.title }}{{ end -}}
     {{ if and $isResolved .Annotations.resolved_title -}}{{ $title = .Annotations.resolved_title }}{{ end -}}
     {{ if .Labels.pool_id -}}
     *<https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|{{ $title }}{{ if .Labels.pair }} — {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
@@ -214,6 +219,9 @@ locals {
     {{ end -}}
     {{ if .Annotations.previous_oracle_price -}}
     *Previous Oracle Price:* {{ .Annotations.previous_oracle_price }}
+    {{ end -}}
+    {{ if .Annotations.last_update -}}
+    *Last Update:* {{ .Annotations.last_update }}
     {{ end -}}
     {{ if .Annotations.breach_started -}}
     *Started:* {{ .Annotations.breach_started }}
