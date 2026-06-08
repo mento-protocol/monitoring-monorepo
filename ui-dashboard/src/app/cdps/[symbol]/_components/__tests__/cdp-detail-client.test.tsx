@@ -685,6 +685,59 @@ describe("CdpDetailClient", () => {
     expect(troveRowText(handle!).join(" ")).toContain("redeemed");
   });
 
+  it("uses stored interest rates for historical batch troves", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return {
+          data: detailData({
+            openTroves: [
+              trove({ id: "trove-open", owner: "0xopen", status: "active" }),
+            ],
+            allTroves: [
+              trove({
+                id: "trove-closed-batch",
+                owner: "0xclosedbatch",
+                status: "redeemed",
+                interestRate: rateBps(210),
+                interestBatchId: "batch-history",
+              }),
+            ],
+            interestBatches: [
+              interestBatch({
+                id: "batch-history",
+                annualInterestRate: rateBps(350),
+              }),
+            ],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+    clickButton(handle!, "History");
+
+    const rows = troveRowText(handle!);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain("0xclosedbatch");
+    expect(rows[0]).toContain("2.10%");
+    expect(rows[0]).not.toContain("3.50%");
+  });
+
   it("discloses when the active trove fetch reaches the hosted row cap", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {

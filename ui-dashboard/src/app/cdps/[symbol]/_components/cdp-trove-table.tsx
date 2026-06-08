@@ -450,15 +450,18 @@ function buildHistoryRows(
   return troves.map((trove) => {
     const ranked = rankedOpenById.get(trove.id);
     if (ranked != null) return ranked;
-    return displayRowForTrove(trove, batchById);
+    return displayRowForTrove(trove, batchById, {
+      useStoredBatchRate: true,
+    });
   });
 }
 
 function displayRowForTrove(
   trove: CdpTrove,
   batchById: ReadonlyMap<string, CdpInterestBatch>,
+  { useStoredBatchRate = false }: { useStoredBatchRate?: boolean } = {},
 ): TroveDisplayRow {
-  if (trove.interestBatchId != null) {
+  if (trove.interestBatchId != null && !useStoredBatchRate) {
     const batch = batchById.get(trove.interestBatchId);
     if (batch == null) {
       return {
