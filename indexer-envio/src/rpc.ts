@@ -14,6 +14,7 @@ import type { EvmOnEventContext, Pool, BreakerConfig } from "envio";
 export {
   getRpcClient,
   getFallbackRpcClient,
+  logRpcFailure,
   withHyperRpcToken,
   _clearRpcClients,
   _setRpcClientForTests,

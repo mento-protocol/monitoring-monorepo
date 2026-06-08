@@ -19,6 +19,7 @@ export type LiquityMarketConfig = {
   collSurplusPool: string;
   addressesRegistry: string;
   systemParams: string;
+  priceFeed: string;
   cdpLiquidityStrategy: string;
   slug: string;
 };
@@ -123,6 +124,7 @@ const buildMarket = (symbol: Sym): LiquityMarketConfig => {
       symbol,
     ),
     systemParams: requireSymbolAddress(chainId, "SystemParams", symbol),
+    priceFeed: requireSharedAddress(chainId, `FXPriceFeedProxy${symbol}`),
     cdpLiquidityStrategy: requireSharedAddress(chainId, "CDPLiquidityStrategy"),
   };
 };

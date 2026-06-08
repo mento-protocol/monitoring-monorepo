@@ -64,6 +64,21 @@ const mode = process.argv[2] ?? "check";
 const cwd = process.cwd();
 const baselinePath = resolve(cwd, "eslint-baseline.json");
 
+function parseEslintJsonStdout(stdout) {
+  const text = stdout ?? "";
+  for (const match of text.matchAll(/(^|\n)\s*\[/g)) {
+    const bracketOffset = match[0].lastIndexOf("[");
+    const jsonStart = match.index + bracketOffset;
+    try {
+      const parsed = JSON.parse(text.slice(jsonStart).trimEnd());
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Continue scanning; warnings can contain bracketed text before JSON.
+    }
+  }
+  return null;
+}
+
 // `ESLINT_BASELINE_INPUT` lets tests inject canned ESLint JSON output
 // instead of spawning eslint. Production runs (CI, dev `pnpm lint`)
 // don't set it and fall through to the spawn path. The injected JSON
@@ -89,13 +104,15 @@ if (eslintInputPath) {
     );
     process.exit(2);
   }
-  if (!eslintRun.stdout || !eslintRun.stdout.trim().startsWith("[")) {
+  eslintOutput = parseEslintJsonStdout(eslintRun.stdout);
+  if (eslintOutput === null) {
     process.stderr.write(
-      `eslint produced no JSON output (exit ${eslintRun.status}):\n${eslintRun.stderr}\n`,
+      `eslint produced no JSON output (exit ${eslintRun.status}):\n` +
+        `stdout:\n${eslintRun.stdout}\n` +
+        `stderr:\n${eslintRun.stderr}\n`,
     );
     process.exit(2);
   }
-  eslintOutput = JSON.parse(eslintRun.stdout);
 }
 
 const sourceCache = new Map();

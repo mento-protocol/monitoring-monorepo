@@ -471,6 +471,19 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_CDP_POOLS).toContain("chainId: { _eq: $chainId }");
   });
 
+  it("CDP_MARKET_DETAIL fetches open/history troves and batch rates with deterministic caps", () => {
+    const query = normalize(queries.CDP_MARKET_DETAIL);
+    expect(query).toContain("OpenTrove: Trove(");
+    expect(query).toContain("AllTrove: Trove(");
+    expect(query).toContain("InterestBatch(");
+    expect(query).toContain("limit: 1000");
+    expect(query).toContain(
+      "order_by: [{ interestRate: asc }, { troveId: asc }, { id: asc }]",
+    );
+    expect(query).toContain("order_by: [{ lastUpdatedAt: desc }, { id: asc }]");
+    expect(query).toContain("annualInterestRate");
+  });
+
   it("POOL_BREAKER_CONFIG queries both BreakerConfig and BreakerTripEvent in one round-trip", () => {
     expect(queries.POOL_BREAKER_CONFIG).toContain("BreakerConfig");
     expect(queries.POOL_BREAKER_CONFIG).toContain("BreakerTripEvent");

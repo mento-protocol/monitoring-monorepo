@@ -17,9 +17,10 @@ import { formatWei, relativeTime, truncateAddress } from "@/lib/format";
 import type { Network } from "@/lib/networks";
 import { explorerAddressUrl } from "@/lib/tokens";
 import {
-  CDP_TROVES_LIST_LIMIT,
+  CDP_TROVES_DETAIL_LIMIT,
   type CdpCollateral,
   type CdpDepositor,
+  type CdpInterestBatch,
   type CdpInstance,
   type CdpInstanceDailySnapshot,
   type CdpPoolRow,
@@ -34,6 +35,7 @@ import {
 import { aggregateTroves, deriveCdpHealth } from "../../_lib/health";
 import { CdpHealthBadge } from "../../_components/cdp-health-badge";
 import { CdpStabilityPoolTvlChart } from "./cdp-stability-pool-tvl-chart";
+import { CdpTroveTable } from "./cdp-trove-table";
 import { CdpTransactionsTable } from "./cdp-transactions-table";
 
 type CdpMarketsResponse = {
@@ -45,7 +47,9 @@ type CdpMarketsResponse = {
 type CdpDetailResponse = {
   LiquityCollateral: CdpCollateral[];
   LiquityInstance: CdpInstance[];
-  Trove: CdpTrove[];
+  OpenTrove: CdpTrove[];
+  AllTrove: CdpTrove[];
+  InterestBatch: CdpInterestBatch[];
   StabilityPoolDepositor: CdpDepositor[];
   CdpPool: CdpPoolRow[];
 };
@@ -106,17 +110,6 @@ function CdpDetailState({
   collateral: CdpCollateral | undefined;
   network: Network;
 }) {
-  // aggregateTroves loops over up to 500 trove rows to produce the borrower
-  // count; memoize so the 30s SWR refresh doesn't recompute when neither
-  // input changed. systemDebt/systemColl come from `LiquityInstance` directly.
-  const aggregates = useMemo(
-    () =>
-      collateral == null
-        ? null
-        : aggregatesFromChainTroves(collateral.id, markets.data?.Trove),
-    [collateral, markets.data?.Trove],
-  );
-
   if (markets.isLoading || (collateral != null && detail.isLoading)) {
     return <Skeleton rows={8} />;
   }
@@ -127,7 +120,7 @@ function CdpDetailState({
       />
     );
   }
-  if (collateral == null || aggregates == null) {
+  if (collateral == null) {
     return <EmptyBox message="Unknown CDP market." />;
   }
   if (detail.error) {
@@ -144,7 +137,6 @@ function CdpDetailState({
         snapshots,
         collateral,
         network,
-        aggregates,
       })}
     />
   );
@@ -155,21 +147,24 @@ function buildContentProps({
   snapshots,
   collateral,
   network,
-  aggregates,
 }: {
   detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
   snapshots: ReturnType<typeof useGQL<CdpDailySnapshotsResponse>>;
   collateral: CdpCollateral;
   network: Network;
-  aggregates: ReturnType<typeof aggregateTroves>;
 }) {
+  const openTroves = detail.data?.OpenTrove ?? [];
   return {
     collateral,
     instance: detail.data?.LiquityInstance[0],
-    troves: detail.data?.Trove ?? [],
+    openTroves,
+    allTroves: detail.data?.AllTrove ?? [],
+    interestBatches: detail.data?.InterestBatch ?? [],
     depositors: detail.data?.StabilityPoolDepositor ?? [],
     cdpPools: detail.data?.CdpPool ?? [],
-    aggregates,
+    aggregates: aggregateTroves(openTroves, {
+      truncated: openTroves.length >= CDP_TROVES_DETAIL_LIMIT,
+    }),
     snapshots: snapshots.data?.LiquityInstanceDailySnapshot ?? [],
     snapshotsLoading: snapshots.isLoading,
     snapshotsError: snapshots.error != null,
@@ -177,25 +172,12 @@ function buildContentProps({
   };
 }
 
-// For the borrower count, use the chain-wide markets-list query (up to 500
-// troves) filtered to this collateral, NOT the 50-row detail query — that
-// one exists only for the recent-activity table and would understate the
-// open-trove count for any market with >50 open troves.
-function aggregatesFromChainTroves(
-  collateralId: string,
-  allChainTroves: CdpTroveListRow[] | undefined,
-) {
-  const rows = allChainTroves ?? [];
-  return aggregateTroves(
-    rows.filter((t) => t.collateralId === collateralId),
-    { truncated: rows.length >= CDP_TROVES_LIST_LIMIT },
-  );
-}
-
 function CdpDetailContent({
   collateral,
   instance,
-  troves,
+  openTroves,
+  allTroves,
+  interestBatches,
   depositors,
   cdpPools,
   aggregates,
@@ -206,7 +188,9 @@ function CdpDetailContent({
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
-  troves: CdpTrove[];
+  openTroves: CdpTrove[];
+  allTroves: CdpTrove[];
+  interestBatches: CdpInterestBatch[];
   depositors: CdpDepositor[];
   cdpPools: CdpPoolRow[];
   aggregates: ReturnType<typeof aggregateTroves>;
@@ -259,20 +243,21 @@ function CdpDetailContent({
         hasError={snapshotsError}
       />
 
+      <CdpTroveTable
+        openTroves={openTroves}
+        allTroves={allTroves}
+        interestBatches={interestBatches}
+        collateral={collateral}
+      />
+
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <TroveTable
-          troves={troves}
-          symbol={collateral.symbol}
-          chainId={collateral.chainId}
-        />
         <DepositorTable
           depositors={depositors}
           symbol={collateral.symbol}
           chainId={collateral.chainId}
         />
+        <CdpPoolsTable cdpPools={cdpPools} />
       </section>
-
-      <CdpPoolsTable cdpPools={cdpPools} />
 
       <CdpTransactionsTable
         instanceId={collateral.id}
@@ -395,50 +380,6 @@ function CdpPoolsTable({ cdpPools }: { cdpPools: CdpPoolRow[] }) {
                 </Td>
                 <Td align="right">{pool.rebalanceCooldownSec}s</Td>
                 <Td align="right">{relativeTime(pool.updatedAtTimestamp)}</Td>
-              </Row>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </section>
-  );
-}
-
-function TroveTable({
-  troves,
-  symbol,
-  chainId,
-}: {
-  troves: CdpTrove[];
-  symbol: string;
-  chainId: number;
-}) {
-  return (
-    <section>
-      <h2 className="text-lg font-semibold text-white mb-3">
-        Recent Live Troves
-      </h2>
-      {troves.length === 0 ? (
-        <EmptyBox message="No troves indexed yet." />
-      ) : (
-        <Table>
-          <thead>
-            <Row>
-              <Th>Owner</Th>
-              <Th>Status</Th>
-              <Th align="right">Debt</Th>
-              <Th align="right">Updated</Th>
-            </Row>
-          </thead>
-          <tbody>
-            {troves.map((trove) => (
-              <Row key={trove.id}>
-                <Td>
-                  <AddressLink address={trove.owner} chainId={chainId} />
-                </Td>
-                <Td>{trove.status}</Td>
-                <Td align="right">{formatTokenAmount(trove.debt, symbol)}</Td>
-                <Td align="right">{relativeTime(trove.lastUpdatedAt)}</Td>
               </Row>
             ))}
           </tbody>

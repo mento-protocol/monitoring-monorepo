@@ -1150,6 +1150,7 @@ type PendingBatchMembershipOperation
   troveId: String!
   operation: Int!
   annualInterestRate: BigInt!
+  interestBatchId: String
   timestamp: BigInt!
   blockNumber: BigInt!
 }

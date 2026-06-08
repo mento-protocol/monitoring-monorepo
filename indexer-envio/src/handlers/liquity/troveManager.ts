@@ -13,6 +13,7 @@ import {
   getOrCreateLiquityInstance,
   preloadLiquityMarket,
 } from "./bootstrap.js";
+import { replayBatchedTroveUpdate } from "./batchReplay.js";
 import {
   findLiquityMarketByEventSource,
   isLiquidityStrategyAddress,
@@ -20,11 +21,18 @@ import {
 } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { pendingTroveKey } from "./keys.js";
-import { negativeToPositive } from "./math.js";
+import { computeTroveIcrBps, negativeToPositive } from "./math.js";
+import { loadLiquityPrice } from "./priceFeed.js";
+import type { LiquityPriceContext } from "./priceFeed.js";
 import {
   captureTroveOperationSnapshotState,
   maybeRecordTroveOperation,
 } from "./troveOperationSnapshot.js";
+import {
+  applyTroveUpdatedFields,
+  moveTroveUpdatedInterestRateBracketDebt,
+  removesFromBatch,
+} from "./troveUpdates.js";
 import { OP, isBatchMembershipOperation } from "./operations.js";
 import {
   setPendingBatchMembershipOperation,
@@ -41,7 +49,6 @@ import {
   normalizeTroveTokenId,
   moveInterestRateBracketDebt,
   statusFromDebt,
-  tracksIndividualInterest,
   transitionTroveStatus,
 } from "./troves.js";
 
@@ -54,54 +61,48 @@ const statusFromCollateral = (
   return statusFromDebt(debt, collateral.minDebt);
 };
 
-const statusFromBatchReplay = (
-  trove: Parameters<typeof isPlaceholderClosedTrove>[0] & { status: string },
-  debt: bigint,
-  collateral: { minDebt: bigint; systemParamsLoaded: boolean } | undefined,
-): string => {
-  if (
-    (trove.status === TROVE_STATUS.CLOSED &&
-      !isPlaceholderClosedTrove(trove)) ||
-    trove.status === TROVE_STATUS.LIQUIDATED
-  ) {
-    return trove.status;
-  }
-  return statusFromCollateral(debt, collateral);
-};
-
 const isForcedOperation = (op: number): boolean =>
   op === OP.REDEEM_COLLATERAL ||
   op === OP.LIQUIDATE ||
   op === OP.APPLY_PENDING_DEBT;
 
-type TroveManagerPreloadContext = Parameters<typeof preloadSystemParams>[0] & {
-  PendingBatchMembershipOperation: {
-    get: (id: string) => Promise<PendingBatchMembershipOperation | undefined>;
-    set: (entity: PendingBatchMembershipOperation) => void;
+type TroveManagerPreloadContext = Parameters<typeof preloadSystemParams>[0] &
+  LiquityPriceContext & {
+    PendingBatchMembershipOperation: {
+      get: (id: string) => Promise<PendingBatchMembershipOperation | undefined>;
+      getWhere: (args: {
+        txHash: { _eq: string };
+      }) => Promise<PendingBatchMembershipOperation[]>;
+      set: (entity: PendingBatchMembershipOperation) => void;
+      deleteUnsafe: (id: string) => void;
+    };
+    PendingRedemption: {
+      get: (id: string) => Promise<PendingRedemption | undefined>;
+    };
+    PendingBatchedTroveUpdate: {
+      getWhere: (args: { txHash: { _eq: string } }) => Promise<
+        Array<{
+          collateralId: string;
+          batchManager: string;
+          logIndex: number;
+          troveId: string;
+          batchDebtShares: bigint;
+        }>
+      >;
+      set: (entity: PendingBatchedTroveUpdate) => void;
+    };
+    InterestRateBracket: {
+      get: (id: string) => Promise<InterestRateBracket | undefined>;
+      set: (entity: InterestRateBracket) => void;
+    };
+    BorrowerInfo: {
+      get: (id: string) => Promise<BorrowerInfo | undefined>;
+      set: (entity: BorrowerInfo) => void;
+    };
   };
-  PendingBatchedTroveUpdate: {
-    getWhere: (args: { txHash: { _eq: string } }) => Promise<
-      Array<{
-        collateralId: string;
-        batchManager: string;
-        logIndex: number;
-        troveId: string;
-        batchDebtShares: bigint;
-      }>
-    >;
-    set: (entity: PendingBatchedTroveUpdate) => void;
-  };
-  InterestRateBracket: {
-    get: (id: string) => Promise<InterestRateBracket | undefined>;
-    set: (entity: InterestRateBracket) => void;
-  };
-  BorrowerInfo: {
-    get: (id: string) => Promise<BorrowerInfo | undefined>;
-    set: (entity: BorrowerInfo) => void;
-  };
-};
 type TroveOperationPreloadContext = TroveManagerPreloadContext & {
   PendingRedemption: {
+    get: (id: string) => Promise<PendingRedemption | undefined>;
     set: (entity: PendingRedemption) => void;
   };
 };
@@ -123,6 +124,17 @@ function isPendingBatchReplayRow(
     pending.collateralId === args.collateralId &&
     pending.batchManager === args.batchManager &&
     pending.logIndex < args.eventLogIndex
+  );
+}
+
+function isPendingBatchRemovalForBatch(
+  pending: PendingBatchMembershipOperation,
+  args: { collateralId: string; batchId: string },
+): boolean {
+  return (
+    pending.collateralId === args.collateralId &&
+    pending.operation === OP.REMOVE_FROM_BATCH &&
+    pending.interestBatchId === args.batchId
   );
 }
 
@@ -159,11 +171,12 @@ async function preloadTroveAndMarket(
   market: Parameters<typeof preloadSystemParams>[1],
   collateralId: string,
   troveId: string,
-): Promise<void> {
-  await Promise.all([
+): Promise<Trove | undefined> {
+  const [, trove] = await Promise.all([
     preloadLiquityMarket(context, market),
     context.Trove.get(makeTroveId(collateralId, troveId)),
   ]);
+  return trove;
 }
 
 async function preloadTroveOperation(
@@ -180,7 +193,7 @@ async function preloadTroveOperation(
     blockTimestamp: bigint;
   },
 ): Promise<void> {
-  await preloadTroveAndMarket(
+  const trove = await preloadTroveAndMarket(
     context,
     args.market,
     args.collateralId,
@@ -195,6 +208,7 @@ async function preloadTroveOperation(
     setPendingBatchMembershipOperation(context, {
       ...args,
       operation: args.operation,
+      interestBatchId: trove?.interestBatchId,
       timestamp: args.blockTimestamp,
     });
   }
@@ -208,6 +222,7 @@ async function preloadBatchReplay(args: {
   collateralId: string;
   batchManager: string;
   eventLogIndex: number;
+  blockNumber: bigint;
   prevBatchRate: bigint;
   nextBatchRate: bigint;
   prevBatchDebt: bigint;
@@ -217,12 +232,17 @@ async function preloadBatchReplay(args: {
   const pendingRows = await args.context.PendingBatchedTroveUpdate.getWhere({
     txHash: { _eq: args.txHash },
   });
+  const pendingBatchOps =
+    await args.context.PendingBatchMembershipOperation.getWhere({
+      txHash: { _eq: args.txHash },
+    });
   const relevantRows = pendingRows.filter((pending) =>
     isPendingBatchReplayRow(pending, args),
   );
   await Promise.all([
     preloadLiquityMarket(args.context, args.market),
     preloadSystemParams(args.context, args.market),
+    loadLiquityPrice(args.context, args.market, args.blockNumber),
     preloadInterestRateBracketDebt(args.context, {
       collateralId: args.collateralId,
       prevRate: args.prevBatchRate,
@@ -231,25 +251,26 @@ async function preloadBatchReplay(args: {
       nextDebt: args.nextBatchDebt,
     }),
     ...relevantRows.map(async (pending) => {
+      const pendingId = pendingTroveKey(
+        args.chainId,
+        args.txHash,
+        args.collateralId,
+        pending.troveId,
+      );
       const [trove, op] = await Promise.all([
         args.context.Trove.get(makeTroveId(args.collateralId, pending.troveId)),
-        args.context.PendingBatchMembershipOperation.get(
-          pendingTroveKey(
-            args.chainId,
-            args.txHash,
-            args.collateralId,
-            pending.troveId,
-          ),
-        ),
+        args.context.PendingBatchMembershipOperation.get(pendingId),
+        args.context.PendingRedemption.get(pendingId),
       ]);
       if (trove === undefined) return;
       const leavesBatch = op?.operation === OP.REMOVE_FROM_BATCH;
       const entersBatch = trove.interestBatchId === undefined && !leavesBatch;
-      const nextDebt =
+      const batchShareDebt =
         args.totalDebtShares === 0n
           ? 0n
           : (args.nextBatchDebt * pending.batchDebtShares) /
             args.totalDebtShares;
+      const nextDebt = leavesBatch ? trove.debt : batchShareDebt;
       if (entersBatch) {
         await preloadInterestRateBracketDebt(args.context, {
           collateralId: args.collateralId,
@@ -258,7 +279,7 @@ async function preloadBatchReplay(args: {
           prevDebt: trove.debt,
           nextDebt: 0n,
         });
-      } else if (leavesBatch) {
+      } else if (leavesBatch && trove.interestBatchId !== undefined) {
         await preloadInterestRateBracketDebt(args.context, {
           collateralId: args.collateralId,
           prevRate: 0n,
@@ -268,41 +289,17 @@ async function preloadBatchReplay(args: {
         });
       }
     }),
+    ...pendingBatchOps
+      .filter((pending) =>
+        isPendingBatchRemovalForBatch(pending, {
+          collateralId: args.collateralId,
+          batchId: `${args.collateralId}-${args.batchManager}`,
+        }),
+      )
+      .map((pending) =>
+        args.context.PendingBatchMembershipOperation.get(pending.id),
+      ),
   ]);
-}
-
-async function moveBatchMembershipBracketDebt(
-  context: TroveManagerPreloadContext,
-  args: {
-    collateralId: string;
-    troveDebt: bigint;
-    troveInterestRate: bigint;
-    opAnnualInterestRate: bigint;
-    leavesBatch: boolean;
-    entersBatch: boolean;
-    nextDebt: bigint;
-    timestamp: bigint;
-  },
-): Promise<void> {
-  if (args.entersBatch) {
-    await moveInterestRateBracketDebt(context, {
-      collateralId: args.collateralId,
-      prevRate: args.troveInterestRate,
-      nextRate: 0n,
-      prevDebt: args.troveDebt,
-      nextDebt: 0n,
-      timestamp: args.timestamp,
-    });
-  } else if (args.leavesBatch) {
-    await moveInterestRateBracketDebt(context, {
-      collateralId: args.collateralId,
-      prevRate: 0n,
-      nextRate: args.opAnnualInterestRate,
-      prevDebt: 0n,
-      nextDebt: args.nextDebt,
-      timestamp: args.timestamp,
-    });
-  }
 }
 
 function transitionOpenedTrove(
@@ -480,6 +477,7 @@ indexer.onEvent(
         troveId: trove.troveId,
         operation: op,
         annualInterestRate: event.params._annualInterestRate,
+        interestBatchId: trove.interestBatchId,
         timestamp: blockTimestamp,
         blockNumber,
       });
@@ -533,24 +531,30 @@ indexer.onEvent(
       collateralId,
       troveId,
     );
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
     if (context.isPreload) {
-      const trove = await context.Trove.get(makeTroveId(collateralId, troveId));
+      const [trove, pendingBatchOperation] = await Promise.all([
+        context.Trove.get(makeTroveId(collateralId, troveId)),
+        context.PendingBatchMembershipOperation.get(pendingId),
+      ]);
+      const leavesBatch = removesFromBatch(pendingBatchOperation);
       await Promise.all([
         preloadLiquityMarket(context, market),
         preloadSystemParams(context, market),
+        loadLiquityPrice(context, market, blockNumber),
         context.PendingRedemption.get(pendingId),
         preloadInterestRateBracketDebt(context, {
           collateralId,
-          prevRate: trove?.interestRate ?? 0n,
+          prevRate: leavesBatch ? 0n : (trove?.interestRate ?? 0n),
           nextRate: event.params._annualInterestRate,
-          prevDebt: trove?.debt ?? 0n,
+          prevDebt: leavesBatch ? 0n : (trove?.debt ?? 0n),
           nextDebt: event.params._debt,
         }),
       ]);
       return;
     }
-    const blockNumber = asBigInt(event.block.number);
-    const blockTimestamp = asBigInt(event.block.timestamp);
+    const price = await loadLiquityPrice(context, market, blockNumber);
     let instance = await getOrCreateLiquityInstance(
       context,
       market,
@@ -575,30 +579,35 @@ indexer.onEvent(
     // debt overwrite, reclassified re-read all happen below). Single
     // capture point so the delta math at the end is unambiguous.
     const prevTroveState = { status: trove.status, debt: trove.debt };
-    if (tracksIndividualInterest(trove)) {
-      await moveInterestRateBracketDebt(context, {
-        collateralId,
-        prevRate: trove.interestRate,
-        nextRate: event.params._annualInterestRate,
-        prevDebt: trove.debt,
-        nextDebt: event.params._debt,
-        timestamp: blockTimestamp,
-      });
-    }
+    const [pendingRedemption, pendingBatchOperation] = await Promise.all([
+      context.PendingRedemption.get(pendingId),
+      context.PendingBatchMembershipOperation.get(pendingId),
+    ]);
+    await moveTroveUpdatedInterestRateBracketDebt(context, {
+      collateralId,
+      trove,
+      pendingBatchOperation,
+      annualInterestRate: event.params._annualInterestRate,
+      debt: event.params._debt,
+      timestamp: blockTimestamp,
+    });
 
-    const pendingRedemption = await context.PendingRedemption.get(pendingId);
-    trove = {
-      ...trove,
+    trove = applyTroveUpdatedFields(trove, {
       debt: event.params._debt,
       coll: event.params._coll,
       stake: event.params._stake,
       snapshotOfTotalCollRedist: event.params._snapshotOfTotalCollRedist,
       snapshotOfTotalDebtRedist: event.params._snapshotOfTotalDebtRedist,
-      interestRate: event.params._annualInterestRate,
-      icrBps: -1,
-      lastUpdatedAt: blockTimestamp,
-      lastUpdatedBlock: blockNumber,
-    };
+      annualInterestRate: event.params._annualInterestRate,
+      icrBps: computeTroveIcrBps({
+        coll: event.params._coll,
+        debt: event.params._debt,
+        price,
+      }),
+      blockTimestamp,
+      blockNumber,
+      pendingBatchOperation,
+    });
     if (
       (trove.status !== TROVE_STATUS.CLOSED ||
         isPlaceholderClosedTrove(trove)) &&
@@ -696,6 +705,7 @@ indexer.onEvent(
         collateralId,
         batchManager,
         eventLogIndex: event.logIndex,
+        blockNumber,
         prevBatchRate: existing?.annualInterestRate ?? 0n,
         nextBatchRate: event.params._annualInterestRate,
         prevBatchDebt: existing?.debt ?? 0n,
@@ -704,6 +714,7 @@ indexer.onEvent(
       });
       return;
     }
+    const price = await loadLiquityPrice(context, market, blockNumber);
     await moveInterestRateBracketDebt(context, {
       collateralId,
       prevRate: existing?.annualInterestRate ?? 0n,
@@ -740,6 +751,10 @@ indexer.onEvent(
     const pendingRows = await context.PendingBatchedTroveUpdate.getWhere({
       txHash: { _eq: event.transaction.hash },
     });
+    const pendingBatchOps =
+      await context.PendingBatchMembershipOperation.getWhere({
+        txHash: { _eq: event.transaction.hash },
+      });
     const relevantRows = pendingRows.filter((pending) =>
       isPendingBatchReplayRow(pending, {
         collateralId,
@@ -755,73 +770,39 @@ indexer.onEvent(
     );
     instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
     for (const pending of relevantRows) {
-      let trove = await getOrCreateTrove(context, {
+      instance = await replayBatchedTroveUpdate(context, {
         chainId: event.chainId,
+        txHash: event.transaction.hash,
         collateralId,
-        troveId: pending.troveId,
+        batchId,
+        pending,
         blockNumber,
         blockTimestamp,
-        txHash: event.transaction.hash,
+        batchDebt: event.params._debt,
+        totalDebtShares: event.params._totalDebtShares,
+        annualInterestRate: event.params._annualInterestRate,
+        price,
+        collateral,
+        instance,
       });
-      // Per-pending capture; the loop may process many troves per
-      // BatchUpdated event, each with its own status/debt flip.
-      const prevTroveState = { status: trove.status, debt: trove.debt };
-      const nextDebt =
-        event.params._totalDebtShares === 0n
-          ? 0n
-          : (event.params._debt * pending.batchDebtShares) /
-            event.params._totalDebtShares;
-      const op = await context.PendingBatchMembershipOperation.get(
+    }
+    const replayedPendingIds = new Set(
+      relevantRows.map((pending) =>
         pendingTroveKey(
           event.chainId,
           event.transaction.hash,
           collateralId,
           pending.troveId,
         ),
-      );
-      if (op !== undefined) {
-        context.PendingBatchMembershipOperation.deleteUnsafe(op.id);
+      ),
+    );
+    for (const pending of pendingBatchOps) {
+      if (
+        !replayedPendingIds.has(pending.id) &&
+        isPendingBatchRemovalForBatch(pending, { collateralId, batchId })
+      ) {
+        context.PendingBatchMembershipOperation.deleteUnsafe(pending.id);
       }
-      const leavesBatch = op?.operation === OP.REMOVE_FROM_BATCH;
-      const entersBatch = trove.interestBatchId === undefined && !leavesBatch;
-      await moveBatchMembershipBracketDebt(context, {
-        collateralId,
-        troveDebt: trove.debt,
-        troveInterestRate: trove.interestRate,
-        opAnnualInterestRate: op?.annualInterestRate ?? 0n,
-        leavesBatch,
-        entersBatch,
-        nextDebt,
-        timestamp: blockTimestamp,
-      });
-      const transitioned = transitionTroveStatus(
-        {
-          ...trove,
-          debt: nextDebt,
-          coll: pending.coll,
-          stake: pending.stake,
-          snapshotOfTotalCollRedist: pending.snapshotOfTotalCollRedist,
-          snapshotOfTotalDebtRedist: pending.snapshotOfTotalDebtRedist,
-          interestRate: leavesBatch
-            ? (op?.annualInterestRate ?? trove.interestRate)
-            : event.params._annualInterestRate,
-          interestBatchId: leavesBatch ? undefined : batchId,
-          batchDebtShares: leavesBatch ? 0n : pending.batchDebtShares,
-          icrBps: -1,
-          lastUpdatedAt: blockTimestamp,
-          lastUpdatedBlock: blockNumber,
-        },
-        statusFromBatchReplay(trove, nextDebt, collateral),
-        instance,
-      );
-      trove = transitioned.trove;
-      instance = transitioned.instance;
-      instance = applySystemDebtDelta(instance, prevTroveState, {
-        status: trove.status,
-        debt: trove.debt,
-      });
-      context.Trove.set(trove);
-      context.PendingBatchedTroveUpdate.deleteUnsafe(pending.id);
     }
 
     context.LiquityInstance.set({

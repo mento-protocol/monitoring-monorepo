@@ -19,11 +19,15 @@ const ADDRESSES = {
   celoUsdc: "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
   celoGbpm: "0xccf663b1ff11028f0b19058d0f7b674004a40746",
   celoBrlm: "0x0000000000000000000000000000000000000b71",
+  celoTroveManagerGbpm: "0xb38aef2bf4e34b997330d626ebcd7629de3885c9",
+  celoStabilityPoolGbpm: "0x2d5d7e2767c5493610cae84e0ab7f9d2cce8c1a5",
   monadAusd: "0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
   monadUsdm: "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
   lp: "0x1111111111111111111111111111111111111111",
   trader: "0x2222222222222222222222222222222222222222",
   recipient: "0x3333333333333333333333333333333333333333",
+  troveOwnerA: "0x4444444444444444444444444444444444444444",
+  troveOwnerB: "0x5555555555555555555555555555555555555555",
 };
 
 function nowSeconds() {
@@ -379,6 +383,206 @@ const stableChanges = [
   ),
 ];
 
+const cdpCollateralId = `42220-${ADDRESSES.celoTroveManagerGbpm}`;
+const cdpInstanceId = cdpCollateralId;
+const cdpNow = stableFixtureNow;
+
+const cdpCollaterals = [
+  {
+    id: cdpCollateralId,
+    chainId: 42220,
+    collIndex: 0,
+    symbol: "GBPm",
+    debtToken: ADDRESSES.celoGbpm,
+    collToken: ADDRESSES.celoUsdm,
+    troveManager: ADDRESSES.celoTroveManagerGbpm,
+    stabilityPool: ADDRESSES.celoStabilityPoolGbpm,
+    minDebt: "1000000000000000000000",
+    minBoldInSp: "100000000000000000000",
+    systemParamsLoaded: true,
+    mcrBps: 11000,
+    ccrBps: 13500,
+    scrBps: 15000,
+  },
+];
+
+const cdpInstances = [
+  {
+    id: cdpInstanceId,
+    collateralId: cdpCollateralId,
+    chainId: 42220,
+    systemColl: "8000000000000000000000",
+    systemDebt: "3000000000000000000000",
+    tcrBps: 26666,
+    spDeposits: "1200000000000000000000",
+    spColl: "100000000000000000000",
+    spHeadroom: "1200000000000000000000",
+    currentRedemptionRateBps: 50,
+    activeTroveCount: 2,
+    icrP1Bps: 15100,
+    icrP5Bps: 17500,
+    icrP50Bps: 24000,
+    icrFracBelowMcrBps: 0,
+    liqCountCum: 0,
+    redemptionCountCum: 3,
+    redemptionDebtCum: "90000000000000000000",
+    redemptionFeeCum: "1000000000000000000",
+    rebalanceRedemptionCountCum: 2,
+    rebalanceRedemptionDebtCum: "60000000000000000000",
+    rebalanceRedemptionFeeCum: "700000000000000000",
+    borrowingFeeCum: "2500000000000000000",
+    isShutDown: false,
+    shutDownAt: null,
+    shutDownTcrBps: null,
+    lastEventBlock: "12345678",
+    lastEventTimestamp: String(cdpNow - 300),
+  },
+];
+
+const cdpTroves = [
+  {
+    id: `${cdpCollateralId}-1`,
+    collateralId: cdpCollateralId,
+    chainId: 42220,
+    troveId: "1",
+    owner: ADDRESSES.troveOwnerA,
+    status: "active",
+    debt: "1000000000000000000000",
+    coll: "2100000000000000000000",
+    icrBps: 21000,
+    interestRate: "21000000000000000",
+    interestBatchId: null,
+    lastUpdatedAt: String(cdpNow - 600),
+    redemptionCount: 1,
+    redeemedDebt: "10000000000000000000",
+    redeemedColl: "20000000000000000000",
+  },
+  {
+    id: `${cdpCollateralId}-2`,
+    collateralId: cdpCollateralId,
+    chainId: 42220,
+    troveId: "2",
+    owner: ADDRESSES.troveOwnerB,
+    status: "zombie",
+    debt: "2000000000000000000000",
+    coll: "5900000000000000000000",
+    icrBps: 29500,
+    interestRate: "0",
+    interestBatchId: `${cdpCollateralId}-batch-low`,
+    lastUpdatedAt: String(cdpNow - 900),
+    redemptionCount: 0,
+    redeemedDebt: "0",
+    redeemedColl: "0",
+  },
+  {
+    id: `${cdpCollateralId}-3`,
+    collateralId: cdpCollateralId,
+    chainId: 42220,
+    troveId: "3",
+    owner: "0x6666666666666666666666666666666666666666",
+    status: "redeemed",
+    debt: "0",
+    coll: "0",
+    icrBps: -1,
+    interestRate: "26000000000000000",
+    interestBatchId: null,
+    lastUpdatedAt: String(cdpNow - 3600),
+    redemptionCount: 1,
+    redeemedDebt: "50000000000000000000",
+    redeemedColl: "110000000000000000000",
+  },
+];
+
+const cdpInterestBatches = [
+  {
+    id: `${cdpCollateralId}-batch-low`,
+    collateralId: cdpCollateralId,
+    batchManager: "0x7777777777777777777777777777777777777777",
+    annualInterestRate: "19000000000000000",
+    updatedAt: String(cdpNow - 1000),
+  },
+];
+
+const cdpDailySnapshots = [
+  {
+    id: `${cdpInstanceId}-${stableFixtureToday - DAY_SECONDS}`,
+    instanceId: cdpInstanceId,
+    timestamp: String(stableFixtureToday - DAY_SECONDS),
+    spDeposits: "1100000000000000000000",
+    spColl: "90000000000000000000",
+    spHeadroom: "1100000000000000000000",
+    systemDebt: "2900000000000000000000",
+    systemColl: "7600000000000000000000",
+  },
+  {
+    id: `${cdpInstanceId}-${stableFixtureToday}`,
+    instanceId: cdpInstanceId,
+    timestamp: String(stableFixtureToday),
+    spDeposits: "1200000000000000000000",
+    spColl: "100000000000000000000",
+    spHeadroom: "1200000000000000000000",
+    systemDebt: "3000000000000000000000",
+    systemColl: "8000000000000000000000",
+  },
+];
+
+const cdpTransactions = {
+  LiquidationEvent: [],
+  RedemptionEvent: [
+    {
+      id: `${cdpInstanceId}-redemption-1`,
+      instanceId: cdpInstanceId,
+      attemptedBoldAmount: "50000000000000000000",
+      actualBoldAmount: "45000000000000000000",
+      ETHSent: "100000000000000000000",
+      ETHFee: "500000000000000000",
+      price: "750000000000000000",
+      redemptionPrice: "750000000000000000",
+      isRebalance: true,
+      timestamp: String(cdpNow - 700),
+      blockNumber: "12345000",
+      txHash:
+        "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    },
+  ],
+  SpRebalanceEvent: [],
+  TroveOperationEvent: [
+    {
+      id: `${cdpInstanceId}-op-1`,
+      instanceId: cdpInstanceId,
+      troveId: "1",
+      operation: 2,
+      collChange: "100000000000000000000",
+      debtChange: "50000000000000000000",
+      annualInterestRate: "21000000000000000",
+      debtIncreaseFromUpfrontFee: "1000000000000000000",
+      timestamp: String(cdpNow - 600),
+      blockNumber: "12345100",
+      txHash:
+        "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    },
+  ],
+};
+
+const cdpTroveOpSnapshots = [
+  {
+    id: `${cdpInstanceId}-op-1`,
+    owner: ADDRESSES.troveOwnerA,
+    debtBefore: "950000000000000000000",
+    debtAfter: "1000000000000000000000",
+    collBefore: "2000000000000000000000",
+    collAfter: "2100000000000000000000",
+  },
+];
+
+function cdpRowsForChain(rows, chainId) {
+  return rows.filter((row) => row.chainId === Number(chainId));
+}
+
+function cdpRowsForCollateral(rows, collateralId) {
+  return rows.filter((row) => row.collateralId === String(collateralId));
+}
+
 function volumeDay() {
   return Math.floor(nowSeconds() / DAY_SECONDS) * DAY_SECONDS;
 }
@@ -612,6 +816,60 @@ function handleGraphQL({ query, variables = {} }) {
           (variables.offset ?? 0) + (variables.limit ?? stableChanges.length),
         ),
       };
+    case "CdpMarkets": {
+      const collaterals = cdpRowsForChain(cdpCollaterals, variables.chainId);
+      const collateralIds = new Set(collaterals.map((row) => row.id));
+      return {
+        LiquityCollateral: collaterals,
+        LiquityInstance: cdpRowsForChain(cdpInstances, variables.chainId),
+        Trove: cdpTroves
+          .filter(
+            (trove) =>
+              collateralIds.has(trove.collateralId) &&
+              ["active", "zombie"].includes(trove.status),
+          )
+          .map(({ id, collateralId, status }) => ({
+            id,
+            collateralId,
+            status,
+          })),
+      };
+    }
+    case "CdpMarketDetail": {
+      const collateralId = String(variables.collateralId);
+      return {
+        LiquityCollateral: cdpRowsForCollateral(cdpCollaterals, collateralId),
+        LiquityInstance: cdpRowsForCollateral(cdpInstances, collateralId),
+        OpenTrove: cdpRowsForCollateral(cdpTroves, collateralId).filter(
+          (trove) => ["active", "zombie"].includes(trove.status),
+        ),
+        AllTrove: cdpRowsForCollateral(cdpTroves, collateralId),
+        InterestBatch: cdpRowsForCollateral(cdpInterestBatches, collateralId),
+        StabilityPoolDepositor: [],
+        CdpPool: [
+          {
+            id: `${collateralId}-${ADDRESSES.celoPool}`,
+            poolId: ADDRESSES.celoPool,
+            debtToken: ADDRESSES.celoGbpm,
+            strategyAddress: "0x8888888888888888888888888888888888888888",
+            rebalanceCooldownSec: 3600,
+            addedAtTimestamp: String(cdpNow - DAY_SECONDS),
+            updatedAtTimestamp: String(cdpNow - 120),
+          },
+        ],
+      };
+    }
+    case "CdpInstanceDailySnapshots":
+      return {
+        LiquityInstanceDailySnapshot:
+          String(variables.instanceId) === cdpInstanceId
+            ? cdpDailySnapshots
+            : [],
+      };
+    case "CdpTransactions":
+      return cdpTransactions;
+    case "CdpTroveOpSnapshots":
+      return { TroveOperationEvent: cdpTroveOpSnapshots };
     default:
       return unhandledOperation(op);
   }

@@ -11,11 +11,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CdpCollateral,
   CdpDepositor,
+  CdpInterestBatch,
   CdpInstance,
   CdpPoolRow,
   CdpTrove,
   CdpTroveListRow,
 } from "../../../_lib/types";
+import { CDP_TROVES_DETAIL_LIMIT } from "../../../_lib/types";
 
 const mockUseGQL = vi.hoisted(() => vi.fn());
 const networkState = vi.hoisted(() => ({
@@ -116,6 +118,10 @@ function wei(amount: number): string {
   return (BigInt(amount) * USD_WEI).toString();
 }
 
+function rateBps(bps: number): string {
+  return ((BigInt(bps) * USD_WEI) / BigInt(10_000)).toString();
+}
+
 function collateral(overrides: Partial<CdpCollateral> = {}): CdpCollateral {
   return {
     id: "gbpm",
@@ -190,6 +196,19 @@ function trove(overrides: Partial<CdpTrove> = {}): CdpTrove {
   };
 }
 
+function interestBatch(
+  overrides: Partial<CdpInterestBatch> = {},
+): CdpInterestBatch {
+  return {
+    id: "batch-1",
+    collateralId: "gbpm",
+    batchManager: "0xbatchmanager",
+    annualInterestRate: rateBps(200),
+    updatedAt: String(NOW),
+    ...overrides,
+  };
+}
+
 function depositor(overrides: Partial<CdpDepositor> = {}): CdpDepositor {
   return {
     id: "dep-1",
@@ -227,18 +246,24 @@ function marketsData(troves: CdpTroveListRow[] = []) {
 }
 
 function detailData({
-  troves = [trove()],
+  openTroves = [trove()],
+  allTroves = openTroves,
+  interestBatches = [],
   depositors = [depositor()],
   cdpPools = [cdpPool()],
 }: {
-  troves?: CdpTrove[];
+  openTroves?: CdpTrove[];
+  allTroves?: CdpTrove[];
+  interestBatches?: CdpInterestBatch[];
   depositors?: CdpDepositor[];
   cdpPools?: CdpPoolRow[];
 } = {}) {
   return {
     LiquityCollateral: [collateral()],
     LiquityInstance: [instance()],
-    Trove: troves,
+    OpenTrove: openTroves,
+    AllTrove: allTroves,
+    InterestBatch: interestBatches,
     StabilityPoolDepositor: depositors,
     CdpPool: cdpPools,
   };
@@ -255,6 +280,44 @@ function setup(): Handle {
 function render(handle: Handle, symbol = "GBPm") {
   act(() => {
     handle.root.render(<CdpDetailClient symbol={symbol} />);
+  });
+}
+
+function troveRowText(handle: Handle): string[] {
+  return Array.from(
+    handle.container.querySelectorAll(
+      'table[aria-label="GBPm troves"] tbody tr',
+    ),
+  ).map((row) => row.textContent ?? "");
+}
+
+function clickButton(handle: Handle, label: string) {
+  const button = Array.from(handle.container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === label,
+  );
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`Button not found: ${label}`);
+  }
+  act(() => {
+    button.click();
+  });
+}
+
+function searchTroves(handle: Handle, value: string) {
+  const input = handle.container.querySelector("#cdp-trove-search");
+  if (!(input instanceof HTMLInputElement)) {
+    throw new Error("Trove search input not found");
+  }
+  const setValue = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  if (setValue == null) {
+    throw new Error("Native input value setter not found");
+  }
+  act(() => {
+    setValue.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
 
@@ -286,7 +349,13 @@ describe("CdpDetailClient", () => {
         };
       }
       if (query === CDP_MARKET_DETAIL) {
-        return { data: detailData(), error: null, isLoading: false };
+        return {
+          data: detailData({
+            openTroves: [trove({ interestRate: rateBps(250) })],
+          }),
+          error: null,
+          isLoading: false,
+        };
       }
       if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
         return {
@@ -317,8 +386,11 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("10 events");
     expect(handle!.container.textContent).toContain("7 events");
     expect(handle!.container.textContent).toContain("3 events");
-    expect(handle!.container.textContent).toContain("Recent Live Troves");
+    expect(handle!.container.textContent).toContain("Troves");
+    expect(handle!.container.textContent).not.toContain("Recent Live Troves");
     expect(handle!.container.textContent).toContain("0xowner");
+    expect(handle!.container.textContent).toContain("2.50%");
+    expect(handle!.container.textContent).toContain("200.00%");
     expect(handle!.container.textContent).toContain("Last-Touched Depositors");
     expect(handle!.container.textContent).toContain("0xdepositor");
     expect(handle!.container.textContent).toContain("CDP Pools");
@@ -344,7 +416,12 @@ describe("CdpDetailClient", () => {
       }
       if (query === CDP_MARKET_DETAIL) {
         return {
-          data: detailData({ troves: [], depositors: [], cdpPools: [] }),
+          data: detailData({
+            openTroves: [],
+            allTroves: [],
+            depositors: [],
+            cdpPools: [],
+          }),
           error: null,
           isLoading: false,
         };
@@ -362,7 +439,9 @@ describe("CdpDetailClient", () => {
     render(handle!);
 
     expect(handle!.container.textContent).toContain("GBPm CDP Market");
-    expect(handle!.container.textContent).toContain("No troves indexed yet.");
+    expect(handle!.container.textContent).toContain(
+      "No open troves indexed yet.",
+    );
     expect(handle!.container.textContent).toContain(
       "No stability pool depositors indexed yet.",
     );
@@ -395,5 +474,332 @@ describe("CdpDetailClient", () => {
     expect(
       handle!.container.querySelector('[role="alert"]')?.textContent,
     ).toContain("Failed to load CDP market");
+  });
+
+  it("sorts open troves by effective interest rate and marks tied rate ranks", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        const lowDirect = trove({
+          id: "trove-low-direct",
+          troveId: "2",
+          owner: "0xlowdirect",
+          interestRate: rateBps(200),
+        });
+        const lowBatch = trove({
+          id: "trove-low-batch",
+          troveId: "3",
+          owner: "0xlowbatch",
+          interestRate: "0",
+          interestBatchId: "batch-low",
+        });
+        const higher = trove({
+          id: "trove-higher",
+          troveId: "1",
+          owner: "0xhigher",
+          interestRate: rateBps(300),
+        });
+        return {
+          data: detailData({
+            openTroves: [higher, lowBatch, lowDirect],
+            interestBatches: [
+              interestBatch({
+                id: "batch-low",
+                annualInterestRate: rateBps(200),
+              }),
+            ],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+
+    const rows = troveRowText(handle!);
+    expect(rows[0]).toContain("0xlowdirect");
+    expect(rows[0]).toContain("#1");
+    expect(rows[0]).toContain("tie");
+    expect(rows[1]).toContain("0xlowbatch");
+    expect(rows[1]).toContain("#1");
+    expect(rows[1]).toContain("Batch");
+    expect(rows[2]).toContain("0xhigher");
+    expect(rows[2]).toContain("#2");
+  });
+
+  it("does not rank missing batch troves by their stale direct rate", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return {
+          data: detailData({
+            openTroves: [
+              trove({
+                id: "trove-missing-batch",
+                troveId: "1",
+                owner: "0xmissingbatch",
+                interestRate: "0",
+                interestBatchId: "missing-batch",
+              }),
+              trove({
+                id: "trove-higher",
+                troveId: "2",
+                owner: "0xhigher",
+                interestRate: rateBps(300),
+              }),
+              trove({
+                id: "trove-low-direct",
+                troveId: "3",
+                owner: "0xlowdirect",
+                interestRate: rateBps(200),
+              }),
+            ],
+            interestBatches: [],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+
+    const rows = troveRowText(handle!);
+    expect(rows[0]).toContain("0xlowdirect");
+    expect(rows[0]).toContain("#1");
+    expect(rows[1]).toContain("0xhigher");
+    expect(rows[1]).toContain("#2");
+    expect(rows[2]).toContain("0xmissingbatch");
+    expect(rows[2]).toContain("Batch missing");
+    const renderedRows = handle!.container.querySelectorAll(
+      'table[aria-label="GBPm troves"] tbody tr',
+    );
+    expect(renderedRows[2]?.querySelector("td")?.textContent).toBe("—");
+  });
+
+  it("searches fetched troves by owner or trove id", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return {
+          data: detailData({
+            openTroves: [
+              trove({ id: "trove-1", troveId: "1", owner: "0xfirst" }),
+              trove({ id: "trove-2", troveId: "42", owner: "0xsecond" }),
+            ],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+    searchTroves(handle!, "42");
+
+    const rows = troveRowText(handle!);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain("0xsecond");
+    expect(rows[0]).not.toContain("0xfirst");
+  });
+
+  it("shows historical troves in the History view", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return {
+          data: detailData({
+            openTroves: [
+              trove({ id: "trove-open", owner: "0xopen", status: "active" }),
+            ],
+            allTroves: [
+              trove({
+                id: "trove-closed",
+                owner: "0xclosed",
+                status: "redeemed",
+              }),
+              trove({ id: "trove-open", owner: "0xopen", status: "active" }),
+            ],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+    expect(troveRowText(handle!).join(" ")).not.toContain("0xclosed");
+
+    clickButton(handle!, "History");
+
+    expect(troveRowText(handle!).join(" ")).toContain("0xclosed");
+    expect(troveRowText(handle!).join(" ")).toContain("redeemed");
+  });
+
+  it("uses stored interest rates for historical batch troves", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return {
+          data: detailData({
+            openTroves: [
+              trove({ id: "trove-open", owner: "0xopen", status: "active" }),
+            ],
+            allTroves: [
+              trove({
+                id: "trove-closed-batch",
+                owner: "0xclosedbatch",
+                status: "redeemed",
+                interestRate: rateBps(210),
+                interestBatchId: "batch-history",
+              }),
+            ],
+            interestBatches: [
+              interestBatch({
+                id: "batch-history",
+                annualInterestRate: rateBps(350),
+              }),
+            ],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+    clickButton(handle!, "History");
+
+    const rows = troveRowText(handle!);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain("0xclosedbatch");
+    expect(rows[0]).toContain("2.10%");
+    expect(rows[0]).not.toContain("3.50%");
+  });
+
+  it("discloses when the active trove fetch reaches the hosted row cap", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return {
+          data: detailData({
+            openTroves: Array.from(
+              { length: CDP_TROVES_DETAIL_LIMIT },
+              (_, i) =>
+                trove({
+                  id: `trove-${i}`,
+                  troveId: String(i + 1),
+                  owner:
+                    i === 0
+                      ? "0xhigherdirect"
+                      : i === 1
+                        ? "0xlowbatch"
+                        : `0x${String(i).padStart(40, "0")}`,
+                  interestRate:
+                    i === 0 ? rateBps(300) : i === 1 ? "0" : rateBps(500),
+                  interestBatchId: i === 1 ? "batch-low" : null,
+                }),
+            ),
+            interestBatches: [
+              interestBatch({
+                id: "batch-low",
+                annualInterestRate: rateBps(200),
+              }),
+            ],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+
+    expect(handle!.container.textContent).toContain(
+      "Showing 1,000 fetched troves",
+    );
+    expect(handle!.container.textContent).toContain(
+      "Redemption ranks are hidden because the full open-trove set is not loaded.",
+    );
+    const rows = troveRowText(handle!);
+    expect(rows[0]).toContain("0xlowbatch");
+    expect(rows[0]).toContain("Batch");
+    expect(rows[1]).toContain("0xhigherdirect");
+    const firstRankCell = handle!.container.querySelector("tbody tr td");
+    expect(firstRankCell?.textContent).toBe("—");
+    expect(handle!.container.textContent).toContain("1,000 total");
   });
 });

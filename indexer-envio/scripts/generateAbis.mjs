@@ -60,6 +60,7 @@ const LIQUITY_ABIS = [
   "CDPLiquidityStrategy",
   "CollateralRegistry",
   "DefaultPool",
+  "FXPriceFeed",
   "ReserveTroveFactory",
   "StabilityPool",
   "SystemParams",

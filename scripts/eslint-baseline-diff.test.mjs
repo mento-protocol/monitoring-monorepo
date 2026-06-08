@@ -17,7 +17,9 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -116,6 +118,32 @@ function runScript(dir, eslintViolations, mode = "check", extraEnv = {}) {
       ESLINT_BASELINE_INPUT: inputPath,
       ...extraEnv,
     },
+  });
+  return {
+    code: result.status,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
+function runScriptWithFakePnpm(dir, stdout, mode = "check") {
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  const pnpm = join(bin, "pnpm");
+  writeFileSync(
+    pnpm,
+    ["#!/bin/sh", "cat <<'EOF'", stdout, "EOF", "exit 0", ""].join("\n"),
+  );
+  chmodSync(pnpm, 0o755);
+  const env = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH ?? ""}`,
+  };
+  delete env.ESLINT_BASELINE_INPUT;
+  const result = spawnSync("node", [SCRIPT, mode], {
+    cwd: dir,
+    encoding: "utf8",
+    env,
   });
   return {
     code: result.status,
@@ -391,6 +419,15 @@ test("update: absorbs line-shift refactor without growth", (dir) => {
   const post = readBaseline(dir);
   assert(post.length === 1, `expected 1 entry, got ${post.length}`);
   assert(post[0].line === 10, `expected line 10, got ${post[0].line}`);
+});
+
+test("spawn path skips bracketed stdout before ESLint JSON", (dir) => {
+  writeBaseline(dir, []);
+  const r = runScriptWithFakePnpm(
+    dir,
+    "node emitted [experimental-warning] before the report\n[]\n",
+  );
+  assert(r.code === 0, `expected 0, got ${r.code}\nstderr: ${r.stderr}`);
 });
 
 test("merge-base: ESLINT_BASELINE_MAIN rejects hand-grown HEAD baseline", (dir) => {
