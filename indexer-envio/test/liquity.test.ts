@@ -248,6 +248,14 @@ describe("Liquity CDP helpers", () => {
       }),
       -1,
     );
+    assert.equal(
+      computeTroveIcrBps({
+        coll: 1000n * d18,
+        debt: 1n,
+        price: d18,
+      }),
+      2_147_483_647,
+    );
   });
 
   it("floors interest-rate brackets at 0.1 percentage-point precision", () => {

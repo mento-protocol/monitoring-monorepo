@@ -1,6 +1,7 @@
 export const BPS = 10_000n;
 export const D18 = 10n ** 18n;
 export const ONE_YEAR_SECONDS = 31_536_000n;
+const MAX_GRAPHQL_INT = 2_147_483_647n;
 const RATE_BRACKET_PRECISION = 10n ** 15n; // 0.1% in D18 rate units.
 
 export const toBpsFromD18 = (value: bigint): number =>
@@ -19,7 +20,8 @@ export const computeCollateralRatioBps = ({
   collateralDebtPriceD18: bigint;
 }): number => {
   if (debt <= 0n || collateralDebtPriceD18 <= 0n) return -1;
-  return Number((coll * collateralDebtPriceD18 * BPS) / (debt * D18));
+  const ratioBps = (coll * collateralDebtPriceD18 * BPS) / (debt * D18);
+  return Number(ratioBps > MAX_GRAPHQL_INT ? MAX_GRAPHQL_INT : ratioBps);
 };
 
 export const computeTroveIcrBps = ({
