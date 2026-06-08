@@ -218,7 +218,9 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last live update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary          = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last live update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      resolved_title   = "Oracle back up"
+      resolved_summary = "Swaps should no longer revert."
     }
 
     labels = {
