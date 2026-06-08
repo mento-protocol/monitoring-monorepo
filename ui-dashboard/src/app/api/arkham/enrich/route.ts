@@ -18,7 +18,6 @@ import {
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { NETWORKS } from "@/lib/networks";
-import { withFlushedMonitor } from "@/lib/sentry-cron";
 
 // Vercel hobby/pro hard caps the per-invocation duration on `serverless` —
 // a 5k-address run at 60ms spacing is ~5 minutes which fits in the 800s
@@ -196,7 +195,11 @@ async function writeEnrichmentLabels(
 }
 
 /**
- * Cron-triggered enrichment of Mento counterparty addresses with Arkham data.
+ * Manual enrichment of Mento counterparty addresses with Arkham data.
+ *
+ * The Vercel schedule is intentionally disabled while the team does not have
+ * Arkham API access. Keep this endpoint for a deliberate CRON_SECRET-gated
+ * backfill/refresh if access is restored.
  *
  * Auth: Bearer `CRON_SECRET`. This is a GET route with expensive side
  * effects, so session-only auth is intentionally rejected by `requireCronAuth`
@@ -205,13 +208,12 @@ async function writeEnrichmentLabels(
  * Query params:
  * - `mode=new` (default) — only enrich addresses not yet labelled.
  * - `mode=refresh` — re-enrich addresses already tagged `arkham`. Use this
- *   monthly to pick up newly-attributed entities.
+ *   manually to pick up newly-attributed entities after access is restored.
  * - `mode=dryRun` — fetch from Arkham but skip the Redis write.
  * - `limit=N` — hard cap on addresses processed (default 10000).
  */
-// Vercel cron jobs invoke the configured path with a GET request, not POST.
-// Exporting POST instead would 405 every scheduled run. The handler accepts
-// no body — `mode` and `limit` are query params — so GET is the right verb.
+// The handler accepts no body — `mode` and `limit` are query params — so GET is
+// enough for an explicit operator-triggered run.
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const authBail = await requireCronAuth(req, "arkham/enrich");
   if (authBail) return authBail;
@@ -236,85 +238,73 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const startedAt = Date.now();
 
   try {
-    return await withFlushedMonitor(
-      "arkham-enrich",
-      async () => {
-        // Pre-flight: health check, address discovery, and existing-label
-        // read have no data dependency on each other — run concurrently so
-        // we don't pay 3× the round-trip latency before Arkham work begins.
-        const [healthy, discovery, existing] = await Promise.all([
-          fetchHealth(apiKey),
-          discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
-          getLabels(),
-        ]);
+    // Pre-flight: health check, address discovery, and existing-label read
+    // have no data dependency on each other — run concurrently so we don't
+    // pay 3× the round-trip latency before Arkham work begins.
+    const [healthy, discovery, existing] = await Promise.all([
+      fetchHealth(apiKey),
+      discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
+      getLabels(),
+    ]);
 
-        if (!healthy) {
-          throw new Error("arkham_health_check_failed");
-        }
+    if (!healthy) {
+      throw new Error("arkham_health_check_failed");
+    }
 
-        const { addresses, perEntity } = discovery;
-        const filterMode = mode === "dryRun" ? "new" : mode;
-        let candidates = filterCandidates(addresses, existing, filterMode);
+    const { addresses, perEntity } = discovery;
+    const filterMode = mode === "dryRun" ? "new" : mode;
+    let candidates = filterCandidates(addresses, existing, filterMode);
 
-        // Refresh-mode rotation: if the arkham-tagged set ever exceeds
-        // `maxAddresses`, a deterministic alphabetical slice would re-process
-        // the same prefix every month and never revisit the tail. Sort by
-        // `updatedAt` ascending so the staler entries refresh first; the
-        // post-write `updatedAt` rolls them to the end of the queue, giving
-        // round-robin coverage across runs.
-        if (mode === "refresh") {
-          candidates = candidates.sort((a, b) => {
-            const ua = existing[a]?.updatedAt ?? "";
-            const ub = existing[b]?.updatedAt ?? "";
-            return ua.localeCompare(ub);
-          });
-        }
-        candidates = candidates.slice(0, maxAddresses);
+    // Refresh-mode rotation: if the arkham-tagged set ever exceeds
+    // `maxAddresses`, a deterministic alphabetical slice would re-process
+    // the same prefix every month and never revisit the tail. Sort by
+    // `updatedAt` ascending so the staler entries refresh first; the
+    // post-write `updatedAt` rolls them to the end of the queue, giving
+    // round-robin coverage across runs.
+    if (mode === "refresh") {
+      candidates = candidates.sort((a, b) => {
+        const ua = existing[a]?.updatedAt ?? "";
+        const ub = existing[b]?.updatedAt ?? "";
+        return ua.localeCompare(ub);
+      });
+    }
+    candidates = candidates.slice(0, maxAddresses);
 
-        const results = await enrichBatch(candidates, { apiKey });
-        const writes = await buildLabelWrites(results, mode);
-        const { errors } = writes;
-        const enrichedCount = await writeEnrichmentLabels(mode, writes);
-        // In write modes this is based on actual atomic writes, so concurrent
-        // inserts/edits that beat our compare-and-set are counted as skipped.
-        const skippedCount = results.length - enrichedCount - errors.length;
+    const results = await enrichBatch(candidates, { apiKey });
+    const writes = await buildLabelWrites(results, mode);
+    const { errors } = writes;
+    const enrichedCount = await writeEnrichmentLabels(mode, writes);
+    // In write modes this is based on actual atomic writes, so concurrent
+    // inserts/edits that beat our compare-and-set are counted as skipped.
+    const skippedCount = results.length - enrichedCount - errors.length;
 
-        if (errors.length > 0) {
-          // Tag in Sentry but don't fail the run — partial success is normal
-          // (e.g. one 5xx during a 5k-address batch).
-          Sentry.captureMessage(
-            `[arkham/enrich] ${errors.length} errors during batch`,
-            {
-              tags: { route: "arkham/enrich", mode },
-              extra: { errors: errors.slice(0, 50) },
-              level: "warning",
-            },
-          );
-        }
+    if (errors.length > 0) {
+      // Tag in Sentry but don't fail the run — partial success is normal
+      // (e.g. one 5xx during a 5k-address batch).
+      Sentry.captureMessage(
+        `[arkham/enrich] ${errors.length} errors during batch`,
+        {
+          tags: { route: "arkham/enrich", mode },
+          extra: { errors: errors.slice(0, 50) },
+          level: "warning",
+        },
+      );
+    }
 
-        const body: EnrichResponse = {
-          ok: true,
-          discoveryChainId: CELO_CHAIN_ID,
-          discovered: addresses.length,
-          candidates: candidates.length,
-          enriched: enrichedCount,
-          skipped: skippedCount,
-          errors: errors.length,
-          durationMs: Date.now() - startedAt,
-          perEntity,
-          sampleErrors: errors.slice(0, 5),
-          mode,
-        };
-        return NextResponse.json(body);
-      },
-      {
-        // Cron schedule mirrors vercel.json — keep them in sync.
-        schedule: { type: "crontab", value: "0 4 * * *" },
-        checkinMargin: 5,
-        maxRuntime: 15,
-        timezone: "Etc/UTC",
-      },
-    );
+    const body: EnrichResponse = {
+      ok: true,
+      discoveryChainId: CELO_CHAIN_ID,
+      discovered: addresses.length,
+      candidates: candidates.length,
+      enriched: enrichedCount,
+      skipped: skippedCount,
+      errors: errors.length,
+      durationMs: Date.now() - startedAt,
+      perEntity,
+      sampleErrors: errors.slice(0, 5),
+      mode,
+    };
+    return NextResponse.json(body);
   } catch (err) {
     Sentry.captureException(err, { tags: { route: "arkham/enrich", mode } });
     console.error("[arkham/enrich]", err);
