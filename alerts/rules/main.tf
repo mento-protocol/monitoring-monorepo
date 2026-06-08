@@ -111,12 +111,14 @@ locals {
   oracle_live_timestamp_compat_promql = "(mento_pool_oracle_live_timestamp or ${local.oracle_timestamp_compat_promql})"
   oracle_expiry_compat_promql         = "max without (last_oracle_update_url) (mento_pool_oracle_expiry)"
   oracle_timestamp_age_promql = format(
-    "(time() - %s) and on(chain_id, pool_id, pair) (%s > 0)",
+    "((time() - %s) and on(chain_id, pool_id, pair) (%s > 0)) or on(chain_id, pool_id, pair) (0 * %s - 1)",
+    local.oracle_timestamp_compat_promql,
     local.oracle_timestamp_compat_promql,
     local.oracle_timestamp_compat_promql,
   )
   oracle_live_age_compat_promql = format(
-    "(time() - %s) and on(chain_id, pool_id, pair) (%s > 0)",
+    "((time() - %s) and on(chain_id, pool_id, pair) (%s > 0)) or on(chain_id, pool_id, pair) (0 * %s - 1)",
+    local.oracle_live_timestamp_compat_promql,
     local.oracle_live_timestamp_compat_promql,
     local.oracle_live_timestamp_compat_promql,
   )

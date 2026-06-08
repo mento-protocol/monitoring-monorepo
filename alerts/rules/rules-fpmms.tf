@@ -33,7 +33,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     annotations = {
       title            = "Oracle Update Delayed"
       summary          = "The pool oracle has not published a new price within its {{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}{{ humanizeDuration $values.OracleExpiry.Value }}{{ else }}expected{{ end }} update window."
-      last_update      = "{{ if $values.OracleAge }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else }}never reported{{ end }}"
+      last_update      = "{{ if and $values.OracleAge (gt $values.OracleAge.Value 0.0) }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else }}never reported{{ end }}"
       resolved_title   = "Oracle Update Recovered"
       resolved_summary = "The pool oracle is publishing recent prices again."
     }
@@ -63,7 +63,8 @@ resource "grafana_rule_group" "fpmms_oracle" {
     # Annotation helper queries:
     #   - OracleTs: live freshness timestamp. == 0 means the indexer has never
     #     seen a live median update for this pool.
-    #   - OracleAge: seconds since live update; absent when OracleTs <= 0.
+    #   - OracleAge: seconds since live update; -1 when OracleTs <= 0 so the
+    #     annotation helper keeps a label-matched fallback series.
     #   - OracleExpiry: the configured update window, displayed in the summary.
     data {
       ref_id         = "OracleTs"
@@ -149,7 +150,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Oracle contract flag is false — swaps will revert.{{ if $values.OracleAge }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Oracle contract flag is false — swaps will revert.{{ if and $values.OracleAge (gt $values.OracleAge.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -237,7 +238,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
 
     annotations = {
       title            = "Oracle Not Usable"
-      summary          = "Oracle not usable — swaps will revert.{{ if $values.OracleAge }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary          = "Oracle not usable — swaps will revert.{{ if and $values.OracleAge (gt $values.OracleAge.Value 0.0) }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
       resolved_title   = "Oracle back up"
       resolved_summary = "Swaps should no longer revert."
     }
@@ -334,7 +335,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     annotations = {
       title            = "Oracle Down"
       summary          = "The pool oracle is far past its {{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}{{ humanizeDuration $values.OracleExpiry.Value }}{{ else }}expected{{ end }} update window."
-      last_update      = "{{ if $values.OracleAge }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else }}never reported{{ end }}"
+      last_update      = "{{ if and $values.OracleAge (gt $values.OracleAge.Value 0.0) }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else }}never reported{{ end }}"
       resolved_title   = "Oracle Back Up"
       resolved_summary = "The pool oracle is back inside its update window."
     }
@@ -361,8 +362,8 @@ resource "grafana_rule_group" "fpmms_oracle" {
     }
 
     # See Oracle Liveness for the annotation helper query rationale; OracleAge
-    # is absent for true never-reported pools instead of relying on an age
-    # cutoff.
+    # is -1 for true never-reported pools instead of relying on a missing
+    # annotation series.
     data {
       ref_id         = "OracleTs"
       datasource_uid = var.prometheus_datasource_uid
