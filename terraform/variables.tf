@@ -137,10 +137,12 @@ variable "cron_secret" {
 
 variable "arkham_api_key" {
   description = <<-EOT
-    Arkham Intelligence API key, used by the nightly /api/arkham/enrich
-    cron to attach curated labels/entity attribution to Mento counterparty
-    addresses. Apply for access at https://intel.arkm.com/api (gated).
-    Server-side only — never exposed to the browser.
+    Arkham Intelligence API key, used by the manual /api/arkham/enrich
+    endpoint to attach curated labels/entity attribution to Mento counterparty
+    addresses when API access is available. The Vercel schedule is disabled
+    while access is unavailable. Apply for access at
+    https://intel.arkm.com/api (gated). Server-side only — never exposed to
+    the browser.
   EOT
   type        = string
   sensitive   = true

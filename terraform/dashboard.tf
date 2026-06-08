@@ -166,10 +166,10 @@ resource "vercel_project_environment_variable" "cron_secret" {
   sensitive = true
 }
 
-# Arkham Intelligence API key for the nightly enrichment cron. Production-only
-# so a compromised preview build can't burn the rate-limit budget. `count`
-# guard skips creation when the key isn't yet provisioned — the dashboard
-# still deploys cleanly without it (the cron route returns 500 on missing key).
+# Arkham Intelligence API key for manual enrichment runs. Production-only so a
+# compromised preview build can't burn the rate-limit budget. `count` guard
+# skips creation when the key isn't provisioned; the Vercel schedule is disabled
+# while access is unavailable.
 resource "vercel_project_environment_variable" "arkham_api_key" {
   count      = var.arkham_api_key == "" ? 0 : 1
   project_id = vercel_project.dashboard.id

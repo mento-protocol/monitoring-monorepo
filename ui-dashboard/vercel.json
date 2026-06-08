@@ -13,14 +13,6 @@
       "schedule": "30 3 * * *"
     },
     {
-      "path": "/api/arkham/enrich",
-      "schedule": "0 4 * * *"
-    },
-    {
-      "path": "/api/arkham/enrich?mode=refresh",
-      "schedule": "30 4 1 * *"
-    },
-    {
       "path": "/api/minipay/tag",
       "schedule": "0 5 * * *"
     }

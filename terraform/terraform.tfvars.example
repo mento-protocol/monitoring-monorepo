@@ -55,8 +55,9 @@ upstash_api_key = "..."
 # squid_integrator_id = "..."
 
 # ── Arkham Intelligence ───────────────────────────────────────────────────────
-# API key for the nightly /api/arkham/enrich cron that tags Mento counterparties.
+# API key for manual /api/arkham/enrich counterparty tagging.
 # Apply for access at https://intel.arkm.com/api — gated, no self-serve signup.
+# The Vercel schedule is disabled while access is unavailable.
 # Leave empty until provisioned; the env var resource is `count`-gated so
 # `terraform apply` succeeds without it.
 # arkham_api_key = "..."
