@@ -89,13 +89,17 @@ if (eslintInputPath) {
     );
     process.exit(2);
   }
-  if (!eslintRun.stdout || !eslintRun.stdout.trim().startsWith("[")) {
+  const stdout = eslintRun.stdout?.trimStart() ?? "";
+  const jsonStart = stdout.indexOf("[");
+  if (jsonStart < 0) {
     process.stderr.write(
-      `eslint produced no JSON output (exit ${eslintRun.status}):\n${eslintRun.stderr}\n`,
+      `eslint produced no JSON output (exit ${eslintRun.status}):\n` +
+        `stdout:\n${eslintRun.stdout}\n` +
+        `stderr:\n${eslintRun.stderr}\n`,
     );
     process.exit(2);
   }
-  eslintOutput = JSON.parse(eslintRun.stdout);
+  eslintOutput = JSON.parse(stdout.slice(jsonStart));
 }
 
 const sourceCache = new Map();

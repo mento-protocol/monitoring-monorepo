@@ -4,6 +4,7 @@ import type {
   LiquityInstance,
   PendingBatchMembershipOperation,
   PendingBatchedTroveUpdate,
+  PendingRedemption,
   Trove,
 } from "envio";
 import { pendingTroveKey } from "./keys.js";
@@ -37,6 +38,10 @@ type BatchReplayContext = {
     deleteUnsafe: (id: string) => void;
   };
   PendingBatchedTroveUpdate: {
+    deleteUnsafe: (id: string) => void;
+  };
+  PendingRedemption: {
+    get: (id: string) => Promise<PendingRedemption | undefined>;
     deleteUnsafe: (id: string) => void;
   };
 };
@@ -139,14 +144,16 @@ export async function replayBatchedTroveUpdate(
     args.totalDebtShares === 0n
       ? 0n
       : (args.batchDebt * pending.batchDebtShares) / args.totalDebtShares;
-  const op = await context.PendingBatchMembershipOperation.get(
-    pendingTroveKey(
-      args.chainId,
-      args.txHash,
-      args.collateralId,
-      pending.troveId,
-    ),
+  const pendingId = pendingTroveKey(
+    args.chainId,
+    args.txHash,
+    args.collateralId,
+    pending.troveId,
   );
+  const [op, pendingRedemption] = await Promise.all([
+    context.PendingBatchMembershipOperation.get(pendingId),
+    context.PendingRedemption.get(pendingId),
+  ]);
   if (op !== undefined) {
     context.PendingBatchMembershipOperation.deleteUnsafe(op.id);
   }
@@ -193,5 +200,8 @@ export async function replayBatchedTroveUpdate(
   });
   context.Trove.set(trove);
   context.PendingBatchedTroveUpdate.deleteUnsafe(pending.id);
+  if (pendingRedemption !== undefined) {
+    context.PendingRedemption.deleteUnsafe(pendingId);
+  }
   return instance;
 }
