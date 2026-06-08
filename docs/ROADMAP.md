@@ -119,7 +119,7 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 | Service          | Rule                                    | Severity | Threshold                                                                        |
 | ---------------- | --------------------------------------- | -------- | -------------------------------------------------------------------------------- |
 | `fpmms`          | Oracle Liveness                         | warning  | liveness ratio `> 1.2` for 2m (FX-weekend gated)                                 |
-| `fpmms`          | Oracle Down                             | critical | `oracle_ok < 0.5` for 1m                                                         |
+| `fpmms`          | Oracle Down                             | critical | `oracle_ok < 0.5` for 5m                                                         |
 | `fpmms`          | Oracle Liveness Critical                | critical | liveness ratio `> 3` for 1m (FX-weekend gated)                                   |
 | `fpmms`          | Deviation Breach                        | warning  | `deviation_ratio > 1.01` for 15m (above 1% tolerance)                            |
 | `fpmms`          | Deviation Breach (anchored)             | warning  | anchored breach + deviation-ratio data unavailable for 15m                       |

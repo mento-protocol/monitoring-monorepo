@@ -107,9 +107,24 @@ locals {
   # The timestamp expression keeps a rollout fallback to the old raw timestamp
   # series so Grafana can apply before the bridge revision that publishes
   # `mento_pool_oracle_live_timestamp`.
-  oracle_live_timestamp_compat_promql = "(mento_pool_oracle_live_timestamp or max without (last_oracle_update_url) (mento_pool_oracle_timestamp))"
+  oracle_timestamp_compat_promql      = "max without (last_oracle_update_url) (mento_pool_oracle_timestamp)"
+  oracle_live_timestamp_compat_promql = "(mento_pool_oracle_live_timestamp or ${local.oracle_timestamp_compat_promql})"
   oracle_expiry_compat_promql         = "max without (last_oracle_update_url) (mento_pool_oracle_expiry)"
-  oracle_live_age_promql              = format("time() - %s", local.oracle_live_timestamp_compat_promql)
+  # Age helpers intentionally repeat the timestamp expression in the guard and
+  # fallback so annotation queries keep a label-matched `-1` sentinel for
+  # never-reported pools without depending on a recording rule.
+  oracle_timestamp_age_promql = format(
+    "((time() - %s) and on(chain_id, pool_id, pair) (%s > 0)) or on(chain_id, pool_id, pair) (0 * %s - 1)",
+    local.oracle_timestamp_compat_promql,
+    local.oracle_timestamp_compat_promql,
+    local.oracle_timestamp_compat_promql,
+  )
+  oracle_live_age_compat_promql = format(
+    "((time() - %s) and on(chain_id, pool_id, pair) (%s > 0)) or on(chain_id, pool_id, pair) (0 * %s - 1)",
+    local.oracle_live_timestamp_compat_promql,
+    local.oracle_live_timestamp_compat_promql,
+    local.oracle_live_timestamp_compat_promql,
+  )
   oracle_expiry_duration_part_promql = {
     OracleExpiryDays    = format("floor((%s) / 86400)", local.oracle_expiry_compat_promql)
     OracleExpiryHours   = format("floor(((%s) %% 86400) / 3600)", local.oracle_expiry_compat_promql)
@@ -117,10 +132,10 @@ locals {
     OracleExpirySeconds = format("floor((%s) %% 60)", local.oracle_expiry_compat_promql)
   }
   oracle_age_duration_part_promql = {
-    OracleAgeDays    = format("floor((%s) / 86400)", local.oracle_live_age_promql)
-    OracleAgeHours   = format("floor(((%s) %% 86400) / 3600)", local.oracle_live_age_promql)
-    OracleAgeMinutes = format("floor(((%s) %% 3600) / 60)", local.oracle_live_age_promql)
-    OracleAgeSeconds = format("floor((%s) %% 60)", local.oracle_live_age_promql)
+    OracleAgeDays    = format("floor((%s) / 86400)", local.oracle_live_age_compat_promql)
+    OracleAgeHours   = format("floor(((%s) %% 86400) / 3600)", local.oracle_live_age_compat_promql)
+    OracleAgeMinutes = format("floor(((%s) %% 3600) / 60)", local.oracle_live_age_compat_promql)
+    OracleAgeSeconds = format("floor((%s) %% 60)", local.oracle_live_age_compat_promql)
   }
 
   # Grafana annotation templates can call `humanizeDuration`, but cannot
