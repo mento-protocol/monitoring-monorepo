@@ -107,8 +107,24 @@ locals {
   # The timestamp expression keeps a rollout fallback to the old raw timestamp
   # series so Grafana can apply before the bridge revision that publishes
   # `mento_pool_oracle_live_timestamp`.
-  oracle_live_timestamp_compat_promql = "(mento_pool_oracle_live_timestamp or max without (last_oracle_update_url) (mento_pool_oracle_timestamp))"
+  oracle_timestamp_compat_promql      = "max without (last_oracle_update_url) (mento_pool_oracle_timestamp)"
+  oracle_live_timestamp_compat_promql = "(mento_pool_oracle_live_timestamp or ${local.oracle_timestamp_compat_promql})"
   oracle_expiry_compat_promql         = "max without (last_oracle_update_url) (mento_pool_oracle_expiry)"
+  # Age helpers intentionally repeat the timestamp expression in the guard and
+  # fallback so annotation queries keep a label-matched `-1` sentinel for
+  # never-reported pools without depending on a recording rule.
+  oracle_timestamp_age_promql = format(
+    "((time() - %s) and on(chain_id, pool_id, pair) (%s > 0)) or on(chain_id, pool_id, pair) (0 * %s - 1)",
+    local.oracle_timestamp_compat_promql,
+    local.oracle_timestamp_compat_promql,
+    local.oracle_timestamp_compat_promql,
+  )
+  oracle_live_age_compat_promql = format(
+    "((time() - %s) and on(chain_id, pool_id, pair) (%s > 0)) or on(chain_id, pool_id, pair) (0 * %s - 1)",
+    local.oracle_live_timestamp_compat_promql,
+    local.oracle_live_timestamp_compat_promql,
+    local.oracle_live_timestamp_compat_promql,
+  )
   fx_oracle_pause_promql = format(
     "(mento_pool_oracle_live_timestamp{pair!~\"%s\",pair=~\".+/.+\"} or max without (last_oracle_update_url) (mento_pool_oracle_timestamp{pair!~\"%s\",pair=~\".+/.+\"})) and on() %s",
     local.usd_pegged_pair_regex,
