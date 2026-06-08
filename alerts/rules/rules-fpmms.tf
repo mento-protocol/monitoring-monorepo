@@ -220,7 +220,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     annotations = {
       summary          = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last live update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
       resolved_title   = "Oracle back up"
-      resolved_summary = "Oracle Down condition cleared — swaps should no longer revert outside scheduled FX pauses."
+      resolved_summary = "Swaps should no longer revert."
     }
 
     labels = {
