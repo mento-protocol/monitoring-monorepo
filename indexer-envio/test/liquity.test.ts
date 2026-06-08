@@ -1059,6 +1059,7 @@ describe("Liquity CDP helpers", () => {
     ]);
     const pendingBatchOps = new Set([pendingId]);
     const pendingBatchedUpdates = new Set([pendingId]);
+    const brackets = new Map<string, Record<string, unknown>>();
     const context = {
       Trove: {
         get: async (id: string) => troves.get(id),
@@ -1066,7 +1067,11 @@ describe("Liquity CDP helpers", () => {
           troves.set(String(entity.id), entity),
       },
       BorrowerInfo: { get: async () => undefined, set: () => undefined },
-      InterestRateBracket: { get: async () => undefined, set: () => undefined },
+      InterestRateBracket: {
+        get: async (id: string) => brackets.get(id),
+        set: (entity: Record<string, unknown>) =>
+          brackets.set(String(entity.id), entity),
+      },
       PendingBatchMembershipOperation: {
         get: async (id: string) =>
           pendingBatchOps.has(id)
@@ -1126,6 +1131,7 @@ describe("Liquity CDP helpers", () => {
     assert.equal(updated?.batchDebtShares, 0n);
     assert.equal(updated?.interestRate, 5n * 10n ** 16n);
     assert.equal(pendingBatchOps.has(pendingId), false);
+    assert.equal(brackets.size, 0);
   });
 
   it("clears pending redemption markers after batched trove replay", async () => {

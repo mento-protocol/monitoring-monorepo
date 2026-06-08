@@ -159,12 +159,13 @@ export async function replayBatchedTroveUpdate(
   }
   const leavesBatch = op?.operation === OP.REMOVE_FROM_BATCH;
   const entersBatch = trove.interestBatchId === undefined && !leavesBatch;
+  const movesLeaveDebt = leavesBatch && trove.interestBatchId !== undefined;
   await moveBatchMembershipBracketDebt(context, {
     collateralId: args.collateralId,
     troveDebt: trove.debt,
     troveInterestRate: trove.interestRate,
     opAnnualInterestRate: op?.annualInterestRate ?? 0n,
-    leavesBatch,
+    leavesBatch: movesLeaveDebt,
     entersBatch,
     nextDebt,
     timestamp: args.blockTimestamp,
