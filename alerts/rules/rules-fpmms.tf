@@ -33,7 +33,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     annotations = {
       title            = "Oracle Update Delayed"
       summary          = "The pool oracle has not published a new price within its {{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}{{ humanizeDuration $values.OracleExpiry.Value }}{{ else }}expected{{ end }} update window."
-      last_update      = "{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}age unavailable{{ else }}never reported{{ end }}"
+      last_update      = "{{ if $values.OracleAge }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else }}never reported{{ end }}"
       resolved_title   = "Oracle Update Recovered"
       resolved_summary = "The pool oracle is publishing recent prices again."
     }
@@ -63,8 +63,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     # Annotation helper queries:
     #   - OracleTs: live freshness timestamp. == 0 means the indexer has never
     #     seen a live median update for this pool.
-    #   - OracleAge: seconds since live update; only meaningful when
-    #     OracleTs > 0.
+    #   - OracleAge: seconds since live update; absent when OracleTs <= 0.
     #   - OracleExpiry: the configured update window, displayed in the summary.
     data {
       ref_id         = "OracleTs"
@@ -89,7 +88,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = format("time() - %s", local.oracle_live_timestamp_compat_promql)
+        expr    = local.oracle_live_age_compat_promql
         instant = true
       })
     }
@@ -150,7 +149,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Oracle contract flag is false — swaps will revert.{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Oracle contract flag is false — swaps will revert.{{ if $values.OracleAge }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -181,7 +180,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleTs"
-        expr    = "max without (last_oracle_update_url) (mento_pool_oracle_timestamp)"
+        expr    = local.oracle_timestamp_compat_promql
         instant = true
       })
     }
@@ -195,7 +194,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = "time() - max without (last_oracle_update_url) (mento_pool_oracle_timestamp)"
+        expr    = local.oracle_timestamp_age_promql
         instant = true
       })
     }
@@ -232,13 +231,13 @@ resource "grafana_rule_group" "fpmms_oracle" {
   rule {
     name           = "Oracle Down"
     condition      = "threshold"
-    for            = "1m"
+    for            = "5m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
       title            = "Oracle Not Usable"
-      summary          = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last live update age unavailable.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary          = "Oracle not usable — swaps will revert.{{ if $values.OracleAge }} Last live update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
       resolved_title   = "Oracle back up"
       resolved_summary = "Swaps should no longer revert."
     }
@@ -288,7 +287,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = format("time() - %s", local.oracle_live_timestamp_compat_promql)
+        expr    = local.oracle_live_age_compat_promql
         instant = true
       })
     }
@@ -335,7 +334,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     annotations = {
       title            = "Oracle Down"
       summary          = "The pool oracle is far past its {{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}{{ humanizeDuration $values.OracleExpiry.Value }}{{ else }}expected{{ end }} update window."
-      last_update      = "{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}age unavailable{{ else }}never reported{{ end }}"
+      last_update      = "{{ if $values.OracleAge }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else }}never reported{{ end }}"
       resolved_title   = "Oracle Back Up"
       resolved_summary = "The pool oracle is back inside its update window."
     }
@@ -361,7 +360,9 @@ resource "grafana_rule_group" "fpmms_oracle" {
       })
     }
 
-    # See Oracle Liveness for the annotation helper query rationale.
+    # See Oracle Liveness for the annotation helper query rationale; OracleAge
+    # is absent for true never-reported pools instead of relying on an age
+    # cutoff.
     data {
       ref_id         = "OracleTs"
       datasource_uid = var.prometheus_datasource_uid
@@ -385,7 +386,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = format("time() - %s", local.oracle_live_timestamp_compat_promql)
+        expr    = local.oracle_live_age_compat_promql
         instant = true
       })
     }
