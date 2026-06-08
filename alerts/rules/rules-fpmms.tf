@@ -34,6 +34,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       title            = "Oracle Update Delayed"
       summary          = "The pool oracle has not published a new price within its {{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}{{ humanizeDuration $values.OracleExpiry.Value }}{{ else }}expected{{ end }} update window."
       last_update      = "{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}age unavailable{{ else }}never reported{{ end }}"
+      resolved_title   = "Oracle Update Recovered"
       resolved_summary = "The pool oracle is publishing recent prices again."
     }
 
@@ -331,6 +332,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       title            = "Oracle Down"
       summary          = "The pool oracle is far past its {{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}{{ humanizeDuration $values.OracleExpiry.Value }}{{ else }}expected{{ end }} update window."
       last_update      = "{{ if and $values.OracleTs $values.OracleAge (gt $values.OracleTs.Value 0.0) }}{{ humanizeDuration $values.OracleAge.Value }} ago{{ else if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}age unavailable{{ else }}never reported{{ end }}"
+      resolved_title   = "Oracle Back Up"
       resolved_summary = "The pool oracle is back inside its update window."
     }
 
