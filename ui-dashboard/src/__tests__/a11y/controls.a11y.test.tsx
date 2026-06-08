@@ -740,6 +740,7 @@ const CDP_COLLATERAL: CdpCollateral = {
   stabilityPool: "0xstability",
   minDebt: "100000000000000000000",
   minBoldInSp: "0",
+  minBoldAfterRebalance: "0",
   systemParamsLoaded: true,
   mcrBps: 11_000,
   ccrBps: 15_000,
