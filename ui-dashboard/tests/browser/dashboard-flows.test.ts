@@ -139,7 +139,7 @@ test.describe("dashboard browser flows", () => {
     ).toBeVisible();
     await expect(table).toContainText("2.10%");
 
-    await page.getByRole("button", { name: "History" }).click();
+    await page.getByRole("tab", { name: "History" }).click();
     await expect(table).toContainText("redeemed");
   });
 

@@ -29,6 +29,10 @@
  *    `aria-selected` + `aria-controls` contract. If the page-side
  *    rendering drops `role="tablist"` or breaks `aria-controls`, this
  *    test now catches it (Cursor finding on PR #342).
+ *
+ * 5. `CdpTroveTable` — the real CDP detail table view switcher. Pins the
+ *    `Open` / `History` pair as tabs, not toggle buttons, so screen readers
+ *    announce the selected table view accurately.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,7 +47,13 @@ import {
 } from "@/components/breach-history/bucket-filter";
 import { PoolTablist } from "@/app/pool/[poolId]/_components/pool-tablist";
 import { TABS, type Tab } from "@/app/pool/[poolId]/_lib/constants";
+import { CdpTroveTable } from "@/app/cdps/[symbol]/_components/cdp-trove-table";
+import type { CdpCollateral } from "@/app/cdps/_lib/types";
 import type { BridgeStatus } from "@/lib/types";
+
+vi.mock("@/components/address-link", () => ({
+  AddressLink: ({ address }: { address: string }) => <span>{address}</span>,
+}));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -712,5 +722,74 @@ describe("PoolTablist a11y (real component)", () => {
       const results = await axe(container);
       expect(results.violations).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CdpTroveTable — real production tablist
+// ---------------------------------------------------------------------------
+
+const CDP_COLLATERAL: CdpCollateral = {
+  id: "gbpm",
+  chainId: 42220,
+  collIndex: 0,
+  symbol: "GBPm",
+  debtToken: "0xdebt",
+  collToken: "0xcoll",
+  troveManager: "0xtrove",
+  stabilityPool: "0xstability",
+  minDebt: "100000000000000000000",
+  minBoldInSp: "0",
+  systemParamsLoaded: true,
+  mcrBps: 11_000,
+  ccrBps: 15_000,
+  scrBps: 11_000,
+};
+
+describe("CdpTroveTable a11y (real component)", () => {
+  it("uses tab semantics for Open and History views and passes axe", async () => {
+    render(
+      <CdpTroveTable
+        openTroves={[]}
+        allTroves={[]}
+        interestBatches={[]}
+        collateral={CDP_COLLATERAL}
+      />,
+    );
+
+    const tablist = container.querySelector('[role="tablist"]');
+    expect(tablist?.getAttribute("aria-label")).toBe("Trove views");
+    const tabs = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+    );
+    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
+      "Open",
+      "History",
+    ]);
+    const selected = tabs.filter(
+      (tab) => tab.getAttribute("aria-selected") === "true",
+    );
+    expect(selected).toHaveLength(1);
+    expect(selected[0]!.id).toBe("cdp-trove-tab-open");
+
+    let panel = container.querySelector('[role="tabpanel"]');
+    expect(panel?.id).toBe("cdp-trove-panel-open");
+    expect(panel?.getAttribute("aria-labelledby")).toBe("cdp-trove-tab-open");
+    expect(selected[0]!.getAttribute("aria-controls")).toBe(panel?.id);
+
+    const history = tabs.find((tab) => tab.textContent?.trim() === "History");
+    expect(history).toBeDefined();
+    act(() => {
+      history!.click();
+    });
+    panel = container.querySelector('[role="tabpanel"]');
+    expect(history!.getAttribute("aria-selected")).toBe("true");
+    expect(panel?.id).toBe("cdp-trove-panel-history");
+    expect(panel?.getAttribute("aria-labelledby")).toBe(
+      "cdp-trove-tab-history",
+    );
+
+    const results = await axe(container);
+    expect(results.violations).toEqual([]);
   });
 });

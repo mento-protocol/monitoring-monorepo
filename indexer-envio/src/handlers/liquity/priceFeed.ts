@@ -55,7 +55,7 @@ const liquityPriceFeedEffect = createEffect(
     },
     output: S.nullable(S.bigint),
     rateLimit: { calls: 100, per: "second" },
-    cache: false,
+    cache: true,
   },
   async ({ input, context }) =>
     (await trackEffectExecution("liquityPriceFeed", () =>
