@@ -539,6 +539,68 @@ describe("CdpDetailClient", () => {
     expect(rows[2]).toContain("#2");
   });
 
+  it("does not rank missing batch troves by their stale direct rate", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return {
+          data: detailData({
+            openTroves: [
+              trove({
+                id: "trove-missing-batch",
+                troveId: "1",
+                owner: "0xmissingbatch",
+                interestRate: "0",
+                interestBatchId: "missing-batch",
+              }),
+              trove({
+                id: "trove-higher",
+                troveId: "2",
+                owner: "0xhigher",
+                interestRate: rateBps(300),
+              }),
+              trove({
+                id: "trove-low-direct",
+                troveId: "3",
+                owner: "0xlowdirect",
+                interestRate: rateBps(200),
+              }),
+            ],
+            interestBatches: [],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+
+    const rows = troveRowText(handle!);
+    expect(rows[0]).toContain("0xlowdirect");
+    expect(rows[0]).toContain("#1");
+    expect(rows[1]).toContain("0xhigher");
+    expect(rows[1]).toContain("#2");
+    expect(rows[2]).toContain("0xmissingbatch");
+    expect(rows[2]).toContain("Batch missing");
+    const renderedRows = handle!.container.querySelectorAll(
+      'table[aria-label="GBPm troves"] tbody tr',
+    );
+    expect(renderedRows[2]?.querySelector("td")?.textContent).toBe("—");
+  });
+
   it("searches fetched troves by owner or trove id", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {

@@ -57,15 +57,19 @@ const liquityPriceFeedEffect = createEffect(
     rateLimit: { calls: 100, per: "second" },
     cache: true,
   },
-  async ({ input, context }) =>
-    (await trackEffectExecution("liquityPriceFeed", () =>
-      fetchLiquityPrice(
-        input.chainId,
-        input.priceFeed,
-        input.blockNumber,
-        context.log,
-      ),
-    )) ?? null,
+  async ({ input, context }) => {
+    const result =
+      (await trackEffectExecution("liquityPriceFeed", () =>
+        fetchLiquityPrice(
+          input.chainId,
+          input.priceFeed,
+          input.blockNumber,
+          context.log,
+        ),
+      )) ?? null;
+    if (result === null) context.cache = false;
+    return result;
+  },
 );
 
 export type LiquityPriceContext = {

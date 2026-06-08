@@ -747,6 +747,24 @@ const CDP_COLLATERAL: CdpCollateral = {
 };
 
 describe("CdpTroveTable a11y (real component)", () => {
+  function cdpTabs(): HTMLButtonElement[] {
+    return Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+    );
+  }
+
+  function cdpTabById(id: string): HTMLButtonElement {
+    const match = cdpTabs().find((tab) => tab.id === id);
+    if (!match) throw new Error(`No CDP trove tab with id ${id}`);
+    return match;
+  }
+
+  function dispatchTabKey(el: HTMLElement, key: string) {
+    act(() => {
+      el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    });
+  }
+
   it("uses tab semantics for Open and History views and passes axe", async () => {
     render(
       <CdpTroveTable
@@ -791,5 +809,47 @@ describe("CdpTroveTable a11y (real component)", () => {
 
     const results = await axe(container);
     expect(results.violations).toEqual([]);
+  });
+
+  it("moves focus with arrow keys and activates only on click", () => {
+    render(
+      <CdpTroveTable
+        openTroves={[]}
+        allTroves={[]}
+        interestBatches={[]}
+        collateral={CDP_COLLATERAL}
+      />,
+    );
+
+    const open = cdpTabById("cdp-trove-tab-open");
+    const history = cdpTabById("cdp-trove-tab-history");
+    expect(open.tabIndex).toBe(0);
+    expect(history.tabIndex).toBe(-1);
+
+    open.focus();
+    dispatchTabKey(open, "ArrowRight");
+
+    expect(document.activeElement).toBe(history);
+    expect(cdpTabById("cdp-trove-tab-open").tabIndex).toBe(-1);
+    expect(cdpTabById("cdp-trove-tab-history").tabIndex).toBe(0);
+    expect(cdpTabById("cdp-trove-tab-open").getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(
+      cdpTabById("cdp-trove-tab-history").getAttribute("aria-selected"),
+    ).toBe("false");
+
+    act(() => {
+      history.click();
+    });
+
+    expect(
+      cdpTabById("cdp-trove-tab-history").getAttribute("aria-selected"),
+    ).toBe("true");
+    const panel = container.querySelector('[role="tabpanel"]');
+    expect(panel?.id).toBe("cdp-trove-panel-history");
+    expect(panel?.getAttribute("aria-labelledby")).toBe(
+      "cdp-trove-tab-history",
+    );
   });
 });

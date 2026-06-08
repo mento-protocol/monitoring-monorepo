@@ -6,6 +6,7 @@ import { EmptyBox } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
 import { Table, Row, Th, Td } from "@/components/table";
 import { relativeTime } from "@/lib/format";
+import { useRovingTabIndex } from "@/lib/use-roving-tab-index";
 import {
   CDP_TROVES_DETAIL_LIMIT,
   type CdpCollateral,
@@ -14,7 +15,9 @@ import {
 } from "../../_lib/types";
 import { formatTokenAmount } from "../../_lib/format";
 
-type TroveTab = "open" | "history";
+const TROVE_TABS = ["open", "history"] as const;
+
+type TroveTab = (typeof TROVE_TABS)[number];
 
 type TroveDisplayRow = {
   trove: CdpTrove;
@@ -180,29 +183,46 @@ function TroveTableHeader({
   onSelectTab: (tab: TroveTab) => void;
   onSearch: (value: string) => void;
 }) {
+  const activeIndex = Math.max(0, TROVE_TABS.indexOf(activeTab));
+  const {
+    groupRef: tablistRef,
+    getItemProps,
+    handleKeyDown,
+  } = useRovingTabIndex({
+    activeIndex,
+    itemCount: TROVE_TABS.length,
+    activation: "manual",
+    arrowKeys: "horizontal",
+  });
+
   return (
     <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <h2 className="text-lg font-semibold text-white">Troves</h2>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div
+          ref={tablistRef}
           className="inline-flex rounded-md border border-slate-800 bg-slate-950 p-0.5"
           role="tablist"
           aria-label="Trove views"
+          onKeyDown={handleKeyDown}
+          tabIndex={-1}
         >
-          <TroveTabButton
-            tab="open"
-            active={activeTab === "open"}
-            onClick={() => onSelectTab("open")}
-          >
-            Open
-          </TroveTabButton>
-          <TroveTabButton
-            tab="history"
-            active={activeTab === "history"}
-            onClick={() => onSelectTab("history")}
-          >
-            History
-          </TroveTabButton>
+          {TROVE_TABS.map((tab, index) => {
+            const rovingProps = getItemProps(index);
+            return (
+              <TroveTabButton
+                key={tab}
+                tab={tab}
+                active={activeTab === tab}
+                tabIndex={rovingProps.tabIndex}
+                buttonRef={rovingProps.ref}
+                onFocus={rovingProps.onFocus}
+                onClick={() => onSelectTab(tab)}
+              >
+                {tab === "open" ? "Open" : "History"}
+              </TroveTabButton>
+            );
+          })}
         </div>
         <label className="sr-only" htmlFor="cdp-trove-search">
           Search troves
@@ -292,21 +312,30 @@ function TroveTableResults({
 function TroveTabButton({
   tab,
   active,
+  tabIndex,
+  buttonRef,
+  onFocus,
   onClick,
   children,
 }: {
   tab: TroveTab;
   active: boolean;
+  tabIndex: number;
+  buttonRef: (node: HTMLButtonElement | null) => void;
+  onFocus: () => void;
   onClick: () => void;
   children: ReactNode;
 }) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       role="tab"
       id={troveTabId(tab)}
       aria-selected={active}
       aria-controls={trovePanelId(tab)}
+      tabIndex={tabIndex}
+      onFocus={onFocus}
       onClick={onClick}
       className={[
         "rounded px-3 py-1 text-xs font-medium transition-colors",
@@ -429,20 +458,33 @@ function displayRowForTrove(
   trove: CdpTrove,
   batchById: ReadonlyMap<string, CdpInterestBatch>,
 ): TroveDisplayRow {
-  const batch =
-    trove.interestBatchId == null
-      ? undefined
-      : batchById.get(trove.interestBatchId);
-  const batchRate =
-    batch == null ? null : parseBigInt(batch.annualInterestRate);
+  if (trove.interestBatchId != null) {
+    const batch = batchById.get(trove.interestBatchId);
+    if (batch == null) {
+      return {
+        trove,
+        effectiveRate: null,
+        rank: null,
+        tied: false,
+        rateSource: null,
+      };
+    }
+    return {
+      trove,
+      effectiveRate: parseBigInt(batch.annualInterestRate),
+      rank: null,
+      tied: false,
+      rateSource: "batch",
+    };
+  }
+
   const directRate = parseBigInt(trove.interestRate);
   return {
     trove,
-    effectiveRate: batchRate ?? directRate,
+    effectiveRate: directRate,
     rank: null,
     tied: false,
-    rateSource:
-      batchRate != null ? "batch" : directRate != null ? "direct" : null,
+    rateSource: directRate != null ? "direct" : null,
   };
 }
 
