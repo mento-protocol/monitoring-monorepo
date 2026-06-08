@@ -125,6 +125,63 @@ locals {
     local.oracle_live_timestamp_compat_promql,
     local.oracle_live_timestamp_compat_promql,
   )
+  oracle_expiry_duration_part_promql = {
+    OracleExpiryDays    = format("floor((%s) / 86400)", local.oracle_expiry_compat_promql)
+    OracleExpiryHours   = format("floor(((%s) %% 86400) / 3600)", local.oracle_expiry_compat_promql)
+    OracleExpiryMinutes = format("floor(((%s) %% 3600) / 60)", local.oracle_expiry_compat_promql)
+    OracleExpirySeconds = format("floor((%s) %% 60)", local.oracle_expiry_compat_promql)
+  }
+  oracle_age_duration_part_promql = {
+    OracleAgeDays    = format("floor((%s) / 86400)", local.oracle_live_age_compat_promql)
+    OracleAgeHours   = format("floor(((%s) %% 86400) / 3600)", local.oracle_live_age_compat_promql)
+    OracleAgeMinutes = format("floor(((%s) %% 3600) / 60)", local.oracle_live_age_compat_promql)
+    OracleAgeSeconds = format("floor((%s) %% 60)", local.oracle_live_age_compat_promql)
+  }
+
+  # Grafana annotation templates can call `humanizeDuration`, but cannot
+  # post-process its output. These oracle annotations use PromQL-derived
+  # duration parts to omit trailing zero units in Slack copy: "6m 0s" -> "6m",
+  # "1h 0m 0s" -> "1h", while keeping sub-minute values on humanizeDuration.
+  oracle_update_window_duration_annotation = join("", [
+    "{{ if and $values.OracleExpiry (gt $values.OracleExpiry.Value 0.0) }}",
+    "{{ if and $values.OracleExpirySeconds (eq $values.OracleExpirySeconds.Value 0.0) }}",
+    "{{ if and $values.OracleExpiryDays (gt $values.OracleExpiryDays.Value 0.0) }}",
+    "{{ printf \"%.0fd\" $values.OracleExpiryDays.Value }}",
+    "{{ if and $values.OracleExpiryHours (gt $values.OracleExpiryHours.Value 0.0) }} {{ printf \"%.0fh\" $values.OracleExpiryHours.Value }}{{ end }}",
+    "{{ if and $values.OracleExpiryMinutes (gt $values.OracleExpiryMinutes.Value 0.0) }} {{ printf \"%.0fm\" $values.OracleExpiryMinutes.Value }}{{ end }}",
+    "{{ else if and $values.OracleExpiryHours (gt $values.OracleExpiryHours.Value 0.0) }}",
+    "{{ printf \"%.0fh\" $values.OracleExpiryHours.Value }}",
+    "{{ if and $values.OracleExpiryMinutes (gt $values.OracleExpiryMinutes.Value 0.0) }} {{ printf \"%.0fm\" $values.OracleExpiryMinutes.Value }}{{ end }}",
+    "{{ else if and $values.OracleExpiryMinutes (gt $values.OracleExpiryMinutes.Value 0.0) }}",
+    "{{ printf \"%.0fm\" $values.OracleExpiryMinutes.Value }}",
+    "{{ else }}",
+    "{{ humanizeDuration $values.OracleExpiry.Value }}",
+    "{{ end }}",
+    "{{ else }}",
+    "{{ humanizeDuration $values.OracleExpiry.Value }}",
+    "{{ end }}",
+    "{{ else }}",
+    "expected",
+    "{{ end }}",
+  ])
+  oracle_live_age_duration_annotation = join("", [
+    "{{ if and $values.OracleAge (gt $values.OracleAge.Value 0.0) $values.OracleAgeSeconds (eq $values.OracleAgeSeconds.Value 0.0) }}",
+    "{{ if and $values.OracleAgeDays (gt $values.OracleAgeDays.Value 0.0) }}",
+    "{{ printf \"%.0fd\" $values.OracleAgeDays.Value }}",
+    "{{ if and $values.OracleAgeHours (gt $values.OracleAgeHours.Value 0.0) }} {{ printf \"%.0fh\" $values.OracleAgeHours.Value }}{{ end }}",
+    "{{ if and $values.OracleAgeMinutes (gt $values.OracleAgeMinutes.Value 0.0) }} {{ printf \"%.0fm\" $values.OracleAgeMinutes.Value }}{{ end }}",
+    "{{ else if and $values.OracleAgeHours (gt $values.OracleAgeHours.Value 0.0) }}",
+    "{{ printf \"%.0fh\" $values.OracleAgeHours.Value }}",
+    "{{ if and $values.OracleAgeMinutes (gt $values.OracleAgeMinutes.Value 0.0) }} {{ printf \"%.0fm\" $values.OracleAgeMinutes.Value }}{{ end }}",
+    "{{ else if and $values.OracleAgeMinutes (gt $values.OracleAgeMinutes.Value 0.0) }}",
+    "{{ printf \"%.0fm\" $values.OracleAgeMinutes.Value }}",
+    "{{ else }}",
+    "{{ humanizeDuration $values.OracleAge.Value }}",
+    "{{ end }}",
+    "{{ else }}",
+    "{{ humanizeDuration $values.OracleAge.Value }}",
+    "{{ end }}",
+  ])
   fx_oracle_pause_promql = format(
     "(mento_pool_oracle_live_timestamp{pair!~\"%s\",pair=~\".+/.+\"} or max without (last_oracle_update_url) (mento_pool_oracle_timestamp{pair!~\"%s\",pair=~\".+/.+\"})) and on() %s",
     local.usd_pegged_pair_regex,
