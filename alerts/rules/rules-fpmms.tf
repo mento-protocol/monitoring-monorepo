@@ -264,7 +264,8 @@ resource "grafana_rule_group" "fpmms_oracle" {
 
     # See Oracle Liveness for the OracleTs / OracleAge rationale. Oracle Down
     # fires on the same live freshness anchor, so its Slack age text cannot
-    # drift from the timestamp used by the live-down gate.
+    # drift from the timestamp used by the live-down gate. OracleTs is kept as
+    # a Grafana UI diagnostic; Slack copy branches on OracleAge.
     data {
       ref_id         = "OracleTs"
       datasource_uid = var.prometheus_datasource_uid

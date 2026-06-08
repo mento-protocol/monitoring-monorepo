@@ -110,6 +110,9 @@ locals {
   oracle_timestamp_compat_promql      = "max without (last_oracle_update_url) (mento_pool_oracle_timestamp)"
   oracle_live_timestamp_compat_promql = "(mento_pool_oracle_live_timestamp or ${local.oracle_timestamp_compat_promql})"
   oracle_expiry_compat_promql         = "max without (last_oracle_update_url) (mento_pool_oracle_expiry)"
+  # Age helpers intentionally repeat the timestamp expression in the guard and
+  # fallback so annotation queries keep a label-matched `-1` sentinel for
+  # never-reported pools without depending on a recording rule.
   oracle_timestamp_age_promql = format(
     "((time() - %s) and on(chain_id, pool_id, pair) (%s > 0)) or on(chain_id, pool_id, pair) (0 * %s - 1)",
     local.oracle_timestamp_compat_promql,
