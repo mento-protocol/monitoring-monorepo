@@ -62,6 +62,14 @@ export type CdpTrove = {
   redeemedColl: string;
 };
 
+export type CdpInterestBatch = {
+  id: string;
+  collateralId: string;
+  batchManager: string;
+  annualInterestRate: string;
+  updatedAt: string;
+};
+
 /** Subset of {@link CdpTrove} fetched on the markets list page — enough to
  * count open troves (active + zombie) for the borrower-count tile.
  * `LiquityInstance.activeTroveCount` excludes zombies, so we still derive the
@@ -84,7 +92,9 @@ export type CdpTroveOpenStatus = (typeof CDP_TROVE_OPEN_STATUSES)[number];
 // Per-row payload is minimal (id + collateralId + status) so 500 is generous
 // for today's population; the count tile prefixes `≥` when the cap is hit.
 export const CDP_TROVES_LIST_LIMIT = 500;
-export const CDP_TROVES_DETAIL_LIMIT = 50;
+// Hosted Envio/Hasura caps a single query branch at 1000 rows. The detail
+// page fetches that full cap and discloses when the result may be incomplete.
+export const CDP_TROVES_DETAIL_LIMIT = 1000;
 
 export type CdpDepositor = {
   id: string;

@@ -102,16 +102,31 @@ export const CDP_MARKET_DETAIL = `
       rebalanceRedemptionFeeCum borrowingFeeCum
       isShutDown shutDownAt shutDownTcrBps lastEventBlock lastEventTimestamp
     }
-    Trove(
+    OpenTrove: Trove(
       where: {
         collateralId: { _eq: $collateralId }
         status: { _in: [${OPEN_STATUS_LIST}] }
       }
-      order_by: { lastUpdatedAt: desc }
+      order_by: [{ interestRate: asc }, { troveId: asc }, { id: asc }]
       limit: ${CDP_TROVES_DETAIL_LIMIT}
     ) {
       id troveId owner status debt coll icrBps interestRate interestBatchId
       lastUpdatedAt redemptionCount redeemedDebt redeemedColl
+    }
+    AllTrove: Trove(
+      where: { collateralId: { _eq: $collateralId } }
+      order_by: [{ lastUpdatedAt: desc }, { id: asc }]
+      limit: ${CDP_TROVES_DETAIL_LIMIT}
+    ) {
+      id troveId owner status debt coll icrBps interestRate interestBatchId
+      lastUpdatedAt redemptionCount redeemedDebt redeemedColl
+    }
+    InterestBatch(
+      where: { collateralId: { _eq: $collateralId } }
+      order_by: [{ annualInterestRate: asc }, { id: asc }]
+      limit: ${CDP_TROVES_DETAIL_LIMIT}
+    ) {
+      id collateralId batchManager annualInterestRate updatedAt
     }
     StabilityPoolDepositor(
       where: { collateralId: { _eq: $collateralId } }

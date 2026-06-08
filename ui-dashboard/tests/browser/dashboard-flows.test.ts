@@ -116,6 +116,33 @@ test.describe("dashboard browser flows", () => {
     );
   });
 
+  test("renders CDP detail trove ranking with indexed ICR and interest", async ({
+    page,
+  }) => {
+    await page.goto("/cdps/gbpm");
+
+    await expect(
+      page.getByRole("heading", { name: "GBPm CDP Market" }),
+    ).toBeVisible();
+    await expect(page.getByText("Total Supply (System Debt)")).toBeVisible();
+
+    const table = page.getByRole("table", { name: "GBPm troves" });
+    await expect(table).toBeVisible();
+    await expect(
+      table.getByRole("columnheader", { name: "Rank" }),
+    ).toBeVisible();
+    await expect(
+      table.getByRole("columnheader", { name: "ICR (indexed)" }),
+    ).toBeVisible();
+    await expect(
+      table.getByRole("columnheader", { name: "Interest" }),
+    ).toBeVisible();
+    await expect(table).toContainText("2.10%");
+
+    await page.getByRole("button", { name: "History" }).click();
+    await expect(table).toContainText("redeemed");
+  });
+
   test("keeps pool tabs manually activated with keyboard focus and URL state", async ({
     page,
   }) => {

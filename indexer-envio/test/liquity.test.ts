@@ -10,6 +10,7 @@ import {
 } from "../src/handlers/liquity/config";
 import {
   computeCollateralRatioBps,
+  computeTroveIcrBps,
   computeTroveOperationSnapshot,
   floorInterestRateBracket,
 } from "../src/handlers/liquity/math";
@@ -105,6 +106,17 @@ describe("Liquity market loader (contracts.json-backed)", () => {
         debtExpected,
         `market.debtToken drift for ${market.symbol}`,
       );
+      const priceFeedExpected =
+        celoMainnet[`FXPriceFeedProxy${market.symbol}`]?.address?.toLowerCase();
+      assert.ok(
+        priceFeedExpected,
+        `FXPriceFeedProxy${market.symbol} missing from @mento-protocol/contracts`,
+      );
+      assert.equal(
+        market.priceFeed,
+        priceFeedExpected,
+        `market.priceFeed drift for ${market.symbol}`,
+      );
       // CDPLiquidityStrategy is shared across all markets.
       assert.equal(
         market.cdpLiquidityStrategy,
@@ -130,6 +142,7 @@ describe("Liquity market loader (contracts.json-backed)", () => {
       "collSurplusPool",
       "addressesRegistry",
       "systemParams",
+      "priceFeed",
       "cdpLiquidityStrategy",
     ] as const;
     for (const market of LIQUITY_MARKETS) {
@@ -216,6 +229,22 @@ describe("Liquity CDP helpers", () => {
         coll: 200n * d18,
         debt: 0n,
         collateralDebtPriceD18: d18,
+      }),
+      -1,
+    );
+    assert.equal(
+      computeTroveIcrBps({
+        coll: 2667n * d18,
+        debt: 1000n * d18,
+        price: 749400479616306954n,
+      }),
+      19986,
+    );
+    assert.equal(
+      computeTroveIcrBps({
+        coll: 2667n * d18,
+        debt: 1000n * d18,
+        price: null,
       }),
       -1,
     );

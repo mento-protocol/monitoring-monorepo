@@ -22,6 +22,23 @@ export const computeCollateralRatioBps = ({
   return Number((coll * collateralDebtPriceD18 * BPS) / (debt * D18));
 };
 
+export const computeTroveIcrBps = ({
+  coll,
+  debt,
+  price,
+}: {
+  coll: bigint;
+  debt: bigint;
+  price: bigint | null;
+}): number =>
+  price == null
+    ? -1
+    : computeCollateralRatioBps({
+        coll,
+        debt,
+        collateralDebtPriceD18: price,
+      });
+
 export const addSigned = (base: bigint, delta: bigint): bigint => {
   const next = base + delta;
   return next > 0n ? next : 0n;
