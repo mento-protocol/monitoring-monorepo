@@ -212,8 +212,9 @@ async function writeEnrichmentLabels(
  * - `mode=dryRun` — fetch from Arkham but skip the Redis write.
  * - `limit=N` — hard cap on addresses processed (default 10000).
  */
-// The handler accepts no body — `mode` and `limit` are query params — so GET is
-// enough for an explicit operator-triggered run.
+// Keep GET for this side-effecting endpoint because the historical Vercel cron
+// integration invoked this path with GET, and operator-triggered runs use query
+// params rather than a request body.
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const authBail = await requireCronAuth(req, "arkham/enrich");
   if (authBail) return authBail;
