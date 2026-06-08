@@ -1240,6 +1240,9 @@ while IFS= read -r path; do
         scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh|scripts/check-react-doctor-diff.sh|scripts/check-react-doctor-score.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
+        scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
+          add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview adapter changed"
+          ;;
         scripts/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
           add_command "pnpm agent:context-check" "Cloud Run revision suffix guard changed"

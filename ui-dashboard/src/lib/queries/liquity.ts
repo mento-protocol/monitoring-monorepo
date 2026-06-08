@@ -23,7 +23,7 @@ export const CDP_MARKETS = `
       order_by: { collIndex: asc }
     ) {
       id chainId collIndex symbol debtToken collToken troveManager stabilityPool
-      minDebt minBoldInSp systemParamsLoaded
+      minDebt minBoldInSp minBoldAfterRebalance systemParamsLoaded
       mcrBps ccrBps scrBps
     }
     LiquityInstance(
@@ -90,7 +90,7 @@ export const CDP_MARKET_DETAIL = `
   query CdpMarketDetail($collateralId: String!) {
     LiquityCollateral(where: { id: { _eq: $collateralId } }, limit: 1) {
       id chainId collIndex symbol debtToken collToken troveManager stabilityPool
-      minDebt minBoldInSp systemParamsLoaded
+      minDebt minBoldInSp minBoldAfterRebalance systemParamsLoaded
       mcrBps ccrBps scrBps
     }
     LiquityInstance(where: { collateralId: { _eq: $collateralId } }, limit: 1) {

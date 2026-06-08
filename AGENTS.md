@@ -207,7 +207,11 @@ Use it as a batch-boundary verifier. Verify every accepted finding in the real
 code before editing, rerun focused checks after review-triggered fixes, and
 rerun autoreview once for that fixed batch. This adapter expects the global
 `~/.agents/skills/autoreview` skill and does not replace the final PR readiness
-probe.
+probe. Inside an active Codex sandbox, the adapter defaults to the helper's
+local deterministic engine because nested `codex exec` is unavailable there;
+pass `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` to override.
+For a true Codex semantic pass from inside Codex, use `--prepare-only` and the
+Codex-native flow described by the global autoreview skill.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
 same gate without running deploy, Terraform, mutation, codegen, or install
@@ -371,7 +375,7 @@ pnpm code-health:history           # CodeScene-style git history report → repo
 pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/ (advisory, never blocks)
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
-pnpm agent:autoreview              # Structured closeout review via ~/.agents/skills/autoreview; supports --engine claude
+pnpm agent:autoreview              # Structured closeout review; Codex sandbox defaults to --engine local, override with --engine claude/codex
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
@@ -473,7 +477,7 @@ Repo-tracked under `.claude/commands/`. Each `.md` file is the body Claude Code 
 | Command                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/verify-ui`                         | Drive chrome-devtools MCP through the dashboard's pages with token-budget guidance and per-page acceptance checks (KPI presence, chart wiring, interaction smoke tests, responsive layouts). Defaults to a localhost dev server; pass `prod` to verify against `monitoring.mento.org`. For session-dependent surfaces, verify both logged-out and locally simulated logged-in states per `ui-dashboard/AGENTS.md`.                                                                                                                                        |
-| `/autoreview [args]`                 | Run the shared structured closeout review helper (`pnpm agent:autoreview`) from Claude Code. Defaults to Codex as the review engine; pass `--engine claude` only when Claude review is explicitly wanted.                                                                                                                                                                                                                                                                                                                                                 |
+| `/autoreview [args]`                 | Run the shared structured closeout review helper (`pnpm agent:autoreview`) from Claude Code. Normal shells default to Codex as the review engine; active Codex sandboxes default to the local deterministic engine unless an engine is passed explicitly.                                                                                                                                                                                                                                                                                                 |
 | `/babysit-indexer-deploy [<commit>]` | Arm a `Monitor` that polls Envio's deployment registry every 45s internally but only emits on state change (`REGISTERED` / `READY_TO_PROMOTE` / `BUILD_FAILED` / `SYNC_DEADLINE` / `ERROR`). Prompts for `pnpm deploy:indexer:promote <commit>` once every chain is caught up — never auto-promotes. Bails after 30min of 404s (build likely failed) or 90min of stagnation. Defaults to `git rev-parse --short origin/envio` when no commit is passed. Replaces the prior `/loop 5m` cron version, which produced ~12 idle macOS notifications per sync. |
 
 To use them you need [Claude Code](https://claude.com/claude-code). Personal/local-only commands belong in your own `~/.claude/commands/` (or in `.git/info/exclude` if you want to keep them in this directory but not share).
@@ -491,7 +495,11 @@ lives in `.codex/config.toml`; local personal Codex settings still belong in
 `autoreview` is a cross-project global skill sourced from
 `~/.agents/skills/autoreview`. This repo exposes it through
 `pnpm agent:autoreview`, and Claude Code also has `/autoreview` as a thin
-command shim. Do not add repo-local `.agents/skills/autoreview` or
+command shim. The repo adapter detects active Codex sandbox sessions and uses
+the helper's local deterministic engine by default so the command does not try
+to spawn unavailable nested `codex exec`; explicit `--engine` arguments and
+`AUTOREVIEW_ENGINE` still take precedence. Do not add repo-local
+`.agents/skills/autoreview` or
 `.claude/skills/autoreview` copies unless the global skill is intentionally
 forked.
 

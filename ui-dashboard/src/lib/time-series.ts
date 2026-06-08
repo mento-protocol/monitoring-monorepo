@@ -110,6 +110,24 @@ export function rangeKeyToDays(range: RangeKey): number | null {
   return RANGE_DAYS[range];
 }
 
+export function dateTickFormatForSeries(
+  series: readonly TimeSeriesPoint[],
+): "%b %d" | "%b %Y" | "%Y" {
+  if (series.length < 2) return "%b %d";
+
+  let min = Infinity;
+  let max = -Infinity;
+  for (const point of series) {
+    min = Math.min(min, point.timestamp);
+    max = Math.max(max, point.timestamp);
+  }
+
+  const spanDays = (max - min) / SECONDS_PER_DAY;
+  if (spanDays >= 365 * 2) return "%Y";
+  if (spanDays >= 120) return "%b %Y";
+  return "%b %d";
+}
+
 // Stocks (TVL, total deposits) compare current to the value 7 days ago
 // (point-to-point), not a sum over two 7-day windows like flows. The
 // baseline must land inside [now - 14d, now - 7d]: sparse indexed histories

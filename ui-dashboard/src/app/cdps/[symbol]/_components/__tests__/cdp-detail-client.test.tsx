@@ -128,6 +128,7 @@ function collateral(overrides: Partial<CdpCollateral> = {}): CdpCollateral {
     stabilityPool: "0xstability",
     minDebt: wei(100),
     minBoldInSp: wei(1),
+    minBoldAfterRebalance: wei(5_000),
     systemParamsLoaded: true,
     mcrBps: 11_000,
     ccrBps: 15_000,
