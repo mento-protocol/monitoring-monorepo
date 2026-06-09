@@ -258,6 +258,12 @@ async function fetchAllDailySnapshotPages(
   chainId: number,
 ): Promise<DailySnapshotPageResult> {
   const rows: CdpBorrowingRevenueDailySnapshot[] = [];
+  // Offset pagination over the append-only snapshot table is unstable under
+  // concurrent inserts: a new row landing between page requests shifts the
+  // `timestamp desc, id desc` window and can re-emit a boundary row on the next
+  // page. Dedup by stable row id (matches `fetchPaginatedRows` in
+  // `lib/network-fetcher/fetch.ts`) so windowed totals can't double-count.
+  const seen = new Set<string>();
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   try {
     for (let page = 0; page < DAILY_SNAPSHOT_MAX_PAGES; page++) {
@@ -273,7 +279,14 @@ async function fetchAllDailySnapshotPages(
         signal,
       );
       const pageRows = response.LiquityBorrowingRevenueDailySnapshot ?? [];
-      rows.push(...pageRows);
+      for (const row of pageRows) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        rows.push(row);
+      }
+      // Stop on the raw page length, not the deduped count — a full page that
+      // happens to contain a boundary duplicate must not look "short" and
+      // truncate pagination a page early.
       if (pageRows.length < DAILY_SNAPSHOT_PAGE_SIZE) {
         return { rows, truncated: false, unavailable: false };
       }
