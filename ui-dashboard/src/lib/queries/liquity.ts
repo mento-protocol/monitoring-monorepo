@@ -112,7 +112,10 @@ export const CDP_BORROWING_REVENUE_BRACKETS = `
 export const CDP_BORROWING_FEE_EVENTS = `
   query CdpBorrowingFeeEvents($chainId: Int!, $limit: Int!, $offset: Int!) {
     TroveOperationEvent(
-      where: { chainId: { _eq: $chainId } }
+      where: {
+        chainId: { _eq: $chainId }
+        debtIncreaseFromUpfrontFee: { _gt: "0" }
+      }
       order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
       offset: $offset
