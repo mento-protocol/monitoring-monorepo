@@ -1,5 +1,9 @@
 # Terraform (note: .terraform.lock.hcl IS committed, like the other monorepo stacks)
 infra/.terraform/
+# Agent quality-gate + tf-wrapper data dirs (TF_DATA_DIR); recursive because the
+# gate's `terraform -chdir=… init` with a relative TF_DATA_DIR nests the path.
+**/.terraform-agent-gate/
+**/.terraform-tf-wrapper/
 infra/terraform.tfstate
 infra/terraform.tfstate.backup
 infra/errored.tfstate
