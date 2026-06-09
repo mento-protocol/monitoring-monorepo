@@ -30,7 +30,7 @@ permissions: read-all
 jobs:
   changes:
     name: Detect changes
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 2
     permissions:
       contents: read
@@ -195,7 +195,7 @@ jobs:
     name: Quality Checks (shared-config)
     needs: changes
     if: needs.changes.outputs.shared == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
       checks: write
@@ -407,7 +407,7 @@ jobs:
     name: Quality Checks (metrics-bridge)
     needs: changes
     if: needs.changes.outputs.bridge == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
       checks: write
@@ -449,7 +449,7 @@ jobs:
     name: Quality Checks (integration-probes)
     needs: changes
     if: needs.changes.outputs.integrationProbes == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
       checks: write
@@ -490,7 +490,7 @@ jobs:
     name: Quality Checks (alerts Cloud Functions)
     needs: changes
     if: needs.changes.outputs.alerts == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
       checks: write
@@ -579,7 +579,7 @@ jobs:
     name: Terraform Validate (registry)
     needs: changes
     if: needs.changes.outputs.terraform == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
       contents: read
@@ -625,7 +625,7 @@ jobs:
     name: Quality Checks (aegis)
     needs: changes
     if: needs.changes.outputs.aegis == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
       checks: write
@@ -681,7 +681,7 @@ jobs:
     name: Lint + test root scripts
     needs: changes
     if: needs.changes.outputs.rootScripts == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
       checks: write
@@ -718,7 +718,7 @@ jobs:
     # (dep-cruiser config + knip configs) so a PR that only edits the
     # rule file is validated against the codebase before merge.
     if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
       checks: write
