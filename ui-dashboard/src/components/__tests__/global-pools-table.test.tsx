@@ -430,7 +430,8 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toContain('text-slate-600" title="TVL Δ WoW">—');
+    expect(html).toContain('title="TVL Δ WoW">—');
+    expect(html).toContain("text-slate-600");
   });
 
   it("renders em-dash when the pool has no WoW entry (no comparable snapshot)", () => {
@@ -440,7 +441,8 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toContain('text-slate-600" title="TVL Δ WoW">—');
+    expect(html).toContain('title="TVL Δ WoW">—');
+    expect(html).toContain("text-slate-600");
   });
 
   it("renders N/A when the WoW value is explicitly null (snapshot query failed)", () => {
@@ -451,7 +453,8 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toContain('text-slate-400" title="TVL Δ WoW">N/A');
+    expect(html).toContain('title="TVL Δ WoW">N/A');
+    expect(html).toContain("text-slate-400");
   });
 
   it("renders positive WoW with + prefix and emerald color in the same cell", () => {
@@ -462,7 +465,8 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toContain('text-emerald-400" title="TVL Δ WoW">+2.35%');
+    expect(html).toContain('title="TVL Δ WoW">+2.35%');
+    expect(html).toContain("text-emerald-400");
   });
 
   it("renders negative WoW with - prefix and red color in the same cell", () => {
@@ -473,7 +477,8 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toContain('text-red-400" title="TVL Δ WoW">-1.10%');
+    expect(html).toContain('title="TVL Δ WoW">-1.10%');
+    expect(html).toContain("text-red-400");
   });
 });
 

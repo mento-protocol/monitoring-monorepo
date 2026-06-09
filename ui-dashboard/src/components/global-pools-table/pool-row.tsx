@@ -293,7 +293,7 @@ function VolumeSummaryCell({
 
 function StrategyCell({ strategies }: { strategies: PoolStrategyLabel[] }) {
   return (
-    <Cell className="hidden lg:table-cell">
+    <Cell className="hidden xl:table-cell">
       {strategies.length > 0 ? (
         <div className="flex gap-1">
           {strategies.map((s) => (

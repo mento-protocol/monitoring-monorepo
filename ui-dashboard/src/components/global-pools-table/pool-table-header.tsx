@@ -87,7 +87,7 @@ export function PoolTableHeader({
         >
           Total
         </SortableTh>
-        <Th className="hidden lg:table-cell">Strategy</Th>
+        <Th className="hidden xl:table-cell">Strategy</Th>
       </tr>
     </thead>
   );
