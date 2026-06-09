@@ -23,14 +23,19 @@ export type GlobalSortKey =
   | "volume7d"
   | "totalVolume";
 
+// URL-settable sort keys. Excludes "tvlChangeWoW" and "volume24h": both now
+// render as secondary lines inside the TVL / Volume cells rather than as their
+// own sortable headers, so they have no header to expose `aria-sort`. Keeping
+// them out of this set means a stale deep link (?poolsSort=volume24h) falls
+// back to the default "tvl desc" instead of sorting by an invisible column.
+// The comparator below still handles them so the metrics can be re-promoted to
+// sortable headers without re-deriving the sort logic.
 export const GLOBAL_SORT_KEYS: ReadonlySet<GlobalSortKey> = new Set([
   "pool",
   "health",
   "uptime",
   "fee",
   "tvl",
-  "tvlChangeWoW",
-  "volume24h",
   "volume7d",
   "totalVolume",
 ]);
