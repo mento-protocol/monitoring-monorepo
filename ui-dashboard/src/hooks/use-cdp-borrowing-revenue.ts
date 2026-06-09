@@ -10,6 +10,8 @@ import {
 } from "@/lib/networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import {
+  CDP_BORROWING_FEE_EVENTS,
+  CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
   CDP_BORROWING_REVENUE_BRACKETS,
   CDP_BORROWING_REVENUE_MARKETS,
   ORACLE_RATES,
@@ -17,9 +19,16 @@ import {
 import { REQUEST_TIMEOUT_MS } from "@/lib/fetch-all-networks";
 import {
   aggregateCdpBorrowingRevenue,
+  aggregateCdpBorrowingRevenueMarkets,
+  buildDailyCdpBorrowingFeeSeries,
+  buildDailyCdpBorrowingFeeSeriesFromSnapshots,
+  type CdpBorrowingFeeEvent,
+  type CdpBorrowingFeeSeriesPoint,
   type CdpBorrowingRevenueBracket,
   type CdpBorrowingRevenueCollateral,
+  type CdpBorrowingRevenueDailySnapshot,
   type CdpBorrowingRevenueInstance,
+  type CdpBorrowingRevenueMarket,
   type CdpBorrowingRevenueSummary,
 } from "@/lib/cdp-borrowing-revenue";
 import {
@@ -38,19 +47,48 @@ type BracketsResponse = {
   InterestRateBracket: CdpBorrowingRevenueBracket[];
 };
 
+type FeeEventsResponse = {
+  TroveOperationEvent: CdpBorrowingFeeEvent[];
+};
+
+type DailySnapshotsResponse = {
+  LiquityBorrowingRevenueDailySnapshot: CdpBorrowingRevenueDailySnapshot[];
+};
+
 type BracketPageResult = {
   rows: CdpBorrowingRevenueBracket[];
   truncated: boolean;
 };
 
+type FeeEventPageResult = {
+  rows: CdpBorrowingFeeEvent[];
+  truncated: boolean;
+};
+
+type DailySnapshotPageResult = {
+  rows: CdpBorrowingRevenueDailySnapshot[];
+  truncated: boolean;
+  unavailable: boolean;
+};
+
 type NetworkCdpBorrowingRevenue = {
   network: Network;
   summary: CdpBorrowingRevenueSummary | null;
+  markets: CdpBorrowingRevenueMarket[];
+  dailySeries: CdpBorrowingFeeSeriesPoint[];
+  dailySeriesTruncated: boolean;
+  dailySeriesApproximate: boolean;
+  dailySeriesFailed: boolean;
   error: Error | null;
 };
 
 export type CdpBorrowingRevenueResult = {
   summary: CdpBorrowingRevenueSummary | null;
+  markets: CdpBorrowingRevenueMarket[];
+  dailySeries: CdpBorrowingFeeSeriesPoint[];
+  dailySeriesTruncated: boolean;
+  dailySeriesApproximate: boolean;
+  dailySeriesFailed: boolean;
   isLoading: boolean;
   hasError: boolean;
 };
@@ -67,6 +105,11 @@ const EMPTY_SUMMARY: CdpBorrowingRevenueSummary = {
 
 const BRACKET_PAGE_SIZE = 1000;
 const BRACKET_MAX_PAGES = 20;
+const FEE_EVENT_PAGE_SIZE = 1000;
+const FEE_EVENT_MAX_PAGES = 20;
+const DAILY_SNAPSHOT_PAGE_SIZE = 1000;
+const DAILY_SNAPSHOT_MAX_PAGES = 20;
+const CDP_REVENUE_CHAIN_IDS = new Set([42220]);
 
 function mergeSummaries(
   rows: ReadonlyArray<NetworkCdpBorrowingRevenue>,
@@ -93,6 +136,47 @@ function mergeSummaries(
   if (!sawSummary) return null;
   merged.unpricedSymbols = [...unpricedSymbols].sort();
   return merged;
+}
+
+function mergeMarkets(
+  rows: ReadonlyArray<NetworkCdpBorrowingRevenue>,
+): CdpBorrowingRevenueMarket[] {
+  return rows
+    .flatMap((row) => row.markets)
+    .sort(
+      (a, b) =>
+        b.totalRevenueUSD - a.totalRevenueUSD || a.collIndex - b.collIndex,
+    );
+}
+
+function mergeDailySeries(
+  rows: ReadonlyArray<NetworkCdpBorrowingRevenue>,
+): CdpBorrowingFeeSeriesPoint[] {
+  const buckets = new Map<
+    number,
+    { upfrontFeesUSD: number; accruedInterestUSD: number }
+  >();
+
+  for (const row of rows) {
+    for (const point of row.dailySeries) {
+      const existing = buckets.get(point.timestamp) ?? {
+        upfrontFeesUSD: 0,
+        accruedInterestUSD: 0,
+      };
+      existing.upfrontFeesUSD += point.upfrontFeesUSD;
+      existing.accruedInterestUSD += point.accruedInterestUSD;
+      buckets.set(point.timestamp, existing);
+    }
+  }
+
+  return [...buckets.entries()]
+    .map(([timestamp, bucket]) => ({
+      timestamp,
+      upfrontFeesUSD: bucket.upfrontFeesUSD,
+      accruedInterestUSD: bucket.accruedInterestUSD,
+      totalFeesUSD: bucket.upfrontFeesUSD + bucket.accruedInterestUSD,
+    }))
+    .sort((a, b) => a.timestamp - b.timestamp);
 }
 
 async function requestWithTimeout<T>(
@@ -136,6 +220,140 @@ async function fetchAllBracketPages(
   return { rows, truncated: true };
 }
 
+async function fetchAllFeeEventPages(
+  client: GraphQLClient,
+  chainId: number,
+): Promise<FeeEventPageResult> {
+  const rows: CdpBorrowingFeeEvent[] = [];
+  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  for (let page = 0; page < FEE_EVENT_MAX_PAGES; page++) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Event pagination is intentionally sequential so we can stop after the first short page.
+    const response = await requestWithTimeout<FeeEventsResponse>(
+      client,
+      CDP_BORROWING_FEE_EVENTS,
+      {
+        chainId,
+        limit: FEE_EVENT_PAGE_SIZE,
+        offset: page * FEE_EVENT_PAGE_SIZE,
+      },
+      signal,
+    );
+    const pageRows = response.TroveOperationEvent ?? [];
+    rows.push(...pageRows);
+    if (pageRows.length < FEE_EVENT_PAGE_SIZE) {
+      return { rows, truncated: false };
+    }
+  }
+
+  return { rows, truncated: true };
+}
+
+function isMissingDailySnapshotEntityError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("LiquityBorrowingRevenueDailySnapshot");
+}
+
+async function fetchAllDailySnapshotPages(
+  client: GraphQLClient,
+  chainId: number,
+): Promise<DailySnapshotPageResult> {
+  const rows: CdpBorrowingRevenueDailySnapshot[] = [];
+  // Offset pagination over the append-only snapshot table is unstable under
+  // concurrent inserts: a new row landing between page requests shifts the
+  // `timestamp desc, id desc` window and can re-emit a boundary row on the next
+  // page. Dedup by stable row id (matches `fetchPaginatedRows` in
+  // `lib/network-fetcher/fetch.ts`) so windowed totals can't double-count.
+  const seen = new Set<string>();
+  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  try {
+    for (let page = 0; page < DAILY_SNAPSHOT_MAX_PAGES; page++) {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Snapshot pagination is intentionally sequential so we can stop after the first short page.
+      const response = await requestWithTimeout<DailySnapshotsResponse>(
+        client,
+        CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
+        {
+          chainId,
+          limit: DAILY_SNAPSHOT_PAGE_SIZE,
+          offset: page * DAILY_SNAPSHOT_PAGE_SIZE,
+        },
+        signal,
+      );
+      const pageRows = response.LiquityBorrowingRevenueDailySnapshot ?? [];
+      for (const row of pageRows) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        rows.push(row);
+      }
+      // Stop on the raw page length, not the deduped count — a full page that
+      // happens to contain a boundary duplicate must not look "short" and
+      // truncate pagination a page early.
+      if (pageRows.length < DAILY_SNAPSHOT_PAGE_SIZE) {
+        return { rows, truncated: false, unavailable: false };
+      }
+    }
+
+    return { rows, truncated: true, unavailable: false };
+  } catch (err) {
+    if (isMissingDailySnapshotEntityError(err)) {
+      return { rows: [], truncated: false, unavailable: true };
+    }
+    throw err;
+  }
+}
+
+// The daily series feeds only the time-series chart. A failure fetching it (a
+// transient error, or fallback fee-event pagination timing out while production
+// is still on the old schema) must NOT blank the summary tiles and market
+// tables that the caller's market/bracket/rate queries already produced. We
+// degrade the series to empty and flag `failed` so the caller can fail-closed
+// the chart (which can't show a meaningful swap+borrowing total without it)
+// while keeping the tiles/tables intact. `failed` is distinct from
+// `truncated`/`approximate`: those mean "mostly there", a failure means "gone".
+async function resolveDailyBorrowingFeeSeries(
+  client: GraphQLClient,
+  chainId: number,
+  aggregateArgs: {
+    collaterals: ReadonlyArray<CdpBorrowingRevenueCollateral>;
+    instances: ReadonlyArray<CdpBorrowingRevenueInstance>;
+    brackets: ReadonlyArray<CdpBorrowingRevenueBracket>;
+    rates: OracleRateMap;
+    bracketsTruncated: boolean;
+  },
+): Promise<{
+  points: CdpBorrowingFeeSeriesPoint[];
+  truncated: boolean;
+  approximate: boolean;
+  failed: boolean;
+}> {
+  try {
+    const dailySnapshotPages = await fetchAllDailySnapshotPages(
+      client,
+      chainId,
+    );
+    const fallbackFeeEventPages = dailySnapshotPages.unavailable
+      ? await fetchAllFeeEventPages(client, chainId)
+      : undefined;
+    return {
+      points:
+        fallbackFeeEventPages === undefined
+          ? buildDailyCdpBorrowingFeeSeriesFromSnapshots({
+              ...aggregateArgs,
+              dailySnapshots: dailySnapshotPages.rows,
+            })
+          : buildDailyCdpBorrowingFeeSeries({
+              ...aggregateArgs,
+              feeEvents: fallbackFeeEventPages.rows,
+            }),
+      truncated:
+        fallbackFeeEventPages?.truncated ?? dailySnapshotPages.truncated,
+      approximate: dailySnapshotPages.unavailable,
+      failed: false,
+    };
+  } catch {
+    return { points: [], truncated: false, approximate: false, failed: true };
+  }
+}
+
 async function fetchRevenueForNetwork(
   network: Network,
 ): Promise<NetworkCdpBorrowingRevenue> {
@@ -143,6 +361,11 @@ async function fetchRevenueForNetwork(
     return {
       network,
       summary: null,
+      markets: [],
+      dailySeries: [],
+      dailySeriesTruncated: false,
+      dailySeriesApproximate: false,
+      dailySeriesFailed: false,
       error: new Error(`Hasura URL not configured for "${network.label}"`),
     };
   }
@@ -165,6 +388,11 @@ async function fetchRevenueForNetwork(
           brackets: [],
           rates: new Map(),
         }),
+        markets: [],
+        dailySeries: [],
+        dailySeriesTruncated: false,
+        dailySeriesApproximate: false,
+        dailySeriesFailed: false,
         error: null,
       };
     }
@@ -182,21 +410,39 @@ async function fetchRevenueForNetwork(
       ratesResponse.Pool ?? [],
       network,
     );
+    const aggregateArgs = {
+      collaterals,
+      instances,
+      brackets: bracketPages.rows,
+      rates,
+      bracketsTruncated: bracketPages.truncated,
+    };
+
+    const daily = await resolveDailyBorrowingFeeSeries(
+      client,
+      network.chainId,
+      aggregateArgs,
+    );
+
     return {
       network,
-      summary: aggregateCdpBorrowingRevenue({
-        collaterals,
-        instances,
-        brackets: bracketPages.rows,
-        rates,
-        bracketsTruncated: bracketPages.truncated,
-      }),
+      summary: aggregateCdpBorrowingRevenue(aggregateArgs),
+      markets: aggregateCdpBorrowingRevenueMarkets(aggregateArgs),
+      dailySeries: daily.points,
+      dailySeriesTruncated: daily.truncated,
+      dailySeriesApproximate: daily.approximate,
+      dailySeriesFailed: daily.failed,
       error: null,
     };
   } catch (err) {
     return {
       network,
       summary: null,
+      markets: [],
+      dailySeries: [],
+      dailySeriesTruncated: false,
+      dailySeriesApproximate: false,
+      dailySeriesFailed: false,
       error: err instanceof Error ? err : new Error(String(err)),
     };
   }
@@ -205,7 +451,11 @@ async function fetchRevenueForNetwork(
 async function fetchAllCdpBorrowingRevenue(): Promise<
   NetworkCdpBorrowingRevenue[]
 > {
-  const ids = NETWORK_IDS.filter(isConfiguredNetworkId);
+  const ids = NETWORK_IDS.filter(
+    (id) =>
+      isConfiguredNetworkId(id) &&
+      CDP_REVENUE_CHAIN_IDS.has(NETWORKS[id].chainId),
+  );
   return Promise.all(ids.map((id) => fetchRevenueForNetwork(NETWORKS[id])));
 }
 
@@ -220,6 +470,11 @@ export function useCdpBorrowingRevenue(): CdpBorrowingRevenueResult {
   return {
     summary:
       data === undefined ? null : (mergeSummaries(rows) ?? EMPTY_SUMMARY),
+    markets: data === undefined ? [] : mergeMarkets(rows),
+    dailySeries: data === undefined ? [] : mergeDailySeries(rows),
+    dailySeriesTruncated: rows.some((row) => row.dailySeriesTruncated),
+    dailySeriesApproximate: rows.some((row) => row.dailySeriesApproximate),
+    dailySeriesFailed: rows.some((row) => row.dailySeriesFailed),
     isLoading,
     hasError: error !== undefined || rows.some((row) => row.error !== null),
   };

@@ -4,7 +4,7 @@
 
 import type { ProtocolFeeTransfer } from "envio";
 import { indexer } from "../indexer.js";
-import { eventId, asAddress, makePoolId } from "../helpers.js";
+import { eventId, asAddress, isVirtualPool, makePoolId } from "../helpers.js";
 import {
   YIELD_SPLIT_ADDRESS,
   UNKNOWN_FEE_TOKEN_META,
@@ -26,14 +26,15 @@ indexer.onEvent(
     where: () => ({ params: { to: YIELD_SPLIT_ADDRESS } }),
   },
   async ({ event, context }) => {
-    // Sender provenance check: only persist transfers originating from known
-    // FPMM pools. This prevents arbitrary third-party transfers to the yield
-    // split address from inflating the protocol fee KPIs.
+    // Sender provenance check: only persist transfers originating from indexed
+    // FPMM/VirtualPool rows. This prevents arbitrary third-party transfers to
+    // the yield split address from inflating the protocol fee KPIs while still
+    // counting every pool type the revenue page lists.
     const sender = asAddress(event.params.from);
     const poolId = makePoolId(event.chainId, sender);
     const pool = await context.Pool.get(poolId);
-    if (!pool || !pool.source.includes("fpmm")) {
-      return; // Not from a known FPMM pool — skip
+    if (!pool || (!pool.source.includes("fpmm") && !isVirtualPool(pool))) {
+      return; // Not from a known revenue-tracked pool — skip
     }
 
     const { chainId } = event;

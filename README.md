@@ -114,6 +114,11 @@ pnpm indexer:testnet:codegen && pnpm indexer:testnet:dev
 pnpm dashboard:dev
 ```
 
+The dashboard dev script defaults to the live production Envio GraphQL endpoint
+when `NEXT_PUBLIC_HASURA_URL` is unset, so fresh git worktrees use real Celo +
+Monad data without copying `.env.local`. Set `NEXT_PUBLIC_HASURA_URL`
+explicitly only when you need a non-prod endpoint.
+
 For deterministic browser review, run the dashboard package directly on a fixed
 port and verify both auth states when the UI differs for signed-in users:
 

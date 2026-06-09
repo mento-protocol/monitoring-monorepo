@@ -18,6 +18,8 @@ const ADDRESSES = {
   celoUsdm: "0x765de816845861e75a25fca122bb6898b8b1282a",
   celoUsdc: "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
   celoGbpm: "0xccf663b1ff11028f0b19058d0f7b674004a40746",
+  celoChfm: "0xb55a79f398e759e43c95b979163f30ec87ee131d",
+  celoJpym: "0xc45ecf20f3cd864b32d9794d6f76814ae8892e20",
   celoBrlm: "0x0000000000000000000000000000000000000b71",
   celoTroveManagerGbpm: "0xb38aef2bf4e34b997330d626ebcd7629de3885c9",
   celoStabilityPoolGbpm: "0x2d5d7e2767c5493610cae84e0ab7f9d2cce8c1a5",
@@ -178,7 +180,98 @@ function oracleRateRowsForChain(chainId) {
       oraclePrice: "1250000000000000000000000",
       oracleOk: true,
     },
+    {
+      token0: ADDRESSES.celoUsdm,
+      token1: ADDRESSES.celoChfm,
+      oraclePrice: "1100000000000000000000000",
+      oracleOk: true,
+    },
+    {
+      token0: ADDRESSES.celoUsdm,
+      token1: ADDRESSES.celoJpym,
+      oraclePrice: "6250000000000000000000",
+      oracleOk: true,
+    },
   ];
+}
+
+function poolLabelRowsForChain(chainId) {
+  return poolRowsForChain(chainId).map(({ id, token0, token1, source }) => ({
+    id,
+    token0,
+    token1,
+    source,
+  }));
+}
+
+function poolDailyFeeSnapshotsForChain(chainId) {
+  if (Number(chainId) !== 42220) return [];
+  const timestamp = String(volumeDay());
+  const poolAddress = ADDRESSES.celoPool.split("-")[1];
+  return [
+    {
+      id: `42220-${poolAddress}-${timestamp}`,
+      chainId: 42220,
+      poolAddress,
+      timestamp,
+      tokens: [ADDRESSES.celoUsdm],
+      tokenSymbols: ["USDm"],
+      tokenDecimals: [18],
+      amounts: ["1000000000000000000"],
+      feesUsdWei: "1000000000000000000",
+    },
+  ];
+}
+
+const borrowingRevenueCollaterals = [
+  { id: "42220-gbpm", chainId: 42220, collIndex: 0, symbol: "GBPm" },
+  { id: "42220-chfm", chainId: 42220, collIndex: 1, symbol: "CHFm" },
+  { id: "42220-jpym", chainId: 42220, collIndex: 2, symbol: "JPYm" },
+];
+
+const borrowingRevenueInstances = borrowingRevenueCollaterals.map(
+  (collateral, i) => ({
+    id: `${collateral.id}-instance`,
+    collateralId: collateral.id,
+    chainId: collateral.chainId,
+    systemDebt: String(BigInt(1000 + i * 100) * 10n ** 18n),
+    activeTroveCount: 3 + i,
+    borrowingFeeCum: String(BigInt(10 + i * 5) * 10n ** 18n),
+  }),
+);
+
+function cdpBorrowingRevenueBrackets(collateralIds) {
+  const ids = new Set(collateralIds ?? []);
+  const timestamp = String(nowSeconds() - DAY_SECONDS);
+  return borrowingRevenueCollaterals
+    .filter((collateral) => ids.has(collateral.id))
+    .map((collateral, i) => {
+      const rate = BigInt(5 + i) * 10n ** 16n;
+      const totalDebt = BigInt(1000 + i * 100) * 10n ** 18n;
+      return {
+        id: `${collateral.id}-${rate}`,
+        collateralId: collateral.id,
+        rate: String(rate),
+        totalDebt: String(totalDebt),
+        sumDebtTimesRateD36: String(totalDebt * rate),
+        pendingDebtTimesOneYearD36: "0",
+        updatedAt: timestamp,
+      };
+    });
+}
+
+function cdpBorrowingRevenueDailySnapshots(chainId) {
+  if (Number(chainId) !== 42220) return [];
+  const timestamp = String(volumeDay());
+  return borrowingRevenueInstances.map((instance, i) => ({
+    id: `${instance.id}-${timestamp}`,
+    chainId: instance.chainId,
+    collateralId: instance.collateralId,
+    instanceId: instance.id,
+    timestamp,
+    upfrontFee: String(BigInt(1 + i) * 10n ** 18n),
+    accruedInterest: String(BigInt(2 + i) * 10n ** 17n),
+  }));
 }
 
 function thresholdRows(rows) {
@@ -705,6 +798,8 @@ function handleGraphQL({ query, variables = {} }) {
       return { Pool: poolRowsForChain(variables.chainId) };
     case "OracleRates":
       return { Pool: oracleRateRowsForChain(variables.chainId) };
+    case "PoolLabelsAll":
+      return { Pool: poolLabelRowsForChain(variables.chainId) };
     case "AllPoolsRebalanceThresholdsKnown":
       return { Pool: thresholdRows(poolRowsForChain(variables.chainId)) };
     case "AllPoolsBreachRollup":
@@ -787,7 +882,41 @@ function handleGraphQL({ query, variables = {} }) {
         ),
       };
     case "PoolDailyFeeSnapshotsPage":
-      return { PoolDailyFeeSnapshot: [] };
+      return {
+        PoolDailyFeeSnapshot: poolDailyFeeSnapshotsForChain(
+          variables.chainId,
+        ).slice(
+          variables.offset ?? 0,
+          (variables.offset ?? 0) + variables.limit,
+        ),
+      };
+    case "CdpBorrowingRevenueMarkets":
+      return {
+        LiquityCollateral:
+          Number(variables.chainId) === 42220
+            ? borrowingRevenueCollaterals
+            : [],
+        LiquityInstance:
+          Number(variables.chainId) === 42220 ? borrowingRevenueInstances : [],
+      };
+    case "CdpBorrowingRevenueBrackets":
+      return {
+        InterestRateBracket: cdpBorrowingRevenueBrackets(
+          variables.collateralIds,
+        ).slice(
+          variables.offset ?? 0,
+          (variables.offset ?? 0) + variables.limit,
+        ),
+      };
+    case "CdpBorrowingRevenueDailySnapshots":
+      return {
+        LiquityBorrowingRevenueDailySnapshot: cdpBorrowingRevenueDailySnapshots(
+          variables.chainId,
+        ).slice(
+          variables.offset ?? 0,
+          (variables.offset ?? 0) + variables.limit,
+        ),
+      };
     case "BrokerDailySnapshotsAll":
       return { BrokerDailySnapshot: [] };
     case "AllTradingLimits":

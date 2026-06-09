@@ -814,6 +814,16 @@ describe("Liquity CDP helpers", () => {
 
   describe("flushLiquitySnapshots — V3_LIQUITY StableSupplyDailySnapshot row", () => {
     const SECONDS_PER_DAY = 86_400n;
+    const emptyBorrowingRevenueContext = {
+      InterestRateBracket: {
+        getWhere: async () => [],
+        set: () => undefined,
+      },
+      LiquityBorrowingRevenueDailySnapshot: {
+        get: async () => undefined,
+        set: () => undefined,
+      },
+    };
 
     it("writes a V3_LIQUITY snapshot row using LIQUITY_MARKETS metadata + bucketed mint/burn", async () => {
       const { flushLiquitySnapshots } =
@@ -833,6 +843,7 @@ describe("Liquity CDP helpers", () => {
 
       const captured: Array<Record<string, unknown>> = [];
       const ctx = {
+        ...emptyBorrowingRevenueContext,
         LiquityInstanceSnapshot: { set: () => undefined },
         LiquityInstanceDailySnapshot: { set: () => undefined },
         StableSupplyDailySnapshot: {
@@ -840,7 +851,7 @@ describe("Liquity CDP helpers", () => {
         },
       };
 
-      flushLiquitySnapshots(ctx as never, instance, day1, 1_000_000n);
+      await flushLiquitySnapshots(ctx as never, instance, day1, 1_000_000n);
 
       assert.equal(captured.length, 1);
       const row = captured[0];
@@ -871,18 +882,247 @@ describe("Liquity CDP helpers", () => {
         systemDebtBurnedDayBucket: 50n,
       };
       const ctx = {
+        ...emptyBorrowingRevenueContext,
         LiquityInstanceSnapshot: { set: () => undefined },
         LiquityInstanceDailySnapshot: { set: () => undefined },
         StableSupplyDailySnapshot: { set: () => undefined },
       };
 
-      const next = flushLiquitySnapshots(ctx as never, instance, day1, 1n);
+      const next = await flushLiquitySnapshots(
+        ctx as never,
+        instance,
+        day1,
+        1n,
+      );
       // Day rollover happened — buckets reset to 0n.
       assert.equal(next.systemDebtMintedDayBucket, 0n);
       assert.equal(next.systemDebtBurnedDayBucket, 0n);
       // Cum survives the rollover (unchanged because flush doesn't bump cum).
       assert.equal(next.systemDebtMintedCum, 0n);
       assert.equal(next.systemDebtBurnedCum, 0n);
+    });
+
+    it("settles active bracket interest into a daily borrowing revenue snapshot on rollover", async () => {
+      const { flushLiquitySnapshots } =
+        await import("../src/handlers/liquity/instance");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm);
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n;
+      const day1 = day0 + SECONDS_PER_DAY;
+      const rate = 10n ** 17n; // 10%
+      const debt = 3_650n * 10n ** 18n;
+      const bracket = {
+        id: `${collateralId}-${rate}`,
+        collateralId,
+        rate,
+        totalDebt: debt,
+        sumDebtTimesRateD36: debt * rate,
+        pendingDebtTimesOneYearD36: 0n,
+        updatedAt: day0,
+      };
+      const instance = makeLiquityInstance(collateralId, 42220, day0);
+      const borrowingSnapshots = new Map<string, Record<string, unknown>>();
+      let updatedBracket: Record<string, unknown> | undefined;
+      const ctx = {
+        LiquityInstanceSnapshot: { set: () => undefined },
+        LiquityInstanceDailySnapshot: { set: () => undefined },
+        StableSupplyDailySnapshot: { set: () => undefined },
+        InterestRateBracket: {
+          getWhere: async () => [bracket],
+          set: (row: Record<string, unknown>) => {
+            updatedBracket = row;
+          },
+        },
+        LiquityBorrowingRevenueDailySnapshot: {
+          get: async (id: string) => borrowingSnapshots.get(id),
+          set: (row: Record<string, unknown>) =>
+            borrowingSnapshots.set(String(row.id), row),
+        },
+      };
+
+      await flushLiquitySnapshots(ctx as never, instance, day1, 123n);
+
+      const row = borrowingSnapshots.get(`${instance.id}-${day0}`);
+      assert.equal(row?.chainId, 42220);
+      assert.equal(row?.collateralId, collateralId);
+      assert.equal(row?.instanceId, instance.id);
+      assert.equal(row?.timestamp, day0);
+      assert.equal(row?.upfrontFee, 0n);
+      assert.equal(row?.accruedInterest, 10n ** 18n);
+      assert.equal(row?.blockNumber, 123n);
+      assert.equal(row?.updatedAtTimestamp, day1);
+      assert.equal(
+        updatedBracket?.pendingDebtTimesOneYearD36,
+        debt * rate * SECONDS_PER_DAY,
+      );
+      assert.equal(updatedBracket?.updatedAt, day1);
+    });
+
+    it("accumulates upfront borrowing fees in the event day's revenue snapshot", async () => {
+      const { recordBorrowingUpfrontFee } =
+        await import("../src/handlers/liquity/borrowingRevenue");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm);
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n;
+      const instance = makeLiquityInstance(collateralId, 42220, day0);
+      const borrowingSnapshots = new Map<string, Record<string, unknown>>();
+      const ctx = {
+        LiquityBorrowingRevenueDailySnapshot: {
+          get: async (id: string) => borrowingSnapshots.get(id),
+          set: (row: Record<string, unknown>) =>
+            borrowingSnapshots.set(String(row.id), row),
+        },
+      };
+
+      await recordBorrowingUpfrontFee(
+        ctx as never,
+        instance,
+        3n,
+        day0 + 60n,
+        1n,
+      );
+      await recordBorrowingUpfrontFee(
+        ctx as never,
+        instance,
+        4n,
+        day0 + 120n,
+        2n,
+      );
+
+      const row = borrowingSnapshots.get(`${instance.id}-${day0}`);
+      assert.equal(row?.upfrontFee, 7n);
+      assert.equal(row?.accruedInterest, 0n);
+      assert.equal(row?.blockNumber, 2n);
+      assert.equal(row?.updatedAtTimestamp, day0 + 120n);
+    });
+
+    it("preloadBorrowingRevenueRollover warms the snapshot rows the rollover flush reads", async () => {
+      const { preloadBorrowingRevenueRollover } =
+        await import("../src/handlers/liquity/borrowingRevenue");
+      const { SECONDS_PER_DAY } = await import("../src/helpers");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm);
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n;
+      const day2 = day0 + 2n * SECONDS_PER_DAY;
+      const bracket = {
+        id: `${collateralId}-bracket`,
+        collateralId,
+        rate: 10n ** 17n,
+        totalDebt: 0n,
+        sumDebtTimesRateD36: 0n,
+        pendingDebtTimesOneYearD36: 0n,
+        updatedAt: day0,
+      };
+      const instance = {
+        ...makeLiquityInstance(collateralId, 42220, day0),
+        currentDayBucket: day0,
+      };
+      const reads: string[] = [];
+      const ctx = {
+        LiquityInstance: {
+          get: async (id: string) =>
+            id === collateralId ? instance : undefined,
+        },
+        InterestRateBracket: { getWhere: async () => [bracket] },
+        LiquityBorrowingRevenueDailySnapshot: {
+          get: async (id: string) => {
+            reads.push(id);
+            return undefined;
+          },
+        },
+      };
+      await preloadBorrowingRevenueRollover(ctx as never, collateralId, day2);
+      // settle walks [updatedAt=day0, until=day2) -> day0 and day1 buckets, with
+      // ids byte-identical to the write path (instanceId === collateralId).
+      assert.deepEqual(
+        [...reads].sort(),
+        [
+          `${collateralId}-${day0}`,
+          `${collateralId}-${day0 + SECONDS_PER_DAY}`,
+        ].sort(),
+      );
+    });
+
+    it("preloadBorrowingRevenueRollover is a no-op when no day rollover is due", async () => {
+      const { preloadBorrowingRevenueRollover } =
+        await import("../src/handlers/liquity/borrowingRevenue");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm);
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n;
+      const instance = {
+        ...makeLiquityInstance(collateralId, 42220, day0),
+        currentDayBucket: day0,
+      };
+      let getWhereCalled = false;
+      const ctx = {
+        LiquityInstance: { get: async () => instance },
+        InterestRateBracket: {
+          getWhere: async () => {
+            getWhereCalled = true;
+            return [];
+          },
+        },
+        LiquityBorrowingRevenueDailySnapshot: { get: async () => undefined },
+      };
+      // Same UTC day as currentDayBucket -> processing won't flush, so no warm.
+      await preloadBorrowingRevenueRollover(
+        ctx as never,
+        collateralId,
+        day0 + 100n,
+      );
+      assert.equal(getWhereCalled, false);
+    });
+
+    it("caps bracket interest accrual at the shutdown timestamp", async () => {
+      const { settleInterestRateBracketRevenue } =
+        await import("../src/handlers/liquity/borrowingRevenue");
+      const { SECONDS_PER_DAY } = await import("../src/helpers");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm);
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n;
+      const shutDownAt = day0 + SECONDS_PER_DAY / 2n;
+      const rate = 10n ** 17n; // 10%
+      const debt = 3_650n * 10n ** 18n;
+      const bracket = {
+        id: `${collateralId}-${rate}`,
+        collateralId,
+        rate,
+        totalDebt: debt,
+        sumDebtTimesRateD36: debt * rate,
+        pendingDebtTimesOneYearD36: 0n,
+        updatedAt: day0,
+      };
+      const snapshots = new Map<string, Record<string, unknown>>();
+      const ctx = {
+        LiquityBorrowingRevenueDailySnapshot: {
+          get: async (id: string) => snapshots.get(id),
+          set: (row: Record<string, unknown>) =>
+            snapshots.set(String(row.id), row),
+        },
+      };
+
+      // Event is two days after day0, but the shut-down branch stopped
+      // accruing at shutDownAt (half a day in) — settle must cap there.
+      const settled = await settleInterestRateBracketRevenue(ctx as never, {
+        chainId: 42220,
+        collateralId,
+        instanceId: collateralId,
+        bracket,
+        untilTimestamp: day0 + 2n * SECONDS_PER_DAY,
+        notAfter: shutDownAt,
+        blockNumber: 1n,
+      });
+
+      assert.equal(settled.updatedAt, shutDownAt);
+      assert.equal(
+        settled.pendingDebtTimesOneYearD36,
+        debt * rate * (shutDownAt - day0),
+      );
     });
   });
 
@@ -894,23 +1134,32 @@ describe("Liquity CDP helpers", () => {
         set: (entity: Record<string, unknown>) =>
           rows.set(String(entity.id), entity),
       },
+      LiquityInstance: { get: async () => undefined },
+      LiquityBorrowingRevenueDailySnapshot: {
+        get: async () => undefined,
+        set: () => undefined,
+      },
     } as unknown as Parameters<typeof moveInterestRateBracketDebt>[0];
     const rate = 5n * 10n ** 16n;
     await moveInterestRateBracketDebt(context, {
+      chainId: 42220,
       collateralId: "42220-0xabc",
       prevRate: 0n,
       nextRate: rate,
       prevDebt: 0n,
       nextDebt: 100n,
       timestamp: 1n,
+      blockNumber: 1n,
     });
     await moveInterestRateBracketDebt(context, {
+      chainId: 42220,
       collateralId: "42220-0xabc",
       prevRate: rate,
       nextRate: 0n,
       prevDebt: 101n,
       nextDebt: 0n,
       timestamp: 2n,
+      blockNumber: 2n,
     });
     const bracket = rows.get(`42220-0xabc-${rate}`);
     assert.equal(bracket?.totalDebt, 0n);
@@ -971,6 +1220,7 @@ describe("Liquity CDP helpers", () => {
       },
       Trove: { get: async () => undefined, set: () => undefined },
       BorrowerInfo: { get: async () => undefined, set: () => undefined },
+      LiquityInstance: { get: async () => undefined },
     } as unknown as Parameters<
       typeof moveTroveUpdatedInterestRateBracketDebt
     >[0];
@@ -1067,6 +1317,7 @@ describe("Liquity CDP helpers", () => {
           troves.set(String(entity.id), entity),
       },
       BorrowerInfo: { get: async () => undefined, set: () => undefined },
+      LiquityInstance: { get: async () => undefined },
       InterestRateBracket: {
         get: async (id: string) => brackets.get(id),
         set: (entity: Record<string, unknown>) =>
@@ -1197,6 +1448,7 @@ describe("Liquity CDP helpers", () => {
           troves.set(String(entity.id), entity),
       },
       BorrowerInfo: { get: async () => undefined, set: () => undefined },
+      LiquityInstance: { get: async () => undefined },
       InterestRateBracket: {
         get: async (id: string) => brackets.get(id),
         set: (entity: Record<string, unknown>) =>
@@ -1327,6 +1579,7 @@ describe("Liquity CDP helpers", () => {
           troves.set(String(entity.id), entity),
       },
       BorrowerInfo: { get: async () => undefined, set: () => undefined },
+      LiquityInstance: { get: async () => undefined },
       InterestRateBracket: { get: async () => undefined, set: () => undefined },
       PendingBatchMembershipOperation: {
         get: async () => undefined,

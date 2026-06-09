@@ -5,6 +5,7 @@ import {
   getOrCreateLiquityInstance,
   preloadLiquityMarket,
 } from "./bootstrap.js";
+import { preloadBorrowingRevenueRollover } from "./borrowingRevenue.js";
 import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { getOrLoadSystemParams, preloadSystemParams } from "./systemParams.js";
@@ -112,6 +113,11 @@ indexer.onEvent(
       await Promise.all([
         preloadLiquityMarket(context, market),
         preloadSystemParams(context, market),
+        preloadBorrowingRevenueRollover(
+          context,
+          makeCollateralId(market),
+          asBigInt(event.block.timestamp),
+        ),
       ]);
       return;
     }
@@ -131,7 +137,12 @@ indexer.onEvent(
     );
     instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
     const next = touchLiquityInstance(
-      flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+      await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
+      ),
       blockNumber,
       blockTimestamp,
     );
@@ -159,6 +170,11 @@ indexer.onEvent(
     if (market === undefined) return;
     if (context.isPreload) {
       await preloadLiquityMarket(context, market);
+      await preloadBorrowingRevenueRollover(
+        context,
+        makeCollateralId(market),
+        asBigInt(event.block.timestamp),
+      );
       return;
     }
     const blockNumber = asBigInt(event.block.number);
@@ -171,7 +187,12 @@ indexer.onEvent(
     );
     context.LiquityInstance.set({
       ...touchLiquityInstance(
-        flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+        await flushLiquitySnapshots(
+          context,
+          instance,
+          blockTimestamp,
+          blockNumber,
+        ),
         blockNumber,
         blockTimestamp,
       ),
@@ -190,6 +211,11 @@ indexer.onEvent(
     if (market === undefined) return;
     if (context.isPreload) {
       await preloadLiquityMarket(context, market);
+      await preloadBorrowingRevenueRollover(
+        context,
+        makeCollateralId(market),
+        asBigInt(event.block.timestamp),
+      );
       return;
     }
     const blockNumber = asBigInt(event.block.number);
@@ -211,7 +237,12 @@ indexer.onEvent(
       txHash: event.transaction.hash,
     });
     const next = touchLiquityInstance(
-      flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+      await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
+      ),
       blockNumber,
       blockTimestamp,
     );

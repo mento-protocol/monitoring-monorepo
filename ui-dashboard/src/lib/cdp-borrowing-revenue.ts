@@ -1,8 +1,21 @@
-import { tokenToUSD, type OracleRateMap } from "./tokens";
-
-const ZERO = BigInt(0);
-const D18 = BigInt(10) ** BigInt(18);
-const ONE_YEAR_SECONDS = BigInt(31_536_000);
+import { type OracleRateMap } from "./tokens";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
+import type { TimeRange } from "./volume";
+import {
+  ZERO,
+  D18,
+  accruedInterestWei,
+  pendingAccruedInterestWei,
+  liveAccruedInterestWei,
+  dayBucket,
+  dayAlignWindow,
+  addPricedWei,
+  addBorrowingFeeWei,
+  bucketHasValue,
+  isBucketInWindow,
+  type BorrowingFeeBucket,
+  type BorrowingFeeBucketContext,
+} from "./cdp-borrowing-revenue-math";
 
 export type CdpBorrowingRevenueCollateral = {
   id: string;
@@ -15,7 +28,11 @@ export type CdpBorrowingRevenueInstance = {
   id: string;
   collateralId: string;
   chainId: number;
+  systemDebt: string;
+  activeTroveCount: number;
   borrowingFeeCum: string;
+  isShutDown: boolean;
+  shutDownAt: string | null;
 };
 
 export type CdpBorrowingRevenueBracket = {
@@ -28,11 +45,52 @@ export type CdpBorrowingRevenueBracket = {
   updatedAt: string;
 };
 
+export type CdpBorrowingFeeEvent = {
+  id: string;
+  instanceId: string;
+  debtIncreaseFromUpfrontFee: string;
+  timestamp: string;
+};
+
+export type CdpBorrowingRevenueDailySnapshot = {
+  id: string;
+  chainId: number;
+  collateralId: string;
+  instanceId: string;
+  timestamp: string;
+  upfrontFee: string;
+  accruedInterest: string;
+};
+
+export type CdpBorrowingFeeSeriesPoint = {
+  timestamp: number;
+  upfrontFeesUSD: number;
+  accruedInterestUSD: number;
+  totalFeesUSD: number;
+};
+
 export type CdpBorrowingRevenueSummary = {
   totalRevenueUSD: number;
   upfrontFeesUSD: number;
   accruedInterestUSD: number;
   marketCount: number;
+  activeInterestBracketCount: number;
+  unpricedSymbols: string[];
+  bracketsTruncated: boolean;
+};
+
+export type CdpBorrowingRevenueMarket = {
+  collateralId: string;
+  chainId: number;
+  collIndex: number;
+  symbol: string;
+  activeDebtUSD: number;
+  averageAnnualInterestRatePercent: number | null;
+  annualInterestRunRateUSD: number;
+  activeTroveCount: number;
+  totalRevenueUSD: number;
+  upfrontFeesUSD: number;
+  accruedInterestUSD: number;
   activeInterestBracketCount: number;
   unpricedSymbols: string[];
   bracketsTruncated: boolean;
@@ -47,39 +105,243 @@ type AggregateArgs = {
   bracketsTruncated?: boolean;
 };
 
-function accruedInterestWei(
-  bracket: Pick<
-    CdpBorrowingRevenueBracket,
-    "pendingDebtTimesOneYearD36" | "sumDebtTimesRateD36" | "updatedAt"
-  >,
+type SeriesAggregateArgs = {
+  collaterals: ReadonlyArray<CdpBorrowingRevenueCollateral>;
+  instances: ReadonlyArray<CdpBorrowingRevenueInstance>;
+  brackets: ReadonlyArray<CdpBorrowingRevenueBracket>;
+  feeEvents: ReadonlyArray<CdpBorrowingFeeEvent>;
+  rates: OracleRateMap;
+  nowSeconds?: number;
+  window?: TimeRange;
+};
+
+type SnapshotSeriesAggregateArgs = {
+  collaterals: ReadonlyArray<CdpBorrowingRevenueCollateral>;
+  instances: ReadonlyArray<CdpBorrowingRevenueInstance>;
+  brackets: ReadonlyArray<CdpBorrowingRevenueBracket>;
+  dailySnapshots: ReadonlyArray<CdpBorrowingRevenueDailySnapshot>;
+  rates: OracleRateMap;
+  nowSeconds?: number;
+  window?: TimeRange;
+};
+
+function addUpfrontFeeEventsToBuckets(args: {
+  feeEvents: ReadonlyArray<CdpBorrowingFeeEvent>;
+  symbolByInstanceId: ReadonlyMap<string, string | undefined>;
+  dayAlignedWindow: TimeRange | undefined;
+  context: BorrowingFeeBucketContext;
+}): void {
+  for (const event of args.feeEvents) {
+    const timestamp = Number(event.timestamp);
+    if (!Number.isFinite(timestamp)) continue;
+    if (!isBucketInWindow(timestamp, args.dayAlignedWindow)) continue;
+    addBorrowingFeeWei(args.context, {
+      symbol: args.symbolByInstanceId.get(event.instanceId),
+      timestamp,
+      kind: "upfront",
+      wei: BigInt(event.debtIncreaseFromUpfrontFee),
+    });
+  }
+}
+
+function addBracketInterestToBuckets(args: {
+  bracket: CdpBorrowingRevenueBracket;
+  symbol: string | undefined;
+  dayAlignedWindow: TimeRange | undefined;
+  nowSeconds: number;
+  context: BorrowingFeeBucketContext;
+}): void {
+  const updatedAt = Number(args.bracket.updatedAt);
+  if (!Number.isFinite(updatedAt)) return;
+
+  const pending = pendingAccruedInterestWei(args.bracket);
+  if (pending > ZERO && isBucketInWindow(updatedAt, args.dayAlignedWindow)) {
+    addBorrowingFeeWei(args.context, {
+      symbol: args.symbol,
+      timestamp: updatedAt,
+      kind: "interest",
+      wei: pending,
+    });
+  }
+
+  const liveFrom = Math.max(
+    Math.floor(updatedAt),
+    args.dayAlignedWindow?.from ?? 0,
+  );
+  const liveTo = Math.min(
+    Math.max(0, Math.floor(args.nowSeconds)),
+    args.dayAlignedWindow?.to ?? Math.max(0, Math.floor(args.nowSeconds)),
+  );
+  let cursor = liveFrom;
+  while (cursor < liveTo) {
+    const bucketTimestamp = dayBucket(cursor);
+    const nextCursor = Math.min(liveTo, bucketTimestamp + SECONDS_PER_DAY);
+    addBorrowingFeeWei(args.context, {
+      symbol: args.symbol,
+      timestamp: cursor,
+      kind: "interest",
+      wei: liveAccruedInterestWei(args.bracket, nextCursor - cursor),
+    });
+    cursor = nextCursor;
+  }
+}
+
+function addLiveBracketInterestToBuckets(args: {
+  bracket: CdpBorrowingRevenueBracket;
+  symbol: string | undefined;
+  dayAlignedWindow: TimeRange | undefined;
+  nowSeconds: number;
+  context: BorrowingFeeBucketContext;
+}): void {
+  const updatedAt = Number(args.bracket.updatedAt);
+  if (!Number.isFinite(updatedAt)) return;
+
+  const liveFrom = Math.max(
+    Math.floor(updatedAt),
+    args.dayAlignedWindow?.from ?? 0,
+  );
+  const liveTo = Math.min(
+    Math.max(0, Math.floor(args.nowSeconds)),
+    args.dayAlignedWindow?.to ?? Math.max(0, Math.floor(args.nowSeconds)),
+  );
+  let cursor = liveFrom;
+  while (cursor < liveTo) {
+    const bucketTimestamp = dayBucket(cursor);
+    const nextCursor = Math.min(liveTo, bucketTimestamp + SECONDS_PER_DAY);
+    addBorrowingFeeWei(args.context, {
+      symbol: args.symbol,
+      timestamp: cursor,
+      kind: "interest",
+      wei: liveAccruedInterestWei(args.bracket, nextCursor - cursor),
+    });
+    cursor = nextCursor;
+  }
+}
+
+function addDailySnapshotsToBuckets(args: {
+  dailySnapshots: ReadonlyArray<CdpBorrowingRevenueDailySnapshot>;
+  symbolByCollateralId: ReadonlyMap<string, string | undefined>;
+  dayAlignedWindow: TimeRange | undefined;
+  context: BorrowingFeeBucketContext;
+}): void {
+  for (const snapshot of args.dailySnapshots) {
+    const timestamp = Number(snapshot.timestamp);
+    if (!Number.isFinite(timestamp)) continue;
+    if (!isBucketInWindow(timestamp, args.dayAlignedWindow)) continue;
+    const symbol = args.symbolByCollateralId.get(snapshot.collateralId);
+    addBorrowingFeeWei(args.context, {
+      symbol,
+      timestamp,
+      kind: "upfront",
+      wei: BigInt(snapshot.upfrontFee),
+    });
+    addBorrowingFeeWei(args.context, {
+      symbol,
+      timestamp,
+      kind: "interest",
+      wei: BigInt(snapshot.accruedInterest),
+    });
+  }
+}
+
+function buildBorrowingFeeSeriesFromBuckets(
+  buckets: ReadonlyMap<number, BorrowingFeeBucket>,
+  dayAlignedWindow: TimeRange | undefined,
   nowSeconds: number,
+): CdpBorrowingFeeSeriesPoint[] {
+  const valuedBuckets = [...buckets.keys()].filter((timestamp) =>
+    bucketHasValue(buckets.get(timestamp)),
+  );
+  if (valuedBuckets.length === 0) return [];
+
+  const startBucket = dayAlignedWindow
+    ? dayAlignedWindow.from
+    : Math.min(...valuedBuckets);
+  const endRef = dayAlignedWindow?.to ?? Math.max(0, Math.floor(nowSeconds));
+  const endBucket = dayBucket(endRef);
+  const lastBucket =
+    endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
+  if (lastBucket < startBucket) return [];
+
+  const series: CdpBorrowingFeeSeriesPoint[] = [];
+  for (
+    let timestamp = startBucket;
+    timestamp <= lastBucket;
+    timestamp += SECONDS_PER_DAY
+  ) {
+    const bucket = buckets.get(timestamp);
+    const upfrontFeesUSD = bucket?.upfrontFeesUSD ?? 0;
+    const accruedInterestUSD = bucket?.accruedInterestUSD ?? 0;
+    series.push({
+      timestamp,
+      upfrontFeesUSD,
+      accruedInterestUSD,
+      totalFeesUSD: upfrontFeesUSD + accruedInterestUSD,
+    });
+  }
+  return series;
+}
+
+function activeDebtWei(
+  instances: ReadonlyArray<CdpBorrowingRevenueInstance>,
 ): bigint {
-  const pendingDebtTimesOneYearD36 = BigInt(bracket.pendingDebtTimesOneYearD36);
-  const sumDebtTimesRateD36 = BigInt(bracket.sumDebtTimesRateD36);
-  const updatedAt = BigInt(bracket.updatedAt);
-  const now = BigInt(Math.max(0, Math.floor(nowSeconds)));
-  const elapsed = now > updatedAt ? now - updatedAt : ZERO;
-  return (
-    (pendingDebtTimesOneYearD36 + sumDebtTimesRateD36 * elapsed) /
-    ONE_YEAR_SECONDS /
-    D18
+  return instances.reduce(
+    (total, instance) => total + BigInt(instance.systemDebt),
+    ZERO,
   );
 }
 
-function weiToTokenAmount(wei: bigint): number {
-  // Split before Number() so large cumulative wei values keep token-scale precision.
-  const whole = wei / D18;
-  const fractional = wei % D18;
-  return Number(whole) + Number(fractional) / 1e18;
+function annualInterestRunRateWei(
+  brackets: ReadonlyArray<CdpBorrowingRevenueBracket>,
+): bigint {
+  return brackets.reduce(
+    (total, bracket) => total + BigInt(bracket.sumDebtTimesRateD36) / D18,
+    ZERO,
+  );
 }
 
-function weiToTokenUSD(
-  symbol: string,
-  wei: bigint,
-  rates: OracleRateMap,
+function weightedAnnualInterestRatePercent(
+  brackets: ReadonlyArray<CdpBorrowingRevenueBracket>,
 ): number | null {
-  if (wei <= ZERO) return 0;
-  return tokenToUSD(symbol, weiToTokenAmount(wei), rates);
+  const { totalDebt, sumDebtTimesRateD36 } = brackets.reduce(
+    (acc, bracket) => {
+      const totalDebt = BigInt(bracket.totalDebt);
+      if (totalDebt <= ZERO) return acc;
+      return {
+        totalDebt: acc.totalDebt + totalDebt,
+        sumDebtTimesRateD36:
+          acc.sumDebtTimesRateD36 + BigInt(bracket.sumDebtTimesRateD36),
+      };
+    },
+    { totalDebt: ZERO, sumDebtTimesRateD36: ZERO },
+  );
+
+  if (totalDebt <= ZERO) return null;
+  const weightedRateD18 = sumDebtTimesRateD36 / totalDebt;
+  return Number(weightedRateD18) / 1e16;
+}
+
+function shutDownSecondsByCollateral(
+  instances: ReadonlyArray<CdpBorrowingRevenueInstance>,
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const instance of instances) {
+    if (instance.isShutDown && instance.shutDownAt !== null) {
+      map.set(instance.collateralId, Number(instance.shutDownAt));
+    }
+  }
+  return map;
+}
+
+// A shut-down branch stops accruing borrowing interest at shutDownAt, so the
+// live projection must not run past it.
+function cappedProjectionSeconds(
+  nowSeconds: number,
+  shutDownAt: number | undefined,
+): number {
+  return shutDownAt !== undefined && shutDownAt < nowSeconds
+    ? shutDownAt
+    : nowSeconds;
 }
 
 export function aggregateCdpBorrowingRevenue({
@@ -98,24 +360,14 @@ export function aggregateCdpBorrowingRevenue({
   let accruedInterestUSD = 0;
   let activeInterestBracketCount = 0;
 
-  const addPricedWei = (symbol: string | undefined, wei: bigint): number => {
-    if (wei <= ZERO) return 0;
-    if (symbol === undefined) {
-      unpricedSymbols.add("UNKNOWN");
-      return 0;
-    }
-    const usd = weiToTokenUSD(symbol, wei, rates);
-    if (usd === null) {
-      unpricedSymbols.add(symbol);
-      return 0;
-    }
-    return usd;
-  };
+  const shutDownSeconds = shutDownSecondsByCollateral(instances);
 
   for (const instance of instances) {
     upfrontFeesUSD += addPricedWei(
       symbolByCollateralId.get(instance.collateralId),
       BigInt(instance.borrowingFeeCum),
+      rates,
+      unpricedSymbols,
     );
   }
 
@@ -126,9 +378,15 @@ export function aggregateCdpBorrowingRevenue({
     if (totalDebt > ZERO && sumDebtTimesRateD36 > ZERO) {
       activeInterestBracketCount += 1;
     }
+    const effectiveNow = cappedProjectionSeconds(
+      nowSeconds,
+      shutDownSeconds.get(bracket.collateralId),
+    );
     accruedInterestUSD += addPricedWei(
       symbol,
-      accruedInterestWei(bracket, nowSeconds),
+      accruedInterestWei(bracket, effectiveNow),
+      rates,
+      unpricedSymbols,
     );
   }
 
@@ -141,4 +399,168 @@ export function aggregateCdpBorrowingRevenue({
     unpricedSymbols: [...unpricedSymbols].sort(),
     bracketsTruncated,
   };
+}
+
+export function aggregateCdpBorrowingRevenueMarkets({
+  collaterals,
+  instances,
+  brackets,
+  rates,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  bracketsTruncated = false,
+}: AggregateArgs): CdpBorrowingRevenueMarket[] {
+  return collaterals
+    .map((collateral) => {
+      const collateralInstances = instances.filter(
+        (i) => i.collateralId === collateral.id,
+      );
+      const collateralBrackets = brackets.filter(
+        (b) => b.collateralId === collateral.id,
+      );
+      // A shut-down branch stops accruing borrowing interest, so its forward
+      // annual run-rate is zero even while brackets still hold debt.
+      const isCollateralShutDown = collateralInstances.some(
+        (i) => i.isShutDown,
+      );
+      const summary = aggregateCdpBorrowingRevenue({
+        collaterals: [collateral],
+        instances: collateralInstances,
+        brackets: collateralBrackets,
+        rates,
+        nowSeconds,
+        bracketsTruncated,
+      });
+      const unpricedSymbols = new Set(summary.unpricedSymbols);
+      return {
+        collateralId: collateral.id,
+        chainId: collateral.chainId,
+        collIndex: collateral.collIndex,
+        symbol: collateral.symbol,
+        activeDebtUSD: addPricedWei(
+          collateral.symbol,
+          activeDebtWei(collateralInstances),
+          rates,
+          unpricedSymbols,
+        ),
+        averageAnnualInterestRatePercent:
+          weightedAnnualInterestRatePercent(collateralBrackets),
+        annualInterestRunRateUSD: addPricedWei(
+          collateral.symbol,
+          isCollateralShutDown
+            ? ZERO
+            : annualInterestRunRateWei(collateralBrackets),
+          rates,
+          unpricedSymbols,
+        ),
+        activeTroveCount: collateralInstances.reduce(
+          (total, instance) => total + instance.activeTroveCount,
+          0,
+        ),
+        totalRevenueUSD: summary.totalRevenueUSD,
+        upfrontFeesUSD: summary.upfrontFeesUSD,
+        accruedInterestUSD: summary.accruedInterestUSD,
+        activeInterestBracketCount: summary.activeInterestBracketCount,
+        unpricedSymbols: [...unpricedSymbols].sort(),
+        bracketsTruncated: summary.bracketsTruncated,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.totalRevenueUSD - a.totalRevenueUSD || a.collIndex - b.collIndex,
+    );
+}
+
+export function buildDailyCdpBorrowingFeeSeries({
+  collaterals,
+  instances,
+  brackets,
+  feeEvents,
+  rates,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  window,
+}: SeriesAggregateArgs): CdpBorrowingFeeSeriesPoint[] {
+  const symbolByCollateralId = new Map(
+    collaterals.map((c) => [c.id, c.symbol]),
+  );
+  const symbolByInstanceId = new Map(
+    instances.map((i) => [i.id, symbolByCollateralId.get(i.collateralId)]),
+  );
+  const buckets = new Map<number, BorrowingFeeBucket>();
+  const unpricedSymbols = new Set<string>();
+  const dayAlignedWindow = window ? dayAlignWindow(window) : undefined;
+  const context = { buckets, rates, unpricedSymbols };
+
+  const shutDownSeconds = shutDownSecondsByCollateral(instances);
+
+  addUpfrontFeeEventsToBuckets({
+    feeEvents,
+    symbolByInstanceId,
+    dayAlignedWindow,
+    context,
+  });
+
+  for (const bracket of brackets) {
+    const effectiveNow = cappedProjectionSeconds(
+      nowSeconds,
+      shutDownSeconds.get(bracket.collateralId),
+    );
+    addBracketInterestToBuckets({
+      bracket,
+      symbol: symbolByCollateralId.get(bracket.collateralId),
+      dayAlignedWindow,
+      nowSeconds: effectiveNow,
+      context,
+    });
+  }
+  return buildBorrowingFeeSeriesFromBuckets(
+    buckets,
+    dayAlignedWindow,
+    nowSeconds,
+  );
+}
+
+export function buildDailyCdpBorrowingFeeSeriesFromSnapshots({
+  collaterals,
+  instances,
+  brackets,
+  dailySnapshots,
+  rates,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  window,
+}: SnapshotSeriesAggregateArgs): CdpBorrowingFeeSeriesPoint[] {
+  const symbolByCollateralId = new Map(
+    collaterals.map((c) => [c.id, c.symbol]),
+  );
+  const buckets = new Map<number, BorrowingFeeBucket>();
+  const unpricedSymbols = new Set<string>();
+  const dayAlignedWindow = window ? dayAlignWindow(window) : undefined;
+  const context = { buckets, rates, unpricedSymbols };
+  const shutDownSeconds = shutDownSecondsByCollateral(instances);
+
+  addDailySnapshotsToBuckets({
+    dailySnapshots,
+    symbolByCollateralId,
+    dayAlignedWindow,
+    context,
+  });
+
+  for (const bracket of brackets) {
+    const effectiveNow = cappedProjectionSeconds(
+      nowSeconds,
+      shutDownSeconds.get(bracket.collateralId),
+    );
+    addLiveBracketInterestToBuckets({
+      bracket,
+      symbol: symbolByCollateralId.get(bracket.collateralId),
+      dayAlignedWindow,
+      nowSeconds: effectiveNow,
+      context,
+    });
+  }
+
+  return buildBorrowingFeeSeriesFromBuckets(
+    buckets,
+    dayAlignedWindow,
+    nowSeconds,
+  );
 }

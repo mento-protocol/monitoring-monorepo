@@ -1,11 +1,16 @@
 import type {
   BorrowerInfo,
   InterestRateBracket,
+  LiquityBorrowingRevenueDailySnapshot,
   LiquityInstance,
   Trove,
 } from "envio";
 import { ZERO_ADDRESS } from "../../constants.js";
 import { asAddress } from "../../helpers.js";
+import {
+  preloadBorrowingRevenueDailyBuckets,
+  settleInterestRateBracketRevenue,
+} from "./borrowingRevenue.js";
 import { debtTimesRateD36, floorInterestRateBracket } from "./math.js";
 
 export const TROVE_STATUS = {
@@ -28,6 +33,15 @@ type TroveContext = {
   InterestRateBracket: {
     get: (id: string) => Promise<InterestRateBracket | undefined>;
     set: (entity: InterestRateBracket) => void;
+  };
+  LiquityBorrowingRevenueDailySnapshot: {
+    get: (
+      id: string,
+    ) => Promise<LiquityBorrowingRevenueDailySnapshot | undefined>;
+    set: (entity: LiquityBorrowingRevenueDailySnapshot) => void;
+  };
+  LiquityInstance: {
+    get: (id: string) => Promise<LiquityInstance | undefined>;
   };
 };
 
@@ -139,6 +153,15 @@ export const isPlaceholderClosedTrove = (
   trove.closedAt === undefined &&
   trove.closedAtBlock === undefined &&
   trove.closedTxHash === undefined;
+
+export const statusFromCollateral = (
+  debt: bigint,
+  collateral: { minDebt: bigint; systemParamsLoaded: boolean } | undefined,
+): string => {
+  if (debt === 0n) return TROVE_STATUS.REDEEMED;
+  if (collateral?.systemParamsLoaded !== true) return TROVE_STATUS.ZOMBIE;
+  return statusFromDebt(debt, collateral.minDebt);
+};
 
 export const makePlaceholderTrove = ({
   id,
@@ -264,41 +287,116 @@ export async function updateBorrowerCount(
 export async function moveInterestRateBracketDebt(
   context: TroveContext,
   args: {
+    chainId: number;
     collateralId: string;
     prevRate: bigint;
     nextRate: bigint;
     prevDebt: bigint;
     nextDebt: bigint;
     timestamp: bigint;
+    blockNumber: bigint;
   },
 ): Promise<void> {
-  await applyBracketDelta(
-    context,
-    args.collateralId,
-    args.prevRate,
-    -args.prevDebt,
-    args.timestamp,
+  if (
+    args.prevRate !== 0n &&
+    args.nextRate !== 0n &&
+    makeInterestRateBracketId(args.collateralId, args.prevRate) ===
+      makeInterestRateBracketId(args.collateralId, args.nextRate)
+  ) {
+    await applyBracketDelta(context, {
+      chainId: args.chainId,
+      collateralId: args.collateralId,
+      rawRate: args.nextRate,
+      debtDelta: args.nextDebt - args.prevDebt,
+      timestamp: args.timestamp,
+      blockNumber: args.blockNumber,
+    });
+    return;
+  }
+
+  await applyBracketDelta(context, {
+    chainId: args.chainId,
+    collateralId: args.collateralId,
+    rawRate: args.prevRate,
+    debtDelta: -args.prevDebt,
+    timestamp: args.timestamp,
+    blockNumber: args.blockNumber,
+  });
+  await applyBracketDelta(context, {
+    chainId: args.chainId,
+    collateralId: args.collateralId,
+    rawRate: args.nextRate,
+    debtDelta: args.nextDebt,
+    timestamp: args.timestamp,
+    blockNumber: args.blockNumber,
+  });
+}
+
+export async function preloadInterestRateBracketDebt(
+  context: Pick<TroveContext, "InterestRateBracket"> & {
+    LiquityBorrowingRevenueDailySnapshot: {
+      get: (
+        id: string,
+      ) => Promise<LiquityBorrowingRevenueDailySnapshot | undefined>;
+      set: (entity: LiquityBorrowingRevenueDailySnapshot) => void;
+    };
+  },
+  args: {
+    collateralId: string;
+    prevRate: bigint;
+    nextRate: bigint;
+    prevDebt: bigint;
+    nextDebt: bigint;
+    untilTimestamp: bigint;
+  },
+): Promise<void> {
+  const rates: bigint[] = [];
+  if (args.prevRate !== 0n && args.prevDebt !== 0n) rates.push(args.prevRate);
+  if (args.nextRate !== 0n && args.nextDebt !== 0n) rates.push(args.nextRate);
+  const brackets = await Promise.all(
+    rates.map((rate) =>
+      context.InterestRateBracket.get(
+        makeInterestRateBracketId(args.collateralId, rate),
+      ),
+    ),
   );
-  await applyBracketDelta(
-    context,
-    args.collateralId,
-    args.nextRate,
-    args.nextDebt,
-    args.timestamp,
+  // moveInterestRateBracketDebt settles each touched bracket up to the event
+  // timestamp before applying its delta; warm the daily-snapshot rows that
+  // settlement will read (instanceId === collateralId for these snapshots).
+  await Promise.all(
+    brackets.map((bracket) =>
+      bracket === undefined
+        ? Promise.resolve()
+        : preloadBorrowingRevenueDailyBuckets(
+            context,
+            args.collateralId,
+            bracket.updatedAt,
+            args.untilTimestamp,
+          ),
+    ),
   );
 }
 
 async function applyBracketDelta(
   context: TroveContext,
-  collateralId: string,
-  rawRate: bigint,
-  debtDelta: bigint,
-  timestamp: bigint,
+  args: {
+    chainId: number;
+    collateralId: string;
+    rawRate: bigint;
+    debtDelta: bigint;
+    timestamp: bigint;
+    blockNumber: bigint;
+  },
 ): Promise<void> {
+  const { chainId, collateralId, rawRate, debtDelta, timestamp, blockNumber } =
+    args;
   if (rawRate === 0n || debtDelta === 0n) return;
   const rate = floorInterestRateBracket(rawRate);
   const id = makeInterestRateBracketId(collateralId, rawRate);
-  const existing = await context.InterestRateBracket.get(id);
+  const [existing, instance] = await Promise.all([
+    context.InterestRateBracket.get(id),
+    context.LiquityInstance.get(collateralId),
+  ]);
   const bracket = existing ?? {
     id,
     collateralId,
@@ -308,18 +406,26 @@ async function applyBracketDelta(
     pendingDebtTimesOneYearD36: 0n,
     updatedAt: timestamp,
   };
-  const elapsed =
-    timestamp > bracket.updatedAt ? timestamp - bracket.updatedAt : 0n;
-  const pending =
-    bracket.pendingDebtTimesOneYearD36 + bracket.sumDebtTimesRateD36 * elapsed;
+  const settled = await settleInterestRateBracketRevenue(context, {
+    chainId,
+    collateralId,
+    instanceId: collateralId,
+    bracket,
+    untilTimestamp: timestamp,
+    // A shut-down branch stops accruing interest at shutDownAt.
+    notAfter:
+      instance?.isShutDown && instance.shutDownAt !== undefined
+        ? instance.shutDownAt
+        : undefined,
+    blockNumber,
+  });
   const totalDebt = bracket.totalDebt + debtDelta;
   const sumDebtTimesRateD36 =
     bracket.sumDebtTimesRateD36 + debtTimesRateD36(debtDelta, rate);
   context.InterestRateBracket.set({
-    ...bracket,
+    ...settled,
     totalDebt: totalDebt > 0n ? totalDebt : 0n,
     sumDebtTimesRateD36: sumDebtTimesRateD36 > 0n ? sumDebtTimesRateD36 : 0n,
-    pendingDebtTimesOneYearD36: pending,
     updatedAt: timestamp,
   });
 }

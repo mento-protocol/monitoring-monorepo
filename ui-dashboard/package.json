@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev-with-live-hasura.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "node ../scripts/eslint-baseline-diff.mjs check",

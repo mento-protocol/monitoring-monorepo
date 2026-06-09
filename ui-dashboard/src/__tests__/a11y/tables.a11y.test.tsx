@@ -58,7 +58,7 @@ vi.mock("@/components/chain-icon", () => ({
 
 import { SortableTh } from "@/components/sortable-th";
 import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
-import type { NetworkData } from "@/lib/fetch-all-networks";
+import type { NetworkData, PoolLabel } from "@/lib/fetch-all-networks";
 import type { PoolDailyFeeSnapshot } from "@/lib/types";
 
 let container: HTMLDivElement;
@@ -224,6 +224,15 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
   };
 }
 
+function poolLabel(poolAddress: string): PoolLabel {
+  return {
+    id: `${CHAIN}-${poolAddress}`,
+    token0: "0xusd",
+    token1: "0xgbp",
+    source: "fpmm_factory",
+  };
+}
+
 describe("RevenueByPoolTable a11y — degraded states", () => {
   it("loading shell has no axe violations", async () => {
     render(
@@ -246,6 +255,24 @@ describe("RevenueByPoolTable a11y — degraded states", () => {
       />,
     );
     expect(container.textContent).toContain("No swap-fee transfers indexed");
+    const results = await axe(container);
+    expect(results.violations).toEqual([]);
+  });
+
+  it("all-pools zero-fee table has no axe violations", async () => {
+    const n = networkData([]);
+    n.poolLabels = new Map([[POOL_ADDR, poolLabel(POOL_ADDR)]]);
+    render(
+      <RevenueByPoolTable
+        networkData={[n]}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+    expect(container.textContent).toContain("$0.00");
+    expect(container.textContent).not.toContain(
+      "No swap-fee transfers indexed",
+    );
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
@@ -277,9 +304,9 @@ describe("RevenueByPoolTable a11y — degraded states", () => {
     // as tabular data.
     const table = container.querySelector("table");
     expect(table).not.toBeNull();
-    // Header row has Pool + Chain + 4 fee columns = 6 SortableTh.
+    // Header row has Pool + 4 fee columns = 5 SortableTh.
     const headers = container.querySelectorAll("th[aria-sort]");
-    expect(headers.length).toBe(6);
+    expect(headers.length).toBe(5);
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
@@ -308,7 +335,7 @@ describe("RevenueByPoolTable a11y — degraded states", () => {
     // Surviving rows still render in a real <table>.
     const table = container.querySelector("table");
     expect(table).not.toBeNull();
-    expect(container.querySelectorAll("th[aria-sort]").length).toBe(6);
+    expect(container.querySelectorAll("th[aria-sort]").length).toBe(5);
     // The empty-error shell text must NOT appear — that's a different branch.
     expect(container.textContent).not.toContain(
       "Couldn't load per-pool revenue",

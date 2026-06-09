@@ -23,6 +23,7 @@ import {
 } from "../src/rpc.ts";
 import { feeTokenMetaEffect } from "../src/rpc/effects.ts";
 import { UNKNOWN_FEE_TOKEN_META } from "../src/feeToken.ts";
+import { makePoolId } from "../src/helpers.ts";
 
 // ---------------------------------------------------------------------------
 // Types & helpers
@@ -140,6 +141,36 @@ describe("ERC20FeeToken.Transfer handler", () => {
       | { from: string; amount: bigint; token: string }
       | undefined;
     assert.ok(transfer, "Expected ProtocolFeeTransfer entity to be written");
+    assert.equal(transfer!.from, POOL_ADDRESS);
+    assert.equal(transfer!.token, TOKEN_ADDRESS);
+  });
+
+  it("persists a ProtocolFeeTransfer when sender is a known VirtualPool", async function () {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedFpmmPool(mockDb);
+    const poolId = makePoolId(42220, POOL_ADDRESS);
+    const seeded = mockDb.entities.Pool.get(poolId) as
+      | Record<string, unknown>
+      | undefined;
+    assert.ok(seeded, "Pool should exist after seed");
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      source: "virtual_pool_factory",
+    });
+
+    const event = createTransferEvent({ from: POOL_ADDRESS, logIndex: 11 });
+    const updatedDb = await ERC20FeeToken.Transfer.processEvent({
+      event,
+      mockDb,
+    });
+
+    const transfer = updatedDb.entities.ProtocolFeeTransfer.get(
+      "42220_500_11",
+    ) as { from: string; amount: bigint; token: string } | undefined;
+    assert.ok(
+      transfer,
+      "Expected ProtocolFeeTransfer entity to be written for a VirtualPool",
+    );
     assert.equal(transfer!.from, POOL_ADDRESS);
     assert.equal(transfer!.token, TOKEN_ADDRESS);
   });

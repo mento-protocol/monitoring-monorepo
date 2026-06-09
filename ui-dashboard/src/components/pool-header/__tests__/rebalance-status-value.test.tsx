@@ -320,6 +320,7 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain(
       'aria-label="Rebalance diagnostics: Stability pool has insufficient liquidity — Stability pool: 34.5k BOLD"',
     );
+    expect(html).not.toContain('title="Stability pool has insufficient');
     expect(html).not.toContain("CDPLS_STABILITY_POOL_BALANCE_TOO_LOW");
   });
 
@@ -394,6 +395,7 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain(
       'aria-label="Rebalance diagnostics: Rebalance reverted with an unrecognized error — [0x12345678]"',
     );
+    expect(html).not.toContain('title="Rebalance reverted');
   });
 
   it("renders a focusable info icon beside 'Rebalance blocked' so the detail is keyboard-reachable", () => {

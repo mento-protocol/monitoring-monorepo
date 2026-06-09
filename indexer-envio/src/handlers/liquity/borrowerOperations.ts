@@ -4,7 +4,8 @@ import {
   getOrCreateLiquityInstance,
   preloadLiquityMarket,
 } from "./bootstrap.js";
-import { findLiquityMarketByEventSource } from "./config.js";
+import { preloadBorrowingRevenueRollover } from "./borrowingRevenue.js";
+import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { toBpsFromD18 } from "./math.js";
 
@@ -18,6 +19,11 @@ indexer.onEvent(
     if (market === undefined) return;
     if (context.isPreload) {
       await preloadLiquityMarket(context, market);
+      await preloadBorrowingRevenueRollover(
+        context,
+        makeCollateralId(market),
+        asBigInt(event.block.timestamp),
+      );
       return;
     }
     const blockNumber = asBigInt(event.block.number);
@@ -29,7 +35,12 @@ indexer.onEvent(
       blockTimestamp,
     );
     const next = touchLiquityInstance(
-      flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+      await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
+      ),
       blockNumber,
       blockTimestamp,
     );

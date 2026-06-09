@@ -86,7 +86,8 @@ export const CDP_BORROWING_REVENUE_MARKETS = `
       where: { chainId: { _eq: $chainId } }
       order_by: { collateralId: asc }
     ) {
-      id collateralId chainId borrowingFeeCum
+      id collateralId chainId systemDebt activeTroveCount borrowingFeeCum
+      isShutDown shutDownAt
     }
   }
 `;
@@ -105,6 +106,39 @@ export const CDP_BORROWING_REVENUE_BRACKETS = `
     ) {
       id collateralId rate totalDebt sumDebtTimesRateD36
       pendingDebtTimesOneYearD36 updatedAt
+    }
+  }
+`;
+
+export const CDP_BORROWING_FEE_EVENTS = `
+  query CdpBorrowingFeeEvents($chainId: Int!, $limit: Int!, $offset: Int!) {
+    TroveOperationEvent(
+      where: {
+        chainId: { _eq: $chainId }
+        debtIncreaseFromUpfrontFee: { _gt: "0" }
+      }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+      offset: $offset
+    ) {
+      id instanceId debtIncreaseFromUpfrontFee timestamp
+    }
+  }
+`;
+
+export const CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS = `
+  query CdpBorrowingRevenueDailySnapshots(
+    $chainId: Int!
+    $limit: Int!
+    $offset: Int!
+  ) {
+    LiquityBorrowingRevenueDailySnapshot(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+      offset: $offset
+    ) {
+      id chainId collateralId instanceId timestamp upfrontFee accruedInterest
     }
   }
 `;
