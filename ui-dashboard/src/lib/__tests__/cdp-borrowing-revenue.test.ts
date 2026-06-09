@@ -201,6 +201,32 @@ describe("aggregateCdpBorrowingRevenue", () => {
     expect(result[0]?.activeTroveCount).toBe(9);
   });
 
+  it("zeroes the annual run rate for a shut-down market", () => {
+    const result = aggregateCdpBorrowingRevenueMarkets({
+      collaterals: [makeCollateral("gbp", "GBPm")],
+      instances: [
+        makeInstance("gbp", tokenWei(0), tokenWei(4_000), 9, {
+          isShutDown: true,
+          shutDownAt: String(NOW_SECONDS - 1_000),
+        }),
+      ],
+      brackets: [
+        makeBracket({
+          collateralId: "gbp",
+          rate: rateD18(1, 10).toString(),
+          totalDebt: tokenWei(1_000),
+        }),
+      ],
+      rates: new Map([["GBPm", 1.25]]) satisfies OracleRateMap,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    // Forward annual run-rate is zero once the branch has shut down...
+    expect(result[0]?.annualInterestRunRateUSD).toBe(0);
+    // ...but active debt (a current balance, not a forward projection) stays.
+    expect(result[0]?.activeDebtUSD).toBeCloseTo(5_000, 6);
+  });
+
   it("includes previously accumulated bracket interest before live accrual", () => {
     const pendingInterestWei = BigInt(tokenWei(10));
     const result = aggregateCdpBorrowingRevenue({

@@ -417,6 +417,11 @@ export function aggregateCdpBorrowingRevenueMarkets({
       const collateralBrackets = brackets.filter(
         (b) => b.collateralId === collateral.id,
       );
+      // A shut-down branch stops accruing borrowing interest, so its forward
+      // annual run-rate is zero even while brackets still hold debt.
+      const isCollateralShutDown = collateralInstances.some(
+        (i) => i.isShutDown,
+      );
       const summary = aggregateCdpBorrowingRevenue({
         collaterals: [collateral],
         instances: collateralInstances,
@@ -441,7 +446,7 @@ export function aggregateCdpBorrowingRevenueMarkets({
           weightedAnnualInterestRatePercent(collateralBrackets),
         annualInterestRunRateUSD: addPricedWei(
           collateral.symbol,
-          annualInterestRunRateWei(collateralBrackets),
+          isCollateralShutDown ? ZERO : annualInterestRunRateWei(collateralBrackets),
           rates,
           unpricedSymbols,
         ),
