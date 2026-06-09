@@ -432,6 +432,69 @@ describe("CdpDetailClient", () => {
     ).toContain("transactions gbpm GBPm");
   });
 
+  it("keeps detail content visible while the tx-hash detail query warms", () => {
+    let supportsTxHash = false;
+    let txQueryLoading = true;
+    const legacyDetail = detailData({
+      openTroves: [trove({ owner: "0xlegacyowner", troveId: "legacy" })],
+      depositors: [],
+      cdpPools: [],
+    });
+    const upgradedDetail = detailData({
+      openTroves: [trove({ owner: "0xupgradedowner", troveId: "upgraded" })],
+      depositors: [],
+      cdpPools: [],
+    });
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return {
+          data: marketsData([
+            { id: "t1", collateralId: "gbpm", status: "active" },
+          ]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return {
+          data: troveSchemaData(supportsTxHash),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return { data: legacyDetail, error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL_WITH_TROVE_TX) {
+        return {
+          data: txQueryLoading ? undefined : upgradedDetail,
+          error: null,
+          isLoading: txQueryLoading,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+    expect(handle!.container.textContent).toContain("0xlegacyowner");
+
+    supportsTxHash = true;
+    render(handle!);
+    expect(handle!.container.textContent).toContain("Troves");
+    expect(handle!.container.textContent).toContain("0xlegacyowner");
+
+    txQueryLoading = false;
+    render(handle!);
+    expect(handle!.container.textContent).toContain("0xupgradedowner");
+  });
+
   it("links trove IDs to the Mento app without a hash prefix", () => {
     const troveId =
       "0x5f23a9b8f4c249163a0d7969d2fc23af8de9e84d3f63b44136bfd18ea3e73ac4";

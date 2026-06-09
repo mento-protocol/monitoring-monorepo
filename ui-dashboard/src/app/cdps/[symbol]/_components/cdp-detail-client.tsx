@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { AddressLink } from "@/components/address-link";
 import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton, Tile } from "@/components/feedback";
@@ -92,14 +92,17 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
       ) === true,
     [troveSchema.data],
   );
-  const detail = useGQL<CdpDetailResponse>(
+  const detailQuery =
     collateral == null
       ? null
       : supportsTroveLastUpdatedTxHash
         ? CDP_MARKET_DETAIL_WITH_TROVE_TX
-        : CDP_MARKET_DETAIL,
+        : CDP_MARKET_DETAIL;
+  const rawDetail = useGQL<CdpDetailResponse>(
+    detailQuery,
     collateral == null ? undefined : { collateralId: collateral.id },
   );
+  const detail = useStableCdpDetail(rawDetail, collateral?.id);
   const snapshots = useGQL<CdpDailySnapshotsResponse>(
     collateral == null ? null : CDP_INSTANCE_DAILY_SNAPSHOTS,
     collateral == null ? undefined : { instanceId: collateral.id },
@@ -121,6 +124,30 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
   );
 }
 
+function useStableCdpDetail(
+  detail: ReturnType<typeof useGQL<CdpDetailResponse>>,
+  collateralId: string | undefined,
+): ReturnType<typeof useGQL<CdpDetailResponse>> {
+  const previous = useRef<{
+    collateralId: string;
+    data: CdpDetailResponse;
+  } | null>(null);
+
+  useEffect(() => {
+    if (collateralId == null || detail.data == null) return;
+    previous.current = { collateralId, data: detail.data };
+  }, [collateralId, detail.data]);
+
+  if (detail.data != null || collateralId == null) return detail;
+  if (previous.current?.collateralId !== collateralId) return detail;
+
+  return {
+    ...detail,
+    data: previous.current.data,
+    isLoading: false,
+  };
+}
+
 function CdpDetailState({
   markets,
   detail,
@@ -134,7 +161,10 @@ function CdpDetailState({
   collateral: CdpCollateral | undefined;
   network: Network;
 }) {
-  if (markets.isLoading || (collateral != null && detail.isLoading)) {
+  if (
+    markets.isLoading ||
+    (collateral != null && detail.isLoading && detail.data == null)
+  ) {
     return <Skeleton rows={8} />;
   }
   if (markets.error) {
