@@ -19,7 +19,7 @@ permissions: read-all
 jobs:
   trunk:
     name: Code Quality
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
       checks: write
@@ -36,13 +36,13 @@ jobs:
           arguments: --all
           # The action's internal ~/.cache/trunk key is
           # `trunk-<cache-key>-<runner.os>-<hash of .trunk/trunk.yaml>` — no
-          # architecture component. This job runs on ARM now; without an arch
-          # discriminator it restores the x64-built tool cache saved before
-          # the migration (same key, immutable entry), trunk re-downloads the
-          # arm64 tools over the restored binaries every run, and the
-          # download-then-exec overlap surfaces as `execve failed: Text file
-          # busy` (seen on the ARM compat PR). Keying on runner.arch gives
-          # each architecture its own cache lineage.
+          # architecture component. Without an arch discriminator, a
+          # runner-architecture change restores the other arch's tool cache
+          # (same key, immutable entry), trunk re-downloads the right tools
+          # over the restored binaries every run, and the download-then-exec
+          # overlap surfaces as `execve failed: Text file busy` (seen on the
+          # ARM compat PR #821). Keying on runner.arch gives each
+          # architecture its own cache lineage.
           cache-key: ${{ runner.arch }}
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

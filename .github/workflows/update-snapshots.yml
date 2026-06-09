@@ -15,7 +15,7 @@ permissions: read-all
 jobs:
   update-snapshots:
     name: Regenerate visual snapshot baselines (Linux)
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
       contents: write

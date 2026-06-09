@@ -62,12 +62,12 @@ jobs:
     # When Lighthouse does run, a performance/accessibility assertion failure
     # warns/errors per the budgets in .lighthouserc.cjs.
     name: Core Web Vitals + accessibility (ui-dashboard)
-    # Deliberately NOT migrated to the cheaper ARM runners (every other
-    # Blacksmith job in this repo is on -arm): lhci launches Chrome via
-    # chrome-launcher, and Google does not publish Chrome (or Chrome for
-    # Testing) for linux-arm64, so the ARM runner image has no Chrome to
-    # launch. Migrating would require pointing CHROME_PATH at Playwright's
-    # arm64 Chromium — a behavior change to the audit browser, out of scope.
+    # Cannot move to the cheaper ARM runners even if the economics ever
+    # favor it: lhci launches Chrome via chrome-launcher, and Google does
+    # not publish Chrome (or Chrome for Testing) for linux-arm64, so the
+    # ARM runner image has no Chrome to launch. Migrating would require
+    # pointing CHROME_PATH at Playwright's arm64 Chromium — a behavior
+    # change to the audit browser.
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
@@ -297,10 +297,11 @@ jobs:
         # next run re-downloads again indefinitely. Hashing the lockfile
         # makes the key flip on any real Playwright version bump.
         #
-        # `runner.arch` is in the key because ci.yml's ui job (same cache
-        # namespace) runs on ARM while this job stays on x64 — Chromium
-        # binaries are arch-specific and a cross-arch restore would fail at
-        # exec time, not install time.
+        # `runner.arch` is in the key so a runner-architecture change in
+        # either consumer of this cache namespace (this job or ci.yml's ui
+        # job) can never restore another arch's Chromium — binaries are
+        # arch-specific and a cross-arch restore would fail at exec time,
+        # not install time.
         if: steps.decide.outputs.run == 'true' && always()
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:

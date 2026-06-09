@@ -27,7 +27,7 @@ permissions: read-all
 jobs:
   duplication:
     name: jscpd
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     # Strictly advisory — never fails the PR. Surfaces duplication signal
     # via an uploaded artifact and (optionally) a PR summary comment.
