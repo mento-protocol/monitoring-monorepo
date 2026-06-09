@@ -87,6 +87,7 @@ export const CDP_BORROWING_REVENUE_MARKETS = `
       order_by: { collateralId: asc }
     ) {
       id collateralId chainId systemDebt activeTroveCount borrowingFeeCum
+      isShutDown shutDownAt
     }
   }
 `;

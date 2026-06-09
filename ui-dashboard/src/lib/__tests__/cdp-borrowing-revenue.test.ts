@@ -44,6 +44,7 @@ function makeInstance(
   borrowingFeeCum: string,
   systemDebt = tokenWei(0),
   activeTroveCount = 0,
+  shutdown?: { isShutDown: boolean; shutDownAt: string | null },
 ): CdpBorrowingRevenueInstance {
   return {
     id: `${collateralId}-instance`,
@@ -52,6 +53,8 @@ function makeInstance(
     systemDebt,
     activeTroveCount,
     borrowingFeeCum,
+    isShutDown: shutdown?.isShutDown ?? false,
+    shutDownAt: shutdown?.shutDownAt ?? null,
   };
 }
 
@@ -255,6 +258,59 @@ describe("aggregateCdpBorrowingRevenue", () => {
     expect(result.accruedInterestUSD).toBe(0);
     expect(result.activeInterestBracketCount).toBe(1);
   });
+
+  it("caps live interest projection at a shut-down branch's shutDownAt", () => {
+    const shutDownAt = NOW_SECONDS - 30 * DAY_SECONDS;
+    const collaterals = [makeCollateral("gbp", "GBPm")];
+    const brackets = [
+      makeBracket({
+        collateralId: "gbp",
+        totalDebt: tokenWei(3_650),
+        rate: rateD18(1, 10).toString(),
+        updatedAt: String(shutDownAt - 10 * DAY_SECONDS),
+      }),
+    ];
+    const rates = new Map([["GBPm", 1.25]]) satisfies OracleRateMap;
+
+    const shutDownResult = aggregateCdpBorrowingRevenue({
+      collaterals,
+      instances: [
+        makeInstance("gbp", tokenWei(0), tokenWei(0), 0, {
+          isShutDown: true,
+          shutDownAt: String(shutDownAt),
+        }),
+      ],
+      brackets,
+      rates,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    // Accrual must stop at shutDownAt: same as projecting only up to shutDownAt.
+    const settledAtShutdown = aggregateCdpBorrowingRevenue({
+      collaterals,
+      instances: [makeInstance("gbp", tokenWei(0), tokenWei(0), 0)],
+      brackets,
+      rates,
+      nowSeconds: shutDownAt,
+    });
+
+    // A live branch keeps accruing to now, so it must be strictly larger.
+    const liveResult = aggregateCdpBorrowingRevenue({
+      collaterals,
+      instances: [makeInstance("gbp", tokenWei(0), tokenWei(0), 0)],
+      brackets,
+      rates,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(shutDownResult.accruedInterestUSD).toBeCloseTo(
+      settledAtShutdown.accruedInterestUSD,
+      6,
+    );
+    expect(shutDownResult.accruedInterestUSD).toBeLessThan(
+      liveResult.accruedInterestUSD,
+    );
+  });
 });
 
 describe("buildDailyCdpBorrowingFeeSeries", () => {
@@ -348,6 +404,7 @@ describe("buildDailyCdpBorrowingFeeSeriesFromSnapshots", () => {
     const collateral = makeCollateral("gbp", "GBPm");
     const result = buildDailyCdpBorrowingFeeSeriesFromSnapshots({
       collaterals: [collateral],
+      instances: [],
       brackets: [],
       dailySnapshots: [
         makeDailySnapshot(collateral.id, NOW_DAY, tokenWei(10), tokenWei(2)),
@@ -375,6 +432,7 @@ describe("buildDailyCdpBorrowingFeeSeriesFromSnapshots", () => {
     const collateral = makeCollateral("gbp", "GBPm");
     const result = buildDailyCdpBorrowingFeeSeriesFromSnapshots({
       collaterals: [collateral],
+      instances: [],
       brackets: [
         makeBracket({
           collateralId: collateral.id,

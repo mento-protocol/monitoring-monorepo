@@ -31,6 +31,8 @@ export type CdpBorrowingRevenueInstance = {
   systemDebt: string;
   activeTroveCount: number;
   borrowingFeeCum: string;
+  isShutDown: boolean;
+  shutDownAt: string | null;
 };
 
 export type CdpBorrowingRevenueBracket = {
@@ -115,6 +117,7 @@ type SeriesAggregateArgs = {
 
 type SnapshotSeriesAggregateArgs = {
   collaterals: ReadonlyArray<CdpBorrowingRevenueCollateral>;
+  instances: ReadonlyArray<CdpBorrowingRevenueInstance>;
   brackets: ReadonlyArray<CdpBorrowingRevenueBracket>;
   dailySnapshots: ReadonlyArray<CdpBorrowingRevenueDailySnapshot>;
   rates: OracleRateMap;
@@ -318,6 +321,29 @@ function weightedAnnualInterestRatePercent(
   return Number(weightedRateD18) / 1e16;
 }
 
+function shutDownSecondsByCollateral(
+  instances: ReadonlyArray<CdpBorrowingRevenueInstance>,
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const instance of instances) {
+    if (instance.isShutDown && instance.shutDownAt !== null) {
+      map.set(instance.collateralId, Number(instance.shutDownAt));
+    }
+  }
+  return map;
+}
+
+// A shut-down branch stops accruing borrowing interest at shutDownAt, so the
+// live projection must not run past it.
+function cappedProjectionSeconds(
+  nowSeconds: number,
+  shutDownAt: number | undefined,
+): number {
+  return shutDownAt !== undefined && shutDownAt < nowSeconds
+    ? shutDownAt
+    : nowSeconds;
+}
+
 export function aggregateCdpBorrowingRevenue({
   collaterals,
   instances,
@@ -333,6 +359,8 @@ export function aggregateCdpBorrowingRevenue({
   let upfrontFeesUSD = 0;
   let accruedInterestUSD = 0;
   let activeInterestBracketCount = 0;
+
+  const shutDownSeconds = shutDownSecondsByCollateral(instances);
 
   for (const instance of instances) {
     upfrontFeesUSD += addPricedWei(
@@ -350,9 +378,13 @@ export function aggregateCdpBorrowingRevenue({
     if (totalDebt > ZERO && sumDebtTimesRateD36 > ZERO) {
       activeInterestBracketCount += 1;
     }
+    const effectiveNow = cappedProjectionSeconds(
+      nowSeconds,
+      shutDownSeconds.get(bracket.collateralId),
+    );
     accruedInterestUSD += addPricedWei(
       symbol,
-      accruedInterestWei(bracket, nowSeconds),
+      accruedInterestWei(bracket, effectiveNow),
       rates,
       unpricedSymbols,
     );
@@ -451,6 +483,8 @@ export function buildDailyCdpBorrowingFeeSeries({
   const dayAlignedWindow = window ? dayAlignWindow(window) : undefined;
   const context = { buckets, rates, unpricedSymbols };
 
+  const shutDownSeconds = shutDownSecondsByCollateral(instances);
+
   addUpfrontFeeEventsToBuckets({
     feeEvents,
     symbolByInstanceId,
@@ -459,11 +493,15 @@ export function buildDailyCdpBorrowingFeeSeries({
   });
 
   for (const bracket of brackets) {
+    const effectiveNow = cappedProjectionSeconds(
+      nowSeconds,
+      shutDownSeconds.get(bracket.collateralId),
+    );
     addBracketInterestToBuckets({
       bracket,
       symbol: symbolByCollateralId.get(bracket.collateralId),
       dayAlignedWindow,
-      nowSeconds,
+      nowSeconds: effectiveNow,
       context,
     });
   }
@@ -476,6 +514,7 @@ export function buildDailyCdpBorrowingFeeSeries({
 
 export function buildDailyCdpBorrowingFeeSeriesFromSnapshots({
   collaterals,
+  instances,
   brackets,
   dailySnapshots,
   rates,
@@ -489,6 +528,7 @@ export function buildDailyCdpBorrowingFeeSeriesFromSnapshots({
   const unpricedSymbols = new Set<string>();
   const dayAlignedWindow = window ? dayAlignWindow(window) : undefined;
   const context = { buckets, rates, unpricedSymbols };
+  const shutDownSeconds = shutDownSecondsByCollateral(instances);
 
   addDailySnapshotsToBuckets({
     dailySnapshots,
@@ -498,11 +538,15 @@ export function buildDailyCdpBorrowingFeeSeriesFromSnapshots({
   });
 
   for (const bracket of brackets) {
+    const effectiveNow = cappedProjectionSeconds(
+      nowSeconds,
+      shutDownSeconds.get(bracket.collateralId),
+    );
     addLiveBracketInterestToBuckets({
       bracket,
       symbol: symbolByCollateralId.get(bracket.collateralId),
       dayAlignedWindow,
-      nowSeconds,
+      nowSeconds: effectiveNow,
       context,
     });
   }
