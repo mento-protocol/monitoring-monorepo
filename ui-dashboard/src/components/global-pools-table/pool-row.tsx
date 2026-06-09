@@ -225,6 +225,7 @@ function TvlCell({
           {tvl !== null && tvl > 0 ? formatUSD(tvl) : "—"}
         </span>
         <span className={`mt-0.5 text-[11px] ${color}`} title="TVL Δ WoW">
+          <span className="sr-only">Week-over-week TVL change: </span>
           {label}
         </span>
       </div>
@@ -282,8 +283,12 @@ function VolumeSummaryCell({
         className="flex flex-col items-end leading-tight"
         title={`7d volume: ${volume7dLabel}\n24h volume: ${volume24hLabel}`}
       >
-        <span className="text-slate-200">{volume7dLabel}</span>
+        <span className="text-slate-200">
+          <span className="sr-only">7-day volume: </span>
+          {volume7dLabel}
+        </span>
         <span className="mt-0.5 text-[11px] text-slate-500">
+          <span className="sr-only">24-hour volume: </span>
           24h {volume24hLabel}
         </span>
       </div>

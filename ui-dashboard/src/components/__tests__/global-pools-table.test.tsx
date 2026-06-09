@@ -430,7 +430,7 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toContain('title="TVL Δ WoW">—');
+    expect(html).toContain("Week-over-week TVL change: </span>—");
     expect(html).toContain("text-slate-600");
   });
 
@@ -441,7 +441,7 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toContain('title="TVL Δ WoW">—');
+    expect(html).toContain("Week-over-week TVL change: </span>—");
     expect(html).toContain("text-slate-600");
   });
 
@@ -453,7 +453,7 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toContain('title="TVL Δ WoW">N/A');
+    expect(html).toContain("Week-over-week TVL change: </span>N/A");
     expect(html).toContain("text-slate-400");
   });
 
@@ -465,7 +465,7 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toContain('title="TVL Δ WoW">+2.35%');
+    expect(html).toContain("Week-over-week TVL change: </span>+2.35%");
     expect(html).toContain("text-emerald-400");
   });
 
@@ -477,7 +477,7 @@ describe("GlobalPoolsTable — TVL cell", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toContain('title="TVL Δ WoW">-1.10%');
+    expect(html).toContain("Week-over-week TVL change: </span>-1.10%");
     expect(html).toContain("text-red-400");
   });
 });
