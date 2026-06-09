@@ -10,7 +10,9 @@ import { useGQL } from "@/lib/graphql";
 import {
   CDP_INSTANCE_DAILY_SNAPSHOTS,
   CDP_MARKET_DETAIL,
+  CDP_MARKET_DETAIL_WITH_TROVE_TX,
   CDP_MARKETS,
+  CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
 import { buildPoolDetailHref } from "@/lib/routing";
 import { formatWei, relativeTime, truncateAddress } from "@/lib/format";
@@ -54,6 +56,12 @@ type CdpDetailResponse = {
   CdpPool: CdpPoolRow[];
 };
 
+type CdpTroveSchemaFieldsResponse = {
+  __type: {
+    fields: Array<{ name: string }>;
+  } | null;
+};
+
 type CdpDailySnapshotsResponse = {
   LiquityInstanceDailySnapshot: CdpInstanceDailySnapshot[];
 };
@@ -72,8 +80,24 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
       ),
     [markets.data, symbolSlug],
   );
+  const troveSchema = useGQL<CdpTroveSchemaFieldsResponse>(
+    network.chainId === 42220 ? CDP_TROVE_SCHEMA_FIELDS : null,
+    undefined,
+    { refreshInterval: 300_000 },
+  );
+  const supportsTroveLastUpdatedTxHash = useMemo(
+    () =>
+      troveSchema.data?.__type?.fields.some(
+        (field) => field.name === "lastUpdatedTxHash",
+      ) === true,
+    [troveSchema.data],
+  );
   const detail = useGQL<CdpDetailResponse>(
-    collateral == null ? null : CDP_MARKET_DETAIL,
+    collateral == null
+      ? null
+      : supportsTroveLastUpdatedTxHash
+        ? CDP_MARKET_DETAIL_WITH_TROVE_TX
+        : CDP_MARKET_DETAIL,
     collateral == null ? undefined : { collateralId: collateral.id },
   );
   const snapshots = useGQL<CdpDailySnapshotsResponse>(

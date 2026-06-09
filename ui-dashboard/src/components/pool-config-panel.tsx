@@ -9,7 +9,7 @@ import {
 } from "@mento-protocol/monitoring-config/oracle-reporters";
 import { isNeverRebalance } from "@/lib/health";
 import { AddressLink } from "@/components/address-link";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 import { Stat } from "@/components/stat";
 import { HASURA_TIMEOUT_MS, useGQL } from "@/lib/graphql";
 import { POOL_CONFIG_EXT, POOL_RATE_FEED_EXT } from "@/lib/queries";
@@ -78,7 +78,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
         label={
           <span className="inline-flex items-center gap-1">
             Swap Fee
-            <InfoPopover
+            <Tooltip
               label="Swap Fee"
               content={`Total fee charged per swap\nSplit between LP fee (${formatBps(lpFee)}) and protocol fee (${formatBps(protocolFee)}).`}
             />
@@ -95,7 +95,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
         label={
           <span className="inline-flex items-center gap-1">
             Rebalance Threshold
-            <InfoPopover
+            <Tooltip
               label="Rebalance Threshold"
               content={
                 neverRebalances
@@ -125,7 +125,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
         label={
           <span className="inline-flex items-center gap-1">
             Rebalance Reward
-            <InfoPopover
+            <Tooltip
               label="Rebalance Reward"
               content="Incentive (% of notional swap value) paid to the rebalancer that closes a deviation breach."
             />

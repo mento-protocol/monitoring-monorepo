@@ -50,6 +50,7 @@ import {
   moveInterestRateBracketDebt,
   statusFromDebt,
   transitionTroveStatus,
+  touchTroveUpdated,
 } from "./troves.js";
 
 const statusFromCollateral = (
@@ -355,6 +356,40 @@ function transitionClosedTrove(
   };
 }
 
+function transitionLiquidatedTrove(
+  trove: Trove,
+  instance: LiquityInstance,
+  args: {
+    collChange: bigint;
+    debtChange: bigint;
+    blockTimestamp: bigint;
+    blockNumber: bigint;
+    txHash: string;
+  },
+): { trove: Trove; instance: LiquityInstance } {
+  const transitioned = transitionTroveStatus(
+    {
+      ...trove,
+      liquidatedColl: negativeToPositive(args.collChange),
+      liquidatedDebt: negativeToPositive(args.debtChange),
+      closedAt: args.blockTimestamp,
+      closedAtBlock: args.blockNumber,
+      closedTxHash: args.txHash,
+    },
+    TROVE_STATUS.LIQUIDATED,
+    instance,
+  );
+  return {
+    trove: transitioned.trove,
+    instance: {
+      ...transitioned.instance,
+      liqCountCum: transitioned.instance.liqCountCum + 1,
+      liqCountBucket: transitioned.instance.liqCountBucket + 1,
+      liqCountDayBucket: transitioned.instance.liqCountDayBucket + 1,
+    },
+  };
+}
+
 indexer.onEvent(
   { contract: "LiquityTroveManager", event: "TroveOperation" },
   async ({ event, context }) => {
@@ -422,29 +457,13 @@ indexer.onEvent(
         txHash: event.transaction.hash,
       }));
     } else if (op === OP.LIQUIDATE) {
-      const transitioned = transitionTroveStatus(
-        {
-          ...trove,
-          liquidatedColl: negativeToPositive(
-            event.params._collChangeFromOperation,
-          ),
-          liquidatedDebt: negativeToPositive(
-            event.params._debtChangeFromOperation,
-          ),
-          closedAt: blockTimestamp,
-          closedAtBlock: blockNumber,
-          closedTxHash: event.transaction.hash,
-        },
-        TROVE_STATUS.LIQUIDATED,
-        instance,
-      );
-      trove = transitioned.trove;
-      instance = {
-        ...transitioned.instance,
-        liqCountCum: transitioned.instance.liqCountCum + 1,
-        liqCountBucket: transitioned.instance.liqCountBucket + 1,
-        liqCountDayBucket: transitioned.instance.liqCountDayBucket + 1,
-      };
+      ({ trove, instance } = transitionLiquidatedTrove(trove, instance, {
+        collChange: event.params._collChangeFromOperation,
+        debtChange: event.params._debtChangeFromOperation,
+        blockTimestamp,
+        blockNumber,
+        txHash: event.transaction.hash,
+      }));
     } else if (op === OP.REDEEM_COLLATERAL) {
       trove = {
         ...trove,
@@ -494,11 +513,14 @@ indexer.onEvent(
       status: trove.status,
       debt: trove.debt,
     });
-    context.Trove.set({
-      ...trove,
-      lastUpdatedAt: blockTimestamp,
-      lastUpdatedBlock: blockNumber,
-    });
+    context.Trove.set(
+      touchTroveUpdated(
+        trove,
+        blockTimestamp,
+        blockNumber,
+        event.transaction.hash,
+      ),
+    );
     context.LiquityInstance.set(
       touchLiquityInstance(instance, blockNumber, blockTimestamp),
     );
@@ -606,6 +628,7 @@ indexer.onEvent(
       }),
       blockTimestamp,
       blockNumber,
+      txHash: event.transaction.hash,
       pendingBatchOperation,
     });
     if (

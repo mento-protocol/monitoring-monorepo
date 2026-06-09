@@ -107,7 +107,9 @@ vi.mock("../cdp-transactions-table", () => ({
 import {
   CDP_INSTANCE_DAILY_SNAPSHOTS,
   CDP_MARKET_DETAIL,
+  CDP_MARKET_DETAIL_WITH_TROVE_TX,
   CDP_MARKETS,
+  CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
 import { CdpDetailClient } from "../cdp-detail-client";
 
@@ -182,16 +184,27 @@ function trove(overrides: Partial<CdpTrove> = {}): CdpTrove {
     id: "trove-1",
     troveId: "1",
     owner: "0xowner",
+    previousOwner: "0xpreviousowner",
     status: "active",
     debt: wei(50),
     coll: wei(100),
     icrBps: 20_000,
     interestRate: "0",
     interestBatchId: null,
+    openedAt: String(NOW - 100),
+    openedTxHash: "0xopened",
+    closedAt: null,
+    closedTxHash: null,
     lastUpdatedAt: String(NOW),
+    lastUpdatedTxHash: "0xupdated",
+    liquidatedDebt: null,
+    liquidatedColl: null,
+    collSurplus: null,
+    priceAtLiquidation: null,
     redemptionCount: 0,
     redeemedDebt: "0",
     redeemedColl: "0",
+    redemptionFeePaidCum: "0",
     ...overrides,
   };
 }
@@ -245,6 +258,18 @@ function marketsData(troves: CdpTroveListRow[] = []) {
   };
 }
 
+function troveSchemaData(hasLastUpdatedTxHash = true) {
+  return {
+    __type: {
+      fields: [
+        { name: "id" },
+        { name: "lastUpdatedAt" },
+        ...(hasLastUpdatedTxHash ? [{ name: "lastUpdatedTxHash" }] : []),
+      ],
+    },
+  };
+}
+
 function detailData({
   openTroves = [trove()],
   allTroves = openTroves,
@@ -285,9 +310,7 @@ function render(handle: Handle, symbol = "GBPm") {
 
 function troveRowText(handle: Handle): string[] {
   return Array.from(
-    handle.container.querySelectorAll(
-      'table[aria-label="GBPm troves"] tbody tr',
-    ),
+    handle.container.querySelectorAll('table[aria-label^="GBPm "] tbody tr'),
   ).map((row) => row.textContent ?? "");
 }
 
@@ -348,7 +371,13 @@ describe("CdpDetailClient", () => {
           isLoading: false,
         };
       }
-      if (query === CDP_MARKET_DETAIL) {
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: troveSchemaData(), error: null, isLoading: false };
+      }
+      if (
+        query === CDP_MARKET_DETAIL ||
+        query === CDP_MARKET_DETAIL_WITH_TROVE_TX
+      ) {
         return {
           data: detailData({
             openTroves: [trove({ interestRate: rateBps(250) })],
@@ -401,6 +430,99 @@ describe("CdpDetailClient", () => {
       handle!.container.querySelector('[data-testid="cdp-transactions"]')
         ?.textContent,
     ).toContain("transactions gbpm GBPm");
+  });
+
+  it("links trove IDs to the Mento app without a hash prefix", () => {
+    const troveId =
+      "0x5f23a9b8f4c249163a0d7969d2fc23af8de9e84d3f63b44136bfd18ea3e73ac4";
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return {
+          data: detailData({
+            openTroves: [trove({ troveId })],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+
+    const link = handle!.container.querySelector<HTMLAnchorElement>(
+      `a[href="https://app.mento.org/borrow/manage/${troveId}?token=GBPm"]`,
+    );
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toBe(troveId);
+    expect(link?.textContent).not.toContain("#");
+    expect(link?.target).toBe("_blank");
+    expect(link?.rel).toBe("noopener noreferrer");
+  });
+
+  it("explains indexed ICR freshness and timestamps each displayed value", () => {
+    render(handle!);
+
+    const infoTrigger = handle!.container.querySelector<HTMLElement>(
+      '[aria-label="About indexed ICR"]',
+    );
+    expect(infoTrigger).not.toBeNull();
+    expect(infoTrigger?.getAttribute("title")).toBeNull();
+
+    const infoTooltipId = infoTrigger?.getAttribute("aria-describedby");
+    expect(infoTooltipId).toBeTruthy();
+    expect(
+      handle!.container.ownerDocument.getElementById(infoTooltipId!)
+        ?.textContent,
+    ).toContain("Individual Collateral Ratio");
+
+    const icrValue = handle!.container.querySelector<HTMLSpanElement>(
+      'table[aria-label="GBPm troves"] tbody tr td:nth-child(6) [aria-describedby] > span',
+    );
+    expect(icrValue?.textContent).toBe("200.00%");
+    const icrTrigger = handle!.container.querySelector<HTMLElement>(
+      'table[aria-label="GBPm troves"] tbody tr td:nth-child(6) [aria-describedby]',
+    );
+    const icrTooltipId = icrTrigger?.getAttribute("aria-describedby");
+    expect(icrTrigger?.getAttribute("title")).toBeNull();
+    expect(
+      handle!.container.ownerDocument.getElementById(icrTooltipId!)
+        ?.textContent,
+    ).toBe(
+      `Indexed ICR as of ${new Date(NOW * 1000).toLocaleString()}.\nNot a live RPC or oracle read.`,
+    );
+  });
+
+  it("links updated timestamps to their updating transaction", () => {
+    render(handle!);
+
+    const link = handle!.container.querySelector<HTMLAnchorElement>(
+      'table[aria-label="GBPm troves"] tbody tr td:nth-child(8) a',
+    );
+    expect(link).not.toBeNull();
+    expect(link?.href).toBe("https://celoscan.io/tx/0xupdated");
+    expect(link?.textContent).toBe("0s ago");
+    expect(link?.target).toBe("_blank");
+    expect(link?.rel).toBe("noopener noreferrer");
+    expect(link?.getAttribute("title")).toBeNull();
+
+    const tooltipId = link?.getAttribute("aria-describedby");
+    expect(tooltipId).toBeTruthy();
+    expect(
+      handle!.container.ownerDocument.getElementById(tooltipId!)?.textContent,
+    ).toContain("Opens transaction 0xupdated");
   });
 
   it("renders empty detail tables without replacing market-level KPIs", () => {
@@ -650,14 +772,32 @@ describe("CdpDetailClient", () => {
           data: detailData({
             openTroves: [
               trove({ id: "trove-open", owner: "0xopen", status: "active" }),
+              trove({
+                id: "trove-zombie",
+                owner: "0xzombie",
+                status: "zombie",
+              }),
             ],
             allTroves: [
               trove({
                 id: "trove-closed",
-                owner: "0xclosed",
+                owner: "0x0000000000000000000000000000000000000000",
+                previousOwner: "0xlastowner",
                 status: "redeemed",
+                openedAt: String(NOW - 200),
+                openedTxHash: "0xstarthistory",
+                closedAt: String(NOW - 100),
+                closedTxHash: "0xclosedhistory",
+                redeemedDebt: wei(12),
+                redemptionCount: 2,
+                redemptionFeePaidCum: wei(3),
               }),
               trove({ id: "trove-open", owner: "0xopen", status: "active" }),
+              trove({
+                id: "trove-zombie",
+                owner: "0xzombie",
+                status: "zombie",
+              }),
             ],
             depositors: [],
             cdpPools: [],
@@ -681,11 +821,45 @@ describe("CdpDetailClient", () => {
 
     clickButton(handle!, "History");
 
-    expect(troveRowText(handle!).join(" ")).toContain("0xclosed");
-    expect(troveRowText(handle!).join(" ")).toContain("redeemed");
+    const headers = Array.from(
+      handle!.container.querySelectorAll('table[aria-label="GBPm troves"] th'),
+    ).map((header) => header.textContent);
+    expect(headers).toEqual([
+      "Last owner / Trove",
+      "Status",
+      "Opened",
+      "Ended / Updated",
+      "Remaining collateral",
+      "Redeemed",
+      "Redemption fee",
+      "Liquidated",
+    ]);
+    expect(headers).not.toContain("Rank");
+    expect(headers).not.toContain("ICR (indexed)");
+
+    const historyRows = troveRowText(handle!);
+    expect(historyRows).toHaveLength(1);
+    expect(historyRows.join(" ")).toContain("0xlastowner");
+    expect(historyRows.join(" ")).not.toContain(
+      "0x0000000000000000000000000000000000000000",
+    );
+    expect(historyRows.join(" ")).toContain("redeemed");
+    expect(historyRows.join(" ")).toContain("12.00 GBPm");
+    expect(historyRows.join(" ")).toContain("2 events");
+    expect(historyRows.join(" ")).toContain("3.00 USDm");
+    expect(historyRows.join(" ")).not.toContain("0xopen");
+    expect(historyRows.join(" ")).not.toContain("0xzombie");
+
+    const historyLinks = Array.from(
+      handle!.container.querySelectorAll<HTMLAnchorElement>(
+        'table[aria-label="GBPm troves"] a',
+      ),
+    ).map((link) => link.href);
+    expect(historyLinks).toContain("https://celoscan.io/tx/0xstarthistory");
+    expect(historyLinks).toContain("https://celoscan.io/tx/0xclosedhistory");
   });
 
-  it("uses stored interest rates for historical batch troves", () => {
+  it("renders liquidated outcomes in the history table", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
         return { data: marketsData(), error: null, isLoading: false };
@@ -698,17 +872,14 @@ describe("CdpDetailClient", () => {
             ],
             allTroves: [
               trove({
-                id: "trove-closed-batch",
-                owner: "0xclosedbatch",
-                status: "redeemed",
-                interestRate: rateBps(210),
-                interestBatchId: "batch-history",
-              }),
-            ],
-            interestBatches: [
-              interestBatch({
-                id: "batch-history",
-                annualInterestRate: rateBps(350),
+                id: "trove-liquidated",
+                owner: "0x0000000000000000000000000000000000000000",
+                previousOwner: "0xliquidatedowner",
+                status: "liquidated",
+                closedAt: String(NOW - 60),
+                closedTxHash: "0xliquidated",
+                liquidatedDebt: wei(7),
+                liquidatedColl: wei(9),
               }),
             ],
             depositors: [],
@@ -733,9 +904,10 @@ describe("CdpDetailClient", () => {
 
     const rows = troveRowText(handle!);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toContain("0xclosedbatch");
-    expect(rows[0]).toContain("2.10%");
-    expect(rows[0]).not.toContain("3.50%");
+    expect(rows[0]).toContain("0xliquidatedowner");
+    expect(rows[0]).toContain("liquidated");
+    expect(rows[0]).toContain("7.00 GBPm");
+    expect(rows[0]).toContain("9.00 USDm");
   });
 
   it("discloses when the active trove fetch reaches the hosted row cap", () => {

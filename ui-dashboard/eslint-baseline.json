@@ -161,13 +161,6 @@
     "linePreview": " | export function PoolHeader({ | pool,"
   },
   {
-    "file": "src/app/pool/[poolId]/_components/v2-exchange-panel.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'V2ExchangePanel' has too many lines (151). Maximum allowed is 100.",
-    "line": 21,
-    "linePreview": "*/ | export function V2ExchangePanel({ | pool,"
-  },
-  {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",

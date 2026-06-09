@@ -453,6 +453,8 @@ const cdpTroves = [
     interestRate: "21000000000000000",
     interestBatchId: null,
     lastUpdatedAt: String(cdpNow - 600),
+    lastUpdatedTxHash:
+      "0x1111111111111111111111111111111111111111111111111111111111111111",
     redemptionCount: 1,
     redeemedDebt: "10000000000000000000",
     redeemedColl: "20000000000000000000",
@@ -470,6 +472,8 @@ const cdpTroves = [
     interestRate: "0",
     interestBatchId: `${cdpCollateralId}-batch-low`,
     lastUpdatedAt: String(cdpNow - 900),
+    lastUpdatedTxHash:
+      "0x2222222222222222222222222222222222222222222222222222222222222222",
     redemptionCount: 0,
     redeemedDebt: "0",
     redeemedColl: "0",
@@ -487,6 +491,8 @@ const cdpTroves = [
     interestRate: "26000000000000000",
     interestBatchId: null,
     lastUpdatedAt: String(cdpNow - 3600),
+    lastUpdatedTxHash:
+      "0x3333333333333333333333333333333333333333333333333333333333333333",
     redemptionCount: 1,
     redeemedDebt: "50000000000000000000",
     redeemedColl: "110000000000000000000",
@@ -581,6 +587,30 @@ function cdpRowsForChain(rows, chainId) {
 
 function cdpRowsForCollateral(rows, collateralId) {
   return rows.filter((row) => row.collateralId === String(collateralId));
+}
+
+function cdpMarketDetailRows(collateralId) {
+  return {
+    LiquityCollateral: cdpRowsForCollateral(cdpCollaterals, collateralId),
+    LiquityInstance: cdpRowsForCollateral(cdpInstances, collateralId),
+    OpenTrove: cdpRowsForCollateral(cdpTroves, collateralId).filter((trove) =>
+      ["active", "zombie"].includes(trove.status),
+    ),
+    AllTrove: cdpRowsForCollateral(cdpTroves, collateralId),
+    InterestBatch: cdpRowsForCollateral(cdpInterestBatches, collateralId),
+    StabilityPoolDepositor: [],
+    CdpPool: [
+      {
+        id: `${collateralId}-${ADDRESSES.celoPool}`,
+        poolId: ADDRESSES.celoPool,
+        debtToken: ADDRESSES.celoGbpm,
+        strategyAddress: "0x8888888888888888888888888888888888888888",
+        rebalanceCooldownSec: 3600,
+        addedAtTimestamp: String(cdpNow - DAY_SECONDS),
+        updatedAtTimestamp: String(cdpNow - 120),
+      },
+    ],
+  };
 }
 
 function volumeDay() {
@@ -835,29 +865,23 @@ function handleGraphQL({ query, variables = {} }) {
           })),
       };
     }
+    case "CdpTroveSchemaFields":
+      return {
+        __type: {
+          fields: [
+            { name: "id" },
+            { name: "lastUpdatedAt" },
+            { name: "lastUpdatedTxHash" },
+          ],
+        },
+      };
     case "CdpMarketDetail": {
       const collateralId = String(variables.collateralId);
-      return {
-        LiquityCollateral: cdpRowsForCollateral(cdpCollaterals, collateralId),
-        LiquityInstance: cdpRowsForCollateral(cdpInstances, collateralId),
-        OpenTrove: cdpRowsForCollateral(cdpTroves, collateralId).filter(
-          (trove) => ["active", "zombie"].includes(trove.status),
-        ),
-        AllTrove: cdpRowsForCollateral(cdpTroves, collateralId),
-        InterestBatch: cdpRowsForCollateral(cdpInterestBatches, collateralId),
-        StabilityPoolDepositor: [],
-        CdpPool: [
-          {
-            id: `${collateralId}-${ADDRESSES.celoPool}`,
-            poolId: ADDRESSES.celoPool,
-            debtToken: ADDRESSES.celoGbpm,
-            strategyAddress: "0x8888888888888888888888888888888888888888",
-            rebalanceCooldownSec: 3600,
-            addedAtTimestamp: String(cdpNow - DAY_SECONDS),
-            updatedAtTimestamp: String(cdpNow - 120),
-          },
-        ],
-      };
+      return cdpMarketDetailRows(collateralId);
+    }
+    case "CdpMarketDetailWithTroveTx": {
+      const collateralId = String(variables.collateralId);
+      return cdpMarketDetailRows(collateralId);
     }
     case "CdpInstanceDailySnapshots":
       return {

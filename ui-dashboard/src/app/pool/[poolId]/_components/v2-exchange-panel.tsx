@@ -1,8 +1,9 @@
 "use client";
 
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
+import type { ReactNode } from "react";
 import { AddressLink } from "@/components/address-link";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 import { Stat } from "@/components/stat";
 import { relativeTime, truncateAddress } from "@/lib/format";
 import { tokenSymbol } from "@/lib/tokens";
@@ -65,6 +66,18 @@ export function V2ExchangePanel({
     return <V2ExchangeSyncingNote />;
   }
 
+  return <V2ExchangeStats pool={pool} network={network} config={v2Config} />;
+}
+
+function V2ExchangeStats({
+  pool,
+  network,
+  config,
+}: {
+  pool: Pool;
+  network: Network;
+  config: BiPoolExchangeRow;
+}) {
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
   // FixidityLib uses 1e24 precision — 5e21 = 0.5% = 50 bps. BigInt math
@@ -72,113 +85,45 @@ export function V2ExchangePanel({
   // above Number.MAX_SAFE_INTEGER (~9e15), so naive `Number(spread)/1e24`
   // would drop low-bit precision. Bps result fits in a safe Number.
   // ES2017 tsconfig target → use BigInt() constructor instead of `Nn` literals.
-  const spreadBps = Number(
-    (BigInt(v2Config.spread) * BigInt(10000)) /
-      BigInt("1000000000000000000000000"),
-  );
-  const resetMins = Number(v2Config.referenceRateResetFrequency) / 60;
+  const spreadBps = formatSpreadBps(config.spread);
+  const resetMins = Number(config.referenceRateResetFrequency) / 60;
 
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
-      <Stat
-        label={
-          <span className="inline-flex items-center gap-1">
-            Swap Fee
-            <InfoPopover
-              label="Swap Fee"
-              content="Spread charged on each swap, set on the v2 BiPoolManager exchange that backs this pool."
-            />
-          </span>
-        }
-        value={`${spreadBps.toFixed(0)} bps`}
-        title={`spread = ${v2Config.spread} (FixidityLib 1e24)`}
-        mono
+      <SwapFeeStat spread={config.spread} spreadBps={spreadBps} />
+      <PricingCurveStat name={config.pricingModuleName} />
+      <BucketResetStat
+        resetMins={resetMins}
+        resetFrequency={config.referenceRateResetFrequency}
       />
-      <Stat
-        label={
-          <span className="inline-flex items-center gap-1">
-            Pricing Curve
-            <InfoPopover
-              label="Pricing Curve"
-              content="Mento v2 pricing module. ConstantSum: zero-slippage swaps within the bucket; buckets reset from the oracle on a fixed cadence."
-            />
-          </span>
-        }
-        value={v2Config.pricingModuleName ?? "—"}
+      <BucketStat
+        symbol={sym0}
+        bucket={config.bucket0}
+        decimals={pool.token0Decimals ?? 18}
+        titleDecimals={pool.token0Decimals}
+        titleKey="bucket0"
       />
-      <Stat
-        label={
-          <span className="inline-flex items-center gap-1">
-            Bucket Reset
-            <InfoPopover
-              label="Bucket Reset Cadence"
-              content="How often the v2 exchange refreshes its bucket reserves from the SortedOracles reference rate."
-            />
-          </span>
-        }
-        value={
-          resetMins >= 1
-            ? `${resetMins} min`
-            : `${v2Config.referenceRateResetFrequency}s`
-        }
-        mono
-      />
-      <Stat
-        label={
-          <span className="inline-flex items-center gap-1">
-            Bucket — {sym0}
-            <InfoPopover
-              label="Bucket reserves"
-              content={BUCKET_INFO_CONTENT}
-            />
-          </span>
-        }
-        value={formatBucket(v2Config.bucket0, pool.token0Decimals ?? 18)}
-        title={`raw bucket0 = ${v2Config.bucket0} (${pool.token0Decimals}d)`}
-        mono
-      />
-      <Stat
-        label={
-          <span className="inline-flex items-center gap-1">
-            Bucket — {sym1}
-            <InfoPopover
-              label="Bucket reserves"
-              content={BUCKET_INFO_CONTENT}
-            />
-          </span>
-        }
-        value={formatBucket(v2Config.bucket1, pool.token1Decimals ?? 18)}
-        title={`raw bucket1 = ${v2Config.bucket1} (${pool.token1Decimals}d)`}
-        mono
+      <BucketStat
+        symbol={sym1}
+        bucket={config.bucket1}
+        decimals={pool.token1Decimals ?? 18}
+        titleDecimals={pool.token1Decimals}
+        titleKey="bucket1"
       />
       <Stat
         label="Last Reset"
-        value={relativeTime(v2Config.lastBucketUpdate)}
-        title={v2Config.lastBucketUpdate}
+        value={relativeTime(config.lastBucketUpdate)}
+        title={config.lastBucketUpdate}
       />
-      <Stat
-        label={
-          <span className="inline-flex items-center gap-1">
-            Oracle Feed
-            <InfoPopover
-              label="Reference Rate Feed"
-              content="SortedOracles feed used to recompute the bucket sizes on each reset."
-            />
-          </span>
-        }
-        value={
-          <AddressLink
-            address={v2Config.referenceRateFeedID}
-            readOnly
-            chainId={pool.chainId}
-          />
-        }
+      <OracleFeedStat
+        feedId={config.referenceRateFeedID}
+        chainId={pool.chainId}
       />
       <Stat
         label="Exchange ID"
         value={
-          <span title={v2Config.exchangeId} className="font-mono">
-            {truncateAddress(v2Config.exchangeId)}
+          <span title={config.exchangeId} className="font-mono">
+            {truncateAddress(config.exchangeId)}
           </span>
         }
       />
@@ -186,13 +131,148 @@ export function V2ExchangePanel({
         label="BiPoolManager"
         value={
           <AddressLink
-            address={v2Config.exchangeProvider}
+            address={config.exchangeProvider}
             readOnly
             chainId={pool.chainId}
           />
         }
       />
     </dl>
+  );
+}
+
+function TooltipLabel({
+  children,
+  label,
+  content,
+}: {
+  children: ReactNode;
+  label: string;
+  content: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {children}
+      <Tooltip label={label} content={content} />
+    </span>
+  );
+}
+
+function SwapFeeStat({
+  spread,
+  spreadBps,
+}: {
+  spread: string;
+  spreadBps: number;
+}) {
+  return (
+    <Stat
+      label={
+        <TooltipLabel
+          label="Swap Fee"
+          content="Spread charged on each swap, set on the v2 BiPoolManager exchange that backs this pool."
+        >
+          Swap Fee
+        </TooltipLabel>
+      }
+      value={`${spreadBps.toFixed(0)} bps`}
+      title={`spread = ${spread} (FixidityLib 1e24)`}
+      mono
+    />
+  );
+}
+
+function PricingCurveStat({ name }: { name: string | null }) {
+  return (
+    <Stat
+      label={
+        <TooltipLabel
+          label="Pricing Curve"
+          content="Mento v2 pricing module. ConstantSum: zero-slippage swaps within the bucket; buckets reset from the oracle on a fixed cadence."
+        >
+          Pricing Curve
+        </TooltipLabel>
+      }
+      value={name ?? "—"}
+    />
+  );
+}
+
+function BucketResetStat({
+  resetMins,
+  resetFrequency,
+}: {
+  resetMins: number;
+  resetFrequency: string;
+}) {
+  return (
+    <Stat
+      label={
+        <TooltipLabel
+          label="Bucket Reset Cadence"
+          content="How often the v2 exchange refreshes its bucket reserves from the SortedOracles reference rate."
+        >
+          Bucket Reset
+        </TooltipLabel>
+      }
+      value={resetMins >= 1 ? `${resetMins} min` : `${resetFrequency}s`}
+      mono
+    />
+  );
+}
+
+function BucketStat({
+  symbol,
+  bucket,
+  decimals,
+  titleDecimals,
+  titleKey,
+}: {
+  symbol: string;
+  bucket: string;
+  decimals: number;
+  titleDecimals: number | null | undefined;
+  titleKey: "bucket0" | "bucket1";
+}) {
+  return (
+    <Stat
+      label={
+        <TooltipLabel label="Bucket reserves" content={BUCKET_INFO_CONTENT}>
+          Bucket — {symbol}
+        </TooltipLabel>
+      }
+      value={formatBucket(bucket, decimals)}
+      title={`raw ${titleKey} = ${bucket} (${titleDecimals}d)`}
+      mono
+    />
+  );
+}
+
+function OracleFeedStat({
+  feedId,
+  chainId,
+}: {
+  feedId: string;
+  chainId: number;
+}) {
+  return (
+    <Stat
+      label={
+        <TooltipLabel
+          label="Reference Rate Feed"
+          content="SortedOracles feed used to recompute the bucket sizes on each reset."
+        >
+          Oracle Feed
+        </TooltipLabel>
+      }
+      value={<AddressLink address={feedId} readOnly chainId={chainId} />}
+    />
+  );
+}
+
+function formatSpreadBps(spread: string): number {
+  return Number(
+    (BigInt(spread) * BigInt(10000)) / BigInt("1000000000000000000000000"),
   );
 }
 

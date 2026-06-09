@@ -191,6 +191,7 @@ export async function replayBatchedTroveUpdate(
       }),
       lastUpdatedAt: args.blockTimestamp,
       lastUpdatedBlock: args.blockNumber,
+      lastUpdatedTxHash: args.txHash,
     },
     statusFromBatchReplay(trove, nextDebt, args.collateral),
     args.instance,

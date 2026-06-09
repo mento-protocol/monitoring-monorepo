@@ -62,6 +62,7 @@ export function applyTroveUpdatedFields(
     icrBps: number;
     blockTimestamp: bigint;
     blockNumber: bigint;
+    txHash: string;
     pendingBatchOperation: PendingBatchOperation | undefined;
   },
 ): Trove {
@@ -79,5 +80,6 @@ export function applyTroveUpdatedFields(
     icrBps: args.icrBps,
     lastUpdatedAt: args.blockTimestamp,
     lastUpdatedBlock: args.blockNumber,
+    lastUpdatedTxHash: args.txHash,
   };
 }

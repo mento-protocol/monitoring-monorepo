@@ -1,22 +1,22 @@
 {
   "schemaVersion": 1,
   "featureId": "feat_ui-flow_74c7f94647",
-  "title": "React component info-popover",
-  "summary": "React component implemented by ui-dashboard/src/components/info-popover.tsx.",
+  "title": "React component tooltip",
+  "summary": "React component implemented by ui-dashboard/src/components/tooltip.tsx.",
   "kind": "ui-flow",
   "source": "react-component",
   "confidence": "medium",
   "entrypoints": [
     {
-      "path": "ui-dashboard/src/components/info-popover.tsx",
-      "symbol": "info-popover",
+      "path": "ui-dashboard/src/components/tooltip.tsx",
+      "symbol": "tooltip",
       "route": null,
       "command": null
     }
   ],
   "ownedFiles": [
     {
-      "path": "ui-dashboard/src/components/info-popover.tsx",
+      "path": "ui-dashboard/src/components/tooltip.tsx",
       "reason": "component implementation"
     }
   ],

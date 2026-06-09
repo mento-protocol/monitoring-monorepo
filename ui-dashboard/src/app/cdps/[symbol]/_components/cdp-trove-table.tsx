@@ -5,9 +5,13 @@ import { AddressLink } from "@/components/address-link";
 import { EmptyBox } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
 import { Table, Row, Th, Td } from "@/components/table";
-import { relativeTime } from "@/lib/format";
+import { Tooltip } from "@/components/tooltip";
+import { formatTimestamp, relativeTime } from "@/lib/format";
+import { NETWORKS, networkIdForChainId } from "@/lib/networks";
+import { explorerTxUrl } from "@/lib/tokens";
 import { useRovingTabIndex } from "@/lib/use-roving-tab-index";
 import {
+  CDP_TROVE_OPEN_STATUSES,
   CDP_TROVES_DETAIL_LIMIT,
   type CdpCollateral,
   type CdpInterestBatch,
@@ -29,6 +33,17 @@ type TroveDisplayRow = {
 
 const TROVE_PAGE_SIZE = 25;
 const D18 = BigInt(10) ** BigInt(18);
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const MENTO_APP_BORROW_MANAGE_BASE_URL = "https://app.mento.org/borrow/manage";
+const ICR_INDEXED_EXPLAINER = (
+  <>
+    Individual Collateral Ratio (
+    <code className="rounded bg-slate-900 px-1 font-mono text-[11px] text-slate-100">
+      coll. / debt
+    </code>
+    ) snapshot from the latest indexed trove event, not a live oracle/RPC read.
+  </>
+);
 
 const troveTabId = (tab: TroveTab) => `cdp-trove-tab-${tab}`;
 const trovePanelId = (tab: TroveTab) => `cdp-trove-panel-${tab}`;
@@ -82,6 +97,7 @@ export function CdpTroveTable({
           <EmptyBox message={tableRows.emptyMessage} />
         ) : (
           <TroveTableResults
+            activeTab={activeTab}
             collateral={collateral}
             visibleRows={tableRows.visibleRows}
             emptyMessage={tableRows.emptyMessage}
@@ -127,16 +143,9 @@ function useTroveTableRows({
       }),
     [openTroves, batchById, openCapped],
   );
-  const rankByTroveId = useMemo(
-    () =>
-      new Map<string, TroveDisplayRow>(
-        openRows.map((row) => [row.trove.id, row] as const),
-      ),
-    [openRows],
-  );
   const historyRows = useMemo(
-    () => buildHistoryRows(allTroves, batchById, rankByTroveId),
-    [allTroves, batchById, rankByTroveId],
+    () => buildHistoryRows(allTroves, batchById),
+    [allTroves, batchById],
   );
   const sourceRows = activeTab === "open" ? openRows : historyRows;
   const normalizedSearch = search.trim().toLowerCase();
@@ -159,7 +168,7 @@ function useTroveTableRows({
     ? "No troves match the active search."
     : activeTab === "open"
       ? "No open troves indexed yet."
-      : "No troves indexed yet.";
+      : "No historical troves indexed yet.";
 
   return {
     sourceRows,
@@ -240,6 +249,7 @@ function TroveTableHeader({
 }
 
 function TroveTableResults({
+  activeTab,
   collateral,
   visibleRows,
   emptyMessage,
@@ -249,6 +259,7 @@ function TroveTableResults({
   rankSuppressed,
   onPageChange,
 }: {
+  activeTab: TroveTab;
   collateral: CdpCollateral;
   visibleRows: TroveDisplayRow[];
   emptyMessage: string;
@@ -258,20 +269,12 @@ function TroveTableResults({
   rankSuppressed: boolean;
   onPageChange: (page: number) => void;
 }) {
+  const historyView = activeTab === "history";
   return (
     <>
       <Table aria-label={`${collateral.symbol} troves`}>
         <thead>
-          <Row>
-            <Th align="right">Rank</Th>
-            <Th>Owner / Trove</Th>
-            <Th>Status</Th>
-            <Th align="right">Debt</Th>
-            <Th align="right">Collateral</Th>
-            <Th align="right">ICR (indexed)</Th>
-            <Th align="right">Interest</Th>
-            <Th align="right">Updated</Th>
-          </Row>
+          {historyView ? <HistoryTroveHeader /> : <OpenTroveHeader />}
         </thead>
         <tbody>
           {visibleRows.length === 0 ? (
@@ -285,7 +288,12 @@ function TroveTableResults({
             </Row>
           ) : (
             visibleRows.map((row) => (
-              <TroveRow key={row.trove.id} row={row} collateral={collateral} />
+              <TroveRow
+                key={row.trove.id}
+                row={row}
+                collateral={collateral}
+                view={activeTab}
+              />
             ))
           )}
         </tbody>
@@ -300,9 +308,9 @@ function TroveTableResults({
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing {CDP_TROVES_DETAIL_LIMIT.toLocaleString()} fetched troves for
           this view — search covers fetched rows only.
-          {rankSuppressed
+          {activeTab === "open" && rankSuppressed
             ? " Redemption ranks are hidden because the full open-trove set is not loaded."
-            : " Ranks cover fetched rows only."}
+            : ""}
         </p>
       )}
     </>
@@ -349,7 +357,67 @@ function TroveTabButton({
   );
 }
 
+function OpenTroveHeader() {
+  return (
+    <Row>
+      <Th align="right">Rank</Th>
+      <Th>Owner / Trove</Th>
+      <Th>Status</Th>
+      <Th align="right">Debt</Th>
+      <Th align="right">Collateral</Th>
+      <Th align="right">
+        <span className="inline-flex items-center justify-end gap-1">
+          <Tooltip
+            label="About indexed ICR"
+            content={ICR_INDEXED_EXPLAINER}
+            align="right"
+          >
+            <span className="inline-flex items-center gap-1">
+              ICR (indexed)
+              <span className="text-slate-500" aria-hidden="true">
+                ⓘ
+              </span>
+            </span>
+          </Tooltip>
+        </span>
+      </Th>
+      <Th align="right">Interest</Th>
+      <Th align="right">Updated</Th>
+    </Row>
+  );
+}
+
+function HistoryTroveHeader() {
+  return (
+    <Row>
+      <Th>Last owner / Trove</Th>
+      <Th>Status</Th>
+      <Th align="right">Opened</Th>
+      <Th align="right">Ended / Updated</Th>
+      <Th align="right">Remaining collateral</Th>
+      <Th align="right">Redeemed</Th>
+      <Th align="right">Redemption fee</Th>
+      <Th align="right">Liquidated</Th>
+    </Row>
+  );
+}
+
 function TroveRow({
+  row,
+  collateral,
+  view,
+}: {
+  row: TroveDisplayRow;
+  collateral: CdpCollateral;
+  view: TroveTab;
+}) {
+  if (view === "history") {
+    return <HistoryTroveRow row={row} collateral={collateral} />;
+  }
+  return <OpenTroveRow row={row} collateral={collateral} />;
+}
+
+function OpenTroveRow({
   row,
   collateral,
 }: {
@@ -357,32 +425,108 @@ function TroveRow({
   collateral: CdpCollateral;
 }) {
   const { trove } = row;
+  const icrTimestamp = formatTimestamp(trove.lastUpdatedAt);
+  const icrTitle =
+    trove.icrBps < 0
+      ? `Indexed ICR unavailable. Row last updated at ${icrTimestamp}.`
+      : `Indexed ICR as of ${icrTimestamp}.\nNot a live RPC or oracle read.`;
   return (
     <Row>
       <Td align="right">
         <RankValue row={row} />
       </Td>
       <Td>
-        <div className="flex flex-col gap-0.5">
-          <AddressLink address={trove.owner} chainId={collateral.chainId} />
-          <span className="font-mono text-[10px] text-slate-500">
-            #{trove.troveId}
-          </span>
-        </div>
+        <OwnerTroveCell trove={trove} collateral={collateral} />
       </Td>
       <Td>{trove.status}</Td>
       <Td align="right">{formatTokenAmount(trove.debt, collateral.symbol)}</Td>
       <Td align="right">{formatTokenAmount(trove.coll, "USDm")}</Td>
       <Td align="right">
-        <span className={icrTextClass(trove.icrBps, collateral.mcrBps)}>
-          {formatBpsPercent(trove.icrBps)}
-        </span>
+        <Tooltip content={icrTitle} align="right">
+          <span className={icrTextClass(trove.icrBps, collateral.mcrBps)}>
+            {formatBpsPercent(trove.icrBps)}
+          </span>
+        </Tooltip>
       </Td>
       <Td align="right">
         <InterestValue row={row} />
       </Td>
-      <Td align="right">{relativeTime(trove.lastUpdatedAt)}</Td>
+      <Td align="right">
+        <UpdatedValue trove={trove} chainId={collateral.chainId} />
+      </Td>
     </Row>
+  );
+}
+
+function HistoryTroveRow({
+  row,
+  collateral,
+}: {
+  row: TroveDisplayRow;
+  collateral: CdpCollateral;
+}) {
+  const { trove } = row;
+  const endedAt = trove.closedAt ?? trove.lastUpdatedAt;
+  const endedTxHash = trove.closedTxHash ?? trove.lastUpdatedTxHash ?? null;
+  return (
+    <Row>
+      <Td>
+        <OwnerTroveCell trove={trove} collateral={collateral} useLastOwner />
+      </Td>
+      <Td>{trove.status}</Td>
+      <Td align="right">
+        <EventTimeValue
+          timestamp={trove.openedAt}
+          txHash={trove.openedTxHash}
+          chainId={collateral.chainId}
+          prefix="Opened at"
+        />
+      </Td>
+      <Td align="right">
+        <EventTimeValue
+          timestamp={endedAt}
+          txHash={endedTxHash}
+          chainId={collateral.chainId}
+          prefix={trove.closedAt == null ? "Updated at" : "Ended at"}
+        />
+      </Td>
+      <Td align="right">{formatTokenAmount(trove.coll, "USDm")}</Td>
+      <Td align="right">
+        <RedeemedValue trove={trove} symbol={collateral.symbol} />
+      </Td>
+      <Td align="right">
+        <OutcomeAmount value={trove.redemptionFeePaidCum} symbol="USDm" />
+      </Td>
+      <Td align="right">
+        <LiquidatedValue trove={trove} symbol={collateral.symbol} />
+      </Td>
+    </Row>
+  );
+}
+
+function OwnerTroveCell({
+  trove,
+  collateral,
+  useLastOwner = false,
+}: {
+  trove: CdpTrove;
+  collateral: CdpCollateral;
+  useLastOwner?: boolean;
+}) {
+  const owner = useLastOwner ? lastOwnerAddress(trove) : trove.owner;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <AddressLink address={owner} chainId={collateral.chainId} />
+      <a
+        href={troveManageUrl(trove.troveId, collateral.symbol)}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Manage trove ${trove.troveId} in the Mento app`}
+        className="font-mono text-[10px] text-slate-500 hover:text-slate-300 hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      >
+        {trove.troveId}
+      </a>
+    </div>
   );
 }
 
@@ -407,6 +551,161 @@ function InterestValue({ row }: { row: TroveDisplayRow }) {
         <span className="text-[10px] text-amber-400">Batch missing</span>
       )}
     </span>
+  );
+}
+
+function EventTimeValue({
+  timestamp,
+  txHash,
+  chainId,
+  prefix,
+}: {
+  timestamp: string | null | undefined;
+  txHash: string | null | undefined;
+  chainId: number;
+  prefix: string;
+}) {
+  if (!timestamp || timestamp === "0") {
+    return <span className="text-slate-500">—</span>;
+  }
+
+  const label = relativeTime(timestamp);
+  const exact = formatTimestamp(timestamp);
+  if (!txHash) {
+    return (
+      <Tooltip content={`${prefix} ${exact}.`} align="right">
+        <span className="text-slate-300">{label}</span>
+      </Tooltip>
+    );
+  }
+
+  const networkId = networkIdForChainId(chainId);
+  const network = networkId ? NETWORKS[networkId] : null;
+  if (network == null) {
+    return (
+      <Tooltip
+        content={`${prefix} ${exact}. Transaction: ${txHash}.`}
+        align="right"
+      >
+        <span className="text-slate-300">{label}</span>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip
+      content={`${prefix} ${exact}. Opens transaction ${txHash}.`}
+      align="right"
+      asChild
+    >
+      <a
+        href={explorerTxUrl(network, txHash)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-mono text-slate-300 transition-colors hover:text-indigo-300"
+      >
+        {label}
+      </a>
+    </Tooltip>
+  );
+}
+
+function RedeemedValue({ trove, symbol }: { trove: CdpTrove; symbol: string }) {
+  if (
+    !isPositiveWei(trove.redeemedDebt) &&
+    !isPositiveWei(trove.redeemedColl) &&
+    trove.redemptionCount === 0
+  ) {
+    return <span className="text-slate-500">—</span>;
+  }
+  return (
+    <span className="inline-flex flex-col items-end leading-tight">
+      <span>{formatTokenAmount(trove.redeemedDebt, symbol)}</span>
+      <span className="text-[10px] text-slate-500">
+        {trove.redemptionCount.toLocaleString()}{" "}
+        {trove.redemptionCount === 1 ? "event" : "events"}
+      </span>
+    </span>
+  );
+}
+
+function OutcomeAmount({
+  value,
+  symbol,
+}: {
+  value: string | null | undefined;
+  symbol: string;
+}) {
+  if (!isPositiveWei(value)) return <span className="text-slate-500">—</span>;
+  return <span>{formatTokenAmount(value, symbol)}</span>;
+}
+
+function LiquidatedValue({
+  trove,
+  symbol,
+}: {
+  trove: CdpTrove;
+  symbol: string;
+}) {
+  if (
+    !isPositiveWei(trove.liquidatedDebt) &&
+    !isPositiveWei(trove.liquidatedColl)
+  ) {
+    return <span className="text-slate-500">—</span>;
+  }
+  return (
+    <span className="inline-flex flex-col items-end leading-tight">
+      <span>{formatTokenAmount(trove.liquidatedDebt, symbol)}</span>
+      {isPositiveWei(trove.liquidatedColl) && (
+        <span className="text-[10px] text-slate-500">
+          {formatTokenAmount(trove.liquidatedColl, "USDm")}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function UpdatedValue({
+  trove,
+  chainId,
+}: {
+  trove: CdpTrove;
+  chainId: number;
+}) {
+  const label = relativeTime(trove.lastUpdatedAt);
+  const timestamp = formatTimestamp(trove.lastUpdatedAt);
+  if (!trove.lastUpdatedTxHash) {
+    return <span className="text-slate-300">{label}</span>;
+  }
+
+  const networkId = networkIdForChainId(chainId);
+  const network = networkId ? NETWORKS[networkId] : null;
+  if (network == null) {
+    return (
+      <Tooltip
+        content={`Updated at ${timestamp}. Transaction: ${trove.lastUpdatedTxHash}.`}
+        align="right"
+      >
+        <span className="text-slate-300">{label}</span>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip
+      content={`Updated at ${timestamp}. Opens transaction ${trove.lastUpdatedTxHash}.`}
+      align="right"
+      asChild
+    >
+      <a
+        href={explorerTxUrl(network, trove.lastUpdatedTxHash)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-mono text-slate-300 transition-colors hover:text-indigo-300"
+      >
+        {label}
+      </a>
+    </Tooltip>
   );
 }
 
@@ -445,15 +744,21 @@ function buildRankedOpenRows(
 function buildHistoryRows(
   troves: CdpTrove[],
   batchById: ReadonlyMap<string, CdpInterestBatch>,
-  rankedOpenById: ReadonlyMap<string, TroveDisplayRow>,
 ): TroveDisplayRow[] {
-  return troves.map((trove) => {
-    const ranked = rankedOpenById.get(trove.id);
-    if (ranked != null) return ranked;
-    return displayRowForTrove(trove, batchById, {
-      useStoredBatchRate: true,
-    });
-  });
+  const rows: TroveDisplayRow[] = [];
+  for (const trove of troves) {
+    if (isOpenTroveStatus(trove.status)) continue;
+    rows.push(
+      displayRowForTrove(trove, batchById, {
+        useStoredBatchRate: true,
+      }),
+    );
+  }
+  return rows;
+}
+
+function isOpenTroveStatus(status: string): boolean {
+  return (CDP_TROVE_OPEN_STATUSES as readonly string[]).includes(status);
 }
 
 function displayRowForTrove(
@@ -530,15 +835,42 @@ function parseBigInt(value: string): bigint | null {
   }
 }
 
+function troveManageUrl(troveId: string, tokenSymbol: string): string {
+  return `${MENTO_APP_BORROW_MANAGE_BASE_URL}/${encodeURIComponent(
+    troveId,
+  )}?token=${encodeURIComponent(tokenSymbol)}`;
+}
+
 function troveMatchesSearch(
   trove: CdpTrove,
   normalizedSearch: string,
 ): boolean {
   return (
     trove.owner.toLowerCase().includes(normalizedSearch) ||
+    trove.previousOwner.toLowerCase().includes(normalizedSearch) ||
     trove.troveId.toLowerCase().includes(normalizedSearch) ||
     trove.id.toLowerCase().includes(normalizedSearch)
   );
+}
+
+function lastOwnerAddress(trove: CdpTrove): string {
+  if (isZeroAddress(trove.owner) && !isZeroAddress(trove.previousOwner)) {
+    return trove.previousOwner;
+  }
+  return trove.owner;
+}
+
+function isZeroAddress(address: string | null | undefined): boolean {
+  return address?.toLowerCase() === ZERO_ADDRESS;
+}
+
+function isPositiveWei(value: string | null | undefined): boolean {
+  if (value == null) return false;
+  try {
+    return BigInt(value) > BigInt(0);
+  } catch {
+    return false;
+  }
 }
 
 function formatInterestRate(rate: bigint | null): string {
