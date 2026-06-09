@@ -31,7 +31,10 @@ babysit_repo_gate() {
     return 0
   fi
 
-  if ! node -e 'const scripts=require("./package.json").scripts||{}; process.exit(scripts["pr:ready-state"] ? 0 : 1)' >/dev/null 2>&1; then
+  # Resolve package.json / the pr:ready-state script from $repo_root, not the
+  # caller's CWD — the harness may invoke this gate from a subdirectory, and
+  # the file guard above already keys on the absolute "$repo_root/package.json".
+  if ! (cd "$repo_root" && node -e 'const scripts=require("./package.json").scripts||{}; process.exit(scripts["pr:ready-state"] ? 0 : 1)') >/dev/null 2>&1; then
     printf 'PASS pr:ready-state script unavailable in this checkout'
     return 0
   fi
@@ -44,20 +47,22 @@ babysit_repo_gate() {
   # parseable output; capturing stderr to /dev/null keeps any script warning
   # from corrupting the JSON too.
   local output
-  output=$(pnpm --silent pr:ready-state --pr "$pr" --json 2>/dev/null) || {
+  output=$(cd "$repo_root" && pnpm --silent pr:ready-state --pr "$pr" --json 2>/dev/null) || {
     printf 'FAIL pr:ready-state errored (repro: pnpm pr:ready-state --pr %s --json)' "$pr"
     return 0
   }
 
+  # Explicit boolean test — do NOT use `.ready // …` fallbacks: jq's `//`
+  # treats an explicit `false` as empty, so a genuine `ready:false` would fall
+  # through to the next term. `pr:ready-state` always emits a top-level
+  # boolean `.ready`, so test it directly.
   local ready summary
-  ready=$(printf '%s' "$output" | jq -r '
-    .ready // .summary.ready // .allClear // .all_clear // (.status == "ALL_CLEAR") // false
-  ' 2>/dev/null) || ready="false"
+  ready=$(printf '%s' "$output" | jq -r 'if .ready == true then "true" else "false" end' 2>/dev/null) || ready="false"
   # `.summary` is the script's human one-liner (string), e.g.
   # "2 required blocker(s) remain." — surface it so a PENDING gate says WHY
   # instead of the opaque "pr:ready-state not ready".
   summary=$(printf '%s' "$output" | jq -r '
-    .summary // .summaryText // .message // .status // empty
+    .summary // .summaryText // .message // empty
   ' 2>/dev/null) || summary=""
 
   if [[ "$ready" == "true" ]]; then
