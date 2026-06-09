@@ -12,7 +12,7 @@ import type {
 import { useProtocolFees } from "@/hooks/use-protocol-fees";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { FeeOverTimeChart } from "@/components/fee-over-time-chart";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
 import { ComingSoonSection } from "@/components/coming-soon-section";
 import { Row, Table, Td, Th } from "@/components/table";
@@ -401,13 +401,9 @@ function CdpBorrowingHeaderInfo({
   tooltipAlign?: "left" | "right";
 }) {
   return (
-    <InfoPopover
-      label={`About ${label}`}
-      content={content}
-      tooltipAlign={tooltipAlign}
-    >
+    <Tooltip label={`About ${label}`} content={content} align={tooltipAlign}>
       {label}
-    </InfoPopover>
+    </Tooltip>
   );
 }
 

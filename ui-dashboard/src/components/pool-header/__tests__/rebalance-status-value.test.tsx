@@ -315,8 +315,8 @@ describe("RebalanceStatusValue", () => {
       />,
     );
     // Content previously lived in the HealthPanel's Rebalance Details
-    // block — now folded into the real InfoPopover trigger so the header
-    // tells the full story without relying on native `title` hover.
+    // block — now exposed through the canonical tooltip so the header tells
+    // the full story on hover/focus without a separate panel.
     expect(html).toContain(
       'aria-label="Rebalance diagnostics: Stability pool has insufficient liquidity — Stability pool: 34.5k BOLD"',
     );
@@ -346,9 +346,6 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain(
       'aria-label="Rebalance diagnostics: [CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"',
     );
-    expect(html).not.toContain(
-      'title="[CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"',
-    );
   });
 
   it("trims blank prose before falling back to the raw error", () => {
@@ -374,7 +371,6 @@ describe("RebalanceStatusValue", () => {
       'aria-label="Rebalance diagnostics: [CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"',
     );
     expect(html).not.toContain('aria-label="Rebalance diagnostics:   —');
-    expect(html).not.toContain('title="');
   });
 
   it("keeps non-identifier raw errors alongside the prose message", () => {

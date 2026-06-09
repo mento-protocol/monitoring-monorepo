@@ -62,7 +62,9 @@ const EXPECTED_EXPORT_NAMES = [
   "CDP_INSTANCE_DAILY_SNAPSHOTS",
   "CDP_MARKETS",
   "CDP_MARKET_DETAIL",
+  "CDP_MARKET_DETAIL_WITH_TROVE_TX",
   "CDP_TRANSACTIONS",
+  "CDP_TROVE_SCHEMA_FIELDS",
   "CDP_TROVE_OP_SNAPSHOTS",
   "POOL_BREAKER_CONFIG",
   "POOL_LABELS_ALL",
@@ -474,11 +476,39 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(query).toContain("AllTrove: Trove(");
     expect(query).toContain("InterestBatch(");
     expect(query).toContain("limit: 1000");
+    expect(query).toContain('status: { _nin: ["active", "zombie"] }');
     expect(query).toContain(
       "order_by: [{ interestRate: asc }, { troveId: asc }, { id: asc }]",
     );
     expect(query).toContain("order_by: [{ lastUpdatedAt: desc }, { id: asc }]");
     expect(query).toContain("annualInterestRate");
+    expect(query).toContain("previousOwner");
+    expect(query).toContain("openedAt openedTxHash closedAt closedTxHash");
+    expect(query).toContain("redemptionFeePaidCum");
+    expect(query).toContain(
+      "liquidatedDebt liquidatedColl collSurplus priceAtLiquidation",
+    );
+    expect(query).not.toContain("lastUpdatedTxHash");
+  });
+
+  it("CDP_MARKET_DETAIL_WITH_TROVE_TX adds updating transaction hashes after schema rollout", () => {
+    const query = normalize(queries.CDP_MARKET_DETAIL_WITH_TROVE_TX);
+    expect(query).toContain("query CdpMarketDetailWithTroveTx");
+    expect(query).toContain("lastUpdatedAt lastUpdatedTxHash");
+  });
+
+  it("CDP_TROVE_SCHEMA_FIELDS probes tx-hash field availability before selecting it", () => {
+    expect(normalize(queries.CDP_TROVE_SCHEMA_FIELDS)).toBe(
+      normalize(`
+        query CdpTroveSchemaFields {
+          __type(name: "Trove") {
+            fields {
+              name
+            }
+          }
+        }
+      `),
+    );
   });
 
   it("POOL_BREAKER_CONFIG queries both BreakerConfig and BreakerTripEvent in one round-trip", () => {

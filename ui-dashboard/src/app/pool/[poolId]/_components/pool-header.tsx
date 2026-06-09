@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import { AddressLink } from "@/components/address-link";
 import { BreakerPanel } from "@/components/breaker-panel";
 import { ChainIcon } from "@/components/chain-icon";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 import { MarketHoursPill } from "@/components/market-hours-pill";
 import { useNetwork } from "@/components/network-provider";
 import { PoolConfigPanel } from "@/components/pool-config-panel";
@@ -371,7 +371,7 @@ function VirtualPoolHeaderTiles({
         label={
           <span className="inline-flex items-center gap-1">
             Wrapper Swaps
-            <InfoPopover
+            <Tooltip
               label="Wrapper Swaps"
               content="Lifetime swap count for the v3 Router → VirtualPool wrapper only. Direct v2-broker swaps on the same trading pair (the majority of activity) are not included — combined-activity panel ships in a follow-up."
             />
@@ -384,7 +384,7 @@ function VirtualPoolHeaderTiles({
         label={
           <span className="inline-flex items-center gap-1">
             24h Volume
-            <InfoPopover
+            <Tooltip
               label="24h Volume"
               content="Current UTC-day USD volume for the backing v2 exchange. Includes direct v2 swaps and VirtualPool-routed Broker swaps, sourced from the per-exchange daily rollup."
             />

@@ -27,8 +27,8 @@ vi.mock("@/components/network-provider", () => ({
   }),
 }));
 
-vi.mock("@/components/info-popover", () => ({
-  InfoPopover: () => null,
+vi.mock("@/components/tooltip", () => ({
+  Tooltip: () => null,
 }));
 
 const FX_FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";

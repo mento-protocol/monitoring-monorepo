@@ -1,7 +1,7 @@
 "use client";
 
 import { isVirtualPool, type Pool } from "@/lib/types";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 import { useGQL } from "@/lib/graphql";
 import {
   POOL_BREACH_ROLLUP,
@@ -160,5 +160,5 @@ export function UptimeInfoIcon({ pool }: { pool: Pool }) {
   // Screen readers stutter on literal newlines; the popover renders them
   // visually but the aria-label needs them collapsed.
   const ariaLabel = `About Uptime. ${content.replace(/\n/g, " ")}`;
-  return <InfoPopover label={ariaLabel} content={content} />;
+  return <Tooltip label={ariaLabel} content={content} />;
 }

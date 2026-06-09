@@ -7,6 +7,29 @@ import {
 const OPEN_STATUS_LIST = CDP_TROVE_OPEN_STATUSES.map((s) => `"${s}"`).join(
   ", ",
 );
+const CDP_TROVE_ROW_FIELDS = `
+      id troveId owner previousOwner status debt coll icrBps interestRate
+      interestBatchId openedAt openedTxHash closedAt closedTxHash lastUpdatedAt
+      liquidatedDebt liquidatedColl collSurplus priceAtLiquidation
+      redemptionCount redeemedDebt redeemedColl redemptionFeePaidCum
+`;
+const CDP_TROVE_ROW_FIELDS_WITH_TX = `
+      id troveId owner previousOwner status debt coll icrBps interestRate
+      interestBatchId openedAt openedTxHash closedAt closedTxHash lastUpdatedAt
+      lastUpdatedTxHash liquidatedDebt liquidatedColl collSurplus
+      priceAtLiquidation redemptionCount redeemedDebt redeemedColl
+      redemptionFeePaidCum
+`;
+
+export const CDP_TROVE_SCHEMA_FIELDS = `
+  query CdpTroveSchemaFields {
+    __type(name: "Trove") {
+      fields {
+        name
+      }
+    }
+  }
+`;
 
 // `LiquityInstance.systemDebt` is the source of truth for the system-debt KPI
 // since the post-fix handlers landed (commit 026c629, promoted 2026-05-20).
@@ -116,8 +139,11 @@ export const CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS = `
   }
 `;
 
-export const CDP_MARKET_DETAIL = `
-  query CdpMarketDetail($collateralId: String!) {
+const cdpMarketDetailQuery = (
+  operationName: string,
+  troveRowFields: string,
+): string => `
+  query ${operationName}($collateralId: String!) {
     LiquityCollateral(where: { id: { _eq: $collateralId } }, limit: 1) {
       id chainId collIndex symbol debtToken collToken troveManager stabilityPool
       minDebt minBoldInSp minBoldAfterRebalance systemParamsLoaded
@@ -140,16 +166,17 @@ export const CDP_MARKET_DETAIL = `
       order_by: [{ interestRate: asc }, { troveId: asc }, { id: asc }]
       limit: ${CDP_TROVES_DETAIL_LIMIT}
     ) {
-      id troveId owner status debt coll icrBps interestRate interestBatchId
-      lastUpdatedAt redemptionCount redeemedDebt redeemedColl
+${troveRowFields}
     }
     AllTrove: Trove(
-      where: { collateralId: { _eq: $collateralId } }
+      where: {
+        collateralId: { _eq: $collateralId }
+        status: { _nin: [${OPEN_STATUS_LIST}] }
+      }
       order_by: [{ lastUpdatedAt: desc }, { id: asc }]
       limit: ${CDP_TROVES_DETAIL_LIMIT}
     ) {
-      id troveId owner status debt coll icrBps interestRate interestBatchId
-      lastUpdatedAt redemptionCount redeemedDebt redeemedColl
+${troveRowFields}
     }
     InterestBatch(
       where: { collateralId: { _eq: $collateralId } }
@@ -176,6 +203,16 @@ export const CDP_MARKET_DETAIL = `
     }
   }
 `;
+
+export const CDP_MARKET_DETAIL = cdpMarketDetailQuery(
+  "CdpMarketDetail",
+  CDP_TROVE_ROW_FIELDS,
+);
+
+export const CDP_MARKET_DETAIL_WITH_TROVE_TX = cdpMarketDetailQuery(
+  "CdpMarketDetailWithTroveTx",
+  CDP_TROVE_ROW_FIELDS_WITH_TX,
+);
 
 // Daily rollup of LiquityInstanceSnapshot — one row per CDP market per UTC day.
 // At ~365 rows per market per year the full history fits well under Hasura's

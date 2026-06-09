@@ -50,6 +50,18 @@ export const makeInterestRateBracketId = (
   rawRate: bigint,
 ): string => `${collateralId}-${floorInterestRateBracket(rawRate)}`;
 
+export const touchTroveUpdated = (
+  trove: Trove,
+  blockTimestamp: bigint,
+  blockNumber: bigint,
+  txHash: string,
+): Trove => ({
+  ...trove,
+  lastUpdatedAt: blockTimestamp,
+  lastUpdatedBlock: blockNumber,
+  lastUpdatedTxHash: txHash,
+});
+
 export const normalizeTroveTokenId = (troveId: bigint | string): string =>
   typeof troveId === "bigint" ? `0x${troveId.toString(16)}` : troveId;
 
@@ -195,6 +207,7 @@ export const makePlaceholderTrove = ({
   lastUserActionAt: 0n,
   lastUpdatedAt: blockTimestamp,
   lastUpdatedBlock: blockNumber,
+  lastUpdatedTxHash: txHash,
 });
 
 export async function getOrCreateTrove(

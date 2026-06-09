@@ -52,6 +52,7 @@ import {
   preloadInterestRateBracketDebt,
   statusFromCollateral,
   transitionTroveStatus,
+  touchTroveUpdated,
 } from "./troves.js";
 
 const isForcedOperation = (op: number): boolean =>
@@ -485,11 +486,14 @@ indexer.onEvent(
       status: trove.status,
       debt: trove.debt,
     });
-    context.Trove.set({
-      ...trove,
-      lastUpdatedAt: blockTimestamp,
-      lastUpdatedBlock: blockNumber,
-    });
+    context.Trove.set(
+      touchTroveUpdated(
+        trove,
+        blockTimestamp,
+        blockNumber,
+        event.transaction.hash,
+      ),
+    );
     context.LiquityInstance.set(
       touchLiquityInstance(instance, blockNumber, blockTimestamp),
     );
@@ -599,6 +603,7 @@ indexer.onEvent(
       }),
       blockTimestamp,
       blockNumber,
+      txHash: event.transaction.hash,
       pendingBatchOperation,
     });
     if (

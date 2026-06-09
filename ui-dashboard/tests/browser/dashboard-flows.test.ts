@@ -131,13 +131,29 @@ test.describe("dashboard browser flows", () => {
     await expect(
       table.getByRole("columnheader", { name: "Rank" }),
     ).toBeVisible();
-    await expect(
-      table.getByRole("columnheader", { name: "ICR (indexed)" }),
-    ).toBeVisible();
+    const icrInfo = table.getByRole("button", {
+      name: "About indexed ICR",
+    });
+    await expect(icrInfo).toBeVisible();
+    await expect(icrInfo).toHaveAccessibleDescription(
+      /not a live oracle\/RPC read/,
+    );
     await expect(
       table.getByRole("columnheader", { name: "Interest" }),
     ).toBeVisible();
     await expect(table).toContainText("2.10%");
+    const firstUpdatedLink = table
+      .locator("tbody tr")
+      .first()
+      .locator("td")
+      .nth(7)
+      .getByRole("link");
+    await expect(firstUpdatedLink).toHaveAttribute(
+      "href",
+      "https://celoscan.io/tx/0x2222222222222222222222222222222222222222222222222222222222222222",
+    );
+    await expect(firstUpdatedLink).toHaveAttribute("aria-describedby", /.+/);
+    await expect(firstUpdatedLink).not.toHaveAttribute("title", /.+/);
 
     await page.getByRole("tab", { name: "History" }).click();
     await expect(table).toContainText("redeemed");
@@ -356,13 +372,8 @@ test.describe("dashboard browser flows", () => {
     const diagnostics = page.getByRole("button", {
       name: /Rebalance diagnostics: Stability pool has insufficient liquidity/,
     });
-    await expect(diagnostics).toHaveAttribute(
-      "aria-label",
-      "Rebalance diagnostics: Stability pool has insufficient liquidity — Stability pool: 5.0k GBPm",
-    );
-    await expect(diagnostics).not.toHaveAttribute(
-      "aria-label",
-      /CDPLS_STABILITY_POOL_BALANCE_TOO_LOW/,
+    await expect(diagnostics).toHaveAccessibleDescription(
+      "Stability pool has insufficient liquidity — Stability pool: 5.0k GBPm",
     );
     await expect(diagnostics).not.toHaveAttribute("title", /.+/);
 

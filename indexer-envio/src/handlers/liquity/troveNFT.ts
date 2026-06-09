@@ -50,6 +50,7 @@ indexer.onEvent(
         owner: to,
         lastUpdatedAt: blockTimestamp,
         lastUpdatedBlock: blockNumber,
+        lastUpdatedTxHash: event.transaction.hash,
       });
       await updateBorrowerCount(context, event.chainId, to, collateralId, 1);
       return;
@@ -62,6 +63,7 @@ indexer.onEvent(
         owner: ZERO_ADDRESS,
         lastUpdatedAt: blockTimestamp,
         lastUpdatedBlock: blockNumber,
+        lastUpdatedTxHash: event.transaction.hash,
       });
       await updateBorrowerCount(context, event.chainId, from, collateralId, -1);
       return;
@@ -73,6 +75,7 @@ indexer.onEvent(
       owner: to,
       lastUpdatedAt: blockTimestamp,
       lastUpdatedBlock: blockNumber,
+      lastUpdatedTxHash: event.transaction.hash,
     });
     await updateBorrowerCount(context, event.chainId, from, collateralId, -1);
     await updateBorrowerCount(context, event.chainId, to, collateralId, 1);

@@ -7,7 +7,7 @@ import { POOL_BREAKER_CONFIG } from "@/lib/queries";
 import type { BreakerConfig, BreakerTripEvent, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
 import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 import { explorerTxUrl } from "@/lib/tokens";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import { formatDurationShort } from "@/lib/bridge-status";
@@ -240,7 +240,7 @@ function BreakerIdentityMetric({
     <div title={`${kind} breaker · ${cfg.breaker.address}`}>
       <dt className="text-slate-400 inline-flex items-center gap-1">
         Breaker
-        <InfoPopover
+        <Tooltip
           label="Breaker"
           content="On-chain circuit breaker that halts trading when the oracle price moves more than the configured threshold from the reference. Reset is automatic on the next oracle report once cooldown elapses AND the rate returns inside the band."
         />

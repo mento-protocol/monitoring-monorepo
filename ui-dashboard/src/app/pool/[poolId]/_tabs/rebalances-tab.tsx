@@ -3,7 +3,7 @@
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { EffectivenessChart } from "@/components/effectiveness-chart";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 import { Pagination } from "@/components/pagination";
 import { SenderCell } from "@/components/sender-cell";
 import { Row, Table, Td, Th } from "@/components/table";
@@ -350,7 +350,7 @@ export function RebalancesTab({
               <Th align="right">
                 <span className="inline-flex items-center gap-1">
                   Boundary (bps)
-                  <InfoPopover
+                  <Tooltip
                     label="About rebalance boundary"
                     content={BOUNDARY_TOOLTIP}
                   />
@@ -359,7 +359,7 @@ export function RebalancesTab({
               <Th align="right">
                 <span className="inline-flex items-center gap-1">
                   Effectiveness
-                  <InfoPopover
+                  <Tooltip
                     label="About rebalance effectiveness"
                     content={EFFECTIVENESS_TOOLTIP}
                   />
@@ -368,7 +368,7 @@ export function RebalancesTab({
               <Th align="right">
                 <span className="inline-flex items-center gap-1">
                   Reward
-                  <InfoPopover
+                  <Tooltip
                     label="About rebalance reward"
                     content={REWARD_TOOLTIP}
                   />

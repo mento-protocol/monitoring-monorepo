@@ -189,7 +189,7 @@ describe("PoolConfigPanel", () => {
       expect(html).toMatch(/Swap Fee[\s\S]*?—/);
     });
 
-    it("renders a real InfoPopover trigger for the LP/Protocol breakdown", () => {
+    it("exposes the LP/Protocol breakdown in the Tooltip content", () => {
       const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
       expect(html).toContain('aria-label="Swap Fee"');
       expect(html).not.toContain('title="LP fee (0.03%)');

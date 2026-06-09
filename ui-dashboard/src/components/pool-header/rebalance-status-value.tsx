@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
@@ -249,7 +249,5 @@ function getPassiveStatus(
 }
 
 function RebalanceDiagnosticsInfoIcon({ title }: { title: string }) {
-  return (
-    <InfoPopover label={`Rebalance diagnostics: ${title}`} content={title} />
-  );
+  return <Tooltip label={`Rebalance diagnostics: ${title}`} content={title} />;
 }
