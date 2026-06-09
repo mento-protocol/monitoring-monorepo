@@ -669,6 +669,10 @@ describe("CdpDetailClient", () => {
     expect(link?.getAttribute("title")).toBe(
       `Updated at ${new Date(NOW * 1000).toLocaleString()}`,
     );
+    // Exact timestamp is exposed to assistive tech (title is hover-only).
+    expect(link?.getAttribute("aria-label")).toBe(
+      `0s ago, updated at ${new Date(NOW * 1000).toLocaleString()}`,
+    );
   });
 
   it("shows the exact updated timestamp as a native title when the tx hash is unavailable", () => {
@@ -714,6 +718,9 @@ describe("CdpDetailClient", () => {
     expect(value?.textContent).toBe("0s ago");
     expect(value?.getAttribute("title")).toBe(
       `Updated at ${new Date(NOW * 1000).toLocaleString()}`,
+    );
+    expect(value?.getAttribute("aria-label")).toBe(
+      `0s ago, updated at ${new Date(NOW * 1000).toLocaleString()}`,
     );
   });
 

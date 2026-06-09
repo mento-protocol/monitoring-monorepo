@@ -702,7 +702,9 @@ function UpdatedValue({
   const network = networkId ? NETWORKS[networkId] : null;
   // Deliberately a plain link, not a Tooltip (unlike EventTimeValue on the
   // History tab): the relative time is already clickable, so the popover was
-  // just noise. The exact timestamp rides along on the native title instead.
+  // just noise. The exact timestamp is exposed to assistive tech via aria-label
+  // (the native title alone is hover-only) and to sighted users via the title.
+  const accessibleLabel = `${label}, updated at ${timestamp}`;
   if (trove.lastUpdatedTxHash && network != null) {
     return (
       <a
@@ -710,6 +712,7 @@ function UpdatedValue({
         target="_blank"
         rel="noopener noreferrer"
         title={`Updated at ${timestamp}`}
+        aria-label={accessibleLabel}
         className="font-mono text-slate-300 transition-colors hover:text-indigo-300"
       >
         {label}
@@ -724,7 +727,11 @@ function UpdatedValue({
     ? `Updated at ${timestamp} · tx ${trove.lastUpdatedTxHash}`
     : `Updated at ${timestamp}`;
   return (
-    <span className="text-slate-300" title={fallbackTitle}>
+    <span
+      className="text-slate-300"
+      title={fallbackTitle}
+      aria-label={accessibleLabel}
+    >
       {label}
     </span>
   );
