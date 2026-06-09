@@ -89,7 +89,6 @@ function PoolsContent({
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
-    tradingLimitsByKey,
     olsPoolKeys,
     cdpPoolKeys,
     reservePoolKeys,
@@ -210,7 +209,6 @@ function PoolsContent({
             volume24hByKey={volume24hByKey}
             volume7dByKey={volume7dByKey}
             tvlChangeWoWByKey={tvlChangeWoWByKey}
-            tradingLimitsByKey={tradingLimitsByKey}
             olsPoolKeys={olsPoolKeys}
             cdpPoolKeys={cdpPoolKeys}
             reservePoolKeys={reservePoolKeys}

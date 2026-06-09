@@ -158,8 +158,17 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).toContain("7d Vol.");
     expect(html).toContain("Total Vol.");
     expect(html).toContain(">Fee<");
-    expect(html).toContain(">Limits<");
+    expect(html).toContain(">Reserves<");
+    expect(html).not.toContain(">Limits<");
     expect(html).toContain(">Strategy<");
+  });
+
+  it("places Reserves after Uptime and before Fee", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry()]} />,
+    );
+    expect(html.indexOf(">Uptime<")).toBeLessThan(html.indexOf(">Reserves<"));
+    expect(html.indexOf(">Reserves<")).toBeLessThan(html.indexOf(">Fee<"));
   });
 
   it("does not render a Chain column header", () => {
@@ -212,6 +221,131 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).toContain(">Type</th>");
     expect(html).toContain("FPMM");
     expect(html).toContain('aria-label="Monad"');
+  });
+});
+
+describe("GlobalPoolsTable — Reserves column", () => {
+  it("renders compact reserve percentages when reserves can be valued", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          makeEntry({
+            token0Decimals: 18,
+            token1Decimals: 18,
+            tokenDecimalsKnown: true,
+            reserves0: "60000000000000000000",
+            reserves1: "40000000000000000000",
+            oraclePrice: "1000000000000000000000000",
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).toContain(">Reserves<");
+    expect(html).toContain("Reserve composition: 60.0% USDm / 40.0% KESm");
+    expect(html).toContain("USDm 60%");
+    expect(html).toContain("KESm 40%");
+  });
+
+  it("renders Empty when both indexed reserves are zero", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          makeEntry({
+            token0Decimals: 18,
+            token1Decimals: 18,
+            tokenDecimalsKnown: true,
+            reserves0: "0",
+            reserves1: "0",
+            oraclePrice: "1000000000000000000000000",
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).toContain(">Empty<");
+    expect(html).toContain("Pool has no reserves yet.");
+  });
+
+  it("does not render confident percentages before decimals are trusted", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          makeEntry({
+            tokenDecimalsKnown: false,
+            reserves0: "60000000000000000000",
+            reserves1: "40000000000000000000",
+            oraclePrice: "1000000000000000000000000",
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).toContain(
+      "Reserves hidden until token decimals are verified.",
+    );
+    expect(html).not.toContain("Reserve composition:");
+  });
+
+  it("does not render confident percentages when reserves are unavailable", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          makeEntry({
+            token0Decimals: 18,
+            token1Decimals: 18,
+            tokenDecimalsKnown: true,
+            oraclePrice: "1000000000000000000000000",
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).toContain("No reserve data available yet.");
+    expect(html).not.toContain("Reserve composition:");
+  });
+
+  it("does not render confident percentages when the pair cannot be priced", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          makeEntry({
+            token0: "0x1111111111111111111111111111111111111111",
+            token1: "0x2222222222222222222222222222222222222222",
+            token0Decimals: 18,
+            token1Decimals: 18,
+            tokenDecimalsKnown: true,
+            reserves0: "60000000000000000000",
+            reserves1: "40000000000000000000",
+            oraclePrice: "1000000000000000000000000",
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Reserves pricing unavailable for this pair.");
+    expect(html).not.toContain("Reserve composition:");
+  });
+
+  it("folds trading-limit pressure into Health after removing the Limits column", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          makeEntry({
+            oracleTimestamp: "4102444800",
+            priceDifference: "0",
+            rebalanceThreshold: 5000,
+            limitStatus: "CRITICAL",
+            limitPressure0: "1.1",
+            limitPressure1: "0",
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).not.toContain(">Limits<");
+    expect(html).toContain(">CRITICAL<");
+    expect(html).toContain("Trading limit breached");
   });
 });
 

@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { formatUSD } from "@/lib/format";
 import { poolName } from "@/lib/tokens";
-import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
+import { type Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { Row } from "@/components/table";
 import { SourceBadge, HealthBadge } from "@/components/badges";
@@ -21,8 +21,8 @@ import {
   poolStrategies,
   type PoolStrategyLabel,
 } from "./formatting";
-import { LimitHeatmap } from "./limit-heatmap";
 import { globalPoolKey, type GlobalPoolEntry } from "./sort";
+import { ReservesCell } from "./reserves-cell";
 import { StrategyBadge } from "./strategy-badge";
 
 interface PoolRowProps {
@@ -37,7 +37,6 @@ interface PoolRowProps {
   volume7dError: boolean;
   totalVolumeByKey: Map<string, number | null>;
   tvlChangeWoWByKey?: Map<string, number | null> | undefined;
-  tradingLimitsByKey?: Map<string, TradingLimit[]> | undefined;
   olsPoolKeys?: Set<string> | undefined;
   cdpPoolKeys?: Set<string> | undefined;
   reservePoolKeys?: Set<string> | undefined;
@@ -55,7 +54,6 @@ export function PoolRow({
   volume7dError,
   totalVolumeByKey,
   tvlChangeWoWByKey,
-  tradingLimitsByKey,
   olsPoolKeys,
   cdpPoolKeys,
   reservePoolKeys,
@@ -87,14 +85,12 @@ export function PoolRow({
       {showVirtualPoolSource && <SourceCell pool={pool} />}
       <HealthCell status={effectiveStatus} details={healthDetails} />
       <UptimeCell pool={pool} />
+      <Cell className="hidden sm:table-cell">
+        <ReservesCell pool={pool} network={network} rates={entry.rates} />
+      </Cell>
       <Cell className="hidden sm:table-cell text-sm text-slate-200 font-mono text-right">
         {formatFee(pool)}
       </Cell>
-      <LimitsCell
-        pool={pool}
-        network={network}
-        limits={tradingLimitsByKey?.get(key) ?? []}
-      />
       <TvlCell tvl={tvlByKey.get(key) ?? null} />
       <WoWCell wow={tvlChangeWoWByKey?.get(key)} />
       <VolumeCell
@@ -195,26 +191,6 @@ function UptimeCell({ pool }: { pool: Pool }) {
       >
         {pct.toFixed(2)}%
       </span>
-    </Cell>
-  );
-}
-
-function LimitsCell({
-  pool,
-  network,
-  limits,
-}: {
-  pool: Pool;
-  network: Network;
-  limits: TradingLimit[];
-}) {
-  return (
-    <Cell className="hidden sm:table-cell">
-      {isVirtualPool(pool) ? (
-        <span className="text-slate-600 text-xs">—</span>
-      ) : (
-        <LimitHeatmap limits={limits} network={network} pool={pool} />
-      )}
     </Cell>
   );
 }

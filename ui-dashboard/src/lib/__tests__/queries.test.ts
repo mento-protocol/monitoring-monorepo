@@ -40,7 +40,6 @@ const EXPECTED_EXPORT_NAMES = [
   "BROKER_DAILY_SNAPSHOTS_ALL",
   "BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H",
   "POOL_DAILY_FEE_SNAPSHOTS_PAGE",
-  "ALL_TRADING_LIMITS",
   "TRADING_LIMITS",
   "ORACLE_SNAPSHOTS",
   "ORACLE_SNAPSHOTS_CHART",
@@ -372,10 +371,6 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H).not.toContain(
       "BrokerSwapEvent",
     );
-  });
-
-  it("ALL_TRADING_LIMITS scopes by chainId", () => {
-    expect(queries.ALL_TRADING_LIMITS).toContain("chainId: { _eq: $chainId }");
   });
 
   it("TRADING_LIMITS scopes by poolId", () => {

@@ -2,21 +2,6 @@
 // re-export lives in `../queries.ts` so existing `from "@/lib/queries"`
 // imports stay stable; consumers can also import directly from this module.
 
-// Fetches all TradingLimit rows for a chain. With 2 rows per FPMM pool (one
-// per token), this stays well under Hasura's silent 1000-row cap for current
-// pool counts. If pool count exceeds ~500 per chain, add pagination.
-export const ALL_TRADING_LIMITS = `
-  query AllTradingLimits($chainId: Int!) {
-    TradingLimit(where: { chainId: { _eq: $chainId } }) {
-      id poolId token limit0 limit1 decimals
-      netflow0 netflow1
-      lastUpdated0 lastUpdated1
-      limitPressure0 limitPressure1
-      limitStatus updatedAtBlock updatedAtTimestamp
-    }
-  }
-`;
-
 export const TRADING_LIMITS = `
   query TradingLimits($poolId: String!) {
     TradingLimit(where: { poolId: { _eq: $poolId } }) {

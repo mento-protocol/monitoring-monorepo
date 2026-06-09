@@ -16,7 +16,6 @@ import {
   ALL_POOLS_HEALTH_CURSOR,
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
   ALL_POOLS_WITH_HEALTH,
-  ALL_TRADING_LIMITS,
   ALL_OLS_POOLS,
   ALL_CDP_POOLS,
   BROKER_DAILY_SNAPSHOTS_ALL,
@@ -37,7 +36,6 @@ import type {
   Pool,
   PoolDailyFeeSnapshot,
   PoolSnapshotWindow,
-  TradingLimit,
   OlsPool,
   CdpPool,
 } from "@/lib/types";
@@ -101,7 +99,6 @@ export const blankNetworkData = (
   snapshotsAllDailyTruncated: false,
   brokerSnapshotsAllDaily: [],
   brokerSnapshotsAllDailyTruncated: false,
-  tradingLimits: [],
   olsPoolIds: new Set(),
   cdpPoolIds: new Set(),
   reservePoolIds: new Set(),
@@ -400,7 +397,6 @@ export async function fetchNetworkData(
     snapshotsAllDailyResult,
     brokerSnapshotsAllDailyResult,
     lpResult,
-    tradingLimitsResult,
     olsResult,
     breachRollupResult,
     healthCursorResult,
@@ -424,9 +420,6 @@ export async function fetchNetworkData(
       : Promise.resolve({
           LiquidityPosition: [] as { address: string }[],
         }),
-    timed<{ TradingLimit: TradingLimit[] }>(ALL_TRADING_LIMITS, {
-      chainId: network.chainId,
-    }),
     timed<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS, {
       chainId: network.chainId,
     }),
@@ -671,11 +664,6 @@ export async function fetchNetworkData(
         )
       : null;
 
-  const tradingLimits =
-    tradingLimitsResult.status === "fulfilled"
-      ? (tradingLimitsResult.value.TradingLimit ?? [])
-      : [];
-
   const olsPoolIds =
     olsResult.status === "fulfilled"
       ? new Set((olsResult.value.OlsPool ?? []).map((p) => p.poolId))
@@ -705,7 +693,6 @@ export async function fetchNetworkData(
     snapshotsAllDailyTruncated,
     brokerSnapshotsAllDaily,
     brokerSnapshotsAllDailyTruncated,
-    tradingLimits,
     olsPoolIds,
     cdpPoolIds,
     reservePoolIds,

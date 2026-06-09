@@ -1,22 +1,22 @@
 {
   "schemaVersion": 1,
   "featureId": "feat_ui-flow_2d45a4e73a",
-  "title": "React component limit-heatmap",
-  "summary": "React component implemented by ui-dashboard/src/components/global-pools-table/limit-heatmap.tsx.",
+  "title": "React component reserves-cell",
+  "summary": "React component implemented by ui-dashboard/src/components/global-pools-table/reserves-cell.tsx.",
   "kind": "ui-flow",
   "source": "react-component",
   "confidence": "medium",
   "entrypoints": [
     {
-      "path": "ui-dashboard/src/components/global-pools-table/limit-heatmap.tsx",
-      "symbol": "limit-heatmap",
+      "path": "ui-dashboard/src/components/global-pools-table/reserves-cell.tsx",
+      "symbol": "reserves-cell",
       "route": null,
       "command": null
     }
   ],
   "ownedFiles": [
     {
-      "path": "ui-dashboard/src/components/global-pools-table/limit-heatmap.tsx",
+      "path": "ui-dashboard/src/components/global-pools-table/reserves-cell.tsx",
       "reason": "component implementation"
     }
   ],

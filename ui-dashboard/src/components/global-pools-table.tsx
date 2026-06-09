@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { poolTvlUSD } from "@/lib/tokens";
-import { type TradingLimit } from "@/lib/types";
 import { Table } from "@/components/table";
 import { useIsWeekend } from "@/hooks/use-is-weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
@@ -36,7 +35,6 @@ interface GlobalPoolsTableProps {
   volume7dLoading?: boolean;
   volume7dError?: boolean;
   tvlChangeWoWByKey?: Map<string, number | null>;
-  tradingLimitsByKey?: Map<string, TradingLimit[]>;
   olsPoolKeys?: Set<string>;
   cdpPoolKeys?: Set<string>;
   reservePoolKeys?: Set<string>;
@@ -51,7 +49,6 @@ export function GlobalPoolsTable({
   volume7dLoading = false,
   volume7dError = false,
   tvlChangeWoWByKey,
-  tradingLimitsByKey,
   olsPoolKeys,
   cdpPoolKeys,
   reservePoolKeys,
@@ -138,7 +135,6 @@ export function GlobalPoolsTable({
               volume7dError={volume7dError}
               totalVolumeByKey={totalVolumeByKey}
               tvlChangeWoWByKey={tvlChangeWoWByKey}
-              tradingLimitsByKey={tradingLimitsByKey}
               olsPoolKeys={olsPoolKeys}
               cdpPoolKeys={cdpPoolKeys}
               reservePoolKeys={reservePoolKeys}

@@ -15,7 +15,7 @@ export const revalidate = 60;
 export const metadata: Metadata = {
   title: "Pools — Mento Analytics",
   description:
-    "All Mento pools across chains: TVL, 24h volume, trading limits, and recent swaps.",
+    "All Mento pools across chains: reserves, TVL, 24h volume, and recent swaps.",
 };
 
 export default async function PoolsPage() {

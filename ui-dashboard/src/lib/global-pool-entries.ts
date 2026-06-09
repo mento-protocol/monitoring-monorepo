@@ -5,7 +5,7 @@ import {
 } from "@/components/global-pools-table";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
 import { buildPoolVolumeMap } from "@/lib/volume";
-import type { Pool, PoolSnapshotWindow, TradingLimit } from "@/lib/types";
+import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import type { OracleRateMap } from "@/lib/tokens";
 
@@ -20,8 +20,6 @@ type DerivedEntries = {
    *  - absent   — no comparable 7d snapshot for that pool.
    */
   tvlChangeWoWByKey: Map<string, number | null>;
-  /** Per-pool trading limits keyed by globalPoolKey → TradingLimit[] (2 per FPMM pool). */
-  tradingLimitsByKey: Map<string, TradingLimit[]>;
   /** Set of globalPoolKeys that have an active OLS strategy. */
   olsPoolKeys: Set<string>;
   /** Set of globalPoolKeys classified as CDP by Celo CdpPool rows. */
@@ -33,6 +31,21 @@ type DerivedEntries = {
    * "strategy detection unavailable", not known Reserve.
    */
   reservePoolKeys: Set<string>;
+};
+
+type WindowedPoolMaps = {
+  vol24hMap: Map<string, number | null | undefined> | null;
+  vol7dMap: Map<string, number | null | undefined> | null;
+  perPool7dTvl: Map<string, { now: number | null; ago: number | null }> | null;
+};
+
+type NetworkEntryContext = WindowedPoolMaps & {
+  network: Network;
+  rates: OracleRateMap;
+  snapshots7dError: NetworkData["snapshots7dError"];
+  olsPoolIds: Set<string>;
+  cdpPoolIds: Set<string>;
+  reservePoolIds: Set<string>;
 };
 
 function perPoolTvlWindow(
@@ -69,84 +82,116 @@ function perPoolTvlWindow(
   return result;
 }
 
+function windowedPoolMaps(netData: NetworkData): WindowedPoolMaps {
+  const { network, pools, snapshots, snapshots7d, rates } = netData;
+  return {
+    vol24hMap:
+      netData.snapshotsError === null
+        ? buildPoolVolumeMap(snapshots, pools, network, rates)
+        : null,
+    vol7dMap:
+      netData.snapshots7dError === null
+        ? buildPoolVolumeMap(snapshots7d, pools, network, rates)
+        : null,
+    perPool7dTvl:
+      netData.snapshots7dError === null && snapshots7d.length > 0
+        ? perPoolTvlWindow(snapshots7d, pools, network, rates)
+        : null,
+  };
+}
+
+function addTvlChange(
+  result: DerivedEntries,
+  key: string,
+  poolId: string,
+  context: NetworkEntryContext,
+): void {
+  if (context.snapshots7dError !== null) {
+    result.tvlChangeWoWByKey.set(key, null);
+    return;
+  }
+  const v = context.perPool7dTvl?.get(poolId);
+  // Untrusted-decimals pools surface as null on either side — skip
+  // the WoW computation entirely so the column degrades to "—".
+  if (v && v.now !== null && v.ago !== null && v.ago > 0) {
+    result.tvlChangeWoWByKey.set(key, ((v.now - v.ago) / v.ago) * 100);
+  }
+}
+
+function addStrategyKeys(
+  result: DerivedEntries,
+  key: string,
+  poolId: string,
+  context: NetworkEntryContext,
+): void {
+  if (context.olsPoolIds.has(poolId)) result.olsPoolKeys.add(key);
+  if (context.cdpPoolIds.has(poolId)) result.cdpPoolKeys.add(key);
+  if (context.reservePoolIds.has(poolId)) result.reservePoolKeys.add(key);
+}
+
+function addPoolEntry(
+  result: DerivedEntries,
+  pool: Pool,
+  context: NetworkEntryContext,
+): void {
+  const entry: GlobalPoolEntry = {
+    pool,
+    network: context.network,
+    rates: context.rates,
+  };
+  result.entries.push(entry);
+  const key = globalPoolKey(entry);
+  result.volume24hByKey.set(
+    key,
+    context.vol24hMap ? context.vol24hMap.get(pool.id) : null,
+  );
+  result.volume7dByKey.set(
+    key,
+    context.vol7dMap ? context.vol7dMap.get(pool.id) : null,
+  );
+  addTvlChange(result, key, pool.id, context);
+  addStrategyKeys(result, key, pool.id, context);
+}
+
+function addNetworkEntries(result: DerivedEntries, netData: NetworkData): void {
+  if (netData.error !== null) return;
+  const { network, pools, rates } = netData;
+  const context: NetworkEntryContext = {
+    network,
+    rates,
+    snapshots7dError: netData.snapshots7dError,
+    olsPoolIds: netData.olsPoolIds,
+    cdpPoolIds: netData.cdpPoolIds,
+    reservePoolIds: netData.reservePoolIds,
+    ...windowedPoolMaps(netData),
+  };
+  for (const pool of pools) {
+    addPoolEntry(result, pool, context);
+  }
+}
+
 /**
- * Build per-pool entries (pool × network × rates) and windowed volume / WoW
- * maps keyed by `globalPoolKey`, suitable for rendering <GlobalPoolsTable>.
+ * Build per-pool entries (pool × network × rates), windowed volume / WoW maps,
+ * and strategy sets keyed by `globalPoolKey`, suitable for rendering
+ * <GlobalPoolsTable>.
  * Skips networks whose top-level pools query failed.
  */
 export function buildGlobalPoolEntries(
   networkData: NetworkData[],
 ): DerivedEntries {
-  const entries: GlobalPoolEntry[] = [];
-  const volume24hByKey = new Map<string, number | null | undefined>();
-  const volume7dByKey = new Map<string, number | null | undefined>();
-  const tvlChangeWoWByKey = new Map<string, number | null>();
-  const tradingLimitsByKey = new Map<string, TradingLimit[]>();
-  const olsPoolKeys = new Set<string>();
-  const cdpPoolKeys = new Set<string>();
-  const reservePoolKeys = new Set<string>();
+  const result: DerivedEntries = {
+    entries: [],
+    volume24hByKey: new Map(),
+    volume7dByKey: new Map(),
+    tvlChangeWoWByKey: new Map(),
+    olsPoolKeys: new Set(),
+    cdpPoolKeys: new Set(),
+    reservePoolKeys: new Set(),
+  };
 
   for (const netData of networkData) {
-    if (netData.error !== null) continue;
-    const { network, pools, snapshots, snapshots7d, rates } = netData;
-
-    // Build per-pool trading limit lookup from the chain-level flat list
-    const tlByPoolId = new Map<string, TradingLimit[]>();
-    for (const tl of netData.tradingLimits) {
-      const arr = tlByPoolId.get(tl.poolId) ?? [];
-      arr.push(tl);
-      tlByPoolId.set(tl.poolId, arr);
-    }
-
-    const vol24hMap =
-      netData.snapshotsError === null
-        ? buildPoolVolumeMap(snapshots, pools, network, rates)
-        : null;
-    const vol7dMap =
-      netData.snapshots7dError === null
-        ? buildPoolVolumeMap(snapshots7d, pools, network, rates)
-        : null;
-
-    const perPool7dTvl =
-      netData.snapshots7dError === null && snapshots7d.length > 0
-        ? perPoolTvlWindow(snapshots7d, pools, network, rates)
-        : null;
-
-    for (const pool of pools) {
-      const entry: GlobalPoolEntry = { pool, network, rates };
-      entries.push(entry);
-      const key = globalPoolKey(entry);
-      volume24hByKey.set(key, vol24hMap ? vol24hMap.get(pool.id) : null);
-      volume7dByKey.set(key, vol7dMap ? vol7dMap.get(pool.id) : null);
-
-      if (netData.snapshots7dError !== null) {
-        tvlChangeWoWByKey.set(key, null);
-      } else {
-        const v = perPool7dTvl?.get(pool.id);
-        // Untrusted-decimals pools surface as null on either side — skip
-        // the WoW computation entirely so the column degrades to "—".
-        if (v && v.now !== null && v.ago !== null && v.ago > 0) {
-          tvlChangeWoWByKey.set(key, ((v.now - v.ago) / v.ago) * 100);
-        }
-      }
-
-      const tls = tlByPoolId.get(pool.id);
-      if (tls) tradingLimitsByKey.set(key, tls);
-
-      if (netData.olsPoolIds.has(pool.id)) olsPoolKeys.add(key);
-      if (netData.cdpPoolIds.has(pool.id)) cdpPoolKeys.add(key);
-      if (netData.reservePoolIds.has(pool.id)) reservePoolKeys.add(key);
-    }
+    addNetworkEntries(result, netData);
   }
 
-  return {
-    entries,
-    volume24hByKey,
-    volume7dByKey,
-    tvlChangeWoWByKey,
-    tradingLimitsByKey,
-    olsPoolKeys,
-    cdpPoolKeys,
-    reservePoolKeys,
-  };
+  return result;
 }
