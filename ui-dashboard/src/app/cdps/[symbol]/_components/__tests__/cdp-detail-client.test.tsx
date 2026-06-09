@@ -588,6 +588,48 @@ describe("CdpDetailClient", () => {
     ).toContain("Opens transaction 0xupdated");
   });
 
+  it("keeps exact updated timestamp tooltips when the update tx hash is unavailable", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: troveSchemaData(false), error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return {
+          data: detailData({
+            openTroves: [trove({ lastUpdatedTxHash: null })],
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+
+    const trigger = handle!.container.querySelector<HTMLElement>(
+      'table[aria-label="GBPm troves"] tbody tr td:nth-child(8) [aria-describedby]',
+    );
+    expect(trigger).not.toBeNull();
+    expect(trigger?.textContent).toBe("0s ago");
+    const tooltipId = trigger?.getAttribute("aria-describedby");
+    expect(
+      handle!.container.ownerDocument.getElementById(tooltipId!)?.textContent,
+    ).toBe(`Updated at ${new Date(NOW * 1000).toLocaleString()}.`);
+  });
+
   it("renders empty detail tables without replacing market-level KPIs", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {

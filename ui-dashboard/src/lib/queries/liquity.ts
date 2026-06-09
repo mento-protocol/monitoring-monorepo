@@ -139,7 +139,10 @@ const cdpMarketDetailQuery = (
 ${troveRowFields}
     }
     AllTrove: Trove(
-      where: { collateralId: { _eq: $collateralId } }
+      where: {
+        collateralId: { _eq: $collateralId }
+        status: { _nin: [${OPEN_STATUS_LIST}] }
+      }
       order_by: [{ lastUpdatedAt: desc }, { id: asc }]
       limit: ${CDP_TROVES_DETAIL_LIMIT}
     ) {

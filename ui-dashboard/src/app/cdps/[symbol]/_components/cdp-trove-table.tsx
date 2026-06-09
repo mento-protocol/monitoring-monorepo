@@ -675,7 +675,11 @@ function UpdatedValue({
   const label = relativeTime(trove.lastUpdatedAt);
   const timestamp = formatTimestamp(trove.lastUpdatedAt);
   if (!trove.lastUpdatedTxHash) {
-    return <span className="text-slate-300">{label}</span>;
+    return (
+      <Tooltip content={`Updated at ${timestamp}.`} align="right">
+        <span className="text-slate-300">{label}</span>
+      </Tooltip>
+    );
   }
 
   const networkId = networkIdForChainId(chainId);

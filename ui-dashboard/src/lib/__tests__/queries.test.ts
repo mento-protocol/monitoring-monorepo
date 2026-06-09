@@ -479,6 +479,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(query).toContain("AllTrove: Trove(");
     expect(query).toContain("InterestBatch(");
     expect(query).toContain("limit: 1000");
+    expect(query).toContain('status: { _nin: ["active", "zombie"] }');
     expect(query).toContain(
       "order_by: [{ interestRate: asc }, { troveId: asc }, { id: asc }]",
     );
