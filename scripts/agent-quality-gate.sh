@@ -1199,6 +1199,21 @@ while IFS= read -r path; do
       add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
       ;;
+    governance-watchdog/*)
+      add_surface "governance-watchdog"
+      case "$path" in
+        governance-watchdog/src/*|governance-watchdog/package.json|governance-watchdog/pnpm-lock.yaml|governance-watchdog/pnpm-workspace.yaml|governance-watchdog/tsconfig.json|governance-watchdog/tsconfig.build.json|governance-watchdog/vitest.config.ts|governance-watchdog/knip.json|governance-watchdog/eslint.config.mjs)
+          add_package_quality_commands "@mento-protocol/governance-watchdog" "governance-watchdog changed"
+          ;;
+        governance-watchdog/infra/*.tf)
+          add_terraform_validate_commands "governance-watchdog/infra" "governance-watchdog Terraform changed"
+          add_checklist "docs/pr-checklists/terraform-cloudrun.md" "governance-watchdog Cloud Function path changed"
+          ;;
+        # Other files (bin/*.sh, *.md, .gcloudignore, .prettierrc, .env.example,
+        # osv-scanner.toml) need no extra routing: shell scripts hit the generic
+        # `*.sh → bash -n` branch above; the rest are doc/config-only.
+      esac
+      ;;
     terraform/*)
       add_surface "terraform"
       add_terraform_validate_commands "terraform" "Terraform changed"
@@ -1277,6 +1292,7 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/rules" "Terraform stack wrapper changed"
           add_terraform_validate_commands "alerts/infra" "Terraform stack wrapper changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform stack wrapper changed"
+          add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack wrapper changed"
           ;;
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
@@ -1311,6 +1327,7 @@ while IFS= read -r path; do
       add_terraform_validate_commands "alerts/rules" "Terraform stack registry changed"
       add_terraform_validate_commands "alerts/infra" "Terraform stack registry changed"
       add_terraform_validate_commands "aegis/terraform" "Terraform stack registry changed"
+      add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack registry changed"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Terraform stack registry changed"
       ;;
     package.json)
