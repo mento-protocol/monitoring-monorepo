@@ -13,16 +13,19 @@ one of the current mutation targets.
   a local logging socket.
 - Classify every survivor as a real test gap, equivalent mutant/noise, or tool
   limitation. Add tests only for real gaps.
-- **All three mutation baselines are PR-blocking.** Each `stryker.config.mjs`
+- **Mutation runs weekly + on-demand, not per-PR.** Each `stryker.config.mjs`
   sets a `break` floor at "rounded baseline score − 2" for measurement
-  noise. `.github/workflows/mutation-testing.yml` runs on every PR
-  (required-status safe — no `paths:` filter at workflow level). Each
-  per-package job has an internal `filter` step (`continue-on-error: true`)
-  so a path-detection failure can't flip the workflow red; the matching
-  `decide` step then interprets "filter failed" as fail-closed and runs
-  the full gate. The mutation step actually runs when (a) the trigger
-  isn't `pull_request`, (b) the filter failed, or (c) the diff touched
-  that package's inputs.
+  noise; a run whose score drops below the floor fails the job. As of the
+  CI-cost work, `.github/workflows/mutation-testing.yml` triggers on the
+  weekly `schedule` cron and `workflow_dispatch` only — it is **not** in the
+  `main` ruleset's required checks, and per-PR mutation testing (3 runner
+  boots on every push) was the single largest avoidable CI-cost line.
+  Mutation testing measures test-suite strength, not per-commit regression,
+  so a weekly cadence is the right altitude. To get a mutation signal for a
+  specific branch before merge, trigger the workflow on demand via the
+  GitHub "Run workflow" button (or `gh workflow run "Mutation Testing"
+--ref <branch>`). Each per-package job keeps its internal `filter`/`decide`
+  steps; on a non-`pull_request` trigger the gate always runs.
 
   | Package          | Config                              | `break` | Baseline | Job                               |
   | ---------------- | ----------------------------------- | ------: | -------: | --------------------------------- |

@@ -3,6 +3,16 @@ name: Code Health — Duplication
 on:
   pull_request:
     branches: [main]
+    # Advisory workflow — strictly non-blocking (never fails the PR; see the
+    # job comment) and NOT in the branch ruleset's required checks, so a path
+    # filter is safe. jscpd measures source duplication, so skip the runner
+    # boot on doc-only PRs. `paths-ignore` (not an allowlist) keeps this
+    # fail-open: any PR that touches code still runs the scan.
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.mdx"
+      - docs/**
+      - "**/LICENSE"
   push:
     branches: [main]
 

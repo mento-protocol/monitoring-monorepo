@@ -3,11 +3,15 @@ name: Schema Diff — Advisory
 on:
   pull_request:
     branches: [main]
-    # Intentionally NO `paths:` filter — required-status workflows must run on
-    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
-    # The job uses an internal path-detection step that is continue-on-error,
-    # so a detector failure cannot fail the workflow (fail-closed: the diff
-    # step then runs anyway).
+    # NO workflow-level `paths:` filter — intentionally runs on every PR.
+    # This workflow posts a sticky PR comment AND has a "Clear stale
+    # schema-diff comment" step that deletes it when the schema reverts to
+    # base. A workflow-level `paths:` filter would skip the whole run on a
+    # revert PR (schema back to base → no longer in the diff), leaving the
+    # stale "breaking change" comment stranded. So the run/skip decision must
+    # stay in-job (the `filter` + `decide` steps below), where the cleanup
+    # path can still execute. The wasted boot on non-schema PRs is the price
+    # of guaranteed sticky-comment cleanup.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

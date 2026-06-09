@@ -91,6 +91,8 @@ remain the enforcement layers.
   triggers must NOT grant `pull-requests: write` or `contents: write`
   unless they also gate on `github.event.pull_request.head.repo.full_name`
   matching the upstream repo (forks shouldn't get write tokens).
-- Required-status CI checks must NOT use `paths:` filters — that creates
+- **Ruleset-required** CI checks must NOT use `paths:` filters — that creates
   permanently-pending checks on PRs that don't touch the paths and blocks
-  the merge queue.
+  the merge queue. "Required" = enforced by the `main` ruleset (`ci`,
+  `Code Quality`, the Vercel checks). Advisory workflows (everything else)
+  SHOULD use `paths:` filters to avoid booting a runner on irrelevant PRs.
