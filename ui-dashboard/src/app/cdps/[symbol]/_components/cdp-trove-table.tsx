@@ -4,12 +4,14 @@ import { useMemo, useState, type ReactNode } from "react";
 import { AddressLink } from "@/components/address-link";
 import { EmptyBox } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
-import { Table, Row, Th, Td } from "@/components/table";
+import { Table, Row, Td } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
+import type { SortDir } from "@/lib/table-sort";
 import { explorerTxUrl } from "@/lib/tokens";
 import { useRovingTabIndex } from "@/lib/use-roving-tab-index";
+import { useTableSort } from "@/lib/use-table-sort";
 import {
   CDP_TROVE_OPEN_STATUSES,
   CDP_TROVES_DETAIL_LIMIT,
@@ -18,32 +20,31 @@ import {
   type CdpTrove,
 } from "../../_lib/types";
 import { formatTokenAmount } from "../../_lib/format";
+import { HistoryTroveHeader, OpenTroveHeader } from "./trove-table-headers";
+import {
+  compareRedemptionPriorityRows,
+  HISTORY_SORT_DEFAULT_DIR,
+  HISTORY_SORT_DEFAULT_KEY,
+  HISTORY_SORT_KEYS,
+  OPEN_SORT_DEFAULT_DIR,
+  OPEN_SORT_DEFAULT_KEY,
+  OPEN_SORT_KEYS,
+  parseBigInt,
+  sortDisplayRows,
+  type HistorySortKey,
+  type OpenSortKey,
+  type TroveDisplayRow,
+  type TroveSortKey,
+} from "./trove-sort";
 
 const TROVE_TABS = ["open", "history"] as const;
 
 type TroveTab = (typeof TROVE_TABS)[number];
 
-type TroveDisplayRow = {
-  trove: CdpTrove;
-  effectiveRate: bigint | null;
-  rank: number | null;
-  tied: boolean;
-  rateSource: "direct" | "batch" | null;
-};
-
 const TROVE_PAGE_SIZE = 25;
 const D18 = BigInt(10) ** BigInt(18);
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const MENTO_APP_BORROW_MANAGE_BASE_URL = "https://app.mento.org/borrow/manage";
-const ICR_INDEXED_EXPLAINER = (
-  <>
-    Individual Collateral Ratio (
-    <code className="rounded bg-slate-900 px-1 font-mono text-[11px] text-slate-100">
-      coll. / debt
-    </code>
-    ) snapshot from the latest indexed trove event, not a live oracle/RPC read.
-  </>
-);
 
 const troveTabId = (tab: TroveTab) => `cdp-trove-tab-${tab}`;
 const trovePanelId = (tab: TroveTab) => `cdp-trove-panel-${tab}`;
@@ -62,10 +63,25 @@ export function CdpTroveTable({
   const [activeTab, setActiveTab] = useState<TroveTab>("open");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const openSort = useTableSort<OpenSortKey>({
+    defaultKey: OPEN_SORT_DEFAULT_KEY,
+    defaultDir: OPEN_SORT_DEFAULT_DIR,
+    validKeys: OPEN_SORT_KEYS,
+    paramPrefix: "troves",
+  });
+  const historySort = useTableSort<HistorySortKey>({
+    defaultKey: HISTORY_SORT_DEFAULT_KEY,
+    defaultDir: HISTORY_SORT_DEFAULT_DIR,
+    validKeys: HISTORY_SORT_KEYS,
+    paramPrefix: "trovesHist",
+  });
+  const activeSort = activeTab === "open" ? openSort : historySort;
   const tableRows = useTroveTableRows({
     activeTab,
     search,
     page,
+    sortKey: activeSort.sortKey,
+    sortDir: activeSort.sortDir,
     openTroves,
     allTroves,
     interestBatches,
@@ -78,6 +94,14 @@ export function CdpTroveTable({
   const updateSearch = (next: string) => {
     setSearch(next);
     setPage(1);
+  };
+  const handleSort = (key: TroveSortKey) => {
+    setPage(1);
+    if (activeTab === "open") {
+      openSort.handleSort(key as OpenSortKey);
+    } else {
+      historySort.handleSort(key as HistorySortKey);
+    }
   };
 
   return (
@@ -105,6 +129,9 @@ export function CdpTroveTable({
             total={tableRows.filteredRows.length}
             capped={tableRows.activeCapped}
             rankSuppressed={tableRows.rankSuppressed}
+            sortKey={activeSort.sortKey}
+            sortDir={activeSort.sortDir}
+            onSort={handleSort}
             onPageChange={setPage}
           />
         )}
@@ -117,6 +144,8 @@ function useTroveTableRows({
   activeTab,
   search,
   page,
+  sortKey,
+  sortDir,
   openTroves,
   allTroves,
   interestBatches,
@@ -124,6 +153,8 @@ function useTroveTableRows({
   activeTab: TroveTab;
   search: string;
   page: number;
+  sortKey: TroveSortKey;
+  sortDir: SortDir;
   openTroves: CdpTrove[];
   allTroves: CdpTrove[];
   interestBatches: CdpInterestBatch[];
@@ -155,9 +186,13 @@ function useTroveTableRows({
       troveMatchesSearch(trove, normalizedSearch),
     );
   }, [normalizedSearch, sourceRows]);
+  const sortedRows = useMemo(
+    () => sortDisplayRows(filteredRows, activeTab, sortKey, sortDir),
+    [filteredRows, activeTab, sortKey, sortDir],
+  );
   const totalPages = Math.max(
     1,
-    Math.ceil(filteredRows.length / TROVE_PAGE_SIZE),
+    Math.ceil(sortedRows.length / TROVE_PAGE_SIZE),
   );
   const clampedPage = Math.max(1, Math.min(page, totalPages));
   const start = (clampedPage - 1) * TROVE_PAGE_SIZE;
@@ -173,7 +208,7 @@ function useTroveTableRows({
   return {
     sourceRows,
     filteredRows,
-    visibleRows: filteredRows.slice(start, start + TROVE_PAGE_SIZE),
+    visibleRows: sortedRows.slice(start, start + TROVE_PAGE_SIZE),
     clampedPage,
     activeCapped,
     rankSuppressed: activeTab === "open" && openCapped,
@@ -257,6 +292,9 @@ function TroveTableResults({
   total,
   capped,
   rankSuppressed,
+  sortKey,
+  sortDir,
+  onSort,
   onPageChange,
 }: {
   activeTab: TroveTab;
@@ -267,14 +305,32 @@ function TroveTableResults({
   total: number;
   capped: boolean;
   rankSuppressed: boolean;
+  sortKey: TroveSortKey;
+  sortDir: SortDir;
+  onSort: (key: TroveSortKey) => void;
   onPageChange: (page: number) => void;
 }) {
   const historyView = activeTab === "history";
   return (
     <>
-      <Table aria-label={`${collateral.symbol} troves`}>
+      <Table
+        aria-label={`${collateral.symbol} troves`}
+        scrollClassName="xl:overflow-x-clip"
+      >
         <thead>
-          {historyView ? <HistoryTroveHeader /> : <OpenTroveHeader />}
+          {historyView ? (
+            <HistoryTroveHeader
+              sortKey={sortKey as HistorySortKey}
+              sortDir={sortDir}
+              onSort={onSort}
+            />
+          ) : (
+            <OpenTroveHeader
+              sortKey={sortKey as OpenSortKey}
+              sortDir={sortDir}
+              onSort={onSort}
+            />
+          )}
         </thead>
         <tbody>
           {visibleRows.length === 0 ? (
@@ -307,7 +363,8 @@ function TroveTableResults({
       {capped && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing {CDP_TROVES_DETAIL_LIMIT.toLocaleString()} fetched troves for
-          this view — search covers fetched rows only.
+          this view — search and sorting cover these fetched rows only, not the
+          full set.
           {activeTab === "open" && rankSuppressed
             ? " Redemption ranks are hidden because the full open-trove set is not loaded."
             : ""}
@@ -354,51 +411,6 @@ function TroveTabButton({
     >
       {children}
     </button>
-  );
-}
-
-function OpenTroveHeader() {
-  return (
-    <Row>
-      <Th align="right">Rank</Th>
-      <Th>Owner / Trove</Th>
-      <Th>Status</Th>
-      <Th align="right">Debt</Th>
-      <Th align="right">Collateral</Th>
-      <Th align="right">
-        <span className="inline-flex items-center justify-end gap-1">
-          <Tooltip
-            label="About indexed ICR"
-            content={ICR_INDEXED_EXPLAINER}
-            align="right"
-          >
-            <span className="inline-flex items-center gap-1">
-              ICR (indexed)
-              <span className="text-slate-500" aria-hidden="true">
-                ⓘ
-              </span>
-            </span>
-          </Tooltip>
-        </span>
-      </Th>
-      <Th align="right">Interest</Th>
-      <Th align="right">Updated</Th>
-    </Row>
-  );
-}
-
-function HistoryTroveHeader() {
-  return (
-    <Row>
-      <Th>Last owner / Trove</Th>
-      <Th>Status</Th>
-      <Th align="right">Opened</Th>
-      <Th align="right">Ended / Updated</Th>
-      <Th align="right">Remaining collateral</Th>
-      <Th align="right">Redeemed</Th>
-      <Th align="right">Redemption fee</Th>
-      <Th align="right">Liquidated</Th>
-    </Row>
   );
 }
 
@@ -521,13 +533,25 @@ function OwnerTroveCell({
         href={troveManageUrl(trove.troveId, collateral.symbol)}
         target="_blank"
         rel="noopener noreferrer"
+        title={trove.troveId}
         aria-label={`Manage trove ${trove.troveId} in the Mento app`}
         className="font-mono text-[10px] text-slate-500 hover:text-slate-300 hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500"
       >
-        {trove.troveId}
+        {shortenTroveId(trove.troveId)}
       </a>
     </div>
   );
+}
+
+/**
+ * Trove IDs are uint256 token ids (often a 66-char `0x…` hash). Rendering them
+ * in full blew the first column out past the viewport (horizontal scroll);
+ * middle-ellipsize for display while keeping the full id in the link + title.
+ */
+function shortenTroveId(troveId: string): string {
+  return troveId.length <= 13
+    ? troveId
+    : `${troveId.slice(0, 6)}…${troveId.slice(-4)}`;
 }
 
 function RankValue({ row }: { row: TroveDisplayRow }) {
@@ -798,45 +822,6 @@ function displayRowForTrove(
     tied: false,
     rateSource: directRate != null ? "direct" : null,
   };
-}
-
-function compareRedemptionPriorityRows(
-  a: TroveDisplayRow,
-  b: TroveDisplayRow,
-): number {
-  const rate = compareNullableBigInt(a.effectiveRate, b.effectiveRate);
-  if (rate !== 0) return rate;
-  const troveId = compareNumericStrings(a.trove.troveId, b.trove.troveId);
-  if (troveId !== 0) return troveId;
-  return a.trove.id.localeCompare(b.trove.id);
-}
-
-function compareNullableBigInt(a: bigint | null, b: bigint | null): number {
-  if (a == null && b == null) return 0;
-  if (a == null) return 1;
-  if (b == null) return -1;
-  if (a < b) return -1;
-  if (a > b) return 1;
-  return 0;
-}
-
-function compareNumericStrings(a: string, b: string): number {
-  const parsedA = parseBigInt(a);
-  const parsedB = parseBigInt(b);
-  if (parsedA != null && parsedB != null) {
-    if (parsedA < parsedB) return -1;
-    if (parsedA > parsedB) return 1;
-    return 0;
-  }
-  return a.localeCompare(b);
-}
-
-function parseBigInt(value: string): bigint | null {
-  try {
-    return BigInt(value);
-  } catch {
-    return null;
-  }
 }
 
 function troveManageUrl(troveId: string, tokenSymbol: string): string {
