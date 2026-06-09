@@ -700,9 +700,9 @@ function UpdatedValue({
   const timestamp = formatTimestamp(trove.lastUpdatedAt);
   const networkId = networkIdForChainId(chainId);
   const network = networkId ? NETWORKS[networkId] : null;
-  // When the tx hash + explorer are known, the relative time links straight to
-  // the transaction (no popover). The exact timestamp stays available via the
-  // native title on hover.
+  // Deliberately a plain link, not a Tooltip (unlike EventTimeValue on the
+  // History tab): the relative time is already clickable, so the popover was
+  // just noise. The exact timestamp rides along on the native title instead.
   if (trove.lastUpdatedTxHash && network != null) {
     return (
       <a
@@ -717,8 +717,14 @@ function UpdatedValue({
     );
   }
 
+  // No linkable explorer for this chain: still disclose the tx hash in the
+  // title when one exists (mirrors EventTimeValue's no-explorer fallback) so it
+  // isn't silently dropped.
+  const fallbackTitle = trove.lastUpdatedTxHash
+    ? `Updated at ${timestamp} · tx ${trove.lastUpdatedTxHash}`
+    : `Updated at ${timestamp}`;
   return (
-    <span className="text-slate-300" title={`Updated at ${timestamp}`}>
+    <span className="text-slate-300" title={fallbackTitle}>
       {label}
     </span>
   );
