@@ -997,6 +997,85 @@ describe("Liquity CDP helpers", () => {
       assert.equal(row?.blockNumber, 2n);
       assert.equal(row?.updatedAtTimestamp, day0 + 120n);
     });
+
+    it("preloadBorrowingRevenueRollover warms the snapshot rows the rollover flush reads", async () => {
+      const { preloadBorrowingRevenueRollover } =
+        await import("../src/handlers/liquity/borrowingRevenue");
+      const { SECONDS_PER_DAY } = await import("../src/helpers");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm);
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n;
+      const day2 = day0 + 2n * SECONDS_PER_DAY;
+      const bracket = {
+        id: `${collateralId}-bracket`,
+        collateralId,
+        rate: 10n ** 17n,
+        totalDebt: 0n,
+        sumDebtTimesRateD36: 0n,
+        pendingDebtTimesOneYearD36: 0n,
+        updatedAt: day0,
+      };
+      const instance = {
+        ...makeLiquityInstance(collateralId, 42220, day0),
+        currentDayBucket: day0,
+      };
+      const reads: string[] = [];
+      const ctx = {
+        LiquityInstance: {
+          get: async (id: string) =>
+            id === collateralId ? instance : undefined,
+        },
+        InterestRateBracket: { getWhere: async () => [bracket] },
+        LiquityBorrowingRevenueDailySnapshot: {
+          get: async (id: string) => {
+            reads.push(id);
+            return undefined;
+          },
+        },
+      };
+      await preloadBorrowingRevenueRollover(ctx as never, collateralId, day2);
+      // settle walks [updatedAt=day0, until=day2) -> day0 and day1 buckets, with
+      // ids byte-identical to the write path (instanceId === collateralId).
+      assert.deepEqual(
+        [...reads].sort(),
+        [
+          `${collateralId}-${day0}`,
+          `${collateralId}-${day0 + SECONDS_PER_DAY}`,
+        ].sort(),
+      );
+    });
+
+    it("preloadBorrowingRevenueRollover is a no-op when no day rollover is due", async () => {
+      const { preloadBorrowingRevenueRollover } =
+        await import("../src/handlers/liquity/borrowingRevenue");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm);
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n;
+      const instance = {
+        ...makeLiquityInstance(collateralId, 42220, day0),
+        currentDayBucket: day0,
+      };
+      let getWhereCalled = false;
+      const ctx = {
+        LiquityInstance: { get: async () => instance },
+        InterestRateBracket: {
+          getWhere: async () => {
+            getWhereCalled = true;
+            return [];
+          },
+        },
+        LiquityBorrowingRevenueDailySnapshot: { get: async () => undefined },
+      };
+      // Same UTC day as currentDayBucket -> processing won't flush, so no warm.
+      await preloadBorrowingRevenueRollover(
+        ctx as never,
+        collateralId,
+        day0 + 100n,
+      );
+      assert.equal(getWhereCalled, false);
+    });
   });
 
   it("floors interest bracket debt and weighted debt when debits overshoot", async () => {

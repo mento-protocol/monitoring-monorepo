@@ -7,7 +7,10 @@ import type {
 } from "envio";
 import { ZERO_ADDRESS } from "../../constants.js";
 import { asAddress } from "../../helpers.js";
-import { settleInterestRateBracketRevenue } from "./borrowingRevenue.js";
+import {
+  preloadBorrowingRevenueDailyBuckets,
+  settleInterestRateBracketRevenue,
+} from "./borrowingRevenue.js";
 import { debtTimesRateD36, floorInterestRateBracket } from "./math.js";
 
 export const TROVE_STATUS = {
@@ -327,31 +330,48 @@ export async function moveInterestRateBracketDebt(
 }
 
 export async function preloadInterestRateBracketDebt(
-  context: Pick<TroveContext, "InterestRateBracket">,
+  context: Pick<TroveContext, "InterestRateBracket"> & {
+    LiquityBorrowingRevenueDailySnapshot: {
+      get: (
+        id: string,
+      ) => Promise<LiquityBorrowingRevenueDailySnapshot | undefined>;
+      set: (entity: LiquityBorrowingRevenueDailySnapshot) => void;
+    };
+  },
   args: {
     collateralId: string;
     prevRate: bigint;
     nextRate: bigint;
     prevDebt: bigint;
     nextDebt: bigint;
+    untilTimestamp: bigint;
   },
 ): Promise<void> {
-  const reads: Array<Promise<InterestRateBracket | undefined>> = [];
-  if (args.prevRate !== 0n && args.prevDebt !== 0n) {
-    reads.push(
+  const rates: bigint[] = [];
+  if (args.prevRate !== 0n && args.prevDebt !== 0n) rates.push(args.prevRate);
+  if (args.nextRate !== 0n && args.nextDebt !== 0n) rates.push(args.nextRate);
+  const brackets = await Promise.all(
+    rates.map((rate) =>
       context.InterestRateBracket.get(
-        makeInterestRateBracketId(args.collateralId, args.prevRate),
+        makeInterestRateBracketId(args.collateralId, rate),
       ),
-    );
-  }
-  if (args.nextRate !== 0n && args.nextDebt !== 0n) {
-    reads.push(
-      context.InterestRateBracket.get(
-        makeInterestRateBracketId(args.collateralId, args.nextRate),
-      ),
-    );
-  }
-  await Promise.all(reads);
+    ),
+  );
+  // moveInterestRateBracketDebt settles each touched bracket up to the event
+  // timestamp before applying its delta; warm the daily-snapshot rows that
+  // settlement will read (instanceId === collateralId for these snapshots).
+  await Promise.all(
+    brackets.map((bracket) =>
+      bracket === undefined
+        ? Promise.resolve()
+        : preloadBorrowingRevenueDailyBuckets(
+            context,
+            args.collateralId,
+            bracket.updatedAt,
+            args.untilTimestamp,
+          ),
+    ),
+  );
 }
 
 async function applyBracketDelta(

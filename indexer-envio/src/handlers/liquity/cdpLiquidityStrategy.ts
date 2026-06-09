@@ -4,6 +4,7 @@ import {
   getOrCreateLiquityInstance,
   preloadLiquityMarket,
 } from "./bootstrap.js";
+import { preloadBorrowingRevenueRollover } from "./borrowingRevenue.js";
 import {
   findCollateralIdByPoolFallback,
   findLiquityMarketByDebtToken,
@@ -111,6 +112,11 @@ indexer.onEvent(
     if (market === undefined) return;
     if (context.isPreload) {
       await preloadLiquityMarket(context, market);
+      await preloadBorrowingRevenueRollover(
+        context,
+        collateralId,
+        asBigInt(event.block.timestamp),
+      );
       return;
     }
 

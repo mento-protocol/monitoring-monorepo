@@ -175,3 +175,81 @@ export async function flushBorrowingRevenueDailySnapshots(
     if (next !== bracket) context.InterestRateBracket.set(next);
   }
 }
+
+// --- Read-only preload warmers --------------------------------------------
+// HyperIndex runs handlers twice: a preload phase that batches DB reads, then
+// an ordered processing phase. This codebase warms reads explicitly in each
+// handler's `isPreload` branch. The settlement paths below read daily-snapshot
+// (and bracket) rows during processing, so these helpers reissue exactly those
+// reads in the preload phase to batch them. They never write; a missed warm
+// degrades to a correct lazy read during processing, never to wrong data.
+
+type BorrowingRevenueInstanceContext = BorrowingRevenueBracketContext & {
+  LiquityInstance: {
+    get: (id: string) => Promise<LiquityInstance | undefined>;
+  };
+};
+
+// Warm the daily-snapshot rows settleInterestRateBracketRevenue reads for a
+// bracket: one per day bucket in [from, until). Uses the same id constructor as
+// the write path so the warmed ids are byte-identical to what processing reads.
+export async function preloadBorrowingRevenueDailyBuckets(
+  context: BorrowingRevenueSnapshotContext,
+  instanceId: string,
+  fromTimestamp: bigint,
+  untilTimestamp: bigint,
+): Promise<void> {
+  const reads: Array<Promise<unknown>> = [];
+  for (
+    let bucket = dayBucket(fromTimestamp);
+    bucket < untilTimestamp;
+    bucket += SECONDS_PER_DAY
+  ) {
+    reads.push(
+      context.LiquityBorrowingRevenueDailySnapshot.get(
+        borrowingRevenueDailySnapshotId(instanceId, bucket),
+      ),
+    );
+  }
+  await Promise.all(reads);
+}
+
+// Warm the reads flushBorrowingRevenueDailySnapshots performs on the first
+// event of a new UTC day: the per-collateral bracket set plus every bracket's
+// settle range. No-op when no rollover is due (matches the processing gate).
+export async function preloadBorrowingRevenueRollover(
+  context: BorrowingRevenueInstanceContext,
+  collateralId: string,
+  untilTimestamp: bigint,
+): Promise<void> {
+  const instance = await context.LiquityInstance.get(collateralId);
+  if (instance === undefined) return;
+  if (instance.currentDayBucket >= dayBucket(untilTimestamp)) return;
+  const brackets = await context.InterestRateBracket.getWhere({
+    collateralId: { _eq: collateralId },
+  });
+  await Promise.all(
+    brackets.map((bracket) =>
+      preloadBorrowingRevenueDailyBuckets(
+        context,
+        instance.id,
+        bracket.updatedAt,
+        untilTimestamp,
+      ),
+    ),
+  );
+}
+
+// Warm the daily-snapshot row recordBorrowingUpfrontFee reads when an upfront
+// fee is present (the event-day bucket).
+export async function preloadBorrowingUpfrontFeeBucket(
+  context: BorrowingRevenueSnapshotContext,
+  instanceId: string,
+  fee: bigint,
+  timestamp: bigint,
+): Promise<void> {
+  if (fee <= ZERO) return;
+  await context.LiquityBorrowingRevenueDailySnapshot.get(
+    borrowingRevenueDailySnapshotId(instanceId, dayBucket(timestamp)),
+  );
+}
