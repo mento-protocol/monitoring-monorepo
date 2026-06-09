@@ -28,11 +28,21 @@ name: Lighthouse CI
 on:
   pull_request:
     branches: [main]
-    # Intentionally NO `paths:` filter — required-status workflows must run on
-    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
-    # The job uses an internal path-detection step that is continue-on-error,
-    # so a detector failure cannot fail the workflow (fail-closed: the
-    # Lighthouse step then runs anyway).
+    # Advisory workflow — NOT in the branch ruleset's required checks, so a
+    # `paths:` filter is safe (a skipped run cannot leave a *required* check
+    # pending). These globs mirror the in-job `filter` step exactly AND the
+    # dashboard paths Vercel builds previews for (ui-dashboard/scripts/
+    # vercel-ignore-build.sh) — a non-dashboard PR posts no preview, so there
+    # is nothing for Lighthouse to measure anyway. The in-job filter/decide
+    # steps are kept (they also skip forks + dependabot). Keep this list in
+    # sync with the in-job `filters:` block and vercel-ignore-build.sh.
+    paths:
+      - ui-dashboard/**
+      - shared-config/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .lighthouserc.cjs
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

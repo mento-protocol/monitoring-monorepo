@@ -23,13 +23,28 @@ name: Supply Chain
 
 on:
   workflow_dispatch:
-  # Run on every PR (no `paths:` filter) so this can serve as a required
-  # branch-protection check. With a paths filter, PRs that don't touch deps
-  # never trigger the workflow at all, and the required check stays pending
-  # forever — blocking unrelated merges. `pnpm audit` is sub-second, so the
-  # wasted CI on non-dep PRs is just checkout + node setup (~20s).
+  # Advisory workflow — NOT in the branch ruleset's required checks (only
+  # `ci`, `Code Quality`, and the Vercel checks are), so a `paths:` filter
+  # is safe here: a skipped run cannot leave a *required* check pending.
+  #
+  # Both gates only have new information to add when the dependency graph
+  # changes: `pnpm audit` scans the whole lockfile (a PR that doesn't touch
+  # deps can only surface a CVE that was already disclosed — which the daily
+  # cron below already catches within 24h), and lockfile-lint validates the
+  # lockfile structure. So trigger per-PR only when a dependency manifest
+  # changes; the daily cron remains the backstop for time-based disclosures.
   pull_request:
     branches: [main]
+    paths:
+      - "**/package.json"
+      - "**/pnpm-lock.yaml"
+      - pnpm-workspace.yaml
+      - .npmrc
+      # The gate itself — changes to the workflow or the lockfile-lint
+      # scripts must self-trigger a run (same pattern as the other gates).
+      - .github/workflows/supply-chain.yml
+      - scripts/lockfile-lint.mjs
+      - scripts/lockfile-lint.test.mjs
   schedule:
     # Daily run so a newly-disclosed CVE against a pinned dep pages us even
     # without a PR in flight.

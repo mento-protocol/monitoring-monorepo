@@ -14,12 +14,28 @@ GitHub treats a "required" check as:
 - "pending" if it ran and is in progress
 - "pending" (forever, blocking the merge) if it never ran at all
 
-**Adding a `paths:` filter to a required workflow is a footgun.** PRs that don't touch the matched paths skip the workflow entirely and the check stays pending forever, silently blocking unrelated merges.
+**Adding a `paths:` filter to a _required_ workflow is a footgun.** PRs that don't touch the matched paths skip the workflow entirely and the check stays pending forever, silently blocking unrelated merges.
 
-- [ ] Required-status workflows MUST NOT use `paths:` / `paths-ignore:` filters. They must run on every PR
-- [ ] If you want path-conditional work, run the workflow on every PR but skip the expensive job inside via `if:` checks (or use `paths-filter`-style gating that reports a green check on no-op)
+The word "required" means **enforced by the `main` branch ruleset**, not "feels important". The ruleset currently requires exactly:
 
-The canonical good example: `.github/workflows/supply-chain.yml:14-18`. The comment explains why the workflow runs on every PR even though `pnpm audit` only matters when `pnpm-lock.yaml` changes.
+- `ci` (the CI sentinel job)
+- `Code Quality` (the Trunk workflow's job)
+- `Vercel` and `Vercel Preview Comments` (the Vercel platform)
+
+Verify the live list before relying on this:
+
+```
+gh api repos/mento-protocol/monitoring-monorepo/rulesets \
+  -q '.[] | select(.target=="branch").id' \
+| xargs -I{} gh api repos/mento-protocol/monitoring-monorepo/rulesets/{} \
+  -q '.rules[] | select(.type=="required_status_checks").parameters.required_status_checks[].context'
+```
+
+- [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
+- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, `schema-diff.yml`, and `supply-chain.yml` for the pattern (the workflow-level `paths:` mirrors the in-job `filter` step, which is kept as a fail-closed backstop).
+- [ ] If you make an advisory workflow required, add it to the ruleset **and** remove its `paths:` filter in the same change.
+
+> ⚠️ The ruleset and these docs have drifted before: several advisory gates were written as if required (run-on-every-PR, no `paths:`) when the ruleset never enforced them. When you add or "promote" a check, update both the ruleset and this list.
 
 ## 2. Branch enforcement on `workflow_dispatch`
 

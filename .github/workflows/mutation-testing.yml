@@ -3,15 +3,14 @@ name: Mutation Testing
 on:
   workflow_dispatch:
   schedule:
-    # Weekly backstop run so all three gates also produce a baseline
-    # signal when no PR has touched their inputs that week.
+    # Weekly run is the primary cadence. Mutation testing measures
+    # test-suite strength (do the tests catch injected faults?), not
+    # per-commit regression, so a weekly backstop is the industry norm and
+    # keeps it off the per-PR hot path. This workflow is advisory — it is
+    # NOT in the branch ruleset's required checks (only `ci`, `Code Quality`,
+    # and the Vercel checks are), so it has no per-PR trigger. Run it against
+    # a specific branch on demand via the "Run workflow" button.
     - cron: 17 5 * * 1
-  pull_request:
-    # Intentionally NO `paths:` filter — required-status workflows must run on
-    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
-    # Each job uses an internal path-detection step that is
-    # continue-on-error, so a detector failure cannot fail the workflow
-    # (fail-closed: the mutation step then runs anyway).
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

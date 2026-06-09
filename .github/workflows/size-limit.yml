@@ -3,11 +3,27 @@ name: Bundle Size Limit
 on:
   pull_request:
     branches: [main]
-    # Intentionally NO `paths:` filter — required-status workflows must run on
-    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
-    # The job uses an internal path-detection step that is continue-on-error,
-    # so a detector failure cannot fail the workflow (fail-closed: the
-    # size-limit step then runs anyway).
+    # Advisory workflow — NOT in the branch ruleset's required checks, so a
+    # `paths:` filter is safe (a skipped run cannot leave a *required* check
+    # pending). These globs mirror the in-job `filter` step exactly, so the
+    # run/skip decision is unchanged — the workflow simply no longer boots a
+    # runner to decide it. The in-job filter is kept as a fail-closed
+    # backstop. Keep this list in sync with the in-job `filters:` block.
+    paths:
+      - ui-dashboard/src/**
+      - ui-dashboard/*.ts
+      - ui-dashboard/*.mjs
+      - ui-dashboard/*.cjs
+      - ui-dashboard/*.js
+      - ui-dashboard/*.json
+      - shared-config/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .npmrc
+      - .node-version
+      - .github/workflows/size-limit.yml
+      - .github/actions/pnpm-install/**
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
