@@ -123,7 +123,12 @@ indexer.onEvent(
       blockTimestamp,
     );
     const next = touchLiquityInstance(
-      flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+      await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
+      ),
       blockNumber,
       blockTimestamp,
     );

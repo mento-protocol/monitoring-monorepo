@@ -1,13 +1,21 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
-import type { CdpBorrowingRevenueSummary } from "@/lib/cdp-borrowing-revenue";
+import type {
+  CdpBorrowingFeeSeriesPoint,
+  CdpBorrowingRevenueMarket,
+  CdpBorrowingRevenueSummary,
+} from "@/lib/cdp-borrowing-revenue";
 import { makeNetworkData } from "@/test-utils/network-fixtures";
 
 type FeeChartProps = {
+  borrowingFeeSeries: CdpBorrowingFeeSeriesPoint[];
+  isBorrowingFeesLoading: boolean;
   hasError: boolean;
   hasFeesError: boolean;
+  hasBorrowingFeesError: boolean;
   isApproximate: boolean;
+  isBorrowingFeesApproximate: boolean;
 };
 
 type RevenueTableProps = {
@@ -31,6 +39,34 @@ const EMPTY_CDP_REVENUE: CdpBorrowingRevenueSummary = {
   bracketsTruncated: false,
 };
 
+function cdpMarket(
+  symbol: string,
+  totalRevenueUSD: number,
+  upfrontFeesUSD: number,
+  accruedInterestUSD: number,
+  activeDebtUSD = 900,
+  averageAnnualInterestRatePercent: number | null = 6.25,
+  annualInterestRunRateUSD = 312.5,
+  activeTroveCount = 3,
+): CdpBorrowingRevenueMarket {
+  return {
+    collateralId: `42220-${symbol.toLowerCase()}`,
+    chainId: 42220,
+    collIndex: 0,
+    symbol,
+    activeDebtUSD,
+    averageAnnualInterestRatePercent,
+    annualInterestRunRateUSD,
+    activeTroveCount,
+    totalRevenueUSD,
+    upfrontFeesUSD,
+    accruedInterestUSD,
+    activeInterestBracketCount: 1,
+    unpricedSymbols: [],
+    bracketsTruncated: false,
+  };
+}
+
 vi.mock("@/hooks/use-protocol-fees", () => ({
   useProtocolFees: () => mockUseProtocolFees(),
 }));
@@ -45,7 +81,9 @@ vi.mock("@/components/fee-over-time-chart", () => ({
     return (
       <div
         data-fees-error={String(props.hasFeesError)}
+        data-borrowing-fees-error={String(props.hasBorrowingFeesError)}
         data-approximate={String(props.isApproximate)}
+        data-borrowing-approximate={String(props.isBorrowingFeesApproximate)}
       />
     );
   },
@@ -65,16 +103,27 @@ function renderRevenue(
   isLoading = false,
   cdpRevenue: {
     summary: CdpBorrowingRevenueSummary | null;
+    markets?: CdpBorrowingRevenueMarket[];
+    dailySeries?: CdpBorrowingFeeSeriesPoint[];
+    dailySeriesTruncated?: boolean;
+    dailySeriesApproximate?: boolean;
     isLoading: boolean;
     hasError: boolean;
   } = {
     summary: EMPTY_CDP_REVENUE,
+    markets: [],
     isLoading: false,
     hasError: false,
   },
 ) {
   mockUseProtocolFees.mockReturnValue({ networkData, isLoading });
-  mockUseCdpBorrowingRevenue.mockReturnValue(cdpRevenue);
+  mockUseCdpBorrowingRevenue.mockReturnValue({
+    markets: [],
+    dailySeries: [],
+    dailySeriesTruncated: false,
+    dailySeriesApproximate: false,
+    ...cdpRevenue,
+  });
   return renderToStaticMarkup(<RevenuePageClient />);
 }
 
@@ -99,7 +148,9 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(capturedProps.chart).toMatchObject({
       hasError: false,
       hasFeesError: true,
+      hasBorrowingFeesError: false,
       isApproximate: false,
+      isBorrowingFeesApproximate: false,
     });
     expect(capturedProps.table).toMatchObject({ hasError: true });
   });
@@ -126,7 +177,9 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(capturedProps.chart).toMatchObject({
       hasError: false,
       hasFeesError: false,
+      hasBorrowingFeesError: false,
       isApproximate: true,
+      isBorrowingFeesApproximate: false,
     });
     expect(capturedProps.table).toMatchObject({ hasError: false });
   });
@@ -141,6 +194,10 @@ describe("RevenuePageClient degraded fee states", () => {
         marketCount: 2,
         activeInterestBracketCount: 1,
       },
+      markets: [
+        cdpMarket("GBPm", 187.5, 125, 62.5),
+        cdpMarket("CHFm", 55, 55, 0),
+      ],
       isLoading: false,
       hasError: false,
     });
@@ -152,11 +209,30 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("Interest");
     expect(html).toContain("$62.50");
     expect(html).toContain(
-      "Upfront fees plus accrued interest from Liquity v2",
+      "Across 2 Celo CDP markets; upfront fees plus accrued interest",
     );
+    expect(html).toContain("Borrowing Fees by CDP");
+    expect(html).toContain("Debt");
+    expect(html).toContain("ø APR");
+    expect(html).toContain("Run/yr");
+    expect(html).toContain('aria-label="About ø APR"');
+    expect(html).toContain('aria-label="About Run/yr"');
+    expect(html).not.toContain(
+      'title="Debt-weighted average APR across active debt',
+    );
+    expect(html).toContain("GBPm");
+    expect(html).toContain("CHFm");
+    expect(html).toContain("$900.00");
+    expect(html).toContain("6.25%");
+    expect(html).toContain("$312.50");
+    expect(html).toContain("3 active troves");
+    expect(html).toContain("$187.50");
     expect(html).not.toContain("Requires Liquity v2 indexing");
     expect(html).toContain("Reserve Yield");
     expect(html).toContain("Requires external data source integration");
+    expect(capturedProps.chart).toMatchObject({
+      isBorrowingFeesApproximate: false,
+    });
   });
 
   it("marks CDP borrowing fees approximate when a debt token is unpriced", () => {
@@ -205,7 +281,24 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("interest brackets exceed pagination cap");
   });
 
-  it("isolates CDP borrowing fee failures from swap fee chart and table props", () => {
+  it("marks the total fee chart approximate when borrowing fee history uses the fallback series", () => {
+    renderRevenue([], false, {
+      summary: {
+        ...EMPTY_CDP_REVENUE,
+        totalRevenueUSD: 20,
+        accruedInterestUSD: 20,
+      },
+      dailySeriesApproximate: true,
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(capturedProps.chart).toMatchObject({
+      isBorrowingFeesApproximate: true,
+    });
+  });
+
+  it("marks the total fee chart partial when CDP borrowing fees fail", () => {
     const html = renderRevenue(
       [
         makeNetworkData({
@@ -233,6 +326,7 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(capturedProps.chart).toMatchObject({
       hasError: false,
       hasFeesError: false,
+      hasBorrowingFeesError: true,
       isApproximate: false,
     });
     expect(capturedProps.table).toMatchObject({ hasError: false });

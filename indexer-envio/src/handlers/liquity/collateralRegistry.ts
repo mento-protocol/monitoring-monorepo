@@ -47,7 +47,12 @@ indexer.onEvent(
     );
     instance = (await context.LiquityInstance.get(instance.id)) ?? instance;
     const next = touchLiquityInstance(
-      flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+      await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
+      ),
       blockNumber,
       blockTimestamp,
     );
@@ -84,7 +89,12 @@ indexer.onEvent(
       blockTimestamp,
     );
     const next = touchLiquityInstance(
-      flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+      await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
+      ),
       blockNumber,
       blockTimestamp,
     );
@@ -117,7 +127,12 @@ indexer.onEvent(
     );
     context.LiquityInstance.set(
       touchLiquityInstance(
-        flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+        await flushLiquitySnapshots(
+          context,
+          instance,
+          blockTimestamp,
+          blockNumber,
+        ),
         blockNumber,
         blockTimestamp,
       ),

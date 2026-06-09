@@ -18,34 +18,40 @@ export const removesFromBatch = (
 export async function moveTroveUpdatedInterestRateBracketDebt(
   context: TroveUpdatedBracketContext,
   args: {
+    chainId: number;
     collateralId: string;
     trove: Trove;
     pendingBatchOperation: PendingBatchOperation | undefined;
     annualInterestRate: bigint;
     debt: bigint;
     timestamp: bigint;
+    blockNumber: bigint;
   },
 ): Promise<void> {
   if (removesFromBatch(args.pendingBatchOperation)) {
     await moveInterestRateBracketDebt(context, {
+      chainId: args.chainId,
       collateralId: args.collateralId,
       prevRate: 0n,
       nextRate: args.annualInterestRate,
       prevDebt: 0n,
       nextDebt: args.debt,
       timestamp: args.timestamp,
+      blockNumber: args.blockNumber,
     });
     return;
   }
 
   if (tracksIndividualInterest(args.trove)) {
     await moveInterestRateBracketDebt(context, {
+      chainId: args.chainId,
       collateralId: args.collateralId,
       prevRate: args.trove.interestRate,
       nextRate: args.annualInterestRate,
       prevDebt: args.trove.debt,
       nextDebt: args.debt,
       timestamp: args.timestamp,
+      blockNumber: args.blockNumber,
     });
   }
 }

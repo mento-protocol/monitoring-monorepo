@@ -161,14 +161,16 @@ describe("RevenueByPoolTable — URL-driven sort wiring", () => {
   it("falls back to defaultKey/defaultDir aria-sort when URL is empty", () => {
     mockSearchParams = new URLSearchParams();
     const sort = render();
-    expect(sort["7d"]).toBe("descending");
+    expect(sort["All-time"]).toBe("descending");
+    expect(sort["7d"]).toBe("none");
     expect(sort["24h"]).toBe("none");
   });
 
   it("uses the revenue prefix (not pools) — wrong prefix would break this", () => {
     mockSearchParams = new URLSearchParams("poolsSort=fees24h&poolsDir=asc");
     const sort = render();
-    expect(sort["7d"]).toBe("descending");
+    expect(sort["All-time"]).toBe("descending");
+    expect(sort["7d"]).toBe("none");
     expect(sort["24h"]).toBe("none");
   });
 });

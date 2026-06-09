@@ -1,6 +1,7 @@
 import type {
   BorrowerInfo,
   InterestRateBracket,
+  LiquityBorrowingRevenueDailySnapshot,
   LiquityInstance,
   PendingBatchMembershipOperation,
   PendingBatchedTroveUpdate,
@@ -32,6 +33,12 @@ type BatchReplayContext = {
   InterestRateBracket: {
     get: (id: string) => Promise<InterestRateBracket | undefined>;
     set: (entity: InterestRateBracket) => void;
+  };
+  LiquityBorrowingRevenueDailySnapshot: {
+    get: (
+      id: string,
+    ) => Promise<LiquityBorrowingRevenueDailySnapshot | undefined>;
+    set: (entity: LiquityBorrowingRevenueDailySnapshot) => void;
   };
   PendingBatchMembershipOperation: {
     get: (id: string) => Promise<PendingBatchMembershipOperation | undefined>;
@@ -81,6 +88,7 @@ const statusFromBatchReplay = (
 async function moveBatchMembershipBracketDebt(
   context: BatchReplayContext,
   args: {
+    chainId: number;
     collateralId: string;
     troveDebt: bigint;
     troveInterestRate: bigint;
@@ -89,25 +97,30 @@ async function moveBatchMembershipBracketDebt(
     entersBatch: boolean;
     nextDebt: bigint;
     timestamp: bigint;
+    blockNumber: bigint;
   },
 ): Promise<void> {
   if (args.entersBatch) {
     await moveInterestRateBracketDebt(context, {
+      chainId: args.chainId,
       collateralId: args.collateralId,
       prevRate: args.troveInterestRate,
       nextRate: 0n,
       prevDebt: args.troveDebt,
       nextDebt: 0n,
       timestamp: args.timestamp,
+      blockNumber: args.blockNumber,
     });
   } else if (args.leavesBatch) {
     await moveInterestRateBracketDebt(context, {
+      chainId: args.chainId,
       collateralId: args.collateralId,
       prevRate: 0n,
       nextRate: args.opAnnualInterestRate,
       prevDebt: 0n,
       nextDebt: args.nextDebt,
       timestamp: args.timestamp,
+      blockNumber: args.blockNumber,
     });
   }
 }
@@ -162,6 +175,7 @@ export async function replayBatchedTroveUpdate(
   const entersBatch = trove.interestBatchId === undefined && !leavesBatch;
   const movesLeaveDebt = leavesBatch && trove.interestBatchId !== undefined;
   await moveBatchMembershipBracketDebt(context, {
+    chainId: args.chainId,
     collateralId: args.collateralId,
     troveDebt: trove.debt,
     troveInterestRate: trove.interestRate,
@@ -170,6 +184,7 @@ export async function replayBatchedTroveUpdate(
     entersBatch,
     nextDebt,
     timestamp: args.blockTimestamp,
+    blockNumber: args.blockNumber,
   });
   const transitioned = transitionTroveStatus(
     {

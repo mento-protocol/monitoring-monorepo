@@ -1,6 +1,7 @@
 import type {
   BorrowerInfo,
   InterestRateBracket,
+  LiquityBorrowingRevenueDailySnapshot,
   PendingBatchMembershipOperation,
   PendingBatchedTroveUpdate,
   PendingRedemption,
@@ -13,6 +14,7 @@ import {
   getOrCreateLiquityInstance,
   preloadLiquityMarket,
 } from "./bootstrap.js";
+import { recordBorrowingFeeAndApplyCum } from "./borrowingRevenue.js";
 import { replayBatchedTroveUpdate } from "./batchReplay.js";
 import {
   findLiquityMarketByEventSource,
@@ -44,22 +46,13 @@ import {
   applySystemDebtDelta,
   getOrCreateTrove,
   isPlaceholderClosedTrove,
-  makeInterestRateBracketId,
   makeTroveId,
   normalizeTroveTokenId,
   moveInterestRateBracketDebt,
-  statusFromDebt,
+  preloadInterestRateBracketDebt,
+  statusFromCollateral,
   transitionTroveStatus,
 } from "./troves.js";
-
-const statusFromCollateral = (
-  debt: bigint,
-  collateral: { minDebt: bigint; systemParamsLoaded: boolean } | undefined,
-): string => {
-  if (debt === 0n) return TROVE_STATUS.REDEEMED;
-  if (collateral?.systemParamsLoaded !== true) return TROVE_STATUS.ZOMBIE;
-  return statusFromDebt(debt, collateral.minDebt);
-};
 
 const isForcedOperation = (op: number): boolean =>
   op === OP.REDEEM_COLLATERAL ||
@@ -94,6 +87,12 @@ type TroveManagerPreloadContext = Parameters<typeof preloadSystemParams>[0] &
     InterestRateBracket: {
       get: (id: string) => Promise<InterestRateBracket | undefined>;
       set: (entity: InterestRateBracket) => void;
+    };
+    LiquityBorrowingRevenueDailySnapshot: {
+      get: (
+        id: string,
+      ) => Promise<LiquityBorrowingRevenueDailySnapshot | undefined>;
+      set: (entity: LiquityBorrowingRevenueDailySnapshot) => void;
     };
     BorrowerInfo: {
       get: (id: string) => Promise<BorrowerInfo | undefined>;
@@ -136,34 +135,6 @@ function isPendingBatchRemovalForBatch(
     pending.operation === OP.REMOVE_FROM_BATCH &&
     pending.interestBatchId === args.batchId
   );
-}
-
-async function preloadInterestRateBracketDebt(
-  context: TroveManagerPreloadContext,
-  args: {
-    collateralId: string;
-    prevRate: bigint;
-    nextRate: bigint;
-    prevDebt: bigint;
-    nextDebt: bigint;
-  },
-): Promise<void> {
-  const reads: Array<Promise<InterestRateBracket | undefined>> = [];
-  if (args.prevRate !== 0n && args.prevDebt !== 0n) {
-    reads.push(
-      context.InterestRateBracket.get(
-        makeInterestRateBracketId(args.collateralId, args.prevRate),
-      ),
-    );
-  }
-  if (args.nextRate !== 0n && args.nextDebt !== 0n) {
-    reads.push(
-      context.InterestRateBracket.get(
-        makeInterestRateBracketId(args.collateralId, args.nextRate),
-      ),
-    );
-  }
-  await Promise.all(reads);
 }
 
 async function preloadTroveAndMarket(
@@ -355,6 +326,40 @@ function transitionClosedTrove(
   };
 }
 
+function transitionLiquidatedTrove(
+  trove: Trove,
+  instance: LiquityInstance,
+  args: {
+    collChange: bigint;
+    debtChange: bigint;
+    blockTimestamp: bigint;
+    blockNumber: bigint;
+    txHash: string;
+  },
+): { trove: Trove; instance: LiquityInstance } {
+  const transitioned = transitionTroveStatus(
+    {
+      ...trove,
+      liquidatedColl: negativeToPositive(args.collChange),
+      liquidatedDebt: negativeToPositive(args.debtChange),
+      closedAt: args.blockTimestamp,
+      closedAtBlock: args.blockNumber,
+      closedTxHash: args.txHash,
+    },
+    TROVE_STATUS.LIQUIDATED,
+    instance,
+  );
+  return {
+    trove: transitioned.trove,
+    instance: {
+      ...transitioned.instance,
+      liqCountCum: transitioned.instance.liqCountCum + 1,
+      liqCountBucket: transitioned.instance.liqCountBucket + 1,
+      liqCountDayBucket: transitioned.instance.liqCountDayBucket + 1,
+    },
+  };
+}
+
 indexer.onEvent(
   { contract: "LiquityTroveManager", event: "TroveOperation" },
   async ({ event, context }) => {
@@ -387,7 +392,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
-    instance = flushLiquitySnapshots(
+    instance = await flushLiquitySnapshots(
       context,
       instance,
       blockTimestamp,
@@ -422,29 +427,13 @@ indexer.onEvent(
         txHash: event.transaction.hash,
       }));
     } else if (op === OP.LIQUIDATE) {
-      const transitioned = transitionTroveStatus(
-        {
-          ...trove,
-          liquidatedColl: negativeToPositive(
-            event.params._collChangeFromOperation,
-          ),
-          liquidatedDebt: negativeToPositive(
-            event.params._debtChangeFromOperation,
-          ),
-          closedAt: blockTimestamp,
-          closedAtBlock: blockNumber,
-          closedTxHash: event.transaction.hash,
-        },
-        TROVE_STATUS.LIQUIDATED,
-        instance,
-      );
-      trove = transitioned.trove;
-      instance = {
-        ...transitioned.instance,
-        liqCountCum: transitioned.instance.liqCountCum + 1,
-        liqCountBucket: transitioned.instance.liqCountBucket + 1,
-        liqCountDayBucket: transitioned.instance.liqCountDayBucket + 1,
-      };
+      ({ trove, instance } = transitionLiquidatedTrove(trove, instance, {
+        collChange: event.params._collChangeFromOperation,
+        debtChange: event.params._debtChangeFromOperation,
+        blockTimestamp,
+        blockNumber,
+        txHash: event.transaction.hash,
+      }));
     } else if (op === OP.REDEEM_COLLATERAL) {
       trove = {
         ...trove,
@@ -484,11 +473,13 @@ indexer.onEvent(
     }
 
     if (!forced) trove = { ...trove, lastUserActionAt: blockTimestamp };
-    instance = {
-      ...instance,
-      borrowingFeeCum:
-        instance.borrowingFeeCum + event.params._debtIncreaseFromUpfrontFee,
-    };
+    instance = await recordBorrowingFeeAndApplyCum(
+      context,
+      instance,
+      event.params._debtIncreaseFromUpfrontFee,
+      blockTimestamp,
+      blockNumber,
+    );
     // TroveOperation only flips status — debt arrives in TroveUpdated.
     instance = applySystemDebtDelta(instance, prevTroveState, {
       status: trove.status,
@@ -561,7 +552,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
-    instance = flushLiquitySnapshots(
+    instance = await flushLiquitySnapshots(
       context,
       instance,
       blockTimestamp,
@@ -584,12 +575,14 @@ indexer.onEvent(
       context.PendingBatchMembershipOperation.get(pendingId),
     ]);
     await moveTroveUpdatedInterestRateBracketDebt(context, {
+      chainId: event.chainId,
       collateralId,
       trove,
       pendingBatchOperation,
       annualInterestRate: event.params._annualInterestRate,
       debt: event.params._debt,
       timestamp: blockTimestamp,
+      blockNumber,
     });
 
     trove = applyTroveUpdatedFields(trove, {
@@ -716,12 +709,14 @@ indexer.onEvent(
     }
     const price = await loadLiquityPrice(context, market, blockNumber);
     await moveInterestRateBracketDebt(context, {
+      chainId: event.chainId,
       collateralId,
       prevRate: existing?.annualInterestRate ?? 0n,
       nextRate: event.params._annualInterestRate,
       prevDebt: existing?.debt ?? 0n,
       nextDebt: event.params._debt,
       timestamp: blockTimestamp,
+      blockNumber,
     });
     context.InterestBatch.set({
       id: batchId,
@@ -741,7 +736,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
-    instance = flushLiquitySnapshots(
+    instance = await flushLiquitySnapshots(
       context,
       instance,
       blockTimestamp,
@@ -805,11 +800,16 @@ indexer.onEvent(
       }
     }
 
-    context.LiquityInstance.set({
-      ...touchLiquityInstance(instance, blockNumber, blockTimestamp),
-      borrowingFeeCum:
-        instance.borrowingFeeCum + event.params._debtIncreaseFromUpfrontFee,
-    });
+    instance = await recordBorrowingFeeAndApplyCum(
+      context,
+      instance,
+      event.params._debtIncreaseFromUpfrontFee,
+      blockTimestamp,
+      blockNumber,
+    );
+    context.LiquityInstance.set(
+      touchLiquityInstance(instance, blockNumber, blockTimestamp),
+    );
   },
 );
 
@@ -852,7 +852,12 @@ indexer.onEvent(
       txHash: event.transaction.hash,
     });
     const next = touchLiquityInstance(
-      flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+      await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
+      ),
       blockNumber,
       blockTimestamp,
     );
@@ -918,7 +923,12 @@ indexer.onEvent(
       txHash: event.transaction.hash,
     });
     const next = touchLiquityInstance(
-      flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+      await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
+      ),
       blockNumber,
       blockTimestamp,
     );

@@ -1,10 +1,13 @@
 import type {
+  InterestRateBracket,
+  LiquityBorrowingRevenueDailySnapshot,
   LiquityInstance,
   LiquityInstanceDailySnapshot,
   LiquityInstanceSnapshot,
   StableSupplyDailySnapshot,
 } from "envio";
 import { dayBucket, hourBucket } from "../../helpers.js";
+import { flushBorrowingRevenueDailySnapshots } from "./borrowingRevenue.js";
 import { marketByCollateralId } from "./config.js";
 
 type SnapshotContext = {
@@ -14,6 +17,18 @@ type SnapshotContext = {
   };
   StableSupplyDailySnapshot: {
     set: (entity: StableSupplyDailySnapshot) => void;
+  };
+  InterestRateBracket: {
+    getWhere: (args: {
+      collateralId: { _eq: string };
+    }) => Promise<InterestRateBracket[]>;
+    set: (entity: InterestRateBracket) => void;
+  };
+  LiquityBorrowingRevenueDailySnapshot: {
+    get: (
+      id: string,
+    ) => Promise<LiquityBorrowingRevenueDailySnapshot | undefined>;
+    set: (entity: LiquityBorrowingRevenueDailySnapshot) => void;
   };
 };
 
@@ -55,12 +70,12 @@ const resetDayBuckets = (
   currentDayBucket: nextBucket,
 });
 
-export function flushLiquitySnapshots(
+export async function flushLiquitySnapshots(
   context: SnapshotContext,
   instance: LiquityInstance,
   timestamp: bigint,
   blockNumber: bigint,
-): LiquityInstance {
+): Promise<LiquityInstance> {
   let next = instance;
   const eventHour = hourBucket(timestamp);
   if (instance.currentHourBucket < eventHour) {
@@ -102,6 +117,13 @@ export function flushLiquitySnapshots(
 
   const eventDay = dayBucket(timestamp);
   if (instance.currentDayBucket < eventDay) {
+    await flushBorrowingRevenueDailySnapshots(
+      context,
+      instance,
+      timestamp,
+      blockNumber,
+    );
+
     context.LiquityInstanceDailySnapshot.set({
       id: `${instance.id}-${instance.currentDayBucket}`,
       chainId: instance.chainId,

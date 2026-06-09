@@ -315,11 +315,12 @@ describe("RebalanceStatusValue", () => {
       />,
     );
     // Content previously lived in the HealthPanel's Rebalance Details
-    // block — now folded into a native title so the header tells the
-    // full story on hover without a separate panel.
+    // block — now folded into the real InfoPopover trigger so the header
+    // tells the full story without relying on native `title` hover.
     expect(html).toContain(
-      'title="Stability pool has insufficient liquidity — Stability pool: 34.5k BOLD"',
+      'aria-label="Rebalance diagnostics: Stability pool has insufficient liquidity — Stability pool: 34.5k BOLD"',
     );
+    expect(html).not.toContain('title="Stability pool has insufficient');
     expect(html).not.toContain("CDPLS_STABILITY_POOL_BALANCE_TOO_LOW");
   });
 
@@ -342,7 +343,12 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain('title="[CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"');
+    expect(html).toContain(
+      'aria-label="Rebalance diagnostics: [CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"',
+    );
+    expect(html).not.toContain(
+      'title="[CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"',
+    );
   });
 
   it("trims blank prose before falling back to the raw error", () => {
@@ -364,8 +370,11 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain('title="[CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"');
-    expect(html).not.toContain('title="  —');
+    expect(html).toContain(
+      'aria-label="Rebalance diagnostics: [CDPLS_STABILITY_POOL_BALANCE_TOO_LOW]"',
+    );
+    expect(html).not.toContain('aria-label="Rebalance diagnostics:   —');
+    expect(html).not.toContain('title="');
   });
 
   it("keeps non-identifier raw errors alongside the prose message", () => {
@@ -388,8 +397,9 @@ describe("RebalanceStatusValue", () => {
       />,
     );
     expect(html).toContain(
-      'title="Rebalance reverted with an unrecognized error — [0x12345678]"',
+      'aria-label="Rebalance diagnostics: Rebalance reverted with an unrecognized error — [0x12345678]"',
     );
+    expect(html).not.toContain('title="Rebalance reverted');
   });
 
   it("renders a focusable info icon beside 'Rebalance blocked' so the detail is keyboard-reachable", () => {

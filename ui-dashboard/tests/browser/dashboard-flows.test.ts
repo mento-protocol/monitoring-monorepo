@@ -357,13 +357,14 @@ test.describe("dashboard browser flows", () => {
       name: /Rebalance diagnostics: Stability pool has insufficient liquidity/,
     });
     await expect(diagnostics).toHaveAttribute(
-      "title",
-      "Stability pool has insufficient liquidity — Stability pool: 5.0k GBPm",
+      "aria-label",
+      "Rebalance diagnostics: Stability pool has insufficient liquidity — Stability pool: 5.0k GBPm",
     );
     await expect(diagnostics).not.toHaveAttribute(
-      "title",
+      "aria-label",
       /CDPLS_STABILITY_POOL_BALANCE_TOO_LOW/,
     );
+    await expect(diagnostics).not.toHaveAttribute("title", /.+/);
 
     await diagnostics.click();
     const tooltip = page.getByRole("tooltip");

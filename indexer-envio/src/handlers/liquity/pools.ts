@@ -8,6 +8,8 @@ import type { LiquityBootstrapContext } from "./bootstrap.js";
 import { findLiquityMarketByEventSource } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import type {
+  InterestRateBracket,
+  LiquityBorrowingRevenueDailySnapshot,
   LiquityInstanceDailySnapshot,
   LiquityInstanceSnapshot,
   StableSupplyDailySnapshot,
@@ -21,6 +23,18 @@ type PoolGaugeContext = LiquityBootstrapContext & {
   };
   StableSupplyDailySnapshot: {
     set: (entity: StableSupplyDailySnapshot) => void;
+  };
+  InterestRateBracket: {
+    getWhere: (args: {
+      collateralId: { _eq: string };
+    }) => Promise<InterestRateBracket[]>;
+    set: (entity: InterestRateBracket) => void;
+  };
+  LiquityBorrowingRevenueDailySnapshot: {
+    get: (
+      id: string,
+    ) => Promise<LiquityBorrowingRevenueDailySnapshot | undefined>;
+    set: (entity: LiquityBorrowingRevenueDailySnapshot) => void;
   };
 };
 
@@ -60,7 +74,7 @@ async function updatePoolGauge({
     blockTimestamp,
   );
   const next = touchLiquityInstance(
-    flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
+    await flushLiquitySnapshots(context, instance, blockTimestamp, blockNumber),
     blockNumber,
     blockTimestamp,
   );

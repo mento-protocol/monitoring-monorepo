@@ -137,6 +137,7 @@ export default tseslint.config(
   {
     ignores: [
       "**/node_modules/**",
+      "coverage/**",
       "generated/**",
       ".envio/**",
       "envio-env.d.ts",

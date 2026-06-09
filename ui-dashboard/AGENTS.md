@@ -75,7 +75,10 @@ pnpm dev --hostname 127.0.0.1 --port 3210
 
 The required local data env is:
 
-- `NEXT_PUBLIC_HASURA_URL` for hosted multichain Hasura data.
+- `NEXT_PUBLIC_HASURA_URL` for hosted multichain Hasura data. `pnpm dev`
+  defaults to the live production Envio endpoint when this is unset, so fresh
+  worktrees use real data without copying `.env.local`. Set it explicitly only
+  when you need a non-prod or fixture endpoint.
 - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` when address labels,
   reports, entities, or authenticated editing surfaces need real data.
 - `AUTH_SECRET`, `AUTH_GOOGLE_ID`, and `AUTH_GOOGLE_SECRET` for local Auth.js
@@ -217,7 +220,7 @@ The dashboard supports multiple network targets (all defined in `src/lib/network
 
 Token symbols and address labels come from `@mento-protocol/monitoring-config/tokens` — the shared derivation also used by metrics-bridge. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
 
-Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Explorer URL defaults come from `@mento-protocol/monitoring-config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
+Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. The package `dev` script supplies the live endpoint by default for local worktrees; explicit env values still override it. Explorer URL defaults come from `@mento-protocol/monitoring-config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
 
 ## Notes
 

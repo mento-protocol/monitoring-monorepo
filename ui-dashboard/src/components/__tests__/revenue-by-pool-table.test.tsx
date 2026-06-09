@@ -27,7 +27,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { NetworkData } from "@/lib/fetch-all-networks";
+import type { NetworkData, PoolLabel } from "@/lib/fetch-all-networks";
 import type { PoolDailyFeeSnapshot } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -72,6 +72,7 @@ import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
 // ---------------------------------------------------------------------------
 
 const POOL_ADDR = "0xaaaa000000000000000000000000000000000001";
+const POOL_ADDR_B = "0xbbbb000000000000000000000000000000000002";
 const CHAIN = 42220;
 const SECS_PER_DAY = 86_400;
 const NOW_S = Math.floor(Date.now() / 1000);
@@ -149,6 +150,19 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     snapshotsAllDailyError: null,
     brokerSnapshotsAllDailyError: null,
     lpError: null,
+  };
+}
+
+function poolLabel(
+  poolAddress: string,
+  overrides: Partial<PoolLabel> = {},
+): PoolLabel {
+  return {
+    id: `${CHAIN}-${poolAddress}`,
+    token0: "0xusd",
+    token1: "0xgbp",
+    source: "fpmm_factory",
+    ...overrides,
   };
 }
 
@@ -268,6 +282,28 @@ describe("RevenueByPoolTable — snapshot path", () => {
       />,
     );
     expect(html).toContain("No swap-fee transfers indexed yet");
+  });
+
+  it("renders every loaded pool, including pools with no fee snapshots yet", () => {
+    const network = networkData([feeSnapshot({ poolAddress: POOL_ADDR })]);
+    network.poolLabels = new Map([
+      [POOL_ADDR, poolLabel(POOL_ADDR)],
+      [POOL_ADDR_B, poolLabel(POOL_ADDR_B)],
+    ]);
+
+    const html = renderToStaticMarkup(
+      <RevenueByPoolTable
+        networkData={[network]}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+
+    expect(html).toContain(`/pool/${CHAIN}-${POOL_ADDR}`);
+    expect(html).toContain(`/pool/${CHAIN}-${POOL_ADDR_B}`);
+    expect(html).toContain("$1.00");
+    expect(html).toContain("$0.00");
+    expect(html).not.toContain("No swap-fee transfers indexed yet");
   });
 
   it("SKIPS chains with ratesError so FX slots don't mis-price as unpriced", () => {
@@ -394,12 +430,21 @@ function poolNamesInOrder(container: HTMLElement): string[] {
 }
 
 /** Build a NetworkData with two pools at controllable fee levels. */
-function twoPoolNetwork(): NetworkData {
+function allTimeDominantNetwork(): NetworkData {
   const POOL_A = "0xaaaa000000000000000000000000000000000001";
   const POOL_B = "0xbbbb000000000000000000000000000000000002";
-  // Pool A: $1 fee. Pool B: $5 fee. Both today's bucket so they land in
-  // 24h/7d/30d/all windows simultaneously.
+  const oldDay = String(
+    Math.floor((NOW_S - 180 * SECS_PER_DAY) / SECS_PER_DAY) * SECS_PER_DAY,
+  );
+  // Pool A has larger all-time revenue ($10 old + $1 today), while Pool B
+  // has larger recent-window revenue ($5 today). This makes the default
+  // all-time sort observably different from the previous 7d default.
   const snapshots: PoolDailyFeeSnapshot[] = [
+    feeSnapshot({
+      poolAddress: POOL_A,
+      timestamp: oldDay,
+      feesUsdWei: "10000000000000000000", // $10
+    }),
     feeSnapshot({
       poolAddress: POOL_A,
       feesUsdWei: "1000000000000000000", // $1
@@ -431,74 +476,80 @@ describe("RevenueByPoolTable — sort transitions", () => {
     }
   });
 
-  it("default sort is fees7d desc — bigger row first, aria-sort wired", () => {
-    handle = renderInteractive([twoPoolNetwork()]);
-    // Default state from useTableSort: { defaultKey: "fees7d", defaultDir: "desc" }.
-    expect(ariaSortFor(handle.container, "7d")).toBe("descending");
+  it("default sort is All-time desc — largest lifetime row first, aria-sort wired", () => {
+    handle = renderInteractive([allTimeDominantNetwork()]);
+    // Default state from useTableSort: { defaultKey: "feesAll", defaultDir: "desc" }.
+    expect(ariaSortFor(handle.container, "All-time")).toBe("descending");
+    expect(ariaSortFor(handle.container, "7d")).toBe("none");
     expect(ariaSortFor(handle.container, "24h")).toBe("none");
     expect(ariaSortFor(handle.container, "Pool")).toBe("none");
-    // Pool B ($5) renders before Pool A ($1) under fees7d desc.
+    expect(window.location.search).toBe("");
+    // Pool A ($11 all-time) renders before Pool B ($5 all-time).
     const names = poolNamesInOrder(handle.container);
     expect(names).toHaveLength(2);
-    expect(names[0]).toContain("0xbbbb");
-    expect(names[1]).toContain("0xaaaa");
+    expect(names[0]).toContain("0xaaaa");
+    expect(names[1]).toContain("0xbbbb");
   });
 
-  it("clicking the active fees7d header toggles desc → asc — rows flip", () => {
-    handle = renderInteractive([twoPoolNetwork()]);
-    const btn = headerButton(handle.container, "7d");
+  it("clicking the active All-time header toggles desc → asc and writes URL state", () => {
+    handle = renderInteractive([allTimeDominantNetwork()]);
+    const btn = headerButton(handle.container, "All-time");
 
     act(() => {
       btn.click();
     });
 
-    expect(ariaSortFor(handle.container, "7d")).toBe("ascending");
-    // Smaller fee row (Pool A, $1) now first.
-    const names = poolNamesInOrder(handle.container);
-    expect(names[0]).toContain("0xaaaa");
-    expect(names[1]).toContain("0xbbbb");
-  });
-
-  it("clicking fees7d twice cycles desc → asc → desc", () => {
-    handle = renderInteractive([twoPoolNetwork()]);
-    const btn = headerButton(handle.container, "7d");
-
-    act(() => {
-      btn.click(); // → asc
-    });
-    expect(ariaSortFor(handle.container, "7d")).toBe("ascending");
-
-    act(() => {
-      btn.click(); // → desc again
-    });
-    expect(ariaSortFor(handle.container, "7d")).toBe("descending");
-    // And rows are back to bigger-first order.
+    expect(ariaSortFor(handle.container, "All-time")).toBe("ascending");
+    expect(window.location.search).toBe("?revenueSort=feesAll&revenueDir=asc");
+    // Smaller all-time row (Pool B, $5) now first.
     const names = poolNamesInOrder(handle.container);
     expect(names[0]).toContain("0xbbbb");
     expect(names[1]).toContain("0xaaaa");
   });
 
+  it("clicking All-time twice cycles desc → asc → desc and clears default URL params", () => {
+    handle = renderInteractive([allTimeDominantNetwork()]);
+    const btn = headerButton(handle.container, "All-time");
+
+    act(() => {
+      btn.click(); // → asc
+    });
+    expect(ariaSortFor(handle.container, "All-time")).toBe("ascending");
+    expect(window.location.search).toBe("?revenueSort=feesAll&revenueDir=asc");
+
+    act(() => {
+      btn.click(); // → desc again
+    });
+    expect(ariaSortFor(handle.container, "All-time")).toBe("descending");
+    expect(window.location.search).toBe("");
+    // And rows are back to bigger-first order.
+    const names = poolNamesInOrder(handle.container);
+    expect(names[0]).toContain("0xaaaa");
+    expect(names[1]).toContain("0xbbbb");
+  });
+
   it("clicking a different column resets to defaultDir (desc) and updates aria-sort", () => {
-    handle = renderInteractive([twoPoolNetwork()]);
-    // Initially fees7d is descending.
-    expect(ariaSortFor(handle.container, "7d")).toBe("descending");
+    handle = renderInteractive([allTimeDominantNetwork()]);
+    // Initially All-time is descending.
+    expect(ariaSortFor(handle.container, "All-time")).toBe("descending");
     expect(ariaSortFor(handle.container, "24h")).toBe("none");
 
     act(() => {
       headerButton(handle!.container, "24h").click();
     });
 
-    // 24h becomes the active column, defaults to descending; 7d goes back to none.
+    // 24h becomes the active column, defaults to descending; All-time goes back to none.
     expect(ariaSortFor(handle.container, "24h")).toBe("descending");
-    expect(ariaSortFor(handle.container, "7d")).toBe("none");
-    // Same data magnitude order in 24h ⇒ Pool B still first.
+    expect(ariaSortFor(handle.container, "All-time")).toBe("none");
+    expect(window.location.search).toBe("?revenueSort=fees24h&revenueDir=desc");
+    // Pool B has the larger 24h fee ($5 vs $1).
     const names = poolNamesInOrder(handle.container);
     expect(names[0]).toContain("0xbbbb");
     expect(names[1]).toContain("0xaaaa");
   });
 
   it("clicking the Pool (string) header sorts by display name desc → asc", () => {
-    handle = renderInteractive([twoPoolNetwork()]);
+    handle = renderInteractive([allTimeDominantNetwork()]);
     // Pool labels are empty in this fixture, so display = truncateAddress(addr).
     // Truncated forms: "0xaaaa…0001" and "0xbbbb…0002". Local-compare on those.
     act(() => {

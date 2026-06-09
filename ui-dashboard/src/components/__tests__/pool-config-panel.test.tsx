@@ -147,8 +147,9 @@ describe("PoolConfigPanel", () => {
       };
       const html = renderToStaticMarkup(<PoolConfigPanel pool={pool} />);
       expect(html).toMatch(/Rebalance Threshold[\s\S]*?Never/);
-      expect(html).toContain(
-        "Governance has disabled rebalancing for this pool",
+      expect(html).toContain('aria-label="Rebalance Threshold"');
+      expect(html).not.toContain(
+        'title="Governance has disabled rebalancing for this pool"',
       );
     });
 
@@ -188,10 +189,10 @@ describe("PoolConfigPanel", () => {
       expect(html).toMatch(/Swap Fee[\s\S]*?—/);
     });
 
-    it("exposes the LP/Protocol breakdown in the InfoPopover content", () => {
+    it("renders a real InfoPopover trigger for the LP/Protocol breakdown", () => {
       const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
-      expect(html).toContain("LP fee (0.03%)");
-      expect(html).toContain("protocol fee (0.02%)");
+      expect(html).toContain('aria-label="Swap Fee"');
+      expect(html).not.toContain('title="LP fee (0.03%)');
     });
   });
 

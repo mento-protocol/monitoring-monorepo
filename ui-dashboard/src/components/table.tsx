@@ -57,6 +57,7 @@ export function Td({
   muted,
   align = "left",
   title,
+  className,
 }: {
   children: ReactNode;
   mono?: boolean;
@@ -64,6 +65,7 @@ export function Td({
   muted?: boolean;
   align?: "left" | "right";
   title?: string;
+  className?: string;
 }) {
   const cls = [
     "px-2 sm:px-4 py-1.5 sm:py-2",
@@ -71,6 +73,7 @@ export function Td({
     small ? "text-[10px] sm:text-xs" : "text-xs sm:text-sm",
     muted ? "text-slate-400" : "text-slate-300",
     align === "right" && "text-right",
+    className,
   ]
     .filter(Boolean)
     .join(" ");

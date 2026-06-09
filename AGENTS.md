@@ -466,7 +466,14 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 ## Environment
 
 - Indexer needs Docker for local dev (Postgres + Hasura containers)
-- Dashboard localhost UI review needs `NEXT_PUBLIC_HASURA_URL`; real address-label/authenticated surfaces also need `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and local Auth.js placeholders (`AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`). See `ui-dashboard/AGENTS.md` for the logged-in/logged-out verification workflow and local session-cookie recipe.
+- Dashboard localhost UI review defaults to the live production Envio endpoint
+  when `NEXT_PUBLIC_HASURA_URL` is unset, so fresh worktrees should verify
+  against real pool/CDP data by default. Set `NEXT_PUBLIC_HASURA_URL` only when
+  a task explicitly needs a non-prod or fixture endpoint. Real
+  address-label/authenticated surfaces also need `UPSTASH_REDIS_REST_URL`,
+  `UPSTASH_REDIS_REST_TOKEN`, and local Auth.js placeholders (`AUTH_SECRET`,
+  `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`). See `ui-dashboard/AGENTS.md` for the
+  logged-in/logged-out verification workflow and local session-cookie recipe.
 - Production env vars are managed by Terraform except Vercel Blob OIDC variables, which are managed by the Vercel store integration — see `terraform/terraform.tfvars.example`
 - See root README.md for full env var documentation
 

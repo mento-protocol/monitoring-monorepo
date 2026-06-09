@@ -1114,6 +1114,20 @@ type InterestRateBracket @index(fields: ["collateralId", "rate"]) {
   updatedAt: BigInt!
 }
 
+type LiquityBorrowingRevenueDailySnapshot
+  @index(fields: ["instanceId", "timestamp"])
+  @index(fields: ["chainId", "timestamp"]) {
+  id: ID!
+  chainId: Int! @index
+  collateralId: String! @index
+  instanceId: String! @index
+  timestamp: BigInt! @index
+  upfrontFee: BigInt!
+  accruedInterest: BigInt!
+  blockNumber: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
 type InterestBatch {
   id: ID!
   collateralId: String! @index

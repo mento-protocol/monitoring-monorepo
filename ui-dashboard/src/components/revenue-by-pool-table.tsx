@@ -12,6 +12,7 @@ import { aggregateFeeSnapshotsByPool } from "@/lib/protocol-fee-snapshots";
 import { buildPoolDetailHref } from "@/lib/routing";
 import type { NetworkData, PoolLabel } from "@/lib/fetch-all-networks";
 import type { Network } from "@/lib/networks";
+import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import type { SortDir } from "@/lib/table-sort";
 import { useTableSort } from "@/lib/use-table-sort";
 
@@ -20,11 +21,10 @@ type PoolFeeRow = PoolFeeEntry & {
   label: PoolLabel | null;
 };
 
-type SortKey = "pool" | "chain" | "fees24h" | "fees7d" | "fees30d" | "feesAll";
+type SortKey = "pool" | "fees24h" | "fees7d" | "fees30d" | "feesAll";
 
 const SORT_KEYS: ReadonlySet<SortKey> = new Set([
   "pool",
-  "chain",
   "fees24h",
   "fees7d",
   "fees30d",
@@ -95,15 +95,51 @@ function buildRows(networkData: NetworkData[]): PoolFeeRow[] {
       n.rates,
       n.network.chainId,
     );
-    for (const e of entries) {
+    const feeRowsByAddress = new Map(entries.map((e) => [e.poolAddress, e]));
+    const labelsByAddress = new Map<string, PoolLabel>(n.poolLabels);
+    for (const p of n.pools) {
+      labelsByAddress.set(stripChainIdFromPoolId(p.id).toLowerCase(), p);
+    }
+
+    for (const [poolAddress, label] of labelsByAddress) {
+      const feeRow = feeRowsByAddress.get(poolAddress);
       rows.push({
-        ...e,
+        ...(feeRow ?? zeroFeeEntry(label, poolAddress, n.network.chainId)),
         network: n.network,
-        label: n.poolLabels.get(e.poolAddress) ?? null,
+        label,
+      });
+      feeRowsByAddress.delete(poolAddress);
+    }
+
+    for (const feeRow of feeRowsByAddress.values()) {
+      rows.push({
+        ...feeRow,
+        network: n.network,
+        label: null,
       });
     }
   }
   return rows;
+}
+
+function zeroFeeEntry(
+  label: PoolLabel,
+  poolAddress: string,
+  chainId: number,
+): PoolFeeEntry {
+  return {
+    poolId: label.id,
+    chainId,
+    poolAddress,
+    totalFeesUSD: 0,
+    fees24hUSD: 0,
+    fees7dUSD: 0,
+    fees30dUSD: 0,
+    unpriced: false,
+    unpriced24h: false,
+    unpriced7d: false,
+    unpriced30d: false,
+  };
 }
 
 function rowDisplayName(row: PoolFeeRow): string {
@@ -116,8 +152,6 @@ function rowSortValue(row: PoolFeeRow, key: SortKey): number | string | null {
   switch (key) {
     case "pool":
       return rowDisplayName(row);
-    case "chain":
-      return row.network.label;
     case "fees24h":
       return row.fees24hUSD;
     case "fees7d":
@@ -183,6 +217,90 @@ function Heading() {
   );
 }
 
+function RevenueTableHeader({
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  return (
+    <thead>
+      <tr className="border-b border-slate-800 bg-slate-900/50">
+        <SortableTh
+          sortKey="pool"
+          activeSortKey={sortKey}
+          sortDir={sortDir}
+          onSort={onSort}
+        >
+          Pool
+        </SortableTh>
+        {FEE_COLUMNS.map((c) => (
+          <SortableTh
+            key={c.key}
+            sortKey={c.key}
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={onSort}
+            align="right"
+            className={c.className}
+          >
+            {c.label}
+          </SortableTh>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
+function FeeCell({ row, column }: { row: PoolFeeRow; column: FeeColumn }) {
+  const { prefix, title } = approxAnnotation(row, column);
+  return (
+    <td
+      className={`${column.className ?? ""} px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-300 font-mono text-right`}
+      title={title}
+    >
+      {prefix}
+      {formatUSD(row[column.field])}
+    </td>
+  );
+}
+
+function RevenueTableRow({ row }: { row: PoolFeeRow }) {
+  const display = rowDisplayName(row);
+  const href = buildPoolDetailHref(row.poolId);
+  return (
+    <Row>
+      <td className="px-2 sm:px-4 py-2 sm:py-3">
+        <div className="flex items-center gap-2">
+          <ChainIcon network={row.network} />
+          <Link
+            href={href}
+            className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
+          >
+            {display}
+          </Link>
+        </div>
+      </td>
+      {FEE_COLUMNS.map((column) => (
+        <FeeCell key={column.key} row={row} column={column} />
+      ))}
+    </Row>
+  );
+}
+
+function RevenueTableBody({ rows }: { rows: PoolFeeRow[] }) {
+  return (
+    <tbody>
+      {rows.map((row) => (
+        <RevenueTableRow key={row.poolId} row={row} />
+      ))}
+    </tbody>
+  );
+}
+
 export function RevenueByPoolTable({
   networkData,
   isLoading,
@@ -190,7 +308,7 @@ export function RevenueByPoolTable({
 }: RevenueByPoolTableProps) {
   const rows = useMemo(() => buildRows(networkData), [networkData]);
   const { sortKey, sortDir, handleSort } = useTableSort<SortKey>({
-    defaultKey: "fees7d",
+    defaultKey: "feesAll",
     defaultDir: "desc",
     validKeys: SORT_KEYS,
     paramPrefix: "revenue",
@@ -234,80 +352,12 @@ export function RevenueByPoolTable({
         </p>
       ) : null}
       <Table>
-        <thead>
-          <tr className="border-b border-slate-800 bg-slate-900/50">
-            <SortableTh
-              sortKey="pool"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-            >
-              Pool
-            </SortableTh>
-            <SortableTh
-              sortKey="chain"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-              className="hidden sm:table-cell"
-            >
-              Chain
-            </SortableTh>
-            {FEE_COLUMNS.map((c) => (
-              <SortableTh
-                key={c.key}
-                sortKey={c.key}
-                activeSortKey={sortKey}
-                sortDir={sortDir}
-                onSort={handleSort}
-                align="right"
-                className={c.className}
-              >
-                {c.label}
-              </SortableTh>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((row) => {
-            const display = rowDisplayName(row);
-            const href = buildPoolDetailHref(row.poolId);
-            return (
-              <Row key={row.poolId}>
-                <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <div className="flex items-center gap-2">
-                    <ChainIcon network={row.network} />
-                    <Link
-                      href={href}
-                      className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
-                    >
-                      {display}
-                    </Link>
-                  </div>
-                </td>
-                <td
-                  className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-400"
-                  title={row.network.label}
-                >
-                  {row.network.label}
-                </td>
-                {FEE_COLUMNS.map((c) => {
-                  const { prefix, title } = approxAnnotation(row, c);
-                  return (
-                    <td
-                      key={c.key}
-                      className={`${c.className ?? ""} px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-300 font-mono text-right`}
-                      title={title}
-                    >
-                      {prefix}
-                      {formatUSD(row[c.field])}
-                    </td>
-                  );
-                })}
-              </Row>
-            );
-          })}
-        </tbody>
+        <RevenueTableHeader
+          sortKey={sortKey}
+          sortDir={sortDir}
+          onSort={handleSort}
+        />
+        <RevenueTableBody rows={sorted} />
       </Table>
     </section>
   );

@@ -34,6 +34,7 @@ describe("InfoPopover", () => {
 
     const button = container.querySelector("button")!;
     expect(button.getAttribute("aria-describedby")).toBeNull();
+    expect(button.hasAttribute("title")).toBe(false);
 
     act(() => {
       button.click();
@@ -44,5 +45,48 @@ describe("InfoPopover", () => {
     expect(tooltipId).toBeTruthy();
     expect(button.getAttribute("aria-controls")).toBe(tooltipId);
     expect(button.getAttribute("aria-describedby")).toBe(tooltipId);
+  });
+
+  it("can use text as the popover trigger", () => {
+    act(() => {
+      root.render(
+        <InfoPopover label="About APR" content="Debt-weighted average APR">
+          ø APR
+        </InfoPopover>,
+      );
+    });
+
+    const button = container.querySelector("button")!;
+    expect(button.textContent).toBe("ø APR");
+
+    act(() => {
+      button.click();
+    });
+
+    expect(container.querySelector('[role="tooltip"]')?.textContent).toBe(
+      "Debt-weighted average APR",
+    );
+  });
+
+  it("opens the real tooltip on focus without a native title fallback", () => {
+    act(() => {
+      root.render(
+        <InfoPopover label="About APR" content="Debt-weighted average APR">
+          ø APR
+        </InfoPopover>,
+      );
+    });
+
+    const button = container.querySelector("button")!;
+    expect(button.hasAttribute("title")).toBe(false);
+
+    act(() => {
+      button.focus();
+    });
+
+    expect(container.querySelector('[role="tooltip"]')?.textContent).toBe(
+      "Debt-weighted average APR",
+    );
+    expect(button.getAttribute("aria-describedby")).toBeTruthy();
   });
 });
