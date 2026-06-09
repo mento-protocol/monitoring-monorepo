@@ -149,3 +149,6 @@ export function countImportLabels(parsed: unknown): number {
 
   return 0;
 }
+
+// ARM-compat-test trigger: comment-only change so the size-limit, ui, and
+// lighthouse workflows run on this PR. Reverted before any merge.
