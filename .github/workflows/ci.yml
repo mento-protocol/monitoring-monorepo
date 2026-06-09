@@ -302,6 +302,31 @@ jobs:
           fi
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
+      - name: Cache Playwright Chromium
+        # `playwright install chromium` re-downloads ~130 MB on every run
+        # otherwise (~84s of uncached CI time). The cache key hashes BOTH
+        # `ui-dashboard/package.json` (the version range, e.g. `^1.60.0`)
+        # AND `pnpm-lock.yaml` (the resolved version pnpm actually picks).
+        # Keying on package.json alone misses lockfile-only
+        # `@playwright/test` updates within the caret range — in that case
+        # the key would stay constant while the Chromium revision Playwright
+        # wants flips, so every run restores the stale cache, the install
+        # step re-downloads, but actions/cache won't re-save under the
+        # already-hit key, so the next run re-downloads again indefinitely.
+        # Hashing the lockfile makes the key flip on any real Playwright
+        # version bump. Mirrors the proven step in lighthouse.yml.
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
+          # `restore-keys` lets an unrelated lockfile or `package.json`
+          # edit still reuse the most recent chromium cache instead of
+          # triggering a ~130 MB fresh download. `playwright install` then
+          # fast-validates the existing binary against the version it wants
+          # (no-op on match, re-download only on a real Playwright version
+          # bump). `--with-deps` still installs OS libraries (fast).
+          restore-keys: |
+            playwright-chromium-
       - name: Install Playwright Chromium
         run: pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
       - name: Browser interaction tests
