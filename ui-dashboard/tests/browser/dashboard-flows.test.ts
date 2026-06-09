@@ -100,14 +100,15 @@ async function globalPoolsTableMetrics(page: Page) {
         document.documentElement.clientWidth,
       tableOverflow:
         wrapper !== null && wrapper.scrollWidth > wrapper.clientWidth + 1,
-      reserveRows: [...table.querySelectorAll("tbody tr")]
-        .map((row) => ({
-          pool: row.querySelector('a[href^="/pool/"]')?.textContent?.trim(),
-          reserve: row
-            .querySelector('[aria-label^="Reserve composition:"]')
-            ?.getAttribute("aria-label"),
-        }))
-        .filter((row) => row.pool && row.reserve),
+      reserveRows: [...table.querySelectorAll("tbody tr")].flatMap((row) => {
+        const pool = row
+          .querySelector('a[href^="/pool/"]')
+          ?.textContent?.trim();
+        const reserve = row
+          .querySelector('[aria-label^="Reserve composition:"]')
+          ?.getAttribute("aria-label");
+        return pool && reserve ? [{ pool, reserve }] : [];
+      }),
     };
   });
 }
@@ -153,6 +154,7 @@ test.describe("dashboard browser flows", () => {
   }) => {
     for (const path of ["/", "/pools"]) {
       for (const width of [1440, 1024, 390]) {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Playwright drives a single shared page; viewport sizing + navigation must run sequentially, not via Promise.all.
         await page.setViewportSize({ width, height: 900 });
         await page.goto(path);
         await expect(
@@ -168,6 +170,7 @@ test.describe("dashboard browser flows", () => {
           const firstSymbol = pool.split("/")[0];
           if (!firstSymbol) continue;
           expect(
+            // react-doctor-disable-next-line react-doctor/js-set-map-lookups -- reserve is a string; indexOf/lastIndexOf are string position searches, not array membership lookups.
             reserve.indexOf(firstSymbol),
             `${path} ${width}px ${pool} reserve label`,
           ).toBeLessThan(reserve.lastIndexOf("USDm"));
