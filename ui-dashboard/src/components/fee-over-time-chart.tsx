@@ -525,7 +525,6 @@ export function FeeOverTimeChart({
   const isChartLoading = isLoading || isBorrowingFeesLoading;
   const hasAnyFeeError = hasError || hasFeesError || hasBorrowingFeesError;
   const isChartApproximate = isApproximate || isBorrowingFeesApproximate;
-  const approxPrefix = isChartApproximate ? "≈ " : "";
   // Fail closed: match the tile's behavior — show N/A when any chain's
   // fee fetch failed, not just when the series is empty. This prevents the
   // chart from showing a partial cross-stream total as if it were complete.
@@ -533,7 +532,7 @@ export function FeeOverTimeChart({
     ? "…"
     : hasAnyFeeError
       ? "N/A"
-      : `${approxPrefix}${formatUSD(rangeTotal)}`;
+      : `${isChartApproximate ? "≈ " : ""}${formatUSD(rangeTotal)}`;
 
   // Suppress WoW delta when data is incomplete — a partial-chain
   // comparison is misleading.
@@ -546,8 +545,8 @@ export function FeeOverTimeChart({
     () => buildFeeChartFigure(visibleSeries, hasBorrowingFees),
     [visibleSeries, hasBorrowingFees],
   );
-
-  const showEmptyState = !isChartLoading && visibleSeries.length === 0;
+  const showEmptyState =
+    !isChartLoading && (visibleSeries.length === 0 || hasAnyFeeError);
   const emptyMessage = hasError
     ? "Unable to load fee history"
     : hasFeesError || hasBorrowingFeesError
