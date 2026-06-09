@@ -586,8 +586,11 @@ describe("CdpDetailClient", () => {
       `a[href="https://app.mento.org/borrow/manage/${troveId}?token=GBPm"]`,
     );
     expect(link).not.toBeNull();
-    expect(link?.textContent).toBe(troveId);
-    expect(link?.textContent).not.toContain("#");
+    // Display text is middle-ellipsized to avoid blowing out the column width;
+    // the full id stays in the href + title (and never carries a `#` prefix).
+    expect(link?.textContent).toBe("0x5f23…3ac4");
+    expect(link?.getAttribute("title")).toBe(troveId);
+    expect(link?.getAttribute("href")).not.toContain("#");
     expect(link?.target).toBe("_blank");
     expect(link?.rel).toBe("noopener noreferrer");
   });
@@ -985,7 +988,11 @@ describe("CdpDetailClient", () => {
 
     const headers = Array.from(
       handle!.container.querySelectorAll('table[aria-label="GBPm troves"] th'),
-    ).map((header) => header.textContent);
+    ).map((header) =>
+      // Strip the sortable-header indicator glyphs (↕/↑/↓) and info ⓘ so the
+      // assertion tracks the column label, not the sort affordance.
+      header.textContent?.replace(/[↕↑↓ⓘ]/g, "").trim(),
+    );
     expect(headers).toEqual([
       "Last owner / Trove",
       "Status",

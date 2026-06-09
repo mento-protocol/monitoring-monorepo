@@ -3,12 +3,28 @@ import type { ComponentPropsWithoutRef, ReactNode } from "react";
 export function Table({
   children,
   "aria-label": ariaLabel,
+  scrollClassName,
 }: {
   children: ReactNode;
   "aria-label"?: string;
+  /**
+   * Extra classes for the scroll wrapper. Use to opt a specific table into
+   * `overflow-x` overrides — e.g. `xl:overflow-x-clip` to suppress the phantom
+   * horizontal scrollbar that hover-tooltip popovers add at widths where the
+   * table already fits, while keeping `overflow-x-auto` scrolling on narrow
+   * viewports where the table genuinely overflows.
+   */
+  scrollClassName?: string;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-800">
+    <div
+      className={[
+        "overflow-x-auto rounded-lg border border-slate-800",
+        scrollClassName,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <table className="w-full text-sm" aria-label={ariaLabel}>
         {children}
       </table>
