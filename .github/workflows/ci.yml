@@ -30,7 +30,7 @@ permissions: read-all
 jobs:
   changes:
     name: Detect changes
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 2
     permissions:
       contents: read
@@ -195,7 +195,7 @@ jobs:
     name: Quality Checks (shared-config)
     needs: changes
     if: needs.changes.outputs.shared == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
     permissions:
       checks: write
@@ -244,7 +244,7 @@ jobs:
     name: Quality Checks (ui-dashboard)
     needs: changes
     if: needs.changes.outputs.ui == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 25
     permissions:
       checks: write
@@ -315,10 +315,16 @@ jobs:
         # already-hit key, so the next run re-downloads again indefinitely.
         # Hashing the lockfile makes the key flip on any real Playwright
         # version bump. Mirrors the proven step in lighthouse.yml.
+        #
+        # `runner.arch` is in the key because this job runs on ARM while
+        # lighthouse.yml (same cache namespace) stays on x64 — Chromium
+        # binaries are arch-specific, and `playwright install` validates
+        # version, not architecture, so a cross-arch restore would pass
+        # validation and then die with an exec-format error.
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
+          key: playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
           # `restore-keys` lets an unrelated lockfile or `package.json`
           # edit still reuse the most recent chromium cache instead of
           # triggering a ~130 MB fresh download. `playwright install` then
@@ -326,7 +332,7 @@ jobs:
           # (no-op on match, re-download only on a real Playwright version
           # bump). `--with-deps` still installs OS libraries (fast).
           restore-keys: |
-            playwright-chromium-
+            playwright-chromium-${{ runner.arch }}-
       - name: Install Playwright Chromium
         run: pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
       - name: Browser interaction tests
@@ -351,7 +357,7 @@ jobs:
     name: Quality Checks (indexer-envio)
     needs: changes
     if: needs.changes.outputs.indexer == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 20
     permissions:
       checks: write
@@ -381,7 +387,7 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: indexer-envio/.envio
-          key: envio-generated-v3-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**', 'indexer-envio/scripts/**') }}
+          key: envio-generated-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**', 'indexer-envio/scripts/**') }}
       - name: Validate YAML address drift
         # Every hex address in config*.yaml must resolve to either
         # @mento-protocol/contracts, indexer-envio/config/nttAddresses.json,
@@ -432,7 +438,7 @@ jobs:
     name: Quality Checks (metrics-bridge)
     needs: changes
     if: needs.changes.outputs.bridge == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
     permissions:
       checks: write
@@ -474,7 +480,7 @@ jobs:
     name: Quality Checks (integration-probes)
     needs: changes
     if: needs.changes.outputs.integrationProbes == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
     permissions:
       checks: write
@@ -515,7 +521,7 @@ jobs:
     name: Quality Checks (alerts Cloud Functions)
     needs: changes
     if: needs.changes.outputs.alerts == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
     permissions:
       checks: write
@@ -604,7 +610,7 @@ jobs:
     name: Terraform Validate (registry)
     needs: changes
     if: needs.changes.outputs.terraform == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -650,7 +656,7 @@ jobs:
     name: Quality Checks (aegis)
     needs: changes
     if: needs.changes.outputs.aegis == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 15
     permissions:
       checks: write
@@ -706,7 +712,7 @@ jobs:
     name: Lint + test root scripts
     needs: changes
     if: needs.changes.outputs.rootScripts == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
     permissions:
       checks: write
@@ -743,7 +749,7 @@ jobs:
     # (dep-cruiser config + knip configs) so a PR that only edits the
     # rule file is validated against the codebase before merge.
     if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
     permissions:
       checks: write

@@ -41,7 +41,7 @@ concurrency:
 jobs:
   discover:
     name: Discover auto-applied stacks
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
     permissions:
       contents: read
@@ -100,7 +100,7 @@ jobs:
     name: Drift Plan (${{ matrix.id }})
     needs: discover
     if: needs.discover.outputs.has-stacks == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 15
     strategy:
       fail-fast: false

@@ -43,7 +43,7 @@ jobs:
     #   - PR + filter failed (any cause)           → run (fail-closed)
     # When `size-limit` does run, a bundle over budget fails the job.
     name: Dashboard bundle size
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 15
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
     permissions:

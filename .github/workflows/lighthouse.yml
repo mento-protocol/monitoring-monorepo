@@ -62,6 +62,12 @@ jobs:
     # When Lighthouse does run, a performance/accessibility assertion failure
     # warns/errors per the budgets in .lighthouserc.cjs.
     name: Core Web Vitals + accessibility (ui-dashboard)
+    # Deliberately NOT migrated to the cheaper ARM runners (every other
+    # Blacksmith job in this repo is on -arm): lhci launches Chrome via
+    # chrome-launcher, and Google does not publish Chrome (or Chrome for
+    # Testing) for linux-arm64, so the ARM runner image has no Chrome to
+    # launch. Migrating would require pointing CHROME_PATH at Playwright's
+    # arm64 Chromium — a behavior change to the audit browser, out of scope.
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
@@ -290,11 +296,16 @@ jobs:
         # actions/cache won't re-save under the already-hit key, so the
         # next run re-downloads again indefinitely. Hashing the lockfile
         # makes the key flip on any real Playwright version bump.
+        #
+        # `runner.arch` is in the key because ci.yml's ui job (same cache
+        # namespace) runs on ARM while this job stays on x64 — Chromium
+        # binaries are arch-specific and a cross-arch restore would fail at
+        # exec time, not install time.
         if: steps.decide.outputs.run == 'true' && always()
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
+          key: playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
           # `restore-keys` lets an unrelated lockfile or `package.json`
           # edit still reuse the most recent chromium cache instead of
           # triggering a ~130 MB fresh download. `playwright install` then fast-
@@ -302,7 +313,7 @@ jobs:
           # (no-op on match, re-download only on a real Playwright
           # version bump).
           restore-keys: |
-            playwright-chromium-
+            playwright-chromium-${{ runner.arch }}-
 
       - name: Install Playwright Chromium (for INP measurement)
         # The INP step uses `@playwright/test`'s chromium (the dashboard's
