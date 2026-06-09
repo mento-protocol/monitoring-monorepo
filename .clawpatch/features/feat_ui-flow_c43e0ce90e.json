@@ -30,7 +30,7 @@
       "reason": "direct import"
     },
     {
-      "path": "ui-dashboard/src/components/global-pools-table/limit-heatmap.tsx",
+      "path": "ui-dashboard/src/components/global-pools-table/reserves-cell.tsx",
       "reason": "direct import"
     },
     {

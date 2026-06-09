@@ -1,5 +1,16 @@
+import { parseWei } from "@/lib/format";
+import type { Network } from "@/lib/networks";
+import {
+  canValueTvl,
+  tokenSymbol,
+  tokenToUSD,
+  USDM_SYMBOLS,
+  type OracleRateMap,
+} from "@/lib/tokens";
+import type { Pool } from "@/lib/types";
+
 /**
- * Pure computation helpers for the reserves tank visualization.
+ * Pure computation helpers for reserve visualizations.
  * Extracted for testability — all functions are side-effect free.
  */
 
@@ -30,6 +41,157 @@ export function computeReservePcts(
         ? (r0! / rawTotal) * 100
         : 0;
   return { pct0, pct1: 100 - pct0 };
+}
+
+export type ReserveComposition =
+  | {
+      kind: "available";
+      symbol0: string;
+      symbol1: string;
+      reserve0: number;
+      reserve1: number;
+      usd0: number;
+      usd1: number;
+      usdTotal: number;
+      pct0: number;
+      pct1: number;
+    }
+  | {
+      kind: "untrusted-decimals" | "missing" | "empty" | "unpriceable";
+      symbol0: string;
+      symbol1: string;
+    };
+
+function usdRateFromOraclePrice(
+  oraclePrice: string | undefined,
+): number | null {
+  if (!oraclePrice || oraclePrice === "0") return null;
+  const rate = Number(oraclePrice) / 1e24;
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+
+function reserveUsdValue({
+  symbol,
+  otherSymbol,
+  reserve,
+  feedRate,
+  rates,
+}: {
+  symbol: string;
+  otherSymbol: string;
+  reserve: number;
+  feedRate: number;
+  rates: OracleRateMap;
+}): number | null {
+  if (USDM_SYMBOLS.has(symbol)) return reserve;
+  if (USDM_SYMBOLS.has(otherSymbol)) return reserve * feedRate;
+
+  const directRate = tokenToUSD(symbol, 1, rates);
+  if (directRate !== null) return reserve * directRate;
+
+  const otherRate = tokenToUSD(otherSymbol, 1, rates);
+  return otherRate !== null ? reserve * feedRate * otherRate : null;
+}
+
+function reserveUsdValues({
+  pool,
+  symbol0,
+  symbol1,
+  reserve0,
+  reserve1,
+  rates,
+}: {
+  pool: Pick<Pool, "oraclePrice">;
+  symbol0: string;
+  symbol1: string;
+  reserve0: number;
+  reserve1: number;
+  rates: OracleRateMap;
+}): { usd0: number; usd1: number } | null {
+  const feedRate = usdRateFromOraclePrice(pool.oraclePrice);
+  if (feedRate === null) return null;
+
+  const usd0 = reserveUsdValue({
+    symbol: symbol0,
+    otherSymbol: symbol1,
+    reserve: reserve0,
+    feedRate,
+    rates,
+  });
+  const usd1 = reserveUsdValue({
+    symbol: symbol1,
+    otherSymbol: symbol0,
+    reserve: reserve1,
+    feedRate,
+    rates,
+  });
+  return usd0 !== null && usd1 !== null ? { usd0, usd1 } : null;
+}
+
+export function computeReserveComposition(
+  pool: Pick<
+    Pool,
+    | "token0"
+    | "token1"
+    | "token0Decimals"
+    | "token1Decimals"
+    | "tokenDecimalsKnown"
+    | "reserves0"
+    | "reserves1"
+    | "oraclePrice"
+  >,
+  network: Network,
+  rates: OracleRateMap,
+): ReserveComposition {
+  const symbol0 = tokenSymbol(network, pool.token0 ?? null);
+  const symbol1 = tokenSymbol(network, pool.token1 ?? null);
+
+  if (pool.tokenDecimalsKnown !== true) {
+    return { kind: "untrusted-decimals", symbol0, symbol1 };
+  }
+  if (pool.reserves0 == null || pool.reserves1 == null) {
+    return { kind: "missing", symbol0, symbol1 };
+  }
+
+  const reserve0 = parseWei(pool.reserves0, pool.token0Decimals ?? 18);
+  const reserve1 = parseWei(pool.reserves1, pool.token1Decimals ?? 18);
+  if (reserve0 === 0 && reserve1 === 0) {
+    return { kind: "empty", symbol0, symbol1 };
+  }
+  if (!canValueTvl(pool, network, rates)) {
+    return { kind: "unpriceable", symbol0, symbol1 };
+  }
+
+  const usdValues = reserveUsdValues({
+    pool,
+    symbol0,
+    symbol1,
+    reserve0,
+    reserve1,
+    rates,
+  });
+  // Second unpriceable path: canValueTvl passed its string-level guard, but
+  // usdRateFromOraclePrice still rejected an Infinity/NaN oracle price.
+  if (usdValues === null) {
+    return { kind: "unpriceable", symbol0, symbol1 };
+  }
+
+  const { usd0, usd1 } = usdValues;
+  const usdTotal = usd0 + usd1;
+  const { pct0, pct1 } = computeReservePcts(reserve0, reserve1, usd0, usd1);
+
+  return {
+    kind: "available",
+    symbol0,
+    symbol1,
+    reserve0,
+    reserve1,
+    usd0,
+    usd1,
+    usdTotal,
+    pct0,
+    pct1,
+  };
 }
 
 /**

@@ -1,15 +1,13 @@
 "use client";
 
 import type { Pool } from "@/lib/types";
-import { parseWei, formatWei, formatUSD } from "@/lib/format";
-import { computeReservePcts, computeThresholdLines } from "@/lib/reserves";
+import { formatWei, formatUSD } from "@/lib/format";
 import {
-  canValueTvl,
-  tokenSymbol,
-  tokenToUSD,
-  USDM_SYMBOLS,
-  type OracleRateMap,
-} from "@/lib/tokens";
+  computeReserveComposition,
+  computeThresholdLines,
+  type ReserveComposition,
+} from "@/lib/reserves";
+import { type OracleRateMap } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import { InfoPopover } from "@/components/info-popover";
 
@@ -43,6 +41,12 @@ interface ReservesPanelProps {
   decimalsError?: boolean;
 }
 
+type AvailableReserveComposition = Extract<
+  ReserveComposition,
+  { kind: "available" }
+>;
+type ReserveThresholds = NonNullable<ReturnType<typeof computeThresholdLines>>;
+
 export function ReservesPanel({
   pool,
   rates,
@@ -52,76 +56,20 @@ export function ReservesPanel({
   decimalsError = false,
 }: ReservesPanelProps) {
   const { network } = useNetwork();
-  const sym0 = tokenSymbol(network, pool.token0);
-  const sym1 = tokenSymbol(network, pool.token1);
-  const decimalsTrusted = pool.tokenDecimalsKnown === true;
-
-  // null/undefined → null (not yet indexed); "0" → 0 (valid empty reserve)
-  const r0 =
-    decimalsTrusted && pool.reserves0 != null
-      ? parseWei(pool.reserves0, pool.token0Decimals ?? 18)
-      : null;
-  const r1 =
-    decimalsTrusted && pool.reserves1 != null
-      ? parseWei(pool.reserves1, pool.token1Decimals ?? 18)
-      : null;
-
-  const hasReserves = r0 !== null && r1 !== null;
-  // Both reserves indexed as "0" — pool exists but has no liquidity yet.
-  // Prevents token1 tank from rendering as 100% full on a fully empty pool.
-  const isEmptyPool = hasReserves && r0 === 0 && r1 === 0;
-
-  const feedVal =
-    pool.oraclePrice && pool.oraclePrice !== "0"
-      ? Number(pool.oraclePrice) / 1e24
-      : null;
-  const usdm0 = USDM_SYMBOLS.has(sym0);
-  const usdm1 = USDM_SYMBOLS.has(sym1);
-  const fxRate0 = rates ? tokenToUSD(sym0, 1, rates) : null;
-  const fxRate1 = rates ? tokenToUSD(sym1, 1, rates) : null;
-  const usd0 =
-    feedVal !== null && r0 !== null
-      ? usdm0
-        ? r0
-        : usdm1
-          ? r0 * feedVal
-          : fxRate0 !== null
-            ? r0 * fxRate0
-            : fxRate1 !== null
-              ? r0 * feedVal * fxRate1
-              : null
-      : null;
-  const usd1 =
-    feedVal !== null && r1 !== null
-      ? usdm1
-        ? r1
-        : usdm0
-          ? r1 * feedVal
-          : fxRate1 !== null
-            ? r1 * fxRate1
-            : fxRate0 !== null
-              ? r1 * feedVal * fxRate0
-              : null
-      : null;
-
-  const usdTotal = usd0 !== null && usd1 !== null ? usd0 + usd1 : null;
-  const { pct0, pct1 } = computeReservePcts(r0, r1, usd0, usd1);
-
-  const color0 = pct0 >= 50 ? "bg-indigo-500" : "bg-emerald-500";
-  const color1 = pct1 > 50 ? "bg-indigo-500" : "bg-emerald-500";
-
-  const thresholds = computeThresholdLines(pool.rebalanceThreshold, usdTotal);
-  // For non-USDm pairs without a loaded rate map — or any pair with a
-  // missing/zero `oraclePrice` — the USD math above can't normalize the
-  // reserves, and `computeReservePcts` would fall back to a raw-token
-  // split. That's economically wrong for FX/FX pools and equally wrong
-  // during oracle outages on USDm-leg pools, so we gate on `canValueTvl`
-  // (USD-convertible legs AND a usable oracle price) to avoid showing a
-  // confident-looking percentage that's silently off.
-  const priceable =
-    decimalsTrusted && canValueTvl(pool, network, rates ?? new Map());
-  const showTanks = hasReserves && !isEmptyPool && priceable;
-  const showThresholdLegend = showTanks && thresholds !== null;
+  const composition = computeReserveComposition(
+    pool,
+    network,
+    rates ?? new Map(),
+  );
+  const availableComposition =
+    composition.kind === "available" ? composition : null;
+  const thresholds = availableComposition
+    ? computeThresholdLines(
+        pool.rebalanceThreshold,
+        availableComposition.usdTotal,
+      )
+    : null;
+  const showThresholdLegend = thresholds !== null;
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6 h-full flex flex-col">
@@ -147,59 +95,119 @@ export function ReservesPanel({
         )}
       </div>
 
-      {decimalsLoading ? (
-        <p className="text-sm text-slate-400">Loading reserves…</p>
-      ) : decimalsError ? (
-        <p className="text-sm text-red-400">
-          Couldn't load reserves — try again later.
-        </p>
-      ) : !decimalsTrusted ? (
-        <p className="text-sm text-slate-400">
-          Reserves hidden until token decimals are verified.
-        </p>
-      ) : !hasReserves ? (
-        <p className="text-sm text-slate-400">No reserve data available yet.</p>
-      ) : isEmptyPool ? (
-        <p className="text-sm text-slate-400">Pool has no reserves yet.</p>
-      ) : !priceable && ratesLoading ? (
-        <p className="text-sm text-slate-400">Loading reserves…</p>
-      ) : !priceable && ratesError ? (
-        <p className="text-sm text-red-400">
-          Couldn't load reserves — try again later.
-        </p>
-      ) : !priceable ? (
-        <p className="text-sm text-slate-400">
-          Reserves pricing unavailable for this pair.
-        </p>
-      ) : (
-        <div className="flex gap-4 flex-1 min-h-[200px]">
-          <Tank
-            symbol={sym0}
-            amount={formatWei(pool.reserves0!, pool.token0Decimals ?? 18, 2)}
-            pct={pct0}
-            usd={usd0}
-            colorClass={color0}
-            thresholdLower={thresholds?.threshold0Lower}
-            thresholdUpper={thresholds?.threshold0Upper}
-            thresholdLegendId={
-              thresholds ? "reserves-threshold-legend" : undefined
-            }
-          />
-          <Tank
-            symbol={sym1}
-            amount={formatWei(pool.reserves1!, pool.token1Decimals ?? 18, 2)}
-            pct={pct1}
-            usd={usd1}
-            colorClass={color1}
-            thresholdLower={thresholds?.threshold1Lower}
-            thresholdUpper={thresholds?.threshold1Upper}
-            thresholdLegendId={
-              thresholds ? "reserves-threshold-legend" : undefined
-            }
-          />
-        </div>
-      )}
+      <ReservesPanelBody
+        pool={pool}
+        composition={composition}
+        thresholds={thresholds}
+        decimalsLoading={decimalsLoading}
+        decimalsError={decimalsError}
+        ratesLoading={ratesLoading}
+        ratesError={ratesError}
+      />
     </section>
+  );
+}
+
+function ReservesPanelBody({
+  pool,
+  composition,
+  thresholds,
+  decimalsLoading,
+  decimalsError,
+  ratesLoading,
+  ratesError,
+}: {
+  pool: Pool;
+  composition: ReserveComposition;
+  thresholds: ReserveThresholds | null;
+  decimalsLoading: boolean;
+  decimalsError: boolean;
+  ratesLoading: boolean;
+  ratesError: boolean;
+}) {
+  if (decimalsLoading) {
+    return <p className="text-sm text-slate-400">Loading reserves…</p>;
+  }
+  if (decimalsError) {
+    return (
+      <p className="text-sm text-red-400">
+        Couldn't load reserves — try again later.
+      </p>
+    );
+  }
+  if (composition.kind === "available") {
+    return (
+      <ReserveTanks
+        pool={pool}
+        composition={composition}
+        thresholds={thresholds}
+      />
+    );
+  }
+  if (composition.kind === "untrusted-decimals") {
+    return (
+      <p className="text-sm text-slate-400">
+        Reserves hidden until token decimals are verified.
+      </p>
+    );
+  }
+  if (composition.kind === "missing") {
+    return (
+      <p className="text-sm text-slate-400">No reserve data available yet.</p>
+    );
+  }
+  if (composition.kind === "empty") {
+    return <p className="text-sm text-slate-400">Pool has no reserves yet.</p>;
+  }
+  if (ratesLoading) {
+    return <p className="text-sm text-slate-400">Loading reserves…</p>;
+  }
+  if (ratesError) {
+    return (
+      <p className="text-sm text-red-400">
+        Couldn't load reserves — try again later.
+      </p>
+    );
+  }
+  return (
+    <p className="text-sm text-slate-400">
+      Reserves pricing unavailable for this pair.
+    </p>
+  );
+}
+
+function ReserveTanks({
+  pool,
+  composition,
+  thresholds,
+}: {
+  pool: Pool;
+  composition: AvailableReserveComposition;
+  thresholds: ReserveThresholds | null;
+}) {
+  return (
+    <div className="flex gap-4 flex-1 min-h-[200px]">
+      <Tank
+        symbol={composition.symbol0}
+        amount={formatWei(pool.reserves0!, pool.token0Decimals ?? 18, 2)}
+        pct={composition.pct0}
+        usd={composition.usd0}
+        colorClass={composition.pct0 >= 50 ? "bg-indigo-500" : "bg-emerald-500"}
+        thresholdLower={thresholds?.threshold0Lower}
+        thresholdUpper={thresholds?.threshold0Upper}
+        thresholdLegendId={thresholds ? "reserves-threshold-legend" : undefined}
+      />
+      <Tank
+        symbol={composition.symbol1}
+        amount={formatWei(pool.reserves1!, pool.token1Decimals ?? 18, 2)}
+        pct={composition.pct1}
+        usd={composition.usd1}
+        colorClass={composition.pct1 > 50 ? "bg-indigo-500" : "bg-emerald-500"}
+        thresholdLower={thresholds?.threshold1Lower}
+        thresholdUpper={thresholds?.threshold1Upper}
+        thresholdLegendId={thresholds ? "reserves-threshold-legend" : undefined}
+      />
+    </div>
   );
 }
 

@@ -147,13 +147,16 @@ function GlobalContent({
     (netData) => netData.lpError !== null && netData.error === null,
   );
 
-  // Per-pool entries, volume, WoW, trading limits, OLS — shared with pools page
+  // Per-pool entries, volume, WoW, and strategy badges — shared with pools page.
+  // Trading-limit pressure still flows into Health through Pool fields.
+  // Separate TradingLimit rows are only needed on pool detail pages.
+  // That keeps this table on the lighter all-pools payload while preserving
+  // the operator signal when a limit nears or hits its cap.
   const {
     entries: globalEntries,
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
-    tradingLimitsByKey,
     olsPoolKeys,
     cdpPoolKeys,
     reservePoolKeys,
@@ -303,6 +306,8 @@ function GlobalContent({
   ]);
 
   const failedNetworks = networkData.filter((net) => net.error !== null);
+  const hasGlobalPools = globalEntries.length > 0;
+  const shouldShowEmptyPools = failedNetworks.length === 0 && !hasGlobalPools;
 
   const feesApprox =
     aggregated.unpricedSymbols.length > 0 ||
@@ -417,7 +422,7 @@ function GlobalContent({
         <h2 className="text-lg font-semibold text-white mb-3">All Pools</h2>
         {showInitialSkeleton(isLoading, networkData.length) ? (
           <Skeleton rows={5} />
-        ) : failedNetworks.length === 0 && globalEntries.length === 0 ? (
+        ) : shouldShowEmptyPools ? (
           <EmptyBox message="No pools found across any chain." />
         ) : (
           <GlobalPoolsTable
@@ -425,7 +430,6 @@ function GlobalContent({
             volume24hByKey={volume24hByKey}
             volume7dByKey={volume7dByKey}
             tvlChangeWoWByKey={tvlChangeWoWByKey}
-            tradingLimitsByKey={tradingLimitsByKey}
             olsPoolKeys={olsPoolKeys}
             cdpPoolKeys={cdpPoolKeys}
             reservePoolKeys={reservePoolKeys}

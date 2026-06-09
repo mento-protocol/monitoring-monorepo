@@ -121,7 +121,6 @@ export function makeNetworkData(
     snapshotsAllDailyTruncated: false,
     brokerSnapshotsAllDaily: [],
     brokerSnapshotsAllDailyTruncated: false,
-    tradingLimits: [],
     olsPoolIds: new Set(),
     cdpPoolIds: new Set(),
     reservePoolIds: new Set(),

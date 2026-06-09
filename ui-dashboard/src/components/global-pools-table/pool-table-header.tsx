@@ -46,6 +46,7 @@ export function PoolTableHeader({
         >
           Uptime
         </SortableTh>
+        <Th className="hidden sm:table-cell">Reserves</Th>
         <SortableTh
           sortKey="fee"
           activeSortKey={sortKey}
@@ -56,7 +57,6 @@ export function PoolTableHeader({
         >
           Fee
         </SortableTh>
-        <Th className="hidden sm:table-cell">Limits</Th>
         <SortableTh
           sortKey="tvl"
           activeSortKey={sortKey}

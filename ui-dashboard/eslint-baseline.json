@@ -73,7 +73,7 @@
     "file": "src/app/page-client.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 35. Maximum allowed is 15.",
-    "line": 163,
+    "line": 166,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
@@ -94,7 +94,7 @@
     "file": "src/app/page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 53 to the 18 allowed.",
-    "line": 163,
+    "line": 166,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
@@ -420,27 +420,6 @@
     "linePreview": " | export function ReserveChart({ | rows,"
   },
   {
-    "file": "src/components/reserves-panel.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'ReservesPanel' has a complexity of 58. Maximum allowed is 15.",
-    "line": 46,
-    "linePreview": " | export function ReservesPanel({ | pool,"
-  },
-  {
-    "file": "src/components/reserves-panel.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'ReservesPanel' has too many lines (141). Maximum allowed is 100.",
-    "line": 46,
-    "linePreview": " | export function ReservesPanel({ | pool,"
-  },
-  {
-    "file": "src/components/reserves-panel.tsx",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 105 to the 18 allowed.",
-    "line": 46,
-    "linePreview": " | export function ReservesPanel({ | pool,"
-  },
-  {
     "file": "src/components/revenue-by-pool-table.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'RevenueByPoolTable' has too many lines (123). Maximum allowed is 100.",
@@ -539,20 +518,6 @@
     "linePreview": " | export async function enrichBatch( | addresses: string[],"
   },
   {
-    "file": "src/lib/global-pool-entries.ts",
-    "ruleId": "complexity",
-    "message": "Function 'buildGlobalPoolEntries' has a complexity of 22. Maximum allowed is 15.",
-    "line": 77,
-    "linePreview": "*/ | export function buildGlobalPoolEntries( | networkData: NetworkData[],"
-  },
-  {
-    "file": "src/lib/global-pool-entries.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 41 to the 18 allowed.",
-    "line": 77,
-    "linePreview": "*/ | export function buildGlobalPoolEntries( | networkData: NetworkData[],"
-  },
-  {
     "file": "src/lib/health.ts",
     "ruleId": "complexity",
     "message": "Function 'liveHealthCounters' has a complexity of 23. Maximum allowed is 15.",
@@ -584,7 +549,7 @@
     "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
-    "line": 197,
+    "line": 194,
     "linePreview": "*/ | async function fetchPaginatedRows<TRow, TVars>(args: { | client: GraphQLClient;"
   },
   {

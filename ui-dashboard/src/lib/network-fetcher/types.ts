@@ -13,7 +13,6 @@ import type {
   Pool,
   PoolDailyFeeSnapshot,
   PoolSnapshotWindow,
-  TradingLimit,
 } from "@/lib/types";
 import type { SnapshotWindows } from "@/lib/volume";
 
@@ -67,7 +66,6 @@ export type NetworkData = {
   brokerSnapshotsAllDaily: BrokerDailySnapshotRow[];
   /** True when the broker pagination loop hit its safety cap. */
   brokerSnapshotsAllDailyTruncated: boolean;
-  tradingLimits: TradingLimit[];
   olsPoolIds: Set<string>;
   /**
    * Pool IDs classified as CDP or Reserve for global strategy badges. CDP
