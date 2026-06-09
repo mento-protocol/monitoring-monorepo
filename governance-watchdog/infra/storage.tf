@@ -22,7 +22,12 @@ locals {
   package_files = [
     "${path.module}/../package.json",
     "${path.module}/../pnpm-lock.yaml",
-    "${path.module}/../pnpm-workspace.yaml"
+    "${path.module}/../pnpm-workspace.yaml",
+    # tsconfig files are build inputs: the Cloud Build `gcp-build` step runs
+    # `tsc --project tsconfig.build.json` (which extends tsconfig.json), so a
+    # change to either alters the emitted JS and must bust the source hash.
+    "${path.module}/../tsconfig.json",
+    "${path.module}/../tsconfig.build.json"
   ]
   # Create a hash of all source files and package files
   source_hash = md5(join("", [
