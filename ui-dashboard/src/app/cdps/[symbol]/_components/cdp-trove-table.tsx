@@ -537,21 +537,20 @@ function OwnerTroveCell({
         aria-label={`Manage trove ${trove.troveId} in the Mento app`}
         className="font-mono text-[10px] text-slate-500 hover:text-slate-300 hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500"
       >
-        {shortenTroveId(trove.troveId)}
+        {shortenHex(trove.troveId)}
       </a>
     </div>
   );
 }
 
 /**
- * Trove IDs are uint256 token ids (often a 66-char `0x…` hash). Rendering them
- * in full blew the first column out past the viewport (horizontal scroll);
- * middle-ellipsize for display while keeping the full id in the link + title.
+ * Middle-ellipsize a long hex string (trove uint256 id, tx hash) for display.
+ * Trove IDs rendered in full blew the first column past the viewport; tx hashes
+ * read in full are noise in screen-reader link names. Short, distinguishable
+ * form; the full value stays in the link href / title.
  */
-function shortenTroveId(troveId: string): string {
-  return troveId.length <= 13
-    ? troveId
-    : `${troveId.slice(0, 6)}…${troveId.slice(-4)}`;
+function shortenHex(value: string): string {
+  return value.length <= 13 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
 
 function RankValue({ row }: { row: TroveDisplayRow }) {
@@ -698,42 +697,47 @@ function UpdatedValue({
 }) {
   const label = relativeTime(trove.lastUpdatedAt);
   const timestamp = formatTimestamp(trove.lastUpdatedAt);
-  if (!trove.lastUpdatedTxHash) {
-    return (
-      <Tooltip content={`Updated at ${timestamp}.`} align="right">
-        <span className="text-slate-300">{label}</span>
-      </Tooltip>
-    );
-  }
-
   const networkId = networkIdForChainId(chainId);
   const network = networkId ? NETWORKS[networkId] : null;
-  if (network == null) {
+  // Deliberately a plain link, not a Tooltip (unlike EventTimeValue on the
+  // History tab): the relative time is already clickable, so the popover was
+  // just noise. The exact timestamp + destination are exposed to assistive tech
+  // via real sr-only text (a native title or aria-label on a non-interactive
+  // span isn't reliably announced) and to sighted users via the title.
+  if (trove.lastUpdatedTxHash && network != null) {
     return (
-      <Tooltip
-        content={`Updated at ${timestamp}. Transaction: ${trove.lastUpdatedTxHash}.`}
-        align="right"
-      >
-        <span className="text-slate-300">{label}</span>
-      </Tooltip>
-    );
-  }
-
-  return (
-    <Tooltip
-      content={`Updated at ${timestamp}. Opens transaction ${trove.lastUpdatedTxHash}.`}
-      align="right"
-      asChild
-    >
       <a
         href={explorerTxUrl(network, trove.lastUpdatedTxHash)}
         target="_blank"
         rel="noopener noreferrer"
+        title={`Updated at ${timestamp}`}
         className="font-mono text-slate-300 transition-colors hover:text-indigo-300"
       >
         {label}
+        <span className="sr-only">
+          , updated at {timestamp}, opens transaction{" "}
+          {shortenHex(trove.lastUpdatedTxHash)}
+        </span>
       </a>
-    </Tooltip>
+    );
+  }
+
+  // No linkable explorer for this chain: still disclose the tx hash in the
+  // title when one exists (mirrors EventTimeValue's no-explorer fallback) so it
+  // isn't silently dropped.
+  const fallbackTitle = trove.lastUpdatedTxHash
+    ? `Updated at ${timestamp} · tx ${trove.lastUpdatedTxHash}`
+    : `Updated at ${timestamp}`;
+  return (
+    <span className="text-slate-300" title={fallbackTitle}>
+      {label}
+      <span className="sr-only">
+        , updated at {timestamp}
+        {trove.lastUpdatedTxHash
+          ? `, tx ${shortenHex(trove.lastUpdatedTxHash)}`
+          : ""}
+      </span>
+    </span>
   );
 }
 

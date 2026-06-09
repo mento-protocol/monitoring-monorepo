@@ -217,8 +217,13 @@ test.describe("dashboard browser flows", () => {
       "href",
       "https://celoscan.io/tx/0x2222222222222222222222222222222222222222222222222222222222222222",
     );
-    await expect(firstUpdatedLink).toHaveAttribute("aria-describedby", /.+/);
-    await expect(firstUpdatedLink).not.toHaveAttribute("title", /.+/);
+    // The Updated time links straight to the tx — no custom tooltip popover;
+    // the exact timestamp lives on the native title.
+    await expect(firstUpdatedLink).not.toHaveAttribute(
+      "aria-describedby",
+      /.+/,
+    );
+    await expect(firstUpdatedLink).toHaveAttribute("title", /^Updated at /);
 
     await page.getByRole("tab", { name: "History" }).click();
     await expect(table).toContainText("redeemed");
