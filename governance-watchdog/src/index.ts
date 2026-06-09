@@ -23,7 +23,7 @@ const isHealthCheckWebhook = (body: unknown): boolean => {
     !body ||
     typeof body !== "object" ||
     !("result" in body) ||
-    !Array.isArray((body).result)
+    !Array.isArray(body.result)
   ) {
     return false;
   }

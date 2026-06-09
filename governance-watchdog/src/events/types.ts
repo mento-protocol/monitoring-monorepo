@@ -114,8 +114,9 @@ export interface QuicknodePayload {
  * Extended event configuration that includes metadata for routing and processing
  */
 
-export interface ExtendedEventHandlerConfig<T extends QuicknodeEvent>
-  extends EventHandlerConfig<T> {
+export interface ExtendedEventHandlerConfig<
+  T extends QuicknodeEvent,
+> extends EventHandlerConfig<T> {
   // Deduplication strategy for this event type
   deduplicationStrategy:
     | "proposalId"

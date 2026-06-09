@@ -50,9 +50,8 @@ describe("get-secret", () => {
   });
 
   it("reuses the singleton SecretManagerServiceClient across calls (no gRPC leak)", async () => {
-    const { SecretManagerServiceClient } = await import(
-      "@google-cloud/secret-manager"
-    );
+    const { SecretManagerServiceClient } =
+      await import("@google-cloud/secret-manager");
     mockAccessSecretVersion.mockResolvedValue([
       { payload: { data: Buffer.from("value") } },
     ]);
