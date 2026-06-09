@@ -8,6 +8,12 @@ interface SortableThProps<K extends string> {
   onSort: (key: K) => void;
   align?: "left" | "right" | undefined;
   className?: string | undefined;
+  /**
+   * Optional element rendered as a *sibling* of the sort button (e.g. an info
+   * tooltip). Kept outside the button so its own interactive trigger isn't
+   * nested inside the button — invalid markup the a11y suite flags.
+   */
+  trailing?: ReactNode | undefined;
   children: ReactNode;
 }
 
@@ -18,11 +24,32 @@ export function SortableTh<K extends string>({
   onSort,
   align = "left",
   className = "",
+  trailing,
   children,
 }: SortableThProps<K>) {
   const isActive = sortKey === activeSortKey;
   const alignClass = align === "right" ? "text-right" : "text-left";
-  const buttonAlign = align === "right" ? "justify-end ml-auto" : "";
+  const buttonAlign =
+    align === "right" && !trailing ? "justify-end ml-auto" : "";
+  const sortButton = (
+    <button
+      type="button"
+      className={`flex items-center gap-1 cursor-pointer select-none bg-transparent border-0 p-0 font-medium text-xs sm:text-sm text-slate-400 hover:text-slate-200 ${buttonAlign}`}
+      onClick={() => onSort(sortKey)}
+    >
+      {children}
+      {isActive ? (
+        <span className="text-indigo-400">{sortDir === "asc" ? "↑" : "↓"}</span>
+      ) : (
+        <span
+          className="text-slate-600 text-[1.1em] leading-none"
+          style={{ fontVariantEmoji: "text" }}
+        >
+          ↕
+        </span>
+      )}
+    </button>
+  );
   return (
     <th
       scope="col"
@@ -31,25 +58,18 @@ export function SortableTh<K extends string>({
       }
       className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 ${alignClass} whitespace-nowrap ${className}`}
     >
-      <button
-        type="button"
-        className={`flex items-center gap-1 cursor-pointer select-none bg-transparent border-0 p-0 font-medium text-xs sm:text-sm text-slate-400 hover:text-slate-200 ${buttonAlign}`}
-        onClick={() => onSort(sortKey)}
-      >
-        {children}
-        {isActive ? (
-          <span className="text-indigo-400">
-            {sortDir === "asc" ? "↑" : "↓"}
-          </span>
-        ) : (
-          <span
-            className="text-slate-600 text-[1.1em] leading-none"
-            style={{ fontVariantEmoji: "text" }}
-          >
-            ↕
-          </span>
-        )}
-      </button>
+      {trailing ? (
+        <span
+          className={`inline-flex items-center gap-1 ${
+            align === "right" ? "justify-end" : ""
+          }`}
+        >
+          {sortButton}
+          {trailing}
+        </span>
+      ) : (
+        sortButton
+      )}
     </th>
   );
 }

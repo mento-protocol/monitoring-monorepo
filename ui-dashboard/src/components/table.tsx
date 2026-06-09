@@ -13,6 +13,11 @@ export function Table({
    * horizontal scrollbar that hover-tooltip popovers add at widths where the
    * table already fits, while keeping `overflow-x-auto` scrolling on narrow
    * viewports where the table genuinely overflows.
+   *
+   * Note: this is appended, not merged (no `tailwind-merge` here). It reliably
+   * overrides the base `overflow-x-auto` only via a responsive prefix
+   * (`xl:overflow-x-clip` wins at its breakpoint by media-query order). A
+   * non-responsive `overflow-x-*` here would leave the winner to cascade order.
    */
   scrollClassName?: string;
 }) {

@@ -92,6 +92,9 @@ function tiebreakRows(a: TroveDisplayRow, b: TroveDisplayRow): number {
 function openSortValue(key: OpenSortKey, row: TroveDisplayRow): bigint | null {
   const t = row.trove;
   switch (key) {
+    // "rank" and "interest" intentionally share the same key: redemption rank
+    // IS ascending-interest-rate order, so both columns sort identically. Kept
+    // as two sortable headers because each is a natural click target.
     case "rank":
     case "interest":
       return row.effectiveRate;
