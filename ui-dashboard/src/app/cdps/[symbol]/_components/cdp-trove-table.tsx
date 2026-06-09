@@ -537,21 +537,20 @@ function OwnerTroveCell({
         aria-label={`Manage trove ${trove.troveId} in the Mento app`}
         className="font-mono text-[10px] text-slate-500 hover:text-slate-300 hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500"
       >
-        {shortenTroveId(trove.troveId)}
+        {shortenHex(trove.troveId)}
       </a>
     </div>
   );
 }
 
 /**
- * Trove IDs are uint256 token ids (often a 66-char `0x…` hash). Rendering them
- * in full blew the first column out past the viewport (horizontal scroll);
- * middle-ellipsize for display while keeping the full id in the link + title.
+ * Middle-ellipsize a long hex string (trove uint256 id, tx hash) for display.
+ * Trove IDs rendered in full blew the first column past the viewport; tx hashes
+ * read in full are noise in screen-reader link names. Short, distinguishable
+ * form; the full value stays in the link href / title.
  */
-function shortenTroveId(troveId: string): string {
-  return troveId.length <= 13
-    ? troveId
-    : `${troveId.slice(0, 6)}…${troveId.slice(-4)}`;
+function shortenHex(value: string): string {
+  return value.length <= 13 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
 
 function RankValue({ row }: { row: TroveDisplayRow }) {
@@ -716,7 +715,8 @@ function UpdatedValue({
       >
         {label}
         <span className="sr-only">
-          , updated at {timestamp}, opens transaction
+          , updated at {timestamp}, opens transaction{" "}
+          {shortenHex(trove.lastUpdatedTxHash)}
         </span>
       </a>
     );

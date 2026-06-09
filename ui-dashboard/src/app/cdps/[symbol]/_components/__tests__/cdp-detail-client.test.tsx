@@ -668,10 +668,10 @@ describe("CdpDetailClient", () => {
     expect(link?.getAttribute("title")).toBe(
       `Updated at ${new Date(NOW * 1000).toLocaleString()}`,
     );
-    // Exact timestamp + destination exposed to assistive tech via real sr-only
-    // text (native title is hover-only).
+    // Exact timestamp + destination (incl. the shortened tx hash so rows are
+    // distinguishable) exposed to assistive tech via real sr-only text.
     expect(link?.querySelector(".sr-only")?.textContent).toBe(
-      `, updated at ${new Date(NOW * 1000).toLocaleString()}, opens transaction`,
+      `, updated at ${new Date(NOW * 1000).toLocaleString()}, opens transaction 0xupdated`,
     );
   });
 
