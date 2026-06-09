@@ -170,6 +170,8 @@ export function computeReserveComposition(
     reserve1,
     rates,
   });
+  // Second unpriceable path: canValueTvl passed its string-level guard, but
+  // usdRateFromOraclePrice still rejected an Infinity/NaN oracle price.
   if (usdValues === null) {
     return { kind: "unpriceable", symbol0, symbol1 };
   }

@@ -70,10 +70,14 @@ function unavailableMessage(
     "available"
   >,
 ): string {
-  if (kind === "untrusted-decimals") {
-    return "Reserves hidden until token decimals are verified.";
+  switch (kind) {
+    case "untrusted-decimals":
+      return "Reserves hidden until token decimals are verified.";
+    case "missing":
+      return "No reserve data available yet.";
+    case "empty":
+      return "Pool has no reserves yet.";
+    case "unpriceable":
+      return "Reserves pricing unavailable for this pair.";
   }
-  if (kind === "missing") return "No reserve data available yet.";
-  if (kind === "empty") return "Pool has no reserves yet.";
-  return "Reserves pricing unavailable for this pair.";
 }
