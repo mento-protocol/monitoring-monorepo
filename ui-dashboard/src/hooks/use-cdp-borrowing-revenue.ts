@@ -286,6 +286,54 @@ async function fetchAllDailySnapshotPages(
   }
 }
 
+// The daily series feeds only the time-series chart. A failure fetching it (a
+// transient error, or fallback fee-event pagination timing out while production
+// is still on the old schema) must NOT blank the summary tiles and market
+// tables that the caller's market/bracket/rate queries already produced.
+// Degrade to an empty, approximate-flagged series instead of rejecting.
+async function resolveDailyBorrowingFeeSeries(
+  client: GraphQLClient,
+  chainId: number,
+  aggregateArgs: {
+    collaterals: ReadonlyArray<CdpBorrowingRevenueCollateral>;
+    instances: ReadonlyArray<CdpBorrowingRevenueInstance>;
+    brackets: ReadonlyArray<CdpBorrowingRevenueBracket>;
+    rates: OracleRateMap;
+    bracketsTruncated: boolean;
+  },
+): Promise<{
+  points: CdpBorrowingFeeSeriesPoint[];
+  truncated: boolean;
+  approximate: boolean;
+}> {
+  try {
+    const dailySnapshotPages = await fetchAllDailySnapshotPages(
+      client,
+      chainId,
+    );
+    const fallbackFeeEventPages = dailySnapshotPages.unavailable
+      ? await fetchAllFeeEventPages(client, chainId)
+      : undefined;
+    return {
+      points:
+        fallbackFeeEventPages === undefined
+          ? buildDailyCdpBorrowingFeeSeriesFromSnapshots({
+              ...aggregateArgs,
+              dailySnapshots: dailySnapshotPages.rows,
+            })
+          : buildDailyCdpBorrowingFeeSeries({
+              ...aggregateArgs,
+              feeEvents: fallbackFeeEventPages.rows,
+            }),
+      truncated:
+        fallbackFeeEventPages?.truncated ?? dailySnapshotPages.truncated,
+      approximate: dailySnapshotPages.unavailable,
+    };
+  } catch {
+    return { points: [], truncated: true, approximate: false };
+  }
+}
+
 async function fetchRevenueForNetwork(
   network: Network,
 ): Promise<NetworkCdpBorrowingRevenue> {
@@ -327,18 +375,15 @@ async function fetchRevenueForNetwork(
       };
     }
 
-    const [ratesResponse, bracketPages, dailySnapshotPages] = await Promise.all(
-      [
-        requestWithTimeout<{ Pool: OracleRatePool[] }>(client, ORACLE_RATES, {
-          chainId: network.chainId,
-        }),
-        fetchAllBracketPages(
-          client,
-          collaterals.map((c) => c.id),
-        ),
-        fetchAllDailySnapshotPages(client, network.chainId),
-      ],
-    );
+    const [ratesResponse, bracketPages] = await Promise.all([
+      requestWithTimeout<{ Pool: OracleRatePool[] }>(client, ORACLE_RATES, {
+        chainId: network.chainId,
+      }),
+      fetchAllBracketPages(
+        client,
+        collaterals.map((c) => c.id),
+      ),
+    ]);
     const rates: OracleRateMap = buildOracleRateMap(
       ratesResponse.Pool ?? [],
       network,
@@ -350,26 +395,20 @@ async function fetchRevenueForNetwork(
       rates,
       bracketsTruncated: bracketPages.truncated,
     };
-    const fallbackFeeEventPages = dailySnapshotPages.unavailable
-      ? await fetchAllFeeEventPages(client, network.chainId)
-      : undefined;
+
+    const daily = await resolveDailyBorrowingFeeSeries(
+      client,
+      network.chainId,
+      aggregateArgs,
+    );
+
     return {
       network,
       summary: aggregateCdpBorrowingRevenue(aggregateArgs),
       markets: aggregateCdpBorrowingRevenueMarkets(aggregateArgs),
-      dailySeries:
-        fallbackFeeEventPages === undefined
-          ? buildDailyCdpBorrowingFeeSeriesFromSnapshots({
-              ...aggregateArgs,
-              dailySnapshots: dailySnapshotPages.rows,
-            })
-          : buildDailyCdpBorrowingFeeSeries({
-              ...aggregateArgs,
-              feeEvents: fallbackFeeEventPages.rows,
-            }),
-      dailySeriesTruncated:
-        fallbackFeeEventPages?.truncated ?? dailySnapshotPages.truncated,
-      dailySeriesApproximate: dailySnapshotPages.unavailable,
+      dailySeries: daily.points,
+      dailySeriesTruncated: daily.truncated,
+      dailySeriesApproximate: daily.approximate,
       error: null,
     };
   } catch (err) {
