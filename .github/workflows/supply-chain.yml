@@ -33,13 +33,21 @@ on:
   # cron below already catches within 24h), and lockfile-lint validates the
   # lockfile structure. So trigger per-PR only when a dependency manifest
   # changes; the daily cron remains the backstop for time-based disclosures.
+  #
+  # `**/.npmrc` (not just root) is load-bearing for security: lockfile-lint
+  # recursively scans EVERY `.npmrc` for a poisoned `registry=` line, so a PR
+  # adding a package-local `.npmrc` (e.g. ui-dashboard/.npmrc) must trigger
+  # the gate. Residual gap: GitHub's `paths:` filter only evaluates the first
+  # 300 changed files, so a >300-file PR whose only dep change falls outside
+  # that window will skip the per-PR run — caught by the daily cron within
+  # 24h (the same accepted disclosure-timing window as a non-dep PR).
   pull_request:
     branches: [main]
     paths:
       - "**/package.json"
       - "**/pnpm-lock.yaml"
       - pnpm-workspace.yaml
-      - .npmrc
+      - "**/.npmrc"
       # The gate itself — changes to the workflow or the lockfile-lint
       # scripts must self-trigger a run (same pattern as the other gates).
       - .github/workflows/supply-chain.yml

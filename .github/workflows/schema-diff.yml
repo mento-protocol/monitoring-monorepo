@@ -3,22 +3,15 @@ name: Schema Diff — Advisory
 on:
   pull_request:
     branches: [main]
-    # Advisory workflow — NOT in the branch ruleset's required checks, so a
-    # `paths:` filter is safe (a skipped run cannot leave a *required* check
-    # pending). These globs mirror the in-job `filter` step exactly, so the
-    # run/skip decision is unchanged — the workflow simply no longer boots a
-    # runner to decide it. The in-job filter is kept as a fail-closed
-    # backstop. Keep this list in sync with the in-job `filters:` block.
-    paths:
-      - indexer-envio/schema.graphql
-      - .github/workflows/schema-diff.yml
-      - scripts/schema-diff.mjs
-      - package.json
-      - pnpm-lock.yaml
-      - pnpm-workspace.yaml
-      - .npmrc
-      - .node-version
-      - .github/actions/pnpm-install/**
+    # NO workflow-level `paths:` filter — intentionally runs on every PR.
+    # This workflow posts a sticky PR comment AND has a "Clear stale
+    # schema-diff comment" step that deletes it when the schema reverts to
+    # base. A workflow-level `paths:` filter would skip the whole run on a
+    # revert PR (schema back to base → no longer in the diff), leaving the
+    # stale "breaking change" comment stranded. So the run/skip decision must
+    # stay in-job (the `filter` + `decide` steps below), where the cleanup
+    # path can still execute. The wasted boot on non-schema PRs is the price
+    # of guaranteed sticky-comment cleanup.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
