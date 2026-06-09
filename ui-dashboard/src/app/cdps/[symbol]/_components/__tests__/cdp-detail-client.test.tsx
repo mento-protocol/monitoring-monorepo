@@ -652,7 +652,7 @@ describe("CdpDetailClient", () => {
     );
   });
 
-  it("links updated timestamps to their updating transaction", () => {
+  it("links updated timestamps directly to their updating transaction", () => {
     render(handle!);
 
     const link = handle!.container.querySelector<HTMLAnchorElement>(
@@ -663,16 +663,15 @@ describe("CdpDetailClient", () => {
     expect(link?.textContent).toBe("0s ago");
     expect(link?.target).toBe("_blank");
     expect(link?.rel).toBe("noopener noreferrer");
-    expect(link?.getAttribute("title")).toBeNull();
-
-    const tooltipId = link?.getAttribute("aria-describedby");
-    expect(tooltipId).toBeTruthy();
-    expect(
-      handle!.container.ownerDocument.getElementById(tooltipId!)?.textContent,
-    ).toContain("Opens transaction 0xupdated");
+    // No custom tooltip popover — the relative time opens the tx on click and
+    // the exact timestamp stays available via the native title.
+    expect(link?.getAttribute("aria-describedby")).toBeNull();
+    expect(link?.getAttribute("title")).toBe(
+      `Updated at ${new Date(NOW * 1000).toLocaleString()}`,
+    );
   });
 
-  it("keeps exact updated timestamp tooltips when the update tx hash is unavailable", () => {
+  it("shows the exact updated timestamp as a native title when the tx hash is unavailable", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
         return { data: marketsData(), error: null, isLoading: false };
@@ -703,15 +702,19 @@ describe("CdpDetailClient", () => {
 
     render(handle!);
 
-    const trigger = handle!.container.querySelector<HTMLElement>(
-      'table[aria-label="GBPm troves"] tbody tr td:nth-child(8) [aria-describedby]',
+    const cell = handle!.container.querySelector<HTMLElement>(
+      'table[aria-label="GBPm troves"] tbody tr td:nth-child(8)',
     );
-    expect(trigger).not.toBeNull();
-    expect(trigger?.textContent).toBe("0s ago");
-    const tooltipId = trigger?.getAttribute("aria-describedby");
-    expect(
-      handle!.container.ownerDocument.getElementById(tooltipId!)?.textContent,
-    ).toBe(`Updated at ${new Date(NOW * 1000).toLocaleString()}.`);
+    expect(cell).not.toBeNull();
+    // No link (no tx hash) and no custom tooltip — just the relative time with
+    // the exact timestamp on the native title.
+    expect(cell?.querySelector("a")).toBeNull();
+    expect(cell?.querySelector("[aria-describedby]")).toBeNull();
+    const value = cell?.querySelector<HTMLElement>("span[title]");
+    expect(value?.textContent).toBe("0s ago");
+    expect(value?.getAttribute("title")).toBe(
+      `Updated at ${new Date(NOW * 1000).toLocaleString()}`,
+    );
   });
 
   it("renders empty detail tables without replacing market-level KPIs", () => {

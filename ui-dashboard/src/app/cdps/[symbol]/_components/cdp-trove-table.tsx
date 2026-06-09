@@ -698,42 +698,29 @@ function UpdatedValue({
 }) {
   const label = relativeTime(trove.lastUpdatedAt);
   const timestamp = formatTimestamp(trove.lastUpdatedAt);
-  if (!trove.lastUpdatedTxHash) {
-    return (
-      <Tooltip content={`Updated at ${timestamp}.`} align="right">
-        <span className="text-slate-300">{label}</span>
-      </Tooltip>
-    );
-  }
-
   const networkId = networkIdForChainId(chainId);
   const network = networkId ? NETWORKS[networkId] : null;
-  if (network == null) {
+  // When the tx hash + explorer are known, the relative time links straight to
+  // the transaction (no popover). The exact timestamp stays available via the
+  // native title on hover.
+  if (trove.lastUpdatedTxHash && network != null) {
     return (
-      <Tooltip
-        content={`Updated at ${timestamp}. Transaction: ${trove.lastUpdatedTxHash}.`}
-        align="right"
-      >
-        <span className="text-slate-300">{label}</span>
-      </Tooltip>
-    );
-  }
-
-  return (
-    <Tooltip
-      content={`Updated at ${timestamp}. Opens transaction ${trove.lastUpdatedTxHash}.`}
-      align="right"
-      asChild
-    >
       <a
         href={explorerTxUrl(network, trove.lastUpdatedTxHash)}
         target="_blank"
         rel="noopener noreferrer"
+        title={`Updated at ${timestamp}`}
         className="font-mono text-slate-300 transition-colors hover:text-indigo-300"
       >
         {label}
       </a>
-    </Tooltip>
+    );
+  }
+
+  return (
+    <span className="text-slate-300" title={`Updated at ${timestamp}`}>
+      {label}
+    </span>
   );
 }
 
