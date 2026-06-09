@@ -446,7 +446,9 @@ export function aggregateCdpBorrowingRevenueMarkets({
           weightedAnnualInterestRatePercent(collateralBrackets),
         annualInterestRunRateUSD: addPricedWei(
           collateral.symbol,
-          isCollateralShutDown ? ZERO : annualInterestRunRateWei(collateralBrackets),
+          isCollateralShutDown
+            ? ZERO
+            : annualInterestRunRateWei(collateralBrackets),
           rates,
           unpricedSymbols,
         ),
