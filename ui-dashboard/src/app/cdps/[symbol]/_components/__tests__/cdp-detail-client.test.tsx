@@ -660,18 +660,18 @@ describe("CdpDetailClient", () => {
     );
     expect(link).not.toBeNull();
     expect(link?.href).toBe("https://celoscan.io/tx/0xupdated");
-    expect(link?.textContent).toBe("0s ago");
     expect(link?.target).toBe("_blank");
     expect(link?.rel).toBe("noopener noreferrer");
-    // No custom tooltip popover — the relative time opens the tx on click and
-    // the exact timestamp stays available via the native title.
+    // Visible text is the relative time; no custom tooltip popover.
+    expect(link?.firstChild?.textContent).toBe("0s ago");
     expect(link?.getAttribute("aria-describedby")).toBeNull();
     expect(link?.getAttribute("title")).toBe(
       `Updated at ${new Date(NOW * 1000).toLocaleString()}`,
     );
-    // Exact timestamp is exposed to assistive tech (title is hover-only).
-    expect(link?.getAttribute("aria-label")).toBe(
-      `0s ago, updated at ${new Date(NOW * 1000).toLocaleString()}`,
+    // Exact timestamp + destination exposed to assistive tech via real sr-only
+    // text (native title is hover-only).
+    expect(link?.querySelector(".sr-only")?.textContent).toBe(
+      `, updated at ${new Date(NOW * 1000).toLocaleString()}, opens transaction`,
     );
   });
 
@@ -710,17 +710,17 @@ describe("CdpDetailClient", () => {
       'table[aria-label="GBPm troves"] tbody tr td:nth-child(8)',
     );
     expect(cell).not.toBeNull();
-    // No link (no tx hash) and no custom tooltip — just the relative time with
-    // the exact timestamp on the native title.
+    // No link (no tx hash) and no custom tooltip — the relative time with the
+    // exact timestamp on the native title plus real sr-only text for AT.
     expect(cell?.querySelector("a")).toBeNull();
     expect(cell?.querySelector("[aria-describedby]")).toBeNull();
     const value = cell?.querySelector<HTMLElement>("span[title]");
-    expect(value?.textContent).toBe("0s ago");
+    expect(value?.firstChild?.textContent).toBe("0s ago");
     expect(value?.getAttribute("title")).toBe(
       `Updated at ${new Date(NOW * 1000).toLocaleString()}`,
     );
-    expect(value?.getAttribute("aria-label")).toBe(
-      `0s ago, updated at ${new Date(NOW * 1000).toLocaleString()}`,
+    expect(value?.querySelector(".sr-only")?.textContent).toBe(
+      `, updated at ${new Date(NOW * 1000).toLocaleString()}`,
     );
   });
 
