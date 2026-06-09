@@ -19,15 +19,20 @@ resource "google_storage_bucket" "watchdog_notifications_function" {
 # This is more reliable than using the zip's SHA256 which includes metadata
 locals {
   source_files = fileset("${path.module}/..", "src/**")
+  # Bare package-relative names: the hash loop below prefixes every entry with
+  # "${path.module}/../" (same treatment as the fileset() results). Embedding
+  # the prefix here too would double it — "${path.module}/../${path.module}/.."
+  # resolves to the MONOREPO ROOT, silently hashing the root package.json and
+  # lockfile instead of this package's own files.
   package_files = [
-    "${path.module}/../package.json",
-    "${path.module}/../pnpm-lock.yaml",
-    "${path.module}/../pnpm-workspace.yaml",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
     # tsconfig files are build inputs: the Cloud Build `gcp-build` step runs
     # `tsc --project tsconfig.build.json` (which extends tsconfig.json), so a
     # change to either alters the emitted JS and must bust the source hash.
-    "${path.module}/../tsconfig.json",
-    "${path.module}/../tsconfig.build.json"
+    "tsconfig.json",
+    "tsconfig.build.json"
   ]
   # Create a hash of all source files and package files
   source_hash = md5(join("", [
