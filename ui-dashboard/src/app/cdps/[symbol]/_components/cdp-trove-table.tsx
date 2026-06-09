@@ -731,7 +731,12 @@ function UpdatedValue({
   return (
     <span className="text-slate-300" title={fallbackTitle}>
       {label}
-      <span className="sr-only">, updated at {timestamp}</span>
+      <span className="sr-only">
+        , updated at {timestamp}
+        {trove.lastUpdatedTxHash
+          ? `, tx ${shortenHex(trove.lastUpdatedTxHash)}`
+          : ""}
+      </span>
     </span>
   );
 }
