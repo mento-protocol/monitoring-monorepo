@@ -80,6 +80,38 @@ async function mockBlockedRebalanceProbe(page: Page) {
   });
 }
 
+async function globalPoolsTableMetrics(page: Page) {
+  return page.evaluate(() => {
+    const table = [...document.querySelectorAll("table")].find((candidate) => {
+      const headers = [...candidate.querySelectorAll("thead th")].map((th) =>
+        (th.textContent || "").replace(/\s+/g, " ").trim(),
+      );
+      return (
+        headers.some((header) => header.startsWith("Pool")) &&
+        headers.includes("Reserves")
+      );
+    });
+    if (!table) throw new Error("Global pools table not found");
+
+    const wrapper = table.parentElement;
+    return {
+      bodyOverflow:
+        document.documentElement.scrollWidth >
+        document.documentElement.clientWidth,
+      tableOverflow:
+        wrapper !== null && wrapper.scrollWidth > wrapper.clientWidth + 1,
+      reserveRows: [...table.querySelectorAll("tbody tr")]
+        .map((row) => ({
+          pool: row.querySelector('a[href^="/pool/"]')?.textContent?.trim(),
+          reserve: row
+            .querySelector('[aria-label^="Reserve composition:"]')
+            ?.getAttribute("aria-label"),
+        }))
+        .filter((row) => row.pool && row.reserve),
+    };
+  });
+}
+
 test.describe("dashboard browser flows", () => {
   let browserErrors: string[];
 
@@ -114,6 +146,34 @@ test.describe("dashboard browser flows", () => {
       "aria-selected",
       "true",
     );
+  });
+
+  test("keeps pools tables within the viewport and mirrors pool token order in reserves", async ({
+    page,
+  }) => {
+    for (const path of ["/", "/pools"]) {
+      for (const width of [1440, 1024, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(path);
+        await expect(
+          page.getByRole("link", { name: "USDC/USDm" }).first(),
+        ).toBeVisible();
+
+        const metrics = await globalPoolsTableMetrics(page);
+        expect(metrics.bodyOverflow, `${path} ${width}px body`).toBe(false);
+        expect(metrics.tableOverflow, `${path} ${width}px table`).toBe(false);
+
+        for (const { pool, reserve } of metrics.reserveRows) {
+          if (!pool?.endsWith("/USDm") || !reserve) continue;
+          const firstSymbol = pool.split("/")[0];
+          if (!firstSymbol) continue;
+          expect(
+            reserve.indexOf(firstSymbol),
+            `${path} ${width}px ${pool} reserve label`,
+          ).toBeLessThan(reserve.lastIndexOf("USDm"));
+        }
+      }
+    }
   });
 
   test("renders CDP detail trove ranking with indexed ICR and interest", async ({

@@ -153,10 +153,12 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).toContain(">Pool<");
     expect(html).toContain(">Health<");
     expect(html).toContain(">TVL<");
-    expect(html).toContain("TVL Δ WoW");
-    expect(html).toContain("24h Vol.");
-    expect(html).toContain("7d Vol.");
-    expect(html).toContain("Total Vol.");
+    expect(html).toContain(">Volume<");
+    expect(html).toContain(">Total<");
+    expect(html).not.toContain(">TVL Δ WoW<");
+    expect(html).not.toContain("24h Vol.");
+    expect(html).not.toContain("7d Vol.");
+    expect(html).not.toContain("Total Vol.");
     expect(html).toContain(">Fee<");
     expect(html).toContain(">Reserves<");
     expect(html).not.toContain(">Limits<");
@@ -242,9 +244,10 @@ describe("GlobalPoolsTable — Reserves column", () => {
     );
 
     expect(html).toContain(">Reserves<");
-    expect(html).toContain("Reserve composition: 60.0% USDm / 40.0% KESm");
-    expect(html).toContain("USDm 60%");
+    expect(html).toContain("Reserve composition: 40.0% KESm / 60.0% USDm");
     expect(html).toContain("KESm 40%");
+    expect(html).toContain("USDm 60%");
+    expect(html.indexOf("KESm 40%")).toBeLessThan(html.indexOf("USDm 60%"));
   });
 
   it("renders Empty when both indexed reserves are zero", () => {
@@ -392,6 +395,7 @@ describe("GlobalPoolsTable — 24h volume states", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} volume24hByKey={volMap} />,
     );
+    expect(html).toContain("24h");
     expect(html).toContain("$500.00");
   });
 });
@@ -421,12 +425,12 @@ describe("GlobalPoolsTable — 7d volume states", () => {
   });
 });
 
-describe("GlobalPoolsTable — TVL WoW column", () => {
-  it("renders em-dash in the WoW cell when tvlChangeWoWByKey is missing", () => {
+describe("GlobalPoolsTable — TVL cell", () => {
+  it("renders em-dash as the secondary WoW value when tvlChangeWoWByKey is missing", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toMatch(/font-mono text-slate-600[^>]*>—/);
+    expect(html).toContain('text-slate-600" title="TVL Δ WoW">—');
   });
 
   it("renders em-dash when the pool has no WoW entry (no comparable snapshot)", () => {
@@ -436,7 +440,7 @@ describe("GlobalPoolsTable — TVL WoW column", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toMatch(/font-mono text-slate-600[^>]*>—/);
+    expect(html).toContain('text-slate-600" title="TVL Δ WoW">—');
   });
 
   it("renders N/A when the WoW value is explicitly null (snapshot query failed)", () => {
@@ -447,7 +451,7 @@ describe("GlobalPoolsTable — TVL WoW column", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toMatch(/font-mono text-slate-400[^>]*>N\/A/);
+    expect(html).toContain('text-slate-400" title="TVL Δ WoW">N/A');
   });
 
   it("renders positive WoW with + prefix and emerald color in the same cell", () => {
@@ -458,7 +462,7 @@ describe("GlobalPoolsTable — TVL WoW column", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toMatch(/text-emerald-400[^<]*>\+2\.35%/);
+    expect(html).toContain('text-emerald-400" title="TVL Δ WoW">+2.35%');
   });
 
   it("renders negative WoW with - prefix and red color in the same cell", () => {
@@ -469,7 +473,7 @@ describe("GlobalPoolsTable — TVL WoW column", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toMatch(/text-red-400[^<]*>-1\.10%/);
+    expect(html).toContain('text-red-400" title="TVL Δ WoW">-1.10%');
   });
 });
 

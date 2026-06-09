@@ -91,19 +91,19 @@ export function PoolRow({
       <Cell className="hidden sm:table-cell text-sm text-slate-200 font-mono text-right">
         {formatFee(pool)}
       </Cell>
-      <TvlCell tvl={tvlByKey.get(key) ?? null} />
-      <WoWCell wow={tvlChangeWoWByKey?.get(key)} />
-      <VolumeCell
-        loading={volume24hLoading}
-        error={volume24hError}
-        value={volume24hByKey?.get(key)}
+      <TvlCell
+        tvl={tvlByKey.get(key) ?? null}
+        wow={tvlChangeWoWByKey?.get(key)}
       />
-      <VolumeCell
-        loading={volume7dLoading}
-        error={volume7dError}
-        value={volume7dByKey?.get(key)}
+      <VolumeSummaryCell
+        volume24hLoading={volume24hLoading}
+        volume24hError={volume24hError}
+        volume24h={volume24hByKey?.get(key)}
+        volume7dLoading={volume7dLoading}
+        volume7dError={volume7dError}
+        volume7d={volume7dByKey?.get(key)}
       />
-      <Cell className="hidden md:table-cell text-sm text-slate-200 font-mono">
+      <Cell className="hidden md:table-cell text-sm text-slate-200 font-mono text-right">
         {(() => {
           const totalVol = totalVolumeByKey.get(key);
           return totalVol == null ? "—" : formatUSD(totalVol);
@@ -122,7 +122,7 @@ function Cell({
   children: ReactNode;
 }) {
   return (
-    <td className={`px-2 sm:px-4 py-2 sm:py-3 ${className}`}>{children}</td>
+    <td className={`px-2 sm:px-3 py-2 sm:py-3 ${className}`}>{children}</td>
   );
 }
 
@@ -195,15 +195,13 @@ function UptimeCell({ pool }: { pool: Pool }) {
   );
 }
 
-function TvlCell({ tvl }: { tvl: number | null }) {
-  return (
-    <Cell className="hidden sm:table-cell text-sm text-slate-200 font-mono">
-      {tvl !== null && tvl > 0 ? formatUSD(tvl) : "—"}
-    </Cell>
-  );
-}
-
-function WoWCell({ wow }: { wow: number | null | undefined }) {
+function TvlCell({
+  tvl,
+  wow,
+}: {
+  tvl: number | null;
+  wow: number | null | undefined;
+}) {
   const color =
     wow === null
       ? "text-slate-400"
@@ -221,13 +219,20 @@ function WoWCell({ wow }: { wow: number | null | undefined }) {
         ? "—"
         : `${wow >= 0 ? "+" : ""}${wow.toFixed(2)}%`;
   return (
-    <Cell className={`hidden sm:table-cell text-sm font-mono ${color}`}>
-      {label}
+    <Cell className="hidden sm:table-cell text-sm font-mono text-right">
+      <div className="flex flex-col items-end leading-tight">
+        <span className="text-slate-200">
+          {tvl !== null && tvl > 0 ? formatUSD(tvl) : "—"}
+        </span>
+        <span className={`mt-0.5 text-[11px] ${color}`} title="TVL Δ WoW">
+          {label}
+        </span>
+      </div>
     </Cell>
   );
 }
 
-function VolumeCell({
+function volumeLabel({
   loading,
   error,
   value,
@@ -235,16 +240,53 @@ function VolumeCell({
   loading: boolean;
   error: boolean;
   value: number | null | undefined;
-}) {
+}): string {
   let label: string;
   if (loading) label = "…";
   else if (error) label = "N/A";
   else if (value === null) label = "N/A";
   else if (value && value > 0) label = formatUSD(value);
   else label = "—";
+  return label;
+}
+
+function VolumeSummaryCell({
+  volume24hLoading,
+  volume24hError,
+  volume24h,
+  volume7dLoading,
+  volume7dError,
+  volume7d,
+}: {
+  volume24hLoading: boolean;
+  volume24hError: boolean;
+  volume24h: number | null | undefined;
+  volume7dLoading: boolean;
+  volume7dError: boolean;
+  volume7d: number | null | undefined;
+}) {
+  const volume24hLabel = volumeLabel({
+    loading: volume24hLoading,
+    error: volume24hError,
+    value: volume24h,
+  });
+  const volume7dLabel = volumeLabel({
+    loading: volume7dLoading,
+    error: volume7dError,
+    value: volume7d,
+  });
+
   return (
-    <Cell className="hidden md:table-cell text-sm text-slate-200 font-mono">
-      {label}
+    <Cell className="hidden md:table-cell text-sm font-mono text-right">
+      <div
+        className="flex flex-col items-end leading-tight"
+        title={`7d volume: ${volume7dLabel}\n24h volume: ${volume24hLabel}`}
+      >
+        <span className="text-slate-200">{volume7dLabel}</span>
+        <span className="mt-0.5 text-[11px] text-slate-500">
+          24h {volume24hLabel}
+        </span>
+      </div>
     </Cell>
   );
 }
