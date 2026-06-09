@@ -1076,6 +1076,54 @@ describe("Liquity CDP helpers", () => {
       );
       assert.equal(getWhereCalled, false);
     });
+
+    it("caps bracket interest accrual at the shutdown timestamp", async () => {
+      const { settleInterestRateBracketRevenue } =
+        await import("../src/handlers/liquity/borrowingRevenue");
+      const { SECONDS_PER_DAY } = await import("../src/helpers");
+      const gbpm = LIQUITY_MARKETS.find((m) => m.symbol === "GBPm");
+      assert.ok(gbpm);
+      const collateralId = makeCollateralId(gbpm);
+      const day0 = 1_716_336_000n;
+      const shutDownAt = day0 + SECONDS_PER_DAY / 2n;
+      const rate = 10n ** 17n; // 10%
+      const debt = 3_650n * 10n ** 18n;
+      const bracket = {
+        id: `${collateralId}-${rate}`,
+        collateralId,
+        rate,
+        totalDebt: debt,
+        sumDebtTimesRateD36: debt * rate,
+        pendingDebtTimesOneYearD36: 0n,
+        updatedAt: day0,
+      };
+      const snapshots = new Map<string, Record<string, unknown>>();
+      const ctx = {
+        LiquityBorrowingRevenueDailySnapshot: {
+          get: async (id: string) => snapshots.get(id),
+          set: (row: Record<string, unknown>) =>
+            snapshots.set(String(row.id), row),
+        },
+      };
+
+      // Event is two days after day0, but the shut-down branch stopped
+      // accruing at shutDownAt (half a day in) — settle must cap there.
+      const settled = await settleInterestRateBracketRevenue(ctx as never, {
+        chainId: 42220,
+        collateralId,
+        instanceId: collateralId,
+        bracket,
+        untilTimestamp: day0 + 2n * SECONDS_PER_DAY,
+        notAfter: shutDownAt,
+        blockNumber: 1n,
+      });
+
+      assert.equal(settled.updatedAt, shutDownAt);
+      assert.equal(
+        settled.pendingDebtTimesOneYearD36,
+        debt * rate * (shutDownAt - day0),
+      );
+    });
   });
 
   it("floors interest bracket debt and weighted debt when debits overshoot", async () => {
@@ -1086,6 +1134,7 @@ describe("Liquity CDP helpers", () => {
         set: (entity: Record<string, unknown>) =>
           rows.set(String(entity.id), entity),
       },
+      LiquityInstance: { get: async () => undefined },
       LiquityBorrowingRevenueDailySnapshot: {
         get: async () => undefined,
         set: () => undefined,
@@ -1171,6 +1220,7 @@ describe("Liquity CDP helpers", () => {
       },
       Trove: { get: async () => undefined, set: () => undefined },
       BorrowerInfo: { get: async () => undefined, set: () => undefined },
+      LiquityInstance: { get: async () => undefined },
     } as unknown as Parameters<
       typeof moveTroveUpdatedInterestRateBracketDebt
     >[0];
@@ -1267,6 +1317,7 @@ describe("Liquity CDP helpers", () => {
           troves.set(String(entity.id), entity),
       },
       BorrowerInfo: { get: async () => undefined, set: () => undefined },
+      LiquityInstance: { get: async () => undefined },
       InterestRateBracket: {
         get: async (id: string) => brackets.get(id),
         set: (entity: Record<string, unknown>) =>
@@ -1397,6 +1448,7 @@ describe("Liquity CDP helpers", () => {
           troves.set(String(entity.id), entity),
       },
       BorrowerInfo: { get: async () => undefined, set: () => undefined },
+      LiquityInstance: { get: async () => undefined },
       InterestRateBracket: {
         get: async (id: string) => brackets.get(id),
         set: (entity: Record<string, unknown>) =>
@@ -1527,6 +1579,7 @@ describe("Liquity CDP helpers", () => {
           troves.set(String(entity.id), entity),
       },
       BorrowerInfo: { get: async () => undefined, set: () => undefined },
+      LiquityInstance: { get: async () => undefined },
       InterestRateBracket: { get: async () => undefined, set: () => undefined },
       PendingBatchMembershipOperation: {
         get: async () => undefined,

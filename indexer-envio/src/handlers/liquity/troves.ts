@@ -40,6 +40,9 @@ type TroveContext = {
     ) => Promise<LiquityBorrowingRevenueDailySnapshot | undefined>;
     set: (entity: LiquityBorrowingRevenueDailySnapshot) => void;
   };
+  LiquityInstance: {
+    get: (id: string) => Promise<LiquityInstance | undefined>;
+  };
 };
 
 export const makeTroveId = (
@@ -390,7 +393,10 @@ async function applyBracketDelta(
   if (rawRate === 0n || debtDelta === 0n) return;
   const rate = floorInterestRateBracket(rawRate);
   const id = makeInterestRateBracketId(collateralId, rawRate);
-  const existing = await context.InterestRateBracket.get(id);
+  const [existing, instance] = await Promise.all([
+    context.InterestRateBracket.get(id),
+    context.LiquityInstance.get(collateralId),
+  ]);
   const bracket = existing ?? {
     id,
     collateralId,
@@ -406,6 +412,11 @@ async function applyBracketDelta(
     instanceId: collateralId,
     bracket,
     untilTimestamp: timestamp,
+    // A shut-down branch stops accruing interest at shutDownAt.
+    notAfter:
+      instance?.isShutDown && instance.shutDownAt !== undefined
+        ? instance.shutDownAt
+        : undefined,
     blockNumber,
   });
   const totalDebt = bracket.totalDebt + debtDelta;

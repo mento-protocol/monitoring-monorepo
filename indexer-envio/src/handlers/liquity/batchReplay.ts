@@ -40,6 +40,9 @@ type BatchReplayContext = {
     ) => Promise<LiquityBorrowingRevenueDailySnapshot | undefined>;
     set: (entity: LiquityBorrowingRevenueDailySnapshot) => void;
   };
+  LiquityInstance: {
+    get: (id: string) => Promise<LiquityInstance | undefined>;
+  };
   PendingBatchMembershipOperation: {
     get: (id: string) => Promise<PendingBatchMembershipOperation | undefined>;
     deleteUnsafe: (id: string) => void;

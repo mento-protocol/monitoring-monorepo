@@ -111,10 +111,18 @@ export async function settleInterestRateBracketRevenue(
     instanceId: string;
     bracket: InterestRateBracket;
     untilTimestamp: bigint;
+    // Stop accruing interest at this timestamp even if the event is later.
+    // A shut-down Liquity branch winds down and stops charging borrowing
+    // interest at `shutDownAt`, so callers pass it here to cap accrual.
+    notAfter?: bigint | undefined;
     blockNumber: bigint;
   },
 ): Promise<InterestRateBracket> {
-  const { bracket, untilTimestamp } = args;
+  const { bracket } = args;
+  const untilTimestamp =
+    args.notAfter !== undefined && args.notAfter < args.untilTimestamp
+      ? args.notAfter
+      : args.untilTimestamp;
   if (untilTimestamp <= bracket.updatedAt) return bracket;
 
   const elapsed = untilTimestamp - bracket.updatedAt;
@@ -163,6 +171,11 @@ export async function flushBorrowingRevenueDailySnapshots(
     collateralId: { _eq: instance.collateralId },
   });
 
+  const notAfter =
+    instance.isShutDown && instance.shutDownAt !== undefined
+      ? instance.shutDownAt
+      : undefined;
+
   for (const bracket of brackets) {
     const next = await settleInterestRateBracketRevenue(context, {
       chainId: instance.chainId,
@@ -170,6 +183,7 @@ export async function flushBorrowingRevenueDailySnapshots(
       instanceId: instance.id,
       bracket,
       untilTimestamp,
+      notAfter,
       blockNumber,
     });
     if (next !== bracket) context.InterestRateBracket.set(next);
