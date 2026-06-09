@@ -363,7 +363,8 @@ function TroveTableResults({
       {capped && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing {CDP_TROVES_DETAIL_LIMIT.toLocaleString()} fetched troves for
-          this view — search covers fetched rows only.
+          this view — search and sorting cover these fetched rows only, not the
+          full set.
           {activeTab === "open" && rankSuppressed
             ? " Redemption ranks are hidden because the full open-trove set is not loaded."
             : ""}

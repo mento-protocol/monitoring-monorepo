@@ -326,6 +326,30 @@ function clickButton(handle: Handle, label: string) {
   });
 }
 
+function clickSortHeader(handle: Handle, label: string) {
+  const button = Array.from(
+    handle.container.querySelectorAll("thead button"),
+  ).find((candidate) => (candidate.textContent ?? "").startsWith(label));
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`Sort header not found: ${label}`);
+  }
+  act(() => {
+    button.click();
+  });
+}
+
+function clickAriaLabel(handle: Handle, label: string) {
+  const button = handle.container.querySelector(
+    `button[aria-label="${label}"]`,
+  );
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`Button not found: ${label}`);
+  }
+  act(() => {
+    button.click();
+  });
+}
+
 function searchTroves(handle: Handle, value: string) {
   const input = handle.container.querySelector("#cdp-trove-search");
   if (!(input instanceof HTMLInputElement)) {
@@ -825,6 +849,76 @@ describe("CdpDetailClient", () => {
     expect(rows[1]).toContain("Batch");
     expect(rows[2]).toContain("0xhigher");
     expect(rows[2]).toContain("#2");
+  });
+
+  it("sorts open troves on header click, persists the column to the URL, and resets to page 1", () => {
+    window.history.replaceState(null, "", "/cdps/gbpm");
+    // 30 troves, equal interest rate so default order is troveId-ascending;
+    // debt is the INVERSE of troveId so a debt sort is visibly distinct from
+    // the default order. Owners are zero-padded to avoid substring collisions.
+    const troves = Array.from({ length: 30 }, (_, i) =>
+      trove({
+        id: `srt-${i + 1}`,
+        troveId: String(i + 1),
+        owner: `0xowner${String(i + 1).padStart(2, "0")}`,
+        debt: wei(30 - i),
+        interestRate: rateBps(100),
+      }),
+    );
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketsData(), error: null, isLoading: false };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: troveSchemaData(), error: null, isLoading: false };
+      }
+      if (
+        query === CDP_MARKET_DETAIL ||
+        query === CDP_MARKET_DETAIL_WITH_TROVE_TX
+      ) {
+        return {
+          data: detailData({
+            openTroves: troves,
+            depositors: [],
+            cdpPools: [],
+          }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+
+    // Default: rank order (equal rate → troveId asc) → owner01 first, no params.
+    expect(troveRowText(handle!)[0]).toContain("0xowner01");
+    expect(window.location.search).toBe("");
+
+    // Page to the second page (rows 26-30 in default order).
+    clickAriaLabel(handle!, "Next page");
+    expect(troveRowText(handle!)[0]).toContain("0xowner26");
+
+    // Click Debt → resets to page 1, ascending (owner30 has the lowest debt),
+    // and the active column is reflected in the URL.
+    clickSortHeader(handle!, "Debt");
+    expect(handle!.container.textContent).toContain("page 1 of 2");
+    expect(troveRowText(handle!)[0]).toContain("0xowner30");
+    expect(window.location.search).toBe("?trovesSort=debt&trovesDir=asc");
+
+    // Toggle to descending — owner01 has the highest debt.
+    clickSortHeader(handle!, "Debt");
+    expect(troveRowText(handle!)[0]).toContain("0xowner01");
+    expect(window.location.search).toBe("?trovesSort=debt&trovesDir=desc");
+
+    window.history.replaceState(null, "", "/");
   });
 
   it("does not rank missing batch troves by their stale direct rate", () => {
