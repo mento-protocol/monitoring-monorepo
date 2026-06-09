@@ -30,7 +30,7 @@ jobs:
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.user.login != 'dependabot[bot]'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Validate PR description
         # Body is passed via env (never interpolated into the script) to avoid

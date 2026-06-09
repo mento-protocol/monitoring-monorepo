@@ -30,7 +30,7 @@ permissions: read-all
 jobs:
   changes:
     name: Detect changes
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 2
     permissions:
       contents: read
@@ -315,10 +315,16 @@ jobs:
         # already-hit key, so the next run re-downloads again indefinitely.
         # Hashing the lockfile makes the key flip on any real Playwright
         # version bump. Mirrors the proven step in lighthouse.yml.
+        #
+        # `runner.arch` is in the key so a runner-architecture change (e.g.
+        # an ARM migration) can never restore another arch's Chromium —
+        # binaries are arch-specific, and `playwright install` validates
+        # version, not architecture, so a cross-arch restore would pass
+        # validation and then die with an exec-format error.
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
+          key: playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
           # `restore-keys` lets an unrelated lockfile or `package.json`
           # edit still reuse the most recent chromium cache instead of
           # triggering a ~130 MB fresh download. `playwright install` then
@@ -326,7 +332,7 @@ jobs:
           # (no-op on match, re-download only on a real Playwright version
           # bump). `--with-deps` still installs OS libraries (fast).
           restore-keys: |
-            playwright-chromium-
+            playwright-chromium-${{ runner.arch }}-
       - name: Install Playwright Chromium
         run: pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
       - name: Browser interaction tests
@@ -604,7 +610,7 @@ jobs:
     name: Terraform Validate (registry)
     needs: changes
     if: needs.changes.outputs.terraform == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
     permissions:
       contents: read
