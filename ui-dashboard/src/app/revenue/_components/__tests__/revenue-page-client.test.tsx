@@ -380,3 +380,70 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("$20.00");
   });
 });
+
+describe("BorrowingEarnedCollectedChart via RevenuePageClient", () => {
+  beforeEach(() => {
+    mockUseProtocolFees.mockReset();
+    mockUseCdpBorrowingRevenue.mockReset();
+  });
+
+  const DAY = 86_400;
+  const day0 = 1_700_006_400;
+
+  it("headlines cumulative earned and collected from the daily series", () => {
+    const html = renderRevenue([], false, {
+      summary: EMPTY_CDP_REVENUE,
+      dailySeries: [
+        {
+          timestamp: day0,
+          upfrontFeesUSD: 6,
+          accruedInterestUSD: 4,
+          totalFeesUSD: 10,
+          collectedUSD: 4,
+        },
+        {
+          timestamp: day0 + DAY,
+          upfrontFeesUSD: 2,
+          accruedInterestUSD: 3,
+          totalFeesUSD: 5,
+          collectedUSD: 2,
+        },
+      ],
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain("Borrowing Revenue — Earned vs Collected");
+    expect(html).toContain("$15.00");
+    expect(html).toContain("earned");
+    expect(html).toContain("$6.00");
+    expect(html).toContain("collected");
+    expect(html).toContain(
+      "Gap between lines = accrued but not yet minted to the treasury",
+    );
+  });
+
+  it("drops the collected leg when the series is the fee-event fallback", () => {
+    const html = renderRevenue([], false, {
+      summary: EMPTY_CDP_REVENUE,
+      dailySeries: [
+        {
+          timestamp: day0,
+          upfrontFeesUSD: 6,
+          accruedInterestUSD: 4,
+          totalFeesUSD: 10,
+          collectedUSD: 0,
+        },
+      ],
+      dailySeriesApproximate: true,
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain("$10.00");
+    expect(html).not.toContain("collected</span>");
+    expect(html).toContain(
+      "Collected mints unavailable — series reconstructed from fee events",
+    );
+  });
+});

@@ -92,6 +92,30 @@ export const CDP_BORROWING_REVENUE_MARKETS = `
   }
 `;
 
+// Old-schema compatibility: production Hasura predating the
+// borrowingFeeCollectedCum field rejects the full markets query with a
+// validation error. This legacy shape lets the hook degrade (split sentinel
+// -1, collected 0) instead of blanking the CDP tile — mirrors the daily
+// snapshot fallback path. Drop once the post-`collected` indexer schema is
+// the only one in production.
+export const CDP_BORROWING_REVENUE_MARKETS_LEGACY = `
+  query CdpBorrowingRevenueMarketsLegacy($chainId: Int!) {
+    LiquityCollateral(
+      where: { chainId: { _eq: $chainId } }
+      order_by: { collIndex: asc }
+    ) {
+      id chainId collIndex symbol spYieldSplitBps
+    }
+    LiquityInstance(
+      where: { chainId: { _eq: $chainId } }
+      order_by: { collateralId: asc }
+    ) {
+      id collateralId chainId systemDebt activeTroveCount borrowingFeeCum
+      isShutDown shutDownAt
+    }
+  }
+`;
+
 export const CDP_BORROWING_REVENUE_BRACKETS = `
   query CdpBorrowingRevenueBrackets(
     $collateralIds: [String!]!

@@ -19,15 +19,19 @@ import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
 import { ComingSoonSection } from "@/components/coming-soon-section";
 import { Row, Table, Td, Th } from "@/components/table";
 
+// Table fee columns are GROSS (borrower-side fees, before the SP yield
+// split); the summary tile headlines the protocol's share. Tooltips call
+// this out so the two surfaces don't read as contradictory.
 const CDP_BORROWING_HEADER_INFO = {
   debt: "Active CDP debt, priced to USD from the debt token's live oracle rate.",
   runRate:
-    "Annualized interest revenue if current debt and rates stay unchanged.",
+    "Annualized gross interest if current debt and rates stay unchanged, before the SP yield split.",
   upfront:
-    "Cumulative one-time borrowing fees paid when troves are opened or debt is increased.",
+    "Cumulative one-time borrowing fees paid when troves are opened or debt is increased (gross, before the SP yield split).",
   interest:
-    "Accrued interest earned so far, including live accrual since the last indexer update.",
-  total: "Upfront fees plus accrued interest.",
+    "Accrued interest so far, including live accrual since the last indexer update (gross, before the SP yield split).",
+  total:
+    "Upfront fees plus accrued interest — gross fees paid by borrowers. The protocol keeps the share shown in the summary tile; the rest is StabilityPool depositor yield.",
 } as const;
 
 const CDP_AVERAGE_APR_INFO = (

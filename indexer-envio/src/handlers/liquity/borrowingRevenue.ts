@@ -286,24 +286,10 @@ export async function preloadBorrowingRevenueRollover(
   );
 }
 
-// Warm the daily-snapshot row recordBorrowingUpfrontFee reads when an upfront
-// fee is present (the event-day bucket).
-export async function preloadBorrowingUpfrontFeeBucket(
-  context: BorrowingRevenueSnapshotContext,
-  instanceId: string,
-  fee: bigint,
-  timestamp: bigint,
-): Promise<void> {
-  if (fee <= ZERO) return;
-  await context.LiquityBorrowingRevenueDailySnapshot.get(
-    borrowingRevenueDailySnapshotId(instanceId, dayBucket(timestamp)),
-  );
-}
-
-// Warm the daily-snapshot row recordBorrowingCollected reads (the event-day
-// bucket). Same shape as the upfront warmer; kept separate so each call site
-// names the flow it warms.
-export async function preloadBorrowingCollectedBucket(
+// Warm the event-day daily-snapshot row a positive revenue delta will read.
+// Shared core for the two named warmers below — each call site names the
+// flow it warms while the read stays byte-identical to the write path's id.
+async function preloadBorrowingRevenueDayBucket(
   context: BorrowingRevenueSnapshotContext,
   instanceId: string,
   amount: bigint,
@@ -314,3 +300,12 @@ export async function preloadBorrowingCollectedBucket(
     borrowingRevenueDailySnapshotId(instanceId, dayBucket(timestamp)),
   );
 }
+
+// Warm the daily-snapshot row recordBorrowingUpfrontFee reads when an upfront
+// fee is present (the event-day bucket).
+export const preloadBorrowingUpfrontFeeBucket =
+  preloadBorrowingRevenueDayBucket;
+
+// Warm the daily-snapshot row recordBorrowingCollected reads (the event-day
+// bucket).
+export const preloadBorrowingCollectedBucket = preloadBorrowingRevenueDayBucket;

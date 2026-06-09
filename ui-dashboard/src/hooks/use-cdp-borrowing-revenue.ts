@@ -14,6 +14,7 @@ import {
   CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
   CDP_BORROWING_REVENUE_BRACKETS,
   CDP_BORROWING_REVENUE_MARKETS,
+  CDP_BORROWING_REVENUE_MARKETS_LEGACY,
   ORACLE_RATES,
 } from "@/lib/queries";
 import { REQUEST_TIMEOUT_MS } from "@/lib/fetch-all-networks";
@@ -42,6 +43,50 @@ type MarketsResponse = {
   LiquityCollateral: CdpBorrowingRevenueCollateral[];
   LiquityInstance: CdpBorrowingRevenueInstance[];
 };
+
+type LegacyMarketsResponse = {
+  LiquityCollateral: CdpBorrowingRevenueCollateral[];
+  LiquityInstance: Array<
+    Omit<CdpBorrowingRevenueInstance, "borrowingFeeCollectedCum">
+  >;
+};
+
+function isMissingCollectedFieldError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("borrowingFeeCollectedCum");
+}
+
+// Old-schema compatibility: production Hasura predating the
+// `borrowingFeeCollectedCum` field rejects the full markets query with a
+// validation error. Retry with the legacy shape and default collected to 0
+// so the CDP tile degrades (collected bar empty) instead of blanking —
+// mirrors the daily-snapshot entity fallback below.
+async function fetchMarketsWithCompat(
+  client: GraphQLClient,
+  chainId: number,
+): Promise<MarketsResponse> {
+  try {
+    return await requestWithTimeout<MarketsResponse>(
+      client,
+      CDP_BORROWING_REVENUE_MARKETS,
+      { chainId },
+    );
+  } catch (err) {
+    if (!isMissingCollectedFieldError(err)) throw err;
+    const legacy = await requestWithTimeout<LegacyMarketsResponse>(
+      client,
+      CDP_BORROWING_REVENUE_MARKETS_LEGACY,
+      { chainId },
+    );
+    return {
+      LiquityCollateral: legacy.LiquityCollateral ?? [],
+      LiquityInstance: (legacy.LiquityInstance ?? []).map((instance) => ({
+        ...instance,
+        borrowingFeeCollectedCum: "0",
+      })),
+    };
+  }
+}
 
 type BracketsResponse = {
   InterestRateBracket: CdpBorrowingRevenueBracket[];
@@ -387,10 +432,9 @@ async function fetchRevenueForNetwork(
 
   try {
     const client = new GraphQLClient(network.hasuraUrl);
-    const marketsResponse = await requestWithTimeout<MarketsResponse>(
+    const marketsResponse = await fetchMarketsWithCompat(
       client,
-      CDP_BORROWING_REVENUE_MARKETS,
-      { chainId: network.chainId },
+      network.chainId,
     );
     const collaterals = marketsResponse.LiquityCollateral ?? [];
     const instances = marketsResponse.LiquityInstance ?? [];
