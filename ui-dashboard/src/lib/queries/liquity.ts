@@ -80,14 +80,14 @@ export const CDP_BORROWING_REVENUE_MARKETS = `
       where: { chainId: { _eq: $chainId } }
       order_by: { collIndex: asc }
     ) {
-      id chainId collIndex symbol
+      id chainId collIndex symbol spYieldSplitBps
     }
     LiquityInstance(
       where: { chainId: { _eq: $chainId } }
       order_by: { collateralId: asc }
     ) {
       id collateralId chainId systemDebt activeTroveCount borrowingFeeCum
-      isShutDown shutDownAt
+      borrowingFeeCollectedCum isShutDown shutDownAt
     }
   }
 `;
@@ -139,6 +139,7 @@ export const CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS = `
       offset: $offset
     ) {
       id chainId collateralId instanceId timestamp upfrontFee accruedInterest
+      collected
     }
   }
 `;

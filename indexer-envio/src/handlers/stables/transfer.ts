@@ -1,9 +1,11 @@
 // ---------------------------------------------------------------------------
-// StableToken Transfer handler — mint/burn supply tracking.
+// StableToken Transfer handler — mint/burn supply tracking + yield-split
+// fee inflows (see feeLeg.ts).
 //
-// Subscribes ERC20 Transfer events with array-OR filter `from=0x0 OR to=0x0`,
-// limited to supply-tracked Mento stable addresses listed under
-// `StableToken` in config.multichain.mainnet.yaml. Each event:
+// Subscribes ERC20 Transfer events with array-OR filter `from=0x0 OR to=0x0
+// OR to=yield-split Safe OR from/to=NTT custody manager`, limited to the
+// Mento stable addresses listed under `StableToken` in
+// config.multichain.mainnet.yaml. Each supply-relevant event:
 //
 //   1. Looks up the running supply entity. First event per token → seeds the
 //      baseline from on-chain `totalSupply(block-1)` via the RPC effect. If
@@ -24,6 +26,7 @@
 
 import type { StableSupplyChangeEvent } from "envio";
 import { ZERO_ADDRESS } from "../../constants.js";
+import { YIELD_SPLIT_ADDRESS } from "../../feeToken.js";
 import { asAddress, eventId } from "../../helpers.js";
 import { indexer } from "../../indexer.js";
 import { isProtocolOwnedAddress } from "../../protocol-actors.js";
@@ -39,15 +42,17 @@ import {
 } from "./config.js";
 import { handleStableTokenCustodyTransfer } from "./custody.js";
 import { flushStableDailySnapshot } from "./dailyFlush.js";
+import { handleYieldSplitInflow } from "./feeLeg.js";
 
 indexer.onEvent(
   {
     contract: "StableToken",
     event: "Transfer",
     // Array-OR semantics per envio 3.0.0: deliver Transfer events where
-    // EITHER from==0x0 (mint), to==0x0 (burn), from==lock/mint NTT manager, or
-    // to==lock/mint NTT manager. Other Transfers are filtered at the HyperSync
-    // edge — they never reach the handler.
+    // EITHER from==0x0 (mint), to==0x0 (burn), from==lock/mint NTT manager,
+    // to==lock/mint NTT manager, or to==yield-split Safe (protocol fees).
+    // Other Transfers are filtered at the HyperSync edge — they never reach
+    // the handler.
     // The `0x${string}` casts narrow ZERO_ADDRESS (typed as plain string in
     // constants.ts) to the SingleOrMultiple<`0x${string}`> envio expects.
     // NTT manager proxies are CREATE3-identical on Celo and Monad, so Monad
@@ -57,12 +62,20 @@ indexer.onEvent(
       params: [
         { from: ZERO_ADDRESS as `0x${string}` },
         { to: ZERO_ADDRESS as `0x${string}` },
+        { to: YIELD_SPLIT_ADDRESS },
         ...STABLE_TOKEN_CUSTODY_TRANSFER_WHERE_PARAMS,
       ],
     }),
   },
   async ({ event, context }) => {
     await handleStableTokenCustodyTransfer({ event, context });
+
+    // Protocol-fee inflows to the yield-split Safe: swap-fee legs paid in
+    // Mento stables (pool → Safe) and collected CDP borrowing revenue
+    // (0x0 → Safe in a debt token). Mints to the Safe also continue into
+    // the supply path below — they are real supply mints; pool → Safe
+    // transfers fall out at the isMint === isBurn guard.
+    await handleYieldSplitInflow({ event, context });
 
     const { chainId, srcAddress } = event;
     const tokenAddress = asAddress(srcAddress);

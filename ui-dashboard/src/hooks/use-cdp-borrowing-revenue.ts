@@ -97,6 +97,10 @@ const EMPTY_SUMMARY: CdpBorrowingRevenueSummary = {
   totalRevenueUSD: 0,
   upfrontFeesUSD: 0,
   accruedInterestUSD: 0,
+  protocolShareUSD: 0,
+  spYieldShareUSD: 0,
+  collectedUSD: 0,
+  receivableUSD: 0,
   marketCount: 0,
   activeInterestBracketCount: 0,
   unpricedSymbols: [],
@@ -124,6 +128,10 @@ function mergeSummaries(
     merged.totalRevenueUSD += row.summary.totalRevenueUSD;
     merged.upfrontFeesUSD += row.summary.upfrontFeesUSD;
     merged.accruedInterestUSD += row.summary.accruedInterestUSD;
+    merged.protocolShareUSD += row.summary.protocolShareUSD;
+    merged.spYieldShareUSD += row.summary.spYieldShareUSD;
+    merged.collectedUSD += row.summary.collectedUSD;
+    merged.receivableUSD += row.summary.receivableUSD;
     merged.marketCount += row.summary.marketCount;
     merged.activeInterestBracketCount += row.summary.activeInterestBracketCount;
     merged.bracketsTruncated =
@@ -154,7 +162,11 @@ function mergeDailySeries(
 ): CdpBorrowingFeeSeriesPoint[] {
   const buckets = new Map<
     number,
-    { upfrontFeesUSD: number; accruedInterestUSD: number }
+    {
+      upfrontFeesUSD: number;
+      accruedInterestUSD: number;
+      collectedUSD: number;
+    }
   >();
 
   for (const row of rows) {
@@ -162,9 +174,11 @@ function mergeDailySeries(
       const existing = buckets.get(point.timestamp) ?? {
         upfrontFeesUSD: 0,
         accruedInterestUSD: 0,
+        collectedUSD: 0,
       };
       existing.upfrontFeesUSD += point.upfrontFeesUSD;
       existing.accruedInterestUSD += point.accruedInterestUSD;
+      existing.collectedUSD += point.collectedUSD;
       buckets.set(point.timestamp, existing);
     }
   }
@@ -175,6 +189,7 @@ function mergeDailySeries(
       upfrontFeesUSD: bucket.upfrontFeesUSD,
       accruedInterestUSD: bucket.accruedInterestUSD,
       totalFeesUSD: bucket.upfrontFeesUSD + bucket.accruedInterestUSD,
+      collectedUSD: bucket.collectedUSD,
     }))
     .sort((a, b) => a.timestamp - b.timestamp);
 }

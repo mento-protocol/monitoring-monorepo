@@ -42,13 +42,17 @@ async function addBorrowingRevenueDelta(
     bucket: bigint;
     upfrontFee?: bigint;
     accruedInterest?: bigint;
+    collected?: bigint;
     blockNumber: bigint;
     updatedAtTimestamp: bigint;
   },
 ): Promise<void> {
   const upfrontFee = args.upfrontFee ?? ZERO;
   const accruedInterest = args.accruedInterest ?? ZERO;
-  if (upfrontFee <= ZERO && accruedInterest <= ZERO) return;
+  const collected = args.collected ?? ZERO;
+  if (upfrontFee <= ZERO && accruedInterest <= ZERO && collected <= ZERO) {
+    return;
+  }
 
   const id = borrowingRevenueDailySnapshotId(args.instanceId, args.bucket);
   const existing = await context.LiquityBorrowingRevenueDailySnapshot.get(id);
@@ -60,6 +64,7 @@ async function addBorrowingRevenueDelta(
     timestamp: args.bucket,
     upfrontFee: (existing?.upfrontFee ?? ZERO) + upfrontFee,
     accruedInterest: (existing?.accruedInterest ?? ZERO) + accruedInterest,
+    collected: (existing?.collected ?? ZERO) + collected,
     blockNumber: args.blockNumber,
     updatedAtTimestamp: args.updatedAtTimestamp,
   });
@@ -100,6 +105,33 @@ export async function recordBorrowingFeeAndApplyCum(
   return {
     ...instance,
     borrowingFeeCum: instance.borrowingFeeCum + fee,
+  };
+}
+
+// Treasury share actually minted to the yield-split Safe (cash basis):
+// ActivePool._mintAggInterest sends (1 − SP_YIELD_SPLIT) × (interest +
+// upfront fee) to the interestRouter on every trove touch. Recorded from
+// zero-address Transfer events of the market's debt token to the Safe —
+// see handlers/stables/feeLeg.ts for the event source.
+export async function recordBorrowingCollected(
+  context: BorrowingRevenueSnapshotContext,
+  instance: LiquityInstance,
+  amount: bigint,
+  timestamp: bigint,
+  blockNumber: bigint,
+): Promise<LiquityInstance> {
+  await addBorrowingRevenueDelta(context, {
+    chainId: instance.chainId,
+    collateralId: instance.collateralId,
+    instanceId: instance.id,
+    bucket: dayBucket(timestamp),
+    collected: amount,
+    blockNumber,
+    updatedAtTimestamp: timestamp,
+  });
+  return {
+    ...instance,
+    borrowingFeeCollectedCum: instance.borrowingFeeCollectedCum + amount,
   };
 }
 
@@ -263,6 +295,21 @@ export async function preloadBorrowingUpfrontFeeBucket(
   timestamp: bigint,
 ): Promise<void> {
   if (fee <= ZERO) return;
+  await context.LiquityBorrowingRevenueDailySnapshot.get(
+    borrowingRevenueDailySnapshotId(instanceId, dayBucket(timestamp)),
+  );
+}
+
+// Warm the daily-snapshot row recordBorrowingCollected reads (the event-day
+// bucket). Same shape as the upfront warmer; kept separate so each call site
+// names the flow it warms.
+export async function preloadBorrowingCollectedBucket(
+  context: BorrowingRevenueSnapshotContext,
+  instanceId: string,
+  amount: bigint,
+  timestamp: bigint,
+): Promise<void> {
+  if (amount <= ZERO) return;
   await context.LiquityBorrowingRevenueDailySnapshot.get(
     borrowingRevenueDailySnapshotId(instanceId, dayBucket(timestamp)),
   );
