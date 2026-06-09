@@ -144,6 +144,7 @@ function useStableCdpDetail(
   return {
     ...detail,
     data: previous.current.data,
+    error: undefined,
     isLoading: false,
   };
 }

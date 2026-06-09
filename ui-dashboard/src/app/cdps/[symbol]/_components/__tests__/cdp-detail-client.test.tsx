@@ -495,6 +495,63 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("0xupgradedowner");
   });
 
+  it("keeps prior detail content visible when the tx-hash detail query errors", () => {
+    let supportsTxHash = false;
+    let txQueryError: Error | null = null;
+    const legacyDetail = detailData({
+      openTroves: [trove({ owner: "0xlegacyowner", troveId: "legacy" })],
+      depositors: [],
+      cdpPools: [],
+    });
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return {
+          data: marketsData([
+            { id: "t1", collateralId: "gbpm", status: "active" },
+          ]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return {
+          data: troveSchemaData(supportsTxHash),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return { data: legacyDetail, error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL_WITH_TROVE_TX) {
+        return {
+          data: undefined,
+          error: txQueryError,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+    expect(handle!.container.textContent).toContain("0xlegacyowner");
+
+    supportsTxHash = true;
+    txQueryError = new Error("tx query failed");
+    render(handle!);
+    expect(handle!.container.textContent).toContain("0xlegacyowner");
+    expect(handle!.container.textContent).not.toContain(
+      "Failed to load CDP market",
+    );
+  });
+
   it("links trove IDs to the Mento app without a hash prefix", () => {
     const troveId =
       "0x5f23a9b8f4c249163a0d7969d2fc23af8de9e84d3f63b44136bfd18ea3e73ac4";
