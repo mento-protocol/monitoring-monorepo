@@ -38,7 +38,7 @@ jobs:
     #
     # Advisory only — exit code is always 0.
     name: GraphQL schema diff
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     # `pull-requests: write` is required to post the sticky PR comment.
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
