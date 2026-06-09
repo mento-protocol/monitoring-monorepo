@@ -152,8 +152,10 @@ test.describe("dashboard browser flows", () => {
   test("keeps pools tables within the viewport and mirrors pool token order in reserves", async ({
     page,
   }) => {
+    // Widths chosen to exercise each column-reveal boundary: 1536 (2xl, Strategy
+    // appears), 1280 (xl, 24h Vol. appears), 1024 (lg, neither), 390 (mobile).
     for (const path of ["/", "/pools"]) {
-      for (const width of [1440, 1024, 390]) {
+      for (const width of [1536, 1280, 1024, 390]) {
         // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Playwright drives a single shared page; viewport sizing + navigation must run sequentially, not via Promise.all.
         await page.setViewportSize({ width, height: 900 });
         await page.goto(path);

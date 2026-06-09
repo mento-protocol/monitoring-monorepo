@@ -95,13 +95,17 @@ export function PoolRow({
         tvl={tvlByKey.get(key) ?? null}
         wow={tvlChangeWoWByKey?.get(key)}
       />
-      <VolumeSummaryCell
-        volume24hLoading={volume24hLoading}
-        volume24hError={volume24hError}
-        volume24h={volume24hByKey?.get(key)}
-        volume7dLoading={volume7dLoading}
-        volume7dError={volume7dError}
-        volume7d={volume7dByKey?.get(key)}
+      <VolumeCell
+        className="hidden md:table-cell text-sm text-slate-200 font-mono text-right"
+        loading={volume7dLoading}
+        error={volume7dError}
+        value={volume7dByKey?.get(key)}
+      />
+      <VolumeCell
+        className="hidden xl:table-cell text-sm text-slate-200 font-mono text-right"
+        loading={volume24hLoading}
+        error={volume24hError}
+        value={volume24hByKey?.get(key)}
       />
       <Cell className="hidden md:table-cell text-sm text-slate-200 font-mono text-right">
         {(() => {
@@ -251,54 +255,25 @@ function volumeLabel({
   return label;
 }
 
-function VolumeSummaryCell({
-  volume24hLoading,
-  volume24hError,
-  volume24h,
-  volume7dLoading,
-  volume7dError,
-  volume7d,
+function VolumeCell({
+  className,
+  loading,
+  error,
+  value,
 }: {
-  volume24hLoading: boolean;
-  volume24hError: boolean;
-  volume24h: number | null | undefined;
-  volume7dLoading: boolean;
-  volume7dError: boolean;
-  volume7d: number | null | undefined;
+  className: string;
+  loading: boolean;
+  error: boolean;
+  value: number | null | undefined;
 }) {
-  const volume24hLabel = volumeLabel({
-    loading: volume24hLoading,
-    error: volume24hError,
-    value: volume24h,
-  });
-  const volume7dLabel = volumeLabel({
-    loading: volume7dLoading,
-    error: volume7dError,
-    value: volume7d,
-  });
-
   return (
-    <Cell className="hidden md:table-cell text-sm font-mono text-right">
-      <div
-        className="flex flex-col items-end leading-tight"
-        title={`7d volume: ${volume7dLabel}\n24h volume: ${volume24hLabel}`}
-      >
-        <span className="text-slate-200">
-          <span className="sr-only">7-day volume: </span>
-          {volume7dLabel}
-        </span>
-        <span className="mt-0.5 text-[11px] text-slate-500">
-          <span className="sr-only">24-hour volume: </span>
-          24h {volume24hLabel}
-        </span>
-      </div>
-    </Cell>
+    <Cell className={className}>{volumeLabel({ loading, error, value })}</Cell>
   );
 }
 
 function StrategyCell({ strategies }: { strategies: PoolStrategyLabel[] }) {
   return (
-    <Cell className="hidden xl:table-cell">
+    <Cell className="hidden 2xl:table-cell">
       {strategies.length > 0 ? (
         <div className="flex gap-1">
           {strategies.map((s) => (

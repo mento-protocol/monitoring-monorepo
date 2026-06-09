@@ -153,11 +153,11 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).toContain(">Pool<");
     expect(html).toContain(">Health<");
     expect(html).toContain(">TVL<");
-    expect(html).toContain(">Volume<");
+    expect(html).toContain("7d Vol.");
+    expect(html).toContain("24h Vol.");
     expect(html).toContain(">Total<");
     expect(html).not.toContain(">TVL Δ WoW<");
-    expect(html).not.toContain("24h Vol.");
-    expect(html).not.toContain("7d Vol.");
+    expect(html).not.toContain(">Volume<");
     expect(html).not.toContain("Total Vol.");
     expect(html).toContain(">Fee<");
     expect(html).toContain(">Reserves<");

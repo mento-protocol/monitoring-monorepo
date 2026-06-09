@@ -75,7 +75,17 @@ export function PoolTableHeader({
           align="right"
           className="hidden md:table-cell"
         >
-          Volume
+          7d Vol.
+        </SortableTh>
+        <SortableTh
+          sortKey="volume24h"
+          activeSortKey={sortKey}
+          sortDir={sortDir}
+          onSort={onSort}
+          align="right"
+          className="hidden xl:table-cell"
+        >
+          24h Vol.
         </SortableTh>
         <SortableTh
           sortKey="totalVolume"
@@ -87,7 +97,7 @@ export function PoolTableHeader({
         >
           Total
         </SortableTh>
-        <Th className="hidden xl:table-cell">Strategy</Th>
+        <Th className="hidden 2xl:table-cell">Strategy</Th>
       </tr>
     </thead>
   );
