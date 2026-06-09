@@ -62,47 +62,42 @@ export function PoolTableHeader({
           activeSortKey={sortKey}
           sortDir={sortDir}
           onSort={onSort}
+          align="right"
           className="hidden sm:table-cell"
         >
           TVL
-        </SortableTh>
-        <SortableTh
-          sortKey="tvlChangeWoW"
-          activeSortKey={sortKey}
-          sortDir={sortDir}
-          onSort={onSort}
-          className="hidden sm:table-cell"
-        >
-          TVL Δ WoW
-        </SortableTh>
-        <SortableTh
-          sortKey="volume24h"
-          activeSortKey={sortKey}
-          sortDir={sortDir}
-          onSort={onSort}
-          className="hidden md:table-cell"
-        >
-          24h Vol.{" "}
         </SortableTh>
         <SortableTh
           sortKey="volume7d"
           activeSortKey={sortKey}
           sortDir={sortDir}
           onSort={onSort}
+          align="right"
           className="hidden md:table-cell"
         >
-          7d Vol.{" "}
+          7d Vol.
+        </SortableTh>
+        <SortableTh
+          sortKey="volume24h"
+          activeSortKey={sortKey}
+          sortDir={sortDir}
+          onSort={onSort}
+          align="right"
+          className="hidden xl:table-cell"
+        >
+          24h Vol.
         </SortableTh>
         <SortableTh
           sortKey="totalVolume"
           activeSortKey={sortKey}
           sortDir={sortDir}
           onSort={onSort}
+          align="right"
           className="hidden md:table-cell"
         >
-          Total Vol.{" "}
+          Total
         </SortableTh>
-        <Th className="hidden lg:table-cell">Strategy</Th>
+        <Th className="hidden 2xl:table-cell">Strategy</Th>
       </tr>
     </thead>
   );

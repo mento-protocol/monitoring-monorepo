@@ -160,6 +160,46 @@ export function tokenSymbol(network: Network, address: string | null): string {
   return truncateAddress(address);
 }
 
+export type PoolTokenDisplayOrder = {
+  symbol0: string;
+  symbol1: string;
+  firstIndex: 0 | 1;
+  secondIndex: 0 | 1;
+  firstSymbol: string;
+  secondSymbol: string;
+};
+
+/** Pool token display order with USDm last, matching poolName(). */
+export function poolTokenDisplayOrder(
+  network: Network,
+  token0: string | null,
+  token1: string | null,
+): PoolTokenDisplayOrder {
+  const symbol0 = tokenSymbol(network, token0);
+  const symbol1 = tokenSymbol(network, token1);
+  const usdmIsToken0 = USDM_SYMBOLS.has(symbol0) && !USDM_SYMBOLS.has(symbol1);
+
+  if (usdmIsToken0) {
+    return {
+      symbol0,
+      symbol1,
+      firstIndex: 1,
+      secondIndex: 0,
+      firstSymbol: symbol1,
+      secondSymbol: symbol0,
+    };
+  }
+
+  return {
+    symbol0,
+    symbol1,
+    firstIndex: 0,
+    secondIndex: 1,
+    firstSymbol: symbol0,
+    secondSymbol: symbol1,
+  };
+}
+
 export function explorerAddressUrl(network: Network, address: string): string {
   return `${network.explorerBaseUrl}/address/${address}`;
 }
@@ -174,13 +214,12 @@ export function poolName(
   token0: string | null,
   token1: string | null,
 ): string {
-  const sym0 = tokenSymbol(network, token0);
-  const sym1 = tokenSymbol(network, token1);
-
-  if (USDM_SYMBOLS.has(sym0) && !USDM_SYMBOLS.has(sym1)) {
-    return `${sym1}/${sym0}`;
-  }
-  return `${sym0}/${sym1}`;
+  const { firstSymbol, secondSymbol } = poolTokenDisplayOrder(
+    network,
+    token0,
+    token1,
+  );
+  return `${firstSymbol}/${secondSymbol}`;
 }
 
 /** Returns true if the pool is an FPMM (as opposed to a VirtualPool).

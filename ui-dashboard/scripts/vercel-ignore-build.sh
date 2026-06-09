@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Last manual redeploy nudge: 2026-06-04 — force prod rebuild to verify session persistence across a deploy.
+# Last manual redeploy nudge: 2026-06-09 — force prod rebuild for #810 (merge SHA was deduped onto an envio preview, so main's production deploy never fired).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

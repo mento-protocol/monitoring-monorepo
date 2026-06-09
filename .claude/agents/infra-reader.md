@@ -17,7 +17,7 @@ Read-only infrastructure specialist. Inspect deploy/CI/infra config and report f
 
 ## Conventions you know
 
-- **Required-status workflows MUST NOT use `paths:` / `paths-ignore:` filters** — skipped runs leave the check pending forever and silently block unrelated merges. Use an inline `filter` step (continue-on-error: true) + a `decide` step that fails-closed.
+- **Ruleset-required workflows MUST NOT use `paths:` / `paths-ignore:` filters** — skipped runs leave the check pending forever and silently block unrelated merges. Use an inline `filter` step (continue-on-error: true) + a `decide` step that fails-closed. "Required" = enforced by the `main` ruleset (`ci`, `Code Quality`, `Vercel`, `Vercel Preview Comments`) — NOT just "important". **Advisory** workflows (everything else) SHOULD use a workflow-level `paths:` filter to avoid booting a runner on irrelevant PRs.
 - **Deploy-job gate:** every job that deploys MUST gate on `if: github.ref == 'refs/heads/main'`. `push.branches` alone does NOT constrain `workflow_dispatch`.
 - **Third-party action pinning:** all actions in deploy paths MUST be SHA-pinned (`uses: org/action@<40-char-sha> # vX.Y.Z`).
 - **Concurrency:** deploy workflows MUST set a workflow-name concurrency group with `cancel-in-progress: false`.
@@ -28,7 +28,7 @@ Read-only infrastructure specialist. Inspect deploy/CI/infra config and report f
 - **Terraform `moved` blocks:** removing `count` / renaming a resource requires a `moved` block. `deletion_protection = true` makes a missed `moved` block fatal.
 - **Lockfile integrity:** `pnpm lockfile:lint` checks (1) every package has sha512 integrity hash, (2) every `.npmrc` / `pnpm-workspace.yaml registries:` is verified to NOT redirect to a lookalike host.
 - **Terraform from a worktree:** `terraform.tfvars` is gitignored and only lives in the main checkout. From a worktree, either run from `<main-checkout>/` or `terraform init -reconfigure` + `terraform plan -var-file=<main-checkout>/terraform/terraform.tfvars`.
-- **Mutation testing CI gate:** `metrics-bridge/stryker.config.mjs` `break: 84` (current baseline 86.01%). `.github/workflows/mutation-testing.yml` runs on every PR; bridge job's `filter` step decides whether to run based on diff scope.
+- **Mutation testing CI gate:** `metrics-bridge/stryker.config.mjs` `break: 84` (current baseline 86.01%). `.github/workflows/mutation-testing.yml` runs weekly (cron) + `workflow_dispatch` only — advisory, not in the `main` ruleset's required checks; the per-PR trigger was removed as a CI-cost control.
 
 ## How to report
 

@@ -3,15 +3,14 @@ name: Mutation Testing
 on:
   workflow_dispatch:
   schedule:
-    # Weekly backstop run so all three gates also produce a baseline
-    # signal when no PR has touched their inputs that week.
+    # Weekly run is the primary cadence. Mutation testing measures
+    # test-suite strength (do the tests catch injected faults?), not
+    # per-commit regression, so a weekly backstop is the industry norm and
+    # keeps it off the per-PR hot path. This workflow is advisory — it is
+    # NOT in the branch ruleset's required checks (only `ci`, `Code Quality`,
+    # and the Vercel checks are), so it has no per-PR trigger. Run it against
+    # a specific branch on demand via the "Run workflow" button.
     - cron: 17 5 * * 1
-  pull_request:
-    # Intentionally NO `paths:` filter — required-status workflows must run on
-    # every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
-    # Each job uses an internal path-detection step that is
-    # continue-on-error, so a detector failure cannot fail the workflow
-    # (fail-closed: the mutation step then runs anyway).
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,15 +21,13 @@ permissions:
 
 jobs:
   dashboard-logic-baseline:
-    # Always runs (required-status safe — no `paths:` filter at workflow
-    # level). The `filter` step is `continue-on-error: true`, and the
-    # `decide` step computes whether to invoke `pnpm dashboard:mutation`:
-    #   - cron / workflow_dispatch     → always run the mutation step
-    #   - PR + filter succeeded + dashboard=true  → run
-    #   - PR + filter succeeded + dashboard=false → no-op skip
-    #   - PR + filter failed (any cause)          → run (fail-closed)
-    # `ui-dashboard/stryker.config.mjs` sets `break: 86`, so when the
-    # mutation step does run, a score below 86% fails the job.
+    # Triggers are cron + workflow_dispatch only (no `pull_request`), so the
+    # `decide` step's `EVENT != pull_request` branch always runs the mutation
+    # step. The `filter`/`decide` machinery is kept inert here: it self-
+    # reactivates the path-gated PR behaviour if a `pull_request` trigger is
+    # ever re-added, with no other change. `ui-dashboard/stryker.config.mjs`
+    # sets `break: 86`, so when the mutation step runs a score below 86% fails
+    # the job.
     name: Dashboard logic baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
@@ -106,15 +103,13 @@ jobs:
         run: pnpm dashboard:mutation
 
   indexer-logic-baseline:
-    # Always runs (required-status safe — no `paths:` filter at workflow
-    # level). The `filter` step is `continue-on-error: true`, and the
-    # `decide` step computes whether to invoke `pnpm indexer:mutation`:
-    #   - cron / workflow_dispatch    → always run the mutation step
-    #   - PR + filter succeeded + indexer=true   → run
-    #   - PR + filter succeeded + indexer=false  → no-op skip
-    #   - PR + filter failed (any cause)         → run (fail-closed)
-    # `indexer-envio/stryker.config.mjs` sets `break: 92`, so when the
-    # mutation step does run, a score below 92% fails the job.
+    # Triggers are cron + workflow_dispatch only (no `pull_request`), so the
+    # `decide` step's `EVENT != pull_request` branch always runs the mutation
+    # step. The `filter`/`decide` machinery is kept inert here: it self-
+    # reactivates the path-gated PR behaviour if a `pull_request` trigger is
+    # ever re-added, with no other change. `indexer-envio/stryker.config.mjs`
+    # sets `break: 92`, so when the mutation step runs a score below 92% fails
+    # the job.
     name: Indexer logic baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
@@ -190,15 +185,13 @@ jobs:
         run: pnpm indexer:mutation
 
   bridge-rebalance-probe-baseline:
-    # Always runs (required-status safe — no `paths:` filter at workflow
-    # level). The `filter` step is `continue-on-error: true`, and the
-    # `decide` step computes whether to invoke `pnpm bridge:mutation`:
-    #   - cron / workflow_dispatch    → always run the mutation step
-    #   - PR + filter succeeded + bridge=true   → run
-    #   - PR + filter succeeded + bridge=false  → no-op skip
-    #   - PR + filter failed (any cause)        → run (fail-closed)
-    # `metrics-bridge/stryker.config.mjs` sets `break: 84`, so when the
-    # mutation step does run, a score below 84% fails the job.
+    # Triggers are cron + workflow_dispatch only (no `pull_request`), so the
+    # `decide` step's `EVENT != pull_request` branch always runs the mutation
+    # step. The `filter`/`decide` machinery is kept inert here: it self-
+    # reactivates the path-gated PR behaviour if a `pull_request` trigger is
+    # ever re-added, with no other change. `metrics-bridge/stryker.config.mjs`
+    # sets `break: 84`, so when the mutation step runs a score below 84% fails
+    # the job.
     name: Bridge rebalance probe baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
