@@ -709,6 +709,27 @@ function handleGraphQL({ query, variables = {} }) {
       return { Pool: thresholdRows(poolRowsForChain(variables.chainId)) };
     case "AllPoolsBreachRollup":
       return { Pool: breachRollupRows(poolRowsForChain(variables.chainId)) };
+    case "AllPoolsHealthCursor":
+      return {
+        Pool: poolRowsForChain(variables.chainId).map((pool) => ({
+          id: pool.id,
+          lastOracleSnapshotTimestamp: null,
+          lastDeviationRatio: null,
+        })),
+      };
+    case "AllCdpPools":
+      return {
+        CdpPool:
+          Number(variables.chainId) === 42220
+            ? [
+                {
+                  poolId: ADDRESSES.celoPool,
+                  collateralId: ADDRESSES.celoGbpm,
+                  strategyAddress: "0x8888888888888888888888888888888888888888",
+                },
+              ]
+            : [],
+      };
     case "PoolDetailWithHealth": {
       const pool = poolsById.get(String(variables.id));
       return {

@@ -1,7 +1,7 @@
 import { formatUSD, formatWei } from "@/lib/format";
 import { computeReserveComposition } from "@/lib/reserves";
 import type { Network } from "@/lib/networks";
-import type { OracleRateMap } from "@/lib/tokens";
+import { poolTokenDisplayOrder, type OracleRateMap } from "@/lib/tokens";
 import type { Pool } from "@/lib/types";
 
 export function ReservesCell({
@@ -26,11 +26,31 @@ export function ReservesCell({
     );
   }
 
-  const label = `Reserve composition: ${composition.pct0.toFixed(1)}% ${composition.symbol0} / ${composition.pct1.toFixed(1)}% ${composition.symbol1}`;
+  const displayOrder = poolTokenDisplayOrder(network, pool.token0, pool.token1);
+  const parts = [
+    {
+      symbol: composition.symbol0,
+      pct: composition.pct0,
+      rawReserve: pool.reserves0!,
+      decimals: pool.token0Decimals ?? 18,
+      usd: composition.usd0,
+    },
+    {
+      symbol: composition.symbol1,
+      pct: composition.pct1,
+      rawReserve: pool.reserves1!,
+      decimals: pool.token1Decimals ?? 18,
+      usd: composition.usd1,
+    },
+  ] as const;
+  const first = parts[displayOrder.firstIndex];
+  const second = parts[displayOrder.secondIndex];
+
+  const label = `Reserve composition: ${first.pct.toFixed(1)}% ${first.symbol} / ${second.pct.toFixed(1)}% ${second.symbol}`;
   const title = [
     label,
-    `${composition.symbol0}: ${formatWei(pool.reserves0!, pool.token0Decimals ?? 18, 2)} ≈ ${formatUSD(composition.usd0)}`,
-    `${composition.symbol1}: ${formatWei(pool.reserves1!, pool.token1Decimals ?? 18, 2)} ≈ ${formatUSD(composition.usd1)}`,
+    `${first.symbol}: ${formatWei(first.rawReserve, first.decimals, 2)} ≈ ${formatUSD(first.usd)}`,
+    `${second.symbol}: ${formatWei(second.rawReserve, second.decimals, 2)} ≈ ${formatUSD(second.usd)}`,
   ].join("\n");
 
   return (
@@ -45,19 +65,19 @@ export function ReservesCell({
       >
         <span
           className="block h-full bg-indigo-500"
-          style={{ width: `${composition.pct0}%` }}
+          style={{ width: `${first.pct}%` }}
         />
         <span
           className="block h-full bg-emerald-500"
-          style={{ width: `${composition.pct1}%` }}
+          style={{ width: `${second.pct}%` }}
         />
       </div>
       <div className="flex items-center justify-between gap-2 text-[11px] leading-tight text-slate-300">
         <span className="truncate">
-          {composition.symbol0} {composition.pct0.toFixed(0)}%
+          {first.symbol} {first.pct.toFixed(0)}%
         </span>
         <span className="truncate text-right">
-          {composition.symbol1} {composition.pct1.toFixed(0)}%
+          {second.symbol} {second.pct.toFixed(0)}%
         </span>
       </div>
     </div>
