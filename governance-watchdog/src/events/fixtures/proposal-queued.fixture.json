@@ -1,0 +1,14 @@
+{
+  "result": [
+    {
+      "address": "0x47036d78bb3169b4f5560dd77bf93f4412a59852",
+      "blockHash": "0x119f19b90827f16f4703bfaa12b59f17c59813fecb983fd0f975cac19e324e94",
+      "blockNumber": "46368838",
+      "eta": "1758442396",
+      "logIndex": "0x3",
+      "name": "ProposalQueued",
+      "proposalId": "110924749435612298277882208964193118052240456547235016113950343564723341619891",
+      "transactionHash": "0xcc7ab83987ae823208d005753406f326a465fdc2d9688259e0d901d9fc75eeab"
+    }
+  ]
+}

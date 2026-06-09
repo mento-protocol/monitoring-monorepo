@@ -118,6 +118,41 @@
         ".github/workflows/aegis-terraform.yml"
       ],
       "aliases": ["pnpm aegis:tf:init", "pnpm aegis:tf:plan"]
+    },
+    {
+      "id": "governance-watchdog",
+      "name": "Governance Watchdog",
+      "path": "governance-watchdog/infra",
+      "description": "Mento Governance event watchdog: dedicated GCP project, Cloud Function (QuickNode webhook -> Discord/Telegram), QuickNode webhooks, Cloud Scheduler health check, Secret Manager, and Cloud Monitoring alert policies. Owns its own GCP project; not part of the alerts-delivery mento-alerts project.",
+      "state": {
+        "backend": "gcs",
+        "bucket": "mento-terraform-tfstate-6ed6",
+        "prefix": "governance-watchdog"
+      },
+      "providers": [
+        "archive",
+        "google",
+        "google-beta",
+        "local",
+        "null",
+        "random",
+        "restapi",
+        "time"
+      ],
+      "ci": {
+        "validate": "changed-paths",
+        "plan": "manual",
+        "apply": "manual"
+      },
+      "applyPolicy": "human-review-required",
+      "changedPathPatterns": [
+        "governance-watchdog/**",
+        "terraform.stacks.json",
+        "scripts/tf-stacks.mjs",
+        ".github/workflows/ci.yml",
+        ".github/workflows/infra.yml"
+      ],
+      "aliases": ["pnpm gov-watchdog:tf:init", "pnpm gov-watchdog:tf:plan"]
     }
   ]
 }

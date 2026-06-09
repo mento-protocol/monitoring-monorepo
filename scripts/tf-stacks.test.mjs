@@ -428,6 +428,7 @@ const requiredStackIds = [
   "alerts-rules",
   "alerts-delivery",
   "aegis",
+  "governance-watchdog",
 ];
 const missingStackIds = requiredStackIds.filter((id) => !stackIds.includes(id));
 assert(
@@ -472,7 +473,7 @@ try {
   writeFileSync(pathsFile, "terraform.stacks.json\n");
   matrix = JSON.parse(run(["changed", "--paths-file", pathsFile, "--json"]));
   assert(
-    matrix.include.length === 4,
+    matrix.include.length === 5,
     "registry change should validate every stack",
   );
 

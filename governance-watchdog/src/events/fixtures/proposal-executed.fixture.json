@@ -1,0 +1,13 @@
+{
+  "result": [
+    {
+      "address": "0x47036d78bb3169b4f5560dd77bf93f4412a59852",
+      "blockHash": "0x2553c51ef4319a39a44d760c2e54a5cc9b7a2c5016ea3ee45b9c0145d200005a",
+      "blockNumber": "46659988",
+      "logIndex": "0x11",
+      "name": "ProposalExecuted",
+      "proposalId": "110924749435612298277882208964193118052240456547235016113950343564723341619891",
+      "transactionHash": "0x4569194da7a0c1601fecad59396b075a7af1b4f08e067531163040902332bb06"
+    }
+  ]
+}

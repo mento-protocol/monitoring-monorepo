@@ -1,0 +1,39 @@
+# Copy this file to terraform.tfvars and fill in the values.
+# terraform.tfvars is gitignored (holds secrets) and stays operator-held.
+# Variables with defaults in variables.tf are omitted here; only the ones you
+# must provide are listed.
+
+# --- GCP org / billing (look up via gcloud) ---
+# gcloud organizations list
+org_id = ""
+# gcloud billing accounts list  (pick the GmbH account)
+billing_account = ""
+
+# --- Discord ---
+# gcloud secrets versions access latest --secret discord-webhook-url
+discord_webhook_url = ""
+# gcloud secrets versions access latest --secret discord-test-webhook-url
+discord_test_webhook_url = ""
+
+# --- Telegram ---
+# Invite @MissRose_bot to the group and run /id (remove the bot afterwards)
+telegram_chat_id      = ""
+telegram_test_chat_id = ""
+# gcloud secrets versions access latest --secret telegram-bot-token
+telegram_bot_token = ""
+
+# --- QuickNode ---
+# Create an API key at https://dashboard.quicknode.com/api-keys
+quicknode_api_key = ""
+# Security token used to authenticate QuickNode webhook requests
+quicknode_security_token = ""
+
+# --- Auth / alerting ---
+# x-auth-token header for authenticating non-QuickNode requests (test in prod)
+x_auth_token = ""
+# VictorOps/Splunk On-Call webhook (Integrations -> Stackdriver; routing key under Settings -> Routing Keys)
+victorops_webhook_url = ""
+
+# Slack notification channel ID for error alerts. Leave empty for the initial
+# deployment; the channel can only be created after the GCP project exists.
+# slack_notification_channel_id = ""

@@ -1,0 +1,13 @@
+{
+  "result": [
+    {
+      "address": "0x890db8a597940165901372dd7db61c9f246e2147",
+      "blockHash": "0x990877d025a93c45b6d70bca1d67193726334c946a09b09a8fbd19bc8d952d62",
+      "blockNumber": "42417724",
+      "logIndex": "0x8",
+      "name": "ProposalCanceled",
+      "proposalId": "110924749435612298277882208964193118052240456547235016113950343564723341619891",
+      "transactionHash": "0xc43e6a0e1f3929b847c7eaf740c2ab2163f63c9a00d8628d60908a373fe2f148"
+    }
+  ]
+}

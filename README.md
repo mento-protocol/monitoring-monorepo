@@ -13,6 +13,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 | [`metrics-bridge`](./metrics-bridge/) | Hasura → Prometheus exporter for v3 alert rules                     |
 | [`shared-config`](./shared-config/)   | Shared deployment config (chain ID → treb namespace mappings)       |
 | [`aegis`](./aegis/)                   | App Engine v2 alerting service + Aegis Grafana dashboards           |
+| [`governance-watchdog`](./governance-watchdog/) | Cloud Function watching Mento Governance events → Discord/Telegram (own GCP project) |
 
 ## Architecture
 
