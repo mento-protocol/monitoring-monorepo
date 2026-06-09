@@ -443,7 +443,7 @@ describe("BorrowingEarnedCollectedChart via RevenuePageClient", () => {
     expect(html).toContain("$10.00");
     expect(html).not.toContain("collected</span>");
     expect(html).toContain(
-      "Collected mints unavailable — series reconstructed from fee events",
+      "Collected mints unavailable on this indexer schema",
     );
   });
 });

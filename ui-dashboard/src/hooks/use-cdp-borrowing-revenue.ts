@@ -12,6 +12,7 @@ import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import {
   CDP_BORROWING_FEE_EVENTS,
   CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
+  CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY,
   CDP_BORROWING_REVENUE_BRACKETS,
   CDP_BORROWING_REVENUE_MARKETS,
   CDP_BORROWING_REVENUE_MARKETS_LEGACY,
@@ -96,10 +97,6 @@ type FeeEventsResponse = {
   TroveOperationEvent: CdpBorrowingFeeEvent[];
 };
 
-type DailySnapshotsResponse = {
-  LiquityBorrowingRevenueDailySnapshot: CdpBorrowingRevenueDailySnapshot[];
-};
-
 type BracketPageResult = {
   rows: CdpBorrowingRevenueBracket[];
   truncated: boolean;
@@ -114,6 +111,9 @@ type DailySnapshotPageResult = {
   rows: CdpBorrowingRevenueDailySnapshot[];
   truncated: boolean;
   unavailable: boolean;
+  // Snapshot rows exist but the schema predates the `collected` field —
+  // earned history is real, collected mints default to 0.
+  collectedUnavailable: boolean;
 };
 
 type NetworkCdpBorrowingRevenue = {
@@ -313,11 +313,25 @@ function isMissingDailySnapshotEntityError(err: unknown): boolean {
   return message.includes("LiquityBorrowingRevenueDailySnapshot");
 }
 
-async function fetchAllDailySnapshotPages(
+// Hasura's missing-field validation error names BOTH the field and the entity
+// (`field 'collected' not found in type: 'LiquityBorrowingRevenueDailySnapshot'`),
+// so this check must run BEFORE the entity-missing check above — otherwise a
+// schema that merely predates `collected` would be misread as having no
+// snapshots at all and degrade to the fee-event reconstruction.
+function isMissingSnapshotCollectedFieldError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes("'collected'") &&
+    message.includes("LiquityBorrowingRevenueDailySnapshot")
+  );
+}
+
+async function paginateDailySnapshots<T extends { id: string }>(
   client: GraphQLClient,
   chainId: number,
-): Promise<DailySnapshotPageResult> {
-  const rows: CdpBorrowingRevenueDailySnapshot[] = [];
+  query: string,
+): Promise<{ rows: T[]; truncated: boolean }> {
+  const rows: T[] = [];
   // Offset pagination over the append-only snapshot table is unstable under
   // concurrent inserts: a new row landing between page requests shifts the
   // `timestamp desc, id desc` window and can re-emit a boundary row on the next
@@ -325,37 +339,68 @@ async function fetchAllDailySnapshotPages(
   // `lib/network-fetcher/fetch.ts`) so windowed totals can't double-count.
   const seen = new Set<string>();
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  try {
-    for (let page = 0; page < DAILY_SNAPSHOT_MAX_PAGES; page++) {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Snapshot pagination is intentionally sequential so we can stop after the first short page.
-      const response = await requestWithTimeout<DailySnapshotsResponse>(
-        client,
-        CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
-        {
-          chainId,
-          limit: DAILY_SNAPSHOT_PAGE_SIZE,
-          offset: page * DAILY_SNAPSHOT_PAGE_SIZE,
-        },
-        signal,
-      );
-      const pageRows = response.LiquityBorrowingRevenueDailySnapshot ?? [];
-      for (const row of pageRows) {
-        if (seen.has(row.id)) continue;
-        seen.add(row.id);
-        rows.push(row);
-      }
-      // Stop on the raw page length, not the deduped count — a full page that
-      // happens to contain a boundary duplicate must not look "short" and
-      // truncate pagination a page early.
-      if (pageRows.length < DAILY_SNAPSHOT_PAGE_SIZE) {
-        return { rows, truncated: false, unavailable: false };
-      }
+  for (let page = 0; page < DAILY_SNAPSHOT_MAX_PAGES; page++) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Snapshot pagination is intentionally sequential so we can stop after the first short page.
+    const response = await requestWithTimeout<
+      Record<"LiquityBorrowingRevenueDailySnapshot", T[]>
+    >(
+      client,
+      query,
+      {
+        chainId,
+        limit: DAILY_SNAPSHOT_PAGE_SIZE,
+        offset: page * DAILY_SNAPSHOT_PAGE_SIZE,
+      },
+      signal,
+    );
+    const pageRows = response.LiquityBorrowingRevenueDailySnapshot ?? [];
+    for (const row of pageRows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
     }
+    // Stop on the raw page length, not the deduped count — a full page that
+    // happens to contain a boundary duplicate must not look "short" and
+    // truncate pagination a page early.
+    if (pageRows.length < DAILY_SNAPSHOT_PAGE_SIZE) {
+      return { rows, truncated: false };
+    }
+  }
 
-    return { rows, truncated: true, unavailable: false };
+  return { rows, truncated: true };
+}
+
+async function fetchAllDailySnapshotPages(
+  client: GraphQLClient,
+  chainId: number,
+): Promise<DailySnapshotPageResult> {
+  try {
+    const page = await paginateDailySnapshots<CdpBorrowingRevenueDailySnapshot>(
+      client,
+      chainId,
+      CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
+    );
+    return { ...page, unavailable: false, collectedUnavailable: false };
   } catch (err) {
+    // Specific-first: the missing-`collected` message also names the entity.
+    if (isMissingSnapshotCollectedFieldError(err)) {
+      const legacy = await paginateDailySnapshots<
+        Omit<CdpBorrowingRevenueDailySnapshot, "collected">
+      >(client, chainId, CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY);
+      return {
+        rows: legacy.rows.map((row) => ({ ...row, collected: "0" })),
+        truncated: legacy.truncated,
+        unavailable: false,
+        collectedUnavailable: true,
+      };
+    }
     if (isMissingDailySnapshotEntityError(err)) {
-      return { rows: [], truncated: false, unavailable: true };
+      return {
+        rows: [],
+        truncated: false,
+        unavailable: true,
+        collectedUnavailable: true,
+      };
     }
     throw err;
   }
@@ -406,7 +451,7 @@ async function resolveDailyBorrowingFeeSeries(
             }),
       truncated:
         fallbackFeeEventPages?.truncated ?? dailySnapshotPages.truncated,
-      approximate: dailySnapshotPages.unavailable,
+      approximate: dailySnapshotPages.collectedUnavailable,
       failed: false,
     };
   } catch {

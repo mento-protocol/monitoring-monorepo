@@ -168,6 +168,27 @@ export const CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS = `
   }
 `;
 
+// Old-schema compatibility: snapshot rows exist on production schemas that
+// predate the `collected` field. This legacy shape keeps the real earned
+// history (vs degrading to fee-event reconstruction) with collected
+// defaulted to 0. Drop together with CDP_BORROWING_REVENUE_MARKETS_LEGACY.
+export const CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY = `
+  query CdpBorrowingRevenueDailySnapshotsLegacy(
+    $chainId: Int!
+    $limit: Int!
+    $offset: Int!
+  ) {
+    LiquityBorrowingRevenueDailySnapshot(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+      offset: $offset
+    ) {
+      id chainId collateralId instanceId timestamp upfrontFee accruedInterest
+    }
+  }
+`;
+
 const cdpMarketDetailQuery = (
   operationName: string,
   troveRowFields: string,

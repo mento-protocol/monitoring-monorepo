@@ -21,9 +21,10 @@ interface BorrowingEarnedCollectedChartProps {
   hasError: boolean;
   isApproximate: boolean;
   /**
-   * True when the series was reconstructed from fee events (production
-   * schema predates daily snapshots) — collected mints are unknown there,
-   * so only the earned line renders.
+   * True when the indexer schema the series came from predates collected
+   * tracking (fee-event reconstruction, or legacy snapshots without the
+   * `collected` field) — collected mints are unknown there, so only the
+   * earned line renders.
    */
   collectedUnavailable: boolean;
 }
@@ -138,7 +139,7 @@ function chartSubtitle(args: {
 }): string {
   if (args.hasError) return "Unable to load borrowing revenue history";
   if (args.collectedUnavailable) {
-    return "Collected mints unavailable — series reconstructed from fee events";
+    return "Collected mints unavailable on this indexer schema";
   }
   if (args.isApproximate) {
     return "Approximate — some history is unpriced or exceeds pagination caps";
@@ -154,7 +155,9 @@ export function BorrowingEarnedCollectedChart({
   collectedUnavailable,
 }: BorrowingEarnedCollectedChartProps) {
   const cumulative = useMemo(() => buildCumulativeSeries(series), [series]);
-  const last = cumulative.at(-1);
+  // ES2017-safe (no Array.prototype.at): client-shipped code, see AGENTS.md.
+  const last =
+    cumulative.length > 0 ? cumulative[cumulative.length - 1] : undefined;
   const showCollected = !collectedUnavailable;
   const figure = useMemo(
     () => buildFigure(cumulative, showCollected),
