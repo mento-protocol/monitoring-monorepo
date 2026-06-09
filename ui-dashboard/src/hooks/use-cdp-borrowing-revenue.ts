@@ -78,6 +78,7 @@ type NetworkCdpBorrowingRevenue = {
   dailySeries: CdpBorrowingFeeSeriesPoint[];
   dailySeriesTruncated: boolean;
   dailySeriesApproximate: boolean;
+  dailySeriesFailed: boolean;
   error: Error | null;
 };
 
@@ -87,6 +88,7 @@ export type CdpBorrowingRevenueResult = {
   dailySeries: CdpBorrowingFeeSeriesPoint[];
   dailySeriesTruncated: boolean;
   dailySeriesApproximate: boolean;
+  dailySeriesFailed: boolean;
   isLoading: boolean;
   hasError: boolean;
 };
@@ -289,8 +291,11 @@ async function fetchAllDailySnapshotPages(
 // The daily series feeds only the time-series chart. A failure fetching it (a
 // transient error, or fallback fee-event pagination timing out while production
 // is still on the old schema) must NOT blank the summary tiles and market
-// tables that the caller's market/bracket/rate queries already produced.
-// Degrade to an empty, approximate-flagged series instead of rejecting.
+// tables that the caller's market/bracket/rate queries already produced. We
+// degrade the series to empty and flag `failed` so the caller can fail-closed
+// the chart (which can't show a meaningful swap+borrowing total without it)
+// while keeping the tiles/tables intact. `failed` is distinct from
+// `truncated`/`approximate`: those mean "mostly there", a failure means "gone".
 async function resolveDailyBorrowingFeeSeries(
   client: GraphQLClient,
   chainId: number,
@@ -305,6 +310,7 @@ async function resolveDailyBorrowingFeeSeries(
   points: CdpBorrowingFeeSeriesPoint[];
   truncated: boolean;
   approximate: boolean;
+  failed: boolean;
 }> {
   try {
     const dailySnapshotPages = await fetchAllDailySnapshotPages(
@@ -328,9 +334,10 @@ async function resolveDailyBorrowingFeeSeries(
       truncated:
         fallbackFeeEventPages?.truncated ?? dailySnapshotPages.truncated,
       approximate: dailySnapshotPages.unavailable,
+      failed: false,
     };
   } catch {
-    return { points: [], truncated: true, approximate: false };
+    return { points: [], truncated: false, approximate: false, failed: true };
   }
 }
 
@@ -345,6 +352,7 @@ async function fetchRevenueForNetwork(
       dailySeries: [],
       dailySeriesTruncated: false,
       dailySeriesApproximate: false,
+      dailySeriesFailed: false,
       error: new Error(`Hasura URL not configured for "${network.label}"`),
     };
   }
@@ -371,6 +379,7 @@ async function fetchRevenueForNetwork(
         dailySeries: [],
         dailySeriesTruncated: false,
         dailySeriesApproximate: false,
+        dailySeriesFailed: false,
         error: null,
       };
     }
@@ -409,6 +418,7 @@ async function fetchRevenueForNetwork(
       dailySeries: daily.points,
       dailySeriesTruncated: daily.truncated,
       dailySeriesApproximate: daily.approximate,
+      dailySeriesFailed: daily.failed,
       error: null,
     };
   } catch (err) {
@@ -419,6 +429,7 @@ async function fetchRevenueForNetwork(
       dailySeries: [],
       dailySeriesTruncated: false,
       dailySeriesApproximate: false,
+      dailySeriesFailed: false,
       error: err instanceof Error ? err : new Error(String(err)),
     };
   }
@@ -450,6 +461,7 @@ export function useCdpBorrowingRevenue(): CdpBorrowingRevenueResult {
     dailySeries: data === undefined ? [] : mergeDailySeries(rows),
     dailySeriesTruncated: rows.some((row) => row.dailySeriesTruncated),
     dailySeriesApproximate: rows.some((row) => row.dailySeriesApproximate),
+    dailySeriesFailed: rows.some((row) => row.dailySeriesFailed),
     isLoading,
     hasError: error !== undefined || rows.some((row) => row.error !== null),
   };

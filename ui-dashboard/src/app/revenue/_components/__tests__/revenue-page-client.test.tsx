@@ -107,6 +107,7 @@ function renderRevenue(
     dailySeries?: CdpBorrowingFeeSeriesPoint[];
     dailySeriesTruncated?: boolean;
     dailySeriesApproximate?: boolean;
+    dailySeriesFailed?: boolean;
     isLoading: boolean;
     hasError: boolean;
   } = {
@@ -122,6 +123,7 @@ function renderRevenue(
     dailySeries: [],
     dailySeriesTruncated: false,
     dailySeriesApproximate: false,
+    dailySeriesFailed: false,
     ...cdpRevenue,
   });
   return renderToStaticMarkup(<RevenuePageClient />);
@@ -330,5 +332,29 @@ describe("RevenuePageClient degraded fee states", () => {
       isApproximate: false,
     });
     expect(capturedProps.table).toMatchObject({ hasError: false });
+  });
+
+  it("fails the total fee chart closed when only the borrowing daily series fails", () => {
+    const html = renderRevenue([], false, {
+      summary: {
+        ...EMPTY_CDP_REVENUE,
+        totalRevenueUSD: 20,
+        accruedInterestUSD: 20,
+      },
+      dailySeriesFailed: true,
+      isLoading: false,
+      hasError: false,
+    });
+
+    // The chart fails closed (a swap-only total would misrepresent the missing
+    // borrowing history) — and is NOT merely flagged approximate.
+    expect(capturedProps.chart).toMatchObject({
+      hasBorrowingFeesError: true,
+      isBorrowingFeesApproximate: false,
+    });
+    // But the summary tiles keep the borrowing revenue already computed from
+    // the (successful) market/bracket/rate queries.
+    expect(html).not.toContain("Unable to load CDP borrowing fees");
+    expect(html).toContain("$20.00");
   });
 });

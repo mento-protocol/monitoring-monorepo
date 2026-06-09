@@ -128,6 +128,7 @@ function RevenueContent() {
     dailySeries: cdpBorrowingFeeSeries,
     dailySeriesTruncated: cdpBorrowingFeeSeriesTruncated,
     dailySeriesApproximate: cdpBorrowingFeeSeriesApproximate,
+    dailySeriesFailed: cdpBorrowingFeeSeriesFailed,
     isLoading: isCdpBorrowingRevenueLoading,
     hasError: hasCdpBorrowingRevenueError,
   } = useCdpBorrowingRevenue();
@@ -193,7 +194,9 @@ function RevenueContent() {
         isBorrowingFeesLoading={isCdpBorrowingRevenueLoading}
         hasError={anyNetworkError}
         hasFeesError={anyFeesError}
-        hasBorrowingFeesError={hasCdpBorrowingRevenueError}
+        hasBorrowingFeesError={
+          hasCdpBorrowingRevenueError || cdpBorrowingFeeSeriesFailed
+        }
         isApproximate={feesApprox}
         isBorrowingFeesApproximate={borrowingFeesChartApprox}
       />
