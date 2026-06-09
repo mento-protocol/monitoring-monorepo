@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 
 export function TableSectionTitle({
   children,
@@ -19,7 +19,7 @@ export function TableSectionTitle({
       className={`flex w-fit items-center gap-1.5 text-sm font-medium text-slate-300 ${className}`}
     >
       <span>{children}</span>
-      <InfoPopover label={label} content={info} />
+      <Tooltip label={label} content={info} />
     </h2>
   );
 }

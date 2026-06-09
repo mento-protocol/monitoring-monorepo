@@ -51,16 +51,27 @@ export type CdpTrove = {
   id: string;
   troveId: string;
   owner: string;
+  previousOwner: string;
   status: string;
   debt: string;
   coll: string;
   icrBps: number;
   interestRate: string;
   interestBatchId: string | null;
+  openedAt: string;
+  openedTxHash: string;
+  closedAt: string | null;
+  closedTxHash: string | null;
   lastUpdatedAt: string;
+  lastUpdatedTxHash?: string | null;
+  liquidatedDebt: string | null;
+  liquidatedColl: string | null;
+  collSurplus: string | null;
+  priceAtLiquidation: string | null;
   redemptionCount: number;
   redeemedDebt: string;
   redeemedColl: string;
+  redemptionFeePaidCum: string;
 };
 
 export type CdpInterestBatch = {

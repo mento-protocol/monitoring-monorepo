@@ -1131,6 +1131,8 @@ describe("Liquity CDP helpers", () => {
     assert.equal(updated?.interestBatchId, undefined);
     assert.equal(updated?.batchDebtShares, 0n);
     assert.equal(updated?.interestRate, 5n * 10n ** 16n);
+    assert.equal(updated?.lastUpdatedAt, 3n);
+    assert.equal(updated?.lastUpdatedTxHash, txHash);
     assert.equal(nextInstance.systemDebt, 1_100n);
     assert.equal(pendingBatchOps.has(pendingId), false);
     assert.equal(brackets.size, 0);
@@ -1259,6 +1261,8 @@ describe("Liquity CDP helpers", () => {
     assert.equal(updated?.interestBatchId, undefined);
     assert.equal(updated?.batchDebtShares, 0n);
     assert.equal(updated?.interestRate, individualRate);
+    assert.equal(updated?.lastUpdatedAt, 3n);
+    assert.equal(updated?.lastUpdatedTxHash, txHash);
     assert.equal(nextInstance.systemDebt, 1_100n);
     assert.equal(pendingBatchOps.has(pendingId), false);
     assert.equal(pendingBatchedUpdates.has(pendingId), false);
@@ -1369,5 +1373,9 @@ describe("Liquity CDP helpers", () => {
     assert.equal(pendingRedemptions.has(pendingId), false);
     assert.equal(pendingBatchedUpdates.has(pendingId), false);
     assert.equal(troves.get(`${collateralId}-${troveId}`)?.debt, 900n);
+    assert.equal(
+      troves.get(`${collateralId}-${troveId}`)?.lastUpdatedTxHash,
+      txHash,
+    );
   });
 });

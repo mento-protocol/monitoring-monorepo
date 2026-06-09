@@ -1102,6 +1102,7 @@ type Trove
   lastUserActionAt: BigInt!
   lastUpdatedAt: BigInt!
   lastUpdatedBlock: BigInt!
+  lastUpdatedTxHash: String
 }
 
 type InterestRateBracket @index(fields: ["collateralId", "rate"]) {

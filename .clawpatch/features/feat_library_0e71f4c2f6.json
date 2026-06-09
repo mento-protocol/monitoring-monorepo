@@ -24,7 +24,7 @@
       "reason": "source group ui-dashboard/src/components#3"
     },
     {
-      "path": "ui-dashboard/src/components/info-popover.tsx",
+      "path": "ui-dashboard/src/components/tooltip.tsx",
       "reason": "source group ui-dashboard/src/components#3"
     },
     {

@@ -188,7 +188,7 @@ describe("PoolConfigPanel", () => {
       expect(html).toMatch(/Swap Fee[\s\S]*?—/);
     });
 
-    it("exposes the LP/Protocol breakdown in the InfoPopover content", () => {
+    it("exposes the LP/Protocol breakdown in the Tooltip content", () => {
       const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
       expect(html).toContain("LP fee (0.03%)");
       expect(html).toContain("protocol fee (0.02%)");

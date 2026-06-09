@@ -12,7 +12,7 @@ import {
 import { useIsWeekend } from "@/hooks/use-is-weekend";
 import { relativeTime, formatTimestamp } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
-import { InfoPopover } from "@/components/info-popover";
+import { Tooltip } from "@/components/tooltip";
 import { POOL_OPEN_BREACH_TX } from "@/lib/queries";
 import { explorerTxUrl } from "@/lib/tokens";
 
@@ -78,7 +78,7 @@ export function DeviationCell({
       <dt className="text-slate-400 flex items-center justify-between gap-1">
         <span className="inline-flex items-center gap-1">
           Deviation
-          <InfoPopover
+          <Tooltip
             label={`About Deviation. ${explainer}`}
             content={explainer}
           />
