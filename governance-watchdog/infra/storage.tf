@@ -12,6 +12,23 @@ resource "google_storage_bucket" "watchdog_notifications_function" {
     log_bucket = google_storage_bucket.logging.id
   }
 
+  # Versioning keeps every replaced function-source-*.zip as a noncurrent
+  # version forever (41 had accumulated by 2026-06-10). Expire them by AGE,
+  # not by generation count: the object name embeds the source hash, so each
+  # deploy writes a NEW name and the old name's archived generation never
+  # gains "newer versions" under itself — a num_newer_versions condition
+  # would never fire. 30 days noncurrent = the rollback window; the live
+  # object is never ARCHIVED and always survives.
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      with_state                 = "ARCHIVED"
+      days_since_noncurrent_time = 30
+    }
+  }
+
   force_destroy = true
 }
 
