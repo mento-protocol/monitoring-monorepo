@@ -15,4 +15,4 @@ overrides:
   # notification delivery in production. 7.24.2 is what the last working
   # standalone deploy ran (npm package-lock) and satisfies the original
   # >=6.24.0 security floor.
-  undici: "7.24.2"
+  undici: 7.24.2
