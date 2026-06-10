@@ -10,10 +10,12 @@ export type CdpBorrowingFeesTileState = {
 };
 
 // Headline = the protocol's share of borrowing fees ((1 − SP_YIELD_SPLIT) ×
-// gross), since this page tracks PROTOCOL revenue. The gross fee burden and
-// the StabilityPool depositors' yield share render as context rows, and the
-// progress bar shows how much of the protocol share has actually been minted
-// to the treasury Safe (cash basis) vs still accruing on untouched troves.
+// gross), since this page tracks PROTOCOL revenue. One context row shows the
+// gross fee burden and the StabilityPool depositors' slice. Collected /
+// receivable stay indexed (LiquityInstance.borrowingFeeCollectedCum +
+// snapshot.collected) but are intentionally not rendered here — on Celo the
+// rebalancer touches troves constantly, so collected tracks earned within a
+// fraction of a percent and the extra figures were noise.
 export function CdpBorrowingFeesTile({
   state,
 }: {
@@ -43,84 +45,20 @@ export function CdpBorrowingFeesTile({
             </span>
           )}
         </p>
-        {showData && <SplitBreakdownRows summary={summary} />}
-        {showData && <CollectedProgress summary={summary} />}
+        {showData && (
+          <p className="mt-1.5 text-sm font-mono">
+            <span className="text-slate-500">Gross</span>{" "}
+            <span className="text-slate-400">
+              {formatUSD(summary.totalRevenueUSD)}
+            </span>{" "}
+            <span className="text-slate-500">
+              · of which {formatUSD(summary.spYieldShareUSD)} goes to stability
+              pool
+            </span>
+          </p>
+        )}
       </div>
       <p className="mt-2 text-xs text-slate-500 min-h-4">{subtitle}</p>
-    </div>
-  );
-}
-
-function SplitBreakdownRows({
-  summary,
-}: {
-  summary: CdpBorrowingRevenueSummary;
-}) {
-  const spSharePct =
-    summary.totalRevenueUSD > 0
-      ? Math.round((summary.spYieldShareUSD / summary.totalRevenueUSD) * 100)
-      : null;
-  return (
-    <div className="mt-1.5 flex gap-3 text-sm font-mono">
-      <span>
-        <span className="text-slate-500">Gross</span>{" "}
-        <span className="text-slate-400">
-          {formatUSD(summary.totalRevenueUSD)}
-        </span>
-      </span>
-      <span>
-        <span className="text-slate-500">
-          To SP yield{spSharePct !== null ? ` (${spSharePct}%)` : ""}
-        </span>{" "}
-        <span className="text-slate-400">
-          {formatUSD(summary.spYieldShareUSD)}
-        </span>
-      </span>
-    </div>
-  );
-}
-
-function CollectedProgress({
-  summary,
-}: {
-  summary: CdpBorrowingRevenueSummary;
-}) {
-  const collectedPct =
-    summary.protocolShareUSD > 0
-      ? Math.min(
-          100,
-          Math.round((summary.collectedUSD / summary.protocolShareUSD) * 100),
-        )
-      : 0;
-  return (
-    <div className="mt-2">
-      <div
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={collectedPct}
-        aria-label="Share of protocol borrowing revenue collected to treasury"
-        className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800"
-      >
-        <div
-          className="h-full rounded-full bg-emerald-500/80"
-          style={{ width: `${collectedPct}%` }}
-        />
-      </div>
-      <div className="mt-1.5 flex gap-3 text-xs font-mono">
-        <span>
-          <span className="text-slate-500">Collected</span>{" "}
-          <span className="text-emerald-400">
-            {formatUSD(summary.collectedUSD)}
-          </span>
-        </span>
-        <span>
-          <span className="text-slate-500">Accruing</span>{" "}
-          <span className="text-slate-400">
-            {formatUSD(summary.receivableUSD)}
-          </span>
-        </span>
-      </div>
     </div>
   );
 }
@@ -138,9 +76,5 @@ function cdpBorrowingFeesSubtitle(
   if (summary.unpricedSymbols.length > 0) {
     return `Approximate — unpriced debt token${summary.unpricedSymbols.length === 1 ? "" : "s"}: ${summary.unpricedSymbols.join(", ")}`;
   }
-  const marketLabel =
-    summary.marketCount === 1
-      ? "1 Celo CDP market"
-      : `${summary.marketCount} Celo CDP markets`;
-  return `Protocol share of upfront fees + interest across ${marketLabel}`;
+  return "Protocol share of borrowing fees";
 }
