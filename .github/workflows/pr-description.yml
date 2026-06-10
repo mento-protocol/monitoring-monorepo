@@ -2,8 +2,10 @@ name: PR Description
 
 # Enforces the repo PR-description standard (AGENTS.md "PR description standard"
 # + .github/PULL_REQUEST_TEMPLATE.md): every PR body must lead with
-# `## The Problem` and `## The Solution`, and must not still contain the
-# unfilled template placeholders.
+# `## The Problem` and `## The Solution`, must not still contain the
+# unfilled template placeholders, and must declare deferrals — a
+# `## Deferrals` section that either says "None" or links the GitHub
+# issue(s) created for everything knowingly deferred from the PR.
 #
 # REQUIRED-STATUS SAFETY: no workflow-level `paths:` filter — this is meant to
 # run on every PR so it can be a required status (AGENTS.md: required-status
@@ -84,4 +86,49 @@ jobs:
             exit 1
           fi
 
-          echo "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders."
+          # 4) Deferral declaration (AGENTS.md "Deferral rule"): a `## Deferrals`
+          #    section must exist and either say "None" or reference at least
+          #    one GitHub issue (#123 or a full issues URL). This is the forcing
+          #    function for "every knowing deferral gets an issue" — CI can't
+          #    judge honesty, but it can require the explicit declaration, and a
+          #    "None" that contradicts deferred-marked review replies is
+          #    auditable. Operates on fence_stripped (comments + code fences
+          #    removed) so an example heading or issue ref inside a fence or the
+          #    template's instructional comment can't satisfy the check.
+          if ! grep -qE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$fence_stripped"; then
+            echo "::error::PR description is missing the '## Deferrals' section. Everything knowingly deferred from this PR (reviewer findings not addressed here, or out-of-scope work) needs a GitHub issue — list the links there, or write 'None'. See AGENTS.md 'Deferral rule'."
+            exit 1
+          fi
+          deferrals=$(awk '
+            /^##[[:space:]]+Deferrals[[:space:]]*$/ { insec = 1; next }
+            insec && /^##[[:space:]]/ { insec = 0 }
+            insec { print }
+          ' <<<"$fence_stripped")
+          # The gate validates ITEMS: list bullets (`- …` / `* …`) plus
+          # standalone `None` lines. Everything else in the section —
+          # wrapped continuation lines, generated trailers like the
+          # `🤖 Generated with …` footer or a bot summary — is ignored, so
+          # metadata appended after a final `## Deferrals` section can't
+          # block a valid body. Rules:
+          #   - at least one item must exist;
+          #   - every item must either be exactly `None` (optional trailing
+          #     period) or reference a GitHub issue (#123 / issues URL).
+          # That makes each knowing deferral carry its own issue link — one
+          # linked item can't cover an untracked sibling — while a leftover
+          # `- None` next to real linked items stays harmless, and prose
+          # merely containing the word "none" never passes.
+          none_re='^[[:space:]]*([-*][[:space:]]+)?[Nn][Oo][Nn][Ee][[:space:]]*\.?[[:space:]]*$'
+          issue_re='#[0-9]+|github\.com/[^[:space:]]+/issues/[0-9]+'
+          items=$(grep -E '^[[:space:]]*[-*][[:space:]]+[^[:space:]]' <<<"$deferrals" || true)
+          standalone_none=$(grep -E "$none_re" <<<"$deferrals" || true)
+          if [ -z "$items" ] && [ -z "$standalone_none" ]; then
+            echo "::error::The '## Deferrals' section must list its content as items: '- None' when nothing was knowingly deferred, or one '- #123 …' / issues-URL item per deferral. Create the issue first (problem description + solution ideas if you have them), then link it here."
+            exit 1
+          fi
+          bad_items=$(grep -vE "$none_re" <<<"$items" | grep -vE "$issue_re" || true)
+          if [ -n "$bad_items" ]; then
+            echo "::error::Every item in '## Deferrals' must either be 'None' or reference a GitHub issue (#123 or an issues URL) — one linked item does not cover an untracked sibling. Missing issue reference on: $(head -3 <<<"$bad_items" | tr '\n' ' ')"
+            exit 1
+          fi
+
+          echo "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders, deferrals declared."
