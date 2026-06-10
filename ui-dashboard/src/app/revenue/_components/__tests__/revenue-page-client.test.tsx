@@ -58,6 +58,7 @@ function cdpMarket(
     chainId: 42220,
     collIndex: 0,
     symbol,
+    spYieldSplitBps: 7500,
     activeDebtUSD,
     averageAnnualInterestRatePercent,
     annualInterestRunRateUSD,
@@ -222,6 +223,14 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("$242.50");
     expect(html).toContain("$181.87");
     expect(html).toContain("Stability Pool Share");
+    // Headline deep-links to the feeRecipient's DeBank profile, like the
+    // Swap Fees tile.
+    expect(html).toContain('aria-label="CDP Borrowing Fees: $60.63"');
+    expect(html.match(/debank\.com\/profile\/0x0dd57f6f/gi)?.length).toBe(2);
+    // All-time tooltip states the live on-chain split (7500 bps fixture).
+    expect(html).toContain(
+      "Split: 25% protocol treasury, 75% Stability Pool depositor yield.",
+    );
     // Collected/receivable stay indexed but are no longer rendered — the
     // fixture's collectedUSD (30) / receivableUSD (30.63) must not appear.
     expect(html).not.toContain("Accruing");
@@ -377,5 +386,43 @@ describe("RevenuePageClient degraded fee states", () => {
     // the (successful) market/bracket/rate queries.
     expect(html).not.toContain("Unable to load CDP borrowing fees");
     expect(html).toContain("$20.00");
+  });
+});
+
+describe("cdpBorrowingTotalTooltip fallback via RevenuePageClient", () => {
+  beforeEach(() => {
+    mockUseProtocolFees.mockReset();
+    mockUseCdpBorrowingRevenue.mockReset();
+  });
+
+  it("falls back to generic split wording when market splits disagree", () => {
+    const gbp = cdpMarket("GBPm", 187.5, 125, 62.5);
+    const chf = { ...cdpMarket("CHFm", 55, 55, 0), spYieldSplitBps: 5000 };
+    const html = renderRevenue([], false, {
+      summary: EMPTY_CDP_REVENUE,
+      markets: [gbp, chf],
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain(
+      "The protocol keeps the share shown in the summary tile",
+    );
+    expect(html).not.toContain("% protocol treasury");
+  });
+
+  it("falls back to generic split wording on the unloaded -1 sentinel", () => {
+    const gbp = { ...cdpMarket("GBPm", 187.5, 125, 62.5), spYieldSplitBps: -1 };
+    const html = renderRevenue([], false, {
+      summary: EMPTY_CDP_REVENUE,
+      markets: [gbp],
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain(
+      "The protocol keeps the share shown in the summary tile",
+    );
+    expect(html).not.toContain("% protocol treasury");
   });
 });
