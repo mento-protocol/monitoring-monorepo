@@ -1,14 +1,9 @@
 # Cloud Functions auto-creates this Docker repo for function build images and
 # never cleans it up — it had accumulated 64 images (~1.9 GB) by 2026-06-10.
-# One-time adoption: this import block brings the existing repo into state so
-# the cleanup policies below can manage retention. DELETE this block after the
-# adopting apply lands — it is not valid for from-scratch bring-up (the repo
-# wouldn't exist yet; Terraform creates it from the resource instead).
-import {
-  to = google_artifact_registry_repository.gcf_artifacts
-  id = "projects/${module.governance_watchdog.project_id}/locations/${var.region}/repositories/gcf-artifacts"
-}
-
+# Adopted into state on 2026-06-10 via a one-time import block (PR #835,
+# removed after the adopting apply) so the cleanup policies below manage
+# retention. On from-scratch bring-up Terraform creates the repo before
+# Cloud Functions would.
 resource "google_artifact_registry_repository" "gcf_artifacts" {
   #checkov:skip=CKV_GCP_84:Repo is auto-created and managed by Cloud Functions with Google-managed encryption; imported as-is purely to attach cleanup policies. Switching to CMEK would force recreation and break the managed deploy flow.
   project       = module.governance_watchdog.project_id
