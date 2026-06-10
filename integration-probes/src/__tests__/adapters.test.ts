@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { flyApiHeaders, flyQuoteUrl } from "../adapterRequests.js";
 import {
   AGGREGATOR_ADAPTERS,
   aggregatePairStatus,
@@ -479,6 +480,14 @@ describe("probeAdapterPair", () => {
     for (const headers of flyHeaders) {
       expect(headers).toEqual({ apikey: "fly-key" });
     }
+  });
+
+  it("treats an empty FLYTRADE_API_KEY as unset and stays on the public Fly origin", () => {
+    const env = { FLYTRADE_API_KEY: "" };
+    expect(flyApiHeaders(env)).toBeUndefined();
+    expect(flyQuoteUrl(monadInput, "monad", env)).toContain(
+      "https://api.fly.trade/aggregator/quote",
+    );
   });
 
   it("uses the winning LI.FI discovery amount for Fly follow-up quotes", async () => {
