@@ -41,8 +41,11 @@ set_project_id() {
 		# If .env doesn't exist, create it with the initial value
 		echo "GCP_PROJECT_ID=${project_id}" >.env
 	else
-		# If .env exists, perform the sed replacement
-		sed -i '' "s/^GCP_PROJECT_ID=.*/GCP_PROJECT_ID=${project_id}/" .env
+		# If .env exists, rewrite via a temp file — in-place `sed -i` flags are
+		# incompatible between BSD/macOS and GNU/Linux sed
+		tmp_env=$(mktemp)
+		sed "s/^GCP_PROJECT_ID=.*/GCP_PROJECT_ID=${project_id}/" .env >"${tmp_env}"
+		mv "${tmp_env}" .env
 	fi
 	printf "✅"
 }
