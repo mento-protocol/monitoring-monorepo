@@ -287,6 +287,23 @@ Every PR description must start with these exact heading lines, in this order:
 The first two sections are not a change log. They are the reviewer-facing story
 for why the PR exists and why this approach resolves it.
 
+## Deferral rule
+
+Every time something is knowingly deferred from a PR — a reviewer finding you
+chose not to address in that PR, or work you judged out of scope — create a
+GitHub issue for it with a clear description of the problem to be solved, plus
+solution ideas if you have them (otherwise describe the problem as best you
+can). Label it `agent-ready` when an agent could pick it up unaided.
+
+The PR body's `## Deferrals` section is the enforcement point: it must either
+say `None` or link the issue(s), and the required `PR description format`
+check fails without it. Two corollaries:
+
+- Create the issue **before** posting a "Deferred — tracking in …" review
+  reply; a deferred reply without an issue link is incomplete.
+- A won't-fix with evidence is **not** a deferral (no issue needed); a "good
+  idea, later" is.
+
 ## PR feedback sweep rule
 
 Before declaring a PR clean, inspect every GitHub feedback surface: top-level PR/issue comments, review submissions and bodies, inline review threads/comments, check-run annotations, and failing check logs. Bot reviews can post actionable multi-finding reports as top-level comments, not only inline comments. A clean or resolved inline-thread list is necessary but not sufficient.

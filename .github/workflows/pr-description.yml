@@ -2,8 +2,10 @@ name: PR Description
 
 # Enforces the repo PR-description standard (AGENTS.md "PR description standard"
 # + .github/PULL_REQUEST_TEMPLATE.md): every PR body must lead with
-# `## The Problem` and `## The Solution`, and must not still contain the
-# unfilled template placeholders.
+# `## The Problem` and `## The Solution`, must not still contain the
+# unfilled template placeholders, and must declare deferrals — a
+# `## Deferrals` section that either says "None" or links the GitHub
+# issue(s) created for everything knowingly deferred from the PR.
 #
 # REQUIRED-STATUS SAFETY: no workflow-level `paths:` filter — this is meant to
 # run on every PR so it can be a required status (AGENTS.md: required-status
@@ -84,4 +86,28 @@ jobs:
             exit 1
           fi
 
-          echo "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders."
+          # 4) Deferral declaration (AGENTS.md "Deferral rule"): a `## Deferrals`
+          #    section must exist and either say "None" or reference at least
+          #    one GitHub issue (#123 or a full issues URL). This is the forcing
+          #    function for "every knowing deferral gets an issue" — CI can't
+          #    judge honesty, but it can require the explicit declaration, and a
+          #    "None" that contradicts deferred-marked review replies is
+          #    auditable. Operates on fence_stripped (comments + code fences
+          #    removed) so an example heading or issue ref inside a fence or the
+          #    template's instructional comment can't satisfy the check.
+          if ! grep -qE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$fence_stripped"; then
+            echo "::error::PR description is missing the '## Deferrals' section. Everything knowingly deferred from this PR (reviewer findings not addressed here, or out-of-scope work) needs a GitHub issue — list the links there, or write 'None'. See AGENTS.md 'Deferral rule'."
+            exit 1
+          fi
+          deferrals=$(awk '
+            /^##[[:space:]]+Deferrals[[:space:]]*$/ { insec = 1; next }
+            insec && /^##[[:space:]]/ { insec = 0 }
+            insec { print }
+          ' <<<"$fence_stripped")
+          if ! grep -qiE '(^|[^[:alnum:]])none([^[:alnum:]]|$)' <<<"$deferrals" \
+             && ! grep -qE '#[0-9]+|github\.com/[^[:space:]]+/issues/[0-9]+' <<<"$deferrals"; then
+            echo "::error::The '## Deferrals' section must either say 'None' or reference at least one GitHub issue (#123 or an issues URL) per knowing deferral. Create the issue first (problem description + solution ideas if you have them), then link it here."
+            exit 1
+          fi
+
+          echo "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders, deferrals declared."

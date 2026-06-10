@@ -16,8 +16,20 @@
 
 - [Commands and results.]
 
+## Deferrals
+
+<!--
+Everything knowingly deferred from this PR — reviewer findings you chose not
+to address here, or work you judged out of scope — MUST have a GitHub issue
+describing the problem (and solution ideas, if any). List the issue links
+below, or write "None" if nothing was deferred. CI enforces this section.
+-->
+
+- None
+
 ## Checklist
 
 - [ ] The Problem has no more than three bullets.
 - [ ] The Solution is plain English and understandable before reading the diff.
 - [ ] Deeper implementation details come after the opening two sections.
+- [ ] Every knowing deferral is listed under Deferrals with a GitHub issue link.
