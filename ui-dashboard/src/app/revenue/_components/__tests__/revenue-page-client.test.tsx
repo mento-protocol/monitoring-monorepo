@@ -220,10 +220,14 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("earned");
     expect(html).toContain("Gross");
     expect(html).toContain("$242.50");
-    expect(html).toContain("of which $181.87 goes to stability");
-    // Collected/receivable stay indexed but are no longer rendered.
+    expect(html).toContain("$181.87");
+    expect(html).toContain("Stability Pool Share");
+    // Collected/receivable stay indexed but are no longer rendered — the
+    // fixture's collectedUSD (30) / receivableUSD (30.63) must not appear.
     expect(html).not.toContain("Accruing");
     expect(html).not.toContain('role="progressbar"');
+    expect(html).not.toContain("$30.00");
+    expect(html).not.toContain("$30.63");
     expect(html).toContain("Protocol share of borrowing fees");
     expect(html).toContain("Protocol share of swap fees");
     expect(html).toContain("Borrowing Fees by CDP");
