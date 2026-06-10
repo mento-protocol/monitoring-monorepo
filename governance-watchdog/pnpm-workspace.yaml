@@ -9,4 +9,10 @@ minimumReleaseAgeExclude:
 
 overrides:
   flatted: ">=3.4.2"
-  undici: ">=6.24.0"
+  # Exact pin, not a range: ">=6.24.0" resolved to undici 8.x on a fresh
+  # install, and @discordjs/rest 2.6.1 crashes against undici 8's stricter
+  # Headers webidl (Symbol(sensitiveHeaders) → TypeError), breaking Discord
+  # notification delivery in production. 7.24.2 is what the last working
+  # standalone deploy ran (npm package-lock) and satisfies the original
+  # >=6.24.0 security floor.
+  undici: "7.24.2"

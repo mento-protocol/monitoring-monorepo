@@ -6,7 +6,7 @@ settings:
 
 overrides:
   flatted: '>=3.4.2'
-  undici: '>=6.24.0'
+  undici: 7.24.2
 
 importers:
 
@@ -2229,9 +2229,9 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
-  undici@8.4.0:
-    resolution: {integrity: sha512-tDR4LgFBeV7YBWOFMlmbhtrnFVWuZ6HKbkG+88/csQdhK2tPlW78PnLI2VRjIQtTlslvgSZ4R43WBE+4g6rhng==}
-    engines: {node: '>=22.19.0'}
+  undici@7.24.2:
+    resolution: {integrity: sha512-P9J1HWYV/ajFr8uCqk5QixwiRKmB1wOamgS0e+o2Z4A44Ej2+thFVRLG/eA7qprx88XXhnV5Bl8LHXTURpzB3Q==}
+    engines: {node: '>=20.18.1'}
 
   unpipe@1.0.0:
     resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
@@ -2495,7 +2495,7 @@ snapshots:
       discord-api-types: 0.38.48
       magic-bytes.js: 1.13.0
       tslib: 2.8.1
-      undici: 8.4.0
+      undici: 7.24.2
 
   '@discordjs/util@1.2.0':
     dependencies:
@@ -3393,7 +3393,7 @@ snapshots:
       lodash.snakecase: 4.1.1
       magic-bytes.js: 1.13.0
       tslib: 2.8.1
-      undici: 8.4.0
+      undici: 7.24.2
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -4640,7 +4640,7 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  undici@8.4.0: {}
+  undici@7.24.2: {}
 
   unpipe@1.0.0: {}
 
