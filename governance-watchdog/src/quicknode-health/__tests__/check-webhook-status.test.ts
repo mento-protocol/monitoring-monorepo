@@ -75,6 +75,19 @@ describe("checkWebhookStatus", () => {
     expect(result.unhealthyWebhooks).toEqual(["MentoGovernor (missing)"]);
   });
 
+  it("stays healthy when an unexpected webhook is inactive", async () => {
+    mockWebhooksResponse([
+      ...ACTIVE_WEBHOOKS,
+      { id: "3", name: "StagingWebhook", status: "paused" },
+    ]);
+    const { checkWebhookStatus } = await import("../check-webhook-status.js");
+
+    const result = await checkWebhookStatus();
+
+    expect(result.healthy).toBe(true);
+    expect(result.unhealthyWebhooks).toEqual([]);
+  });
+
   it("reports unhealthy when an expected webhook is present but not active", async () => {
     mockWebhooksResponse([
       ACTIVE_WEBHOOKS[0],

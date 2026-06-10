@@ -31,9 +31,12 @@ const HEALTHY_STATUSES = ["active"];
 
 /**
  * Webhooks Terraform provisions in infra/quicknode.tf — keep in sync if one is
- * ever renamed or added there. Requiring these by name means an account with
- * zero webhooks (deleted webhooks, or an API key scoped to the wrong account)
- * reports unhealthy instead of "no inactive webhooks → healthy".
+ * ever renamed or added there. Health is derived from exactly this set: each
+ * expected webhook must be present AND active, so an account with zero
+ * webhooks (deleted webhooks, or an API key scoped to the wrong account)
+ * reports unhealthy instead of "no inactive webhooks → healthy". Webhooks
+ * outside this set are reported in the status list but don't affect health —
+ * they belong to other services and would page the wrong on-call.
  */
 const EXPECTED_WEBHOOK_NAMES = ["SortedOracles", "MentoGovernor"];
 
@@ -121,7 +124,7 @@ export const checkWebhookStatus = async (): Promise<WebhookHealthResult> => {
   const unhealthyWebhooks = [
     ...missingWebhooks.map((name) => `${name} (missing)`),
     ...webhookStatuses
-      .filter((w) => !w.isHealthy)
+      .filter((w) => EXPECTED_WEBHOOK_NAMES.includes(w.name) && !w.isHealthy)
       .map((w) => `${w.name} (${w.status})`),
   ];
 

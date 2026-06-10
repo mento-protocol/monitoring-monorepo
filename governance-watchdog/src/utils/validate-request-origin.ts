@@ -105,6 +105,11 @@ export async function hasAuthToken(req: Request): Promise<boolean> {
  * QuickNode sends unix epoch seconds; we tolerate milliseconds defensively
  * because the unit is controlled by QuickNode and guessing wrong would reject
  * every legitimate webhook (which QuickNode punishes by terminating it).
+ *
+ * Do NOT "clean this up" into a strict seconds-only check: the tolerance does
+ * not widen the window (each timestamp string normalizes to a single instant,
+ * and the timestamp is HMAC-bound so an attacker can't re-encode it), but
+ * removing it would reject every webhook if QuickNode ever switches units.
  */
 function isTimestampFresh(timestamp: string): boolean {
   const parsed = Number(timestamp);

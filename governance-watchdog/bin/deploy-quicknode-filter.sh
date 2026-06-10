@@ -32,9 +32,10 @@ FILTER_DIR="${REPO_ROOT}/infra/quicknode-filter-functions"
 # Deploy scripts must refuse dirty working trees before mutating external
 # systems (scripts/AGENTS.md). This script PATCHes the live QuickNode webhook
 # templates from local filter files, so uncommitted edits would ship unreviewed.
-if [[ -n "$(git status --porcelain)" ]]; then
+# -C pins the check to the repo the filter files are read from, not the cwd.
+if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain)" ]]; then
 	echo "❌ Working directory is not clean. Commit or stash your changes first."
-	git status --short
+	git -C "${REPO_ROOT}" status --short
 	exit 1
 fi
 
