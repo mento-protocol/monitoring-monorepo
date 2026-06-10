@@ -104,22 +104,30 @@ jobs:
             insec && /^##[[:space:]]/ { insec = 0 }
             insec { print }
           ' <<<"$fence_stripped")
-          # "None" satisfies the gate only when it is the section's SOLE
-          # non-blank content — every non-blank line must be exactly `None`
-          # (optionally a `-`/`*` list item, optional trailing period).
-          # Prose containing the word ("None of the follow-ups are tracked
-          # yet"), or a leftover `- None` next to an added untracked
-          # deferral line, does NOT pass; any other content requires an
-          # issue reference.
-          deferrals_nonblank=$(grep -vE '^[[:space:]]*$' <<<"$deferrals" || true)
-          none_only=false
-          if [ -n "$deferrals_nonblank" ] \
-             && ! grep -qviE '^[[:space:]]*([-*][[:space:]]+)?none[[:space:]]*\.?[[:space:]]*$' <<<"$deferrals_nonblank"; then
-            none_only=true
+          # The gate validates ITEMS: list bullets (`- …` / `* …`) plus
+          # standalone `None` lines. Everything else in the section —
+          # wrapped continuation lines, generated trailers like the
+          # `🤖 Generated with …` footer or a bot summary — is ignored, so
+          # metadata appended after a final `## Deferrals` section can't
+          # block a valid body. Rules:
+          #   - at least one item must exist;
+          #   - every item must either be exactly `None` (optional trailing
+          #     period) or reference a GitHub issue (#123 / issues URL).
+          # That makes each knowing deferral carry its own issue link — one
+          # linked item can't cover an untracked sibling — while a leftover
+          # `- None` next to real linked items stays harmless, and prose
+          # merely containing the word "none" never passes.
+          none_re='^[[:space:]]*([-*][[:space:]]+)?[Nn][Oo][Nn][Ee][[:space:]]*\.?[[:space:]]*$'
+          issue_re='#[0-9]+|github\.com/[^[:space:]]+/issues/[0-9]+'
+          items=$(grep -E '^[[:space:]]*[-*][[:space:]]+[^[:space:]]' <<<"$deferrals" || true)
+          standalone_none=$(grep -E "$none_re" <<<"$deferrals" || true)
+          if [ -z "$items" ] && [ -z "$standalone_none" ]; then
+            echo "::error::The '## Deferrals' section must list its content as items: '- None' when nothing was knowingly deferred, or one '- #123 …' / issues-URL item per deferral. Create the issue first (problem description + solution ideas if you have them), then link it here."
+            exit 1
           fi
-          if [ "$none_only" != true ] \
-             && ! grep -qE '#[0-9]+|github\.com/[^[:space:]]+/issues/[0-9]+' <<<"$deferrals_nonblank"; then
-            echo "::error::The '## Deferrals' section must either be exactly 'None' (as its only content) or reference a GitHub issue (#123 or an issues URL) for each knowing deferral. Create the issue first (problem description + solution ideas if you have them), then link it here."
+          bad_items=$(grep -vE "$none_re" <<<"$items" | grep -vE "$issue_re" || true)
+          if [ -n "$bad_items" ]; then
+            echo "::error::Every item in '## Deferrals' must either be 'None' or reference a GitHub issue (#123 or an issues URL) — one linked item does not cover an untracked sibling. Missing issue reference on: $(head -3 <<<"$bad_items" | tr '\n' ' ')"
             exit 1
           fi
 
