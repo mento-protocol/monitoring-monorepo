@@ -606,6 +606,7 @@ add_workspace_quality_commands() {
   add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
   add_package_quality_commands "@mento-protocol/integration-probes" "$reason"
   add_package_quality_commands "@mento-protocol/monitoring-config" "$reason"
+  add_package_quality_commands "@mento-protocol/governance-watchdog" "$reason"
   add_aegis_quality_commands "$reason"
 }
 
@@ -1202,7 +1203,7 @@ while IFS= read -r path; do
     governance-watchdog/*)
       add_surface "governance-watchdog"
       case "$path" in
-        governance-watchdog/src/*|governance-watchdog/package.json|governance-watchdog/pnpm-lock.yaml|governance-watchdog/pnpm-workspace.yaml|governance-watchdog/tsconfig.json|governance-watchdog/tsconfig.build.json|governance-watchdog/vitest.config.ts|governance-watchdog/knip.json|governance-watchdog/eslint.config.mjs)
+        governance-watchdog/src/*|governance-watchdog/bin/*.ts|governance-watchdog/package.json|governance-watchdog/pnpm-lock.yaml|governance-watchdog/pnpm-workspace.yaml|governance-watchdog/tsconfig.json|governance-watchdog/tsconfig.build.json|governance-watchdog/vitest.config.ts|governance-watchdog/knip.json|governance-watchdog/eslint.config.mjs)
           add_package_quality_commands "@mento-protocol/governance-watchdog" "governance-watchdog changed"
           ;;
         governance-watchdog/infra/*.tf)
@@ -1212,6 +1213,8 @@ while IFS= read -r path; do
         # Other files (bin/*.sh, *.md, .gcloudignore, .prettierrc, .env.example,
         # osv-scanner.toml) need no extra routing: shell scripts hit the generic
         # `*.sh → bash -n` branch above; the rest are doc/config-only.
+        # bin/*.ts is routed to package quality above — the package tsconfig
+        # includes `bin/**/*`, so typecheck/build cover those entrypoints.
       esac
       ;;
     terraform/*)
