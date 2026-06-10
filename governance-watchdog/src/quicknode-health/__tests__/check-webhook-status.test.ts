@@ -17,21 +17,23 @@ interface FakeWebhook {
   id: string;
   name: string;
   status: string;
+  network: string;
+}
+
+function fakePage(webhooks: FakeWebhook[]) {
+  return {
+    ok: true,
+    json: () => Promise.resolve({ data: webhooks }),
+  };
 }
 
 function mockWebhooksResponse(webhooks: FakeWebhook[]) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ data: webhooks }),
-    }),
-  );
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(fakePage(webhooks)));
 }
 
 const ACTIVE_WEBHOOKS: FakeWebhook[] = [
-  { id: "1", name: "SortedOracles", status: "active" },
-  { id: "2", name: "MentoGovernor", status: "active" },
+  { id: "1", name: "SortedOracles", status: "active", network: "celo-mainnet" },
+  { id: "2", name: "MentoGovernor", status: "active", network: "celo-mainnet" },
 ];
 
 describe("checkWebhookStatus", () => {
@@ -75,10 +77,33 @@ describe("checkWebhookStatus", () => {
     expect(result.unhealthyWebhooks).toEqual(["MentoGovernor (missing)"]);
   });
 
+  it("treats a same-named webhook on another network as missing", async () => {
+    mockWebhooksResponse([
+      {
+        id: "1",
+        name: "SortedOracles",
+        status: "active",
+        network: "ethereum-mainnet",
+      },
+      ACTIVE_WEBHOOKS[1],
+    ]);
+    const { checkWebhookStatus } = await import("../check-webhook-status.js");
+
+    const result = await checkWebhookStatus();
+
+    expect(result.healthy).toBe(false);
+    expect(result.unhealthyWebhooks).toEqual(["SortedOracles (missing)"]);
+  });
+
   it("stays healthy when an unexpected webhook is inactive", async () => {
     mockWebhooksResponse([
       ...ACTIVE_WEBHOOKS,
-      { id: "3", name: "StagingWebhook", status: "paused" },
+      {
+        id: "3",
+        name: "StagingWebhook",
+        status: "paused",
+        network: "celo-mainnet",
+      },
     ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -91,7 +116,12 @@ describe("checkWebhookStatus", () => {
   it("reports unhealthy when an expected webhook is present but not active", async () => {
     mockWebhooksResponse([
       ACTIVE_WEBHOOKS[0],
-      { id: "2", name: "MentoGovernor", status: "paused" },
+      {
+        id: "2",
+        name: "MentoGovernor",
+        status: "paused",
+        network: "celo-mainnet",
+      },
     ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -99,6 +129,31 @@ describe("checkWebhookStatus", () => {
 
     expect(result.healthy).toBe(false);
     expect(result.unhealthyWebhooks).toEqual(["MentoGovernor (paused)"]);
+  });
+
+  it("pages through all webhooks before deciding one is missing", async () => {
+    // First page is full (100 unrelated webhooks); the expected ones are on page 2
+    const filler: FakeWebhook[] = Array.from({ length: 100 }, (_, i) => ({
+      id: `filler-${String(i)}`,
+      name: `Other-${String(i)}`,
+      status: "active",
+      network: "celo-mainnet",
+    }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(fakePage(filler))
+      .mockResolvedValueOnce(fakePage(ACTIVE_WEBHOOKS));
+    vi.stubGlobal("fetch", fetchMock);
+    const { checkWebhookStatus } = await import("../check-webhook-status.js");
+
+    const result = await checkWebhookStatus();
+
+    expect(result.healthy).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("limit=100&offset=0");
+    expect(String(fetchMock.mock.calls[1][0])).toContain(
+      "limit=100&offset=100",
+    );
   });
 
   it("reads the API key secret id from config", async () => {

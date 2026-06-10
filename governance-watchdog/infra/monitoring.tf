@@ -65,9 +65,12 @@ resource "google_monitoring_alert_policy" "health_check_policy" {
   notification_channels = [google_monitoring_notification_channel.victorops_channel.id]
   severity              = "CRITICAL"
 
-  # Extends the incident auto-close window beyond GCP's 7-day default so a
-  # still-firing incident isn't closed under responders. The API stores values
-  # above 7 days verbatim (verified on the live policy).
+  # Extends the incident auto-close window beyond GCP's 7-day default. The API
+  # stores values above 7 days verbatim (verified on the live policy).
+  # ~21 days is the deliberate policy — ample time to act on a CRITICAL page —
+  # not the "effectively never auto-close" the previous comment claimed; an
+  # incident nobody acted on for three weeks is a process problem, not one
+  # more weeks of open-incident state would fix.
   alert_strategy {
     auto_close = "1800000s" # ~21 days
   }
