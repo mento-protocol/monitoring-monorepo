@@ -8,6 +8,7 @@ import {
 }
 
 resource "google_artifact_registry_repository" "gcf_artifacts" {
+  #checkov:skip=CKV_GCP_84:Repo is auto-created and managed by Cloud Functions with Google-managed encryption; imported as-is purely to attach cleanup policies. Switching to CMEK would force recreation and break the managed deploy flow.
   project       = module.governance_watchdog.project_id
   location      = var.region
   repository_id = "gcf-artifacts"
