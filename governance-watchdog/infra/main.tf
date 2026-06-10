@@ -1,5 +1,8 @@
 module "governance_watchdog" {
   activate_apis = [
+    # Gen2 function builds publish their images through Artifact Registry; without
+    # this a from-scratch apply on a fresh project fails before the function exists.
+    "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
     "cloudfunctions.googleapis.com",
     "cloudresourcemanager.googleapis.com",

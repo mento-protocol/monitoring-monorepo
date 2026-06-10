@@ -228,7 +228,9 @@ QuickNode webhooks use the `evmAbiFilter` template to match blockchain events by
    */
    ```
 
-2. **Deploy to QuickNode** using the deploy script:
+2. **Commit your changes** — the deploy script refuses dirty working trees so that only reviewed, committed filter code ships to the live webhooks.
+
+3. **Deploy to QuickNode** using the deploy script:
 
    ```sh
    ./bin/deploy-quicknode-filter.sh --webhook healthcheck   # SortedOracles
@@ -238,7 +240,7 @@ QuickNode webhooks use the `evmAbiFilter` template to match blockchain events by
 
    This reads the ABI and contract addresses from the comment header, builds the `templateArgs` payload, and calls `PATCH /webhooks/{id}/template/evmAbiFilterGo` to apply the update live (no downtime).
 
-3. **Verify** by checking the [QuickNode Webhooks Dashboard](https://dashboard.quicknode.com/webhooks) or inspecting the raw webhook via:
+4. **Verify** by checking the [QuickNode Webhooks Dashboard](https://dashboard.quicknode.com/webhooks) or inspecting the raw webhook via:
 
    ```bash
    curl -X GET "https://api.quicknode.com/webhooks/rest/v1/webhooks/$webhook_id" \

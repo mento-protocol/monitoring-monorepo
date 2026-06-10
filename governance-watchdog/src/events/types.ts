@@ -1,6 +1,6 @@
 import { EmbedBuilder } from "discord.js";
-import { TelegramMessageBuilder } from "../event-notifications/message-builder.telegram";
-import type { EventHandlerConfig } from "./event-handler-factory";
+import { TelegramMessageBuilder } from "../event-notifications/message-builder.telegram.js";
+import type { EventHandlerConfig } from "./event-handler-factory.js";
 
 /**
  * Event type enum - all supported governance events

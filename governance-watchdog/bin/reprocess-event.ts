@@ -281,9 +281,13 @@ async function fetchEventsByBlockHash(
 
   console.log(`🔍 Fetching block ${blockHash}...`);
 
+  // includeTransactions: false returns transaction hashes only — that's all the
+  // loop needs, since fetchEventsByTxHash fetches each receipt itself. (With
+  // `true`, viem returns full transaction objects and the string-typed loop
+  // below would process zero transactions.)
   const block = await publicClient.getBlock({
     blockHash,
-    includeTransactions: true,
+    includeTransactions: false,
   });
 
   const txCount = block.transactions.length;
@@ -292,20 +296,14 @@ async function fetchEventsByBlockHash(
   const allEvents: QuicknodeEvent[] = [];
 
   for (const tx of block.transactions) {
-    if (typeof tx === "string") {
-      // Transaction hash only, fetch receipt
-      try {
-        const events = await fetchEventsByTxHash(tx as `0x${string}`);
-        allEvents.push(...events);
-      } catch (error: unknown) {
-        if (process.env.DEBUG) {
-          const errorMessage =
-            error instanceof Error ? error.message : String(error);
-          const txHashStr = String(tx);
-          console.log(
-            `⚠️  Error fetching events from tx ${txHashStr}: ${errorMessage}`,
-          );
-        }
+    try {
+      const events = await fetchEventsByTxHash(tx);
+      allEvents.push(...events);
+    } catch (error: unknown) {
+      if (process.env.DEBUG) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        console.log(`⚠️  Error fetching events from tx ${tx}: ${errorMessage}`);
       }
     }
   }

@@ -136,7 +136,9 @@ const handleQuicknodeWebhook = async (
   let eventsDeduplicated = 0;
 
   for (const quicknodeEvent of parseRequestBody(req.body)) {
-    // Skip duplicated events to prevent sending multiple notifications
+    // Skip duplicated events to prevent sending multiple notifications.
+    // Note: isDuplicate registers the event as seen immediately, even if
+    // processing then fails — see the invariant note in utils/event-deduplication.ts.
     if (isDuplicate(quicknodeEvent)) {
       eventsDeduplicated++;
       continue;

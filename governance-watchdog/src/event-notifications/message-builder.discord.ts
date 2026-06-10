@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { MessageBuilder } from "./message-builder.base";
+import { MessageBuilder } from "./message-builder.base.js";
 
 /**
  * Theme configuration for different event types

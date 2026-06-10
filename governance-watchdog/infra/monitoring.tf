@@ -3,8 +3,12 @@ resource "google_logging_metric" "health_check_metric" {
   project     = module.governance_watchdog.project_id
   name        = "health_check_logs_count"
   description = "Number of log entries containing 'health check' in the watchdog cloud function"
-  filter      = <<EOF
-    severity=DEFAULT
+  # severity>=DEFAULT matches every severity: console.* writes to stdout land as
+  # DEFAULT today, but if the function ever adopts structured logging the same
+  # line would land as INFO — a severity=DEFAULT filter would then silently zero
+  # this metric and keep the CRITICAL no-health-check-logs alert firing forever.
+  filter = <<EOF
+    severity>=DEFAULT
     SEARCH("`[HealthCheck]`")
     resource.labels.service_name="${google_cloudfunctions2_function.watchdog_notifications.name}"
   EOF
@@ -61,9 +65,11 @@ resource "google_monitoring_alert_policy" "health_check_policy" {
   notification_channels = [google_monitoring_notification_channel.victorops_channel.id]
   severity              = "CRITICAL"
 
-  # This is a workaround to prevent the alert from being automatically closed after 7 days (even if still firing)
+  # Extends the incident auto-close window beyond GCP's 7-day default so a
+  # still-firing incident isn't closed under responders. The API stores values
+  # above 7 days verbatim (verified on the live policy).
   alert_strategy {
-    auto_close = "1800000s" # 20+ years, effectively never auto-close
+    auto_close = "1800000s" # ~21 days
   }
 }
 
@@ -190,7 +196,7 @@ resource "google_monitoring_alert_policy" "signature_failure_policy" {
       2. Check the security token for the failing webhook
       3. Ensure it matches the value in GCP Secret Manager:
          ```
-         gcloud secrets versions access latest --secret="quicknode_security_token" --project="${module.governance_watchdog.project_id}"
+         gcloud secrets versions access latest --secret="${google_secret_manager_secret.quicknode_security_token.secret_id}" --project="${module.governance_watchdog.project_id}"
          ```
       4. Update the webhook in QuickNode with the correct token
       5. If the token is correct, check the logs for the cloud function to see if there are any errors processing the webhook.

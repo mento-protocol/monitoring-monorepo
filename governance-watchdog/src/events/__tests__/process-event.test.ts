@@ -12,7 +12,7 @@ import {
 const mockHandler = vi.fn().mockResolvedValue(undefined);
 const mockHealthCheckHandler = vi.fn();
 
-vi.mock("../registry", () => ({
+vi.mock("../registry.js", () => ({
   eventRegistry: {
     getHandler: vi.fn(() => mockHandler),
     getSpecialHandler: vi.fn(() => mockHealthCheckHandler),

@@ -1,3 +1,4 @@
+import config from "../config.js";
 import getSecret from "../utils/get-secret.js";
 
 interface QuicknodeWebhook {
@@ -28,6 +29,14 @@ interface WebhookHealthResult {
 const QUICKNODE_API_BASE_URL = "https://api.quicknode.com";
 const HEALTHY_STATUSES = ["active"];
 
+/**
+ * Webhooks Terraform provisions in infra/quicknode.tf — keep in sync if one is
+ * ever renamed or added there. Requiring these by name means an account with
+ * zero webhooks (deleted webhooks, or an API key scoped to the wrong account)
+ * reports unhealthy instead of "no inactive webhooks → healthy".
+ */
+const EXPECTED_WEBHOOK_NAMES = ["SortedOracles", "MentoGovernor"];
+
 /** Timeout for QuickNode API requests (30 seconds) */
 const QUICKNODE_API_TIMEOUT_MS = 30_000;
 
@@ -42,9 +51,7 @@ export const checkWebhookStatus = async (): Promise<WebhookHealthResult> => {
   let apiKey: string;
   const secretStartTime = Date.now();
   try {
-    apiKey = await getSecret(
-      process.env.QUICKNODE_API_KEY_SECRET_ID ?? "quicknode-api-key",
-    );
+    apiKey = await getSecret(config.QUICKNODE_API_KEY_SECRET_ID);
   } catch (error) {
     const secretDuration = Date.now() - secretStartTime;
     throw new Error(
@@ -106,9 +113,17 @@ export const checkWebhookStatus = async (): Promise<WebhookHealthResult> => {
     isHealthy: HEALTHY_STATUSES.includes(webhook.status.toLowerCase()),
   }));
 
-  const unhealthyWebhooks = webhookStatuses
-    .filter((w) => !w.isHealthy)
-    .map((w) => `${w.name} (${w.status})`);
+  const presentNames = new Set(webhooks.map((webhook) => webhook.name));
+  const missingWebhooks = EXPECTED_WEBHOOK_NAMES.filter(
+    (name) => !presentNames.has(name),
+  );
+
+  const unhealthyWebhooks = [
+    ...missingWebhooks.map((name) => `${name} (missing)`),
+    ...webhookStatuses
+      .filter((w) => !w.isHealthy)
+      .map((w) => `${w.name} (${w.status})`),
+  ];
 
   return {
     healthy: unhealthyWebhooks.length === 0,
