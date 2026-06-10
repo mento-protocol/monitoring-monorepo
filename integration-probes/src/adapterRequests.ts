@@ -12,6 +12,11 @@ const LIFI_FLY_EXCHANGE = "fly";
 export const SQUID_MAX_QUOTE_REQUESTS_PER_RUN = 160;
 export const SQUID_QUOTE_REQUEST_DELAY_MS = 2_500;
 
+// Fly.trade serves keyed requests from the magpiefi origin; the fly.trade
+// origin is the public, unauthenticated tier.
+const FLY_AUTHENTICATED_API_ORIGIN = "https://api.magpiefi.xyz";
+const FLY_PUBLIC_API_ORIGIN = "https://api.fly.trade";
+
 const LIFI_FLY_CHAIN_ID = 143;
 const LIFI_FLY_NETWORKS: Partial<Record<number, string>> = {
   [LIFI_FLY_CHAIN_ID]: "monad",
@@ -125,8 +130,24 @@ export function lifiFlyNetwork(chainId: number): string | null {
   return LIFI_FLY_NETWORKS[chainId] ?? null;
 }
 
-export function flyQuoteUrl(input: QuoteProbeInput, network: string): string {
-  const url = new URL("https://api.fly.trade/aggregator/quote");
+export function flyApiHeaders(
+  env: NodeJS.ProcessEnv,
+): RequestHeaders | undefined {
+  return env.FLYTRADE_API_KEY ? { apikey: env.FLYTRADE_API_KEY } : undefined;
+}
+
+function flyApiOrigin(env: NodeJS.ProcessEnv): string {
+  return env.FLYTRADE_API_KEY
+    ? FLY_AUTHENTICATED_API_ORIGIN
+    : FLY_PUBLIC_API_ORIGIN;
+}
+
+export function flyQuoteUrl(
+  input: QuoteProbeInput,
+  network: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const url = new URL(`${flyApiOrigin(env)}/aggregator/quote`);
   setParams(url, {
     network,
     fromTokenAddress: input.sellToken.address,
@@ -140,8 +161,11 @@ export function flyQuoteUrl(input: QuoteProbeInput, network: string): string {
   return url.toString();
 }
 
-export function flyDistributionsUrl(quoteId: string): string {
-  const url = new URL("https://api.fly.trade/aggregator/distributions");
+export function flyDistributionsUrl(
+  quoteId: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const url = new URL(`${flyApiOrigin(env)}/aggregator/distributions`);
   setParams(url, { quoteId });
   return url.toString();
 }

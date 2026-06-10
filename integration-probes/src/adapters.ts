@@ -1,5 +1,6 @@
 import { detectEvidence } from "./evidence.js";
 import {
+  flyApiHeaders,
   flyDistributionsUrl,
   flyQuoteId,
   flyQuoteUrl,
@@ -26,6 +27,7 @@ import type {
   QuoteRequest,
   QuoteResponseEvidenceArgs,
   QuoteResponseEvidenceHook,
+  RequestHeaders,
   TimedPayload,
 } from "./adapterTypes.js";
 import type {
@@ -635,7 +637,7 @@ function lifiAdapter(): AggregatorAdapter {
     researchNote:
       "LI.FI chain metadata lists both Celo and Monad; scheduled probes use an API key and route-discovery attempts to avoid confusing cheaper non-Mento default routes with missing Mento support.",
     quote: (input, env) =>
-      lifiQuoteRequests(input, env, lifiAfterResponseHook(input)),
+      lifiQuoteRequests(input, env, lifiAfterResponseHook(input, env)),
   };
 }
 
@@ -823,12 +825,16 @@ function excludedAdapter(
 
 function lifiAfterResponseHook(
   input: QuoteProbeInput,
+  env: NodeJS.ProcessEnv,
 ): QuoteResponseEvidenceHook | undefined {
-  return lifiFlyNetwork(input.chainId) ? lifiFlyEvidence : undefined;
+  return lifiFlyNetwork(input.chainId)
+    ? (args) => lifiFlyEvidence(args, env)
+    : undefined;
 }
 
 async function lifiFlyEvidence(
   args: QuoteResponseEvidenceArgs,
+  env: NodeJS.ProcessEnv,
 ): Promise<PairProbeResult | null> {
   if (!lifiPayloadUsesFly(args.payload)) return null;
   const network = lifiFlyNetwork(args.input.chainId);
@@ -836,7 +842,8 @@ async function lifiFlyEvidence(
 
   const quoteRequest = downstreamRequest(
     args.request,
-    flyQuoteUrl(lifiFollowUpInput(args.input, args.request), network),
+    flyQuoteUrl(lifiFollowUpInput(args.input, args.request), network, env),
+    flyApiHeaders(env),
   );
   const quotePayload = await fetchDownstreamPayload({
     ...args,
@@ -869,7 +876,8 @@ async function lifiFlyEvidence(
 
   const distributionRequest = downstreamRequest(
     args.request,
-    flyDistributionsUrl(quoteId),
+    flyDistributionsUrl(quoteId, env),
+    flyApiHeaders(env),
   );
   const distributionPayload = await fetchDownstreamPayload({
     ...args,
@@ -936,9 +944,14 @@ function mergedStrings(
   return [...new Set([...left, ...right])].sort();
 }
 
-function downstreamRequest(parent: QuoteRequest, url: string): QuoteRequest {
+function downstreamRequest(
+  parent: QuoteRequest,
+  url: string,
+  headers?: RequestHeaders,
+): QuoteRequest {
   return {
     url,
+    ...(headers ? { init: { headers } } : {}),
     ...(parent.amountDecimal ? { amountDecimal: parent.amountDecimal } : {}),
     ...(parent.amountRaw ? { amountRaw: parent.amountRaw } : {}),
     ...(parent.variant ? { variant: parent.variant } : {}),

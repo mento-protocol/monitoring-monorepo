@@ -425,6 +425,62 @@ describe("probeAdapterPair", () => {
     expect(calls).toHaveLength(3);
   });
 
+  it("sends Fly follow-ups to the authenticated origin with the apikey header when FLYTRADE_API_KEY is set", async () => {
+    const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
+    expect(lifi).toBeDefined();
+    const flyHeaders: unknown[] = [];
+
+    const result = await probeAdapterPair({
+      adapter: lifi!,
+      chain: monadChain,
+      input: monadInput,
+      fetcher: async (url, init) => {
+        const href = String(url);
+        if (href.startsWith("https://li.quest/v1/quote")) {
+          expect(JSON.stringify(init?.headers)).not.toContain("fly-key");
+          return new Response(
+            JSON.stringify({
+              tool: "fly",
+              transactionRequest: { to: PRIMARY_TARGET },
+            }),
+          );
+        }
+        if (href.startsWith("https://api.magpiefi.xyz/aggregator/quote?")) {
+          flyHeaders.push(init?.headers);
+          return new Response(
+            JSON.stringify({
+              id: "391cd96d-c4bb-453a-8ab8-2459b5a2f57c",
+            }),
+          );
+        }
+        if (
+          href ===
+          "https://api.magpiefi.xyz/aggregator/distributions?quoteId=391cd96d-c4bb-453a-8ab8-2459b5a2f57c"
+        ) {
+          flyHeaders.push(init?.headers);
+          return new Response(
+            JSON.stringify({
+              distributions: [
+                { route: [{ protocol: "mento-v3", pool: { address: POOL } }] },
+              ],
+            }),
+          );
+        }
+        throw new Error(`unexpected URL ${href}`);
+      },
+      env: { LIFI_API_KEY: "lifi-key", FLYTRADE_API_KEY: "fly-key" },
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.requestUrl).toContain(
+      "https://api.magpiefi.xyz/aggregator/distributions",
+    );
+    expect(flyHeaders).toHaveLength(2);
+    for (const headers of flyHeaders) {
+      expect(headers).toEqual({ apikey: "fly-key" });
+    }
+  });
+
   it("uses the winning LI.FI discovery amount for Fly follow-up quotes", async () => {
     const lifi = AGGREGATOR_ADAPTERS.find((item) => item.id === "lifi");
     expect(lifi).toBeDefined();

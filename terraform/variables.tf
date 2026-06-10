@@ -87,6 +87,16 @@ variable "lifi_api_key" {
   default     = ""
 }
 
+variable "flytrade_api_key" {
+  description = <<-EOT
+    Fly.trade (Magpie) API key for the scheduled integration-probes workflow.
+    Mirrors into the repo-level Actions secret `FLYTRADE_API_KEY`.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "openocean_api_key" {
   description = <<-EOT
     OpenOcean Pro API key for the scheduled integration-probes workflow.

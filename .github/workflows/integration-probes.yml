@@ -23,6 +23,7 @@ jobs:
       UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
       UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
       LIFI_API_KEY: ${{ secrets.LIFI_API_KEY }}
+      FLYTRADE_API_KEY: ${{ secrets.FLYTRADE_API_KEY }}
       OPENOCEAN_API_KEY: ${{ secrets.OPENOCEAN_API_KEY }}
       ZEROX_API_KEY: ${{ secrets.ZEROX_API_KEY }}
       ONEINCH_API_KEY: ${{ secrets.ONEINCH_API_KEY }}
