@@ -71,6 +71,8 @@ A cache key that misses an input silently serves stale build artifacts.
 - [ ] Lockfile (`pnpm-lock.yaml`) is necessary but NOT sufficient — codegen output depends on more than dep versions
 - [ ] For caches of **external binaries whose version is resolved transitively** (Playwright Chromium under `~/.cache/ms-playwright`, Cypress browsers under `~/.cache/Cypress`, etc.), the cache key MUST include `pnpm-lock.yaml`, NOT just `package.json`. A caret-range dep (`@playwright/test: ^1.60.0`) lets a lockfile-only update flip the resolved Playwright version — and thus the Chromium revision it wants — without changing `package.json`'s hash. Result: every CI run restores the stale cache, the install step re-downloads (~130 MB for Chromium), but `actions/cache` won't re-save under the already-hit key, so the download repeats indefinitely until something forces a `package.json` change. Caught on PR #633 (`.github/workflows/lighthouse.yml` Playwright Chromium cache step). Pair with a `restore-keys:` fallback so unrelated lockfile churn still benefits from a near-match cache.
 
+- [ ] If a cache stores **architecture-specific binaries** (Playwright Chromium, trunk's `~/.cache/trunk` tool dir), the key MUST include `${{ runner.arch }}` — installers typically validate version, not architecture, so a cross-arch restore passes validation and dies at exec time (`Exec format error`, or trunk's `execve failed: Text file busy` from re-downloading over restored binaries; seen on PR #821). Text-only caches (e.g. envio codegen's `.envio/types.d.ts`) deliberately do NOT take an arch component — adding one just orphans the warm cache (PR #822 review).
+
 ## 6. Fail-closed audit / security workflows
 
 Audit workflows that "tolerate transient errors" become attack surface — an attacker who can wedge the registry can ship malicious deps during the outage window.
@@ -95,10 +97,29 @@ Cooldown default in `dependabot.yml`: `default-days: 7`. Per-semver-tier cooldow
 - [ ] If you add a new external Action that's load-bearing for review/merge gating (Cursor Bugbot, Codex, Claude), add it to the auto-merge exclusion list with the same self-loop rationale
 - [ ] If you add a new `package-ecosystem` to `dependabot.yml`, decide whether it inherits the same auto-merge policy or needs a separate rule — npm in particular has a larger transitive blast radius than github-actions
 
-## 8. Lessons already paid for
+## 8. Runner architecture (ARM vs x64)
+
+Blacksmith ARM runners (`blacksmith-{2,4}vcpu-ubuntu-2404-arm`) bill at 0.625× the x64 per-minute rate — but they are **not** automatically cheaper. Measured on this repo (compat PR #821, two full sweeps cold + warm, June 2026):
+
+- **CPU-bound node jobs run ~2–3.4× slower on ARM** (ui browser tests 7m34s vs 2m13s, indexer vitest 4m09s vs 2m00s, shared 1m08s vs 0m33s). This is per-core throughput, not a cold-cache artifact.
+- **Network-bound jobs run at parity** (terraform init/plan/apply, gcloud deploys, RPC-driven probes: 1m03s vs 1m02s).
+- With per-job **round-up billing**, the break-even runtime ratio is **1.6×** (price ratio 0.625). A job that crosses one extra billed-minute boundary on ARM costs _more_ despite the cheaper rate.
+
+Decision framework for `runs-on` (applied in PR #822 — partial migration saving ≈$10/mo; the blanket migration would have _added_ ≈$36/mo):
+
+- [ ] **Network/IO-bound job** (terraform, gcloud, curl-driven, external-API polling) → ARM. Runtime is parity; the 37.5% rate cut is pure savings.
+- [ ] **Sub-minute on both architectures** (paths-filter `changes` detectors, format checks, lockfile lint) → ARM. Both bill 1 minute; rate cut is pure savings.
+- [ ] **CPU-bound job** (vitest/typecheck/lint suites, Next builds, browser tests, Stryker) → **x64**. ARM's ~2× slowdown crosses billing-minute boundaries AND doubles hot-path PR latency.
+- [ ] **Anything launching Chrome via chrome-launcher/puppeteer/lhci** → x64, hard requirement: Google publishes no Chrome for linux-arm64. (Playwright's own Chromium DOES ship arm64 — only Chrome-dependent tooling is blocked.)
+- [ ] Jobs that generate artifacts consumed by another job (`update-snapshots.yml` baselines ↔ ci.yml `ui` snapshot assertions) MUST stay on the same architecture as their consumer.
+- [ ] Before migrating any job class, **measure** warm runtime on the target arch (throwaway PR with two pushes — cold then warm caches; `workflow_dispatch` for cron workflows) and compare the ratio against 1.6×. Don't extrapolate from the price sheet.
+- [ ] New ARM labels go into BOTH actionlint allow-lists (`.github/actionlint.yaml` + `.trunk/configs/actionlint.yaml`), and binary caches get arch-keyed (see §5).
+
+## 9. Lessons already paid for
 
 - PR #188 — consolidating per-package CI workflows nearly removed the push-to-main guard on the metrics-bridge deploy and the workflow_dispatch branch check
 - PR #191 — `paths:` filter on the supply-chain workflow would have made the required check skip on PRs that don't touch deps, blocking unrelated merges
 - PR #191 — third-party actions weren't all SHA-pinned, leaving a supply-chain trust gap
 - PR #188 — caching key for indexer codegen missed the codegen scripts; cached output went stale on script-only changes
 - PR #186 — workflow path filter for "bridge changes" missed the workflow file itself, so workflow edits didn't re-run
+- PR #821/#822 — "ARM is 37.5% cheaper" was falsified for CPU-bound jobs: ~2–3.4× slower runtime + round-up billing made them MORE expensive on ARM; only network-bound and sub-minute jobs migrated. Also: trunk-action's cache key has no arch component — cross-arch restore caused `execve failed: Text file busy` until `cache-key: ${{ runner.arch }}` was passed
