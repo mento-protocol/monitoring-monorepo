@@ -1,0 +1,6 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["src/index.ts", "bin/reprocess-event.ts"],
+  "project": ["src/**/*.ts", "bin/**/*.ts", "!src/**/*.test.ts"],
+  "ignoreBinaries": ["terraform"]
+}

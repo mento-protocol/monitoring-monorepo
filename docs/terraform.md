@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-28
+last_verified: 2026-06-10
 ---
 
 # Terraform Stacks
@@ -11,12 +11,13 @@ last_verified: 2026-05-28
 `terraform.stacks.json` is the machine-readable registry for Terraform roots.
 Use it instead of inferring ownership from directory names.
 
-| Stack             | Path               | State prefix          | Owns                                                                                                                                                                     | Plan/apply policy                                                 |
-| ----------------- | ------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `platform`        | `terraform/`       | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, CI WIF/IAM                                | Manual plan; human-approved local apply                           |
-| `alerts-rules`    | `alerts/rules/`    | `alerts-rules`        | Protocol Grafana alert rules + the Aegis service-health rule group, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings | PR plan; `main` apply through the `production` GitHub Environment |
-| `alerts-delivery` | `alerts/infra/`    | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources                          | PR plan; `main` apply through the `production` GitHub Environment |
-| `aegis`           | `aegis/terraform/` | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                 | PR plan; `main` apply through the `production` GitHub Environment |
+| Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                                     | Plan/apply policy                                                                                    |
+| --------------------- | ---------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, CI WIF/IAM                                                                                | Manual plan; human-approved local apply                                                              |
+| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + the Aegis service-health rule group, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                                 | PR plan; `main` apply through the `production` GitHub Environment                                    |
+| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources                                                                          | PR plan; `main` apply through the `production` GitHub Environment                                    |
+| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                                 | PR plan; `main` apply through the `production` GitHub Environment                                    |
+| `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project (project factory), the watchdog Cloud Function + source archive, Secret Manager secrets, QuickNode webhooks/filters, Cloud Scheduler health check, log-based monitoring/alerts | Manual plan (`pnpm gov-watchdog:tf:plan`); human-approved local apply via `pnpm gov-watchdog:deploy` |
 
 ## Commands
 
@@ -34,6 +35,7 @@ pnpm infra:plan
 pnpm alerts:rules:plan
 pnpm alerts:infra:plan
 pnpm aegis:tf:plan
+pnpm gov-watchdog:tf:plan
 ```
 
 `pnpm tf validate` without a stack validates all registered stacks with
@@ -64,7 +66,10 @@ YAML.
 `main`, gated by the `production` GitHub Environment. Their plan jobs can run
 for workflow/notifier edits too, but the apply jobs only become eligible when
 the stack root changed or a maintainer used `workflow_dispatch`. The platform
-stack remains manual-plan/manual-apply only.
+and `governance-watchdog` stacks remain manual-plan/manual-apply only —
+governance-watchdog lives in its own GCP project that monorepo CI has no IAM
+for, so applies stay operator-run (`pnpm gov-watchdog:deploy`, which guards
+against dirty trees).
 
 When one of those CI-applied stacks plans real changes on `main`, the plan job
 posts a Slack apply-pending summary before the environment-gated apply job waits
@@ -108,6 +113,11 @@ Local gitignored tfvars files must follow the same ownership:
   credentials, GitHub PAT, and Splunk On-Call API ID/key plus Slack channel
   and usergroup IDs for the on-call announcer.
 - `aegis/terraform/terraform.tfvars`: only `grafana_service_account_token`.
+- `governance-watchdog/infra/terraform.tfvars`: org/billing ids plus the
+  notification and webhook secrets (Discord/Telegram credentials, QuickNode
+  API key + security token, x-auth token, VictorOps webhook URL); template in
+  `governance-watchdog/infra/terraform.tfvars.example`, real file stays
+  operator-held and gitignored.
 
 Verify ownership and drift with:
 

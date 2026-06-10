@@ -6,13 +6,14 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 
 ## Packages
 
-| Package                               | Description                                                         |
-| ------------------------------------- | ------------------------------------------------------------------- |
-| [`indexer-envio`](./indexer-envio/)   | Envio HyperIndex indexer — Celo + Monad multichain                  |
-| [`ui-dashboard`](./ui-dashboard/)     | Next.js 16 + Plotly.js dashboard with multi-chain network switching |
-| [`metrics-bridge`](./metrics-bridge/) | Hasura → Prometheus exporter for v3 alert rules                     |
-| [`shared-config`](./shared-config/)   | Shared deployment config (chain ID → treb namespace mappings)       |
-| [`aegis`](./aegis/)                   | App Engine v2 alerting service + Aegis Grafana dashboards           |
+| Package                                         | Description                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad multichain                                   |
+| [`ui-dashboard`](./ui-dashboard/)               | Next.js 16 + Plotly.js dashboard with multi-chain network switching                  |
+| [`metrics-bridge`](./metrics-bridge/)           | Hasura → Prometheus exporter for v3 alert rules                                      |
+| [`shared-config`](./shared-config/)             | Shared deployment config (chain ID → treb namespace mappings)                        |
+| [`aegis`](./aegis/)                             | App Engine v2 alerting service + Aegis Grafana dashboards                            |
+| [`governance-watchdog`](./governance-watchdog/) | Cloud Function watching Mento Governance events → Discord/Telegram (own GCP project) |
 
 ## Architecture
 

@@ -1,0 +1,4 @@
+[[IgnoredVulns]]
+id = "GHSA-vpq2-c234-7xj6"
+reason = "Transitive dep via @google-cloud/secret-manager → google-gax → teeny-request → http-proxy-agent. No upgrade path available upstream."
+ignoreUntil = 2026-09-01
