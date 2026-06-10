@@ -12,6 +12,19 @@ resource "google_storage_bucket" "watchdog_notifications_function" {
     log_bucket = google_storage_bucket.logging.id
   }
 
+  # Versioning keeps every replaced function-source-*.zip as a noncurrent
+  # version forever (41 had accumulated by 2026-06-10). Keep the 3 newest
+  # noncurrent versions as rollback candidates and delete the rest.
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      with_state         = "ARCHIVED"
+      num_newer_versions = 3
+    }
+  }
+
   force_destroy = true
 }
 
