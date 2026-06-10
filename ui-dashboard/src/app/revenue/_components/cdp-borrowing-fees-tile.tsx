@@ -47,14 +47,15 @@ export function CdpBorrowingFeesTile({
         </p>
         {showData && (
           <p className="mt-1.5 text-sm font-mono">
-            <span className="text-slate-500">Gross</span>{" "}
             <span className="text-slate-400">
               {formatUSD(summary.totalRevenueUSD)}
             </span>{" "}
-            <span className="text-slate-500">
-              · of which {formatUSD(summary.spYieldShareUSD)} goes to stability
-              pool
-            </span>
+            <span className="text-slate-500">Gross</span>{" "}
+            <span className="text-slate-500">·</span>{" "}
+            <span className="text-slate-400">
+              {formatUSD(summary.spYieldShareUSD)}
+            </span>{" "}
+            <span className="text-slate-500">Stability Pool Share</span>
           </p>
         )}
       </div>
