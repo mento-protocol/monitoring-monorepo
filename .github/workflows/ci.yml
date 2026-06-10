@@ -627,6 +627,13 @@ jobs:
         run: |
           find governance-watchdog/bin -name '*.sh' -not -path '*/node_modules/*' -print0 \
             | xargs -0 -I {} bash -n {}
+      # QuickNode filter functions are the canonical source that
+      # bin/deploy-quicknode-filter.sh pushes to the live webhook; a syntax
+      # regression here would otherwise only surface during a live filter update.
+      - name: QuickNode filter-function syntax check
+        run: |
+          find governance-watchdog/infra/quicknode-filter-functions -name '*.js' -print0 \
+            | xargs -0 -I {} node --check {}
       - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           fail_ci_if_error: false

@@ -1210,6 +1210,12 @@ while IFS= read -r path; do
           add_terraform_validate_commands "governance-watchdog/infra" "governance-watchdog Terraform changed"
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "governance-watchdog Cloud Function path changed"
           ;;
+        governance-watchdog/infra/quicknode-filter-functions/*.js)
+          # Canonical source that bin/deploy-quicknode-filter.sh pushes to the
+          # live QuickNode webhook — a syntax regression would otherwise only
+          # surface during a live filter update.
+          add_command "node --check $(quote_path "$path")" "QuickNode filter function changed"
+          ;;
         # Other files (bin/*.sh, *.md, .gcloudignore, .prettierrc, .env.example,
         # osv-scanner.toml) need no extra routing: shell scripts hit the generic
         # `*.sh → bash -n` branch above; the rest are doc/config-only.

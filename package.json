@@ -77,7 +77,7 @@
     "gov-watchdog:typecheck": "pnpm --filter @mento-protocol/governance-watchdog typecheck",
     "gov-watchdog:test": "pnpm --filter @mento-protocol/governance-watchdog test:unit",
     "gov-watchdog:lint": "pnpm --filter @mento-protocol/governance-watchdog lint",
-    "gov-watchdog:deploy": "pnpm --filter @mento-protocol/governance-watchdog run deploy",
+    "gov-watchdog:deploy": "./scripts/deploy-gov-watchdog.sh",
     "gov-watchdog:logs": "pnpm --filter @mento-protocol/governance-watchdog logs",
     "gov-watchdog:tf:init": "terraform -chdir=governance-watchdog/infra init",
     "gov-watchdog:tf:plan": "pnpm tf plan governance-watchdog",
