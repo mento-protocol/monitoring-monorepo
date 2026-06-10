@@ -82,13 +82,22 @@ export async function hasAuthToken(req: Request): Promise<boolean> {
 
   // Don't burn a Secret Manager read when the header is absent (see the
   // pre-check note in isFromQuicknode).
-  if (!authToken) {
+  if (typeof authToken !== "string" || authToken === "") {
     return false;
   }
 
   const expectedAuthToken = await getSecret(config.X_AUTH_TOKEN_SECRET_ID);
 
-  return authToken === expectedAuthToken;
+  // Constant-time comparison, like the signature check above. The length
+  // pre-check is required (timingSafeEqual throws on mismatched lengths)
+  // and leaks only the token length.
+  const encoder = new TextEncoder();
+  const given = encoder.encode(authToken);
+  const expected = encoder.encode(expectedAuthToken);
+
+  return (
+    given.length === expected.length && crypto.timingSafeEqual(given, expected)
+  );
 }
 
 /**

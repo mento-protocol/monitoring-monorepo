@@ -186,4 +186,14 @@ describe("hasAuthToken", () => {
 
     expect(result).toBe(false);
   });
+
+  it("rejects a wrong auth token of the same length", async () => {
+    const { hasAuthToken } = await import("../validate-request-origin.js");
+
+    const result = await hasAuthToken({
+      headers: { "x-auth-token": "expected-auth-tokeX" },
+    } as unknown as Request);
+
+    expect(result).toBe(false);
+  });
 });
