@@ -29,9 +29,36 @@ const CDP_BORROWING_HEADER_INFO = {
     "Cumulative one-time borrowing fees paid when troves are opened or debt is increased (gross, before the SP yield split).",
   interest:
     "Accrued interest so far, including live accrual since the last indexer update (gross, before the SP yield split).",
-  total:
-    "Upfront fees plus accrued interest — gross fees paid by borrowers. The protocol keeps the share shown in the summary tile; the rest is StabilityPool depositor yield.",
 } as const;
+
+const bpsToPercentLabel = (bps: number): string => {
+  const pct = bps / 100;
+  return Number.isInteger(pct)
+    ? String(pct)
+    : String(Math.round(pct * 100) / 100);
+};
+
+// The split is governance-set on-chain per market (SystemParams.SP_YIELD_SPLIT,
+// indexed as LiquityCollateral.spYieldSplitBps and surfaced per market row),
+// so the tooltip states the live values instead of hardcoding 25/75. Falls
+// back to generic wording when markets disagree or the indexer hasn't loaded
+// the param yet (-1 sentinel).
+function cdpBorrowingTotalTooltip(
+  markets: ReadonlyArray<CdpBorrowingRevenueMarket>,
+): string {
+  const splits = [...new Set(markets.map((m) => m.spYieldSplitBps))];
+  const bps =
+    splits.length === 1 &&
+    splits[0] !== undefined &&
+    splits[0] >= 0 &&
+    splits[0] <= 10_000
+      ? splits[0]
+      : null;
+  if (bps === null) {
+    return "Gross borrowing fees (upfront + accrued interest), paid by borrowers. The protocol keeps the share shown in the summary tile; the rest is Stability Pool depositor yield.";
+  }
+  return `Gross borrowing fees (upfront + accrued interest), paid by borrowers. Split: ${bpsToPercentLabel(10_000 - bps)}% protocol treasury, ${bpsToPercentLabel(bps)}% Stability Pool depositor yield.`;
+}
 
 const CDP_AVERAGE_APR_INFO = (
   <span className="block space-y-1.5">
@@ -472,7 +499,7 @@ function CdpBorrowingFeesByMarketTable({
             <Th align="right" className="sm:!px-2">
               <CdpBorrowingHeaderInfo
                 label="All-time"
-                content={CDP_BORROWING_HEADER_INFO.total}
+                content={cdpBorrowingTotalTooltip(markets)}
                 tooltipAlign="right"
               />
             </Th>

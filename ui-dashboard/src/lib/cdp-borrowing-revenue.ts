@@ -107,6 +107,9 @@ export type CdpBorrowingRevenueMarket = {
   chainId: number;
   collIndex: number;
   symbol: string;
+  // On-chain SP_YIELD_SPLIT for this market (bps; -1 = not loaded yet).
+  // Surfaced so the UI can state the live split instead of hardcoding 25/75.
+  spYieldSplitBps: number;
   activeDebtUSD: number;
   averageAnnualInterestRatePercent: number | null;
   annualInterestRunRateUSD: number;
@@ -490,6 +493,7 @@ export function aggregateCdpBorrowingRevenueMarkets({
         chainId: collateral.chainId,
         collIndex: collateral.collIndex,
         symbol: collateral.symbol,
+        spYieldSplitBps: collateral.spYieldSplitBps,
         activeDebtUSD: addPricedWei(
           collateral.symbol,
           activeDebtWei(collateralInstances),

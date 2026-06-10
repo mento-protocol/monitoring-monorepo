@@ -1,5 +1,6 @@
 "use client";
 
+import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/monitoring-config/protocol-fee";
 import { formatUSD } from "@/lib/format";
 import type { CdpBorrowingRevenueSummary } from "@/lib/cdp-borrowing-revenue";
 
@@ -37,14 +38,22 @@ export function CdpBorrowingFeesTile({
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
       <div>
         <p className="text-sm text-slate-400">CDP Borrowing Fees</p>
-        <p className="mt-1 text-2xl font-semibold text-white font-mono">
+        {/* Same DeBank deep-link as the Swap Fees tile (BreakdownTile href) —
+            both fee streams land in the same feeRecipient Safe. */}
+        <a
+          href={`https://debank.com/profile/${PROTOCOL_FEE_RECIPIENT_ADDRESS}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`CDP Borrowing Fees: ${mainValue}`}
+          className="mt-1 block text-2xl font-semibold text-white font-mono hover:text-indigo-400 transition-colors"
+        >
           {mainValue}
           {showData && (
             <span className="ml-1.5 text-sm font-normal text-slate-500">
               earned
             </span>
           )}
-        </p>
+        </a>
         {showData && (
           <p className="mt-1.5 text-sm font-mono">
             <span className="text-slate-400">
