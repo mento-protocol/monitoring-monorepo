@@ -10,7 +10,22 @@ const ONE_YEAR_SECONDS = BigInt(31_536_000);
 export type BorrowingFeeBucket = {
   upfrontFeesUSD: number;
   accruedInterestUSD: number;
+  collectedUSD: number;
 };
+
+const BPS_DENOMINATOR = BigInt(10_000);
+
+// Treasury share of a gross borrowing-fee amount: ActivePool._mintAggInterest
+// sends SP_YIELD_SPLIT × (interest + upfront fee) to StabilityPool depositors
+// as yield; only the remainder is protocol revenue. A negative bps value is
+// the indexer's "system params not loaded yet" sentinel — the heal flow
+// resolves it within the market's first few events, so treat it as 0 (no
+// split) rather than building a dedicated unknown state.
+export function protocolShareWei(wei: bigint, spYieldSplitBps: number): bigint {
+  if (wei <= ZERO) return ZERO;
+  const clamped = Math.min(10_000, Math.max(0, spYieldSplitBps));
+  return (wei * (BPS_DENOMINATOR - BigInt(clamped))) / BPS_DENOMINATOR;
+}
 
 export type BorrowingFeeBucketContext = {
   buckets: Map<number, BorrowingFeeBucket>;
@@ -106,7 +121,7 @@ export function addPricedWei(
 function addBorrowingFeeUsd(
   buckets: Map<number, BorrowingFeeBucket>,
   timestamp: number,
-  kind: "upfront" | "interest",
+  kind: "upfront" | "interest" | "collected",
   usd: number,
 ): void {
   if (usd <= 0) return;
@@ -114,11 +129,14 @@ function addBorrowingFeeUsd(
   const bucket = buckets.get(bucketTimestamp) ?? {
     upfrontFeesUSD: 0,
     accruedInterestUSD: 0,
+    collectedUSD: 0,
   };
   if (kind === "upfront") {
     bucket.upfrontFeesUSD += usd;
-  } else {
+  } else if (kind === "interest") {
     bucket.accruedInterestUSD += usd;
+  } else {
+    bucket.collectedUSD += usd;
   }
   buckets.set(bucketTimestamp, bucket);
 }
@@ -128,7 +146,7 @@ export function addBorrowingFeeWei(
   input: {
     symbol: string | undefined;
     timestamp: number;
-    kind: "upfront" | "interest";
+    kind: "upfront" | "interest" | "collected";
     wei: bigint;
   },
 ): void {
@@ -150,7 +168,9 @@ export function bucketHasValue(
 ): boolean {
   return (
     bucket !== undefined &&
-    (bucket.upfrontFeesUSD > 0 || bucket.accruedInterestUSD > 0)
+    (bucket.upfrontFeesUSD > 0 ||
+      bucket.accruedInterestUSD > 0 ||
+      bucket.collectedUSD > 0)
   );
 }
 

@@ -33,6 +33,10 @@ const EMPTY_CDP_REVENUE: CdpBorrowingRevenueSummary = {
   totalRevenueUSD: 0,
   upfrontFeesUSD: 0,
   accruedInterestUSD: 0,
+  protocolShareUSD: 0,
+  spYieldShareUSD: 0,
+  collectedUSD: 0,
+  receivableUSD: 0,
   marketCount: 0,
   activeInterestBracketCount: 0,
   unpricedSymbols: [],
@@ -61,6 +65,8 @@ function cdpMarket(
     totalRevenueUSD,
     upfrontFeesUSD,
     accruedInterestUSD,
+    protocolShareUSD: totalRevenueUSD * 0.25,
+    collectedUSD: 0,
     activeInterestBracketCount: 1,
     unpricedSymbols: [],
     bracketsTruncated: false,
@@ -193,6 +199,10 @@ describe("RevenuePageClient degraded fee states", () => {
         totalRevenueUSD: 242.5,
         upfrontFeesUSD: 180,
         accruedInterestUSD: 62.5,
+        protocolShareUSD: 60.63,
+        spYieldShareUSD: 181.87,
+        collectedUSD: 30,
+        receivableUSD: 30.63,
         marketCount: 2,
         activeInterestBracketCount: 1,
       },
@@ -205,13 +215,21 @@ describe("RevenuePageClient degraded fee states", () => {
     });
 
     expect(html).toContain("CDP Borrowing Fees");
+    // Headline = protocol share (earned); gross + SP yield render as rows.
+    expect(html).toContain("$60.63");
+    expect(html).toContain("earned");
+    expect(html).toContain("Gross");
     expect(html).toContain("$242.50");
-    expect(html).toContain("Upfront");
-    expect(html).toContain("$180.00");
-    expect(html).toContain("Interest");
-    expect(html).toContain("$62.50");
+    expect(html).toContain("To SP yield (75%)");
+    expect(html).toContain("$181.87");
+    expect(html).toContain("Collected");
+    expect(html).toContain("$30.00");
+    expect(html).toContain("Accruing");
+    expect(html).toContain("$30.63");
+    expect(html).toContain('role="progressbar"');
+    expect(html).toContain('aria-valuenow="49"');
     expect(html).toContain(
-      "Across 2 Celo CDP markets; upfront fees plus accrued interest",
+      "Protocol share of upfront fees + interest across 2 Celo CDP markets",
     );
     expect(html).toContain("Borrowing Fees by CDP");
     expect(html).toContain("Debt");
@@ -243,13 +261,15 @@ describe("RevenuePageClient degraded fee states", () => {
         ...EMPTY_CDP_REVENUE,
         totalRevenueUSD: 20,
         upfrontFeesUSD: 20,
+        protocolShareUSD: 5,
+        spYieldShareUSD: 15,
         unpricedSymbols: ["JPYm"],
       },
       isLoading: false,
       hasError: false,
     });
 
-    expect(html).toContain("≈ $20.00");
+    expect(html).toContain("≈ $5.00");
     expect(html).toContain("Approximate");
     expect(html).toContain("unpriced debt token: JPYm");
   });
@@ -273,13 +293,15 @@ describe("RevenuePageClient degraded fee states", () => {
         ...EMPTY_CDP_REVENUE,
         totalRevenueUSD: 20,
         upfrontFeesUSD: 20,
+        protocolShareUSD: 5,
+        spYieldShareUSD: 15,
         bracketsTruncated: true,
       },
       isLoading: false,
       hasError: false,
     });
 
-    expect(html).toContain("≈ $20.00");
+    expect(html).toContain("≈ $5.00");
     expect(html).toContain("interest brackets exceed pagination cap");
   });
 
@@ -356,5 +378,72 @@ describe("RevenuePageClient degraded fee states", () => {
     // the (successful) market/bracket/rate queries.
     expect(html).not.toContain("Unable to load CDP borrowing fees");
     expect(html).toContain("$20.00");
+  });
+});
+
+describe("BorrowingEarnedCollectedChart via RevenuePageClient", () => {
+  beforeEach(() => {
+    mockUseProtocolFees.mockReset();
+    mockUseCdpBorrowingRevenue.mockReset();
+  });
+
+  const DAY = 86_400;
+  const day0 = 1_700_006_400;
+
+  it("headlines cumulative earned and collected from the daily series", () => {
+    const html = renderRevenue([], false, {
+      summary: EMPTY_CDP_REVENUE,
+      dailySeries: [
+        {
+          timestamp: day0,
+          upfrontFeesUSD: 6,
+          accruedInterestUSD: 4,
+          totalFeesUSD: 10,
+          collectedUSD: 4,
+        },
+        {
+          timestamp: day0 + DAY,
+          upfrontFeesUSD: 2,
+          accruedInterestUSD: 3,
+          totalFeesUSD: 5,
+          collectedUSD: 2,
+        },
+      ],
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain("Borrowing Revenue — Earned vs Collected");
+    expect(html).toContain("$15.00");
+    expect(html).toContain("earned");
+    expect(html).toContain("$6.00");
+    expect(html).toContain("collected");
+    expect(html).toContain(
+      "Gap between lines = accrued but not yet minted to the treasury",
+    );
+  });
+
+  it("drops the collected leg when the series is the fee-event fallback", () => {
+    const html = renderRevenue([], false, {
+      summary: EMPTY_CDP_REVENUE,
+      dailySeries: [
+        {
+          timestamp: day0,
+          upfrontFeesUSD: 6,
+          accruedInterestUSD: 4,
+          totalFeesUSD: 10,
+          collectedUSD: 0,
+        },
+      ],
+      dailySeriesApproximate: true,
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain("$10.00");
+    expect(html).not.toContain("collected</span>");
+    expect(html).toContain(
+      "Collected mints unavailable on this indexer schema",
+    );
   });
 });

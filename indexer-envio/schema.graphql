@@ -1125,6 +1125,11 @@ type LiquityBorrowingRevenueDailySnapshot
   timestamp: BigInt! @index
   upfrontFee: BigInt!
   accruedInterest: BigInt!
+  # Treasury share actually minted to the yield-split Safe that day —
+  # ActivePool._mintAggInterest sends (1 − SP_YIELD_SPLIT) × (interest +
+  # upfront fee) to the interestRouter (= the Safe). Cash basis, vs the
+  # accrual-basis upfrontFee/accruedInterest fields above.
+  collected: BigInt!
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
 }
@@ -1256,6 +1261,12 @@ type LiquityInstance {
   rebalanceRedemptionDebtCum: BigInt!
   rebalanceRedemptionFeeCum: BigInt!
   borrowingFeeCum: BigInt!
+  # Cumulative treasury share minted to the yield-split Safe (cash basis) —
+  # zero-address mints of this market's debt token to the Safe, i.e.
+  # (1 − SP_YIELD_SPLIT) × (interest + upfront fees) realized on trove
+  # touches. Compare against borrowingFeeCum + accrued interest (accrual
+  # basis); SP_YIELD_SPLIT lives on LiquityCollateral.spYieldSplitBps.
+  borrowingFeeCollectedCum: BigInt!
   spRebalanceCount: Int!
   spRebalanceCollInCum: BigInt!
   spRebalanceStableOutCum: BigInt!

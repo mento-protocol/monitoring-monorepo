@@ -224,9 +224,27 @@ function poolDailyFeeSnapshotsForChain(chainId) {
 }
 
 const borrowingRevenueCollaterals = [
-  { id: "42220-gbpm", chainId: 42220, collIndex: 0, symbol: "GBPm" },
-  { id: "42220-chfm", chainId: 42220, collIndex: 1, symbol: "CHFm" },
-  { id: "42220-jpym", chainId: 42220, collIndex: 2, symbol: "JPYm" },
+  {
+    id: "42220-gbpm",
+    chainId: 42220,
+    collIndex: 0,
+    symbol: "GBPm",
+    spYieldSplitBps: 7500,
+  },
+  {
+    id: "42220-chfm",
+    chainId: 42220,
+    collIndex: 1,
+    symbol: "CHFm",
+    spYieldSplitBps: 7500,
+  },
+  {
+    id: "42220-jpym",
+    chainId: 42220,
+    collIndex: 2,
+    symbol: "JPYm",
+    spYieldSplitBps: 7500,
+  },
 ];
 
 const borrowingRevenueInstances = borrowingRevenueCollaterals.map(
@@ -237,6 +255,7 @@ const borrowingRevenueInstances = borrowingRevenueCollaterals.map(
     systemDebt: String(BigInt(1000 + i * 100) * 10n ** 18n),
     activeTroveCount: 3 + i,
     borrowingFeeCum: String(BigInt(10 + i * 5) * 10n ** 18n),
+    borrowingFeeCollectedCum: String(BigInt(1 + i) * 10n ** 18n),
   }),
 );
 
@@ -271,6 +290,7 @@ function cdpBorrowingRevenueDailySnapshots(chainId) {
     timestamp,
     upfrontFee: String(BigInt(1 + i) * 10n ** 18n),
     accruedInterest: String(BigInt(2 + i) * 10n ** 17n),
+    collected: String(BigInt(1 + i) * 10n ** 17n),
   }));
 }
 

@@ -13,6 +13,7 @@ import {
   addBorrowingFeeWei,
   bucketHasValue,
   isBucketInWindow,
+  protocolShareWei,
   type BorrowingFeeBucket,
   type BorrowingFeeBucketContext,
 } from "./cdp-borrowing-revenue-math";
@@ -22,6 +23,10 @@ export type CdpBorrowingRevenueCollateral = {
   chainId: number;
   collIndex: number;
   symbol: string;
+  // SP_YIELD_SPLIT in bps: the share of every interest + upfront-fee mint
+  // routed to StabilityPool depositors as yield. Only the remainder is
+  // protocol revenue. -1 = indexer "not loaded yet" sentinel.
+  spYieldSplitBps: number;
 };
 
 export type CdpBorrowingRevenueInstance = {
@@ -31,6 +36,8 @@ export type CdpBorrowingRevenueInstance = {
   systemDebt: string;
   activeTroveCount: number;
   borrowingFeeCum: string;
+  // Treasury share actually minted to the yield-split Safe (cash basis).
+  borrowingFeeCollectedCum: string;
   isShutDown: boolean;
   shutDownAt: string | null;
 };
@@ -60,19 +67,35 @@ export type CdpBorrowingRevenueDailySnapshot = {
   timestamp: string;
   upfrontFee: string;
   accruedInterest: string;
+  collected: string;
 };
 
+// Daily series semantics: the upfront/accrued/total fields carry the
+// PROTOCOL SHARE of the day's gross fees ((1 − SP_YIELD_SPLIT)-scaled), so
+// the Total Fees chart sums to the page's protocol-revenue tiles.
+// `collectedUSD` is the cash actually minted to the treasury Safe that day —
+// a different basis, deliberately not part of `totalFeesUSD`.
 export type CdpBorrowingFeeSeriesPoint = {
   timestamp: number;
   upfrontFeesUSD: number;
   accruedInterestUSD: number;
   totalFeesUSD: number;
+  collectedUSD: number;
 };
 
 export type CdpBorrowingRevenueSummary = {
+  // Gross fee burden borrowers pay (accrual basis): upfront + interest.
   totalRevenueUSD: number;
   upfrontFeesUSD: number;
   accruedInterestUSD: number;
+  // Protocol's share of the gross: (1 − SP_YIELD_SPLIT) per market.
+  protocolShareUSD: number;
+  // StabilityPool depositors' yield share: gross − protocol share.
+  spYieldShareUSD: number;
+  // Cash basis: treasury share actually minted to the yield-split Safe.
+  collectedUSD: number;
+  // Protocol share earned but not yet minted (accrues until a trove touch).
+  receivableUSD: number;
   marketCount: number;
   activeInterestBracketCount: number;
   unpricedSymbols: string[];
@@ -91,6 +114,8 @@ export type CdpBorrowingRevenueMarket = {
   totalRevenueUSD: number;
   upfrontFeesUSD: number;
   accruedInterestUSD: number;
+  protocolShareUSD: number;
+  collectedUSD: number;
   activeInterestBracketCount: number;
   unpricedSymbols: string[];
   bracketsTruncated: boolean;
@@ -128,6 +153,7 @@ type SnapshotSeriesAggregateArgs = {
 function addUpfrontFeeEventsToBuckets(args: {
   feeEvents: ReadonlyArray<CdpBorrowingFeeEvent>;
   symbolByInstanceId: ReadonlyMap<string, string | undefined>;
+  splitBpsByInstanceId: ReadonlyMap<string, number>;
   dayAlignedWindow: TimeRange | undefined;
   context: BorrowingFeeBucketContext;
 }): void {
@@ -139,7 +165,10 @@ function addUpfrontFeeEventsToBuckets(args: {
       symbol: args.symbolByInstanceId.get(event.instanceId),
       timestamp,
       kind: "upfront",
-      wei: BigInt(event.debtIncreaseFromUpfrontFee),
+      wei: protocolShareWei(
+        BigInt(event.debtIncreaseFromUpfrontFee),
+        args.splitBpsByInstanceId.get(event.instanceId) ?? 0,
+      ),
     });
   }
 }
@@ -147,6 +176,7 @@ function addUpfrontFeeEventsToBuckets(args: {
 function addBracketInterestToBuckets(args: {
   bracket: CdpBorrowingRevenueBracket;
   symbol: string | undefined;
+  splitBps: number;
   dayAlignedWindow: TimeRange | undefined;
   nowSeconds: number;
   context: BorrowingFeeBucketContext;
@@ -160,35 +190,17 @@ function addBracketInterestToBuckets(args: {
       symbol: args.symbol,
       timestamp: updatedAt,
       kind: "interest",
-      wei: pending,
+      wei: protocolShareWei(pending, args.splitBps),
     });
   }
 
-  const liveFrom = Math.max(
-    Math.floor(updatedAt),
-    args.dayAlignedWindow?.from ?? 0,
-  );
-  const liveTo = Math.min(
-    Math.max(0, Math.floor(args.nowSeconds)),
-    args.dayAlignedWindow?.to ?? Math.max(0, Math.floor(args.nowSeconds)),
-  );
-  let cursor = liveFrom;
-  while (cursor < liveTo) {
-    const bucketTimestamp = dayBucket(cursor);
-    const nextCursor = Math.min(liveTo, bucketTimestamp + SECONDS_PER_DAY);
-    addBorrowingFeeWei(args.context, {
-      symbol: args.symbol,
-      timestamp: cursor,
-      kind: "interest",
-      wei: liveAccruedInterestWei(args.bracket, nextCursor - cursor),
-    });
-    cursor = nextCursor;
-  }
+  addLiveBracketInterestToBuckets(args);
 }
 
 function addLiveBracketInterestToBuckets(args: {
   bracket: CdpBorrowingRevenueBracket;
   symbol: string | undefined;
+  splitBps: number;
   dayAlignedWindow: TimeRange | undefined;
   nowSeconds: number;
   context: BorrowingFeeBucketContext;
@@ -212,7 +224,10 @@ function addLiveBracketInterestToBuckets(args: {
       symbol: args.symbol,
       timestamp: cursor,
       kind: "interest",
-      wei: liveAccruedInterestWei(args.bracket, nextCursor - cursor),
+      wei: protocolShareWei(
+        liveAccruedInterestWei(args.bracket, nextCursor - cursor),
+        args.splitBps,
+      ),
     });
     cursor = nextCursor;
   }
@@ -221,6 +236,7 @@ function addLiveBracketInterestToBuckets(args: {
 function addDailySnapshotsToBuckets(args: {
   dailySnapshots: ReadonlyArray<CdpBorrowingRevenueDailySnapshot>;
   symbolByCollateralId: ReadonlyMap<string, string | undefined>;
+  splitBpsByCollateralId: ReadonlyMap<string, number>;
   dayAlignedWindow: TimeRange | undefined;
   context: BorrowingFeeBucketContext;
 }): void {
@@ -229,17 +245,26 @@ function addDailySnapshotsToBuckets(args: {
     if (!Number.isFinite(timestamp)) continue;
     if (!isBucketInWindow(timestamp, args.dayAlignedWindow)) continue;
     const symbol = args.symbolByCollateralId.get(snapshot.collateralId);
+    const splitBps =
+      args.splitBpsByCollateralId.get(snapshot.collateralId) ?? 0;
     addBorrowingFeeWei(args.context, {
       symbol,
       timestamp,
       kind: "upfront",
-      wei: BigInt(snapshot.upfrontFee),
+      wei: protocolShareWei(BigInt(snapshot.upfrontFee), splitBps),
     });
     addBorrowingFeeWei(args.context, {
       symbol,
       timestamp,
       kind: "interest",
-      wei: BigInt(snapshot.accruedInterest),
+      wei: protocolShareWei(BigInt(snapshot.accruedInterest), splitBps),
+    });
+    // Collected is the treasury share as minted on-chain — already post-split.
+    addBorrowingFeeWei(args.context, {
+      symbol,
+      timestamp,
+      kind: "collected",
+      wei: BigInt(snapshot.collected),
     });
   }
 }
@@ -277,6 +302,7 @@ function buildBorrowingFeeSeriesFromBuckets(
       upfrontFeesUSD,
       accruedInterestUSD,
       totalFeesUSD: upfrontFeesUSD + accruedInterestUSD,
+      collectedUSD: bucket?.collectedUSD ?? 0,
     });
   }
   return series;
@@ -355,17 +381,32 @@ export function aggregateCdpBorrowingRevenue({
   const symbolByCollateralId = new Map(
     collaterals.map((c) => [c.id, c.symbol]),
   );
+  const splitBpsByCollateralId = new Map(
+    collaterals.map((c) => [c.id, c.spYieldSplitBps]),
+  );
   const unpricedSymbols = new Set<string>();
   let upfrontFeesUSD = 0;
   let accruedInterestUSD = 0;
+  let protocolShareUSD = 0;
+  let collectedUSD = 0;
   let activeInterestBracketCount = 0;
 
   const shutDownSeconds = shutDownSecondsByCollateral(instances);
 
   for (const instance of instances) {
-    upfrontFeesUSD += addPricedWei(
-      symbolByCollateralId.get(instance.collateralId),
-      BigInt(instance.borrowingFeeCum),
+    const symbol = symbolByCollateralId.get(instance.collateralId);
+    const splitBps = splitBpsByCollateralId.get(instance.collateralId) ?? 0;
+    const upfrontWei = BigInt(instance.borrowingFeeCum);
+    upfrontFeesUSD += addPricedWei(symbol, upfrontWei, rates, unpricedSymbols);
+    protocolShareUSD += addPricedWei(
+      symbol,
+      protocolShareWei(upfrontWei, splitBps),
+      rates,
+      unpricedSymbols,
+    );
+    collectedUSD += addPricedWei(
+      symbol,
+      BigInt(instance.borrowingFeeCollectedCum),
       rates,
       unpricedSymbols,
     );
@@ -373,6 +414,7 @@ export function aggregateCdpBorrowingRevenue({
 
   for (const bracket of brackets) {
     const symbol = symbolByCollateralId.get(bracket.collateralId);
+    const splitBps = splitBpsByCollateralId.get(bracket.collateralId) ?? 0;
     const totalDebt = BigInt(bracket.totalDebt);
     const sumDebtTimesRateD36 = BigInt(bracket.sumDebtTimesRateD36);
     if (totalDebt > ZERO && sumDebtTimesRateD36 > ZERO) {
@@ -382,18 +424,30 @@ export function aggregateCdpBorrowingRevenue({
       nowSeconds,
       shutDownSeconds.get(bracket.collateralId),
     );
+    const interestWei = accruedInterestWei(bracket, effectiveNow);
     accruedInterestUSD += addPricedWei(
       symbol,
-      accruedInterestWei(bracket, effectiveNow),
+      interestWei,
+      rates,
+      unpricedSymbols,
+    );
+    protocolShareUSD += addPricedWei(
+      symbol,
+      protocolShareWei(interestWei, splitBps),
       rates,
       unpricedSymbols,
     );
   }
 
+  const totalRevenueUSD = upfrontFeesUSD + accruedInterestUSD;
   return {
-    totalRevenueUSD: upfrontFeesUSD + accruedInterestUSD,
+    totalRevenueUSD,
     upfrontFeesUSD,
     accruedInterestUSD,
+    protocolShareUSD,
+    spYieldShareUSD: Math.max(0, totalRevenueUSD - protocolShareUSD),
+    collectedUSD,
+    receivableUSD: Math.max(0, protocolShareUSD - collectedUSD),
     marketCount: collaterals.length,
     activeInterestBracketCount,
     unpricedSymbols: [...unpricedSymbols].sort(),
@@ -459,6 +513,8 @@ export function aggregateCdpBorrowingRevenueMarkets({
         totalRevenueUSD: summary.totalRevenueUSD,
         upfrontFeesUSD: summary.upfrontFeesUSD,
         accruedInterestUSD: summary.accruedInterestUSD,
+        protocolShareUSD: summary.protocolShareUSD,
+        collectedUSD: summary.collectedUSD,
         activeInterestBracketCount: summary.activeInterestBracketCount,
         unpricedSymbols: [...unpricedSymbols].sort(),
         bracketsTruncated: summary.bracketsTruncated,
@@ -482,8 +538,17 @@ export function buildDailyCdpBorrowingFeeSeries({
   const symbolByCollateralId = new Map(
     collaterals.map((c) => [c.id, c.symbol]),
   );
+  const splitBpsByCollateralId = new Map(
+    collaterals.map((c) => [c.id, c.spYieldSplitBps]),
+  );
   const symbolByInstanceId = new Map(
     instances.map((i) => [i.id, symbolByCollateralId.get(i.collateralId)]),
+  );
+  const splitBpsByInstanceId = new Map(
+    instances.map((i) => [
+      i.id,
+      splitBpsByCollateralId.get(i.collateralId) ?? 0,
+    ]),
   );
   const buckets = new Map<number, BorrowingFeeBucket>();
   const unpricedSymbols = new Set<string>();
@@ -495,6 +560,7 @@ export function buildDailyCdpBorrowingFeeSeries({
   addUpfrontFeeEventsToBuckets({
     feeEvents,
     symbolByInstanceId,
+    splitBpsByInstanceId,
     dayAlignedWindow,
     context,
   });
@@ -507,6 +573,7 @@ export function buildDailyCdpBorrowingFeeSeries({
     addBracketInterestToBuckets({
       bracket,
       symbol: symbolByCollateralId.get(bracket.collateralId),
+      splitBps: splitBpsByCollateralId.get(bracket.collateralId) ?? 0,
       dayAlignedWindow,
       nowSeconds: effectiveNow,
       context,
@@ -531,6 +598,9 @@ export function buildDailyCdpBorrowingFeeSeriesFromSnapshots({
   const symbolByCollateralId = new Map(
     collaterals.map((c) => [c.id, c.symbol]),
   );
+  const splitBpsByCollateralId = new Map(
+    collaterals.map((c) => [c.id, c.spYieldSplitBps]),
+  );
   const buckets = new Map<number, BorrowingFeeBucket>();
   const unpricedSymbols = new Set<string>();
   const dayAlignedWindow = window ? dayAlignWindow(window) : undefined;
@@ -540,6 +610,7 @@ export function buildDailyCdpBorrowingFeeSeriesFromSnapshots({
   addDailySnapshotsToBuckets({
     dailySnapshots,
     symbolByCollateralId,
+    splitBpsByCollateralId,
     dayAlignedWindow,
     context,
   });
@@ -552,6 +623,7 @@ export function buildDailyCdpBorrowingFeeSeriesFromSnapshots({
     addLiveBracketInterestToBuckets({
       bracket,
       symbol: symbolByCollateralId.get(bracket.collateralId),
+      splitBps: splitBpsByCollateralId.get(bracket.collateralId) ?? 0,
       dayAlignedWindow,
       nowSeconds: effectiveNow,
       context,

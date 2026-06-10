@@ -104,6 +104,7 @@ export const makeLiquityInstance = (
   rebalanceRedemptionDebtCum: 0n,
   rebalanceRedemptionFeeCum: 0n,
   borrowingFeeCum: 0n,
+  borrowingFeeCollectedCum: 0n,
   spRebalanceCount: 0,
   spRebalanceCollInCum: 0n,
   spRebalanceStableOutCum: 0n,

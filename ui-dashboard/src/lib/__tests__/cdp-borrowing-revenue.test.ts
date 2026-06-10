@@ -30,12 +30,17 @@ function makeCollateral(
   id: string,
   symbol: string,
   collIndex = 0,
+  // 0 = no SP yield split → protocol share equals gross, keeping the
+  // pre-split expectations in this file intact. Split-specific tests pass
+  // the real 7500.
+  spYieldSplitBps = 0,
 ): CdpBorrowingRevenueCollateral {
   return {
     id,
     chainId: 42220,
     collIndex,
     symbol,
+    spYieldSplitBps,
   };
 }
 
@@ -45,6 +50,7 @@ function makeInstance(
   systemDebt = tokenWei(0),
   activeTroveCount = 0,
   shutdown?: { isShutDown: boolean; shutDownAt: string | null },
+  borrowingFeeCollectedCum = "0",
 ): CdpBorrowingRevenueInstance {
   return {
     id: `${collateralId}-instance`,
@@ -53,6 +59,7 @@ function makeInstance(
     systemDebt,
     activeTroveCount,
     borrowingFeeCum,
+    borrowingFeeCollectedCum,
     isShutDown: shutdown?.isShutDown ?? false,
     shutDownAt: shutdown?.shutDownAt ?? null,
   };
@@ -97,6 +104,7 @@ function makeDailySnapshot(
   timestamp: number,
   upfrontFee: string,
   accruedInterest: string,
+  collected = "0",
 ): CdpBorrowingRevenueDailySnapshot {
   return {
     id: `${collateralId}-${timestamp}`,
@@ -106,6 +114,7 @@ function makeDailySnapshot(
     timestamp: String(timestamp),
     upfrontFee,
     accruedInterest,
+    collected,
   };
 }
 
@@ -483,5 +492,127 @@ describe("buildDailyCdpBorrowingFeeSeriesFromSnapshots", () => {
     expect(result).toHaveLength(1);
     expect(result[0]?.accruedInterestUSD).toBeCloseTo(6.25, 6);
     expect(result[0]?.totalFeesUSD).toBeCloseTo(6.25, 6);
+  });
+});
+
+describe("SP yield split — protocol share, collected, receivable", () => {
+  const RATES: OracleRateMap = new Map([["GBPm", 1.25]]);
+
+  it("splits gross fees into protocol share and SP yield share", () => {
+    // 75% SP split on 100 GBPm of upfront fees: protocol keeps 25 GBPm.
+    const result = aggregateCdpBorrowingRevenue({
+      collaterals: [makeCollateral("gbp", "GBPm", 0, 7_500)],
+      instances: [makeInstance("gbp", tokenWei(100))],
+      brackets: [],
+      rates: RATES,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.totalRevenueUSD).toBeCloseTo(125, 6); // 100 × 1.25
+    expect(result.protocolShareUSD).toBeCloseTo(31.25, 6); // 25 × 1.25
+    expect(result.spYieldShareUSD).toBeCloseTo(93.75, 6);
+  });
+
+  it("prices collected mints and derives the outstanding receivable", () => {
+    const result = aggregateCdpBorrowingRevenue({
+      collaterals: [makeCollateral("gbp", "GBPm", 0, 7_500)],
+      instances: [
+        makeInstance(
+          "gbp",
+          tokenWei(100),
+          tokenWei(0),
+          0,
+          undefined,
+          tokenWei(10),
+        ),
+      ],
+      brackets: [],
+      rates: RATES,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.collectedUSD).toBeCloseTo(12.5, 6); // 10 × 1.25
+    // receivable = protocol share (31.25) − collected (12.5)
+    expect(result.receivableUSD).toBeCloseTo(18.75, 6);
+  });
+
+  it("clamps the receivable at zero when collected exceeds the live share", () => {
+    const result = aggregateCdpBorrowingRevenue({
+      collaterals: [makeCollateral("gbp", "GBPm", 0, 7_500)],
+      instances: [
+        makeInstance(
+          "gbp",
+          tokenWei(4),
+          tokenWei(0),
+          0,
+          undefined,
+          tokenWei(10),
+        ),
+      ],
+      brackets: [],
+      rates: RATES,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.receivableUSD).toBe(0);
+  });
+
+  it("treats the indexer's -1 split sentinel as no split", () => {
+    const result = aggregateCdpBorrowingRevenue({
+      collaterals: [makeCollateral("gbp", "GBPm", 0, -1)],
+      instances: [makeInstance("gbp", tokenWei(100))],
+      brackets: [],
+      rates: RATES,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.protocolShareUSD).toBeCloseTo(result.totalRevenueUSD, 6);
+  });
+
+  it("scales the snapshot daily series to protocol share and passes collected through unscaled", () => {
+    const day0 = NOW_DAY - DAY_SECONDS;
+    const result = buildDailyCdpBorrowingFeeSeriesFromSnapshots({
+      collaterals: [makeCollateral("gbp", "GBPm", 0, 7_500)],
+      instances: [],
+      brackets: [],
+      dailySnapshots: [
+        // Gross 100 upfront + 4 interest; collected mint of 26 (already the
+        // on-chain treasury share — must NOT be re-scaled).
+        makeDailySnapshot(
+          "gbp",
+          day0,
+          tokenWei(100),
+          tokenWei(4),
+          tokenWei(26),
+        ),
+      ],
+      rates: RATES,
+      nowSeconds: day0 + DAY_SECONDS,
+      window: { from: day0, to: day0 + DAY_SECONDS },
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.upfrontFeesUSD).toBeCloseTo(31.25, 6); // 25 × 1.25
+    expect(result[0]?.accruedInterestUSD).toBeCloseTo(1.25, 6); // 1 × 1.25
+    expect(result[0]?.totalFeesUSD).toBeCloseTo(32.5, 6);
+    expect(result[0]?.collectedUSD).toBeCloseTo(32.5, 6); // 26 × 1.25
+  });
+
+  it("scales the fee-event fallback series by the instance's market split", () => {
+    const day0 = NOW_DAY - DAY_SECONDS;
+    const instance = makeInstance("gbp", tokenWei(0));
+    const result = buildDailyCdpBorrowingFeeSeries({
+      collaterals: [makeCollateral("gbp", "GBPm", 0, 7_500)],
+      instances: [instance],
+      brackets: [],
+      feeEvents: [makeFeeEvent(instance.id, tokenWei(100), day0)],
+      rates: RATES,
+      nowSeconds: day0 + DAY_SECONDS,
+      window: { from: day0, to: day0 + DAY_SECONDS },
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.upfrontFeesUSD).toBeCloseTo(31.25, 6);
+    expect(result[0]?.collectedUSD).toBe(0);
   });
 });

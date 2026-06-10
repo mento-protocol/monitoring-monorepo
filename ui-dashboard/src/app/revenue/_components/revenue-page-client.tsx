@@ -5,27 +5,33 @@ import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/monitoring-confi
 import { formatUSD } from "@/lib/format";
 import type { NetworkData } from "@/lib/fetch-all-networks";
 import { useCdpBorrowingRevenue } from "@/hooks/use-cdp-borrowing-revenue";
-import type {
-  CdpBorrowingRevenueMarket,
-  CdpBorrowingRevenueSummary,
-} from "@/lib/cdp-borrowing-revenue";
+import type { CdpBorrowingRevenueMarket } from "@/lib/cdp-borrowing-revenue";
 import { useProtocolFees } from "@/hooks/use-protocol-fees";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { FeeOverTimeChart } from "@/components/fee-over-time-chart";
+import {
+  CdpBorrowingFeesTile,
+  type CdpBorrowingFeesTileState,
+} from "./cdp-borrowing-fees-tile";
+import { BorrowingEarnedCollectedChart } from "./borrowing-earned-collected-chart";
 import { Tooltip } from "@/components/tooltip";
 import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
 import { ComingSoonSection } from "@/components/coming-soon-section";
 import { Row, Table, Td, Th } from "@/components/table";
 
+// Table fee columns are GROSS (borrower-side fees, before the SP yield
+// split); the summary tile headlines the protocol's share. Tooltips call
+// this out so the two surfaces don't read as contradictory.
 const CDP_BORROWING_HEADER_INFO = {
   debt: "Active CDP debt, priced to USD from the debt token's live oracle rate.",
   runRate:
-    "Annualized interest revenue if current debt and rates stay unchanged.",
+    "Annualized gross interest if current debt and rates stay unchanged, before the SP yield split.",
   upfront:
-    "Cumulative one-time borrowing fees paid when troves are opened or debt is increased.",
+    "Cumulative one-time borrowing fees paid when troves are opened or debt is increased (gross, before the SP yield split).",
   interest:
-    "Accrued interest earned so far, including live accrual since the last indexer update.",
-  total: "Upfront fees plus accrued interest.",
+    "Accrued interest so far, including live accrual since the last indexer update (gross, before the SP yield split).",
+  total:
+    "Upfront fees plus accrued interest — gross fees paid by borrowers. The protocol keeps the share shown in the summary tile; the rest is StabilityPool depositor yield.",
 } as const;
 
 const CDP_AVERAGE_APR_INFO = (
@@ -64,12 +70,6 @@ type SwapFeesTileState = {
   hasError: boolean;
   isApproximate: boolean;
   isTruncated: boolean;
-};
-
-type CdpBorrowingFeesTileState = {
-  summary: CdpBorrowingRevenueSummary | null;
-  isLoading: boolean;
-  hasError: boolean;
 };
 
 function aggregateSwapFees(
@@ -201,6 +201,14 @@ function RevenueContent() {
         isBorrowingFeesApproximate={borrowingFeesChartApprox}
       />
 
+      <BorrowingEarnedCollectedChart
+        series={cdpBorrowingFeeSeries}
+        isLoading={isCdpBorrowingRevenueLoading}
+        hasError={hasCdpBorrowingRevenueError || cdpBorrowingFeeSeriesFailed}
+        isApproximate={borrowingFeesChartApprox}
+        collectedUnavailable={cdpBorrowingFeeSeriesApproximate}
+      />
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
         <RevenueByPoolTable
           networkData={networkData}
@@ -273,68 +281,6 @@ function SwapFeesTile({ state }: { state: SwapFeesTileState }) {
       subtitle={swapFeesSubtitle(aggregated, isTruncated)}
     />
   );
-}
-
-function CdpBorrowingFeesTile({ state }: { state: CdpBorrowingFeesTileState }) {
-  const { summary, isLoading, hasError } = state;
-  const isApproximate =
-    (summary?.unpricedSymbols.length ?? 0) > 0 ||
-    (summary?.bracketsTruncated ?? false);
-  const mainValue = isLoading
-    ? "—"
-    : hasError || summary === null
-      ? "N/A"
-      : `${isApproximate ? "≈ " : ""}${formatUSD(summary.totalRevenueUSD)}`;
-  const componentItems =
-    !isLoading && !hasError && summary !== null
-      ? [
-          { label: "Upfront", value: summary.upfrontFeesUSD },
-          { label: "Interest", value: summary.accruedInterestUSD },
-        ]
-      : null;
-  const subtitle = cdpBorrowingFeesSubtitle(summary, isLoading, hasError);
-
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
-      <div>
-        <p className="text-sm text-slate-400">CDP Borrowing Fees</p>
-        <p className="mt-1 text-2xl font-semibold text-white font-mono">
-          {mainValue}
-        </p>
-        {componentItems && (
-          <div className="mt-1.5 flex gap-3 text-sm font-mono">
-            {componentItems.map((item) => (
-              <span key={item.label}>
-                <span className="text-slate-500">{item.label}</span>{" "}
-                <span className="text-slate-400">{formatUSD(item.value)}</span>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-      <p className="mt-2 text-xs text-slate-500 min-h-4">{subtitle}</p>
-    </div>
-  );
-}
-
-function cdpBorrowingFeesSubtitle(
-  summary: CdpBorrowingRevenueSummary | null,
-  isLoading: boolean,
-  hasError: boolean,
-): string {
-  if (isLoading) return "Loading CDP borrowing fees";
-  if (hasError || summary === null) return "Unable to load CDP borrowing fees";
-  if (summary.bracketsTruncated) {
-    return "Approximate — interest brackets exceed pagination cap";
-  }
-  if (summary.unpricedSymbols.length > 0) {
-    return `Approximate — unpriced debt token${summary.unpricedSymbols.length === 1 ? "" : "s"}: ${summary.unpricedSymbols.join(", ")}`;
-  }
-  const marketLabel =
-    summary.marketCount === 1
-      ? "1 Celo CDP market"
-      : `${summary.marketCount} Celo CDP markets`;
-  return `Across ${marketLabel}; upfront fees plus accrued interest`;
 }
 
 function MarketFeeCell({

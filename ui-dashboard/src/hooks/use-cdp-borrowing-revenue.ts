@@ -12,8 +12,10 @@ import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import {
   CDP_BORROWING_FEE_EVENTS,
   CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
+  CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY,
   CDP_BORROWING_REVENUE_BRACKETS,
   CDP_BORROWING_REVENUE_MARKETS,
+  CDP_BORROWING_REVENUE_MARKETS_LEGACY,
   ORACLE_RATES,
 } from "@/lib/queries";
 import { REQUEST_TIMEOUT_MS } from "@/lib/fetch-all-networks";
@@ -43,16 +45,56 @@ type MarketsResponse = {
   LiquityInstance: CdpBorrowingRevenueInstance[];
 };
 
+type LegacyMarketsResponse = {
+  LiquityCollateral: CdpBorrowingRevenueCollateral[];
+  LiquityInstance: Array<
+    Omit<CdpBorrowingRevenueInstance, "borrowingFeeCollectedCum">
+  >;
+};
+
+function isMissingCollectedFieldError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("borrowingFeeCollectedCum");
+}
+
+// Old-schema compatibility: production Hasura predating the
+// `borrowingFeeCollectedCum` field rejects the full markets query with a
+// validation error. Retry with the legacy shape and default collected to 0
+// so the CDP tile degrades (collected bar empty) instead of blanking —
+// mirrors the daily-snapshot entity fallback below.
+async function fetchMarketsWithCompat(
+  client: GraphQLClient,
+  chainId: number,
+): Promise<MarketsResponse> {
+  try {
+    return await requestWithTimeout<MarketsResponse>(
+      client,
+      CDP_BORROWING_REVENUE_MARKETS,
+      { chainId },
+    );
+  } catch (err) {
+    if (!isMissingCollectedFieldError(err)) throw err;
+    const legacy = await requestWithTimeout<LegacyMarketsResponse>(
+      client,
+      CDP_BORROWING_REVENUE_MARKETS_LEGACY,
+      { chainId },
+    );
+    return {
+      LiquityCollateral: legacy.LiquityCollateral ?? [],
+      LiquityInstance: (legacy.LiquityInstance ?? []).map((instance) => ({
+        ...instance,
+        borrowingFeeCollectedCum: "0",
+      })),
+    };
+  }
+}
+
 type BracketsResponse = {
   InterestRateBracket: CdpBorrowingRevenueBracket[];
 };
 
 type FeeEventsResponse = {
   TroveOperationEvent: CdpBorrowingFeeEvent[];
-};
-
-type DailySnapshotsResponse = {
-  LiquityBorrowingRevenueDailySnapshot: CdpBorrowingRevenueDailySnapshot[];
 };
 
 type BracketPageResult = {
@@ -69,6 +111,9 @@ type DailySnapshotPageResult = {
   rows: CdpBorrowingRevenueDailySnapshot[];
   truncated: boolean;
   unavailable: boolean;
+  // Snapshot rows exist but the schema predates the `collected` field —
+  // earned history is real, collected mints default to 0.
+  collectedUnavailable: boolean;
 };
 
 type NetworkCdpBorrowingRevenue = {
@@ -97,6 +142,10 @@ const EMPTY_SUMMARY: CdpBorrowingRevenueSummary = {
   totalRevenueUSD: 0,
   upfrontFeesUSD: 0,
   accruedInterestUSD: 0,
+  protocolShareUSD: 0,
+  spYieldShareUSD: 0,
+  collectedUSD: 0,
+  receivableUSD: 0,
   marketCount: 0,
   activeInterestBracketCount: 0,
   unpricedSymbols: [],
@@ -124,6 +173,10 @@ function mergeSummaries(
     merged.totalRevenueUSD += row.summary.totalRevenueUSD;
     merged.upfrontFeesUSD += row.summary.upfrontFeesUSD;
     merged.accruedInterestUSD += row.summary.accruedInterestUSD;
+    merged.protocolShareUSD += row.summary.protocolShareUSD;
+    merged.spYieldShareUSD += row.summary.spYieldShareUSD;
+    merged.collectedUSD += row.summary.collectedUSD;
+    merged.receivableUSD += row.summary.receivableUSD;
     merged.marketCount += row.summary.marketCount;
     merged.activeInterestBracketCount += row.summary.activeInterestBracketCount;
     merged.bracketsTruncated =
@@ -154,7 +207,11 @@ function mergeDailySeries(
 ): CdpBorrowingFeeSeriesPoint[] {
   const buckets = new Map<
     number,
-    { upfrontFeesUSD: number; accruedInterestUSD: number }
+    {
+      upfrontFeesUSD: number;
+      accruedInterestUSD: number;
+      collectedUSD: number;
+    }
   >();
 
   for (const row of rows) {
@@ -162,9 +219,11 @@ function mergeDailySeries(
       const existing = buckets.get(point.timestamp) ?? {
         upfrontFeesUSD: 0,
         accruedInterestUSD: 0,
+        collectedUSD: 0,
       };
       existing.upfrontFeesUSD += point.upfrontFeesUSD;
       existing.accruedInterestUSD += point.accruedInterestUSD;
+      existing.collectedUSD += point.collectedUSD;
       buckets.set(point.timestamp, existing);
     }
   }
@@ -175,6 +234,7 @@ function mergeDailySeries(
       upfrontFeesUSD: bucket.upfrontFeesUSD,
       accruedInterestUSD: bucket.accruedInterestUSD,
       totalFeesUSD: bucket.upfrontFeesUSD + bucket.accruedInterestUSD,
+      collectedUSD: bucket.collectedUSD,
     }))
     .sort((a, b) => a.timestamp - b.timestamp);
 }
@@ -253,11 +313,25 @@ function isMissingDailySnapshotEntityError(err: unknown): boolean {
   return message.includes("LiquityBorrowingRevenueDailySnapshot");
 }
 
-async function fetchAllDailySnapshotPages(
+// Hasura's missing-field validation error names BOTH the field and the entity
+// (`field 'collected' not found in type: 'LiquityBorrowingRevenueDailySnapshot'`),
+// so this check must run BEFORE the entity-missing check above — otherwise a
+// schema that merely predates `collected` would be misread as having no
+// snapshots at all and degrade to the fee-event reconstruction.
+function isMissingSnapshotCollectedFieldError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes("'collected'") &&
+    message.includes("LiquityBorrowingRevenueDailySnapshot")
+  );
+}
+
+async function paginateDailySnapshots<T extends { id: string }>(
   client: GraphQLClient,
   chainId: number,
-): Promise<DailySnapshotPageResult> {
-  const rows: CdpBorrowingRevenueDailySnapshot[] = [];
+  query: string,
+): Promise<{ rows: T[]; truncated: boolean }> {
+  const rows: T[] = [];
   // Offset pagination over the append-only snapshot table is unstable under
   // concurrent inserts: a new row landing between page requests shifts the
   // `timestamp desc, id desc` window and can re-emit a boundary row on the next
@@ -265,37 +339,68 @@ async function fetchAllDailySnapshotPages(
   // `lib/network-fetcher/fetch.ts`) so windowed totals can't double-count.
   const seen = new Set<string>();
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  try {
-    for (let page = 0; page < DAILY_SNAPSHOT_MAX_PAGES; page++) {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Snapshot pagination is intentionally sequential so we can stop after the first short page.
-      const response = await requestWithTimeout<DailySnapshotsResponse>(
-        client,
-        CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
-        {
-          chainId,
-          limit: DAILY_SNAPSHOT_PAGE_SIZE,
-          offset: page * DAILY_SNAPSHOT_PAGE_SIZE,
-        },
-        signal,
-      );
-      const pageRows = response.LiquityBorrowingRevenueDailySnapshot ?? [];
-      for (const row of pageRows) {
-        if (seen.has(row.id)) continue;
-        seen.add(row.id);
-        rows.push(row);
-      }
-      // Stop on the raw page length, not the deduped count — a full page that
-      // happens to contain a boundary duplicate must not look "short" and
-      // truncate pagination a page early.
-      if (pageRows.length < DAILY_SNAPSHOT_PAGE_SIZE) {
-        return { rows, truncated: false, unavailable: false };
-      }
+  for (let page = 0; page < DAILY_SNAPSHOT_MAX_PAGES; page++) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Snapshot pagination is intentionally sequential so we can stop after the first short page.
+    const response = await requestWithTimeout<
+      Record<"LiquityBorrowingRevenueDailySnapshot", T[]>
+    >(
+      client,
+      query,
+      {
+        chainId,
+        limit: DAILY_SNAPSHOT_PAGE_SIZE,
+        offset: page * DAILY_SNAPSHOT_PAGE_SIZE,
+      },
+      signal,
+    );
+    const pageRows = response.LiquityBorrowingRevenueDailySnapshot ?? [];
+    for (const row of pageRows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
     }
+    // Stop on the raw page length, not the deduped count — a full page that
+    // happens to contain a boundary duplicate must not look "short" and
+    // truncate pagination a page early.
+    if (pageRows.length < DAILY_SNAPSHOT_PAGE_SIZE) {
+      return { rows, truncated: false };
+    }
+  }
 
-    return { rows, truncated: true, unavailable: false };
+  return { rows, truncated: true };
+}
+
+async function fetchAllDailySnapshotPages(
+  client: GraphQLClient,
+  chainId: number,
+): Promise<DailySnapshotPageResult> {
+  try {
+    const page = await paginateDailySnapshots<CdpBorrowingRevenueDailySnapshot>(
+      client,
+      chainId,
+      CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
+    );
+    return { ...page, unavailable: false, collectedUnavailable: false };
   } catch (err) {
+    // Specific-first: the missing-`collected` message also names the entity.
+    if (isMissingSnapshotCollectedFieldError(err)) {
+      const legacy = await paginateDailySnapshots<
+        Omit<CdpBorrowingRevenueDailySnapshot, "collected">
+      >(client, chainId, CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY);
+      return {
+        rows: legacy.rows.map((row) => ({ ...row, collected: "0" })),
+        truncated: legacy.truncated,
+        unavailable: false,
+        collectedUnavailable: true,
+      };
+    }
     if (isMissingDailySnapshotEntityError(err)) {
-      return { rows: [], truncated: false, unavailable: true };
+      return {
+        rows: [],
+        truncated: false,
+        unavailable: true,
+        collectedUnavailable: true,
+      };
     }
     throw err;
   }
@@ -346,7 +451,7 @@ async function resolveDailyBorrowingFeeSeries(
             }),
       truncated:
         fallbackFeeEventPages?.truncated ?? dailySnapshotPages.truncated,
-      approximate: dailySnapshotPages.unavailable,
+      approximate: dailySnapshotPages.collectedUnavailable,
       failed: false,
     };
   } catch {
@@ -372,10 +477,9 @@ async function fetchRevenueForNetwork(
 
   try {
     const client = new GraphQLClient(network.hasuraUrl);
-    const marketsResponse = await requestWithTimeout<MarketsResponse>(
+    const marketsResponse = await fetchMarketsWithCompat(
       client,
-      CDP_BORROWING_REVENUE_MARKETS,
-      { chainId: network.chainId },
+      network.chainId,
     );
     const collaterals = marketsResponse.LiquityCollateral ?? [];
     const instances = marketsResponse.LiquityInstance ?? [];
