@@ -16,6 +16,8 @@ set -euo pipefail
 #   - gcloud CLI authenticated with access to the governance-watchdog project
 #   - curl, python3 available
 #   - QuickNode API key stored in GCP Secret Manager as "quicknode-api-key"
+#     (override with QUICKNODE_API_KEY_SECRET_ID if the Terraform variable
+#     quicknode_api_key_secret_id is customized — see infra/variables.tf)
 # =============================================================================
 
 WEBHOOK_TARGET="${1:-all}"
@@ -84,7 +86,7 @@ fetch_api_key() {
 		exit 1
 	fi
 	QN_API_KEY=$(gcloud secrets versions access latest \
-		--secret=quicknode-api-key \
+		--secret="${QUICKNODE_API_KEY_SECRET_ID:-quicknode-api-key}" \
 		--project="${project_id}" 2>/dev/null)
 	if [[ -z ${QN_API_KEY} ]]; then
 		echo "❌ Could not fetch QuickNode API key from Secret Manager."

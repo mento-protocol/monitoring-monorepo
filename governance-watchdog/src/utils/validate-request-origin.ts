@@ -22,7 +22,7 @@ export async function isFromQuicknode(req: Request): Promise<boolean> {
   const givenSignature = req.headers["x-qn-signature"] as string;
 
   // Cheap pre-checks come before any getSecret() call: the function is publicly
-  // invokable and getSecret intentionally doesn't cache values, so every check we
+  // callable and getSecret intentionally doesn't cache values, so every check we
   // can do without a Secret Manager round trip saves quota and latency on
   // unauthenticated scans and malformed traffic.
   if (!nonce || !timestamp || !givenSignature) {
