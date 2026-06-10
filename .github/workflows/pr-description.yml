@@ -104,9 +104,13 @@ jobs:
             insec && /^##[[:space:]]/ { insec = 0 }
             insec { print }
           ' <<<"$fence_stripped")
-          if ! grep -qiE '(^|[^[:alnum:]])none([^[:alnum:]]|$)' <<<"$deferrals" \
+          # "None" must be the section's explicit value — a line that is
+          # exactly `None` (optionally as a `-`/`*` list item, optional
+          # trailing period). Prose that merely contains the word ("None of
+          # the follow-ups are tracked yet") does NOT satisfy the check.
+          if ! grep -qiE '^[[:space:]]*([-*][[:space:]]+)?none[[:space:]]*\.?[[:space:]]*$' <<<"$deferrals" \
              && ! grep -qE '#[0-9]+|github\.com/[^[:space:]]+/issues/[0-9]+' <<<"$deferrals"; then
-            echo "::error::The '## Deferrals' section must either say 'None' or reference at least one GitHub issue (#123 or an issues URL) per knowing deferral. Create the issue first (problem description + solution ideas if you have them), then link it here."
+            echo "::error::The '## Deferrals' section must either be exactly 'None' (own line / list item) or reference at least one GitHub issue (#123 or an issues URL) per knowing deferral. Create the issue first (problem description + solution ideas if you have them), then link it here."
             exit 1
           fi
 
