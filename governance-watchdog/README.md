@@ -172,6 +172,7 @@ You have two options, using `terraform` or the `gcloud` cli. Both are perfectly 
 
 1. Via `terraform` by running `pnpm run deploy`
    - How? The pnpm script will:
+     - Refuse dirty working trees and print the target/commit/rollback info (via `scripts/deploy-gov-watchdog.sh` at the monorepo root — `terraform apply` archives your local checkout into the function source, so uncommitted edits must not ship)
      - Call `terraform apply` which re-deploys the function with the latest code from your local machine (and all other infrastructure that may have changed since the last terraform deploy)
    - Pros
      - Keeps the terraform state clean

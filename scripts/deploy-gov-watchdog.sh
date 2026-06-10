@@ -23,7 +23,7 @@ echo "   Verify after apply: pnpm gov-watchdog:logs"
 echo "   Rollback: git checkout <last-good-sha>, then re-run pnpm gov-watchdog:deploy"
 echo ""
 
-pnpm --filter @mento-protocol/governance-watchdog run deploy
+pnpm --filter @mento-protocol/governance-watchdog run deploy:terraform
 
 echo ""
 echo "✅ Deploy finished for commit ${COMMIT_SHA}. Verify with: pnpm gov-watchdog:logs"

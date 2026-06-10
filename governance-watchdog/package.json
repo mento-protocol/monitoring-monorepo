@@ -14,8 +14,9 @@
   "scripts": {
     "build": "rimraf dist && tsc --project tsconfig.build.json",
     "cache:clear": "./bin/get-project-vars.sh --invalidate-cache",
-    "deploy": "terraform -chdir=infra apply",
+    "deploy": "../scripts/deploy-gov-watchdog.sh",
     "deploy:function": "./bin/deploy-via-gcloud.sh",
+    "deploy:terraform": "terraform -chdir=infra apply",
     "destroy": "terraform -chdir=infra destroy",
     "dev": "nodemon --ext ts --ignore dist --exec \"pnpm run start\"",
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
