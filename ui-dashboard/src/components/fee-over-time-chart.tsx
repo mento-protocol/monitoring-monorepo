@@ -467,7 +467,10 @@ export function FeeOverTimeChart({
   isApproximate,
   isBorrowingFeesApproximate,
 }: FeeOverTimeChartProps) {
-  const [range, setRange] = useState<RangeKey>("30d");
+  // Default to all-time so the headline is consistent with the all-time
+  // summary tiles directly above — a 30d default read as "Total Fees is
+  // lower than Swap Fees alone" next to the $-all-time tiles.
+  const [range, setRange] = useState<RangeKey>("all");
 
   const fullSwapSeries = useMemo(
     () => buildDailyFeeSeries(networkData),

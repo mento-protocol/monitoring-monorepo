@@ -215,22 +215,17 @@ describe("RevenuePageClient degraded fee states", () => {
     });
 
     expect(html).toContain("CDP Borrowing Fees");
-    // Headline = protocol share (earned); gross + SP yield render as rows.
+    // Headline = protocol share (earned); one gross/SP-split context row.
     expect(html).toContain("$60.63");
     expect(html).toContain("earned");
     expect(html).toContain("Gross");
     expect(html).toContain("$242.50");
-    expect(html).toContain("To SP yield (75%)");
-    expect(html).toContain("$181.87");
-    expect(html).toContain("Collected");
-    expect(html).toContain("$30.00");
-    expect(html).toContain("Accruing");
-    expect(html).toContain("$30.63");
-    expect(html).toContain('role="progressbar"');
-    expect(html).toContain('aria-valuenow="49"');
-    expect(html).toContain(
-      "Protocol share of upfront fees + interest across 2 Celo CDP markets",
-    );
+    expect(html).toContain("of which $181.87 goes to stability");
+    // Collected/receivable stay indexed but are no longer rendered.
+    expect(html).not.toContain("Accruing");
+    expect(html).not.toContain('role="progressbar"');
+    expect(html).toContain("Protocol share of borrowing fees");
+    expect(html).toContain("Protocol share of swap fees");
     expect(html).toContain("Borrowing Fees by CDP");
     expect(html).toContain("Debt");
     expect(html).toContain("ø APR");
@@ -378,72 +373,5 @@ describe("RevenuePageClient degraded fee states", () => {
     // the (successful) market/bracket/rate queries.
     expect(html).not.toContain("Unable to load CDP borrowing fees");
     expect(html).toContain("$20.00");
-  });
-});
-
-describe("BorrowingEarnedCollectedChart via RevenuePageClient", () => {
-  beforeEach(() => {
-    mockUseProtocolFees.mockReset();
-    mockUseCdpBorrowingRevenue.mockReset();
-  });
-
-  const DAY = 86_400;
-  const day0 = 1_700_006_400;
-
-  it("headlines cumulative earned and collected from the daily series", () => {
-    const html = renderRevenue([], false, {
-      summary: EMPTY_CDP_REVENUE,
-      dailySeries: [
-        {
-          timestamp: day0,
-          upfrontFeesUSD: 6,
-          accruedInterestUSD: 4,
-          totalFeesUSD: 10,
-          collectedUSD: 4,
-        },
-        {
-          timestamp: day0 + DAY,
-          upfrontFeesUSD: 2,
-          accruedInterestUSD: 3,
-          totalFeesUSD: 5,
-          collectedUSD: 2,
-        },
-      ],
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(html).toContain("Borrowing Revenue — Earned vs Collected");
-    expect(html).toContain("$15.00");
-    expect(html).toContain("earned");
-    expect(html).toContain("$6.00");
-    expect(html).toContain("collected");
-    expect(html).toContain(
-      "Gap between lines = accrued but not yet minted to the treasury",
-    );
-  });
-
-  it("drops the collected leg when the series is the fee-event fallback", () => {
-    const html = renderRevenue([], false, {
-      summary: EMPTY_CDP_REVENUE,
-      dailySeries: [
-        {
-          timestamp: day0,
-          upfrontFeesUSD: 6,
-          accruedInterestUSD: 4,
-          totalFeesUSD: 10,
-          collectedUSD: 0,
-        },
-      ],
-      dailySeriesApproximate: true,
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(html).toContain("$10.00");
-    expect(html).not.toContain("collected</span>");
-    expect(html).toContain(
-      "Collected mints unavailable on this indexer schema",
-    );
   });
 });

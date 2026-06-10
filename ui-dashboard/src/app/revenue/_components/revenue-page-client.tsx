@@ -13,7 +13,6 @@ import {
   CdpBorrowingFeesTile,
   type CdpBorrowingFeesTileState,
 } from "./cdp-borrowing-fees-tile";
-import { BorrowingEarnedCollectedChart } from "./borrowing-earned-collected-chart";
 import { Tooltip } from "@/components/tooltip";
 import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
 import { ComingSoonSection } from "@/components/coming-soon-section";
@@ -201,14 +200,6 @@ function RevenueContent() {
         isBorrowingFeesApproximate={borrowingFeesChartApprox}
       />
 
-      <BorrowingEarnedCollectedChart
-        series={cdpBorrowingFeeSeries}
-        isLoading={isCdpBorrowingRevenueLoading}
-        hasError={hasCdpBorrowingRevenueError || cdpBorrowingFeeSeriesFailed}
-        isApproximate={borrowingFeesChartApprox}
-        collectedUnavailable={cdpBorrowingFeeSeriesApproximate}
-      />
-
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
         <RevenueByPoolTable
           networkData={networkData}
@@ -261,7 +252,7 @@ function swapFeesSubtitle(
   if (aggregated.totalUnresolvedCount > 0) {
     return "Approximate — some tokens unresolved";
   }
-  return "Protocol fee transfers to yield split address";
+  return "Protocol share of swap fees";
 }
 
 function SwapFeesTile({ state }: { state: SwapFeesTileState }) {
