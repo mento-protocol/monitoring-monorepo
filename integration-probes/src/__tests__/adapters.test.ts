@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { flyApiHeaders, flyQuoteUrl } from "../adapterRequests.js";
+import {
+  flyApiHeaders,
+  flyDistributionsUrl,
+  flyQuoteUrl,
+} from "../adapterRequests.js";
 import {
   AGGREGATOR_ADAPTERS,
   aggregatePairStatus,
@@ -487,6 +491,9 @@ describe("probeAdapterPair", () => {
     expect(flyApiHeaders(env)).toBeUndefined();
     expect(flyQuoteUrl(monadInput, "monad", env)).toContain(
       "https://api.fly.trade/aggregator/quote",
+    );
+    expect(flyDistributionsUrl("some-quote-id", env)).toContain(
+      "https://api.fly.trade/aggregator/distributions",
     );
   });
 
