@@ -1,10 +1,12 @@
 # Cloud Functions auto-creates this Docker repo for function build images and
 # never cleans it up — it had accumulated 64 images (~1.9 GB) by 2026-06-10.
-# The import block adopts the existing repo into state on the next apply
-# (idempotent afterwards) so the cleanup policies below can manage retention.
+# One-time adoption: this import block brings the existing repo into state so
+# the cleanup policies below can manage retention. DELETE this block after the
+# adopting apply lands — it is not valid for from-scratch bring-up (the repo
+# wouldn't exist yet; Terraform creates it from the resource instead).
 import {
   to = google_artifact_registry_repository.gcf_artifacts
-  id = "projects/governance-watchdog-b2a6/locations/europe-west1/repositories/gcf-artifacts"
+  id = "projects/${module.governance_watchdog.project_id}/locations/${var.region}/repositories/gcf-artifacts"
 }
 
 resource "google_artifact_registry_repository" "gcf_artifacts" {
