@@ -44,6 +44,11 @@ upstash_api_key = "..."
 # `count`-gated so `terraform apply` succeeds without it.
 # lifi_api_key = "..."
 
+# Fly.trade (Magpie) API key for the scheduled integration-probes workflow.
+# Leave empty until provisioned; the GitHub Actions secret resource is
+# `count`-gated so `terraform apply` succeeds without it.
+# flytrade_api_key = "..."
+
 # OpenOcean Pro API key for the scheduled integration-probes workflow.
 # Leave empty until provisioned; the GitHub Actions secret resource is
 # `count`-gated so `terraform apply` succeeds without it.

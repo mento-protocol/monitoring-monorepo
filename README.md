@@ -223,6 +223,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | ------------------------------- | ------------------------------------------------------------------------------------------- |
 | `INTEGRATION_PROBES_HASURA_URL` | Optional override for the pool-discovery GraphQL endpoint                                   |
 | `LIFI_API_KEY`                  | LI.FI/Jumper quote API key; probes return `needs_key` without it                            |
+| `FLYTRADE_API_KEY`              | Optional Fly.trade (Magpie) API key for authenticated Fly follow-up requests                |
 | `OPENOCEAN_API_KEY`             | Optional OpenOcean Pro quote API key                                                        |
 | `ZEROX_API_KEY`                 | Optional 0x quote API key                                                                   |
 | `ONEINCH_API_KEY`               | Optional 1inch quote API key                                                                |
