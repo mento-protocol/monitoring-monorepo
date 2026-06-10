@@ -112,6 +112,8 @@ resource "grafana_notification_policy" "all" {
     # this previously hardcoded `chain = "celo"` which silently dropped
     # Monad (env=prod) page alerts from #alerts-critical (sec-review
     # 2026-05-22 f-010).
+    # `continue = true` so pages also reach the #alerts-oracles copies below —
+    # the oracle-domain channel carries the full oracle picture, pages included.
     policy {
       contact_point = grafana_contact_point.slack_alerts_critical.name
 
@@ -133,12 +135,66 @@ resource "grafana_notification_policy" "all" {
         value = local.weekend_disabled_feeds_pattern
       }
 
+      continue = true
     }
 
     # Oracle Relayer page alerts → #alerts-critical (weekend FX, muted)
     # Same severity=page gating as the non-weekend policy above.
     policy {
       contact_point = grafana_contact_point.slack_alerts_critical.name
+      mute_timings  = [grafana_mute_timing.weekend_mute.name]
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "rateFeed"
+        match = "=~"
+        value = local.weekend_disabled_feeds_pattern
+      }
+
+      continue = true
+    }
+
+    # Oracle Relayer page alerts → #alerts-oracles (non-weekend FX).
+    # Terminal copy of the #alerts-critical pair above (which `continue`s),
+    # in addition to Splunk On-Call — so page-grade oracle incidents are
+    # visible in the oracle-domain channel alongside the warning-grade ones.
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_oracles.name
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "oracle-relayers"
+      }
+
+      matcher {
+        label = "rateFeed"
+        match = "!~"
+        value = local.weekend_disabled_feeds_pattern
+      }
+
+    }
+
+    # Oracle Relayer page alerts → #alerts-oracles (weekend FX, muted)
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_oracles.name
       mute_timings  = [grafana_mute_timing.weekend_mute.name]
 
       matcher {
