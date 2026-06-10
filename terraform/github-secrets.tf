@@ -97,6 +97,16 @@ resource "github_actions_secret" "integration_probe_lifi_api_key" {
   value       = var.lifi_api_key
 }
 
+resource "github_actions_secret" "integration_probe_flytrade_api_key" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.flytrade_api_key == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "FLYTRADE_API_KEY"
+  value       = var.flytrade_api_key
+}
+
 resource "github_actions_secret" "integration_probe_openocean_api_key" {
   # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
   # `vercel_automation_bypass`; see the comment above for the threat model.

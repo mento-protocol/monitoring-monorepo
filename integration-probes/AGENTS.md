@@ -89,6 +89,12 @@ pnpm --filter @mento-protocol/integration-probes knip
   `OKX_DEX_PASSPHRASE`.
 - `LIFI_API_KEY` authenticates LI.FI/Jumper quote probes with
   `x-lifi-api-key`; keep it server-side and Terraform-managed.
+- `FLYTRADE_API_KEY` authenticates the Fly.trade follow-up requests behind
+  Monad LI.FI routes with the `apikey` header against the authenticated
+  `api.magpiefi.xyz` origin; without it the probe falls back to the public
+  `api.fly.trade` origin. It is optional (not part of `credentialEnv`), so a
+  missing key never renders LI.FI as `needs_key`. Keep it server-side and
+  Terraform-managed.
 - `SQUID_INTEGRATOR_ID` authenticates Squid quote probes with
   `x-integrator-id`; keep it server-side and Terraform-managed.
 - `SQUID_CELO_RPC_URL` optionally overrides the default Forno Celo RPC used for
