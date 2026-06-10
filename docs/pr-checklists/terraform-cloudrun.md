@@ -55,16 +55,24 @@ For variables that gate critical behavior:
 - [ ] Add a `validation` block for non-empty strings (image refs, project IDs, region). An empty string forwarded to a required field fails the apply with a cryptic error and blocks unrelated infra changes
 - [ ] If a previous schema accepted an empty value as "disable this resource", normalize it back to a safe default (or fail loudly with a migration message) — silent breakage of previously-valid `terraform.tfvars` is a hostile change
 
-## 6. Pre-apply rituals
+## 6. Build-artifact retention
+
+New GCP project, Cloud Function, or versioned-bucket stacks ship WITH retention — auto-created build resources grow unbounded otherwise (PR #835: 64 images / ~1.9 GB had silently accumulated in governance-watchdog's `gcf-artifacts`).
+
+- [ ] Gen2 Cloud Functions / Cloud Build stacks own their auto-created `gcf-artifacts` repo in Terraform (one-time `import` block, deleted right after the adopting apply) with `cleanup_policies`: `DELETE` older-than + `KEEP` most-recent-versions. Checkov's CMEK finding (CKV_GCP_84) gets an inline skip — the repo is Cloud-Functions-managed and CMEK would force recreation
+- [ ] Versioned GCS buckets have a `lifecycle_rule`. Use age-based `days_since_noncurrent_time` with `with_state = "ARCHIVED"`, NOT `num_newer_versions`, when object names embed a content hash — each deploy writes a new name, so an old name's archived generation never gains newer versions and a generation-count condition never fires (it also counts the live version)
+
+## 7. Pre-apply rituals
 
 - [ ] `pnpm infra:plan` ALWAYS before apply; read every `# ... will be destroyed` line
 - [ ] If the plan touches `google_cloud_run_v2_service`, double-check that image/API bookkeeping drift is ignored and probe paths still match the deployed app
 - [ ] After apply, hit the public URL once and confirm a 200 from `/health` — Cloud Run can return 503s for ~30s while the new revision rolls
 
-## 7. Lessons already paid for
+## 8. Lessons already paid for
 
 - PR #199 — `/healthz` returned a Google-branded 404 because Cloud Run v2 reserves the path; moved bridge health to `/health`
 - PR #197 — bootstrap IAM only gated API enablement, not the project-level grants the impersonated SA needed
 - PR #198 — Cloud Run rejected `256Mi` because `cpu_idle = false` requires `≥512Mi`
 - PR #200 — Workload Identity Federation deploy failed at `getAccessToken` because deployer SA lacked `roles/iam.serviceAccountTokenCreator` on the runtime SA
 - PR #201 — removing `count` without `moved` blocks would have planned destroy on a `deletion_protection = true` service; default `gcr.io/cloudrun/hello:latest` would have failed `/health` probes; revision suffixes derived from raw SHA can start with a digit and fail the deploy
+- PR #835 — governance-watchdog's auto-created `gcf-artifacts` repo had accumulated 64 build images (~1.9 GB) with no retention; the first lifecycle attempt used `num_newer_versions`, which never fires for hash-named source zips — replaced with age-based expiry in review
