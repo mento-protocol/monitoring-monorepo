@@ -1,4 +1,4 @@
-import { MessageBuilder } from "./message-builder.base";
+import { MessageBuilder } from "./message-builder.base.js";
 
 /**
  * Telegram message builder for proposal events

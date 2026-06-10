@@ -21,7 +21,7 @@ deploy_via_gcloud() {
 		--impersonate-service-account "${terraform_service_account}" \
 		--project "${project_id}" \
 		--region "${region}" \
-		--runtime nodejs20 \
+		--runtime nodejs22 \
 		--service-account "${project_service_account}" \
 		--source . \
 		--trigger-http

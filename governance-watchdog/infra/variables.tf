@@ -87,6 +87,13 @@ variable "quicknode_api_key" {
 
 # You can look this up via:
 #  `gcloud secrets list`
+variable "quicknode_api_key_secret_id" {
+  type    = string
+  default = "quicknode-api-key"
+}
+
+# You can look this up via:
+#  `gcloud secrets list`
 variable "quicknode_security_token_secret_id" {
   type    = string
   default = "quicknode-security-token"

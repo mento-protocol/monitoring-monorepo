@@ -136,7 +136,9 @@ const handleQuicknodeWebhook = async (
   let eventsDeduplicated = 0;
 
   for (const quicknodeEvent of parseRequestBody(req.body)) {
-    // Skip duplicated events to prevent sending multiple notifications
+    // Skip duplicated events to prevent sending multiple notifications.
+    // Note: isDuplicate registers the event as seen immediately, even if
+    // processing then fails — see the invariant note in utils/event-deduplication.ts.
     if (isDuplicate(quicknodeEvent)) {
       eventsDeduplicated++;
       continue;
@@ -167,6 +169,12 @@ export const governanceWatchdog: HttpFunction = async (
   try {
     // Route based on path
     if (req.path === "/quicknode-health") {
+      // Deliberately unauthenticated (documented tradeoff, like the function's
+      // public ingress — see infra/cloud_function.tf): the endpoint is read-only,
+      // leaks nothing sensitive (webhook names/statuses only), and Cloud
+      // Scheduler's hourly OIDC-signed call is not verified app-side to keep
+      // this path dependency-free. Cost of an unauthenticated hit is one
+      // Secret Manager read + one QuickNode API call, bounded by quota.
       await handleQuicknodeHealthCheck(req, res);
       return;
     }

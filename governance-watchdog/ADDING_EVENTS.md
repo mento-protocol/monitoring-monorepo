@@ -55,7 +55,7 @@ function main(data) {
 }
 ```
 
-**Deploy the updated filter to QuickNode** using the deploy script:
+**Deploy the updated filter to QuickNode** using the deploy script (commit your filter changes first — the script refuses dirty working trees):
 
 ```bash
 # Deploy a specific webhook
@@ -123,7 +123,7 @@ Once your filter function works correctly:
 
    Keep only the events your handler actually uses — this reduces Cloud Function invocation volume.
 
-3. **Deploy to the permanent webhook** via:
+3. **Deploy to the permanent webhook** (commit your filter changes first — the script refuses dirty working trees):
 
    ```bash
    ./bin/deploy-quicknode-filter.sh --webhook <healthcheck|governor>

@@ -8,15 +8,13 @@ minimumReleaseAgeExclude:
   - "@envio-dev/envio-cloud-*"
 
 overrides:
-  # Exact pin for the same reason as undici below: ranges resolve forward on
-  # fresh installs. 3.4.2 is what both the standalone npm lockfile and this
-  # lockfile resolve today.
+  # Exact pin because ranges resolve forward on fresh installs. 3.4.2 is what
+  # both the standalone npm lockfile and this lockfile resolve today.
   flatted: 3.4.2
-  # Exact pin, not a range: ">=6.24.0" resolved to undici 8.x on a fresh
-  # install, and @discordjs/rest 2.6.1 crashes against undici 8's stricter
-  # Headers webidl (Symbol(sensitiveHeaders) → TypeError) while wrapping the
-  # response — sends deliver but report as failures and rate-limit headers
-  # are never read. 7.24.2 is what the last working standalone deploy ran
-  # (npm package-lock) and satisfies the original >=6.24.0 security floor.
-  # Upgrade path (bump discord.js, then drop this): issue #833.
-  undici: 7.24.2
+  # No undici override: discord.js and @discordjs/rest both pin undici EXACTLY
+  # (6.24.1 as of discord.js 14.26.4), which already satisfies the >=6.24.0
+  # security floor from the 2026 advisory batch. Overriding past their pin is
+  # what broke prod once (undici 8's stricter Headers webidl rejects
+  # Symbol(sensitiveHeaders) in @discordjs/rest's response wrapping — sends
+  # deliver but report as failures; see issue #833). If a future undici
+  # advisory lands, bump discord.js instead of re-adding an override.

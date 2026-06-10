@@ -16,6 +16,8 @@ set -euo pipefail
 #   - gcloud CLI authenticated with access to the governance-watchdog project
 #   - curl, python3 available
 #   - QuickNode API key stored in GCP Secret Manager as "quicknode-api-key"
+#     (override with QUICKNODE_API_KEY_SECRET_ID if the Terraform variable
+#     quicknode_api_key_secret_id is customized — see infra/variables.tf)
 # =============================================================================
 
 WEBHOOK_TARGET="${1:-all}"
@@ -26,6 +28,16 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 FILTER_DIR="${REPO_ROOT}/infra/quicknode-filter-functions"
+
+# Deploy scripts must refuse dirty working trees before mutating external
+# systems (scripts/AGENTS.md). This script PATCHes the live QuickNode webhook
+# templates from local filter files, so uncommitted edits would ship unreviewed.
+# -C pins the check to the repo the filter files are read from, not the cwd.
+if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain)" ]]; then
+	echo "❌ Working directory is not clean. Commit or stash your changes first."
+	git -C "${REPO_ROOT}" status --short
+	exit 1
+fi
 
 # Webhook IDs (from QuickNode API)
 # Webhook IDs are server-assigned by QuickNode and will change if webhooks are deleted and recreated.
@@ -75,7 +87,7 @@ fetch_api_key() {
 		exit 1
 	fi
 	QN_API_KEY=$(gcloud secrets versions access latest \
-		--secret=quicknode-api-key \
+		--secret="${QUICKNODE_API_KEY_SECRET_ID:-quicknode-api-key}" \
 		--project="${project_id}" 2>/dev/null)
 	if [[ -z ${QN_API_KEY} ]]; then
 		echo "❌ Could not fetch QuickNode API key from Secret Manager."

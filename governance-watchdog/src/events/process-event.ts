@@ -1,4 +1,4 @@
-import { eventRegistry } from "./registry";
+import { eventRegistry } from "./registry.js";
 import { EventType, QuicknodeEvent } from "./types.js";
 
 /**

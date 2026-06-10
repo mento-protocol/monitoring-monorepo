@@ -114,7 +114,13 @@ export function isDuplicate(event: QuicknodeEvent): boolean {
     }
   }
 
-  // Update the cache
+  // INVARIANT (deliberate tradeoff): the event is registered as seen BEFORE the
+  // caller runs processEvent. If downstream delivery (Discord/Telegram) then
+  // fails, a QuickNode retry within DEDUPLICATION_WINDOW_MS is dropped — we
+  // prefer a missed notification over duplicate notification spam. Retries
+  // after the window (or ones landing on another instance — this cache is
+  // per-instance memory) are processed normally. Do not move this set() to
+  // after processing without revisiting that tradeoff.
   processedEvents.set(eventId, now);
 
   if (process.env.DEBUG) {

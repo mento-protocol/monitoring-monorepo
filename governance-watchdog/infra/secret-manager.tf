@@ -66,7 +66,7 @@ resource "google_secret_manager_secret_version" "x_auth_token" {
 # Creates a new secret for the Quicknode Security Token which is used to verify that requests to the Cloud Function are coming from Quicknode.
 resource "google_secret_manager_secret" "quicknode_security_token" {
   project   = module.governance_watchdog.project_id
-  secret_id = "quicknode-security-token"
+  secret_id = var.quicknode_security_token_secret_id
 
   replication {
     auto {}
@@ -82,7 +82,7 @@ resource "google_secret_manager_secret_version" "quicknode_security_token" {
 # for webhook health status monitoring.
 resource "google_secret_manager_secret" "quicknode_api_key" {
   project   = module.governance_watchdog.project_id
-  secret_id = "quicknode-api-key"
+  secret_id = var.quicknode_api_key_secret_id
 
   replication {
     auto {}
