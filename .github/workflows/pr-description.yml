@@ -104,13 +104,22 @@ jobs:
             insec && /^##[[:space:]]/ { insec = 0 }
             insec { print }
           ' <<<"$fence_stripped")
-          # "None" must be the section's explicit value — a line that is
-          # exactly `None` (optionally as a `-`/`*` list item, optional
-          # trailing period). Prose that merely contains the word ("None of
-          # the follow-ups are tracked yet") does NOT satisfy the check.
-          if ! grep -qiE '^[[:space:]]*([-*][[:space:]]+)?none[[:space:]]*\.?[[:space:]]*$' <<<"$deferrals" \
-             && ! grep -qE '#[0-9]+|github\.com/[^[:space:]]+/issues/[0-9]+' <<<"$deferrals"; then
-            echo "::error::The '## Deferrals' section must either be exactly 'None' (own line / list item) or reference at least one GitHub issue (#123 or an issues URL) per knowing deferral. Create the issue first (problem description + solution ideas if you have them), then link it here."
+          # "None" satisfies the gate only when it is the section's SOLE
+          # non-blank content — every non-blank line must be exactly `None`
+          # (optionally a `-`/`*` list item, optional trailing period).
+          # Prose containing the word ("None of the follow-ups are tracked
+          # yet"), or a leftover `- None` next to an added untracked
+          # deferral line, does NOT pass; any other content requires an
+          # issue reference.
+          deferrals_nonblank=$(grep -vE '^[[:space:]]*$' <<<"$deferrals" || true)
+          none_only=false
+          if [ -n "$deferrals_nonblank" ] \
+             && ! grep -qviE '^[[:space:]]*([-*][[:space:]]+)?none[[:space:]]*\.?[[:space:]]*$' <<<"$deferrals_nonblank"; then
+            none_only=true
+          fi
+          if [ "$none_only" != true ] \
+             && ! grep -qE '#[0-9]+|github\.com/[^[:space:]]+/issues/[0-9]+' <<<"$deferrals_nonblank"; then
+            echo "::error::The '## Deferrals' section must either be exactly 'None' (as its only content) or reference a GitHub issue (#123 or an issues URL) for each knowing deferral. Create the issue first (problem description + solution ideas if you have them), then link it here."
             exit 1
           fi
 
