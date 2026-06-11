@@ -89,7 +89,7 @@ function reserveYieldForecastTooltip(
       ? "- sUSDS APY is unavailable until the Sky Savings Rate feed loads"
       : `- sUSDS APY uses the Sky Savings Rate (${formatAnnualInterestRatePercent(data.skySavingsRateApyPercent)}) from Block Analitica`;
   const remainingUnavailableSymbols = forecastUnavailableSymbols.filter(
-    (symbol) => !["AUSD", "sUSDS"].includes(symbol),
+    (symbol) => !["AUSD", "SUSDS"].includes(symbol),
   );
   const exclusions =
     remainingUnavailableSymbols.length === 0

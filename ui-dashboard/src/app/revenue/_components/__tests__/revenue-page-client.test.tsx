@@ -95,7 +95,7 @@ const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
       annualRunRateUsd: 79.2,
     },
     {
-      id: "ethereum:wallet:0xops:ops:0",
+      id: "AUSD:ethereum:wallet:0xops:ops:0",
       assetSymbol: "AUSD",
       chain: "ethereum",
       sourceType: "wallet",
@@ -114,7 +114,7 @@ const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
       annualRunRateUsd: 62.16,
     },
     {
-      id: "monad:fpmm:0xfpmm:ops:0",
+      id: "AUSD:monad:fpmm:0xfpmm:ops:0",
       assetSymbol: "AUSD",
       chain: "monad",
       sourceType: "fpmm",
@@ -435,7 +435,7 @@ describe("RevenuePageClient degraded fee states", () => {
         next30dUsd: null,
         next365dUsd: null,
         annualRunRateUsd: null,
-        forecastUnavailableSymbols: ["AUSD", "sUSDS"],
+        forecastUnavailableSymbols: ["AUSD", "SUSDS"],
         holdings: RESERVE_YIELD_WITH_HOLDINGS.holdings.map((holding) => ({
           ...holding,
           apyPercent: null,

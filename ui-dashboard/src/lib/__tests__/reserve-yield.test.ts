@@ -161,6 +161,12 @@ describe("reserve yield parsing and math", () => {
     ).toBeCloseTo(3.6, 12);
   });
 
+  it("rejects Sky Savings Rate values that are already percentages", () => {
+    expect(() =>
+      parseSkySavingsRateApyPercent({ sky_savings_rate_apy: "3.6" }),
+    ).toThrow("expected a decimal fraction");
+  });
+
   it("applies the provider APY formula", () => {
     expect(computeNetMentoApyPercent(5.33)).toBeCloseTo(4.144, 6);
   });

@@ -207,7 +207,34 @@ describe("GET /api/reserve-yield", () => {
     expect(body.rateError).toContain("Sky Savings Rate");
     expect(body.annualRunRateUsd).toBeCloseTo(41.44, 6);
     expect(body.holdings[0].dailyRunRateUsd).toBeNull();
-    expect(body.forecastUnavailableSymbols).toEqual(["sUSDS"]);
+    expect(body.forecastUnavailableSymbols).toEqual(["SUSDS"]);
+  });
+
+  it("returns null forecasts when both rate feeds fail", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_YIELD_COMPONENTS))
+      .mockResolvedValueOnce(new Response("fred down", { status: 503 }))
+      .mockResolvedValueOnce(new Response("sky down", { status: 503 }));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.principalUsd).toBe(3200);
+    expect(body.forecastPrincipalUsd).toBeNull();
+    expect(body.grossApyPercent).toBeNull();
+    expect(body.netMentoApyPercent).toBeNull();
+    expect(body.skySavingsRateApyPercent).toBeNull();
+    expect(body.rateError).toContain("FRED FEDFUNDS");
+    expect(body.rateError).toContain("Sky Savings Rate");
+    expect(body.dailyRunRateUsd).toBeNull();
+    expect(body.next30dUsd).toBeNull();
+    expect(body.next365dUsd).toBeNull();
+    expect(body.annualRunRateUsd).toBeNull();
+    expect(body.holdings[0].dailyRunRateUsd).toBeNull();
+    expect(body.holdings[1].dailyRunRateUsd).toBeNull();
+    expect(body.forecastUnavailableSymbols).toEqual(["AUSD", "SUSDS"]);
   });
 
   it("does not emit zero-dollar estimates for malformed yield-bearing numeric fields", async () => {

@@ -361,7 +361,7 @@ function buildForecastTotals(
   const unavailableSymbols = new Set<string>();
   for (const holding of modeledHoldings) {
     if (holding.apyPercent === null) {
-      unavailableSymbols.add(holding.assetSymbol);
+      unavailableSymbols.add(holding.assetSymbol.toUpperCase());
     } else {
       forecastableHoldings.push(holding);
     }
@@ -429,7 +429,13 @@ export function parseSkySavingsRateApyPercent(payload: unknown): number {
   for (const record of records) {
     if (!isRecord(record)) continue;
     const rate = numericField(record.sky_savings_rate_apy);
-    if (rate !== null) return rate * 100;
+    if (rate === null) continue;
+    if (rate > 1) {
+      throw new Error(
+        `sky_savings_rate_apy looks like a percent (${rate}), expected a decimal fraction`,
+      );
+    }
+    return rate * 100;
   }
 
   throw new Error("Sky overall response did not contain sky_savings_rate_apy");
