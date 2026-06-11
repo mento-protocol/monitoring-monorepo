@@ -6,6 +6,7 @@ import { formatUSD } from "@/lib/format";
 import type { NetworkData } from "@/lib/fetch-all-networks";
 import { useCdpBorrowingRevenue } from "@/hooks/use-cdp-borrowing-revenue";
 import type { CdpBorrowingRevenueMarket } from "@/lib/cdp-borrowing-revenue";
+import { useReserveYield } from "@/hooks/use-reserve-yield";
 import { useProtocolFees } from "@/hooks/use-protocol-fees";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { FeeOverTimeChart } from "@/components/fee-over-time-chart";
@@ -13,9 +14,13 @@ import {
   CdpBorrowingFeesTile,
   type CdpBorrowingFeesTileState,
 } from "./cdp-borrowing-fees-tile";
+import {
+  ReserveYieldByHoldingTable,
+  ReserveYieldTile,
+  type ReserveYieldTileState,
+} from "./reserve-yield-components";
 import { Tooltip } from "@/components/tooltip";
 import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
-import { ComingSoonSection } from "@/components/coming-soon-section";
 import { Row, Table, Td, Th } from "@/components/table";
 
 // Table fee columns are GROSS (borrower-side fees, before the SP yield
@@ -158,6 +163,7 @@ function RevenueContent() {
     isLoading: isCdpBorrowingRevenueLoading,
     hasError: hasCdpBorrowingRevenueError,
   } = useCdpBorrowingRevenue();
+  const reserveYieldState = useReserveYield();
 
   const anyNetworkError = networkData.some((n) => n.error !== null);
   // Tile + chart + table all read from snapshots since PR-snapshot-3.
@@ -211,6 +217,7 @@ function RevenueContent() {
           isLoading: isCdpBorrowingRevenueLoading,
           hasError: hasCdpBorrowingRevenueError,
         }}
+        reserveYield={reserveYieldState}
       />
 
       <FeeOverTimeChart
@@ -241,9 +248,10 @@ function RevenueContent() {
       </div>
 
       <div className="grid grid-cols-1 gap-6">
-        <ComingSoonSection
-          title="Reserve Yield"
-          description="Yield generated on reserve assets (USDS savings rate, etc.). Requires external data source integration."
+        <ReserveYieldByHoldingTable
+          data={reserveYieldState.data}
+          isLoading={reserveYieldState.isLoading}
+          hasError={reserveYieldState.hasError}
         />
       </div>
     </div>
@@ -253,16 +261,18 @@ function RevenueContent() {
 function RevenueSummaryTiles({
   swapFees,
   cdpBorrowingFees,
+  reserveYield,
 }: {
   swapFees: SwapFeesTileState;
   cdpBorrowingFees: CdpBorrowingFeesTileState;
+  reserveYield: ReserveYieldTileState;
 }) {
   return (
     <section>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <SwapFeesTile state={swapFees} />
         <CdpBorrowingFeesTile state={cdpBorrowingFees} />
-        <ReserveYieldTile />
+        <ReserveYieldTile state={reserveYield} />
       </div>
     </section>
   );
@@ -515,26 +525,5 @@ function CdpBorrowingFeesByMarketTable({
         </tbody>
       </Table>
     </section>
-  );
-}
-
-function ReserveYieldTile() {
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px] opacity-60">
-      <div>
-        <div className="flex items-center gap-2">
-          <p className="text-sm text-slate-400">Reserve Yield</p>
-          <span className="rounded-full bg-slate-700 px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider text-slate-400">
-            Soon
-          </span>
-        </div>
-        <p className="mt-1 text-2xl font-semibold text-slate-600 font-mono">
-          —
-        </p>
-      </div>
-      <p className="mt-2 text-xs text-slate-600 min-h-4">
-        Requires external data integration
-      </p>
-    </div>
   );
 }

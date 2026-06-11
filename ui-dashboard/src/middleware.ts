@@ -6,17 +6,21 @@ const authConfigured = !!(
   process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
 );
 
-function isAddressBookPath(path: string) {
-  return (
-    path === "/address-book" ||
-    path.startsWith("/address-book/") ||
-    path === "/entities" ||
-    path.startsWith("/entities/")
-  );
+const PROTECTED_PAGE_PREFIXES = [
+  "/address-book",
+  "/entities",
+  "/integrations",
+  "/revenue",
+] as const;
+
+function matchesPathPrefix(path: string, prefix: string) {
+  return path === prefix || path.startsWith(`${prefix}/`);
 }
 
-function isIntegrationsPath(path: string) {
-  return path === "/integrations" || path.startsWith("/integrations/");
+function isProtectedPagePath(path: string) {
+  return PROTECTED_PAGE_PREFIXES.some((prefix) =>
+    matchesPathPrefix(path, prefix),
+  );
 }
 
 function isProtectedAddressLabelsApi(path: string) {
@@ -30,6 +34,12 @@ function isProtectedAddressLabelsApi(path: string) {
     (path.startsWith("/api/address-labels/") &&
       !path.startsWith("/api/address-labels/backup") &&
       !path.startsWith("/api/address-labels/restore"))
+  );
+}
+
+function isProtectedReserveYieldApi(path: string) {
+  return (
+    path === "/api/reserve-yield" || path.startsWith("/api/reserve-yield/")
   );
 }
 
@@ -64,8 +74,8 @@ function authMisconfiguredResponse(csp: string, isApi: boolean) {
 //    to apply the nonce to its own inline <script> injections (RSC payload,
 //    hydration). We echo the CSP on the response so the browser enforces it.
 //
-// 2. Auth protection — /address-book and /api/address-labels require a
-//    verified @mentolabs.xyz session. `auth(callback)` from NextAuth v5
+// 2. Auth protection — private pages/APIs require a verified
+//    @mentolabs.xyz session. `auth(callback)` from NextAuth v5
 //    attaches `.auth` (session) to the request before calling the callback.
 export default auth((req) => {
   // 1. Nonce + CSP
@@ -76,8 +86,9 @@ export default auth((req) => {
 
   // 2. Auth checks (protected paths only)
   const path = req.nextUrl.pathname;
-  const isProtectedPage = isAddressBookPath(path) || isIntegrationsPath(path);
-  const isProtectedApi = isProtectedAddressLabelsApi(path);
+  const isProtectedPage = isProtectedPagePath(path);
+  const isProtectedApi =
+    isProtectedAddressLabelsApi(path) || isProtectedReserveYieldApi(path);
 
   if (isProtectedPage || isProtectedApi) {
     if (!authConfigured) {
