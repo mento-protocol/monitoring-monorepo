@@ -8,6 +8,7 @@ import { initializeEventRegistry } from "./events/registry.js";
 import { EventType } from "./events/types.js";
 import { checkWebhookStatus } from "./quicknode-health/index.js";
 import { getCacheSize, isDuplicate } from "./utils/event-deduplication.js";
+import logError from "./utils/log-error.js";
 import parseRequestBody from "./utils/parse-request-body.js";
 import {
   hasAuthToken,
@@ -64,11 +65,13 @@ const handleQuicknodeHealthCheck = async (
       );
       res.status(200).send("All QuickNode webhooks are healthy");
     } else {
-      // Log as ERROR to trigger Slack alert via error_logs_policy
-      console.error(
+      // Structured ERROR severity so these feed the cloud-function-errors
+      // Slack alert via error_logs_policy (plain console.error lands as
+      // severity DEFAULT and is invisible to the metric)
+      logError(
         `[QuickNodeHealth] ❌ Unhealthy webhooks detected: ${result.unhealthyWebhooks.join(", ")}`,
       );
-      console.error(
+      logError(
         `[QuickNodeHealth] Webhook statuses: ${JSON.stringify(result.webhooks)}`,
       );
       res
@@ -78,7 +81,7 @@ const handleQuicknodeHealthCheck = async (
   } catch (error) {
     const requestDuration = Date.now() - requestStartTime;
     // Include timing in error log to help diagnose timeouts
-    console.error(
+    logError(
       `[QuickNodeHealth] ❌ Failed to check webhook status after ${String(requestDuration)}ms:`,
       error,
     );
@@ -124,7 +127,7 @@ const handleQuicknodeWebhook = async (
   }
 
   if (req.body && typeof req.body === "object" && "error" in req.body) {
-    console.error(
+    logError(
       "❌ Request body contains an error:",
       (req.body as { error: unknown }).error,
     );
@@ -182,7 +185,7 @@ export const governanceWatchdog: HttpFunction = async (
     // Default: handle QuickNode webhook events
     await handleQuicknodeWebhook(req, res);
   } catch (error) {
-    console.error("Error processing request:", error);
+    logError("Error processing request:", error);
     res.status(500).send("Something went wrong 🤔");
   }
 };
