@@ -6,6 +6,7 @@ import type {
   CdpBorrowingRevenueMarket,
   CdpBorrowingRevenueSummary,
 } from "@/lib/cdp-borrowing-revenue";
+import type { ReserveYieldResponse } from "@/lib/reserve-yield";
 import { makeNetworkData } from "@/test-utils/network-fixtures";
 
 type FeeChartProps = {
@@ -24,6 +25,7 @@ type RevenueTableProps = {
 
 const mockUseProtocolFees = vi.hoisted(() => vi.fn());
 const mockUseCdpBorrowingRevenue = vi.hoisted(() => vi.fn());
+const mockUseReserveYield = vi.hoisted(() => vi.fn());
 const capturedProps = vi.hoisted(() => ({
   chart: null as FeeChartProps | null,
   table: null as RevenueTableProps | null,
@@ -41,6 +43,95 @@ const EMPTY_CDP_REVENUE: CdpBorrowingRevenueSummary = {
   activeInterestBracketCount: 0,
   unpricedSymbols: [],
   bracketsTruncated: false,
+};
+
+const EMPTY_RESERVE_YIELD: ReserveYieldResponse = {
+  principalUsd: 0,
+  forecastPrincipalUsd: null,
+  earnedYieldUsd: null,
+  holdings: [],
+  holdingsAsOf: "2026-06-11T12:00:00.000Z",
+  grossApyPercent: 5.33,
+  fedfundsAsOf: "2026-05-01",
+  expenseBps: 15,
+  revenueShareBps: 8000,
+  netMentoApyPercent: 4.144,
+  dailyRunRateUsd: 0,
+  next30dUsd: 0,
+  next365dUsd: 0,
+  annualRunRateUsd: 0,
+  forecastUnavailableSymbols: [],
+  holdingsError: null,
+  rateError: null,
+};
+
+const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
+  ...EMPTY_RESERVE_YIELD,
+  principalUsd: 4700,
+  forecastPrincipalUsd: 2500,
+  dailyRunRateUsd: 0.2838356164383562,
+  next30dUsd: 8.515068493150686,
+  next365dUsd: 103.6,
+  annualRunRateUsd: 103.6,
+  forecastUnavailableSymbols: ["sUSDS"],
+  holdings: [
+    {
+      id: "susds:ethereum:wallet:0xreserve:cold:0",
+      assetSymbol: "sUSDS",
+      chain: "ethereum",
+      sourceType: "wallet",
+      sourceLabel: "Reserve Safe",
+      identifier: "0xreserve",
+      custodianType: "cold",
+      balance: 2000,
+      principalUsd: 2200,
+      earnedYieldUsd: null,
+      apyPercent: null,
+      yieldModel: "APY source pending",
+      dailyRunRateUsd: null,
+      next30dUsd: null,
+      next365dUsd: null,
+      annualRunRateUsd: null,
+    },
+    {
+      id: "ethereum:wallet:0xops:ops:0",
+      assetSymbol: "AUSD",
+      chain: "ethereum",
+      sourceType: "wallet",
+      sourceLabel: "Ops Safe",
+      identifier: "0xops",
+      custodianType: "ops",
+      balance: 1500,
+      principalUsd: 1500,
+      earnedYieldUsd: null,
+      apyPercent: 4.144,
+      yieldModel:
+        "FEDFUNDS minus 15 bps expenses, then 80% Mento revenue share",
+      dailyRunRateUsd: 0.1703013698630137,
+      next30dUsd: 5.109041095890411,
+      next365dUsd: 62.16,
+      annualRunRateUsd: 62.16,
+    },
+    {
+      id: "monad:fpmm:0xfpmm:ops:0",
+      assetSymbol: "AUSD",
+      chain: "monad",
+      sourceType: "fpmm",
+      sourceLabel: "FPMM AUSD / USDm",
+      identifier: "0xfpmm",
+      custodianType: "ops",
+      balance: 1000,
+      principalUsd: 1000,
+      earnedYieldUsd: null,
+      apyPercent: 4.144,
+      yieldModel:
+        "FEDFUNDS minus 15 bps expenses, then 80% Mento revenue share",
+      dailyRunRateUsd: 41.44 / 365,
+      next30dUsd: (41.44 * 30) / 365,
+      next365dUsd: 41.44,
+      annualRunRateUsd: 41.44,
+    },
+  ],
 };
 
 function cdpMarket(
@@ -80,6 +171,10 @@ vi.mock("@/hooks/use-protocol-fees", () => ({
 
 vi.mock("@/hooks/use-cdp-borrowing-revenue", () => ({
   useCdpBorrowingRevenue: () => mockUseCdpBorrowingRevenue(),
+}));
+
+vi.mock("@/hooks/use-reserve-yield", () => ({
+  useReserveYield: () => mockUseReserveYield(),
 }));
 
 vi.mock("@/components/fee-over-time-chart", () => ({
@@ -123,6 +218,15 @@ function renderRevenue(
     isLoading: false,
     hasError: false,
   },
+  reserveYield: {
+    data: ReserveYieldResponse | null;
+    isLoading: boolean;
+    hasError: boolean;
+  } = {
+    data: EMPTY_RESERVE_YIELD,
+    isLoading: false,
+    hasError: false,
+  },
 ) {
   mockUseProtocolFees.mockReturnValue({ networkData, isLoading });
   mockUseCdpBorrowingRevenue.mockReturnValue({
@@ -133,6 +237,7 @@ function renderRevenue(
     dailySeriesFailed: false,
     ...cdpRevenue,
   });
+  mockUseReserveYield.mockReturnValue(reserveYield);
   return renderToStaticMarkup(<RevenuePageClient />);
 }
 
@@ -140,6 +245,7 @@ describe("RevenuePageClient degraded fee states", () => {
   beforeEach(() => {
     mockUseProtocolFees.mockReset();
     mockUseCdpBorrowingRevenue.mockReset();
+    mockUseReserveYield.mockReset();
     capturedProps.chart = null;
     capturedProps.table = null;
   });
@@ -257,9 +363,108 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("$187.50");
     expect(html).not.toContain("Requires Liquity v2 indexing");
     expect(html).toContain("Reserve Yield");
-    expect(html).toContain("Requires external data source integration");
+    expect(html).toContain("No yield-bearing reserve holdings returned");
     expect(capturedProps.chart).toMatchObject({
       isBorrowingFeesApproximate: false,
+    });
+  });
+
+  it("renders reserve yield earned headline, forecasts, and component table", () => {
+    const html = renderRevenue([], false, undefined, {
+      data: RESERVE_YIELD_WITH_HOLDINGS,
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain("Reserve Yield");
+    expect(html).toContain("N/A");
+    expect(html).toContain("earned");
+    expect(html).toContain("$8.52");
+    expect(html).toContain("per month");
+    expect(html).toContain("$103.60");
+    expect(html).toContain("per year");
+    expect(html).toContain("$4.7K");
+    expect(html).toContain("reserve assets earning yield");
+    expect(html).toContain('aria-label="About Reserve Yield forecast"');
+    expect(html).toContain("Annual Forecast based on blended APY");
+    expect(html).not.toContain("- Based on blended APY");
+    expect(html).toContain("current Fed Funds Rate");
+    expect(html).toContain("balance x APY x days / 365");
+    expect(html).toContain("sUSDS currently excluded");
+    expect(html).toContain("Reserve Yield Components");
+    expect(html).toContain("Balance");
+    expect(html).toContain("sUSDS");
+    expect(html).toContain("AUSD");
+    expect(html).toContain("Ethereum");
+    expect(html).toContain("Monad");
+    expect(html).toContain("Reserve Safe");
+    expect(html).toContain("Ops Safe");
+    expect(html).toContain("wallet / ops");
+    expect(html).toContain("FPMM AUSD / USDm");
+    expect(html).toContain('aria-label="Reserve yield components"');
+  });
+
+  it("shows reserve yield loading state before the route resolves", () => {
+    const html = renderRevenue([], false, undefined, {
+      data: null,
+      isLoading: true,
+      hasError: false,
+    });
+
+    expect(html).toContain("Reserve Yield");
+    expect(html).toContain("Loading reserve yield");
+    expect(html).toContain("Reserve Yield Components");
+    expect(html).toContain("Loading…");
+  });
+
+  it("keeps AUSD balance visible when FEDFUNDS is unavailable", () => {
+    const html = renderRevenue([], false, undefined, {
+      data: {
+        ...RESERVE_YIELD_WITH_HOLDINGS,
+        grossApyPercent: null,
+        fedfundsAsOf: null,
+        netMentoApyPercent: null,
+        forecastPrincipalUsd: null,
+        dailyRunRateUsd: null,
+        next30dUsd: null,
+        next365dUsd: null,
+        annualRunRateUsd: null,
+        forecastUnavailableSymbols: ["AUSD", "sUSDS"],
+        holdings: RESERVE_YIELD_WITH_HOLDINGS.holdings.map((holding) => ({
+          ...holding,
+          apyPercent: null,
+          dailyRunRateUsd: null,
+          next30dUsd: null,
+          next365dUsd: null,
+          annualRunRateUsd: null,
+        })),
+        rateError: "FRED FEDFUNDS: HTTP 503",
+      },
+      isLoading: false,
+      hasError: true,
+    });
+
+    expect(html).toContain("forecast rates unavailable");
+    expect(html).toContain("$4.7K");
+    expect(html).toContain("Forecast rates are unavailable");
+    expect(html).toContain("showing balance without forecast");
+    expect(html).toContain("N/A");
+  });
+
+  it("does not pass reserve-yield forecasts into the Total Fees chart", () => {
+    renderRevenue([], false, undefined, {
+      data: RESERVE_YIELD_WITH_HOLDINGS,
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(capturedProps.chart).not.toBeNull();
+    expect(Object.keys(capturedProps.chart ?? {})).not.toContain(
+      "reserveYield",
+    );
+    expect(capturedProps.chart).toMatchObject({
+      borrowingFeeSeries: [],
+      hasBorrowingFeesError: false,
     });
   });
 

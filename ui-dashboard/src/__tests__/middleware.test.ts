@@ -139,6 +139,43 @@ describe("middleware auth routing", () => {
     expect(res!.headers.get("content-security-policy")).toBeDefined();
   });
 
+  it("redirects unauthenticated /revenue to /sign-in", () => {
+    const res = authCallback!(makeReq("/revenue"));
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(302);
+    const location = res!.headers.get("location") ?? "";
+    expect(location).toContain("/sign-in");
+    expect(location).toContain("callbackUrl=%2Frevenue");
+  });
+
+  it("allows authenticated /revenue through (returns 200 with CSP)", () => {
+    const res = authCallback!(makeReq("/revenue", { authenticated: true }));
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(200);
+    expect(res!.headers.get("content-security-policy")).toBeDefined();
+  });
+
+  it("redirects a non-mentolabs session on /revenue", () => {
+    const res = authCallback!(
+      makeReq("/revenue", { email: "attacker@gmail.com" }),
+    );
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(302);
+    expect(res!.headers.get("location") ?? "").toContain("/sign-in");
+  });
+
+  it("redirects an errored (revoked) session on /revenue", () => {
+    const res = authCallback!(
+      makeReq("/revenue", {
+        authenticated: true,
+        error: "RefreshTokenError",
+      }),
+    );
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(302);
+    expect(res!.headers.get("location") ?? "").toContain("/sign-in");
+  });
+
   it("redirects an errored (revoked) session on /integrations", () => {
     const res = authCallback!(
       makeReq("/integrations", {
@@ -177,6 +214,21 @@ describe("middleware auth routing", () => {
   it("returns 401 for unauthenticated /api/address-labels/export", () => {
     const res = authCallback!(makeReq("/api/address-labels/export"));
     expect(res!.status).toBe(401);
+  });
+
+  it("returns 401 for unauthenticated /api/reserve-yield", () => {
+    const res = authCallback!(makeReq("/api/reserve-yield"));
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(401);
+  });
+
+  it("allows authenticated /api/reserve-yield through (returns 200 with CSP)", () => {
+    const res = authCallback!(
+      makeReq("/api/reserve-yield", { authenticated: true }),
+    );
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(200);
+    expect(res!.headers.get("content-security-policy")).toBeDefined();
   });
 
   it("allows unauthenticated /api/address-labels/backup through (returns 200 with CSP)", () => {
@@ -281,6 +333,19 @@ describe("middleware auth routing", () => {
     expect(res!.headers.get("x-middleware-next")).not.toBe("1");
   });
 
+  it("fails closed for /revenue when OAuth env vars are missing at module load", async () => {
+    const callback = await importMiddlewareWithEnv({
+      authGoogleId: undefined,
+      authGoogleSecret: "test-secret",
+    });
+
+    const res = callback(makeReq("/revenue"));
+
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(503);
+    expect(res!.headers.get("x-middleware-next")).not.toBe("1");
+  });
+
   it("fails closed for protected APIs when OAuth env vars are missing at module load", async () => {
     const callback = await importMiddlewareWithEnv({
       authGoogleId: "test-id",
@@ -288,6 +353,19 @@ describe("middleware auth routing", () => {
     });
 
     const res = callback(makeReq("/api/address-labels", { method: "PUT" }));
+
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(503);
+    expect(res!.headers.get("x-middleware-next")).not.toBe("1");
+  });
+
+  it("fails closed for /api/reserve-yield when OAuth env vars are missing at module load", async () => {
+    const callback = await importMiddlewareWithEnv({
+      authGoogleId: "test-id",
+      authGoogleSecret: undefined,
+    });
+
+    const res = callback(makeReq("/api/reserve-yield"));
 
     expect(res).toBeDefined();
     expect(res!.status).toBe(503);

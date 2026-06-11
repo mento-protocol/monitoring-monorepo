@@ -12,10 +12,6 @@ import type { Network } from "@/lib/networks";
 // useSWR / useNetwork into the server bundle (codex P1 PR #372).
 export { HASURA_TIMEOUT_MS };
 
-// Re-export so callers that `import { GraphQLSchemaError } from "@/lib/graphql"`
-// continue to work without a second import path.
-export { GraphQLSchemaError };
-
 // Cache clients per Hasura URL so we don't recreate on every render
 const clientCache = new Map<string, GraphQLClient>();
 

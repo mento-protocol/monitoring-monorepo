@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "featureId": "feat_library_99392de0f4",
   "title": "Node source ui-dashboard/src/components#2",
-  "summary": "Node/TypeScript source group ui-dashboard/src/components#2 with 12 files.",
+  "summary": "Node/TypeScript source group ui-dashboard/src/components#2 with 11 files.",
   "kind": "library",
   "source": "node-source-group",
   "confidence": "medium",
@@ -41,10 +41,6 @@
     },
     {
       "path": "ui-dashboard/src/components/chain-icon.tsx",
-      "reason": "source group ui-dashboard/src/components#2"
-    },
-    {
-      "path": "ui-dashboard/src/components/coming-soon-section.tsx",
       "reason": "source group ui-dashboard/src/components#2"
     },
     {

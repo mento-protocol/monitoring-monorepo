@@ -94,7 +94,8 @@ Logged-out verification:
 - Use an isolated browser context, or clear both `authjs.session-token` and
   `__Secure-authjs.session-token` cookies for `127.0.0.1`.
 - Expect public pages to show `Sign in`.
-- Expect protected pages (`/address-book`, `/entities`, `/integrations`) to
+- Expect protected pages (`/address-book`, `/entities`, `/integrations`,
+  `/revenue`) to
   redirect to `/sign-in?callbackUrl=...` when auth env is configured.
 
 Logged-in verification:
