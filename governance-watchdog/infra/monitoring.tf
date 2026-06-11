@@ -81,6 +81,13 @@ resource "google_monitoring_alert_policy" "health_check_policy" {
 # =============================================================================
 
 # Creates a metric that counts ERROR-level logs in the watchdog cloud function.
+# Request logs are excluded: every paging-worthy error path emits one structured
+# ERROR line (src/utils/log-error.ts) AND returns a 5xx whose request log is
+# ALSO severity ERROR — counting both would let a single transient failure
+# (e.g. one QuickNode 522) hit the 2-in-5min burst threshold and re-introduce
+# the false pages that threshold was built to suppress. App-emitted ERROR lines
+# are the sole signal; they also carry context (which webhooks are unhealthy)
+# that bare 500 request entries lack.
 resource "google_logging_metric" "error_logs_metric" {
   project     = module.governance_watchdog.project_id
   name        = "error_logs_count"
@@ -89,6 +96,7 @@ resource "google_logging_metric" "error_logs_metric" {
     severity>=ERROR
     resource.type="cloud_run_revision"
     resource.labels.service_name="${google_cloudfunctions2_function.watchdog_notifications.name}"
+    -logName="projects/${module.governance_watchdog.project_id}/logs/run.googleapis.com%2Frequests"
   EOF
 }
 

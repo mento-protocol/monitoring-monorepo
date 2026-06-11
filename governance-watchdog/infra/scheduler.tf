@@ -31,9 +31,10 @@ resource "google_cloud_scheduler_job" "quicknode_health_check" {
   schedule    = "0 * * * *" # Every hour at minute 0
   time_zone   = "UTC"
 
-  # Note: If the health check fails, retries may generate multiple error logs which could
-  # trigger multiple Slack alerts. However, the error_logs_policy has a 60s aggregation
-  # window which should deduplicate alerts within that period.
+  # Note: If the health check fails persistently, the original attempt plus this
+  # retry produce two ERROR logs ~70s apart — which is exactly what lets the
+  # error_logs_policy's 2-in-5min burst threshold (300s aggregation window) fire
+  # for the hourly cadence, while a single transient failure stays below it.
   retry_config {
     retry_count          = 1 # Reduced from 3 to avoid alert spam if QuickNode API is down
     min_backoff_duration = "30s"
