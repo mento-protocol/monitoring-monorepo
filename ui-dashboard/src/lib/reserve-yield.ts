@@ -469,6 +469,18 @@ function joinErrors(...errors: Array<string | null>): string | null {
   return present.length === 0 ? null : present.join("; ");
 }
 
+function rateErrorForUnavailableForecasts(
+  forecastUnavailableSymbols: string[],
+  fedfundsError: string | null,
+  skyRateError: string | null,
+): string | null {
+  const unavailable = new Set(forecastUnavailableSymbols);
+  return joinErrors(
+    unavailable.has(FORECASTABLE_AUSD_SYMBOL) ? fedfundsError : null,
+    unavailable.has(FORECASTABLE_SUSDS_SYMBOL) ? skyRateError : null,
+  );
+}
+
 export async function fetchReserveYieldSnapshot({
   fetchImpl = fetch,
   now = new Date(),
@@ -554,6 +566,10 @@ export async function fetchReserveYieldSnapshot({
     annualRunRateUsd: forecast.annualRunRateUsd,
     forecastUnavailableSymbols: forecast.forecastUnavailableSymbols,
     holdingsError,
-    rateError: joinErrors(fedfundsError, skyRateError),
+    rateError: rateErrorForUnavailableForecasts(
+      forecast.forecastUnavailableSymbols,
+      fedfundsError,
+      skyRateError,
+    ),
   };
 }

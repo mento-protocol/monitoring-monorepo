@@ -53,6 +53,29 @@ const RESERVE_WITHOUT_YIELD_COMPONENTS = {
   },
 };
 
+const RESERVE_WITH_ONLY_SUSDS = {
+  collateral: {
+    assets: [
+      {
+        symbol: "sUSDS",
+        chain: "ethereum",
+        balance: "2000",
+        usd_value: 2200,
+        sources: [
+          {
+            type: "wallet",
+            label: "Reserve Safe",
+            identifier: "0xreserve-safe",
+            balance: "2000",
+            usd_value: 2200,
+            custodian_type: "cold",
+          },
+        ],
+      },
+    ],
+  },
+};
+
 async function loadRoute(): Promise<{
   GET: () => Promise<Response>;
 }> {
@@ -184,6 +207,29 @@ describe("GET /api/reserve-yield", () => {
     expect(body.dailyRunRateUsd).toBeCloseTo(79.2 / 365, 6);
     expect(body.holdings[0].dailyRunRateUsd).toBeCloseTo(79.2 / 365, 6);
     expect(body.forecastUnavailableSymbols).toEqual(["AUSD"]);
+  });
+
+  it("suppresses FRED errors when only sUSDS forecasts are shown", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_ONLY_SUSDS))
+      .mockResolvedValueOnce(new Response("fred down", { status: 503 }))
+      .mockResolvedValueOnce(
+        Response.json([{ sky_savings_rate_apy: "0.036" }]),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.principalUsd).toBe(2200);
+    expect(body.forecastPrincipalUsd).toBe(2200);
+    expect(body.grossApyPercent).toBeNull();
+    expect(body.netMentoApyPercent).toBeNull();
+    expect(body.skySavingsRateApyPercent).toBeCloseTo(3.6, 12);
+    expect(body.rateError).toBeNull();
+    expect(body.dailyRunRateUsd).toBeCloseTo(79.2 / 365, 6);
+    expect(body.forecastUnavailableSymbols).toEqual([]);
   });
 
   it("keeps AUSD forecasts when the Sky Savings Rate feed fails", async () => {
