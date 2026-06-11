@@ -32,7 +32,10 @@ describe("logError", () => {
 
     logError("request failed:", error);
 
-    const parsed = JSON.parse(loggedLine()) as { message: string };
+    const line = loggedLine();
+    // Stacks contain newlines; the JSON encoding must keep the entry single-line
+    expect(line).not.toContain("\n");
+    const parsed = JSON.parse(line) as { message: string };
     expect(parsed.message).toContain("request failed:");
     expect(parsed.message).toContain("Error: boom");
   });

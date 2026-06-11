@@ -67,7 +67,11 @@ const handleQuicknodeHealthCheck = async (
     } else {
       // Structured ERROR severity so these feed the cloud-function-errors
       // Slack alert via error_logs_policy (plain console.error lands as
-      // severity DEFAULT and is invisible to the metric)
+      // severity DEFAULT and is invisible to the metric).
+      // Two separate logError calls are intentional: together they satisfy the
+      // policy's 2-in-5min burst threshold within a single invocation, so
+      // unhealthy webhooks page on the first failing check instead of waiting
+      // for the Scheduler retry. Do not collapse into one call.
       logError(
         `[QuickNodeHealth] ❌ Unhealthy webhooks detected: ${result.unhealthyWebhooks.join(", ")}`,
       );
