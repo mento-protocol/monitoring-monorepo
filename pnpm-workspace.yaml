@@ -9,6 +9,15 @@ packages:
   - alerts/infra/oncall-announcer
   - governance-watchdog
 
+# No undici override on purpose (overrides live in package.json#pnpm.overrides,
+# which can't carry comments): discord.js/@discordjs/rest pin undici exactly
+# (6.24.1), and the other root-graph consumers' own ranges (@vercel/blob ^6.23.0,
+# jsdom ^7.24.5) resolve at or above the 6.24.0/7.24.0 advisory floor from the
+# 2026-03 GHSA batch. A range override forward-resolves the whole graph to
+# undici 8.x on fresh installs, which broke Discord delivery (#831/#833/#837).
+# If a future undici advisory lands, bump the consumers instead of re-adding a
+# blanket override.
+
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - "@mento-protocol/*"
