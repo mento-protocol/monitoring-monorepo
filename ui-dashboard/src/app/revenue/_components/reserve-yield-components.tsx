@@ -50,6 +50,12 @@ function reserveYieldSubtitle(state: ReserveYieldTileState): string {
   return "";
 }
 
+function reserveYieldRateBanner(data: ReserveYieldResponse): string {
+  return data.dailyRunRateUsd === null
+    ? "Forecast rates are unavailable — showing balances without forecast estimates."
+    : "Some forecast rates are unavailable — showing balances without forecast estimates where needed.";
+}
+
 function reserveYieldHasHoldings(data: ReserveYieldResponse | null): boolean {
   return (data?.holdings.length ?? 0) > 0;
 }
@@ -268,8 +274,7 @@ export function ReserveYieldByHoldingTable({
       ) : null}
       {data?.rateError != null ? (
         <p className="mb-3 text-xs text-amber-400/80">
-          Some forecast rates are unavailable — showing balance without forecast
-          estimates where needed.
+          {reserveYieldRateBanner(data)}
         </p>
       ) : null}
       <Table aria-label="Reserve yield components">

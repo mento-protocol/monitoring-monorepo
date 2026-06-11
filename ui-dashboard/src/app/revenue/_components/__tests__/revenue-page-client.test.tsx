@@ -452,8 +452,9 @@ describe("RevenuePageClient degraded fee states", () => {
 
     expect(html).toContain("forecast rates unavailable");
     expect(html).toContain("$4.7K");
-    expect(html).toContain("Some forecast rates are unavailable");
-    expect(html).toContain("showing balance without forecast");
+    expect(html).toContain("Forecast rates are unavailable");
+    expect(html).not.toContain("Some forecast rates are unavailable");
+    expect(html).toContain("showing balances without forecast");
     expect(html).toContain("N/A");
   });
 
