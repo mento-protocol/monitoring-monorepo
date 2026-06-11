@@ -4,6 +4,7 @@ import useSWR from "swr";
 import { fetchJsonOrThrow } from "@/lib/fetch-json";
 import type { ReserveYieldResponse } from "@/lib/reserve-yield";
 import { SWR_KEY_RESERVE_YIELD } from "@/lib/swr-keys";
+import { rateLimitAwareRetry } from "@/lib/gql-retry";
 
 const RESERVE_YIELD_REFRESH_MS = 5 * 60_000;
 
@@ -29,21 +30,8 @@ export function useReserveYield(): ReserveYieldResult {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
-      onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
-        if (
-          typeof document !== "undefined" &&
-          document.visibilityState === "hidden"
-        ) {
-          return;
-        }
-        if (retryCount >= 5) return;
-        setTimeout(
-          () => {
-            void revalidate({ retryCount });
-          },
-          Math.min(1_000 * 2 ** retryCount, 30_000),
-        );
-      },
+      errorRetryCount: 5,
+      onErrorRetry: rateLimitAwareRetry,
     },
   );
 

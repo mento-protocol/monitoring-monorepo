@@ -4,23 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReserveYieldResponse } from "@/lib/reserve-yield";
-
-type ReserveYieldRetryOptions = {
-  retryCount: number;
-};
+import { rateLimitAwareRetry } from "@/lib/gql-retry";
 
 type ReserveYieldSWRConfig = {
   refreshInterval: number;
   revalidateOnFocus: boolean;
   revalidateOnReconnect: boolean;
   refreshWhenHidden: boolean;
-  onErrorRetry: (
-    error: unknown,
-    key: string,
-    config: unknown,
-    revalidate: (options: ReserveYieldRetryOptions) => void,
-    options: ReserveYieldRetryOptions,
-  ) => void;
+  errorRetryCount: number;
+  onErrorRetry: unknown;
 };
 
 const swrMock = vi.hoisted(() => vi.fn());
@@ -67,48 +59,20 @@ describe("useReserveYield", () => {
       error: undefined,
       isLoading: false,
     });
-    vi.useFakeTimers();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
-  it("gates SWR error retries while the tab is hidden", () => {
+  it("wires the shared active-tab retry guard", () => {
     const { config } = renderReserveYieldProbe();
-    const revalidate = vi.fn();
-    vi.stubGlobal("document", { visibilityState: "hidden" });
-
-    config.onErrorRetry(new Error("boom"), "key", {}, revalidate, {
-      retryCount: 0,
-    });
-    vi.advanceTimersByTime(30_000);
 
     expect(config.revalidateOnFocus).toBe(false);
     expect(config.revalidateOnReconnect).toBe(false);
-    expect(revalidate).not.toHaveBeenCalled();
-  });
-
-  it("schedules visible-tab retries with a small cap", () => {
-    const { config } = renderReserveYieldProbe();
-    const revalidate = vi.fn();
-    vi.stubGlobal("document", { visibilityState: "visible" });
-
-    config.onErrorRetry(new Error("boom"), "key", {}, revalidate, {
-      retryCount: 2,
-    });
-    vi.advanceTimersByTime(3_999);
-    expect(revalidate).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    expect(revalidate).toHaveBeenCalledWith({ retryCount: 2 });
-
-    revalidate.mockClear();
-    config.onErrorRetry(new Error("boom"), "key", {}, revalidate, {
-      retryCount: 5,
-    });
-    vi.advanceTimersByTime(30_000);
-    expect(revalidate).not.toHaveBeenCalled();
+    expect(config.refreshWhenHidden).toBe(false);
+    expect(config.errorRetryCount).toBe(5);
+    expect(config.onErrorRetry).toBe(rateLimitAwareRetry);
   });
 
   it("surfaces source errors in hasError", () => {
