@@ -1,5 +1,5 @@
 const RESERVE_API_URL =
-  "https://mento-analytics-api-12390052758.us-central1.run.app//api/v2/reserve";
+  "https://mento-analytics-api-12390052758.us-central1.run.app/api/v2/reserve";
 const FEDFUNDS_CSV_URL =
   "https://fred.stlouisfed.org/graph/fredgraph.csv?id=FEDFUNDS";
 const FETCH_TIMEOUT_MS = 8_000;

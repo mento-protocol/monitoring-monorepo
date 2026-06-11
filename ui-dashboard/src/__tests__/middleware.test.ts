@@ -222,9 +222,24 @@ describe("middleware auth routing", () => {
     expect(res!.status).toBe(401);
   });
 
+  it("returns 401 for unauthenticated /api/reserve-yield sub-paths", () => {
+    const res = authCallback!(makeReq("/api/reserve-yield/holdings"));
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(401);
+  });
+
   it("allows authenticated /api/reserve-yield through (returns 200 with CSP)", () => {
     const res = authCallback!(
       makeReq("/api/reserve-yield", { authenticated: true }),
+    );
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(200);
+    expect(res!.headers.get("content-security-policy")).toBeDefined();
+  });
+
+  it("allows authenticated /api/reserve-yield sub-paths through (returns 200 with CSP)", () => {
+    const res = authCallback!(
+      makeReq("/api/reserve-yield/holdings", { authenticated: true }),
     );
     expect(res).toBeDefined();
     expect(res!.status).toBe(200);

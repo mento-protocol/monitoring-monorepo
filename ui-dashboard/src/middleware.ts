@@ -38,7 +38,9 @@ function isProtectedAddressLabelsApi(path: string) {
 }
 
 function isProtectedReserveYieldApi(path: string) {
-  return path === "/api/reserve-yield";
+  return (
+    path === "/api/reserve-yield" || path.startsWith("/api/reserve-yield/")
+  );
 }
 
 function authMisconfiguredResponse(csp: string, isApi: boolean) {

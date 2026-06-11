@@ -29,6 +29,21 @@ export function useReserveYield(): ReserveYieldResult {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
+      onErrorRetry: (_err, _key, _config, revalidate, { retryCount }) => {
+        if (
+          typeof document !== "undefined" &&
+          document.visibilityState === "hidden"
+        ) {
+          return;
+        }
+        if (retryCount >= 5) return;
+        setTimeout(
+          () => {
+            void revalidate({ retryCount });
+          },
+          Math.min(1_000 * 2 ** retryCount, 30_000),
+        );
+      },
     },
   );
 
