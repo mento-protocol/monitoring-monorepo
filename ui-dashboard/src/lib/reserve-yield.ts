@@ -2,12 +2,17 @@ const RESERVE_API_URL =
   "https://mento-analytics-api-12390052758.us-central1.run.app/api/v2/reserve";
 const FEDFUNDS_CSV_URL =
   "https://fred.stlouisfed.org/graph/fredgraph.csv?id=FEDFUNDS";
+const SKY_OVERALL_URL = "https://info-sky.blockanalitica.com/api/v1/overall/";
 const FETCH_TIMEOUT_MS = 8_000;
 
 const RESERVE_YIELD_EXPENSE_BPS = 15;
 const RESERVE_YIELD_REVENUE_SHARE_BPS = 8_000;
 const FORECASTABLE_AUSD_SYMBOL = "AUSD";
-const TRACKED_YIELD_SYMBOLS = new Set([FORECASTABLE_AUSD_SYMBOL, "SUSDS"]);
+const FORECASTABLE_SUSDS_SYMBOL = "SUSDS";
+const TRACKED_YIELD_SYMBOLS = new Set([
+  FORECASTABLE_AUSD_SYMBOL,
+  FORECASTABLE_SUSDS_SYMBOL,
+]);
 
 export type ReserveYieldHolding = {
   id: string;
@@ -39,6 +44,7 @@ export type ReserveYieldResponse = {
   expenseBps: typeof RESERVE_YIELD_EXPENSE_BPS;
   revenueShareBps: typeof RESERVE_YIELD_REVENUE_SHARE_BPS;
   netMentoApyPercent: number | null;
+  skySavingsRateApyPercent: number | null;
   dailyRunRateUsd: number | null;
   next30dUsd: number | null;
   next365dUsd: number | null;
@@ -59,6 +65,11 @@ type ReserveYieldExtraction = {
 type FredObservation = {
   date: string;
   grossApyPercent: number;
+};
+
+type ForecastApyBySymbol = {
+  ausdNetMentoApyPercent: number | null;
+  susdsApyPercent: number | null;
 };
 
 type ForecastTotals = {
@@ -313,29 +324,37 @@ export function extractReserveYieldHoldings(
 
 function applyForecastModels(
   holdings: ReserveYieldHolding[],
-  netMentoApyPercent: number | null,
+  apyBySymbol: ForecastApyBySymbol,
 ): ReserveYieldHolding[] {
   return holdings.map((holding) => {
-    if (holding.assetSymbol.toUpperCase() !== FORECASTABLE_AUSD_SYMBOL) {
+    const symbol = holding.assetSymbol.toUpperCase();
+    if (symbol === FORECASTABLE_AUSD_SYMBOL) {
       return {
         ...holding,
-        yieldModel: "APY source pending",
+        apyPercent: apyBySymbol.ausdNetMentoApyPercent,
+        yieldModel:
+          "FEDFUNDS minus 15 bps expenses, then 80% Mento revenue share",
+      };
+    }
+    if (symbol === FORECASTABLE_SUSDS_SYMBOL) {
+      return {
+        ...holding,
+        apyPercent: apyBySymbol.susdsApyPercent,
+        yieldModel: "Sky Savings Rate APY from Block Analitica",
       };
     }
     return {
       ...holding,
-      apyPercent: netMentoApyPercent,
-      yieldModel:
-        "FEDFUNDS minus 15 bps expenses, then 80% Mento revenue share",
+      yieldModel: "APY source pending",
     };
   });
 }
 
 function buildForecastTotals(
   holdings: ReserveYieldHolding[],
-  netMentoApyPercent: number | null,
+  apyBySymbol: ForecastApyBySymbol,
 ): ForecastTotals {
-  const modeledHoldings = applyForecastModels(holdings, netMentoApyPercent).map(
+  const modeledHoldings = applyForecastModels(holdings, apyBySymbol).map(
     estimateHolding,
   );
   const forecastableHoldings: ReserveYieldHolding[] = [];
@@ -405,6 +424,17 @@ export function parseFredFedFundsCsv(csv: string): FredObservation {
   throw new Error("FEDFUNDS CSV did not contain a valid observation");
 }
 
+export function parseSkySavingsRateApyPercent(payload: unknown): number {
+  const records = Array.isArray(payload) ? payload : [payload];
+  for (const record of records) {
+    if (!isRecord(record)) continue;
+    const rate = numericField(record.sky_savings_rate_apy);
+    if (rate !== null) return rate * 100;
+  }
+
+  throw new Error("Sky overall response did not contain sky_savings_rate_apy");
+}
+
 async function fetchJson(fetchImpl: FetchImpl, url: string): Promise<unknown> {
   const res = await fetchImpl(url, {
     headers: { accept: "application/json" },
@@ -428,6 +458,11 @@ function errorMessage(label: string, err: unknown): string {
   return `${label}: ${detail}`;
 }
 
+function joinErrors(...errors: Array<string | null>): string | null {
+  const present = errors.filter((error): error is string => error !== null);
+  return present.length === 0 ? null : present.join("; ");
+}
+
 export async function fetchReserveYieldSnapshot({
   fetchImpl = fetch,
   now = new Date(),
@@ -435,10 +470,12 @@ export async function fetchReserveYieldSnapshot({
   fetchImpl?: FetchImpl;
   now?: Date;
 } = {}): Promise<ReserveYieldResponse> {
-  const [reserveResult, rateResult] = await Promise.allSettled([
-    fetchJson(fetchImpl, RESERVE_API_URL),
-    fetchText(fetchImpl, FEDFUNDS_CSV_URL).then(parseFredFedFundsCsv),
-  ]);
+  const [reserveResult, fedfundsResult, skyRateResult] =
+    await Promise.allSettled([
+      fetchJson(fetchImpl, RESERVE_API_URL),
+      fetchText(fetchImpl, FEDFUNDS_CSV_URL).then(parseFredFedFundsCsv),
+      fetchJson(fetchImpl, SKY_OVERALL_URL).then(parseSkySavingsRateApyPercent),
+    ]);
 
   const fetchedAt = now.toISOString();
   let holdings: ReserveYieldHolding[] = [];
@@ -466,20 +503,32 @@ export async function fetchReserveYieldSnapshot({
 
   let grossApyPercent: number | null = null;
   let fedfundsAsOf: string | null = null;
-  let rateError: string | null = null;
+  let fedfundsError: string | null = null;
 
-  if (rateResult.status === "fulfilled") {
-    grossApyPercent = rateResult.value.grossApyPercent;
-    fedfundsAsOf = rateResult.value.date;
+  if (fedfundsResult.status === "fulfilled") {
+    grossApyPercent = fedfundsResult.value.grossApyPercent;
+    fedfundsAsOf = fedfundsResult.value.date;
   } else {
-    rateError = errorMessage("FRED FEDFUNDS", rateResult.reason);
+    fedfundsError = errorMessage("FRED FEDFUNDS", fedfundsResult.reason);
+  }
+
+  let skySavingsRateApyPercent: number | null = null;
+  let skyRateError: string | null = null;
+
+  if (skyRateResult.status === "fulfilled") {
+    skySavingsRateApyPercent = skyRateResult.value;
+  } else {
+    skyRateError = errorMessage("Sky Savings Rate", skyRateResult.reason);
   }
 
   const netMentoApyPercent =
     grossApyPercent === null
       ? null
       : computeNetMentoApyPercent(grossApyPercent);
-  const forecast = buildForecastTotals(holdings, netMentoApyPercent);
+  const forecast = buildForecastTotals(holdings, {
+    ausdNetMentoApyPercent: netMentoApyPercent,
+    susdsApyPercent: skySavingsRateApyPercent,
+  });
 
   return {
     principalUsd,
@@ -492,12 +541,13 @@ export async function fetchReserveYieldSnapshot({
     expenseBps: RESERVE_YIELD_EXPENSE_BPS,
     revenueShareBps: RESERVE_YIELD_REVENUE_SHARE_BPS,
     netMentoApyPercent,
+    skySavingsRateApyPercent,
     dailyRunRateUsd: forecast.dailyRunRateUsd,
     next30dUsd: forecast.next30dUsd,
     next365dUsd: forecast.next365dUsd,
     annualRunRateUsd: forecast.annualRunRateUsd,
     forecastUnavailableSymbols: forecast.forecastUnavailableSymbols,
     holdingsError,
-    rateError,
+    rateError: joinErrors(fedfundsError, skyRateError),
   };
 }

@@ -4,6 +4,7 @@ import {
   extractReserveYieldHoldings,
   fetchReserveYieldSnapshot,
   parseFredFedFundsCsv,
+  parseSkySavingsRateApyPercent,
 } from "../reserve-yield";
 
 const RESERVE_PAYLOAD = {
@@ -151,6 +152,15 @@ describe("reserve yield parsing and math", () => {
     ).toEqual({ date: "2026-05-01", grossApyPercent: 3.63 });
   });
 
+  it("parses Sky Savings Rate APY from the Sky overall feed", () => {
+    expect(
+      parseSkySavingsRateApyPercent([
+        { total_save: "100" },
+        { sky_savings_rate_apy: "0.036000000000000000" },
+      ]),
+    ).toBeCloseTo(3.6, 12);
+  });
+
   it("applies the provider APY formula", () => {
     expect(computeNetMentoApyPercent(5.33)).toBeCloseTo(4.144, 6);
   });
@@ -161,6 +171,9 @@ describe("reserve yield parsing and math", () => {
       .mockResolvedValueOnce(Response.json(RESERVE_PAYLOAD))
       .mockResolvedValueOnce(
         new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(
+        Response.json([{ sky_savings_rate_apy: "0.036" }]),
       );
 
     const snapshot = await fetchReserveYieldSnapshot({
@@ -169,23 +182,23 @@ describe("reserve yield parsing and math", () => {
     });
 
     expect(snapshot.principalUsd).toBe(4700);
-    expect(snapshot.forecastPrincipalUsd).toBe(2500);
+    expect(snapshot.forecastPrincipalUsd).toBe(4700);
     expect(snapshot.earnedYieldUsd).toBeNull();
     expect(snapshot.holdingsAsOf).toBe("2026-06-11T12:00:00.000Z");
     expect(snapshot.grossApyPercent).toBe(5.33);
     expect(snapshot.netMentoApyPercent).toBeCloseTo(4.144, 6);
-    expect(snapshot.annualRunRateUsd).toBeCloseTo(103.6, 6);
-    expect(snapshot.next30dUsd).toBeCloseTo(8.515068, 6);
-    expect(snapshot.next365dUsd).toBeCloseTo(103.6, 6);
-    expect(snapshot.dailyRunRateUsd).toBeCloseTo(0.283836, 6);
+    expect(snapshot.skySavingsRateApyPercent).toBeCloseTo(3.6, 12);
+    expect(snapshot.annualRunRateUsd).toBeCloseTo(182.8, 6);
+    expect(snapshot.next30dUsd).toBeCloseTo(15.024658, 6);
+    expect(snapshot.next365dUsd).toBeCloseTo(182.8, 6);
+    expect(snapshot.dailyRunRateUsd).toBeCloseTo(0.500822, 6);
     expect(snapshot.holdings[0]).toMatchObject({
       assetSymbol: "sUSDS",
       earnedYieldUsd: null,
-      apyPercent: null,
-      next30dUsd: null,
-      next365dUsd: null,
     });
+    expect(snapshot.holdings[0]?.apyPercent).toBeCloseTo(3.6, 12);
+    expect(snapshot.holdings[0]?.next365dUsd).toBeCloseTo(79.2, 6);
     expect(snapshot.holdings[1]?.annualRunRateUsd).toBeCloseTo(62.16, 6);
-    expect(snapshot.forecastUnavailableSymbols).toEqual(["sUSDS"]);
+    expect(snapshot.forecastUnavailableSymbols).toEqual([]);
   });
 });
