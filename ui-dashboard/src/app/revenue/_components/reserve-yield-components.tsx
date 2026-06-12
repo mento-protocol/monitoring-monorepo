@@ -17,8 +17,7 @@ export type ReserveYieldTileState = {
 
 function formatAnnualInterestRatePercent(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "—";
-  const digits = Math.abs(value) < 10 ? 2 : 1;
-  return `${value.toFixed(digits).replace(/\.?0+$/, "")}%`;
+  return `${value.toFixed(3).replace(/\.?0+$/, "")}%`;
 }
 
 function formatNullableUSD(value: number | null): string {

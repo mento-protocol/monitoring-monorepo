@@ -407,6 +407,7 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("Balance");
     expect(html).toContain("APY");
     expect(html).toContain("3.6%");
+    expect(html).toContain("4.144%");
     expect(html).toContain("sUSDS");
     expect(html).toContain("AUSD");
     expect(html).toContain("Ethereum");
