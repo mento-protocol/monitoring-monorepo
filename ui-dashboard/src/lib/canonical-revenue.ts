@@ -382,9 +382,31 @@ function computeCdpInterestDailyRunRate(
   return { dailyUsd: annualProtocolRunRateUsd / 365, partialReason: null };
 }
 
+function reserveForecastPartialReasons(
+  reserveYield: ReserveYieldResponse,
+): string[] {
+  const reasons: string[] = [];
+  const unavailableSymbols = reserveYield.forecastUnavailableSymbols;
+  if (unavailableSymbols.length > 0) {
+    reasons.push(
+      `Reserve forecast excludes holdings without APY sources: ${unavailableSymbols.join(", ")}.`,
+    );
+  }
+  if (reserveYield.holdingsError !== null) {
+    reasons.push(
+      "Reserve forecast partial: reserve holdings failed to load completely.",
+    );
+  }
+  if (reserveYield.rateError !== null) {
+    reasons.push(`Reserve forecast partial: ${reserveYield.rateError}`);
+  }
+  return reasons;
+}
+
 function buildForecastSource(args: {
   reserveYield: ReserveYieldResponse | null;
   swapSeries: ReadonlyArray<ReturnType<typeof buildDailyFeeSeries>[number]>;
+  swapFeesFailed: boolean;
   cdpDailySeries: ReadonlyArray<CdpBorrowingFeeSeriesPoint>;
   cdpMarkets: ReadonlyArray<CdpBorrowingRevenueMarket>;
   cdpDailySeriesFailed: boolean;
@@ -398,17 +420,25 @@ function buildForecastSource(args: {
     partialReasons.push(
       "Reserve forecast unavailable: current APY or reserve balances did not load.",
     );
+  } else {
+    partialReasons.push(...reserveForecastPartialReasons(args.reserveYield));
   }
 
-  const swapAverage = completedWindowAverage({
-    points: args.swapSeries,
-    value: (point) => point.protocolFeesUSD + point.lpFeesUSD,
-    timestamp: (point) => point.timestamp,
-    nowSeconds: args.nowSeconds,
-    trailingDays: 30,
-    minimumBuckets: 7,
-  });
-  if (swapAverage.dailyAverageUsd === null) {
+  const swapAverage = args.swapFeesFailed
+    ? { dailyAverageUsd: null, buckets: 0 }
+    : completedWindowAverage({
+        points: args.swapSeries,
+        value: (point) => point.protocolFeesUSD + point.lpFeesUSD,
+        timestamp: (point) => point.timestamp,
+        nowSeconds: args.nowSeconds,
+        trailingDays: 30,
+        minimumBuckets: 7,
+      });
+  if (args.swapFeesFailed) {
+    partialReasons.push(
+      "Swap forecast unavailable: swap fee history failed to load.",
+    );
+  } else if (swapAverage.dailyAverageUsd === null) {
     partialReasons.push(
       `Swap forecast unavailable: only ${swapAverage.buckets} completed daily buckets loaded.`,
     );
@@ -626,6 +656,7 @@ export function buildCanonicalRevenue({
     buildForecastSource({
       reserveYield,
       swapSeries,
+      swapFeesFailed,
       cdpDailySeries,
       cdpMarkets,
       cdpDailySeriesFailed,

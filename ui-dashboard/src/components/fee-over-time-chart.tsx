@@ -65,6 +65,20 @@ function filterSeriesByRevenueRange(
   return series.filter((point) => point.timestamp >= from);
 }
 
+export function revenueWeekOverWeekChangePct(
+  series: ReadonlyArray<CanonicalRevenueDailyPoint>,
+  range: RangeKey,
+  partialReasons: readonly string[],
+): number | null {
+  if (range !== "7d" || partialReasons.length > 0) return null;
+  return weekOverWeekChangePct(
+    series.map((p) => ({
+      timestamp: p.timestamp,
+      value: p.totalRevenueUsd,
+    })),
+  );
+}
+
 function buildTrace(args: {
   xs: string[];
   y: number[];
@@ -306,16 +320,7 @@ export function TotalRevenueChart({
     () => visibleSeries.reduce((sum, p) => sum + p.totalRevenueUsd, 0),
     [visibleSeries],
   );
-  const fullAsTimeSeries = useMemo(
-    () =>
-      series.map((p) => ({
-        timestamp: p.timestamp,
-        value: p.totalRevenueUsd,
-      })),
-    [series],
-  );
-  const change =
-    range === "7d" ? weekOverWeekChangePct(fullAsTimeSeries) : null;
+  const change = revenueWeekOverWeekChangePct(series, range, partialReasons);
   const headline = `${partialReasons.length > 0 ? "≈ " : ""}${formatUSD(rangeTotal)}`;
   const figure = useMemo(
     () => buildRevenueChartFigure(visibleSeries),

@@ -269,6 +269,56 @@ describe("buildCanonicalRevenue", () => {
     expect(result.forecasts.next365d.swapFeesUsd).toBe(3650);
   });
 
+  it("marks swap forecasts unavailable when swap history failed to load", () => {
+    const completedDays = Array.from(
+      { length: 30 },
+      (_, index) => ts("2026-05-13") + index * DAY,
+    );
+    const result = buildCanonicalRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: completedDays.map((timestamp) =>
+            feeSnapshot(timestamp, 10),
+          ),
+        }),
+      ],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [],
+      swapFeesFailed: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.forecasts.next7d.swapFeesUsd).toBeNull();
+    expect(result.forecasts.next7d.totalUsd).toBe(14);
+    expect(result.forecasts.next7d.partialReasons).toContain(
+      "Swap forecast unavailable: swap fee history failed to load.",
+    );
+  });
+
+  it("surfaces partial reserve forecast inputs without dropping modeled holdings", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        forecastUnavailableSymbols: ["AUSD"],
+        rateError: "AUSD APY source unavailable",
+      }),
+      reserveDailySnapshots: [],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.forecasts.next7d.reserveYieldUsd).toBe(14);
+    expect(result.forecasts.next7d.partialReasons).toContain(
+      "Reserve forecast excludes holdings without APY sources: AUSD.",
+    );
+    expect(result.forecasts.next7d.partialReasons).toContain(
+      "Reserve forecast partial: AUSD APY source unavailable",
+    );
+  });
+
   it("marks CDP forecasts unavailable when borrowing revenue inputs fail", () => {
     const completedDays = Array.from(
       { length: 30 },
