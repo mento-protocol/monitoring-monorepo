@@ -297,6 +297,33 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
+  it("marks swap forecasts partial when swap history is approximate", () => {
+    const completedDays = Array.from(
+      { length: 30 },
+      (_, index) => ts("2026-05-13") + index * DAY,
+    );
+    const result = buildCanonicalRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: completedDays.map((timestamp) =>
+            feeSnapshot(timestamp, 10),
+          ),
+        }),
+      ],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [],
+      swapFeesApproximate: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.forecasts.next7d.swapFeesUsd).toBe(70);
+    expect(result.forecasts.next7d.partialReasons).toContain(
+      "Swap forecast partial: swap fee history is approximate.",
+    );
+  });
+
   it("surfaces partial reserve forecast inputs without dropping modeled holdings", () => {
     const result = buildCanonicalRevenue({
       networkData: [],

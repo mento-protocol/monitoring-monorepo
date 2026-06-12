@@ -98,6 +98,7 @@ export type BuildCanonicalRevenueArgs = {
   reserveHistoryFailed?: boolean;
   reserveHistoryTruncated?: boolean;
   swapFeesFailed?: boolean;
+  swapFeesApproximate?: boolean;
   cdpDailySeriesFailed?: boolean;
   nowSeconds?: number;
 };
@@ -407,6 +408,7 @@ function buildForecastSource(args: {
   reserveYield: ReserveYieldResponse | null;
   swapSeries: ReadonlyArray<ReturnType<typeof buildDailyFeeSeries>[number]>;
   swapFeesFailed: boolean;
+  swapFeesApproximate: boolean;
   cdpDailySeries: ReadonlyArray<CdpBorrowingFeeSeriesPoint>;
   cdpMarkets: ReadonlyArray<CdpBorrowingRevenueMarket>;
   cdpDailySeriesFailed: boolean;
@@ -441,6 +443,10 @@ function buildForecastSource(args: {
   } else if (swapAverage.dailyAverageUsd === null) {
     partialReasons.push(
       `Swap forecast unavailable: only ${swapAverage.buckets} completed daily buckets loaded.`,
+    );
+  } else if (args.swapFeesApproximate) {
+    partialReasons.push(
+      "Swap forecast partial: swap fee history is approximate.",
     );
   }
 
@@ -624,6 +630,7 @@ export function buildCanonicalRevenue({
   reserveHistoryFailed = false,
   reserveHistoryTruncated = false,
   swapFeesFailed = false,
+  swapFeesApproximate = false,
   cdpDailySeriesFailed = false,
   nowSeconds = Math.floor(Date.now() / 1000),
 }: BuildCanonicalRevenueArgs): CanonicalRevenueResult {
@@ -657,6 +664,7 @@ export function buildCanonicalRevenue({
       reserveYield,
       swapSeries,
       swapFeesFailed,
+      swapFeesApproximate,
       cdpDailySeries,
       cdpMarkets,
       cdpDailySeriesFailed,

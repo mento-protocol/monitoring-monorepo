@@ -131,6 +131,7 @@ function useRevenuePageState() {
     reserveHistoryFailed: reserveYieldHistory.hasError,
     reserveHistoryTruncated: reserveYieldHistory.truncated,
     swapFeesFailed: hasSwapFeesError,
+    swapFeesApproximate: feesApprox && !hasSwapFeesError,
     cdpDailySeriesFailed:
       hasCdpBorrowingRevenueError || cdpBorrowingFeeSeriesFailed,
   });
