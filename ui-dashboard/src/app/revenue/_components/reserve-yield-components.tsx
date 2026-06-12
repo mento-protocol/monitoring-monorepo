@@ -76,6 +76,27 @@ function reserveForecastMetric(value: number | null): string {
   return value === null ? "N/A" : `≈ ${formatUSD(value)}`;
 }
 
+function reserveTotalApyPercent(data: ReserveYieldResponse): number | null {
+  if (
+    data.forecastPrincipalUsd === null ||
+    data.next365dUsd === null ||
+    data.forecastPrincipalUsd <= 0
+  ) {
+    return null;
+  }
+  return (data.next365dUsd / data.forecastPrincipalUsd) * 100;
+}
+
+function reserveTotalForecastTitle(data: ReserveYieldResponse): string {
+  if (data.next365dUsd === null) {
+    return "Forecast unavailable until APY sources load for current reserve holdings.";
+  }
+  if (data.forecastUnavailableSymbols.length > 0) {
+    return `Forecast totals include holdings with APY sources only; missing APY for ${data.forecastUnavailableSymbols.join(", ")}.`;
+  }
+  return "Forecast totals use non-compounding math across current reserve balances.";
+}
+
 function reserveTileForecastMetric(value: number | null): string {
   return formatNullableUSD(value);
 }
@@ -224,6 +245,65 @@ function ReserveYieldHoldingRow({ holding }: { holding: ReserveYieldHolding }) {
   );
 }
 
+function ReserveYieldTotalRow({ data }: { data: ReserveYieldResponse }) {
+  const totalApyPercent = reserveTotalApyPercent(data);
+  const forecastTitle = reserveTotalForecastTitle(data);
+  return (
+    <tr
+      aria-label="Reserve yield total row"
+      className="border-t border-slate-700 bg-slate-900/80"
+    >
+      <th
+        scope="row"
+        colSpan={3}
+        className="px-2 py-2.5 text-left text-xs font-semibold text-slate-100 sm:px-4 sm:text-sm"
+      >
+        Total
+      </th>
+      <Td mono align="right" className="font-semibold text-slate-100 sm:!px-2">
+        {formatNullableUSD(data.principalUsd)}
+      </Td>
+      <Td
+        mono
+        align="right"
+        {...(data.earnedYieldError !== null
+          ? { title: data.earnedYieldError }
+          : {})}
+        className="font-semibold text-slate-100 sm:!px-2"
+      >
+        {formatNullableUSD(data.earnedYieldUsd)}
+      </Td>
+      <Td
+        mono
+        align="right"
+        title={`Blended APY across forecastable reserve balances. ${forecastTitle}`}
+        className="font-semibold text-slate-100 sm:!px-2"
+      >
+        {data.forecastUnavailableSymbols.length > 0 && totalApyPercent !== null
+          ? "≈ "
+          : ""}
+        {formatAnnualInterestRatePercent(totalApyPercent)}
+      </Td>
+      <Td
+        mono
+        align="right"
+        title={forecastTitle}
+        className="font-semibold text-slate-100 sm:!px-2"
+      >
+        {reserveForecastMetric(data.next30dUsd)}
+      </Td>
+      <Td
+        mono
+        align="right"
+        title={forecastTitle}
+        className="font-semibold text-slate-100 sm:!px-2"
+      >
+        {reserveForecastMetric(data.next365dUsd)}
+      </Td>
+    </tr>
+  );
+}
+
 function ReserveYieldTableShell({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-400">
@@ -252,7 +332,7 @@ export function ReserveYieldByHoldingTable({
 }: ReserveYieldTileState) {
   const holdings = data?.holdings ?? [];
 
-  if (holdings.length === 0) {
+  if (data === null || holdings.length === 0) {
     return (
       <section>
         <h2 className="mb-3 text-lg font-semibold text-white">
@@ -314,6 +394,9 @@ export function ReserveYieldByHoldingTable({
             <ReserveYieldHoldingRow key={holding.id} holding={holding} />
           ))}
         </tbody>
+        <tfoot>
+          <ReserveYieldTotalRow data={data} />
+        </tfoot>
       </Table>
     </section>
   );

@@ -417,6 +417,13 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("wallet / ops");
     expect(html).toContain("FPMM AUSD / USDm");
     expect(html).toContain('aria-label="Reserve yield components"');
+    expect(html).toContain('aria-label="Reserve yield total row"');
+    expect(html).toContain("Total");
+    expect(html).toContain("3.889%");
+    expect(html).toContain("Blended APY across forecastable reserve balances.");
+    expect(html).toContain(
+      "Forecast totals use non-compounding math across current reserve balances.",
+    );
     expect(html.indexOf('aria-label="Reserve yield components"')).toBeLessThan(
       html.indexOf("data-table-error"),
     );
@@ -487,6 +494,9 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("Forecast rates are unavailable");
     expect(html).not.toContain("Some forecast rates are unavailable");
     expect(html).toContain("showing balances without forecast");
+    expect(html).toContain(
+      "Forecast unavailable until APY sources load for current reserve holdings.",
+    );
     expect(html).toContain("N/A");
   });
 
