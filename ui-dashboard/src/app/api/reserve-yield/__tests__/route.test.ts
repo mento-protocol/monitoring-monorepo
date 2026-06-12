@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const SKY_SSR_APY_PERCENT = 3.600000425292;
+const TRACKED_SUSDS_WALLET = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
 const SKY_SSR_RPC_RESPONSE = {
   jsonrpc: "2.0",
   id: 1,
@@ -35,7 +36,7 @@ const RESERVE_WITH_YIELD_COMPONENTS = {
           {
             type: "wallet",
             label: "Reserve Safe",
-            identifier: "0xreserve-safe",
+            identifier: TRACKED_SUSDS_WALLET,
             balance: "2000",
             usd_value: 2200,
             custodian_type: "cold",
@@ -207,6 +208,79 @@ describe("GET /api/reserve-yield", () => {
     expect(body.earnedYieldError).toBeNull();
     expect(body.holdings[0].assetSymbol).toBe("sUSDS");
     expect(body.holdings[0].earnedYieldUsd).toBeCloseTo(300, 6);
+  });
+
+  it("does not refresh sUSDS earned yield from reserve rows outside indexed wallets", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              RESERVE_WITH_YIELD_COMPONENTS.collateral.assets[0],
+              {
+                symbol: "sUSDS",
+                chain: "ethereum",
+                balance: "3000",
+                usd_value: 3300,
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Reserve Safe",
+                    identifier: TRACKED_SUSDS_WALLET,
+                    balance: "2000",
+                    usd_value: 2200,
+                    custodian_type: "cold",
+                  },
+                  {
+                    type: "wallet",
+                    label: "New Custodian",
+                    identifier: "0x0000000000000000000000000000000000000001",
+                    balance: "1000",
+                    usd_value: 1100,
+                    custodian_type: "custodian",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
+          },
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.principalUsd).toBe(4300);
+    expect(body.earnedYieldUsd).toBeCloseTo(200, 6);
+    expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
+    expect(body.unrealizedYieldUsd).toBeCloseTo(100, 6);
+    expect(body.earnedYieldError).toContain("outside indexed wallets");
+    expect(body.holdings).toHaveLength(3);
+    expect(
+      body.holdings.find(
+        (holding: { sourceLabel: string }) =>
+          holding.sourceLabel === "Reserve Safe",
+      ).earnedYieldUsd,
+    ).toBeCloseTo(200, 6);
+    expect(
+      body.holdings.find(
+        (holding: { sourceLabel: string }) =>
+          holding.sourceLabel === "New Custodian",
+      ).earnedYieldUsd,
+    ).toBeNull();
   });
 
   it("parses large sUSDS ledger wei without rounding before scaling", async () => {

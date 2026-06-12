@@ -13,6 +13,7 @@ const SKY_SSR_RAY = BigInt("1000000001121484774769253326");
 const SKY_SSR_RPC_RESULT =
   "0x0000000000000000000000000000000000000000033b2e3caf60d0b2dd215bce";
 const SKY_SSR_APY_PERCENT = 3.600000425292;
+const TRACKED_SUSDS_WALLET = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
 const SKY_SSR_RPC_RESPONSE = {
   jsonrpc: "2.0",
   id: 1,
@@ -38,7 +39,7 @@ const RESERVE_PAYLOAD = {
           {
             type: "wallet",
             label: "Reserve Safe",
-            identifier: "0xreserve-safe",
+            identifier: TRACKED_SUSDS_WALLET,
             balance: "2000",
             usd_value: 2200,
             custodian_type: "cold",
@@ -127,6 +128,74 @@ describe("reserve yield parsing and math", () => {
         0,
       ),
     ).toBe(4700);
+  });
+
+  it("prices sUSDS sources from source USD value or allocated asset USD value", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "100",
+            usd_value: 112,
+            sources: [
+              {
+                type: "wallet",
+                label: "Tracked Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "25",
+                usd_value: 28,
+              },
+              {
+                type: "wallet",
+                label: "Secondary Safe",
+                identifier: "0xsecondary",
+                balance: "75",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(2);
+    expect(extracted.holdings[0]).toMatchObject({
+      sourceLabel: "Secondary Safe",
+      balance: 75,
+      principalUsd: 84,
+    });
+    expect(extracted.holdings[1]).toMatchObject({
+      sourceLabel: "Tracked Safe",
+      balance: 25,
+      principalUsd: 28,
+    });
+  });
+
+  it("does not treat sUSDS source shares as dollars when USD values are missing", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "100",
+            sources: [
+              {
+                type: "wallet",
+                label: "Unpriced Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "100",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toEqual([]);
+    expect(extracted.malformedCount).toBe(2);
   });
 
   it("uses the yield-bearing asset row when no source rows are available", () => {
