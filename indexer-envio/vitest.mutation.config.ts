@@ -12,6 +12,7 @@ export default defineConfig({
     env: {
       ENVIO_START_BLOCK_CELO: "0",
       ENVIO_START_BLOCK_MONAD: "0",
+      ENVIO_START_BLOCK_ETHEREUM: "0",
       ENVIO_START_BLOCK_CELO_SEPOLIA: "0",
       ENVIO_START_BLOCK_MONAD_TESTNET: "0",
     },

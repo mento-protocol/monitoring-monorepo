@@ -48,6 +48,10 @@ const NTT_JSON = resolve(REPO, "config/nttAddresses.json");
 // free pass. Add new entries with a reason when wiring a new external
 // contract into a YAML.
 const ALLOWLIST = new Map([
+  [
+    "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
+    { chainId: 1, reason: "Sky sUSDS token for reserve-yield accounting" },
+  ],
   // Testnet FPMM pool instances. Mainnet uses dynamic registration via
   // `FPMMFactory.FPMMDeployed.contractRegister`; testnet hand-lists them.
   [

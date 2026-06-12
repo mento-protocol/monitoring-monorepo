@@ -30,6 +30,7 @@ import "./handlers/virtualPool.js";
 import "./handlers/biPoolManager.js";
 import "./handlers/feeToken.js";
 import "./handlers/stables/transfer.js";
+import "./handlers/susds.js";
 import "./handlers/openLiquidityStrategy.js";
 import "./handlers/liquity/collateralRegistry.js";
 import "./handlers/liquity/bootstrapHandler.js";
@@ -90,6 +91,11 @@ export {
   _clearMockStableTotalSupply,
 } from "./rpc/stable-fetchers.js";
 
+export {
+  _setMockSusdsSharePrice,
+  _clearMockSusdsSharePrices,
+} from "./rpc/susds.js";
+
 // Fee token test mocks and helpers
 export {
   _setMockFeeTokenMeta,
@@ -119,4 +125,5 @@ export {
   assertStartBlocksValid,
   FPMM_FIRST_DEPLOY_BLOCK,
   START_BLOCK_ENV_NAME,
+  SUSDS_FIRST_TRACKED_EVENT_BLOCK,
 } from "./startupChecks.js";

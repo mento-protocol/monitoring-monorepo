@@ -8,7 +8,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 
 | Package                                         | Description                                                                          |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad multichain                                   |
+| [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad + Ethereum sUSDS multichain                  |
 | [`ui-dashboard`](./ui-dashboard/)               | Next.js 16 + Plotly.js dashboard with multi-chain network switching                  |
 | [`metrics-bridge`](./metrics-bridge/)           | Hasura → Prometheus exporter for v3 alert rules                                      |
 | [`shared-config`](./shared-config/)             | Shared deployment config (chain ID → treb namespace mappings)                        |
@@ -19,7 +19,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 
 ```text
 ┌──────────────────────┐     ┌──────────────────┐     ┌────────────────┐
-│  Celo + Monad Chains │────▶│  Envio HyperIndex │────▶│  Hasura        │
+│ Celo + Monad + ETH   │────▶│  Envio HyperIndex │────▶│  Hasura        │
 │  (HyperSync / RPC)   │     │  (Hosted, mento)  │     │  (GraphQL API) │
 └──────────────────────┘     └──────────────────┘     └───────┬────────┘
                                                                │
@@ -30,7 +30,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
                                                         └─────────────┘
 ```
 
-Both Celo Mainnet (42220) and Monad Mainnet (143) are served from a single Envio project (`mento`) using `config.multichain.mainnet.yaml`. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions.
+Celo Mainnet (42220), Monad Mainnet (143), and Ethereum Mainnet (1) sUSDS reserve-yield events are served from a single Envio project (`mento`) using `config.multichain.mainnet.yaml`. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions.
 
 **Static production endpoint:** `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`
 
@@ -40,6 +40,7 @@ Both Celo Mainnet (42220) and Monad Mainnet (143) are served from a single Envio
 | ------------- | -------- | ---------------------------------------------- |
 | Celo Mainnet  | 42220    | Live in the production multichain indexer      |
 | Monad Mainnet | 143      | Live in the production multichain indexer      |
+| Ethereum      | 1        | Live for sUSDS reserve-yield accounting        |
 | Celo Sepolia  | 11142220 | Local/testnet config available, not production |
 | Monad Testnet | 10143    | Local/testnet config available, not production |
 
@@ -102,7 +103,7 @@ pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentr
 ### Run the Indexer (local)
 
 ```bash
-# Multichain mainnet (Celo + Monad) — default
+# Multichain mainnet (Celo + Monad + Ethereum sUSDS) — default
 pnpm indexer:codegen && pnpm indexer:dev
 
 # Multichain testnet (Celo Sepolia + Monad testnet)
@@ -116,8 +117,8 @@ pnpm dashboard:dev
 ```
 
 The dashboard dev script defaults to the live production Envio GraphQL endpoint
-when `NEXT_PUBLIC_HASURA_URL` is unset, so fresh git worktrees use real Celo +
-Monad data without copying `.env.local`. Set `NEXT_PUBLIC_HASURA_URL`
+when `NEXT_PUBLIC_HASURA_URL` is unset, so fresh git worktrees use real Celo,
+Monad, and reserve-yield data without copying `.env.local`. Set `NEXT_PUBLIC_HASURA_URL`
 explicitly only when you need a non-prod endpoint.
 
 For deterministic browser review, run the dashboard package directly on a fixed
@@ -194,9 +195,11 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `ENVIO_RPC_URL_42220`              | Celo Mainnet primary RPC endpoint                                                                              |
 | `ENVIO_RPC_URL_143`                | Monad Mainnet primary RPC endpoint                                                                             |
+| `ENVIO_RPC_URL_1`                  | Ethereum Mainnet primary RPC endpoint for historical sUSDS share-price reads                                   |
 | `ENVIO_RPC_FALLBACK_URL_<chainId>` | (optional) per-chain fallback RPC for archive-depth + rate-limit failover (see `indexer-envio/AGENTS.md`)      |
 | `ENVIO_START_BLOCK_CELO`           | Celo start block (default: 60664500)                                                                           |
 | `ENVIO_START_BLOCK_MONAD`          | Monad start block (default: 60710000)                                                                          |
+| `ENVIO_START_BLOCK_ETHEREUM`       | Ethereum start block (default: 22990000; must cover first tracked sUSDS deposit at block 22994825)             |
 | `INDEXER_PERF`                     | Optional indexer sync profiler; set to `1` to log handler/effect/entity counters during local or debug replays |
 | `INDEXER_PERF_LOG_INTERVAL_EVENTS` | Optional profiler log interval in processed handler calls (default: 10000)                                     |
 
@@ -204,7 +207,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 | Variable                                 | Description                                                                                                |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo + Monad mainnet, filtered by chainId)                          |
+| `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo, Monad, and Ethereum sUSDS reserve-yield data)                 |
 | `HASURA_SECRET_CELO_SEPOLIA_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-sepolia-local` proxy                               |
 | `HASURA_SECRET_CELO_MAINNET_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-mainnet-local` proxy                               |
 | `HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL` | Optional upstream URL override for local sepolia Hasura proxy (default `http://localhost:8080/v1/graphql`) |

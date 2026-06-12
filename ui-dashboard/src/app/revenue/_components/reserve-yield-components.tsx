@@ -39,6 +39,9 @@ function reserveYieldSubtitle(state: ReserveYieldTileState): string {
   if (data.holdings.length === 0) {
     return "No yield-bearing reserve holdings returned";
   }
+  if (data.earnedYieldError !== null) {
+    return "Earned-yield ledger pending; forecasts use current reserve balances";
+  }
   if (data.rateError !== null) {
     return data.dailyRunRateUsd === null
       ? "Earned-yield ledger pending; forecast rates unavailable"
@@ -87,7 +90,9 @@ function reserveYieldForecastTooltip(
     data?.skySavingsRateApyPercent === null ||
     data?.skySavingsRateApyPercent === undefined
       ? "- sUSDS APY is unavailable until the Sky Savings Rate feed loads"
-      : `- sUSDS APY uses the Sky Savings Rate (${formatAnnualInterestRatePercent(data.skySavingsRateApyPercent)}) from Block Analitica`;
+      : data.skySavingsRateSource === "blockanalitica-overall"
+        ? `- sUSDS APY uses the Sky Savings Rate (${formatAnnualInterestRatePercent(data.skySavingsRateApyPercent)}) from Block Analitica fallback`
+        : `- sUSDS APY reads on-chain sUSDS.ssr() on Ethereum (${formatAnnualInterestRatePercent(data.skySavingsRateApyPercent)})`;
   const remainingUnavailableSymbols = forecastUnavailableSymbols.filter(
     (symbol) => !["AUSD", "SUSDS"].includes(symbol),
   );
@@ -98,13 +103,10 @@ function reserveYieldForecastTooltip(
   return `Annual Forecast based on blended APY on current reserve balances & non-compounding math: balance x APY x days / 365\n${ausdApyLine}\n${susdsApyLine}${exclusions}`;
 }
 
-function reserveYieldHeadline(
-  state: ReserveYieldTileState,
-  hasHoldings: boolean,
-): string {
+function reserveYieldHeadline(state: ReserveYieldTileState): string {
   const { data, isLoading } = state;
   if (isLoading && data === null) return "—";
-  if (!hasHoldings || data === null || data.earnedYieldUsd === null) {
+  if (data === null || data.earnedYieldUsd === null) {
     return "N/A";
   }
   return formatUSD(data.earnedYieldUsd);
@@ -121,7 +123,7 @@ function reserveYieldTileView(state: ReserveYieldTileState): {
   const { data } = state;
   const hasHoldings = reserveYieldHasHoldings(data);
   return {
-    headline: reserveYieldHeadline(state, hasHoldings),
+    headline: reserveYieldHeadline(state),
     showEarnedLabel: data !== null && !state.isLoading,
     reserveBalance: reserveYieldMetric(data?.principalUsd ?? null, hasHoldings),
     monthlyForecast: reserveTileForecastMetric(data?.next30dUsd ?? null),
@@ -270,6 +272,11 @@ export function ReserveYieldByHoldingTable({
         <p className="mb-3 text-xs text-amber-400/80">
           Some yield-bearing reserve holdings could not be parsed — showing
           partial data.
+        </p>
+      ) : null}
+      {data?.earnedYieldError != null ? (
+        <p className="mb-3 text-xs text-amber-400/80">
+          {data.earnedYieldError}
         </p>
       ) : null}
       {data?.rateError != null ? (

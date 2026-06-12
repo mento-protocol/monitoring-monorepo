@@ -175,6 +175,10 @@ const RPC_CONFIG_BY_CHAIN: Record<number, { default: string; envVar: string }> =
       envVar: "ENVIO_RPC_URL_11142220",
     }, // Celo Sepolia
     143: { default: "https://rpc2.monad.xyz", envVar: "ENVIO_RPC_URL_143" }, // Monad Mainnet
+    1: {
+      default: "https://ethereum.publicnode.com",
+      envVar: "ENVIO_RPC_URL_1",
+    }, // Ethereum Mainnet
     10143: {
       default: "https://10143.rpc.hypersync.xyz",
       envVar: "ENVIO_RPC_URL_10143",

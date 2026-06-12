@@ -41,6 +41,7 @@ export function useReserveYield(): ReserveYieldResult {
     hasError:
       error !== undefined ||
       (data?.holdingsError ?? null) !== null ||
-      (data?.rateError ?? null) !== null,
+      (data?.rateError ?? null) !== null ||
+      (data?.earnedYieldError ?? null) !== null,
   };
 }

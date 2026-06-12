@@ -3,9 +3,11 @@ import {
   assertStartBlocksValid,
   FPMM_FIRST_DEPLOY_BLOCK,
   START_BLOCK_ENV_NAME,
+  SUSDS_FIRST_TRACKED_EVENT_BLOCK,
 } from "../src/EventHandlers.js";
 
 // Chain IDs used in tests (mainnet only — startup guard only covers mainnet)
+const ETHEREUM = 1;
 const CELO = 42220;
 const MONAD = 143;
 
@@ -78,6 +80,19 @@ describe("assertStartBlocksValid", () => {
       (err: unknown) => {
         assert(err instanceof Error);
         assert(err.message.includes(START_BLOCK_ENV_NAME[MONAD]));
+        return true;
+      },
+    );
+  });
+
+  it("throws for Ethereum sUSDS when the start block misses tracked history", () => {
+    const tooHigh = SUSDS_FIRST_TRACKED_EVENT_BLOCK + 1;
+    assert.throws(
+      () => assertStartBlocksValid({ [ETHEREUM]: String(tooHigh) }, true),
+      (err: unknown) => {
+        assert(err instanceof Error);
+        assert(err.message.includes(START_BLOCK_ENV_NAME[ETHEREUM]));
+        assert(err.message.includes(String(SUSDS_FIRST_TRACKED_EVENT_BLOCK)));
         return true;
       },
     );

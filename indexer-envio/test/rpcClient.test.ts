@@ -15,10 +15,12 @@ const ENV_KEYS = [
   "ENVIO_RPC_URL_42220",
   "ENVIO_RPC_URL_11142220",
   "ENVIO_RPC_URL_143",
+  "ENVIO_RPC_URL_1",
   "ENVIO_RPC_URL_10143",
   "ENVIO_RPC_FALLBACK_URL_42220",
   "ENVIO_RPC_FALLBACK_URL_11142220",
   "ENVIO_RPC_FALLBACK_URL_143",
+  "ENVIO_RPC_FALLBACK_URL_1",
   "ENVIO_RPC_FALLBACK_URL_10143",
 ] as const;
 
@@ -102,6 +104,13 @@ describe("getRpcClient", () => {
     delete process.env.ENVIO_API_TOKEN;
     process.env.ENVIO_RPC_URL_42220 = "https://example.org/celo";
     const client = getRpcClient(42220);
+    assert.ok(client);
+  });
+
+  it("returns an Ethereum client from the hardcoded sUSDS read default", () => {
+    delete process.env.ENVIO_API_TOKEN;
+    delete process.env.ENVIO_RPC_URL_1;
+    const client = getRpcClient(1);
     assert.ok(client);
   });
 

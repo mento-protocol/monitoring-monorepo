@@ -193,6 +193,14 @@ contracts:
     events:
       - event: Transfer
 
+  - name: Susds
+    abi_file_path: abis/Susds.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: Transfer
+      - event: Deposit
+      - event: Withdraw
+
   # Circuit Breakers — see config.multichain.mainnet.yaml for the full
   # rationale + event list. Mirrored here so testnet codegen + handler
   # bindings stay aligned with mainnet (EventHandlers.ts imports the same
@@ -319,6 +327,8 @@ chains:
         address: [] # Dynamically registered from FPMMDeployed events
       - name: StableToken
         address: [] # Stable supply tracking not yet wired on testnet
+      - name: Susds
+        address: []
       - name: BreakerBox
         address:
           - 0x578bD46003B9D3fd4c3C3f47c98B329562a6a1dE
@@ -360,6 +370,8 @@ chains:
         address: [] # Dynamically registered from FPMMDeployed events
       - name: StableToken
         address: [] # reserve-backed stables are Celo-only
+      - name: Susds
+        address: []
       - name: OpenLiquidityStrategy
         address:
           - 0xCCd2aD0603a08EBc14D223a983171ef18192e8c9

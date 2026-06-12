@@ -846,6 +846,71 @@ type PoolDailyFeeSnapshot {
   updatedAtTimestamp: BigInt!
 }
 
+# sUSDS reserve-yield accounting on Ethereum. Rows are intentionally compact:
+# the dashboard reads the singleton summary, while movement/lot rows preserve
+# event-level lineage for audits and future drill-downs.
+type SusdsYieldMovement {
+  id: ID! # eventId(chainId, blockNumber, logIndex)
+  chainId: Int! @index
+  kind: String! @index # deposit | withdraw | transfer_in | transfer_out | internal_transfer
+  from: String!
+  to: String!
+  shares: BigInt! @config(precision: 78)
+  assetsUsdWei: BigInt! @config(precision: 78)
+  costBasisUsdWei: BigInt! @config(precision: 78)
+  yieldUsdWei: BigInt! @config(precision: 78)
+  sharePriceUsdWei: BigInt! @config(precision: 78)
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
+
+type SusdsCostBasisLot {
+  id: ID!
+  chainId: Int! @index
+  wallet: String! @index
+  originalShares: BigInt! @config(precision: 78)
+  remainingShares: BigInt! @config(precision: 78)
+  costBasisUsdWei: BigInt! @config(precision: 78)
+  openedAtBlock: BigInt!
+  openedAtLogIndex: Int!
+  openedTxHash: String!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+type SusdsPosition {
+  id: ID! # "{chainId}-{wallet}"
+  chainId: Int! @index
+  wallet: String! @index
+  shares: BigInt! @config(precision: 78)
+  costBasisUsdWei: BigInt! @config(precision: 78)
+  realizedYieldUsdWei: BigInt! @config(precision: 78)
+  transferredOutYieldUsdWei: BigInt! @config(precision: 78)
+  redeemedYieldUsdWei: BigInt! @config(precision: 78)
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
+
+type SusdsYieldSummary {
+  id: ID! # "{chainId}-susds"
+  chainId: Int! @index
+  token: String!
+  trackedWallets: [String!]!
+  currentShares: BigInt! @config(precision: 78)
+  costBasisUsdWei: BigInt! @config(precision: 78)
+  realizedYieldUsdWei: BigInt! @config(precision: 78)
+  transferredOutYieldUsdWei: BigInt! @config(precision: 78)
+  redeemedYieldUsdWei: BigInt! @config(precision: 78)
+  currentValueUsdWei: BigInt! @config(precision: 78)
+  unrealizedYieldUsdWei: BigInt! @config(precision: 78)
+  totalEarnedYieldUsdWei: BigInt! @config(precision: 78)
+  sharePriceUsdWei: BigInt! @config(precision: 78)
+  lastMovementTxHash: String!
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
+
 # Pre-rolled hero metrics for /volume. Bypasses Hasura's 1000-row
 # cap on TraderDailySnapshot for any window-level aggregation.
 # One row per (chainId, windowKey, snapshotDay). The dashboard reads the

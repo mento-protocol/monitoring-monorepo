@@ -66,6 +66,16 @@ export const FPMM_FEE_ABI = [
   },
 ] as const;
 
+export const SUSDS_CONVERT_TO_ASSETS_ABI = [
+  {
+    type: "function",
+    name: "convertToAssets",
+    inputs: [{ name: "shares", type: "uint256" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
 export const FPMM_MINIMAL_ABI = [
   {
     type: "function",

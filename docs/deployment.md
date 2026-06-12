@@ -15,9 +15,9 @@ This monorepo deploys two services independently:
 
 The prod multichain indexer is driven by a single deploy branch that Envio watches:
 
-| Network                | Deploy Branch | Config File                      | Envio Project                  |
-| ---------------------- | ------------- | -------------------------------- | ------------------------------ |
-| Celo + Monad (mainnet) | `envio`       | `config.multichain.mainnet.yaml` | `mento-protocol/mento` (Envio) |
+| Network                       | Deploy Branch | Config File                      | Envio Project                  |
+| ----------------------------- | ------------- | -------------------------------- | ------------------------------ |
+| Celo + Monad + Ethereum sUSDS | `envio`       | `config.multichain.mainnet.yaml` | `mento-protocol/mento` (Envio) |
 
 ### Endpoint URL
 
@@ -121,13 +121,13 @@ manual CLI commands (`gh secret set`, `vercel env add`, `gcloud secrets versions
 add`, etc.). Add or update the owning Terraform resource/integration instead,
 document the source of truth here, and wait for a human-approved plan/apply.
 
-| Variable                   | Source                   | Description                                      |
-| -------------------------- | ------------------------ | ------------------------------------------------ |
-| `NEXT_PUBLIC_HASURA_URL`   | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad mainnet)       |
-| `UPSTASH_REDIS_REST_URL`   | Terraform output         | Address labels Redis — auto-set from DB          |
-| `UPSTASH_REDIS_REST_TOKEN` | Terraform output         | Address labels Redis token — auto-set            |
-| `BLOB_STORE_ID`            | Vercel store integration | Blob OIDC store id for backup and restore routes |
-| `BLOB_WEBHOOK_PUBLIC_KEY`  | Vercel store integration | Blob OIDC public key for the connected store     |
+| Variable                   | Source                   | Description                                         |
+| -------------------------- | ------------------------ | --------------------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL`   | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad + Ethereum sUSDS) |
+| `UPSTASH_REDIS_REST_URL`   | Terraform output         | Address labels Redis — auto-set from DB             |
+| `UPSTASH_REDIS_REST_TOKEN` | Terraform output         | Address labels Redis token — auto-set               |
+| `BLOB_STORE_ID`            | Vercel store integration | Blob OIDC store id for backup and restore routes    |
+| `BLOB_WEBHOOK_PUBLIC_KEY`  | Vercel store integration | Blob OIDC public key for the connected store        |
 
 ### Aggregator Integration Probes
 
@@ -287,7 +287,7 @@ main
 └── feature branches → PR → main
 
 envio
-├── 🚀 auto-deploys to Envio (multichain indexer, Celo + Monad mainnet)
+├── 🚀 auto-deploys to Envio (multichain indexer, Celo + Monad + Ethereum sUSDS)
 └── updated via: pnpm deploy:indexer
 ```
 

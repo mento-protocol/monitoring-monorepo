@@ -49,6 +49,9 @@ const EMPTY_RESERVE_YIELD: ReserveYieldResponse = {
   principalUsd: 0,
   forecastPrincipalUsd: null,
   earnedYieldUsd: null,
+  realizedYieldUsd: null,
+  unrealizedYieldUsd: null,
+  earnedYieldAsOf: null,
   holdings: [],
   holdingsAsOf: "2026-06-11T12:00:00.000Z",
   grossApyPercent: 5.33,
@@ -57,6 +60,7 @@ const EMPTY_RESERVE_YIELD: ReserveYieldResponse = {
   revenueShareBps: 8000,
   netMentoApyPercent: 4.144,
   skySavingsRateApyPercent: 3.6,
+  skySavingsRateSource: "onchain-susds-ssr",
   dailyRunRateUsd: 0,
   next30dUsd: 0,
   next365dUsd: 0,
@@ -64,12 +68,17 @@ const EMPTY_RESERVE_YIELD: ReserveYieldResponse = {
   forecastUnavailableSymbols: [],
   holdingsError: null,
   rateError: null,
+  earnedYieldError: null,
 };
 
 const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
   ...EMPTY_RESERVE_YIELD,
   principalUsd: 4700,
   forecastPrincipalUsd: 4700,
+  earnedYieldUsd: 439.4,
+  realizedYieldUsd: 275.58,
+  unrealizedYieldUsd: 163.82,
+  earnedYieldAsOf: "2026-06-03T10:41:11.000Z",
   dailyRunRateUsd: 182.8 / 365,
   next30dUsd: (182.8 * 30) / 365,
   next365dUsd: 182.8,
@@ -86,9 +95,9 @@ const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
       custodianType: "cold",
       balance: 2000,
       principalUsd: 2200,
-      earnedYieldUsd: null,
+      earnedYieldUsd: 205.68,
       apyPercent: 3.6,
-      yieldModel: "Sky Savings Rate APY from Block Analitica",
+      yieldModel: "Sky Savings Rate APY from on-chain sUSDS.ssr()",
       dailyRunRateUsd: 79.2 / 365,
       next30dUsd: (79.2 * 30) / 365,
       next365dUsd: 79.2,
@@ -378,7 +387,7 @@ describe("RevenuePageClient degraded fee states", () => {
     });
 
     expect(html).toContain("Reserve Yield");
-    expect(html).toContain("N/A");
+    expect(html).toContain("$439.40");
     expect(html).toContain("earned");
     expect(html).toContain("$15.02");
     expect(html).toContain("per month");
@@ -390,8 +399,8 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("Annual Forecast based on blended APY");
     expect(html).not.toContain("- Based on blended APY");
     expect(html).toContain("current Fed Funds Rate");
-    expect(html).toContain("sUSDS APY uses the Sky Savings Rate");
-    expect(html).toContain("Block Analitica");
+    expect(html).toContain("sUSDS APY reads on-chain sUSDS.ssr()");
+    expect(html).not.toContain("Block Analitica fallback");
     expect(html).toContain("balance x APY x days / 365");
     expect(html).not.toContain("sUSDS currently excluded");
     expect(html).toContain("Reserve Yield Components");
@@ -407,6 +416,20 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("wallet / ops");
     expect(html).toContain("FPMM AUSD / USDm");
     expect(html).toContain('aria-label="Reserve yield components"');
+  });
+
+  it("labels the sUSDS APY fallback source when Block Analitica supplies the rate", () => {
+    const html = renderRevenue([], false, undefined, {
+      data: {
+        ...RESERVE_YIELD_WITH_HOLDINGS,
+        skySavingsRateSource: "blockanalitica-overall",
+      },
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain("Block Analitica fallback");
+    expect(html).not.toContain("sUSDS APY reads on-chain sUSDS.ssr()");
   });
 
   it("shows reserve yield loading state before the route resolves", () => {
@@ -430,6 +453,7 @@ describe("RevenuePageClient degraded fee states", () => {
         fedfundsAsOf: null,
         netMentoApyPercent: null,
         skySavingsRateApyPercent: null,
+        skySavingsRateSource: null,
         forecastPrincipalUsd: null,
         dailyRunRateUsd: null,
         next30dUsd: null,

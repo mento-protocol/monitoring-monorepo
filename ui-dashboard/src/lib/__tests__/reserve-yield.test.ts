@@ -1,11 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   computeNetMentoApyPercent,
+  computeSkySavingsRateApyPercentFromSsr,
   extractReserveYieldHoldings,
   fetchReserveYieldSnapshot,
   parseFredFedFundsCsv,
   parseSkySavingsRateApyPercent,
+  parseSkySavingsRateSsrApyPercent,
 } from "../reserve-yield";
+
+const SKY_SSR_RAY = BigInt("1000000001121484774769253326");
+const SKY_SSR_RPC_RESULT =
+  "0x0000000000000000000000000000000000000000033b2e3caf60d0b2dd215bce";
+const SKY_SSR_APY_PERCENT = 3.600000425292;
+const SKY_SSR_RPC_RESPONSE = {
+  jsonrpc: "2.0",
+  id: 1,
+  result: SKY_SSR_RPC_RESULT,
+};
 
 const RESERVE_PAYLOAD = {
   collateral: {
@@ -167,6 +179,30 @@ describe("reserve yield parsing and math", () => {
     ).toThrow("expected a decimal fraction");
   });
 
+  it("computes Sky Savings Rate APY from on-chain sUSDS ssr()", () => {
+    expect(computeSkySavingsRateApyPercentFromSsr(SKY_SSR_RAY)).toBeCloseTo(
+      SKY_SSR_APY_PERCENT,
+      12,
+    );
+    expect(parseSkySavingsRateSsrApyPercent(SKY_SSR_RPC_RESPONSE)).toBeCloseTo(
+      SKY_SSR_APY_PERCENT,
+      12,
+    );
+  });
+
+  it("rejects malformed sUSDS ssr() RPC responses", () => {
+    expect(() =>
+      parseSkySavingsRateSsrApyPercent({
+        jsonrpc: "2.0",
+        id: 1,
+        error: { code: -32000, message: "execution reverted" },
+      }),
+    ).toThrow("RPC -32000");
+    expect(() => parseSkySavingsRateSsrApyPercent({ result: "0x" })).toThrow(
+      "uint256 result",
+    );
+  });
+
   it("applies the provider APY formula", () => {
     expect(computeNetMentoApyPercent(5.33)).toBeCloseTo(4.144, 6);
   });
@@ -178,9 +214,7 @@ describe("reserve yield parsing and math", () => {
       .mockResolvedValueOnce(
         new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
       )
-      .mockResolvedValueOnce(
-        Response.json([{ sky_savings_rate_apy: "0.036" }]),
-      );
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE));
 
     const snapshot = await fetchReserveYieldSnapshot({
       fetchImpl,
@@ -193,17 +227,24 @@ describe("reserve yield parsing and math", () => {
     expect(snapshot.holdingsAsOf).toBe("2026-06-11T12:00:00.000Z");
     expect(snapshot.grossApyPercent).toBe(5.33);
     expect(snapshot.netMentoApyPercent).toBeCloseTo(4.144, 6);
-    expect(snapshot.skySavingsRateApyPercent).toBeCloseTo(3.6, 12);
-    expect(snapshot.annualRunRateUsd).toBeCloseTo(182.8, 6);
+    expect(snapshot.skySavingsRateApyPercent).toBeCloseTo(
+      SKY_SSR_APY_PERCENT,
+      12,
+    );
+    expect(snapshot.skySavingsRateSource).toBe("onchain-susds-ssr");
+    expect(snapshot.annualRunRateUsd).toBeCloseTo(182.800009, 6);
     expect(snapshot.next30dUsd).toBeCloseTo(15.024658, 6);
-    expect(snapshot.next365dUsd).toBeCloseTo(182.8, 6);
+    expect(snapshot.next365dUsd).toBeCloseTo(182.800009, 6);
     expect(snapshot.dailyRunRateUsd).toBeCloseTo(0.500822, 6);
     expect(snapshot.holdings[0]).toMatchObject({
       assetSymbol: "sUSDS",
       earnedYieldUsd: null,
     });
-    expect(snapshot.holdings[0]?.apyPercent).toBeCloseTo(3.6, 12);
-    expect(snapshot.holdings[0]?.next365dUsd).toBeCloseTo(79.2, 6);
+    expect(snapshot.holdings[0]?.apyPercent).toBeCloseTo(
+      SKY_SSR_APY_PERCENT,
+      12,
+    );
+    expect(snapshot.holdings[0]?.next365dUsd).toBeCloseTo(79.200009, 6);
     expect(snapshot.holdings[1]?.annualRunRateUsd).toBeCloseTo(62.16, 6);
     expect(snapshot.forecastUnavailableSymbols).toEqual([]);
   });

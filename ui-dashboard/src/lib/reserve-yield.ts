@@ -2,17 +2,41 @@ const RESERVE_API_URL =
   "https://mento-analytics-api-12390052758.us-central1.run.app/api/v2/reserve";
 const FEDFUNDS_CSV_URL =
   "https://fred.stlouisfed.org/graph/fredgraph.csv?id=FEDFUNDS";
+const SKY_SUSDS_RPC_URL = "https://ethereum.publicnode.com";
+const SKY_SUSDS_CONTRACT_ADDRESS = "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD";
+const SKY_SUSDS_SSR_CALL_DATA = "0x03607ceb";
 const SKY_OVERALL_URL = "https://info-sky.blockanalitica.com/api/v1/overall/";
 const FETCH_TIMEOUT_MS = 8_000;
+const SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
 
 const RESERVE_YIELD_EXPENSE_BPS = 15;
 const RESERVE_YIELD_REVENUE_SHARE_BPS = 8_000;
 const FORECASTABLE_AUSD_SYMBOL = "AUSD";
 const FORECASTABLE_SUSDS_SYMBOL = "SUSDS";
+const SUSDS_YIELD_SUMMARY_ID = "1-susds";
 const TRACKED_YIELD_SYMBOLS = new Set([
   FORECASTABLE_AUSD_SYMBOL,
   FORECASTABLE_SUSDS_SYMBOL,
 ]);
+
+const SUSDS_YIELD_SUMMARY_QUERY = /* GraphQL */ `
+  query SusdsYieldSummary($id: ID!) {
+    SusdsYieldSummary(where: { id: { _eq: $id } }, limit: 1) {
+      id
+      currentShares
+      costBasisUsdWei
+      realizedYieldUsdWei
+      transferredOutYieldUsdWei
+      redeemedYieldUsdWei
+      currentValueUsdWei
+      unrealizedYieldUsdWei
+      totalEarnedYieldUsdWei
+      sharePriceUsdWei
+      lastUpdatedBlock
+      lastUpdatedTimestamp
+    }
+  }
+`;
 
 export type ReserveYieldHolding = {
   id: string;
@@ -37,6 +61,9 @@ export type ReserveYieldResponse = {
   principalUsd: number | null;
   forecastPrincipalUsd: number | null;
   earnedYieldUsd: number | null;
+  realizedYieldUsd: number | null;
+  unrealizedYieldUsd: number | null;
+  earnedYieldAsOf: string | null;
   holdings: ReserveYieldHolding[];
   holdingsAsOf: string | null;
   grossApyPercent: number | null;
@@ -45,6 +72,7 @@ export type ReserveYieldResponse = {
   revenueShareBps: typeof RESERVE_YIELD_REVENUE_SHARE_BPS;
   netMentoApyPercent: number | null;
   skySavingsRateApyPercent: number | null;
+  skySavingsRateSource: SkySavingsRateSource | null;
   dailyRunRateUsd: number | null;
   next30dUsd: number | null;
   next365dUsd: number | null;
@@ -52,6 +80,7 @@ export type ReserveYieldResponse = {
   forecastUnavailableSymbols: string[];
   holdingsError: string | null;
   rateError: string | null;
+  earnedYieldError: string | null;
 };
 
 type FetchImpl = typeof fetch;
@@ -67,6 +96,13 @@ type FredObservation = {
   grossApyPercent: number;
 };
 
+type SkySavingsRateSource = "onchain-susds-ssr" | "blockanalitica-overall";
+
+type SkySavingsRateObservation = {
+  apyPercent: number;
+  source: SkySavingsRateSource;
+};
+
 type ForecastApyBySymbol = {
   ausdNetMentoApyPercent: number | null;
   susdsApyPercent: number | null;
@@ -80,6 +116,28 @@ type ForecastTotals = {
   next365dUsd: number | null;
   annualRunRateUsd: number | null;
   forecastUnavailableSymbols: string[];
+};
+
+type SusdsYieldLedger = {
+  earnedYieldUsd: number;
+  realizedYieldUsd: number;
+  unrealizedYieldUsd: number;
+  costBasisUsd: number;
+  asOf: string | null;
+};
+
+type SusdsYieldLedgerResult = {
+  ledger: SusdsYieldLedger | null;
+  error: string | null;
+};
+
+type SusdsYieldState = {
+  holdings: ReserveYieldHolding[];
+  earnedYieldUsd: number | null;
+  realizedYieldUsd: number | null;
+  unrealizedYieldUsd: number | null;
+  earnedYieldAsOf: string | null;
+  earnedYieldError: string | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -109,6 +167,26 @@ function numericField(value: unknown): number | null {
   if (trimmed === "") return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function bigintField(value: unknown, label: string): bigint {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return BigInt(value);
+  }
+  if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
+    return BigInt(value.trim());
+  }
+  throw new Error(`${label} was not an integer string`);
+}
+
+function weiToUsd(value: bigint): number {
+  return Number(value) / 1e18;
+}
+
+function unixSecondsToIso(value: bigint): string | null {
+  if (value <= BigInt(0)) return null;
+  return new Date(Number(value) * 1000).toISOString();
 }
 
 function yieldForDays(
@@ -187,6 +265,57 @@ function aggregateHoldings(
       `${b.chain} ${b.sourceLabel}`,
     );
   });
+}
+
+function applySusdsYieldLedger(
+  holdings: ReserveYieldHolding[],
+  ledger: SusdsYieldLedger | null,
+): ReserveYieldHolding[] {
+  if (ledger === null) return holdings;
+  const susdsHoldings = holdings.filter(
+    (holding) =>
+      holding.assetSymbol.toUpperCase() === FORECASTABLE_SUSDS_SYMBOL,
+  );
+  const susdsPrincipalUsd = susdsHoldings.reduce(
+    (sum, holding) => sum + holding.principalUsd,
+    0,
+  );
+  if (susdsPrincipalUsd <= 0) return holdings;
+
+  return holdings.map((holding) => {
+    if (holding.assetSymbol.toUpperCase() !== FORECASTABLE_SUSDS_SYMBOL) {
+      return holding;
+    }
+    return {
+      ...holding,
+      earnedYieldUsd:
+        ledger.earnedYieldUsd * (holding.principalUsd / susdsPrincipalUsd),
+    };
+  });
+}
+
+function currentSusdsPrincipalUsd(holdings: ReserveYieldHolding[]): number {
+  return holdings
+    .filter(
+      (holding) =>
+        holding.assetSymbol.toUpperCase() === FORECASTABLE_SUSDS_SYMBOL,
+    )
+    .reduce((sum, holding) => sum + holding.principalUsd, 0);
+}
+
+function refreshSusdsUnrealizedYield(
+  holdings: ReserveYieldHolding[],
+  ledger: SusdsYieldLedger,
+  useCurrentReserveBalance: boolean,
+): SusdsYieldLedger {
+  if (!useCurrentReserveBalance) return ledger;
+  const currentValueUsd = currentSusdsPrincipalUsd(holdings);
+  const unrealizedYieldUsd = Math.max(currentValueUsd - ledger.costBasisUsd, 0);
+  return {
+    ...ledger,
+    earnedYieldUsd: ledger.realizedYieldUsd + unrealizedYieldUsd,
+    unrealizedYieldUsd,
+  };
 }
 
 function sourceHoldingFromRecord({
@@ -340,7 +469,7 @@ function applyForecastModels(
       return {
         ...holding,
         apyPercent: apyBySymbol.susdsApyPercent,
-        yieldModel: "Sky Savings Rate APY from Block Analitica",
+        yieldModel: "Sky Savings Rate APY from on-chain sUSDS.ssr()",
       };
     }
     return {
@@ -441,9 +570,97 @@ export function parseSkySavingsRateApyPercent(payload: unknown): number {
   throw new Error("Sky overall response did not contain sky_savings_rate_apy");
 }
 
+export function computeSkySavingsRateApyPercentFromSsr(ssrRay: bigint): number {
+  const perSecondRate = Number(ssrRay) / 1e27;
+  if (!Number.isFinite(perSecondRate) || perSecondRate < 1) {
+    throw new Error(`sUSDS ssr() returned invalid ray value ${ssrRay}`);
+  }
+  return (Math.pow(perSecondRate, SECONDS_PER_YEAR) - 1) * 100;
+}
+
+export function parseSkySavingsRateSsrApyPercent(payload: unknown): number {
+  if (!isRecord(payload)) {
+    throw new Error("sUSDS ssr() RPC response was not an object");
+  }
+
+  if (isRecord(payload.error)) {
+    const code = numericField(payload.error.code);
+    const message =
+      typeof payload.error.message === "string"
+        ? payload.error.message
+        : "unknown RPC error";
+    throw new Error(code === null ? message : `RPC ${code}: ${message}`);
+  }
+
+  const result = payload.result;
+  if (
+    typeof result !== "string" ||
+    !/^0x[0-9a-fA-F]+$/.test(result) ||
+    result === "0x"
+  ) {
+    throw new Error(
+      "sUSDS ssr() RPC response did not contain a uint256 result",
+    );
+  }
+
+  return computeSkySavingsRateApyPercentFromSsr(BigInt(result));
+}
+
 async function fetchJson(fetchImpl: FetchImpl, url: string): Promise<unknown> {
   const res = await fetchImpl(url, {
     headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fetchJsonRpcEthCall(
+  fetchImpl: FetchImpl,
+  {
+    rpcUrl,
+    to,
+    data,
+  }: {
+    rpcUrl: string;
+    to: string;
+    data: string;
+  },
+): Promise<unknown> {
+  const res = await fetchImpl(rpcUrl, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_call",
+      params: [{ to, data }, "latest"],
+    }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fetchGraphql(
+  fetchImpl: FetchImpl,
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<unknown> {
+  const hasuraUrl = process.env.NEXT_PUBLIC_HASURA_URL?.trim();
+  if (!hasuraUrl) {
+    throw new Error("NEXT_PUBLIC_HASURA_URL is not configured");
+  }
+  const res = await fetchImpl(hasuraUrl, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -457,6 +674,107 @@ async function fetchText(fetchImpl: FetchImpl, url: string): Promise<string> {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.text();
+}
+
+function parseSusdsYieldLedger(payload: unknown): SusdsYieldLedgerResult {
+  if (!isRecord(payload)) {
+    throw new Error("Hasura response was not an object");
+  }
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    const first = payload.errors[0];
+    const message =
+      isRecord(first) && typeof first.message === "string"
+        ? first.message
+        : "GraphQL error";
+    throw new Error(message);
+  }
+  const data = isRecord(payload.data) ? payload.data : null;
+  const rows = data ? asArray(data.SusdsYieldSummary) : [];
+  const row = rows.find(isRecord);
+  if (!row) {
+    return {
+      ledger: null,
+      error: "sUSDS earned-yield ledger pending: no indexed summary row yet.",
+    };
+  }
+
+  const earnedYieldWei = bigintField(
+    row.totalEarnedYieldUsdWei,
+    "totalEarnedYieldUsdWei",
+  );
+  const costBasisWei = bigintField(row.costBasisUsdWei, "costBasisUsdWei");
+  const realizedYieldWei = bigintField(
+    row.realizedYieldUsdWei,
+    "realizedYieldUsdWei",
+  );
+  const unrealizedYieldWei = bigintField(
+    row.unrealizedYieldUsdWei,
+    "unrealizedYieldUsdWei",
+  );
+  const lastUpdatedTimestamp = bigintField(
+    row.lastUpdatedTimestamp,
+    "lastUpdatedTimestamp",
+  );
+  return {
+    ledger: {
+      earnedYieldUsd: weiToUsd(earnedYieldWei),
+      realizedYieldUsd: weiToUsd(realizedYieldWei),
+      unrealizedYieldUsd: weiToUsd(unrealizedYieldWei),
+      costBasisUsd: weiToUsd(costBasisWei),
+      asOf: unixSecondsToIso(lastUpdatedTimestamp),
+    },
+    error: null,
+  };
+}
+
+async function fetchSusdsYieldLedger(
+  fetchImpl: FetchImpl,
+): Promise<SusdsYieldLedgerResult> {
+  return fetchGraphql(fetchImpl, SUSDS_YIELD_SUMMARY_QUERY, {
+    id: SUSDS_YIELD_SUMMARY_ID,
+  }).then(parseSusdsYieldLedger);
+}
+
+function applySusdsYieldLedgerResult(
+  holdings: ReserveYieldHolding[],
+  result: PromiseSettledResult<SusdsYieldLedgerResult>,
+  useCurrentReserveBalance: boolean,
+): SusdsYieldState {
+  const emptyState = {
+    holdings,
+    earnedYieldUsd: null,
+    realizedYieldUsd: null,
+    unrealizedYieldUsd: null,
+    earnedYieldAsOf: null,
+  };
+  if (result.status === "rejected") {
+    return {
+      ...emptyState,
+      earnedYieldError: errorMessage(
+        "sUSDS earned-yield ledger",
+        result.reason,
+      ),
+    };
+  }
+
+  const { ledger: rawLedger, error } = result.value;
+  if (rawLedger === null) {
+    return { ...emptyState, earnedYieldError: error };
+  }
+  const ledger = refreshSusdsUnrealizedYield(
+    holdings,
+    rawLedger,
+    useCurrentReserveBalance,
+  );
+
+  return {
+    holdings: applySusdsYieldLedger(holdings, ledger),
+    earnedYieldUsd: ledger.earnedYieldUsd,
+    realizedYieldUsd: ledger.realizedYieldUsd,
+    unrealizedYieldUsd: ledger.unrealizedYieldUsd,
+    earnedYieldAsOf: ledger.asOf,
+    earnedYieldError: null,
+  };
 }
 
 function errorMessage(label: string, err: unknown): string {
@@ -481,6 +799,46 @@ function rateErrorForUnavailableForecasts(
   );
 }
 
+async function fetchOnchainSkySavingsRate(
+  fetchImpl: FetchImpl,
+): Promise<SkySavingsRateObservation> {
+  const apyPercent = await fetchJsonRpcEthCall(fetchImpl, {
+    rpcUrl: SKY_SUSDS_RPC_URL,
+    to: SKY_SUSDS_CONTRACT_ADDRESS,
+    data: SKY_SUSDS_SSR_CALL_DATA,
+  }).then(parseSkySavingsRateSsrApyPercent);
+  return { apyPercent, source: "onchain-susds-ssr" };
+}
+
+async function fetchBlockAnaliticaSkySavingsRateFallback(
+  fetchImpl: FetchImpl,
+): Promise<SkySavingsRateObservation> {
+  const apyPercent = await fetchJson(fetchImpl, SKY_OVERALL_URL).then(
+    parseSkySavingsRateApyPercent,
+  );
+  return { apyPercent, source: "blockanalitica-overall" };
+}
+
+async function fetchSkySavingsRate(
+  fetchImpl: FetchImpl,
+): Promise<SkySavingsRateObservation> {
+  try {
+    return await fetchOnchainSkySavingsRate(fetchImpl);
+  } catch (primaryErr) {
+    try {
+      return await fetchBlockAnaliticaSkySavingsRateFallback(fetchImpl);
+    } catch (fallbackErr) {
+      throw new Error(
+        joinErrors(
+          errorMessage("on-chain sUSDS.ssr()", primaryErr),
+          errorMessage("Block Analitica fallback", fallbackErr),
+        ) ?? "Sky Savings Rate unavailable",
+        { cause: fallbackErr },
+      );
+    }
+  }
+}
+
 export async function fetchReserveYieldSnapshot({
   fetchImpl = fetch,
   now = new Date(),
@@ -488,11 +846,12 @@ export async function fetchReserveYieldSnapshot({
   fetchImpl?: FetchImpl;
   now?: Date;
 } = {}): Promise<ReserveYieldResponse> {
-  const [reserveResult, fedfundsResult, skyRateResult] =
+  const [reserveResult, fedfundsResult, skyRateResult, susdsLedgerResult] =
     await Promise.allSettled([
       fetchJson(fetchImpl, RESERVE_API_URL),
       fetchText(fetchImpl, FEDFUNDS_CSV_URL).then(parseFredFedFundsCsv),
-      fetchJson(fetchImpl, SKY_OVERALL_URL).then(parseSkySavingsRateApyPercent),
+      fetchSkySavingsRate(fetchImpl),
+      fetchSusdsYieldLedger(fetchImpl),
     ]);
 
   const fetchedAt = now.toISOString();
@@ -531,13 +890,22 @@ export async function fetchReserveYieldSnapshot({
   }
 
   let skySavingsRateApyPercent: number | null = null;
+  let skySavingsRateSource: SkySavingsRateSource | null = null;
   let skyRateError: string | null = null;
 
   if (skyRateResult.status === "fulfilled") {
-    skySavingsRateApyPercent = skyRateResult.value;
+    skySavingsRateApyPercent = skyRateResult.value.apyPercent;
+    skySavingsRateSource = skyRateResult.value.source;
   } else {
     skyRateError = errorMessage("Sky Savings Rate", skyRateResult.reason);
   }
+
+  const susdsYield = applySusdsYieldLedgerResult(
+    holdings,
+    susdsLedgerResult,
+    reserveResult.status === "fulfilled",
+  );
+  holdings = susdsYield.holdings;
 
   const netMentoApyPercent =
     grossApyPercent === null
@@ -551,7 +919,10 @@ export async function fetchReserveYieldSnapshot({
   return {
     principalUsd,
     forecastPrincipalUsd: forecast.forecastPrincipalUsd,
-    earnedYieldUsd: null,
+    earnedYieldUsd: susdsYield.earnedYieldUsd,
+    realizedYieldUsd: susdsYield.realizedYieldUsd,
+    unrealizedYieldUsd: susdsYield.unrealizedYieldUsd,
+    earnedYieldAsOf: susdsYield.earnedYieldAsOf,
     holdings: forecast.modeledHoldings,
     holdingsAsOf,
     grossApyPercent,
@@ -560,6 +931,7 @@ export async function fetchReserveYieldSnapshot({
     revenueShareBps: RESERVE_YIELD_REVENUE_SHARE_BPS,
     netMentoApyPercent,
     skySavingsRateApyPercent,
+    skySavingsRateSource,
     dailyRunRateUsd: forecast.dailyRunRateUsd,
     next30dUsd: forecast.next30dUsd,
     next365dUsd: forecast.next365dUsd,
@@ -571,5 +943,6 @@ export async function fetchReserveYieldSnapshot({
       fedfundsError,
       skyRateError,
     ),
+    earnedYieldError: susdsYield.earnedYieldError,
   };
 }
