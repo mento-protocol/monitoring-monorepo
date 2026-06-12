@@ -54,6 +54,7 @@ function cdpPoint(
 function reserveSnapshot(
   timestamp: number,
   dailyEarnedYieldUsd: number,
+  totalEarnedYieldUsd = dailyEarnedYieldUsd,
 ): SusdsYieldDailySnapshotRow {
   return {
     id: `1-susds-${timestamp}`,
@@ -67,7 +68,7 @@ function reserveSnapshot(
     redeemedYieldUsdWei: "0",
     currentValueUsdWei: "0",
     unrealizedYieldUsdWei: "0",
-    totalEarnedYieldUsdWei: usdWei(dailyEarnedYieldUsd),
+    totalEarnedYieldUsdWei: usdWei(totalEarnedYieldUsd),
     dailyEarnedYieldUsdWei: usdWei(dailyEarnedYieldUsd),
     dailyRealizedYieldUsdWei: "0",
     dailyUnrealizedYieldUsdWei: usdWei(dailyEarnedYieldUsd),
@@ -153,9 +154,9 @@ describe("buildCanonicalRevenue", () => {
       cdpMarkets: [],
       reserveYield: null,
       reserveDailySnapshots: [
-        reserveSnapshot(ts("2026-03-04"), 7),
-        reserveSnapshot(ts("2026-06-07"), 11),
-        reserveSnapshot(ts("2026-06-12"), 3),
+        reserveSnapshot(ts("2026-03-04"), 7, 7),
+        reserveSnapshot(ts("2026-06-07"), 11, 18),
+        reserveSnapshot(ts("2026-06-12"), 3, 21),
       ],
       nowSeconds: NOW_SECONDS,
     });
@@ -204,6 +205,26 @@ describe("buildCanonicalRevenue", () => {
     expect(result.periods.allTimeSinceV3.partialReasons).toContain(
       "Reserve earned-yield history has no sUSDS snapshots yet.",
     );
+  });
+
+  it("uses cumulative reserve-yield deltas so compression reduces period totals", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-10"), 100, 100),
+        reserveSnapshot(ts("2026-06-11"), 0, 50),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    const compressionDay = result.dailySeries.find(
+      (point) => point.timestamp === ts("2026-06-11"),
+    );
+    expect(compressionDay?.reserveYieldUsd).toBe(-50);
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(50);
   });
 
   it("builds reserve, swap, and CDP forecasts from their separate assumptions", () => {

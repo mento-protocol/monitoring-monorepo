@@ -187,15 +187,34 @@ function buildRevenueBuckets(args: {
     });
   }
 
-  for (const row of args.reserveDailySnapshots) {
+  const previousReserveTotalsBySource = new Map<string, number>();
+  const reserveRows = [...args.reserveDailySnapshots].sort(
+    (a, b) => Number(a.timestamp) - Number(b.timestamp),
+  );
+  for (const row of reserveRows) {
     const timestamp = Number(row.timestamp);
     if (!Number.isFinite(timestamp)) continue;
-    const dailyYieldUsd = numericUsdWei(row.dailyEarnedYieldUsdWei);
-    if (dailyYieldUsd === null) continue;
+    const totalYieldUsd = numericUsdWei(row.totalEarnedYieldUsdWei);
+    if (totalYieldUsd === null) continue;
+    const sourceKey = `${row.chainId}:${row.token.toLowerCase()}`;
+    const previousTotalUsd = previousReserveTotalsBySource.get(sourceKey);
+    const baselineUsd =
+      previousTotalUsd ?? reserveSnapshotBaselineUsd(row, totalYieldUsd);
+    if (baselineUsd === null) continue;
+    const dailyYieldUsd = totalYieldUsd - baselineUsd;
+    previousReserveTotalsBySource.set(sourceKey, totalYieldUsd);
     addBucketValue(buckets, timestamp, { reserveYieldUsd: dailyYieldUsd });
   }
 
   return buckets;
+}
+
+function reserveSnapshotBaselineUsd(
+  row: SusdsYieldDailySnapshotRow,
+  totalYieldUsd: number,
+): number | null {
+  const dailyYieldUsd = numericUsdWei(row.dailyEarnedYieldUsdWei);
+  return dailyYieldUsd === null ? null : totalYieldUsd - dailyYieldUsd;
 }
 
 function buildDailySeries(
