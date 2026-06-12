@@ -279,10 +279,9 @@ function ReserveYieldTotalRow({ data }: { data: ReserveYieldResponse }) {
         title={`Blended APY across forecastable reserve balances. ${forecastTitle}`}
         className="font-semibold text-slate-100 sm:!px-2"
       >
-        {data.forecastUnavailableSymbols.length > 0 && totalApyPercent !== null
-          ? "≈ "
-          : ""}
-        {formatAnnualInterestRatePercent(totalApyPercent)}
+        {totalApyPercent !== null && data.forecastUnavailableSymbols.length > 0
+          ? `≈ ${formatAnnualInterestRatePercent(totalApyPercent)}`
+          : formatAnnualInterestRatePercent(totalApyPercent)}
       </Td>
       <Td
         mono
