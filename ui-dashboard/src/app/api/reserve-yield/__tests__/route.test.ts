@@ -46,6 +46,27 @@ const RESERVE_WITH_YIELD_COMPONENTS = {
   },
 };
 
+const SUSDS_LEDGER_SUMMARY = {
+  id: "1-susds",
+  currentShares: "2000000000000000000000",
+  costBasisUsdWei: "2000000000000000000000",
+  realizedYieldUsdWei: "100000000000000000000",
+  transferredOutYieldUsdWei: "100000000000000000000",
+  redeemedYieldUsdWei: "0",
+  currentValueUsdWei: "2100000000000000000000",
+  unrealizedYieldUsdWei: "100000000000000000000",
+  totalEarnedYieldUsdWei: "200000000000000000000",
+  sharePriceUsdWei: "1050000000000000000",
+  lastUpdatedBlock: "25236329",
+  lastUpdatedTimestamp: "1780483271",
+};
+
+const RESERVE_WITH_ONLY_AUSD = {
+  collateral: {
+    assets: [RESERVE_WITH_YIELD_COMPONENTS.collateral.assets[0]],
+  },
+};
+
 const RESERVE_WITHOUT_YIELD_COMPONENTS = {
   collateral: {
     assets: [
@@ -158,22 +179,7 @@ describe("GET /api/reserve-yield", () => {
       .mockResolvedValueOnce(
         Response.json({
           data: {
-            SusdsYieldSummary: [
-              {
-                id: "1-susds",
-                currentShares: "2000000000000000000000",
-                costBasisUsdWei: "2000000000000000000000",
-                realizedYieldUsdWei: "100000000000000000000",
-                transferredOutYieldUsdWei: "100000000000000000000",
-                redeemedYieldUsdWei: "0",
-                currentValueUsdWei: "2100000000000000000000",
-                unrealizedYieldUsdWei: "100000000000000000000",
-                totalEarnedYieldUsdWei: "200000000000000000000",
-                sharePriceUsdWei: "1050000000000000000",
-                lastUpdatedBlock: "25236329",
-                lastUpdatedTimestamp: "1780483271",
-              },
-            ],
+            SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
           },
         }),
       );
@@ -194,6 +200,82 @@ describe("GET /api/reserve-yield", () => {
     expect(body.earnedYieldError).toBeNull();
     expect(body.holdings[0].assetSymbol).toBe("sUSDS");
     expect(body.holdings[0].earnedYieldUsd).toBeCloseTo(300, 6);
+  });
+
+  it("keeps indexed sUSDS yield when current reserve sUSDS parsing fails", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              {
+                symbol: "sUSDS",
+                chain: "ethereum",
+                balance: "not-a-number",
+                usd_value: "not-a-number",
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Reserve Safe",
+                    balance: "not-a-number",
+                    usd_value: "not-a-number",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
+          },
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdings).toEqual([]);
+    expect(body.principalUsd).toBeNull();
+    expect(body.holdingsError).toContain("without usable USD values");
+    expect(body.earnedYieldUsd).toBeCloseTo(200, 6);
+    expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
+    expect(body.unrealizedYieldUsd).toBeCloseTo(100, 6);
+    expect(body.earnedYieldError).toBeNull();
+  });
+
+  it("suppresses sUSDS ledger errors when no sUSDS holding is displayed", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_ONLY_AUSD))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          errors: [{ message: "field 'SusdsYieldSummary' not found" }],
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdings).toHaveLength(1);
+    expect(body.holdings[0].assetSymbol).toBe("AUSD");
+    expect(body.earnedYieldUsd).toBeNull();
+    expect(body.earnedYieldError).toBeNull();
   });
 
   it("returns a clear empty holdings shape when the reserve has no yield-bearing rows", async () => {

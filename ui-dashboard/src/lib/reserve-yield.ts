@@ -310,6 +310,7 @@ function refreshSusdsUnrealizedYield(
 ): SusdsYieldLedger {
   if (!useCurrentReserveBalance) return ledger;
   const currentValueUsd = currentSusdsPrincipalUsd(holdings);
+  if (currentValueUsd <= 0) return ledger;
   const unrealizedYieldUsd = Math.max(currentValueUsd - ledger.costBasisUsd, 0);
   return {
     ...ledger,
@@ -740,6 +741,9 @@ function applySusdsYieldLedgerResult(
   result: PromiseSettledResult<SusdsYieldLedgerResult>,
   useCurrentReserveBalance: boolean,
 ): SusdsYieldState {
+  const hasVisibleSusdsHolding = currentSusdsPrincipalUsd(holdings) > 0;
+  const shouldSurfaceLedgerError =
+    hasVisibleSusdsHolding || !useCurrentReserveBalance;
   const emptyState = {
     holdings,
     earnedYieldUsd: null,
@@ -750,16 +754,18 @@ function applySusdsYieldLedgerResult(
   if (result.status === "rejected") {
     return {
       ...emptyState,
-      earnedYieldError: errorMessage(
-        "sUSDS earned-yield ledger",
-        result.reason,
-      ),
+      earnedYieldError: shouldSurfaceLedgerError
+        ? errorMessage("sUSDS earned-yield ledger", result.reason)
+        : null,
     };
   }
 
   const { ledger: rawLedger, error } = result.value;
   if (rawLedger === null) {
-    return { ...emptyState, earnedYieldError: error };
+    return {
+      ...emptyState,
+      earnedYieldError: shouldSurfaceLedgerError ? error : null,
+    };
   }
   const ledger = refreshSusdsUnrealizedYield(
     holdings,

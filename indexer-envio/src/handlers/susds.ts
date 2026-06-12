@@ -509,9 +509,9 @@ indexer.onEvent(
     const owner = asAddress(event.params.owner);
     if (!isTrackedWallet(owner)) return;
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
+    if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
     const sharePriceUsdWei = await readSharePrice(context, meta);
-    if (context.isPreload) return;
     await recordDeposit(
       context,
       meta,
@@ -535,9 +535,9 @@ indexer.onEvent(
     const owner = asAddress(event.params.owner);
     if (!isTrackedWallet(owner)) return;
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
+    if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
     const sharePriceUsdWei = await readSharePrice(context, meta);
-    if (context.isPreload) return;
     await recordWithdraw(context, meta, {
       owner,
       receiver: asAddress(event.params.receiver),
@@ -561,9 +561,9 @@ indexer.onEvent(
     if (from === ZERO_ADDRESS || to === ZERO_ADDRESS) return;
     const meta = eventMeta(event);
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
+    if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
     const sharePriceUsdWei = await readSharePrice(context, meta);
-    if (context.isPreload) return;
     await recordTransfer(
       context,
       meta,
