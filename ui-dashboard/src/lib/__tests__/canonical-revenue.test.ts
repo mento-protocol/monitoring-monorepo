@@ -306,6 +306,50 @@ describe("buildCanonicalRevenue", () => {
     expect(result.forecasts.next365d.swapFeesUsd).toBe(3650);
   });
 
+  it("excludes pre-launch swap fee buckets from trailing forecasts", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [
+            feeSnapshot(ts("2026-02-28"), 100),
+            feeSnapshot(ts("2026-03-01"), 100),
+            feeSnapshot(ts("2026-03-02"), 100),
+            feeSnapshot(ts("2026-03-03"), 10),
+            feeSnapshot(ts("2026-03-04"), 10),
+            feeSnapshot(ts("2026-03-05"), 10),
+          ],
+        }),
+      ],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [],
+      nowSeconds: ts("2026-03-06") + 12 * 60 * 60,
+    });
+
+    expect(result.forecasts.next7d.swapFeesUsd).toBeNull();
+    expect(result.forecasts.next7d.partialReasons).toContain(
+      "Swap forecast unavailable: only 3 completed daily buckets loaded.",
+    );
+  });
+
+  it("excludes pre-launch CDP upfront fee buckets from trailing forecasts", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [
+        cdpPoint(ts("2026-03-02"), 1_000, 1_000),
+        cdpPoint(ts("2026-03-04"), 10, 10),
+      ],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [],
+      nowSeconds: ts("2026-03-05") + 12 * 60 * 60,
+    });
+
+    expect(result.forecasts.next7d.cdpBorrowingUsd).toBe(70);
+    expect(result.forecasts.next30d.cdpBorrowingUsd).toBe(300);
+  });
+
   it("marks swap forecasts unavailable when swap history failed to load", () => {
     const completedDays = Array.from(
       { length: 30 },

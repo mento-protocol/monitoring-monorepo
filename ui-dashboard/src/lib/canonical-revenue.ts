@@ -359,9 +359,15 @@ function completedWindowAverage<T>(args: {
   nowSeconds: number;
   trailingDays: number;
   minimumBuckets: number;
+  minimumTimestamp?: number;
 }): { dailyAverageUsd: number | null; buckets: number } {
   const today = currentDayBucket(args.nowSeconds);
-  const from = today - args.trailingDays * SECONDS_PER_DAY;
+  const from = Math.max(
+    today - args.trailingDays * SECONDS_PER_DAY,
+    args.minimumTimestamp === undefined
+      ? Number.NEGATIVE_INFINITY
+      : dayBucket(args.minimumTimestamp),
+  );
   const values = new Map<number, number>();
   for (const point of args.points) {
     const timestamp = args.timestamp(point);
@@ -458,6 +464,7 @@ function buildForecastSource(args: {
         nowSeconds: args.nowSeconds,
         trailingDays: 30,
         minimumBuckets: 7,
+        minimumTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
       });
   if (args.swapFeesFailed) {
     partialReasons.push(
@@ -495,6 +502,7 @@ function buildForecastSource(args: {
       nowSeconds: args.nowSeconds,
       trailingDays: 30,
       minimumBuckets: 1,
+      minimumTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
     });
     const cdpUpfrontDailyUsd = cdpUpfrontAverage.dailyAverageUsd ?? 0;
     cdpDailyUsd =
