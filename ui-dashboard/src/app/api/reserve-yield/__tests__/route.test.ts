@@ -193,6 +193,13 @@ describe("GET /api/reserve-yield", () => {
     expect(fetchMock.mock.calls[3]?.[0]).toBe(
       "https://hasura.example/v1/graphql",
     );
+    const graphqlBody = JSON.parse(
+      String(fetchMock.mock.calls[3]?.[1]?.body),
+    ) as { query: string; variables: Record<string, unknown> };
+    expect(graphqlBody.query).toContain(
+      "query SusdsYieldSummary($id: String!)",
+    );
+    expect(graphqlBody.variables.id).toBe("1-susds");
     expect(body.earnedYieldUsd).toBeCloseTo(300, 6);
     expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(200, 6);

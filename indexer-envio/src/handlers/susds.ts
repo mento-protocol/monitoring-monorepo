@@ -559,6 +559,7 @@ indexer.onEvent(
     const from = asAddress(event.params.from);
     const to = asAddress(event.params.to);
     if (from === ZERO_ADDRESS || to === ZERO_ADDRESS) return;
+    if (from === to) return;
     const meta = eventMeta(event);
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
     if (context.isPreload) return;

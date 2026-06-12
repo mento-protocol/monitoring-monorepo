@@ -20,7 +20,7 @@ const TRACKED_YIELD_SYMBOLS = new Set([
 ]);
 
 const SUSDS_YIELD_SUMMARY_QUERY = /* GraphQL */ `
-  query SusdsYieldSummary($id: ID!) {
+  query SusdsYieldSummary($id: String!) {
     SusdsYieldSummary(where: { id: { _eq: $id } }, limit: 1) {
       id
       currentShares

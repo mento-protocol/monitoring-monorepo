@@ -222,4 +222,30 @@ describe("sUSDS reserve yield accounting", () => {
       undefined,
     );
   });
+
+  it("ignores tracked self-transfers without reading share price", async () => {
+    let mockDb = MockDb.createMockDb();
+    setSharePrice(100, dollars(106) / 100n);
+    mockDb = await deposit(mockDb, 100, 0, dollars(1060), dollars(1000));
+    const before = summary(mockDb);
+    const beforeCurrentShares = before.currentShares;
+    const beforeCostBasis = before.costBasisUsdWei;
+    const beforeTotalEarnedYield = before.totalEarnedYieldUsdWei;
+
+    _clearMockSusdsSharePrices();
+    mockDb = await transfer(
+      mockDb,
+      110,
+      1,
+      RESERVE_SAFE,
+      RESERVE_SAFE,
+      dollars(250),
+    );
+
+    const after = summary(mockDb);
+    assert.equal(mockDb.entities.SusdsYieldMovement.getAll().length, 1);
+    assert.equal(after.currentShares, beforeCurrentShares);
+    assert.equal(after.costBasisUsdWei, beforeCostBasis);
+    assert.equal(after.totalEarnedYieldUsdWei, beforeTotalEarnedYield);
+  });
 });
