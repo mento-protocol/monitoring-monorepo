@@ -1,7 +1,7 @@
 # Mento v3 Envio HyperIndex Indexer
 
-Multichain Envio HyperIndex indexer for Mento v3 — Celo Mainnet (42220) and Monad Mainnet (143).
-Tracks FPMM pool activity, oracle health, trading limits, and rebalancer liveness.
+Multichain Envio HyperIndex indexer for Mento v3 — Celo Mainnet (42220), Monad Mainnet (143), and Ethereum Mainnet (1) sUSDS reserve-yield events.
+Tracks FPMM pool activity, oracle health, trading limits, rebalancer liveness, and reserve-yield accounting.
 
 ## What It Does
 
@@ -25,6 +25,7 @@ Listens to on-chain events from Mento v3 contracts and writes structured entitie
 | ValueDeltaBreaker     | `DefaultCooldownTimeUpdated`, `RateFeedCooldownTimeUpdated`, `DefaultRateChangeThresholdUpdated`, `RateChangeThresholdUpdated`, `ReferenceValueUpdated`                                                                  |
 | WormholeNttManager    | `TransferSent`, `TransferRedeemed`, `MessageAttestedTo`, `InboundTransferQueued`                                                                                                                                         |
 | WormholeTransceiver   | `ReceivedMessage`                                                                                                                                                                                                        |
+| Susds                 | `Deposit`, `Withdraw`, `Transfer` (Ethereum only; filtered to tracked Mento reserve wallets)                                                                                                                             |
 
 ### Entities Written
 
@@ -42,6 +43,7 @@ Listens to on-chain events from Mento v3 contracts and writes structured entitie
 | Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                            |
 | Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
 | Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                             |
+| Reserve yield           | `SusdsYieldMovement`, `SusdsCostBasisLot`, `SusdsPosition`, `SusdsYieldSummary`                                                                                                 |
 
 ### Pool ID Format
 
@@ -50,11 +52,11 @@ This prevents collisions when the same contract address is deployed on multiple 
 
 ## Configuration
 
-| File                                 | Networks                                          |
-| ------------------------------------ | ------------------------------------------------- |
-| `config.multichain.mainnet.yaml`     | Celo Mainnet + Monad Mainnet (default/production) |
-| `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                      |
-| `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness              |
+| File                                 | Networks                                                           |
+| ------------------------------------ | ------------------------------------------------------------------ |
+| `config.multichain.mainnet.yaml`     | Celo Mainnet + Monad Mainnet + Ethereum sUSDS (default/production) |
+| `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                                       |
+| `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness                               |
 
 `config/protocolActors.json` contains manual protocol-controlled caller and
 entry-point overrides for the dashboard volume filter. Pool liquidity-strategy
@@ -76,7 +78,7 @@ Deploy branch: `envio` → triggers hosted reindex on push.
 
 ```bash
 cp indexer-envio/.env.example indexer-envio/.env
-# Mainnet defaults (forno, rpc2.monad.xyz) work out of the box.
+# Mainnet defaults (forno, rpc2.monad.xyz, ethereum.publicnode.com) work out of the box.
 # For testnet, set ENVIO_API_TOKEN or override ENVIO_RPC_URL_10143.
 
 # Generate types + start multichain indexer
@@ -89,7 +91,7 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
 ### Available Commands (from repo root)
 
 ```bash
-pnpm indexer:codegen                # Generate types (multichain mainnet — Celo + Monad)
+pnpm indexer:codegen                # Generate types (multichain mainnet — Celo + Monad + Ethereum sUSDS)
 pnpm indexer:dev                    # Start local multichain mainnet indexer
 pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev            # Start local multichain testnet indexer
@@ -224,6 +226,6 @@ See [`STATUS.md`](./STATUS.md) for current sync state and endpoint details.
 | `src/EventHandlers.ts`              | Event → entity mapping                                  |
 | `src/helpers.ts`                    | `makePoolId`, `poolIdToAddress` utilities               |
 | `src/rpc.ts` + `src/rpc/`           | RPC read helpers (per-chain clients, effects, fallback) |
-| `config.multichain.mainnet.yaml`    | Production config (Celo + Monad)                        |
+| `config.multichain.mainnet.yaml`    | Production config (Celo + Monad + Ethereum sUSDS)       |
 | `config/deployment-namespaces.json` | Vendored namespace map for hosted builds                |
 | `abis/`                             | Vendored contract ABI subsets                           |

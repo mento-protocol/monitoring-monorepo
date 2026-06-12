@@ -23,12 +23,18 @@ import {
   FPMM_TRADING_LIMITS_ABI,
   MEDIAN_DELTA_BREAKER_ABI,
   SortedOraclesContract,
+  SUSDS_CONVERT_TO_ASSETS_ABI,
   VALUE_DELTA_BREAKER_ABI,
 } from "../abis.js";
 
-const TEST_CHAIN_IDS = Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)
-  .map((chainId) => Number(chainId))
-  .filter((chainId) => Number.isFinite(chainId));
+const TEST_CHAIN_IDS = Array.from(
+  new Set([
+    ...Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)
+      .map((chainId) => Number(chainId))
+      .filter((chainId) => Number.isFinite(chainId)),
+    1,
+  ]),
+);
 
 const GET_BREAKERS_ABI = [
   {
@@ -73,6 +79,7 @@ const TEST_RPC_ABI = [
   ...VALUE_DELTA_BREAKER_ABI,
   ...GET_BREAKERS_ABI,
   ...RATE_FEED_DEPS_ABI,
+  ...SUSDS_CONVERT_TO_ASSETS_ABI,
   ...(SortedOraclesContract.abi as Abi),
 ] as const satisfies Abi;
 

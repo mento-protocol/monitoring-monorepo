@@ -85,6 +85,7 @@ describe("getRpcClient fail-fast guard", () => {
   const ORIGINAL_RPC_GLOBAL = process.env.ENVIO_RPC_URL;
   const ORIGINAL_RPC_42220 = process.env.ENVIO_RPC_URL_42220;
   const ORIGINAL_RPC_143 = process.env.ENVIO_RPC_URL_143;
+  const ORIGINAL_RPC_1 = process.env.ENVIO_RPC_URL_1;
   const ORIGINAL_RPC_10143 = process.env.ENVIO_RPC_URL_10143;
 
   beforeEach(() => {
@@ -93,6 +94,7 @@ describe("getRpcClient fail-fast guard", () => {
     delete process.env.ENVIO_RPC_URL;
     delete process.env.ENVIO_RPC_URL_42220;
     delete process.env.ENVIO_RPC_URL_143;
+    delete process.env.ENVIO_RPC_URL_1;
     delete process.env.ENVIO_RPC_URL_10143;
   });
 
@@ -117,6 +119,11 @@ describe("getRpcClient fail-fast guard", () => {
       process.env.ENVIO_RPC_URL_143 = ORIGINAL_RPC_143;
     } else {
       delete process.env.ENVIO_RPC_URL_143;
+    }
+    if (ORIGINAL_RPC_1 !== undefined) {
+      process.env.ENVIO_RPC_URL_1 = ORIGINAL_RPC_1;
+    } else {
+      delete process.env.ENVIO_RPC_URL_1;
     }
     if (ORIGINAL_RPC_10143 !== undefined) {
       process.env.ENVIO_RPC_URL_10143 = ORIGINAL_RPC_10143;
@@ -157,6 +164,12 @@ describe("getRpcClient fail-fast guard", () => {
     delete process.env.ENVIO_API_TOKEN;
     delete process.env.ENVIO_RPC_URL_143;
     assert.doesNotThrow(() => getRpcClient(143));
+  });
+
+  it("does not throw for full-node default: Ethereum Mainnet (chain 1)", () => {
+    delete process.env.ENVIO_API_TOKEN;
+    delete process.env.ENVIO_RPC_URL_1;
+    assert.doesNotThrow(() => getRpcClient(1));
   });
 
   it("does not throw when a non-HyperRPC override is used", () => {

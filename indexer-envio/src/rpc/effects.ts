@@ -52,6 +52,7 @@ import {
 } from "./breakers.js";
 import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
 import { trackEffectExecution } from "../performance.js";
+import { fetchSusdsSharePriceUsdWei } from "./susds.js";
 
 type UntypedCreateEffect = (
   options: unknown,
@@ -430,6 +431,23 @@ export const feeTokenMetaEffect = createEffect(
     }
     return result;
   },
+);
+
+export const susdsSharePriceEffect = createEffect(
+  {
+    name: "susdsSharePrice",
+    input: { chainId: S.int32, tokenAddress: S.string, blockNumber: S.bigint },
+    output: S.nullable(S.bigint),
+    rateLimit: { calls: 200, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) =>
+    fetchSusdsSharePriceUsdWei(
+      input.chainId,
+      input.tokenAddress,
+      input.blockNumber,
+      context.log,
+    ),
 );
 
 /** Convert the `feesEffect` output (explicit `undefined` keys) into a

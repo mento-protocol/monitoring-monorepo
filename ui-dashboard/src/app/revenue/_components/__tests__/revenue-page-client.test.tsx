@@ -49,6 +49,9 @@ const EMPTY_RESERVE_YIELD: ReserveYieldResponse = {
   principalUsd: 0,
   forecastPrincipalUsd: null,
   earnedYieldUsd: null,
+  realizedYieldUsd: null,
+  unrealizedYieldUsd: null,
+  earnedYieldAsOf: null,
   holdings: [],
   holdingsAsOf: "2026-06-11T12:00:00.000Z",
   grossApyPercent: 5.33,
@@ -56,6 +59,8 @@ const EMPTY_RESERVE_YIELD: ReserveYieldResponse = {
   expenseBps: 15,
   revenueShareBps: 8000,
   netMentoApyPercent: 4.144,
+  skySavingsRateApyPercent: 3.6,
+  skySavingsRateSource: "onchain-susds-ssr",
   dailyRunRateUsd: 0,
   next30dUsd: 0,
   next365dUsd: 0,
@@ -63,17 +68,22 @@ const EMPTY_RESERVE_YIELD: ReserveYieldResponse = {
   forecastUnavailableSymbols: [],
   holdingsError: null,
   rateError: null,
+  earnedYieldError: null,
 };
 
 const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
   ...EMPTY_RESERVE_YIELD,
   principalUsd: 4700,
-  forecastPrincipalUsd: 2500,
-  dailyRunRateUsd: 0.2838356164383562,
-  next30dUsd: 8.515068493150686,
-  next365dUsd: 103.6,
-  annualRunRateUsd: 103.6,
-  forecastUnavailableSymbols: ["sUSDS"],
+  forecastPrincipalUsd: 4700,
+  earnedYieldUsd: 439.4,
+  realizedYieldUsd: 275.58,
+  unrealizedYieldUsd: 163.82,
+  earnedYieldAsOf: "2026-06-03T10:41:11.000Z",
+  dailyRunRateUsd: 182.8 / 365,
+  next30dUsd: (182.8 * 30) / 365,
+  next365dUsd: 182.8,
+  annualRunRateUsd: 182.8,
+  forecastUnavailableSymbols: [],
   holdings: [
     {
       id: "susds:ethereum:wallet:0xreserve:cold:0",
@@ -85,16 +95,16 @@ const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
       custodianType: "cold",
       balance: 2000,
       principalUsd: 2200,
-      earnedYieldUsd: null,
-      apyPercent: null,
-      yieldModel: "APY source pending",
-      dailyRunRateUsd: null,
-      next30dUsd: null,
-      next365dUsd: null,
-      annualRunRateUsd: null,
+      earnedYieldUsd: 205.68,
+      apyPercent: 3.6,
+      yieldModel: "Sky Savings Rate APY from on-chain sUSDS.ssr()",
+      dailyRunRateUsd: 79.2 / 365,
+      next30dUsd: (79.2 * 30) / 365,
+      next365dUsd: 79.2,
+      annualRunRateUsd: 79.2,
     },
     {
-      id: "ethereum:wallet:0xops:ops:0",
+      id: "AUSD:ethereum:wallet:0xops:ops:0",
       assetSymbol: "AUSD",
       chain: "ethereum",
       sourceType: "wallet",
@@ -113,7 +123,7 @@ const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
       annualRunRateUsd: 62.16,
     },
     {
-      id: "monad:fpmm:0xfpmm:ops:0",
+      id: "AUSD:monad:fpmm:0xfpmm:ops:0",
       assetSymbol: "AUSD",
       chain: "monad",
       sourceType: "fpmm",
@@ -377,11 +387,11 @@ describe("RevenuePageClient degraded fee states", () => {
     });
 
     expect(html).toContain("Reserve Yield");
-    expect(html).toContain("N/A");
+    expect(html).toContain("$439.40");
     expect(html).toContain("earned");
-    expect(html).toContain("$8.52");
+    expect(html).toContain("$15.02");
     expect(html).toContain("per month");
-    expect(html).toContain("$103.60");
+    expect(html).toContain("$182.80");
     expect(html).toContain("per year");
     expect(html).toContain("$4.7K");
     expect(html).toContain("reserve assets earning yield");
@@ -389,10 +399,15 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("Annual Forecast based on blended APY");
     expect(html).not.toContain("- Based on blended APY");
     expect(html).toContain("current Fed Funds Rate");
+    expect(html).toContain("sUSDS APY reads on-chain sUSDS.ssr()");
+    expect(html).not.toContain("Block Analitica fallback");
     expect(html).toContain("balance x APY x days / 365");
-    expect(html).toContain("sUSDS currently excluded");
+    expect(html).not.toContain("sUSDS currently excluded");
     expect(html).toContain("Reserve Yield Components");
     expect(html).toContain("Balance");
+    expect(html).toContain("APY");
+    expect(html).toContain("3.6%");
+    expect(html).toContain("4.144%");
     expect(html).toContain("sUSDS");
     expect(html).toContain("AUSD");
     expect(html).toContain("Ethereum");
@@ -402,6 +417,20 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("wallet / ops");
     expect(html).toContain("FPMM AUSD / USDm");
     expect(html).toContain('aria-label="Reserve yield components"');
+  });
+
+  it("labels the sUSDS APY fallback source when Block Analitica supplies the rate", () => {
+    const html = renderRevenue([], false, undefined, {
+      data: {
+        ...RESERVE_YIELD_WITH_HOLDINGS,
+        skySavingsRateSource: "blockanalitica-overall",
+      },
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(html).toContain("Block Analitica fallback");
+    expect(html).not.toContain("sUSDS APY reads on-chain sUSDS.ssr()");
   });
 
   it("shows reserve yield loading state before the route resolves", () => {
@@ -424,12 +453,14 @@ describe("RevenuePageClient degraded fee states", () => {
         grossApyPercent: null,
         fedfundsAsOf: null,
         netMentoApyPercent: null,
+        skySavingsRateApyPercent: null,
+        skySavingsRateSource: null,
         forecastPrincipalUsd: null,
         dailyRunRateUsd: null,
         next30dUsd: null,
         next365dUsd: null,
         annualRunRateUsd: null,
-        forecastUnavailableSymbols: ["AUSD", "sUSDS"],
+        forecastUnavailableSymbols: ["AUSD", "SUSDS"],
         holdings: RESERVE_YIELD_WITH_HOLDINGS.holdings.map((holding) => ({
           ...holding,
           apyPercent: null,
@@ -444,11 +475,46 @@ describe("RevenuePageClient degraded fee states", () => {
       hasError: true,
     });
 
-    expect(html).toContain("forecast rates unavailable");
+    expect(html).toContain("Forecast rates unavailable");
+    expect(html).not.toContain("Earned-yield ledger pending; forecast rates");
     expect(html).toContain("$4.7K");
     expect(html).toContain("Forecast rates are unavailable");
-    expect(html).toContain("showing balance without forecast");
+    expect(html).not.toContain("Some forecast rates are unavailable");
+    expect(html).toContain("showing balances without forecast");
     expect(html).toContain("N/A");
+  });
+
+  it("labels partial reserve row parsing separately from ledger status", () => {
+    const html = renderRevenue([], false, undefined, {
+      data: {
+        ...RESERVE_YIELD_WITH_HOLDINGS,
+        holdingsError:
+          "Some reserve yield rows were missing usable USD values.",
+      },
+      isLoading: false,
+      hasError: true,
+    });
+
+    expect(html).toContain("Some reserve rows unavailable");
+    expect(html).not.toContain(
+      "Earned-yield ledger pending; forecasts use parsed rows",
+    );
+  });
+
+  it("does not label available earned-yield data as pending when a ledger warning is present", () => {
+    const html = renderRevenue([], false, undefined, {
+      data: {
+        ...RESERVE_YIELD_WITH_HOLDINGS,
+        earnedYieldError:
+          "sUSDS earned-yield ledger: current reserve includes sUSDS rows outside indexed wallets.",
+      },
+      isLoading: false,
+      hasError: true,
+    });
+
+    expect(html).toContain("Earned-yield ledger loaded with warnings");
+    expect(html).not.toContain("Earned-yield ledger pending");
+    expect(html).toContain("current reserve includes sUSDS rows outside");
   });
 
   it("does not pass reserve-yield forecasts into the Total Fees chart", () => {

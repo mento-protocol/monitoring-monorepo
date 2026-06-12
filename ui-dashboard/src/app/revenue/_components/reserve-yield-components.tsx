@@ -17,8 +17,7 @@ export type ReserveYieldTileState = {
 
 function formatAnnualInterestRatePercent(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "—";
-  const digits = Math.abs(value) < 10 ? 2 : 1;
-  return `${value.toFixed(digits).replace(/\.?0+$/, "")}%`;
+  return `${value.toFixed(3).replace(/\.?0+$/, "")}%`;
 }
 
 function formatNullableUSD(value: number | null): string {
@@ -39,13 +38,27 @@ function reserveYieldSubtitle(state: ReserveYieldTileState): string {
   if (data.holdings.length === 0) {
     return "No yield-bearing reserve holdings returned";
   }
+  if (data.earnedYieldError !== null) {
+    if (data.earnedYieldUsd !== null) {
+      return "Earned-yield ledger loaded with warnings; forecasts use current reserve balances";
+    }
+    return "Earned-yield ledger pending; forecasts use current reserve balances";
+  }
   if (data.rateError !== null) {
-    return "Earned-yield ledger pending; forecast rates unavailable";
+    return data.dailyRunRateUsd === null
+      ? "Forecast rates unavailable"
+      : "Some forecast rates unavailable";
   }
   if (data.holdingsError !== null) {
-    return "Earned-yield ledger pending; forecasts use parsed rows";
+    return "Some reserve rows unavailable; forecasts use parsed rows";
   }
   return "";
+}
+
+function reserveYieldRateBanner(data: ReserveYieldResponse): string {
+  return data.dailyRunRateUsd === null
+    ? "Forecast rates are unavailable — showing balances without forecast estimates."
+    : "Some forecast rates are unavailable — showing balances without forecast estimates where needed.";
 }
 
 function reserveYieldHasHoldings(data: ReserveYieldResponse | null): boolean {
@@ -71,24 +84,31 @@ function reserveYieldForecastTooltip(
   data: ReserveYieldResponse | null,
 ): string {
   const forecastUnavailableSymbols = data?.forecastUnavailableSymbols ?? [];
-  const apyLine =
+  const ausdApyLine =
     data?.grossApyPercent === null || data?.grossApyPercent === undefined
       ? "- AUSD APY is unavailable until the Fed Funds feed loads"
       : `- AUSD APY uses current Fed Funds Rate (${formatAnnualInterestRatePercent(data.grossApyPercent)} gross), minus 15 bps expenses, then 80% Mento revenue share (${formatAnnualInterestRatePercent(data.netMentoApyPercent)} net)`;
+  const susdsApyLine =
+    data?.skySavingsRateApyPercent === null ||
+    data?.skySavingsRateApyPercent === undefined
+      ? "- sUSDS APY is unavailable until the Sky Savings Rate feed loads"
+      : data.skySavingsRateSource === "blockanalitica-overall"
+        ? `- sUSDS APY uses the Sky Savings Rate (${formatAnnualInterestRatePercent(data.skySavingsRateApyPercent)}) from Block Analitica fallback`
+        : `- sUSDS APY reads on-chain sUSDS.ssr() on Ethereum (${formatAnnualInterestRatePercent(data.skySavingsRateApyPercent)})`;
+  const remainingUnavailableSymbols = forecastUnavailableSymbols.filter(
+    (symbol) => !["AUSD", "SUSDS"].includes(symbol),
+  );
   const exclusions =
-    forecastUnavailableSymbols.length === 0
+    remainingUnavailableSymbols.length === 0
       ? ""
-      : `\n- ${forecastUnavailableSymbols.join(", ")} currently excluded until an APY source is wired`;
-  return `Annual Forecast based on blended APY on current reserve balances & non-compounding math: balance x APY x days / 365\n${apyLine}${exclusions}`;
+      : `\n- ${remainingUnavailableSymbols.join(", ")} currently excluded until an APY source is wired`;
+  return `Annual Forecast based on blended APY on current reserve balances & non-compounding math: balance x APY x days / 365\n${ausdApyLine}\n${susdsApyLine}${exclusions}`;
 }
 
-function reserveYieldHeadline(
-  state: ReserveYieldTileState,
-  hasHoldings: boolean,
-): string {
+function reserveYieldHeadline(state: ReserveYieldTileState): string {
   const { data, isLoading } = state;
   if (isLoading && data === null) return "—";
-  if (!hasHoldings || data === null || data.earnedYieldUsd === null) {
+  if (data === null || data.earnedYieldUsd === null) {
     return "N/A";
   }
   return formatUSD(data.earnedYieldUsd);
@@ -105,7 +125,7 @@ function reserveYieldTileView(state: ReserveYieldTileState): {
   const { data } = state;
   const hasHoldings = reserveYieldHasHoldings(data);
   return {
-    headline: reserveYieldHeadline(state, hasHoldings),
+    headline: reserveYieldHeadline(state),
     showEarnedLabel: data !== null && !state.isLoading,
     reserveBalance: reserveYieldMetric(data?.principalUsd ?? null, hasHoldings),
     monthlyForecast: reserveTileForecastMetric(data?.next30dUsd ?? null),
@@ -192,6 +212,9 @@ function ReserveYieldHoldingRow({ holding }: { holding: ReserveYieldHolding }) {
         {formatNullableUSD(holding.earnedYieldUsd)}
       </Td>
       <Td mono align="right" className="sm:!px-2">
+        {formatAnnualInterestRatePercent(holding.apyPercent)}
+      </Td>
+      <Td mono align="right" className="sm:!px-2">
         {reserveForecastMetric(holding.next30dUsd)}
       </Td>
       <Td mono align="right" className="sm:!px-2">
@@ -253,10 +276,14 @@ export function ReserveYieldByHoldingTable({
           partial data.
         </p>
       ) : null}
+      {data?.earnedYieldError != null ? (
+        <p className="mb-3 text-xs text-amber-400/80">
+          {data.earnedYieldError}
+        </p>
+      ) : null}
       {data?.rateError != null ? (
         <p className="mb-3 text-xs text-amber-400/80">
-          Forecast rates are unavailable — showing balance without forecast
-          estimates where needed.
+          {reserveYieldRateBanner(data)}
         </p>
       ) : null}
       <Table aria-label="Reserve yield components">
@@ -270,6 +297,9 @@ export function ReserveYieldByHoldingTable({
             </Th>
             <Th align="right" className="sm:!px-2">
               Earned
+            </Th>
+            <Th align="right" className="sm:!px-2">
+              APY
             </Th>
             <Th align="right" className="sm:!px-2">
               30d

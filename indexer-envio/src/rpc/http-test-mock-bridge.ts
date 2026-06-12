@@ -172,6 +172,35 @@ export function registerMockERC20DecimalsHttp(
   });
 }
 
+export function registerMockSusdsSharePriceHttp(
+  chainId: number,
+  tokenAddress: string,
+  value: bigint | null,
+): void {
+  if (value === null) {
+    setTestRpcErrorMock({
+      group: "susdsSharePrice",
+      chainId,
+      address: tokenAddress,
+      functionName: "convertToAssets",
+      callArgs: [10n ** 18n],
+    });
+    return;
+  }
+  setTestRpcMock({
+    group: "susdsSharePrice",
+    chainId,
+    address: tokenAddress,
+    functionName: "convertToAssets",
+    callArgs: [10n ** 18n],
+    result: value,
+  });
+}
+
+export function clearSusdsSharePriceHttpMocks(): void {
+  clearTestRpcMockGroup("susdsSharePrice");
+}
+
 export function registerMockTokenDecimalsScalingHttp(
   chainId: number,
   poolAddress: string,
