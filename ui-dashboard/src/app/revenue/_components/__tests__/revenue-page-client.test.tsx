@@ -475,12 +475,30 @@ describe("RevenuePageClient degraded fee states", () => {
       hasError: true,
     });
 
-    expect(html).toContain("forecast rates unavailable");
+    expect(html).toContain("Forecast rates unavailable");
+    expect(html).not.toContain("Earned-yield ledger pending; forecast rates");
     expect(html).toContain("$4.7K");
     expect(html).toContain("Forecast rates are unavailable");
     expect(html).not.toContain("Some forecast rates are unavailable");
     expect(html).toContain("showing balances without forecast");
     expect(html).toContain("N/A");
+  });
+
+  it("labels partial reserve row parsing separately from ledger status", () => {
+    const html = renderRevenue([], false, undefined, {
+      data: {
+        ...RESERVE_YIELD_WITH_HOLDINGS,
+        holdingsError:
+          "Some reserve yield rows were missing usable USD values.",
+      },
+      isLoading: false,
+      hasError: true,
+    });
+
+    expect(html).toContain("Some reserve rows unavailable");
+    expect(html).not.toContain(
+      "Earned-yield ledger pending; forecasts use parsed rows",
+    );
   });
 
   it("does not pass reserve-yield forecasts into the Total Fees chart", () => {

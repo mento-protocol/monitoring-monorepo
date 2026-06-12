@@ -43,11 +43,11 @@ function reserveYieldSubtitle(state: ReserveYieldTileState): string {
   }
   if (data.rateError !== null) {
     return data.dailyRunRateUsd === null
-      ? "Earned-yield ledger pending; forecast rates unavailable"
-      : "Earned-yield ledger pending; some forecast rates unavailable";
+      ? "Forecast rates unavailable"
+      : "Some forecast rates unavailable";
   }
   if (data.holdingsError !== null) {
-    return "Earned-yield ledger pending; forecasts use parsed rows";
+    return "Some reserve rows unavailable; forecasts use parsed rows";
   }
   return "";
 }

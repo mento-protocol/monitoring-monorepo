@@ -386,6 +386,10 @@ describe("GET /api/reserve-yield", () => {
     expect(body.skySavingsRateSource).toBe("blockanalitica-overall");
     expect(body.rateError).toBeNull();
     expect(body.forecastUnavailableSymbols).toEqual([]);
+    expect(body.holdings[0].assetSymbol).toBe("sUSDS");
+    expect(body.holdings[0].yieldModel).toBe(
+      "Sky Savings Rate APY from Block Analitica fallback",
+    );
   });
 
   it("keeps AUSD forecasts when the Sky Savings Rate sources fail", async () => {

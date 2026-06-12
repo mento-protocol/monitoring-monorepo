@@ -106,6 +106,7 @@ type SkySavingsRateObservation = {
 type ForecastApyBySymbol = {
   ausdNetMentoApyPercent: number | null;
   susdsApyPercent: number | null;
+  susdsApySource: SkySavingsRateSource | null;
 };
 
 type ForecastTotals = {
@@ -470,7 +471,12 @@ function applyForecastModels(
       return {
         ...holding,
         apyPercent: apyBySymbol.susdsApyPercent,
-        yieldModel: "Sky Savings Rate APY from on-chain sUSDS.ssr()",
+        yieldModel:
+          apyBySymbol.susdsApySource === "blockanalitica-overall"
+            ? "Sky Savings Rate APY from Block Analitica fallback"
+            : apyBySymbol.susdsApySource === "onchain-susds-ssr"
+              ? "Sky Savings Rate APY from on-chain sUSDS.ssr()"
+              : "Sky Savings Rate APY source pending",
       };
     }
     return {
@@ -920,6 +926,7 @@ export async function fetchReserveYieldSnapshot({
   const forecast = buildForecastTotals(holdings, {
     ausdNetMentoApyPercent: netMentoApyPercent,
     susdsApyPercent: skySavingsRateApyPercent,
+    susdsApySource: skySavingsRateSource,
   });
 
   return {
