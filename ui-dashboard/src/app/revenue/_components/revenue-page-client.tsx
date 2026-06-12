@@ -256,6 +256,7 @@ function RevenueContent() {
           canonicalRevenue.streams.cdp,
         ]}
         isLoading={isRevenueLoading}
+        actualPartialReasons={actualPartialReasons}
       />
 
       <TotalRevenueChart
@@ -539,37 +540,70 @@ function ForecastMetricPill({
 function RevenueStreamCards({
   streams,
   isLoading,
+  actualPartialReasons,
 }: {
   streams: CanonicalRevenueStream[];
   isLoading: boolean;
+  actualPartialReasons: string[];
 }) {
   return (
     <section
       aria-label="Revenue streams"
       className="grid grid-cols-1 gap-4 md:grid-cols-3"
     >
-      {streams.map((stream) => (
-        <StreamCard
-          key={stream.key}
-          stream={stream}
-          isLoading={isLoading}
-          partialReasons={stream.partialReasons}
-        />
-      ))}
+      {streams.map((stream) => {
+        const streamActualPartialReasons = [
+          ...new Set([
+            ...stream.actualPartialReasons,
+            ...partialReasonsForStream(stream.key, actualPartialReasons),
+          ]),
+        ];
+        const partialReasons = [
+          ...new Set([
+            ...streamActualPartialReasons,
+            ...stream.forecastPartialReasons,
+          ]),
+        ];
+        return (
+          <StreamCard
+            key={stream.key}
+            stream={stream}
+            isLoading={isLoading}
+            actualPartialReasons={streamActualPartialReasons}
+            partialReasons={partialReasons}
+          />
+        );
+      })}
     </section>
   );
+}
+
+function partialReasonsForStream(
+  streamKey: CanonicalRevenueStream["key"],
+  reasons: readonly string[],
+): string[] {
+  const needle =
+    streamKey === "cdp" ? "cdp" : streamKey === "swap" ? "swap" : "reserve";
+  return [
+    ...new Set(
+      reasons.filter((reason) => reason.toLowerCase().includes(needle)),
+    ),
+  ];
 }
 
 function StreamCard({
   stream,
   isLoading,
+  actualPartialReasons,
   partialReasons,
 }: {
   stream: CanonicalRevenueStream;
   isLoading: boolean;
+  actualPartialReasons: string[];
   partialReasons: string[];
 }) {
   const isPartial = partialReasons.length > 0;
+  const actualIsPartial = actualPartialReasons.length > 0;
   return (
     <article className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
       <div className="flex items-start justify-between gap-2">
@@ -589,7 +623,7 @@ function StreamCard({
         {isLoading ? (
           <LoadingValue />
         ) : (
-          `${isPartial ? "≈ " : ""}${formatUSD(stream.actualUsd)}`
+          `${actualIsPartial ? "≈ " : ""}${formatUSD(stream.actualUsd)}`
         )}
       </p>
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">

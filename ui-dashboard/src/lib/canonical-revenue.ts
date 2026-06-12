@@ -77,6 +77,8 @@ export type CanonicalRevenueStream = {
   forecast30dUsd: number | null;
   forecast365dUsd: number | null;
   subtitle: string;
+  actualPartialReasons: string[];
+  forecastPartialReasons: string[];
   partialReasons: string[];
 };
 
@@ -596,8 +598,14 @@ function hasSusdsReserveYieldSignal(
 function buildPartialReasons(args: BuildCanonicalRevenueArgs): string[] {
   const reasons: string[] = [];
   if (args.swapFeesFailed) reasons.push("Swap fee history failed to load.");
+  if (!args.swapFeesFailed && args.swapFeesApproximate) {
+    reasons.push("Swap fee history is approximate.");
+  }
   if (args.cdpDailySeriesFailed) {
     reasons.push("CDP borrowing revenue history failed to load.");
+  }
+  if (!args.cdpDailySeriesFailed && args.cdpInputsApproximate) {
+    reasons.push("CDP borrowing history is approximate.");
   }
   if (args.reserveHistoryFailed) {
     reasons.push("Reserve earned-yield history failed to load.");
@@ -617,8 +625,7 @@ function buildPartialReasons(args: BuildCanonicalRevenueArgs): string[] {
 
 function partialReasonsForStream(args: {
   streamKey: CanonicalRevenueStream["key"];
-  actualReasons: string[];
-  forecasts: Record<RevenueForecastKey, CanonicalRevenueForecast>;
+  reasons: readonly string[];
 }): string[] {
   const needle =
     args.streamKey === "cdp"
@@ -626,17 +633,25 @@ function partialReasonsForStream(args: {
       : args.streamKey === "swap"
         ? "swap"
         : "reserve";
-  const reasons = [
-    ...args.actualReasons,
-    ...args.forecasts.next7d.partialReasons,
-    ...args.forecasts.next30d.partialReasons,
-    ...args.forecasts.next365d.partialReasons,
-  ];
   return [
     ...new Set(
-      reasons.filter((reason) => reason.toLowerCase().includes(needle)),
+      args.reasons.filter((reason) => reason.toLowerCase().includes(needle)),
     ),
   ];
+}
+
+function forecastPartialReasonsForStream(args: {
+  streamKey: CanonicalRevenueStream["key"];
+  forecasts: Record<RevenueForecastKey, CanonicalRevenueForecast>;
+}): string[] {
+  return partialReasonsForStream({
+    streamKey: args.streamKey,
+    reasons: [
+      ...args.forecasts.next7d.partialReasons,
+      ...args.forecasts.next30d.partialReasons,
+      ...args.forecasts.next365d.partialReasons,
+    ],
+  });
 }
 
 function buildStreams(args: {
@@ -646,6 +661,30 @@ function buildStreams(args: {
   partialReasons: string[];
 }): Record<CanonicalRevenueStream["key"], CanonicalRevenueStream> {
   const allPeriod = args.periods.allTimeSinceV3;
+  const reserveActualPartialReasons = partialReasonsForStream({
+    streamKey: "reserve",
+    reasons: args.partialReasons,
+  });
+  const reserveForecastPartialReasons = forecastPartialReasonsForStream({
+    streamKey: "reserve",
+    forecasts: args.forecasts,
+  });
+  const swapActualPartialReasons = partialReasonsForStream({
+    streamKey: "swap",
+    reasons: args.partialReasons,
+  });
+  const swapForecastPartialReasons = forecastPartialReasonsForStream({
+    streamKey: "swap",
+    forecasts: args.forecasts,
+  });
+  const cdpActualPartialReasons = partialReasonsForStream({
+    streamKey: "cdp",
+    reasons: args.partialReasons,
+  });
+  const cdpForecastPartialReasons = forecastPartialReasonsForStream({
+    streamKey: "cdp",
+    forecasts: args.forecasts,
+  });
   return {
     reserve: {
       key: "reserve",
@@ -657,11 +696,14 @@ function buildStreams(args: {
         args.reserveYield?.principalUsd !== undefined
           ? "sUSDS actual yield; AUSD forecast-only"
           : "Reserve actuals from sUSDS snapshots",
-      partialReasons: partialReasonsForStream({
-        streamKey: "reserve",
-        actualReasons: args.partialReasons,
-        forecasts: args.forecasts,
-      }),
+      actualPartialReasons: reserveActualPartialReasons,
+      forecastPartialReasons: reserveForecastPartialReasons,
+      partialReasons: [
+        ...new Set([
+          ...reserveActualPartialReasons,
+          ...reserveForecastPartialReasons,
+        ]),
+      ],
     },
     swap: {
       key: "swap",
@@ -670,11 +712,14 @@ function buildStreams(args: {
       forecast30dUsd: args.forecasts.next30d.swapFeesUsd,
       forecast365dUsd: args.forecasts.next365d.swapFeesUsd,
       subtitle: "Protocol fee snapshots across v3 pools",
-      partialReasons: partialReasonsForStream({
-        streamKey: "swap",
-        actualReasons: args.partialReasons,
-        forecasts: args.forecasts,
-      }),
+      actualPartialReasons: swapActualPartialReasons,
+      forecastPartialReasons: swapForecastPartialReasons,
+      partialReasons: [
+        ...new Set([
+          ...swapActualPartialReasons,
+          ...swapForecastPartialReasons,
+        ]),
+      ],
     },
     cdp: {
       key: "cdp",
@@ -683,11 +728,11 @@ function buildStreams(args: {
       forecast30dUsd: args.forecasts.next30d.cdpBorrowingUsd,
       forecast365dUsd: args.forecasts.next365d.cdpBorrowingUsd,
       subtitle: "Protocol share of upfront fees and interest",
-      partialReasons: partialReasonsForStream({
-        streamKey: "cdp",
-        actualReasons: args.partialReasons,
-        forecasts: args.forecasts,
-      }),
+      actualPartialReasons: cdpActualPartialReasons,
+      forecastPartialReasons: cdpForecastPartialReasons,
+      partialReasons: [
+        ...new Set([...cdpActualPartialReasons, ...cdpForecastPartialReasons]),
+      ],
     },
   };
 }
@@ -728,7 +773,9 @@ export function buildCanonicalRevenue({
     reserveHistoryFailed,
     reserveHistoryTruncated,
     swapFeesFailed,
+    swapFeesApproximate,
     cdpDailySeriesFailed,
+    cdpInputsApproximate,
     nowSeconds,
   });
   const periods = buildPeriods(dailySeries, nowSeconds, partialReasons);

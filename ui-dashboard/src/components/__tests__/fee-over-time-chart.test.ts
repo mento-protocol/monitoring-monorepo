@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  revenueChartYAxisRange,
   revenueChartEmptyMessage,
   revenueWeekOverWeekChangePct,
 } from "@/components/fee-over-time-chart";
@@ -54,5 +55,22 @@ describe("revenueChartEmptyMessage", () => {
     expect(revenueChartEmptyMessage(["Swap fee history failed to load."])).toBe(
       "Revenue history is partial because some inputs failed to load",
     );
+  });
+});
+
+describe("revenueChartYAxisRange", () => {
+  it("keeps negative revenue days inside the visible y-axis range", () => {
+    const range = revenueChartYAxisRange([
+      {
+        timestamp: START,
+        reserveYieldUsd: -50,
+        swapFeesUsd: 0,
+        cdpBorrowingUsd: 0,
+        totalRevenueUsd: -50,
+      },
+    ]);
+
+    expect(range[0]).toBeLessThan(-50);
+    expect(range[1]).toBeGreaterThan(0);
   });
 });

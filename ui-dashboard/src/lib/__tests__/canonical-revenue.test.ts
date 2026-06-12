@@ -359,6 +359,12 @@ describe("buildCanonicalRevenue", () => {
     expect(result.forecasts.next7d.partialReasons).toContain(
       "Swap forecast partial: swap fee history is approximate.",
     );
+    expect(result.streams.swap.actualPartialReasons).toContain(
+      "Swap fee history is approximate.",
+    );
+    expect(result.streams.swap.forecastPartialReasons).toContain(
+      "Swap forecast partial: swap fee history is approximate.",
+    );
   });
 
   it("marks CDP forecasts partial when borrowing inputs are approximate", () => {
@@ -400,6 +406,10 @@ describe("buildCanonicalRevenue", () => {
       "Reserve forecast excludes holdings without APY sources: AUSD.",
     );
     expect(result.streams.reserve.partialReasons).toContain(
+      "Reserve forecast excludes holdings without APY sources: AUSD.",
+    );
+    expect(result.streams.reserve.actualPartialReasons).toEqual([]);
+    expect(result.streams.reserve.forecastPartialReasons).toContain(
       "Reserve forecast excludes holdings without APY sources: AUSD.",
     );
     expect(result.forecasts.next7d.partialReasons).toContain(

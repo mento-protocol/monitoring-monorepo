@@ -292,6 +292,24 @@ function renderRevenue({
   return renderToStaticMarkup(<RevenuePageClient />);
 }
 
+function streamCardHtml(
+  html: string,
+  title: "Reserve Yield" | "Swap Fees" | "CDP Borrowing Revenue",
+): string {
+  const sectionStart = html.indexOf('aria-label="Revenue streams"');
+  const sectionEnd = html.indexOf('aria-label="Total Revenue chart"');
+  const streamSection = html.slice(sectionStart, sectionEnd);
+  const cardStart = streamSection.indexOf(title);
+  const nextTitle =
+    title === "Reserve Yield"
+      ? "Swap Fees"
+      : title === "Swap Fees"
+        ? "CDP Borrowing Revenue"
+        : "</section>";
+  const cardEnd = streamSection.indexOf(nextTitle, cardStart + title.length);
+  return streamSection.slice(cardStart, cardEnd === -1 ? undefined : cardEnd);
+}
+
 describe("RevenuePageClient canonical revenue layout", () => {
   beforeEach(() => {
     mockUseProtocolFees.mockReset();
@@ -395,6 +413,7 @@ describe("RevenuePageClient canonical revenue layout", () => {
     expect(html).toContain("About Total Revenue partial data");
     expect(html).toContain("About Swap Fees partial data");
     expect(html).toContain("Swap fee history is approximate.");
+    expect(streamCardHtml(html, "Swap Fees")).toContain("≈ $12.00");
     expect(capturedProps.chart?.partialReasons).toContain(
       "Swap fee history is approximate.",
     );
@@ -413,6 +432,8 @@ describe("RevenuePageClient canonical revenue layout", () => {
     expect(html).toContain(
       "Reserve forecast excludes holdings without APY sources: AUSD.",
     );
+    expect(streamCardHtml(html, "Reserve Yield")).toContain("$45.00");
+    expect(streamCardHtml(html, "Reserve Yield")).not.toContain("≈ $45.00");
   });
 
   it("flags reserve history missing as partial and does not inject current earned-yield API totals into chart actuals", () => {

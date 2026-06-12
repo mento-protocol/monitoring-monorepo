@@ -110,13 +110,22 @@ function buildTrace(args: {
   };
 }
 
-function yAxisRange(
+export function revenueChartYAxisRange(
   series: ReadonlyArray<CanonicalRevenueDailyPoint>,
 ): [number, number] {
-  const allYs = series.map((p) => p.totalRevenueUsd);
-  const ymax = allYs.length > 0 ? Math.max(...allYs) : 1;
-  const span = Math.max(ymax * 0.04, 1);
-  return [0, ymax + span * 2.5];
+  const yValues = series.flatMap((p) => [
+    p.swapFeesUsd,
+    p.swapFeesUsd + p.cdpBorrowingUsd,
+    p.totalRevenueUsd,
+    p.reserveYieldUsd,
+    p.cdpBorrowingUsd,
+  ]);
+  const ymax = Math.max(0, ...yValues);
+  const ymin = Math.min(0, ...yValues);
+  if (ymax === 0 && ymin === 0) return [0, 1];
+  const span = Math.max(ymax - ymin, Math.abs(ymax || ymin) * 0.04, 1);
+  const padding = Math.max(span * 0.08, 1);
+  return [ymin < 0 ? ymin - padding : 0, ymax > 0 ? ymax + padding : padding];
 }
 
 function buildRevenueChartFigure(
@@ -175,7 +184,7 @@ function buildRevenueChartFigure(
         showticklabels: false,
         showline: false,
         zeroline: false,
-        range: yAxisRange(series),
+        range: revenueChartYAxisRange(series),
         fixedrange: true,
       },
       showlegend: true,
