@@ -209,6 +209,35 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdings[0].earnedYieldUsd).toBeCloseTo(300, 6);
   });
 
+  it("parses large sUSDS ledger wei without rounding before scaling", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("reserve down", { status: 502 }))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [
+              {
+                ...SUSDS_LEDGER_SUMMARY,
+                totalEarnedYieldUsdWei: "100000000000000500000000000000000",
+              },
+            ],
+          },
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldUsd).toBeCloseTo(100_000_000_000_000.5, 3);
+  });
+
   it("keeps indexed sUSDS yield when current reserve sUSDS parsing fails", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     vi.spyOn(globalThis, "fetch")

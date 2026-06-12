@@ -1,3 +1,5 @@
+import { weiToUsd } from "@/lib/format";
+
 const RESERVE_API_URL =
   "https://mento-analytics-api-12390052758.us-central1.run.app/api/v2/reserve";
 const FEDFUNDS_CSV_URL =
@@ -189,10 +191,6 @@ function bigintField(value: unknown, label: string): bigint {
     return BigInt(value.trim());
   }
   throw new Error(`${label} was not an integer string`);
-}
-
-function weiToUsd(value: bigint): number {
-  return Number(value) / 1e18;
 }
 
 function unixSecondsToIso(value: bigint): string | null {
