@@ -350,6 +350,25 @@ function buildSusdsYieldDailySnapshot({
   };
 }
 
+async function findPreviousDailySnapshot(
+  context: SusdsContext,
+  chainId: number,
+  bucket: bigint,
+): Promise<SusdsYieldDailySnapshot | undefined> {
+  const launchBucket = dayBucket(V3_REVENUE_LAUNCH_TIMESTAMP);
+  for (
+    let previousBucket = bucket - SECONDS_PER_DAY;
+    previousBucket >= launchBucket;
+    previousBucket -= SECONDS_PER_DAY
+  ) {
+    const snapshot = await context.SusdsYieldDailySnapshot.get(
+      susdsDailySnapshotId(chainId, previousBucket),
+    );
+    if (snapshot !== undefined) return snapshot;
+  }
+  return undefined;
+}
+
 export async function recordSusdsYieldDailySnapshot(
   context: SusdsContext,
   meta: BlockMeta,
@@ -367,8 +386,10 @@ export async function recordSusdsYieldDailySnapshot(
 
   const bucket = dayBucket(meta.blockTimestamp);
   const id = susdsDailySnapshotId(meta.chainId, bucket);
-  const previousSnapshot = await context.SusdsYieldDailySnapshot.get(
-    susdsDailySnapshotId(meta.chainId, bucket - SECONDS_PER_DAY),
+  const previousSnapshot = await findPreviousDailySnapshot(
+    context,
+    meta.chainId,
+    bucket,
   );
   const currentSnapshot =
     previousSnapshot === undefined

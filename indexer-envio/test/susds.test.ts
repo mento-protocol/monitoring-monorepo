@@ -402,6 +402,49 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.dailyUnrealizedYieldUsdWei, -dollars(50));
   });
 
+  it("uses the latest prior sUSDS daily snapshot when the previous UTC day is missing", async () => {
+    let mockDb = MockDb.createMockDb();
+    const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
+    const day3 = day1 + 2n * 86_400n;
+
+    setSharePrice(100, WAD);
+    mockDb = await deposit(
+      mockDb,
+      100,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(day1 + 3_600n),
+    );
+
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: 200n,
+        blockTimestamp: day1 + 43_200n,
+      },
+      dollars(110) / 100n,
+    );
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: 400n,
+        blockTimestamp: day3 + 3_600n,
+      },
+      dollars(130) / 100n,
+    );
+
+    const rows = dailySnapshots(mockDb).sort((a, b) =>
+      a.timestamp < b.timestamp ? -1 : 1,
+    );
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0]?.totalEarnedYieldUsdWei, dollars(100));
+    assert.equal(rows[1]?.totalEarnedYieldUsdWei, dollars(300));
+    assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(200));
+  });
+
   it("uses the first post-launch sUSDS daily snapshot as the delta baseline", async () => {
     let mockDb = MockDb.createMockDb();
     const beforeLaunch = Number(V3_REVENUE_LAUNCH_TIMESTAMP - 3_600n);
