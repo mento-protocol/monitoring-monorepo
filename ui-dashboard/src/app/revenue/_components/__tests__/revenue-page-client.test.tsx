@@ -400,6 +400,21 @@ describe("RevenuePageClient canonical revenue layout", () => {
     );
   });
 
+  it("propagates forecast partial reasons to stream cards", () => {
+    const html = renderRevenue({
+      reserveYield: {
+        ...RESERVE_YIELD,
+        forecastUnavailableSymbols: ["AUSD"],
+      },
+      reserveRows: [reserveSnapshot(ts("2026-06-10"), 45)],
+    });
+
+    expect(html).toContain("About Reserve Yield partial data");
+    expect(html).toContain(
+      "Reserve forecast excludes holdings without APY sources: AUSD.",
+    );
+  });
+
   it("flags reserve history missing as partial and does not inject current earned-yield API totals into chart actuals", () => {
     const html = renderRevenue({
       networkData: [

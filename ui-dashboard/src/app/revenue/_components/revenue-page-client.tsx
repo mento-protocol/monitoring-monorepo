@@ -256,7 +256,6 @@ function RevenueContent() {
           canonicalRevenue.streams.cdp,
         ]}
         isLoading={isRevenueLoading}
-        partialReasons={actualPartialReasons}
       />
 
       <TotalRevenueChart
@@ -540,11 +539,9 @@ function ForecastMetricPill({
 function RevenueStreamCards({
   streams,
   isLoading,
-  partialReasons,
 }: {
   streams: CanonicalRevenueStream[];
   isLoading: boolean;
-  partialReasons: string[];
 }) {
   return (
     <section
@@ -556,21 +553,10 @@ function RevenueStreamCards({
           key={stream.key}
           stream={stream}
           isLoading={isLoading}
-          partialReasons={partialReasonsForStream(stream.key, partialReasons)}
+          partialReasons={stream.partialReasons}
         />
       ))}
     </section>
-  );
-}
-
-function partialReasonsForStream(
-  streamKey: CanonicalRevenueStream["key"],
-  partialReasons: string[],
-): string[] {
-  const needle =
-    streamKey === "cdp" ? "cdp" : streamKey === "swap" ? "swap" : "reserve";
-  return partialReasons.filter((reason) =>
-    reason.toLowerCase().includes(needle),
   );
 }
 

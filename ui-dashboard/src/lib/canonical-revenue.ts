@@ -562,6 +562,18 @@ function buildForecasts(
   };
 }
 
+function hasSusdsReserveYieldSignal(
+  reserveYield: ReserveYieldResponse | null,
+): boolean {
+  if (reserveYield === null) return false;
+  const earnedYieldUsd = finiteOrNull(reserveYield.earnedYieldUsd);
+  if (earnedYieldUsd !== null && earnedYieldUsd > 0) return true;
+  return reserveYield.holdings.some(
+    (holding) =>
+      holding.assetSymbol.toUpperCase() === "SUSDS" && holding.principalUsd > 0,
+  );
+}
+
 function buildPartialReasons(args: BuildCanonicalRevenueArgs): string[] {
   const reasons: string[] = [];
   if (args.swapFeesFailed) reasons.push("Swap fee history failed to load.");
@@ -572,11 +584,40 @@ function buildPartialReasons(args: BuildCanonicalRevenueArgs): string[] {
     reasons.push("Reserve earned-yield history failed to load.");
   } else if (args.reserveHistoryUnavailable) {
     reasons.push("Reserve earned-yield history is not indexed yet.");
+  } else if (
+    args.reserveDailySnapshots.length === 0 &&
+    hasSusdsReserveYieldSignal(args.reserveYield)
+  ) {
+    reasons.push("Reserve earned-yield history has no sUSDS snapshots yet.");
   }
   if (args.reserveHistoryTruncated) {
     reasons.push("Reserve earned-yield history exceeded the pagination cap.");
   }
   return reasons;
+}
+
+function partialReasonsForStream(args: {
+  streamKey: CanonicalRevenueStream["key"];
+  actualReasons: string[];
+  forecasts: Record<RevenueForecastKey, CanonicalRevenueForecast>;
+}): string[] {
+  const needle =
+    args.streamKey === "cdp"
+      ? "cdp"
+      : args.streamKey === "swap"
+        ? "swap"
+        : "reserve";
+  const reasons = [
+    ...args.actualReasons,
+    ...args.forecasts.next7d.partialReasons,
+    ...args.forecasts.next30d.partialReasons,
+    ...args.forecasts.next365d.partialReasons,
+  ];
+  return [
+    ...new Set(
+      reasons.filter((reason) => reason.toLowerCase().includes(needle)),
+    ),
+  ];
 }
 
 function buildStreams(args: {
@@ -586,9 +627,6 @@ function buildStreams(args: {
   partialReasons: string[];
 }): Record<CanonicalRevenueStream["key"], CanonicalRevenueStream> {
   const allPeriod = args.periods.allTimeSinceV3;
-  const reservePartialReasons = args.partialReasons.filter((reason) =>
-    reason.toLowerCase().includes("reserve"),
-  );
   return {
     reserve: {
       key: "reserve",
@@ -600,7 +638,11 @@ function buildStreams(args: {
         args.reserveYield?.principalUsd !== undefined
           ? "sUSDS actual yield; AUSD forecast-only"
           : "Reserve actuals from sUSDS snapshots",
-      partialReasons: reservePartialReasons,
+      partialReasons: partialReasonsForStream({
+        streamKey: "reserve",
+        actualReasons: args.partialReasons,
+        forecasts: args.forecasts,
+      }),
     },
     swap: {
       key: "swap",
@@ -609,9 +651,11 @@ function buildStreams(args: {
       forecast30dUsd: args.forecasts.next30d.swapFeesUsd,
       forecast365dUsd: args.forecasts.next365d.swapFeesUsd,
       subtitle: "Protocol fee snapshots across v3 pools",
-      partialReasons: args.partialReasons.filter((reason) =>
-        reason.toLowerCase().includes("swap"),
-      ),
+      partialReasons: partialReasonsForStream({
+        streamKey: "swap",
+        actualReasons: args.partialReasons,
+        forecasts: args.forecasts,
+      }),
     },
     cdp: {
       key: "cdp",
@@ -620,9 +664,11 @@ function buildStreams(args: {
       forecast30dUsd: args.forecasts.next30d.cdpBorrowingUsd,
       forecast365dUsd: args.forecasts.next365d.cdpBorrowingUsd,
       subtitle: "Protocol share of upfront fees and interest",
-      partialReasons: args.partialReasons.filter((reason) =>
-        reason.toLowerCase().includes("cdp"),
-      ),
+      partialReasons: partialReasonsForStream({
+        streamKey: "cdp",
+        actualReasons: args.partialReasons,
+        forecasts: args.forecasts,
+      }),
     },
   };
 }

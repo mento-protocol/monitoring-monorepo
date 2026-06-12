@@ -190,6 +190,22 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
+  it("flags empty reserve snapshots as partial when the current sUSDS ledger has yield", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({ earnedYieldUsd: 123 }),
+      reserveDailySnapshots: [],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(0);
+    expect(result.periods.allTimeSinceV3.partialReasons).toContain(
+      "Reserve earned-yield history has no sUSDS snapshots yet.",
+    );
+  });
+
   it("builds reserve, swap, and CDP forecasts from their separate assumptions", () => {
     const completedDays = Array.from(
       { length: 30 },
@@ -360,6 +376,9 @@ describe("buildCanonicalRevenue", () => {
 
     expect(result.forecasts.next7d.reserveYieldUsd).toBe(14);
     expect(result.forecasts.next7d.partialReasons).toContain(
+      "Reserve forecast excludes holdings without APY sources: AUSD.",
+    );
+    expect(result.streams.reserve.partialReasons).toContain(
       "Reserve forecast excludes holdings without APY sources: AUSD.",
     );
     expect(result.forecasts.next7d.partialReasons).toContain(
