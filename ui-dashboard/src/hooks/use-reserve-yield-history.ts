@@ -115,12 +115,13 @@ export function useReserveYieldHistory(): ReserveYieldHistoryResult {
     fetchReserveYieldHistory,
     SHARED_QUERY_SWR_CONFIG,
   );
+  const hasError = error !== undefined;
 
   return {
-    rows: data?.rows ?? [],
+    rows: hasError ? [] : (data?.rows ?? []),
     isLoading,
-    hasError: error !== undefined,
-    unavailable: data?.unavailable ?? false,
-    truncated: data?.truncated ?? false,
+    hasError,
+    unavailable: hasError ? false : (data?.unavailable ?? false),
+    truncated: hasError ? false : (data?.truncated ?? false),
   };
 }
