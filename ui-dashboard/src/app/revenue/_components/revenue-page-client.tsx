@@ -288,6 +288,12 @@ function LoadingValue() {
   );
 }
 
+function LoadingPillValue() {
+  return (
+    <span className="inline-block h-[1em] w-12 animate-pulse rounded bg-slate-800/60 align-middle" />
+  );
+}
+
 function mutedUnavailable(value: number | null): string {
   return value === null ? "N/A" : `≈ ${formatUSD(value)}`;
 }
@@ -323,9 +329,21 @@ function PeriodCard({
         )}
       </p>
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-        <MetricPill label="Reserve" value={period.reserveYieldUsd} />
-        <MetricPill label="Swap" value={period.swapFeesUsd} />
-        <MetricPill label="CDP" value={period.cdpBorrowingUsd} />
+        <MetricPill
+          label="Reserve"
+          value={period.reserveYieldUsd}
+          isLoading={isLoading}
+        />
+        <MetricPill
+          label="Swap"
+          value={period.swapFeesUsd}
+          isLoading={isLoading}
+        />
+        <MetricPill
+          label="CDP"
+          value={period.cdpBorrowingUsd}
+          isLoading={isLoading}
+        />
       </div>
     </article>
   );
@@ -357,14 +375,22 @@ function RevenuePeriodCards({
   );
 }
 
-function MetricPill({ label, value }: { label: string; value: number }) {
+function MetricPill({
+  label,
+  value,
+  isLoading,
+}: {
+  label: string;
+  value: number;
+  isLoading: boolean;
+}) {
   return (
     <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/40 px-2 py-1.5">
       <p className="truncate text-[10px] uppercase tracking-wide text-slate-500">
         {label}
       </p>
       <p className="mt-0.5 truncate font-mono text-slate-200">
-        {formatUSD(value)}
+        {isLoading ? <LoadingPillValue /> : formatUSD(value)}
       </p>
     </div>
   );
@@ -401,9 +427,21 @@ function ForecastCard({
         {isLoading ? <LoadingValue /> : mutedUnavailable(forecast.totalUsd)}
       </p>
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-        <ForecastMetricPill label="Reserve" value={forecast.reserveYieldUsd} />
-        <ForecastMetricPill label="Swap" value={forecast.swapFeesUsd} />
-        <ForecastMetricPill label="CDP" value={forecast.cdpBorrowingUsd} />
+        <ForecastMetricPill
+          label="Reserve"
+          value={forecast.reserveYieldUsd}
+          isLoading={isLoading}
+        />
+        <ForecastMetricPill
+          label="Swap"
+          value={forecast.swapFeesUsd}
+          isLoading={isLoading}
+        />
+        <ForecastMetricPill
+          label="CDP"
+          value={forecast.cdpBorrowingUsd}
+          isLoading={isLoading}
+        />
       </div>
       {isPartial ? (
         <p className="mt-2 text-xs text-slate-500">Partial forecast inputs</p>
@@ -446,9 +484,11 @@ function ForecastCards({
 function ForecastMetricPill({
   label,
   value,
+  isLoading,
 }: {
   label: string;
   value: number | null;
+  isLoading: boolean;
 }) {
   return (
     <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/40 px-2 py-1.5">
@@ -456,7 +496,13 @@ function ForecastMetricPill({
         {label}
       </p>
       <p className="mt-0.5 truncate font-mono text-slate-200">
-        {value === null ? "N/A" : formatUSD(value)}
+        {isLoading ? (
+          <LoadingPillValue />
+        ) : value === null ? (
+          "N/A"
+        ) : (
+          formatUSD(value)
+        )}
       </p>
     </div>
   );

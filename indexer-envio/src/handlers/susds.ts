@@ -290,11 +290,29 @@ function susdsDailySnapshotId(chainId: number, bucket: bigint): string {
   return `${chainId}-susds-${bucket}`;
 }
 
+type SusdsYieldDeltaBaseline = Pick<
+  SusdsYieldDailySnapshot | SusdsYieldTotals,
+  "totalEarnedYieldUsdWei" | "realizedYieldUsdWei" | "unrealizedYieldUsdWei"
+>;
+
+function baselineFromSameDaySnapshot(
+  snapshot: SusdsYieldDailySnapshot,
+): SusdsYieldDeltaBaseline {
+  return {
+    totalEarnedYieldUsdWei:
+      snapshot.totalEarnedYieldUsdWei - snapshot.dailyEarnedYieldUsdWei,
+    realizedYieldUsdWei:
+      snapshot.realizedYieldUsdWei - snapshot.dailyRealizedYieldUsdWei,
+    unrealizedYieldUsdWei:
+      snapshot.unrealizedYieldUsdWei - snapshot.dailyUnrealizedYieldUsdWei,
+  };
+}
+
 function buildSusdsYieldDailySnapshot({
   chainId,
   bucket,
   totals,
-  previousSnapshot,
+  deltaBaseline,
   sharePriceUsdWei,
   sampledAtBlock,
   sampledAtTimestamp,
@@ -302,24 +320,23 @@ function buildSusdsYieldDailySnapshot({
   chainId: number;
   bucket: bigint;
   totals: SusdsYieldTotals;
-  previousSnapshot: SusdsYieldDailySnapshot | null;
+  deltaBaseline: SusdsYieldDeltaBaseline;
   sharePriceUsdWei: bigint;
   sampledAtBlock: bigint;
   sampledAtTimestamp: bigint;
 }): SusdsYieldDailySnapshot {
-  const previousEarned = previousSnapshot?.totalEarnedYieldUsdWei ?? ZERO;
-  const previousRealized = previousSnapshot?.realizedYieldUsdWei ?? ZERO;
-  const previousUnrealized = previousSnapshot?.unrealizedYieldUsdWei ?? ZERO;
   return {
     id: susdsDailySnapshotId(chainId, bucket),
     chainId,
     token: SUSDS_ADDRESS,
     timestamp: bucket,
     ...totals,
-    dailyEarnedYieldUsdWei: totals.totalEarnedYieldUsdWei - previousEarned,
-    dailyRealizedYieldUsdWei: totals.realizedYieldUsdWei - previousRealized,
+    dailyEarnedYieldUsdWei:
+      totals.totalEarnedYieldUsdWei - deltaBaseline.totalEarnedYieldUsdWei,
+    dailyRealizedYieldUsdWei:
+      totals.realizedYieldUsdWei - deltaBaseline.realizedYieldUsdWei,
     dailyUnrealizedYieldUsdWei:
-      totals.unrealizedYieldUsdWei - previousUnrealized,
+      totals.unrealizedYieldUsdWei - deltaBaseline.unrealizedYieldUsdWei,
     sharePriceUsdWei,
     sampledAtBlock,
     sampledAtTimestamp,
@@ -342,15 +359,25 @@ export async function recordSusdsYieldDailySnapshot(
   }
 
   const bucket = dayBucket(meta.blockTimestamp);
+  const id = susdsDailySnapshotId(meta.chainId, bucket);
   const previousSnapshot = await context.SusdsYieldDailySnapshot.get(
     susdsDailySnapshotId(meta.chainId, bucket - SECONDS_PER_DAY),
   );
+  const currentSnapshot =
+    previousSnapshot === undefined
+      ? await context.SusdsYieldDailySnapshot.get(id)
+      : undefined;
+  const deltaBaseline =
+    previousSnapshot ??
+    (currentSnapshot === undefined
+      ? totals
+      : baselineFromSameDaySnapshot(currentSnapshot));
   context.SusdsYieldDailySnapshot.set(
     buildSusdsYieldDailySnapshot({
       chainId: meta.chainId,
       bucket,
       totals,
-      previousSnapshot: previousSnapshot ?? null,
+      deltaBaseline,
       sharePriceUsdWei,
       sampledAtBlock: meta.blockNumber,
       sampledAtTimestamp: meta.blockTimestamp,

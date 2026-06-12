@@ -243,4 +243,29 @@ describe("buildCanonicalRevenue", () => {
       "Swap forecast unavailable: only 6 completed daily buckets loaded.",
     );
   });
+
+  it("averages swap forecasts over loaded completed buckets instead of a fixed thirty-day divisor", () => {
+    const completedDays = Array.from(
+      { length: 7 },
+      (_, index) => ts("2026-06-05") + index * DAY,
+    );
+    const result = buildCanonicalRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: completedDays.map((timestamp) =>
+            feeSnapshot(timestamp, 10),
+          ),
+        }),
+      ],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: null,
+      reserveDailySnapshots: [],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.forecasts.next7d.swapFeesUsd).toBe(70);
+    expect(result.forecasts.next30d.swapFeesUsd).toBe(300);
+    expect(result.forecasts.next365d.swapFeesUsd).toBe(3650);
+  });
 });

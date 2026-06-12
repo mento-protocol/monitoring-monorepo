@@ -240,6 +240,9 @@ function renderRevenue({
   reserveYield = RESERVE_YIELD,
   reserveRows = [],
   reserveHistoryUnavailable = false,
+  protocolFeesLoading = false,
+  reserveYieldLoading = false,
+  reserveHistoryLoading = false,
 }: {
   networkData?: NetworkData[];
   cdpRevenue?: Partial<{
@@ -255,8 +258,14 @@ function renderRevenue({
   reserveYield?: ReserveYieldResponse | null;
   reserveRows?: SusdsYieldDailySnapshotRow[];
   reserveHistoryUnavailable?: boolean;
+  protocolFeesLoading?: boolean;
+  reserveYieldLoading?: boolean;
+  reserveHistoryLoading?: boolean;
 } = {}) {
-  mockUseProtocolFees.mockReturnValue({ networkData, isLoading: false });
+  mockUseProtocolFees.mockReturnValue({
+    networkData,
+    isLoading: protocolFeesLoading,
+  });
   mockUseCdpBorrowingRevenue.mockReturnValue({
     summary: EMPTY_CDP_REVENUE,
     markets: [],
@@ -270,12 +279,12 @@ function renderRevenue({
   });
   mockUseReserveYield.mockReturnValue({
     data: reserveYield,
-    isLoading: false,
+    isLoading: reserveYieldLoading,
     hasError: false,
   });
   mockUseReserveYieldHistory.mockReturnValue({
     rows: reserveRows,
-    isLoading: false,
+    isLoading: reserveHistoryLoading,
     hasError: false,
     unavailable: reserveHistoryUnavailable,
     truncated: false,
@@ -345,6 +354,23 @@ describe("RevenuePageClient canonical revenue layout", () => {
       capturedProps.chart?.series.some((p) => p.reserveYieldUsd === 45),
     ).toBe(true);
     expect(capturedProps.table).toMatchObject({ hasError: false });
+  });
+
+  it("shows neutral loading placeholders for period and forecast breakdown pills", () => {
+    const html = renderRevenue({
+      protocolFeesLoading: true,
+      cdpRevenue: { isLoading: true },
+      reserveYieldLoading: true,
+      reserveHistoryLoading: true,
+      reserveYield: null,
+    });
+
+    const cardSections = html.slice(
+      0,
+      html.indexOf('aria-label="Revenue streams"'),
+    );
+    expect(html).toContain("animate-pulse");
+    expect(cardSections).not.toContain("$0.00");
   });
 
   it("flags reserve history missing as partial and does not inject current earned-yield API totals into chart actuals", () => {

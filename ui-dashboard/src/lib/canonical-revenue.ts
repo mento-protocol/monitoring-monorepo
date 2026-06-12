@@ -351,7 +351,7 @@ function completedWindowAverage<T>(args: {
   }
   let total = 0;
   for (const value of values.values()) total += value;
-  return { dailyAverageUsd: total / args.trailingDays, buckets: values.size };
+  return { dailyAverageUsd: total / values.size, buckets: values.size };
 }
 
 function marketProtocolShareBps(
