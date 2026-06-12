@@ -43,6 +43,23 @@ const bpsToPercentLabel = (bps: number): string => {
     : String(Math.round(pct * 100) / 100);
 };
 
+function hasApproximateCdpForecastInputs(args: {
+  dailySeriesApproximate: boolean;
+  dailySeriesTruncated: boolean;
+  dailySeriesFailed: boolean;
+  hasRevenueError: boolean;
+  unpricedSymbolCount: number;
+  bracketsTruncated: boolean;
+}): boolean {
+  if (args.hasRevenueError || args.dailySeriesFailed) return false;
+  return (
+    args.dailySeriesApproximate ||
+    args.dailySeriesTruncated ||
+    args.unpricedSymbolCount > 0 ||
+    args.bracketsTruncated
+  );
+}
+
 // The split is governance-set on-chain per market (SystemParams.SP_YIELD_SPLIT,
 // indexed as LiquityCollateral.spYieldSplitBps and surfaced per market row),
 // so the tooltip states the live values instead of hardcoding 25/75. Falls
@@ -120,6 +137,14 @@ function useRevenuePageState() {
   );
   const hasSwapFeesError = anyNetworkError || anyFeesError;
   const feesApprox = hasApproximateFees(networkData) || anyFeesTruncated;
+  const cdpInputsApproximate = hasApproximateCdpForecastInputs({
+    dailySeriesApproximate: cdpBorrowingFeeSeriesApproximate,
+    dailySeriesTruncated: cdpBorrowingFeeSeriesTruncated,
+    dailySeriesFailed: cdpBorrowingFeeSeriesFailed,
+    hasRevenueError: hasCdpBorrowingRevenueError,
+    unpricedSymbolCount: cdpBorrowingRevenue?.unpricedSymbols.length ?? 0,
+    bracketsTruncated: cdpBorrowingRevenue?.bracketsTruncated ?? false,
+  });
 
   const canonicalRevenue = useCanonicalRevenue({
     networkData,
@@ -134,6 +159,7 @@ function useRevenuePageState() {
     swapFeesApproximate: feesApprox && !hasSwapFeesError,
     cdpDailySeriesFailed:
       hasCdpBorrowingRevenueError || cdpBorrowingFeeSeriesFailed,
+    cdpInputsApproximate,
   });
 
   const isRevenueLoading =
@@ -147,13 +173,7 @@ function useRevenuePageState() {
     if (feesApprox && !hasSwapFeesError) {
       reasons.push("Swap fee history is approximate.");
     }
-    if (
-      (cdpBorrowingFeeSeriesApproximate ||
-        cdpBorrowingFeeSeriesTruncated ||
-        (cdpBorrowingRevenue?.unpricedSymbols.length ?? 0) > 0 ||
-        (cdpBorrowingRevenue?.bracketsTruncated ?? false)) &&
-      !hasCdpBorrowingRevenueError
-    ) {
+    if (cdpInputsApproximate) {
       reasons.push("CDP borrowing history is approximate.");
     }
     return [...new Set(reasons)];
@@ -161,10 +181,7 @@ function useRevenuePageState() {
     canonicalRevenue.partialReasons,
     feesApprox,
     hasSwapFeesError,
-    cdpBorrowingFeeSeriesApproximate,
-    cdpBorrowingFeeSeriesTruncated,
-    cdpBorrowingRevenue,
-    hasCdpBorrowingRevenueError,
+    cdpInputsApproximate,
   ]);
 
   return {

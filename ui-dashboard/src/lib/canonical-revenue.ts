@@ -100,6 +100,7 @@ export type BuildCanonicalRevenueArgs = {
   swapFeesFailed?: boolean;
   swapFeesApproximate?: boolean;
   cdpDailySeriesFailed?: boolean;
+  cdpInputsApproximate?: boolean;
   nowSeconds?: number;
 };
 
@@ -412,6 +413,7 @@ function buildForecastSource(args: {
   cdpDailySeries: ReadonlyArray<CdpBorrowingFeeSeriesPoint>;
   cdpMarkets: ReadonlyArray<CdpBorrowingRevenueMarket>;
   cdpDailySeriesFailed: boolean;
+  cdpInputsApproximate: boolean;
   nowSeconds: number;
 }): ForecastSource {
   const partialReasons: string[] = [];
@@ -456,6 +458,11 @@ function buildForecastSource(args: {
       "CDP forecast unavailable: borrowing revenue inputs failed to load.",
     );
   } else {
+    if (args.cdpInputsApproximate) {
+      partialReasons.push(
+        "CDP forecast partial: borrowing revenue inputs are approximate.",
+      );
+    }
     const cdpInterest = computeCdpInterestDailyRunRate(args.cdpMarkets);
     if (cdpInterest.partialReason !== null) {
       partialReasons.push(cdpInterest.partialReason);
@@ -632,6 +639,7 @@ export function buildCanonicalRevenue({
   swapFeesFailed = false,
   swapFeesApproximate = false,
   cdpDailySeriesFailed = false,
+  cdpInputsApproximate = false,
   nowSeconds = Math.floor(Date.now() / 1000),
 }: BuildCanonicalRevenueArgs): CanonicalRevenueResult {
   const swapSeries = buildDailyFeeSeries(
@@ -668,6 +676,7 @@ export function buildCanonicalRevenue({
       cdpDailySeries,
       cdpMarkets,
       cdpDailySeriesFailed,
+      cdpInputsApproximate,
       nowSeconds,
     }),
   );

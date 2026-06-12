@@ -25,6 +25,7 @@ export type UseCanonicalRevenueArgs = {
   swapFeesFailed: boolean;
   swapFeesApproximate: boolean;
   cdpDailySeriesFailed: boolean;
+  cdpInputsApproximate: boolean;
 };
 
 export function useCanonicalRevenue(
@@ -42,6 +43,7 @@ export function useCanonicalRevenue(
     swapFeesFailed,
     swapFeesApproximate,
     cdpDailySeriesFailed,
+    cdpInputsApproximate,
   } = args;
 
   return useMemo(
@@ -58,6 +60,7 @@ export function useCanonicalRevenue(
         swapFeesFailed,
         swapFeesApproximate,
         cdpDailySeriesFailed,
+        cdpInputsApproximate,
       }),
     [
       networkData,
@@ -71,6 +74,7 @@ export function useCanonicalRevenue(
       swapFeesFailed,
       swapFeesApproximate,
       cdpDailySeriesFailed,
+      cdpInputsApproximate,
     ],
   );
 }

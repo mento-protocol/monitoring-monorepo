@@ -324,6 +324,27 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
+  it("marks CDP forecasts partial when borrowing inputs are approximate", () => {
+    const completedDays = Array.from(
+      { length: 30 },
+      (_, index) => ts("2026-05-13") + index * DAY,
+    );
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: completedDays.map((timestamp) => cdpPoint(timestamp, 5)),
+      cdpMarkets: [cdpMarket()],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [],
+      cdpInputsApproximate: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.forecasts.next7d.cdpBorrowingUsd).toBe(42);
+    expect(result.forecasts.next7d.partialReasons).toContain(
+      "CDP forecast partial: borrowing revenue inputs are approximate.",
+    );
+  });
+
   it("surfaces partial reserve forecast inputs without dropping modeled holdings", () => {
     const result = buildCanonicalRevenue({
       networkData: [],
