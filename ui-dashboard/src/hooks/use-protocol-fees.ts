@@ -32,9 +32,9 @@ import { SWR_KEY_PROTOCOL_FEES } from "@/lib/swr-keys";
 
 type ProtocolFeesResult = {
   /**
-   * `NetworkData[]`-shaped payload so revenue/page.tsx, FeeOverTimeChart,
-   * and the per-pool table keep their existing types. Only the fees
-   * / rate / labels slices are populated — `pools`, `snapshots`,
+   * `NetworkData[]`-shaped payload so the revenue page's chart and per-pool
+   * table keep their existing types. Only the fees / rate / labels slices
+   * are populated — `pools`, `snapshots`,
    * `tradingLimits`, `uniqueLpAddresses`, etc. stay at `blankNetworkData`'s
    * zero defaults.
    *

@@ -1,7 +1,6 @@
 "use client";
 
 import { formatUSD } from "@/lib/format";
-import { Tooltip } from "@/components/tooltip";
 import { Row, Table, Td, Th } from "@/components/table";
 import type { ReactNode } from "react";
 import type {
@@ -9,7 +8,7 @@ import type {
   ReserveYieldResponse,
 } from "@/lib/reserve-yield";
 
-export type ReserveYieldTileState = {
+type ReserveYieldTableState = {
   data: ReserveYieldResponse | null;
   isLoading: boolean;
   hasError: boolean;
@@ -24,52 +23,10 @@ function formatNullableUSD(value: number | null): string {
   return value === null ? "N/A" : formatUSD(value);
 }
 
-function reserveYieldSubtitle(state: ReserveYieldTileState): string {
-  const { data, hasError, isLoading } = state;
-  if (isLoading && data === null) return "Loading reserve yield";
-  if (data === null) {
-    return hasError
-      ? "Unable to load reserve yield"
-      : "Reserve yield unavailable";
-  }
-  if (data.holdingsError !== null && data.holdings.length === 0) {
-    return "Yield-bearing holdings unavailable";
-  }
-  if (data.holdings.length === 0) {
-    return "No yield-bearing reserve holdings returned";
-  }
-  if (data.earnedYieldError !== null) {
-    if (data.earnedYieldUsd !== null) {
-      return "Earned-yield ledger loaded with warnings; forecasts use current reserve balances";
-    }
-    return "Earned-yield ledger pending; forecasts use current reserve balances";
-  }
-  if (data.rateError !== null) {
-    return data.dailyRunRateUsd === null
-      ? "Forecast rates unavailable"
-      : "Some forecast rates unavailable";
-  }
-  if (data.holdingsError !== null) {
-    return "Some reserve rows unavailable; forecasts use parsed rows";
-  }
-  return "";
-}
-
 function reserveYieldRateBanner(data: ReserveYieldResponse): string {
   return data.dailyRunRateUsd === null
     ? "Forecast rates are unavailable — showing balances without forecast estimates."
     : "Some forecast rates are unavailable — showing balances without forecast estimates where needed.";
-}
-
-function reserveYieldHasHoldings(data: ReserveYieldResponse | null): boolean {
-  return (data?.holdings.length ?? 0) > 0;
-}
-
-function reserveYieldMetric(
-  value: number | null,
-  hasHoldings: boolean,
-): string {
-  return formatNullableUSD(hasHoldings ? value : null);
 }
 
 function reserveForecastMetric(value: number | null): string {
@@ -95,105 +52,6 @@ function reserveTotalForecastTitle(data: ReserveYieldResponse): string {
     return `Forecast totals include holdings with APY sources only; missing APY for ${data.forecastUnavailableSymbols.join(", ")}.`;
   }
   return "Forecast totals use non-compounding math across current reserve balances.";
-}
-
-function reserveTileForecastMetric(value: number | null): string {
-  return formatNullableUSD(value);
-}
-
-function reserveYieldForecastTooltip(
-  data: ReserveYieldResponse | null,
-): string {
-  const forecastUnavailableSymbols = data?.forecastUnavailableSymbols ?? [];
-  const ausdApyLine =
-    data?.grossApyPercent === null || data?.grossApyPercent === undefined
-      ? "- AUSD APY is unavailable until the Fed Funds feed loads"
-      : `- AUSD APY uses current Fed Funds Rate (${formatAnnualInterestRatePercent(data.grossApyPercent)} gross), minus 15 bps expenses, then 80% Mento revenue share (${formatAnnualInterestRatePercent(data.netMentoApyPercent)} net)`;
-  const susdsApyLine =
-    data?.skySavingsRateApyPercent === null ||
-    data?.skySavingsRateApyPercent === undefined
-      ? "- sUSDS APY is unavailable until the Sky Savings Rate feed loads"
-      : data.skySavingsRateSource === "blockanalitica-overall"
-        ? `- sUSDS APY uses the Sky Savings Rate (${formatAnnualInterestRatePercent(data.skySavingsRateApyPercent)}) from Block Analitica fallback`
-        : `- sUSDS APY reads on-chain sUSDS.ssr() on Ethereum (${formatAnnualInterestRatePercent(data.skySavingsRateApyPercent)})`;
-  const remainingUnavailableSymbols = forecastUnavailableSymbols.filter(
-    (symbol) => !["AUSD", "SUSDS"].includes(symbol),
-  );
-  const exclusions =
-    remainingUnavailableSymbols.length === 0
-      ? ""
-      : `\n- ${remainingUnavailableSymbols.join(", ")} currently excluded until an APY source is wired`;
-  return `Annual Forecast based on blended APY on current reserve balances & non-compounding math: balance x APY x days / 365\n${ausdApyLine}\n${susdsApyLine}${exclusions}`;
-}
-
-function reserveYieldHeadline(state: ReserveYieldTileState): string {
-  const { data, isLoading } = state;
-  if (isLoading && data === null) return "—";
-  if (data === null || data.earnedYieldUsd === null) {
-    return "N/A";
-  }
-  return formatUSD(data.earnedYieldUsd);
-}
-
-function reserveYieldTileView(state: ReserveYieldTileState): {
-  headline: string;
-  showEarnedLabel: boolean;
-  reserveBalance: string;
-  monthlyForecast: string;
-  yearlyForecast: string;
-  subtitle: string;
-} {
-  const { data } = state;
-  const hasHoldings = reserveYieldHasHoldings(data);
-  return {
-    headline: reserveYieldHeadline(state),
-    showEarnedLabel: data !== null && !state.isLoading,
-    reserveBalance: reserveYieldMetric(data?.principalUsd ?? null, hasHoldings),
-    monthlyForecast: reserveTileForecastMetric(data?.next30dUsd ?? null),
-    yearlyForecast: reserveTileForecastMetric(data?.next365dUsd ?? null),
-    subtitle: reserveYieldSubtitle(state),
-  };
-}
-
-export function ReserveYieldTile({ state }: { state: ReserveYieldTileState }) {
-  const view = reserveYieldTileView(state);
-
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex min-h-[152px] flex-col justify-between">
-      <div>
-        <p className="text-sm text-slate-400">Reserve Yield</p>
-        <p className="mt-1 text-2xl font-semibold text-white font-mono">
-          {view.headline}
-          {view.showEarnedLabel && (
-            <span className="ml-1.5 text-sm font-normal text-slate-500">
-              earned
-            </span>
-          )}
-        </p>
-        <div className="mt-1.5 space-y-1 text-sm font-mono">
-          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-            <span className="text-slate-400">{view.monthlyForecast}</span>
-            <span className="text-slate-500">per month</span>
-            <span className="text-slate-500">·</span>
-            <span className="text-slate-400">{view.yearlyForecast}</span>
-            <span className="text-slate-500">per year</span>
-            <Tooltip
-              label="About Reserve Yield forecast"
-              content={reserveYieldForecastTooltip(state.data)}
-              align="right"
-              className="ml-0.5"
-              tooltipClassName="font-sans"
-            />
-          </p>
-          <p>
-            <span className="text-slate-400">{view.reserveBalance}</span>{" "}
-            <span className="text-slate-500">reserve assets earning yield</span>
-          </p>
-        </div>
-      </div>
-      <p className="mt-2 min-h-4 text-xs text-slate-500">{view.subtitle}</p>
-    </div>
-  );
 }
 
 function sourceTypeLabel(holding: ReserveYieldHolding): string {
@@ -315,7 +173,7 @@ function reserveYieldTableEmptyState({
   data,
   hasError,
   isLoading,
-}: ReserveYieldTileState): string {
+}: ReserveYieldTableState): string {
   if (isLoading && data === null) return "Loading…";
   if (data?.holdingsError != null) {
     return "Couldn't load yield-bearing reserve holdings.";
@@ -328,7 +186,7 @@ export function ReserveYieldByHoldingTable({
   data,
   isLoading,
   hasError,
-}: ReserveYieldTileState) {
+}: ReserveYieldTableState) {
   const holdings = data?.holdings ?? [];
 
   if (data === null || holdings.length === 0) {

@@ -7,3 +7,4 @@ export * from "./queries/lp";
 export * from "./queries/ols";
 export * from "./queries/liquity";
 export * from "./queries/protocol";
+export * from "./queries/reserve-yield";

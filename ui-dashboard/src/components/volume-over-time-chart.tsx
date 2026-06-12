@@ -568,7 +568,8 @@ interface VolumeOverTimeChartProps {
   fullVolumeSeries: DailyVolumeSeriesResult;
 }
 
-// Same independent-flags rationale as FeeOverTimeChart — see that file.
+// The four loading/error flags are independent: volume can load while
+// snapshots or broker rollups degrade separately.
 // react-doctor-disable-next-line react-doctor/no-many-boolean-props
 export function VolumeOverTimeChart({
   networkData,

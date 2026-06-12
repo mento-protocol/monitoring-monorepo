@@ -268,26 +268,27 @@ Per-pool deep-dive. The pool header displays the current health/limit/rebalancer
 
 #### Protocol Revenue (`/revenue`)
 
-Swap fee time-series with 24h/7d/30d/all-time breakdowns. Placeholders for CDP Borrowing Fees and Reserve Yield.
+Canonical revenue dashboard with period-first actual revenue, forward forecasts,
+stacked Total Revenue history, stream summaries, and detailed revenue tables.
 
 ### Key Components
 
-| Component          | File                                 |
-| ------------------ | ------------------------------------ |
-| `PoolsTable`       | `components/global-pools-table.tsx`  |
-| `HealthBadge`      | `components/badges.tsx`              |
-| `LimitBadge`       | `components/badges.tsx`              |
-| `RebalancerBadge`  | `components/badges.tsx`              |
-| `HealthPanel`      | `components/health-panel.tsx`        |
-| `LimitPanel`       | `components/limit-panel.tsx`         |
-| `RebalancerPanel`  | `components/rebalancer-panel.tsx`    |
-| `OracleChart`      | `components/oracle-chart.tsx`        |
-| `ReserveChart`     | `components/reserve-chart.tsx`       |
-| `SnapshotChart`    | `components/snapshot-chart.tsx`      |
-| `TvlOverTimeChart` | `components/tvl-over-time-chart.tsx` |
-| `FeeOverTimeChart` | `components/fee-over-time-chart.tsx` |
-| `ChainIcon`        | `components/chain-icon.tsx`          |
-| `Skeletons`        | `components/skeletons.tsx`           |
+| Component           | File                                 |
+| ------------------- | ------------------------------------ |
+| `PoolsTable`        | `components/global-pools-table.tsx`  |
+| `HealthBadge`       | `components/badges.tsx`              |
+| `LimitBadge`        | `components/badges.tsx`              |
+| `RebalancerBadge`   | `components/badges.tsx`              |
+| `HealthPanel`       | `components/health-panel.tsx`        |
+| `LimitPanel`        | `components/limit-panel.tsx`         |
+| `RebalancerPanel`   | `components/rebalancer-panel.tsx`    |
+| `OracleChart`       | `components/oracle-chart.tsx`        |
+| `ReserveChart`      | `components/reserve-chart.tsx`       |
+| `SnapshotChart`     | `components/snapshot-chart.tsx`      |
+| `TvlOverTimeChart`  | `components/tvl-over-time-chart.tsx` |
+| `TotalRevenueChart` | `components/fee-over-time-chart.tsx` |
+| `ChainIcon`         | `components/chain-icon.tsx`          |
+| `Skeletons`         | `components/skeletons.tsx`           |
 
 ### Pool Type Detection
 

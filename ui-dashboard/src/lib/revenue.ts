@@ -83,6 +83,7 @@ function priceFeeSnapshotInUsd(
 export function buildDailyFeeSeries(
   networkData: NetworkData[],
   window?: TimeRange,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
 ): FeeSeriesPoint[] {
   const buckets = new Map<
     number,
@@ -138,7 +139,7 @@ export function buildDailyFeeSeries(
   // snapshots because the filter above already excluded anything before
   // window.from.
   const startBucket = dayAlignedWindow ? dayAlignedWindow.from : minBucket;
-  const endRef = window?.to ?? Math.floor(Date.now() / 1000);
+  const endRef = window?.to ?? nowSeconds;
   const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
   const lastBucket =
     endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;

@@ -1,22 +1,23 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { NetworkData } from "@/hooks/use-all-networks-data";
 import type {
   CdpBorrowingFeeSeriesPoint,
   CdpBorrowingRevenueMarket,
   CdpBorrowingRevenueSummary,
 } from "@/lib/cdp-borrowing-revenue";
+import type {
+  CanonicalRevenueDailyPoint,
+  SusdsYieldDailySnapshotRow,
+} from "@/lib/canonical-revenue";
 import type { ReserveYieldResponse } from "@/lib/reserve-yield";
+import type { PoolDailyFeeSnapshot } from "@/lib/types";
+import type { NetworkData } from "@/hooks/use-all-networks-data";
 import { makeNetworkData } from "@/test-utils/network-fixtures";
 
-type FeeChartProps = {
-  borrowingFeeSeries: CdpBorrowingFeeSeriesPoint[];
-  isBorrowingFeesLoading: boolean;
-  hasError: boolean;
-  hasFeesError: boolean;
-  hasBorrowingFeesError: boolean;
-  isApproximate: boolean;
-  isBorrowingFeesApproximate: boolean;
+type TotalRevenueChartProps = {
+  series: CanonicalRevenueDailyPoint[];
+  isLoading: boolean;
+  partialReasons: string[];
 };
 
 type RevenueTableProps = {
@@ -26,10 +27,74 @@ type RevenueTableProps = {
 const mockUseProtocolFees = vi.hoisted(() => vi.fn());
 const mockUseCdpBorrowingRevenue = vi.hoisted(() => vi.fn());
 const mockUseReserveYield = vi.hoisted(() => vi.fn());
+const mockUseReserveYieldHistory = vi.hoisted(() => vi.fn());
 const capturedProps = vi.hoisted(() => ({
-  chart: null as FeeChartProps | null,
+  chart: null as TotalRevenueChartProps | null,
   table: null as RevenueTableProps | null,
 }));
+
+const DAY = 86_400;
+
+function ts(iso: string): number {
+  return Date.parse(`${iso}T00:00:00Z`) / 1000;
+}
+
+function usdWei(usd: number): string {
+  return (BigInt(usd) * BigInt("1000000000000000000")).toString();
+}
+
+function feeSnapshot(timestamp: number, usd: number): PoolDailyFeeSnapshot {
+  return {
+    id: `fee-${timestamp}-${usd}`,
+    chainId: 42220,
+    poolAddress: "0xpool",
+    timestamp: String(timestamp),
+    tokens: [],
+    tokenSymbols: [],
+    tokenDecimals: [],
+    amounts: [],
+    feesUsdWei: usdWei(usd),
+  };
+}
+
+function cdpPoint(
+  timestamp: number,
+  totalFeesUSD: number,
+): CdpBorrowingFeeSeriesPoint {
+  return {
+    timestamp,
+    upfrontFeesUSD: totalFeesUSD,
+    accruedInterestUSD: 0,
+    totalFeesUSD,
+    collectedUSD: 0,
+  };
+}
+
+function reserveSnapshot(
+  timestamp: number,
+  dailyEarnedYieldUsd: number,
+): SusdsYieldDailySnapshotRow {
+  return {
+    id: `1-susds-${timestamp}`,
+    chainId: 1,
+    token: "0xsusds",
+    timestamp: String(timestamp),
+    currentShares: "0",
+    costBasisUsdWei: "0",
+    realizedYieldUsdWei: "0",
+    transferredOutYieldUsdWei: "0",
+    redeemedYieldUsdWei: "0",
+    currentValueUsdWei: "0",
+    unrealizedYieldUsdWei: "0",
+    totalEarnedYieldUsdWei: usdWei(dailyEarnedYieldUsd),
+    dailyEarnedYieldUsdWei: usdWei(dailyEarnedYieldUsd),
+    dailyRealizedYieldUsdWei: "0",
+    dailyUnrealizedYieldUsdWei: usdWei(dailyEarnedYieldUsd),
+    sharePriceUsdWei: "1000000000000000000",
+    sampledAtBlock: "1",
+    sampledAtTimestamp: String(timestamp),
+  };
+}
 
 const EMPTY_CDP_REVENUE: CdpBorrowingRevenueSummary = {
   totalRevenueUSD: 0,
@@ -45,45 +110,13 @@ const EMPTY_CDP_REVENUE: CdpBorrowingRevenueSummary = {
   bracketsTruncated: false,
 };
 
-const EMPTY_RESERVE_YIELD: ReserveYieldResponse = {
-  principalUsd: 0,
-  forecastPrincipalUsd: null,
-  earnedYieldUsd: null,
-  realizedYieldUsd: null,
-  unrealizedYieldUsd: null,
-  earnedYieldAsOf: null,
-  holdings: [],
-  holdingsAsOf: "2026-06-11T12:00:00.000Z",
-  grossApyPercent: 5.33,
-  fedfundsAsOf: "2026-05-01",
-  expenseBps: 15,
-  revenueShareBps: 8000,
-  netMentoApyPercent: 4.144,
-  skySavingsRateApyPercent: 3.6,
-  skySavingsRateSource: "onchain-susds-ssr",
-  dailyRunRateUsd: 0,
-  next30dUsd: 0,
-  next365dUsd: 0,
-  annualRunRateUsd: 0,
-  forecastUnavailableSymbols: [],
-  holdingsError: null,
-  rateError: null,
-  earnedYieldError: null,
-};
-
-const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
-  ...EMPTY_RESERVE_YIELD,
-  principalUsd: 4700,
-  forecastPrincipalUsd: 4700,
+const RESERVE_YIELD: ReserveYieldResponse = {
+  principalUsd: 4_700,
+  forecastPrincipalUsd: 4_700,
   earnedYieldUsd: 439.4,
   realizedYieldUsd: 275.58,
   unrealizedYieldUsd: 163.82,
   earnedYieldAsOf: "2026-06-03T10:41:11.000Z",
-  dailyRunRateUsd: 182.8 / 365,
-  next30dUsd: (182.8 * 30) / 365,
-  next365dUsd: 182.8,
-  annualRunRateUsd: 182.8,
-  forecastUnavailableSymbols: [],
   holdings: [
     {
       id: "susds:ethereum:wallet:0xreserve:cold:0",
@@ -93,8 +126,8 @@ const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
       sourceLabel: "Reserve Safe",
       identifier: "0xreserve",
       custodianType: "cold",
-      balance: 2000,
-      principalUsd: 2200,
+      balance: 2_000,
+      principalUsd: 2_200,
       earnedYieldUsd: 205.68,
       apyPercent: 3.6,
       yieldModel: "Sky Savings Rate APY from on-chain sUSDS.ssr()",
@@ -111,48 +144,39 @@ const RESERVE_YIELD_WITH_HOLDINGS: ReserveYieldResponse = {
       sourceLabel: "Ops Safe",
       identifier: "0xops",
       custodianType: "ops",
-      balance: 1500,
-      principalUsd: 1500,
+      balance: 1_500,
+      principalUsd: 1_500,
       earnedYieldUsd: null,
-      apyPercent: 4.144,
+      apyPercent: 2.784,
       yieldModel:
         "FEDFUNDS minus 15 bps expenses, then 80% Mento revenue share",
-      dailyRunRateUsd: 0.1703013698630137,
-      next30dUsd: 5.109041095890411,
-      next365dUsd: 62.16,
-      annualRunRateUsd: 62.16,
-    },
-    {
-      id: "AUSD:monad:fpmm:0xfpmm:ops:0",
-      assetSymbol: "AUSD",
-      chain: "monad",
-      sourceType: "fpmm",
-      sourceLabel: "FPMM AUSD / USDm",
-      identifier: "0xfpmm",
-      custodianType: "ops",
-      balance: 1000,
-      principalUsd: 1000,
-      earnedYieldUsd: null,
-      apyPercent: 4.144,
-      yieldModel:
-        "FEDFUNDS minus 15 bps expenses, then 80% Mento revenue share",
-      dailyRunRateUsd: 41.44 / 365,
-      next30dUsd: (41.44 * 30) / 365,
-      next365dUsd: 41.44,
-      annualRunRateUsd: 41.44,
+      dailyRunRateUsd: 41.76 / 365,
+      next30dUsd: (41.76 * 30) / 365,
+      next365dUsd: 41.76,
+      annualRunRateUsd: 41.76,
     },
   ],
+  holdingsAsOf: "2026-06-11T12:00:00.000Z",
+  grossApyPercent: 3.63,
+  fedfundsAsOf: "2026-06-01",
+  expenseBps: 15,
+  revenueShareBps: 8000,
+  netMentoApyPercent: 2.784,
+  skySavingsRateApyPercent: 3.6,
+  skySavingsRateSource: "onchain-susds-ssr",
+  dailyRunRateUsd: 10,
+  next30dUsd: 300,
+  next365dUsd: 3_650,
+  annualRunRateUsd: 3_650,
+  forecastUnavailableSymbols: [],
+  holdingsError: null,
+  rateError: null,
+  earnedYieldError: null,
 };
 
 function cdpMarket(
   symbol: string,
-  totalRevenueUSD: number,
-  upfrontFeesUSD: number,
-  accruedInterestUSD: number,
-  activeDebtUSD = 900,
-  averageAnnualInterestRatePercent: number | null = 6.25,
-  annualInterestRunRateUSD = 312.5,
-  activeTroveCount = 3,
+  overrides: Partial<CdpBorrowingRevenueMarket> = {},
 ): CdpBorrowingRevenueMarket {
   return {
     collateralId: `42220-${symbol.toLowerCase()}`,
@@ -160,18 +184,19 @@ function cdpMarket(
     collIndex: 0,
     symbol,
     spYieldSplitBps: 7500,
-    activeDebtUSD,
-    averageAnnualInterestRatePercent,
-    annualInterestRunRateUSD,
-    activeTroveCount,
-    totalRevenueUSD,
-    upfrontFeesUSD,
-    accruedInterestUSD,
-    protocolShareUSD: totalRevenueUSD * 0.25,
+    activeDebtUSD: 900,
+    averageAnnualInterestRatePercent: 6.25,
+    annualInterestRunRateUSD: 312.5,
+    activeTroveCount: 3,
+    totalRevenueUSD: 187.5,
+    upfrontFeesUSD: 125,
+    accruedInterestUSD: 62.5,
+    protocolShareUSD: 46.875,
     collectedUSD: 0,
     activeInterestBracketCount: 1,
     unpricedSymbols: [],
     bracketsTruncated: false,
+    ...overrides,
   };
 }
 
@@ -187,16 +212,15 @@ vi.mock("@/hooks/use-reserve-yield", () => ({
   useReserveYield: () => mockUseReserveYield(),
 }));
 
+vi.mock("@/hooks/use-reserve-yield-history", () => ({
+  useReserveYieldHistory: () => mockUseReserveYieldHistory(),
+}));
+
 vi.mock("@/components/fee-over-time-chart", () => ({
-  FeeOverTimeChart: (props: FeeChartProps) => {
+  TotalRevenueChart: (props: TotalRevenueChartProps) => {
     capturedProps.chart = props;
     return (
-      <div
-        data-fees-error={String(props.hasFeesError)}
-        data-borrowing-fees-error={String(props.hasBorrowingFeesError)}
-        data-approximate={String(props.isApproximate)}
-        data-borrowing-approximate={String(props.isBorrowingFeesApproximate)}
-      />
+      <section aria-label="Total Revenue chart">Total Revenue chart</section>
     );
   },
 }));
@@ -204,428 +228,87 @@ vi.mock("@/components/fee-over-time-chart", () => ({
 vi.mock("@/components/revenue-by-pool-table", () => ({
   RevenueByPoolTable: (props: RevenueTableProps) => {
     capturedProps.table = props;
-    return <div data-table-error={String(props.hasError)} />;
+    return <div data-table-error={String(props.hasError)}>Swap table</div>;
   },
 }));
 
 import { RevenuePageClient } from "../revenue-page-client";
 
-function renderRevenue(
-  networkData: NetworkData[],
-  isLoading = false,
-  cdpRevenue: {
+function renderRevenue({
+  networkData = [],
+  cdpRevenue = {},
+  reserveYield = RESERVE_YIELD,
+  reserveRows = [],
+  reserveHistoryUnavailable = false,
+}: {
+  networkData?: NetworkData[];
+  cdpRevenue?: Partial<{
     summary: CdpBorrowingRevenueSummary | null;
-    markets?: CdpBorrowingRevenueMarket[];
-    dailySeries?: CdpBorrowingFeeSeriesPoint[];
-    dailySeriesTruncated?: boolean;
-    dailySeriesApproximate?: boolean;
-    dailySeriesFailed?: boolean;
+    markets: CdpBorrowingRevenueMarket[];
+    dailySeries: CdpBorrowingFeeSeriesPoint[];
+    dailySeriesTruncated: boolean;
+    dailySeriesApproximate: boolean;
+    dailySeriesFailed: boolean;
     isLoading: boolean;
     hasError: boolean;
-  } = {
-    summary: EMPTY_CDP_REVENUE,
-    markets: [],
-    isLoading: false,
-    hasError: false,
-  },
-  reserveYield: {
-    data: ReserveYieldResponse | null;
-    isLoading: boolean;
-    hasError: boolean;
-  } = {
-    data: EMPTY_RESERVE_YIELD,
-    isLoading: false,
-    hasError: false,
-  },
-) {
-  mockUseProtocolFees.mockReturnValue({ networkData, isLoading });
+  }>;
+  reserveYield?: ReserveYieldResponse | null;
+  reserveRows?: SusdsYieldDailySnapshotRow[];
+  reserveHistoryUnavailable?: boolean;
+} = {}) {
+  mockUseProtocolFees.mockReturnValue({ networkData, isLoading: false });
   mockUseCdpBorrowingRevenue.mockReturnValue({
+    summary: EMPTY_CDP_REVENUE,
     markets: [],
     dailySeries: [],
     dailySeriesTruncated: false,
     dailySeriesApproximate: false,
     dailySeriesFailed: false,
+    isLoading: false,
+    hasError: false,
     ...cdpRevenue,
   });
-  mockUseReserveYield.mockReturnValue(reserveYield);
+  mockUseReserveYield.mockReturnValue({
+    data: reserveYield,
+    isLoading: false,
+    hasError: false,
+  });
+  mockUseReserveYieldHistory.mockReturnValue({
+    rows: reserveRows,
+    isLoading: false,
+    hasError: false,
+    unavailable: reserveHistoryUnavailable,
+    truncated: false,
+  });
   return renderToStaticMarkup(<RevenuePageClient />);
 }
 
-describe("RevenuePageClient degraded fee states", () => {
+describe("RevenuePageClient canonical revenue layout", () => {
   beforeEach(() => {
     mockUseProtocolFees.mockReset();
     mockUseCdpBorrowingRevenue.mockReset();
     mockUseReserveYield.mockReset();
+    mockUseReserveYieldHistory.mockReset();
     capturedProps.chart = null;
     capturedProps.table = null;
   });
 
-  it("fails fee surfaces closed when the protocol fee hook reports a fee error", () => {
-    const html = renderRevenue([
-      makeNetworkData({
-        ratesError: new Error("rates timeout"),
-        fees: null,
-      }),
-    ]);
-
-    expect(html).toContain("N/A");
-    expect(html).toContain("Some chains failed to load");
-    expect(capturedProps.chart).toMatchObject({
-      hasError: false,
-      hasFeesError: true,
-      hasBorrowingFeesError: false,
-      isApproximate: false,
-      isBorrowingFeesApproximate: false,
-    });
-    expect(capturedProps.table).toMatchObject({ hasError: true });
-  });
-
-  it("marks fees approximate when fee snapshot pagination is truncated", () => {
-    const html = renderRevenue([
-      makeNetworkData({
-        feeSnapshotsTruncated: true,
-        fees: {
-          totalFeesUSD: 100,
-          fees24hUSD: 10,
-          fees7dUSD: 25,
-          fees30dUSD: 50,
-          unpricedSymbols: [],
-          unpricedSymbols24h: [],
-          unresolvedCount: 0,
-          unresolvedCount24h: 0,
-        },
-      }),
-    ]);
-
-    expect(html).toContain("Approximate");
-    expect(html).toContain("full history exceeds pagination cap");
-    expect(capturedProps.chart).toMatchObject({
-      hasError: false,
-      hasFeesError: false,
-      hasBorrowingFeesError: false,
-      isApproximate: true,
-      isBorrowingFeesApproximate: false,
-    });
-    expect(capturedProps.table).toMatchObject({ hasError: false });
-  });
-
-  it("renders CDP borrowing fees from real upfront and accrued interest data", () => {
-    const html = renderRevenue([], false, {
-      summary: {
-        ...EMPTY_CDP_REVENUE,
-        totalRevenueUSD: 242.5,
-        upfrontFeesUSD: 180,
-        accruedInterestUSD: 62.5,
-        protocolShareUSD: 60.63,
-        spYieldShareUSD: 181.87,
-        collectedUSD: 30,
-        receivableUSD: 30.63,
-        marketCount: 2,
-        activeInterestBracketCount: 1,
-      },
-      markets: [
-        cdpMarket("GBPm", 187.5, 125, 62.5),
-        cdpMarket("CHFm", 55, 55, 0),
-      ],
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(html).toContain("CDP Borrowing Fees");
-    // Headline = protocol share (earned); one gross/SP-split context row.
-    expect(html).toContain("$60.63");
-    expect(html).toContain("earned");
-    expect(html).toContain("Gross");
-    expect(html).toContain("$242.50");
-    expect(html).toContain("$181.87");
-    expect(html).toContain("Stability Pool Share");
-    // Headline deep-links to the feeRecipient's DeBank profile, like the
-    // Swap Fees tile.
-    expect(html).toContain('aria-label="CDP Borrowing Fees: $60.63"');
-    expect(html.match(/debank\.com\/profile\/0x0dd57f6f/gi)?.length).toBe(2);
-    // All-time tooltip states the live on-chain split (7500 bps fixture).
-    expect(html).toContain(
-      "Split: 25% protocol treasury, 75% Stability Pool depositor yield.",
+  it("renders canonical period cards, forecast cards, stream cards, and tables", () => {
+    const completedDays = Array.from(
+      { length: 30 },
+      (_, index) => ts("2026-05-13") + index * DAY,
     );
-    // Collected/receivable stay indexed but are no longer rendered — the
-    // fixture's collectedUSD (30) / receivableUSD (30.63) must not appear.
-    expect(html).not.toContain("Accruing");
-    expect(html).not.toContain('role="progressbar"');
-    expect(html).not.toContain("$30.00");
-    expect(html).not.toContain("$30.63");
-    expect(html).toContain("Protocol share of borrowing fees");
-    expect(html).toContain("Protocol share of swap fees");
-    expect(html).toContain("Borrowing Fees by CDP");
-    expect(html).toContain("Debt");
-    expect(html).toContain("ø APR");
-    expect(html).toContain("Run/yr");
-    expect(html).toContain('aria-label="About ø APR"');
-    expect(html).toContain('aria-label="About Run/yr"');
-    expect(html).not.toContain(
-      'title="Debt-weighted average APR across active debt',
-    );
-    expect(html).toContain("GBPm");
-    expect(html).toContain("CHFm");
-    expect(html).toContain("$900.00");
-    expect(html).toContain("6.25%");
-    expect(html).toContain("$312.50");
-    expect(html).toContain("3 active troves");
-    expect(html).toContain("$187.50");
-    expect(html).not.toContain("Requires Liquity v2 indexing");
-    expect(html).toContain("Reserve Yield");
-    expect(html).toContain("No yield-bearing reserve holdings returned");
-    expect(capturedProps.chart).toMatchObject({
-      isBorrowingFeesApproximate: false,
-    });
-  });
-
-  it("renders reserve yield earned headline, forecasts, and component table", () => {
-    const html = renderRevenue([], false, undefined, {
-      data: RESERVE_YIELD_WITH_HOLDINGS,
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(html).toContain("Reserve Yield");
-    expect(html).toContain("$439.40");
-    expect(html).toContain("earned");
-    expect(html).toContain("$15.02");
-    expect(html).toContain("per month");
-    expect(html).toContain("$182.80");
-    expect(html).toContain("per year");
-    expect(html).toContain("$4.7K");
-    expect(html).toContain("reserve assets earning yield");
-    expect(html).toContain('aria-label="About Reserve Yield forecast"');
-    expect(html).toContain("Annual Forecast based on blended APY");
-    expect(html).not.toContain("- Based on blended APY");
-    expect(html).toContain("current Fed Funds Rate");
-    expect(html).toContain("sUSDS APY reads on-chain sUSDS.ssr()");
-    expect(html).not.toContain("Block Analitica fallback");
-    expect(html).toContain("balance x APY x days / 365");
-    expect(html).not.toContain("sUSDS currently excluded");
-    expect(html).toContain("Reserve Yield Components");
-    expect(html).toContain("Balance");
-    expect(html).toContain("APY");
-    expect(html).toContain("3.6%");
-    expect(html).toContain("4.144%");
-    expect(html).toContain("sUSDS");
-    expect(html).toContain("AUSD");
-    expect(html).toContain("Ethereum");
-    expect(html).toContain("Monad");
-    expect(html).toContain("Reserve Safe");
-    expect(html).toContain("Ops Safe");
-    expect(html).toContain("wallet / ops");
-    expect(html).toContain("FPMM AUSD / USDm");
-    expect(html).toContain('aria-label="Reserve yield components"');
-    expect(html).toContain('aria-label="Reserve yield total row"');
-    expect(html).toContain("Total");
-    expect(html).toContain("3.889%");
-    expect(html).toContain("Blended APY across forecastable reserve balances.");
-    expect(html).toContain(
-      "Forecast totals use non-compounding math across current reserve balances.",
-    );
-    expect(html.indexOf('aria-label="Reserve yield components"')).toBeLessThan(
-      html.indexOf("data-table-error"),
-    );
-    expect(html.indexOf('aria-label="Reserve yield components"')).toBeLessThan(
-      html.indexOf("Borrowing Fees by CDP"),
-    );
-  });
-
-  it("labels the sUSDS APY fallback source when Block Analitica supplies the rate", () => {
-    const html = renderRevenue([], false, undefined, {
-      data: {
-        ...RESERVE_YIELD_WITH_HOLDINGS,
-        skySavingsRateSource: "blockanalitica-overall",
-      },
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(html).toContain("Block Analitica fallback");
-    expect(html).not.toContain("sUSDS APY reads on-chain sUSDS.ssr()");
-  });
-
-  it("shows reserve yield loading state before the route resolves", () => {
-    const html = renderRevenue([], false, undefined, {
-      data: null,
-      isLoading: true,
-      hasError: false,
-    });
-
-    expect(html).toContain("Reserve Yield");
-    expect(html).toContain("Loading reserve yield");
-    expect(html).toContain("Reserve Yield Components");
-    expect(html).toContain("Loading…");
-  });
-
-  it("keeps AUSD balance visible when FEDFUNDS is unavailable", () => {
-    const html = renderRevenue([], false, undefined, {
-      data: {
-        ...RESERVE_YIELD_WITH_HOLDINGS,
-        grossApyPercent: null,
-        fedfundsAsOf: null,
-        netMentoApyPercent: null,
-        skySavingsRateApyPercent: null,
-        skySavingsRateSource: null,
-        forecastPrincipalUsd: null,
-        dailyRunRateUsd: null,
-        next30dUsd: null,
-        next365dUsd: null,
-        annualRunRateUsd: null,
-        forecastUnavailableSymbols: ["AUSD", "SUSDS"],
-        holdings: RESERVE_YIELD_WITH_HOLDINGS.holdings.map((holding) => ({
-          ...holding,
-          apyPercent: null,
-          dailyRunRateUsd: null,
-          next30dUsd: null,
-          next365dUsd: null,
-          annualRunRateUsd: null,
-        })),
-        rateError: "FRED FEDFUNDS: HTTP 503",
-      },
-      isLoading: false,
-      hasError: true,
-    });
-
-    expect(html).toContain("Forecast rates unavailable");
-    expect(html).not.toContain("Earned-yield ledger pending; forecast rates");
-    expect(html).toContain("$4.7K");
-    expect(html).toContain("Forecast rates are unavailable");
-    expect(html).not.toContain("Some forecast rates are unavailable");
-    expect(html).toContain("showing balances without forecast");
-    expect(html).toContain(
-      "Forecast unavailable until APY sources load for current reserve holdings.",
-    );
-    expect(html).toContain("N/A");
-  });
-
-  it("labels partial reserve row parsing separately from ledger status", () => {
-    const html = renderRevenue([], false, undefined, {
-      data: {
-        ...RESERVE_YIELD_WITH_HOLDINGS,
-        holdingsError:
-          "Some reserve yield rows were missing usable USD values.",
-      },
-      isLoading: false,
-      hasError: true,
-    });
-
-    expect(html).toContain("Some reserve rows unavailable");
-    expect(html).not.toContain(
-      "Earned-yield ledger pending; forecasts use parsed rows",
-    );
-  });
-
-  it("does not label available earned-yield data as pending when a ledger warning is present", () => {
-    const html = renderRevenue([], false, undefined, {
-      data: {
-        ...RESERVE_YIELD_WITH_HOLDINGS,
-        earnedYieldError:
-          "sUSDS earned-yield ledger: current reserve includes sUSDS rows outside indexed wallets.",
-      },
-      isLoading: false,
-      hasError: true,
-    });
-
-    expect(html).toContain("Earned-yield ledger loaded with warnings");
-    expect(html).not.toContain("Earned-yield ledger pending");
-    expect(html).toContain("current reserve includes sUSDS rows outside");
-  });
-
-  it("does not pass reserve-yield forecasts into the Total Fees chart", () => {
-    renderRevenue([], false, undefined, {
-      data: RESERVE_YIELD_WITH_HOLDINGS,
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(capturedProps.chart).not.toBeNull();
-    expect(Object.keys(capturedProps.chart ?? {})).not.toContain(
-      "reserveYield",
-    );
-    expect(capturedProps.chart).toMatchObject({
-      borrowingFeeSeries: [],
-      hasBorrowingFeesError: false,
-    });
-  });
-
-  it("marks CDP borrowing fees approximate when a debt token is unpriced", () => {
-    const html = renderRevenue([], false, {
-      summary: {
-        ...EMPTY_CDP_REVENUE,
-        totalRevenueUSD: 20,
-        upfrontFeesUSD: 20,
-        protocolShareUSD: 5,
-        spYieldShareUSD: 15,
-        unpricedSymbols: ["JPYm"],
-      },
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(html).toContain("≈ $5.00");
-    expect(html).toContain("Approximate");
-    expect(html).toContain("unpriced debt token: JPYm");
-  });
-
-  it("shows CDP borrowing fees as loading before the hook resolves", () => {
-    const html = renderRevenue([], false, {
-      summary: null,
-      isLoading: true,
-      hasError: false,
-    });
-
-    expect(html).toContain("CDP Borrowing Fees");
-    expect(html).toContain("—");
-    expect(html).toContain("Loading CDP borrowing fees");
-    expect(html).not.toContain("Unable to load CDP borrowing fees");
-  });
-
-  it("marks CDP borrowing fees approximate when bracket pagination is capped", () => {
-    const html = renderRevenue([], false, {
-      summary: {
-        ...EMPTY_CDP_REVENUE,
-        totalRevenueUSD: 20,
-        upfrontFeesUSD: 20,
-        protocolShareUSD: 5,
-        spYieldShareUSD: 15,
-        bracketsTruncated: true,
-      },
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(html).toContain("≈ $5.00");
-    expect(html).toContain("interest brackets exceed pagination cap");
-  });
-
-  it("marks the total fee chart approximate when borrowing fee history uses the fallback series", () => {
-    renderRevenue([], false, {
-      summary: {
-        ...EMPTY_CDP_REVENUE,
-        totalRevenueUSD: 20,
-        accruedInterestUSD: 20,
-      },
-      dailySeriesApproximate: true,
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(capturedProps.chart).toMatchObject({
-      isBorrowingFeesApproximate: true,
-    });
-  });
-
-  it("marks the total fee chart partial when CDP borrowing fees fail", () => {
-    const html = renderRevenue(
-      [
+    const html = renderRevenue({
+      networkData: [
         makeNetworkData({
+          feeSnapshots: completedDays.map((timestamp) =>
+            feeSnapshot(timestamp, 10),
+          ),
           fees: {
-            totalFeesUSD: 100,
+            totalFeesUSD: 300,
             fees24hUSD: 10,
-            fees7dUSD: 25,
-            fees30dUSD: 50,
+            fees7dUSD: 70,
+            fees30dUSD: 300,
             unpricedSymbols: [],
             unpricedSymbols24h: [],
             unresolvedCount: 0,
@@ -633,83 +316,76 @@ describe("RevenuePageClient degraded fee states", () => {
           },
         }),
       ],
-      false,
-      {
-        summary: null,
-        isLoading: false,
-        hasError: true,
+      cdpRevenue: {
+        markets: [cdpMarket("GBPm")],
+        dailySeries: completedDays.map((timestamp) => cdpPoint(timestamp, 3)),
       },
-    );
-
-    expect(html).toContain("Unable to load CDP borrowing fees");
-    expect(capturedProps.chart).toMatchObject({
-      hasError: false,
-      hasFeesError: false,
-      hasBorrowingFeesError: true,
-      isApproximate: false,
+      reserveRows: [reserveSnapshot(ts("2026-06-10"), 45)],
     });
+
+    expect(html).toContain("Canonical revenue actuals since Mar 3, 2026");
+    expect(html).toContain("Total Revenue");
+    expect(html).toContain("Since Mar 3, 2026");
+    expect(html).toContain("Year To Date");
+    expect(html).toContain("Last 30 Days");
+    expect(html).toContain("Rolling UTC daily buckets");
+    expect(html).toContain("7d Forecast");
+    expect(html).toContain("Monthly Forecast");
+    expect(html).toContain("Annual Forecast");
+    expect(html).toContain("Next 365 days");
+    expect(html).toContain("AUSD is forecast-only until a payout ledger");
+    expect(html).toContain("Revenue streams");
+    expect(html).toContain("sUSDS actual yield; AUSD forecast-only");
+    expect(html).toContain("Reserve Yield Components");
+    expect(html).toContain("Borrowing Fees by CDP");
+    expect(html).toContain(
+      "Split: 25% protocol treasury, 75% Stability Pool depositor yield.",
+    );
+    expect(
+      capturedProps.chart?.series.some((p) => p.reserveYieldUsd === 45),
+    ).toBe(true);
     expect(capturedProps.table).toMatchObject({ hasError: false });
   });
 
-  it("fails the total fee chart closed when only the borrowing daily series fails", () => {
-    const html = renderRevenue([], false, {
-      summary: {
-        ...EMPTY_CDP_REVENUE,
-        totalRevenueUSD: 20,
-        accruedInterestUSD: 20,
+  it("flags reserve history missing as partial and does not inject current earned-yield API totals into chart actuals", () => {
+    const html = renderRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [feeSnapshot(ts("2026-06-12"), 12)],
+        }),
+      ],
+      reserveYield: {
+        ...RESERVE_YIELD,
+        earnedYieldUsd: 999,
       },
-      dailySeriesFailed: true,
-      isLoading: false,
-      hasError: false,
+      reserveRows: [],
+      reserveHistoryUnavailable: true,
     });
 
-    // The chart fails closed (a swap-only total would misrepresent the missing
-    // borrowing history) — and is NOT merely flagged approximate.
-    expect(capturedProps.chart).toMatchObject({
-      hasBorrowingFeesError: true,
-      isBorrowingFeesApproximate: false,
-    });
-    // But the summary tiles keep the borrowing revenue already computed from
-    // the (successful) market/bracket/rate queries.
-    expect(html).not.toContain("Unable to load CDP borrowing fees");
-    expect(html).toContain("$20.00");
-  });
-});
-
-describe("cdpBorrowingTotalTooltip fallback via RevenuePageClient", () => {
-  beforeEach(() => {
-    mockUseProtocolFees.mockReset();
-    mockUseCdpBorrowingRevenue.mockReset();
-  });
-
-  it("falls back to generic split wording when market splits disagree", () => {
-    const gbp = cdpMarket("GBPm", 187.5, 125, 62.5);
-    const chf = { ...cdpMarket("CHFm", 55, 55, 0), spYieldSplitBps: 5000 };
-    const html = renderRevenue([], false, {
-      summary: EMPTY_CDP_REVENUE,
-      markets: [gbp, chf],
-      isLoading: false,
-      hasError: false,
-    });
-
-    expect(html).toContain(
-      "The protocol keeps the share shown in the summary tile",
+    expect(html).toContain("Reserve earned-yield history is not indexed yet.");
+    expect(capturedProps.chart?.partialReasons).toContain(
+      "Reserve earned-yield history is not indexed yet.",
     );
-    expect(html).not.toContain("% protocol treasury");
+    const reserveActual = capturedProps.chart?.series.reduce(
+      (sum, point) => sum + point.reserveYieldUsd,
+      0,
+    );
+    expect(reserveActual).toBe(0);
   });
 
-  it("falls back to generic split wording on the unloaded -1 sentinel", () => {
-    const gbp = { ...cdpMarket("GBPm", 187.5, 125, 62.5), spYieldSplitBps: -1 };
-    const html = renderRevenue([], false, {
-      summary: EMPTY_CDP_REVENUE,
-      markets: [gbp],
-      isLoading: false,
-      hasError: false,
+  it("passes fee failures through to the swap table and chart partial state", () => {
+    renderRevenue({
+      networkData: [
+        makeNetworkData({
+          ratesError: new Error("rates timeout"),
+          fees: null,
+        }),
+      ],
     });
 
-    expect(html).toContain(
-      "The protocol keeps the share shown in the summary tile",
+    expect(capturedProps.table).toMatchObject({ hasError: true });
+    expect(capturedProps.chart?.partialReasons).toContain(
+      "Swap fee history failed to load.",
     );
-    expect(html).not.toContain("% protocol treasury");
   });
 });
