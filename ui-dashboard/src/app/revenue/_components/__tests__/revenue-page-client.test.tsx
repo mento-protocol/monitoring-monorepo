@@ -501,6 +501,22 @@ describe("RevenuePageClient degraded fee states", () => {
     );
   });
 
+  it("does not label available earned-yield data as pending when a ledger warning is present", () => {
+    const html = renderRevenue([], false, undefined, {
+      data: {
+        ...RESERVE_YIELD_WITH_HOLDINGS,
+        earnedYieldError:
+          "sUSDS earned-yield ledger: current reserve includes sUSDS rows outside indexed wallets.",
+      },
+      isLoading: false,
+      hasError: true,
+    });
+
+    expect(html).toContain("Earned-yield ledger loaded with warnings");
+    expect(html).not.toContain("Earned-yield ledger pending");
+    expect(html).toContain("current reserve includes sUSDS rows outside");
+  });
+
   it("does not pass reserve-yield forecasts into the Total Fees chart", () => {
     renderRevenue([], false, undefined, {
       data: RESERVE_YIELD_WITH_HOLDINGS,

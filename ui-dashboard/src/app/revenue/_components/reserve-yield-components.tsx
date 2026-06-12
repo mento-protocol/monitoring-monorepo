@@ -39,6 +39,9 @@ function reserveYieldSubtitle(state: ReserveYieldTileState): string {
     return "No yield-bearing reserve holdings returned";
   }
   if (data.earnedYieldError !== null) {
+    if (data.earnedYieldUsd !== null) {
+      return "Earned-yield ledger loaded with warnings; forecasts use current reserve balances";
+    }
     return "Earned-yield ledger pending; forecasts use current reserve balances";
   }
   if (data.rateError !== null) {
