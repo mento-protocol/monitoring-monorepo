@@ -1,0 +1,1056 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Revenue Page Design Mockups</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #080b10;
+        --panel: #111720;
+        --panel-2: #151d27;
+        --panel-3: #0d131b;
+        --border: #263241;
+        --border-soft: #1d2733;
+        --text: #f8fafc;
+        --muted: #94a3b8;
+        --quiet: #64748b;
+        --blue: #60a5fa;
+        --green: #34d399;
+        --amber: #f59e0b;
+        --reserve: #a78bfa;
+        --pink: #f472b6;
+        --red: #fb7185;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      .page {
+        margin: 0 auto;
+        max-width: 1440px;
+        padding: 32px 28px 64px;
+      }
+
+      .topbar {
+        align-items: center;
+        border-bottom: 1px solid var(--border-soft);
+        display: flex;
+        gap: 24px;
+        min-height: 48px;
+        padding-bottom: 20px;
+      }
+
+      .brand {
+        color: #e2e8f0;
+        font-size: 15px;
+        font-weight: 700;
+        margin-right: 8px;
+      }
+
+      .nav {
+        color: var(--quiet);
+        display: flex;
+        flex: 1;
+        flex-wrap: wrap;
+        gap: 16px;
+        font-size: 13px;
+      }
+
+      .nav span.active {
+        color: var(--text);
+      }
+
+      .user {
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .hero {
+        align-items: end;
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        margin: 28px 0 22px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 26px;
+        letter-spacing: 0;
+        line-height: 1.15;
+      }
+
+      .subtitle {
+        color: var(--muted);
+        font-size: 14px;
+        margin-top: 6px;
+      }
+
+      .status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .chip {
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--muted);
+        display: inline-flex;
+        font-size: 12px;
+        gap: 7px;
+        padding: 6px 10px;
+        white-space: nowrap;
+      }
+
+      .dot {
+        border-radius: 999px;
+        display: inline-block;
+        height: 7px;
+        width: 7px;
+      }
+
+      .dot.green {
+        background: var(--green);
+      }
+
+      .dot.amber {
+        background: var(--amber);
+      }
+
+      .mockup {
+        border-top: 1px solid var(--border-soft);
+        margin-top: 34px;
+        padding-top: 28px;
+      }
+
+      .mockup:first-of-type {
+        border-top: 0;
+        margin-top: 0;
+        padding-top: 0;
+      }
+
+      .mock-label {
+        align-items: center;
+        color: var(--quiet);
+        display: flex;
+        font-size: 12px;
+        font-weight: 700;
+        gap: 10px;
+        letter-spacing: 0.08em;
+        margin-bottom: 12px;
+        text-transform: uppercase;
+      }
+
+      .mock-label::after {
+        background: var(--border-soft);
+        content: "";
+        flex: 1;
+        height: 1px;
+      }
+
+      .section-grid {
+        display: grid;
+        gap: 18px;
+      }
+
+      .overview-grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: minmax(280px, 1.15fr) repeat(
+            3,
+            minmax(180px, 1fr)
+          );
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+
+      .period-card {
+        min-height: 164px;
+        padding: 18px;
+      }
+
+      .period-card.primary {
+        background: linear-gradient(135deg, #172235 0%, #111720 62%);
+      }
+
+      .eyebrow {
+        color: var(--quiet);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .value {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 32px;
+        font-weight: 700;
+        letter-spacing: 0;
+        line-height: 1.08;
+        margin-top: 10px;
+      }
+
+      .primary .value {
+        font-size: 42px;
+      }
+
+      .note {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 8px;
+      }
+
+      .bars {
+        display: grid;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .bar-row {
+        align-items: center;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 82px 1fr 70px;
+      }
+
+      .bar-label,
+      .bar-value {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .bar-value {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        text-align: right;
+      }
+
+      .track {
+        background: #0b1118;
+        border-radius: 999px;
+        height: 6px;
+        overflow: hidden;
+      }
+
+      .fill {
+        border-radius: 999px;
+        display: block;
+        height: 100%;
+      }
+
+      .fill.swap {
+        background: var(--blue);
+      }
+
+      .fill.cdp {
+        background: var(--green);
+      }
+
+      .fill.reserve {
+        background: var(--reserve);
+      }
+
+      .fill.forecast {
+        background: var(--pink);
+      }
+
+      .forecast-grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .forecast-card {
+        display: grid;
+        gap: 14px;
+        min-height: 142px;
+        padding: 18px;
+      }
+
+      .forecast-card .value {
+        font-size: 30px;
+      }
+
+      .forecast-head {
+        align-items: center;
+        display: flex;
+        gap: 8px;
+        justify-content: space-between;
+      }
+
+      .info {
+        align-items: center;
+        background: #0b1118;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--muted);
+        cursor: help;
+        display: inline-flex;
+        flex: 0 0 auto;
+        font-size: 12px;
+        font-weight: 700;
+        height: 20px;
+        justify-content: center;
+        line-height: 1;
+        width: 20px;
+      }
+
+      .main-grid {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: minmax(420px, 1.35fr) minmax(320px, 0.85fr);
+      }
+
+      .chart-panel,
+      .table-panel {
+        padding: 18px;
+      }
+
+      .panel-title {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 18px;
+      }
+
+      .panel-title h2,
+      .panel-title h3 {
+        font-size: 16px;
+      }
+
+      .segment {
+        background: #0b1118;
+        border: 1px solid var(--border-soft);
+        border-radius: 7px;
+        display: inline-flex;
+        padding: 3px;
+      }
+
+      .segment span {
+        border-radius: 5px;
+        color: var(--quiet);
+        font-size: 12px;
+        padding: 6px 10px;
+      }
+
+      .segment span.active {
+        background: var(--panel-2);
+        color: var(--text);
+      }
+
+      .chart {
+        height: 236px;
+        width: 100%;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 14px;
+      }
+
+      .legend-item {
+        align-items: center;
+        color: var(--muted);
+        display: inline-flex;
+        font-size: 12px;
+        gap: 7px;
+      }
+
+      .legend-line {
+        border-radius: 999px;
+        display: inline-block;
+        height: 3px;
+        width: 22px;
+      }
+
+      .stream-cards {
+        display: grid;
+        gap: 12px;
+      }
+
+      .stream-card {
+        background: var(--panel-3);
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        padding: 14px;
+      }
+
+      .stream-head {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .stream-name {
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .stream-total {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .mini {
+        color: var(--muted);
+        display: flex;
+        flex-wrap: wrap;
+        font-size: 12px;
+        gap: 12px;
+        margin-top: 10px;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--border-soft);
+        color: var(--muted);
+        font-size: 12px;
+        padding: 11px 10px;
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      th:first-child,
+      td:first-child {
+        color: var(--text);
+        font-weight: 700;
+        text-align: left;
+      }
+
+      th {
+        color: var(--quiet);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      tfoot td {
+        color: var(--text);
+        font-weight: 700;
+      }
+
+      .matrix-grid {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .matrix-panel {
+        padding: 18px;
+      }
+
+      .source-strip {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .source {
+        background: var(--panel-3);
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        padding: 12px;
+      }
+
+      .source strong {
+        display: block;
+        font-size: 13px;
+      }
+
+      .source span {
+        color: var(--muted);
+        display: block;
+        font-size: 12px;
+        margin-top: 6px;
+      }
+
+      .partial {
+        color: var(--amber);
+      }
+
+      @media (max-width: 1280px) {
+        .overview-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .main-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 980px) {
+        .forecast-grid,
+        .source-strip {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          padding: 22px 16px 48px;
+        }
+
+        .hero,
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .status-row {
+          justify-content: flex-start;
+        }
+
+        .overview-grid,
+        .forecast-grid,
+        .source-strip {
+          grid-template-columns: 1fr;
+        }
+
+        .primary .value,
+        .value {
+          font-size: 30px;
+        }
+
+        .bar-row {
+          grid-template-columns: 76px 1fr 64px;
+        }
+
+        .table-scroll {
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div class="brand">Mento Analytics</div>
+        <nav class="nav" aria-label="Mock navigation">
+          <span>Pools</span>
+          <span>Volume</span>
+          <span>Stables</span>
+          <span>Bridges</span>
+          <span>CDPs</span>
+          <span class="active">Revenue</span>
+          <span>Addresses</span>
+        </nav>
+        <div class="user">dev@mentolabs.xyz</div>
+      </header>
+
+      <div class="hero">
+        <div>
+          <h1>Protocol Revenue</h1>
+          <p class="subtitle">Actual revenue periods first, forecast second.</p>
+        </div>
+        <div class="status-row" aria-label="Revenue data freshness">
+          <span class="chip"
+            ><span class="dot green"></span>Swap fees live</span
+          >
+          <span class="chip"><span class="dot green"></span>CDP fees live</span>
+          <span class="chip"
+            ><span class="dot green"></span>Reserve cutoff: Mar 3, 2026</span
+          >
+        </div>
+      </div>
+
+      <section class="mockup" aria-label="Recommended revenue design">
+        <div class="mock-label">Recommended layout</div>
+
+        <div class="section-grid">
+          <div class="overview-grid" aria-label="Actual revenue periods">
+            <article class="panel period-card primary">
+              <p class="eyebrow">Total Revenue</p>
+              <p class="value">$446.5K</p>
+              <p class="note">Since v3 launch on Mar 3, 2026</p>
+              <div class="bars" aria-label="All-time stream breakdown">
+                <div class="bar-row">
+                  <span class="bar-label">Reserve</span>
+                  <span class="track"
+                    ><span class="fill reserve" style="width: 98%"></span
+                  ></span>
+                  <span class="bar-value">$440K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">Swap</span>
+                  <span class="track"
+                    ><span class="fill swap" style="width: 12%"></span
+                  ></span>
+                  <span class="bar-value">$5.3K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">CDP</span>
+                  <span class="track"
+                    ><span class="fill cdp" style="width: 4%"></span
+                  ></span>
+                  <span class="bar-value">$1.2K</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel period-card">
+              <p class="eyebrow">Year To Date</p>
+              <p class="value">$221.8K</p>
+              <p class="note">Reserve yield starts at v3 launch: Mar 3, 2026</p>
+              <div class="bars">
+                <div class="bar-row">
+                  <span class="bar-label">Reserve</span>
+                  <span class="track"
+                    ><span class="fill reserve" style="width: 92%"></span
+                  ></span>
+                  <span class="bar-value">$216K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">Swap</span>
+                  <span class="track"
+                    ><span class="fill swap" style="width: 18%"></span
+                  ></span>
+                  <span class="bar-value">$4.6K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">CDP</span>
+                  <span class="track"
+                    ><span class="fill cdp" style="width: 5%"></span
+                  ></span>
+                  <span class="bar-value">$1.1K</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel period-card">
+              <p class="eyebrow">Last 30 Days</p>
+              <p class="value">$26.3K</p>
+              <p class="note">Rolling 30 daily buckets</p>
+              <div class="bars">
+                <div class="bar-row">
+                  <span class="bar-label">Reserve</span>
+                  <span class="track"
+                    ><span class="fill reserve" style="width: 86%"></span
+                  ></span>
+                  <span class="bar-value">$23.9K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">Swap</span>
+                  <span class="track"
+                    ><span class="fill swap" style="width: 12%"></span
+                  ></span>
+                  <span class="bar-value">$1.9K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">CDP</span>
+                  <span class="track"
+                    ><span class="fill cdp" style="width: 3%"></span
+                  ></span>
+                  <span class="bar-value">$0.5K</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel period-card">
+              <p class="eyebrow">Last 7 Days</p>
+              <p class="value">$6.4K</p>
+              <p class="note">Rolling 7 daily buckets</p>
+              <div class="bars">
+                <div class="bar-row">
+                  <span class="bar-label">Reserve</span>
+                  <span class="track"
+                    ><span class="fill reserve" style="width: 80%"></span
+                  ></span>
+                  <span class="bar-value">$5.5K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">Swap</span>
+                  <span class="track"
+                    ><span class="fill swap" style="width: 9%"></span
+                  ></span>
+                  <span class="bar-value">$0.5K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">CDP</span>
+                  <span class="track"
+                    ><span class="fill cdp" style="width: 6%"></span
+                  ></span>
+                  <span class="bar-value">$0.4K</span>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div class="forecast-grid" aria-label="Forecast revenue periods">
+            <article class="panel forecast-card">
+              <div>
+                <div class="forecast-head">
+                  <p class="eyebrow">7d Forecast</p>
+                  <button
+                    class="info"
+                    type="button"
+                    aria-label="7d forecast assumptions"
+                    title="Reserve yield uses current balances and blended APY. Swap fees use trailing daily activity scaled to 7 days. CDP borrowing uses current active debt and rates scaled to 7 days."
+                  >
+                    i
+                  </button>
+                </div>
+                <p class="value">$7.2K</p>
+                <p class="note">Next 7 days</p>
+              </div>
+              <div class="bars">
+                <div class="bar-row">
+                  <span class="bar-label">Reserve</span>
+                  <span class="track"
+                    ><span class="fill reserve" style="width: 78%"></span
+                  ></span>
+                  <span class="bar-value">$5.6K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">Fees</span>
+                  <span class="track"
+                    ><span class="fill forecast" style="width: 22%"></span
+                  ></span>
+                  <span class="bar-value">$1.6K</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel forecast-card">
+              <div>
+                <div class="forecast-head">
+                  <p class="eyebrow">Monthly Forecast</p>
+                  <button
+                    class="info"
+                    type="button"
+                    aria-label="Monthly forecast assumptions"
+                    title="Reserve yield uses current balances and blended APY. Swap fees use trailing 30 daily buckets. CDP borrowing uses current active debt and rates for the next 30 days."
+                  >
+                    i
+                  </button>
+                </div>
+                <p class="value">$31.1K</p>
+                <p class="note">Next 30 days</p>
+              </div>
+              <div class="bars">
+                <div class="bar-row">
+                  <span class="bar-label">Reserve</span>
+                  <span class="track"
+                    ><span class="fill reserve" style="width: 77%"></span
+                  ></span>
+                  <span class="bar-value">$24.1K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">Fees</span>
+                  <span class="track"
+                    ><span class="fill forecast" style="width: 23%"></span
+                  ></span>
+                  <span class="bar-value">$7.0K</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel forecast-card">
+              <div>
+                <div class="forecast-head">
+                  <p class="eyebrow">Annual Forecast</p>
+                  <button
+                    class="info"
+                    type="button"
+                    aria-label="Annual forecast assumptions"
+                    title="Reserve yield uses non-compounding balance x APY x days / 365. Swap fees use trailing 30d activity annualized until a better volume model is wired. CDP borrowing uses current active debt and rates, capped for shut-down markets."
+                  >
+                    i
+                  </button>
+                </div>
+                <p class="value">$377K</p>
+                <p class="note">Next 365 days</p>
+              </div>
+              <div class="bars">
+                <div class="bar-row">
+                  <span class="bar-label">Reserve</span>
+                  <span class="track"
+                    ><span class="fill reserve" style="width: 78%"></span
+                  ></span>
+                  <span class="bar-value">$293K</span>
+                </div>
+                <div class="bar-row">
+                  <span class="bar-label">Fees</span>
+                  <span class="track"
+                    ><span class="fill forecast" style="width: 22%"></span
+                  ></span>
+                  <span class="bar-value">$84K</span>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <div class="main-grid">
+            <section
+              class="panel chart-panel"
+              aria-label="Total revenue chart mockup"
+            >
+              <div class="panel-title">
+                <h2>Total Revenue</h2>
+                <div class="segment" aria-label="Mock chart range selector">
+                  <span>7D</span>
+                  <span>1M</span>
+                  <span>YTD</span>
+                  <span class="active">All</span>
+                </div>
+              </div>
+              <svg
+                class="chart"
+                viewBox="0 0 720 236"
+                role="img"
+                aria-label="Stacked revenue history with forecast extension"
+              >
+                <line x1="34" y1="202" x2="694" y2="202" stroke="#263241" />
+                <line x1="34" y1="148" x2="694" y2="148" stroke="#17202b" />
+                <line x1="34" y1="94" x2="694" y2="94" stroke="#17202b" />
+                <line x1="34" y1="40" x2="694" y2="40" stroke="#17202b" />
+                <path
+                  d="M38 198 C116 190 160 184 224 170 C302 153 386 138 450 112 C512 86 568 56 636 44"
+                  fill="none"
+                  stroke="#a78bfa"
+                  stroke-width="4"
+                />
+                <path
+                  d="M38 202 C132 199 210 196 292 190 C376 184 484 178 636 170"
+                  fill="none"
+                  stroke="#60a5fa"
+                  stroke-width="3"
+                />
+                <path
+                  d="M38 202 C136 201 250 199 332 194 C426 188 538 181 636 174"
+                  fill="none"
+                  stroke="#34d399"
+                  stroke-width="3"
+                />
+                <path
+                  d="M636 44 C660 38 676 30 694 22"
+                  fill="none"
+                  stroke="#f472b6"
+                  stroke-width="3"
+                  stroke-dasharray="8 7"
+                />
+                <rect x="636" y="22" width="1" height="180" fill="#334155" />
+                <text x="36" y="224" fill="#64748b" font-size="11">Mar 3</text>
+                <text x="220" y="224" fill="#64748b" font-size="11">Apr</text>
+                <text x="394" y="224" fill="#64748b" font-size="11">May</text>
+                <text x="566" y="224" fill="#64748b" font-size="11">Jun</text>
+                <text x="646" y="224" fill="#64748b" font-size="11">
+                  Forecast
+                </text>
+              </svg>
+              <div class="legend">
+                <span class="legend-item"
+                  ><span
+                    class="legend-line"
+                    style="background: var(--reserve)"
+                  ></span
+                  >Reserve yield</span
+                >
+                <span class="legend-item"
+                  ><span
+                    class="legend-line"
+                    style="background: var(--blue)"
+                  ></span
+                  >Swap fees</span
+                >
+                <span class="legend-item"
+                  ><span
+                    class="legend-line"
+                    style="background: var(--green)"
+                  ></span
+                  >CDP borrowing</span
+                >
+                <span class="legend-item"
+                  ><span
+                    class="legend-line"
+                    style="background: var(--pink)"
+                  ></span
+                  >Forecast</span
+                >
+              </div>
+            </section>
+
+            <aside class="panel table-panel" aria-label="Revenue stream cards">
+              <div class="panel-title">
+                <h3>Streams</h3>
+              </div>
+              <div class="stream-cards">
+                <article class="stream-card">
+                  <div class="stream-head">
+                    <span class="stream-name">Reserve Yield</span>
+                    <span class="stream-total">$440K</span>
+                  </div>
+                  <div class="mini">
+                    <span>$24.1K next 30d</span>
+                    <span>$9.17M earning yield</span>
+                  </div>
+                </article>
+                <article class="stream-card">
+                  <div class="stream-head">
+                    <span class="stream-name">Swap Fees</span>
+                    <span class="stream-total">$5.3K</span>
+                  </div>
+                  <div class="mini">
+                    <span>$540 last 7d</span>
+                    <span>$1.5K last 30d</span>
+                  </div>
+                </article>
+                <article class="stream-card">
+                  <div class="stream-head">
+                    <span class="stream-name">CDP Borrowing</span>
+                    <span class="stream-total">$1.2K</span>
+                  </div>
+                  <div class="mini">
+                    <span>$4.7K gross</span>
+                    <span>$3.5K SP share</span>
+                  </div>
+                </article>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="mockup" aria-label="Dense revenue matrix alternative">
+        <div class="mock-label">Dense matrix alternative</div>
+        <div class="matrix-grid">
+          <section class="panel matrix-panel">
+            <div class="panel-title">
+              <h2>Revenue Ledger</h2>
+              <div class="segment" aria-label="Mock basis selector">
+                <span class="active">Actual</span>
+                <span>Forecast</span>
+                <span>Sources</span>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table aria-label="Revenue ledger matrix">
+                <thead>
+                  <tr>
+                    <th>Stream</th>
+                    <th>All Time</th>
+                    <th>YTD</th>
+                    <th>Last 30D</th>
+                    <th>Last 7D</th>
+                    <th>Next 7D</th>
+                    <th>Next 30D</th>
+                    <th>Next 1Y</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Reserve Yield</td>
+                    <td>$440K</td>
+                    <td>$216K</td>
+                    <td>$23.9K</td>
+                    <td>$5.5K</td>
+                    <td>$5.6K</td>
+                    <td>$24.1K</td>
+                    <td>$293K</td>
+                  </tr>
+                  <tr>
+                    <td>Swap Fees</td>
+                    <td>$5.3K</td>
+                    <td>$4.6K</td>
+                    <td>$1.9K</td>
+                    <td>$0.5K</td>
+                    <td>$0.4K</td>
+                    <td>$1.7K</td>
+                    <td>$20K</td>
+                  </tr>
+                  <tr>
+                    <td>CDP Borrowing</td>
+                    <td>$1.2K</td>
+                    <td>$1.1K</td>
+                    <td>$0.5K</td>
+                    <td>$0.4K</td>
+                    <td>$1.2K</td>
+                    <td>$5.3K</td>
+                    <td>$64K</td>
+                  </tr>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td>Total Revenue</td>
+                    <td>$446.5K</td>
+                    <td>$221.8K</td>
+                    <td>$26.3K</td>
+                    <td>$6.4K</td>
+                    <td>$7.2K</td>
+                    <td>$31.1K</td>
+                    <td>$377K</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </section>
+
+          <div class="source-strip" aria-label="Source completeness">
+            <article class="source">
+              <strong>Actual basis</strong>
+              <span>Protocol revenue since v3 launch on Mar 3, 2026.</span>
+            </article>
+            <article class="source">
+              <strong>Reserve history</strong>
+              <span>Reserve yield history is clipped to v3 launch.</span>
+            </article>
+            <article class="source">
+              <strong>Forecast basis</strong>
+              <span
+                >Current balances, rates, debt, and trailing fee activity.</span
+              >
+            </article>
+            <article class="source">
+              <strong>Cutoffs</strong>
+              <span
+                >UTC daily buckets; Last 30D means rolling 30 daily
+                buckets.</span
+              >
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
