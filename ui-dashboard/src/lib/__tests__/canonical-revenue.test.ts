@@ -218,6 +218,7 @@ describe("buildCanonicalRevenue", () => {
       reserveDailySnapshots: [
         reserveSnapshot(ts("2026-06-10"), 100, 100),
         reserveSnapshot(ts("2026-06-11"), 0, 50),
+        reserveSnapshot(ts("2026-06-12"), 0, 50),
       ],
       nowSeconds: NOW_SECONDS,
     });
@@ -227,6 +228,54 @@ describe("buildCanonicalRevenue", () => {
     );
     expect(compressionDay?.reserveYieldUsd).toBe(-50);
     expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(50);
+  });
+
+  it("marks reserve actuals unavailable when current reserve yield fails before snapshots exist", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [feeSnapshot(ts("2026-06-12"), 12)],
+        }),
+      ],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: null,
+      reserveDailySnapshots: [],
+      reserveYieldFailed: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.availableTotalUsd).toBe(12);
+    expect(result.partialReasons).toContain(
+      "Reserve earned-yield actuals unavailable: current reserve yield failed to load before any snapshots were indexed.",
+    );
+  });
+
+  it("marks reserve history stale instead of zero-filling after the latest snapshot", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-10"), 45)],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.availableTotalUsd).toBe(45);
+    expect(
+      result.dailySeries.find((point) => point.timestamp === ts("2026-06-10"))
+        ?.reserveYieldUsd,
+    ).toBe(45);
+    expect(
+      result.dailySeries.find((point) => point.timestamp === ts("2026-06-11"))
+        ?.reserveYieldUsd,
+    ).toBeNull();
+    expect(result.partialReasons).toContain(
+      "Reserve earned-yield history is stale; latest snapshot is Jun 10, 2026.",
+    );
   });
 
   it("builds reserve, swap, and CDP forecasts from their separate assumptions", () => {

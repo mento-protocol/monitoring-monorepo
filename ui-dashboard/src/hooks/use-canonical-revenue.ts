@@ -22,6 +22,7 @@ export type UseCanonicalRevenueArgs = {
   reserveHistoryUnavailable: boolean;
   reserveHistoryFailed: boolean;
   reserveHistoryTruncated: boolean;
+  reserveYieldFailed: boolean;
   swapFeesFailed: boolean;
   swapFeesApproximate: boolean;
   cdpDailySeriesFailed: boolean;
@@ -40,6 +41,7 @@ export function useCanonicalRevenue(
     reserveHistoryUnavailable,
     reserveHistoryFailed,
     reserveHistoryTruncated,
+    reserveYieldFailed,
     swapFeesFailed,
     swapFeesApproximate,
     cdpDailySeriesFailed,
@@ -57,6 +59,7 @@ export function useCanonicalRevenue(
         reserveHistoryUnavailable,
         reserveHistoryFailed,
         reserveHistoryTruncated,
+        reserveYieldFailed,
         swapFeesFailed,
         swapFeesApproximate,
         cdpDailySeriesFailed,
@@ -71,6 +74,7 @@ export function useCanonicalRevenue(
       reserveHistoryUnavailable,
       reserveHistoryFailed,
       reserveHistoryTruncated,
+      reserveYieldFailed,
       swapFeesFailed,
       swapFeesApproximate,
       cdpDailySeriesFailed,

@@ -34,7 +34,12 @@ export type SusdsYieldDailySnapshotRow = {
 
 type ActualRevenueValue = number | null;
 
-type ActualRevenueAvailability = Record<"reserve" | "swap" | "cdp", boolean>;
+type ActualRevenueAvailability = {
+  reserve: boolean;
+  reserveStaleAfter: number | null;
+  swap: boolean;
+  cdp: boolean;
+};
 
 export type CanonicalRevenueDailyPoint = {
   timestamp: number;
@@ -105,6 +110,7 @@ export type BuildCanonicalRevenueArgs = {
   reserveHistoryUnavailable?: boolean;
   reserveHistoryFailed?: boolean;
   reserveHistoryTruncated?: boolean;
+  reserveYieldFailed?: boolean;
   swapFeesFailed?: boolean;
   swapFeesApproximate?: boolean;
   cdpDailySeriesFailed?: boolean;
@@ -239,9 +245,13 @@ function buildDailySeries(
     timestamp += SECONDS_PER_DAY
   ) {
     const bucket = buckets.get(timestamp) ?? emptyRevenueBucket();
-    const reserveYieldUsd = actualAvailability.reserve
-      ? bucket.reserveYieldUsd
-      : null;
+    const reserveStale =
+      actualAvailability.reserveStaleAfter !== null &&
+      timestamp > actualAvailability.reserveStaleAfter;
+    const reserveYieldUsd =
+      actualAvailability.reserve && !reserveStale
+        ? bucket.reserveYieldUsd
+        : null;
     const swapFeesUsd = actualAvailability.swap ? bucket.swapFeesUsd : null;
     const cdpBorrowingUsd = actualAvailability.cdp
       ? bucket.cdpBorrowingUsd
@@ -647,6 +657,31 @@ function hasSusdsReserveYieldSignal(
   );
 }
 
+function latestReserveSnapshotBucket(
+  reserveDailySnapshots: ReadonlyArray<SusdsYieldDailySnapshotRow>,
+): number | null {
+  let latest: number | null = null;
+  for (const row of reserveDailySnapshots) {
+    const timestamp = Number(row.timestamp);
+    if (!Number.isFinite(timestamp)) continue;
+    const bucket = dayBucket(timestamp);
+    if (latest === null || bucket > latest) latest = bucket;
+  }
+  return latest;
+}
+
+function reserveStaleAfterBucket(
+  args: BuildCanonicalRevenueArgs,
+): number | null {
+  if (args.reserveHistoryFailed || args.reserveHistoryUnavailable) return null;
+  const latestBucket = latestReserveSnapshotBucket(args.reserveDailySnapshots);
+  if (latestBucket === null) return null;
+  return latestBucket <
+    currentDayBucket(args.nowSeconds ?? Math.floor(Date.now() / 1000))
+    ? latestBucket
+    : null;
+}
+
 function buildActualAvailability(
   args: BuildCanonicalRevenueArgs,
 ): ActualRevenueAvailability {
@@ -654,9 +689,11 @@ function buildActualAvailability(
     args.reserveHistoryFailed === true ||
     args.reserveHistoryUnavailable === true ||
     (args.reserveDailySnapshots.length === 0 &&
-      hasSusdsReserveYieldSignal(args.reserveYield));
+      (args.reserveYieldFailed === true ||
+        hasSusdsReserveYieldSignal(args.reserveYield)));
   return {
     reserve: !reserveHistoryUnavailable,
+    reserveStaleAfter: reserveStaleAfterBucket(args),
     swap: args.swapFeesFailed !== true,
     cdp: args.cdpDailySeriesFailed !== true,
   };
@@ -679,10 +716,24 @@ function buildPartialReasons(args: BuildCanonicalRevenueArgs): string[] {
   } else if (args.reserveHistoryUnavailable) {
     reasons.push("Reserve earned-yield history is not indexed yet.");
   } else if (
+    args.reserveYieldFailed &&
+    args.reserveDailySnapshots.length === 0
+  ) {
+    reasons.push(
+      "Reserve earned-yield actuals unavailable: current reserve yield failed to load before any snapshots were indexed.",
+    );
+  } else if (
     args.reserveDailySnapshots.length === 0 &&
     hasSusdsReserveYieldSignal(args.reserveYield)
   ) {
     reasons.push("Reserve earned-yield history has no sUSDS snapshots yet.");
+  } else {
+    const staleAfter = reserveStaleAfterBucket(args);
+    if (staleAfter !== null) {
+      reasons.push(
+        `Reserve earned-yield history is stale; latest snapshot is ${isoDate(staleAfter)}.`,
+      );
+    }
   }
   if (args.reserveHistoryTruncated) {
     reasons.push("Reserve earned-yield history exceeded the pagination cap.");
@@ -813,6 +864,7 @@ export function buildCanonicalRevenue({
   reserveHistoryUnavailable = false,
   reserveHistoryFailed = false,
   reserveHistoryTruncated = false,
+  reserveYieldFailed = false,
   swapFeesFailed = false,
   swapFeesApproximate = false,
   cdpDailySeriesFailed = false,
@@ -838,6 +890,7 @@ export function buildCanonicalRevenue({
     reserveHistoryUnavailable,
     reserveHistoryFailed,
     reserveHistoryTruncated,
+    reserveYieldFailed,
     swapFeesFailed,
     swapFeesApproximate,
     cdpDailySeriesFailed,
@@ -854,6 +907,7 @@ export function buildCanonicalRevenue({
     reserveHistoryUnavailable,
     reserveHistoryFailed,
     reserveHistoryTruncated,
+    reserveYieldFailed,
     swapFeesFailed,
     swapFeesApproximate,
     cdpDailySeriesFailed,

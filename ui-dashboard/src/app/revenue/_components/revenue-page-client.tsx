@@ -155,6 +155,7 @@ function useRevenuePageState() {
     reserveHistoryUnavailable: reserveYieldHistory.unavailable,
     reserveHistoryFailed: reserveYieldHistory.hasError,
     reserveHistoryTruncated: reserveYieldHistory.truncated,
+    reserveYieldFailed: reserveYieldState.hasError,
     swapFeesFailed: hasSwapFeesError,
     swapFeesApproximate: feesApprox && !hasSwapFeesError,
     cdpDailySeriesFailed:

@@ -242,6 +242,7 @@ function renderRevenue({
   reserveHistoryUnavailable = false,
   protocolFeesLoading = false,
   reserveYieldLoading = false,
+  reserveYieldError = false,
   reserveHistoryLoading = false,
 }: {
   networkData?: NetworkData[];
@@ -260,6 +261,7 @@ function renderRevenue({
   reserveHistoryUnavailable?: boolean;
   protocolFeesLoading?: boolean;
   reserveYieldLoading?: boolean;
+  reserveYieldError?: boolean;
   reserveHistoryLoading?: boolean;
 } = {}) {
   mockUseProtocolFees.mockReturnValue({
@@ -280,7 +282,7 @@ function renderRevenue({
   mockUseReserveYield.mockReturnValue({
     data: reserveYield,
     isLoading: reserveYieldLoading,
-    hasError: false,
+    hasError: reserveYieldError,
   });
   mockUseReserveYieldHistory.mockReturnValue({
     rows: reserveRows,
@@ -347,7 +349,7 @@ describe("RevenuePageClient canonical revenue layout", () => {
         markets: [cdpMarket("GBPm")],
         dailySeries: completedDays.map((timestamp) => cdpPoint(timestamp, 3)),
       },
-      reserveRows: [reserveSnapshot(ts("2026-06-10"), 45)],
+      reserveRows: [reserveSnapshot(ts("2026-06-12"), 45)],
     });
 
     expect(html).toContain("Canonical revenue actuals since Mar 3, 2026");
@@ -425,7 +427,7 @@ describe("RevenuePageClient canonical revenue layout", () => {
         ...RESERVE_YIELD,
         forecastUnavailableSymbols: ["AUSD"],
       },
-      reserveRows: [reserveSnapshot(ts("2026-06-10"), 45)],
+      reserveRows: [reserveSnapshot(ts("2026-06-12"), 45)],
     });
 
     expect(html).toContain("About Reserve Yield partial data");
@@ -460,6 +462,27 @@ describe("RevenuePageClient canonical revenue layout", () => {
       0,
     );
     expect(reserveActual).toBe(0);
+  });
+
+  it("renders reserve actuals as N/A when reserve yield fails before snapshots exist", () => {
+    const html = renderRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [feeSnapshot(ts("2026-06-12"), 12)],
+        }),
+      ],
+      reserveYield: null,
+      reserveRows: [],
+      reserveYieldError: true,
+    });
+
+    expect(html).toContain(
+      "Reserve earned-yield actuals unavailable: current reserve yield failed to load before any snapshots were indexed.",
+    );
+    expect(streamCardHtml(html, "Reserve Yield")).toContain("N/A");
+    expect(
+      capturedProps.chart?.series.some((p) => p.reserveYieldUsd === null),
+    ).toBe(true);
   });
 
   it("renders unavailable CDP actuals as N/A when daily history fails", () => {
