@@ -387,6 +387,7 @@ function buildForecastSource(args: {
   swapSeries: ReadonlyArray<ReturnType<typeof buildDailyFeeSeries>[number]>;
   cdpDailySeries: ReadonlyArray<CdpBorrowingFeeSeriesPoint>;
   cdpMarkets: ReadonlyArray<CdpBorrowingRevenueMarket>;
+  cdpDailySeriesFailed: boolean;
   nowSeconds: number;
 }): ForecastSource {
   const partialReasons: string[] = [];
@@ -413,23 +414,30 @@ function buildForecastSource(args: {
     );
   }
 
-  const cdpInterest = computeCdpInterestDailyRunRate(args.cdpMarkets);
-  if (cdpInterest.partialReason !== null) {
-    partialReasons.push(cdpInterest.partialReason);
+  let cdpDailyUsd: number | null = null;
+  if (args.cdpDailySeriesFailed) {
+    partialReasons.push(
+      "CDP forecast unavailable: borrowing revenue inputs failed to load.",
+    );
+  } else {
+    const cdpInterest = computeCdpInterestDailyRunRate(args.cdpMarkets);
+    if (cdpInterest.partialReason !== null) {
+      partialReasons.push(cdpInterest.partialReason);
+    }
+    const cdpUpfrontAverage = completedWindowAverage({
+      points: args.cdpDailySeries,
+      value: (point) => point.upfrontFeesUSD,
+      timestamp: (point) => point.timestamp,
+      nowSeconds: args.nowSeconds,
+      trailingDays: 30,
+      minimumBuckets: 1,
+    });
+    const cdpUpfrontDailyUsd = cdpUpfrontAverage.dailyAverageUsd ?? 0;
+    cdpDailyUsd =
+      cdpInterest.dailyUsd === null
+        ? null
+        : cdpInterest.dailyUsd + cdpUpfrontDailyUsd;
   }
-  const cdpUpfrontAverage = completedWindowAverage({
-    points: args.cdpDailySeries,
-    value: (point) => point.upfrontFeesUSD,
-    timestamp: (point) => point.timestamp,
-    nowSeconds: args.nowSeconds,
-    trailingDays: 30,
-    minimumBuckets: 1,
-  });
-  const cdpUpfrontDailyUsd = cdpUpfrontAverage.dailyAverageUsd ?? 0;
-  const cdpDailyUsd =
-    cdpInterest.dailyUsd === null
-      ? null
-      : cdpInterest.dailyUsd + cdpUpfrontDailyUsd;
 
   return {
     reserveDailyUsd,
@@ -620,6 +628,7 @@ export function buildCanonicalRevenue({
       swapSeries,
       cdpDailySeries,
       cdpMarkets,
+      cdpDailySeriesFailed,
       nowSeconds,
     }),
   );

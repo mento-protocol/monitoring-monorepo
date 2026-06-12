@@ -373,6 +373,33 @@ describe("RevenuePageClient canonical revenue layout", () => {
     expect(cardSections).not.toContain("$0.00");
   });
 
+  it("propagates approximate actual reasons to period and stream cards", () => {
+    const html = renderRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [feeSnapshot(ts("2026-06-12"), 12)],
+          fees: {
+            totalFeesUSD: 12,
+            fees24hUSD: 12,
+            fees7dUSD: 12,
+            fees30dUSD: 12,
+            unpricedSymbols: ["UNKNOWN"],
+            unpricedSymbols24h: ["UNKNOWN"],
+            unresolvedCount: 0,
+            unresolvedCount24h: 0,
+          },
+        }),
+      ],
+    });
+
+    expect(html).toContain("About Total Revenue partial data");
+    expect(html).toContain("About Swap Fees partial data");
+    expect(html).toContain("Swap fee history is approximate.");
+    expect(capturedProps.chart?.partialReasons).toContain(
+      "Swap fee history is approximate.",
+    );
+  });
+
   it("flags reserve history missing as partial and does not inject current earned-yield API totals into chart actuals", () => {
     const html = renderRevenue({
       networkData: [

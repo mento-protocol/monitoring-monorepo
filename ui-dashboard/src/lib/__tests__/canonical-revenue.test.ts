@@ -268,4 +268,32 @@ describe("buildCanonicalRevenue", () => {
     expect(result.forecasts.next30d.swapFeesUsd).toBe(300);
     expect(result.forecasts.next365d.swapFeesUsd).toBe(3650);
   });
+
+  it("marks CDP forecasts unavailable when borrowing revenue inputs fail", () => {
+    const completedDays = Array.from(
+      { length: 30 },
+      (_, index) => ts("2026-05-13") + index * DAY,
+    );
+    const result = buildCanonicalRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: completedDays.map((timestamp) =>
+            feeSnapshot(timestamp, 10),
+          ),
+        }),
+      ],
+      cdpDailySeries: completedDays.map((timestamp) => cdpPoint(timestamp, 3)),
+      cdpMarkets: [cdpMarket()],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [],
+      cdpDailySeriesFailed: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.forecasts.next7d.cdpBorrowingUsd).toBeNull();
+    expect(result.forecasts.next7d.totalUsd).toBe(84);
+    expect(result.forecasts.next7d.partialReasons).toContain(
+      "CDP forecast unavailable: borrowing revenue inputs failed to load.",
+    );
+  });
 });

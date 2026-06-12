@@ -4,7 +4,12 @@ import dynamic from "next/dynamic";
 import { useMemo, useState, type ReactNode } from "react";
 import { formatUSD } from "@/lib/format";
 import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
-import { RANGES, SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
+import {
+  RANGES,
+  SECONDS_PER_DAY,
+  dailyBucket as dayBucket,
+  type RangeKey,
+} from "@/lib/time-series";
 import { weekOverWeekChangePct } from "@/components/volume-over-time-chart";
 import type { CanonicalRevenueDailyPoint } from "@/lib/canonical-revenue";
 
@@ -44,10 +49,6 @@ type RevenueTrace = {
   stackgroup: string;
   hovertemplate: string;
 };
-
-function dayBucket(timestampSeconds: number): number {
-  return Math.floor(timestampSeconds / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-}
 
 function currentDayBucket(): number {
   return dayBucket(Math.floor(Date.now() / 1000));

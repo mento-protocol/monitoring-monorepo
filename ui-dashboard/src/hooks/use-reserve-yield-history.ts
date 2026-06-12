@@ -54,7 +54,11 @@ async function requestWithTimeout<T>(
 
 function isMissingSusdsYieldDailySnapshotEntity(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return message.includes("SusdsYieldDailySnapshot");
+  return (
+    message.includes("SusdsYieldDailySnapshot") &&
+    (message.includes("not found in type") ||
+      message.includes("Cannot query field"))
+  );
 }
 
 async function fetchReserveYieldHistory(): Promise<SnapshotPageResult> {

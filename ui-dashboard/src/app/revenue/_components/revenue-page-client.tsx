@@ -219,6 +219,7 @@ function RevenueContent() {
           canonicalRevenue.periods.last7d,
         ]}
         isLoading={isRevenueLoading}
+        partialReasons={actualPartialReasons}
       />
 
       <ForecastCards
@@ -237,6 +238,7 @@ function RevenueContent() {
           canonicalRevenue.streams.cdp,
         ]}
         isLoading={isRevenueLoading}
+        partialReasons={actualPartialReasons}
       />
 
       <TotalRevenueChart
@@ -301,11 +303,13 @@ function mutedUnavailable(value: number | null): string {
 function PeriodCard({
   period,
   isLoading,
+  partialReasons,
 }: {
   period: CanonicalRevenuePeriod;
   isLoading: boolean;
+  partialReasons: string[];
 }) {
-  const isPartial = period.partialReasons.length > 0;
+  const isPartial = partialReasons.length > 0;
   return (
     <article className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
       <div className="flex items-start justify-between gap-2">
@@ -316,7 +320,7 @@ function PeriodCard({
         {isPartial ? (
           <Tooltip
             label={`About ${period.title} partial data`}
-            content={period.partialReasons.join("\n")}
+            content={partialReasons.join("\n")}
             align="right"
           />
         ) : null}
@@ -352,9 +356,11 @@ function PeriodCard({
 function RevenuePeriodCards({
   periods,
   isLoading,
+  partialReasons,
 }: {
   periods: CanonicalRevenuePeriod[];
   isLoading: boolean;
+  partialReasons: string[];
 }) {
   const orderedPeriods: CanonicalRevenuePeriod[] = [];
   const periodByKey = new Map(periods.map((period) => [period.key, period]));
@@ -369,7 +375,12 @@ function RevenuePeriodCards({
       className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
     >
       {orderedPeriods.map((period) => (
-        <PeriodCard key={period.key} period={period} isLoading={isLoading} />
+        <PeriodCard
+          key={period.key}
+          period={period}
+          isLoading={isLoading}
+          partialReasons={partialReasons}
+        />
       ))}
     </section>
   );
@@ -511,9 +522,11 @@ function ForecastMetricPill({
 function RevenueStreamCards({
   streams,
   isLoading,
+  partialReasons,
 }: {
   streams: CanonicalRevenueStream[];
   isLoading: boolean;
+  partialReasons: string[];
 }) {
   return (
     <section
@@ -521,19 +534,38 @@ function RevenueStreamCards({
       className="grid grid-cols-1 gap-4 md:grid-cols-3"
     >
       {streams.map((stream) => (
-        <StreamCard key={stream.key} stream={stream} isLoading={isLoading} />
+        <StreamCard
+          key={stream.key}
+          stream={stream}
+          isLoading={isLoading}
+          partialReasons={partialReasonsForStream(stream.key, partialReasons)}
+        />
       ))}
     </section>
+  );
+}
+
+function partialReasonsForStream(
+  streamKey: CanonicalRevenueStream["key"],
+  partialReasons: string[],
+): string[] {
+  const needle =
+    streamKey === "cdp" ? "cdp" : streamKey === "swap" ? "swap" : "reserve";
+  return partialReasons.filter((reason) =>
+    reason.toLowerCase().includes(needle),
   );
 }
 
 function StreamCard({
   stream,
   isLoading,
+  partialReasons,
 }: {
   stream: CanonicalRevenueStream;
   isLoading: boolean;
+  partialReasons: string[];
 }) {
+  const isPartial = partialReasons.length > 0;
   return (
     <article className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
       <div className="flex items-start justify-between gap-2">
@@ -541,16 +573,20 @@ function StreamCard({
           <h2 className="text-sm font-medium text-slate-300">{stream.title}</h2>
           <p className="mt-0.5 text-xs text-slate-500">{stream.subtitle}</p>
         </div>
-        {stream.partialReasons.length > 0 ? (
+        {isPartial ? (
           <Tooltip
             label={`About ${stream.title} partial data`}
-            content={stream.partialReasons.join("\n")}
+            content={partialReasons.join("\n")}
             align="right"
           />
         ) : null}
       </div>
       <p className="mt-3 font-mono text-xl font-semibold text-white">
-        {isLoading ? <LoadingValue /> : formatUSD(stream.actualUsd)}
+        {isLoading ? (
+          <LoadingValue />
+        ) : (
+          `${isPartial ? "≈ " : ""}${formatUSD(stream.actualUsd)}`
+        )}
       </p>
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
         <span>30d {mutedUnavailable(stream.forecast30dUsd)}</span>

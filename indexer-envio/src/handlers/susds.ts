@@ -308,6 +308,11 @@ function baselineFromSameDaySnapshot(
   };
 }
 
+function nonNegativeDelta(current: bigint, baseline: bigint): bigint {
+  const delta = current - baseline;
+  return delta < ZERO ? ZERO : delta;
+}
+
 function buildSusdsYieldDailySnapshot({
   chainId,
   bucket,
@@ -331,8 +336,10 @@ function buildSusdsYieldDailySnapshot({
     token: SUSDS_ADDRESS,
     timestamp: bucket,
     ...totals,
-    dailyEarnedYieldUsdWei:
-      totals.totalEarnedYieldUsdWei - deltaBaseline.totalEarnedYieldUsdWei,
+    dailyEarnedYieldUsdWei: nonNegativeDelta(
+      totals.totalEarnedYieldUsdWei,
+      deltaBaseline.totalEarnedYieldUsdWei,
+    ),
     dailyRealizedYieldUsdWei:
       totals.realizedYieldUsdWei - deltaBaseline.realizedYieldUsdWei,
     dailyUnrealizedYieldUsdWei:
