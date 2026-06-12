@@ -417,6 +417,12 @@ describe("RevenuePageClient degraded fee states", () => {
     expect(html).toContain("wallet / ops");
     expect(html).toContain("FPMM AUSD / USDm");
     expect(html).toContain('aria-label="Reserve yield components"');
+    expect(html.indexOf('aria-label="Reserve yield components"')).toBeLessThan(
+      html.indexOf("data-table-error"),
+    );
+    expect(html.indexOf('aria-label="Reserve yield components"')).toBeLessThan(
+      html.indexOf("Borrowing Fees by CDP"),
+    );
   });
 
   it("labels the sUSDS APY fallback source when Block Analitica supplies the rate", () => {

@@ -234,6 +234,14 @@ function RevenueContent() {
         isBorrowingFeesApproximate={borrowingFeesChartApprox}
       />
 
+      <div className="grid grid-cols-1 gap-6">
+        <ReserveYieldByHoldingTable
+          data={reserveYieldState.data}
+          isLoading={reserveYieldState.isLoading}
+          hasError={reserveYieldState.hasError}
+        />
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
         <RevenueByPoolTable
           networkData={networkData}
@@ -244,14 +252,6 @@ function RevenueContent() {
           markets={cdpBorrowingMarkets}
           isLoading={isCdpBorrowingRevenueLoading}
           hasError={hasCdpBorrowingRevenueError}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-6">
-        <ReserveYieldByHoldingTable
-          data={reserveYieldState.data}
-          isLoading={reserveYieldState.isLoading}
-          hasError={reserveYieldState.hasError}
         />
       </div>
     </div>
