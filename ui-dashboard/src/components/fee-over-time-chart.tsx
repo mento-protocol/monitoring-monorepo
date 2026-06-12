@@ -79,6 +79,14 @@ export function revenueWeekOverWeekChangePct(
   );
 }
 
+export function revenueChartEmptyMessage(
+  partialReasons: readonly string[],
+): string {
+  return partialReasons.length > 0
+    ? "Revenue history is partial because some inputs failed to load"
+    : "No revenue history indexed yet";
+}
+
 function buildTrace(args: {
   xs: string[];
   y: number[];
@@ -348,7 +356,7 @@ export function TotalRevenueChart({
       <RevenueChartBody
         isLoading={isLoading}
         showEmptyState={showEmptyState}
-        emptyMessage="No revenue history indexed yet"
+        emptyMessage={revenueChartEmptyMessage(partialReasons)}
         figure={figure}
       />
     </section>

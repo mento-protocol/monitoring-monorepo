@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { revenueWeekOverWeekChangePct } from "@/components/fee-over-time-chart";
+import {
+  revenueChartEmptyMessage,
+  revenueWeekOverWeekChangePct,
+} from "@/components/fee-over-time-chart";
 import type { CanonicalRevenueDailyPoint } from "@/lib/canonical-revenue";
 
 const DAY = 86_400;
@@ -39,5 +42,17 @@ describe("revenueWeekOverWeekChangePct", () => {
         "Swap fee history failed to load.",
       ]),
     ).toBeNull();
+  });
+});
+
+describe("revenueChartEmptyMessage", () => {
+  it("uses indexing copy only when revenue inputs are complete", () => {
+    expect(revenueChartEmptyMessage([])).toBe("No revenue history indexed yet");
+  });
+
+  it("uses partial-data copy when input failures explain the empty chart", () => {
+    expect(revenueChartEmptyMessage(["Swap fee history failed to load."])).toBe(
+      "Revenue history is partial because some inputs failed to load",
+    );
   });
 });
