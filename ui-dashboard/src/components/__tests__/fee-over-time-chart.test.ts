@@ -19,6 +19,7 @@ function revenuePoint(
     swapFeesUsd: totalRevenueUsd,
     cdpBorrowingUsd: 0,
     totalRevenueUsd,
+    availableRevenueUsd: totalRevenueUsd,
   };
 }
 
@@ -67,6 +68,7 @@ describe("revenueChartYAxisRange", () => {
         swapFeesUsd: 0,
         cdpBorrowingUsd: 0,
         totalRevenueUsd: -50,
+        availableRevenueUsd: -50,
       },
     ]);
 

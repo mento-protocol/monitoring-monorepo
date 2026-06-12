@@ -318,6 +318,11 @@ function mutedUnavailable(value: number | null): string {
   return value === null ? "N/A" : `≈ ${formatUSD(value)}`;
 }
 
+function formatActualValue(value: number | null, isPartial: boolean): string {
+  if (value === null) return "N/A";
+  return `${isPartial ? "≈ " : ""}${formatUSD(value)}`;
+}
+
 function PeriodCard({
   period,
   isLoading,
@@ -347,7 +352,7 @@ function PeriodCard({
         {isLoading ? (
           <LoadingValue />
         ) : (
-          `${isPartial ? "≈ " : ""}${formatUSD(period.totalUsd)}`
+          formatActualValue(period.totalUsd, isPartial)
         )}
       </p>
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
@@ -410,7 +415,7 @@ function MetricPill({
   isLoading,
 }: {
   label: string;
-  value: number;
+  value: number | null;
   isLoading: boolean;
 }) {
   return (
@@ -419,7 +424,13 @@ function MetricPill({
         {label}
       </p>
       <p className="mt-0.5 truncate font-mono text-slate-200">
-        {isLoading ? <LoadingPillValue /> : formatUSD(value)}
+        {isLoading ? (
+          <LoadingPillValue />
+        ) : value === null ? (
+          "N/A"
+        ) : (
+          formatUSD(value)
+        )}
       </p>
     </div>
   );
@@ -456,17 +467,17 @@ function ForecastCard({
         {isLoading ? <LoadingValue /> : mutedUnavailable(forecast.totalUsd)}
       </p>
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-        <ForecastMetricPill
+        <MetricPill
           label="Reserve"
           value={forecast.reserveYieldUsd}
           isLoading={isLoading}
         />
-        <ForecastMetricPill
+        <MetricPill
           label="Swap"
           value={forecast.swapFeesUsd}
           isLoading={isLoading}
         />
-        <ForecastMetricPill
+        <MetricPill
           label="CDP"
           value={forecast.cdpBorrowingUsd}
           isLoading={isLoading}
@@ -507,33 +518,6 @@ function ForecastCards({
         />
       ))}
     </section>
-  );
-}
-
-function ForecastMetricPill({
-  label,
-  value,
-  isLoading,
-}: {
-  label: string;
-  value: number | null;
-  isLoading: boolean;
-}) {
-  return (
-    <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/40 px-2 py-1.5">
-      <p className="truncate text-[10px] uppercase tracking-wide text-slate-500">
-        {label}
-      </p>
-      <p className="mt-0.5 truncate font-mono text-slate-200">
-        {isLoading ? (
-          <LoadingPillValue />
-        ) : value === null ? (
-          "N/A"
-        ) : (
-          formatUSD(value)
-        )}
-      </p>
-    </div>
   );
 }
 
@@ -623,7 +607,7 @@ function StreamCard({
         {isLoading ? (
           <LoadingValue />
         ) : (
-          `${actualIsPartial ? "≈ " : ""}${formatUSD(stream.actualUsd)}`
+          formatActualValue(stream.actualUsd, actualIsPartial)
         )}
       </p>
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">

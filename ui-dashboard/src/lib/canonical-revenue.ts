@@ -32,12 +32,17 @@ export type SusdsYieldDailySnapshotRow = {
   sampledAtTimestamp: string;
 };
 
+type ActualRevenueValue = number | null;
+
+type ActualRevenueAvailability = Record<"reserve" | "swap" | "cdp", boolean>;
+
 export type CanonicalRevenueDailyPoint = {
   timestamp: number;
-  reserveYieldUsd: number;
-  swapFeesUsd: number;
-  cdpBorrowingUsd: number;
-  totalRevenueUsd: number;
+  reserveYieldUsd: ActualRevenueValue;
+  swapFeesUsd: ActualRevenueValue;
+  cdpBorrowingUsd: ActualRevenueValue;
+  totalRevenueUsd: ActualRevenueValue;
+  availableRevenueUsd: number;
 };
 
 export type RevenuePeriodKey = "allTimeSinceV3" | "ytd" | "last30d" | "last7d";
@@ -50,10 +55,11 @@ export type CanonicalRevenuePeriod = {
   subtitle: string;
   from: number;
   to: number;
-  totalUsd: number;
-  reserveYieldUsd: number;
-  swapFeesUsd: number;
-  cdpBorrowingUsd: number;
+  totalUsd: ActualRevenueValue;
+  availableTotalUsd: number;
+  reserveYieldUsd: ActualRevenueValue;
+  swapFeesUsd: ActualRevenueValue;
+  cdpBorrowingUsd: ActualRevenueValue;
   partialReasons: string[];
 };
 
@@ -73,7 +79,7 @@ export type CanonicalRevenueForecast = {
 export type CanonicalRevenueStream = {
   key: "reserve" | "swap" | "cdp";
   title: string;
-  actualUsd: number;
+  actualUsd: ActualRevenueValue;
   forecast30dUsd: number | null;
   forecast365dUsd: number | null;
   subtitle: string;
@@ -222,6 +228,7 @@ function reserveSnapshotBaselineUsd(
 function buildDailySeries(
   buckets: ReadonlyMap<number, RevenueBucket>,
   nowSeconds: number,
+  actualAvailability: ActualRevenueAvailability,
 ): CanonicalRevenueDailyPoint[] {
   const today = currentDayBucket(nowSeconds);
   const endBucket = today;
@@ -232,13 +239,31 @@ function buildDailySeries(
     timestamp += SECONDS_PER_DAY
   ) {
     const bucket = buckets.get(timestamp) ?? emptyRevenueBucket();
+    const reserveYieldUsd = actualAvailability.reserve
+      ? bucket.reserveYieldUsd
+      : null;
+    const swapFeesUsd = actualAvailability.swap ? bucket.swapFeesUsd : null;
+    const cdpBorrowingUsd = actualAvailability.cdp
+      ? bucket.cdpBorrowingUsd
+      : null;
+    const values = [reserveYieldUsd, swapFeesUsd, cdpBorrowingUsd];
+    const availableRevenueUsd = values.reduce<number>(
+      (sum, value) => sum + (value ?? 0),
+      0,
+    );
+    const totalRevenueUsd =
+      reserveYieldUsd === null ||
+      swapFeesUsd === null ||
+      cdpBorrowingUsd === null
+        ? null
+        : availableRevenueUsd;
     series.push({
       timestamp,
-      reserveYieldUsd: bucket.reserveYieldUsd,
-      swapFeesUsd: bucket.swapFeesUsd,
-      cdpBorrowingUsd: bucket.cdpBorrowingUsd,
-      totalRevenueUsd:
-        bucket.reserveYieldUsd + bucket.swapFeesUsd + bucket.cdpBorrowingUsd,
+      reserveYieldUsd,
+      swapFeesUsd,
+      cdpBorrowingUsd,
+      totalRevenueUsd,
+      availableRevenueUsd,
     });
   }
   return series;
@@ -300,21 +325,40 @@ function sumDailySeriesWindow(
 ): Pick<
   CanonicalRevenuePeriod,
   "totalUsd" | "reserveYieldUsd" | "swapFeesUsd" | "cdpBorrowingUsd"
-> {
+> & { availableTotalUsd: number } {
   let reserveYieldUsd = 0;
   let swapFeesUsd = 0;
   let cdpBorrowingUsd = 0;
+  let reserveYieldUnavailable = false;
+  let swapFeesUnavailable = false;
+  let cdpBorrowingUnavailable = false;
   for (const point of series) {
     if (point.timestamp < from || point.timestamp >= to) continue;
-    reserveYieldUsd += point.reserveYieldUsd;
-    swapFeesUsd += point.swapFeesUsd;
-    cdpBorrowingUsd += point.cdpBorrowingUsd;
+    if (point.reserveYieldUsd === null) {
+      reserveYieldUnavailable = true;
+    } else {
+      reserveYieldUsd += point.reserveYieldUsd;
+    }
+    if (point.swapFeesUsd === null) {
+      swapFeesUnavailable = true;
+    } else {
+      swapFeesUsd += point.swapFeesUsd;
+    }
+    if (point.cdpBorrowingUsd === null) {
+      cdpBorrowingUnavailable = true;
+    } else {
+      cdpBorrowingUsd += point.cdpBorrowingUsd;
+    }
   }
+  const availableTotalUsd = reserveYieldUsd + swapFeesUsd + cdpBorrowingUsd;
+  const totalUnavailable =
+    reserveYieldUnavailable || swapFeesUnavailable || cdpBorrowingUnavailable;
   return {
-    reserveYieldUsd,
-    swapFeesUsd,
-    cdpBorrowingUsd,
-    totalUsd: reserveYieldUsd + swapFeesUsd + cdpBorrowingUsd,
+    reserveYieldUsd: reserveYieldUnavailable ? null : reserveYieldUsd,
+    swapFeesUsd: swapFeesUnavailable ? null : swapFeesUsd,
+    cdpBorrowingUsd: cdpBorrowingUnavailable ? null : cdpBorrowingUsd,
+    availableTotalUsd,
+    totalUsd: totalUnavailable ? null : availableTotalUsd,
   };
 }
 
@@ -603,6 +647,21 @@ function hasSusdsReserveYieldSignal(
   );
 }
 
+function buildActualAvailability(
+  args: BuildCanonicalRevenueArgs,
+): ActualRevenueAvailability {
+  const reserveHistoryUnavailable =
+    args.reserveHistoryFailed === true ||
+    args.reserveHistoryUnavailable === true ||
+    (args.reserveDailySnapshots.length === 0 &&
+      hasSusdsReserveYieldSignal(args.reserveYield));
+  return {
+    reserve: !reserveHistoryUnavailable,
+    swap: args.swapFeesFailed !== true,
+    cdp: args.cdpDailySeriesFailed !== true,
+  };
+}
+
 function buildPartialReasons(args: BuildCanonicalRevenueArgs): string[] {
   const reasons: string[] = [];
   if (args.swapFeesFailed) reasons.push("Swap fee history failed to load.");
@@ -770,7 +829,22 @@ export function buildCanonicalRevenue({
     cdpDailySeries,
     reserveDailySnapshots,
   });
-  const dailySeries = buildDailySeries(buckets, nowSeconds);
+  const actualAvailability = buildActualAvailability({
+    networkData,
+    cdpDailySeries,
+    cdpMarkets,
+    reserveYield,
+    reserveDailySnapshots,
+    reserveHistoryUnavailable,
+    reserveHistoryFailed,
+    reserveHistoryTruncated,
+    swapFeesFailed,
+    swapFeesApproximate,
+    cdpDailySeriesFailed,
+    cdpInputsApproximate,
+    nowSeconds,
+  });
+  const dailySeries = buildDailySeries(buckets, nowSeconds, actualAvailability);
   const partialReasons = buildPartialReasons({
     networkData,
     cdpDailySeries,

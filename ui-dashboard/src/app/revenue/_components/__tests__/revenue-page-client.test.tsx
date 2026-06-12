@@ -456,10 +456,32 @@ describe("RevenuePageClient canonical revenue layout", () => {
       "Reserve earned-yield history is not indexed yet.",
     );
     const reserveActual = capturedProps.chart?.series.reduce(
-      (sum, point) => sum + point.reserveYieldUsd,
+      (sum, point) => sum + (point.reserveYieldUsd ?? 0),
       0,
     );
     expect(reserveActual).toBe(0);
+  });
+
+  it("renders unavailable CDP actuals as N/A when daily history fails", () => {
+    const html = renderRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [feeSnapshot(ts("2026-06-12"), 12)],
+        }),
+      ],
+      cdpRevenue: {
+        markets: [cdpMarket("GBPm")],
+        dailySeries: [],
+        dailySeriesFailed: true,
+      },
+      reserveRows: [reserveSnapshot(ts("2026-06-12"), 5)],
+    });
+
+    expect(html).toContain("CDP borrowing revenue history failed to load.");
+    expect(streamCardHtml(html, "CDP Borrowing Revenue")).toContain("N/A");
+    expect(
+      capturedProps.chart?.series.some((p) => p.cdpBorrowingUsd === null),
+    ).toBe(true);
   });
 
   it("passes fee failures through to the swap table and chart partial state", () => {

@@ -184,8 +184,9 @@ describe("buildCanonicalRevenue", () => {
       nowSeconds: NOW_SECONDS,
     });
 
-    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(0);
-    expect(result.periods.allTimeSinceV3.totalUsd).toBe(12);
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.availableTotalUsd).toBe(12);
     expect(result.periods.allTimeSinceV3.partialReasons).toContain(
       "Reserve earned-yield history is not indexed yet.",
     );
@@ -201,7 +202,8 @@ describe("buildCanonicalRevenue", () => {
       nowSeconds: NOW_SECONDS,
     });
 
-    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(0);
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
     expect(result.periods.allTimeSinceV3.partialReasons).toContain(
       "Reserve earned-yield history has no sUSDS snapshots yet.",
     );
@@ -486,6 +488,33 @@ describe("buildCanonicalRevenue", () => {
     expect(result.forecasts.next7d.totalUsd).toBe(84);
     expect(result.forecasts.next7d.partialReasons).toContain(
       "CDP forecast unavailable: borrowing revenue inputs failed to load.",
+    );
+  });
+
+  it("marks CDP actuals unavailable when daily history fails instead of reporting zero", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [feeSnapshot(ts("2026-06-12"), 12)],
+        }),
+      ],
+      cdpDailySeries: [],
+      cdpMarkets: [cdpMarket({ protocolShareUSD: 46.875 })],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      cdpDailySeriesFailed: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.cdpBorrowingUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.availableTotalUsd).toBe(17);
+    expect(result.streams.cdp.actualUsd).toBeNull();
+    expect(
+      result.dailySeries.some((point) => point.cdpBorrowingUsd === null),
+    ).toBe(true);
+    expect(result.partialReasons).toContain(
+      "CDP borrowing revenue history failed to load.",
     );
   });
 });

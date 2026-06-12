@@ -39,7 +39,7 @@ type FillType =
 
 type RevenueTrace = {
   x: string[];
-  y: number[];
+  y: Array<number | null>;
   type: "scatter";
   mode: "lines";
   name: string;
@@ -74,7 +74,7 @@ export function revenueWeekOverWeekChangePct(
   return weekOverWeekChangePct(
     series.map((p) => ({
       timestamp: p.timestamp,
-      value: p.totalRevenueUsd,
+      value: p.totalRevenueUsd ?? 0,
     })),
   );
 }
@@ -89,7 +89,7 @@ export function revenueChartEmptyMessage(
 
 function buildTrace(args: {
   xs: string[];
-  y: number[];
+  y: Array<number | null>;
   name: string;
   color: string;
   fillcolor: string;
@@ -113,13 +113,19 @@ function buildTrace(args: {
 export function revenueChartYAxisRange(
   series: ReadonlyArray<CanonicalRevenueDailyPoint>,
 ): [number, number] {
-  const yValues = series.flatMap((p) => [
-    p.swapFeesUsd,
-    p.swapFeesUsd + p.cdpBorrowingUsd,
-    p.totalRevenueUsd,
-    p.reserveYieldUsd,
-    p.cdpBorrowingUsd,
-  ]);
+  const yValues: number[] = [];
+  for (const point of series) {
+    const values = [
+      point.swapFeesUsd,
+      point.cdpBorrowingUsd,
+      point.reserveYieldUsd,
+      point.availableRevenueUsd,
+      point.totalRevenueUsd,
+    ];
+    for (const value of values) {
+      if (value !== null) yValues.push(value);
+    }
+  }
   const ymax = Math.max(0, ...yValues);
   const ymin = Math.min(0, ...yValues);
   if (ymax === 0 && ymin === 0) return [0, 1];
@@ -333,17 +339,26 @@ export function TotalRevenueChart({
     () => filterSeriesByRevenueRange(series, range),
     [series, range],
   );
-  const rangeTotal = useMemo(
-    () => visibleSeries.reduce((sum, p) => sum + p.totalRevenueUsd, 0),
-    [visibleSeries],
-  );
+  const rangeTotal = useMemo(() => {
+    const availableTotal = visibleSeries.reduce(
+      (sum, p) => sum + p.availableRevenueUsd,
+      0,
+    );
+    const exactTotal = visibleSeries.every((p) => p.totalRevenueUsd !== null)
+      ? visibleSeries.reduce((sum, p) => sum + (p.totalRevenueUsd ?? 0), 0)
+      : null;
+    return { availableTotal, exactTotal };
+  }, [visibleSeries]);
   const change = revenueWeekOverWeekChangePct(series, range, partialReasons);
-  const headline = `${partialReasons.length > 0 ? "≈ " : ""}${formatUSD(rangeTotal)}`;
+  const headline =
+    rangeTotal.exactTotal === null
+      ? `≈ ${formatUSD(rangeTotal.availableTotal)}`
+      : `${partialReasons.length > 0 ? "≈ " : ""}${formatUSD(rangeTotal.exactTotal)}`;
   const figure = useMemo(
     () => buildRevenueChartFigure(visibleSeries),
     [visibleSeries],
   );
-  const hasAnyRevenue = series.some((point) => point.totalRevenueUsd !== 0);
+  const hasAnyRevenue = series.some((point) => point.availableRevenueUsd !== 0);
   const showEmptyState = !isLoading && !hasAnyRevenue;
 
   return (
