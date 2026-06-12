@@ -260,6 +260,102 @@ describe("GET /api/reserve-yield", () => {
     expect(body.earnedYieldError).toBeNull();
   });
 
+  it("keeps indexed sUSDS yield when current reserve sUSDS rows are partial", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              {
+                symbol: "sUSDS",
+                chain: "ethereum",
+                balance: "500",
+                usd_value: 500,
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Partial Reserve Safe",
+                    balance: "500",
+                    usd_value: 500,
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
+          },
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.principalUsd).toBe(500);
+    expect(body.earnedYieldUsd).toBeCloseTo(200, 6);
+    expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
+    expect(body.unrealizedYieldUsd).toBeCloseTo(100, 6);
+    expect(body.earnedYieldError).toBeNull();
+    expect(body.holdings[0].earnedYieldUsd).toBeNull();
+  });
+
+  it("surfaces sUSDS ledger errors when current reserve sUSDS rows are malformed", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              {
+                symbol: "sUSDS",
+                chain: "ethereum",
+                balance: "not-a-number",
+                usd_value: "not-a-number",
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Reserve Safe",
+                    balance: "not-a-number",
+                    usd_value: "not-a-number",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          errors: [{ message: "field 'SusdsYieldSummary' not found" }],
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdings).toEqual([]);
+    expect(body.holdingsError).toContain("without usable USD values");
+    expect(body.earnedYieldError).toContain("sUSDS earned-yield ledger");
+    expect(body.earnedYieldError).toContain("SusdsYieldSummary");
+  });
+
   it("suppresses sUSDS ledger errors when no sUSDS holding is displayed", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     vi.spyOn(globalThis, "fetch")

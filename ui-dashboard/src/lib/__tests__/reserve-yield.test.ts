@@ -103,6 +103,7 @@ describe("reserve yield parsing and math", () => {
 
     expect(extracted.malformedCount).toBe(0);
     expect(extracted.trackedAssetCount).toBe(3);
+    expect(extracted.susdsAssetCount).toBe(1);
     expect(extracted.holdings).toHaveLength(4);
     expect(extracted.holdings[0]).toMatchObject({
       assetSymbol: "sUSDS",

@@ -89,6 +89,7 @@ type ReserveYieldExtraction = {
   holdings: ReserveYieldHolding[];
   malformedCount: number;
   trackedAssetCount: number;
+  susdsAssetCount: number;
 };
 
 type FredObservation = {
@@ -124,6 +125,7 @@ type SusdsYieldLedger = {
   realizedYieldUsd: number;
   unrealizedYieldUsd: number;
   costBasisUsd: number;
+  currentValueUsd: number;
   asOf: string | null;
 };
 
@@ -139,6 +141,14 @@ type SusdsYieldState = {
   unrealizedYieldUsd: number | null;
   earnedYieldAsOf: string | null;
   earnedYieldError: string | null;
+};
+
+type ReserveHoldingsState = {
+  holdings: ReserveYieldHolding[];
+  principalUsd: number | null;
+  holdingsAsOf: string | null;
+  holdingsError: string | null;
+  hasCurrentSusdsAsset: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -281,7 +291,9 @@ function applySusdsYieldLedger(
     (sum, holding) => sum + holding.principalUsd,
     0,
   );
-  if (susdsPrincipalUsd <= 0) return holdings;
+  if (susdsPrincipalUsd <= 0 || susdsPrincipalUsd < ledger.currentValueUsd) {
+    return holdings;
+  }
 
   return holdings.map((holding) => {
     if (holding.assetSymbol.toUpperCase() !== FORECASTABLE_SUSDS_SYMBOL) {
@@ -312,6 +324,7 @@ function refreshSusdsUnrealizedYield(
   if (!useCurrentReserveBalance) return ledger;
   const currentValueUsd = currentSusdsPrincipalUsd(holdings);
   if (currentValueUsd <= 0) return ledger;
+  if (currentValueUsd < ledger.currentValueUsd) return ledger;
   const unrealizedYieldUsd = Math.max(currentValueUsd - ledger.costBasisUsd, 0);
   return {
     ...ledger,
@@ -412,11 +425,16 @@ export function extractReserveYieldHoldings(
   const holdings: ReserveYieldHolding[] = [];
   let malformedCount = 0;
   let trackedAssetCount = 0;
+  let susdsAssetCount = 0;
 
   assets.forEach((assetValue, assetIndex) => {
     if (!isRecord(assetValue)) return;
-    if (!isTrackedYieldAsset(stringField(assetValue.symbol, ""))) return;
+    const symbol = stringField(assetValue.symbol, "");
+    if (!isTrackedYieldAsset(symbol)) return;
     trackedAssetCount += 1;
+    if (symbol.toUpperCase() === FORECASTABLE_SUSDS_SYMBOL) {
+      susdsAssetCount += 1;
+    }
 
     const sources: Record<string, unknown>[] = [];
     for (const source of asArray(assetValue.sources)) {
@@ -450,6 +468,7 @@ export function extractReserveYieldHoldings(
     holdings: aggregateHoldings(holdings),
     malformedCount,
     trackedAssetCount,
+    susdsAssetCount,
   };
 }
 
@@ -710,6 +729,10 @@ function parseSusdsYieldLedger(payload: unknown): SusdsYieldLedgerResult {
     "totalEarnedYieldUsdWei",
   );
   const costBasisWei = bigintField(row.costBasisUsdWei, "costBasisUsdWei");
+  const currentValueWei = bigintField(
+    row.currentValueUsdWei,
+    "currentValueUsdWei",
+  );
   const realizedYieldWei = bigintField(
     row.realizedYieldUsdWei,
     "realizedYieldUsdWei",
@@ -728,6 +751,7 @@ function parseSusdsYieldLedger(payload: unknown): SusdsYieldLedgerResult {
       realizedYieldUsd: weiToUsd(realizedYieldWei),
       unrealizedYieldUsd: weiToUsd(unrealizedYieldWei),
       costBasisUsd: weiToUsd(costBasisWei),
+      currentValueUsd: weiToUsd(currentValueWei),
       asOf: unixSecondsToIso(lastUpdatedTimestamp),
     },
     error: null,
@@ -746,10 +770,11 @@ function applySusdsYieldLedgerResult(
   holdings: ReserveYieldHolding[],
   result: PromiseSettledResult<SusdsYieldLedgerResult>,
   useCurrentReserveBalance: boolean,
+  hasCurrentSusdsAsset: boolean,
 ): SusdsYieldState {
   const hasVisibleSusdsHolding = currentSusdsPrincipalUsd(holdings) > 0;
   const shouldSurfaceLedgerError =
-    hasVisibleSusdsHolding || !useCurrentReserveBalance;
+    hasVisibleSusdsHolding || hasCurrentSusdsAsset || !useCurrentReserveBalance;
   const emptyState = {
     holdings,
     earnedYieldUsd: null,
@@ -811,6 +836,41 @@ function rateErrorForUnavailableForecasts(
   );
 }
 
+function reserveHoldingsState(
+  reserveResult: PromiseSettledResult<unknown>,
+  fetchedAt: string,
+): ReserveHoldingsState {
+  if (reserveResult.status === "rejected") {
+    return {
+      holdings: [],
+      principalUsd: null,
+      holdingsAsOf: null,
+      holdingsError: errorMessage("Reserve API", reserveResult.reason),
+      hasCurrentSusdsAsset: false,
+    };
+  }
+
+  const extracted = extractReserveYieldHoldings(reserveResult.value);
+  let holdingsError: string | null = null;
+  if (extracted.malformedCount > 0) {
+    holdingsError =
+      extracted.holdings.length > 0
+        ? "Some reserve yield rows were missing usable USD values."
+        : "Reserve API returned yield rows without usable USD values.";
+  }
+
+  return {
+    holdings: extracted.holdings,
+    principalUsd:
+      extracted.holdings.length === 0 && extracted.malformedCount > 0
+        ? null
+        : extracted.holdings.reduce((sum, h) => sum + h.principalUsd, 0),
+    holdingsAsOf: fetchedAt,
+    holdingsError,
+    hasCurrentSusdsAsset: extracted.susdsAssetCount > 0,
+  };
+}
+
 async function fetchOnchainSkySavingsRate(
   fetchImpl: FetchImpl,
 ): Promise<SkySavingsRateObservation> {
@@ -867,28 +927,8 @@ export async function fetchReserveYieldSnapshot({
     ]);
 
   const fetchedAt = now.toISOString();
-  let holdings: ReserveYieldHolding[] = [];
-  let principalUsd: number | null = null;
-  let holdingsAsOf: string | null = null;
-  let holdingsError: string | null = null;
-
-  if (reserveResult.status === "fulfilled") {
-    const extracted = extractReserveYieldHoldings(reserveResult.value);
-    holdings = extracted.holdings;
-    principalUsd =
-      holdings.length === 0 && extracted.malformedCount > 0
-        ? null
-        : holdings.reduce((sum, h) => sum + h.principalUsd, 0);
-    holdingsAsOf = fetchedAt;
-    if (extracted.malformedCount > 0) {
-      holdingsError =
-        extracted.holdings.length > 0
-          ? "Some reserve yield rows were missing usable USD values."
-          : "Reserve API returned yield rows without usable USD values.";
-    }
-  } else {
-    holdingsError = errorMessage("Reserve API", reserveResult.reason);
-  }
+  const reserveState = reserveHoldingsState(reserveResult, fetchedAt);
+  let { holdings } = reserveState;
 
   let grossApyPercent: number | null = null;
   let fedfundsAsOf: string | null = null;
@@ -916,6 +956,7 @@ export async function fetchReserveYieldSnapshot({
     holdings,
     susdsLedgerResult,
     reserveResult.status === "fulfilled",
+    reserveState.hasCurrentSusdsAsset,
   );
   holdings = susdsYield.holdings;
 
@@ -930,14 +971,14 @@ export async function fetchReserveYieldSnapshot({
   });
 
   return {
-    principalUsd,
+    principalUsd: reserveState.principalUsd,
     forecastPrincipalUsd: forecast.forecastPrincipalUsd,
     earnedYieldUsd: susdsYield.earnedYieldUsd,
     realizedYieldUsd: susdsYield.realizedYieldUsd,
     unrealizedYieldUsd: susdsYield.unrealizedYieldUsd,
     earnedYieldAsOf: susdsYield.earnedYieldAsOf,
     holdings: forecast.modeledHoldings,
-    holdingsAsOf,
+    holdingsAsOf: reserveState.holdingsAsOf,
     grossApyPercent,
     fedfundsAsOf,
     expenseBps: RESERVE_YIELD_EXPENSE_BPS,
@@ -950,7 +991,7 @@ export async function fetchReserveYieldSnapshot({
     next365dUsd: forecast.next365dUsd,
     annualRunRateUsd: forecast.annualRunRateUsd,
     forecastUnavailableSymbols: forecast.forecastUnavailableSymbols,
-    holdingsError,
+    holdingsError: reserveState.holdingsError,
     rateError: rateErrorForUnavailableForecasts(
       forecast.forecastUnavailableSymbols,
       fedfundsError,
