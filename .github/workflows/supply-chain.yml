@@ -46,7 +46,7 @@ on:
     paths:
       - "**/package.json"
       - "**/pnpm-lock.yaml"
-      - pnpm-workspace.yaml
+      - "**/pnpm-workspace.yaml"
       - "**/.npmrc"
       # The gate itself — changes to the workflow or the lockfile-lint
       # scripts must self-trigger a run (same pattern as the other gates).
