@@ -299,8 +299,12 @@ describe('QueryService', () => {
         getBalance: jest.fn(),
       } as unknown as ReturnType<typeof createPublicClient>);
 
-    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const loggerWarn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
 
     const chainWithFallback = {
       ...chain,
@@ -310,6 +314,23 @@ describe('QueryService', () => {
     const metric = makeMetric();
 
     await expect(service.query(metric)).resolves.toBeUndefined();
+
+    // The warn fires before the fallback is attempted and carries the primary error.
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Primary RPC failed for BreakerBox.getRateFeedTradingMode on localnet',
+      ),
+    );
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('primary down'),
+    );
+    // When both fail, the error log surfaces BOTH errors, not just the fallback.
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining('primary down'),
+    );
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining('fallback down'),
+    );
 
     const metrics = await service.rpcErrors.get();
     expect(metrics.values).toEqual(
@@ -324,5 +345,24 @@ describe('QueryService', () => {
         }),
       ]),
     );
+  });
+
+  // (E) Counter NOT incremented when the RPC succeeds but parse throws.
+  // The counter tracks RPC-transport failures only, not parse/validation errors.
+  it('does not increment rpcErrors counter when parse fails after a successful RPC', async () => {
+    readContract.mockResolvedValue(2n);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const service = new QueryService(makeConfigService());
+    const metric = makeMetric({
+      parse: jest.fn(() => {
+        throw new Error('unparseable value');
+      }),
+    });
+
+    await expect(service.query(metric)).resolves.toBeUndefined();
+
+    const metrics = await service.rpcErrors.get();
+    const total = metrics.values.reduce((sum, v) => sum + v.value, 0);
+    expect(total).toBe(0);
   });
 });

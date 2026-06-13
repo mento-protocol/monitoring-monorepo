@@ -25,6 +25,9 @@ const makeChain = (chain: ChainConfig): chains.Chain => ({
   },
 });
 
+const errMsg = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
+
 @Injectable()
 export class QueryService {
   private readonly logger = new Logger(QueryService.name);
@@ -91,6 +94,45 @@ export class QueryService {
     });
   }
 
+  /**
+   * Attempts the primary RPC call, then the fallback if available.
+   * Returns the raw on-chain data or throws when all endpoints fail.
+   * Increments rpcErrors and logs on all-endpoints-exhausted paths.
+   */
+  private async fetchWithFallback(
+    metric: Metric,
+    chain: ChainConfig,
+    args: unknown[],
+    label: string,
+  ): Promise<unknown> {
+    const client = this.clients[metric.chain];
+    let primaryError: unknown;
+    try {
+      return await this.executeCall(client, metric, chain, args);
+    } catch (e) {
+      primaryError = e;
+    }
+
+    const fallbackClient = this.fallbackClients[metric.chain];
+    if (fallbackClient) {
+      this.logger.warn(
+        `Primary RPC failed for ${label}, retrying with fallback: ${errMsg(primaryError)}`,
+      );
+      try {
+        return await this.executeCall(fallbackClient, metric, chain, args);
+      } catch (fallbackError) {
+        this.logger.error(
+          `Both primary and fallback RPC failed for ${label}. Primary: ${errMsg(primaryError)}. Fallback: ${errMsg(fallbackError)}`,
+        );
+        throw fallbackError;
+      }
+    }
+
+    // No fallback configured — re-throw the primary error.
+    this.logger.error(primaryError);
+    throw primaryError;
+  }
+
   async query(metric: Metric): Promise<number | number[] | undefined> {
     if (this.chains[metric.chain] === undefined) {
       throw new Error(
@@ -106,49 +148,41 @@ export class QueryService {
       );
     }
 
-    const vars = chain.vars;
     const contractName = metric.source.contract;
     const functionName = metric.source.functionAbi.name;
     if (!functionName) {
       throw new Error(`Missing function name for metric ${metric.name}`);
     }
-    const args = metric.args.map((arg) => {
-      const value = vars[arg];
-      if (value === undefined) {
-        return arg;
-      }
-      return value;
-    });
+    const args = metric.args.map((arg) => chain.vars[arg] ?? arg);
+    const label = `${contractName}.${functionName} on ${metric.chain}`;
 
     const timer = this.queryTime.startTimer({
-      contract: metric.source.contract,
-      functionName: metric.source.functionAbi.name,
+      contract: contractName,
+      functionName,
       chain: metric.chain,
     });
+
+    let data: unknown;
     try {
-      let data: unknown;
-      try {
-        data = await this.executeCall(client, metric, chain, args);
-      } catch (primaryError) {
-        const fallbackClient = this.fallbackClients[metric.chain];
-        if (!fallbackClient) {
-          throw primaryError;
-        }
-        this.logger.warn(
-          `Primary RPC failed for ${contractName}.${functionName} on ${metric.chain}, retrying with fallback`,
-        );
-        data = await this.executeCall(fallbackClient, metric, chain, args);
-      }
+      data = await this.fetchWithFallback(metric, chain, args, label);
+    } catch {
+      // rpcErrors counts only RPC transport failures (primary + fallback exhausted).
+      // Parse errors below are intentionally excluded.
+      this.rpcErrors.inc({
+        contract: contractName,
+        functionName,
+        chain: metric.chain,
+      });
+      timer({ status: 'error' });
+      return undefined;
+    }
+
+    try {
       const value = metric.parse(data, contractName, functionName);
       timer({ status: 'success' });
       return value;
-    } catch (e) {
-      this.logger.error(e);
-      this.rpcErrors.inc({
-        contract: metric.source.contract,
-        functionName: metric.source.functionAbi.name,
-        chain: metric.chain,
-      });
+    } catch (parseError) {
+      this.logger.error(parseError);
       timer({ status: 'error' });
       return undefined;
     }
