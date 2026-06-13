@@ -22,6 +22,7 @@ const BRIDGE_POOLS_QUERY = gql`
       token0
       token1
       source
+      wrappedExchangeId
       healthStatus
       oracleOk
       oracleTimestamp
