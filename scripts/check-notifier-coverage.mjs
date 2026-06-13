@@ -55,7 +55,9 @@ function parseName(text) {
 
 /**
  * Returns true if the workflow has an `on.push` trigger targeting `main`.
- * Handles both inline `push: {branches: [main]}` and block-scalar forms.
+ * Handles both inline (`branches: [main]`) and block-sequence forms:
+ *   branches:
+ *     - main
  * @param {string} text
  */
 function hasPushMain(text) {
@@ -65,13 +67,20 @@ function hasPushMain(text) {
   const onBlock = onMatch[1];
 
   // Look for a `push:` sub-key within the on: block, then capture everything
-  // until the next same-level (2-space-indented) key OR end of the on: block.
-  const pushMatch = onBlock.match(/^ {2}push:\s*\n([\s\S]*?)(?=^ {2}\S|$)/m);
+  // until the next same-level (2-space-indented) key using a negative lookahead
+  // (avoids the multiline-`$` pitfall where lazy `*?` stops at end-of-line).
+  const pushMatch = onBlock.match(/^ {2}push:\s*\n((?:(?!^ {2}\S)[\s\S])*)/m);
   if (!pushMatch) return false;
   const pushBlock = pushMatch[1];
 
-  // Check that `branches` contains `main`.
-  return /branches:\s*\[?[^\]]*\bmain\b/.test(pushBlock);
+  // Inline form:  branches: [main]  or  branches: [main, develop]
+  if (/branches:\s*\[?[^\]]*\bmain\b/.test(pushBlock)) return true;
+  // Block-sequence form:
+  //   branches:
+  //     - main
+  if (/branches:\s*\n(?:\s*-\s+\S+\n)*\s*-\s+main\b/.test(pushBlock))
+    return true;
+  return false;
 }
 
 /**

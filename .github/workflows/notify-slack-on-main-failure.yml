@@ -1,7 +1,7 @@
 name: Notify Slack on main-branch workflow failure
 
-# Fires when any push-triggered workflow on `main` completes with
-# conclusion=failure. Posts a structured message to `#ci-failures` via
+# Fires when any push-triggered or schedule-only workflow on `main` completes
+# with conclusion=failure. Posts a structured message to `#ci-failures` via
 # Slack's chat.postMessage so silent post-merge breakage gets caught
 # without anyone having to manually watch the Actions tab.
 #
@@ -42,7 +42,7 @@ on:
       - Code Health — Duplication
       - Alerts Rules
       - Aegis Terraform
-      # Schedule-only workflows (cron jobs with no push trigger):
+      # Schedule-only or PR-only (no push-to-main) workflows:
       - Supply Chain
       - Integration Probes
       - Terraform Drift Detection
@@ -135,7 +135,7 @@ jobs:
               --arg msg "$COMMIT_MSG" \
               --arg actor "$ACTOR" \
               '($msg | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;")) as $safe_msg
-               | (if $actor != "" then "\n*Triggered by:* " + $actor else "\n*Triggered by:* scheduled cron" end) as $actor_line
+               | (if $actor != "" and $actor != "null" then "\n*Triggered by:* " + $actor else "\n*Triggered by:* scheduled cron" end) as $actor_line
                | {
                 channel: $ch,
                 text: ("❌ " + $wf + " failed on main (" + $sha + ")"),
