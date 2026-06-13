@@ -132,6 +132,7 @@ export function makeNetworkData(
     ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: [],
+    uniqueLpAddressesTruncated: false,
     rates: new Map(),
     error: null,
     snapshotsError: null,

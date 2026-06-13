@@ -103,6 +103,7 @@ function perPoolTvlWindow(
 // layout share the same cross-network aggregation state. Revisit only with a
 // focused split that keeps those derived values centralized.
 // react-doctor-disable-next-line react-doctor/no-giant-component
+// eslint-disable-next-line max-lines-per-function -- Homepage coordinates network data polling, KPI aggregation, and global pool table in one route surface.
 function GlobalContent({
   initialNetworkData,
 }: {
@@ -376,36 +377,17 @@ function GlobalContent({
             }
           />
 
-          <Tile
-            label="LPs"
-            value={
-              isLoading
-                ? "…"
-                : aggregated.totalUniqueLps === null
-                  ? "N/A"
-                  : aggregated.totalUniqueLps.toLocaleString()
-            }
-            subtitle={
-              // totalUniqueLps is forced to null whenever any chain failed at
-              // the top level, so the subtitle must degrade for network errors
-              // too — not just lpError — otherwise we'd claim a complete
-              // global metric while actually showing N/A.
-              anyNetworkError || anyLpError
-                ? "Partial — some chains failed to load"
-                : "Unique LP addresses across all chains"
-            }
+          <LpTile
+            isLoading={isLoading}
+            totalUniqueLps={aggregated.totalUniqueLps}
+            anyNetworkError={anyNetworkError}
+            anyLpError={anyLpError}
+            networkData={networkData}
           />
 
-          <Tile
-            label="Swaps"
-            value={
-              isLoading
-                ? "…"
-                : aggregated.totalSwapsAllTime === null
-                  ? "N/A"
-                  : aggregated.totalSwapsAllTime.toLocaleString()
-            }
-            subtitle="All-time across all pools"
+          <SwapsTile
+            isLoading={isLoading}
+            totalSwapsAllTime={aggregated.totalSwapsAllTime}
           />
           <TradersTile isLoading={isLoading} networkData={networkData} />
         </div>
@@ -438,6 +420,69 @@ function GlobalContent({
       </section>
     </div>
   );
+}
+
+// Homepage Swaps KPI tile. Shows total all-time swap count across all chains.
+function SwapsTile({
+  isLoading,
+  totalSwapsAllTime,
+}: {
+  isLoading: boolean;
+  totalSwapsAllTime: number | null;
+}) {
+  const value = isLoading
+    ? "…"
+    : totalSwapsAllTime === null
+      ? "N/A"
+      : totalSwapsAllTime.toLocaleString();
+  return (
+    <Tile label="Swaps" value={value} subtitle="All-time across all pools" />
+  );
+}
+
+// Homepage LP KPI tile. Displays unique LP addresses across all chains with
+// truncation awareness. When the paginator hits the 100-page cap it sets
+// `uniqueLpAddressesTruncated`, which triggers an `≈` prefix and an
+// "Approximate" subtitle so the user knows the count is a lower bound.
+// Isolated here (rather than inlined in GlobalContent) so the truncation
+// conditionals don't push GlobalContent's complexity past the baseline.
+function LpTile({
+  isLoading,
+  totalUniqueLps,
+  anyNetworkError,
+  anyLpError,
+  networkData,
+}: {
+  isLoading: boolean;
+  totalUniqueLps: number | null;
+  anyNetworkError: boolean;
+  anyLpError: boolean;
+  networkData: NetworkData[];
+}) {
+  const anyLpAddressesTruncated = networkData.some(
+    (netData) => netData.uniqueLpAddressesTruncated && netData.error === null,
+  );
+
+  const value = isLoading
+    ? "…"
+    : totalUniqueLps === null
+      ? "N/A"
+      : anyLpAddressesTruncated && !anyLpError
+        ? `≈ ${totalUniqueLps.toLocaleString()}`
+        : totalUniqueLps.toLocaleString();
+
+  // totalUniqueLps is forced to null whenever any chain failed at
+  // the top level, so the subtitle must degrade for network errors
+  // too — not just lpError — otherwise we'd claim a complete
+  // global metric while actually showing N/A.
+  const subtitle =
+    anyNetworkError || anyLpError
+      ? "Partial — some chains failed to load"
+      : anyLpAddressesTruncated
+        ? "Approximate — full LP history exceeds pagination cap"
+        : "Unique LP addresses across all chains";
+
+  return <Tile label="LPs" value={value} subtitle={subtitle} />;
 }
 
 // Homepage Traders KPI tile. Counts unique v3 traders across all chains

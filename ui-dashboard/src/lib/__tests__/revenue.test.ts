@@ -70,6 +70,7 @@ function networkData(
     ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
+    uniqueLpAddressesTruncated: false,
     rates: TEST_RATES,
     error: null,
     snapshotsError: null,

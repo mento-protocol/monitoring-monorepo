@@ -166,6 +166,7 @@ function makeNetworkData(
     ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
+    uniqueLpAddressesTruncated: false,
     rates: new Map(),
     error: null,
     snapshotsError: null,
