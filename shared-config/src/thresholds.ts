@@ -14,8 +14,9 @@
  * Strict `>` flips the pool to WARN (or above).
  *
  * Mirrors `DEVIATION_TOLERANCE_NUM / DEVIATION_TOLERANCE_DEN` in
- * `indexer-envio/src/pool.ts`; the indexer's `test/healthStatusParity.test.ts`
- * enforces parity with the dashboard's `computeHealthStatus`.
+ * `indexer-envio/src/pool/health.ts`; `test/deviationThresholdSharedConfigSync.test.ts`
+ * enforces numeric parity and `test/healthStatusParity.test.ts` enforces
+ * behavioral parity with the dashboard's `computeHealthStatus`.
  */
 export const DEVIATION_TOLERANCE_RATIO = 1.01;
 
@@ -26,7 +27,9 @@ export const DEVIATION_TOLERANCE_RATIO = 1.01;
  * magnitude, duration alone never escalates a breach to CRITICAL.
  *
  * Mirrors `DEVIATION_CRITICAL_NUM / DEVIATION_CRITICAL_DEN` in
- * `indexer-envio/src/pool.ts`. Also gates the metrics-bridge rebalance-reason
- * probe so the annotation only attaches to alerts that can actually fire.
+ * `indexer-envio/src/pool/health.ts`; `test/deviationThresholdSharedConfigSync.test.ts`
+ * enforces numeric parity and `test/healthStatusParity.test.ts` enforces
+ * behavioral parity. Also gates the metrics-bridge rebalance-reason probe so
+ * the annotation only attaches to alerts that can actually fire.
  */
 export const DEVIATION_CRITICAL_RATIO = 1.05;
