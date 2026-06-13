@@ -9,7 +9,15 @@ if [[ -z "$_repo_root" ]]; then
   echo "❌ deploy-guard: not inside a git repository; refusing to deploy."
   return 1
 fi
-if [[ -n "$(git -C "$_repo_root" status --porcelain)" ]]; then
+# Capture status in a branch that fails closed: a command substitution inside
+# `[[ ... ]]` swallows a non-zero git exit even under `set -e`, so a corrupt or
+# unreadable worktree would yield empty output and look "clean". Check the exit
+# code explicitly and refuse to deploy if git itself errors.
+if ! _status="$(git -C "$_repo_root" status --porcelain)"; then
+  echo "❌ deploy-guard: 'git status' failed for $_repo_root; refusing to deploy."
+  return 1
+fi
+if [[ -n "$_status" ]]; then
   echo "❌ Working directory is not clean. Commit or stash your changes first."
   git -C "$_repo_root" status --short
   return 1
