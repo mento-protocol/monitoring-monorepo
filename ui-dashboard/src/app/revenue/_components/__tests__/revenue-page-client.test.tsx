@@ -316,6 +316,24 @@ function streamCardHtml(
   return streamSection.slice(cardStart, cardEnd === -1 ? undefined : cardEnd);
 }
 
+function periodCardHtml(
+  html: string,
+  title: "Total Revenue" | "Last 30 Days" | "Last 7 Days",
+): string {
+  const sectionStart = html.indexOf('aria-label="Revenue actuals by period"');
+  const sectionEnd = html.indexOf('aria-label="Revenue forecasts"');
+  const periodSection = html.slice(sectionStart, sectionEnd);
+  const cardStart = periodSection.indexOf(title);
+  const nextTitle =
+    title === "Total Revenue"
+      ? "Last 30 Days"
+      : title === "Last 30 Days"
+        ? "Last 7 Days"
+        : "</section>";
+  const cardEnd = periodSection.indexOf(nextTitle, cardStart + title.length);
+  return periodSection.slice(cardStart, cardEnd === -1 ? undefined : cardEnd);
+}
+
 describe("RevenuePageClient canonical revenue layout", () => {
   beforeEach(() => {
     mockUseProtocolFees.mockReset();
@@ -472,6 +490,24 @@ describe("RevenuePageClient canonical revenue layout", () => {
       0,
     );
     expect(reserveActual).toBe(0);
+  });
+
+  it("shows available actual revenue in period headlines when reserve history is stale", () => {
+    const html = renderRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [feeSnapshot(ts("2026-06-12"), 12)],
+        }),
+      ],
+      reserveRows: [reserveSnapshot(ts("2026-06-03"), 5)],
+    });
+
+    expect(html).toContain(
+      "Reserve earned-yield history is stale; latest snapshot is Jun 3, 2026.",
+    );
+    expect(periodCardHtml(html, "Total Revenue")).toContain("≈ $17.00");
+    expect(periodCardHtml(html, "Total Revenue")).toContain("N/A");
+    expect(streamCardHtml(html, "Reserve Yield")).toContain("N/A");
   });
 
   it("renders reserve actuals as N/A when reserve yield fails before snapshots exist", () => {

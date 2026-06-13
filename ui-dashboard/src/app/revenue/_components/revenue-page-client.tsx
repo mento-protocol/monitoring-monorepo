@@ -322,6 +322,11 @@ function formatActualValue(value: number | null, isPartial: boolean): string {
   return `${isPartial ? "≈ " : ""}${formatUSD(value)}`;
 }
 
+function periodHeadlineTotal(period: CanonicalRevenuePeriod): number | null {
+  if (period.totalUsd !== null) return period.totalUsd;
+  return period.availableTotalUsd > 0 ? period.availableTotalUsd : null;
+}
+
 function PeriodCard({
   period,
   isLoading,
@@ -351,7 +356,7 @@ function PeriodCard({
         {isLoading ? (
           <LoadingValue />
         ) : (
-          formatActualValue(period.totalUsd, isPartial)
+          formatActualValue(periodHeadlineTotal(period), isPartial)
         )}
       </p>
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
