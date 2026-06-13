@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  revenueChartYAxisRange,
+  buildRevenueChartFigure,
   revenueChartEmptyMessage,
   revenueWeekOverWeekChangePct,
 } from "@/components/fee-over-time-chart";
@@ -59,20 +59,32 @@ describe("revenueChartEmptyMessage", () => {
   });
 });
 
-describe("revenueChartYAxisRange", () => {
-  it("keeps negative revenue days inside the visible y-axis range", () => {
-    const range = revenueChartYAxisRange([
+describe("buildRevenueChartFigure", () => {
+  it("lets Plotly rescale the stacked y-axis after legend toggles", () => {
+    const figure = buildRevenueChartFigure([
       {
         timestamp: START,
-        reserveYieldUsd: -50,
-        swapFeesUsd: 0,
+        reserveYieldUsd: 10_000,
+        swapFeesUsd: 10,
+        cdpBorrowingUsd: 5,
+        totalRevenueUsd: 10_015,
+        availableRevenueUsd: 10_015,
+      },
+      {
+        timestamp: START + DAY,
+        reserveYieldUsd: null,
+        swapFeesUsd: 12,
         cdpBorrowingUsd: 0,
-        totalRevenueUsd: -50,
-        availableRevenueUsd: -50,
+        totalRevenueUsd: null,
+        availableRevenueUsd: 12,
       },
     ]);
 
-    expect(range[0]).toBeLessThan(-50);
-    expect(range[1]).toBeGreaterThan(0);
+    expect(figure.layout.yaxis).toMatchObject({
+      autorange: true,
+      rangemode: "tozero",
+      fixedrange: true,
+    });
+    expect("range" in figure.layout.yaxis).toBe(false);
   });
 });
