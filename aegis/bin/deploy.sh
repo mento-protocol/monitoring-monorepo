@@ -6,6 +6,9 @@ set -u          # Treat unset variables as an error when substituting
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 app_root="$repo_root/aegis"
 
+# shellcheck source=scripts/lib/deploy-guard.sh
+source "$repo_root/scripts/lib/deploy-guard.sh"
+
 # Build the App Engine entrypoint before uploading this checkout.
 cd "$repo_root"
 pnpm --filter @mento-protocol/aegis build
