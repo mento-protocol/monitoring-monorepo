@@ -191,4 +191,138 @@ describe('QueryService', () => {
     );
     expect(readContract).not.toHaveBeenCalled();
   });
+
+  // (A) Counter increments when a call fails with no fallback
+  it('increments rpcErrors counter when view call fails and no fallback is configured', async () => {
+    const error = new Error('rpc unavailable');
+    readContract.mockRejectedValue(error);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const service = new QueryService(makeConfigService());
+    const metric = makeMetric();
+
+    await expect(service.query(metric)).resolves.toBeUndefined();
+
+    const metrics = await service.rpcErrors.get();
+    expect(metrics.values).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          labels: {
+            contract: 'BreakerBox',
+            functionName: 'getRateFeedTradingMode',
+            chain: 'localnet',
+          },
+          value: 1,
+        }),
+      ]),
+    );
+  });
+
+  // (B) Fallback used when primary fails
+  it('retries via fallback client when primary RPC fails', async () => {
+    const primaryReadContract = jest
+      .fn()
+      .mockRejectedValue(new Error('primary down'));
+    const fallbackReadContract = jest.fn().mockResolvedValue(42n);
+
+    mockCreatePublicClient
+      .mockReturnValueOnce({
+        readContract: primaryReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>)
+      .mockReturnValueOnce({
+        readContract: fallbackReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>);
+
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    const chainWithFallback = {
+      ...chain,
+      fallbackHttpRpcUrl: 'http://localhost:8546',
+    } as unknown as ChainConfig;
+    const service = new QueryService(makeConfigService([chainWithFallback]));
+    const metric = makeMetric({ parse: jest.fn(() => 42) });
+
+    await expect(service.query(metric)).resolves.toBe(42);
+
+    expect(primaryReadContract).toHaveBeenCalledTimes(1);
+    expect(fallbackReadContract).toHaveBeenCalledTimes(1);
+  });
+
+  // (C) Counter NOT incremented when fallback succeeds
+  it('does not increment rpcErrors counter when fallback succeeds', async () => {
+    const primaryReadContract = jest
+      .fn()
+      .mockRejectedValue(new Error('primary down'));
+    const fallbackReadContract = jest.fn().mockResolvedValue(42n);
+
+    mockCreatePublicClient
+      .mockReturnValueOnce({
+        readContract: primaryReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>)
+      .mockReturnValueOnce({
+        readContract: fallbackReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>);
+
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    const chainWithFallback = {
+      ...chain,
+      fallbackHttpRpcUrl: 'http://localhost:8546',
+    } as unknown as ChainConfig;
+    const service = new QueryService(makeConfigService([chainWithFallback]));
+    const metric = makeMetric({ parse: jest.fn(() => 42) });
+
+    await expect(service.query(metric)).resolves.toBe(42);
+
+    const metrics = await service.rpcErrors.get();
+    const total = metrics.values.reduce((sum, v) => sum + v.value, 0);
+    expect(total).toBe(0);
+  });
+
+  // (D) Counter incremented when both primary and fallback fail
+  it('increments rpcErrors counter when both primary and fallback fail', async () => {
+    const primaryError = new Error('primary down');
+    const fallbackError = new Error('fallback down');
+    const primaryReadContract = jest.fn().mockRejectedValue(primaryError);
+    const fallbackReadContract = jest.fn().mockRejectedValue(fallbackError);
+
+    mockCreatePublicClient
+      .mockReturnValueOnce({
+        readContract: primaryReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>)
+      .mockReturnValueOnce({
+        readContract: fallbackReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>);
+
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    const chainWithFallback = {
+      ...chain,
+      fallbackHttpRpcUrl: 'http://localhost:8546',
+    } as unknown as ChainConfig;
+    const service = new QueryService(makeConfigService([chainWithFallback]));
+    const metric = makeMetric();
+
+    await expect(service.query(metric)).resolves.toBeUndefined();
+
+    const metrics = await service.rpcErrors.get();
+    expect(metrics.values).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          labels: {
+            contract: 'BreakerBox',
+            functionName: 'getRateFeedTradingMode',
+            chain: 'localnet',
+          },
+          value: 1,
+        }),
+      ]),
+    );
+  });
 });
