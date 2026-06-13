@@ -509,6 +509,18 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.sampledAtBlock, 300n);
   });
 
+  it("skips the sUSDS heartbeat snapshot when block timestamp RPC returns null", async () => {
+    const mockDb = MockDb.createMockDb();
+
+    const didWrite = await recordSusdsYieldHeartbeatSnapshot(
+      heartbeatContext(mockDb, null, WAD),
+      300n,
+    );
+
+    assert.equal(didWrite, false);
+    assert.equal(dailySnapshots(mockDb).length, 0);
+  });
+
   it("uses the first post-launch sUSDS daily snapshot as the delta baseline", async () => {
     let mockDb = MockDb.createMockDb();
     const beforeLaunch = Number(V3_REVENUE_LAUNCH_TIMESTAMP - 3_600n);

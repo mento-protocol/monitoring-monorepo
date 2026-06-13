@@ -9,7 +9,7 @@ function normalizeBlockTimestamp(block: unknown): bigint | null {
   if (typeof block !== "object" || block === null) return null;
   const timestamp = (block as BlockWithTimestamp).timestamp;
   if (typeof timestamp === "bigint") return timestamp;
-  if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+  if (typeof timestamp === "number" && Number.isInteger(timestamp)) {
     return BigInt(timestamp);
   }
   return null;
@@ -24,6 +24,14 @@ export async function fetchBlockTimestamp(
     const block = await getRpcClient(chainId).getBlock({ blockNumber });
     return normalizeBlockTimestamp(block);
   } catch (err) {
+    logRpcFailure(
+      chainId,
+      "getBlockTimestamp",
+      `block:${blockNumber}`,
+      err,
+      blockNumber,
+      log,
+    );
     const fallback = getFallbackRpcClient(chainId);
     if (fallback !== null) {
       try {
@@ -40,14 +48,6 @@ export async function fetchBlockTimestamp(
         );
       }
     }
-    logRpcFailure(
-      chainId,
-      "getBlockTimestamp",
-      `block:${blockNumber}`,
-      err,
-      blockNumber,
-      log,
-    );
     return null;
   }
 }

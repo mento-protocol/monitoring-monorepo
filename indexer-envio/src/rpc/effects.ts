@@ -451,6 +451,8 @@ export const susdsSharePriceEffect = createEffect(
     ),
 );
 
+// sUSDS daily heartbeat metadata is block-scoped. Keep it uncached for the
+// same reorg-safety reason as Group C effects.
 export const blockTimestampEffect = createEffect(
   {
     name: "blockTimestamp",
@@ -466,7 +468,6 @@ export const blockTimestampEffect = createEffect(
       context.log,
     );
     if (result === null) {
-      context.cache = false;
       return null;
     }
     return result;
