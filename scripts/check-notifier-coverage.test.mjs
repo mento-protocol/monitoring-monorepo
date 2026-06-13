@@ -214,6 +214,148 @@ test("true for bare push: as last top-level key (on: last-key edge case)", () =>
   assert(hasPushMain(yaml), "expected true when on: is the last top-level key");
 });
 
+// ── hasPushMain edge-case tests (js-yaml refactor) ───────────────────────────
+
+console.log("\nhasPushMain (edge cases — js-yaml)");
+
+test("true for scalar shorthand: on: push", () => {
+  // GitHub supports bare `on: push` which runs on all branches including main.
+  const yaml = "name: T\non: push\njobs:\n  t:\n    runs-on: ubuntu-latest\n";
+  assert(hasPushMain(yaml), "expected true for scalar on: push");
+});
+
+test("true for array shorthand: on: [push, schedule]", () => {
+  // Array shorthand includes push → main-capable.
+  const yaml =
+    "name: T\non: [push, schedule]\njobs:\n  t:\n    runs-on: ubuntu-latest\n";
+  assert(hasPushMain(yaml), "expected true for on: [push, schedule]");
+});
+
+test("true for array shorthand: on: [push] (push only)", () => {
+  const yaml = "name: T\non: [push]\njobs:\n  t:\n    runs-on: ubuntu-latest\n";
+  assert(hasPushMain(yaml), "expected true for on: [push]");
+});
+
+test("false for array shorthand without push: on: [schedule]", () => {
+  const yaml =
+    "name: T\non: [schedule]\njobs:\n  t:\n    runs-on: ubuntu-latest\n";
+  assert(!hasPushMain(yaml), "expected false for on: [schedule] (no push)");
+});
+
+test("false for not-main branch — no word-boundary false match", () => {
+  // The old \\bmain\\b regex matched 'not-main' because \\b sees the hyphen
+  // boundary. The exact list match must return false here.
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches: [not-main]",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(!hasPushMain(yaml), "expected false for branches: [not-main]");
+});
+
+test("false for main-x branch — no substring false match", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches: [main-x]",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(!hasPushMain(yaml), "expected false for branches: [main-x]");
+});
+
+test("true for branches-ignore without main (main is not ignored)", () => {
+  // branches-ignore: [develop] → main is not in the ignore list → TRUE.
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches-ignore: [develop]",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    hasPushMain(yaml),
+    "expected true for branches-ignore: [develop] (main not ignored)",
+  );
+});
+
+test("false for branches-ignore that explicitly ignores main", () => {
+  // branches-ignore: [main] → main is excluded → FALSE.
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches-ignore: [main]",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    !hasPushMain(yaml),
+    "expected false for branches-ignore: [main] (main explicitly ignored)",
+  );
+});
+
+test("false for tag-only push filter (no branches/branches-ignore)", () => {
+  // push: tags: [...] without branches → does NOT run on branch pushes.
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    tags: ['v*']",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    !hasPushMain(yaml),
+    "expected false for tag-only push (no branches filter)",
+  );
+});
+
+test("false for tags-ignore-only push filter (no branches/branches-ignore)", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    tags-ignore: ['v*']",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    !hasPushMain(yaml),
+    "expected false for tags-ignore-only push (no branches filter)",
+  );
+});
+
+// ── hasSchedule edge-case tests ───────────────────────────────────────────────
+
+test("true for array shorthand: on: [push, schedule] → hasSchedule", () => {
+  const yaml =
+    "name: T\non: [push, schedule]\njobs:\n  t:\n    runs-on: ubuntu-latest\n";
+  assert(hasSchedule(yaml), "expected true for on: [push, schedule]");
+});
+
+test("false for array shorthand without schedule: on: [push]", () => {
+  const yaml = "name: T\non: [push]\njobs:\n  t:\n    runs-on: ubuntu-latest\n";
+  assert(!hasSchedule(yaml), "expected false for on: [push] (no schedule)");
+});
+
 // ── hasSchedule tests ─────────────────────────────────────────────────────────
 
 console.log("\nhasSchedule");
@@ -495,6 +637,108 @@ test("exits non-zero for branchless push workflow NOT in notifier", () => {
   assert(
     stderr.includes("Branchless Push CI") && stderr.includes("NOT listed"),
     `expected missing-workflow error, got: ${stderr}`,
+  );
+});
+
+test("scalar on: push is treated as main push (e2e)", () => {
+  const scalarPushWorkflow = [
+    "name: Scalar Push CI",
+    "on: push",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stdout, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["Scalar Push CI"]),
+    "scalar.yml": scalarPushWorkflow,
+  });
+  assert(
+    exitCode === 0,
+    `expected exit 0 for scalar on: push, got ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
+  );
+});
+
+test("branches-ignore without main is treated as main-capable (e2e)", () => {
+  const branchIgnoreWorkflow = [
+    "name: Branch Ignore CI",
+    "on:",
+    "  push:",
+    "    branches-ignore: [develop]",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stdout, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["Branch Ignore CI"]),
+    "branch-ignore.yml": branchIgnoreWorkflow,
+  });
+  assert(
+    exitCode === 0,
+    `expected exit 0 for branches-ignore without main, got ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
+  );
+});
+
+test("tag-only push workflow is NOT required in notifier (e2e)", () => {
+  // A workflow that only runs on tag pushes should not need notifier coverage.
+  const tagOnlyWorkflow = [
+    "name: Tag Release",
+    "on:",
+    "  push:",
+    "    tags: ['v*']",
+    "jobs:",
+    "  release:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["Some CI"]),
+    "ci.yml": PUSH_WORKFLOW("Some CI"),
+    "release.yml": tagOnlyWorkflow,
+  });
+  assert(
+    exitCode === 0,
+    `expected exit 0 (tag-only workflow must not be flagged), got ${exitCode}\nstderr: ${stderr}`,
+  );
+  assert(
+    !stderr.includes("Tag Release"),
+    `tag-only workflow must not appear in error output, got: ${stderr}`,
+  );
+});
+
+test("not-main branch workflow is NOT required in notifier (e2e)", () => {
+  // A workflow only targeting 'not-main' must not appear as missing coverage.
+  const notMainWorkflow = [
+    "name: Not Main CI",
+    "on:",
+    "  push:",
+    "    branches: [not-main]",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["Some CI"]),
+    "ci.yml": PUSH_WORKFLOW("Some CI"),
+    "not-main.yml": notMainWorkflow,
+  });
+  assert(
+    exitCode === 0,
+    `expected exit 0 (not-main branch workflow must not be flagged), got ${exitCode}\nstderr: ${stderr}`,
+  );
+  assert(
+    !stderr.includes("Not Main CI"),
+    `not-main branch workflow must not appear in error output, got: ${stderr}`,
   );
 });
 

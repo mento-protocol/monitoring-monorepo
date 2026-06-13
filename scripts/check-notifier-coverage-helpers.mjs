@@ -3,8 +3,12 @@
  * Extracted as a separate module so the script and its test file can both
  * import the real implementations instead of duplicating them.
  *
- * No external dependencies — pure regex / string operations.
+ * Uses js-yaml to parse workflow YAML correctly, handling all trigger forms
+ * documented by GitHub Actions (scalar, array, mapping with branches /
+ * branches-ignore / tags / tags-ignore).
  */
+
+import jsYaml from "js-yaml";
 
 /**
  * Extract the `name:` field value from a workflow YAML text.
@@ -13,72 +17,121 @@
  * @returns {string|null}
  */
 export function parseName(text) {
-  const m = text.match(/^name:\s*(.+)$/m);
-  return m ? m[1].trim().replace(/^['"]|['"]$/g, "") : null;
+  const doc = jsYaml.load(text);
+  if (!doc || typeof doc !== "object") return null;
+  const name = doc["name"];
+  if (name == null) return null;
+  return String(name);
 }
 
 /**
- * Returns true if the workflow has an `on.push` trigger targeting `main`.
- * Handles:
- *   - Inline form:        branches: [main]
- *   - Block-sequence:     branches:\n      - main
- *   - Branchless push:    push: (no branches / branches-ignore) → runs on ALL
- *                         branches, including main
+ * Returns true if the workflow has an `on.push` trigger that can fire on the
+ * `main` branch.  Handles all forms documented by GitHub Actions:
+ *
+ *   on: push                      → scalar  → TRUE (all branches incl. main)
+ *   on: [push, schedule]          → array   → TRUE (push present)
+ *   on:
+ *     push:                       → null push body → TRUE (all branches)
+ *     push:
+ *       branches: [main]          → exact list match → TRUE
+ *       branches: [not-main]      → exact list match → FALSE
+ *     push:
+ *       branches-ignore: [dev]    → main not ignored → TRUE
+ *       branches-ignore: [main]   → main ignored     → FALSE
+ *     push:
+ *       tags: [v*]                → tag-only filter  → FALSE
+ *       tags-ignore: [v*]         → tag-only filter  → FALSE
+ *
  * @param {string} text
+ * @returns {boolean}
  */
 export function hasPushMain(text) {
-  // Extract the `on:` block — everything until the next top-level key, with a
-  // fallback for when `on:` is the last key (nothing follows at column 0).
-  const onMatch =
-    text.match(/^on:\s*\n([\s\S]*?)(?=^\S)/m) ??
-    text.match(/^on:\s*\n([\s\S]*)$/m);
-  if (!onMatch) return false;
-  const onBlock = onMatch[1];
+  const doc = jsYaml.load(text);
+  if (!doc || typeof doc !== "object") return false;
 
-  // Look for a `push:` sub-key within the on: block, then capture everything
-  // until the next same-level (2-space-indented) key.
-  const pushMatch = onBlock.match(/^ {2}push:\s*\n((?:(?!^ {2}\S)[\s\S])*)/m);
-  if (!pushMatch) return false;
-  const pushBlock = pushMatch[1];
+  const on = doc["on"] ?? doc["true"]; // YAML may parse bare `on` as true
+  if (!on) return false;
 
-  // Branchless push — no `branches:` or `branches-ignore:` restriction means
-  // the workflow runs on every push, which includes main.
-  if (!/branches/.test(pushBlock)) return true;
+  // Scalar shorthand: `on: push` or `on: "push"`
+  if (typeof on === "string") return on === "push";
 
-  // Inline form:  branches: [main]  or  branches: [main, develop]
-  if (/branches:\s*\[?[^\]]*\bmain\b/.test(pushBlock)) return true;
-  // Block-sequence form:
-  //   branches:
-  //     - main
-  if (/branches:\s*\n(?:\s*-\s+\S+\n)*\s*-\s+main\b/.test(pushBlock))
-    return true;
-  return false;
+  // Array shorthand: `on: [push, schedule]`
+  if (Array.isArray(on)) return on.includes("push");
+
+  // Mapping form: `on:\n  push: ...`
+  if (typeof on !== "object") return false;
+
+  const push = on["push"];
+
+  // No `push:` key — not a push workflow.
+  if (!Object.prototype.hasOwnProperty.call(on, "push")) return false;
+
+  // `push:` present but null/empty (no branch/tag filters) → runs on everything.
+  if (push == null || typeof push !== "object") return true;
+
+  const branches = push["branches"];
+  const branchesIgnore = push["branches-ignore"];
+  const hasBranchFilter = branches != null;
+  const hasBranchIgnore = branchesIgnore != null;
+  const hasTags = push["tags"] != null || push["tags-ignore"] != null;
+
+  // Tag-only filters (no branches/branches-ignore) → runs only on tag pushes,
+  // not branch pushes.
+  if (!hasBranchFilter && !hasBranchIgnore && hasTags) return false;
+
+  // No branch filter at all and no tag-only filter → runs on all branches.
+  if (!hasBranchFilter && !hasBranchIgnore) return true;
+
+  // branches: list — main must appear exactly.
+  if (hasBranchFilter) {
+    const list = Array.isArray(branches) ? branches : [branches];
+    return list.map(String).includes("main");
+  }
+
+  // branches-ignore: list — runs on main unless "main" is in the ignore list.
+  const ignoreList = Array.isArray(branchesIgnore)
+    ? branchesIgnore
+    : [branchesIgnore];
+  return !ignoreList.map(String).includes("main");
 }
 
 /**
  * Returns true if the workflow has an `on.schedule` trigger.
  * @param {string} text
+ * @returns {boolean}
  */
 export function hasSchedule(text) {
-  return /^ {2}schedule:\s*$/m.test(text);
+  const doc = jsYaml.load(text);
+  if (!doc || typeof doc !== "object") return false;
+
+  const on = doc["on"] ?? doc["true"];
+  if (!on) return false;
+
+  if (typeof on === "string") return on === "schedule";
+  if (Array.isArray(on)) return on.includes("schedule");
+  if (typeof on !== "object") return false;
+
+  return Object.prototype.hasOwnProperty.call(on, "schedule");
 }
 
 /**
  * Extract the list of workflow names from the notifier's workflow_run.workflows
  * list. Returns a Set of strings.
  * @param {string} text
+ * @returns {Set<string>}
  */
 export function parseNotifierList(text) {
-  // Find the `workflows:` key under `workflow_run:` and collect all `- Name` entries.
-  const workflowRunMatch = text.match(
-    /workflow_run:\s*\n\s+workflows:\s*\n([\s\S]*?)(?=\s+types:)/,
-  );
-  if (!workflowRunMatch) return new Set();
+  const doc = jsYaml.load(text);
+  if (!doc || typeof doc !== "object") return new Set();
 
-  const listBlock = workflowRunMatch[1];
-  const names = new Set();
-  for (const m of listBlock.matchAll(/^\s+-\s+(.+)$/gm)) {
-    names.add(m[1].trim().replace(/^['"]|['"]$/g, ""));
-  }
-  return names;
+  const on = doc["on"] ?? doc["true"];
+  if (!on || typeof on !== "object") return new Set();
+
+  const workflowRun = on["workflow_run"];
+  if (!workflowRun || typeof workflowRun !== "object") return new Set();
+
+  const workflows = workflowRun["workflows"];
+  if (!Array.isArray(workflows)) return new Set();
+
+  return new Set(workflows.map(String));
 }
