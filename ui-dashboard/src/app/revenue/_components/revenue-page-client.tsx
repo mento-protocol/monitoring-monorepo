@@ -233,7 +233,6 @@ function RevenueContent() {
       <RevenuePeriodCards
         periods={[
           canonicalRevenue.periods.allTimeSinceV3,
-          canonicalRevenue.periods.ytd,
           canonicalRevenue.periods.last30d,
           canonicalRevenue.periods.last7d,
         ]}
@@ -243,9 +242,9 @@ function RevenueContent() {
 
       <ForecastCards
         forecasts={[
-          canonicalRevenue.forecasts.next7d,
-          canonicalRevenue.forecasts.next30d,
           canonicalRevenue.forecasts.next365d,
+          canonicalRevenue.forecasts.next30d,
+          canonicalRevenue.forecasts.next7d,
         ]}
         isLoading={isRevenueLoading}
       />
@@ -292,15 +291,14 @@ function RevenueContent() {
 
 const PERIOD_CARD_ORDER: RevenuePeriodKey[] = [
   "allTimeSinceV3",
-  "ytd",
   "last30d",
   "last7d",
 ];
 
 const FORECAST_CARD_ORDER: RevenueForecastKey[] = [
-  "next7d",
-  "next30d",
   "next365d",
+  "next30d",
+  "next7d",
 ];
 
 function LoadingValue() {

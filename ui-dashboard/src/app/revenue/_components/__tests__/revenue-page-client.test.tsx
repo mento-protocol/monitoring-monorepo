@@ -39,6 +39,10 @@ function ts(iso: string): number {
   return Date.parse(`${iso}T00:00:00Z`) / 1000;
 }
 
+function currentDayTimestamp(): number {
+  return Math.floor(Date.now() / 1000 / DAY) * DAY;
+}
+
 function usdWei(usd: number): string {
   return (BigInt(usd) * BigInt("1000000000000000000")).toString();
 }
@@ -349,19 +353,25 @@ describe("RevenuePageClient canonical revenue layout", () => {
         markets: [cdpMarket("GBPm")],
         dailySeries: completedDays.map((timestamp) => cdpPoint(timestamp, 3)),
       },
-      reserveRows: [reserveSnapshot(ts("2026-06-12"), 45)],
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 45)],
     });
 
     expect(html).toContain("Canonical revenue actuals since Mar 3, 2026");
     expect(html).toContain("Total Revenue");
     expect(html).toContain("Since Mar 3, 2026");
-    expect(html).toContain("Year To Date");
+    expect(html).not.toContain("Year To Date");
     expect(html).toContain("Last 30 Days");
     expect(html).toContain("Rolling UTC daily buckets");
     expect(html).toContain("7d Forecast");
     expect(html).toContain("Monthly Forecast");
     expect(html).toContain("Annual Forecast");
     expect(html).toContain("Next 365 days");
+    expect(html.indexOf("Annual Forecast")).toBeLessThan(
+      html.indexOf("Monthly Forecast"),
+    );
+    expect(html.indexOf("Monthly Forecast")).toBeLessThan(
+      html.indexOf("7d Forecast"),
+    );
     expect(html).toContain("AUSD is forecast-only until a payout ledger");
     expect(html).toContain("Revenue streams");
     expect(html).toContain("sUSDS actual yield; AUSD forecast-only");
@@ -427,7 +437,7 @@ describe("RevenuePageClient canonical revenue layout", () => {
         ...RESERVE_YIELD,
         forecastUnavailableSymbols: ["AUSD"],
       },
-      reserveRows: [reserveSnapshot(ts("2026-06-12"), 45)],
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 45)],
     });
 
     expect(html).toContain("About Reserve Yield partial data");
@@ -497,7 +507,7 @@ describe("RevenuePageClient canonical revenue layout", () => {
         dailySeries: [],
         dailySeriesFailed: true,
       },
-      reserveRows: [reserveSnapshot(ts("2026-06-12"), 5)],
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 5)],
     });
 
     expect(html).toContain("CDP borrowing revenue history failed to load.");
