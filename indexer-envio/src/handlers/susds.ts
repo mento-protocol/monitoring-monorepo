@@ -6,7 +6,7 @@ import type {
 import { ZERO_ADDRESS } from "../constants.js";
 import { SECONDS_PER_DAY, asAddress, dayBucket, eventId } from "../helpers.js";
 import { indexer } from "../indexer.js";
-import { susdsSharePriceEffect } from "../rpc/effects.js";
+import { blockTimestampEffect, susdsSharePriceEffect } from "../rpc/effects.js";
 
 export const ETHEREUM_CHAIN_ID = 1;
 export const SUSDS_ADDRESS = "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd";
@@ -430,6 +430,28 @@ async function readSharePrice(
   return sharePriceUsdWei;
 }
 
+export async function recordSusdsYieldHeartbeatSnapshot(
+  context: SusdsContext,
+  blockNumber: bigint,
+): Promise<boolean> {
+  const blockTimestamp = await context.effect(blockTimestampEffect, {
+    chainId: ETHEREUM_CHAIN_ID,
+    blockNumber,
+  });
+  if (blockTimestamp === null || blockTimestamp <= 0n) return false;
+
+  const meta: BlockMeta = {
+    chainId: ETHEREUM_CHAIN_ID,
+    blockNumber,
+    blockTimestamp,
+  };
+  if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
+
+  const sharePriceUsdWei = await readSharePrice(context, meta);
+  await recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
+  return true;
+}
+
 async function shouldProcess(
   context: SusdsContext,
   movementId: string,
@@ -755,11 +777,6 @@ indexer.onEvent(
   },
 );
 
-type BlockWithTimestamp = {
-  readonly number: number;
-  readonly timestamp?: number;
-};
-
 indexer.onBlock(
   {
     name: "SusdsYieldDailySnapshotHeartbeat",
@@ -777,16 +794,6 @@ indexer.onBlock(
   },
   async ({ block, context }) => {
     if (context.isPreload) return;
-    const blockWithTimestamp = block as BlockWithTimestamp;
-    const timestamp = blockWithTimestamp.timestamp;
-    if (timestamp === undefined || timestamp <= 0) return;
-    const meta: BlockMeta = {
-      chainId: ETHEREUM_CHAIN_ID,
-      blockNumber: BigInt(block.number),
-      blockTimestamp: BigInt(timestamp),
-    };
-    if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return;
-    const sharePriceUsdWei = await readSharePrice(context, meta);
-    await recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
+    await recordSusdsYieldHeartbeatSnapshot(context, BigInt(block.number));
   },
 );

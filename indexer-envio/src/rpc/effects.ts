@@ -37,6 +37,7 @@ import {
   fetchReportExpiry,
 } from "./oracle-state.js";
 import { fetchFees, fetchRebalanceIncentiveAtBlock } from "./pool-fees.js";
+import { fetchBlockTimestamp } from "./block.js";
 import {
   fetchPoolExchange,
   fetchVirtualPoolExchangeId,
@@ -448,6 +449,28 @@ export const susdsSharePriceEffect = createEffect(
       input.blockNumber,
       context.log,
     ),
+);
+
+export const blockTimestampEffect = createEffect(
+  {
+    name: "blockTimestamp",
+    input: { chainId: S.int32, blockNumber: S.bigint },
+    output: S.nullable(S.bigint),
+    rateLimit: { calls: 200, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) => {
+    const result = await fetchBlockTimestamp(
+      input.chainId,
+      input.blockNumber,
+      context.log,
+    );
+    if (result === null) {
+      context.cache = false;
+      return null;
+    }
+    return result;
+  },
 );
 
 /** Convert the `feesEffect` output (explicit `undefined` keys) into a
