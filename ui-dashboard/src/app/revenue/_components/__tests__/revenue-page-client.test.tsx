@@ -493,18 +493,18 @@ describe("RevenuePageClient canonical revenue layout", () => {
   });
 
   it("shows available actual revenue in period headlines when reserve history is stale", () => {
+    const currentDay = currentDayTimestamp();
+    const staleReserveSnapshotDay = currentDay - 10 * DAY;
     const html = renderRevenue({
       networkData: [
         makeNetworkData({
-          feeSnapshots: [feeSnapshot(ts("2026-06-12"), 12)],
+          feeSnapshots: [feeSnapshot(currentDay, 12)],
         }),
       ],
-      reserveRows: [reserveSnapshot(ts("2026-06-03"), 5)],
+      reserveRows: [reserveSnapshot(staleReserveSnapshotDay, 5)],
     });
 
-    expect(html).toContain(
-      "Reserve earned-yield history is stale; latest snapshot is Jun 3, 2026.",
-    );
+    expect(html).toContain("Reserve earned-yield history is stale");
     expect(periodCardHtml(html, "Total Revenue")).toContain("≈ $17.00");
     expect(periodCardHtml(html, "Total Revenue")).toContain("N/A");
     expect(streamCardHtml(html, "Reserve Yield")).toContain("N/A");
