@@ -1,18 +1,26 @@
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { register } from 'prom-client';
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, HttpRequestError } from 'viem';
 import { ChainConfig } from './config';
 import { Metric } from './metric';
 import { QueryService } from './query.service';
 
+// Preserve viem's real error classes (HttpRequestError, etc.) so the source's
+// `instanceof` transport-error checks work; only stub the two functions we mock.
 jest.mock('viem', () => ({
+  ...jest.requireActual('viem'),
   createPublicClient: jest.fn(),
   http: jest.fn((url: string) => ({ url })),
 }));
 
 const mockCreatePublicClient = jest.mocked(createPublicClient);
 const mockHttp = jest.mocked(http);
+
+// A representative transport-level error (endpoint unreachable). Used where a
+// test needs the retry/counter path to fire.
+const makeTransportError = (message: string): HttpRequestError =>
+  new HttpRequestError({ url: 'http://localhost:8545', details: message });
 
 const readContract = jest.fn();
 const getBalance = jest.fn();
@@ -192,10 +200,9 @@ describe('QueryService', () => {
     expect(readContract).not.toHaveBeenCalled();
   });
 
-  // (A) Counter increments when a call fails with no fallback
-  it('increments rpcErrors counter when view call fails and no fallback is configured', async () => {
-    const error = new Error('rpc unavailable');
-    readContract.mockRejectedValue(error);
+  // (A) Counter increments on a transport failure with no fallback
+  it('increments rpcErrors counter when a transport call fails and no fallback is configured', async () => {
+    readContract.mockRejectedValue(makeTransportError('rpc unavailable'));
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const service = new QueryService(makeConfigService());
     const metric = makeMetric();
@@ -217,11 +224,11 @@ describe('QueryService', () => {
     );
   });
 
-  // (B) Fallback used when primary fails
-  it('retries via fallback client when primary RPC fails', async () => {
+  // (B) Fallback used when primary fails with a transport error
+  it('retries via fallback client when primary RPC fails with a transport error', async () => {
     const primaryReadContract = jest
       .fn()
-      .mockRejectedValue(new Error('primary down'));
+      .mockRejectedValue(makeTransportError('primary down'));
     const fallbackReadContract = jest.fn().mockResolvedValue(42n);
 
     mockCreatePublicClient
@@ -253,7 +260,7 @@ describe('QueryService', () => {
   it('does not increment rpcErrors counter when fallback succeeds', async () => {
     const primaryReadContract = jest
       .fn()
-      .mockRejectedValue(new Error('primary down'));
+      .mockRejectedValue(makeTransportError('primary down'));
     const fallbackReadContract = jest.fn().mockResolvedValue(42n);
 
     mockCreatePublicClient
@@ -282,10 +289,10 @@ describe('QueryService', () => {
     expect(total).toBe(0);
   });
 
-  // (D) Counter incremented when both primary and fallback fail
+  // (D) Counter incremented when both primary and fallback fail (transport)
   it('increments rpcErrors counter when both primary and fallback fail', async () => {
-    const primaryError = new Error('primary down');
-    const fallbackError = new Error('fallback down');
+    const primaryError = makeTransportError('primary down');
+    const fallbackError = makeTransportError('fallback down');
     const primaryReadContract = jest.fn().mockRejectedValue(primaryError);
     const fallbackReadContract = jest.fn().mockRejectedValue(fallbackError);
 
@@ -361,6 +368,46 @@ describe('QueryService', () => {
 
     await expect(service.query(metric)).resolves.toBeUndefined();
 
+    const metrics = await service.rpcErrors.get();
+    const total = metrics.values.reduce((sum, v) => sum + v.value, 0);
+    expect(total).toBe(0);
+  });
+
+  // (F) A deterministic call failure (e.g. contract revert) is NOT a transport
+  // error: the fallback must not be tried and the counter must stay flat, since
+  // the same error would reproduce on every healthy endpoint.
+  it('does not retry fallback or increment counter on a non-transport (deterministic) error', async () => {
+    const primaryReadContract = jest
+      .fn()
+      .mockRejectedValue(new Error('execution reverted'));
+    const fallbackReadContract = jest.fn().mockResolvedValue(99n);
+
+    mockCreatePublicClient
+      .mockReturnValueOnce({
+        readContract: primaryReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>)
+      .mockReturnValueOnce({
+        readContract: fallbackReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>);
+
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    const chainWithFallback = {
+      ...chain,
+      fallbackHttpRpcUrl: 'http://localhost:8546',
+    } as unknown as ChainConfig;
+    const service = new QueryService(makeConfigService([chainWithFallback]));
+    const metric = makeMetric();
+
+    await expect(service.query(metric)).resolves.toBeUndefined();
+
+    // Fallback must NOT be attempted for a deterministic error.
+    expect(fallbackReadContract).not.toHaveBeenCalled();
+
+    // Counter must stay flat — this is a protocol/config failure, not an outage.
     const metrics = await service.rpcErrors.get();
     const total = metrics.values.reduce((sum, v) => sum + v.value, 0);
     expect(total).toBe(0);

@@ -42,9 +42,18 @@ Aegis uses a simple primary-then-fallback retry model with no circuit breaker or
 - **Fallback RPC**: the optional `fallbackHttpRpcUrl` field on a chain config. If a primary call throws, Aegis retries once against the fallback (if configured). If the fallback also throws, or no fallback is configured, the error propagates to the outer handler.
 - **No breaker / no backoff**: the retry is a single immediate attempt. There is no exponential backoff, no half-open state, and no per-endpoint health tracking. This is intentional — Aegis metrics are already polled on a schedule; adding backoff would silently extend stale windows.
 
+### Transport vs. deterministic error classification
+
+Aegis classifies every caught error before deciding whether to retry the fallback or increment the counter:
+
+- **Transport errors** (network down, HTTP 5xx, timeout, connection refused): the endpoint is unhealthy. These trigger the fallback retry and, if all endpoints fail, increment `view_call_rpc_errors_total`. Identified by viem's `HttpRequestError`, `RpcRequestError`, `TimeoutError`, or `WebSocketRequestError` anywhere in the error cause chain.
+- **Deterministic errors** (contract revert, ABI decoding failure, invalid address): the call itself is broken — it would reproduce on every healthy endpoint. These do NOT retry the fallback and do NOT increment the counter. The error is logged and `query()` returns `undefined`, identical to a parse failure. If unsure, the implementation defaults to TRANSPORT so genuine outages are still captured.
+
+This prevents Grafana from seeing false RPC-outage signals when a metric is misconfigured or a contract reverts.
+
 ### `view_call_rpc_errors_total` counter
 
-The counter `view_call_rpc_errors_total` (labels: `contract`, `functionName`, `chain`) increments **only when both the primary and fallback fail** (or when there is no fallback and the primary fails). It does NOT increment on a successful fallback retry.
+The counter `view_call_rpc_errors_total` (labels: `contract`, `functionName`, `chain`) increments **only when both the primary and fallback fail with transport errors** (or when there is no fallback and the primary fails with a transport error). It does NOT increment on a successful fallback retry, and it does NOT increment on deterministic call failures (reverts, ABI/decoding errors, invalid addresses).
 
 This lets Grafana distinguish "RPC endpoint was temporarily down but recovered via fallback" (counter stays flat, metric value updates normally) from "both endpoints unreachable" (counter increments, metric goes stale).
 

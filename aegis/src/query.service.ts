@@ -4,6 +4,10 @@ import { Counter, Histogram } from 'prom-client';
 import {
   createPublicClient,
   http,
+  HttpRequestError,
+  RpcRequestError,
+  TimeoutError,
+  WebSocketRequestError,
   type Address,
   type PublicClient,
 } from 'viem';
@@ -27,6 +31,28 @@ const makeChain = (chain: ChainConfig): chains.Chain => ({
 
 const errMsg = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
+
+// Transport-level failures (endpoint unreachable/slow/malformed response) are
+// retryable on another endpoint and are what `view_call_rpc_errors_total` is
+// meant to track. Deterministic call failures — contract reverts, bad ABI/args,
+// invalid addresses — reproduce on every healthy endpoint, so they are NOT
+// transport errors: retrying is pointless and counting them as RPC outages
+// would mislead Grafana. viem nests the underlying cause, so walk the chain.
+const isTransportError = (err: unknown): boolean => {
+  let current: unknown = err;
+  for (let depth = 0; current != null && depth < 10; depth += 1) {
+    if (
+      current instanceof HttpRequestError ||
+      current instanceof RpcRequestError ||
+      current instanceof TimeoutError ||
+      current instanceof WebSocketRequestError
+    ) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+};
 
 @Injectable()
 export class QueryService {
@@ -97,7 +123,12 @@ export class QueryService {
   /**
    * Attempts the primary RPC call, then the fallback if available.
    * Returns the raw on-chain data or throws when all endpoints fail.
-   * Increments rpcErrors and logs on all-endpoints-exhausted paths.
+   *
+   * The fallback is only attempted for transport-level errors (endpoint
+   * down/slow). A deterministic call failure (revert, bad ABI/args) would
+   * reproduce on the fallback, so it is re-thrown immediately. Logs on
+   * all-endpoints-exhausted paths; never increments the counter (the caller
+   * decides that based on whether the thrown error is transport-level).
    */
   private async fetchWithFallback(
     client: PublicClient,
@@ -114,7 +145,7 @@ export class QueryService {
     }
 
     const fallbackClient = this.fallbackClients[metric.chain];
-    if (fallbackClient) {
+    if (fallbackClient && isTransportError(primaryError)) {
       this.logger.warn(
         `Primary RPC failed for ${label}, retrying with fallback: ${errMsg(primaryError)}`,
       );
@@ -128,7 +159,8 @@ export class QueryService {
       }
     }
 
-    // No fallback configured — re-throw the primary error.
+    // No usable fallback (none configured, or the error is deterministic and
+    // would just reproduce) — re-throw the primary error for the caller.
     this.logger.error(primaryError);
     throw primaryError;
   }
@@ -164,14 +196,18 @@ export class QueryService {
     let data: unknown;
     try {
       data = await this.fetchWithFallback(client, metric, chain, args);
-    } catch {
-      // rpcErrors counts only RPC transport failures (primary + fallback exhausted).
-      // Parse errors below are intentionally excluded.
-      this.rpcErrors.inc({
-        contract: contractName,
-        functionName,
-        chain: metric.chain,
-      });
+    } catch (rpcError) {
+      // rpcErrors counts only transport-level failures (endpoint down/slow,
+      // all endpoints exhausted). Deterministic call failures (revert, bad
+      // ABI/args) and parse errors below are intentionally excluded — they
+      // are not RPC outages and would mislabel a config/protocol problem.
+      if (isTransportError(rpcError)) {
+        this.rpcErrors.inc({
+          contract: contractName,
+          functionName,
+          chain: metric.chain,
+        });
+      }
       timer({ status: 'error' });
       return undefined;
     }
