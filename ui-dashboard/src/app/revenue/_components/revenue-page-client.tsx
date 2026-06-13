@@ -231,21 +231,13 @@ function RevenueContent() {
       </div>
 
       <RevenuePeriodCards
-        periods={[
-          canonicalRevenue.periods.allTimeSinceV3,
-          canonicalRevenue.periods.last30d,
-          canonicalRevenue.periods.last7d,
-        ]}
+        periods={canonicalRevenue.periods}
         isLoading={isRevenueLoading}
         partialReasons={actualPartialReasons}
       />
 
       <ForecastCards
-        forecasts={[
-          canonicalRevenue.forecasts.next365d,
-          canonicalRevenue.forecasts.next30d,
-          canonicalRevenue.forecasts.next7d,
-        ]}
+        forecasts={canonicalRevenue.forecasts}
         isLoading={isRevenueLoading}
       />
 
@@ -385,30 +377,26 @@ function RevenuePeriodCards({
   isLoading,
   partialReasons,
 }: {
-  periods: CanonicalRevenuePeriod[];
+  periods: Record<RevenuePeriodKey, CanonicalRevenuePeriod>;
   isLoading: boolean;
   partialReasons: string[];
 }) {
-  const orderedPeriods: CanonicalRevenuePeriod[] = [];
-  const periodByKey = new Map(periods.map((period) => [period.key, period]));
-  for (const key of PERIOD_CARD_ORDER) {
-    const period = periodByKey.get(key);
-    if (period !== undefined) orderedPeriods.push(period);
-  }
-
   return (
     <section
       aria-label="Revenue actuals by period"
       className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
     >
-      {orderedPeriods.map((period) => (
-        <PeriodCard
-          key={period.key}
-          period={period}
-          isLoading={isLoading}
-          partialReasons={partialReasons}
-        />
-      ))}
+      {PERIOD_CARD_ORDER.map((key) => {
+        const period = periods[key];
+        return (
+          <PeriodCard
+            key={period.key}
+            period={period}
+            isLoading={isLoading}
+            partialReasons={partialReasons}
+          />
+        );
+      })}
     </section>
   );
 }
@@ -498,29 +486,24 @@ function ForecastCards({
   forecasts,
   isLoading,
 }: {
-  forecasts: CanonicalRevenueForecast[];
+  forecasts: Record<RevenueForecastKey, CanonicalRevenueForecast>;
   isLoading: boolean;
 }) {
-  const orderedForecasts: CanonicalRevenueForecast[] = [];
-  const forecastByKey = new Map(
-    forecasts.map((forecast) => [forecast.key, forecast]),
-  );
-  for (const key of FORECAST_CARD_ORDER) {
-    const forecast = forecastByKey.get(key);
-    if (forecast !== undefined) orderedForecasts.push(forecast);
-  }
   return (
     <section
       aria-label="Revenue forecasts"
       className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
     >
-      {orderedForecasts.map((forecast) => (
-        <ForecastCard
-          key={forecast.key}
-          forecast={forecast}
-          isLoading={isLoading}
-        />
-      ))}
+      {FORECAST_CARD_ORDER.map((key) => {
+        const forecast = forecasts[key];
+        return (
+          <ForecastCard
+            key={forecast.key}
+            forecast={forecast}
+            isLoading={isLoading}
+          />
+        );
+      })}
     </section>
   );
 }
