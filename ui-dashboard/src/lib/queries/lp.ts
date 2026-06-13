@@ -23,17 +23,14 @@ export const POOL_LP_POSITIONS = `
  * "unique LPs" tile. Paginated via `fetchAllLpAddressPages` using the
  * canonical `fetchPaginatedRows` helper (page size 1 000).
  *
- * **Caveat:** offset pagination on an append-only table is not perfectly
- * stable under concurrent inserts — a new position row arriving between
- * pages can shift offsets and produce a duplicate or omission. Dedup by
- * `address.toLowerCase()` in the fetcher collapses duplicates; omissions
- * are rare and self-heal on the next poll. A proper fix is keyset
- * pagination — tracked as a follow-up.
+ * `order_by: {id: asc}` gives offset pagination a stable sort so consecutive
+ * pages neither overlap nor skip rows under concurrent inserts.
  */
 export const UNIQUE_LP_ADDRESSES = `
   query UniqueLpAddresses($poolIds: [String!]!, $limit: Int!, $offset: Int!) {
     LiquidityPosition(
       where: { poolId: { _in: $poolIds }, netLiquidity: { _gt: "0" } }
+      order_by: { id: asc }
       limit: $limit
       offset: $offset
     ) {
