@@ -146,6 +146,9 @@ function GlobalContent({
   const anyLpError = networkData.some(
     (netData) => netData.lpError !== null && netData.error === null,
   );
+  const anyLpAddressesTruncated = networkData.some(
+    (netData) => netData.uniqueLpAddressesTruncated && netData.error === null,
+  );
 
   // Per-pool entries, volume, WoW, and strategy badges — shared with pools page.
   // Trading-limit pressure still flows into Health through Pool fields.
@@ -303,6 +306,7 @@ function GlobalContent({
     anySnapshots7dError,
     anyFeesError,
     anyLpError,
+    anyLpAddressesTruncated,
   ]);
 
   const failedNetworks = networkData.filter((net) => net.error !== null);
@@ -313,6 +317,25 @@ function GlobalContent({
     aggregated.unpricedSymbols.length > 0 ||
     aggregated.totalUnresolvedCount > 0 ||
     anyFeesTruncated;
+
+  const lpTileValue = isLoading
+    ? "…"
+    : aggregated.totalUniqueLps === null
+      ? "N/A"
+      : anyLpAddressesTruncated && !anyLpError
+        ? `≈ ${aggregated.totalUniqueLps.toLocaleString()}`
+        : aggregated.totalUniqueLps.toLocaleString();
+
+  // totalUniqueLps is forced to null whenever any chain failed at
+  // the top level, so the subtitle must degrade for network errors
+  // too — not just lpError — otherwise we'd claim a complete
+  // global metric while actually showing N/A.
+  const lpTileSubtitle =
+    anyNetworkError || anyLpError
+      ? "Partial — some chains failed to load"
+      : anyLpAddressesTruncated
+        ? "Approximate — full LP history exceeds pagination cap"
+        : "Unique LP addresses across all chains";
 
   return (
     <div className="space-y-8">
@@ -376,25 +399,7 @@ function GlobalContent({
             }
           />
 
-          <Tile
-            label="LPs"
-            value={
-              isLoading
-                ? "…"
-                : aggregated.totalUniqueLps === null
-                  ? "N/A"
-                  : aggregated.totalUniqueLps.toLocaleString()
-            }
-            subtitle={
-              // totalUniqueLps is forced to null whenever any chain failed at
-              // the top level, so the subtitle must degrade for network errors
-              // too — not just lpError — otherwise we'd claim a complete
-              // global metric while actually showing N/A.
-              anyNetworkError || anyLpError
-                ? "Partial — some chains failed to load"
-                : "Unique LP addresses across all chains"
-            }
-          />
+          <Tile label="LPs" value={lpTileValue} subtitle={lpTileSubtitle} />
 
           <Tile
             label="Swaps"

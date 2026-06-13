@@ -220,6 +220,8 @@ describe("fetchNetworkData — happy path", () => {
     });
     expect(varsFor("LiquidityPosition")).toEqual({
       poolIds: ["pool-1"],
+      limit: 1000,
+      offset: 0,
     });
     // PoolDailySnapshotsAll paginates: with an empty response, the loop exits
     // after the first page. Assert that page was requested with limit + offset=0.
@@ -938,6 +940,121 @@ describe("fetchNetworkData — LP query failure only", () => {
     expect(result.fees).not.toBeNull();
     expect(result.uniqueLpAddresses).toBeNull();
     expect(result.lpError).toBe(lpErr);
+  });
+});
+
+// fetchNetworkData — LP address pagination
+
+describe("fetchNetworkData — LP address pagination", () => {
+  it("deduplicates across multiple pages (1000+42 rows → 1042 unique, truncated false)", async () => {
+    const pool = makePool("pool-lp-multi");
+    // Page 1: 1000 unique addresses
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({
+      address: `0xlp${i}`,
+    }));
+    // Page 2: 42 unique addresses (not in page 1)
+    const page2 = Array.from({ length: 42 }, (_, i) => ({
+      address: `0xlp${1000 + i}`,
+    }));
+    let lpCall = 0;
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
+      if (query.includes("LiquidityPosition")) {
+        lpCall++;
+        const rows = lpCall === 1 ? page1 : page2;
+        return Promise.resolve({ LiquidityPosition: rows });
+      }
+      if (query.includes("PoolDailySnapshot"))
+        return Promise.resolve({ PoolDailySnapshot: [] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [] });
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
+      return Promise.resolve({});
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.uniqueLpAddresses).toHaveLength(1042);
+    expect(result.uniqueLpAddressesTruncated).toBe(false);
+    expect(result.lpError).toBeNull();
+  });
+
+  it("sets truncated true when every page is full (cap exhaustion)", async () => {
+    const pool = makePool("pool-lp-cap");
+    let rowCursor = 0;
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
+      if (query.includes("LiquidityPosition")) {
+        const rows = Array.from({ length: 1000 }, () => ({
+          address: `0xlpfull${rowCursor++}`,
+        }));
+        return Promise.resolve({ LiquidityPosition: rows });
+      }
+      if (query.includes("PoolDailySnapshot"))
+        return Promise.resolve({ PoolDailySnapshot: [] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [] });
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
+      return Promise.resolve({});
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.uniqueLpAddressesTruncated).toBe(true);
+    expect(result.uniqueLpAddresses).not.toBeNull();
+    expect(result.uniqueLpAddresses!.length).toBe(100 * 1000);
+  });
+
+  it("on mid-loop LP failure, preserves fetched rows, sets truncated true and lpError", async () => {
+    const pool = makePool("pool-lp-mid");
+    // Page 1: 1000 rows. Page 2: reject.
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({
+      address: `0xlpmid${i}`,
+    }));
+    let lpCall = 0;
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
+      if (query.includes("LiquidityPosition")) {
+        lpCall++;
+        if (lpCall === 1) return Promise.resolve({ LiquidityPosition: page1 });
+        return Promise.reject(new Error("LP page 2 timeout"));
+      }
+      if (query.includes("PoolDailySnapshot"))
+        return Promise.resolve({ PoolDailySnapshot: [] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [] });
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
+      return Promise.resolve({});
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    // Rows from page 1 are preserved.
+    expect(result.uniqueLpAddresses).toHaveLength(1000);
+    // truncated and lpError are both set.
+    expect(result.uniqueLpAddressesTruncated).toBe(true);
+    expect(result.lpError).not.toBeNull();
+    expect(result.lpError?.message).toContain("LP page 2 timeout");
+    // Top-level error stays null (LP is isolated from pools).
+    expect(result.error).toBeNull();
   });
 });
 
