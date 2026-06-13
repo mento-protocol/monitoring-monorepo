@@ -104,8 +104,8 @@ export class QueryService {
     metric: Metric,
     chain: ChainConfig,
     args: unknown[],
-    label: string,
   ): Promise<unknown> {
+    const label = `${metric.source.contract}.${metric.source.functionAbi.name} on ${metric.chain}`;
     let primaryError: unknown;
     try {
       return await this.executeCall(client, metric, chain, args);
@@ -154,7 +154,6 @@ export class QueryService {
       throw new Error(`Missing function name for metric ${metric.name}`);
     }
     const args = metric.args.map((arg) => chain.vars[arg] ?? arg);
-    const label = `${contractName}.${functionName} on ${metric.chain}`;
 
     const timer = this.queryTime.startTimer({
       contract: contractName,
@@ -164,7 +163,7 @@ export class QueryService {
 
     let data: unknown;
     try {
-      data = await this.fetchWithFallback(client, metric, chain, args, label);
+      data = await this.fetchWithFallback(client, metric, chain, args);
     } catch {
       // rpcErrors counts only RPC transport failures (primary + fallback exhausted).
       // Parse errors below are intentionally excluded.
