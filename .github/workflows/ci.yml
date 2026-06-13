@@ -200,6 +200,8 @@ jobs:
               - package.json
               - pnpm-workspace.yaml
               - .node-version
+              # Notifier coverage check re-runs when the notifier list changes.
+              - .github/workflows/notify-slack-on-main-failure.yml
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
@@ -807,6 +809,12 @@ jobs:
         # check). The wrapper is now load-bearing CI policy; routing tests
         # alone don't prove it behaves correctly.
         run: node scripts/eslint-baseline-diff.test.mjs
+      - name: Notifier coverage assertion
+        # Asserts that every push-to-main or schedule-only workflow is listed
+        # in notify-slack-on-main-failure.yml so failures are never silent.
+        # Also triggered by changes to the notifier itself (rootScripts filter
+        # above includes the notifier YAML).
+        run: node scripts/check-notifier-coverage.mjs
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
