@@ -1,7 +1,14 @@
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { register } from 'prom-client';
-import { createPublicClient, http, HttpRequestError } from 'viem';
+import {
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  createPublicClient,
+  http,
+  HttpRequestError,
+  RpcRequestError,
+} from 'viem';
 import { ChainConfig } from './config';
 import { Metric } from './metric';
 import { QueryService } from './query.service';
@@ -11,7 +18,10 @@ import { QueryService } from './query.service';
 jest.mock('viem', () => ({
   ...jest.requireActual('viem'),
   createPublicClient: jest.fn(),
-  http: jest.fn((url: string) => ({ url })),
+  http: jest.fn((url: string, opts?: Record<string, unknown>) => ({
+    url,
+    ...opts,
+  })),
 }));
 
 const mockCreatePublicClient = jest.mocked(createPublicClient);
@@ -21,6 +31,38 @@ const mockHttp = jest.mocked(http);
 // test needs the retry/counter path to fire.
 const makeTransportError = (message: string): HttpRequestError =>
   new HttpRequestError({ url: 'http://localhost:8545', details: message });
+
+// A representative deterministic error (contract revert). viem wraps these as
+// ContractFunctionExecutionError → ContractFunctionRevertedError. Used where a
+// test needs to assert that no retry/counter path fires.
+const makeRevertError = (): ContractFunctionExecutionError => {
+  const cause = new ContractFunctionRevertedError({
+    abi: [],
+    functionName: 'getRateFeedTradingMode',
+    message: 'execution reverted',
+  });
+  return new ContractFunctionExecutionError(cause, {
+    abi: [
+      {
+        type: 'function',
+        name: 'getRateFeedTradingMode',
+        inputs: [],
+        outputs: [],
+        stateMutability: 'view',
+      },
+    ],
+    functionName: 'getRateFeedTradingMode',
+  });
+};
+
+// An RpcRequestError that carries an on-chain execution-revert code (3). Some
+// nodes surface this directly instead of viem's ContractFunctionRevertedError.
+const makeRpcRevertError = (): RpcRequestError =>
+  new RpcRequestError({
+    body: { method: 'eth_call', params: [] },
+    error: { code: 3, message: 'execution reverted' },
+    url: 'http://localhost:8545',
+  });
 
 const readContract = jest.fn();
 const getBalance = jest.fn();
@@ -86,16 +128,18 @@ describe('QueryService', () => {
     register.clear();
   });
 
-  it('creates a public client for each configured chain', () => {
+  it('creates a public client for each configured chain with retryCount 0', () => {
     new QueryService(makeConfigService());
 
-    expect(mockHttp).toHaveBeenCalledWith('http://localhost:8545');
+    expect(mockHttp).toHaveBeenCalledWith('http://localhost:8545', {
+      retryCount: 0,
+    });
     expect(mockCreatePublicClient).toHaveBeenCalledWith(
       expect.objectContaining({
         chain: expect.objectContaining({
           name: 'localnet',
         }),
-        transport: { url: 'http://localhost:8545' },
+        transport: { url: 'http://localhost:8545', retryCount: 0 },
       }),
     );
   });
@@ -373,13 +417,12 @@ describe('QueryService', () => {
     expect(total).toBe(0);
   });
 
-  // (F) A deterministic call failure (e.g. contract revert) is NOT a transport
-  // error: the fallback must not be tried and the counter must stay flat, since
-  // the same error would reproduce on every healthy endpoint.
-  it('does not retry fallback or increment counter on a non-transport (deterministic) error', async () => {
-    const primaryReadContract = jest
-      .fn()
-      .mockRejectedValue(new Error('execution reverted'));
+  // (F) A deterministic call failure (contract revert via viem's
+  // ContractFunctionExecutionError) is NOT a transport error: the fallback must
+  // not be tried and the counter must stay flat, since the same error would
+  // reproduce on every healthy endpoint.
+  it('does not retry fallback or increment counter on a contract revert (ContractFunctionExecutionError)', async () => {
+    const primaryReadContract = jest.fn().mockRejectedValue(makeRevertError());
     const fallbackReadContract = jest.fn().mockResolvedValue(99n);
 
     mockCreatePublicClient
@@ -408,6 +451,43 @@ describe('QueryService', () => {
     expect(fallbackReadContract).not.toHaveBeenCalled();
 
     // Counter must stay flat — this is a protocol/config failure, not an outage.
+    const metrics = await service.rpcErrors.get();
+    const total = metrics.values.reduce((sum, v) => sum + v.value, 0);
+    expect(total).toBe(0);
+  });
+
+  // (G) An RpcRequestError with code 3 (execution reverted) is deterministic:
+  // no fallback retry, no counter increment.
+  it('does not retry fallback or increment counter on an RpcRequestError with revert code', async () => {
+    const primaryReadContract = jest
+      .fn()
+      .mockRejectedValue(makeRpcRevertError());
+    const fallbackReadContract = jest.fn().mockResolvedValue(99n);
+
+    mockCreatePublicClient
+      .mockReturnValueOnce({
+        readContract: primaryReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>)
+      .mockReturnValueOnce({
+        readContract: fallbackReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>);
+
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    const chainWithFallback = {
+      ...chain,
+      fallbackHttpRpcUrl: 'http://localhost:8546',
+    } as unknown as ChainConfig;
+    const service = new QueryService(makeConfigService([chainWithFallback]));
+    const metric = makeMetric();
+
+    await expect(service.query(metric)).resolves.toBeUndefined();
+
+    expect(fallbackReadContract).not.toHaveBeenCalled();
+
     const metrics = await service.rpcErrors.get();
     const total = metrics.values.reduce((sum, v) => sum + v.value, 0);
     expect(total).toBe(0);

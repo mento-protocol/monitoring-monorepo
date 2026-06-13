@@ -2,12 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Counter, Histogram } from 'prom-client';
 import {
+  AbiDecodingZeroDataError,
+  AbiErrorSignatureNotFoundError,
+  BaseError,
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
   createPublicClient,
   http,
-  HttpRequestError,
+  InvalidAddressError,
   RpcRequestError,
-  TimeoutError,
-  WebSocketRequestError,
   type Address,
   type PublicClient,
 } from 'viem';
@@ -32,26 +35,51 @@ const makeChain = (chain: ChainConfig): chains.Chain => ({
 const errMsg = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
 
+// JSON-RPC error code 3 = execution reverted (EIP-1474 / Ethereum yellow paper).
+const EXECUTION_REVERT_CODE = 3;
+
+// Returns true when an RpcRequestError is a server-side execution revert rather
+// than a transport problem.  Code 3 is the canonical revert code; the message
+// fallback catches non-standard nodes that omit the code field.
+const isRevertRpcError = (err: RpcRequestError): boolean =>
+  err.code === EXECUTION_REVERT_CODE ||
+  err.message.toLowerCase().includes('execution reverted') ||
+  err.message.toLowerCase().includes('revert');
+
 // Transport-level failures (endpoint unreachable/slow/malformed response) are
 // retryable on another endpoint and are what `view_call_rpc_errors_total` is
 // meant to track. Deterministic call failures — contract reverts, bad ABI/args,
 // invalid addresses — reproduce on every healthy endpoint, so they are NOT
 // transport errors: retrying is pointless and counting them as RPC outages
-// would mislead Grafana. viem nests the underlying cause, so walk the chain.
+// would mislead Grafana.
+//
+// viem wraps deterministic errors inside ContractFunctionExecutionError (which
+// itself nests ContractFunctionRevertedError, ABI decode errors, etc.).
+// RpcRequestError can appear in both contexts: viem nests it under revert
+// wrappers for on-chain reverts, but it also surfaces directly for network-level
+// JSON-RPC failures.  We use BaseError.walk() to inspect the full error tree.
+//
+// When genuinely ambiguous, we default to TRANSPORT so real outages are caught.
 const isTransportError = (err: unknown): boolean => {
-  let current: unknown = err;
-  for (let depth = 0; current != null && depth < 10; depth += 1) {
-    if (
-      current instanceof HttpRequestError ||
-      current instanceof RpcRequestError ||
-      current instanceof TimeoutError ||
-      current instanceof WebSocketRequestError
-    ) {
-      return true;
-    }
-    current = (current as { cause?: unknown }).cause;
+  if (!(err instanceof BaseError)) {
+    // Unknown / non-viem error — default to transport so outages are captured.
+    return true;
   }
-  return false;
+
+  // Deterministic: viem's contract-call wrappers and ABI/address errors.
+  // These reproduce on every healthy endpoint; never retry the fallback.
+  const isDeterministic = err.walk(
+    (e) =>
+      e instanceof ContractFunctionRevertedError ||
+      e instanceof ContractFunctionExecutionError ||
+      e instanceof AbiDecodingZeroDataError ||
+      e instanceof AbiErrorSignatureNotFoundError ||
+      e instanceof InvalidAddressError ||
+      // RpcRequestError whose code/message signals a server-side revert.
+      (e instanceof RpcRequestError && isRevertRpcError(e)),
+  );
+
+  return isDeterministic === null;
 };
 
 @Injectable()
@@ -70,18 +98,22 @@ export class QueryService {
     }
     chainConfigs.forEach((chain) => {
       this.chains[chain.id] = chain;
+      // retryCount: 0 disables viem's built-in per-transport retry loop (default
+      // is 3). We manage retries explicitly via the primary→fallback logic below;
+      // letting viem retry internally would compound latency and undermine the
+      // single-fallback posture described in AGENTS.md.
       this.clients[chain.id] = createPublicClient({
         chain:
           (chains as Record<string, chains.Chain>)[chain.id] ??
           makeChain(chain),
-        transport: http(chain.httpRpcUrl),
+        transport: http(chain.httpRpcUrl, { retryCount: 0 }),
       });
       this.fallbackClients[chain.id] = chain.fallbackHttpRpcUrl
         ? createPublicClient({
             chain:
               (chains as Record<string, chains.Chain>)[chain.id] ??
               makeChain(chain),
-            transport: http(chain.fallbackHttpRpcUrl),
+            transport: http(chain.fallbackHttpRpcUrl, { retryCount: 0 }),
           })
         : undefined;
     });

@@ -41,13 +41,16 @@ Aegis uses a simple primary-then-fallback retry model with no circuit breaker or
 - **Primary RPC**: the `httpRpcUrl` configured per chain in `config.yaml`. All calls attempt this first.
 - **Fallback RPC**: the optional `fallbackHttpRpcUrl` field on a chain config. If a primary call throws, Aegis retries once against the fallback (if configured). If the fallback also throws, or no fallback is configured, the error propagates to the outer handler.
 - **No breaker / no backoff**: the retry is a single immediate attempt. There is no exponential backoff, no half-open state, and no per-endpoint health tracking. This is intentional — Aegis metrics are already polled on a schedule; adding backoff would silently extend stale windows.
+- **No internal viem retries**: both primary and fallback clients are created with `http(url, { retryCount: 0 })`. viem defaults to `retryCount = 3` (with 150 ms delay between attempts); leaving that enabled would compound latency on transport failures and undermine the explicit single-fallback posture above.
 
 ### Transport vs. deterministic error classification
 
 Aegis classifies every caught error before deciding whether to retry the fallback or increment the counter:
 
-- **Transport errors** (network down, HTTP 5xx, timeout, connection refused): the endpoint is unhealthy. These trigger the fallback retry and, if all endpoints fail, increment `view_call_rpc_errors_total`. Identified by viem's `HttpRequestError`, `RpcRequestError`, `TimeoutError`, or `WebSocketRequestError` anywhere in the error cause chain.
-- **Deterministic errors** (contract revert, ABI decoding failure, invalid address): the call itself is broken — it would reproduce on every healthy endpoint. These do NOT retry the fallback and do NOT increment the counter. The error is logged and `query()` returns `undefined`, identical to a parse failure. If unsure, the implementation defaults to TRANSPORT so genuine outages are still captured.
+- **Transport errors** (network down, HTTP 5xx, timeout, connection refused): the endpoint is unhealthy. These trigger the fallback retry and, if all endpoints fail, increment `view_call_rpc_errors_total`. Identified when the error is `HttpRequestError`, `TimeoutError`, `WebSocketRequestError`, or an `RpcRequestError` that does NOT carry revert semantics — and when none of the deterministic markers below are found.
+- **Deterministic errors** (contract revert, ABI decoding failure, invalid address): the call itself is broken — it would reproduce on every healthy endpoint. These do NOT retry the fallback and do NOT increment the counter. The error is logged and `query()` returns `undefined`, identical to a parse failure.
+
+**How deterministic is detected (using `BaseError.walk()`):** `ContractFunctionRevertedError`, `ContractFunctionExecutionError`, `AbiDecodingZeroDataError`, `AbiErrorSignatureNotFoundError`, `InvalidAddressError`, or an `RpcRequestError` with JSON-RPC error code 3 (execution reverted) or a message containing "execution reverted"/"revert". If the error is not a viem `BaseError` at all (unexpected type), the implementation defaults to TRANSPORT so genuine outages are still captured.
 
 This prevents Grafana from seeing false RPC-outage signals when a metric is misconfigured or a contract reverts.
 
