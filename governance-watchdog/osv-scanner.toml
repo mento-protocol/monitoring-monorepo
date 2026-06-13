@@ -2,3 +2,13 @@
 id = "GHSA-vpq2-c234-7xj6"
 reason = "Transitive dep via @google-cloud/secret-manager → google-gax → teeny-request → http-proxy-agent. No upgrade path available upstream."
 ignoreUntil = 2026-09-01
+
+[[IgnoredVulns]]
+id = "GHSA-58qx-3vcg-4xpx"
+reason = "Transitive dep ws via viem. No upgrade path: viem pins ws@8 and the fix requires ws>=8.20.1. Tracked in follow-up issue."
+ignoreUntil = 2026-09-01
+
+[[IgnoredVulns]]
+id = "GHSA-w5hq-g745-h8pq"
+reason = "Transitive dep uuid via @google-cloud/functions-framework→cloudevents and @google-cloud/secret-manager→google-gax. No direct fix path available upstream."
+ignoreUntil = 2026-09-01
