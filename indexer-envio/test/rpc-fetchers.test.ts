@@ -19,6 +19,7 @@ import {
   _setMockStableTotalSupply,
   fetchStableTotalSupply,
 } from "../src/rpc/stable-fetchers.ts";
+import { fetchBlockTimestamp } from "../src/rpc.ts";
 
 const CHAIN_ID = 42220;
 const POOL = "0x00000000000000000000000000000000000000aa";
@@ -76,6 +77,19 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
     assert.equal(result, null);
     assert.equal(calls.length, 5);
     assert.equal(calls.at(-1)?.blockNumber, undefined);
+  });
+
+  it("fetchBlockTimestamp reads historical block timestamps by number", async () => {
+    _setRpcClientForTests(CHAIN_ID, {
+      getBlock: async (args) => {
+        assert.deepEqual(args, { blockNumber: BLOCK });
+        return { timestamp: 1_780_444_800n };
+      },
+    });
+
+    const result = await fetchBlockTimestamp(CHAIN_ID, BLOCK, noopLogger);
+
+    assert.equal(result, 1_780_444_800n);
   });
 
   it("fetchRebalanceThresholds fails closed when either threshold uses latest fallback", async () => {

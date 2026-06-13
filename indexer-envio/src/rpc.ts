@@ -24,6 +24,7 @@ export {
   _testHooks,
 } from "./rpc/block-fallback.js";
 export type { BlockFallbackResult } from "./rpc/block-fallback.js";
+export { fetchBlockTimestamp } from "./rpc/block.js";
 
 // Re-export pool-state symbols so existing callers that import from "./rpc.js"
 // continue to work without import-path changes (feeToken.ts, EventHandlers.ts,

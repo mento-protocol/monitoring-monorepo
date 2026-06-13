@@ -384,7 +384,7 @@ function RevenuePeriodCards({
   return (
     <section
       aria-label="Revenue actuals by period"
-      className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
     >
       {PERIOD_CARD_ORDER.map((key) => {
         const period = periods[key];

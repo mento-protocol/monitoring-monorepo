@@ -151,7 +151,10 @@ export function _clearRpcClients(): void {
  * viem surface is unused by the functions tested via this hook. */
 export function _setRpcClientForTests(
   chainId: number,
-  client: { readContract: (args: unknown) => Promise<unknown> } | null,
+  client: {
+    readContract?: (args: unknown) => Promise<unknown>;
+    getBlock?: (args: unknown) => Promise<unknown>;
+  } | null,
 ): void {
   if (client === null) {
     rpcClients.delete(chainId);

@@ -16,9 +16,14 @@ import {
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
+  recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
 } from "../src/handlers/susds.ts";
 import { ZERO_ADDRESS } from "../src/constants.ts";
+import {
+  blockTimestampEffect,
+  susdsSharePriceEffect,
+} from "../src/rpc/effects.ts";
 
 type MockDb = MockDbWith<{
   SusdsCostBasisLot: EntityCollection;
@@ -158,6 +163,34 @@ function dailySnapshotContext(
       },
     },
   } as unknown as Parameters<typeof recordSusdsYieldDailySnapshot>[0];
+}
+
+function heartbeatContext(
+  mockDb: MockDb,
+  blockTimestamp: bigint | null,
+  sharePriceUsdWei: bigint,
+): Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0] {
+  return {
+    ...dailySnapshotContext(mockDb),
+    effect: async (effect, input) => {
+      if (effect === blockTimestampEffect) {
+        assert.deepEqual(input, {
+          chainId: ETHEREUM_CHAIN_ID,
+          blockNumber: 300n,
+        });
+        return blockTimestamp;
+      }
+      if (effect === susdsSharePriceEffect) {
+        assert.deepEqual(input, {
+          chainId: ETHEREUM_CHAIN_ID,
+          tokenAddress: SUSDS_ADDRESS,
+          blockNumber: 300n,
+        });
+        return sharePriceUsdWei;
+      }
+      throw new Error("unexpected effect");
+    },
+  } as unknown as Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0];
 }
 
 describe("sUSDS reserve yield accounting", () => {
@@ -443,6 +476,49 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(rows[0]?.totalEarnedYieldUsdWei, dollars(100));
     assert.equal(rows[1]?.totalEarnedYieldUsdWei, dollars(300));
     assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(200));
+  });
+
+  it("writes sUSDS daily snapshots from a block-number-only heartbeat", async () => {
+    let mockDb = MockDb.createMockDb();
+    const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
+    const day2 = day1 + 86_400n;
+
+    setSharePrice(100, WAD);
+    mockDb = await deposit(
+      mockDb,
+      100,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(day1 + 3_600n),
+    );
+
+    const didWrite = await recordSusdsYieldHeartbeatSnapshot(
+      heartbeatContext(mockDb, day2 + 3_600n, dollars(120) / 100n),
+      300n,
+    );
+
+    const rows = dailySnapshots(mockDb).sort((a, b) =>
+      a.timestamp < b.timestamp ? -1 : 1,
+    );
+    assert.equal(didWrite, true);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[1]?.timestamp, day2);
+    assert.equal(rows[1]?.totalEarnedYieldUsdWei, dollars(200));
+    assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(200));
+    assert.equal(rows[1]?.sampledAtBlock, 300n);
+  });
+
+  it("skips the sUSDS heartbeat snapshot when block timestamp RPC returns null", async () => {
+    const mockDb = MockDb.createMockDb();
+
+    const didWrite = await recordSusdsYieldHeartbeatSnapshot(
+      heartbeatContext(mockDb, null, WAD),
+      300n,
+    );
+
+    assert.equal(didWrite, false);
+    assert.equal(dailySnapshots(mockDb).length, 0);
   });
 
   it("uses the first post-launch sUSDS daily snapshot as the delta baseline", async () => {
