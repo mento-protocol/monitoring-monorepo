@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "featureId": "feat_ui-flow_f33ab0b054",
-  "title": "React component fee-over-time-chart",
+  "title": "React component total-revenue-chart",
   "summary": "React component implemented by ui-dashboard/src/components/fee-over-time-chart.tsx.",
   "kind": "ui-flow",
   "source": "react-component",
@@ -9,7 +9,7 @@
   "entrypoints": [
     {
       "path": "ui-dashboard/src/components/fee-over-time-chart.tsx",
-      "symbol": "fee-over-time-chart",
+      "symbol": "total-revenue-chart",
       "route": null,
       "command": null
     }

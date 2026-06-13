@@ -911,6 +911,27 @@ type SusdsYieldSummary {
   lastUpdatedTimestamp: BigInt!
 }
 
+type SusdsYieldDailySnapshot {
+  id: ID! # "{chainId}-susds-{dayTimestamp}"
+  chainId: Int! @index
+  token: String!
+  timestamp: BigInt! @index # UTC day bucket start
+  currentShares: BigInt! @config(precision: 78)
+  costBasisUsdWei: BigInt! @config(precision: 78)
+  realizedYieldUsdWei: BigInt! @config(precision: 78)
+  transferredOutYieldUsdWei: BigInt! @config(precision: 78)
+  redeemedYieldUsdWei: BigInt! @config(precision: 78)
+  currentValueUsdWei: BigInt! @config(precision: 78)
+  unrealizedYieldUsdWei: BigInt! @config(precision: 78)
+  totalEarnedYieldUsdWei: BigInt! @config(precision: 78)
+  dailyEarnedYieldUsdWei: BigInt! @config(precision: 78)
+  dailyRealizedYieldUsdWei: BigInt! @config(precision: 78)
+  dailyUnrealizedYieldUsdWei: BigInt! @config(precision: 78)
+  sharePriceUsdWei: BigInt! @config(precision: 78)
+  sampledAtBlock: BigInt!
+  sampledAtTimestamp: BigInt!
+}
+
 # Pre-rolled hero metrics for /volume. Bypasses Hasura's 1000-row
 # cap on TraderDailySnapshot for any window-level aggregation.
 # One row per (chainId, windowKey, snapshotDay). The dashboard reads the

@@ -1,6 +1,10 @@
-import type { EvmOnEventContext, SusdsPosition } from "envio";
+import type {
+  EvmOnEventContext,
+  SusdsPosition,
+  SusdsYieldDailySnapshot,
+} from "envio";
 import { ZERO_ADDRESS } from "../constants.js";
-import { asAddress, eventId } from "../helpers.js";
+import { SECONDS_PER_DAY, asAddress, dayBucket, eventId } from "../helpers.js";
 import { indexer } from "../indexer.js";
 import { susdsSharePriceEffect } from "../rpc/effects.js";
 
@@ -14,6 +18,8 @@ export const TRACKED_SUSDS_WALLETS = [
 const WAD = 10n ** 18n;
 const ZERO = 0n;
 const SUMMARY_ID = `${ETHEREUM_CHAIN_ID}-susds`;
+export const V3_REVENUE_LAUNCH_TIMESTAMP = 1_772_496_000n; // 2026-03-03T00:00:00Z
+const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
 const TRACKED_WALLET_SET = new Set<string>(TRACKED_SUSDS_WALLETS);
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
@@ -35,17 +41,32 @@ type SusdsContext = Pick<
   | "SusdsCostBasisLot"
   | "SusdsPosition"
   | "SusdsYieldMovement"
+  | "SusdsYieldDailySnapshot"
   | "SusdsYieldSummary"
   | "effect"
   | "isPreload"
 >;
 
-type EventMeta = {
+type BlockMeta = {
   chainId: number;
   blockNumber: bigint;
   blockTimestamp: bigint;
+};
+
+type EventMeta = BlockMeta & {
   logIndex: number;
   txHash: string;
+};
+
+type SusdsYieldTotals = {
+  currentShares: bigint;
+  costBasisUsdWei: bigint;
+  realizedYieldUsdWei: bigint;
+  transferredOutYieldUsdWei: bigint;
+  redeemedYieldUsdWei: bigint;
+  currentValueUsdWei: bigint;
+  unrealizedYieldUsdWei: bigint;
+  totalEarnedYieldUsdWei: bigint;
 };
 
 function isTrackedWallet(address: string): boolean {
@@ -209,7 +230,27 @@ async function updateSummary(
   context: SusdsContext,
   meta: EventMeta,
   sharePriceUsdWei: bigint,
-): Promise<void> {
+): Promise<SusdsYieldTotals> {
+  const totals = await computeYieldTotals(context, meta, sharePriceUsdWei);
+  context.SusdsYieldSummary.set({
+    id: SUMMARY_ID,
+    chainId: meta.chainId,
+    token: SUSDS_ADDRESS,
+    trackedWallets: [...TRACKED_SUSDS_WALLETS],
+    ...totals,
+    sharePriceUsdWei,
+    lastMovementTxHash: meta.txHash,
+    lastUpdatedBlock: meta.blockNumber,
+    lastUpdatedTimestamp: meta.blockTimestamp,
+  });
+  return totals;
+}
+
+async function computeYieldTotals(
+  context: SusdsContext,
+  meta: BlockMeta,
+  sharePriceUsdWei: bigint,
+): Promise<SusdsYieldTotals> {
   let currentShares = ZERO;
   let costBasisUsdWei = ZERO;
   let realizedYieldUsdWei = ZERO;
@@ -233,11 +274,7 @@ async function updateSummary(
     currentValueUsdWei,
     costBasisUsdWei,
   );
-  context.SusdsYieldSummary.set({
-    id: SUMMARY_ID,
-    chainId: meta.chainId,
-    token: SUSDS_ADDRESS,
-    trackedWallets: [...TRACKED_SUSDS_WALLETS],
+  return {
     currentShares,
     costBasisUsdWei,
     realizedYieldUsdWei,
@@ -246,16 +283,139 @@ async function updateSummary(
     currentValueUsdWei,
     unrealizedYieldUsdWei,
     totalEarnedYieldUsdWei: realizedYieldUsdWei + unrealizedYieldUsdWei,
+  };
+}
+
+function susdsDailySnapshotId(chainId: number, bucket: bigint): string {
+  return `${chainId}-susds-${bucket}`;
+}
+
+type SusdsYieldDeltaBaseline = Pick<
+  SusdsYieldDailySnapshot | SusdsYieldTotals,
+  "totalEarnedYieldUsdWei" | "realizedYieldUsdWei" | "unrealizedYieldUsdWei"
+>;
+
+function baselineFromSameDaySnapshot(
+  snapshot: SusdsYieldDailySnapshot,
+): SusdsYieldDeltaBaseline {
+  return {
+    totalEarnedYieldUsdWei:
+      snapshot.totalEarnedYieldUsdWei - snapshot.dailyEarnedYieldUsdWei,
+    realizedYieldUsdWei:
+      snapshot.realizedYieldUsdWei - snapshot.dailyRealizedYieldUsdWei,
+    unrealizedYieldUsdWei:
+      snapshot.unrealizedYieldUsdWei - snapshot.dailyUnrealizedYieldUsdWei,
+  };
+}
+
+function nonNegativeDelta(current: bigint, baseline: bigint): bigint {
+  const delta = current - baseline;
+  return delta < ZERO ? ZERO : delta;
+}
+
+function buildSusdsYieldDailySnapshot({
+  chainId,
+  bucket,
+  totals,
+  deltaBaseline,
+  sharePriceUsdWei,
+  sampledAtBlock,
+  sampledAtTimestamp,
+}: {
+  chainId: number;
+  bucket: bigint;
+  totals: SusdsYieldTotals;
+  deltaBaseline: SusdsYieldDeltaBaseline;
+  sharePriceUsdWei: bigint;
+  sampledAtBlock: bigint;
+  sampledAtTimestamp: bigint;
+}): SusdsYieldDailySnapshot {
+  return {
+    id: susdsDailySnapshotId(chainId, bucket),
+    chainId,
+    token: SUSDS_ADDRESS,
+    timestamp: bucket,
+    ...totals,
+    dailyEarnedYieldUsdWei: nonNegativeDelta(
+      totals.totalEarnedYieldUsdWei,
+      deltaBaseline.totalEarnedYieldUsdWei,
+    ),
+    dailyRealizedYieldUsdWei:
+      totals.realizedYieldUsdWei - deltaBaseline.realizedYieldUsdWei,
+    dailyUnrealizedYieldUsdWei:
+      totals.unrealizedYieldUsdWei - deltaBaseline.unrealizedYieldUsdWei,
     sharePriceUsdWei,
-    lastMovementTxHash: meta.txHash,
-    lastUpdatedBlock: meta.blockNumber,
-    lastUpdatedTimestamp: meta.blockTimestamp,
-  });
+    sampledAtBlock,
+    sampledAtTimestamp,
+  };
+}
+
+async function findPreviousDailySnapshot(
+  context: SusdsContext,
+  chainId: number,
+  bucket: bigint,
+): Promise<SusdsYieldDailySnapshot | undefined> {
+  const launchBucket = dayBucket(V3_REVENUE_LAUNCH_TIMESTAMP);
+  for (
+    let previousBucket = bucket - SECONDS_PER_DAY;
+    previousBucket >= launchBucket;
+    previousBucket -= SECONDS_PER_DAY
+  ) {
+    const snapshot = await context.SusdsYieldDailySnapshot.get(
+      susdsDailySnapshotId(chainId, previousBucket),
+    );
+    if (snapshot !== undefined) return snapshot;
+  }
+  return undefined;
+}
+
+export async function recordSusdsYieldDailySnapshot(
+  context: SusdsContext,
+  meta: BlockMeta,
+  sharePriceUsdWei: bigint,
+  precomputedTotals?: SusdsYieldTotals,
+): Promise<void> {
+  if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return;
+
+  const totals =
+    precomputedTotals ??
+    (await computeYieldTotals(context, meta, sharePriceUsdWei));
+  if (totals.currentShares === ZERO && totals.totalEarnedYieldUsdWei === ZERO) {
+    return;
+  }
+
+  const bucket = dayBucket(meta.blockTimestamp);
+  const id = susdsDailySnapshotId(meta.chainId, bucket);
+  const previousSnapshot = await findPreviousDailySnapshot(
+    context,
+    meta.chainId,
+    bucket,
+  );
+  const currentSnapshot =
+    previousSnapshot === undefined
+      ? await context.SusdsYieldDailySnapshot.get(id)
+      : undefined;
+  const deltaBaseline =
+    previousSnapshot ??
+    (currentSnapshot === undefined
+      ? totals
+      : baselineFromSameDaySnapshot(currentSnapshot));
+  context.SusdsYieldDailySnapshot.set(
+    buildSusdsYieldDailySnapshot({
+      chainId: meta.chainId,
+      bucket,
+      totals,
+      deltaBaseline,
+      sharePriceUsdWei,
+      sampledAtBlock: meta.blockNumber,
+      sampledAtTimestamp: meta.blockTimestamp,
+    }),
+  );
 }
 
 async function readSharePrice(
   context: SusdsContext,
-  meta: EventMeta,
+  meta: BlockMeta,
 ): Promise<bigint> {
   const sharePriceUsdWei = await context.effect(susdsSharePriceEffect, {
     chainId: meta.chainId,
@@ -520,7 +680,13 @@ indexer.onEvent(
       event.params.shares,
       sharePriceUsdWei,
     );
-    await updateSummary(context, meta, sharePriceUsdWei);
+    const totals = await updateSummary(context, meta, sharePriceUsdWei);
+    await recordSusdsYieldDailySnapshot(
+      context,
+      meta,
+      sharePriceUsdWei,
+      totals,
+    );
   },
 );
 
@@ -545,7 +711,13 @@ indexer.onEvent(
       shares: event.params.shares,
       sharePriceUsdWei,
     });
-    await updateSummary(context, meta, sharePriceUsdWei);
+    const totals = await updateSummary(context, meta, sharePriceUsdWei);
+    await recordSusdsYieldDailySnapshot(
+      context,
+      meta,
+      sharePriceUsdWei,
+      totals,
+    );
   },
 );
 
@@ -573,6 +745,48 @@ indexer.onEvent(
       event.params.value,
       sharePriceUsdWei,
     );
-    await updateSummary(context, meta, sharePriceUsdWei);
+    const totals = await updateSummary(context, meta, sharePriceUsdWei);
+    await recordSusdsYieldDailySnapshot(
+      context,
+      meta,
+      sharePriceUsdWei,
+      totals,
+    );
+  },
+);
+
+type BlockWithTimestamp = {
+  readonly number: number;
+  readonly timestamp?: number;
+};
+
+indexer.onBlock(
+  {
+    name: "SusdsYieldDailySnapshotHeartbeat",
+    where: ({ chain }) =>
+      chain.id === ETHEREUM_CHAIN_ID
+        ? {
+            block: {
+              number: {
+                _gte: chain.startBlock,
+                _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
+              },
+            },
+          }
+        : false,
+  },
+  async ({ block, context }) => {
+    if (context.isPreload) return;
+    const blockWithTimestamp = block as BlockWithTimestamp;
+    const timestamp = blockWithTimestamp.timestamp;
+    if (timestamp === undefined || timestamp <= 0) return;
+    const meta: BlockMeta = {
+      chainId: ETHEREUM_CHAIN_ID,
+      blockNumber: BigInt(block.number),
+      blockTimestamp: BigInt(timestamp),
+    };
+    if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return;
+    const sharePriceUsdWei = await readSharePrice(context, meta);
+    await recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
   },
 );

@@ -9,3 +9,4 @@ export const SWR_KEY_PROTOCOL_FEES = "protocol-fees-all-networks";
 export const SWR_KEY_CDP_BORROWING_REVENUE =
   "cdp-borrowing-revenue-all-networks";
 export const SWR_KEY_RESERVE_YIELD = "reserve-yield-current";
+export const SWR_KEY_RESERVE_YIELD_HISTORY = "reserve-yield-history";
