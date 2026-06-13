@@ -87,4 +87,23 @@ describe("buildRevenueChartFigure", () => {
     });
     expect("range" in figure.layout.yaxis).toBe(false);
   });
+
+  it("keeps negative revenue days on Plotly autorange instead of restoring a fixed range", () => {
+    const figure = buildRevenueChartFigure([
+      {
+        timestamp: START,
+        reserveYieldUsd: -50,
+        swapFeesUsd: 0,
+        cdpBorrowingUsd: 0,
+        totalRevenueUsd: -50,
+        availableRevenueUsd: -50,
+      },
+    ]);
+
+    expect(figure.layout.yaxis).toMatchObject({
+      autorange: true,
+      rangemode: "tozero",
+    });
+    expect("range" in figure.layout.yaxis).toBe(false);
+  });
 });
