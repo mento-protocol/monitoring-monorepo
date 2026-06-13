@@ -100,12 +100,12 @@ export class QueryService {
    * Increments rpcErrors and logs on all-endpoints-exhausted paths.
    */
   private async fetchWithFallback(
+    client: PublicClient,
     metric: Metric,
     chain: ChainConfig,
     args: unknown[],
     label: string,
   ): Promise<unknown> {
-    const client = this.clients[metric.chain];
     let primaryError: unknown;
     try {
       return await this.executeCall(client, metric, chain, args);
@@ -164,7 +164,7 @@ export class QueryService {
 
     let data: unknown;
     try {
-      data = await this.fetchWithFallback(metric, chain, args, label);
+      data = await this.fetchWithFallback(client, metric, chain, args, label);
     } catch {
       // rpcErrors counts only RPC transport failures (primary + fallback exhausted).
       // Parse errors below are intentionally excluded.
