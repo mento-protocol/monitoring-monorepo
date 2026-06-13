@@ -119,9 +119,9 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 
 `notify-slack-on-main-failure.yml` fires for every workflow whose failure would otherwise be silent. It must be kept in sync whenever a new workflow is added.
 
-- [ ] If the new workflow has `on.push.branches: [main]` OR `on.schedule`, add its `name:` value to the `workflow_run.workflows` list in `notify-slack-on-main-failure.yml`
+- [ ] If the new workflow runs on push to `main` (`on.push.branches: [main]`, OR a branchless `on.push:` with no `branches:`/`branches-ignore:` key, which runs on every branch) OR has `on.schedule`, add its `name:` value to the `workflow_run.workflows` list in `notify-slack-on-main-failure.yml`
 - [ ] If it's intentionally advisory/non-blocking and you don't want Slack noise on flakes, add its `name:` value to the `EXCLUDED_NAMES` set in `scripts/check-notifier-coverage.mjs` with a comment explaining why
-- [ ] `node scripts/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job and enforces this structurally
+- [ ] `node scripts/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job and enforces this structurally. The `scripts` job's `rootScripts` path filter includes `.github/workflows/**`, so adding a workflow file alone is enough to fire the check (no script edit required)
 
 `workflow_run.workflows` does NOT support wildcards — every new workflow name must be listed explicitly.
 
