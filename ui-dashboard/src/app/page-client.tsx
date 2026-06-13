@@ -463,11 +463,15 @@ function LpTile({
     (netData) => netData.uniqueLpAddressesTruncated && netData.error === null,
   );
 
+  // Keep the `≈` prefix whenever the count is truncated, even if a chain
+  // also errored: a truncated count is a lower bound, so showing a precise
+  // figure would be misleading. The subtitle still prioritizes the "Partial"
+  // load-failure message over "Approximate" when both conditions hold.
   const value = isLoading
     ? "…"
     : totalUniqueLps === null
       ? "N/A"
-      : anyLpAddressesTruncated && !anyLpError
+      : anyLpAddressesTruncated
         ? `≈ ${totalUniqueLps.toLocaleString()}`
         : totalUniqueLps.toLocaleString();
 
