@@ -103,6 +103,7 @@ function perPoolTvlWindow(
 // layout share the same cross-network aggregation state. Revisit only with a
 // focused split that keeps those derived values centralized.
 // react-doctor-disable-next-line react-doctor/no-giant-component
+// eslint-disable-next-line max-lines-per-function -- Homepage coordinates network data polling, KPI aggregation, and global pool table in one route surface.
 function GlobalContent({
   initialNetworkData,
 }: {
