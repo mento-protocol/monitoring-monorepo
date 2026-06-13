@@ -13,6 +13,12 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import {
+  parseName,
+  hasPushMain,
+  hasSchedule,
+  parseNotifierList,
+} from "./check-notifier-coverage-helpers.mjs";
 
 const ROOT = process.cwd();
 const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
@@ -38,77 +44,6 @@ function fail(msg) {
 /** @param {string} msg */
 function ok(msg) {
   console.log(`\x1b[32m✔ ${msg}\x1b[0m`);
-}
-
-// ── parse helpers (regex-only, no new deps) ──────────────────────────────────
-
-/**
- * Extract the `name:` field value from a workflow YAML text.
- * Returns null if not found.
- * @param {string} text
- * @returns {string|null}
- */
-function parseName(text) {
-  const m = text.match(/^name:\s*(.+)$/m);
-  return m ? m[1].trim().replace(/^['"]|['"]$/g, "") : null;
-}
-
-/**
- * Returns true if the workflow has an `on.push` trigger targeting `main`.
- * Handles both inline (`branches: [main]`) and block-sequence forms:
- *   branches:
- *     - main
- * @param {string} text
- */
-function hasPushMain(text) {
-  // Extract the `on:` block — everything until the next top-level key.
-  const onMatch = text.match(/^on:\s*\n([\s\S]*?)(?=^\S)/m);
-  if (!onMatch) return false;
-  const onBlock = onMatch[1];
-
-  // Look for a `push:` sub-key within the on: block, then capture everything
-  // until the next same-level (2-space-indented) key using a negative lookahead
-  // (avoids the multiline-`$` pitfall where lazy `*?` stops at end-of-line).
-  const pushMatch = onBlock.match(/^ {2}push:\s*\n((?:(?!^ {2}\S)[\s\S])*)/m);
-  if (!pushMatch) return false;
-  const pushBlock = pushMatch[1];
-
-  // Inline form:  branches: [main]  or  branches: [main, develop]
-  if (/branches:\s*\[?[^\]]*\bmain\b/.test(pushBlock)) return true;
-  // Block-sequence form:
-  //   branches:
-  //     - main
-  if (/branches:\s*\n(?:\s*-\s+\S+\n)*\s*-\s+main\b/.test(pushBlock))
-    return true;
-  return false;
-}
-
-/**
- * Returns true if the workflow has an `on.schedule` trigger.
- * @param {string} text
- */
-function hasSchedule(text) {
-  return /^ {2}schedule:\s*$/m.test(text);
-}
-
-/**
- * Extract the list of workflow names from the notifier's workflow_run.workflows
- * list. Returns a Set of strings.
- * @param {string} text
- */
-function parseNotifierList(text) {
-  // Find the `workflows:` key under `workflow_run:` and collect all `- Name` entries.
-  const workflowRunMatch = text.match(
-    /workflow_run:\s*\n\s+workflows:\s*\n([\s\S]*?)(?=\s+types:)/,
-  );
-  if (!workflowRunMatch) return new Set();
-
-  const listBlock = workflowRunMatch[1];
-  const names = new Set();
-  for (const m of listBlock.matchAll(/^\s+-\s+(.+)$/gm)) {
-    names.add(m[1].trim().replace(/^['"]|['"]$/g, ""));
-  }
-  return names;
 }
 
 // ── main ─────────────────────────────────────────────────────────────────────

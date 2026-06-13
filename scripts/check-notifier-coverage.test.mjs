@@ -2,10 +2,10 @@
 /**
  * Unit tests for scripts/check-notifier-coverage.mjs.
  *
- * Covers the parse helpers directly (by re-implementing them inline with
- * the same logic — avoids ES-module import complexities since the script
- * is not structured as a library) and the end-to-end CLI path via
- * spawnSync against a synthetic WORKFLOWS_DIR written to a temp directory.
+ * Imports parse helpers from check-notifier-coverage-helpers.mjs (the shared
+ * module) so tests always exercise the real implementations without drift.
+ * End-to-end CLI behaviour is tested via spawnSync against a synthetic
+ * WORKFLOWS_DIR written to a temp directory.
  *
  * Run: node scripts/check-notifier-coverage.test.mjs
  * CI:  .github/workflows/ci.yml  (scripts job)
@@ -16,6 +16,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  parseName,
+  hasPushMain,
+  hasSchedule,
+  parseNotifierList,
+} from "./check-notifier-coverage-helpers.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const SCRIPT = join(__dirname, "check-notifier-coverage.mjs");
@@ -40,44 +46,6 @@ function test(name, fn) {
 
 function assert(condition, msg) {
   if (!condition) throw new Error(msg);
-}
-
-// ── mirror parse helpers (kept in sync with check-notifier-coverage.mjs) ─────
-// Re-implemented here so tests run without dynamic import of the script.
-
-function parseName(text) {
-  const m = text.match(/^name:\s*(.+)$/m);
-  return m ? m[1].trim().replace(/^['"]|['"]$/g, "") : null;
-}
-
-function hasPushMain(text) {
-  const onMatch = text.match(/^on:\s*\n([\s\S]*?)(?=^\S)/m);
-  if (!onMatch) return false;
-  const onBlock = onMatch[1];
-  const pushMatch = onBlock.match(/^ {2}push:\s*\n((?:(?!^ {2}\S)[\s\S])*)/m);
-  if (!pushMatch) return false;
-  const pushBlock = pushMatch[1];
-  if (/branches:\s*\[?[^\]]*\bmain\b/.test(pushBlock)) return true;
-  if (/branches:\s*\n(?:\s*-\s+\S+\n)*\s*-\s+main\b/.test(pushBlock))
-    return true;
-  return false;
-}
-
-function hasSchedule(text) {
-  return /^ {2}schedule:\s*$/m.test(text);
-}
-
-function parseNotifierList(text) {
-  const workflowRunMatch = text.match(
-    /workflow_run:\s*\n\s+workflows:\s*\n([\s\S]*?)(?=\s+types:)/,
-  );
-  if (!workflowRunMatch) return new Set();
-  const listBlock = workflowRunMatch[1];
-  const names = new Set();
-  for (const m of listBlock.matchAll(/^\s+-\s+(.+)$/gm)) {
-    names.add(m[1].trim().replace(/^['"]|['"]$/g, ""));
-  }
-  return names;
 }
 
 // ── helpers for end-to-end tests ──────────────────────────────────────────────
@@ -218,6 +186,32 @@ test("true when push + pull_request both present and push targets main", () => {
     hasPushMain(yaml),
     "expected true when push + pull_request both target main",
   );
+});
+
+test("true for branchless push: (no branches restriction — runs on all branches including main)", () => {
+  // `on:\n  push:` with no branches key means every push, including main.
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    hasPushMain(yaml),
+    "expected true for branchless push: (no branches restriction)",
+  );
+});
+
+test("true for bare push: as last top-level key (on: last-key edge case)", () => {
+  // on: is the last top-level key — the lookahead for ^\S fails because
+  // nothing follows; the EOF fallback must capture the block.
+  const yaml = ["name: T", "on:", "  push:", "    branches: [main]", ""].join(
+    "\n",
+  );
+  assert(hasPushMain(yaml), "expected true when on: is the last top-level key");
 });
 
 // ── hasSchedule tests ─────────────────────────────────────────────────────────
@@ -387,17 +381,20 @@ test("exits non-zero when qualifying workflow is missing from notifier", () => {
 });
 
 test("PR-only workflow is not required in notifier (no push, no schedule)", () => {
-  const { exitCode } = runScript({
-    "notify-slack-on-main-failure.yml": NOTIFIER_YAML([]),
+  // A push workflow is covered in the notifier; a PR-only workflow coexists.
+  // The PR-only workflow must NOT be flagged as missing from the notifier.
+  const { exitCode, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["My CI"]),
+    "ci.yml": PUSH_WORKFLOW("My CI"),
     "pr-lint.yml": PR_ONLY_WORKFLOW("PR Lint"),
   });
-  // No qualifying workflows → checked===0 guard fires with non-zero exit,
-  // but that is a different path from the notifier-coverage check.
-  // The PR-only workflow itself should NOT be flagged as missing.
-  // (checked===0 guard fires because no push/schedule workflows exist.)
   assert(
-    exitCode !== 0,
-    "checked===0 guard should fire when no push/schedule workflows found",
+    exitCode === 0,
+    `expected exit 0 (PR-only workflow must not be flagged), got ${exitCode}\nstderr: ${stderr}`,
+  );
+  assert(
+    !stderr.includes("PR Lint"),
+    `PR-only workflow must not appear in error output, got: ${stderr}`,
   );
 });
 
@@ -452,6 +449,52 @@ test("exits 0 when block-sequence push branches: - main workflow is covered", ()
   assert(
     exitCode === 0,
     `expected exit 0 for block-sequence branches form, got ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
+  );
+});
+
+test("exits 0 for branchless push workflow covered in notifier", () => {
+  // `on:\n  push:` with no branches key means every push, so main is included.
+  const branchlessPushWorkflow = [
+    "name: Branchless Push CI",
+    "on:",
+    "  push:",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stdout, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["Branchless Push CI"]),
+    "branchless.yml": branchlessPushWorkflow,
+  });
+  assert(
+    exitCode === 0,
+    `expected exit 0 for branchless push, got ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
+  );
+});
+
+test("exits non-zero for branchless push workflow NOT in notifier", () => {
+  const branchlessPushWorkflow = [
+    "name: Branchless Push CI",
+    "on:",
+    "  push:",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["Other Workflow"]),
+    "branchless.yml": branchlessPushWorkflow,
+  });
+  assert(exitCode !== 0, `expected non-zero exit, got ${exitCode}`);
+  assert(
+    stderr.includes("Branchless Push CI") && stderr.includes("NOT listed"),
+    `expected missing-workflow error, got: ${stderr}`,
   );
 });
 
