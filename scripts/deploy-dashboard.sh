@@ -48,6 +48,9 @@ ok "Logged in as $(vercel whoami "${VERCEL_TOKEN_ARGS[@]}" 2>/dev/null)"
 # No --scope: vercel deploy reads project/team from .vercel/project.json,
 # which is written by Terraform's local_file resource.
 
+# shellcheck source=scripts/lib/deploy-guard.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"
+
 log "Deploying to production…"
 (cd "$REPO_ROOT" && vercel deploy --prod "${VERCEL_TOKEN_ARGS[@]}")
 ok "Deploy complete!"

@@ -40,6 +40,9 @@ if [ "$SKIP_CONFIRM" = true ]; then
   TF_APPROVE="-auto-approve"
 fi
 
+# shellcheck source=scripts/lib/deploy-guard.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"
+
 echo "━━━ Metrics Bridge Deploy ━━━"
 echo "Project:  ${PROJECT}"
 echo "Image:    ${IMAGE}"

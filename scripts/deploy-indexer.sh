@@ -69,12 +69,8 @@ else
   echo "🚀 Deploying indexer (network: $NETWORK) → branch: $DEPLOY_BRANCH"
 fi
 
-# Check if we're on a clean working tree
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "❌ Working directory is not clean. Commit or stash your changes first."
-  git status --short
-  exit 1
-fi
+# shellcheck source=scripts/lib/deploy-guard.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"
 
 # Check if deploy branch exists on remote. When it doesn't, the first-time
 # create push below IS the webhook trigger; the subsequent `HEAD:refs/heads/...`
