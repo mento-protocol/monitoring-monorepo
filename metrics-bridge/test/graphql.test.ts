@@ -56,6 +56,7 @@ const BASE_POOL = {
   token0Decimals: 18,
   token1Decimals: 18,
   rebalancerAddress: "0xbeef",
+  wrappedExchangeId: "",
 };
 
 function unknownFieldError(field: string): ClientError {
