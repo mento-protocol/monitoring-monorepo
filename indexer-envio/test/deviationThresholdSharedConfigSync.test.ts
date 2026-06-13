@@ -19,8 +19,10 @@ import {
  * the source file and regex-extract the float literals, then assert that the
  * bigint fraction equals the float.
  *
- * Both 101/100 === 1.01 and 105/100 === 1.05 are exact in IEEE-754 (no
- * rounding error), so strict equality is safe here.
+ * Both `Number(101n) / Number(100n)` and the literal `1.01` parse to the same
+ * nearest IEEE-754 double (likewise for 105/100 and 1.05), so there's no
+ * rounding divergence between the two paths and strict equality is safe — but
+ * neither value is exact in binary (1.01 is a non-terminating fraction).
  *
  * If this test fails, update BOTH files together:
  *   - indexer-envio/src/pool/health.ts   (bigint NUM/DEN pairs)
