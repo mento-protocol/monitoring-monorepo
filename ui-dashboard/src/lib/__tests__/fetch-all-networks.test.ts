@@ -14,6 +14,7 @@ const EXPECTED_EXPORT_NAMES = [
   "fetchAllFeeSnapshotPages",
   "fetchAllNetworks",
   "fetchNetworkData",
+  "fetchPaginatedRows",
   "isNetworkDataFullyHealthy",
   "partialPageLastCapturedAt",
   "warnedCapKeys",

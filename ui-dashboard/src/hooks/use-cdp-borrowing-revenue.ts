@@ -18,7 +18,10 @@ import {
   CDP_BORROWING_REVENUE_MARKETS_LEGACY,
   ORACLE_RATES,
 } from "@/lib/queries";
-import { REQUEST_TIMEOUT_MS } from "@/lib/fetch-all-networks";
+import {
+  REQUEST_TIMEOUT_MS,
+  fetchPaginatedRows,
+} from "@/lib/fetch-all-networks";
 import {
   aggregateCdpBorrowingRevenue,
   aggregateCdpBorrowingRevenueMarkets,
@@ -89,14 +92,6 @@ async function fetchMarketsWithCompat(
   }
 }
 
-type BracketsResponse = {
-  InterestRateBracket: CdpBorrowingRevenueBracket[];
-};
-
-type FeeEventsResponse = {
-  TroveOperationEvent: CdpBorrowingFeeEvent[];
-};
-
 type BracketPageResult = {
   rows: CdpBorrowingRevenueBracket[];
   truncated: boolean;
@@ -152,12 +147,7 @@ const EMPTY_SUMMARY: CdpBorrowingRevenueSummary = {
   bracketsTruncated: false,
 };
 
-const BRACKET_PAGE_SIZE = 1000;
-const BRACKET_MAX_PAGES = 20;
-const FEE_EVENT_PAGE_SIZE = 1000;
-const FEE_EVENT_MAX_PAGES = 20;
-const DAILY_SNAPSHOT_PAGE_SIZE = 1000;
-const DAILY_SNAPSHOT_MAX_PAGES = 20;
+const CDP_PAGE_SIZE = 1000;
 const CDP_REVENUE_CHAIN_IDS = new Set([42220]);
 
 function mergeSummaries(
@@ -255,57 +245,43 @@ async function requestWithTimeout<T>(
 async function fetchAllBracketPages(
   client: GraphQLClient,
   collateralIds: string[],
+  network: string,
 ): Promise<BracketPageResult> {
-  const rows: CdpBorrowingRevenueBracket[] = [];
-  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  for (let page = 0; page < BRACKET_MAX_PAGES; page++) {
-    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Bracket pagination is intentionally sequential so we can stop after the first short page.
-    const response = await requestWithTimeout<BracketsResponse>(
-      client,
-      CDP_BORROWING_REVENUE_BRACKETS,
-      {
-        collateralIds,
-        limit: BRACKET_PAGE_SIZE,
-        offset: page * BRACKET_PAGE_SIZE,
-      },
-      signal,
-    );
-    const pageRows = response.InterestRateBracket ?? [];
-    rows.push(...pageRows);
-    if (pageRows.length < BRACKET_PAGE_SIZE) {
-      return { rows, truncated: false };
-    }
-  }
-
-  return { rows, truncated: true };
+  const result = await fetchPaginatedRows<CdpBorrowingRevenueBracket, unknown>({
+    client,
+    query: CDP_BORROWING_REVENUE_BRACKETS,
+    responseKey: "InterestRateBracket",
+    network,
+    variablesFor: (page) => ({
+      collateralIds,
+      limit: CDP_PAGE_SIZE,
+      offset: page * CDP_PAGE_SIZE,
+    }),
+    dedupKey: (r) => r.id,
+  });
+  if (result.error) throw result.error;
+  return { rows: result.rows, truncated: result.truncated };
 }
 
 async function fetchAllFeeEventPages(
   client: GraphQLClient,
   chainId: number,
+  network: string,
 ): Promise<FeeEventPageResult> {
-  const rows: CdpBorrowingFeeEvent[] = [];
-  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  for (let page = 0; page < FEE_EVENT_MAX_PAGES; page++) {
-    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Event pagination is intentionally sequential so we can stop after the first short page.
-    const response = await requestWithTimeout<FeeEventsResponse>(
-      client,
-      CDP_BORROWING_FEE_EVENTS,
-      {
-        chainId,
-        limit: FEE_EVENT_PAGE_SIZE,
-        offset: page * FEE_EVENT_PAGE_SIZE,
-      },
-      signal,
-    );
-    const pageRows = response.TroveOperationEvent ?? [];
-    rows.push(...pageRows);
-    if (pageRows.length < FEE_EVENT_PAGE_SIZE) {
-      return { rows, truncated: false };
-    }
-  }
-
-  return { rows, truncated: true };
+  const result = await fetchPaginatedRows<CdpBorrowingFeeEvent, unknown>({
+    client,
+    query: CDP_BORROWING_FEE_EVENTS,
+    responseKey: "TroveOperationEvent",
+    network,
+    variablesFor: (page) => ({
+      chainId,
+      limit: CDP_PAGE_SIZE,
+      offset: page * CDP_PAGE_SIZE,
+    }),
+    dedupKey: (r) => r.id,
+  });
+  if (result.error && result.rows.length === 0) throw result.error;
+  return { rows: result.rows, truncated: result.truncated };
 }
 
 function isMissingDailySnapshotEntityError(err: unknown): boolean {
@@ -330,55 +306,41 @@ async function paginateDailySnapshots<T extends { id: string }>(
   client: GraphQLClient,
   chainId: number,
   query: string,
+  network: string,
 ): Promise<{ rows: T[]; truncated: boolean }> {
-  const rows: T[] = [];
   // Offset pagination over the append-only snapshot table is unstable under
   // concurrent inserts: a new row landing between page requests shifts the
   // `timestamp desc, id desc` window and can re-emit a boundary row on the next
-  // page. Dedup by stable row id (matches `fetchPaginatedRows` in
-  // `lib/network-fetcher/fetch.ts`) so windowed totals can't double-count.
-  const seen = new Set<string>();
-  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  for (let page = 0; page < DAILY_SNAPSHOT_MAX_PAGES; page++) {
-    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Snapshot pagination is intentionally sequential so we can stop after the first short page.
-    const response = await requestWithTimeout<
-      Record<"LiquityBorrowingRevenueDailySnapshot", T[]>
-    >(
-      client,
-      query,
-      {
-        chainId,
-        limit: DAILY_SNAPSHOT_PAGE_SIZE,
-        offset: page * DAILY_SNAPSHOT_PAGE_SIZE,
-      },
-      signal,
-    );
-    const pageRows = response.LiquityBorrowingRevenueDailySnapshot ?? [];
-    for (const row of pageRows) {
-      if (seen.has(row.id)) continue;
-      seen.add(row.id);
-      rows.push(row);
-    }
-    // Stop on the raw page length, not the deduped count — a full page that
-    // happens to contain a boundary duplicate must not look "short" and
-    // truncate pagination a page early.
-    if (pageRows.length < DAILY_SNAPSHOT_PAGE_SIZE) {
-      return { rows, truncated: false };
-    }
-  }
-
-  return { rows, truncated: true };
+  // page. fetchPaginatedRows deduplicates by dedupKey (row id) so windowed
+  // totals can't double-count. It also creates a fresh AbortSignal.timeout per
+  // page (fixing the shared-signal bug in the old hand-rolled loop).
+  const result = await fetchPaginatedRows<T, unknown>({
+    client,
+    query,
+    responseKey: "LiquityBorrowingRevenueDailySnapshot",
+    network,
+    variablesFor: (page) => ({
+      chainId,
+      limit: CDP_PAGE_SIZE,
+      offset: page * CDP_PAGE_SIZE,
+    }),
+    dedupKey: (r) => r.id,
+  });
+  if (result.error && result.rows.length === 0) throw result.error;
+  return { rows: result.rows, truncated: result.truncated };
 }
 
 async function fetchAllDailySnapshotPages(
   client: GraphQLClient,
   chainId: number,
+  network: string,
 ): Promise<DailySnapshotPageResult> {
   try {
     const page = await paginateDailySnapshots<CdpBorrowingRevenueDailySnapshot>(
       client,
       chainId,
       CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
+      network,
     );
     return { ...page, unavailable: false, collectedUnavailable: false };
   } catch (err) {
@@ -386,7 +348,7 @@ async function fetchAllDailySnapshotPages(
     if (isMissingSnapshotCollectedFieldError(err)) {
       const legacy = await paginateDailySnapshots<
         Omit<CdpBorrowingRevenueDailySnapshot, "collected">
-      >(client, chainId, CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY);
+      >(client, chainId, CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY, network);
       return {
         rows: legacy.rows.map((row) => ({ ...row, collected: "0" })),
         truncated: legacy.truncated,
@@ -417,6 +379,7 @@ async function fetchAllDailySnapshotPages(
 async function resolveDailyBorrowingFeeSeries(
   client: GraphQLClient,
   chainId: number,
+  network: string,
   aggregateArgs: {
     collaterals: ReadonlyArray<CdpBorrowingRevenueCollateral>;
     instances: ReadonlyArray<CdpBorrowingRevenueInstance>;
@@ -434,9 +397,10 @@ async function resolveDailyBorrowingFeeSeries(
     const dailySnapshotPages = await fetchAllDailySnapshotPages(
       client,
       chainId,
+      network,
     );
     const fallbackFeeEventPages = dailySnapshotPages.unavailable
-      ? await fetchAllFeeEventPages(client, chainId)
+      ? await fetchAllFeeEventPages(client, chainId, network)
       : undefined;
     return {
       points:
@@ -508,6 +472,7 @@ async function fetchRevenueForNetwork(
       fetchAllBracketPages(
         client,
         collaterals.map((c) => c.id),
+        network.id,
       ),
     ]);
     const rates: OracleRateMap = buildOracleRateMap(
@@ -525,6 +490,7 @@ async function fetchRevenueForNetwork(
     const daily = await resolveDailyBorrowingFeeSeries(
       client,
       network.chainId,
+      network.id,
       aggregateArgs,
     );
 

@@ -191,7 +191,7 @@ export const partialPageLastCapturedAt = new Map<string, number>();
  * under concurrent inserts, so dedup is required to keep windowed totals
  * accurate even when a refresh hits mid-write.
  */
-async function fetchPaginatedRows<TRow, TVars>(args: {
+export async function fetchPaginatedRows<TRow, TVars>(args: {
   client: GraphQLClient;
   query: string;
   responseKey: string;
