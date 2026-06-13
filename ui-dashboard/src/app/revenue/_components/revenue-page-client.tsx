@@ -231,22 +231,13 @@ function RevenueContent() {
       </div>
 
       <RevenuePeriodCards
-        periods={[
-          canonicalRevenue.periods.allTimeSinceV3,
-          canonicalRevenue.periods.ytd,
-          canonicalRevenue.periods.last30d,
-          canonicalRevenue.periods.last7d,
-        ]}
+        periods={canonicalRevenue.periods}
         isLoading={isRevenueLoading}
         partialReasons={actualPartialReasons}
       />
 
       <ForecastCards
-        forecasts={[
-          canonicalRevenue.forecasts.next7d,
-          canonicalRevenue.forecasts.next30d,
-          canonicalRevenue.forecasts.next365d,
-        ]}
+        forecasts={canonicalRevenue.forecasts}
         isLoading={isRevenueLoading}
       />
 
@@ -292,15 +283,14 @@ function RevenueContent() {
 
 const PERIOD_CARD_ORDER: RevenuePeriodKey[] = [
   "allTimeSinceV3",
-  "ytd",
   "last30d",
   "last7d",
 ];
 
 const FORECAST_CARD_ORDER: RevenueForecastKey[] = [
-  "next7d",
-  "next30d",
   "next365d",
+  "next30d",
+  "next7d",
 ];
 
 function LoadingValue() {
@@ -322,6 +312,11 @@ function mutedUnavailable(value: number | null): string {
 function formatActualValue(value: number | null, isPartial: boolean): string {
   if (value === null) return "N/A";
   return `${isPartial ? "≈ " : ""}${formatUSD(value)}`;
+}
+
+function periodHeadlineTotal(period: CanonicalRevenuePeriod): number | null {
+  if (period.totalUsd !== null) return period.totalUsd;
+  return period.availableTotalUsd > 0 ? period.availableTotalUsd : null;
 }
 
 function PeriodCard({
@@ -353,7 +348,7 @@ function PeriodCard({
         {isLoading ? (
           <LoadingValue />
         ) : (
-          formatActualValue(period.totalUsd, isPartial)
+          formatActualValue(periodHeadlineTotal(period), isPartial)
         )}
       </p>
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
@@ -382,30 +377,26 @@ function RevenuePeriodCards({
   isLoading,
   partialReasons,
 }: {
-  periods: CanonicalRevenuePeriod[];
+  periods: Record<RevenuePeriodKey, CanonicalRevenuePeriod>;
   isLoading: boolean;
   partialReasons: string[];
 }) {
-  const orderedPeriods: CanonicalRevenuePeriod[] = [];
-  const periodByKey = new Map(periods.map((period) => [period.key, period]));
-  for (const key of PERIOD_CARD_ORDER) {
-    const period = periodByKey.get(key);
-    if (period !== undefined) orderedPeriods.push(period);
-  }
-
   return (
     <section
       aria-label="Revenue actuals by period"
       className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
     >
-      {orderedPeriods.map((period) => (
-        <PeriodCard
-          key={period.key}
-          period={period}
-          isLoading={isLoading}
-          partialReasons={partialReasons}
-        />
-      ))}
+      {PERIOD_CARD_ORDER.map((key) => {
+        const period = periods[key];
+        return (
+          <PeriodCard
+            key={period.key}
+            period={period}
+            isLoading={isLoading}
+            partialReasons={partialReasons}
+          />
+        );
+      })}
     </section>
   );
 }
@@ -495,29 +486,24 @@ function ForecastCards({
   forecasts,
   isLoading,
 }: {
-  forecasts: CanonicalRevenueForecast[];
+  forecasts: Record<RevenueForecastKey, CanonicalRevenueForecast>;
   isLoading: boolean;
 }) {
-  const orderedForecasts: CanonicalRevenueForecast[] = [];
-  const forecastByKey = new Map(
-    forecasts.map((forecast) => [forecast.key, forecast]),
-  );
-  for (const key of FORECAST_CARD_ORDER) {
-    const forecast = forecastByKey.get(key);
-    if (forecast !== undefined) orderedForecasts.push(forecast);
-  }
   return (
     <section
       aria-label="Revenue forecasts"
       className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
     >
-      {orderedForecasts.map((forecast) => (
-        <ForecastCard
-          key={forecast.key}
-          forecast={forecast}
-          isLoading={isLoading}
-        />
-      ))}
+      {FORECAST_CARD_ORDER.map((key) => {
+        const forecast = forecasts[key];
+        return (
+          <ForecastCard
+            key={forecast.key}
+            forecast={forecast}
+            isLoading={isLoading}
+          />
+        );
+      })}
     </section>
   );
 }

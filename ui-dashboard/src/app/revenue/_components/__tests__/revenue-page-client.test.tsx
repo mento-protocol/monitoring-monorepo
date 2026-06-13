@@ -39,6 +39,10 @@ function ts(iso: string): number {
   return Date.parse(`${iso}T00:00:00Z`) / 1000;
 }
 
+function currentDayTimestamp(): number {
+  return Math.floor(Date.now() / 1000 / DAY) * DAY;
+}
+
 function usdWei(usd: number): string {
   return (BigInt(usd) * BigInt("1000000000000000000")).toString();
 }
@@ -312,6 +316,24 @@ function streamCardHtml(
   return streamSection.slice(cardStart, cardEnd === -1 ? undefined : cardEnd);
 }
 
+function periodCardHtml(
+  html: string,
+  title: "Total Revenue" | "Last 30 Days" | "Last 7 Days",
+): string {
+  const sectionStart = html.indexOf('aria-label="Revenue actuals by period"');
+  const sectionEnd = html.indexOf('aria-label="Revenue forecasts"');
+  const periodSection = html.slice(sectionStart, sectionEnd);
+  const cardStart = periodSection.indexOf(title);
+  const nextTitle =
+    title === "Total Revenue"
+      ? "Last 30 Days"
+      : title === "Last 30 Days"
+        ? "Last 7 Days"
+        : "</section>";
+  const cardEnd = periodSection.indexOf(nextTitle, cardStart + title.length);
+  return periodSection.slice(cardStart, cardEnd === -1 ? undefined : cardEnd);
+}
+
 describe("RevenuePageClient canonical revenue layout", () => {
   beforeEach(() => {
     mockUseProtocolFees.mockReset();
@@ -349,19 +371,25 @@ describe("RevenuePageClient canonical revenue layout", () => {
         markets: [cdpMarket("GBPm")],
         dailySeries: completedDays.map((timestamp) => cdpPoint(timestamp, 3)),
       },
-      reserveRows: [reserveSnapshot(ts("2026-06-12"), 45)],
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 45)],
     });
 
     expect(html).toContain("Canonical revenue actuals since Mar 3, 2026");
     expect(html).toContain("Total Revenue");
     expect(html).toContain("Since Mar 3, 2026");
-    expect(html).toContain("Year To Date");
+    expect(html).not.toContain("Year To Date");
     expect(html).toContain("Last 30 Days");
     expect(html).toContain("Rolling UTC daily buckets");
     expect(html).toContain("7d Forecast");
     expect(html).toContain("Monthly Forecast");
     expect(html).toContain("Annual Forecast");
     expect(html).toContain("Next 365 days");
+    expect(html.indexOf("Annual Forecast")).toBeLessThan(
+      html.indexOf("Monthly Forecast"),
+    );
+    expect(html.indexOf("Monthly Forecast")).toBeLessThan(
+      html.indexOf("7d Forecast"),
+    );
     expect(html).toContain("AUSD is forecast-only until a payout ledger");
     expect(html).toContain("Revenue streams");
     expect(html).toContain("sUSDS actual yield; AUSD forecast-only");
@@ -427,7 +455,7 @@ describe("RevenuePageClient canonical revenue layout", () => {
         ...RESERVE_YIELD,
         forecastUnavailableSymbols: ["AUSD"],
       },
-      reserveRows: [reserveSnapshot(ts("2026-06-12"), 45)],
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 45)],
     });
 
     expect(html).toContain("About Reserve Yield partial data");
@@ -464,6 +492,24 @@ describe("RevenuePageClient canonical revenue layout", () => {
     expect(reserveActual).toBe(0);
   });
 
+  it("shows available actual revenue in period headlines when reserve history is stale", () => {
+    const currentDay = currentDayTimestamp();
+    const staleReserveSnapshotDay = currentDay - 10 * DAY;
+    const html = renderRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [feeSnapshot(currentDay, 12)],
+        }),
+      ],
+      reserveRows: [reserveSnapshot(staleReserveSnapshotDay, 5)],
+    });
+
+    expect(html).toContain("Reserve earned-yield history is stale");
+    expect(periodCardHtml(html, "Total Revenue")).toContain("≈ $17.00");
+    expect(periodCardHtml(html, "Total Revenue")).toContain("N/A");
+    expect(streamCardHtml(html, "Reserve Yield")).toContain("N/A");
+  });
+
   it("renders reserve actuals as N/A when reserve yield fails before snapshots exist", () => {
     const html = renderRevenue({
       networkData: [
@@ -497,7 +543,7 @@ describe("RevenuePageClient canonical revenue layout", () => {
         dailySeries: [],
         dailySeriesFailed: true,
       },
-      reserveRows: [reserveSnapshot(ts("2026-06-12"), 5)],
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 5)],
     });
 
     expect(html).toContain("CDP borrowing revenue history failed to load.");
