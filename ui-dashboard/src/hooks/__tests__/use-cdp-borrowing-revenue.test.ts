@@ -107,13 +107,16 @@ describe("fetchPaginatedRows — AbortSignal.timeout per page", () => {
 
     // Capture the signal passed into each client.request() call.
     const capturedSignals: AbortSignal[] = [];
-    vi.mocked(client.request).mockImplementation(
-      async (opts: { signal?: AbortSignal; [k: string]: unknown }) => {
-        if (opts.signal) capturedSignals.push(opts.signal);
-        const callIndex = capturedSignals.length - 1;
-        return callIndex === 0 ? { TestKey: page1 } : { TestKey: page2 };
-      },
-    );
+    type RequestArg = Parameters<typeof client.request>[0];
+    vi.mocked(client.request).mockImplementation(async (opts: RequestArg) => {
+      const sig =
+        opts != null && typeof opts === "object" && "signal" in opts
+          ? (opts as { signal?: AbortSignal | null }).signal
+          : undefined;
+      if (sig) capturedSignals.push(sig);
+      const callIndex = capturedSignals.length - 1;
+      return callIndex === 0 ? { TestKey: page1 } : { TestKey: page2 };
+    });
 
     await fetchPaginatedRows({
       client,
