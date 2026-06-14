@@ -13,15 +13,15 @@ import jsYaml from "js-yaml";
 /**
  * Returns true if the GitHub Actions branch glob `pattern` matches `branch`.
  *
- * GitHub uses fnmatch-style globs:
- *   `**`  → matches any string (including those with `/`)
- *   `*`   → matches any string that does NOT contain `/`
- *   `?`   → matches any single character that is not `/`
+ * Implements GitHub's filter-pattern syntax as documented at:
+ * https://docs.github.com/actions/using-workflows/workflow-syntax-for-github-actions#filter-pattern-cheat-sheet
  *
- * For the common case of matching "main":
- *   - exact match  → trivially true
- *   - `**`         → matches everything
- *   - `*`          → matches any single path segment (main has no `/`) → true
+ *   `**`   → matches zero or more characters INCLUDING `/`
+ *   `*`    → matches zero or more characters NOT including `/`
+ *   `?`    → zero-or-one of the PRECEDING token (regex `?` quantifier)
+ *   `+`    → one-or-more of the PRECEDING token (regex `+` quantifier)
+ *   `[…]`  → character class (passed through as a regex char class)
+ *   leading `!` → negation (handled by orderedGlobMatches; strip before calling)
  *
  * @param {string} pattern
  * @param {string} branch
@@ -31,26 +31,42 @@ function globMatchesBranch(pattern, branch) {
   // Exact match fast-path.
   if (pattern === branch) return true;
 
-  // Convert the glob pattern to a regex.
-  // Escape all regex special chars except *, ?, which we handle ourselves.
+  // Convert the glob pattern to an anchored regex string.
+  // We walk character-by-character, translating GitHub filter-pattern tokens.
   let regexStr = "";
   for (let i = 0; i < pattern.length; i++) {
     const ch = pattern[i];
+
     if (ch === "*" && pattern[i + 1] === "*") {
       // `**` — matches any sequence of chars including `/`
       regexStr += ".*";
       i++; // skip the second *
-      // skip optional trailing `/` after `**/`
+      // skip optional trailing `/` after `**` (i.e. `**/`)
       if (pattern[i + 1] === "/") i++;
     } else if (ch === "*") {
       // `*` — matches any sequence of chars except `/`
       regexStr += "[^/]*";
     } else if (ch === "?") {
-      // `?` — matches any single char except `/`
-      regexStr += "[^/]";
+      // GitHub `?` = regex `?` quantifier (zero-or-one of the preceding token)
+      regexStr += "?";
+    } else if (ch === "+") {
+      // GitHub `+` = regex `+` quantifier (one-or-more of the preceding token)
+      regexStr += "+";
+    } else if (ch === "[") {
+      // Character class — find the matching `]` and pass through verbatim.
+      const end = pattern.indexOf("]", i + 1);
+      if (end === -1) {
+        // Unmatched `[` — treat as a literal bracket.
+        regexStr += "\\[";
+      } else {
+        // Pass the entire [...] through as a regex character class.
+        regexStr += pattern.slice(i, end + 1);
+        i = end;
+      }
     } else {
-      // Escape regex special characters.
-      regexStr += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      // Escape all other regex-special characters as literals.
+      // Excludes ?, +, [, ] which are handled above.
+      regexStr += ch.replace(/[.^${}()|[\]\\]/g, "\\$&");
     }
   }
   return new RegExp(`^${regexStr}$`).test(branch);
