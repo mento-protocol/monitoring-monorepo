@@ -2,13 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Counter, Histogram } from 'prom-client';
 import {
-  AbiDecodingZeroDataError,
-  AbiErrorSignatureNotFoundError,
   BaseError,
   ContractFunctionRevertedError,
   createPublicClient,
   http,
-  InvalidAddressError,
   RpcRequestError,
   type Address,
   type PublicClient,
@@ -45,12 +42,37 @@ const isRevertRpcError = (err: RpcRequestError): boolean =>
   err.message.toLowerCase().includes('execution reverted') ||
   err.message.toLowerCase().includes('revert');
 
+// Matches any viem error whose .name indicates a bad ABI definition, encoding
+// failure, or argument shape problem — errors that are 100% deterministic (they
+// reproduce on every healthy endpoint) but are NOT caught by isinstance checks
+// alone, because viem exports many individual Abi* classes.
+//
+// Covered by the first branch (`/^Abi/`):
+//   AbiConstructorNotFoundError, AbiConstructorParamsNotFoundError,
+//   AbiDecodingDataSizeInvalidError, AbiDecodingDataSizeTooSmallError,
+//   AbiDecodingZeroDataError, AbiEncodingArrayLengthMismatchError,
+//   AbiEncodingBytesSizeMismatchError, AbiEncodingLengthMismatchError,
+//   AbiErrorInputsNotFoundError, AbiErrorNotFoundError,
+//   AbiErrorSignatureNotFoundError, AbiEventNotFoundError,
+//   AbiEventSignatureEmptyTopicsError, AbiEventSignatureNotFoundError,
+//   AbiFunctionNotFoundError, AbiFunctionOutputsNotFoundError,
+//   AbiFunctionSignatureNotFoundError, AbiItemAmbiguityError
+//
+// Covered by the second branch (`/^Invalid(Abi|Array|Definition)/`):
+//   InvalidAbiEncodingTypeError, InvalidAbiDecodingTypeError,
+//   InvalidArrayError, InvalidDefinitionTypeError
+//
+// Note: InvalidAddressError (from viem/errors/address.ts) is also covered by
+// /^Invalid/ but lives outside abi.ts — we include it deliberately.
+const ABI_ERROR_NAME_RE =
+  /^Abi[A-Za-z]*Error$|^Invalid(?:Abi|Array|Definition|Address)[A-Za-z]*Error$/;
+
 // Transport-level failures (endpoint unreachable/slow/malformed response) are
 // retryable on another endpoint and are what `view_call_rpc_errors_total` is
 // meant to track. Deterministic call failures — contract reverts, bad ABI/args,
-// invalid addresses — reproduce on every healthy endpoint, so they are NOT
-// transport errors: retrying is pointless and counting them as RPC outages
-// would mislead Grafana.
+// encoding errors, invalid addresses — reproduce on every healthy endpoint, so
+// they are NOT transport errors: retrying is pointless and counting them as RPC
+// outages would mislead Grafana.
 //
 // IMPORTANT: viem's `readContract` wraps nearly ALL failures — including
 // transport failures — inside ContractFunctionExecutionError. That wrapper is
@@ -67,15 +89,17 @@ const isTransportError = (err: unknown): boolean => {
     return true;
   }
 
-  // Deterministic: only true on-chain reverts, ABI decode failures, or invalid
-  // addresses. ContractFunctionExecutionError is intentionally EXCLUDED — it is
-  // the wrapper viem uses for nearly all failures, including transport errors.
+  // Deterministic: on-chain reverts, ALL ABI/encoding/argument errors (matched
+  // by name regex — covers the full viem Abi* and Invalid* surface), and
+  // invalid addresses. ContractFunctionExecutionError is intentionally EXCLUDED
+  // — it is the wrapper viem uses for nearly all failures, including transport
+  // errors, so the wrapper alone is not a determinism signal.
   const isDeterministic = err.walk(
     (e) =>
       e instanceof ContractFunctionRevertedError ||
-      e instanceof AbiDecodingZeroDataError ||
-      e instanceof AbiErrorSignatureNotFoundError ||
-      e instanceof InvalidAddressError ||
+      // Name-based match catches the entire Abi*/Invalid* error family in viem,
+      // including AbiEncoding*, AbiDecoding*, AbiFunctionNotFound*, and friends.
+      (e instanceof BaseError && ABI_ERROR_NAME_RE.test(e.name)) ||
       // RpcRequestError whose code/message signals a server-side revert.
       (e instanceof RpcRequestError && isRevertRpcError(e)),
   );

@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { register } from 'prom-client';
 import {
+  AbiEncodingLengthMismatchError,
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
   createPublicClient,
@@ -570,5 +571,50 @@ describe('QueryService', () => {
         }),
       ]),
     );
+  });
+
+  // (I) An ABI encoding error (e.g. wrong number of args for a function
+  // signature) is deterministic — it would reproduce on every healthy endpoint.
+  // The fallback must NOT be retried and the counter must stay flat.
+  it('does not retry fallback or increment counter on an ABI encoding error', async () => {
+    // AbiEncodingLengthMismatchError is what viem raises when the number of
+    // encoded values does not match the ABI param list — a typical outcome of a
+    // bad metric ABI / arg-shape configuration.
+    const abiError = new AbiEncodingLengthMismatchError({
+      expectedLength: 1,
+      givenLength: 0,
+    });
+    const primaryReadContract = jest.fn().mockRejectedValue(abiError);
+    const fallbackReadContract = jest.fn().mockResolvedValue(99n);
+
+    mockCreatePublicClient
+      .mockReturnValueOnce({
+        readContract: primaryReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>)
+      .mockReturnValueOnce({
+        readContract: fallbackReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>);
+
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    const chainWithFallback = {
+      ...chain,
+      fallbackHttpRpcUrl: 'http://localhost:8546',
+    } as unknown as ChainConfig;
+    const service = new QueryService(makeConfigService([chainWithFallback]));
+    const metric = makeMetric();
+
+    await expect(service.query(metric)).resolves.toBeUndefined();
+
+    // Fallback must NOT be attempted — the ABI error is deterministic.
+    expect(fallbackReadContract).not.toHaveBeenCalled();
+
+    // Counter must stay flat — this is a config/ABI failure, not an outage.
+    const metrics = await service.rpcErrors.get();
+    const total = metrics.values.reduce((sum, v) => sum + v.value, 0);
+    expect(total).toBe(0);
   });
 });
