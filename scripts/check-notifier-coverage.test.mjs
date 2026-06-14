@@ -822,6 +822,79 @@ test("not-main branch workflow is NOT required in notifier (e2e)", () => {
   );
 });
 
+// ── ordered negative branch glob unit tests ───────────────────────────────────
+
+console.log("\nhasPushMain (ordered negative branch globs)");
+
+test("false for branches: ['**','!main'] — negation after wildcard excludes main", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches:",
+    "      - '**'",
+    "      - '!main'",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    !hasPushMain(yaml),
+    "expected false: ** matches main but !main removes it (ordered semantics)",
+  );
+});
+
+test("true for branches: ['!main','**'] — wildcard after negation re-includes main", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches:",
+    "      - '!main'",
+    "      - '**'",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    hasPushMain(yaml),
+    "expected true: !main unsets but ** re-includes main (order matters)",
+  );
+});
+
+test("true for branches: ['**'] — wildcard matches main (baseline)", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches: ['**']",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    hasPushMain(yaml),
+    "expected true: ** matches all branches including main",
+  );
+});
+
+test("false for branches: ['releases/**'] — does not match main (baseline)", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches: ['releases/**']",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(!hasPushMain(yaml), "expected false: releases/** does not match main");
+});
+
 // ── glob branch filter e2e tests ──────────────────────────────────────────────
 
 console.log("\nglob branch filters (e2e)");

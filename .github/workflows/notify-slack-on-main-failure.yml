@@ -89,6 +89,7 @@ jobs:
           COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
           COMMIT_MSG: ${{ github.event.workflow_run.display_title }}
           ACTOR: ${{ github.event.workflow_run.triggering_actor.login }}
+          EVENT: ${{ github.event.workflow_run.event }}
         run: |
           set -euo pipefail
 
@@ -134,8 +135,9 @@ jobs:
               --arg sha "${COMMIT_SHA:0:7}" \
               --arg msg "$COMMIT_MSG" \
               --arg actor "$ACTOR" \
+              --arg event "$EVENT" \
               '($msg | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;")) as $safe_msg
-               | (if $actor != "" and $actor != "null" then "\n*Triggered by:* " + $actor else "\n*Triggered by:* scheduled cron" end) as $actor_line
+               | (if $actor != "" and $actor != "null" then "\n*Triggered by:* " + $actor elif $event == "schedule" then "\n*Triggered by:* scheduled cron" else "" end) as $actor_line
                | {
                 channel: $ch,
                 text: ("❌ " + $wf + " failed on main (" + $sha + ")"),

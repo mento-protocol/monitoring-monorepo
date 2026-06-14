@@ -57,13 +57,36 @@ function globMatchesBranch(pattern, branch) {
 }
 
 /**
- * Returns true if any entry in `list` glob-matches `branch`.
+ * Returns true if, processing the list in order with GitHub's ordered
+ * include/exclude semantics, the final decision for `branch` is "included".
+ *
+ * GitHub evaluates branch filters left-to-right: a pattern starting with `!`
+ * is a negation — if it matches, it unsets the current match; a positive
+ * pattern that matches sets it. The branch is included if and only if the
+ * LAST matching pattern (positive or negative) leaves it included.
+ *
+ * Examples:
+ *   ['**', '!main']   → false  (** matches, then !main unsets it)
+ *   ['!main', '**']   → true   (!main unsets, but ** re-includes)
+ *   ['**']            → true
+ *   ['releases/**']   → false  (no pattern matches main)
+ *
  * @param {unknown[]} list
  * @param {string} branch
  * @returns {boolean}
  */
-function anyGlobMatches(list, branch) {
-  return list.map(String).some((entry) => globMatchesBranch(entry, branch));
+function orderedGlobMatches(list, branch) {
+  let matched = false;
+  for (const rawEntry of list) {
+    const entry = String(rawEntry);
+    if (entry.startsWith("!")) {
+      const pattern = entry.slice(1);
+      if (globMatchesBranch(pattern, branch)) matched = false;
+    } else {
+      if (globMatchesBranch(entry, branch)) matched = true;
+    }
+  }
+  return matched;
 }
 
 /**
@@ -138,17 +161,17 @@ export function hasPushMain(text) {
   // No branch filter at all and no tag-only filter → runs on all branches.
   if (!hasBranchFilter && !hasBranchIgnore) return true;
 
-  // branches: list — main must be matched by at least one glob entry.
+  // branches: list — main must be included after ordered include/exclude eval.
   if (hasBranchFilter) {
     const list = Array.isArray(branches) ? branches : [branches];
-    return anyGlobMatches(list, "main");
+    return orderedGlobMatches(list, "main");
   }
 
   // branches-ignore: list — runs on main unless some glob entry matches "main".
   const ignoreList = Array.isArray(branchesIgnore)
     ? branchesIgnore
     : [branchesIgnore];
-  return !anyGlobMatches(ignoreList, "main");
+  return !orderedGlobMatches(ignoreList, "main");
 }
 
 /**
