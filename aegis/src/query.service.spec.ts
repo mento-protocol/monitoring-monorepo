@@ -64,6 +64,31 @@ const makeRpcRevertError = (): RpcRequestError =>
     url: 'http://localhost:8545',
   });
 
+// A transport failure wrapped inside ContractFunctionExecutionError, which is
+// exactly what viem's readContract emits when the *underlying cause* is a
+// network/HTTP error. The outer wrapper must NOT be treated as deterministic.
+const makeTransportWrappedInExecutionError =
+  (): ContractFunctionExecutionError =>
+    new ContractFunctionExecutionError(
+      new HttpRequestError({
+        url: 'http://localhost:8545',
+        details: 'connection refused',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }) as any,
+      {
+        abi: [
+          {
+            type: 'function',
+            name: 'getRateFeedTradingMode',
+            inputs: [],
+            outputs: [],
+            stateMutability: 'view',
+          },
+        ],
+        functionName: 'getRateFeedTradingMode',
+      },
+    );
+
 const readContract = jest.fn();
 const getBalance = jest.fn();
 
@@ -417,10 +442,9 @@ describe('QueryService', () => {
     expect(total).toBe(0);
   });
 
-  // (F) A deterministic call failure (contract revert via viem's
-  // ContractFunctionExecutionError) is NOT a transport error: the fallback must
-  // not be tried and the counter must stay flat, since the same error would
-  // reproduce on every healthy endpoint.
+  // (F) A deterministic call failure (contract revert — ContractFunctionRevertedError
+  // nested inside ContractFunctionExecutionError) is NOT a transport error: the
+  // fallback must not be tried and the counter must stay flat.
   it('does not retry fallback or increment counter on a contract revert (ContractFunctionExecutionError)', async () => {
     const primaryReadContract = jest.fn().mockRejectedValue(makeRevertError());
     const fallbackReadContract = jest.fn().mockResolvedValue(99n);
@@ -455,6 +479,8 @@ describe('QueryService', () => {
     const total = metrics.values.reduce((sum, v) => sum + v.value, 0);
     expect(total).toBe(0);
   });
+
+  // (G-H order): G = RpcRequestError revert, H = transport wrapped in exec error.
 
   // (G) An RpcRequestError with code 3 (execution reverted) is deterministic:
   // no fallback retry, no counter increment.
@@ -491,5 +517,58 @@ describe('QueryService', () => {
     const metrics = await service.rpcErrors.get();
     const total = metrics.values.reduce((sum, v) => sum + v.value, 0);
     expect(total).toBe(0);
+  });
+
+  // (H) A transport failure (HttpRequestError) wrapped inside viem's
+  // ContractFunctionExecutionError — the exact shape readContract emits for
+  // network-level errors — IS a transport error: the fallback must be tried and
+  // the counter must increment when all endpoints fail.
+  it('retries fallback and increments counter when a transport error is wrapped in ContractFunctionExecutionError', async () => {
+    const transportWrapped = makeTransportWrappedInExecutionError();
+    const primaryReadContract = jest.fn().mockRejectedValue(transportWrapped);
+    const fallbackReadContract = jest
+      .fn()
+      .mockRejectedValue(makeTransportError('fallback down'));
+
+    mockCreatePublicClient
+      .mockReturnValueOnce({
+        readContract: primaryReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>)
+      .mockReturnValueOnce({
+        readContract: fallbackReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>);
+
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    const chainWithFallback = {
+      ...chain,
+      fallbackHttpRpcUrl: 'http://localhost:8546',
+    } as unknown as ChainConfig;
+    const service = new QueryService(makeConfigService([chainWithFallback]));
+    const metric = makeMetric();
+
+    await expect(service.query(metric)).resolves.toBeUndefined();
+
+    // The fallback MUST be attempted — ContractFunctionExecutionError wrapping a
+    // transport cause is NOT deterministic.
+    expect(fallbackReadContract).toHaveBeenCalledTimes(1);
+
+    // Both failed with transport errors, so the counter must increment.
+    const metrics = await service.rpcErrors.get();
+    expect(metrics.values).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          labels: {
+            contract: 'BreakerBox',
+            functionName: 'getRateFeedTradingMode',
+            chain: 'localnet',
+          },
+          value: 1,
+        }),
+      ]),
+    );
   });
 });

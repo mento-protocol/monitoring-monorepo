@@ -5,7 +5,6 @@ import {
   AbiDecodingZeroDataError,
   AbiErrorSignatureNotFoundError,
   BaseError,
-  ContractFunctionExecutionError,
   ContractFunctionRevertedError,
   createPublicClient,
   http,
@@ -53,11 +52,13 @@ const isRevertRpcError = (err: RpcRequestError): boolean =>
 // transport errors: retrying is pointless and counting them as RPC outages
 // would mislead Grafana.
 //
-// viem wraps deterministic errors inside ContractFunctionExecutionError (which
-// itself nests ContractFunctionRevertedError, ABI decode errors, etc.).
+// IMPORTANT: viem's `readContract` wraps nearly ALL failures — including
+// transport failures — inside ContractFunctionExecutionError. That wrapper is
+// NOT a determinism signal. Only the specific cause types nested within it are.
+// We use BaseError.walk() to inspect the full error chain for those causes.
 // RpcRequestError can appear in both contexts: viem nests it under revert
 // wrappers for on-chain reverts, but it also surfaces directly for network-level
-// JSON-RPC failures.  We use BaseError.walk() to inspect the full error tree.
+// JSON-RPC failures.
 //
 // When genuinely ambiguous, we default to TRANSPORT so real outages are caught.
 const isTransportError = (err: unknown): boolean => {
@@ -66,12 +67,12 @@ const isTransportError = (err: unknown): boolean => {
     return true;
   }
 
-  // Deterministic: viem's contract-call wrappers and ABI/address errors.
-  // These reproduce on every healthy endpoint; never retry the fallback.
+  // Deterministic: only true on-chain reverts, ABI decode failures, or invalid
+  // addresses. ContractFunctionExecutionError is intentionally EXCLUDED — it is
+  // the wrapper viem uses for nearly all failures, including transport errors.
   const isDeterministic = err.walk(
     (e) =>
       e instanceof ContractFunctionRevertedError ||
-      e instanceof ContractFunctionExecutionError ||
       e instanceof AbiDecodingZeroDataError ||
       e instanceof AbiErrorSignatureNotFoundError ||
       e instanceof InvalidAddressError ||
