@@ -12,7 +12,7 @@
  */
 
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   parseName,
   hasPushMain,
@@ -70,9 +70,10 @@ let checked = 0;
 for (const file of files) {
   const filePath = join(WORKFLOWS_DIR, file);
   const text = readFileSync(filePath, "utf8");
-  const name = parseName(text);
-
-  if (!name) continue; // no name: field — skip (e.g. reusable workflow fragments)
+  // Derive effective workflow name: explicit name: field, or the repo-relative
+  // file path when omitted (GitHub's documented fallback display name).
+  const explicitName = parseName(text);
+  const name = explicitName ?? relative(ROOT, filePath);
   if (EXCLUDED_NAMES.has(name)) continue;
 
   const needsCoverage = hasPushMain(text) || hasSchedule(text);

@@ -11,6 +11,62 @@
 import jsYaml from "js-yaml";
 
 /**
+ * Returns true if the GitHub Actions branch glob `pattern` matches `branch`.
+ *
+ * GitHub uses fnmatch-style globs:
+ *   `**`  → matches any string (including those with `/`)
+ *   `*`   → matches any string that does NOT contain `/`
+ *   `?`   → matches any single character that is not `/`
+ *
+ * For the common case of matching "main":
+ *   - exact match  → trivially true
+ *   - `**`         → matches everything
+ *   - `*`          → matches any single path segment (main has no `/`) → true
+ *
+ * @param {string} pattern
+ * @param {string} branch
+ * @returns {boolean}
+ */
+function globMatchesBranch(pattern, branch) {
+  // Exact match fast-path.
+  if (pattern === branch) return true;
+
+  // Convert the glob pattern to a regex.
+  // Escape all regex special chars except *, ?, which we handle ourselves.
+  let regexStr = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "*" && pattern[i + 1] === "*") {
+      // `**` — matches any sequence of chars including `/`
+      regexStr += ".*";
+      i++; // skip the second *
+      // skip optional trailing `/` after `**/`
+      if (pattern[i + 1] === "/") i++;
+    } else if (ch === "*") {
+      // `*` — matches any sequence of chars except `/`
+      regexStr += "[^/]*";
+    } else if (ch === "?") {
+      // `?` — matches any single char except `/`
+      regexStr += "[^/]";
+    } else {
+      // Escape regex special characters.
+      regexStr += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${regexStr}$`).test(branch);
+}
+
+/**
+ * Returns true if any entry in `list` glob-matches `branch`.
+ * @param {unknown[]} list
+ * @param {string} branch
+ * @returns {boolean}
+ */
+function anyGlobMatches(list, branch) {
+  return list.map(String).some((entry) => globMatchesBranch(entry, branch));
+}
+
+/**
  * Extract the `name:` field value from a workflow YAML text.
  * Returns null if not found.
  * @param {string} text
@@ -82,17 +138,17 @@ export function hasPushMain(text) {
   // No branch filter at all and no tag-only filter → runs on all branches.
   if (!hasBranchFilter && !hasBranchIgnore) return true;
 
-  // branches: list — main must appear exactly.
+  // branches: list — main must be matched by at least one glob entry.
   if (hasBranchFilter) {
     const list = Array.isArray(branches) ? branches : [branches];
-    return list.map(String).includes("main");
+    return anyGlobMatches(list, "main");
   }
 
-  // branches-ignore: list — runs on main unless "main" is in the ignore list.
+  // branches-ignore: list — runs on main unless some glob entry matches "main".
   const ignoreList = Array.isArray(branchesIgnore)
     ? branchesIgnore
     : [branchesIgnore];
-  return !ignoreList.map(String).includes("main");
+  return !anyGlobMatches(ignoreList, "main");
 }
 
 /**

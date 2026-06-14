@@ -272,6 +272,86 @@ test("false for main-x branch — no substring false match", () => {
   assert(!hasPushMain(yaml), "expected false for branches: [main-x]");
 });
 
+// ── hasPushMain glob branch filter tests ─────────────────────────────────────
+
+console.log("\nhasPushMain (glob branch filters)");
+
+test("true for branches: ['**'] — matches all branches including main", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches: ['**']",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(hasPushMain(yaml), "expected true for branches: ['**']");
+});
+
+test("true for branches: ['*'] — matches all top-level branches including main", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches: ['*']",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(hasPushMain(yaml), "expected true for branches: ['*']");
+});
+
+test("false for branches: ['releases/**'] — does not match main", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches: ['releases/**']",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(!hasPushMain(yaml), "expected false for branches: ['releases/**']");
+});
+
+test("false for branches-ignore: ['**'] — ignores all branches including main", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches-ignore: ['**']",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    !hasPushMain(yaml),
+    "expected false for branches-ignore: ['**'] (main matched by glob)",
+  );
+});
+
+test("true for branches-ignore: ['releases/**'] — main is not ignored", () => {
+  const yaml = [
+    "name: T",
+    "on:",
+    "  push:",
+    "    branches-ignore: ['releases/**']",
+    "jobs:",
+    "  t:",
+    "    runs-on: ubuntu-latest",
+    "",
+  ].join("\n");
+  assert(
+    hasPushMain(yaml),
+    "expected true for branches-ignore: ['releases/**'] (main not matched)",
+  );
+});
+
 test("true for branches-ignore without main (main is not ignored)", () => {
   // branches-ignore: [develop] → main is not in the ignore list → TRUE.
   const yaml = [
@@ -739,6 +819,156 @@ test("not-main branch workflow is NOT required in notifier (e2e)", () => {
   assert(
     !stderr.includes("Not Main CI"),
     `not-main branch workflow must not appear in error output, got: ${stderr}`,
+  );
+});
+
+// ── glob branch filter e2e tests ──────────────────────────────────────────────
+
+console.log("\nglob branch filters (e2e)");
+
+test("exits 0 for branches: ['**'] workflow covered in notifier", () => {
+  const allBranchesWorkflow = [
+    "name: All Branches CI",
+    "on:",
+    "  push:",
+    "    branches: ['**']",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stdout, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["All Branches CI"]),
+    "all-branches.yml": allBranchesWorkflow,
+  });
+  assert(
+    exitCode === 0,
+    `expected exit 0 for branches: ['**'], got ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
+  );
+});
+
+test("exits 0 for branches: ['*'] workflow covered in notifier", () => {
+  const starBranchWorkflow = [
+    "name: Star Branch CI",
+    "on:",
+    "  push:",
+    "    branches: ['*']",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stdout, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["Star Branch CI"]),
+    "star-branch.yml": starBranchWorkflow,
+  });
+  assert(
+    exitCode === 0,
+    `expected exit 0 for branches: ['*'], got ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
+  );
+});
+
+test("tag-only workflow with releases/** branch is NOT required in notifier", () => {
+  const releasesWorkflow = [
+    "name: Releases CI",
+    "on:",
+    "  push:",
+    "    branches: ['releases/**']",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML(["Some CI"]),
+    "ci.yml": PUSH_WORKFLOW("Some CI"),
+    "releases.yml": releasesWorkflow,
+  });
+  assert(
+    exitCode === 0,
+    `expected exit 0 (releases/** does not match main), got ${exitCode}\nstderr: ${stderr}`,
+  );
+  assert(
+    !stderr.includes("Releases CI"),
+    `releases/** workflow must not appear in error output, got: ${stderr}`,
+  );
+});
+
+// ── unnamed workflow e2e tests ────────────────────────────────────────────────
+
+console.log("\nunnamed workflows (e2e)");
+
+test("unnamed push-to-main workflow is flagged as missing when absent from notifier", () => {
+  // A workflow without a name: field has its effective name derived from the
+  // repo-relative file path (GitHub's documented fallback).
+  const unnamedWorkflow = [
+    "on:",
+    "  push:",
+    "    branches: [main]",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  const { exitCode, stderr } = runScript({
+    // The notifier covers a DIFFERENT name — the unnamed workflow is uncovered.
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML([
+      "Some Other Workflow",
+      // We need at least one non-unnamed push workflow so checked > 0
+    ]),
+    "ci.yml": PUSH_WORKFLOW("Some Other Workflow"),
+    "unnamed.yml": unnamedWorkflow,
+  });
+  assert(
+    exitCode !== 0,
+    `expected non-zero exit for uncovered unnamed workflow, got ${exitCode}`,
+  );
+  assert(
+    stderr.includes("NOT listed"),
+    `expected missing-workflow error for unnamed workflow, got: ${stderr}`,
+  );
+  // The effective name should appear in the error and be the path form
+  assert(
+    stderr.includes("unnamed.yml"),
+    `expected file path in error for unnamed workflow, got: ${stderr}`,
+  );
+});
+
+test("unnamed push-to-main workflow is covered when notifier uses its path as name", () => {
+  // If the notifier lists the workflow by its effective (path-derived) name,
+  // the check must pass.
+  const unnamedWorkflow = [
+    "on:",
+    "  push:",
+    "    branches: [main]",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+  // The effective name of the unnamed workflow when ROOT = tmpdir is
+  // ".github/workflows/unnamed.yml"
+  const { exitCode, stdout, stderr } = runScript({
+    "notify-slack-on-main-failure.yml": NOTIFIER_YAML([
+      "Some CI",
+      ".github/workflows/unnamed.yml",
+    ]),
+    "ci.yml": PUSH_WORKFLOW("Some CI"),
+    "unnamed.yml": unnamedWorkflow,
+  });
+  assert(
+    exitCode === 0,
+    `expected exit 0 when unnamed workflow covered by path name, got ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
   );
 });
 
