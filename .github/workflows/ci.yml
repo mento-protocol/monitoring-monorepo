@@ -71,6 +71,9 @@ jobs:
             ui:
               - ui-dashboard/**
               - shared-config/**
+              # GraphQL contract test validates dashboard queries against the
+              # indexer schema, so schema-only PRs must run the ui job.
+              - indexer-envio/schema.graphql
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
@@ -98,6 +101,9 @@ jobs:
             bridge:
               - metrics-bridge/**
               - shared-config/**
+              # GraphQL contract test validates bridge queries against the
+              # indexer schema, so schema-only PRs must run the bridge job.
+              - indexer-envio/schema.graphql
               - scripts/eslint-baseline-diff.mjs
               - cloudbuild.yaml
               - .gcloudignore

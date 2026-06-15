@@ -43,7 +43,8 @@
         "package.json",
         "vitest.config.*",
         "jest.config.*",
-        "tsconfig*.json"
+        "tsconfig*.json",
+        "$TURBO_ROOT$/indexer-envio/schema.graphql"
       ],
       "outputs": []
     },

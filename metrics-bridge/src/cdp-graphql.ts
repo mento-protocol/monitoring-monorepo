@@ -23,7 +23,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 // `refreshCdpMetrics`, which records it and leaves the last-good gauges in
 // place (it never calls `updateCdpMetrics([])`). Matches the FPMM *base*-query
 // posture, which likewise does not special-case unknown-field.
-const BRIDGE_CDPS_QUERY = gql`
+export const BRIDGE_CDPS_QUERY = gql`
   query BridgeCdps {
     LiquityInstance {
       id
