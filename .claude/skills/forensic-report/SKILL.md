@@ -442,10 +442,11 @@ Before concluding "no interesting getters", do three things:
 -- Report as a UTC band, never a country. MUST be an EOA ("from"); a contract returns 0 rows (use <chain>.traces).
 SELECT hour(block_time) utc_hour, count(*) FROM <chain>.transactions WHERE "from" = <eoa> GROUP BY 1 ORDER BY 1;
 
--- NONCE/ORIGIN: sequential nonces start at 0, so a chain-native key has max_nonce = count-1.
---   min_nonce=0 AND max_nonce = count-1 → Celo-native key (no gaps).  max_nonce >> count-1 → key reused on
---   OTHER chains (its first Celo tx is NOT its birth — pivot to Arkham/Sim there; the cross-chain identity lever).
-SELECT min(nonce), max(nonce), count(*), min(block_time), max(block_time) FROM <chain>.transactions WHERE "from" = <eoa>;
+-- AGE / FIRST-SEEN: first + last activity on THIS chain. NOTE: do NOT infer cross-chain reuse from nonce —
+--   EVM nonces are chain-LOCAL, so a key with Ethereum/Base history still starts at nonce 0 on its first
+--   Celo tx (max_nonce ≈ count-1 given complete data; a gap just means missing/filtered rows, not other-chain
+--   activity). To find the operator's other-chain footprint use the Arkham/Sim identity leg (Step 2), not nonce.
+SELECT min(block_time) AS first_seen, max(block_time) AS last_seen, count(*) AS tx_count FROM <chain>.transactions WHERE "from" = <eoa>;
 
 -- APPROVAL GRAPH: topic1=owner (delegation OUT → routers it trusts), topic2=spender (delegation IN → who can move its funds).
 SELECT * FROM <chain>.logs
