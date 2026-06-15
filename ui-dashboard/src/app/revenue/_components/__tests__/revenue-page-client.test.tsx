@@ -178,6 +178,26 @@ const RESERVE_YIELD: ReserveYieldResponse = {
   earnedYieldError: null,
 };
 
+const STETH_HOLDING: ReserveYieldResponse["holdings"][number] = {
+  id: "stETH:ethereum:wallet:0xreserve:cold:0",
+  assetSymbol: "stETH",
+  chain: "ethereum",
+  sourceType: "wallet",
+  sourceLabel: "Reserve Safe",
+  identifier: "0xreserve",
+  custodianType: "cold",
+  balance: 251.59825779325257,
+  principalUsd: 419_495.97,
+  earnedYieldUsd: null,
+  apyPercent: 2.95,
+  yieldModel:
+    "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
+  dailyRunRateUsd: 12_375.131115 / 365,
+  next30dUsd: (12_375.131115 * 30) / 365,
+  next365dUsd: 12_375.131115,
+  annualRunRateUsd: 12_375.131115,
+};
+
 function cdpMarket(
   symbol: string,
   overrides: Partial<CdpBorrowingRevenueMarket> = {},
@@ -388,9 +408,10 @@ describe("RevenuePageClient canonical revenue layout", () => {
     expect(html.indexOf("Monthly Forecast")).toBeLessThan(
       html.indexOf("7d Forecast"),
     );
-    expect(html).toContain("AUSD is forecast-only until a payout ledger");
+    expect(html).toContain("AUSD and stETH are forecast-only");
+    expect(html).toContain("balance x annual rate");
     expect(html).toContain("Revenue streams");
-    expect(html).toContain("sUSDS actual yield; AUSD forecast-only");
+    expect(html).toContain("sUSDS actual yield; AUSD and stETH forecast-only");
     expect(html).toContain("Reserve Yield Components");
     expect(html).toContain("Borrowing Fees by CDP");
     expect(html).toContain(
@@ -458,10 +479,73 @@ describe("RevenuePageClient canonical revenue layout", () => {
 
     expect(html).toContain("About Reserve Yield partial data");
     expect(html).toContain(
-      "Reserve forecast excludes holdings without APY sources: AUSD.",
+      "Reserve forecast excludes holdings without annual-rate sources: AUSD.",
     );
     expect(streamCardHtml(html, "Reserve Yield")).toContain("$45.00");
     expect(streamCardHtml(html, "Reserve Yield")).not.toContain("≈ $45.00");
+  });
+
+  it("renders stETH reserve-yield forecasts without earned-yield actuals", () => {
+    const html = renderRevenue({
+      reserveYield: {
+        ...RESERVE_YIELD,
+        principalUsd:
+          (RESERVE_YIELD.principalUsd ?? 0) + STETH_HOLDING.principalUsd,
+        forecastPrincipalUsd:
+          (RESERVE_YIELD.forecastPrincipalUsd ?? 0) +
+          STETH_HOLDING.principalUsd,
+        holdings: [...RESERVE_YIELD.holdings, STETH_HOLDING],
+        next30dUsd:
+          (RESERVE_YIELD.next30dUsd ?? 0) + (STETH_HOLDING.next30dUsd ?? 0),
+        next365dUsd:
+          (RESERVE_YIELD.next365dUsd ?? 0) + (STETH_HOLDING.next365dUsd ?? 0),
+        annualRunRateUsd:
+          (RESERVE_YIELD.annualRunRateUsd ?? 0) +
+          (STETH_HOLDING.annualRunRateUsd ?? 0),
+      },
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 45)],
+    });
+
+    expect(html).toContain("stETH");
+    expect(html).toContain("Ethereum");
+    expect(html).toContain("Reserve Safe");
+    expect(html).toContain("$419.5K");
+    expect(html).toContain("2.95%");
+    expect(html).toContain("≈ $1K");
+    expect(html).toContain(
+      "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
+    );
+  });
+
+  it("marks stETH forecasts partial when the Lido APR source is unavailable", () => {
+    const html = renderRevenue({
+      reserveYield: {
+        ...RESERVE_YIELD,
+        holdings: [
+          ...RESERVE_YIELD.holdings,
+          {
+            ...STETH_HOLDING,
+            apyPercent: null,
+            next30dUsd: null,
+            next365dUsd: null,
+            annualRunRateUsd: null,
+            yieldModel:
+              "Lido stETH APR source pending; stETH mark-to-market changes are not counted as earned revenue",
+          },
+        ],
+        forecastUnavailableSymbols: ["STETH"],
+        rateError: "Lido stETH APR: HTTP 503",
+      },
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 45)],
+    });
+
+    expect(html).toContain("About Reserve Yield partial data");
+    expect(html).toContain(
+      "Reserve forecast excludes holdings without annual-rate sources: STETH.",
+    );
+    expect(html).toContain(
+      "Lido stETH APR source pending; stETH mark-to-market changes are not counted as earned revenue",
+    );
   });
 
   it("flags reserve history missing as partial and does not inject current earned-yield API totals into chart actuals", () => {
