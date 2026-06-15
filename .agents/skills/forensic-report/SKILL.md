@@ -431,7 +431,7 @@ Before concluding "no interesting getters", do three things:
    cast storage $ADDR 0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7 --block $HEAD_BLOCK --rpc-url $RPC  # EIP-1822
    # If the beacon slot was non-zero, resolve the real implementation from the beacon contract:
    BEACON=0x…   # last 20 bytes of the beacon slot value above
-   cast call "$BEACON" "implementation()(address)" --rpc-url "$RPC"
+   cast call "$BEACON" "implementation()(address)" --block "$HEAD_BLOCK" --rpc-url "$RPC"
    ```
 
 2. **Verified-source check before decompiling** — exact source beats pseudo-source. Sourcify is multichain, free, no key: `GET https://sourcify.dev/server/v2/contract/$CHAIN_ID/{addr}?fields=all` (use `$CHAIN_ID` from Step 1 — `42220` for Celo, `143` Monad, etc.; cross-check the chain's explorer: Celoscan / Monadscan / Polygonscan / Etherscan).
@@ -456,7 +456,7 @@ WHERE topic0 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b92
   AND topic1 = <32-byte left-padded owner> LIMIT 100;   -- events are grant HISTORY; for live use eth_call allowance()
 ```
 
-If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real human signers and policy — `cast call "$ADDR" 'getOwners()(address[])' --rpc-url "$RPC"` and `cast call "$ADDR" 'getThreshold()(uint256)' --rpc-url "$RPC"` (two complete commands; use the in-scope `$ADDR`/`$RPC`, not a bare `<safe>` token) — and link Safes by intersecting owner sets. Free hosted Safe tx-service (keyless reads) is per-chain — `https://api.safe.global/tx-service/<safe-slug>/api/v1/safes/<safe>/`, where `<safe-slug>` is the chain's Safe short-name (celo→`celo`, polygon→`pol`, ethereum→`eth`); not every chain has one (Monad doesn't), so don't copy the `celo` slug for a non-Celo target. This exposes the people behind a treasury/managed-bot the proxy address would otherwise hide.
+If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real human signers and policy — `cast call "$ADDR" 'getOwners()(address[])' --block "$HEAD_BLOCK" --rpc-url "$RPC"` and `cast call "$ADDR" 'getThreshold()(uint256)' --block "$HEAD_BLOCK" --rpc-url "$RPC"` (two complete commands, block-pinned for reproducibility; use the in-scope `$ADDR`/`$RPC`, not a bare `<safe>` token) — and link Safes by intersecting owner sets. Free hosted Safe tx-service (keyless reads) is per-chain — `https://api.safe.global/tx-service/<safe-slug>/api/v1/safes/<safe>/`, where `<safe-slug>` is the chain's Safe short-name (celo→`celo`, polygon→`pol`, ethereum→`eth`); not every chain has one (Monad doesn't), so don't copy the `celo` slug for a non-Celo target. This exposes the people behind a treasury/managed-bot the proxy address would otherwise hide.
 
 ### Step 4 — Transaction anatomy
 
@@ -526,19 +526,20 @@ Free-form prose, but be specific. Don't say "arbitrage" — say which mispricing
 **Name the venue, don't guess it.** Resolve any non-Mento pool or token the target touched via two free, no-key APIs — turns "an unknown pool" into "USDC/CELO 0.01% on Uniswap V3 Celo, $X TVL". GeckoTerminal covers Celo + many EVM chains but **not Monad** (its `$GT_NS` arm stays empty for Monad — that's correct, skip it); DexScreener is the broader fallback there:
 
 ```bash
-# GeckoTerminal uses its own network slugs (NOT chain ids) — select per $CHAIN, like $BS in Step 4.
-# Verify/extend against https://api.geckoterminal.com/api/v2/networks (a chain may have no GT coverage).
+# GeckoTerminal + DexScreener each use their OWN network slugs (NOT chain ids) — select both per $CHAIN
+# in one switch, like $BS in Step 4. Verify against api.geckoterminal.com/api/v2/networks and
+# DexScreener's docs (a chain may be on one but not the other — GeckoTerminal has no Monad, DexScreener does).
 case "$CHAIN" in
-  celo)     GT_NS=celo ;;
-  polygon)  GT_NS=polygon_pos ;;
-  ethereum) GT_NS=eth ;;
-  *)        GT_NS=""; echo "No GeckoTerminal slug mapped for $CHAIN — verify at /api/v2/networks, then set GT_NS or skip." >&2 ;;
+  celo)     GT_NS=celo;        DS_NS=celo ;;
+  monad)    GT_NS="";          DS_NS=monad ;;     # GeckoTerminal: no Monad; DexScreener: yes (verify slug)
+  polygon)  GT_NS=polygon_pos; DS_NS=polygon ;;
+  ethereum) GT_NS=eth;         DS_NS=ethereum ;;
+  *)        GT_NS=""; DS_NS=""; echo "No GeckoTerminal/DexScreener slug mapped for $CHAIN — verify their network lists, then set GT_NS/DS_NS or skip." >&2 ;;
 esac
-[ -n "$GT_NS" ] && curl -s "https://api.geckoterminal.com/api/v2/networks/$GT_NS/pools/{poolAddr}"   # → pair, dex, reserve_usd, vol24h (30 req/min); skipped when no GT slug for $CHAIN
-curl -s "https://api.dexscreener.com/token-pairs/v1/<ds-slug>/{tokenAddr}"         # chain-scoped: pairs for this token on $CHAIN only
-# <ds-slug> = DexScreener chain slug for $CHAIN (celo / ethereum / polygon / base / …). The chain-scoped
-# token-pairs/v1 endpoint avoids the old /latest/dex/tokens form, which returned the token's pairs on ALL
-# chains and risked naming a different chain's venue/TVL for an unrelated same-address token.
+[ -n "$GT_NS" ] && curl -s "https://api.geckoterminal.com/api/v2/networks/$GT_NS/pools/{poolAddr}"   # → pair, dex, reserve_usd, vol24h (30 req/min); skipped when no GT slug
+[ -n "$DS_NS" ] && curl -s "https://api.dexscreener.com/token-pairs/v1/$DS_NS/{tokenAddr}"           # chain-scoped: pairs for this token on $CHAIN only; skipped when no DS slug
+# The chain-scoped token-pairs/v1 endpoint avoids the old /latest/dex/tokens form, which returned the
+# token's pairs on ALL chains and risked naming a different chain's venue/TVL for a same-address token.
 ```
 
 (Use `networks/$GT_NS/tokens/{addr}` for token price/FDV in Steps 5/5.5 too. Set `GT_NS` to match `$CHAIN` — GeckoTerminal uses its own slugs, so confirm against `/api/v2/networks` rather than assuming the chain name.)
@@ -569,8 +570,8 @@ A forensic product should screen every target. Primary, zero new dependency — 
 # guaranteed everywhere (e.g. Monad). Only call it where it's deployed on $CHAIN; elsewhere rely on the
 # chain-agnostic TRM + static-OFAC paths below. Run on the target AND each Step-2 funder/counterparty.
 if [ "$CHAIN" = celo ]; then   # extend once you've verified the oracle is deployed on another target chain
-  cast call 0x40C57923924B5c5c5455c48D93317139ADDaC8fb 'isSanctioned(address)(bool)' "$ADDR" --rpc-url "$RPC"
-  # repeat for each Step-2 funder/counterparty, e.g.: for a in "$ADDR" "${FUNDERS[@]}"; do cast call 0x40C5…c8fb 'isSanctioned(address)(bool)' "$a" --rpc-url "$RPC"; done
+  cast call 0x40C57923924B5c5c5455c48D93317139ADDaC8fb 'isSanctioned(address)(bool)' "$ADDR" --block "$HEAD_BLOCK" --rpc-url "$RPC"
+  # repeat for each Step-2 funder/counterparty, e.g.: for a in "$ADDR" "${FUNDERS[@]}"; do cast call 0x40C5…c8fb 'isSanctioned(address)(bool)' "$a" --block "$HEAD_BLOCK" --rpc-url "$RPC"; done
 fi
 ```
 
