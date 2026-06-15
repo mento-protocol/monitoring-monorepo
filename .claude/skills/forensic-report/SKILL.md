@@ -66,7 +66,16 @@ mkdir -p .investigations
 **Capture provenance up front** — mutable-state reads (storage, balances, prices) are only reproducible if pinned to a block. Record these and put them in the report's provenance footer:
 
 ```bash
-RPC=https://forno.celo.org
+# RPC MUST match $CHAIN — every cast call below (head block, storage reads, codehash,
+# sanctions oracle) executes against whatever this points at. Default Celo; override per
+# the target chain (Monad/Polygon/Ethereum full-node RPC) so a non-Celo investigation
+# isn't silently scoped to Celo. See the chain doctrine.
+case "$CHAIN" in
+  celo)    RPC=https://forno.celo.org ;;
+  monad)   RPC=https://rpc.monad.xyz ;;          # or the current Monad mainnet full node
+  polygon) RPC=https://polygon-rpc.com ;;
+  *)       RPC=<full-node RPC for $CHAIN> ;;
+esac
 HEAD_BLOCK=$(cast block-number --rpc-url $RPC)   # the block your storage/balance reads are "as of"
 cast --version                                   # tool version, for the footer
 # Note the RPC endpoint, $HEAD_BLOCK, and the UTC timestamp of each Sim/DefiLlama query.
@@ -161,11 +170,15 @@ curl -s "$HASURA" -H 'content-type: application/json' \
 
 Run a small battery keyed on the target address (all fields verified against `indexer-envio/schema.graphql`). `caller` = `tx.from` (the signing EOA — the volume-attribution primary key); `sender`/`brokerCaller` = `msg.sender` to the pool/broker (often a router); `txTo` = entry-point contract (identifies the aggregator router). All three are in each row, so you disambiguate EOA-vs-router on the spot.
 
+**Scope every query to the target chain.** Add `chainId: { _eq: <CHAIN_ID> }` to the `where` of each entity that carries it (every swap/rollup/rebalance/LP entity below does; `BridgeTransfer` does not). Without it, a multi-chain address silently merges its Celo and Monad footprints and misreports volume/activity. Drop the filter only when you deliberately want the all-chain Mento footprint.
+
+**Pick the filter field for the target type.** `caller` is `tx.from` — correct for an **EOA target**. For a **contract target** (router / aggregator / rebalancer / the bot contract itself), `tx.from` is the _operator EOA_, not the contract, so a `caller`-only filter returns a false-EMPTY even though the contract is all over the data. Filter on `sender` / `txTo` / `recipient` / `brokerCaller` instead, or `_in` across roles when the address could appear as either. The examples below show `caller`; swap the field to match the target.
+
 ```graphql
 # Lifetime rollups (fast path — swap volume, cadence, routers, protocol-actor flag)
 {
   TraderDailySnapshot(
-    where: { trader: { _eq: "0xtarget" } }
+    where: { trader: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
     order_by: { timestamp: desc }
     limit: 1000
   ) {
@@ -181,7 +194,7 @@ Run a small battery keyed on the target address (all fields verified against `in
 }
 {
   BrokerTraderDailySnapshot(
-    where: { caller: { _eq: "0xtarget" } }
+    where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
     order_by: { timestamp: desc }
     limit: 1000
   ) {
@@ -196,8 +209,8 @@ Run a small battery keyed on the target address (all fields verified against `in
 # Raw per-swap detail (v3 pools + v2 broker)
 {
   SwapEvent(
-    where: { caller: { _eq: "0xtarget" } }
-    order_by: { blockTimestamp: desc }
+    where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
+    order_by: [{ blockTimestamp: desc }, { id: desc }] # id tiebreaker → deterministic offset pagination
     limit: 1000
   ) {
     txHash
@@ -217,8 +230,8 @@ Run a small battery keyed on the target address (all fields verified against `in
 }
 {
   BrokerSwapEvent(
-    where: { caller: { _eq: "0xtarget" }, routedViaV3Router: { _eq: false } }
-    order_by: { blockTimestamp: desc }
+    where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> }, routedViaV3Router: { _eq: false } }
+    order_by: [{ blockTimestamp: desc }, { id: desc }] # id tiebreaker → deterministic offset pagination
     limit: 1000
   ) {
     txHash
@@ -238,7 +251,7 @@ Run a small battery keyed on the target address (all fields verified against `in
 
 # Role-specific: MEV keeper? CDP actor? LP? mint/burn? bridger?
 {
-  RebalanceEvent(where: { caller: { _eq: "0xtarget" } }, limit: 1000) {
+  RebalanceEvent(where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ blockTimestamp: desc }, { id: desc }], limit: 1000) {
     txHash
     poolId
     sender
@@ -290,7 +303,7 @@ Run a small battery keyed on the target address (all fields verified against `in
 
 Hard constraints (from `docs/pr-checklists/swr-polling-hasura.md`):
 
-- **1000-row cap** per response; **no `_aggregate`** on hosted Hasura. For lifetime totals, page with `offset`/`limit` or narrow with `where`, then **sum client-side**.
+- **1000-row cap** per response; **no `_aggregate`** on hosted Hasura. For lifetime totals, page with `offset`/`limit` or narrow with `where`, then **sum client-side**. When paging, `order_by` must end in a unique tiebreaker (`{ id: desc }`) — ordering by `blockTimestamp`/`timestamp` alone is non-deterministic when rows share a block, so plain offset pagination would skip and duplicate rows.
 - `volumeUsdWei` is 0 when neither leg is USD-pegged (non-stable FX pairs) — don't read that as "no volume".
 - `BrokerSwapEvent` with `routedViaV3Router:true` are v3 siblings already counted in `SwapEvent` — filter them out (`_eq:false`) to avoid double-counting.
 - `RebalanceEvent.notionalUsd`/`rewardUsd` use an empty-string sentinel when pre-reserve RPC failed — handle "" distinctly from "0".
@@ -352,7 +365,7 @@ FROM celo.transactions WHERE "from" = <funder> AND value > 0 GROUP BY 1 ORDER BY
 
 ```bash
 # (3) CODEHASH CLUSTERING: byte-identical bots, even across different deployers/factories.
-CODE=$(cast code <addr> --rpc-url https://forno.celo.org); cast keccak $CODE   # runtime codehash
+CODE=$(cast code <addr> --rpc-url $RPC); cast keccak $CODE   # runtime codehash ($RPC from Step 1, scoped to $CHAIN)
 # Pre-filter candidates from creation_traces by length(code), then confirm by keccak match.
 ```
 
@@ -368,7 +381,7 @@ CODE=$(cast code <addr> --rpc-url https://forno.celo.org); cast keccak $CODE   #
 **For a contract target** — read public storage directly. Most arb / MEV contracts leave trivial getters in (router addresses, allowlists, fee tiers, hardcoded principals). Use the chain's full-node RPC (NOT HyperRPC — `eth_call` requires a full node):
 
 ```bash
-RPC=https://forno.celo.org   # or whatever full-node RPC for the target chain
+# Reuse $RPC from Step 1 (already scoped to $CHAIN — full node, NOT HyperRPC, since eth_call needs one).
 cast call $ADDR "router()(address)" --rpc-url $RPC
 cast call $ADDR "routerSushi()(address)" --rpc-url $RPC
 cast call $ADDR "lastAddress()(address)" --rpc-url $RPC
@@ -399,8 +412,9 @@ Before concluding "no interesting getters", do three things:
 -- Report as a UTC band, never a country. MUST be an EOA ("from"); a contract returns 0 rows (use celo.traces).
 SELECT hour(block_time) utc_hour, count(*) FROM celo.transactions WHERE "from" = <eoa> GROUP BY 1 ORDER BY 1;
 
--- NONCE/ORIGIN: min_nonce=0 & max==count → Celo-native key. max_nonce >> count → key reused on OTHER chains
--- (its first Celo tx is NOT its birth — pivot to Arkham/Sim on those chains; this is the cross-chain identity lever).
+-- NONCE/ORIGIN: sequential nonces start at 0, so a chain-native key has max_nonce = count-1.
+--   min_nonce=0 AND max_nonce = count-1 → Celo-native key (no gaps).  max_nonce >> count-1 → key reused on
+--   OTHER chains (its first Celo tx is NOT its birth — pivot to Arkham/Sim there; the cross-chain identity lever).
 SELECT min(nonce), max(nonce), count(*), min(block_time), max(block_time) FROM celo.transactions WHERE "from" = <eoa>;
 
 -- APPROVAL GRAPH: topic1=owner (delegation OUT → routers it trusts), topic2=spender (delegation IN → who can move its funds).
@@ -525,7 +539,7 @@ Write the finished markdown to `.investigations/<addr>-<slug>.md`. Slug = first 
 End the report with a **provenance footer** so mutable-state reads are reproducible (this lives in the markdown body — the report JSON has no field for it, and the API silently drops unknown keys):
 
 ```
-_Provenance: Celo head block <N> (hash <0x…>), RPC forno.celo.org, cast <version>. Sim/DefiLlama queried <UTC ts>. Investigation date: YYYY-MM-DD._
+_Provenance: <chain> head block <N> (hash <0x…>), RPC <endpoint>, cast <version>. Sim/DefiLlama queried <UTC ts>. Investigation date: YYYY-MM-DD._
 ```
 
 ### Step 10 — Push to production (only on user confirmation)
@@ -592,12 +606,22 @@ end
 
 payload.createdAt = (prior and prior.createdAt) or now
 payload.updatedAt = now
--- Coerce non-numeric prior versions to 0 before incrementing.
--- cjson.decode maps JSON null to cjson.null (truthy in Lua), so a
--- stored {"version": null} from a legacy/partial record would
--- propagate cjson.null into the arithmetic and crash the EVAL.
-local priorVersion = prior and prior.version
-if type(priorVersion) ~= 'number' then priorVersion = 0 end
+-- Mirror upsertReport()'s read-side version normalization. A true first write
+-- (no prior record) is version 1. cjson.decode maps JSON null to cjson.null
+-- (truthy in Lua), so a legacy/partial {"version": null} must be normalized,
+-- not propagated into arithmetic (which would crash the EVAL). Such records
+-- read as version 1 in JS, so normalize missing/invalid/<=0 to 1 here too —
+-- coercing to 0 would write version 1 over an existing record and regress the
+-- version the editor's optimistic-concurrency (CAS) path expects.
+local priorVersion = 0
+if prior then
+  priorVersion = prior.version
+  if type(priorVersion) ~= 'number' or priorVersion <= 0 then
+    priorVersion = 1
+  else
+    priorVersion = math.floor(priorVersion)
+  end
+end
 payload.version = priorVersion + 1
 
 local encoded = cjson.encode(payload)
@@ -625,7 +649,7 @@ The script returns the persisted record (already JSON-encoded). It handles every
 
 - `createdAt` preserved when updating; stamped fresh on first write
 - `updatedAt` always = now
-- `version` = `(prior.version or 0) + 1` — works even when the prior record is a legacy/partial entry without a numeric `version` field (Lua coerces `nil` → `0`, so first write is `1`, never `NaN`)
+- `version` — first write (no prior) is `1`; updates increment. A legacy/partial prior whose `version` is missing/non-numeric/≤0 normalizes to `1` (matching `upsertReport()`'s read-side normalization), so the next write is `2` — never regressing the version the editor's CAS path expects, and never crashing on `cjson.null`
 - Atomic against concurrent writers — the editor route + this skill + any future caller can interleave without losing updates
 
 **Verify:**
