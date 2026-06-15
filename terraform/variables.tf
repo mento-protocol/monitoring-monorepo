@@ -76,7 +76,13 @@ variable "hasura_url" {
 }
 
 variable "hasura_testnet_url" {
-  description = "Optional GraphQL endpoint for the shared testnet Envio indexer. Leave empty to keep hosted testnet networks hidden."
+  description = "Optional GraphQL endpoint for the Monad Testnet Envio indexer. Leave empty to keep Monad Testnet hidden."
+  type        = string
+  default     = ""
+}
+
+variable "hasura_celo_sepolia_url" {
+  description = "Optional GraphQL endpoint for the Celo Sepolia Envio indexer. Leave empty to keep hosted Celo Sepolia hidden."
   type        = string
   default     = ""
 }

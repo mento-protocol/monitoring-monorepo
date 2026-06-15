@@ -48,6 +48,10 @@ describe("buildCspWithNonce", () => {
       "NEXT_PUBLIC_HASURA_URL_TESTNET",
       "https://testnet-hasura.example/v1/graphql",
     );
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA",
+      "https://celo-sepolia-hasura.example/v1/graphql",
+    );
     vi.resetModules();
 
     const { buildCspWithNonce: buildCspWithEnv } = await import("@/lib/csp");
@@ -58,6 +62,7 @@ describe("buildCspWithNonce", () => {
 
     expect(connectSrc).toBeDefined();
     expect(connectSrc).toContain("https://testnet-hasura.example");
+    expect(connectSrc).toContain("https://celo-sepolia-hasura.example");
   });
 
   it("includes frame-ancestors none (clickjacking defense)", () => {

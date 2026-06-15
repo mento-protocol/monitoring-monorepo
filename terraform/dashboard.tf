@@ -69,6 +69,15 @@ resource "vercel_project_environment_variable" "hasura_testnet_url" {
   target     = ["production", "preview"]
 }
 
+resource "vercel_project_environment_variable" "hasura_celo_sepolia_url" {
+  count      = var.hasura_celo_sepolia_url == "" ? 0 : 1
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA"
+  value      = var.hasura_celo_sepolia_url
+  target     = ["production", "preview"]
+}
+
 resource "vercel_project_environment_variable" "show_testnet_networks" {
   count      = var.show_testnet_networks ? 1 : 0
   project_id = vercel_project.dashboard.id

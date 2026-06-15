@@ -74,9 +74,9 @@ pnpm deploy:indexer monad-testnet
 Wait for Envio to reach 100% sync at <https://envio.dev/app/mento-protocol/mento-v3-monad-testnet>.
 Testnet start block is 17,932,300 — sync should be fast.
 
-#### Step 3 — Configure the shared testnet dashboard endpoint (~10 min)
+#### Step 3 — Configure the Monad Testnet dashboard endpoint (~10 min)
 
-Set the shared testnet endpoint and explicit dashboard opt-in in
+Set the Monad Testnet endpoint and explicit dashboard opt-in in
 `terraform/terraform.tfvars`:
 
 ```hcl

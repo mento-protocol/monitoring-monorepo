@@ -137,7 +137,9 @@ intentionally uses an app-level harness instead of Playwright Component Testing
 because the covered risks are App Router navigation, URL state, hydration, CSP,
 SWR request behavior, and real browser focus. The agent quality gate installs
 Playwright Chromium before running this command; for direct fresh-checkout runs,
-run `pnpm exec playwright install chromium` once first.
+run `pnpm exec playwright install chromium` once first. The wrapper restores
+`next-env.d.ts` and removes generated `.next/dev` route types after dev-mode
+runs so later `tsc` checks read production route metadata.
 
 Use `pnpm test:browser:production` when the verification target should match a
 built app (`next build` plus `next start`) instead of dev mode. It allocates the
@@ -146,6 +148,11 @@ bakes the live fixture GraphQL URL into the production build, and then runs the
 same Playwright suite against `next start` while reusing that fixture server.
 Use `PLAYWRIGHT_NEXT_START_TIMEOUT_MS` to tune the production `next start`
 timeout; `PLAYWRIGHT_NEXT_TIMEOUT_MS` remains the dev-server timeout knob.
+For local macOS agent runs that can bind localhost outside the sandbox but hit
+Chromium frame-detach flakes, set `PLAYWRIGHT_FORCE_SINGLE_PROCESS=true`. If
+Next's dev server panics under Turbopack during that local verification, use
+`PLAYWRIGHT_NEXT_COMMAND='pnpm dev --webpack --hostname 127.0.0.1 --port {port}'`;
+CI should leave both unset.
 
 ## React Doctor
 
@@ -223,7 +230,7 @@ The dashboard supports multiple network targets (all defined in `src/lib/network
 
 Token symbols and address labels come from `@mento-protocol/monitoring-config/tokens` — the shared derivation also used by metrics-bridge. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
 
-Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Hosted testnet networks share `NEXT_PUBLIC_HASURA_URL_TESTNET`, stay hidden unless `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true`, and still filter by `chainId`. The package `dev` script supplies the live prod endpoint by default for local worktrees; explicit env values still override it. Explorer URL defaults come from `@mento-protocol/monitoring-config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
+Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Hosted testnet networks stay hidden unless `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true` and their per-network endpoint is configured: `NEXT_PUBLIC_HASURA_URL_TESTNET` for Monad Testnet and `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` for Celo Sepolia. The package `dev` script supplies the live prod endpoint by default for local worktrees; explicit env values still override it. Explorer URL defaults come from `@mento-protocol/monitoring-config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
 
 ## Notes
 

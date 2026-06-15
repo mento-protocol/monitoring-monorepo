@@ -226,7 +226,7 @@ describe("NETWORKS — Monad networks", () => {
     expect(networks.isConfiguredNetworkId("monad-mainnet")).toBe(true);
   });
 
-  it("wires TESTNET_HASURA_URL into hosted testnets only when explicitly shown", async () => {
+  it("wires TESTNET_HASURA_URL into Monad Testnet only when explicitly shown", async () => {
     vi.stubEnv(
       "NEXT_PUBLIC_HASURA_URL_TESTNET",
       "  https://indexer.hyperindex.xyz/testnet/v1/graphql  ",
@@ -234,14 +234,28 @@ describe("NETWORKS — Monad networks", () => {
     vi.stubEnv("NEXT_PUBLIC_SHOW_TESTNET_NETWORKS", "true");
 
     const networks = await import("../networks");
-    expect(networks.NETWORKS["celo-sepolia"].hasuraUrl).toBe(
-      "https://indexer.hyperindex.xyz/testnet/v1/graphql",
-    );
+    expect(networks.NETWORKS["celo-sepolia"].hasuraUrl).toBe("");
     expect(networks.NETWORKS["monad-testnet"].hasuraUrl).toBe(
       "https://indexer.hyperindex.xyz/testnet/v1/graphql",
     );
-    expect(networks.isConfiguredNetworkId("celo-sepolia")).toBe(true);
+    expect(networks.isConfiguredNetworkId("celo-sepolia")).toBe(false);
     expect(networks.isConfiguredNetworkId("monad-testnet")).toBe(true);
+  });
+
+  it("wires CELO_SEPOLIA_HASURA_URL into Celo Sepolia only when explicitly shown", async () => {
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA",
+      "  https://indexer.hyperindex.xyz/celo-sepolia/v1/graphql  ",
+    );
+    vi.stubEnv("NEXT_PUBLIC_SHOW_TESTNET_NETWORKS", "true");
+
+    const networks = await import("../networks");
+    expect(networks.NETWORKS["celo-sepolia"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/celo-sepolia/v1/graphql",
+    );
+    expect(networks.NETWORKS["monad-testnet"].hasuraUrl).toBe("");
+    expect(networks.isConfiguredNetworkId("celo-sepolia")).toBe(true);
+    expect(networks.isConfiguredNetworkId("monad-testnet")).toBe(false);
   });
 
   it("keeps hosted testnets hidden when the opt-in flag is absent", async () => {
@@ -249,9 +263,16 @@ describe("NETWORKS — Monad networks", () => {
       "NEXT_PUBLIC_HASURA_URL_TESTNET",
       "https://indexer.hyperindex.xyz/testnet/v1/graphql",
     );
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA",
+      "https://indexer.hyperindex.xyz/celo-sepolia/v1/graphql",
+    );
 
     const networks = await import("../networks");
     expect(networks.NETWORKS["celo-sepolia"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/celo-sepolia/v1/graphql",
+    );
+    expect(networks.NETWORKS["monad-testnet"].hasuraUrl).toBe(
       "https://indexer.hyperindex.xyz/testnet/v1/graphql",
     );
     expect(networks.isConfiguredNetworkId("celo-sepolia")).toBe(false);

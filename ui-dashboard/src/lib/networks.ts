@@ -156,7 +156,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
     rpcUrl: clientEnv.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA,
-    hasuraUrl: clientEnv.NEXT_PUBLIC_HASURA_URL_TESTNET?.trim() ?? "",
+    hasuraUrl: clientEnv.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
       clientEnv.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA ??

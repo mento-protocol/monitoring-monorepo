@@ -20,6 +20,11 @@ const envBool = z
 // default instead of failing `.url()` validation and crashing at module load.
 const clientSchema = z.object({
   NEXT_PUBLIC_HASURA_URL: z.string().url().optional().catch(undefined),
+  NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA: z
+    .string()
+    .url()
+    .optional()
+    .catch(undefined),
   NEXT_PUBLIC_HASURA_URL_TESTNET: z.string().url().optional().catch(undefined),
   NEXT_PUBLIC_RPC_URL_CELO: z.string().url().catch("https://forno.celo.org"),
   NEXT_PUBLIC_RPC_URL_MONAD_MAINNET: z
@@ -92,6 +97,8 @@ const serverSchema = z.object({
 
 export const clientEnv = clientSchema.parse({
   NEXT_PUBLIC_HASURA_URL: process.env.NEXT_PUBLIC_HASURA_URL,
+  NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA:
+    process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA,
   NEXT_PUBLIC_HASURA_URL_TESTNET: process.env.NEXT_PUBLIC_HASURA_URL_TESTNET,
   NEXT_PUBLIC_RPC_URL_CELO: process.env.NEXT_PUBLIC_RPC_URL_CELO,
   NEXT_PUBLIC_RPC_URL_MONAD_MAINNET:

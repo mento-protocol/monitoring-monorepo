@@ -155,7 +155,7 @@ The config file is the same. No code changes needed between environments — onl
 
 | Step | Task                                                                         | Time  |
 | ---- | ---------------------------------------------------------------------------- | ----- |
-| 13   | Set `hasura_testnet_url` + `show_testnet_networks=true` via Terraform        | 2 min |
+| 13   | Set `hasura_celo_sepolia_url` + `show_testnet_networks=true` via Terraform   | 2 min |
 | 14   | Add `NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA` to Vercel env vars               | 1 min |
 | 15   | Create Vercel project pointing to `ui-dashboard/` — see `docs/deployment.md` | 5 min |
 | 16   | Deploy dashboard to Vercel                                                   | 5 min |
