@@ -29,16 +29,40 @@ let lastRefreshErrorCaptureMs = 0;
 // cookie re-triggers JWTSessionError on every middleware `auth()` resolution
 // until the cookie clears, which would otherwise flood Sentry (events still
 // ingest against quota even when the issue is ignored). The throttle is keyed
-// by error name + message — NOT name alone: Auth.js wraps every JWT/session
-// failure as JWTSessionError, so a name-only key would let a noisy stale-cookie
-// failure mask a *different*-cause JWTSessionError (e.g. a callback regression
-// after a bad deploy) for the whole window. Fingerprinting on the message gives
-// each distinct cause its own bucket, so a recurring failure is rate-limited
-// while a genuinely new one still surfaces on first occurrence. The map is
-// capped so a volatile message can't leak memory on a long-lived warm instance.
+// by a fingerprint that MUST include the wrapped cause — not just name+message:
+// Auth.js logs session failures as `new JWTSessionError(e)`, and AuthError's own
+// `message` is just the docs URL ("Read more at https://errors.authjs.dev/"),
+// identical across causes. So stale cookies, bad secrets, and a jwt/session
+// callback regression would all collapse into ONE bucket on name+message alone,
+// letting a noisy stale-cookie loop mask a real regression for the whole window
+// — exactly the signal this logger exists to surface. `loggerThrottleKey` folds
+// in the wrapped error (`cause` / `cause.err`), whose message/stack discriminate
+// the underlying cause, so a recurring failure is rate-limited while a
+// genuinely new one still surfaces on first occurrence. The map is capped so a
+// volatile fingerprint can't leak memory on a long-lived warm instance.
 const LOGGER_CAPTURE_INTERVAL_MS = 5 * 60 * 1_000;
 const LOGGER_CAPTURE_KEYS_MAX = 100;
 const lastLoggerCaptureMsByKey = new Map<string, number>();
+
+// Build the throttle fingerprint. AuthError's own `message` is a constant docs
+// URL, so the discriminating signal lives in the wrapped cause. Auth.js stores
+// it as either `error.cause` directly or `error.cause.err` (e.g. the jose
+// decryption error for a stale cookie vs the thrown error for a callback
+// regression); we unwrap both shapes and fold the cause's name+message into the
+// key so distinct causes land in distinct buckets.
+function loggerThrottleKey(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  const rawCause = (error as { cause?: unknown }).cause;
+  const cause =
+    rawCause && typeof rawCause === "object" && "err" in rawCause
+      ? (rawCause as { err?: unknown }).err
+      : rawCause;
+  const causeKey =
+    cause instanceof Error
+      ? `${cause.name}:${cause.message}`
+      : String(cause ?? "");
+  return `${error.name}:${error.message}:${causeKey}`;
+}
 
 // Probe Google with the stored refresh token to confirm the account is still
 // active, rolling `expires_at` forward. Mutates and returns the token. Three
@@ -186,8 +210,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // regression (different stack/cause → new fingerprint) free to alert.
   logger: {
     error(error) {
-      const key =
-        error instanceof Error ? `${error.name}:${error.message}` : "unknown";
+      const key = loggerThrottleKey(error);
       const now = Date.now();
       const last = lastLoggerCaptureMsByKey.get(key);
       if (last !== undefined && now - last <= LOGGER_CAPTURE_INTERVAL_MS) {
