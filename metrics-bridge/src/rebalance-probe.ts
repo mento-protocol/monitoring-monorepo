@@ -32,7 +32,7 @@ import {
   type RebalanceProbeResult,
 } from "./rebalance-check.js";
 import { getRpcClient } from "./rpc.js";
-import type { PoolRow } from "./types.js";
+import { isFpmmPool, type PoolRow } from "./types.js";
 
 // Module-scope re-entrancy guard. The production poller awaits each
 // `runRebalanceProbes()` call before scheduling the next loop, so cycles can't
@@ -67,34 +67,32 @@ export function _resetProbeInProgressForTests(): void {
  *   - `rebalancerAddress` non-empty (pool has a probe-able liquidity strategy)
  */
 export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
-  // Mirror the VP exclusion from `updateMetrics`: a healed VP retains its
-  // FPMM source until re-sync, so `wrappedExchangeId` is the canonical gate.
-  // "" = FPMM (probe); non-empty = VP (skip — the pool no longer fires the
-  // Deviation Breach Critical alert so annotating it would emit a phantom
-  // `mento_pool_rebalance_blocked` gauge).
-  return pools
-    .filter((p) => !p.wrappedExchangeId)
-    .filter((pool) => {
-      if (Number(pool.deviationBreachStartedAt) <= 0) return false;
-      const ratio = parseFloat(pool.lastDeviationRatio);
-      if (!Number.isFinite(ratio)) return false;
-      if (ratio <= REBALANCE_PROBE_TOLERANCE_THRESHOLD) return false;
-      const openBreachPeak = parseFloat(pool.currentOpenBreachPeak);
-      const entryThreshold =
-        pool.currentOpenBreachEntryThreshold > 0
-          ? pool.currentOpenBreachEntryThreshold
-          : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
-      const openBreachPeakRatio =
-        Number.isFinite(openBreachPeak) && openBreachPeak > 0
-          ? openBreachPeak / entryThreshold
-          : 0;
-      const crossedCritical =
-        ratio > REBALANCE_PROBE_DEVIATION_THRESHOLD ||
-        openBreachPeakRatio > REBALANCE_PROBE_DEVIATION_THRESHOLD;
-      if (!crossedCritical) return false;
-      if (!pool.rebalancerAddress) return false;
-      return true;
-    });
+  // Defense-in-depth VP exclusion via the canonical `isFpmmPool` predicate.
+  // The poller already filters to FPMM-only rows at the boundary, but a healed
+  // VP that slipped through (or a direct caller passing unfiltered pools) no
+  // longer fires the Deviation Breach Critical alert, so annotating it would
+  // emit a phantom `mento_pool_rebalance_blocked` gauge.
+  return pools.filter(isFpmmPool).filter((pool) => {
+    if (Number(pool.deviationBreachStartedAt) <= 0) return false;
+    const ratio = parseFloat(pool.lastDeviationRatio);
+    if (!Number.isFinite(ratio)) return false;
+    if (ratio <= REBALANCE_PROBE_TOLERANCE_THRESHOLD) return false;
+    const openBreachPeak = parseFloat(pool.currentOpenBreachPeak);
+    const entryThreshold =
+      pool.currentOpenBreachEntryThreshold > 0
+        ? pool.currentOpenBreachEntryThreshold
+        : LEGACY_OPEN_BREACH_ENTRY_THRESHOLD;
+    const openBreachPeakRatio =
+      Number.isFinite(openBreachPeak) && openBreachPeak > 0
+        ? openBreachPeak / entryThreshold
+        : 0;
+    const crossedCritical =
+      ratio > REBALANCE_PROBE_DEVIATION_THRESHOLD ||
+      openBreachPeakRatio > REBALANCE_PROBE_DEVIATION_THRESHOLD;
+    if (!crossedCritical) return false;
+    if (!pool.rebalancerAddress) return false;
+    return true;
+  });
 }
 
 /**

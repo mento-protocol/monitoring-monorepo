@@ -10,7 +10,7 @@ import {
 import { runRebalanceProbes } from "./rebalance-probe.js";
 import { markHealthy } from "./server.js";
 import { POLL_INTERVAL_MS, REBALANCE_PROBE_EVERY_N_POLLS } from "./config.js";
-import type { PoolRow } from "./types.js";
+import { isFpmmPool, type PoolRow } from "./types.js";
 
 // Cycle counter — 0-indexed, advanced AFTER each probe check on successful
 // Hasura polls. The rebalance probe runs when
@@ -94,7 +94,10 @@ async function pollPools(): Promise<void> {
   let pools: PoolRow[];
   try {
     const data = await fetchPools();
-    pools = data.Pool;
+    // Exclude healed VirtualPools at the boundary so BOTH gauge publication and
+    // the rebalance probe see FPMM-only rows. See `isFpmmPool` for why the
+    // `source: { _like: "%fpmm%" }` query filter alone is insufficient.
+    pools = data.Pool.filter(isFpmmPool);
   } catch (error) {
     recordPollError(
       "hasura_query",

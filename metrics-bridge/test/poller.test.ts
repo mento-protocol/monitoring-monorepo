@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { register } from "../src/metrics.js";
 import * as metricsModule from "../src/metrics.js";
 import {
+  makePool,
   makePoolResponse,
   getGaugeValue,
   getMetricValues,
@@ -242,6 +243,29 @@ describe("poll", () => {
     );
     expect(await pollErrorValue("rebalance_probe")).toBe(1);
     errorSpy.mockRestore();
+  });
+
+  it("excludes healed VirtualPools from BOTH gauge publication and the rebalance probe", async () => {
+    // Regression: the VP filter must live at the poll boundary, not only in
+    // updateMetrics. A VP with a non-empty rebalancerAddress would otherwise
+    // still be probed and publish a phantom mento_pool_rebalance_blocked gauge.
+    const fpmm = makePool({ id: "42220-0xfpmm", wrappedExchangeId: "" });
+    const vp = makePool({
+      id: "42220-0xdead",
+      source: "fpmm_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    });
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse([fpmm, vp]));
+    const updateSpy = vi.spyOn(metricsModule, "updateMetrics");
+
+    await poll();
+
+    const updateArg = updateSpy.mock.calls[0]?.[0];
+    expect(updateArg?.map((p) => p.id)).toEqual([fpmm.id]);
+    const probeArg = mockRunRebalanceProbes.mock.calls[0]?.[0];
+    expect(probeArg?.map((p) => p.id)).toEqual([fpmm.id]);
+    updateSpy.mockRestore();
   });
 });
 

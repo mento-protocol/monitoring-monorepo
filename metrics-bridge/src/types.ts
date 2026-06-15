@@ -38,9 +38,28 @@ export interface PoolRow {
   // in the GraphQL response.
   rebalancerAddress: string;
   // "" = FPMM (native pool), non-empty hex = VP (VirtualPool healed from an
-  // FPMM). Keep rows where !wrappedExchangeId; skip VPs in updateMetrics().
+  // FPMM). Filtered out by `isFpmmPool` before any gauge/probe work.
   // Schema: `Pool.wrappedExchangeId: String! @index` (schema.graphql:181).
   wrappedExchangeId: string;
+}
+
+// Canonical FPMM predicate. Analogous to `isVirtualPool` in
+// `indexer-envio/src/helpers.ts` and `ui-dashboard/src/lib/types.ts`, but
+// simplified: those check two conditions (`source.includes("virtual") ||
+// wrappedExchangeId`), whereas here the GQL query's `source: { _like: "%fpmm%" }`
+// filter has already excluded native VPs (`source: "virtual_pool_factory"`) at
+// the query boundary, leaving `wrappedExchangeId` as the only remaining
+// discriminator. A healed VirtualPool retains its original "fpmm_factory" source
+// until the next re-sync, so the source filter alone is not sufficient —
+// `wrappedExchangeId` is the load-bearing discriminator:
+// "" = native FPMM; non-empty = healed VP. Applied once at the poller boundary
+// so BOTH gauge publication (`updateMetrics`) and the rebalance probe
+// (`runRebalanceProbes`) operate on FPMM-only rows from a single source of
+// truth instead of each re-deriving the guard. `eligibleForProbe` also applies
+// it defensively, since a leaked VP with a non-empty `rebalancerAddress` would
+// otherwise publish a phantom `mento_pool_rebalance_blocked` gauge.
+export function isFpmmPool(pool: PoolRow): boolean {
+  return !pool.wrappedExchangeId;
 }
 
 export interface BridgePoolsResponse {
