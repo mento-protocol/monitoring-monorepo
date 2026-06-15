@@ -136,7 +136,8 @@ rewriting the quality-gate dispatcher.
    `ui-dashboard/src/instrumentation-client.ts` invalidate the dashboard build.
 
 6. Root package-manager inputs (`package.json`, `pnpm-lock.yaml`,
-   `pnpm-workspace.yaml`, `.npmrc`, `.node-version`) invalidate both commands.
+   `pnpm-workspace.yaml`, `.npmrc`, `patches/**`, `.node-version`) invalidate
+   both commands.
 
 7. Cache runner/config changes invalidate both commands.
 
