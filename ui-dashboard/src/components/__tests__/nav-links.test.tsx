@@ -19,7 +19,7 @@ vi.mock("next-auth/react", () => ({
 }));
 
 describe("NavLinks", () => {
-  it("shows Addresses and Integrations links when user is authenticated", () => {
+  it("shows protected links when user is authenticated", () => {
     mockUseSession.mockReturnValue({
       data: { user: { email: "alice@mentolabs.xyz" } },
     });
@@ -28,24 +28,26 @@ describe("NavLinks", () => {
     expect(html).toContain("/address-book");
     expect(html).toContain("Integrations");
     expect(html).toContain("/integrations");
+    expect(html).toContain("Revenue");
+    expect(html).toContain("/revenue");
   });
 
-  it("hides Addresses and Integrations links when user is not authenticated", () => {
+  it("hides protected links when user is not authenticated", () => {
     mockUseSession.mockReturnValue({ data: null });
     const html = renderToStaticMarkup(<NavLinks />);
     expect(html).not.toContain("Addresses");
     expect(html).not.toContain("/address-book");
     expect(html).not.toContain("Integrations");
     expect(html).not.toContain("/integrations");
+    expect(html).not.toContain("Revenue");
+    expect(html).not.toContain("/revenue");
   });
 
-  it("always shows Pools, Revenue, and home links regardless of auth", () => {
+  it("always shows Pools and home links regardless of auth", () => {
     mockUseSession.mockReturnValue({ data: null });
     const html = renderToStaticMarkup(<NavLinks />);
     expect(html).toContain("Pools");
     expect(html).toContain("/pools");
-    expect(html).toContain("Revenue");
-    expect(html).toContain("/revenue");
     expect(html).toContain("Mento Analytics");
   });
 
