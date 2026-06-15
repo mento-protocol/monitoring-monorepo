@@ -24,8 +24,6 @@ set -euo pipefail
 PROJECT="${GCP_PROJECT:-mento-monitoring}"
 REGION="${GCP_REGION:-europe-west1}"
 AR_REPO="${REGION}-docker.pkg.dev/${PROJECT}/metrics-bridge"
-TAG="$(git rev-parse --short HEAD)"
-IMAGE="${AR_REPO}/metrics-bridge:${TAG}"
 SKIP_CONFIRM=false
 
 while [[ $# -gt 0 ]]; do
@@ -39,6 +37,18 @@ TF_APPROVE=""
 if [ "$SKIP_CONFIRM" = true ]; then
   TF_APPROVE="-auto-approve"
 fi
+
+# shellcheck source=scripts/lib/deploy-guard.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"
+
+# Anchor all subsequent terraform/gcloud mutations to the guarded repo root so
+# the guard and the deploy operate on the same checkout regardless of caller CWD.
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Compute TAG after cd so git rev-parse targets the guarded checkout.
+TAG="$(git rev-parse --short HEAD)"
+IMAGE="${AR_REPO}/metrics-bridge:${TAG}"
 
 echo "━━━ Metrics Bridge Deploy ━━━"
 echo "Project:  ${PROJECT}"
