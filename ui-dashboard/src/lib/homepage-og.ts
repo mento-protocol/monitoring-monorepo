@@ -17,6 +17,9 @@ import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
 import {
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
   ALL_POOLS_WITH_HEALTH,
+  // OG-specific homepage daily snapshot query. Lives in queries/pools.ts so
+  // the GraphQL contract test covers it.
+  HOMEPAGE_OG_DAILY_SNAPSHOTS,
 } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
@@ -41,34 +44,6 @@ const DAILY_SINCE_DAYS = 35;
 // in place, we should never come close at realistic scale.
 const DAILY_PAGE_SIZE = 1000;
 const DAILY_MAX_PAGES = 5;
-
-// OG-specific multi-pool daily-snapshot query. Bounded by $since so we
-// never scan the full table, even for chains with years of history.
-// Pagination still loops in case a chain has many pools × 35 days that
-// overflows a single 1000-row page (50 pools × 35d = 1750 rows).
-const HOMEPAGE_OG_DAILY_SNAPSHOTS = `
-  query HomepageOgDailySnapshots(
-    $poolIds: [String!]!
-    $since: numeric!
-    $limit: Int!
-    $offset: Int!
-  ) {
-    PoolDailySnapshot(
-      where: { poolId: { _in: $poolIds }, timestamp: { _gte: $since } }
-      order_by: [{ timestamp: desc }, { id: desc }]
-      limit: $limit
-      offset: $offset
-    ) {
-      poolId
-      timestamp
-      reserves0
-      reserves1
-      swapCount
-      swapVolume0
-      swapVolume1
-    }
-  }
-`;
 
 type AttentionPool = {
   name: string;
