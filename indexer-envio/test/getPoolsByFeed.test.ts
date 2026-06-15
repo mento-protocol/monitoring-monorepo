@@ -55,4 +55,11 @@ describe("getPoolsByFeed cross-chain isolation", () => {
     assert.deepEqual(result.sort(), ["42220-0xa", "42220-0xb"]);
     assert.equal(warnings.length, 0);
   });
+
+  it("returns [] with no warning when the feed matches no pools", async () => {
+    const { context, warnings } = makeMockContext([]);
+    const result = await getPoolsByFeed(context, 42220, FEED);
+    assert.deepEqual(result, []);
+    assert.equal(warnings.length, 0);
+  });
 });

@@ -205,6 +205,20 @@ const buildStables = (): ReadonlyArray<StableInfo> => {
   return out;
 };
 
+// Chain-ID convention precondition. The raw chain IDs live in src/rpc/client.ts;
+// the two hardcoded here (CELO_CHAIN_ID / MONAD_CHAIN_ID) are validated against
+// the namespace map *before* the builders run, so a chain rename/removal in
+// deployment-namespaces.json fails loud at module load instead of buildStables()
+// silently returning [].
+for (const cid of [CELO_CHAIN_ID, MONAD_CHAIN_ID]) {
+  if (!(String(cid) in CONTRACT_NAMESPACE_BY_CHAIN)) {
+    throw new Error(
+      `[stables/config] Chain ${cid} is not a key in CONTRACT_NAMESPACE_BY_CHAIN. ` +
+        `Update config/deployment-namespaces.json or the hardcoded chain IDs in this file.`,
+    );
+  }
+}
+
 export const NTT_STABLES: ReadonlyArray<NttStableInfo> = buildNttStables();
 
 export const LOCK_AND_MINT_NTT_STABLES: ReadonlyArray<NttStableInfo> =
@@ -216,18 +230,6 @@ export const STABLES: ReadonlyArray<StableInfo> = buildStables();
 // If the package drops one, throw at module load so the indexer fails fast
 // rather than silently under-tracking a token.
 {
-  // Chain-ID convention guard. The raw chain IDs live in src/rpc/client.ts; the
-  // two hardcoded here (CELO_CHAIN_ID / MONAD_CHAIN_ID) are validated against
-  // the namespace map so a chain rename/removal in deployment-namespaces.json
-  // fails loud at module load instead of buildStables() silently returning [].
-  for (const cid of [CELO_CHAIN_ID, MONAD_CHAIN_ID]) {
-    if (!(String(cid) in CONTRACT_NAMESPACE_BY_CHAIN)) {
-      throw new Error(
-        `[stables/config] Chain ${cid} is not a key in CONTRACT_NAMESPACE_BY_CHAIN. ` +
-          `Update config/deployment-namespaces.json or the hardcoded chain IDs in this file.`,
-      );
-    }
-  }
   const reserveSymbols = new Set(
     STABLES.filter(
       (s) => s.chainId === CELO_CHAIN_ID && s.source === "RESERVE",
