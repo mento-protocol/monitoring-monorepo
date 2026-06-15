@@ -25,6 +25,45 @@ const GOOGLE_TOKEN_TIMEOUT_MS = 8_000;
 const REFRESH_ERROR_CAPTURE_INTERVAL_MS = 5 * 60 * 1_000;
 let lastRefreshErrorCaptureMs = 0;
 
+// Throttle the NextAuth logger's Sentry capture. A stale/undecryptable session
+// cookie re-triggers JWTSessionError on every middleware `auth()` resolution
+// until the cookie clears, which would otherwise flood Sentry (events still
+// ingest against quota even when the issue is ignored). The throttle is keyed
+// by a fingerprint that MUST include the wrapped cause — not just name+message:
+// Auth.js logs session failures as `new JWTSessionError(e)`, and AuthError's own
+// `message` is just the docs URL ("Read more at https://errors.authjs.dev/"),
+// identical across causes. So stale cookies, bad secrets, and a jwt/session
+// callback regression would all collapse into ONE bucket on name+message alone,
+// letting a noisy stale-cookie loop mask a real regression for the whole window
+// — exactly the signal this logger exists to surface. `loggerThrottleKey` folds
+// in the wrapped error (`cause` / `cause.err`), whose message/stack discriminate
+// the underlying cause, so a recurring failure is rate-limited while a
+// genuinely new one still surfaces on first occurrence. The map is capped so a
+// volatile fingerprint can't leak memory on a long-lived warm instance.
+const LOGGER_CAPTURE_INTERVAL_MS = 5 * 60 * 1_000;
+const LOGGER_CAPTURE_KEYS_MAX = 100;
+const lastLoggerCaptureMsByKey = new Map<string, number>();
+
+// Build the throttle fingerprint. AuthError's own `message` is a constant docs
+// URL, so the discriminating signal lives in the wrapped cause. Auth.js stores
+// it as either `error.cause` directly or `error.cause.err` (e.g. the jose
+// decryption error for a stale cookie vs the thrown error for a callback
+// regression); we unwrap both shapes and fold the cause's name+message into the
+// key so distinct causes land in distinct buckets.
+function loggerThrottleKey(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  const rawCause = (error as { cause?: unknown }).cause;
+  const cause =
+    rawCause && typeof rawCause === "object" && "err" in rawCause
+      ? (rawCause as { err?: unknown }).err
+      : rawCause;
+  const causeKey =
+    cause instanceof Error
+      ? `${cause.name}:${cause.message}`
+      : String(cause ?? "");
+  return `${error.name}:${error.message}:${causeKey}`;
+}
+
 // Probe Google with the stored refresh token to confirm the account is still
 // active, rolling `expires_at` forward. Mutates and returns the token. Three
 // outcomes:
@@ -152,13 +191,47 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   pages: {
     signIn: "/sign-in",
+    // Redirect auth.js error page (OAuth failures, CSRF mismatches, etc.) back
+    // to our custom sign-in page instead of the default /api/auth/error page.
+    error: "/sign-in",
   },
 
   // Fire NextAuth internal errors (OAuth handshake failures, JWE verification
   // breaks, callback URL mismatches) to Sentry so sign-in regressions don't
   // need "users can't log in" bug reports to be noticed.
+  //
+  // We deliberately do NOT filter JWTSessionError here: Auth.js wraps *any*
+  // failure during JWT/session resolution in that class — not just benign
+  // stale-cookie / AUTH_SECRET-rotation decryption failures, but also a broken
+  // jwt/session callback after a bad deploy. Suppressing the whole class would
+  // mute exactly the auth-regression signal this logger exists to surface. The
+  // benign rotation noise (Sentry ANALYTICS-MENTO-ORG-1J) is handled at the
+  // Sentry layer via an issue-level ignore instead, which leaves a future
+  // regression (different stack/cause → new fingerprint) free to alert.
   logger: {
     error(error) {
+      const key = loggerThrottleKey(error);
+      const now = Date.now();
+      const last = lastLoggerCaptureMsByKey.get(key);
+      if (last !== undefined && now - last <= LOGGER_CAPTURE_INTERVAL_MS) {
+        return;
+      }
+      // Drop only entries whose window has already elapsed — they no longer
+      // throttle anything, so this keeps the map bounded by the distinct errors
+      // seen within a single window WITHOUT resetting still-active throttles (a
+      // full clear would let a recurring error re-capture immediately and flood).
+      for (const [k, ts] of lastLoggerCaptureMsByKey) {
+        if (now - ts > LOGGER_CAPTURE_INTERVAL_MS) {
+          lastLoggerCaptureMsByKey.delete(k);
+        }
+      }
+      // Final guard against pathological cardinality within one window: evict the
+      // single oldest still-active entry rather than clearing all of them.
+      if (lastLoggerCaptureMsByKey.size >= LOGGER_CAPTURE_KEYS_MAX) {
+        const oldestKey = lastLoggerCaptureMsByKey.keys().next().value;
+        if (oldestKey !== undefined) lastLoggerCaptureMsByKey.delete(oldestKey);
+      }
+      lastLoggerCaptureMsByKey.set(key, now);
       Sentry.captureException(error, { tags: { source: "nextauth" } });
     },
   },

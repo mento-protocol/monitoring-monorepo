@@ -26,6 +26,15 @@ const orderedAnchors = {
     'cd "$REPO_ROOT"',
     "git ls-remote --heads origin",
   ],
+  "scripts/deploy-indexer-rollback.sh": [
+    'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',
+    'cd "$REPO_ROOT"',
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+    'pnpm deploy:indexer:promote "$REGISTERED" --yes',
+    'echo "Dry run: nothing pushed."',
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+    'git push --force-with-lease origin "$FULL_SHA:refs/heads/$DEPLOY_BRANCH"',
+  ],
   "scripts/deploy-bridge.sh": [
     'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
     'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',

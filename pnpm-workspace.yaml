@@ -31,8 +31,16 @@ minimumReleaseAgeExclude:
   - "@mento-protocol/*"
   - envio-cloud
   - "@envio-dev/envio-cloud-*"
+  # Security override floors for the 2026-06-15 advisory batch may be younger
+  # than the 3-day release-age gate.
+  - "@babel/core"
   - esbuild
   - "@esbuild/*"
+  - form-data
+  - js-yaml
+  - protobufjs
+  - tar
+  - vite
 
 ignoredBuiltDependencies:
   - sharp

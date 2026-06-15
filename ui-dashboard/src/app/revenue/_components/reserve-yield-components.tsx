@@ -45,13 +45,33 @@ function reserveTotalApyPercent(data: ReserveYieldResponse): number | null {
 }
 
 function reserveTotalForecastTitle(data: ReserveYieldResponse): string {
+  const rateSources = reserveForecastAnnualRateSourceTitle(data);
   if (data.next365dUsd === null) {
-    return "Forecast unavailable until APY sources load for current reserve holdings.";
+    return `Forecast unavailable until annual-rate sources load for current reserve holdings.${rateSources}`;
   }
   if (data.forecastUnavailableSymbols.length > 0) {
-    return `Forecast totals include holdings with APY sources only; missing APY for ${data.forecastUnavailableSymbols.join(", ")}.`;
+    return `Forecast totals include holdings with annual-rate sources only; missing annual rate for ${data.forecastUnavailableSymbols.join(", ")}.${rateSources}`;
   }
-  return "Forecast totals use non-compounding math across current reserve balances.";
+  return `Forecast totals use non-compounding math across current reserve balances.${rateSources}`;
+}
+
+function reserveForecastAnnualRateSourceTitle(
+  data: ReserveYieldResponse,
+): string {
+  const sourceLines: string[] = [];
+  const seenSymbols = new Set<string>();
+  for (const holding of data.holdings) {
+    if (holding.apyPercent === null) continue;
+    const symbol = holding.assetSymbol.toUpperCase();
+    if (seenSymbols.has(symbol)) continue;
+    seenSymbols.add(symbol);
+    sourceLines.push(
+      `${symbol}: ${formatAnnualInterestRatePercent(holding.apyPercent)} (${holding.yieldModel})`,
+    );
+  }
+  return sourceLines.length === 0
+    ? ""
+    : ` Annual-rate sources: ${sourceLines.join("; ")}.`;
 }
 
 function sourceTypeLabel(holding: ReserveYieldHolding): string {
@@ -134,7 +154,7 @@ function ReserveYieldTotalRow({ data }: { data: ReserveYieldResponse }) {
       <Td
         mono
         align="right"
-        title={`Blended APY across forecastable reserve balances. ${forecastTitle}`}
+        title={`Blended annual rate across forecastable reserve balances. ${forecastTitle}`}
         className="font-semibold text-slate-100 sm:!px-2"
       >
         {totalApyPercent !== null && data.forecastUnavailableSymbols.length > 0
@@ -236,7 +256,7 @@ export function ReserveYieldByHoldingTable({
               Earned
             </Th>
             <Th align="right" className="sm:!px-2">
-              APY
+              Annual rate
             </Th>
             <Th align="right" className="sm:!px-2">
               30d

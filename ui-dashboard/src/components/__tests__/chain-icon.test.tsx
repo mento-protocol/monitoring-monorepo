@@ -53,6 +53,22 @@ describe("ChainIcon", () => {
     expect(html).toContain('fill="#836EF9"');
   });
 
+  it("renders the branded Monad icon for Monad Testnet (10143)", () => {
+    const html = renderToStaticMarkup(
+      <ChainIcon
+        network={{
+          ...BASE,
+          id: "monad-testnet",
+          chainId: 10143,
+          label: "Monad Testnet",
+          testnet: true,
+        }}
+      />,
+    );
+    expect(html).toContain('aria-label="Monad Testnet"');
+    expect(html).toContain('fill="#836EF9"');
+  });
+
   it("renders the branded Polygon icon for chainId 137", () => {
     const html = renderToStaticMarkup(
       <ChainIcon

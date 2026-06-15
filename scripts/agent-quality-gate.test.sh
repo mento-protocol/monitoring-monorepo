@@ -473,6 +473,7 @@ assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_PORT"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_FIXTURE_PORT"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_COMMAND"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_TIMEOUT_MS"
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_FORCE_SINGLE_PROCESS"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_REUSE_FIXTURE_SERVER"
 assert_turbo_task_has_env "test:browser" "CI"
 assert_turbo_task_has_env "test:browser" "NEXT_TELEMETRY_DISABLED"
@@ -626,33 +627,38 @@ assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/metrics-bri
 assert_not_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
 
 run_gate_expect_failure "ui-dashboard/package.json"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "re-run with --allow-package-script-changes if they are safe."
 
 run_gate_expect_failure "pnpm-lock.yaml"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 
 run_gate_expect_failure "pnpm-workspace.yaml"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 
+run_gate_expect_failure "patches/@lhci__utils@0.15.1.patch"
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
+assert_contains "dependency install scripts"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
+
 run_gate_expect_failure ".npmrc"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 
 run_gate_expect_failure "indexer-envio/.npmrc"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
 run_gate_expect_failure "pnpmfile.cjs"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
 run_gate_expect_failure ".pnpmfile.cjs"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
@@ -681,6 +687,13 @@ assert_order \
 assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
   "- pnpm --filter @mento-protocol/indexer-envio lint (package manager config changed)"
+
+run_gate "patches/@lhci__utils@0.15.1.patch"
+assert_contains "- pnpm install --frozen-lockfile (pnpm patch changed)"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (pnpm patch changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (pnpm patch changed)"
+assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (pnpm patch changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (pnpm patch changed)"
 
 run_gate "package.json"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (agent quality gate package script changed)"
@@ -2018,7 +2031,7 @@ rename_repo="$(mktemp -d)"
   [[ "$exit_code" -ne 0 ]]
 )
 rm -rf "$rename_repo"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 
 scripts/agent-quality-gate.sh \
