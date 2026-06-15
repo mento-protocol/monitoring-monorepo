@@ -98,13 +98,21 @@
       "brace-expansion@>=5.0.0 <6": "^5.0.6",
       "postcss": ">=8.5.10",
       "picomatch": ">=4.0.4",
-      "vite": ">=8.0.8",
+      "vite@>=8.0.0 <8.0.16": "8.0.16",
       "@grpc/grpc-js": "1.14.4",
       "esbuild": "0.28.1",
+      "@babel/core@>=7.0.0 <7.29.6": "7.29.6",
       "body-parser@<1.20.3": "1.20.3",
       "path-to-regexp@<0.1.13": "0.1.13",
       "fast-uri": ">=3.1.1",
       "express@<4.20.0": "4.22.1",
+      "form-data@<2.5.6": "2.5.6",
+      "form-data@>=3.0.0 <3.0.5": "3.0.5",
+      "form-data@>=4.0.0 <4.0.6": "4.0.6",
+      "@istanbuljs/load-nyc-config>js-yaml": "4.2.0",
+      "@lhci/utils>js-yaml": "4.2.0",
+      "js-yaml@>=4.0.0 <4.2.0": "4.2.0",
+      "protobufjs@>=7.0.0 <7.6.3": "7.6.3",
       "qs@<6.15.2": "6.15.2",
       "cookie@<0.7.0": "0.7.2",
       "send@<0.19.0": "0.19.2",
@@ -127,7 +135,8 @@
       "path-to-regexp@^8.0.0": "^8.4.0",
       "picomatch@^2.0.0": "^2.3.2",
       "qs": ">=6.15.2",
-      "tar": ">=7.5.11",
+      "@trunkio/launcher>tar": "7.5.16",
+      "tar@>=7.0.0 <7.5.16": "7.5.16",
       "@lhci/cli>tmp": "0.2.7",
       "external-editor>tmp": "0.2.7",
       "uuid@<11.1.1": "11.1.1",
@@ -135,6 +144,9 @@
       "lighthouse>ws": "7.5.11",
       "ws@>=8.0.0 <8.21.0": "8.21.0",
       "yaml@^2.0.0": "^2.8.3"
+    },
+    "patchedDependencies": {
+      "@lhci/utils@0.15.1": "patches/@lhci__utils@0.15.1.patch"
     }
   },
   "devDependencies": {
@@ -145,7 +157,7 @@
     "eslint": "^10.0.2",
     "globals": "^17.4.0",
     "graphql": "16.13.1",
-    "js-yaml": "4.1.1",
+    "js-yaml": "4.2.0",
     "jscpd": "4.0.9",
     "turbo": "^2.9.14"
   }

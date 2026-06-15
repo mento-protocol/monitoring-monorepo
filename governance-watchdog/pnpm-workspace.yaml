@@ -12,6 +12,9 @@ minimumReleaseAgeExclude:
   # package and share the same release timestamp.
   - esbuild
   - "@esbuild/*"
+  # Security override floors for the 2026-06-15 advisory batch may be younger
+  # than the 3-day release-age gate.
+  - protobufjs
 
 overrides:
   # Exact pin because ranges resolve forward on fresh installs. 3.4.2 is what
@@ -24,6 +27,7 @@ overrides:
   # vulnerable ranges narrowly instead of overriding whole packages.
   "qs@<6.15.2": 6.15.2
   "uuid@<11.1.1": 11.1.1
+  "protobufjs@>=7.0.0 <7.6.3": 7.6.3
   # isows resolves ws@8.20.1 through viem; 8.21.0 contains the GHSA-96hv-2xvq-fx4p
   # fix and stays compatible with isows' ws peer range.
   "ws@<8.21.0": 8.21.0
