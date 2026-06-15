@@ -34,3 +34,4 @@ overrides:
   # Symbol(sensitiveHeaders) in @discordjs/rest's response wrapping — sends
   # deliver but report as failures; see issue #833). If a future undici
   # advisory lands, bump discord.js instead of re-adding an override.
+  protobufjs: 7.6.4
