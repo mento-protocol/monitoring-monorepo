@@ -248,7 +248,7 @@ jobs:
         run: pnpm --filter @mento-protocol/monitoring-config knip
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/monitoring-config test:coverage
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
           flags: monitoring-config
@@ -361,7 +361,7 @@ jobs:
           name: playwright-snapshot-diffs
           path: ui-dashboard/test-results/
           retention-days: 7
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
           flags: ui-dashboard
@@ -442,7 +442,7 @@ jobs:
         run: pnpm --filter @mento-protocol/indexer-envio knip
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/indexer-envio test:coverage
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
           flags: indexer-envio
@@ -484,7 +484,7 @@ jobs:
         run: pnpm --filter @mento-protocol/metrics-bridge knip
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/metrics-bridge test:coverage
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
           flags: metrics-bridge
@@ -525,7 +525,7 @@ jobs:
         run: pnpm --filter @mento-protocol/integration-probes knip
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/integration-probes test:coverage
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
           flags: integration-probes
@@ -605,13 +605,13 @@ jobs:
         run: |
           find alerts/infra -name '*.sh' -not -path '*/node_modules/*' -print0 \
             | xargs -0 -I {} bash -n {}
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
           flags: alerts-onchain-event-handler
           directory: alerts/infra/onchain-event-handler/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
           flags: alerts-oncall-announcer
@@ -668,7 +668,7 @@ jobs:
         run: |
           find governance-watchdog/infra/quicknode-filter-functions -name '*.js' -print0 \
             | xargs -0 -I {} node --check {}
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
           flags: governance-watchdog
@@ -773,7 +773,7 @@ jobs:
       - name: Forge tests
         working-directory: aegis
         run: forge test -vvv
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
           flags: aegis
