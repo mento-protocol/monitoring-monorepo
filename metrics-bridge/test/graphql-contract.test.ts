@@ -20,13 +20,12 @@ import {
 // rationale. Same rule subset: only FieldsOnCorrectTypeRule + ScalarLeafsRule
 // (Hasura-injected args/types would false-positive under any other rule).
 
-// Keep in sync with ENVIO_STUBS in scripts/schema-diff.mjs.
-const ENVIO_STUBS = `
-scalar BigInt
-scalar Bytes
-directive @index(fields: [String!]) repeatable on OBJECT | FIELD_DEFINITION
-directive @config(precision: Int) repeatable on FIELD_DEFINITION
-`;
+// Single source of truth shared with scripts/schema-diff.mjs and the dashboard
+// contract test — read via fs so no cross-package import is needed.
+const ENVIO_STUBS = readFileSync(
+  new URL("../../scripts/envio-schema-stubs.graphql", import.meta.url),
+  "utf8",
+);
 
 const sdl = readFileSync(
   new URL("../../indexer-envio/schema.graphql", import.meta.url),
