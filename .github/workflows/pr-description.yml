@@ -37,7 +37,7 @@ jobs:
       - name: Checkout trusted validator
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.ref }}
           path: trusted-base
       - name: Checkout bootstrap validator
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -54,7 +54,10 @@ jobs:
 
           if [ -f trusted-base/scripts/check-pr-description.mjs ]; then
             node trusted-base/scripts/check-pr-description.mjs
-          else
-            echo "::warning::Trusted PR-description validator missing on base ref; using PR copy only for the bootstrap PR that introduces the script."
+          elif [ -f pr-head/scripts/check-pr-description.mjs ]; then
+            echo "::warning::Trusted PR-description validator missing on target branch; using PR copy only for the bootstrap PR that introduces the script."
             node pr-head/scripts/check-pr-description.mjs
+          else
+            echo "::error::PR-description validator is missing from both the target branch and PR head."
+            exit 1
           fi
