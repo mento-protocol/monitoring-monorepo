@@ -22,6 +22,8 @@ function sources({
   critical = "1.05",
   mainTolerance = tolerance,
   mainCritical = critical,
+  annotationTolerancePercent = "1",
+  annotationCriticalPercent = "5",
   evaluatorTolerance = tolerance,
   bannerTolerance = tolerance,
   bannerCritical = critical,
@@ -36,6 +38,9 @@ deviation_critical_gate_promql = format(
   "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > ${mainTolerance}) and on(chain_id, pool_id, pair) (%s))",
   local.deviation_critical_magnitude_promql,
 )
+deviation_critical_summary_annotation = <<-EOT
+Pool crossed ${annotationCriticalPercent}%% threshold and remains above ${annotationTolerancePercent}%% tolerance.
+EOT
 `,
     [FPMM_RULES_PATH]: `
 # DEVIATION THRESHOLDS -- the bare \`${bannerTolerance}\` (warn) and \`${bannerCritical}\` (critical) literals
@@ -58,13 +63,15 @@ test("fails when shared-config tolerance changes without Terraform updates", () 
     sources({
       tolerance: "1.02",
       mainTolerance: "1.01",
+      annotationTolerancePercent: "1",
       evaluatorTolerance: "1.01",
       bannerTolerance: "1.01",
     }),
   );
 
-  assert.equal(result.failures.length, 3);
+  assert.equal(result.failures.length, 4);
   assert.match(result.failures.join("\n"), /current ratio above tolerance/);
+  assert.match(result.failures.join("\n"), /warning tolerance percent/);
   assert.match(result.failures.join("\n"), /warning Grafana threshold/);
   assert.match(result.failures.join("\n"), /threshold banner/);
 });
@@ -74,14 +81,29 @@ test("fails when shared-config critical changes without Terraform updates", () =
     sources({
       critical: "1.06",
       mainCritical: "1.05",
+      annotationCriticalPercent: "5",
       bannerCritical: "1.05",
     }),
   );
 
-  assert.equal(result.failures.length, 3);
+  assert.equal(result.failures.length, 4);
   assert.match(result.failures.join("\n"), /open-breach peak above critical/);
   assert.match(result.failures.join("\n"), /current ratio above critical/);
+  assert.match(result.failures.join("\n"), /critical threshold percent/);
   assert.match(result.failures.join("\n"), /threshold banner/);
+});
+
+test("fails when alert annotation percentages do not mirror thresholds", () => {
+  const result = validateDeviationThresholdDrift(
+    sources({
+      annotationTolerancePercent: "0.5",
+      annotationCriticalPercent: "4",
+    }),
+  );
+
+  assert.equal(result.failures.length, 2);
+  assert.match(result.failures.join("\n"), /critical threshold percent/);
+  assert.match(result.failures.join("\n"), /warning tolerance percent/);
 });
 
 test("does not accept partial numeric literal matches", () => {
@@ -92,6 +114,20 @@ test("does not accept partial numeric literal matches", () => {
       evaluatorTolerance: "1.010",
       bannerTolerance: "1.010",
       bannerCritical: "1.050",
+    }),
+  );
+
+  assert.equal(result.failures.length, 5);
+});
+
+test("does not accept exponent-suffixed numeric literal matches", () => {
+  const result = validateDeviationThresholdDrift(
+    sources({
+      mainTolerance: "1.01e0",
+      mainCritical: "1.05e1",
+      evaluatorTolerance: "1.01e0",
+      bannerTolerance: "1.01e0",
+      bannerCritical: "1.05e1",
     }),
   );
 
@@ -115,7 +151,7 @@ test("fails when a Terraform consumer source is missing", () => {
 
   const result = validateDeviationThresholdDrift(incomplete);
 
-  assert.equal(result.failures.length, 3);
+  assert.equal(result.failures.length, 5);
   assert.match(
     result.failures.join("\n"),
     /alerts\/rules\/main\.tf: missing source/,

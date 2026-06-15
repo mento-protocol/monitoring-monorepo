@@ -116,6 +116,14 @@ assert_contains() {
   fail "expected output to contain: $expected"
 }
 
+assert_raw_contains() {
+  local expected="$1"
+  if grep -Fq -- "$expected" "$output_file"; then
+    return
+  fi
+  fail "expected output to contain: $expected"
+}
+
 assert_occurrences() {
   local expected_count="$1"
   local expected="$2"
@@ -1408,6 +1416,7 @@ assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:br
 
 run_gate "shared-config/src/thresholds.ts"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
+assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio test -- deviationThresholdSharedConfigSync (shared deviation threshold source changed)"
 assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 

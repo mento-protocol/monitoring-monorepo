@@ -268,6 +268,8 @@ jobs:
         run: pnpm --filter @mento-protocol/monitoring-config typecheck
       - name: Lint
         run: pnpm --filter @mento-protocol/monitoring-config lint
+      - name: Deviation threshold drift check
+        run: node scripts/check-deviation-threshold-drift.mjs
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/monitoring-config knip
       - name: Test with coverage
@@ -826,6 +828,8 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: Deviation threshold drift suite
+        run: node scripts/check-deviation-threshold-drift.test.mjs
       - name: PR description validator suite
         run: node scripts/check-pr-description.test.mjs
       - name: Deploy root-anchor regression suite

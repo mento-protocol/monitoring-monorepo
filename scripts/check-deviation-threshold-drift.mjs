@@ -22,7 +22,28 @@ function escapeRegex(value) {
 }
 
 function numberLiteral(value) {
-  return `(?<![0-9.])${escapeRegex(value)}(?![0-9.])`;
+  return `(?<![0-9A-Za-z_.+-])${escapeRegex(value)}(?![0-9A-Za-z_.+-])`;
+}
+
+function ratioToPercentLiteral(value) {
+  const [whole, fraction = ""] = value.split(".");
+  const denominator = 10n ** BigInt(fraction.length);
+  const numerator = BigInt(whole) * denominator + BigInt(fraction || "0");
+  let percentNumerator = (numerator - denominator) * 100n;
+  const sign = percentNumerator < 0n ? "-" : "";
+  if (percentNumerator < 0n) percentNumerator = -percentNumerator;
+
+  const integer = percentNumerator / denominator;
+  let remainder = percentNumerator % denominator;
+  if (remainder === 0n) return `${sign}${integer}`;
+
+  let decimals = "";
+  while (remainder !== 0n && decimals.length < 12) {
+    remainder *= 10n;
+    decimals += remainder / denominator;
+    remainder %= denominator;
+  }
+  return `${sign}${integer}.${decimals.replace(/0+$/, "")}`;
 }
 
 function extractThreshold(source, exportName) {
@@ -40,6 +61,12 @@ function extractThreshold(source, exportName) {
 function requiredChecks(thresholds) {
   const tolerance = numberLiteral(thresholds.tolerance);
   const critical = numberLiteral(thresholds.critical);
+  const tolerancePercent = escapeRegex(
+    ratioToPercentLiteral(thresholds.tolerance),
+  );
+  const criticalPercent = escapeRegex(
+    ratioToPercentLiteral(thresholds.critical),
+  );
 
   return [
     {
@@ -59,6 +86,20 @@ function requiredChecks(thresholds) {
       file: ALERTS_MAIN_PATH,
       description: "critical gate still requires current ratio above critical",
       pattern: new RegExp(`mento_pool_deviation_ratio\\s*>\\s*${critical}`),
+    },
+    {
+      file: ALERTS_MAIN_PATH,
+      description: "critical annotation mirrors critical threshold percent",
+      pattern: new RegExp(
+        `deviation_critical_summary_annotation\\s*=\\s*<<-EOT[\\s\\S]*?${criticalPercent}%{1,2}\\s+threshold[\\s\\S]*?EOT`,
+      ),
+    },
+    {
+      file: ALERTS_MAIN_PATH,
+      description: "critical annotation mirrors warning tolerance percent",
+      pattern: new RegExp(
+        `deviation_critical_summary_annotation\\s*=\\s*<<-EOT[\\s\\S]*?${tolerancePercent}%{1,2}\\s+tolerance[\\s\\S]*?EOT`,
+      ),
     },
     {
       file: FPMM_RULES_PATH,
