@@ -235,7 +235,12 @@ async function fetchAllFeeEventPages(
 
 function isMissingDailySnapshotEntityError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return message.includes("LiquityBorrowingRevenueDailySnapshot");
+  // Only the root field being absent means an older indexer schema. Missing
+  // child fields on the entity are incompatible schema drift and must fail
+  // visibly instead of silently falling back to reconstructed fee events.
+  return /(?:field|Cannot query field)\s+["']LiquityBorrowingRevenueDailySnapshot["']\s+(?:not found in|on)\s+type:?\s+["']query_root["']/i.test(
+    message,
+  );
 }
 
 async function paginateDailySnapshots<T extends { id: string }>(
