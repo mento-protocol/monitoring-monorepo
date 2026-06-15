@@ -216,7 +216,7 @@ treating it as live. The static production endpoint never changes on redeploy:
 https://indexer.hyperindex.xyz/2f3dd15/v1/graphql
 ```
 
-See [`STATUS.md`](./STATUS.md) for current sync state and endpoint details.
+See [`STATUS.md`](./STATUS.md) for the static endpoint and deployment reference.
 
 ## Key Files
 
