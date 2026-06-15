@@ -1,0 +1,154 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProposalCanceled message rendering > builds the Discord message 1`] = `
+{
+  "content": "Proposal Canceled",
+  "embed": {
+    "color": 16732754,
+    "description": "The proposal has been canceled and will not proceed further.",
+    "fields": [
+      {
+        "name": "Proposal Link",
+        "value": "https://governance.mento.org/proposals/110924749435612298277882208964193118052240456547235016113950343564723341619891",
+      },
+      {
+        "name": "Cancellation Transaction",
+        "value": "https://celoscan.io/tx/0xc43e6a0e1f3929b847c7eaf740c2ab2163f63c9a00d8628d60908a373fe2f148",
+      },
+    ],
+    "title": "Proposal Canceled",
+  },
+}
+`;
+
+exports[`ProposalCanceled message rendering > builds the Telegram HTML 1`] = `
+"<b>❌ Proposal Canceled ❌</b>
+
+The proposal has been canceled and will not proceed further.
+
+<b>Proposal Link:</b> https://governance.mento.org/proposals/110924749435612298277882208964193118052240456547235016113950343564723341619891
+
+<b>Cancellation Transaction:</b> https://celoscan.io/tx/0xc43e6a0e1f3929b847c7eaf740c2ab2163f63c9a00d8628d60908a373fe2f148
+
+"
+`;
+
+exports[`ProposalCreated message rendering > builds the Discord message 1`] = `
+{
+  "content": "MGP-0: Fund MiniPay airdrops & incentive campaigns",
+  "embed": {
+    "color": 10937846,
+    "fields": [
+      {
+        "name": "Proposal Link",
+        "value": "https://governance.mento.org/proposals/103735995345693199910086363052242384161838722208226379263598180615966957884012",
+      },
+      {
+        "name": "Proposer",
+        "value": "https://celoscan.io/address/0x6C9234Acc7D85488763e8963F61DA65bf9f5Ce1F",
+      },
+      {
+        "name": "Timelock ID",
+        "value": "0x5da695c29881cc9559d40a6732041621375051eae368cd61a408f7b4d50b2f21",
+      },
+      {
+        "name": "Proposal Transaction",
+        "value": "https://celoscan.io/tx/0x71c89ff65fe1e7b2ae58f6459959507bc405421efa18159fb4e96b589a140c4f",
+      },
+    ],
+    "title": "MGP-0: Fund MiniPay airdrops & incentive campaigns",
+  },
+}
+`;
+
+exports[`ProposalCreated message rendering > builds the Telegram HTML 1`] = `
+"<b>📝 Proposal Created 📝</b>
+
+Please review the proposal and check if anything looks off.
+
+<b>Title:</b> MGP-0: Fund MiniPay airdrops &amp; incentive campaigns
+
+<b>Proposal Link:</b> https://governance.mento.org/proposals/103735995345693199910086363052242384161838722208226379263598180615966957884012
+
+<b>Proposal Transaction:</b> https://celoscan.io/tx/0x71c89ff65fe1e7b2ae58f6459959507bc405421efa18159fb4e96b589a140c4f
+
+<b>Proposer Address:</b> https://celoscan.io/address/0x6C9234Acc7D85488763e8963F61DA65bf9f5Ce1F
+
+<b>Timelock ID:</b> 0x5da695c29881cc9559d40a6732041621375051eae368cd61a408f7b4d50b2f21
+
+"
+`;
+
+exports[`ProposalExecuted message rendering > builds the Discord message 1`] = `
+{
+  "content": "Proposal Executed",
+  "embed": {
+    "color": 5025616,
+    "description": "The proposal has been executed successfully!",
+    "fields": [
+      {
+        "name": "Proposal Link",
+        "value": "https://governance.mento.org/proposals/110924749435612298277882208964193118052240456547235016113950343564723341619891",
+      },
+      {
+        "name": "Execution Transaction",
+        "value": "https://celoscan.io/tx/0x4569194da7a0c1601fecad59396b075a7af1b4f08e067531163040902332bb06",
+      },
+    ],
+    "title": "Proposal Executed",
+  },
+}
+`;
+
+exports[`ProposalExecuted message rendering > builds the Telegram HTML 1`] = `
+"<b>✅ Proposal Executed ✅</b>
+
+The proposal has been executed successfully!
+
+<b>Proposal Link:</b> https://governance.mento.org/proposals/110924749435612298277882208964193118052240456547235016113950343564723341619891
+
+<b>Execution Transaction:</b> https://celoscan.io/tx/0x4569194da7a0c1601fecad59396b075a7af1b4f08e067531163040902332bb06
+
+"
+`;
+
+exports[`ProposalQueued message rendering > builds the Discord message 1`] = `
+{
+  "content": "Proposal Queued",
+  "embed": {
+    "color": 16098851,
+    "description": "A proposal has been queued for execution on Sun, 21 Sep 2025 08:13:16 GMT.",
+    "fields": [
+      {
+        "name": "Proposal Link",
+        "value": "https://governance.mento.org/proposals/110924749435612298277882208964193118052240456547235016113950343564723341619891",
+      },
+      {
+        "name": "Execution Time",
+        "value": "Sun, 21 Sep 2025 08:13:16 GMT",
+      },
+      {
+        "name": "Queue Transaction",
+        "value": "https://celoscan.io/tx/0xcc7ab83987ae823208d005753406f326a465fdc2d9688259e0d901d9fc75eeab",
+      },
+    ],
+    "title": "Proposal Queued",
+  },
+}
+`;
+
+exports[`ProposalQueued message rendering > builds the Telegram HTML 1`] = `
+"<b>⏱️ Proposal Queued ⏱️</b>
+
+A proposal has been queued for execution on Sun, 21 Sep 2025 08:13:16 GMT. Please review the proposal and discuss with your fellow watchdogs if it should be vetoed.
+
+<b>Execution Time:</b> Sun, 21 Sep 2025 08:13:16 GMT
+
+<b>Proposal Link:</b> https://governance.mento.org/proposals/110924749435612298277882208964193118052240456547235016113950343564723341619891
+
+<b>Queue Transaction:</b> https://celoscan.io/tx/0xcc7ab83987ae823208d005753406f326a465fdc2d9688259e0d901d9fc75eeab
+
+<b>How to Veto:</b> https://mentolabs.notion.site/Mento-Governance-Watchdogs-1c523e14987740c99fa7dedd490c0aa9#9324b6cbe737428c96166d8e66c29f02
+
+"
+`;
