@@ -160,12 +160,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // Fire NextAuth internal errors (OAuth handshake failures, JWE verification
   // breaks, callback URL mismatches) to Sentry so sign-in regressions don't
   // need "users can't log in" bug reports to be noticed.
+  //
+  // We deliberately do NOT filter JWTSessionError here: Auth.js wraps *any*
+  // failure during JWT/session resolution in that class — not just benign
+  // stale-cookie / AUTH_SECRET-rotation decryption failures, but also a broken
+  // jwt/session callback after a bad deploy. Suppressing the whole class would
+  // mute exactly the auth-regression signal this logger exists to surface. The
+  // benign rotation noise (Sentry ANALYTICS-MENTO-ORG-1J) is handled at the
+  // Sentry layer via an issue-level ignore instead, which leaves a future
+  // regression (different stack/cause → new fingerprint) free to alert.
   logger: {
     error(error) {
-      // JWTSessionError is expected when AUTH_SECRET rotates or when a session
-      // cookie pre-dates an auth.js upgrade — the invalid JWT is discarded and
-      // the user is signed out on the next request, so no action is needed.
-      if (error instanceof Error && error.name === "JWTSessionError") return;
       Sentry.captureException(error, { tags: { source: "nextauth" } });
     },
   },
