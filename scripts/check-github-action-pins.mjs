@@ -80,11 +80,11 @@ function extractUsesRawValue(line) {
   );
   if (plain) return plain[1] ?? "";
 
-  const flow = line.match(
+  const { value: lineWithoutComment, comment } = splitInlineComment(line);
+  const flow = lineWithoutComment.match(
     /^\s*-\s*\{.*(?:"uses"|'uses'|uses)\s*:\s*([^,}]+).*}\s*$/,
   );
   if (!flow) return null;
-  const { comment } = splitInlineComment(line);
   const value = flow[1] ?? "";
   return comment ? `${value} # ${comment}` : value;
 }

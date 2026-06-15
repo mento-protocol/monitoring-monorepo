@@ -230,6 +230,7 @@ jobs:
   test:
     steps:
       - { uses: actions/checkout@v6 }
+      - { uses: actions/cache@v4 } # v4
 `,
     );
 
@@ -239,6 +240,11 @@ jobs:
       result.stderr,
       ".github/workflows/ci.yml:5 uses: actions/checkout@v6",
       "flow-style failure location",
+    );
+    contains(
+      result.stderr,
+      ".github/workflows/ci.yml:6 uses: actions/cache@v4",
+      "commented flow-style failure location",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
