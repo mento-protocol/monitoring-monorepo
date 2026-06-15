@@ -22,7 +22,8 @@
 Everything knowingly deferred from this PR — reviewer findings you chose not
 to address here, or work you judged out of scope — MUST have a GitHub issue
 describing the problem (and solution ideas, if any). List the issue links
-below, or write "None" if nothing was deferred. CI enforces this section.
+below. This section is OPTIONAL: delete it entirely when nothing was deferred.
+When you keep it, CI requires each item to be "None" or link a GitHub issue.
 -->
 
 - None

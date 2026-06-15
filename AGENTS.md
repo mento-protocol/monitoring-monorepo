@@ -295,9 +295,11 @@ GitHub issue for it with a clear description of the problem to be solved, plus
 solution ideas if you have them (otherwise describe the problem as best you
 can). Label it `agent-ready` when an agent could pick it up unaided.
 
-The PR body's `## Deferrals` section is the enforcement point: it must either
-say `None` or link the issue(s), and the required `PR description format`
-check fails without it. Two corollaries:
+The PR body's `## Deferrals` section is the enforcement point. It is optional:
+omit it when nothing was knowingly deferred — there's no need to write the
+section just to say "None". When the section is present, the `PR description
+format` check requires every item to either say `None` or link a GitHub issue,
+so a real deferral can't hide behind an empty declaration. Two corollaries:
 
 - Create the issue **before** posting a "Deferred — tracking in …" review
   reply; a deferred reply without an issue link is incomplete.

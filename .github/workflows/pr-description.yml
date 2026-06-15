@@ -86,18 +86,18 @@ jobs:
             exit 1
           fi
 
-          # 4) Deferral declaration (AGENTS.md "Deferral rule"): a `## Deferrals`
-          #    section must exist and either say "None" or reference at least
-          #    one GitHub issue (#123 or a full issues URL). This is the forcing
-          #    function for "every knowing deferral gets an issue" — CI can't
-          #    judge honesty, but it can require the explicit declaration, and a
-          #    "None" that contradicts deferred-marked review replies is
-          #    auditable. Operates on fence_stripped (comments + code fences
+          # 4) Deferral declaration (AGENTS.md "Deferral rule"): the `## Deferrals`
+          #    section is OPTIONAL. When it is omitted, the PR is treated as
+          #    deferring nothing — there is no need to write the section just to
+          #    say "None". When the section IS present, it must either say "None"
+          #    or reference at least one GitHub issue (#123 or a full issues URL):
+          #    that keeps every knowing deferral carrying its own issue link. The
+          #    checks below operate on fence_stripped (comments + code fences
           #    removed) so an example heading or issue ref inside a fence or the
           #    template's instructional comment can't satisfy the check.
           if ! grep -qE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$fence_stripped"; then
-            echo "::error::PR description is missing the '## Deferrals' section. Everything knowingly deferred from this PR (reviewer findings not addressed here, or out-of-scope work) needs a GitHub issue — list the links there, or write 'None'. See AGENTS.md 'Deferral rule'."
-            exit 1
+            echo "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders, no Deferrals section (nothing deferred)."
+            exit 0
           fi
           deferrals=$(awk '
             /^##[[:space:]]+Deferrals[[:space:]]*$/ { insec = 1; next }
