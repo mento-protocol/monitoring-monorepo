@@ -22,6 +22,7 @@ trap cleanup EXIT
 cp "$app_root/app.yaml" "$deploy_dir/app.yaml"
 cp "$app_root/config.yaml" "$deploy_dir/config.yaml"
 cp -R "$app_root/dist" "$deploy_dir/dist"
+cp "$repo_root/pnpm-workspace.yaml" "$deploy_dir/pnpm-workspace.yaml"
 
 node - "$repo_root/package.json" "$app_root/package.json" "$deploy_dir/package.json" <<'NODE'
 const fs = require('fs');

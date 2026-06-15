@@ -584,6 +584,7 @@ add_indexer_mutation_baseline() {
 
 add_workspace_quality_commands() {
   local reason="$1"
+  add_command "pnpm skew:check" "$reason"
   add_all_indexer_codegen "$reason"
   # Use the lightweight dashboard quality (typecheck/lint/test/knip) for
   # workspace-wide triggers (root package.json, CI yaml, npmrc, etc.).
@@ -868,6 +869,7 @@ while IFS= read -r path; do
     */package.json)
       package_script_risk_changed=true
       add_preflight_command "pnpm install --frozen-lockfile" "workspace package manifest changed"
+      add_command "pnpm skew:check" "workspace package manifest changed"
       ;;
     pnpm-lock.yaml|pnpm-workspace.yaml)
       package_script_risk_changed=true

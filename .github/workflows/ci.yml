@@ -802,6 +802,12 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: Version skew check
+        # Required via the `ci` sentinel. Prevents catalog/literal package drift
+        # in both agent and non-agent PRs that touch manifests or pnpm config.
+        run: pnpm skew:check
+      - name: Version skew checker tests
+        run: pnpm skew:check:test
       - name: Terraform stack registry suite
         run: pnpm tf:test
       - name: ESLint baseline-diff semantic suite

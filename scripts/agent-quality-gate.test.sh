@@ -593,8 +593,12 @@ assert_contains 'package.json scripts.agent:quality-gate must be "./scripts/agen
 run_gate "ui-dashboard/package.json"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 assert_contains "- pnpm install --frozen-lockfile (workspace package manifest changed)"
+assert_contains "- pnpm skew:check (workspace package manifest changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (workspace package manifest changed)" \
+  "- pnpm skew:check (workspace package manifest changed)"
+assert_order \
+  "- pnpm skew:check (workspace package manifest changed)" \
   "- pnpm --filter @mento-protocol/ui-dashboard lint (ui-dashboard changed)"
 assert_order \
   "- pnpm --filter @mento-protocol/ui-dashboard test:coverage (ui-dashboard changed (coverage floor))" \
@@ -646,6 +650,7 @@ assert_contains "- ./tools/trunk check --all (changed paths require full-repo Tr
 
 run_gate ".npmrc"
 assert_contains "- pnpm install --frozen-lockfile (package manager config changed)"
+assert_contains "- pnpm skew:check (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (package manager config changed)"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed)"
@@ -671,6 +676,7 @@ assert_order \
 
 run_gate "package.json"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (agent quality gate package script changed)"
+assert_contains "- pnpm skew:check (workspace dependency/config changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (workspace dependency/config changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (workspace dependency/config changed)"
 assert_order \
