@@ -26,6 +26,20 @@ Context authority, placement, and metadata rules live in
 and non-canonical notes/plans as historical input that must be verified before
 use.
 
+## Cross-Protocol Context
+
+For broader Mento protocol context beyond this monitoring repo, start with the
+private `mento-master-context` checkout when available:
+
+```text
+../mento-master-context/.agents/mento-context/README.md
+```
+
+Use it to find source-of-truth contracts, deployments, live-state recipes, data
+semantics, Aegis/Grafana context, docs, and whitepaper sources. It is a router,
+not live truth; verify current values through the source-specific repo, API,
+RPC, or dashboard path it points to.
+
 ## Secrets Rule (IaC Before CLI)
 
 Agents must not create, rotate, or overwrite secrets manually with CLI commands
