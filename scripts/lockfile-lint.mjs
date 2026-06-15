@@ -570,7 +570,7 @@ function splitYamlInlineMapItems(text) {
  * @param {number} line
  * @returns {Array<{ selector: string; replacement: string; line: number }>}
  */
-function extractInlineWorkspaceOverrides(value, line) {
+function extractInlineWorkspaceMapEntries(value, line) {
   const trimmed = stripYamlInlineComment(value);
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
     return [];
@@ -588,12 +588,14 @@ function extractInlineWorkspaceOverrides(value, line) {
 
 /**
  * @param {string} absPath
+ * @param {string} mapName
  * @returns {Array<{ selector: string; replacement: string; line: number }>}
  */
-function extractWorkspaceOverrides(absPath) {
+function extractWorkspaceMapEntries(absPath, mapName) {
   const content = readFileSync(absPath, "utf8");
-  const overrides = [];
-  let inOverrides = false;
+  const mapEntries = [];
+  const mapHeader = new RegExp(`^['"]?${mapName}['"]?\\s*:\\s*(.*)$`);
+  let inTargetMap = false;
 
   for (const [i, rawLine] of content.split("\n").entries()) {
     const line = rawLine.replace(/\r$/, "");
@@ -601,23 +603,25 @@ function extractWorkspaceOverrides(absPath) {
     if (!trimmed || trimmed.startsWith("#")) continue;
 
     if (/^\S/.test(line)) {
-      const overridesMatch = /^['"]?overrides['"]?\s*:\s*(.*)$/.exec(trimmed);
-      if (overridesMatch) {
-        const inlineValue = stripYamlInlineComment(overridesMatch[1]);
-        if (inlineValue) {
-          overrides.push(
-            ...extractInlineWorkspaceOverrides(inlineValue, i + 1),
+      const mapMatch = mapHeader.exec(trimmed);
+      if (mapMatch) {
+        const inlineValue = stripYamlInlineComment(mapMatch[1]);
+        if (!inlineValue || inlineValue.startsWith("&")) {
+          inTargetMap = true;
+        } else if (inlineValue.startsWith("{") && inlineValue.endsWith("}")) {
+          mapEntries.push(
+            ...extractInlineWorkspaceMapEntries(inlineValue, i + 1),
           );
-          inOverrides = false;
+          inTargetMap = false;
         } else {
-          inOverrides = true;
+          inTargetMap = false;
         }
       } else {
-        inOverrides = false;
+        inTargetMap = false;
       }
       continue;
     }
-    if (!inOverrides) continue;
+    if (!inTargetMap) continue;
 
     const entry = splitYamlMapEntry(trimmed);
     if (!entry) continue;
@@ -625,11 +629,67 @@ function extractWorkspaceOverrides(absPath) {
     const selector = unquote(entry.key);
     const replacement = unquote(stripYamlInlineComment(entry.value));
     if (selector && replacement) {
-      overrides.push({ selector, replacement, line: i + 1 });
+      mapEntries.push({ selector, replacement, line: i + 1 });
     }
   }
 
-  return overrides;
+  return mapEntries;
+}
+
+/**
+ * @param {string} absPath
+ * @returns {Array<{ selector: string; replacement: string; line: number }>}
+ */
+function extractWorkspaceOverrides(absPath) {
+  return extractWorkspaceMapEntries(absPath, "overrides");
+}
+
+/**
+ * @param {string} absPath
+ */
+function extractWorkspaceCatalog(absPath) {
+  return new Map(
+    extractWorkspaceMapEntries(absPath, "catalog").map(
+      ({ selector, replacement }) => [selector, replacement],
+    ),
+  );
+}
+
+/**
+ * @param {string} selector
+ */
+function packageNameFromOverrideSelector(selector) {
+  const parts = peerQualifiedSelectorParts(selector);
+  const packageSelector = parts[parts.length - 1] ?? selector;
+  const rangeSeparator = packageSelector.indexOf("@", 1);
+  return rangeSeparator === -1
+    ? packageSelector
+    : packageSelector.slice(0, rangeSeparator);
+}
+
+/**
+ * @param {string} value
+ */
+function npmAliasRange(value) {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("npm:")) return null;
+  const spec = trimmed.slice("npm:".length);
+  const rangeSeparator = spec.startsWith("@")
+    ? spec.indexOf("@", spec.indexOf("/") + 1)
+    : spec.indexOf("@");
+  if (rangeSeparator === -1) return null;
+  return spec.slice(rangeSeparator + 1).trim() || null;
+}
+
+/**
+ * @param {string} selector
+ * @param {unknown} replacement
+ * @param {Map<string, string>} catalog
+ */
+function effectiveOverrideReplacement(selector, replacement, catalog) {
+  if (replacement !== "catalog:") return replacement;
+  const packageName = packageNameFromOverrideSelector(selector);
+  return catalog.get(packageName) ?? replacement;
 }
 
 /**
@@ -649,21 +709,29 @@ function validatePnpmOverrideEntry(source, selector, replacement) {
       errors++;
     }
   }
-  if (
-    typeof replacement === "string" &&
-    isUnboundedMinimumOverrideValue(replacement)
-  ) {
-    fail(
-      `${source}["${selector}"] uses unbounded minimum ` +
-        `range "${replacement}". Use a bounded selector with an exact ` +
-        "replacement or a same-major/capped replacement range.",
-    );
-    errors++;
+  if (typeof replacement === "string") {
+    const replacementRanges = [replacement];
+    const aliasRange = npmAliasRange(replacement);
+    if (aliasRange) replacementRanges.push(aliasRange);
+    for (const replacementRange of replacementRanges) {
+      if (isUnboundedMinimumOverrideValue(replacementRange)) {
+        fail(
+          `${source}["${selector}"] uses unbounded minimum ` +
+            `range "${replacementRange}". Use a bounded selector with an exact ` +
+            "replacement or a same-major/capped replacement range.",
+        );
+        errors++;
+      }
+    }
   }
   return errors;
 }
 
 const packageJsonPath = resolve(ROOT, "package.json");
+const rootWorkspacePath = resolve(ROOT, "pnpm-workspace.yaml");
+const rootCatalog = existsSync(rootWorkspacePath)
+  ? extractWorkspaceCatalog(rootWorkspacePath)
+  : new Map();
 let overrideRangeErrors = 0;
 
 if (existsSync(packageJsonPath)) {
@@ -685,7 +753,7 @@ if (existsSync(packageJsonPath)) {
       overrideRangeErrors += validatePnpmOverrideEntry(
         "package.json pnpm.overrides",
         selector,
-        replacement,
+        effectiveOverrideReplacement(selector, replacement, rootCatalog),
       );
     }
   }
@@ -693,13 +761,14 @@ if (existsSync(packageJsonPath)) {
 
 for (const absPath of workspaceFiles) {
   const rel = relative(ROOT, absPath);
+  const catalog = extractWorkspaceCatalog(absPath);
   for (const { selector, replacement, line } of extractWorkspaceOverrides(
     absPath,
   )) {
     overrideRangeErrors += validatePnpmOverrideEntry(
       `${rel}:${line} overrides`,
       selector,
-      replacement,
+      effectiveOverrideReplacement(selector, replacement, catalog),
     );
   }
 }
