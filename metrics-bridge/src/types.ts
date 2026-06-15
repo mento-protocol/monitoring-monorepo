@@ -43,11 +43,15 @@ export interface PoolRow {
   wrappedExchangeId: string;
 }
 
-// Canonical FPMM predicate, mirroring `isVirtualPool` in
-// `indexer-envio/src/helpers.ts` and `ui-dashboard/src/lib/types.ts`. A healed
-// VirtualPool retains its original "fpmm_factory" source until the next re-sync,
-// so the bridge's `source: { _like: "%fpmm%" }` query filter alone is not
-// sufficient — `wrappedExchangeId` is the load-bearing discriminator:
+// Canonical FPMM predicate. Analogous to `isVirtualPool` in
+// `indexer-envio/src/helpers.ts` and `ui-dashboard/src/lib/types.ts`, but
+// simplified: those check two conditions (`source.includes("virtual") ||
+// wrappedExchangeId`), whereas here the GQL query's `source: { _like: "%fpmm%" }`
+// filter has already excluded native VPs (`source: "virtual_pool_factory"`) at
+// the query boundary, leaving `wrappedExchangeId` as the only remaining
+// discriminator. A healed VirtualPool retains its original "fpmm_factory" source
+// until the next re-sync, so the source filter alone is not sufficient —
+// `wrappedExchangeId` is the load-bearing discriminator:
 // "" = native FPMM; non-empty = healed VP. Applied once at the poller boundary
 // so BOTH gauge publication (`updateMetrics`) and the rebalance probe
 // (`runRebalanceProbes`) operate on FPMM-only rows from a single source of
