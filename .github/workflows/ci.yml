@@ -808,6 +808,8 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: PR description validator suite
+        run: node scripts/check-pr-description.test.mjs
       - name: Deploy root-anchor regression suite
         # Verifies deploy wrappers run deploy-sensitive commands from the same
         # repo root that scripts/lib/deploy-guard.sh checked for cleanliness.

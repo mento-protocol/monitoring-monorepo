@@ -1323,6 +1323,9 @@ while IFS= read -r path; do
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
           ;;
+        scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
+          add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"
+          ;;
         scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
           add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
           ;;
