@@ -18,16 +18,31 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "lcov"],
       include: ["src/**/*.ts"],
-      exclude: ["src/**/*.test.ts", "src/**/*.d.ts", "src/handlers/**/*.ts"],
-      // Floors: measured 2026-06-03 with Envio event-handler registration files
-      // excluded. Handlers are exercised by integration tests, but their module
-      // scope and framework callbacks are not meaningful global unit-coverage
-      // inputs. Threshold = floor(current) - 2.
+      exclude: ["src/**/*.test.ts", "src/**/*.d.ts"],
+      // Floors = floor(measured) - 2, measured 2026-06-15.
+      //
+      // The ~12.4k lines under src/handlers/** were previously excluded from
+      // coverage entirely — exercised end-to-end by the integration harness
+      // (test/helpers/indexerTestHarness.ts) but invisible to every gate. They
+      // are now included and gated two ways: the "src/handlers/**/*.ts" glob
+      // bucket gives them a dedicated floor, and (since vitest also folds glob
+      // files into the global pool) the global floors were re-measured over all
+      // of src. Net effect: handlers go from ungated to ratcheted, and the
+      // global gate now spans every source file rather than a hand-picked
+      // subset. The handler floors are low because the harness drives common
+      // paths, not rare-event branches — the bucket's job is visibility plus a
+      // regression ratchet, not a high bar. Raising it is follow-up work.
       thresholds: {
-        statements: 70,
-        branches: 62,
-        functions: 76,
-        lines: 72,
+        statements: 47,
+        branches: 42,
+        functions: 56,
+        lines: 48,
+        "src/handlers/**/*.ts": {
+          statements: 22,
+          branches: 14,
+          functions: 29,
+          lines: 22,
+        },
       },
     },
   },
