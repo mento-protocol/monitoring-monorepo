@@ -66,12 +66,13 @@ mkdir -p .investigations
 #   CHAIN_ID → Hasura `chainId` filters + Sim `--chain-ids`
 #   RPC      → every `cast` call (head block, storage, codehash, sanctions oracle)
 #   DUNE_NS  → Dune table prefix (the `<chain>.` in `<chain>.transactions`, etc.)
+#   DL_NS    → DefiLlama coin-price slug (Step 5.5); may differ from the chain name — verify on DefiLlama
 case "$CHAIN" in
-  celo)     CHAIN_ID=42220; RPC=https://forno.celo.org;    DUNE_NS=celo ;;
-  monad)    CHAIN_ID=143;   RPC=https://rpc.monad.xyz;     DUNE_NS=monad ;;    # current Monad mainnet full node
-  polygon)  CHAIN_ID=137;   RPC=https://polygon-rpc.com;   DUNE_NS=polygon ;;
-  ethereum) CHAIN_ID=1;     RPC=https://eth.llamarpc.com;  DUNE_NS=ethereum ;;
-  *) echo "Unsupported CHAIN=$CHAIN — add a case arm with its CHAIN_ID / RPC / DUNE_NS." >&2; exit 1 ;;
+  celo)     CHAIN_ID=42220; RPC=https://forno.celo.org;    DUNE_NS=celo;     DL_NS=celo ;;
+  monad)    CHAIN_ID=143;   RPC=https://rpc.monad.xyz;     DUNE_NS=monad;    DL_NS=monad ;;     # Monad full node; DefiLlama may not cover monad yet (Step 5.5 caveat)
+  polygon)  CHAIN_ID=137;   RPC=https://polygon-rpc.com;   DUNE_NS=polygon;  DL_NS=polygon ;;
+  ethereum) CHAIN_ID=1;     RPC=https://eth.llamarpc.com;  DUNE_NS=ethereum; DL_NS=ethereum ;;
+  *) echo "Unsupported CHAIN=$CHAIN — add a case arm with its CHAIN_ID / RPC / DUNE_NS / DL_NS." >&2; exit 1 ;;
 esac
 ```
 
@@ -333,7 +334,9 @@ A non-empty result here, scoped to the actual target chain, is far stronger than
 
 Then attribution. Use the `arkham` skill (project-scoped) for the **cross-chain identity leg** — Step 1.5 caches first; live calls only if the key is valid. Remember the doctrine: Arkham/Nansen don't cover Celo or Monad, so the play is:
 
-1. Run `address_enriched/all` on the target address — gets every chain Arkham DOES cover. Often returns zero hits for a Celo-native contract; that's a signal, not a failure. **For a CONTRACT target, don't trust an Arkham hit on the target address**: the same 20-byte address on Ethereum/L2 is usually an unrelated EOA/contract (addresses aren't shared across chains unless deployed deterministically). For contracts, derive the deployer/operator EOA first (step 5) and run the cross-chain identity leg on THAT — only treat a same-address cross-chain hit as the target if bytecode/CREATE2 evidence proves the address is intentionally shared.
+1. Branch on target type before any cross-chain enrichment:
+   - **EOA target** → run `address_enriched/all` on it. Zero hits for a Celo-native EOA is a signal, not a failure.
+   - **CONTRACT target** → do **NOT** run `address_enriched/all` on the contract address as an identity source yet. The same 20-byte address on Ethereum/L2 is almost always an unrelated EOA/contract (addresses aren't shared across chains unless deployed deterministically), so an Arkham hit there would record a false identity. Identify the deployer/operator EOA first (step 5), then run the identity leg on THAT EOA. Only treat a same-address cross-chain hit as the target if CREATE2/bytecode evidence proves the address is intentionally shared.
 2. Walk inbound funders on the target chain. Two pitfalls to handle explicitly:
    - **Sim's Activity API returns NEWEST first**, not oldest. Don't take the top result and call it the FIRST funder — paginate to the tail (or use a `block_time ASC` DuneSQL query) before treating any counterparty as the original funder. A recent counterparty mistaken for the original funder permanently mis-attributes the report.
    - **Sim's `--chain-ids` defaults to all configured chains** when omitted. For an EVM address that's been used on Ethereum / Base / Arbitrum / etc., the "first receive" without a chain filter can come from a totally different chain than the target. Always pass `--chain-ids $CHAIN_ID` so the funder graph is scoped to the chain the contract actually lives on.
@@ -454,8 +457,10 @@ case "$CHAIN" in
   polygon) BS=https://polygon.blockscout.com/api/v2 ;;
   *)       BS=""; echo "No Blockscout instance mapped for $CHAIN — use the RPC-native debug_traceTransaction fallback below." >&2 ;;
 esac
-curl -s "$BS/transactions/$TX/internal-transactions" | jq '.items[] | {type, from:.from.hash, to:.to.hash, value, error}'  # decoded CALL/DELEGATECALL/CREATE tree
-curl -s "$BS/transactions/$TX/state-changes"        | jq '.items[] | {addr:.address.hash, type, change}'                  # per-address coin+token balance_before→after = net flow
+if [ -n "$BS" ]; then   # skip when no Blockscout for $CHAIN — use the RPC-native fallback below instead
+  curl -s "$BS/transactions/$TX/internal-transactions" | jq '.items[] | {type, from:.from.hash, to:.to.hash, value, error}'  # decoded CALL/DELEGATECALL/CREATE tree
+  curl -s "$BS/transactions/$TX/state-changes"        | jq '.items[] | {addr:.address.hash, type, change}'                  # per-address coin+token balance_before→after = net flow
+fi
 ```
 
 Reachable via plain `curl`/WebFetch or the bundled `mcp__claude_ai_Blockscout__*` tools (pass `chain_id: $CHAIN_ID`). Expect `internal-transactions` to be empty on simple transfers and rich on multi-hop / reverted txs; `state-changes` gives the dollar-accurate flow `cast` can't. Keep `cast tx` + OpenChain for the top-level selector. **Chains without a Blockscout instance (e.g. Monad):** fall back to RPC-native `debug_traceTransaction` against an archive endpoint that supports it (dRPC / QuickNode / Tenderly) — never `cast run` on Celo (CIP-64, below).
@@ -481,7 +486,7 @@ Sum the USD value, drop scam airdrops. Rather than eyeballing names like `CLAIM`
 
 Sim's `value_usd` is _current spot_. A forensic claim like "moved $2M in March" is wrong if the token has since mooned or rugged — value flows **at the time they happened**. DefiLlama's coin price oracle does this, and it lives on the FREE `coins.llama.fi` host: the DefiLlama **Pro** subscription adds nothing to this skill (its Pro-only endpoints — bridges, token-liquidity-by-slug, treasury, unlocks, active users — are protocol-aggregate data, not address-level), so do **not** gate any of this behind a Pro key.
 
-Key format is `$DL_NS:<lowercaseTokenAddress>`, where `DL_NS` is the DefiLlama slug for `$CHAIN` — set it alongside the other chain knobs (celo→`celo`, polygon→`polygon`, ethereum→`ethereum`, base→`base`, arbitrum→`arbitrum`; verify novel chains against DefiLlama — Monad may be absent, see the caveat below). Don't hardcode `celo:` for a non-Celo target — you'd query the wrong chain's namespace and price a different token. Native CELO uses its ERC20 wrapper, e.g. `celo:0x471ece3750da237f93b8e339c536989b8978a438`.
+Key format is `$DL_NS:<lowercaseTokenAddress>`, where `$DL_NS` is the DefiLlama slug set by Step 1's case switch (celo→`celo`, polygon→`polygon`, ethereum→`ethereum`; verify novel chains against DefiLlama — Monad may be absent, see the caveat below). Don't hardcode `celo:` for a non-Celo target — you'd query the wrong chain's namespace and price a different token. Native CELO uses its ERC20 wrapper, e.g. `celo:0x471ece3750da237f93b8e339c536989b8978a438`.
 
 **Historical price at a tx's block time** (Unix seconds — derive from the block: `cast block <n> -f timestamp --rpc-url $RPC`):
 
@@ -515,7 +520,7 @@ case "$CHAIN" in
   ethereum) GT_NS=eth ;;
   *)        GT_NS=""; echo "No GeckoTerminal slug mapped for $CHAIN — verify at /api/v2/networks, then set GT_NS or skip." >&2 ;;
 esac
-curl -s "https://api.geckoterminal.com/api/v2/networks/$GT_NS/pools/{poolAddr}"   # → pair, dex, reserve_usd, vol24h (30 req/min)
+[ -n "$GT_NS" ] && curl -s "https://api.geckoterminal.com/api/v2/networks/$GT_NS/pools/{poolAddr}"   # → pair, dex, reserve_usd, vol24h (30 req/min); skipped when no GT slug for $CHAIN
 curl -s "https://api.dexscreener.com/latest/dex/tokens/{tokenAddr}"               # returns the token's pairs on ALL chains
 # MUST filter to the target chain before using, or you may name a different chain's venue/TVL for an
 # unrelated same-address token: ... | jq '[.pairs[] | select(.chainId == "<DexScreener slug for $CHAIN: celo/ethereum/polygon/base/…>")]'
