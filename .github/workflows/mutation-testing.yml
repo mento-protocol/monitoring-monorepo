@@ -53,8 +53,8 @@ jobs:
             # are also picked up. `weekend.ts` imports the FX calendar JSON
             # shipped from `shared-config`, so the calendar + the shared-config
             # package metadata are in the filter too. Configs +
-            # package-manager files (root + dashboard) capture script wiring +
-            # version drift.
+            # package-manager files (root + dashboard, including pnpm patches)
+            # capture script wiring + version drift.
             dashboard:
               - ui-dashboard/src/lib/**
               - ui-dashboard/stryker.config.mjs
@@ -71,6 +71,7 @@ jobs:
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
               - .npmrc
+              - patches/**
               # `.github/actions/pnpm-install` uses `.node-version` to set
               # the Node runtime that Stryker + the mutation tests run on.
               - .node-version
@@ -218,8 +219,8 @@ jobs:
             # mutation test imports `fixtures.ts` and the regular probe
             # tests stress shared behavior. Bridge tsconfig matters because
             # it controls TS compilation / module resolution. Configs +
-            # package-manager files (root + bridge) capture script wiring +
-            # version drift.
+            # package-manager files (root + bridge, including pnpm patches)
+            # capture script wiring + version drift.
             bridge:
               - metrics-bridge/src/**
               - metrics-bridge/test/**
@@ -238,6 +239,7 @@ jobs:
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
               - .npmrc
+              - patches/**
               # `.github/actions/pnpm-install` uses `.node-version` to set
               # the Node runtime that Stryker + the mutation tests run on.
               - .node-version

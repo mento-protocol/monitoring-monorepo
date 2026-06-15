@@ -42,6 +42,7 @@ on:
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
+      - patches/**
       - .lighthouserc.cjs
 
 concurrency:
@@ -115,6 +116,7 @@ jobs:
               - package.json
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
+              - patches/**
               - .lighthouserc.cjs
 
       - name: Decide whether to run Lighthouse
