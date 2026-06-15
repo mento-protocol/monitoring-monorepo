@@ -25,6 +25,10 @@ function numberLiteral(value) {
   return `(?<![0-9A-Za-z_.+-])${escapeRegex(value)}(?![0-9A-Za-z_.+-])`;
 }
 
+function percentLiteral(value) {
+  return `(?<![0-9.])${escapeRegex(value)}%{1,2}(?![0-9.%])`;
+}
+
 function ratioToPercentLiteral(value) {
   const [whole, fraction = ""] = value.split(".");
   const denominator = 10n ** BigInt(fraction.length);
@@ -61,12 +65,8 @@ function extractThreshold(source, exportName) {
 function requiredChecks(thresholds) {
   const tolerance = numberLiteral(thresholds.tolerance);
   const critical = numberLiteral(thresholds.critical);
-  const tolerancePercent = escapeRegex(
-    ratioToPercentLiteral(thresholds.tolerance),
-  );
-  const criticalPercent = escapeRegex(
-    ratioToPercentLiteral(thresholds.critical),
-  );
+  const tolerancePercent = ratioToPercentLiteral(thresholds.tolerance);
+  const criticalPercent = ratioToPercentLiteral(thresholds.critical);
 
   return [
     {
@@ -91,14 +91,14 @@ function requiredChecks(thresholds) {
       file: ALERTS_MAIN_PATH,
       description: "critical annotation mirrors critical threshold percent",
       pattern: new RegExp(
-        `deviation_critical_summary_annotation\\s*=\\s*<<-EOT[\\s\\S]*?${criticalPercent}%{1,2}\\s+threshold[\\s\\S]*?EOT`,
+        `deviation_critical_summary_annotation\\s*=\\s*<<-EOT[\\s\\S]*?${percentLiteral(criticalPercent)}\\s+threshold[\\s\\S]*?EOT`,
       ),
     },
     {
       file: ALERTS_MAIN_PATH,
       description: "critical annotation mirrors warning tolerance percent",
       pattern: new RegExp(
-        `deviation_critical_summary_annotation\\s*=\\s*<<-EOT[\\s\\S]*?${tolerancePercent}%{1,2}\\s+tolerance[\\s\\S]*?EOT`,
+        `deviation_critical_summary_annotation\\s*=\\s*<<-EOT[\\s\\S]*?${percentLiteral(tolerancePercent)}\\s+tolerance[\\s\\S]*?EOT`,
       ),
     },
     {

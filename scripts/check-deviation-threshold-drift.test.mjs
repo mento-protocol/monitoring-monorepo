@@ -106,6 +106,23 @@ test("fails when alert annotation percentages do not mirror thresholds", () => {
   assert.match(result.failures.join("\n"), /warning tolerance percent/);
 });
 
+test("does not accept partial percent literal matches", () => {
+  const result = validateDeviationThresholdDrift(
+    sources({
+      tolerance: "1.02",
+      mainTolerance: "1.02",
+      annotationTolerancePercent: "12",
+      evaluatorTolerance: "1.02",
+      bannerTolerance: "1.02",
+      annotationCriticalPercent: "15",
+    }),
+  );
+
+  assert.equal(result.failures.length, 2);
+  assert.match(result.failures.join("\n"), /critical threshold percent/);
+  assert.match(result.failures.join("\n"), /warning tolerance percent/);
+});
+
 test("does not accept partial numeric literal matches", () => {
   const result = validateDeviationThresholdDrift(
     sources({
