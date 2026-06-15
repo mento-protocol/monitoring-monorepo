@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { useGQL } from "@/lib/graphql";
+import { resolveGraphqlEndpoint } from "@/lib/graphql-endpoint";
 
 /**
  * Keyset-windowed history for a timestamp-ordered Hasura entity.
@@ -135,9 +136,12 @@ export function useWindowedHistory<T extends WindowedHistoryRow>({
   maxPages = DEFAULT_MAX_PAGES,
 }: UseWindowedHistoryParams<T>): UseWindowedHistoryResult<T> {
   const { network } = useNetwork();
+  const graphqlEndpoint = network.hasuraUrl
+    ? resolveGraphqlEndpoint(network.hasuraUrl)
+    : "";
   const client = useMemo(
-    () => (network.hasuraUrl ? new GraphQLClient(network.hasuraUrl) : null),
-    [network.hasuraUrl],
+    () => (graphqlEndpoint ? new GraphQLClient(graphqlEndpoint) : null),
+    [graphqlEndpoint],
   );
 
   // All rows ever loaded (head + older pages), keyed by id. A ref so appending
