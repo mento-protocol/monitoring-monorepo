@@ -396,6 +396,7 @@ pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs orig
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
 pnpm agent:autoreview              # Structured closeout review; Codex sandbox defaults to --engine local, override with --engine claude/codex
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
+node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 

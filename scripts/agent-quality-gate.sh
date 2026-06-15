@@ -1096,6 +1096,7 @@ while IFS= read -r path; do
     .github/workflows/*|.github/actions/*)
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
+      add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions workflow/action changed"
       case "$path" in
         .github/workflows/ci.yml)
           add_surface "workspace"
@@ -1133,6 +1134,7 @@ while IFS= read -r path; do
       ;;
     .trunk/*)
       add_surface "tooling"
+      add_command "node scripts/check-github-action-pins.mjs" "Trunk workflow/action setup changed"
       add_command "pnpm agent:quality-gate:test" "agent quality gate trunk hook changed"
       ;;
     turbo.json)
@@ -1305,6 +1307,13 @@ while IFS= read -r path; do
           ;;
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
+          ;;
+        scripts/check-github-action-pins.mjs)
+          add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions pin checker changed"
+          add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker changed"
+          ;;
+        scripts/check-github-action-pins.test.mjs)
+          add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
           ;;
         scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
           add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
