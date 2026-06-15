@@ -25,6 +25,17 @@ const GOOGLE_TOKEN_TIMEOUT_MS = 8_000;
 const REFRESH_ERROR_CAPTURE_INTERVAL_MS = 5 * 60 * 1_000;
 let lastRefreshErrorCaptureMs = 0;
 
+// Throttle the NextAuth logger's Sentry capture. A stale/undecryptable session
+// cookie re-triggers JWTSessionError on every middleware `auth()` resolution
+// until the cookie clears, which would otherwise flood Sentry (events still
+// ingest against quota even when the issue is ignored). Keyed by error name so
+// a recurring failure is rate-limited per warm instance WITHOUT starving a
+// different, genuinely new auth error — the first occurrence of each distinct
+// error type always gets through, so regressions still surface. The name set
+// is bounded by Auth.js's AuthError subclasses, so the map stays tiny.
+const LOGGER_CAPTURE_INTERVAL_MS = 5 * 60 * 1_000;
+const lastLoggerCaptureMsByName = new Map<string, number>();
+
 // Probe Google with the stored refresh token to confirm the account is still
 // active, rolling `expires_at` forward. Mutates and returns the token. Three
 // outcomes:
@@ -171,6 +182,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // regression (different stack/cause → new fingerprint) free to alert.
   logger: {
     error(error) {
+      const key = error instanceof Error ? error.name : "unknown";
+      const now = Date.now();
+      if (
+        now - (lastLoggerCaptureMsByName.get(key) ?? 0) <=
+        LOGGER_CAPTURE_INTERVAL_MS
+      ) {
+        return;
+      }
+      lastLoggerCaptureMsByName.set(key, now);
       Sentry.captureException(error, { tags: { source: "nextauth" } });
     },
   },
