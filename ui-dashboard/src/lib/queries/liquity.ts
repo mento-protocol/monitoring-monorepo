@@ -92,30 +92,6 @@ export const CDP_BORROWING_REVENUE_MARKETS = `
   }
 `;
 
-// Old-schema compatibility: production Hasura predating the
-// borrowingFeeCollectedCum field rejects the full markets query with a
-// validation error. This legacy shape lets the hook degrade (split sentinel
-// -1, collected 0) instead of blanking the CDP tile — mirrors the daily
-// snapshot fallback path. Drop once the post-`collected` indexer schema is
-// the only one in production.
-export const CDP_BORROWING_REVENUE_MARKETS_LEGACY = `
-  query CdpBorrowingRevenueMarketsLegacy($chainId: Int!) {
-    LiquityCollateral(
-      where: { chainId: { _eq: $chainId } }
-      order_by: { collIndex: asc }
-    ) {
-      id chainId collIndex symbol spYieldSplitBps
-    }
-    LiquityInstance(
-      where: { chainId: { _eq: $chainId } }
-      order_by: { collateralId: asc }
-    ) {
-      id collateralId chainId systemDebt activeTroveCount borrowingFeeCum
-      isShutDown shutDownAt
-    }
-  }
-`;
-
 export const CDP_BORROWING_REVENUE_BRACKETS = `
   query CdpBorrowingRevenueBrackets(
     $collateralIds: [String!]!
@@ -164,27 +140,6 @@ export const CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS = `
     ) {
       id chainId collateralId instanceId timestamp upfrontFee accruedInterest
       collected
-    }
-  }
-`;
-
-// Old-schema compatibility: snapshot rows exist on production schemas that
-// predate the `collected` field. This legacy shape keeps the real earned
-// history (vs degrading to fee-event reconstruction) with collected
-// defaulted to 0. Drop together with CDP_BORROWING_REVENUE_MARKETS_LEGACY.
-export const CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY = `
-  query CdpBorrowingRevenueDailySnapshotsLegacy(
-    $chainId: Int!
-    $limit: Int!
-    $offset: Int!
-  ) {
-    LiquityBorrowingRevenueDailySnapshot(
-      where: { chainId: { _eq: $chainId } }
-      order_by: [{ timestamp: desc }, { id: desc }]
-      limit: $limit
-      offset: $offset
-    ) {
-      id chainId collateralId instanceId timestamp upfrontFee accruedInterest
     }
   }
 `;

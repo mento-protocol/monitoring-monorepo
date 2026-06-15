@@ -44,7 +44,6 @@ const bpsToPercentLabel = (bps: number): string => {
 };
 
 function hasApproximateCdpForecastInputs(args: {
-  dailySeriesApproximate: boolean;
   dailySeriesTruncated: boolean;
   dailySeriesFailed: boolean;
   hasRevenueError: boolean;
@@ -53,7 +52,6 @@ function hasApproximateCdpForecastInputs(args: {
 }): boolean {
   if (args.hasRevenueError || args.dailySeriesFailed) return false;
   return (
-    args.dailySeriesApproximate ||
     args.dailySeriesTruncated ||
     args.unpricedSymbolCount > 0 ||
     args.bracketsTruncated
@@ -114,7 +112,6 @@ function useRevenuePageState() {
     markets: cdpBorrowingMarkets,
     dailySeries: cdpBorrowingFeeSeries,
     dailySeriesTruncated: cdpBorrowingFeeSeriesTruncated,
-    dailySeriesApproximate: cdpBorrowingFeeSeriesApproximate,
     dailySeriesFailed: cdpBorrowingFeeSeriesFailed,
     isLoading: isCdpBorrowingRevenueLoading,
     hasError: hasCdpBorrowingRevenueError,
@@ -138,7 +135,6 @@ function useRevenuePageState() {
   const hasSwapFeesError = anyNetworkError || anyFeesError;
   const feesApprox = hasApproximateFees(networkData) || anyFeesTruncated;
   const cdpInputsApproximate = hasApproximateCdpForecastInputs({
-    dailySeriesApproximate: cdpBorrowingFeeSeriesApproximate,
     dailySeriesTruncated: cdpBorrowingFeeSeriesTruncated,
     dailySeriesFailed: cdpBorrowingFeeSeriesFailed,
     hasRevenueError: hasCdpBorrowingRevenueError,
