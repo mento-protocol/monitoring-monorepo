@@ -98,7 +98,7 @@ echo "   Plan: force-push $SHORT_SHA to '$DEPLOY_BRANCH', wait for full resync, 
 echo "   If Envio already has 3 live deployments, delete a stale non-prod deployment first:"
 echo "   https://envio.dev/app/$ENVIO_ORG/$ENVIO_INDEXER"
 echo ""
-echo "   git push --no-verify --force-with-lease origin $FULL_SHA:refs/heads/$DEPLOY_BRANCH"
+echo "   git push --force-with-lease origin $FULL_SHA:refs/heads/$DEPLOY_BRANCH"
 echo ""
 
 if [[ "$DRY_RUN" == "true" ]]; then
@@ -117,24 +117,44 @@ if [[ "$AUTO_YES" == "false" ]]; then
   fi
 fi
 
-if ! PUSH_OUTPUT=$(LC_ALL=C git push --no-verify --force-with-lease origin "$FULL_SHA:refs/heads/$DEPLOY_BRANCH" 2>&1 | tee /dev/stderr); then
+if ! PUSH_OUTPUT=$(LC_ALL=C git push --force-with-lease origin "$FULL_SHA:refs/heads/$DEPLOY_BRANCH" 2>&1 | tee /dev/stderr); then
   echo "Push to $DEPLOY_BRANCH failed."
   exit 1
 fi
 
+POST_PUSH_MESSAGE="Pushed $SHORT_SHA to $DEPLOY_BRANCH. Envio will rebuild and resync from scratch."
+
 if grep -q "Everything up-to-date" <<<"$PUSH_OUTPUT"; then
-  echo ""
-  echo "Push was a no-op: '$DEPLOY_BRANCH' already points at $SHORT_SHA,"
-  echo "but Envio has no registered deployment for it, so no webhook will fire."
-  echo "Retrigger with a fresh SHA:"
-  echo "  git checkout $FULL_SHA"
-  echo "  git commit --allow-empty -m 'chore: retrigger envio deploy for rollback'"
-  echo "  git push --no-verify origin HEAD:refs/heads/$DEPLOY_BRANCH"
-  exit 2
+  set +e
+  DEPLOYMENTS_AFTER_NOOP_JSON=$(pnpm --silent exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json 2>/dev/null)
+  DEPLOYMENTS_AFTER_NOOP_STATUS=$?
+  REGISTERED_AFTER_NOOP=""
+  if [[ "$DEPLOYMENTS_AFTER_NOOP_STATUS" -eq 0 ]]; then
+    REGISTERED_AFTER_NOOP=$(printf "%s" "$DEPLOYMENTS_AFTER_NOOP_JSON" \
+      | node scripts/resolve-envio-deployment.mjs "$FULL_SHA" 2>/dev/null)
+  fi
+  set -e
+  REGISTERED_AFTER_NOOP="${REGISTERED_AFTER_NOOP:-}"
+
+  if [[ -n "$REGISTERED_AFTER_NOOP" ]]; then
+    POST_PUSH_MESSAGE="Push was a no-op: '$DEPLOY_BRANCH' already points at $SHORT_SHA and Envio has registered deployment $REGISTERED_AFTER_NOOP."
+  else
+    echo ""
+    echo "Push was a no-op: '$DEPLOY_BRANCH' already points at $SHORT_SHA,"
+    echo "and Envio has no registered deployment for it, so no webhook will fire."
+    echo "Retrigger with a fresh SHA:"
+    echo "  git checkout $FULL_SHA"
+    echo "  git commit --allow-empty -m 'chore: retrigger envio deploy for rollback'"
+    echo "  git push origin HEAD:refs/heads/$DEPLOY_BRANCH"
+    exit 2
+  fi
 fi
 
 echo ""
-echo "Pushed $SHORT_SHA to $DEPLOY_BRANCH. Envio will rebuild and resync from scratch."
+echo "$POST_PUSH_MESSAGE"
+if [[ "$POST_PUSH_MESSAGE" == Push\ was\ a\ no-op:* ]]; then
+  echo "Continue with the post-deploy checklist for that existing deployment."
+fi
 echo ""
 echo "Rollback checklist:"
 echo ""
