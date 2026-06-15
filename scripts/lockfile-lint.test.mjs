@@ -585,7 +585,32 @@ test("fails when one pnpm override union branch has an unbounded minimum", () =>
   );
 });
 
-// 28. Selector ranges can also be unbounded and match future majors.
+// 28. Strict-greater floors are also unbounded on fresh resolves.
+test("fails strict-greater pnpm override values", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            example: ">3.0.0",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected strict-greater range rejection: ${out}`,
+  );
+});
+
+// 29. Selector ranges can also be unbounded and match future majors.
 test("fails when package.json has an unbounded minimum pnpm override selector", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
@@ -610,7 +635,7 @@ test("fails when package.json has an unbounded minimum pnpm override selector", 
   );
 });
 
-// 29. Peer-qualified selectors need the child package range checked.
+// 30. Peer-qualified selectors need the child package range checked.
 test("fails when peer-qualified pnpm override selector range is unbounded", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
@@ -628,9 +653,14 @@ test("fails when peer-qualified pnpm override selector range is unbounded", () =
     exitCode !== 0,
     `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
   );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected peer-qualified selector range rejection: ${out}`,
+  );
 });
 
-// 30. Bounded selector keys and same-major/capped replacement values are fine.
+// 31. Bounded selector keys and same-major/capped replacement values are fine.
 test("passes bounded and same-major pnpm override replacements", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),

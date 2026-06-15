@@ -406,7 +406,7 @@ function isUnboundedMinimumOverrideValue(value) {
     .filter(Boolean);
   return branches.some(
     (branch) =>
-      /(?:^|\s)>=\s*\d/.test(branch) && !/(?:^|\s)<[=]?\s*\d/.test(branch),
+      /(?:^|\s)>[=]?\s*\d/.test(branch) && !/(?:^|\s)<[=]?\s*\d/.test(branch),
   );
 }
 
