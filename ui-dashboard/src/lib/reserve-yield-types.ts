@@ -7,6 +7,7 @@ export const RESERVE_YIELD_EXPENSE_BPS = 15;
 export const RESERVE_YIELD_REVENUE_SHARE_BPS = 8_000;
 export const FORECASTABLE_AUSD_SYMBOL = "AUSD";
 export const FORECASTABLE_SUSDS_SYMBOL = "SUSDS";
+export const FORECASTABLE_STETH_SYMBOL = "STETH";
 
 export type FetchImpl = typeof fetch;
 
@@ -80,6 +81,7 @@ export type ForecastApyBySymbol = {
   ausdNetMentoApyPercent: number | null;
   susdsApyPercent: number | null;
   susdsApySource: SkySavingsRateSource | null;
+  stethApyPercent: number | null;
 };
 
 export type ForecastTotals = {

@@ -9,6 +9,10 @@ import {
   fetchSusdsYieldLedger,
 } from "@/lib/reserve-yield-susds";
 import {
+  fetchLidoStethApy,
+  parseLidoStethApyPercent,
+} from "@/lib/reserve-yield-steth";
+import {
   asArray,
   errorMessage,
   fetchJson,
@@ -23,6 +27,7 @@ import {
   FEDFUNDS_CSV_URL,
   FORECASTABLE_AUSD_SYMBOL,
   FORECASTABLE_SUSDS_SYMBOL,
+  FORECASTABLE_STETH_SYMBOL,
   RESERVE_API_URL,
   RESERVE_YIELD_EXPENSE_BPS,
   RESERVE_YIELD_REVENUE_SHARE_BPS,
@@ -42,11 +47,13 @@ export {
   computeSkySavingsRateApyPercentFromSsr,
   parseSkySavingsRateApyPercent,
   parseSkySavingsRateSsrApyPercent,
+  parseLidoStethApyPercent,
 };
 
 const TRACKED_YIELD_SYMBOLS = new Set([
   FORECASTABLE_AUSD_SYMBOL,
   FORECASTABLE_SUSDS_SYMBOL,
+  FORECASTABLE_STETH_SYMBOL,
 ]);
 
 function yieldForDays(
@@ -135,13 +142,21 @@ function isSusdsSymbol(symbol: string): boolean {
   return symbol.toUpperCase() === FORECASTABLE_SUSDS_SYMBOL;
 }
 
+function isStethSymbol(symbol: string): boolean {
+  return symbol.toUpperCase() === FORECASTABLE_STETH_SYMBOL;
+}
+
+function requiresExplicitUsdValue(symbol: string): boolean {
+  return isSusdsSymbol(symbol) || isStethSymbol(symbol);
+}
+
 function principalUsdFromAsset(
   asset: Record<string, unknown>,
   symbol: string,
 ): number | null {
   const usdValue = numericField(asset.usd_value);
   if (usdValue !== null) return usdValue;
-  return isSusdsSymbol(symbol) ? null : numericField(asset.balance);
+  return requiresExplicitUsdValue(symbol) ? null : numericField(asset.balance);
 }
 
 function principalUsdFromSource({
@@ -157,7 +172,7 @@ function principalUsdFromSource({
   if (sourceUsdValue !== null) return sourceUsdValue;
 
   const sourceBalance = numericField(source.balance);
-  if (!isSusdsSymbol(symbol)) return sourceBalance;
+  if (!requiresExplicitUsdValue(symbol)) return sourceBalance;
   if (sourceBalance === null) return null;
 
   const assetUsdValue = numericField(asset.usd_value);
@@ -331,6 +346,16 @@ function applyForecastModels(
               : "Sky Savings Rate APY source pending",
       };
     }
+    if (symbol === FORECASTABLE_STETH_SYMBOL) {
+      return {
+        ...holding,
+        apyPercent: apyBySymbol.stethApyPercent,
+        yieldModel:
+          apyBySymbol.stethApyPercent === null
+            ? "Lido stETH APR source pending; stETH mark-to-market changes are not counted as earned revenue"
+            : "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
+      };
+    }
     return {
       ...holding,
       yieldModel: "APY source pending",
@@ -416,12 +441,18 @@ function rateErrorForUnavailableForecasts(
   forecastUnavailableSymbols: string[],
   fedfundsError: string | null,
   skyRateError: string | null,
+  stethRateError: string | null,
 ): string | null {
   const unavailable = new Set(forecastUnavailableSymbols);
   return joinErrors(
     unavailable.has(FORECASTABLE_AUSD_SYMBOL) ? fedfundsError : null,
     unavailable.has(FORECASTABLE_SUSDS_SYMBOL) ? skyRateError : null,
+    unavailable.has(FORECASTABLE_STETH_SYMBOL) ? stethRateError : null,
   );
+}
+
+function hasStethHolding(holdings: ReserveYieldHolding[]): boolean {
+  return holdings.some((holding) => isStethSymbol(holding.assetSymbol));
 }
 
 function reserveHoldingsState(
@@ -508,6 +539,16 @@ export async function fetchReserveYieldSnapshot({
   );
   holdings = susdsYield.holdings;
 
+  let stethApyPercent: number | null = null;
+  let stethRateError: string | null = null;
+  if (hasStethHolding(holdings)) {
+    try {
+      stethApyPercent = await fetchLidoStethApy(fetchImpl);
+    } catch (err) {
+      stethRateError = errorMessage("Lido stETH APR", err);
+    }
+  }
+
   const netMentoApyPercent =
     grossApyPercent === null
       ? null
@@ -516,6 +557,7 @@ export async function fetchReserveYieldSnapshot({
     ausdNetMentoApyPercent: netMentoApyPercent,
     susdsApyPercent: skySavingsRateApyPercent,
     susdsApySource: skySavingsRateSource,
+    stethApyPercent,
   });
 
   return {
@@ -544,6 +586,7 @@ export async function fetchReserveYieldSnapshot({
       forecast.forecastUnavailableSymbols,
       fedfundsError,
       skyRateError,
+      stethRateError,
     ),
     earnedYieldError: susdsYield.earnedYieldError,
   };

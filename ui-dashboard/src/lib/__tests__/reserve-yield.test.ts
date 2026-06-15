@@ -5,6 +5,7 @@ import {
   extractReserveYieldHoldings,
   fetchReserveYieldSnapshot,
   parseFredFedFundsCsv,
+  parseLidoStethApyPercent,
   parseSkySavingsRateApyPercent,
   parseSkySavingsRateSsrApyPercent,
 } from "../reserve-yield";
@@ -18,6 +19,14 @@ const SKY_SSR_RPC_RESPONSE = {
   jsonrpc: "2.0",
   id: 1,
   result: SKY_SSR_RPC_RESULT,
+};
+const LIDO_STETH_APR_RESPONSE = {
+  data: { apr: 2.95 },
+  meta: {
+    symbol: "stETH",
+    address: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
+    chainId: 1,
+  },
 };
 
 const RESERVE_PAYLOAD = {
@@ -173,6 +182,76 @@ describe("reserve yield parsing and math", () => {
     });
   });
 
+  it("prices stETH sources from USD values instead of token balances", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "250",
+            usd_value: 420_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                identifier: "0xreserve",
+                balance: "100",
+                custodian_type: "cold",
+              },
+              {
+                type: "wallet",
+                label: "Custodian",
+                identifier: "0xcustodian",
+                balance: "150",
+                usd_value: 252_000,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(2);
+    expect(extracted.holdings[0]).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Custodian",
+      balance: 150,
+      principalUsd: 252_000,
+    });
+    expect(extracted.holdings[1]).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Reserve Safe",
+      balance: 100,
+      principalUsd: 168_000,
+    });
+  });
+
+  it("does not treat stETH token balances as dollars when USD values are missing", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "250",
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                balance: "250",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toEqual([]);
+    expect(extracted.malformedCount).toBe(2);
+  });
+
   it("does not treat sUSDS source shares as dollars when USD values are missing", () => {
     const extracted = extractReserveYieldHoldings({
       collateral: {
@@ -273,6 +352,26 @@ describe("reserve yield parsing and math", () => {
     );
   });
 
+  it("parses Lido stETH APR only for Ethereum stETH metadata", () => {
+    expect(parseLidoStethApyPercent(LIDO_STETH_APR_RESPONSE)).toBe(2.95);
+    expect(() =>
+      parseLidoStethApyPercent({
+        data: { apr: 2.95 },
+        meta: {
+          symbol: "wstETH",
+          address: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
+          chainId: 1,
+        },
+      }),
+    ).toThrow("symbol");
+    expect(() =>
+      parseLidoStethApyPercent({
+        data: { apr: -1 },
+        meta: LIDO_STETH_APR_RESPONSE.meta,
+      }),
+    ).toThrow("valid APR");
+  });
+
   it("applies the provider APY formula", () => {
     expect(computeNetMentoApyPercent(5.33)).toBeCloseTo(4.144, 6);
   });
@@ -317,5 +416,106 @@ describe("reserve yield parsing and math", () => {
     expect(snapshot.holdings[0]?.next365dUsd).toBeCloseTo(79.200009, 6);
     expect(snapshot.holdings[1]?.annualRunRateUsd).toBeCloseTo(62.16, 6);
     expect(snapshot.forecastUnavailableSymbols).toEqual([]);
+  });
+
+  it("includes stETH Lido APR forecasts without earned-yield actuals", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              ...RESERVE_PAYLOAD.collateral.assets,
+              {
+                symbol: "stETH",
+                chain: "ethereum",
+                balance: "251.59825779325257",
+                usd_value: 419_495.97,
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Reserve Safe",
+                    identifier: "0xd0697f70E79476195B742d5aFAb14BE50f98CC1E",
+                    balance: "251.59825779325257",
+                    usd_value: 419_495.97,
+                    custodian_type: "cold",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+
+    const snapshot = await fetchReserveYieldSnapshot({
+      fetchImpl,
+      now: new Date("2026-06-11T12:00:00.000Z"),
+    });
+    const stethHolding = snapshot.holdings.find(
+      (holding) => holding.assetSymbol === "stETH",
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(snapshot.principalUsd).toBeCloseTo(424_195.97, 6);
+    expect(snapshot.forecastPrincipalUsd).toBeCloseTo(424_195.97, 6);
+    expect(snapshot.earnedYieldUsd).toBeNull();
+    expect(snapshot.annualRunRateUsd).toBeCloseTo(12_557.931124, 6);
+    expect(snapshot.next30dUsd).toBeCloseTo(1_032.158723, 6);
+    expect(snapshot.forecastUnavailableSymbols).toEqual([]);
+    expect(stethHolding).toMatchObject({
+      assetSymbol: "stETH",
+      chain: "ethereum",
+      sourceLabel: "Reserve Safe",
+      principalUsd: 419_495.97,
+      earnedYieldUsd: null,
+      apyPercent: 2.95,
+      yieldModel:
+        "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
+    });
+    expect(stethHolding?.next365dUsd).toBeCloseTo(12_375.131115, 6);
+  });
+
+  it("keeps stETH balances while excluding forecasts when Lido APR is unavailable", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              {
+                symbol: "stETH",
+                chain: "ethereum",
+                balance: "10",
+                usd_value: 17_000,
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(new Response("lido down", { status: 503 }));
+
+    const snapshot = await fetchReserveYieldSnapshot({ fetchImpl });
+
+    expect(snapshot.principalUsd).toBe(17_000);
+    expect(snapshot.forecastPrincipalUsd).toBeNull();
+    expect(snapshot.holdings).toHaveLength(1);
+    expect(snapshot.holdings[0]).toMatchObject({
+      assetSymbol: "stETH",
+      principalUsd: 17_000,
+      earnedYieldUsd: null,
+      apyPercent: null,
+      next30dUsd: null,
+    });
+    expect(snapshot.rateError).toContain("Lido stETH APR");
+    expect(snapshot.forecastUnavailableSymbols).toEqual(["STETH"]);
   });
 });

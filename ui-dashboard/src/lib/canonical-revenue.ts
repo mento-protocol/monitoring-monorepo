@@ -472,7 +472,7 @@ function reserveForecastPartialReasons(
   const unavailableSymbols = reserveYield.forecastUnavailableSymbols;
   if (unavailableSymbols.length > 0) {
     reasons.push(
-      `Reserve forecast excludes holdings without APY sources: ${unavailableSymbols.join(", ")}.`,
+      `Reserve forecast excludes holdings without annual-rate sources: ${unavailableSymbols.join(", ")}.`,
     );
   }
   if (reserveYield.holdingsError !== null) {
@@ -503,7 +503,7 @@ function buildForecastSource(args: {
   const reserve365dUsd = finiteOrNull(args.reserveYield?.next365dUsd);
   if (args.reserveYield === null || reserveDailyUsd === null) {
     partialReasons.push(
-      "Reserve forecast unavailable: current APY or reserve balances did not load.",
+      "Reserve forecast unavailable: current annual rate or reserve balances did not load.",
     );
   } else {
     partialReasons.push(...reserveForecastPartialReasons(args.reserveYield));
@@ -578,8 +578,8 @@ function buildForecastSource(args: {
 function forecastAssumption(days: number): string {
   return [
     "Forecast based on current reserve balances, trailing swap activity, and CDP current run-rate.",
-    `Reserve uses non-compounding math: balance x APY x ${days} / 365.`,
-    "AUSD is forecast-only until a payout ledger is wired; sUSDS actuals come from indexed earned-yield snapshots.",
+    `Reserve uses non-compounding forecast math: balance x annual rate x ${days} / 365.`,
+    "AUSD and stETH are forecast-only; sUSDS actuals come from indexed earned-yield snapshots.",
     "Swap uses the last 30 completed daily fee buckets; CDP uses current protocol-share interest run-rate plus trailing upfront fees.",
   ].join("\n");
 }
@@ -812,7 +812,7 @@ function buildStreams(args: {
       forecast365dUsd: args.forecasts.next365d.reserveYieldUsd,
       subtitle:
         args.reserveYield?.principalUsd !== undefined
-          ? "sUSDS actual yield; AUSD forecast-only"
+          ? "sUSDS actual yield; AUSD and stETH forecast-only"
           : "Reserve actuals from sUSDS snapshots",
       actualPartialReasons: reserveActualPartialReasons,
       forecastPartialReasons: reserveForecastPartialReasons,
