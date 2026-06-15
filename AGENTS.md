@@ -171,8 +171,8 @@ pnpm agent:quality-gate --run
 The execution mode is intentionally local-only: lint, typecheck, tests, codegen,
 Trunk, and formatting/validation commands. It never runs deploy commands or
 Terraform apply. If any package manifest, `pnpm-lock.yaml`,
-`pnpm-workspace.yaml`, `.npmrc`, or pnpmfile changed, `--run` refuses to
-execute until you review package scripts/lifecycle hooks and pass
+`pnpm-workspace.yaml`, `.npmrc`, pnpmfile, or `patches/**` file changed,
+`--run` refuses to execute until you review package scripts/lifecycle hooks and pass
 `--allow-package-script-changes`. The narrow exception is a root `package.json`
 edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:quality-gate:test`, `scripts.agent:prewarm`,
@@ -186,8 +186,9 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
 regression tests instead of the package-script refusal path. Existing changed paths run
 targeted Trunk checks for faster local iteration. Deleted paths,
-Trunk/tooling changes, and package-manager or package-manifest changes still run
-full-repo Trunk locally. CI also runs a required full-repo Trunk check on every
+Trunk/tooling changes, package-manager changes, pnpm patches, and
+package-manifest changes still run full-repo Trunk locally. CI also runs a
+required full-repo Trunk check on every
 PR. Normal `--run` mode executes independent quality-phase commands with
 bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
 `AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
@@ -224,8 +225,8 @@ pnpm agent:prewarm --base origin/main
 
 It is a no-op when the gate maps no relevant Turbo commands. Like the run mode
 gate, prewarm refuses to execute Turbo-backed package scripts when package
-manifests, lockfiles, `.npmrc`, or pnpmfile changed unless you first review the
-script/lifecycle diff and pass `--allow-package-script-changes`. Prewarm runs
+manifests, lockfiles, `.npmrc`, pnpmfile, or `patches/**` changed unless you
+first review the script/lifecycle diff and pass `--allow-package-script-changes`. Prewarm runs
 Turbo commands with bounded parallelism too (`--parallel <n>`, default `2`, or
 `AGENT_PREWARM_PARALLELISM`) and captures each command's output separately so
 concurrent logs do not interleave. The same dashboard `.next` serialization rule
@@ -385,6 +386,7 @@ pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Runtime issue
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
+pnpm deploy:indexer:rollback <last-good-sha>  # Roll prod back: re-promote if still registered, else rebuild + resync
 
 # Code health (CodeScene-equivalent OSS checks)
 pnpm code-health:knip              # Strict knip across all packages (blocking)
@@ -491,7 +493,11 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 - Dashboard localhost UI review defaults to the live production Envio endpoint
   when `NEXT_PUBLIC_HASURA_URL` is unset, so fresh worktrees should verify
   against real pool/CDP data by default. Set `NEXT_PUBLIC_HASURA_URL` only when
-  a task explicitly needs a non-prod or fixture endpoint. Real
+  a task explicitly needs a non-prod or fixture endpoint. Hosted testnet
+  networks require `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true` plus the
+  per-network endpoint env (`NEXT_PUBLIC_HASURA_URL_TESTNET` for Monad Testnet
+  or `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` for Celo Sepolia); leave them unset
+  unless the task explicitly needs testnet UI coverage. Real
   address-label/authenticated surfaces also need `UPSTASH_REDIS_REST_URL`,
   `UPSTASH_REDIS_REST_TOKEN`, and local Auth.js placeholders (`AUTH_SECRET`,
   `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`). See `ui-dashboard/AGENTS.md` for the

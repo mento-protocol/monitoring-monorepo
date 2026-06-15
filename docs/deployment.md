@@ -78,6 +78,45 @@ artifact was active. The current CLI settings command does not expose the
 indexer-level cache toggle or cache-artifact selection; use the Envio dashboard
 cache settings, or Envio support if the dashboard is unavailable.
 
+### Rollback a Bad Promotion
+
+If a promoted deployment turns out bad (schema-breaking change, handler crash
+on a real block), roll the static production endpoint back to the last-good
+commit:
+
+1. Find the last-good SHA. List Envio's live deployments - the `prod` row is
+   what is serving right now:
+
+   ```bash
+   pnpm --silent exec envio-cloud indexer get mento mento-protocol -o json \
+     | jq -r '.data.deployments[] | [.commit_hash, (.prod_status // "-"), .created_time] | @tsv'
+   ```
+
+   The rollback script also fetches `origin/envio` and refuses slow rollbacks to
+   commits outside that deploy-branch history.
+
+2. Run the rollback. Preview the plan first with `--dry-run`:
+
+   ```bash
+   pnpm deploy:indexer:rollback <last-good-sha> --dry-run
+   pnpm deploy:indexer:rollback <last-good-sha>
+   ```
+
+   - **Fast path** - the last-good deployment is still one of Envio's live
+     deployments: the script re-promotes it directly. No resync; takes seconds.
+   - **Slow path** - the deployment was pruned: the script requires the
+     last-good SHA to be in `origin/envio` history, refuses to push while Envio
+     already has 3 live deployments, then force-pushes the last-good SHA to the
+     `envio` branch and prints the resync-then-promote checklist. Budget
+     10-30+ minutes for the from-genesis resync. If Envio is at capacity,
+     delete a stale non-prod deployment first
+     ([envio.dev/app](https://envio.dev/app/mento-protocol/mento)).
+
+3. Verify [monitoring.mento.org](https://monitoring.mento.org) loads data.
+
+4. Roll forward later by promoting the fixed deployment:
+   `pnpm deploy:indexer:promote <fixed-sha>`.
+
 ---
 
 ## Dashboard Deployment (Vercel)
@@ -121,13 +160,16 @@ manual CLI commands (`gh secret set`, `vercel env add`, `gcloud secrets versions
 add`, etc.). Add or update the owning Terraform resource/integration instead,
 document the source of truth here, and wait for a human-approved plan/apply.
 
-| Variable                   | Source                   | Description                                         |
-| -------------------------- | ------------------------ | --------------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL`   | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad + Ethereum sUSDS) |
-| `UPSTASH_REDIS_REST_URL`   | Terraform output         | Address labels Redis — auto-set from DB             |
-| `UPSTASH_REDIS_REST_TOKEN` | Terraform output         | Address labels Redis token — auto-set               |
-| `BLOB_STORE_ID`            | Vercel store integration | Blob OIDC store id for backup and restore routes    |
-| `BLOB_WEBHOOK_PUBLIC_KEY`  | Vercel store integration | Blob OIDC public key for the connected store        |
+| Variable                              | Source                   | Description                                               |
+| ------------------------------------- | ------------------------ | --------------------------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad + Ethereum sUSDS)       |
+| `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                     |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                      |
+| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks |
+| `UPSTASH_REDIS_REST_URL`              | Terraform output         | Address labels Redis — auto-set from DB                   |
+| `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Address labels Redis token — auto-set                     |
+| `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes          |
+| `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store              |
 
 ### Aggregator Integration Probes
 

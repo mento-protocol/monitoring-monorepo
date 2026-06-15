@@ -77,6 +77,16 @@ export default async function SignInPage({ searchParams }: Props) {
             Only @mentolabs.xyz accounts are allowed.
           </p>
         )}
+        {/* Auth.js routes failures (CallbackRouteError, OAuthSignin, JWT
+            verification breaks) here via `pages.error: "/sign-in"`, appending
+            `?error=<code>`. AccessDenied has a specific message above; every
+            other code gets a generic retry prompt so the user isn't dropped on
+            a silent sign-in page wondering what happened. */}
+        {signInError && signInError !== "AccessDenied" && (
+          <p className="mb-4 rounded-lg border border-yellow-800 bg-yellow-950 px-3 py-2 text-xs text-yellow-300">
+            Sign-in failed. Please try again.
+          </p>
+        )}
         <form
           action={async () => {
             "use server";

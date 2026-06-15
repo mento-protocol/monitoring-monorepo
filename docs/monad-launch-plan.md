@@ -74,42 +74,21 @@ pnpm deploy:indexer monad-testnet
 Wait for Envio to reach 100% sync at <https://envio.dev/app/mento-protocol/mento-v3-monad-testnet>.
 Testnet start block is 17,932,300 — sync should be fast.
 
-#### Step 3 — Add Terraform variables (~10 min)
+#### Step 3 — Configure the Monad Testnet dashboard endpoint (~10 min)
 
-Add to `terraform/variables.tf`:
-
-```hcl
-variable "hasura_url_monad_testnet" {
-  description = "Hasura GraphQL endpoint for Monad Testnet (Envio)"
-  type        = string
-  default     = ""
-}
-```
-
-Add to `terraform/terraform.tfvars`:
+Set the Monad Testnet endpoint and explicit dashboard opt-in in
+`terraform/terraform.tfvars`:
 
 ```hcl
-hasura_url_monad_testnet = "https://indexer.hyperindex.xyz/<hash>/v1/graphql"
-```
-
-Add to `terraform/dashboard.tf` in the `platform` stack (same pattern as the
-Sepolia block):
-
-```hcl
-resource "vercel_project_environment_variable" "hasura_url_monad_testnet" {
-  project_id = vercel_project.dashboard.id
-  team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET"
-  value      = var.hasura_url_monad_testnet
-  target     = ["production", "preview"]
-}
+hasura_testnet_url    = "https://indexer.hyperindex.xyz/<hash>/v1/graphql"
+show_testnet_networks = true
 ```
 
 Then apply:
 
 ```bash
 pnpm tf plan platform   # preview
-pnpm infra:apply        # apply → sets NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET in Vercel
+pnpm infra:apply        # apply -> sets NEXT_PUBLIC_HASURA_URL_TESTNET + opt-in flag in Vercel
 ```
 
 #### Step 4 — Verify (~5 min)
@@ -150,7 +129,7 @@ pnpm run dev:monad-testnet
 
 # 3. Run the dashboard against the local indexer
 cd ui-dashboard
-NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET=http://localhost:8080/v1/graphql pnpm dev
+NEXT_PUBLIC_HASURA_URL_TESTNET=http://localhost:8080/v1/graphql NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true pnpm dev
 # Visit http://localhost:3000 → select "Monad Testnet"
 # Verify: pools visible, health badges render, oracle prices shown
 ```

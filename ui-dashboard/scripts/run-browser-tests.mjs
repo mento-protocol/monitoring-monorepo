@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 
 // `next dev` rewrites this import to `.next/dev`, which would otherwise leave
 // local browser-test runs with a dirty worktree.
 const nextEnvUrl = new URL("../next-env.d.ts", import.meta.url);
+const nextDevDirUrl = new URL("../.next/dev", import.meta.url);
 const originalNextEnv = existsSync(nextEnvUrl)
   ? await readFile(nextEnvUrl, "utf8")
   : null;
@@ -205,6 +206,7 @@ try {
   if (originalNextEnv !== null) {
     await writeFile(nextEnvUrl, originalNextEnv);
   }
+  await rm(nextDevDirUrl, { recursive: true, force: true });
 }
 
 process.exit(exitCode);

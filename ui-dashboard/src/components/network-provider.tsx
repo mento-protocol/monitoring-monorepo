@@ -6,8 +6,7 @@ import * as Sentry from "@sentry/nextjs";
 import {
   NETWORKS,
   DEFAULT_NETWORK,
-  isConfiguredNetworkId,
-  networkIdForChainId,
+  configuredNetworkIdForChainId,
   type IndexerNetworkId,
   type Network,
 } from "@/lib/networks";
@@ -37,9 +36,9 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   const networkId = useMemo<IndexerNetworkId>(() => {
     const chainId = pathnamePoolChainId(pathname);
-    const fromPathname = chainId == null ? null : networkIdForChainId(chainId);
-    if (fromPathname && isConfiguredNetworkId(fromPathname))
-      return fromPathname;
+    const fromPathname =
+      chainId == null ? null : configuredNetworkIdForChainId(chainId);
+    if (fromPathname) return fromPathname;
     return DEFAULT_NETWORK;
   }, [pathname]);
 

@@ -75,6 +75,24 @@ variable "hasura_url" {
   default     = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql"
 }
 
+variable "hasura_testnet_url" {
+  description = "Optional GraphQL endpoint for the Monad Testnet Envio indexer. Leave empty to keep Monad Testnet hidden."
+  type        = string
+  default     = ""
+}
+
+variable "hasura_celo_sepolia_url" {
+  description = "Optional GraphQL endpoint for the Celo Sepolia Envio indexer. Leave empty to keep hosted Celo Sepolia hidden."
+  type        = string
+  default     = ""
+}
+
+variable "show_testnet_networks" {
+  description = "Whether to expose hosted testnet networks in the dashboard network picker."
+  type        = bool
+  default     = false
+}
+
 # ── Integration Probes ────────────────────────────────────────────────────────
 
 variable "lifi_api_key" {

@@ -498,14 +498,14 @@ describe("buildCanonicalRevenue", () => {
 
     expect(result.forecasts.next7d.reserveYieldUsd).toBe(14);
     expect(result.forecasts.next7d.partialReasons).toContain(
-      "Reserve forecast excludes holdings without APY sources: AUSD.",
+      "Reserve forecast excludes holdings without annual-rate sources: AUSD.",
     );
     expect(result.streams.reserve.partialReasons).toContain(
-      "Reserve forecast excludes holdings without APY sources: AUSD.",
+      "Reserve forecast excludes holdings without annual-rate sources: AUSD.",
     );
     expect(result.streams.reserve.actualPartialReasons).toEqual([]);
     expect(result.streams.reserve.forecastPartialReasons).toContain(
-      "Reserve forecast excludes holdings without APY sources: AUSD.",
+      "Reserve forecast excludes holdings without annual-rate sources: AUSD.",
     );
     expect(result.forecasts.next7d.partialReasons).toContain(
       "Reserve forecast partial: AUSD APY source unavailable",
