@@ -438,7 +438,8 @@ function isUnboundedMinimumOverrideValue(value) {
     .filter(Boolean);
   return branches.some(
     (branch) =>
-      /(?:^|\s)>[=]?\s*\d/.test(branch) && !/(?:^|\s)<[=]?\s*\d/.test(branch),
+      /(?:^|\s)=?>=?\s*v?\d/i.test(branch) &&
+      !/(?:^|\s)<[=]?\s*v?\d/i.test(branch),
   );
 }
 
@@ -539,6 +540,53 @@ function splitYamlMapEntry(text) {
 }
 
 /**
+ * @param {string} text
+ */
+function splitYamlInlineMapItems(text) {
+  const items = [];
+  let quote = "";
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === ",") {
+      items.push(text.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  items.push(text.slice(start).trim());
+  return items.filter(Boolean);
+}
+
+/**
+ * @param {string} value
+ * @param {number} line
+ * @returns {Array<{ selector: string; replacement: string; line: number }>}
+ */
+function extractInlineWorkspaceOverrides(value, line) {
+  const trimmed = stripYamlInlineComment(value);
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return [];
+  }
+  return splitYamlInlineMapItems(trimmed.slice(1, -1))
+    .map((item) => {
+      const entry = splitYamlMapEntry(item);
+      if (!entry) return null;
+      const selector = unquote(entry.key);
+      const replacement = unquote(stripYamlInlineComment(entry.value));
+      return selector && replacement ? { selector, replacement, line } : null;
+    })
+    .filter((entry) => entry !== null);
+}
+
+/**
  * @param {string} absPath
  * @returns {Array<{ selector: string; replacement: string; line: number }>}
  */
@@ -553,7 +601,20 @@ function extractWorkspaceOverrides(absPath) {
     if (!trimmed || trimmed.startsWith("#")) continue;
 
     if (/^\S/.test(line)) {
-      inOverrides = /^['"]?overrides['"]?\s*:\s*(?:#.*)?$/.test(trimmed);
+      const overridesMatch = /^['"]?overrides['"]?\s*:\s*(.*)$/.exec(trimmed);
+      if (overridesMatch) {
+        const inlineValue = overridesMatch[1].trim();
+        if (inlineValue) {
+          overrides.push(
+            ...extractInlineWorkspaceOverrides(inlineValue, i + 1),
+          );
+          inOverrides = false;
+        } else {
+          inOverrides = true;
+        }
+      } else {
+        inOverrides = false;
+      }
       continue;
     }
     if (!inOverrides) continue;
