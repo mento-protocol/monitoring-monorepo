@@ -7,6 +7,9 @@
  * governance-watchdog, and alert function roots). Those packages keep literal
  * pins instead of "catalog:". This script asserts every declared version of a
  * cataloged package is either "catalog:" or exactly the catalog version.
+ * This intentionally checks only the default `catalog:` block. If this
+ * workspace adopts pnpm named catalogs via `catalogs:`, extend this checker
+ * and its fixtures in the same change.
  *
  * No external dependencies. Run: pnpm skew:check
  */
@@ -75,7 +78,7 @@ function parseCatalog(blockLines) {
  */
 function parseWorkspacePackages(blockLines) {
   return blockLines.flatMap((line) => {
-    const match = line.match(/^ {2}-\s*["']?([^"'\s]+)["']?\s*$/);
+    const match = line.match(/^\s*-\s*["']?([^"'\s]+)["']?\s*$/);
     return match ? [match[1]] : [];
   });
 }

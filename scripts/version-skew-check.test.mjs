@@ -117,6 +117,40 @@ test("fails when a member drifts from the catalog", () => {
   assert(stderr.includes("2.47.0"), `stderr: ${stderr}`);
 });
 
+test("fails when a devDependency drifts from the catalog", () => {
+  const { exitCode, stderr } = run(
+    `packages:\n    - app\n\ncatalog:\n  viem: 2.50.4\n`,
+    {
+      "package.json": { name: "root" },
+      "app/package.json": {
+        name: "app",
+        devDependencies: { viem: "2.49.0" },
+      },
+    },
+  );
+
+  assert(exitCode !== 0, `expected non-zero exit, got ${exitCode}`);
+  assert(stderr.includes("devDependencies.viem"), `stderr: ${stderr}`);
+  assert(stderr.includes("2.49.0"), `stderr: ${stderr}`);
+});
+
+test("fails when an optionalDependency drifts from the catalog", () => {
+  const { exitCode, stderr } = run(
+    `packages:\n  - app\n\ncatalog:\n  viem: 2.50.4\n`,
+    {
+      "package.json": { name: "root" },
+      "app/package.json": {
+        name: "app",
+        optionalDependencies: { viem: "2.48.0" },
+      },
+    },
+  );
+
+  assert(exitCode !== 0, `expected non-zero exit, got ${exitCode}`);
+  assert(stderr.includes("optionalDependencies.viem"), `stderr: ${stderr}`);
+  assert(stderr.includes("2.48.0"), `stderr: ${stderr}`);
+});
+
 test("passes when the workspace has no catalog", () => {
   const { exitCode, stdout } = run(`packages:\n  - app\n`, {
     "package.json": { name: "root" },
