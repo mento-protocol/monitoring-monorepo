@@ -65,11 +65,12 @@ mkdir -p .investigations
 # a non-Celo investigation must not silently read Celo data. Thread these everywhere:
 #   CHAIN_ID → Hasura `chainId` filters + Sim `--chain-ids`
 #   RPC      → every `cast` call (head block, storage, codehash, sanctions oracle)
-#   DUNE_NS  → Dune table prefix (the `<chain>.` in `<chain>.transactions`, etc.)
+#   DUNE_NS  → value to hand-substitute for the `<chain>.` table prefix in the DuneSQL examples
+#              (the dune CLI doesn't shell-interpolate inside a SQL string, so swap it in manually)
 #   DL_NS    → DefiLlama coin-price slug (Step 5.5); may differ from the chain name — verify on DefiLlama
 case "$CHAIN" in
   celo)     CHAIN_ID=42220; RPC=https://forno.celo.org;    DUNE_NS=celo;     DL_NS=celo ;;
-  monad)    CHAIN_ID=143;   RPC=https://rpc.monad.xyz;     DUNE_NS=monad;    DL_NS=monad ;;     # Monad full node; DefiLlama may not cover monad yet (Step 5.5 caveat)
+  monad)    CHAIN_ID=143;   RPC=https://rpc2.monad.xyz;    DUNE_NS=monad;    DL_NS=monad ;;     # Monad full node (repo-canonical rpc2.monad.xyz); DefiLlama may not cover monad yet (Step 5.5 caveat)
   polygon)  CHAIN_ID=137;   RPC=https://polygon-rpc.com;   DUNE_NS=polygon;  DL_NS=polygon ;;
   ethereum) CHAIN_ID=1;     RPC=https://eth.llamarpc.com;  DUNE_NS=ethereum; DL_NS=ethereum ;;
   *) echo "Unsupported CHAIN=$CHAIN — add a case arm with its CHAIN_ID / RPC / DUNE_NS / DL_NS." >&2; exit 1 ;;
@@ -336,7 +337,7 @@ Then attribution. Use the `arkham` skill (project-scoped) for the **cross-chain 
 
 1. Branch on target type before any cross-chain enrichment:
    - **EOA target** → run `address_enriched/all` on it. Zero hits for a Celo-native EOA is a signal, not a failure.
-   - **CONTRACT target** → do **NOT** run `address_enriched/all` on the contract address as an identity source yet. The same 20-byte address on Ethereum/L2 is almost always an unrelated EOA/contract (addresses aren't shared across chains unless deployed deterministically), so an Arkham hit there would record a false identity. Identify the deployer/operator EOA first (step 5), then run the identity leg on THAT EOA. Only treat a same-address cross-chain hit as the target if CREATE2/bytecode evidence proves the address is intentionally shared.
+   - **CONTRACT target** → do **NOT** run `address_enriched/all` on the contract address as an identity source yet. The same 20-byte address on Ethereum/L2 is almost always an unrelated EOA/contract (addresses aren't shared across chains unless deployed deterministically), so an Arkham hit there would record a false identity. Identify the deployer/operator EOA first (item 5 below), then run the identity leg on THAT EOA. Only treat a same-address cross-chain hit as the target if CREATE2/bytecode evidence proves the address is intentionally shared.
 2. Walk inbound funders on the target chain. Two pitfalls to handle explicitly:
    - **Sim's Activity API returns NEWEST first**, not oldest. Don't take the top result and call it the FIRST funder — paginate to the tail (or use a `block_time ASC` DuneSQL query) before treating any counterparty as the original funder. A recent counterparty mistaken for the original funder permanently mis-attributes the report.
    - **Sim's `--chain-ids` defaults to all configured chains** when omitted. For an EVM address that's been used on Ethereum / Base / Arbitrum / etc., the "first receive" without a chain filter can come from a totally different chain than the target. Always pass `--chain-ids $CHAIN_ID` so the funder graph is scoped to the chain the contract actually lives on.
@@ -383,7 +384,7 @@ FROM <chain>.transactions WHERE "from" = <funder> AND value > 0 GROUP BY 1 ORDER
 
 ```bash
 # (3) CODEHASH CLUSTERING: byte-identical bots, even across different deployers/factories.
-CODE=$(cast code <addr> --rpc-url $RPC); cast keccak $CODE   # runtime codehash ($RPC from Step 1, scoped to $CHAIN)
+CODE=$(cast code "$ADDR" --rpc-url "$RPC"); cast keccak "$CODE"   # runtime codehash ($ADDR/$RPC from Step 1, scoped to $CHAIN)
 # Pre-filter candidates from creation_traces by length(code), then confirm by keccak match.
 ```
 
@@ -442,7 +443,7 @@ WHERE topic0 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b92
   AND topic1 = <32-byte left-padded owner> LIMIT 100;   -- events are grant HISTORY; for live use eth_call allowance()
 ```
 
-If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real human signers — `cast call <safe> 'getOwners()(address[])'` + `'getThreshold()(uint256)'` — and link Safes by intersecting owner sets. Free hosted Safe tx-service for Celo: `https://api.safe.global/tx-service/celo/` (keyless reads). This exposes the people behind a treasury/managed-bot the proxy address would otherwise hide.
+If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real human signers — `cast call <safe> 'getOwners()(address[])'` + `'getThreshold()(uint256)'` — and link Safes by intersecting owner sets. Free hosted Safe tx-service (keyless reads) is per-chain — `https://api.safe.global/tx-service/<safe-slug>/api/v1/safes/<safe>/`, where `<safe-slug>` is the chain's Safe short-name (celo→`celo`, polygon→`pol`, ethereum→`eth`); not every chain has one (Monad doesn't), so don't copy the `celo` slug for a non-Celo target. This exposes the people behind a treasury/managed-bot the proxy address would otherwise hide.
 
 ### Step 4 — Transaction anatomy
 
@@ -554,7 +555,8 @@ A forensic product should screen every target. Primary, zero new dependency — 
 # guaranteed everywhere (e.g. Monad). Only call it where it's deployed on $CHAIN; elsewhere rely on the
 # chain-agnostic TRM + static-OFAC paths below. Run on the target AND each Step-2 funder/counterparty.
 if [ "$CHAIN" = celo ]; then   # extend once you've verified the oracle is deployed on another target chain
-  cast call 0x40C57923924B5c5c5455c48D93317139ADDaC8fb 'isSanctioned(address)(bool)' <target> --rpc-url $RPC
+  cast call 0x40C57923924B5c5c5455c48D93317139ADDaC8fb 'isSanctioned(address)(bool)' "$ADDR" --rpc-url "$RPC"
+  # repeat for each Step-2 funder/counterparty, e.g.: for a in "$ADDR" "${FUNDERS[@]}"; do cast call 0x40C5…c8fb 'isSanctioned(address)(bool)' "$a" --rpc-url "$RPC"; done
 fi
 ```
 
