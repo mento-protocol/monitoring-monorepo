@@ -1,7 +1,7 @@
 name: Notify Slack on main-branch workflow failure
 
-# Fires when any push-triggered workflow on `main` completes with
-# conclusion=failure. Posts a structured message to `#ci-failures` via
+# Fires when any push-triggered or schedule-only workflow on `main` completes
+# with conclusion=failure. Posts a structured message to `#ci-failures` via
 # Slack's chat.postMessage so silent post-merge breakage gets caught
 # without anyone having to manually watch the Actions tab.
 #
@@ -15,10 +15,13 @@ name: Notify Slack on main-branch workflow failure
 # Trigger discipline:
 #   - `workflow_run` requires the watched workflows to be named explicitly
 #     here (no wildcards). Add new workflows as they become push-to-main
-#     auto-deploys. The current list covers every workflow whose
-#     `on.push.branches` includes `main`.
+#     auto-deploys or schedule-only gates. The current list covers every
+#     workflow whose `on.push.branches` includes `main` OR that runs on a
+#     schedule (since a cron failure is equally silent).
 #   - The `if:` gate filters to: conclusion=='failure', head_branch=='main',
-#     event=='push' (skip workflow_dispatch + schedule reruns).
+#     event in ['push','schedule'] (skip workflow_dispatch reruns).
+#     Cron runs set head_branch to the default branch (main), so the same
+#     branch guard works for both push and schedule events.
 #   - `workflow_dispatch` lets you smoke-test the wiring by posting a
 #     "this is a test, ignore" message to #ci-failures without breaking
 #     anything for real.
@@ -26,11 +29,10 @@ name: Notify Slack on main-branch workflow failure
 on:
   workflow_run:
     workflows:
-      # Every workflow that runs on `push` to `main`. Add new entries here as
-      # more push-to-main workflows land — `workflow_run.workflows` does NOT
-      # support wildcards. Scope is broader than just auto-deploy workflows
-      # because any required-gate failure on main is operationally silent if
-      # nobody happens to look at the Actions tab.
+      # Every workflow that runs on `push` to `main` OR on a `schedule`.
+      # Add new entries here as more push-to-main or schedule-only workflows
+      # land — `workflow_run.workflows` does NOT support wildcards.
+      # Push-to-main workflows (on.push.branches: [main]):
       - Alerts Infra
       - Metrics Bridge
       - Infra
@@ -38,6 +40,12 @@ on:
       - CI
       - Trunk
       - Code Health — Duplication
+      - Alerts Rules
+      - Aegis Terraform
+      # Schedule-only or PR-only (no push-to-main) workflows:
+      - Supply Chain
+      - Integration Probes
+      - Terraform Drift Detection
     types: [completed]
   # workflow_dispatch (no inputs — checkov/CKV_GHA_7 forbids them) lets you
   # smoke-test the Slack wiring by manually running this workflow from the
@@ -62,7 +70,8 @@ jobs:
       (contains(fromJSON('["failure","timed_out","startup_failure"]'),
                 github.event.workflow_run.conclusion) &&
        github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.event == 'push')
+       contains(fromJSON('["push","schedule"]'),
+                github.event.workflow_run.event))
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
     steps:
@@ -80,6 +89,7 @@ jobs:
           COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
           COMMIT_MSG: ${{ github.event.workflow_run.display_title }}
           ACTOR: ${{ github.event.workflow_run.triggering_actor.login }}
+          EVENT: ${{ github.event.workflow_run.event }}
         run: |
           set -euo pipefail
 
@@ -125,13 +135,15 @@ jobs:
               --arg sha "${COMMIT_SHA:0:7}" \
               --arg msg "$COMMIT_MSG" \
               --arg actor "$ACTOR" \
+              --arg event "$EVENT" \
               '($msg | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;")) as $safe_msg
+               | (if $actor != "" and $actor != "null" then "\n*Triggered by:* " + $actor elif $event == "schedule" then "\n*Triggered by:* scheduled cron" else "" end) as $actor_line
                | {
                 channel: $ch,
                 text: ("❌ " + $wf + " failed on main (" + $sha + ")"),
                 blocks: [
                   {type: "section", text: {type: "mrkdwn", text: ("❌ *<" + $url + "|" + $wf + ">* failed on `main`")}},
-                  {type: "section", text: {type: "mrkdwn", text: ("*Commit:* `" + $sha + "` — " + $safe_msg + "\n*Triggered by:* " + $actor + "\n\n<" + $url + "|View failed run →>")}}
+                  {type: "section", text: {type: "mrkdwn", text: ("*Commit:* `" + $sha + "` — " + $safe_msg + $actor_line + "\n\n<" + $url + "|View failed run →>")}}
                 ]
               }')
           fi

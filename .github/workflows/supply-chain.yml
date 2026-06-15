@@ -54,8 +54,9 @@ on:
       - scripts/lockfile-lint.mjs
       - scripts/lockfile-lint.test.mjs
   schedule:
-    # Daily run so a newly-disclosed CVE against a pinned dep pages us even
-    # without a PR in flight.
+    # Daily run so a newly-disclosed CVE against a pinned dep is caught
+    # within 24h. Failures are reported to Slack via
+    # notify-slack-on-main-failure.yml.
     - cron: 17 6 * * *
 
 concurrency:

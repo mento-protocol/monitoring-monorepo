@@ -71,6 +71,9 @@ importers:
       graphql:
         specifier: 16.13.1
         version: 16.13.1
+      js-yaml:
+        specifier: 4.1.1
+        version: 4.1.1
       jscpd:
         specifier: 4.0.9
         version: 4.0.9
