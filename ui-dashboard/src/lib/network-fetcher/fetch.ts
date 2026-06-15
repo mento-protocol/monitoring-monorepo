@@ -57,11 +57,11 @@ import type {
  * poll.
  *
  * Truncation flags (`feeSnapshotsTruncated`, `snapshotsAllDailyTruncated`,
- * `brokerSnapshotsAllDailyTruncated`) are intentionally excluded — they
- * represent a permanent cap-exhaustion state until `SNAPSHOT_MAX_PAGES`
- * is raised. Including them would force perpetual mount-time revalidation
- * that can never recover. The UI surfaces truncation via the `≈` prefix
- * + subtitle; this gate is for transient errors only.
+ * `brokerSnapshotsAllDailyTruncated`, `uniqueLpAddressesTruncated`) are
+ * intentionally excluded — they represent a permanent cap-exhaustion state
+ * until `SNAPSHOT_MAX_PAGES` is raised. Including them would force perpetual
+ * mount-time revalidation that can never recover. The UI surfaces truncation
+ * via the `≈` prefix + subtitle; this gate is for transient errors only.
  */
 export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
   return (
@@ -110,6 +110,7 @@ export const blankNetworkData = (
   ratesError: null,
   poolLabels: new Map(),
   uniqueLpAddresses: null,
+  uniqueLpAddressesTruncated: false,
   rates: new Map(),
   error: null,
   snapshotsError: null,
@@ -324,6 +325,33 @@ async function fetchAllBrokerDailySnapshotPages(
 }
 
 /**
+ * Paginate `LiquidityPosition` rows for a set of pool IDs, deduplicating
+ * by lowercase address. One LP may hold positions in multiple pools, so
+ * the same wallet address can appear across rows — dedup collapses them
+ * to a unique-address list. Same fail-open semantics as the daily snapshot
+ * path: hard-fail on page 0, preserve and flag truncated on mid-loop failure.
+ */
+async function fetchAllLpAddressPages(
+  client: GraphQLClient,
+  poolIds: string[],
+  network: string,
+): Promise<PaginatedPageResult<{ address: string }>> {
+  return fetchPaginatedRows<{ address: string }, unknown>({
+    client,
+    query: UNIQUE_LP_ADDRESSES,
+    responseKey: "LiquidityPosition",
+    network,
+    variablesFor: (page) => ({
+      poolIds,
+      limit: SNAPSHOT_PAGE_SIZE,
+      offset: page * SNAPSHOT_PAGE_SIZE,
+    }),
+    dedupKey: (r) => r.address.toLowerCase(),
+    extra: { poolCount: poolIds.length },
+  });
+}
+
+/**
  * Per-pool fee-snapshot pagination — pool×day cardinality (~30 pools × ~430
  * days) easily exceeds the 1000-row cap, so we paginate. Same fail-open
  * semantics as the daily snapshot path. Dedup keyed off `id` since
@@ -413,12 +441,11 @@ export async function fetchNetworkData(
     // querying on every chain is harmless (Monad simply returns 0 rows).
     fetchAllBrokerDailySnapshotPages(client, network.chainId, network.id),
     fpmmPoolIds.length > 0
-      ? timed<{ LiquidityPosition: { address: string }[] }>(
-          UNIQUE_LP_ADDRESSES,
-          { poolIds: fpmmPoolIds },
-        )
+      ? fetchAllLpAddressPages(client, fpmmPoolIds, network.id)
       : Promise.resolve({
-          LiquidityPosition: [] as { address: string }[],
+          rows: [] as { address: string }[],
+          truncated: false,
+          error: null,
         }),
     timed<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS, {
       chainId: network.chainId,
@@ -650,19 +677,14 @@ export async function fetchNetworkData(
   const snapshots7dError = windowError(dw7d.from);
   const snapshots30dError = windowError(dw30d.from);
 
+  // fetchAllLpAddressPages deduplicates by address.toLowerCase() internally,
+  // so the rows are already unique — no second Set pass needed.
   const uniqueLpAddresses =
     lpResult.status === "fulfilled"
-      ? Array.from(
-          new Set(
-            // Lowercase before dedup: upstream rows can arrive in mixed casing
-            // (checksum on some sources, lowercase on others) and Set keys on
-            // raw strings would count the same wallet twice.
-            (lpResult.value.LiquidityPosition ?? []).map((lp) =>
-              lp.address.toLowerCase(),
-            ),
-          ),
-        )
+      ? lpResult.value.rows.map((r) => r.address)
       : null;
+  const uniqueLpAddressesTruncated =
+    lpResult.status === "fulfilled" && lpResult.value.truncated;
 
   const olsPoolIds =
     olsResult.status === "fulfilled"
@@ -713,7 +735,11 @@ export async function fetchNetworkData(
     snapshots30dError,
     snapshotsAllDailyError,
     brokerSnapshotsAllDailyError,
-    lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
+    uniqueLpAddressesTruncated,
+    lpError:
+      lpResult.status === "rejected"
+        ? toError(lpResult.reason)
+        : (lpResult.value.error ?? null),
   };
 }
 

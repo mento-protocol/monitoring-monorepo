@@ -107,6 +107,8 @@ export type NetworkData = {
    */
   poolLabels: Map<string, PoolLabel>;
   uniqueLpAddresses: string[] | null;
+  /** True when the LP address pagination loop hit its safety cap. */
+  uniqueLpAddressesTruncated: boolean;
   rates: OracleRateMap;
   error: SerializableError | null;
   /**

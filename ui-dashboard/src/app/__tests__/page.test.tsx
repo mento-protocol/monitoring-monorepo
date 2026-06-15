@@ -274,6 +274,63 @@ describe("GlobalPage — LP query failure", () => {
   });
 });
 
+// LP truncation
+
+describe("GlobalPage — LP address truncation", () => {
+  it("shows ≈ prefix and truncated subtitle when uniqueLpAddressesTruncated is true", () => {
+    const addrs = Array.from({ length: 37 }, (_, i) => `0xlp${i}`);
+    const html = render([
+      makeNetworkData({
+        uniqueLpAddresses: addrs,
+        uniqueLpAddressesTruncated: true,
+      }),
+    ]);
+    expect(html).toContain("LPs");
+    // ≈ prefix before the count (37 is unlikely to collide with Tailwind classes).
+    expect(html).toContain("≈");
+    expect(html).toContain("37");
+    expect(html).toContain(
+      "Approximate — full LP history exceeds pagination cap",
+    );
+  });
+
+  it("shows exact count and normal subtitle when not truncated", () => {
+    const addrs = Array.from({ length: 37 }, (_, i) => `0xlp${i}`);
+    const html = render([
+      makeNetworkData({
+        uniqueLpAddresses: addrs,
+        uniqueLpAddressesTruncated: false,
+      }),
+    ]);
+    expect(html).not.toContain("≈");
+    expect(html).toContain("Unique LP addresses across all chains");
+  });
+
+  it("keeps ≈ prefix when truncation coincides with an LP error", () => {
+    // One chain hit the pagination cap (truncated, lower bound) while another
+    // chain errored mid-fetch. The count is still a lower bound, so the ≈
+    // prefix must survive even though the subtitle degrades to "Partial".
+    const addrs = Array.from({ length: 37 }, (_, i) => `0xlp${i}`);
+    const html = render([
+      makeNetworkData({
+        uniqueLpAddresses: addrs,
+        uniqueLpAddressesTruncated: true,
+      }),
+      makeNetworkData({
+        uniqueLpAddresses: null,
+        lpError: new Error("LP page 3 timeout"),
+      }),
+    ]);
+    expect(html).toContain("≈");
+    expect(html).toContain("37");
+    // Error subtitle wins over the "Approximate" copy, but the value keeps ≈.
+    expect(html).toContain("Partial — some chains failed to load");
+    expect(html).not.toContain(
+      "Approximate — full LP history exceeds pagination cap",
+    );
+  });
+});
+
 // Snapshots-only failure
 
 describe("GlobalPage — snapshots-only failure", () => {

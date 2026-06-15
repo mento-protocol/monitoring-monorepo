@@ -139,6 +139,7 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
+    uniqueLpAddressesTruncated: false,
     rates: new Map([
       ["USDm", 1],
       ["GBPm", 1.3263],
