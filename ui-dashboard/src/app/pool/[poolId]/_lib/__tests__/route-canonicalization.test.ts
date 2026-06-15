@@ -6,9 +6,15 @@ vi.mock("@/lib/networks", () => ({
       ? "celo-mainnet"
       : chainId === 143
         ? "monad-mainnet"
-        : null,
+        : chainId === 11142220
+          ? "celo-sepolia"
+          : chainId === 10143
+            ? "monad-testnet"
+            : null,
   isConfiguredNetworkId: (networkId: string) =>
-    networkId === "celo-mainnet" || networkId === "monad-mainnet",
+    networkId === "celo-mainnet" ||
+    networkId === "monad-mainnet" ||
+    networkId === "monad-testnet",
 }));
 
 import {
@@ -20,6 +26,7 @@ import {
 describe("pool route chain context", () => {
   it("parses positive integer chain ids", () => {
     expect(parseRouteChainId("143")).toBe(143);
+    expect(parseRouteChainId("10143")).toBe(10143);
     expect(parseRouteChainId(["42220", "143"])).toBe(42220);
   });
 
@@ -31,9 +38,9 @@ describe("pool route chain context", () => {
     expect(parseRouteChainId(String(Number.MAX_SAFE_INTEGER + 1))).toBeNull();
   });
 
-  it("rejects unsupported chain ids", () => {
+  it("rejects unsupported or hidden chain ids", () => {
     expect(parseRouteChainId("1")).toBeNull();
-    expect(parseRouteChainId("10143")).toBeNull();
+    expect(parseRouteChainId("11142220")).toBeNull();
   });
 });
 
@@ -82,6 +89,9 @@ describe("pool route canonicalization", () => {
     );
     expect(
       isRoutablePoolId("42220-0xaaa0000000000000000000000000000000000001"),
+    ).toBe(true);
+    expect(
+      isRoutablePoolId("10143-0xaaa0000000000000000000000000000000000001"),
     ).toBe(true);
   });
 

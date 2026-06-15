@@ -57,7 +57,8 @@ resource "grafana_contact_point" "slack_warnings_transition" {
 }
 
 # Domain-split warning contact points. v3 warnings route to a domain-
-# specific channel based on which service rolls up the rule. The
+# specific channel based on which service rolls up the rule. Testnet warnings
+# route to the existing staging alert channel. The
 # `slack_warnings` / `_transition` contact points above are unused once
 # every rule has migrated and will be removed in a follow-up cleanup.
 
@@ -112,6 +113,17 @@ resource "grafana_contact_point" "slack_cdps" {
   slack {
     token     = var.slack_bot_token
     recipient = var.slack_channel_cdps
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text      = local.slack_body_template
+  }
+}
+
+resource "grafana_contact_point" "slack_testnet" {
+  name = "slack-alerts-testnet"
+
+  slack {
+    token     = var.slack_bot_token
+    recipient = var.slack_channel_testnet
     title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
     text      = local.slack_body_template
   }
@@ -304,6 +316,7 @@ locals {
   #   - Pool mechanics (deviation, rebalancer, trading lim.) → notify_warning_pools_pool
   #   - Pool transitions (deviation breach state changes)    → notify_warning_pools_transition
   #   - Service infrastructure (indexer, metrics-bridge)     → notify_warning_infra
+  #   - Testnet service health                               → notify_warning_testnet
 
   notify_warning_oracles_pool = {
     contact_point   = grafana_contact_point.slack_oracles.name
@@ -332,6 +345,14 @@ locals {
   notify_warning_infra = {
     contact_point   = grafana_contact_point.slack_infra.name
     group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
+    repeat_interval = "4h"
+  }
+
+  notify_warning_testnet = {
+    contact_point   = grafana_contact_point.slack_testnet.name
+    group_by        = ["alertname", "grafana_folder", "chain"]
     group_wait      = "1m"
     group_interval  = "10m"
     repeat_interval = "4h"

@@ -60,6 +60,24 @@ resource "vercel_project_environment_variable" "hasura_url" {
   target     = ["production", "preview"]
 }
 
+resource "vercel_project_environment_variable" "hasura_testnet_url" {
+  count      = var.hasura_testnet_url == "" ? 0 : 1
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "NEXT_PUBLIC_HASURA_URL_TESTNET"
+  value      = var.hasura_testnet_url
+  target     = ["production", "preview"]
+}
+
+resource "vercel_project_environment_variable" "show_testnet_networks" {
+  count      = var.show_testnet_networks ? 1 : 0
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "NEXT_PUBLIC_SHOW_TESTNET_NETWORKS"
+  value      = "true"
+  target     = ["production", "preview"]
+}
+
 resource "vercel_project_environment_variable" "redis_url" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id

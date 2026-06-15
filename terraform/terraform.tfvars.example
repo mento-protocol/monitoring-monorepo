@@ -38,6 +38,11 @@ upstash_api_key = "..."
 # Override here only if the deployment ID changes.
 # hasura_url = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql"
 
+# Optional shared testnet Envio endpoint. Testnet networks stay hidden unless
+# both this URL is set and show_testnet_networks is true.
+# hasura_testnet_url = "https://indexer.hyperindex.xyz/<testnet-deployment>/v1/graphql"
+# show_testnet_networks = true
+
 # ── Integration Probes ────────────────────────────────────────────────────────
 # LI.FI API key for the scheduled integration-probes workflow.
 # Leave empty until provisioned; the GitHub Actions secret resource is

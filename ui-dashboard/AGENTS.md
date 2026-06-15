@@ -212,16 +212,18 @@ here.
 
 The dashboard supports multiple network targets (all defined in `src/lib/networks.ts`):
 
-| ID                   | Chain         | Mode  |
-| -------------------- | ------------- | ----- |
-| `celo-sepolia-local` | Celo Sepolia  | local |
-| `celo-mainnet-local` | Celo Mainnet  | local |
-| `celo-mainnet`       | Celo Mainnet  | prod  |
-| `monad-mainnet`      | Monad Mainnet | prod  |
+| ID                   | Chain         | Mode    |
+| -------------------- | ------------- | ------- |
+| `celo-sepolia-local` | Celo Sepolia  | local   |
+| `celo-mainnet-local` | Celo Mainnet  | local   |
+| `celo-mainnet`       | Celo Mainnet  | prod    |
+| `monad-mainnet`      | Monad Mainnet | prod    |
+| `celo-sepolia`       | Celo Sepolia  | testnet |
+| `monad-testnet`      | Monad Testnet | testnet |
 
 Token symbols and address labels come from `@mento-protocol/monitoring-config/tokens` — the shared derivation also used by metrics-bridge. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
 
-Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. The package `dev` script supplies the live endpoint by default for local worktrees; explicit env values still override it. Explorer URL defaults come from `@mento-protocol/monitoring-config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
+Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Hosted testnet networks share `NEXT_PUBLIC_HASURA_URL_TESTNET`, stay hidden unless `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true`, and still filter by `chainId`. The package `dev` script supplies the live prod endpoint by default for local worktrees; explicit env values still override it. Explorer URL defaults come from `@mento-protocol/monitoring-config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
 
 ## Notes
 

@@ -13,5 +13,10 @@
     "slug": "celo-sepolia",
     "label": "Celo Sepolia",
     "explorerBaseUrl": "https://celo-sepolia.blockscout.com"
+  },
+  "10143": {
+    "slug": "monad-testnet",
+    "label": "Monad Testnet",
+    "explorerBaseUrl": "https://testnet.monadscan.com"
   }
 }
