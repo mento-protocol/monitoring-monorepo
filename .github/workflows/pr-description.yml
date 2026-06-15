@@ -113,8 +113,12 @@ jobs:
           #    `[[:space:]]{0,3}` prefix matches CommonMark heading indentation
           #    (1–3 leading spaces still render as a heading; 4+ is a code block
           #    and correctly not treated as a Deferrals section), so an indented
-          #    ` ## Deferrals.` can't slip past the matcher either.
-          deferrals_style=$(grep -E '^[[:space:]]{0,3}#{1,6}[[:space:]]*Deferrals([^[:alnum:]_]|$)' <<<"$fence_stripped" || true)
+          #    ` ## Deferrals.` can't slip past the matcher either. The detector
+          #    is case-INSENSITIVE (`grep -i`) so a case variant (`## deferrals`,
+          #    `## DEFERRALS`) is caught as a near-miss; the canonical filter and
+          #    presence check below stay exact-case, so only title-case
+          #    `## Deferrals` is accepted as the canonical heading.
+          deferrals_style=$(grep -iE '^[[:space:]]{0,3}#{1,6}[[:space:]]*Deferrals([^[:alnum:]_]|$)' <<<"$fence_stripped" || true)
           near_miss=$(grep -vE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$deferrals_style" || true)
           if [ -n "$near_miss" ]; then
             echo "::error::PR description has a Deferrals-style heading that isn't exactly '## Deferrals'. Every Deferrals heading must be exactly '## Deferrals' (H2, no trailing punctuation or extra words), or be removed if nothing was knowingly deferred. Offending heading(s): $(head -3 <<<"$near_miss" | tr '\n' ' '). See AGENTS.md 'Deferral rule'."
