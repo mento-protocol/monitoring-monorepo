@@ -29,6 +29,20 @@ function percentLiteral(value) {
   return `(?<![0-9.])${escapeRegex(value)}%{1,2}(?![0-9.%])`;
 }
 
+function percentNumberLiteral(value) {
+  const suffix = /^[0-9]+$/.test(value) ? "(?:\\.0+)?" : "";
+  return `(?<![0-9.])${escapeRegex(value)}${suffix}(?![0-9.])`;
+}
+
+function normalizeDecimalLiteral(value) {
+  const [whole, fraction = ""] = value.split(".");
+  const normalizedWhole = whole.replace(/^0+(?=[0-9])/, "") || "0";
+  const normalizedFraction = fraction.replace(/0+$/, "");
+  return normalizedFraction
+    ? `${normalizedWhole}.${normalizedFraction}`
+    : normalizedWhole;
+}
+
 function ratioToPercentLiteral(value) {
   const [whole, fraction = ""] = value.split(".");
   const denominator = 10n ** BigInt(fraction.length);
@@ -48,6 +62,48 @@ function ratioToPercentLiteral(value) {
     remainder %= denominator;
   }
   return `${sign}${integer}.${decimals.replace(/0+$/, "")}`;
+}
+
+function extractQuotedLocal(source, name) {
+  const match = source.match(
+    new RegExp(`\\b${name}\\s*=\\s*"((?:\\\\.|[^"\\\\])*)"`),
+  );
+  return match?.[1] ?? null;
+}
+
+function extractFormatStringLocal(source, name) {
+  const match = source.match(
+    new RegExp(`\\b${name}\\s*=\\s*format\\(\\s*"((?:\\\\.|[^"\\\\])*)"`),
+  );
+  return match?.[1] ?? null;
+}
+
+function extractHeredocLocal(source, name) {
+  const match = source.match(
+    new RegExp(`\\b${name}\\s*=\\s*<<-EOT\\n([\\s\\S]*?)\\n\\s*EOT`),
+  );
+  return match?.[1] ?? null;
+}
+
+function contextPercentLiterals(fragment, context) {
+  const literals = [];
+  const pattern =
+    /(?<![0-9.])([0-9]+(?:\.[0-9]+)?)%{1,2}\s+(tolerance|threshold)(?![A-Za-z])/g;
+  for (const match of fragment.matchAll(pattern)) {
+    if (match[2] === context) literals.push(match[1]);
+  }
+  return literals;
+}
+
+function allContextPercentLiteralsMatch(fragment, context, expected) {
+  const literals = contextPercentLiterals(fragment, context);
+  const normalizedExpected = normalizeDecimalLiteral(expected);
+  return (
+    literals.length > 0 &&
+    literals.every(
+      (literal) => normalizeDecimalLiteral(literal) === normalizedExpected,
+    )
+  );
 }
 
 function extractThreshold(source, exportName) {
@@ -72,12 +128,16 @@ function requiredChecks(thresholds) {
     {
       file: ALERTS_MAIN_PATH,
       description: "critical gate still requires current ratio above tolerance",
+      extract: (source) =>
+        extractFormatStringLocal(source, "deviation_critical_gate_promql"),
       pattern: new RegExp(`mento_pool_deviation_ratio\\s*>\\s*${tolerance}`),
     },
     {
       file: ALERTS_MAIN_PATH,
       description:
         "critical gate still requires open-breach peak above critical",
+      extract: (source) =>
+        extractQuotedLocal(source, "deviation_critical_magnitude_promql"),
       pattern: new RegExp(
         `mento_pool_deviation_open_breach_peak_ratio\\s*>\\s*${critical}`,
       ),
@@ -85,21 +145,43 @@ function requiredChecks(thresholds) {
     {
       file: ALERTS_MAIN_PATH,
       description: "critical gate still requires current ratio above critical",
+      extract: (source) =>
+        extractQuotedLocal(source, "deviation_critical_magnitude_promql"),
       pattern: new RegExp(`mento_pool_deviation_ratio\\s*>\\s*${critical}`),
     },
     {
       file: ALERTS_MAIN_PATH,
       description: "critical annotation mirrors critical threshold percent",
+      extract: (source) =>
+        extractHeredocLocal(source, "deviation_critical_summary_annotation"),
+      validate: (fragment) =>
+        allContextPercentLiteralsMatch(fragment, "threshold", criticalPercent),
+    },
+    {
+      file: ALERTS_MAIN_PATH,
+      description:
+        "critical annotation crossed branch mirrors critical threshold percent",
+      extract: (source) =>
+        extractHeredocLocal(source, "deviation_critical_summary_annotation"),
       pattern: new RegExp(
-        `deviation_critical_summary_annotation\\s*=\\s*<<-EOT[\\s\\S]*?${percentLiteral(criticalPercent)}\\s+threshold[\\s\\S]*?EOT`,
+        `if\\s+lt\\s+\\$dev\\s+${percentNumberLiteral(criticalPercent)}\\s*-}}[\\s\\S]*?Pool\\s+crossed\\s+${percentLiteral(criticalPercent)}\\s+threshold`,
       ),
     },
     {
       file: ALERTS_MAIN_PATH,
       description: "critical annotation mirrors warning tolerance percent",
-      pattern: new RegExp(
-        `deviation_critical_summary_annotation\\s*=\\s*<<-EOT[\\s\\S]*?${percentLiteral(tolerancePercent)}\\s+tolerance[\\s\\S]*?EOT`,
-      ),
+      extract: (source) =>
+        extractHeredocLocal(source, "deviation_critical_summary_annotation"),
+      validate: (fragment) =>
+        allContextPercentLiteralsMatch(fragment, "tolerance", tolerancePercent),
+    },
+    {
+      file: ALERTS_MAIN_PATH,
+      description: "warning annotation mirrors warning tolerance percent",
+      extract: (source) =>
+        extractHeredocLocal(source, "deviation_warning_summary_annotation"),
+      validate: (fragment) =>
+        allContextPercentLiteralsMatch(fragment, "tolerance", tolerancePercent),
     },
     {
       file: FPMM_RULES_PATH,
@@ -136,10 +218,18 @@ export function validateDeviationThresholdDrift(sources) {
       failures.push(`${check.file}: missing source`);
       continue;
     }
-    if (!check.pattern.test(source)) {
+    const fragment = check.extract ? check.extract(source) : source;
+    if (fragment === null) {
+      failures.push(`${check.file}: missing source for ${check.description}`);
+      continue;
+    }
+    if (check.pattern && !check.pattern.test(fragment)) {
       failures.push(
         `${check.file}: expected ${check.description} (${check.pattern.source})`,
       );
+    }
+    if (check.validate && !check.validate(fragment)) {
+      failures.push(`${check.file}: expected ${check.description}`);
     }
   }
 

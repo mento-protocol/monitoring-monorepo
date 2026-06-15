@@ -1092,7 +1092,7 @@ while IFS= read -r path; do
       case "$path" in
         shared-config/src/thresholds.ts)
           add_command "node scripts/check-deviation-threshold-drift.mjs" "shared deviation threshold source changed"
-          add_command "pnpm --filter @mento-protocol/indexer-envio test -- deviationThresholdSharedConfigSync" "shared deviation threshold source changed"
+          add_command "pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync" "shared deviation threshold source changed"
           ;;
         shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
           add_all_indexer_codegen "shared-config vendored indexer fixture changed"
