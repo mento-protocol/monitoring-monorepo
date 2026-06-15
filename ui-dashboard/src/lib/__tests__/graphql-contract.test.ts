@@ -85,6 +85,8 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
 const QUERIES: Array<[string, string]> = [];
 for (const [moduleName, mod] of Object.entries(QUERY_MODULES)) {
   for (const [exportName, value] of Object.entries(mod)) {
+    // Only `query` operations — the dashboard is read-only, so `mutation` /
+    // `subscription` strings are intentionally out of scope here.
     if (typeof value === "string" && /\bquery\s+[A-Za-z0-9_]+/.test(value)) {
       QUERIES.push([`${moduleName}.${exportName}`, value]);
     }

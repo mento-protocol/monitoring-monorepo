@@ -1,4 +1,6 @@
 import { weiToUsd } from "@/lib/format";
+// Lives in queries/reserve-yield.ts so the GraphQL contract test covers it.
+import { SUSDS_YIELD_SUMMARY_QUERY } from "@/lib/queries/reserve-yield";
 import {
   asArray,
   bigintField,
@@ -22,25 +24,6 @@ const TRACKED_SUSDS_WALLET_IDENTIFIERS = new Set([
   "0xd0697f70e79476195b742d5afab14be50f98cc1e",
   "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1",
 ]);
-
-const SUSDS_YIELD_SUMMARY_QUERY = /* GraphQL */ `
-  query SusdsYieldSummary($id: String!) {
-    SusdsYieldSummary(where: { id: { _eq: $id } }, limit: 1) {
-      id
-      currentShares
-      costBasisUsdWei
-      realizedYieldUsdWei
-      transferredOutYieldUsdWei
-      redeemedYieldUsdWei
-      currentValueUsdWei
-      unrealizedYieldUsdWei
-      totalEarnedYieldUsdWei
-      sharePriceUsdWei
-      lastUpdatedBlock
-      lastUpdatedTimestamp
-    }
-  }
-`;
 
 function isSusdsHolding(holding: ReserveYieldHolding): boolean {
   return holding.assetSymbol.toUpperCase() === FORECASTABLE_SUSDS_SYMBOL;
