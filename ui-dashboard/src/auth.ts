@@ -189,16 +189,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const key =
         error instanceof Error ? `${error.name}:${error.message}` : "unknown";
       const now = Date.now();
-      if (
-        now - (lastLoggerCaptureMsByKey.get(key) ?? 0) <=
-        LOGGER_CAPTURE_INTERVAL_MS
-      ) {
+      const last = lastLoggerCaptureMsByKey.get(key);
+      if (last !== undefined && now - last <= LOGGER_CAPTURE_INTERVAL_MS) {
         return;
       }
-      // Bound the map: auth fingerprints are low-cardinality in practice, but a
-      // message carrying volatile data shouldn't grow it without limit.
+      // Drop only entries whose window has already elapsed — they no longer
+      // throttle anything, so this keeps the map bounded by the distinct errors
+      // seen within a single window WITHOUT resetting still-active throttles (a
+      // full clear would let a recurring error re-capture immediately and flood).
+      for (const [k, ts] of lastLoggerCaptureMsByKey) {
+        if (now - ts > LOGGER_CAPTURE_INTERVAL_MS) {
+          lastLoggerCaptureMsByKey.delete(k);
+        }
+      }
+      // Final guard against pathological cardinality within one window: evict the
+      // single oldest still-active entry rather than clearing all of them.
       if (lastLoggerCaptureMsByKey.size >= LOGGER_CAPTURE_KEYS_MAX) {
-        lastLoggerCaptureMsByKey.clear();
+        const oldestKey = lastLoggerCaptureMsByKey.keys().next().value;
+        if (oldestKey !== undefined) lastLoggerCaptureMsByKey.delete(oldestKey);
       }
       lastLoggerCaptureMsByKey.set(key, now);
       Sentry.captureException(error, { tags: { source: "nextauth" } });
