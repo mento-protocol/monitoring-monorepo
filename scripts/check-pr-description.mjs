@@ -17,17 +17,46 @@ function stripHtmlCommentLines(body) {
   let inComment = false;
   const kept = [];
 
-  for (const line of linesOf(body)) {
-    if (inComment) {
-      if (line.includes("-->")) inComment = false;
+  for (const originalLine of linesOf(body)) {
+    let line = originalLine;
+    let output = "";
+    let strippedComment = false;
+
+    while (line !== "") {
+      if (inComment) {
+        const close = line.indexOf("-->");
+        if (close === -1) {
+          break;
+        }
+        inComment = false;
+        strippedComment = true;
+        line = line.slice(close + 3);
+        continue;
+      }
+
+      const open = line.indexOf("<!--");
+      if (open === -1) {
+        output += line;
+        break;
+      }
+
+      output += line.slice(0, open);
+      strippedComment = true;
+
+      const close = line.indexOf("-->", open + 4);
+      if (close === -1) {
+        inComment = true;
+        break;
+      }
+
+      line = line.slice(close + 3);
+    }
+
+    if (strippedComment && output.trim() === "") {
       continue;
     }
-    if (line.includes("<!--") && !line.includes("-->")) {
-      inComment = true;
-      continue;
-    }
-    if (/^\s*<!--.*-->\s*$/.test(line)) continue;
-    kept.push(line);
+
+    kept.push(strippedComment ? output.trimStart() : output);
   }
 
   return kept.join("\n");
@@ -46,7 +75,7 @@ function stripFencedBlocks(body) {
     kept.push(line);
   }
 
-  return kept.join("\n");
+  return { body: kept.join("\n"), hasUnclosedFence: inFence };
 }
 
 function firstNonBlankLine(body) {
@@ -92,7 +121,19 @@ export function validatePrDescription(body) {
 
   const commentStripped = stripHtmlCommentLines(body);
   const firstLine = firstNonBlankLine(commentStripped);
-  const fenceStripped = stripFencedBlocks(commentStripped);
+  const { body: fenceStripped, hasUnclosedFence } =
+    stripFencedBlocks(commentStripped);
+
+  if (hasUnclosedFence) {
+    return {
+      ok: false,
+      message:
+        "PR description contains an unclosed fenced code block. Close the fence before the rest of the description so required sections cannot be hidden.",
+    };
+  }
+
+  // Keep the opening check stricter than the later section scan: a leading code
+  // fence is real content before '## The Problem' and must stay rejected.
   const secondHeading = h2Headings(fenceStripped)[1] ?? "";
 
   if (

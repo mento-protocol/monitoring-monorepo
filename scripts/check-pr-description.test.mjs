@@ -42,6 +42,18 @@ test("passes with explicit None deferral item", () => {
   );
 });
 
+test("passes with explicit None deferral item with trailing period", () => {
+  assertPass(
+    body(`
+
+## Deferrals
+
+- None.
+`),
+    /deferrals declared/,
+  );
+});
+
 test("passes with linked deferral issue item", () => {
   assertPass(
     body(`
@@ -84,6 +96,19 @@ test("allows HTML comments before the opening heading", () => {
 ${body()}`);
 });
 
+test("preserves content after a closing HTML comment marker", () => {
+  assertPass(`<!--
+template comment
+-->## The Problem
+
+- Reviewers need a clear problem statement.
+
+## The Solution
+
+- This explains the approach.
+`);
+});
+
 test("does not allow a leading code fence before the opening heading", () => {
   assertFail(
     `\`\`\`md
@@ -92,6 +117,23 @@ example
 
 ${body()}`,
     /must START with '## The Problem' then '## The Solution'/,
+  );
+});
+
+test("fails an unclosed fence before Deferrals instead of hiding the tail", () => {
+  assertFail(
+    body(`
+
+## Details
+
+\`\`\`md
+example
+
+## Deferrals
+
+- Do this later.
+`),
+    /unclosed fenced code block/,
   );
 });
 
