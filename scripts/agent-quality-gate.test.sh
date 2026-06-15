@@ -1291,11 +1291,13 @@ assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chd
 
 run_gate ".github/workflows/metrics-bridge.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
 assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
 
 run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm install --frozen-lockfile (central CI workflow changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
 assert_contains "- pnpm tf:test (Terraform registry-backed CI workflow changed)"
@@ -1325,6 +1327,7 @@ assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -
 
 run_gate ".github/actions/pnpm-install/action.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm install --frozen-lockfile (pnpm install action changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (pnpm install action changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (pnpm install action changed)"
@@ -1402,6 +1405,7 @@ assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping chan
 
 run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
+assert_contains "- node scripts/check-github-action-pins.mjs (Trunk workflow/action setup changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate trunk hook changed)"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck"
 
@@ -2090,6 +2094,13 @@ assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 
 run_gate "scripts/lockfile-lint.test.mjs"
 assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
+
+run_gate "scripts/check-github-action-pins.mjs"
+assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions pin checker changed)"
+assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker changed)"
+
+run_gate "scripts/check-github-action-pins.test.mjs"
+assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
 
 run_gate "scripts/agent-autoreview.sh"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
