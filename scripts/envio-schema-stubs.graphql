@@ -1,0 +1,18 @@
+# Envio framework SDL extensions not in the standard GraphQL spec.
+#
+# Single source of truth for the stub definitions needed so the standard
+# `graphql` parser (`buildSchema`) accepts `indexer-envio/schema.graphql`.
+# Read via fs by all consumers — keep it a plain SDL fragment with no imports
+# so any package (and the root scripts) can load it across boundaries:
+#   - scripts/schema-diff.mjs
+#   - ui-dashboard/src/lib/__tests__/graphql-contract.test.ts
+#   - metrics-bridge/test/graphql-contract.test.ts
+#
+# `repeatable` is required because @index is applied multiple times on the same
+# type (once per field, or once per composite-index declaration). The stubs do
+# not affect structural diffing or contract validation — they only make the SDL
+# parse.
+scalar BigInt
+scalar Bytes
+directive @index(fields: [String!]) repeatable on OBJECT | FIELD_DEFINITION
+directive @config(precision: Int) repeatable on FIELD_DEFINITION
