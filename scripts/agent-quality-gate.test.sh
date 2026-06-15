@@ -1381,16 +1381,20 @@ assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
 
 run_gate "scripts/deploy-indexer.sh"
 assert_contains "- bash -n scripts/deploy-indexer.sh (shell script changed)"
-assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy root-anchor guard changed)"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+
+run_gate "scripts/deploy-indexer-status.sh"
+assert_contains "- bash -n scripts/deploy-indexer-status.sh (shell script changed)"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
 run_gate "scripts/deploy-bridge.sh"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
 assert_occurrences 1 "- bash -n scripts/deploy-bridge.sh (shell script changed)"
-assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy root-anchor guard changed)"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
 run_gate "scripts/deploy-gov-watchdog.sh"
 assert_contains "- bash -n scripts/deploy-gov-watchdog.sh (shell script changed)"
-assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy root-anchor guard changed)"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
 run_gate "scripts/check-deploy-root-anchors.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"

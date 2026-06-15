@@ -1257,8 +1257,8 @@ while IFS= read -r path; do
     scripts/*.sh)
       add_surface "scripts"
       case "$path" in
-        scripts/deploy-indexer.sh|scripts/deploy-bridge.sh|scripts/deploy-gov-watchdog.sh)
-          add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy root-anchor guard changed"
+        scripts/deploy-*.sh)
+          add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
           ;;
       esac
       case "$path" in

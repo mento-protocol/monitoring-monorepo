@@ -8,26 +8,50 @@
  * artifacts after the monitoring-monorepo guard has passed.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-const scripts = [
-  {
-    path: "scripts/deploy-indexer.sh",
-    firstRepoCommand: "git ls-remote --heads origin",
-  },
-  {
-    path: "scripts/deploy-bridge.sh",
-    firstRepoCommand: 'TAG="$(git rev-parse --short HEAD)"',
-  },
-  {
-    path: "scripts/deploy-gov-watchdog.sh",
-    firstRepoCommand: "COMMIT_SHA=$(git rev-parse --short HEAD)",
-  },
-];
+const orderedAnchors = {
+  "scripts/deploy-dashboard.sh": [
+    'REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+    '(cd "$REPO_ROOT" && vercel deploy --prod',
+  ],
+  "scripts/deploy-indexer.sh": [
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+    'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',
+    'cd "$REPO_ROOT"',
+    "git ls-remote --heads origin",
+  ],
+  "scripts/deploy-bridge.sh": [
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+    'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',
+    'cd "$REPO_ROOT"',
+    'TAG="$(git rev-parse --short HEAD)"',
+  ],
+  "scripts/deploy-gov-watchdog.sh": [
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+    'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',
+    'cd "$REPO_ROOT"',
+    "COMMIT_SHA=$(git rev-parse --short HEAD)",
+  ],
+};
+
+const scripts = readdirSync(resolve(ROOT, "scripts"))
+  .filter(
+    (fileName) => fileName.startsWith("deploy-") && fileName.endsWith(".sh"),
+  )
+  .map((fileName) => `scripts/${fileName}`)
+  .filter((path) =>
+    readFileSync(resolve(ROOT, path), "utf8").includes("lib/deploy-guard.sh"),
+  )
+  .map((path) => ({
+    path,
+    orderedAnchors: orderedAnchors[path],
+  }));
 
 let failures = 0;
 
@@ -51,12 +75,13 @@ for (const script of scripts) {
   const text = readFileSync(absolutePath, "utf8");
   const displayPath = relative(ROOT, absolutePath);
 
-  assertOrdered(displayPath, text, [
-    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
-    'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',
-    'cd "$REPO_ROOT"',
-    script.firstRepoCommand,
-  ]);
+  if (!script.orderedAnchors) {
+    console.error(`${displayPath}: missing orderedAnchors mapping`);
+    failures++;
+    continue;
+  }
+
+  assertOrdered(displayPath, text, script.orderedAnchors);
 }
 
 if (failures > 0) {
