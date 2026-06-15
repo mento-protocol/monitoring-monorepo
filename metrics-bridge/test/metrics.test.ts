@@ -1715,7 +1715,11 @@ describe("label-shape contract: alert template ↔ metric labels", () => {
   });
 });
 
-describe("updateMetrics — VirtualPool exclusion", () => {
+describe("updateMetrics — VirtualPool transition", () => {
+  // VP exclusion itself is enforced at the poll boundary by `isFpmmPool`
+  // (covered in poller.test.ts). The behavior that lives in `updateMetrics` is
+  // deviation-alert-state pruning: once a healed VP is filtered out upstream, a
+  // subsequent poll that no longer carries its id must evict the stale state.
   const DEFAULT_NOW_SECONDS = 1713200100;
 
   beforeEach(() => {
@@ -1729,39 +1733,29 @@ describe("updateMetrics — VirtualPool exclusion", () => {
     vi.useRealTimers();
   });
 
-  it("publishes gauges for a native FPMM pool (empty wrappedExchangeId)", async () => {
-    const pool = makePool({ wrappedExchangeId: "" });
-    updateMetrics([pool], DEFAULT_NOW_SECONDS);
-    const values = await getMetricValues(register, "mento_pool_health_status");
-    expect(values.some((v) => v.labels.pool_id === pool.id)).toBe(true);
-  });
-
-  it("publishes no gauges for a healed VirtualPool (non-empty wrappedExchangeId, source fpmm_factory)", async () => {
-    // A VP healed from an FPMM retains source="fpmm_factory" until resync, so
-    // the base query's source filter is insufficient. The bridge must also check
-    // wrappedExchangeId to block phantom gauge publication.
-    const vp = makePool({
-      id: "42220-0x000000000000000000000000000000000000dead",
-      wrappedExchangeId:
-        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-      source: "fpmm_factory",
+  it("prunes deviation alert state when an FPMM heals to a VP and drops out", async () => {
+    // Poll 1: an FPMM in an active critical breach registers deviation state.
+    const fpmm = makePool({
+      wrappedExchangeId: "",
+      deviationBreachStartedAt: String(DEFAULT_NOW_SECONDS - 60),
+      lastDeviationRatio: "1.10",
+      currentOpenBreachPeak: "1.10",
     });
-    updateMetrics([vp], DEFAULT_NOW_SECONDS);
-    const values = await getMetricValues(register, "mento_pool_health_status");
-    expect(values.some((v) => v.labels.pool_id === vp.id)).toBe(false);
-  });
+    updateMetrics([fpmm], DEFAULT_NOW_SECONDS);
+    expect(
+      (
+        await getMetricValues(register, "mento_pool_deviation_alert_state")
+      ).some((v) => v.labels.pool_id === fpmm.id),
+    ).toBe(true);
 
-  it("publishes gauges only for FPMMs when the list is mixed", async () => {
-    const fpmm = makePool({ wrappedExchangeId: "" });
-    const vp = makePool({
-      id: "42220-0x000000000000000000000000000000000000dead",
-      wrappedExchangeId:
-        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-      source: "fpmm_factory",
-    });
-    updateMetrics([fpmm, vp], DEFAULT_NOW_SECONDS);
-    const values = await getMetricValues(register, "mento_pool_health_status");
-    expect(values.some((v) => v.labels.pool_id === fpmm.id)).toBe(true);
-    expect(values.some((v) => v.labels.pool_id === vp.id)).toBe(false);
+    // Poll 2: the pool has healed to a VP, so `isFpmmPool` filters it out at the
+    // poll boundary and `updateMetrics` receives an empty list — its id is
+    // absent from activePoolIds and the stale deviation state is pruned.
+    updateMetrics([], DEFAULT_NOW_SECONDS);
+    expect(
+      (
+        await getMetricValues(register, "mento_pool_deviation_alert_state")
+      ).some((v) => v.labels.pool_id === fpmm.id),
+    ).toBe(false);
   });
 });

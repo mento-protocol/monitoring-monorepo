@@ -347,19 +347,11 @@ export function updateMetrics(
 ): void {
   resetPollGauges();
 
-  // Exclude VirtualPools healed from FPMMs. The base query already filters
-  // `source: { _like: "%fpmm%" }`, which excludes pools with source
-  // "virtual_pool_factory". However, a healed VP retains its original
-  // "fpmm_factory" source until the next re-sync, so the source filter alone
-  // is not sufficient. The canonical VP predicate (mirroring
-  // `isVirtualPool` in `indexer-envio/src/helpers.ts` and
-  // `ui-dashboard/src/lib/types.ts`) also gates on `wrappedExchangeId`:
-  // "" = native FPMM; non-empty = VP. Skip VPs here so their stale FPMM
-  // gauges don't fire phantom alerts.
-  const fpmmPools = pools.filter((p) => !p.wrappedExchangeId);
-
+  // `pools` is already filtered to FPMM-only rows by `isFpmmPool` at the poller
+  // boundary (see `pollPools`), so healed VirtualPools never reach gauge
+  // publication here.
   const activePoolIds = new Set<string>();
-  for (const pool of fpmmPools) {
+  for (const pool of pools) {
     activePoolIds.add(pool.id);
     updatePoolMetrics(pool, nowSeconds);
   }
