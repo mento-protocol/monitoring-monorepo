@@ -388,6 +388,113 @@ if (registryErrors === 0) {
   );
 }
 
+// ── 4. pnpm override range validation ────────────────────────────────────────
+//
+// Root `pnpm.overrides` selector ranges or values like `">=1.2.3"` are
+// install-time floors, not persistent pins. On a fresh lockfile resolve, they
+// can pull in the newest future major for the whole graph. Allow bounded
+// selector keys (`pkg@>=1 <2`) and same-major/capped values, but reject
+// unbounded minimum ranges.
+
+/**
+ * @param {string} value
+ */
+function isUnboundedMinimumOverrideValue(value) {
+  const branches = value
+    .trim()
+    .split(/\s*\|\|\s*/)
+    .filter(Boolean);
+  return branches.some(
+    (branch) =>
+      /(?:^|\s)>=\s*\d/.test(branch) && !/(?:^|\s)<[=]?\s*\d/.test(branch),
+  );
+}
+
+/**
+ * @param {string} selector
+ * @param {number} index
+ */
+function isPeerSelectorSeparator(selector, index) {
+  const previous = selector[index - 1] ?? "";
+  const next = selector[index + 1] ?? "";
+  return (
+    next !== "" &&
+    next !== "=" &&
+    previous !== "@" &&
+    previous !== "<" &&
+    previous !== ">" &&
+    previous !== "=" &&
+    !/\s|\|/.test(previous)
+  );
+}
+
+/**
+ * @param {string} selector
+ */
+function overrideSelectorRange(selector) {
+  let peerSeparator = -1;
+  for (let index = 0; index < selector.length; index += 1) {
+    if (selector[index] === ">" && isPeerSelectorSeparator(selector, index)) {
+      peerSeparator = index;
+    }
+  }
+  const packageSelector =
+    peerSeparator === -1 ? selector : selector.slice(peerSeparator + 1);
+  const rangeSeparator = packageSelector.indexOf("@", 1);
+  if (rangeSeparator === -1) return null;
+  return packageSelector.slice(rangeSeparator + 1).trim() || null;
+}
+
+const packageJsonPath = resolve(ROOT, "package.json");
+let overrideRangeErrors = 0;
+
+if (existsSync(packageJsonPath)) {
+  let packageJson;
+  try {
+    packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  } catch (error) {
+    fail(
+      `package.json could not be parsed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    overrideRangeErrors++;
+  }
+
+  const overrides = packageJson?.pnpm?.overrides;
+  if (overrides && typeof overrides === "object" && !Array.isArray(overrides)) {
+    for (const [selector, replacement] of Object.entries(overrides)) {
+      const selectorRange = overrideSelectorRange(selector);
+      if (
+        selectorRange !== null &&
+        isUnboundedMinimumOverrideValue(selectorRange)
+      ) {
+        fail(
+          `package.json pnpm.overrides selector "${selector}" uses ` +
+            `unbounded minimum range "${selectorRange}". Use a bounded ` +
+            "selector range before pinning the replacement.",
+        );
+        overrideRangeErrors++;
+      }
+      if (
+        typeof replacement === "string" &&
+        isUnboundedMinimumOverrideValue(replacement)
+      ) {
+        fail(
+          `package.json pnpm.overrides["${selector}"] uses unbounded minimum ` +
+            `range "${replacement}". Use a bounded selector with an exact ` +
+            "replacement or a same-major/capped replacement range.",
+        );
+        overrideRangeErrors++;
+      }
+    }
+  }
+}
+
+if (overrideRangeErrors === 0) {
+  ok("No unbounded minimum pnpm override values detected.");
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 if (process.exitCode === 1) {

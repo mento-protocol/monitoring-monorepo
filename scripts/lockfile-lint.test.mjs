@@ -534,6 +534,130 @@ test("fails when .npmrc uses userconfig= indirection", () => {
   );
 });
 
+// 26. Root pnpm override floors like `>=1.2.3` can fresh-resolve the whole
+// graph to future majors. Reject unbounded minimum values.
+test("fails when package.json has an unbounded minimum pnpm override value", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            flatted: ">=3.4.2",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected override range rejection: ${out}`,
+  );
+});
+
+// 27. Each `||` branch must carry its own upper bound.
+test("fails when one pnpm override union branch has an unbounded minimum", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            example: ">=1.2.3 <2 || >=3.0.0",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected override range rejection: ${out}`,
+  );
+});
+
+// 28. Selector ranges can also be unbounded and match future majors.
+test("fails when package.json has an unbounded minimum pnpm override selector", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "diff@>=6": "8.0.3",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected selector range rejection: ${out}`,
+  );
+});
+
+// 29. Peer-qualified selectors need the child package range checked.
+test("fails when peer-qualified pnpm override selector range is unbounded", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "parent>child@>=1": "1.2.3",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
+// 30. Bounded selector keys and same-major/capped replacement values are fine.
+test("passes bounded and same-major pnpm override replacements", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "flatted@<3.4.2": "3.4.2",
+            "ajv@^8.0.0": "^8.18.0",
+            "form-data@>=3.0.0 <3.0.5": "3.0.5",
+            "parent>child@>=1 <2": "1.2.3",
+            example: ">=1.2.3 <2 || >=3.0.0 <4",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode === 0,
+    `Expected exit 0, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  assert(
+    stdout.includes("No unbounded minimum pnpm override values detected"),
+    `expected override range success: ${stdout}`,
+  );
+});
+
 // ── summary ───────────────────────────────────────────────────────────────────
 
 console.log(
