@@ -31,6 +31,8 @@ minimumReleaseAgeExclude:
   - "@mento-protocol/*"
   - envio-cloud
   - "@envio-dev/envio-cloud-*"
+  - esbuild
+  - "@esbuild/*"
 
 ignoredBuiltDependencies:
   - sharp
