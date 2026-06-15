@@ -251,7 +251,7 @@ Run a small battery keyed on the target address (all fields verified against `in
 {
   Trove(where: { owner: { _eq: "0xtarget" } }) {
     id
-    collateral
+    coll
     debt
     status
   }
@@ -280,7 +280,7 @@ Run a small battery keyed on the target address (all fields verified against `in
     }
     limit: 1000
   ) {
-    txHash
+    sentTxHash
     sender
     recipient
     amount
