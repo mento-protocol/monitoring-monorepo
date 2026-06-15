@@ -1,6 +1,7 @@
 /**
  * Health status computation for pool oracle monitoring.
- * Mirrors the logic in the indexer's EventHandlers.ts.
+ * Mirrors the deviation-threshold logic in the indexer's pool/health.ts;
+ * behavioral parity enforced by indexer-envio/test/healthStatusParity.test.ts.
  */
 
 export type HealthStatus =
