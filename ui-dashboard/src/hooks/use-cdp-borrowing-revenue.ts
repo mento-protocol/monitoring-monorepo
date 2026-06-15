@@ -18,6 +18,7 @@ import {
 } from "@/lib/queries";
 import {
   REQUEST_TIMEOUT_MS,
+  SNAPSHOT_PAGE_SIZE,
   fetchPaginatedRows,
 } from "@/lib/fetch-all-networks";
 import {
@@ -96,7 +97,6 @@ const EMPTY_SUMMARY: CdpBorrowingRevenueSummary = {
   bracketsTruncated: false,
 };
 
-const CDP_PAGE_SIZE = 1000;
 const CDP_REVENUE_CHAIN_IDS = new Set([42220]);
 
 function mergeSummaries(
@@ -201,11 +201,11 @@ async function fetchAllBracketPages(
     query: CDP_BORROWING_REVENUE_BRACKETS,
     responseKey: "InterestRateBracket",
     network,
-    pageSize: CDP_PAGE_SIZE,
+    pageSize: SNAPSHOT_PAGE_SIZE,
     variablesFor: (page) => ({
       collateralIds,
-      limit: CDP_PAGE_SIZE,
-      offset: page * CDP_PAGE_SIZE,
+      limit: SNAPSHOT_PAGE_SIZE,
+      offset: page * SNAPSHOT_PAGE_SIZE,
     }),
     dedupKey: (r) => r.id,
   });
@@ -223,11 +223,11 @@ async function fetchAllFeeEventPages(
     query: CDP_BORROWING_FEE_EVENTS,
     responseKey: "TroveOperationEvent",
     network,
-    pageSize: CDP_PAGE_SIZE,
+    pageSize: SNAPSHOT_PAGE_SIZE,
     variablesFor: (page) => ({
       chainId,
-      limit: CDP_PAGE_SIZE,
-      offset: page * CDP_PAGE_SIZE,
+      limit: SNAPSHOT_PAGE_SIZE,
+      offset: page * SNAPSHOT_PAGE_SIZE,
     }),
     dedupKey: (r) => r.id,
   });
@@ -262,11 +262,11 @@ async function paginateDailySnapshots<T extends { id: string }>(
     query,
     responseKey: "LiquityBorrowingRevenueDailySnapshot",
     network,
-    pageSize: CDP_PAGE_SIZE,
+    pageSize: SNAPSHOT_PAGE_SIZE,
     variablesFor: (page) => ({
       chainId,
-      limit: CDP_PAGE_SIZE,
-      offset: page * CDP_PAGE_SIZE,
+      limit: SNAPSHOT_PAGE_SIZE,
+      offset: page * SNAPSHOT_PAGE_SIZE,
     }),
     dedupKey: (r) => r.id,
   });

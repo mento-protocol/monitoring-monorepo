@@ -10,6 +10,7 @@ import { NETWORKS } from "@/lib/networks";
 // silently drop or rename a named export — 7 importers depend on these.
 const EXPECTED_EXPORT_NAMES = [
   "REQUEST_TIMEOUT_MS",
+  "SNAPSHOT_PAGE_SIZE",
   "blankNetworkData",
   "fetchAllFeeSnapshotPages",
   "fetchAllNetworks",

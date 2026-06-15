@@ -47,6 +47,9 @@ import type {
   SerializableError,
   SnapshotPageResult,
 } from "./types";
+import { SNAPSHOT_PAGE_SIZE } from "./constants";
+
+export { SNAPSHOT_PAGE_SIZE } from "./constants";
 
 /**
  * True iff every error channel on `n` is null — top-level, rates,
@@ -158,7 +161,6 @@ const emptyNetworkData = (
  * possible but rare and self-heal on the next refresh. A proper fix is
  * keyset pagination — tracked as a follow-up.
  */
-const SNAPSHOT_PAGE_SIZE = 1000;
 const SNAPSHOT_MAX_PAGES = 100;
 
 // Per-request abort budget. Matches `homepage-og.ts` and `useBridgeGQL`. Without
