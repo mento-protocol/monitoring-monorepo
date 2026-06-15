@@ -191,6 +191,12 @@ export const partialPageLastCapturedAt = new Map<string, number>();
  * key extractor — offset pagination over an append-only table is unstable
  * under concurrent inserts, so dedup is required to keep windowed totals
  * accurate even when a refresh hits mid-write.
+ *
+ * IMPORTANT: the `limit` a caller passes via `variablesFor` MUST equal
+ * `SNAPSHOT_PAGE_SIZE` (1000). That constant is the early-exit sentinel — the
+ * loop stops when a page returns fewer than `SNAPSHOT_PAGE_SIZE` rows. A caller
+ * passing a smaller `limit` (e.g. 500) would terminate after the first page
+ * because `500 < 1000` always holds, silently truncating the result set.
  */
 export async function fetchPaginatedRows<TRow, TVars>(args: {
   client: GraphQLClient;
