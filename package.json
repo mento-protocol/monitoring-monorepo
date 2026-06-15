@@ -84,6 +84,8 @@
     "gov-watchdog:tf:plan": "pnpm tf plan governance-watchdog",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
     "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/version-skew-check.mjs",
+    "skew:check:test": "node scripts/version-skew-check.test.mjs",
     "code-health:schema-diff": "git show origin/main:indexer-envio/schema.graphql > /tmp/schema-base-local.graphql && node scripts/schema-diff.mjs /tmp/schema-base-local.graphql indexer-envio/schema.graphql"
   },
   "pnpm": {
@@ -97,6 +99,8 @@
       "postcss": ">=8.5.10",
       "picomatch": ">=4.0.4",
       "vite": ">=8.0.8",
+      "@grpc/grpc-js": "1.14.4",
+      "esbuild": "0.28.1",
       "body-parser@<1.20.3": "1.20.3",
       "path-to-regexp@<0.1.13": "0.1.13",
       "fast-uri": ">=3.1.1",
@@ -127,6 +131,7 @@
       "@lhci/cli>tmp": "0.2.6",
       "external-editor>tmp": "0.2.6",
       "webpack": ">=5.104.1",
+      "ws@>=8.0.0 <8.20.1": "8.20.1",
       "yaml@^2.0.0": "^2.8.3"
     }
   },

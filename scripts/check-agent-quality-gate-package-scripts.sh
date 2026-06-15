@@ -21,6 +21,8 @@ const expectedScripts = {
   "tf:test": "node scripts/tf-stacks.test.mjs",
   "lockfile:lint": "node scripts/lockfile-lint.mjs",
   "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
+  "skew:check": "node scripts/version-skew-check.mjs",
+  "skew:check:test": "node scripts/version-skew-check.test.mjs",
 };
 
 for (const [name, expected] of Object.entries(expectedScripts)) {

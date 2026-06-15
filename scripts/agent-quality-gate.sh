@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -584,6 +584,7 @@ add_indexer_mutation_baseline() {
 
 add_workspace_quality_commands() {
   local reason="$1"
+  add_command "pnpm skew:check" "$reason"
   add_all_indexer_codegen "$reason"
   # Use the lightweight dashboard quality (typecheck/lint/test/knip) for
   # workspace-wide triggers (root package.json, CI yaml, npmrc, etc.).
@@ -619,6 +620,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
   add_command "node scripts/lockfile-lint.test.mjs" "$reason"
+  add_command "node scripts/version-skew-check.test.mjs" "$reason"
 }
 
 add_indexer_post_codegen_install() {
@@ -867,6 +869,7 @@ while IFS= read -r path; do
     */package.json)
       package_script_risk_changed=true
       add_preflight_command "pnpm install --frozen-lockfile" "workspace package manifest changed"
+      add_command "pnpm skew:check" "workspace package manifest changed"
       ;;
     pnpm-lock.yaml|pnpm-workspace.yaml)
       package_script_risk_changed=true
@@ -1316,12 +1319,18 @@ while IFS= read -r path; do
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
           ;;
+        scripts/version-skew-check.mjs|scripts/version-skew-check.test.mjs)
+          add_command "pnpm skew:check:test" "version skew checker changed"
+          ;;
         scripts/check-github-action-pins.mjs)
           add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions pin checker changed"
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker changed"
           ;;
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
+          ;;
+        scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
+          add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"
           ;;
         scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
           add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"

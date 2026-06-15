@@ -49,6 +49,7 @@ jobs:
       terraform: ${{ steps.filter.outputs.terraform }}
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
       rootScripts: ${{ steps.filter.outputs.rootScripts }}
+      versionSkew: ${{ steps.filter.outputs.versionSkew }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - id: filter
@@ -214,6 +215,19 @@ jobs:
               # a new workflow with push-main or schedule must be caught even
               # if only the new workflow file is touched (no script change).
               - .github/workflows/**
+              - .github/actions/pnpm-install/**
+            # Dependency manifest and pnpm catalog/lifecycle policy drift.
+            # This runs independently of package quality jobs so a manifest-only
+            # PR cannot satisfy the required `ci` sentinel while bypassing the
+            # catalog-vs-literal version invariant.
+            versionSkew:
+              - package.json
+              - "**/package.json"
+              - pnpm-workspace.yaml
+              - "**/pnpm-workspace.yaml"
+              - scripts/version-skew-check.mjs
+              - scripts/version-skew-check.test.mjs
+              - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
@@ -812,6 +826,8 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: PR description validator suite
+        run: node scripts/check-pr-description.test.mjs
       - name: Deploy root-anchor regression suite
         # Verifies deploy wrappers run deploy-sensitive commands from the same
         # repo root that scripts/lib/deploy-guard.sh checked for cleanliness.
@@ -836,6 +852,28 @@ jobs:
         # Also triggered by changes to the notifier itself (rootScripts filter
         # above includes the notifier YAML).
         run: node scripts/check-notifier-coverage.mjs
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  version-skew:
+    name: Version skew
+    needs: changes
+    if: needs.changes.outputs.versionSkew == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      checks: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: ./.github/actions/pnpm-install
+      - name: Version skew check
+        # Required via the `ci` sentinel. Prevents catalog/literal package drift
+        # in both agent and non-agent PRs that touch manifests or pnpm config.
+        run: pnpm skew:check
+      - name: Version skew checker tests
+        run: pnpm skew:check:test
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
@@ -879,6 +917,7 @@ jobs:
         terraform,
         deps,
         scripts,
+        version-skew,
       ]
     if: always()
     runs-on: ubuntu-latest
@@ -890,6 +929,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts
+          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,version-skew
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

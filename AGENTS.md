@@ -180,8 +180,9 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:autoreview`, `scripts.pr:feedback-state`,
 `scripts.pr:feedback-state:test`, `scripts.pr:ready-state`,
 `scripts.pr:ready-state:test`,
-`scripts.tf`, `scripts.tf:test`, `scripts.lockfile:lint`, or
-`scripts.lockfile:lint:test`; the gate treats that as tooling-only and runs an
+`scripts.tf`, `scripts.tf:test`, `scripts.lockfile:lint`,
+`scripts.lockfile:lint:test`, `scripts.skew:check`, or
+`scripts.skew:check:test`; the gate treats that as tooling-only and runs an
 entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
 regression tests instead of the package-script refusal path. Existing changed paths run
 targeted Trunk checks for faster local iteration. Deleted paths,
@@ -397,6 +398,7 @@ pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs orig
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
 pnpm agent:autoreview              # Structured closeout review; Codex sandbox defaults to --engine local, override with --engine claude/codex
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
+pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
