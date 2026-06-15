@@ -1257,6 +1257,11 @@ while IFS= read -r path; do
     scripts/*.sh)
       add_surface "scripts"
       case "$path" in
+        scripts/deploy-indexer.sh|scripts/deploy-bridge.sh|scripts/deploy-gov-watchdog.sh)
+          add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy root-anchor guard changed"
+          ;;
+      esac
+      case "$path" in
         scripts/check-agent-quality-gate-package-scripts.sh)
           add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "agent quality gate package script validator changed"
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
@@ -1285,6 +1290,9 @@ while IFS= read -r path; do
       case "$path" in
         scripts/check-agent-context.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
+          ;;
+        scripts/check-deploy-root-anchors.test.mjs)
+          add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy root-anchor test changed"
           ;;
         scripts/agent-prewarm.mjs|scripts/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
