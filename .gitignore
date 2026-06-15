@@ -5,6 +5,12 @@ playwright-report/
 test-results/
 .env
 .env.local
+# Credentials file written into the workspace root by
+# google-github-actions/auth during CI. Ignored so the deploy-guard
+# clean-tree check (scripts/lib/deploy-guard.sh) doesn't flag it as a
+# dirty working tree before `gcloud app deploy`. Left unanchored on
+# purpose: a credentials file is never safe to commit at any depth.
+gha-creds-*.json
 .env.sepolia
 .env.production.local
 .next/
