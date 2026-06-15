@@ -15,6 +15,9 @@
  *      registry is configured (i.e. all packages resolve from the default
  *      https://registry.npmjs.org).
  *
+ *   3. Override floor gate: `pnpm.overrides` ranges in package.json and
+ *      every pnpm-workspace.yaml must not use unbounded minimum ranges.
+ *
  * No external dependencies — parses the lockfile with pure Node.js regex on
  * the known-structured pnpm v9 format.
  *
@@ -342,13 +345,42 @@ for (const absPath of npmrcFiles) {
   }
 }
 
-// Check pnpm-workspace.yaml for BOTH the singular `registry:` top-level key
-// (default registry override; `pnpm config get registry --location project`
+/**
+ * @param {string} dir
+ * @param {string[]} out
+ */
+function findPnpmWorkspaces(dir, out) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.name === ".git" || entry.name === "node_modules") continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      findPnpmWorkspaces(full, out);
+    } else if (
+      (entry.isFile() || entry.isSymbolicLink()) &&
+      entry.name === "pnpm-workspace.yaml"
+    ) {
+      out.push(full);
+    }
+  }
+}
+
+/** @type {string[]} */
+const workspaceFiles = [];
+findPnpmWorkspaces(ROOT, workspaceFiles);
+
+// Check every pnpm-workspace.yaml for BOTH the singular `registry:` top-level
+// key (default registry override; `pnpm config get registry --location project`
 // resolves it) AND the plural `registries:` block (scoped overrides). Either
 // can redirect installs away from npmjs.org.
-const workspacePath = resolve(ROOT, "pnpm-workspace.yaml");
-if (existsSync(workspacePath)) {
-  const ws = readFileSync(workspacePath, "utf8");
+for (const absPath of workspaceFiles) {
+  const rel = relative(ROOT, absPath);
+  const ws = readFileSync(absPath, "utf8");
   const lines = ws.split("\n");
   for (const [i, line] of lines.entries()) {
     const trimmed = line.trim();
@@ -362,7 +394,7 @@ if (existsSync(workspacePath)) {
       const raw = unquote(singularMatch[2].trim());
       if (!isOfficialNpmRegistry(raw)) {
         fail(
-          `pnpm-workspace.yaml:${i + 1} — non-npmjs default registry: "${raw}". ` +
+          `${rel}:${i + 1} — non-npmjs default registry: "${raw}". ` +
             "All packages must resolve from https://registry.npmjs.org.",
         );
         registryErrors++;
@@ -374,7 +406,7 @@ if (existsSync(workspacePath)) {
       /^\s/.test(line) === false
     ) {
       fail(
-        `pnpm-workspace.yaml:${i + 1} — \`registries:\` block configures custom package ` +
+        `${rel}:${i + 1} — \`registries:\` block configures custom package ` +
           "registries. Verify this is intentional and every non-npmjs registry entry is audited.",
       );
       registryErrors++;
@@ -445,6 +477,120 @@ function overrideSelectorRange(selector) {
   return packageSelector.slice(rangeSeparator + 1).trim() || null;
 }
 
+/**
+ * @param {string} value
+ */
+function stripYamlInlineComment(value) {
+  let quote = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (quote) {
+      if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === "#" && (index === 0 || /\s/.test(value[index - 1]))) {
+      return value.slice(0, index).trim();
+    }
+  }
+  return value.trim();
+}
+
+/**
+ * @param {string} text
+ * @returns {{ key: string; value: string } | null}
+ */
+function splitYamlMapEntry(text) {
+  let quote = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === ":") {
+      return {
+        key: text.slice(0, index).trim(),
+        value: text.slice(index + 1).trim(),
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {string} absPath
+ * @returns {Array<{ selector: string; replacement: string; line: number }>}
+ */
+function extractWorkspaceOverrides(absPath) {
+  const content = readFileSync(absPath, "utf8");
+  const overrides = [];
+  let inOverrides = false;
+
+  for (const [i, rawLine] of content.split("\n").entries()) {
+    const line = rawLine.replace(/\r$/, "");
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    if (/^\S/.test(line)) {
+      inOverrides = /^['"]?overrides['"]?\s*:\s*(?:#.*)?$/.test(trimmed);
+      continue;
+    }
+    if (!inOverrides) continue;
+
+    const entry = splitYamlMapEntry(trimmed);
+    if (!entry) continue;
+
+    const selector = unquote(entry.key);
+    const replacement = unquote(stripYamlInlineComment(entry.value));
+    if (selector && replacement) {
+      overrides.push({ selector, replacement, line: i + 1 });
+    }
+  }
+
+  return overrides;
+}
+
+/**
+ * @param {string} source
+ * @param {string} selector
+ * @param {unknown} replacement
+ */
+function validatePnpmOverrideEntry(source, selector, replacement) {
+  let errors = 0;
+  const selectorRange = overrideSelectorRange(selector);
+  if (
+    selectorRange !== null &&
+    isUnboundedMinimumOverrideValue(selectorRange)
+  ) {
+    fail(
+      `${source} selector "${selector}" uses ` +
+        `unbounded minimum range "${selectorRange}". Use a bounded ` +
+        "selector range before pinning the replacement.",
+    );
+    errors++;
+  }
+  if (
+    typeof replacement === "string" &&
+    isUnboundedMinimumOverrideValue(replacement)
+  ) {
+    fail(
+      `${source}["${selector}"] uses unbounded minimum ` +
+        `range "${replacement}". Use a bounded selector with an exact ` +
+        "replacement or a same-major/capped replacement range.",
+    );
+    errors++;
+  }
+  return errors;
+}
+
 const packageJsonPath = resolve(ROOT, "package.json");
 let overrideRangeErrors = 0;
 
@@ -464,30 +610,25 @@ if (existsSync(packageJsonPath)) {
   const overrides = packageJson?.pnpm?.overrides;
   if (overrides && typeof overrides === "object" && !Array.isArray(overrides)) {
     for (const [selector, replacement] of Object.entries(overrides)) {
-      const selectorRange = overrideSelectorRange(selector);
-      if (
-        selectorRange !== null &&
-        isUnboundedMinimumOverrideValue(selectorRange)
-      ) {
-        fail(
-          `package.json pnpm.overrides selector "${selector}" uses ` +
-            `unbounded minimum range "${selectorRange}". Use a bounded ` +
-            "selector range before pinning the replacement.",
-        );
-        overrideRangeErrors++;
-      }
-      if (
-        typeof replacement === "string" &&
-        isUnboundedMinimumOverrideValue(replacement)
-      ) {
-        fail(
-          `package.json pnpm.overrides["${selector}"] uses unbounded minimum ` +
-            `range "${replacement}". Use a bounded selector with an exact ` +
-            "replacement or a same-major/capped replacement range.",
-        );
-        overrideRangeErrors++;
-      }
+      overrideRangeErrors += validatePnpmOverrideEntry(
+        "package.json pnpm.overrides",
+        selector,
+        replacement,
+      );
     }
+  }
+}
+
+for (const absPath of workspaceFiles) {
+  const rel = relative(ROOT, absPath);
+  for (const { selector, replacement, line } of extractWorkspaceOverrides(
+    absPath,
+  )) {
+    overrideRangeErrors += validatePnpmOverrideEntry(
+      `${rel}:${line} overrides`,
+      selector,
+      replacement,
+    );
   }
 }
 
