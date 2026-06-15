@@ -33,6 +33,7 @@ Hasura silently caps every query at **1000 rows** (Envio hosted Hasura config). 
 - [ ] If the query feeds a metric that aggregates over the full lifetime (uptime %, breach count, cumulative volume), the data MUST come from a pre-rolled snapshot/rollup entity on the indexer — NOT from a paginated list
 - [ ] If pagination is genuinely needed, model it after the offset-pagination pattern in `ui-dashboard/src/hooks/use-all-networks-data.ts` (`fetchPaginatedSnapshotPages`): deterministic `order_by` with a tiebreaker, `SNAPSHOT_MAX_PAGES` safety cap, and a warning signal when the cap is hit
 - [ ] Never ship `_aggregate` queries to the dashboard against hosted Hasura — they're disabled
+- [ ] New query strings must live in a module covered by the GraphQL contract test (`QUERY_MODULES` in `ui-dashboard/src/lib/__tests__/graphql-contract.test.ts`, or `metrics-bridge/test/graphql-contract.test.ts`) so an indexer field rename fails CI instead of production
 - [ ] **Curl-verify** every new KPI query against the hosted endpoint with a representative pool (one with >1000 rows of history). Confirm the page count matches your local-dev assumption
 
 ## 4. Loading vs zero vs empty
