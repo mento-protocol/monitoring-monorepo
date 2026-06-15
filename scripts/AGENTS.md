@@ -24,3 +24,4 @@ last_verified: 2026-05-20
 ## Verification
 
 Run `pnpm lint:scripts`, `bash -n scripts/<changed-script>.sh`, and `pnpm agent:quality-gate:test` when quality-gate routing changes.
+For deploy-wrapper changes, also run `node scripts/check-deploy-root-anchors.test.mjs`.

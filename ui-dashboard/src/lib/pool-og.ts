@@ -24,30 +24,13 @@ import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import {
   ALL_POOLS_WITH_HEALTH,
   POOL_DETAIL_WITH_HEALTH,
+  // Lean, OG-specific daily snapshot query (sparkline + 7d WoW). Lives in
+  // queries/pools.ts so the GraphQL contract test covers it.
+  POOL_OG_DAILY_SNAPSHOTS,
   POOL_THRESHOLDS_KNOWN_EXT,
 } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import { isVirtualPool, type Pool, type PoolSnapshot } from "@/lib/types";
-
-// Lean, OG-specific daily snapshot query. Only pulls the fields and row count
-// needed for the sparkline + 7d WoW — a fraction of POOL_DAILY_SNAPSHOTS_CHART's
-// payload. Ordered newest-first; 14 rows covers both the 14-point sparkline
-// and the ~7d-ago row for WoW.
-const POOL_OG_DAILY_SNAPSHOTS = `
-  query PoolOgDailySnapshots($poolId: String!) {
-    PoolDailySnapshot(
-      where: { poolId: { _eq: $poolId } }
-      order_by: [{ timestamp: desc }, { id: desc }]
-      limit: 14
-    ) {
-      timestamp
-      reserves0
-      reserves1
-      swapVolume0
-      swapVolume1
-    }
-  }
-`;
 
 const SECONDS_PER_DAY = 86_400;
 const SEVEN_DAYS = 7 * SECONDS_PER_DAY;
