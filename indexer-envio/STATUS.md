@@ -7,10 +7,10 @@ Ethereum Mainnet `1` sUSDS reserve-yield events) on the Envio Cloud `mento`
 project (org `mento-protocol`), Production Medium tier.
 
 This file documents only facts that stay true across redeployments. For live
-sync state and the currently promoted deployment, run:
+sync state and the latest deployment currently visible to Envio, run:
 
 ```bash
-pnpm deploy:indexer:status          # latest deployment status
+pnpm deploy:indexer:status          # latest visible deployment status
 pnpm deploy:indexer:status --json   # machine-readable
 ```
 
