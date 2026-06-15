@@ -73,6 +73,22 @@ function isPinnedExternalAction(value) {
   return PINNED_REF.test(ref);
 }
 
+/** @param {string} line */
+function extractUsesRawValue(line) {
+  const plain = line.match(
+    /^\s*(?:-\s*)?(?:"uses"|'uses'|uses)\s*:\s*(.+?)\s*$/,
+  );
+  if (plain) return plain[1] ?? "";
+
+  const flow = line.match(
+    /^\s*-\s*\{.*(?:"uses"|'uses'|uses)\s*:\s*([^,}]+).*}\s*$/,
+  );
+  if (!flow) return null;
+  const { comment } = splitInlineComment(line);
+  const value = flow[1] ?? "";
+  return comment ? `${value} # ${comment}` : value;
+}
+
 /** @param {string} raw */
 function hasReleaseTagComment(raw) {
   const { comment } = splitInlineComment(raw);
@@ -105,11 +121,8 @@ for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
   const text = readFileSync(file, "utf8");
   const lines = text.split(/\r?\n/);
   lines.forEach((line, index) => {
-    const match = line.match(
-      /^\s*(?:-\s*)?(?:"uses"|'uses'|uses)\s*:\s*(.+?)\s*$/,
-    );
-    if (!match) return;
-    const rawValue = match[1] ?? "";
+    const rawValue = extractUsesRawValue(line);
+    if (rawValue == null) return;
     const value = normalizeUsesValue(rawValue);
     if (value === "") return;
     if (isLocalAction(value)) {

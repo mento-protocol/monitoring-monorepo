@@ -66,6 +66,7 @@ jobs:
   test:
     steps:
       - uses: actions/checkout@${PINNED_SHA} # v6.0.3
+      - { uses: actions/cache@${PINNED_SHA} } # v5.0.5
       - uses: ./.github/actions/pnpm-install
 `,
     );
@@ -212,6 +213,32 @@ runs:
       result.stderr,
       "tools/actions/custom/action.yml:5 uses: actions/setup-node@v4",
       "local target failure location",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails mutable tags in flow-style workflow steps", () => {
+  const root = fixtureRoot("flow-fail");
+  try {
+    write(
+      root,
+      ".github/workflows/ci.yml",
+      `
+jobs:
+  test:
+    steps:
+      - { uses: actions/checkout@v6 }
+`,
+    );
+
+    const result = run(root);
+    equal(result.status, 1, result.stdout);
+    contains(
+      result.stderr,
+      ".github/workflows/ci.yml:5 uses: actions/checkout@v6",
+      "flow-style failure location",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
