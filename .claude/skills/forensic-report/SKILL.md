@@ -264,7 +264,7 @@ Run a small battery keyed on the target address (all fields verified against `in
   }
 }
 {
-  Trove(where: { owner: { _eq: "0xtarget" } }) {
+  Trove(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
     id
     coll
     debt
@@ -272,19 +272,19 @@ Run a small battery keyed on the target address (all fields verified against `in
   }
 }
 {
-  LiquidityPosition(where: { address: { _eq: "0xtarget" } }) {
+  LiquidityPosition(where: { address: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
     poolId
   }
 }
 {
-  StableSupplyChangeEvent(where: { caller: { _eq: "0xtarget" } }, limit: 1000) {
+  StableSupplyChangeEvent(where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, limit: 1000) {
     txHash
     kind
     amount
   }
 }
 {
-  BridgeBridger(where: { sender: { _eq: "0xtarget" } }) {
+  BridgeBridger(where: { sender: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
     id
   }
 }
@@ -346,7 +346,7 @@ Then attribution. Use the `arkham` skill (project-scoped) for the **cross-chain 
    - Match any counterparty against `indexer-envio/config/nttAddresses.json` (`nttManagerProxy` / `transceiverProxy` / `helper` / `tokenAddress`) so a transfer to/from NTT infra is labelled a bridge flow, not a real funder.
    - For NON-Mento inbound bridges, reach for the right tracer per the Tooling matrix: **LayerZeroScan** covers Celo (`GET https://scan.layerzero-api.com/v1/messages/wallet/{eoa}`, Celo EID=30125); Across/deBridge cover **Monad only** (not Celo) so use them on the Monad leg.
 5. For contracts: also pull the deployer (the `from` of the contract-creation tx) — it may differ from the operator. Note both rows in the table. (The deployer is the seed for the fleet clustering in Step 2.5.)
-6. **ENS de-anon pivot** (the seed's `idontloseiwin.eth` is exactly this). A Celo address's ENS primary name lives in the **Ethereum L1** reverse registry, not on Celo — forno can't answer it. Resolve via `viem` `getEnsName({ address, coinType })` against an L1 RPC with the **correct Celo coinType `0x8000A4EC`** (= `0x80000000 | 42220`; reverse namespace `a4ec.reverse`). Watch out: a common doc example mis-states this — `0x8000A4DC` decodes to chain 42204, the wrong chain. Mostly negatives for bot EOAs; one hit is gold.
+6. **ENS de-anon pivot** (the seed's `idontloseiwin.eth` is exactly this). A Celo address's ENS primary name lives in the **Ethereum L1** reverse registry, not on Celo — forno can't answer it. Resolve via `viem` `getEnsName({ address, coinType })` against an L1 RPC with the **chain-correct ENSIP-11 coinType** `0x80000000 | $CHAIN_ID` (Celo `42220` → `0x8000A4EC`, namespace `a4ec.reverse`; Monad `143` → `0x8000008F`; etc.). Watch out: a common doc example mis-states Celo as `0x8000A4DC`, which decodes to chain 42204 — wrong. Also try the default L1 reverse record (coinType `0`), which many owners set regardless of chain. Mostly negatives for bot EOAs; one hit is gold.
 
 For each address you add to the Cast: include age (days since first activity), multichain footprint (which chains it's been seen on), a one-line "what it does" note, and a **confidence tier** on the attribution claim (see "Confidence tiers" below).
 
@@ -404,7 +404,7 @@ Before concluding "no interesting getters", do three things:
    cast storage $ADDR 0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7 --rpc-url $RPC  # EIP-1822
    ```
 
-2. **Verified-source check before decompiling** — exact source beats pseudo-source. Sourcify covers Celo, free, no key: `GET https://sourcify.dev/server/v2/contract/42220/{addr}?fields=all` (cross-check Celoscan).
+2. **Verified-source check before decompiling** — exact source beats pseudo-source. Sourcify is multichain, free, no key: `GET https://sourcify.dev/server/v2/contract/$CHAIN_ID/{addr}?fields=all` (use `$CHAIN_ID` from Step 1 — `42220` for Celo, `143` Monad, etc.; cross-check the chain's explorer: Celoscan / Monadscan / Polygonscan / Etherscan).
 3. **Decompile if unverified** — these are chain-agnostic (they operate on raw bytecode, so Celo non-indexing is irrelevant): Dedaub API (`https://api.dedaub.com`, free tier, async POST→poll) for readable pseudo-Solidity, or local **heimdall-rs** (`heimdall decompile/cfg`, MIT, nothing leaves the machine — use for sensitive targets). Enumerate the full selector surface first with WhatsABI (`@shazow/whatsabi`, autoloads over a forno provider and follows EIP-1967 proxies), then resolve names via the OpenChain DB. This is the only way to describe what a closed-source proprietary bot actually does.
 
 **For an EOA target** — behavioural profile. Top counterparties (`dune sim evm activity` filtered by counterparty), top tokens held (`dune sim evm balances`), tx-time distribution if relevant. Add these cheap, Celo-native behavioural fingerprints (all free via the `dune` skill on `celo.*` or `cast`):
@@ -431,15 +431,20 @@ If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real h
 
 Pick a representative tx — preferably a recent successful one with the typical calldata shape. Use `cast tx <hash> --rpc-url $RPC` for the raw shape, then decode the top-level selector via OpenChain.
 
-**For the call tree + asset flow, use Blockscout — not `cast`.** `forno.celo.org` whitelists no trace methods (`debug_traceTransaction` / `trace_transaction` both return `-32601 "method not whitelisted"`), so `cast` cannot produce a call tree on Celo. The free, no-key Celo Blockscout v2 REST API gives both the decoded nested-call tree and the exact net asset flow:
+**For the call tree + asset flow, use Blockscout — not `cast`.** `forno.celo.org` (and most public full nodes) whitelists no trace methods (`debug_traceTransaction` / `trace_transaction` return `-32601 "method not whitelisted"`), so `cast` cannot produce a call tree. The free, no-key Blockscout v2 REST API gives both the decoded nested-call tree and the exact net asset flow — point `BS` at the target chain's Blockscout instance:
 
 ```bash
-BS=https://celo.blockscout.com/api/v2
+# Pick the Blockscout v2 base for $CHAIN. Not every chain has one (e.g. Monad — see fallback below).
+case "$CHAIN" in
+  celo)    BS=https://celo.blockscout.com/api/v2 ;;
+  polygon) BS=https://polygon.blockscout.com/api/v2 ;;
+  *)       BS=<target chain's Blockscout v2 base, or use the RPC-native fallback> ;;
+esac
 curl -s "$BS/transactions/$TX/internal-transactions" | jq '.items[] | {type, from:.from.hash, to:.to.hash, value, error}'  # decoded CALL/DELEGATECALL/CREATE tree
 curl -s "$BS/transactions/$TX/state-changes"        | jq '.items[] | {addr:.address.hash, type, change}'                  # per-address coin+token balance_before→after = net flow
 ```
 
-Reachable via plain `curl`/WebFetch or the bundled `mcp__claude_ai_Blockscout__*` tools (`chain_id: 42220`). Expect `internal-transactions` to be empty on simple transfers and rich on multi-hop / reverted txs; `state-changes` gives the dollar-accurate flow `cast` can't. Keep `cast tx` + OpenChain for the top-level selector.
+Reachable via plain `curl`/WebFetch or the bundled `mcp__claude_ai_Blockscout__*` tools (pass `chain_id: $CHAIN_ID`). Expect `internal-transactions` to be empty on simple transfers and rich on multi-hop / reverted txs; `state-changes` gives the dollar-accurate flow `cast` can't. Keep `cast tx` + OpenChain for the top-level selector. **Chains without a Blockscout instance (e.g. Monad):** fall back to RPC-native `debug_traceTransaction` against an archive endpoint that supports it (dRPC / QuickNode / Tenderly) — never `cast run` on Celo (CIP-64, below).
 
 > **Do NOT use `cast run` on Celo.** It chokes on Celo's CIP-64 fee-currency tx type `0x7b` (the _dominant_ tx type since Gingerbread) with `unknown variant 0x7b`, failing on essentially every Mento-active block — and forno is non-archive anyway. For a full trace prefer Blockscout (above) or an RPC-native `debug_traceTransaction` against a Celo archive endpoint that understands CIP-64 (dRPC / QuickNode / Tenderly on `42220`).
 
@@ -488,11 +493,12 @@ Free-form prose, but be specific. Don't say "arbitrage" — say which mispricing
 **Name the venue, don't guess it.** Resolve any non-Mento pool or token the target touched via two free, no-key, Celo+Monad-covering APIs — turns "an unknown pool" into "USDC/CELO 0.01% on Uniswap V3 Celo, $X TVL":
 
 ```bash
-curl -s "https://api.geckoterminal.com/api/v2/networks/celo/pools/{poolAddr}"   # → pair, dex, reserve_usd, vol24h (30 req/min)
-curl -s "https://api.dexscreener.com/latest/dex/tokens/{tokenAddr}"             # → every pair, dexId, liquidity.usd, volume.h24
+GT_NS=celo   # GeckoTerminal network slug for $CHAIN: celo / polygon_pos / eth / … (NOT the chain id; verify at /api/v2/networks)
+curl -s "https://api.geckoterminal.com/api/v2/networks/$GT_NS/pools/{poolAddr}"   # → pair, dex, reserve_usd, vol24h (30 req/min)
+curl -s "https://api.dexscreener.com/latest/dex/tokens/{tokenAddr}"               # → every pair, dexId, liquidity.usd, volume.h24 (chain-agnostic by token addr)
 ```
 
-(Use `networks/celo/tokens/{addr}` for token price/FDV in Steps 5/5.5 too. For chains other than Celo swap the `networks/<slug>` segment.)
+(Use `networks/$GT_NS/tokens/{addr}` for token price/FDV in Steps 5/5.5 too. Set `GT_NS` to match `$CHAIN` — GeckoTerminal uses its own slugs, so confirm against `/api/v2/networks` rather than assuming the chain name.)
 
 **MEV classification across chains.** The Celo MEV-detection ecosystem is thin (EigenPhi/zeromev are Ethereum-only). Two moves: (a) borrow their **taxonomy** (arb / sandwich / backrun / JIT / liquidation) as vocabulary and derive the classification yourself from the indexer + Dune `dex.trades` on Celo (group by `tx_hash`, detect ≥2-leg cycles, cross-project legs, sandwich via `block_number` ordering); (b) if the operator runs the same strategy on Ethereum/L2s, run it through EigenPhi/zeromev **there** (cross-chain identity leg) and cite the classification as corroboration. See the Tooling matrix.
 
