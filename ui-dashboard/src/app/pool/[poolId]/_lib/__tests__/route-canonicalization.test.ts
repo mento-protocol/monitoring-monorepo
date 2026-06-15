@@ -1,20 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/networks", () => ({
-  networkIdForChainId: (chainId: number) =>
+  configuredNetworkIdForChainId: (chainId: number) =>
     chainId === 42220
       ? "celo-mainnet"
       : chainId === 143
         ? "monad-mainnet"
         : chainId === 11142220
-          ? "celo-sepolia"
+          ? "celo-sepolia-local"
           : chainId === 10143
             ? "monad-testnet"
             : null,
-  isConfiguredNetworkId: (networkId: string) =>
-    networkId === "celo-mainnet" ||
-    networkId === "monad-mainnet" ||
-    networkId === "monad-testnet",
 }));
 
 import {
@@ -38,9 +34,12 @@ describe("pool route chain context", () => {
     expect(parseRouteChainId(String(Number.MAX_SAFE_INTEGER + 1))).toBeNull();
   });
 
-  it("rejects unsupported or hidden chain ids", () => {
+  it("rejects unsupported chain ids", () => {
     expect(parseRouteChainId("1")).toBeNull();
-    expect(parseRouteChainId("11142220")).toBeNull();
+  });
+
+  it("accepts Sepolia chain ids when a local Sepolia network is configured", () => {
+    expect(parseRouteChainId("11142220")).toBe(11142220);
   });
 });
 

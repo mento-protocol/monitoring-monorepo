@@ -37,6 +37,12 @@ All rule/routing secrets live in `alerts/rules/terraform.tfvars` (gitignored). M
 
 ## Smoke test
 
+Before applying Aegis testnet-health rules, confirm Aegis has recently emitted
+successful `view_call_query_duration_count` samples for `celoSepolia` and
+`monadTestnet`. The no-successful-poll rules intentionally use
+`no_data_state = "Alerting"` with a 5m grace, so a never-published series can
+fire immediately after apply.
+
 After `apply`, temporarily drop one threshold (e.g. set `params = [0.0]` on the Deviation Breach rule) and `terraform apply` again. Within ~2m, `#alerts-pools` should receive a fire, then a resolve after reverting the change. For deviation state transitions, the bridge emits a short-lived transition marker and the transition contact points intentionally do not send a second resolve message.
 
 ## Service label routing

@@ -351,7 +351,8 @@ locals {
   }
 
   notify_warning_testnet = {
-    contact_point   = grafana_contact_point.slack_testnet.name
+    contact_point = grafana_contact_point.slack_testnet.name
+    # Aegis testnet rules carry the `chain` label, not the protocol `chain_id`.
     group_by        = ["alertname", "grafana_folder", "chain"]
     group_wait      = "1m"
     group_interval  = "10m"

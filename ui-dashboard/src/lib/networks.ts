@@ -195,11 +195,18 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
 export const NETWORK_IDS = Object.keys(NETWORKS) as IndexerNetworkId[];
 export const DEFAULT_NETWORK: IndexerNetworkId = "celo-mainnet";
 
-// Canonical id per chainId. Hand-rolled (not derived from NETWORKS) so a
-// future local variant sharing a chainId with hosted data can't silently reroute
-// pool URLs. For chainIds with both a prod and a local variant, the prod id
-// wins here — `isConfiguredNetworkId` gates the local variants out in prod
-// where `NEXT_PUBLIC_SHOW_LOCAL_NETWORKS` is unset.
+// Candidate ids per chainId, in canonical-preferred order. Hand-rolled (not
+// derived from NETWORKS) so a future local variant sharing a chainId with
+// hosted data can't silently reroute generated pool URLs. Runtime routing can
+// still fall through to a local variant when the canonical hosted endpoint is
+// intentionally absent in development.
+const NETWORKS_BY_CHAIN_ID: Record<number, readonly IndexerNetworkId[]> = {
+  42220: ["celo-mainnet", "celo-mainnet-local"],
+  11142220: ["celo-sepolia", "celo-sepolia-local"],
+  143: ["monad-mainnet"],
+  10143: ["monad-testnet"],
+};
+
 const CANONICAL_NETWORK_BY_CHAIN_ID: Record<number, IndexerNetworkId> = {
   42220: "celo-mainnet",
   11142220: "celo-sepolia",
@@ -211,6 +218,13 @@ const CANONICAL_NETWORK_BY_CHAIN_ID: Record<number, IndexerNetworkId> = {
 // from a namespaced pool id without needing ?network=).
 export function networkIdForChainId(chainId: number): IndexerNetworkId | null {
   return CANONICAL_NETWORK_BY_CHAIN_ID[chainId] ?? null;
+}
+
+// All network ids that can serve a chainId, in canonical-preferred order.
+export function networkIdsForChainId(
+  chainId: number,
+): readonly IndexerNetworkId[] {
+  return NETWORKS_BY_CHAIN_ID[chainId] ?? [];
 }
 
 /** Canonical Network for a chainId, or null if the chain isn't configured. */
@@ -263,7 +277,13 @@ const showTestnetNetworks = clientEnv.NEXT_PUBLIC_SHOW_TESTNET_NETWORKS;
 export function isConfiguredNetworkId(v: string): v is IndexerNetworkId {
   if (!isNetworkId(v)) return false;
   const network = NETWORKS[v];
-  if (!showLocalNetworks && network.local) return false;
+  if (network.local) return showLocalNetworks && !!network.hasuraUrl;
   if (!showTestnetNetworks && network.testnet) return false;
   return !!network.hasuraUrl;
+}
+
+export function configuredNetworkIdForChainId(
+  chainId: number,
+): IndexerNetworkId | null {
+  return networkIdsForChainId(chainId).find(isConfiguredNetworkId) ?? null;
 }

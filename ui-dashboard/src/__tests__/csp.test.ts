@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { buildCspWithNonce } from "@/lib/csp";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 describe("buildCspWithNonce", () => {
   it("includes the nonce in script-src", () => {
@@ -36,6 +41,23 @@ describe("buildCspWithNonce", () => {
     expect(connectSrc).toContain("https://rpc2.monad.xyz");
     expect(connectSrc).toContain("https://testnet-rpc.monad.xyz");
     expect(connectSrc).toContain("wss://ws-us3.pusher.com");
+  });
+
+  it("includes the configured testnet Hasura origin in connect-src", async () => {
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL_TESTNET",
+      "https://testnet-hasura.example/v1/graphql",
+    );
+    vi.resetModules();
+
+    const { buildCspWithNonce: buildCspWithEnv } = await import("@/lib/csp");
+    const csp = buildCspWithEnv("test");
+    const connectSrc = csp
+      .split(";")
+      .find((d) => d.trim().startsWith("connect-src"));
+
+    expect(connectSrc).toBeDefined();
+    expect(connectSrc).toContain("https://testnet-hasura.example");
   });
 
   it("includes frame-ancestors none (clickjacking defense)", () => {

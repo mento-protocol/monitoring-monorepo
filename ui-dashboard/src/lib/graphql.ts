@@ -3,6 +3,7 @@ import useSWR, { type SWRResponse } from "swr";
 import type { ZodType } from "zod";
 import { useNetwork } from "@/components/network-provider";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
+import { resolveGraphqlEndpoint } from "@/lib/graphql-endpoint";
 import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { Network } from "@/lib/networks";
@@ -16,10 +17,11 @@ export { HASURA_TIMEOUT_MS };
 const clientCache = new Map<string, GraphQLClient>();
 
 function getClient(network: Network): GraphQLClient {
-  const cached = clientCache.get(network.hasuraUrl);
+  const endpoint = resolveGraphqlEndpoint(network.hasuraUrl);
+  const cached = clientCache.get(endpoint);
   if (cached) return cached;
-  const client = new GraphQLClient(network.hasuraUrl);
-  clientCache.set(network.hasuraUrl, client);
+  const client = new GraphQLClient(endpoint);
+  clientCache.set(endpoint, client);
   return client;
 }
 

@@ -11,7 +11,9 @@ import {
   isCanonicalNetwork,
   isConfiguredNetworkId,
   isNetworkId,
+  configuredNetworkIdForChainId,
   networkIdForChainId,
+  networkIdsForChainId,
 } from "../networks";
 
 // Mirror of the private map in networks.ts — kept here so the drift-guard
@@ -369,6 +371,37 @@ describe("networkIdForChainId — pool-ID-driven network resolution", () => {
       expect(networkId).not.toBeNull();
       expect(NETWORKS[networkId!].chainId).toBe(chainId);
     }
+  });
+});
+
+describe("networkIdsForChainId — runtime network candidates", () => {
+  it("keeps canonical hosted variants first for generated links", () => {
+    expect(networkIdsForChainId(42220)).toEqual([
+      "celo-mainnet",
+      "celo-mainnet-local",
+    ]);
+    expect(networkIdsForChainId(11142220)).toEqual([
+      "celo-sepolia",
+      "celo-sepolia-local",
+    ]);
+  });
+
+  it("falls back to local Celo Sepolia when only local networks are enabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SHOW_LOCAL_NETWORKS", "true");
+    vi.stubEnv("NEXT_PUBLIC_SHOW_TESTNET_NETWORKS", "");
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL_TESTNET", "");
+
+    const networks = await import("../networks");
+    expect(networks.networkIdForChainId(11142220)).toBe("celo-sepolia");
+    expect(networks.isConfiguredNetworkId("celo-sepolia")).toBe(false);
+    expect(networks.isConfiguredNetworkId("celo-sepolia-local")).toBe(true);
+    expect(networks.configuredNetworkIdForChainId(11142220)).toBe(
+      "celo-sepolia-local",
+    );
+  });
+
+  it("returns null when no candidate for a chainId is configured", () => {
+    expect(configuredNetworkIdForChainId(1)).toBeNull();
   });
 });
 

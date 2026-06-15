@@ -105,6 +105,12 @@ vi.mock("@/lib/networks", async (importOriginal) => {
         : chainId === 143
           ? "monad-mainnet"
           : null,
+    configuredNetworkIdForChainId: (chainId: number) =>
+      chainId === 42220
+        ? "celo-mainnet"
+        : chainId === 143
+          ? "monad-mainnet"
+          : null,
   };
 });
 
