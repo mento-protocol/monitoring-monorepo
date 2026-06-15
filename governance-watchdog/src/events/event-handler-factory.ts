@@ -2,6 +2,7 @@ import assert from "assert/strict";
 import { EmbedBuilder } from "discord.js";
 import sendDiscordNotification from "../event-notifications/send-discord-notification.js";
 import sendTelegramNotification from "../event-notifications/send-telegram-notification.js";
+import logError from "../utils/log-error.js";
 import { EventType, QuicknodeEvent } from "./types.js";
 import { createEventTitle } from "./utils/create-event-title.js";
 
@@ -52,7 +53,7 @@ export function createEventHandler<T extends QuicknodeEvent>(
         `✅ Successfully sent Discord notification for ${config.eventType} event`,
       );
     } catch (error) {
-      console.error(
+      logError(
         `❌ Failed to send Discord notification for ${config.eventType} event:`,
         error,
       );
@@ -71,7 +72,7 @@ export function createEventHandler<T extends QuicknodeEvent>(
         `✅ Successfully sent Telegram notification for ${config.eventType} event`,
       );
     } catch (error) {
-      console.error(
+      logError(
         `❌ Failed to send Telegram notification for ${config.eventType} event:`,
         error,
       );
