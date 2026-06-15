@@ -1217,6 +1217,66 @@ test("fails when named catalog tagged scalar anchor resolves to an unbounded ove
   );
 });
 
+// 56. Unresolved default catalog override values fail closed.
+test("fails when default catalog override replacement is missing", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalog: { other: "1.2.3" }\noverrides: { flatted: "catalog:" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unresolved catalog override"),
+    `expected unresolved default catalog rejection: ${out}`,
+  );
+});
+
+// 57. Unresolved named catalog override values fail closed.
+test("fails when named catalog override replacement is missing", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalogs:\n  security: { other: "1.2.3" }\noverrides: { flatted: "catalog:security" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unresolved catalog override"),
+    `expected unresolved named catalog rejection: ${out}`,
+  );
+});
+
+// 58. Missing named catalogs fail closed too.
+test("fails when named catalog override references a missing catalog", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalogs:\n  security: { flatted: "1.2.3" }\noverrides: { flatted: "catalog:missing" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unresolved catalog override"),
+    `expected missing named catalog rejection: ${out}`,
+  );
+});
+
 // ── summary ───────────────────────────────────────────────────────────────────
 
 console.log(

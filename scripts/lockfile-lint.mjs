@@ -861,6 +861,13 @@ function isYamlAliasOverrideValue(value) {
 }
 
 /**
+ * @param {string} value
+ */
+function isUnresolvedCatalogOverrideValue(value) {
+  return /^catalog:(?:[A-Za-z0-9._-]+)?$/.test(value.trim());
+}
+
+/**
  * @param {string} selector
  * @param {unknown} replacement
  * @param {{ default: Map<string, string>; named: Map<string, Map<string, string>> }} catalogs
@@ -895,6 +902,15 @@ function validatePnpmOverrideEntry(source, selector, replacement) {
     }
   }
   if (typeof replacement === "string") {
+    if (isUnresolvedCatalogOverrideValue(replacement)) {
+      fail(
+        `${source}["${selector}"] uses unresolved catalog override ` +
+          `"${replacement}". Add a matching catalog entry for the package or ` +
+          "inline the replacement range.",
+      );
+      errors++;
+      return errors;
+    }
     if (isYamlAliasOverrideValue(replacement)) {
       fail(
         `${source}["${selector}"] uses YAML alias "${replacement}". Inline ` +
