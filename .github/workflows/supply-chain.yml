@@ -1,12 +1,12 @@
 name: Supply Chain
 
-# Three gates that protect the dependency supply chain:
+# Four gates that protect the dependency supply chain:
 #
 # 1. npm advisory audit — blocks merges when a high/critical advisory exists
-#    against any package in either deployable lockfile.
+#    against any package in the root or standalone deploy lockfiles.
 #
 # 2. lockfile-lint — validates pnpm-lock.yaml structural integrity for the root
-#    workspace lockfile and the handler's package-local Cloud Build lockfile:
+#    workspace lockfile and the package-local Cloud Build lockfiles:
 #    a) Every package has a sha512 integrity hash (pnpm cannot verify a
 #       tarball without it).
 #    b) No custom registry is configured in .npmrc or pnpm-workspace.yaml.
@@ -19,6 +19,10 @@ name: Supply Chain
 # 3. dependency version-skew check — validates every manifest entry for a
 #    cataloged package is either "catalog:" or the exact catalog version. This
 #    keeps standalone deploy roots aligned with workspace-only catalog consumers.
+#
+# 4. moderate advisory report — a weekly non-blocking audit that opens or
+#    updates a labeled GitHub issue for sub-high advisories, so stale
+#    resolution-time override floors stay visible without blocking merges.
 #
 # What this does NOT cover: sigstore attestations / SLSA provenance. pnpm 10
 # has no `audit signatures` equivalent, and `npm audit signatures` requires a
@@ -41,10 +45,13 @@ on:
   # `**/.npmrc` (not just root) is load-bearing for security: lockfile-lint
   # recursively scans EVERY `.npmrc` for a poisoned `registry=` line, so a PR
   # adding a package-local `.npmrc` (e.g. ui-dashboard/.npmrc) must trigger
-  # the gate. Residual gap: GitHub's `paths:` filter only evaluates the first
-  # 300 changed files, so a >300-file PR whose only dep change falls outside
-  # that window will skip the per-PR run — caught by the daily cron within
-  # 24h (the same accepted disclosure-timing window as a non-dep PR).
+  # the gate. `patches/**` is load-bearing too: pnpm stores patched dependency
+  # hashes in pnpm-lock.yaml, so patch-only edits must be treated as dependency
+  # graph changes and routed through the same supply-chain surface. Residual
+  # gap: GitHub's `paths:` filter only evaluates the first 300 changed files,
+  # so a >300-file PR whose only dep change falls outside that window will skip
+  # the per-PR run — caught by the daily cron within 24h (the same accepted
+  # disclosure-timing window as a non-dep PR).
   pull_request:
     branches: [main]
     paths:
@@ -52,6 +59,7 @@ on:
       - "**/pnpm-lock.yaml"
       - "**/pnpm-workspace.yaml"
       - "**/.npmrc"
+      - patches/**
       # The gate itself — changes to the workflow or the lockfile-lint
       # scripts must self-trigger a run (same pattern as the other gates).
       - .github/workflows/supply-chain.yml
@@ -64,6 +72,10 @@ on:
     # within 24h. Failures are reported to Slack via
     # notify-slack-on-main-failure.yml.
     - cron: 17 6 * * *
+    # Weekly trigger for the non-blocking moderate-advisory report job below.
+    # The blocking audit/lockfile/version-skew jobs also run on this cron; the
+    # duplicate Monday run is harmless.
+    - cron: 17 7 * * 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -146,3 +158,180 @@ jobs:
         # Every declared version of a cataloged package (currently viem)
         # must be "catalog:" or exactly the catalog version.
         run: node scripts/version-skew-check.mjs
+
+  moderate-advisory-report:
+    name: moderate advisory report (non-blocking)
+    # Weekly cron + default-branch manual dispatch only — never on pull_request,
+    # so this job can never block a merge. The manual branch guard matters
+    # because this job mutates the canonical security-advisories issue.
+    if: >-
+      github.event.schedule == '17 7 * * 1' ||
+      (github.event_name == 'workflow_dispatch' &&
+        github.ref_name == github.event.repository.default_branch)
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          # No pnpm install — same as the blocking audit job. Audit queries the
+          # hosted advisory DB directly from the committed lockfile.
+      - name: pnpm audit (moderate+, report only)
+        # Exit 1 means advisories found, which is the expected report case.
+        # The script step below fails if pnpm returns a registry error payload.
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/audit-reports
+          pnpm audit --audit-level=moderate --json > /tmp/audit-reports/root.json || true
+          pnpm --dir alerts/infra/onchain-event-handler audit --audit-level=moderate --json > /tmp/audit-reports/alerts-onchain-event-handler.json || true
+          pnpm --dir alerts/infra/oncall-announcer audit --audit-level=moderate --json > /tmp/audit-reports/alerts-oncall-announcer.json || true
+          pnpm --dir governance-watchdog audit --audit-level=moderate --json > /tmp/audit-reports/governance-watchdog.json || true
+      - name: Ensure label exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create "security-advisories" --color "d73a4a" --description "Open npm advisories below the blocking high gate" --force
+          gh label create "dependencies" --color "0366d6" --description "Dependency updates and supply-chain advisory tracking" --force
+      - name: Open, update, or close the advisory issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const reportSpecs = [
+              ["root", "/tmp/audit-reports/root.json"],
+              [
+                "alerts/infra/onchain-event-handler",
+                "/tmp/audit-reports/alerts-onchain-event-handler.json",
+              ],
+              [
+                "alerts/infra/oncall-announcer",
+                "/tmp/audit-reports/alerts-oncall-announcer.json",
+              ],
+              ["governance-watchdog", "/tmp/audit-reports/governance-watchdog.json"],
+            ];
+            const advisoriesByKey = new Map();
+
+            for (const [lockfile, path] of reportSpecs) {
+              const raw = fs.readFileSync(path, "utf8");
+              let report;
+              try {
+                report = JSON.parse(raw);
+              } catch (error) {
+                core.setFailed(
+                  `pnpm audit for ${lockfile} did not produce JSON: ${raw.slice(0, 500)}`,
+                );
+                return;
+              }
+              if (report.error) {
+                core.setFailed(
+                  `pnpm audit failed for ${lockfile}: ` +
+                    `${report.error.message ?? JSON.stringify(report.error)}`,
+                );
+                return;
+              }
+
+              for (const advisory of Object.values(report.advisories ?? {})) {
+                const id = advisory.github_advisory_id ?? advisory.url ?? advisory.id;
+                const findingPath = advisory.findings?.[0]?.paths?.[0] ?? "unknown";
+                const key = `${id}:${advisory.module_name}:${findingPath}`;
+                const existing = advisoriesByKey.get(key);
+                if (existing) {
+                  existing.lockfiles.push(lockfile);
+                  continue;
+                }
+                advisoriesByKey.set(key, {
+                  ...advisory,
+                  id,
+                  path: findingPath,
+                  lockfiles: [lockfile],
+                });
+              }
+            }
+
+            const advisories = Array.from(advisoriesByKey.values());
+            const marker = "<!-- supply-chain-moderate-audit -->";
+            const labels = ["security-advisories", "dependencies"];
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+            const checkedAt = new Date().toISOString();
+
+            const lines = advisories.map((advisory) => {
+              const lockfiles = advisory.lockfiles.map((lockfile) => `\`${lockfile}\``).join(", ");
+              return (
+                `- **${advisory.module_name}** (${advisory.severity}) ${advisory.id}: ` +
+                `${advisory.title}\n` +
+                `  - vulnerable \`${advisory.vulnerable_versions}\`, ` +
+                `patched \`${advisory.patched_versions}\`\n` +
+                `  - lockfiles: ${lockfiles}\n` +
+                `  - path: \`${advisory.path}\``
+              );
+            });
+
+            const body =
+              `**Last checked:** ${checkedAt}\n` +
+              `[Workflow run](${runUrl})\n\n` +
+              `\`pnpm audit --audit-level=moderate\` on the root and standalone ` +
+              `deploy lockfiles reports:\n\n` +
+              `${lines.join("\n")}\n\n` +
+              `**Rule:** override floors in \`package.json\` \`pnpm.overrides\` ` +
+              `only act at lockfile (re)resolution. If an advisory's patch line ` +
+              `supersedes a floor, bump the override and run \`pnpm install\` to ` +
+              `re-resolve. Prefer range-scoped exact pins ` +
+              `(\`pkg@<x.y.z: x.y.z\`) for anything with major-incompat risk.\n\n` +
+              marker;
+
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: "open",
+                labels: "security-advisories",
+                per_page: 100,
+              },
+            );
+            const existing = issues.find(
+              (issue) => issue.body && issue.body.includes(marker),
+            );
+
+            if (advisories.length === 0) {
+              if (existing) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  body: `Audit is clean as of ${checkedAt} — closing. ([run](${runUrl}))`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  state: "closed",
+                });
+              }
+              return;
+            }
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: "Supply chain: moderate npm advisories",
+                body,
+                labels,
+              });
+            }

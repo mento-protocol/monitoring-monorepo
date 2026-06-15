@@ -7,6 +7,14 @@ const SKY_SSR_RPC_RESPONSE = {
   id: 1,
   result: "0x0000000000000000000000000000000000000000033b2e3caf60d0b2dd215bce",
 };
+const LIDO_STETH_APR_RESPONSE = {
+  data: { apr: 2.95 },
+  meta: {
+    symbol: "stETH",
+    address: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
+    chainId: 1,
+  },
+};
 
 const RESERVE_WITH_YIELD_COMPONENTS = {
   collateral: {
@@ -105,6 +113,30 @@ const RESERVE_WITH_ONLY_SUSDS = {
   },
 };
 
+const RESERVE_WITH_STETH = {
+  collateral: {
+    assets: [
+      RESERVE_WITH_YIELD_COMPONENTS.collateral.assets[0],
+      {
+        symbol: "stETH",
+        chain: "ethereum",
+        balance: "251.59825779325257",
+        usd_value: 419_495.97,
+        sources: [
+          {
+            type: "wallet",
+            label: "Reserve Safe",
+            identifier: "0xd0697f70E79476195B742d5aFAb14BE50f98CC1E",
+            balance: "251.59825779325257",
+            usd_value: 419_495.97,
+            custodian_type: "cold",
+          },
+        ],
+      },
+    ],
+  },
+};
+
 async function loadRoute(): Promise<{
   GET: () => Promise<Response>;
 }> {
@@ -166,6 +198,80 @@ describe("GET /api/reserve-yield", () => {
       sourceLabel: "Ops Safe",
       principalUsd: 1000,
     });
+  });
+
+  it("includes stETH holdings and Lido APR forecasts from the reserve API", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_STETH))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+    const stethHolding = body.holdings.find(
+      (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
+    );
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(body.principalUsd).toBeCloseTo(420_495.97, 6);
+    expect(body.forecastPrincipalUsd).toBeCloseTo(420_495.97, 6);
+    expect(body.earnedYieldUsd).toBeNull();
+    expect(body.annualRunRateUsd).toBeCloseTo(12_416.571115, 6);
+    expect(body.next30dUsd).toBeCloseTo(1_020.540092, 6);
+    expect(body.rateError).toBeNull();
+    expect(body.forecastUnavailableSymbols).toEqual([]);
+    expect(stethHolding).toMatchObject({
+      assetSymbol: "stETH",
+      chain: "ethereum",
+      sourceLabel: "Reserve Safe",
+      principalUsd: 419_495.97,
+      earnedYieldUsd: null,
+      apyPercent: 2.95,
+      yieldModel:
+        "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
+    });
+    expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
+  });
+
+  it("keeps stETH balances visible when Lido APR is unavailable", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [RESERVE_WITH_STETH.collateral.assets[1]],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(new Response("lido down", { status: 503 }));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.principalUsd).toBe(419_495.97);
+    expect(body.forecastPrincipalUsd).toBeNull();
+    expect(body.holdings).toHaveLength(1);
+    expect(body.holdings[0]).toMatchObject({
+      assetSymbol: "stETH",
+      principalUsd: 419_495.97,
+      earnedYieldUsd: null,
+      apyPercent: null,
+      next30dUsd: null,
+      next365dUsd: null,
+    });
+    expect(body.rateError).toContain("Lido stETH APR");
+    expect(body.forecastUnavailableSymbols).toEqual(["STETH"]);
   });
 
   it("merges indexed sUSDS cost basis with current reserve value when the ledger is available", async () => {

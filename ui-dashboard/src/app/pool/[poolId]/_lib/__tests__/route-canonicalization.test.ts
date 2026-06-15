@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/networks", () => ({
-  networkIdForChainId: (chainId: number) =>
+  configuredNetworkIdForChainId: (chainId: number) =>
     chainId === 42220
       ? "celo-mainnet"
       : chainId === 143
         ? "monad-mainnet"
-        : null,
-  isConfiguredNetworkId: (networkId: string) =>
-    networkId === "celo-mainnet" || networkId === "monad-mainnet",
+        : chainId === 11142220
+          ? "celo-sepolia-local"
+          : chainId === 10143
+            ? "monad-testnet"
+            : null,
 }));
 
 import {
@@ -20,6 +22,7 @@ import {
 describe("pool route chain context", () => {
   it("parses positive integer chain ids", () => {
     expect(parseRouteChainId("143")).toBe(143);
+    expect(parseRouteChainId("10143")).toBe(10143);
     expect(parseRouteChainId(["42220", "143"])).toBe(42220);
   });
 
@@ -33,7 +36,10 @@ describe("pool route chain context", () => {
 
   it("rejects unsupported chain ids", () => {
     expect(parseRouteChainId("1")).toBeNull();
-    expect(parseRouteChainId("10143")).toBeNull();
+  });
+
+  it("accepts Sepolia chain ids when a local Sepolia network is configured", () => {
+    expect(parseRouteChainId("11142220")).toBe(11142220);
   });
 });
 
@@ -82,6 +88,9 @@ describe("pool route canonicalization", () => {
     );
     expect(
       isRoutablePoolId("42220-0xaaa0000000000000000000000000000000000001"),
+    ).toBe(true);
+    expect(
+      isRoutablePoolId("10143-0xaaa0000000000000000000000000000000000001"),
     ).toBe(true);
   });
 
