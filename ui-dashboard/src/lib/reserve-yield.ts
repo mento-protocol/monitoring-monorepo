@@ -9,8 +9,8 @@ import {
   fetchSusdsYieldLedger,
 } from "@/lib/reserve-yield-susds";
 import {
-  fetchLidoStethApy,
-  parseLidoStethApyPercent,
+  fetchLidoStethApr,
+  parseLidoStethAprPercent,
 } from "@/lib/reserve-yield-steth";
 import {
   asArray,
@@ -47,7 +47,7 @@ export {
   computeSkySavingsRateApyPercentFromSsr,
   parseSkySavingsRateApyPercent,
   parseSkySavingsRateSsrApyPercent,
-  parseLidoStethApyPercent,
+  parseLidoStethAprPercent,
 };
 
 const TRACKED_YIELD_SYMBOLS = new Set([
@@ -349,9 +349,9 @@ function applyForecastModels(
     if (symbol === FORECASTABLE_STETH_SYMBOL) {
       return {
         ...holding,
-        apyPercent: apyBySymbol.stethApyPercent,
+        apyPercent: apyBySymbol.stethAprPercent,
         yieldModel:
-          apyBySymbol.stethApyPercent === null
+          apyBySymbol.stethAprPercent === null
             ? "Lido stETH APR source pending; stETH mark-to-market changes are not counted as earned revenue"
             : "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
       };
@@ -539,11 +539,14 @@ export async function fetchReserveYieldSnapshot({
   );
   holdings = susdsYield.holdings;
 
-  let stethApyPercent: number | null = null;
+  let stethAprPercent: number | null = null;
   let stethRateError: string | null = null;
   if (hasStethHolding(holdings)) {
     try {
-      stethApyPercent = await fetchLidoStethApy(fetchImpl);
+      // Lido is fetched only after the reserve payload proves stETH is held.
+      // Starting it speculatively would reduce one RTT for current reserves, but
+      // would also call Lido on every request even when stETH is absent.
+      stethAprPercent = await fetchLidoStethApr(fetchImpl);
     } catch (err) {
       stethRateError = errorMessage("Lido stETH APR", err);
     }
@@ -557,7 +560,7 @@ export async function fetchReserveYieldSnapshot({
     ausdNetMentoApyPercent: netMentoApyPercent,
     susdsApyPercent: skySavingsRateApyPercent,
     susdsApySource: skySavingsRateSource,
-    stethApyPercent,
+    stethAprPercent,
   });
 
   return {

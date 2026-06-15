@@ -5,7 +5,7 @@ import {
   extractReserveYieldHoldings,
   fetchReserveYieldSnapshot,
   parseFredFedFundsCsv,
-  parseLidoStethApyPercent,
+  parseLidoStethAprPercent,
   parseSkySavingsRateApyPercent,
   parseSkySavingsRateSsrApyPercent,
 } from "../reserve-yield";
@@ -353,9 +353,9 @@ describe("reserve yield parsing and math", () => {
   });
 
   it("parses Lido stETH APR only for Ethereum stETH metadata", () => {
-    expect(parseLidoStethApyPercent(LIDO_STETH_APR_RESPONSE)).toBe(2.95);
+    expect(parseLidoStethAprPercent(LIDO_STETH_APR_RESPONSE)).toBe(2.95);
     expect(() =>
-      parseLidoStethApyPercent({
+      parseLidoStethAprPercent({
         data: { apr: 2.95 },
         meta: {
           symbol: "wstETH",
@@ -365,7 +365,7 @@ describe("reserve yield parsing and math", () => {
       }),
     ).toThrow("symbol");
     expect(() =>
-      parseLidoStethApyPercent({
+      parseLidoStethAprPercent({
         data: { apr: -1 },
         meta: LIDO_STETH_APR_RESPONSE.meta,
       }),

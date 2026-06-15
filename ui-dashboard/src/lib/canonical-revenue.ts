@@ -811,7 +811,7 @@ function buildStreams(args: {
       forecast30dUsd: args.forecasts.next30d.reserveYieldUsd,
       forecast365dUsd: args.forecasts.next365d.reserveYieldUsd,
       subtitle:
-        args.reserveYield?.principalUsd !== undefined
+        args.reserveYield !== null
           ? "sUSDS actual yield; AUSD and stETH forecast-only"
           : "Reserve actuals from sUSDS snapshots",
       actualPartialReasons: reserveActualPartialReasons,

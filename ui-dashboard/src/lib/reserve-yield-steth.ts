@@ -27,7 +27,7 @@ function validateStethMeta(meta: unknown): void {
   }
 }
 
-export function parseLidoStethApyPercent(payload: unknown): number {
+export function parseLidoStethAprPercent(payload: unknown): number {
   if (!isRecord(payload)) {
     throw new Error("Lido stETH APR response was not an object");
   }
@@ -41,8 +41,8 @@ export function parseLidoStethApyPercent(payload: unknown): number {
   return apr;
 }
 
-export async function fetchLidoStethApy(fetchImpl: FetchImpl): Promise<number> {
+export async function fetchLidoStethApr(fetchImpl: FetchImpl): Promise<number> {
   return fetchJson(fetchImpl, LIDO_STETH_APR_URL).then(
-    parseLidoStethApyPercent,
+    parseLidoStethAprPercent,
   );
 }

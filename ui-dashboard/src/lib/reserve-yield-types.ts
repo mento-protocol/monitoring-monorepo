@@ -81,7 +81,7 @@ export type ForecastApyBySymbol = {
   ausdNetMentoApyPercent: number | null;
   susdsApyPercent: number | null;
   susdsApySource: SkySavingsRateSource | null;
-  stethApyPercent: number | null;
+  stethAprPercent: number | null;
 };
 
 export type ForecastTotals = {
