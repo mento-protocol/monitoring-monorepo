@@ -71,6 +71,9 @@ jobs:
             ui:
               - ui-dashboard/**
               - shared-config/**
+              # GraphQL contract test validates dashboard queries against the
+              # indexer schema, so schema-only PRs must run the ui job.
+              - indexer-envio/schema.graphql
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
@@ -98,6 +101,9 @@ jobs:
             bridge:
               - metrics-bridge/**
               - shared-config/**
+              # GraphQL contract test validates bridge queries against the
+              # indexer schema, so schema-only PRs must run the bridge job.
+              - indexer-envio/schema.graphql
               - scripts/eslint-baseline-diff.mjs
               - cloudbuild.yaml
               - .gcloudignore
@@ -808,6 +814,10 @@ jobs:
         run: pnpm skew:check
       - name: Version skew checker tests
         run: pnpm skew:check:test
+      - name: Deploy root-anchor regression suite
+        # Verifies deploy wrappers run deploy-sensitive commands from the same
+        # repo root that scripts/lib/deploy-guard.sh checked for cleanliness.
+        run: node scripts/check-deploy-root-anchors.test.mjs
       - name: Terraform stack registry suite
         run: pnpm tf:test
       - name: ESLint baseline-diff semantic suite
