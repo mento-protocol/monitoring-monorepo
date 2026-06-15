@@ -285,9 +285,11 @@ Run a small battery keyed on the target address (all fields verified against `in
   }
 }
 {
-  # CDP operation HISTORY (open/adjust/close/liquidation), not just currently-owned troves — a target that
-  # opened then closed/was-liquidated owns no Trove now but is all over TroveOperationEvent.
-  TroveOperationEvent(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, limit: 1000) {
+  # CDP operation HISTORY (open/adjust/close), not just currently-owned troves — a target that opened then
+  # closed owns no Trove now but is all over TroveOperationEvent. NOTE: the indexer records LIQUIDATE in a
+  # separate LiquidationEvent (keyed by trove/instance, not owner address), so liquidations are NOT in this
+  # entity — check LiquidationEvent by troveId if the target's trove may have been liquidated.
+  TroveOperationEvent(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ timestamp: desc }, { id: desc }], limit: 1000) {
     id
     troveId
     operation
@@ -298,6 +300,13 @@ Run a small battery keyed on the target address (all fields verified against `in
 {
   LiquidityPosition(where: { address: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
     poolId
+  }
+}
+{
+  # sUSDS yield ledger (Ethereum-only in this indexer) — keyed by `wallet`. Mirrors the coverage probe so
+  # an Ethereum target's position is actually queried, not just probed.
+  SusdsPosition(where: { wallet: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
+    id
   }
 }
 {
