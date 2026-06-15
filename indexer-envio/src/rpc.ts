@@ -134,7 +134,18 @@ export async function getPoolsByFeed(
   const pools = await context.Pool.getWhere({
     referenceRateFeedID: { _eq: rateFeedID },
   });
-  return pools.filter((p) => p.chainId === chainId).map((p) => p.id);
+  // The chainId filter is the only thing preventing a cross-chain update when a
+  // rateFeedID resolves on more than one chain (plausible with NTT-deterministic
+  // deploys). Today that never drops rows; log if it ever does so the collision
+  // is visible in Loki instead of silently bleeding oracle writes across chains.
+  const matched = pools.filter((p) => p.chainId === chainId);
+  if (matched.length !== pools.length) {
+    context.log.warn(
+      `[getPoolsByFeed] rateFeedID ${rateFeedID} resolves on multiple chains; ` +
+        `dropped ${pools.length - matched.length} cross-chain pool(s) for chain ${chainId}`,
+    );
+  }
+  return matched.map((p) => p.id);
 }
 
 export async function updatePoolsOracleExpiry(

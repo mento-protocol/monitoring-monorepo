@@ -639,6 +639,11 @@ indexer.onEvent(
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
     const troveId = normalizeTroveTokenId(event.params._troveId);
+    // Guard before the write: preload is the read-only cache-warming pass, and
+    // this handler reads nothing it needs to warm (the row is built purely from
+    // event params). Writing during preload only duplicated the set() the
+    // processing pass already performs.
+    if (context.isPreload) return;
     const pendingUpdate = {
       id: pendingTroveKey(
         event.chainId,
@@ -660,7 +665,6 @@ indexer.onEvent(
       logIndex: event.logIndex,
     };
     context.PendingBatchedTroveUpdate.set(pendingUpdate);
-    if (context.isPreload) return;
   },
 );
 
