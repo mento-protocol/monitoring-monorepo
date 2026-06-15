@@ -97,15 +97,19 @@ jobs:
           #    template's instructional comment can't satisfy the check.
           #    The section is OPTIONAL: a body with no Deferrals heading at all
           #    passes (nothing was deferred). But a near-miss heading
-          #    (`### Deferrals`, `## Deferrals:`, `##Deferrals`) must NOT
-          #    silently pass — it falls to the strict per-item validation only
-          #    when the heading is EXACTLY `## Deferrals`; otherwise it's an
-          #    error so an unlinked deferred section can't slip through. The
-          #    near-miss matcher uses `[[:space:]]*` (not `+`) so a missing
-          #    space after the hashes (`##Deferrals`) is still caught.
+          #    (`### Deferrals`, `## Deferrals:`, `##Deferrals`,
+          #    `## Deferrals.`, `## Deferrals — later`) must NOT silently pass
+          #    — it falls to the strict per-item validation only when the
+          #    heading is EXACTLY `## Deferrals`; otherwise it's an error so an
+          #    unlinked deferred section can't slip through. The near-miss
+          #    matcher allows any `#`-run with optional space, then `Deferrals`
+          #    followed by ANY non-word character or EOL — so a missing space
+          #    (`##Deferrals`) and any trailing punctuation/words are all
+          #    caught, while a genuinely different word (`## DeferralsX`,
+          #    `## Deferred work`) is not flagged.
           if grep -qE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$fence_stripped"; then
             : # canonical heading — fall through to strict per-item validation below
-          elif grep -qE '^#{1,6}[[:space:]]*Deferrals([[:space:]]|:|$)' <<<"$fence_stripped"; then
+          elif grep -qE '^#{1,6}[[:space:]]*Deferrals([^[:alnum:]_]|$)' <<<"$fence_stripped"; then
             echo "::error::PR description has a Deferrals-style heading that isn't exactly '## Deferrals'. The section heading must be exactly '## Deferrals' (H2, no trailing punctuation), or remove it entirely if nothing was knowingly deferred. See AGENTS.md 'Deferral rule'."
             exit 1
           else
