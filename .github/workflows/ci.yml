@@ -73,8 +73,10 @@ jobs:
               - ui-dashboard/**
               - shared-config/**
               # GraphQL contract test validates dashboard queries against the
-              # indexer schema, so schema-only PRs must run the ui job.
+              # indexer schema, so schema-only PRs must run the ui job. The
+              # shared Envio stub fragment feeds the same buildSchema() call.
               - indexer-envio/schema.graphql
+              - scripts/envio-schema-stubs.graphql
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
@@ -103,8 +105,10 @@ jobs:
               - metrics-bridge/**
               - shared-config/**
               # GraphQL contract test validates bridge queries against the
-              # indexer schema, so schema-only PRs must run the bridge job.
+              # indexer schema, so schema-only PRs must run the bridge job. The
+              # shared Envio stub fragment feeds the same buildSchema() call.
               - indexer-envio/schema.graphql
+              - scripts/envio-schema-stubs.graphql
               - scripts/eslint-baseline-diff.mjs
               - cloudbuild.yaml
               - .gcloudignore

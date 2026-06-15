@@ -28,15 +28,13 @@ import {
   parse,
 } from "graphql";
 
-// Envio framework extensions not in standard GraphQL spec.
-// `repeatable` is required because @index is used multiple times on the same
-// type (once per field, or once per composite-index declaration).
-const ENVIO_STUBS = `
-scalar BigInt
-scalar Bytes
-directive @index(fields: [String!]) repeatable on OBJECT | FIELD_DEFINITION
-directive @config(precision: Int) repeatable on FIELD_DEFINITION
-`;
+// Envio framework SDL extensions not in the standard GraphQL spec, needed so
+// the standard parser accepts the Envio schema. Single source of truth shared
+// with the dashboard + metrics-bridge GraphQL contract tests.
+const ENVIO_STUBS = readFileSync(
+  new URL("./envio-schema-stubs.graphql", import.meta.url),
+  "utf8",
+);
 
 const [, , baseFile, headFile] = process.argv;
 
