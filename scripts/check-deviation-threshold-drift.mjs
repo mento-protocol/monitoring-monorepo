@@ -106,10 +106,57 @@ function allContextPercentLiteralsMatch(fragment, context, expected) {
   );
 }
 
+function findBalancedBlock(source, openBraceIndex) {
+  let depth = 0;
+  for (let index = openBraceIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(openBraceIndex, index + 1);
+    }
+  }
+  return null;
+}
+
+function extractBlocks(source, blockType) {
+  const blocks = [];
+  const pattern = new RegExp(`(?:^|\\n)\\s*${blockType}\\s*\\{`, "g");
+  for (const match of source.matchAll(pattern)) {
+    const openBraceIndex = source.indexOf("{", match.index);
+    const block = findBalancedBlock(source, openBraceIndex);
+    if (block !== null) blocks.push(block);
+  }
+  return blocks;
+}
+
+function extractNamedRuleBlock(source, ruleName) {
+  return (
+    extractBlocks(source, "rule").find((block) =>
+      new RegExp(`\\bname\\s*=\\s*"${escapeRegex(ruleName)}"`).test(block),
+    ) ?? null
+  );
+}
+
+function extractDataBlockByRefId(source, refId) {
+  return (
+    extractBlocks(source, "data").find((block) =>
+      new RegExp(`\\bref_id\\s*=\\s*"${escapeRegex(refId)}"`).test(block),
+    ) ?? null
+  );
+}
+
+function extractDeviationWarningThresholdBlock(source) {
+  const rule = extractNamedRuleBlock(source, "Deviation Breach");
+  if (rule === null) return null;
+  return extractDataBlockByRefId(rule, "threshold");
+}
+
 function extractThreshold(source, exportName) {
   const match = source.match(
     new RegExp(
-      `export\\s+const\\s+${exportName}\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)\\s*;`,
+      `^\\s*export\\s+const\\s+${exportName}\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)\\s*;`,
+      "m",
     ),
   );
   if (!match) {
@@ -186,6 +233,7 @@ function requiredChecks(thresholds) {
     {
       file: FPMM_RULES_PATH,
       description: "warning Grafana threshold evaluator mirrors tolerance",
+      extract: extractDeviationWarningThresholdBlock,
       pattern: new RegExp(
         `evaluator\\s*=\\s*\\{\\s*params\\s*=\\s*\\[${tolerance}\\]\\s*,\\s*type\\s*=\\s*"gt"`,
       ),

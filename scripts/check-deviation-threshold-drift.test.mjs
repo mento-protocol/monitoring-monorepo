@@ -33,6 +33,7 @@ function sources({
   bannerTolerance = tolerance,
   bannerCritical = critical,
   extraMainSource = "",
+  extraFpmmsSource = "",
 } = {}) {
   return {
     [THRESHOLDS_PATH]: `export const DEVIATION_TOLERANCE_RATIO = ${tolerance};
@@ -55,14 +56,25 @@ deviation_critical_summary_annotation = <<-EOT
   Pool above ${criticalFallbackThresholdPercent}% threshold.
 {{- end -}}
 EOT
-${extraMainSource}
-`,
+	${extraMainSource}
+	`,
     [FPMM_RULES_PATH]: `
-# DEVIATION THRESHOLDS -- the bare \`${bannerTolerance}\` (warn) and \`${bannerCritical}\` (critical) literals
-conditions = [{
-  evaluator = { params = [${evaluatorTolerance}], type = "gt" }
-}]
-`,
+	${extraFpmmsSource}
+	# DEVIATION THRESHOLDS -- the bare \`${bannerTolerance}\` (warn) and \`${bannerCritical}\` (critical) literals
+	resource "grafana_rule_group" "fpmms_deviation" {
+	  rule {
+	    name = "Deviation Breach"
+	    data {
+	      ref_id = "threshold"
+	      model = jsonencode({
+	        conditions = [{
+	          evaluator = { params = [${evaluatorTolerance}], type = "gt" }
+	        }]
+	      })
+	    }
+	  }
+	}
+	`,
   };
 }
 
@@ -229,6 +241,55 @@ test("scopes PromQL threshold checks to the intended locals", () => {
   assert.equal(result.failures.length, 2);
   assert.match(result.failures.join("\n"), /open-breach peak above critical/);
   assert.match(result.failures.join("\n"), /current ratio above critical/);
+});
+
+test("ignores commented threshold export statements", () => {
+  const fixture = sources({
+    tolerance: "1.02",
+    mainTolerance: "1.02",
+    annotationTolerancePercent: "2",
+    evaluatorTolerance: "1.02",
+    bannerTolerance: "1.02",
+  });
+  fixture[THRESHOLDS_PATH] = `// export const DEVIATION_TOLERANCE_RATIO = 1.01;
+export const DEVIATION_TOLERANCE_RATIO = 1.02;
+export const DEVIATION_CRITICAL_RATIO = 1.05;
+`;
+
+  const result = validateDeviationThresholdDrift(fixture);
+
+  assert.deepEqual(result.failures, []);
+  assert.deepEqual(result.thresholds, { tolerance: "1.02", critical: "1.05" });
+});
+
+test("scopes the warning evaluator check to the Deviation Breach threshold block", () => {
+  const result = validateDeviationThresholdDrift(
+    sources({
+      tolerance: "1.02",
+      mainTolerance: "1.02",
+      annotationTolerancePercent: "2",
+      evaluatorTolerance: "1.01",
+      bannerTolerance: "1.02",
+      extraFpmmsSource: `
+resource "grafana_rule_group" "fpmms_oracle" {
+  rule {
+    name = "Oracle Liveness"
+    data {
+      ref_id = "threshold"
+      model = jsonencode({
+        conditions = [{
+          evaluator = { params = [1.02], type = "gt" }
+        }]
+      })
+    }
+  }
+}
+`,
+    }),
+  );
+
+  assert.equal(result.failures.length, 1);
+  assert.match(result.failures.join("\n"), /warning Grafana threshold/);
 });
 
 test("does not accept partial numeric literal matches", () => {
