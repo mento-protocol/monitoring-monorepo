@@ -58,25 +58,27 @@ Run these in order. Each step maps onto a section of the template — fill that 
 ```bash
 ADDR=$(echo "0x…" | tr 'A-Z' 'a-z')   # always lowercase the storage key
 CHAIN=celo                            # default; override if user said otherwise
-CHAIN_ID=42220                        # Celo. Monad=143, Polygon=137, Ethereum=1. Thread this everywhere.
 DATE=$(date -u +%F)
 mkdir -p .investigations
+
+# Derive EVERY chain-scoped knob from $CHAIN in ONE place so they never drift apart —
+# a non-Celo investigation must not silently read Celo data. Thread these everywhere:
+#   CHAIN_ID → Hasura `chainId` filters + Sim `--chain-ids`
+#   RPC      → every `cast` call (head block, storage, codehash, sanctions oracle)
+#   DUNE_NS  → Dune table prefix (the `<chain>.` in `<chain>.transactions`, etc.)
+case "$CHAIN" in
+  celo)     CHAIN_ID=42220; RPC=https://forno.celo.org;    DUNE_NS=celo ;;
+  monad)    CHAIN_ID=143;   RPC=https://rpc.monad.xyz;     DUNE_NS=monad ;;    # current Monad mainnet full node
+  polygon)  CHAIN_ID=137;   RPC=https://polygon-rpc.com;   DUNE_NS=polygon ;;
+  ethereum) CHAIN_ID=1;     RPC=https://eth.llamarpc.com;  DUNE_NS=ethereum ;;
+  *)        CHAIN_ID=<id>;  RPC=<full-node RPC for $CHAIN>; DUNE_NS=<chain> ;;
+esac
 ```
 
 **Capture provenance up front** — mutable-state reads (storage, balances, prices) are only reproducible if pinned to a block. Record these and put them in the report's provenance footer:
 
 ```bash
-# RPC MUST match $CHAIN — every cast call below (head block, storage reads, codehash,
-# sanctions oracle) executes against whatever this points at. Default Celo; override per
-# the target chain (Monad/Polygon/Ethereum full-node RPC) so a non-Celo investigation
-# isn't silently scoped to Celo. See the chain doctrine.
-case "$CHAIN" in
-  celo)    RPC=https://forno.celo.org ;;
-  monad)   RPC=https://rpc.monad.xyz ;;          # or the current Monad mainnet full node
-  polygon) RPC=https://polygon-rpc.com ;;
-  *)       RPC=<full-node RPC for $CHAIN> ;;
-esac
-HEAD_BLOCK=$(cast block-number --rpc-url $RPC)   # the block your storage/balance reads are "as of"
+HEAD_BLOCK=$(cast block-number --rpc-url $RPC)   # $RPC from Step 1's case switch; the block reads are "as of"
 cast --version                                   # tool version, for the footer
 # Note the RPC endpoint, $HEAD_BLOCK, and the UTC timestamp of each Sim/DefiLlama query.
 ```
@@ -329,7 +331,7 @@ Then attribution. Use the `arkham` skill (project-scoped) for the **cross-chain 
 
    ```sql
    SELECT block_time, "from", value, hash
-   FROM celo.transactions
+   FROM <chain>.transactions
    WHERE "to" = LOWER('<addr>')
    ORDER BY block_time ASC
    LIMIT 5;
@@ -356,11 +358,11 @@ The skill historically walked exactly one hop to the funder and stopped. The hig
 -- (1) DEPLOYER FAN-OUT: every contract a deployer created.
 --     For CREATE2 the trace "from" is the FACTORY — recurse to the factory's own deployer.
 SELECT address, block_time, length(code) AS code_len, tx_hash
-FROM celo.creation_traces WHERE "from" = <deployer> ORDER BY block_time ASC;
+FROM <chain>.creation_traces WHERE "from" = <deployer> ORDER BY block_time ASC;
 
 -- (2) COMMON-FUNDER CLUSTERING: every sibling EOA the operator's gas-refill EOA funded.
 SELECT "to" AS funded, count(*) n, min(block_time) first_fund
-FROM celo.transactions WHERE "from" = <funder> AND value > 0 GROUP BY 1 ORDER BY n DESC;
+FROM <chain>.transactions WHERE "from" = <funder> AND value > 0 GROUP BY 1 ORDER BY n DESC;
 ```
 
 ```bash
@@ -409,16 +411,16 @@ Before concluding "no interesting getters", do three things:
 
 ```sql
 -- ACTIVITY CLOCK: flat 24h = automated bot; a dead-hours gap = operator's local night.
--- Report as a UTC band, never a country. MUST be an EOA ("from"); a contract returns 0 rows (use celo.traces).
-SELECT hour(block_time) utc_hour, count(*) FROM celo.transactions WHERE "from" = <eoa> GROUP BY 1 ORDER BY 1;
+-- Report as a UTC band, never a country. MUST be an EOA ("from"); a contract returns 0 rows (use <chain>.traces).
+SELECT hour(block_time) utc_hour, count(*) FROM <chain>.transactions WHERE "from" = <eoa> GROUP BY 1 ORDER BY 1;
 
 -- NONCE/ORIGIN: sequential nonces start at 0, so a chain-native key has max_nonce = count-1.
 --   min_nonce=0 AND max_nonce = count-1 → Celo-native key (no gaps).  max_nonce >> count-1 → key reused on
 --   OTHER chains (its first Celo tx is NOT its birth — pivot to Arkham/Sim there; the cross-chain identity lever).
-SELECT min(nonce), max(nonce), count(*), min(block_time), max(block_time) FROM celo.transactions WHERE "from" = <eoa>;
+SELECT min(nonce), max(nonce), count(*), min(block_time), max(block_time) FROM <chain>.transactions WHERE "from" = <eoa>;
 
 -- APPROVAL GRAPH: topic1=owner (delegation OUT → routers it trusts), topic2=spender (delegation IN → who can move its funds).
-SELECT * FROM celo.logs
+SELECT * FROM <chain>.logs
 WHERE topic0 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925   -- Approval
   AND topic1 = <32-byte left-padded owner> LIMIT 100;   -- events are grant HISTORY; for live use eth_call allowance()
 ```
