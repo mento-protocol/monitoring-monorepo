@@ -175,7 +175,9 @@ curl -s "$HASURA" -H 'content-type: application/json' \
 #     bridges — so a quiet/new chain whose activity is non-swap isn't mis-marked. (BridgeTransfer keys on
 #     sourceChainId/destChainId, not chainId.)
 curl -s "$HASURA" -H 'content-type: application/json' \
-  --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} LiquidityEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StableSupplyChangeEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} RebalanceEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} BridgeTransfer(where:{_or:[{sourceChainId:{_eq:$CHAIN_ID}},{destChainId:{_eq:$CHAIN_ID}}]},limit:1){id} }\"}" | jq .
+  --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} LiquidityEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StableSupplyChangeEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} RebalanceEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} BridgeTransfer(where:{_or:[{sourceChainId:{_eq:$CHAIN_ID}},{destChainId:{_eq:$CHAIN_ID}}]},limit:1){id} SusdsPosition(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} }\"}" | jq .
+# (Ethereum is sUSDS-only in this indexer — that's why SusdsPosition is in the probe; without it an
+#  ethereum target would always look NOT-COVERED despite the indexer serving its sUSDS ledger.)
 # Mark the indexer NOT-COVERED for $CHAIN only if EVERY entity above (and the full Step 1.6 battery) is
 # empty AND $CHAIN isn't in the indexer's configured network list — see the `networks:` section of
 # `indexer-envio/config.multichain.mainnet.yaml`. Otherwise an empty result is EMPTY (a real signal).
@@ -280,6 +282,17 @@ Run a small battery keyed on the target address (all fields verified against `in
     coll
     debt
     status
+  }
+}
+{
+  # CDP operation HISTORY (open/adjust/close/liquidation), not just currently-owned troves — a target that
+  # opened then closed/was-liquidated owns no Trove now but is all over TroveOperationEvent.
+  TroveOperationEvent(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, limit: 1000) {
+    id
+    troveId
+    operation
+    collChange
+    debtChange
   }
 }
 {
@@ -544,7 +557,7 @@ esac
 
 (Use `networks/$GT_NS/tokens/{addr}` for token price/FDV in Steps 5/5.5 too. Set `GT_NS` to match `$CHAIN` — GeckoTerminal uses its own slugs, so confirm against `/api/v2/networks` rather than assuming the chain name.)
 
-**MEV classification across chains.** The Celo MEV-detection ecosystem is thin (EigenPhi/zeromev are Ethereum-only). Two moves: (a) borrow their **taxonomy** (arb / sandwich / backrun / JIT / liquidation) as vocabulary and derive the classification yourself from the indexer + Dune `$DUNE_NS.dex.trades` (the target chain's table — `celo.dex.trades` / `monad.dex.trades` / …; group by `tx_hash`, detect ≥2-leg cycles, cross-project legs, sandwich via `block_number` ordering); (b) if the operator runs the same strategy on Ethereum/L2s, run it through EigenPhi/zeromev **there** (cross-chain identity leg) and cite the classification as corroboration. See the Tooling matrix.
+**MEV classification across chains.** The Celo MEV-detection ecosystem is thin (EigenPhi/zeromev are Ethereum-only). Two moves: (a) borrow their **taxonomy** (arb / sandwich / backrun / JIT / liquidation) as vocabulary and derive the classification yourself from the indexer + Dune's unified `dex.trades` spellbook filtered `WHERE blockchain = '$DUNE_NS'` (it's ONE cross-chain table with a `blockchain` column — there is no per-chain `celo.dex.trades`; group by `tx_hash`, detect ≥2-leg cycles, cross-project legs, sandwich via `block_number` ordering); (b) if the operator runs the same strategy on Ethereum/L2s, run it through EigenPhi/zeromev **there** (cross-chain identity leg) and cite the classification as corroboration. See the Tooling matrix.
 
 ### Step 7 — Coverage and dead ends
 
@@ -575,7 +588,7 @@ if [ "$CHAIN" = celo ]; then   # extend once you've verified the oracle is deplo
 fi
 ```
 
-Caveat to write into the report: the **per-chain Celo oracle's SDN set is not identical to Ethereum's** — a `false` on Celo is not an authoritative global negative. For a definitive verdict also hit the chain-agnostic free path (works for any `0x` address regardless of chain): TRM's keyless `POST https://api.trmlabs.com/public/v1/sanctions/screening` `[{"address":"0x…"}]`, or set-membership against the static OFAC list at `raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses`. For scam/phishing (not sanctions), cross-check counterparties against the Scam Sniffer blacklist and — on chains it covers (Monad `143`, not Celo) — GoPlus; see the Tooling matrix for coverage. Most Mento targets return clean; the value is the rare hit and a citable verified negative for the audit trail.
+Caveat to write into the report: the **per-chain Celo oracle's SDN set is not identical to Ethereum's** — a `false` on Celo is not an authoritative global negative. For a definitive verdict also hit the chain-agnostic free path (works for any `0x` address regardless of chain): TRM's keyless `POST https://api.trmlabs.com/public/v1/sanctions/screening` `[{"address":"0x…"}]`, or set-membership against an actual static OFAC list file, e.g. `raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/main/data/sanctioned_addresses_ETH.txt` (one 0x address per line; covers EVM addresses regardless of target chain). For scam/phishing (not sanctions), cross-check counterparties against the Scam Sniffer blacklist and — on chains it covers (Monad `143`, not Celo) — GoPlus; see the Tooling matrix for coverage. Most Mento targets return clean; the value is the rare hit and a citable verified negative for the audit trail.
 
 ### Step 8 — Bottom line
 
