@@ -1343,6 +1343,18 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
+    scripts/envio-schema-stubs.graphql)
+      # Shared Envio SDL stub fragment, read at test time by BOTH the dashboard
+      # and metrics-bridge GraphQL contract suites (and scripts/schema-diff.mjs)
+      # to make buildSchema() parse. A stub-only edit can break those contract
+      # tests, so route it to both packages' quality commands (test:coverage
+      # runs the contract suites) — the local mirror of the ui/bridge CI
+      # paths-filters. add_package_quality_commands omits test:browser, so this
+      # stays light.
+      add_surface "scripts"
+      add_package_quality_commands "@mento-protocol/ui-dashboard" "shared Envio schema stub changed (dashboard GraphQL contract test reads it)"
+      add_package_quality_commands "@mento-protocol/metrics-bridge" "shared Envio schema stub changed (bridge GraphQL contract test reads it)"
+      ;;
     scripts/*|tools/*)
       add_surface "scripts"
       ;;
