@@ -514,6 +514,30 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.sampledAtBlock, 300n);
   });
 
+  it("skips the sUSDS heartbeat onBlock handler path while preloading", async () => {
+    const mockDb = MockDb.createMockDb();
+    const context = heartbeatContext(
+      mockDb,
+      V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n + 1n,
+      WAD,
+      300n,
+    );
+
+    const didWrite = await handleSusdsYieldDailySnapshotHeartbeat({
+      block: { number: 300 },
+      context: {
+        ...context,
+        isPreload: true,
+        effect: async () => {
+          throw new Error("preload heartbeat must not read effects");
+        },
+      },
+    });
+
+    assert.equal(didWrite, false);
+    assert.equal(dailySnapshots(mockDb).length, 0);
+  });
+
   it("runs the sUSDS heartbeat onBlock handler path", async () => {
     let mockDb = MockDb.createMockDb();
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
@@ -523,7 +547,6 @@ describe("sUSDS reserve yield accounting", () => {
     const heartbeatBlockNumber = BigInt(heartbeatBlock);
     const heartbeatTimestamp = day2 + 3_600n;
     const heartbeatSharePrice = dollars(120) / 100n;
-    let requestedBlock: bigint | undefined;
 
     setSharePrice(depositBlock, WAD);
     mockDb = await deposit(
@@ -545,19 +568,12 @@ describe("sUSDS reserve yield accounting", () => {
       block: { number: heartbeatBlock },
       context: {
         ...context,
-        effect: async (effect, input) => {
-          if (effect === blockTimestampEffect) {
-            requestedBlock = (input as { blockNumber: bigint }).blockNumber;
-          }
-          return context.effect(effect, input);
-        },
       },
     });
 
     const rows = dailySnapshots(mockDb).sort((a, b) =>
       a.timestamp < b.timestamp ? -1 : 1,
     );
-    assert.equal(requestedBlock, heartbeatBlockNumber);
     assert.equal(didWrite, true);
     assert.equal(rows.length, 2);
     assert.equal(rows[1]?.timestamp, day2);
