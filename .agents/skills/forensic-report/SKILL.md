@@ -171,12 +171,14 @@ HASURA=https://indexer.hyperindex.xyz/2f3dd15/v1/graphql   # public, no key, POS
 # (a) Liveness: confirm the endpoint serves at all.
 curl -s "$HASURA" -H 'content-type: application/json' \
   --data '{"query":"{ SwapEvent(limit:1){ id } }"}' | jq .
-# (b) Chain coverage: probe several core entity types for $CHAIN_ID — a quiet/new chain may have
-#     bridge/CDP/supply activity but zero swaps, so DON'T equate 0 SwapEvent rows with NOT-COVERED.
+# (b) Chain coverage: probe a SPREAD of activity areas for $CHAIN_ID — swaps, LP, supply, rebalances, and
+#     bridges — so a quiet/new chain whose activity is non-swap isn't mis-marked. (BridgeTransfer keys on
+#     sourceChainId/destChainId, not chainId.)
 curl -s "$HASURA" -H 'content-type: application/json' \
-  --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} LiquidityEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StableSupplyChangeEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} }\"}" | jq .
-# Mark the indexer NOT-COVERED for $CHAIN only if the FULL Step 1.6 battery (all entity types) is empty
-# AND $CHAIN isn't in the indexer's configured chain list; otherwise an empty result is EMPTY (real signal).
+  --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} LiquidityEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StableSupplyChangeEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} RebalanceEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} BridgeTransfer(where:{_or:[{sourceChainId:{_eq:$CHAIN_ID}},{destChainId:{_eq:$CHAIN_ID}}]},limit:1){id} }\"}" | jq .
+# Mark the indexer NOT-COVERED for $CHAIN only if EVERY entity above (and the full Step 1.6 battery) is
+# empty AND $CHAIN isn't in the indexer's configured network list — see the `networks:` section of
+# `indexer-envio/config.multichain.mainnet.yaml`. Otherwise an empty result is EMPTY (a real signal).
 ```
 
 Run a small battery keyed on the target address (all fields verified against `indexer-envio/schema.graphql`). `caller` = `tx.from` (the signing EOA — the volume-attribution primary key); `sender`/`brokerCaller` = `msg.sender` to the pool/broker (often a router); `txTo` = entry-point contract (identifies the aggregator router). All three are in each row, so you disambiguate EOA-vs-router on the spot.
@@ -451,7 +453,7 @@ WHERE topic0 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b92
   AND topic1 = <32-byte left-padded owner> LIMIT 100;   -- events are grant HISTORY; for live use eth_call allowance()
 ```
 
-If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real human signers — `cast call "$ADDR" 'getOwners()(address[])' --rpc-url "$RPC"` + `'getThreshold()(uint256)'` (use the in-scope `$ADDR`/`$RPC`, not a bare `<safe>` token) — and link Safes by intersecting owner sets. Free hosted Safe tx-service (keyless reads) is per-chain — `https://api.safe.global/tx-service/<safe-slug>/api/v1/safes/<safe>/`, where `<safe-slug>` is the chain's Safe short-name (celo→`celo`, polygon→`pol`, ethereum→`eth`); not every chain has one (Monad doesn't), so don't copy the `celo` slug for a non-Celo target. This exposes the people behind a treasury/managed-bot the proxy address would otherwise hide.
+If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real human signers and policy — `cast call "$ADDR" 'getOwners()(address[])' --rpc-url "$RPC"` and `cast call "$ADDR" 'getThreshold()(uint256)' --rpc-url "$RPC"` (two complete commands; use the in-scope `$ADDR`/`$RPC`, not a bare `<safe>` token) — and link Safes by intersecting owner sets. Free hosted Safe tx-service (keyless reads) is per-chain — `https://api.safe.global/tx-service/<safe-slug>/api/v1/safes/<safe>/`, where `<safe-slug>` is the chain's Safe short-name (celo→`celo`, polygon→`pol`, ethereum→`eth`); not every chain has one (Monad doesn't), so don't copy the `celo` slug for a non-Celo target. This exposes the people behind a treasury/managed-bot the proxy address would otherwise hide.
 
 ### Step 4 — Transaction anatomy
 
