@@ -37,6 +37,10 @@ export interface PoolRow {
   // (`indexer-envio/schema.graphql:95`), so this field is always populated
   // in the GraphQL response.
   rebalancerAddress: string;
+  // "" = FPMM (native pool), non-empty hex = VP (VirtualPool healed from an
+  // FPMM). Keep rows where !wrappedExchangeId; skip VPs in updateMetrics().
+  // Schema: `Pool.wrappedExchangeId: String! @index` (schema.graphql:181).
+  wrappedExchangeId: string;
 }
 
 export interface BridgePoolsResponse {

@@ -69,6 +69,7 @@ function eligiblePool(overrides: Partial<PoolRow> = {}): PoolRow {
     token0Decimals: 18,
     token1Decimals: 18,
     rebalancerAddress: "0x0000000000000000000000000000000000000beef",
+    wrappedExchangeId: "",
     ...overrides,
   };
 }

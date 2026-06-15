@@ -1714,3 +1714,54 @@ describe("label-shape contract: alert template ↔ metric labels", () => {
     expect(labelNamesOf(counters.pollErrors)).toEqual(["kind"]);
   });
 });
+
+describe("updateMetrics — VirtualPool exclusion", () => {
+  const DEFAULT_NOW_SECONDS = 1713200100;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(DEFAULT_NOW_SECONDS * 1000));
+    register.resetMetrics();
+    resetDeviationAlertStateForTests();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("publishes gauges for a native FPMM pool (empty wrappedExchangeId)", async () => {
+    const pool = makePool({ wrappedExchangeId: "" });
+    updateMetrics([pool], DEFAULT_NOW_SECONDS);
+    const values = await getMetricValues(register, "mento_pool_health_status");
+    expect(values.some((v) => v.labels.pool_id === pool.id)).toBe(true);
+  });
+
+  it("publishes no gauges for a healed VirtualPool (non-empty wrappedExchangeId, source fpmm_factory)", async () => {
+    // A VP healed from an FPMM retains source="fpmm_factory" until resync, so
+    // the base query's source filter is insufficient. The bridge must also check
+    // wrappedExchangeId to block phantom gauge publication.
+    const vp = makePool({
+      id: "42220-0x000000000000000000000000000000000000dead",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      source: "fpmm_factory",
+    });
+    updateMetrics([vp], DEFAULT_NOW_SECONDS);
+    const values = await getMetricValues(register, "mento_pool_health_status");
+    expect(values.some((v) => v.labels.pool_id === vp.id)).toBe(false);
+  });
+
+  it("publishes gauges only for FPMMs when the list is mixed", async () => {
+    const fpmm = makePool({ wrappedExchangeId: "" });
+    const vp = makePool({
+      id: "42220-0x000000000000000000000000000000000000dead",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      source: "fpmm_factory",
+    });
+    updateMetrics([fpmm, vp], DEFAULT_NOW_SECONDS);
+    const values = await getMetricValues(register, "mento_pool_health_status");
+    expect(values.some((v) => v.labels.pool_id === fpmm.id)).toBe(true);
+    expect(values.some((v) => v.labels.pool_id === vp.id)).toBe(false);
+  });
+});

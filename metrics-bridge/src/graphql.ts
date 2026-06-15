@@ -14,6 +14,14 @@ const REQUEST_TIMEOUT_MS = 15_000;
 // by the indexer's jump computation since the initial Oracle Jump alert), so
 // degraded mode keeps publishing the current-price gauge — only the
 // previous-price pair drops out.
+//
+// Companion-query exception: `wrappedExchangeId` stays on the BASE query even
+// though it is "new" relative to most callers. It is load-bearing for
+// CORRECTNESS, not just annotation — `isFpmmPool` filters healed VirtualPools
+// on it. Missing field → filter can't run → VPs leak as phantom FPMM gauges,
+// which is WORSE than the base query failing loudly. A companion query with a
+// graceful `""` fallback would silently re-introduce that bug. Schema-stable
+// since VP Phase 2 (see PR #853); fail-loud is the correct posture here.
 const BRIDGE_POOLS_QUERY = gql`
   query BridgePools {
     Pool(where: { source: { _like: "%fpmm%" } }) {
@@ -22,6 +30,10 @@ const BRIDGE_POOLS_QUERY = gql`
       token0
       token1
       source
+      # BASE query (not companion): load-bearing for VP exclusion — "" = FPMM, non-empty = healed VP.
+      # A companion "wrappedExchangeId" with graceful "" fallback would silently let VPs leak as
+      # phantom FPMM gauges. Fail-loud (base query error) is the correct posture here.
+      wrappedExchangeId
       healthStatus
       oracleOk
       oracleTimestamp

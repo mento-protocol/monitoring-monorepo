@@ -118,6 +118,23 @@ describe("eligibleForProbe — gating mirrors the critical alert rule", () => {
     expect(eligibleForProbe([pool])).toEqual([]);
   });
 
+  it("excludes healed VirtualPools (non-empty wrappedExchangeId) even with a rebalancerAddress and active critical breach", () => {
+    // A pool that was originally an FPMM and has been healed to a VP retains
+    // its `source="fpmm_factory"` label until the next re-sync, so it can pass
+    // the Hasura `_like "%fpmm%"` filter and appear in the probe input. The
+    // `wrappedExchangeId` guard is the canonical VP discriminator: non-empty
+    // means VP — skip to avoid emitting a phantom `mento_pool_rebalance_blocked`
+    // gauge for a pool that no longer fires the Deviation Breach Critical alert.
+    const healedVp = makePool({
+      wrappedExchangeId:
+        "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.20",
+      rebalancerAddress: "0x0000000000000000000000000000000000000beef",
+    });
+    expect(eligibleForProbe([healedVp])).toEqual([]);
+  });
+
   // Boundary cases — locks the `>` (NOT `>=`) semantics. The alert
   // rule's threshold is strict >, so the probe MUST stay aligned to
   // avoid annotating pools that aren't actually firing the critical
