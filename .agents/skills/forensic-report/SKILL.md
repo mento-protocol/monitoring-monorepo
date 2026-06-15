@@ -284,7 +284,9 @@ Run a small battery keyed on the target address (all fields verified against `in
   }
 }
 {
-  BridgeBridger(where: { sender: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
+  # BridgeBridger is a cross-chain identity aggregate keyed by sender (sourceChainsUsed is a
+  # JSON array) — it has NO chainId field, so do not add a chainId filter here.
+  BridgeBridger(where: { sender: { _eq: "0xtarget" } }) {
     id
   }
 }
@@ -493,7 +495,14 @@ Free-form prose, but be specific. Don't say "arbitrage" — say which mispricing
 **Name the venue, don't guess it.** Resolve any non-Mento pool or token the target touched via two free, no-key, Celo+Monad-covering APIs — turns "an unknown pool" into "USDC/CELO 0.01% on Uniswap V3 Celo, $X TVL":
 
 ```bash
-GT_NS=celo   # GeckoTerminal network slug for $CHAIN: celo / polygon_pos / eth / … (NOT the chain id; verify at /api/v2/networks)
+# GeckoTerminal uses its own network slugs (NOT chain ids) — select per $CHAIN, like $BS in Step 4.
+# Verify/extend against https://api.geckoterminal.com/api/v2/networks (a chain may have no GT coverage).
+case "$CHAIN" in
+  celo)     GT_NS=celo ;;
+  polygon)  GT_NS=polygon_pos ;;
+  ethereum) GT_NS=eth ;;
+  *)        GT_NS=<GeckoTerminal slug for $CHAIN, or skip if unlisted> ;;
+esac
 curl -s "https://api.geckoterminal.com/api/v2/networks/$GT_NS/pools/{poolAddr}"   # → pair, dex, reserve_usd, vol24h (30 req/min)
 curl -s "https://api.dexscreener.com/latest/dex/tokens/{tokenAddr}"               # → every pair, dexId, liquidity.usd, volume.h24 (chain-agnostic by token addr)
 ```
