@@ -47,7 +47,7 @@ Two artefacts:
 
 ## Output template
 
-The literal shape every report follows lives at `template.md` next to this file. Read it once, then mirror its structure exactly: same named H2 sections in the same order (TL;DR, Cast of characters, Related addresses / fleet, What it does, Transaction anatomy, Capital and scale, Why \_\_\_ why these venues, Coverage and dead ends, Bottom line), same code-fenced storage / tx blocks, the confidence-tier tags on attribution claims, and the provenance + "Investigation date" footer. The template is the spec — don't invent new sections, don't drop existing ones, don't reorder. ("Related addresses / fleet" may be omitted only when clustering in Step 2.5 found nothing — say so in one line rather than dropping the heading silently.)
+The literal shape every report follows lives at `template.md` next to this file. Read it once, then mirror its structure exactly: same named H2 sections in the same order (TL;DR, Cast of characters, Related addresses / fleet, What it does, Transaction anatomy, Capital and scale, Why \_\_\_, why these venues, Coverage and dead ends, Bottom line), same code-fenced storage / tx blocks, the confidence-tier tags on attribution claims, and the provenance + "Investigation date" footer. The template is the spec — don't invent new sections, don't drop existing ones, don't reorder. ("Related addresses / fleet" may be omitted only when clustering in Step 2.5 found nothing — say so in one line rather than dropping the heading silently.)
 
 ## Procedure (how to fill the template)
 
@@ -734,7 +734,7 @@ mcp__upstash__redis_database_run_redis_commands({
 });
 ```
 
-Match its tone (specific, evidence-anchored, code-fenced for storage / tx data), structure (the eight named sections in order), and length (1500–2500 words for a meaty target; less is fine for a thin one).
+Match its tone (specific, evidence-anchored, code-fenced for storage / tx data), structure (the nine named sections in order), and length (1500–2500 words for a meaty target; less is fine for a thin one).
 
 ## Rules
 
