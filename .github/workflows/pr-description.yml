@@ -97,13 +97,15 @@ jobs:
           #    template's instructional comment can't satisfy the check.
           #    The section is OPTIONAL: a body with no Deferrals heading at all
           #    passes (nothing was deferred). But a near-miss heading
-          #    (`### Deferrals`, `## Deferrals:`) must NOT silently pass — it
-          #    falls to the strict per-item validation only when the heading is
-          #    EXACTLY `## Deferrals`; otherwise it's an error so an unlinked
-          #    deferred section can't slip through.
+          #    (`### Deferrals`, `## Deferrals:`, `##Deferrals`) must NOT
+          #    silently pass — it falls to the strict per-item validation only
+          #    when the heading is EXACTLY `## Deferrals`; otherwise it's an
+          #    error so an unlinked deferred section can't slip through. The
+          #    near-miss matcher uses `[[:space:]]*` (not `+`) so a missing
+          #    space after the hashes (`##Deferrals`) is still caught.
           if grep -qE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$fence_stripped"; then
             : # canonical heading — fall through to strict per-item validation below
-          elif grep -qE '^#{1,6}[[:space:]]+Deferrals([[:space:]]|:|$)' <<<"$fence_stripped"; then
+          elif grep -qE '^#{1,6}[[:space:]]*Deferrals([[:space:]]|:|$)' <<<"$fence_stripped"; then
             echo "::error::PR description has a Deferrals-style heading that isn't exactly '## Deferrals'. The section heading must be exactly '## Deferrals' (H2, no trailing punctuation), or remove it entirely if nothing was knowingly deferred. See AGENTS.md 'Deferral rule'."
             exit 1
           else
