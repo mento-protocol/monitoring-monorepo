@@ -152,6 +152,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   pages: {
     signIn: "/sign-in",
+    // Redirect auth.js error page (OAuth failures, CSRF mismatches, etc.) back
+    // to our custom sign-in page instead of the default /api/auth/error page.
+    error: "/sign-in",
   },
 
   // Fire NextAuth internal errors (OAuth handshake failures, JWE verification
@@ -159,6 +162,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // need "users can't log in" bug reports to be noticed.
   logger: {
     error(error) {
+      // JWTSessionError is expected when AUTH_SECRET rotates or when a session
+      // cookie pre-dates an auth.js upgrade — the invalid JWT is discarded and
+      // the user is signed out on the next request, so no action is needed.
+      if (error instanceof Error && error.name === "JWTSessionError") return;
       Sentry.captureException(error, { tags: { source: "nextauth" } });
     },
   },
