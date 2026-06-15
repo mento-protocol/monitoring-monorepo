@@ -329,20 +329,20 @@ Sourced from the published [`@mento-protocol/contracts`](https://www.npmjs.com/p
 
 ## Key Files
 
-| What                      | Where                                                                            |
-| ------------------------- | -------------------------------------------------------------------------------- |
-| Indexer schema            | `indexer-envio/schema.graphql`                                                   |
-| Event handlers            | `indexer-envio/src/EventHandlers.ts`                                             |
-| Pool ID helpers           | `indexer-envio/src/helpers.ts`                                                   |
-| Multichain config         | `indexer-envio/config.multichain.mainnet.yaml`                                   |
-| Indexer status + endpoint | `indexer-envio/STATUS.md`                                                        |
-| Dashboard app             | `ui-dashboard/src/app/`                                                          |
-| Network defs              | `ui-dashboard/src/lib/networks.ts`                                               |
-| GraphQL queries           | `ui-dashboard/src/lib/queries.ts` (barrel) + `ui-dashboard/src/lib/queries/*.ts` |
-| Terraform infrastructure  | `terraform/`                                                                     |
+| What                         | Where                                                                            |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| Indexer schema               | `indexer-envio/schema.graphql`                                                   |
+| Event handlers               | `indexer-envio/src/EventHandlers.ts`                                             |
+| Pool ID helpers              | `indexer-envio/src/helpers.ts`                                                   |
+| Multichain config            | `indexer-envio/config.multichain.mainnet.yaml`                                   |
+| Indexer deployment reference | `indexer-envio/STATUS.md`                                                        |
+| Dashboard app                | `ui-dashboard/src/app/`                                                          |
+| Network defs                 | `ui-dashboard/src/lib/networks.ts`                                               |
+| GraphQL queries              | `ui-dashboard/src/lib/queries.ts` (barrel) + `ui-dashboard/src/lib/queries/*.ts` |
+| Terraform infrastructure     | `terraform/`                                                                     |
 
 ## Documentation
 
 - [`indexer-envio/README.md`](./indexer-envio/README.md) — Indexer reference
-- [`indexer-envio/STATUS.md`](./indexer-envio/STATUS.md) — Current sync state + endpoint
+- [`indexer-envio/STATUS.md`](./indexer-envio/STATUS.md) — Static endpoint + deployment reference
 - [`docs/deployment.md`](./docs/deployment.md) — Full deployment guide

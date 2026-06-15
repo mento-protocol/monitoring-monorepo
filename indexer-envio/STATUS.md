@@ -1,23 +1,18 @@
-# Indexer Status
+# Indexer Deployment Reference
 
-Last updated: 2026-05-13
+## Deployment Model
 
-## Current State
+Single multichain mainnet indexer (Celo Mainnet `42220` + Monad `143` +
+Ethereum Mainnet `1` sUSDS reserve-yield events) on the Envio Cloud `mento`
+project (org `mento-protocol`), Production Medium tier.
 
-Single multichain mainnet indexer (Celo + Monad) live on Envio Cloud.
+This file documents only facts that stay true across redeployments. For live
+sync state and the latest deployment currently visible to Envio, run:
 
-| Network      | Envio Project | Tier              | Status | Sync state                          |
-| ------------ | ------------- | ----------------- | ------ | ----------------------------------- |
-| Celo Mainnet | `mento`       | Production Medium | Live   | Caught up at `2026-05-13T11:54:24Z` |
-| Monad        | `mento`       | Production Medium | Live   | Caught up at `2026-05-13T11:54:24Z` |
-
-Current production deployment:
-
-| Field       | Value                                        |
-| ----------- | -------------------------------------------- |
-| Commit      | `cea00ee`                                    |
-| Commit name | `Optimize Envio v3 indexer sync path (#405)` |
-| Created     | `2026-05-13T10:42:34Z`                       |
+```bash
+pnpm deploy:indexer:status          # latest visible deployment status
+pnpm deploy:indexer:status --json   # machine-readable
+```
 
 ## GraphQL Endpoint
 
