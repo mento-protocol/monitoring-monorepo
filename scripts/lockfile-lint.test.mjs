@@ -731,7 +731,28 @@ test("fails when pnpm-workspace.yaml has an unbounded minimum override value", (
   );
 });
 
-// 34. pnpm-workspace.yaml inline override maps need the same floor guard.
+// 34. End-of-line comments on the overrides header still start a block map.
+test("fails when pnpm-workspace.yaml overrides header comment has unbounded block values", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        "packages:\n  - .\noverrides: # security pins\n  flatted: >=3.4.2\n",
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:4") &&
+      out.includes("unbounded minimum range"),
+    `expected commented workspace override header rejection: ${out}`,
+  );
+});
+
+// 35. pnpm-workspace.yaml inline override maps need the same floor guard.
 test("fails when pnpm-workspace.yaml has an inline unbounded override map", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
@@ -752,7 +773,7 @@ test("fails when pnpm-workspace.yaml has an inline unbounded override map", () =
   );
 });
 
-// 35. Standalone deploy roots can carry their own pnpm-workspace.yaml.
+// 36. Standalone deploy roots can carry their own pnpm-workspace.yaml.
 test("fails nested pnpm-workspace.yaml unbounded override selectors", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
@@ -773,7 +794,7 @@ test("fails nested pnpm-workspace.yaml unbounded override selectors", () => {
   );
 });
 
-// 36. Peer-qualified selectors need the child package range checked.
+// 37. Peer-qualified selectors need the child package range checked.
 test("fails when peer-qualified pnpm override selector range is unbounded", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
@@ -798,7 +819,7 @@ test("fails when peer-qualified pnpm override selector range is unbounded", () =
   );
 });
 
-// 37. Peer-qualified selectors need the parent package range checked too.
+// 38. Peer-qualified selectors need the parent package range checked too.
 test("fails when peer-qualified pnpm override parent selector range is unbounded", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
@@ -823,7 +844,7 @@ test("fails when peer-qualified pnpm override parent selector range is unbounded
   );
 });
 
-// 38. Bounded selector keys and same-major/capped replacement values are fine.
+// 39. Bounded selector keys and same-major/capped replacement values are fine.
 test("passes bounded and same-major pnpm override replacements", () => {
   const { exitCode, stdout, stderr } = run(
     makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),

@@ -603,7 +603,7 @@ function extractWorkspaceOverrides(absPath) {
     if (/^\S/.test(line)) {
       const overridesMatch = /^['"]?overrides['"]?\s*:\s*(.*)$/.exec(trimmed);
       if (overridesMatch) {
-        const inlineValue = overridesMatch[1].trim();
+        const inlineValue = stripYamlInlineComment(overridesMatch[1]);
         if (inlineValue) {
           overrides.push(
             ...extractInlineWorkspaceOverrides(inlineValue, i + 1),
