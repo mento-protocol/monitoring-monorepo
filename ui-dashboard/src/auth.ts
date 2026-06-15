@@ -28,13 +28,17 @@ let lastRefreshErrorCaptureMs = 0;
 // Throttle the NextAuth logger's Sentry capture. A stale/undecryptable session
 // cookie re-triggers JWTSessionError on every middleware `auth()` resolution
 // until the cookie clears, which would otherwise flood Sentry (events still
-// ingest against quota even when the issue is ignored). Keyed by error name so
-// a recurring failure is rate-limited per warm instance WITHOUT starving a
-// different, genuinely new auth error — the first occurrence of each distinct
-// error type always gets through, so regressions still surface. The name set
-// is bounded by Auth.js's AuthError subclasses, so the map stays tiny.
+// ingest against quota even when the issue is ignored). The throttle is keyed
+// by error name + message — NOT name alone: Auth.js wraps every JWT/session
+// failure as JWTSessionError, so a name-only key would let a noisy stale-cookie
+// failure mask a *different*-cause JWTSessionError (e.g. a callback regression
+// after a bad deploy) for the whole window. Fingerprinting on the message gives
+// each distinct cause its own bucket, so a recurring failure is rate-limited
+// while a genuinely new one still surfaces on first occurrence. The map is
+// capped so a volatile message can't leak memory on a long-lived warm instance.
 const LOGGER_CAPTURE_INTERVAL_MS = 5 * 60 * 1_000;
-const lastLoggerCaptureMsByName = new Map<string, number>();
+const LOGGER_CAPTURE_KEYS_MAX = 100;
+const lastLoggerCaptureMsByKey = new Map<string, number>();
 
 // Probe Google with the stored refresh token to confirm the account is still
 // active, rolling `expires_at` forward. Mutates and returns the token. Three
@@ -182,15 +186,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // regression (different stack/cause → new fingerprint) free to alert.
   logger: {
     error(error) {
-      const key = error instanceof Error ? error.name : "unknown";
+      const key =
+        error instanceof Error ? `${error.name}:${error.message}` : "unknown";
       const now = Date.now();
       if (
-        now - (lastLoggerCaptureMsByName.get(key) ?? 0) <=
+        now - (lastLoggerCaptureMsByKey.get(key) ?? 0) <=
         LOGGER_CAPTURE_INTERVAL_MS
       ) {
         return;
       }
-      lastLoggerCaptureMsByName.set(key, now);
+      // Bound the map: auth fingerprints are low-cardinality in practice, but a
+      // message carrying volatile data shouldn't grow it without limit.
+      if (lastLoggerCaptureMsByKey.size >= LOGGER_CAPTURE_KEYS_MAX) {
+        lastLoggerCaptureMsByKey.clear();
+      }
+      lastLoggerCaptureMsByKey.set(key, now);
       Sentry.captureException(error, { tags: { source: "nextauth" } });
     },
   },
