@@ -105,8 +105,12 @@ describe("fetchPaginatedRows — AbortSignal.timeout per page", () => {
     }));
     const page2 = [{ id: "p2-0" }];
 
-    // Capture the signal passed into each client.request() call.
+    // Capture the signal passed into each client.request() call. Use a
+    // dedicated call counter rather than deriving the page index from
+    // capturedSignals.length so the fixture selection can't desync if a
+    // future code path ever omits the signal field.
     const capturedSignals: AbortSignal[] = [];
+    let callCount = 0;
     type RequestArg = Parameters<typeof client.request>[0];
     vi.mocked(client.request).mockImplementation(async (opts: RequestArg) => {
       const sig =
@@ -114,8 +118,7 @@ describe("fetchPaginatedRows — AbortSignal.timeout per page", () => {
           ? (opts as { signal?: AbortSignal | null }).signal
           : undefined;
       if (sig) capturedSignals.push(sig);
-      const callIndex = capturedSignals.length - 1;
-      return callIndex === 0 ? { TestKey: page1 } : { TestKey: page2 };
+      return callCount++ === 0 ? { TestKey: page1 } : { TestKey: page2 };
     });
 
     await fetchPaginatedRows({

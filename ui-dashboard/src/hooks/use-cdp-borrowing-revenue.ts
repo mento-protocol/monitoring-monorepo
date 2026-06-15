@@ -326,6 +326,12 @@ async function paginateDailySnapshots<T extends { id: string }>(
     }),
     dedupKey: (r) => r.id,
   });
+  // Mid-loop errors with partial rows are intentionally absorbed here: the
+  // chart renders the partial history (flagged via `truncated`) rather than
+  // failing closed, and `fetchPaginatedRows` has already captured the error to
+  // Sentry (throttled per network:responseKey). We only rethrow when NOTHING
+  // was fetched (page-0 failure), so the caller's daily-series fallback chain
+  // still degrades to fee-event reconstruction / `failed` state on total loss.
   if (result.error && result.rows.length === 0) throw result.error;
   return { rows: result.rows, truncated: result.truncated };
 }
