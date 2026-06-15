@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { relative } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { validatePrDescription } from "./check-pr-description.mjs";
+
+const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+const relativeScriptPath = relative(
+  repoRoot,
+  fileURLToPath(new URL("./check-pr-description.mjs", import.meta.url)),
+);
 
 function body(extra = "") {
   return `## The Problem
@@ -183,6 +192,26 @@ test("fails unlinked Deferrals item prose", () => {
   );
 });
 
+test("fails unlinked items in later Deferrals sections", () => {
+  assertFail(
+    body(`
+
+## Deferrals
+
+- None
+
+## Validation
+
+- node scripts/check-pr-description.test.mjs
+
+## Deferrals
+
+- Do this later.
+`),
+    /Missing issue reference/,
+  );
+});
+
 test("fails near-miss Deferrals headings", () => {
   for (const heading of [
     "### Deferrals",
@@ -200,4 +229,28 @@ ${heading}
       /isn't exactly '## Deferrals'/,
     );
   }
+});
+
+test("CLI guard runs validation when invoked with a relative script path", () => {
+  let error;
+  try {
+    execFileSync(process.execPath, [relativeScriptPath], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, PR_BODY: "# Summary\n" },
+    });
+  } catch (caught) {
+    error = caught;
+  }
+  assert.ok(error instanceof Error, "expected CLI validation to fail");
+  assert.match(error.stdout, /must START with '## The Problem'/);
+});
+
+test("CLI guard prints success when invoked with a relative script path", () => {
+  const output = execFileSync(process.execPath, [relativeScriptPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, PR_BODY: body() },
+  });
+  assert.match(output, /PR description OK/);
 });

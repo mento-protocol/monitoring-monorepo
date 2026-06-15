@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 const PLACEHOLDER_RE =
   /\[Plain-English problem|\[Simple explanation of how|\[Implementation details, invariants|\[Commands and results/;
 const PROBLEM_HEADING_RE = /^##\s+The Problem\s*$/;
@@ -95,7 +98,10 @@ function deferralsSection(body) {
       inSection = true;
       continue;
     }
-    if (inSection && /^##\s/.test(line)) break;
+    if (inSection && /^##\s/.test(line)) {
+      inSection = false;
+      continue;
+    }
     if (inSection) section.push(line);
   }
 
@@ -197,7 +203,14 @@ export function validatePrDescription(body) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+function isCliEntrypoint() {
+  return (
+    process.argv[1] !== undefined &&
+    fileURLToPath(import.meta.url) === resolve(process.argv[1])
+  );
+}
+
+if (isCliEntrypoint()) {
   const result = validatePrDescription(process.env.PR_BODY ?? "");
   if (result.ok) {
     console.log(result.message);
