@@ -41,10 +41,6 @@ lint:
         # scanning this derived artifact would just double-report transitive
         # findings with no fix path.
         - alerts/infra/onchain-event-handler/package-lock.json
-        # Package-local lockfile for the governance-watchdog Cloud Function
-        # (committed for Cloud Build's pnpm install). Same rationale as the
-        # workspace lockfile above: transitive findings with no direct fix path.
-        - governance-watchdog/pnpm-lock.yaml
     - linters: [checkov]
       paths:
         - terraform/main.tf

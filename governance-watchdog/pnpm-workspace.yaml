@@ -6,11 +6,20 @@ minimumReleaseAgeExclude:
   - "@mento-protocol/*"
   - envio-cloud
   - "@envio-dev/envio-cloud-*"
+  # esbuild@0.28.1 patches GHSA-gv7w-rqvm-qjhr (high); exclude so the security
+  # override is not blocked by the 3-day minimumReleaseAge gate. The @esbuild/*
+  # platform packages are optional deps installed alongside the main esbuild
+  # package and share the same release timestamp.
+  - esbuild
+  - "@esbuild/*"
 
 overrides:
   # Exact pin because ranges resolve forward on fresh installs. 3.4.2 is what
   # both the standalone npm lockfile and this lockfile resolve today.
   flatted: 3.4.2
+  # esbuild: tsx@4.22.4 still pins esbuild@0.28.0 (GHSA-gv7w-rqvm-qjhr, high).
+  # Patched floor is 0.28.1; pin exact so fresh installs don't drift.
+  esbuild: 0.28.1
   # No undici override: discord.js and @discordjs/rest both pin undici EXACTLY
   # (6.24.1 as of discord.js 14.26.4), which already satisfies the >=6.24.0
   # security floor from the 2026 advisory batch. Overriding past their pin is
