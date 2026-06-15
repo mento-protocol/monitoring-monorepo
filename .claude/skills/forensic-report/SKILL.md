@@ -647,7 +647,7 @@ Replace the old binary "skip if weak" with a per-claim grade on **load-bearing a
 - **PROBABLE** — a funder-graph or behavioural inference corroborated by **≥2 independent signals** (e.g. codehash + common-funder, or activity-clock + nonce-origin).
 - **POSSIBLE** — a single uncorroborated heuristic. Allowed in the report, but must carry the tag so a reader never mistakes it for fact.
 
-Tag inline, e.g. `Operator EOA `0x…` **[PROBABLE: codehash + funder]**`. A claim that can't reach POSSIBLE doesn't belong in the report at all.
+Tag inline, e.g. **Operator EOA** `0x…` **[PROBABLE: codehash + funder]**. A claim that can't reach POSSIBLE doesn't belong in the report at all.
 
 ## Schema invariants (mirror these — the API enforces the same rules)
 
