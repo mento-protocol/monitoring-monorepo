@@ -24,6 +24,9 @@ overrides:
   # vulnerable ranges narrowly instead of overriding whole packages.
   "qs@<6.15.2": 6.15.2
   "uuid@<11.1.1": 11.1.1
+  # isows resolves ws@8.20.1 through viem; 8.21.0 contains the GHSA-96hv-2xvq-fx4p
+  # fix and stays compatible with isows' ws peer range.
+  "ws@<8.21.0": 8.21.0
   # No undici override: discord.js and @discordjs/rest both pin undici EXACTLY
   # (6.24.1 as of discord.js 14.26.4), which already satisfies the >=6.24.0
   # security floor from the 2026 advisory batch. Overriding past their pin is
