@@ -98,24 +98,29 @@ jobs:
           #    The section is OPTIONAL: a body with no Deferrals heading at all
           #    passes (nothing was deferred). But a near-miss heading
           #    (`### Deferrals`, `## Deferrals:`, `##Deferrals`,
-          #    `## Deferrals.`, `## Deferrals — later`) must NOT silently pass
-          #    — it falls to the strict per-item validation only when the
-          #    heading is EXACTLY `## Deferrals`; otherwise it's an error so an
-          #    unlinked deferred section can't slip through. The near-miss
-          #    matcher allows any `#`-run with optional space, then `Deferrals`
-          #    followed by ANY non-word character or EOL — so a missing space
-          #    (`##Deferrals`) and any trailing punctuation/words are all
-          #    caught, while a genuinely different word (`## DeferralsX`,
-          #    `## Deferred work`) is not flagged.
-          if grep -qE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$fence_stripped"; then
-            : # canonical heading — fall through to strict per-item validation below
-          elif grep -qE '^#{1,6}[[:space:]]*Deferrals([^[:alnum:]_]|$)' <<<"$fence_stripped"; then
-            echo "::error::PR description has a Deferrals-style heading that isn't exactly '## Deferrals'. The section heading must be exactly '## Deferrals' (H2, no trailing punctuation), or remove it entirely if nothing was knowingly deferred. See AGENTS.md 'Deferral rule'."
+          #    `## Deferrals.`, `## Deferrals — later`) must NOT silently pass —
+          #    otherwise an unlinked deferred section under a malformed heading
+          #    slips through. The "Deferrals-style heading" matcher allows any
+          #    `#`-run with optional space, then `Deferrals` followed by ANY
+          #    non-word character or EOL — so a missing space (`##Deferrals`)
+          #    and any trailing punctuation/words are all caught, while a
+          #    genuinely different word (`## DeferralsX`, `## Deferred work`) is
+          #    not flagged. We reject EVERY non-canonical Deferrals heading
+          #    first, INDEPENDENTLY of whether a canonical `## Deferrals` also
+          #    exists — a body can carry both a valid `## Deferrals` section and
+          #    a separate malformed one, and validating only the canonical
+          #    section would let the malformed one bypass the guard.
+          deferrals_style=$(grep -E '^#{1,6}[[:space:]]*Deferrals([^[:alnum:]_]|$)' <<<"$fence_stripped" || true)
+          near_miss=$(grep -vE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$deferrals_style" || true)
+          if [ -n "$near_miss" ]; then
+            echo "::error::PR description has a Deferrals-style heading that isn't exactly '## Deferrals'. Every Deferrals heading must be exactly '## Deferrals' (H2, no trailing punctuation or extra words), or be removed if nothing was knowingly deferred. Offending heading(s): $(head -3 <<<"$near_miss" | tr '\n' ' '). See AGENTS.md 'Deferral rule'."
             exit 1
-          else
+          fi
+          if ! grep -qE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$fence_stripped"; then
             echo "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders, no Deferrals section (nothing deferred)."
             exit 0
           fi
+          # canonical heading present — fall through to strict per-item validation below
           deferrals=$(awk '
             /^##[[:space:]]+Deferrals[[:space:]]*$/ { insec = 1; next }
             insec && /^##[[:space:]]/ { insec = 0 }
