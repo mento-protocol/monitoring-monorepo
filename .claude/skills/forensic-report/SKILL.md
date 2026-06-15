@@ -450,7 +450,8 @@ Reachable via plain `curl`/WebFetch or the bundled `mcp__claude_ai_Blockscout__*
 Pass the chain hint through to Sim — Mento is on Celo (`42220`) but the skill also runs against Monad (`143`) and any future chain. Hardcoding `--chain-ids 42220` would return empty / unrelated holdings for a Monad principal:
 
 ```bash
-CHAIN_ID=42220   # Celo mainnet. Monad mainnet is 143 (testnet is 10143 — use mainnet for prod investigations). Map other chains by their canonical mainnet chain id.
+# $CHAIN_ID is from Step 1's case switch (Celo 42220 / Monad 143 / …) — do NOT re-hardcode it.
+# Hardcoding 42220 would return empty / unrelated holdings for a Monad (or other-chain) principal.
 dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID -o json | jq '.balance_data | length'
 dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID -o json | jq '.balance_data[] | {symbol, amount, value_usd}'
 ```
