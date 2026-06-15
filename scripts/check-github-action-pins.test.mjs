@@ -103,7 +103,8 @@ jobs:
   test:
     steps:
       - uses: actions/checkout@v6
-      - uses: 'actions/setup-node@v4'
+      - "uses": actions/setup-node@v4
+      - uses: 'actions/cache@v4'
 `,
     );
 
@@ -117,7 +118,12 @@ jobs:
     contains(
       result.stderr,
       ".github/workflows/ci.yml:6 uses: actions/setup-node@v4",
-      "quoted failure location",
+      "quoted key failure location",
+    );
+    contains(
+      result.stderr,
+      ".github/workflows/ci.yml:7 uses: actions/cache@v4",
+      "quoted value failure location",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -170,6 +176,68 @@ runs:
       result.stderr,
       ".trunk/setup-ci/action.yaml:5 uses: pnpm/action-setup@v4",
       "failure location",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("discovers and fails mutable tags in local action targets", () => {
+  const root = fixtureRoot("local-target-fail");
+  try {
+    write(
+      root,
+      ".github/workflows/ci.yml",
+      `
+jobs:
+  test:
+    steps:
+      - uses: ./tools/actions/custom
+`,
+    );
+    write(
+      root,
+      "tools/actions/custom/action.yml",
+      `
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+`,
+    );
+
+    const result = run(root);
+    equal(result.status, 1, result.stdout);
+    contains(
+      result.stderr,
+      "tools/actions/custom/action.yml:5 uses: actions/setup-node@v4",
+      "local target failure location",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails pinned external actions without release-tag comments", () => {
+  const root = fixtureRoot("missing-comment");
+  try {
+    write(
+      root,
+      ".github/workflows/ci.yml",
+      `
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@${PINNED_SHA}
+`,
+    );
+
+    const result = run(root);
+    equal(result.status, 1, result.stdout);
+    contains(
+      result.stderr,
+      `.github/workflows/ci.yml:5 uses: actions/checkout@${PINNED_SHA}`,
+      "missing comment failure location",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

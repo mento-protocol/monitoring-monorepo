@@ -51,7 +51,7 @@ Canonical good example: `.github/workflows/metrics-bridge.yml:41`.
 A `uses: org/action@v4` line trusts whoever owns that tag to never re-point it at malicious code. Tags are mutable; commit SHAs are not.
 
 - [ ] All third-party actions in workflows and composite actions MUST be pinned to a full commit SHA with the tag in a comment: `uses: org/action@<40-char-sha> # v6.0.2`
-- [ ] Local relative actions such as `uses: ./.github/actions/pnpm-install` are allowed.
+- [ ] Local relative actions such as `uses: ./.github/actions/pnpm-install` are allowed; the scanner follows their `action.yml` / `action.yaml` targets and checks nested third-party `uses:` entries too.
 - [ ] Run `node scripts/check-github-action-pins.mjs` locally when editing `.github/workflows/**`, `.github/actions/**`, or `.trunk/setup-ci/**`; the required `Code Quality` workflow runs the same check on every PR.
 
 Canonical good example: `.github/workflows/metrics-bridge.yml:59,62,68,117` — every external action SHA-pinned.
