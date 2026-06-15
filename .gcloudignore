@@ -28,5 +28,6 @@ terraform.tfvars
 # Credentials file written into the workspace root by
 # google-github-actions/auth during CI. This file has its own ignore rules
 # (it does not fall back to .gitignore), so the pattern must be repeated here
-# to keep the CI credential file out of the `gcloud builds submit` source archive.
+# to keep the CI credential file out of the `gcloud builds submit` source
+# archive. Left unanchored on purpose, matching .gitignore.
 gha-creds-*.json
