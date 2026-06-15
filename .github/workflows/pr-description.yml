@@ -2,10 +2,10 @@ name: PR Description
 
 # Enforces the repo PR-description standard (AGENTS.md "PR description standard"
 # + .github/PULL_REQUEST_TEMPLATE.md): every PR body must lead with
-# `## The Problem` and `## The Solution`, must not still contain the
-# unfilled template placeholders, and must declare deferrals — a
-# `## Deferrals` section that either says "None" or links the GitHub
-# issue(s) created for everything knowingly deferred from the PR.
+# `## The Problem` and `## The Solution`, and must not still contain the
+# unfilled template placeholders. The `## Deferrals` section is OPTIONAL —
+# omit it when nothing is deferred; when present it must say "None" or link a
+# GitHub issue per item (for everything knowingly deferred from the PR).
 #
 # REQUIRED-STATUS SAFETY: no workflow-level `paths:` filter — this is meant to
 # run on every PR so it can be a required status (AGENTS.md: required-status
@@ -95,7 +95,18 @@ jobs:
           #    checks below operate on fence_stripped (comments + code fences
           #    removed) so an example heading or issue ref inside a fence or the
           #    template's instructional comment can't satisfy the check.
-          if ! grep -qE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$fence_stripped"; then
+          #    The section is OPTIONAL: a body with no Deferrals heading at all
+          #    passes (nothing was deferred). But a near-miss heading
+          #    (`### Deferrals`, `## Deferrals:`) must NOT silently pass — it
+          #    falls to the strict per-item validation only when the heading is
+          #    EXACTLY `## Deferrals`; otherwise it's an error so an unlinked
+          #    deferred section can't slip through.
+          if grep -qE '^##[[:space:]]+Deferrals[[:space:]]*$' <<<"$fence_stripped"; then
+            : # canonical heading — fall through to strict per-item validation below
+          elif grep -qE '^#{1,6}[[:space:]]+Deferrals([[:space:]]|:|$)' <<<"$fence_stripped"; then
+            echo "::error::PR description has a Deferrals-style heading that isn't exactly '## Deferrals'. The section heading must be exactly '## Deferrals' (H2, no trailing punctuation), or remove it entirely if nothing was knowingly deferred. See AGENTS.md 'Deferral rule'."
+            exit 1
+          else
             echo "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders, no Deferrals section (nothing deferred)."
             exit 0
           fi
