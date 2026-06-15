@@ -288,7 +288,9 @@ Run a small battery keyed on the target address (all fields verified against `in
   }
 }
 {
-  StableSupplyChangeEvent(where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, limit: 1000) {
+  # Filter on caller (signer) OR counterparty (mint recipient / burn holder) — the target may be the
+  # recipient/holder rather than the tx signer, which a caller-only filter would miss.
+  StableSupplyChangeEvent(where: { _and: [{ _or: [{ caller: { _eq: "0xtarget" } }, { counterparty: { _eq: "0xtarget" } }] }, { chainId: { _eq: <CHAIN_ID> } }] }, limit: 1000) {
     txHash
     kind
     amount
@@ -368,7 +370,7 @@ Then attribution. Use the `arkham` skill (project-scoped) for the **cross-chain 
    - Match any counterparty against `indexer-envio/config/nttAddresses.json` (`nttManagerProxy` / `transceiverProxy` / `helper` / `tokenAddress`) so a transfer to/from NTT infra is labelled a bridge flow, not a real funder.
    - For NON-Mento inbound bridges, reach for the right tracer per the Tooling matrix: **LayerZeroScan** covers Celo (`GET https://scan.layerzero-api.com/v1/messages/wallet/{eoa}`, Celo EID=30125); Across/deBridge cover **Monad only** (not Celo) so use them on the Monad leg.
 5. For contracts: also pull the deployer (the `from` of the contract-creation tx) — it may differ from the operator. Note both rows in the table. (The deployer is the seed for the fleet clustering in Step 2.5.)
-6. **ENS de-anon pivot** (the seed's `idontloseiwin.eth` is exactly this). A Celo address's ENS primary name lives in the **Ethereum L1** reverse registry, not on Celo — forno can't answer it. Resolve via `viem` `getEnsName({ address, coinType })` against an L1 RPC with the **chain-correct ENSIP-11 coinType** `0x80000000 | $CHAIN_ID` (Celo `42220` → `0x8000A4EC`, namespace `a4ec.reverse`; Monad `143` → `0x8000008F`; etc.). Watch out: a common doc example mis-states Celo as `0x8000A4DC`, which decodes to chain 42204 — wrong. Also try the default L1 reverse record (coinType `0`), which many owners set regardless of chain. Mostly negatives for bot EOAs; one hit is gold.
+6. **ENS de-anon pivot** (the seed's `idontloseiwin.eth` is exactly this). A Celo address's ENS primary name lives in the **Ethereum L1** reverse registry, not on Celo — forno can't answer it. Resolve via `viem` `getEnsName({ address, coinType })` against an L1 RPC with the **chain-correct ENSIP-11 coinType** `0x80000000 | $CHAIN_ID` (Celo `42220` → `0x8000A4EC`, namespace `a4ec.reverse`; Monad `143` → `0x8000008F`; etc.). Watch out: a common doc example mis-states Celo as `0x8000A4DC`, which decodes to chain 42204 — wrong. Also try the default L1 reverse record — viem's `getEnsName` defaults to the **Ethereum coinType `60`** (`evmChainIdToCoinType` → `60` for mainnet), which many owners set regardless of chain; call it once with the default and once with the chain-specific coinType above. Mostly negatives for bot EOAs; one hit is gold.
 
 For each address you add to the Cast: include age (days since first activity), multichain footprint (which chains it's been seen on), a one-line "what it does" note, and a **confidence tier** on the attribution claim (see "Confidence tiers" below).
 
@@ -423,17 +425,17 @@ Before concluding "no interesting getters", do three things:
    # EIP-1967 impl / admin / beacon, then EIP-1822 (UUPS). For impl/admin/EIP-1822, non-zero → last 20
    # bytes IS the address to analyse. The BEACON slot is different: its last 20 bytes are the BEACON
    # contract, not the impl — call beacon.implementation() and analyse THAT (see below).
-   cast storage $ADDR 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --rpc-url $RPC  # impl
-   cast storage $ADDR 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103 --rpc-url $RPC  # admin
-   cast storage $ADDR 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50 --rpc-url $RPC  # beacon
-   cast storage $ADDR 0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7 --rpc-url $RPC  # EIP-1822
+   cast storage $ADDR 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --block $HEAD_BLOCK --rpc-url $RPC  # impl
+   cast storage $ADDR 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103 --block $HEAD_BLOCK --rpc-url $RPC  # admin
+   cast storage $ADDR 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50 --block $HEAD_BLOCK --rpc-url $RPC  # beacon
+   cast storage $ADDR 0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7 --block $HEAD_BLOCK --rpc-url $RPC  # EIP-1822
    # If the beacon slot was non-zero, resolve the real implementation from the beacon contract:
    BEACON=0x…   # last 20 bytes of the beacon slot value above
    cast call "$BEACON" "implementation()(address)" --rpc-url "$RPC"
    ```
 
 2. **Verified-source check before decompiling** — exact source beats pseudo-source. Sourcify is multichain, free, no key: `GET https://sourcify.dev/server/v2/contract/$CHAIN_ID/{addr}?fields=all` (use `$CHAIN_ID` from Step 1 — `42220` for Celo, `143` Monad, etc.; cross-check the chain's explorer: Celoscan / Monadscan / Polygonscan / Etherscan).
-3. **Decompile if unverified** — these are chain-agnostic (they operate on raw bytecode, so Celo non-indexing is irrelevant): Dedaub API (`https://api.dedaub.com`, free tier, async POST→poll) for readable pseudo-Solidity, or local **heimdall-rs** (`heimdall decompile/cfg`, MIT, nothing leaves the machine — use for sensitive targets). Enumerate the full selector surface first with WhatsABI (`@shazow/whatsabi`, autoloads over a forno provider and follows EIP-1967 proxies), then resolve names via the OpenChain DB. This is the only way to describe what a closed-source proprietary bot actually does.
+3. **Decompile if unverified** — these are chain-agnostic (they operate on raw bytecode, so Celo non-indexing is irrelevant): Dedaub API (`https://api.dedaub.com`, free tier, async POST→poll) for readable pseudo-Solidity, or local **heimdall-rs** (`heimdall decompile/cfg`, MIT, nothing leaves the machine — use for sensitive targets). Enumerate the full selector surface first with WhatsABI (`@shazow/whatsabi`, autoloads over a provider on `$RPC` — the target chain's, not forno, or it reads bytecode/proxy slots on the wrong chain — and follows EIP-1967 proxies), then resolve names via the OpenChain DB. This is the only way to describe what a closed-source proprietary bot actually does.
 
 **For an EOA target** — behavioural profile. Top counterparties (`dune sim evm activity` filtered by counterparty), top tokens held (`dune sim evm balances`), tx-time distribution if relevant. Add these cheap, Celo-native behavioural fingerprints (all free via the `dune` skill on `celo.*` or `cast`):
 
@@ -533,14 +535,15 @@ case "$CHAIN" in
   *)        GT_NS=""; echo "No GeckoTerminal slug mapped for $CHAIN — verify at /api/v2/networks, then set GT_NS or skip." >&2 ;;
 esac
 [ -n "$GT_NS" ] && curl -s "https://api.geckoterminal.com/api/v2/networks/$GT_NS/pools/{poolAddr}"   # → pair, dex, reserve_usd, vol24h (30 req/min); skipped when no GT slug for $CHAIN
-curl -s "https://api.dexscreener.com/latest/dex/tokens/{tokenAddr}"               # returns the token's pairs on ALL chains
-# MUST filter to the target chain before using, or you may name a different chain's venue/TVL for an
-# unrelated same-address token: ... | jq '[.pairs[] | select(.chainId == "<DexScreener slug for $CHAIN: celo/ethereum/polygon/base/…>")]'
+curl -s "https://api.dexscreener.com/token-pairs/v1/<ds-slug>/{tokenAddr}"         # chain-scoped: pairs for this token on $CHAIN only
+# <ds-slug> = DexScreener chain slug for $CHAIN (celo / ethereum / polygon / base / …). The chain-scoped
+# token-pairs/v1 endpoint avoids the old /latest/dex/tokens form, which returned the token's pairs on ALL
+# chains and risked naming a different chain's venue/TVL for an unrelated same-address token.
 ```
 
 (Use `networks/$GT_NS/tokens/{addr}` for token price/FDV in Steps 5/5.5 too. Set `GT_NS` to match `$CHAIN` — GeckoTerminal uses its own slugs, so confirm against `/api/v2/networks` rather than assuming the chain name.)
 
-**MEV classification across chains.** The Celo MEV-detection ecosystem is thin (EigenPhi/zeromev are Ethereum-only). Two moves: (a) borrow their **taxonomy** (arb / sandwich / backrun / JIT / liquidation) as vocabulary and derive the classification yourself from the indexer + Dune `dex.trades` on Celo (group by `tx_hash`, detect ≥2-leg cycles, cross-project legs, sandwich via `block_number` ordering); (b) if the operator runs the same strategy on Ethereum/L2s, run it through EigenPhi/zeromev **there** (cross-chain identity leg) and cite the classification as corroboration. See the Tooling matrix.
+**MEV classification across chains.** The Celo MEV-detection ecosystem is thin (EigenPhi/zeromev are Ethereum-only). Two moves: (a) borrow their **taxonomy** (arb / sandwich / backrun / JIT / liquidation) as vocabulary and derive the classification yourself from the indexer + Dune `$DUNE_NS.dex.trades` (the target chain's table — `celo.dex.trades` / `monad.dex.trades` / …; group by `tx_hash`, detect ≥2-leg cycles, cross-project legs, sandwich via `block_number` ordering); (b) if the operator runs the same strategy on Ethereum/L2s, run it through EigenPhi/zeromev **there** (cross-chain identity leg) and cite the classification as corroboration. See the Tooling matrix.
 
 ### Step 7 — Coverage and dead ends
 
@@ -722,7 +725,7 @@ The address-book index endpoint reads from the same hash on every request, so th
 Replace the old binary "skip if weak" with a per-claim grade on **load-bearing attribution claims only** (Cast of characters rows, fleet links, Bottom line) — not every sentence. This lets the report keep a useful "likely but unproven" lead instead of discarding it, as long as it's labelled honestly:
 
 - **CONFIRMED** — a deterministic on-chain fact (creation-tx `from`, a storage read, a codehash match, a decoded selector) or external ground truth (an ENS reverse record). No hedging words.
-- **PROBABLE** — a funder-graph or behavioural inference corroborated by **≥2 independent signals** (e.g. codehash + common-funder, or activity-clock + nonce-origin).
+- **PROBABLE** — a funder-graph or behavioural inference corroborated by **≥2 independent signals** (e.g. codehash + common-funder, or activity-clock + approval-graph).
 - **POSSIBLE** — a single uncorroborated heuristic. Allowed in the report, but must carry the tag so a reader never mistakes it for fact.
 
 Tag inline, e.g. **Operator EOA** `0x…` **[PROBABLE: codehash + funder]**. A claim that can't reach POSSIBLE doesn't belong in the report at all.
