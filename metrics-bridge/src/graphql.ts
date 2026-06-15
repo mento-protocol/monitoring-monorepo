@@ -22,7 +22,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 // which is WORSE than the base query failing loudly. A companion query with a
 // graceful `""` fallback would silently re-introduce that bug. Schema-stable
 // since VP Phase 2 (see PR #853); fail-loud is the correct posture here.
-const BRIDGE_POOLS_QUERY = gql`
+export const BRIDGE_POOLS_QUERY = gql`
   query BridgePools {
     Pool(where: { source: { _like: "%fpmm%" } }) {
       id
@@ -65,7 +65,7 @@ const BRIDGE_POOLS_QUERY = gql`
 // Isolated so a schema/deploy-order mismatch (bridge ships ahead of indexer
 // re-sync) degrades to "no previous-price annotation" instead of "every
 // pool metric stale".
-const BRIDGE_POOLS_ORACLE_LINEAGE_QUERY = gql`
+export const BRIDGE_POOLS_ORACLE_LINEAGE_QUERY = gql`
   query BridgePoolsOracleLineage {
     Pool(where: { source: { _like: "%fpmm%" } }) {
       id
@@ -78,7 +78,7 @@ const BRIDGE_POOLS_ORACLE_LINEAGE_QUERY = gql`
 // Optional companion query for the open-breach denormalized state. Grafana
 // uses this to keep the critical deviation alert firing until a breach that
 // crossed the critical magnitude actually returns within tolerance.
-const BRIDGE_POOLS_OPEN_BREACH_QUERY = gql`
+export const BRIDGE_POOLS_OPEN_BREACH_QUERY = gql`
   query BridgePoolsOpenBreach {
     Pool(where: { source: { _like: "%fpmm%" } }) {
       id
@@ -91,7 +91,7 @@ const BRIDGE_POOLS_OPEN_BREACH_QUERY = gql`
 // Optional companion query for the transaction that produced the last oracle
 // update. If this column is unavailable during a schema rollout, only the
 // Slack deep link degrades; timestamp/liveness metrics keep publishing.
-const BRIDGE_POOLS_ORACLE_TX_QUERY = gql`
+export const BRIDGE_POOLS_ORACLE_TX_QUERY = gql`
   query BridgePoolsOracleTx {
     Pool(where: { source: { _like: "%fpmm%" } }) {
       id

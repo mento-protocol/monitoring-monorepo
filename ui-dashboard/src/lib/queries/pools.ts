@@ -377,3 +377,46 @@ export const POOL_DAILY_SNAPSHOTS_ALL = `
     }
   }
 `;
+
+// OG-image metadata routes. Defined here (not in lib/*-og.ts) so the GraphQL
+// contract test covers them — those modules import next/cache and can't be
+// imported into the node test env. The OG routes import these from @/lib/queries.
+export const POOL_OG_DAILY_SNAPSHOTS = `
+  query PoolOgDailySnapshots($poolId: String!) {
+    PoolDailySnapshot(
+      where: { poolId: { _eq: $poolId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: 14
+    ) {
+      timestamp
+      reserves0
+      reserves1
+      swapVolume0
+      swapVolume1
+    }
+  }
+`;
+
+export const HOMEPAGE_OG_DAILY_SNAPSHOTS = `
+  query HomepageOgDailySnapshots(
+    $poolIds: [String!]!
+    $since: numeric!
+    $limit: Int!
+    $offset: Int!
+  ) {
+    PoolDailySnapshot(
+      where: { poolId: { _in: $poolIds }, timestamp: { _gte: $since } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+      offset: $offset
+    ) {
+      poolId
+      timestamp
+      reserves0
+      reserves1
+      swapCount
+      swapVolume0
+      swapVolume1
+    }
+  }
+`;

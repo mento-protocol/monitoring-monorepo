@@ -43,6 +43,25 @@ export default defineConfig({
           functions: 29,
           lines: 22,
         },
+        // Re-pins the pre-#925 non-handler floor so a coverage regression in
+        // well-tested code (rpc.ts, pool.ts, helpers.ts, src/pool/**, src/rpc/**,
+        // src/wormhole/**) isn't masked by low-coverage handler lines diluting
+        // the global pool. Two globs are needed: picomatch's !(handlers) extglob
+        // requires a child segment, so "src/!(handlers)/**/*.ts" covers non-handler
+        // subdirs but silently misses direct children of src/. "src/*.ts" fills
+        // that gap. Floors = floor(measured) - 2.
+        "src/*.ts": {
+          statements: 74,
+          branches: 71,
+          functions: 76,
+          lines: 77,
+        },
+        "src/!(handlers)/**/*.ts": {
+          statements: 65,
+          branches: 52,
+          functions: 75,
+          lines: 66,
+        },
       },
     },
   },
