@@ -78,6 +78,42 @@ artifact was active. The current CLI settings command does not expose the
 indexer-level cache toggle or cache-artifact selection; use the Envio dashboard
 cache settings, or Envio support if the dashboard is unavailable.
 
+### Rollback a Bad Promotion
+
+If a promoted deployment turns out bad (schema-breaking change, handler crash
+on a real block), roll the static production endpoint back to the last-good
+commit:
+
+1. Find the last-good SHA. List Envio's live deployments - the `prod` row is
+   what is serving right now:
+
+   ```bash
+   pnpm --silent exec envio-cloud indexer get mento mento-protocol -o json \
+     | jq -r '.data.deployments[] | [.commit_hash, (.prod_status // "-"), .created_time] | @tsv'
+   ```
+
+   Cross-check against the deploy-branch history: `git log --oneline origin/envio`.
+
+2. Run the rollback. Preview the plan first with `--dry-run`:
+
+   ```bash
+   pnpm deploy:indexer:rollback <last-good-sha> --dry-run
+   pnpm deploy:indexer:rollback <last-good-sha>
+   ```
+
+   - **Fast path** - the last-good deployment is still one of Envio's live
+     deployments: the script re-promotes it directly. No resync; takes seconds.
+   - **Slow path** - the deployment was pruned: the script force-pushes the
+     last-good SHA to the `envio` branch and prints the resync-then-promote
+     checklist. Budget 10-30+ minutes for the from-genesis resync. If Envio
+     already has 3 live deployments, delete a stale non-prod deployment first
+     ([envio.dev/app](https://envio.dev/app/mento-protocol/mento)).
+
+3. Verify [monitoring.mento.org](https://monitoring.mento.org) loads data.
+
+4. Roll forward later by promoting the fixed deployment:
+   `pnpm deploy:indexer:promote <fixed-sha>`.
+
 ---
 
 ## Dashboard Deployment (Vercel)

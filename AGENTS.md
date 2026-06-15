@@ -384,6 +384,7 @@ pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Runtime issue
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
+pnpm deploy:indexer:rollback <last-good-sha>  # Roll prod back: re-promote if still registered, else rebuild + resync
 
 # Code health (CodeScene-equivalent OSS checks)
 pnpm code-health:knip              # Strict knip across all packages (blocking)

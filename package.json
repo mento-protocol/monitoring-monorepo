@@ -39,6 +39,7 @@
     "deploy:indexer": "./scripts/deploy-indexer.sh",
     "deploy:indexer:status": "./scripts/deploy-indexer-status.sh",
     "deploy:indexer:promote": "./scripts/deploy-indexer-promote.sh",
+    "deploy:indexer:rollback": "./scripts/deploy-indexer-rollback.sh",
     "deploy:indexer:logs": "./scripts/deploy-indexer-logs.sh",
     "deploy:indexer:metrics": "./scripts/deploy-indexer-metrics.sh",
     "deploy:indexer:info": "./scripts/deploy-indexer-info.sh",

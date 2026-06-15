@@ -255,6 +255,10 @@ pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
 pnpm deploy:indexer:promote "$COMMIT"
 ```
 
+If a promotion turns out bad, roll back with
+`pnpm deploy:indexer:rollback <last-good-sha>` - see
+[docs/deployment.md](./docs/deployment.md#rollback-a-bad-promotion).
+
 The `mento` project on [Envio Cloud](https://envio.dev/app/mento-protocol/mento)
 watches this branch. Envio registers deployments under short commit hashes and
 can lag the Git push by several minutes, so use the explicit commit form while
