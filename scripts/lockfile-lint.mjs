@@ -462,19 +462,32 @@ function isPeerSelectorSeparator(selector, index) {
 
 /**
  * @param {string} selector
+ * @returns {string[]}
  */
-function overrideSelectorRange(selector) {
-  let peerSeparator = -1;
+function peerQualifiedSelectorParts(selector) {
+  const parts = [];
+  let start = 0;
   for (let index = 0; index < selector.length; index += 1) {
     if (selector[index] === ">" && isPeerSelectorSeparator(selector, index)) {
-      peerSeparator = index;
+      parts.push(selector.slice(start, index));
+      start = index + 1;
     }
   }
-  const packageSelector =
-    peerSeparator === -1 ? selector : selector.slice(peerSeparator + 1);
-  const rangeSeparator = packageSelector.indexOf("@", 1);
-  if (rangeSeparator === -1) return null;
-  return packageSelector.slice(rangeSeparator + 1).trim() || null;
+  parts.push(selector.slice(start));
+  return parts;
+}
+
+/**
+ * @param {string} selector
+ */
+function overrideSelectorRanges(selector) {
+  return peerQualifiedSelectorParts(selector)
+    .map((packageSelector) => {
+      const rangeSeparator = packageSelector.indexOf("@", 1);
+      if (rangeSeparator === -1) return null;
+      return packageSelector.slice(rangeSeparator + 1).trim() || null;
+    })
+    .filter((range) => range !== null);
 }
 
 /**
@@ -565,17 +578,15 @@ function extractWorkspaceOverrides(absPath) {
  */
 function validatePnpmOverrideEntry(source, selector, replacement) {
   let errors = 0;
-  const selectorRange = overrideSelectorRange(selector);
-  if (
-    selectorRange !== null &&
-    isUnboundedMinimumOverrideValue(selectorRange)
-  ) {
-    fail(
-      `${source} selector "${selector}" uses ` +
-        `unbounded minimum range "${selectorRange}". Use a bounded ` +
-        "selector range before pinning the replacement.",
-    );
-    errors++;
+  for (const selectorRange of overrideSelectorRanges(selector)) {
+    if (isUnboundedMinimumOverrideValue(selectorRange)) {
+      fail(
+        `${source} selector "${selector}" uses ` +
+          `unbounded minimum range "${selectorRange}". Use a bounded ` +
+          "selector range before pinning the replacement.",
+      );
+      errors++;
+    }
   }
   if (
     typeof replacement === "string" &&
