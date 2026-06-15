@@ -1,6 +1,6 @@
 name: Supply Chain
 
-# Two gates that protect the dependency supply chain:
+# Three gates that protect the dependency supply chain:
 #
 # 1. npm advisory audit — blocks merges when a high/critical advisory exists
 #    against any package in either deployable lockfile.
@@ -15,6 +15,10 @@ name: Supply Chain
 #       files instead. This catches the same class of "poisoned mirror" attacks
 #       that lockfile-lint(1) was designed for — a rogue `registry=` line that
 #       silently redirects all installs to an attacker-controlled server.
+#
+# 3. dependency version-skew check — validates every manifest entry for a
+#    cataloged package is either "catalog:" or the exact catalog version. This
+#    keeps standalone deploy roots aligned with workspace-only catalog consumers.
 #
 # What this does NOT cover: sigstore attestations / SLSA provenance. pnpm 10
 # has no `audit signatures` equivalent, and `npm audit signatures` requires a
@@ -53,6 +57,8 @@ on:
       - .github/workflows/supply-chain.yml
       - scripts/lockfile-lint.mjs
       - scripts/lockfile-lint.test.mjs
+      - scripts/version-skew-check.mjs
+      - scripts/version-skew-check.test.mjs
   schedule:
     # Daily run so a newly-disclosed CVE against a pinned dep is caught
     # within 24h. Failures are reported to Slack via
@@ -134,3 +140,9 @@ jobs:
         # Same gate for the package-local lockfile Cloud Build uses as the
         # governance-watchdog deploy source of truth.
         run: LOCKFILE_LINT_ROOT=governance-watchdog node scripts/lockfile-lint.mjs
+      - name: version-skew self-tests
+        run: node scripts/version-skew-check.test.mjs
+      - name: dependency version-skew check
+        # Every declared version of a cataloged package (currently viem)
+        # must be "catalog:" or exactly the catalog version.
+        run: node scripts/version-skew-check.mjs

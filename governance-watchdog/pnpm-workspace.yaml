@@ -20,6 +20,10 @@ overrides:
   # esbuild: tsx@4.22.4 still pins esbuild@0.28.0 (GHSA-gv7w-rqvm-qjhr, high).
   # Patched floor is 0.28.1; pin exact so fresh installs don't drift.
   esbuild: 0.28.1
+  # Google Cloud deps still resolve vulnerable qs/uuid ranges. Pin the
+  # vulnerable ranges narrowly instead of overriding whole packages.
+  "qs@<6.15.2": 6.15.2
+  "uuid@<11.1.1": 11.1.1
   # No undici override: discord.js and @discordjs/rest both pin undici EXACTLY
   # (6.24.1 as of discord.js 14.26.4), which already satisfies the >=6.24.0
   # security floor from the 2026 advisory batch. Overriding past their pin is

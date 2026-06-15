@@ -9,6 +9,14 @@ packages:
   - alerts/infra/oncall-announcer
   - governance-watchdog
 
+catalog:
+  # Single source of truth for viem. ui-dashboard/metrics-bridge reference it
+  # via "catalog:"; indexer-envio, aegis, governance-watchdog and the alerts
+  # handler are also built as standalone source roots outside this workspace,
+  # so they keep literal pins; scripts/version-skew-check.mjs enforces they
+  # stay equal to this entry.
+  viem: 2.50.4
+
 # No undici override on purpose (overrides live in package.json#pnpm.overrides,
 # which can't carry comments): discord.js/@discordjs/rest pin undici exactly
 # (6.24.1), and the other root-graph consumers' own ranges (@vercel/blob ^6.23.0,

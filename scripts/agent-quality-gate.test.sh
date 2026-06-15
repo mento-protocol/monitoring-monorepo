@@ -575,7 +575,9 @@ validator_repo="$(mktemp -d)"
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/version-skew-check.mjs",
+    "skew:check:test": "node scripts/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -699,7 +701,9 @@ package_json_repo="$(mktemp -d)"
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/version-skew-check.mjs",
+    "skew:check:test": "node scripts/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -722,6 +726,7 @@ assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/version-skew-check.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm agent:quality-gate:test"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
@@ -749,7 +754,9 @@ dedupe_quality_gate_alias_repo="$(mktemp -d)"
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/version-skew-check.mjs",
+    "skew:check:test": "node scripts/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -790,7 +797,9 @@ lockfile_script_repo="$(mktemp -d)"
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/version-skew-check.mjs",
+    "skew:check:test": "node scripts/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -813,6 +822,7 @@ assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/version-skew-check.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
@@ -838,7 +848,9 @@ pr_ready_state_script_repo="$(mktemp -d)"
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs"
+    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/version-skew-check.mjs",
+    "skew:check:test": "node scripts/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -861,6 +873,7 @@ assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/version-skew-check.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
@@ -2095,6 +2108,12 @@ assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 
 run_gate "scripts/lockfile-lint.test.mjs"
 assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
+
+run_gate "scripts/version-skew-check.mjs"
+assert_contains "- pnpm skew:check:test (version skew checker changed)"
+
+run_gate "scripts/version-skew-check.test.mjs"
+assert_contains "- pnpm skew:check:test (version skew checker changed)"
 
 run_gate "scripts/check-github-action-pins.mjs"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions pin checker changed)"
