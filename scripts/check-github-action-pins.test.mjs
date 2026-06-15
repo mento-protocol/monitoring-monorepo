@@ -103,6 +103,7 @@ jobs:
   test:
     steps:
       - uses: actions/checkout@v6
+      - uses: 'actions/setup-node@v4'
 `,
     );
 
@@ -111,6 +112,37 @@ jobs:
     contains(
       result.stderr,
       ".github/workflows/ci.yml:5 uses: actions/checkout@v6",
+      "failure location",
+    );
+    contains(
+      result.stderr,
+      ".github/workflows/ci.yml:6 uses: actions/setup-node@v4",
+      "quoted failure location",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails mutable tags in composite actions under .github/actions", () => {
+  const root = fixtureRoot("actions-fail");
+  try {
+    write(
+      root,
+      ".github/actions/pnpm-install/action.yml",
+      `
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+`,
+    );
+
+    const result = run(root);
+    equal(result.status, 1, result.stdout);
+    contains(
+      result.stderr,
+      ".github/actions/pnpm-install/action.yml:5 uses: actions/setup-node@v4",
       "failure location",
     );
   } finally {

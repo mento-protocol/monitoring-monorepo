@@ -1319,6 +1319,7 @@ assert_order \
 
 run_gate ".github/workflows/infra.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm tf:test (Terraform registry workflow changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform registry workflow changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform registry workflow changed)"
