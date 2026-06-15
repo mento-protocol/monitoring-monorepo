@@ -24,6 +24,7 @@ export const ChainConfig = z
     id: z.string(),
     label: z.string(),
     httpRpcUrl: z.string(),
+    fallbackHttpRpcUrl: z.string().optional(),
     contracts: z.record(z.string(), z.string()).default({}),
     vars: z.record(z.string(), z.string()).default({}),
   })

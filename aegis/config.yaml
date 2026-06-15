@@ -74,6 +74,7 @@ chains:
   - id: celo
     label: celo
     httpRpcUrl: https://forno.celo.org
+    fallbackHttpRpcUrl: https://rpc.ankr.com/celo
     contracts:
       SortedOracles: '0xefb84935239dacdecf7c5ba76d8de40b077b7b33'
       BreakerBox: '0x303ED1df62Fa067659B586EbEe8De0EcE824Ab39'
