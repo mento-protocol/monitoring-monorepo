@@ -452,6 +452,17 @@ export async function recordSusdsYieldHeartbeatSnapshot(
   return true;
 }
 
+export async function handleSusdsYieldDailySnapshotHeartbeat({
+  block,
+  context,
+}: {
+  block: { number: number | bigint };
+  context: SusdsContext;
+}): Promise<boolean> {
+  if (context.isPreload) return false;
+  return recordSusdsYieldHeartbeatSnapshot(context, BigInt(block.number));
+}
+
 async function shouldProcess(
   context: SusdsContext,
   movementId: string,
@@ -793,7 +804,6 @@ indexer.onBlock(
         : false,
   },
   async ({ block, context }) => {
-    if (context.isPreload) return;
-    await recordSusdsYieldHeartbeatSnapshot(context, BigInt(block.number));
+    await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
   },
 );

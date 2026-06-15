@@ -32,6 +32,8 @@ const HISTORY_PAGE_SIZE = 1000;
 const HISTORY_MAX_PAGES = 20;
 
 function reserveYieldHistoryHasuraUrl(): string {
+  // Production Celo and Monad entries share the same multichain Envio Hasura
+  // endpoint; the Monad fallback is an endpoint fallback, not a chain switch.
   const url =
     NETWORKS["celo-mainnet"].hasuraUrl || NETWORKS["monad-mainnet"].hasuraUrl;
   if (!url) {
