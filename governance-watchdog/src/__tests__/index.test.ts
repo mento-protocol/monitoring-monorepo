@@ -1,5 +1,5 @@
 import type { Request, Response } from "@google-cloud/functions-framework";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import healthCheck from "../events/fixtures/health-check.fixture.json";
 import proposalCreated from "../events/fixtures/proposal-created.fixture.json";
 
@@ -93,6 +93,10 @@ function telegramPayload() {
 }
 
 describe("governanceWatchdog HTTP entrypoint", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -163,6 +167,19 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     expect(res.status).toHaveBeenCalledWith(401);
     expect(mockDiscordSend).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("processes requests authenticated via x-auth-token", async () => {
+    mockIsFromQuicknode.mockResolvedValue(false);
+    mockHasAuthToken.mockResolvedValue(true);
+    const governanceWatchdog = await loadFunction();
+    const res = makeRes();
+
+    await governanceWatchdog(makeReq("/", proposalCreated), res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mockDiscordSend).toHaveBeenCalledOnce();
+    expect(mockFetch).toHaveBeenCalledOnce();
   });
 
   it("returns 500 for QuickNode error bodies", async () => {

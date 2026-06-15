@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EventType, type QuicknodePayload } from "../../events/types.js";
+import { EventType } from "../../events/types.js";
 import healthCheck from "../../events/fixtures/health-check.fixture.json";
 import proposalCreated from "../../events/fixtures/proposal-created.fixture.json";
 import parseRequestBody from "../parse-request-body.js";
@@ -17,15 +17,13 @@ describe("parseRequestBody", () => {
   });
 
   it("returns valid events as-is", () => {
-    const result = parseRequestBody(
-      proposalCreated as unknown as QuicknodePayload,
-    );
+    const result = parseRequestBody(proposalCreated);
 
     expect(result).toEqual(proposalCreated.result);
   });
 
   it("skips unknown events while keeping supported events", () => {
-    const result = parseRequestBody(healthCheck as unknown as QuicknodePayload);
+    const result = parseRequestBody(healthCheck);
 
     expect(result).not.toHaveLength(0);
     expect(
@@ -47,8 +45,6 @@ describe("parseRequestBody", () => {
       ],
     };
 
-    expect(parseRequestBody(payload as unknown as QuicknodePayload)).toEqual(
-      [],
-    );
+    expect(parseRequestBody(payload)).toEqual([]);
   });
 });
