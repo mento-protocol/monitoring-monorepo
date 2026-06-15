@@ -83,7 +83,8 @@ describe("createEventHandler notification failures", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.clearAllMocks();
+    mockSendDiscordNotification.mockClear();
+    mockSendTelegramNotification.mockClear();
   });
 
   it("logs Discord send failures as structured ERROR entries and still sends Telegram", async () => {
@@ -96,8 +97,9 @@ describe("createEventHandler notification failures", () => {
 
     expect(mockSendDiscordNotification).toHaveBeenCalledOnce();
     expect(mockSendTelegramNotification).toHaveBeenCalledOnce();
-    expect(loggedErrors()).toHaveLength(1);
-    const [entry] = loggedErrors();
+    const errors = loggedErrors();
+    expect(errors).toHaveLength(1);
+    const [entry] = errors;
     expect(entry.severity).toBe("ERROR");
     expect(entry.message).toContain(
       "Failed to send Discord notification for ProposalCreated event:",
@@ -115,8 +117,9 @@ describe("createEventHandler notification failures", () => {
 
     expect(mockSendDiscordNotification).toHaveBeenCalledOnce();
     expect(mockSendTelegramNotification).toHaveBeenCalledOnce();
-    expect(loggedErrors()).toHaveLength(1);
-    const [entry] = loggedErrors();
+    const errors = loggedErrors();
+    expect(errors).toHaveLength(1);
+    const [entry] = errors;
     expect(entry.severity).toBe("ERROR");
     expect(entry.message).toContain(
       "Failed to send Telegram notification for ProposalCreated event:",
