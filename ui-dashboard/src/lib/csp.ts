@@ -19,11 +19,16 @@
 
 import { clientEnv } from "@/env";
 
-function browserTestConnectSrc(): string[] {
-  if (!clientEnv.NEXT_PUBLIC_BROWSER_TEST_FIXTURES) return [];
-  const hasuraUrl = clientEnv.NEXT_PUBLIC_HASURA_URL;
-  if (!hasuraUrl) return [];
-  return [new URL(hasuraUrl).origin];
+function configuredHasuraConnectSrc(): string[] {
+  return Array.from(
+    new Set(
+      [
+        clientEnv.NEXT_PUBLIC_HASURA_URL,
+        clientEnv.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA,
+        clientEnv.NEXT_PUBLIC_HASURA_URL_TESTNET,
+      ].flatMap((url) => (url ? [new URL(url).origin] : [])),
+    ),
+  );
 }
 
 // Next.js dev HMR needs eval during fixture-mode browser tests.
@@ -39,7 +44,8 @@ const CSP_CONNECT_SRC = [
   "https://forno.celo.org",
   "https://forno.celo-sepolia.celo-testnet.org",
   "https://rpc2.monad.xyz",
-  ...browserTestConnectSrc(),
+  "https://testnet-rpc.monad.xyz",
+  ...configuredHasuraConnectSrc(),
 ].join(" ");
 
 /**

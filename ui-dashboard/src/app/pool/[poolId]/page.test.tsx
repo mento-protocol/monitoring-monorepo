@@ -105,6 +105,12 @@ vi.mock("@/lib/networks", async (importOriginal) => {
         : chainId === 143
           ? "monad-mainnet"
           : null,
+    configuredNetworkIdForChainId: (chainId: number) =>
+      chainId === 42220
+        ? "celo-mainnet"
+        : chainId === 143
+          ? "monad-mainnet"
+          : null,
   };
 });
 
@@ -548,7 +554,7 @@ describe("pool detail route redirects", () => {
     expect(redirectMock).toHaveBeenCalledWith(POOL_NOT_FOUND_DEST);
   });
 
-  it("rejects namespaced routes for unsupported chains", async () => {
+  it("rejects namespaced routes for hidden testnet chains", async () => {
     await expect(renderServerPoolPage(`10143-${rawPoolId}`)).rejects.toThrow(
       `NEXT_REDIRECT:${POOL_NOT_FOUND_DEST}`,
     );

@@ -36,13 +36,13 @@ Celo Mainnet (42220), Monad Mainnet (143), and Ethereum Mainnet (1) sUSDS reserv
 
 ## Networks
 
-| Network       | Chain ID | Status                                         |
-| ------------- | -------- | ---------------------------------------------- |
-| Celo Mainnet  | 42220    | Live in the production multichain indexer      |
-| Monad Mainnet | 143      | Live in the production multichain indexer      |
-| Ethereum      | 1        | Live for sUSDS reserve-yield accounting        |
-| Celo Sepolia  | 11142220 | Local/testnet config available, not production |
-| Monad Testnet | 10143    | Local/testnet config available, not production |
+| Network       | Chain ID | Status                                                  |
+| ------------- | -------- | ------------------------------------------------------- |
+| Celo Mainnet  | 42220    | Live in the production multichain indexer               |
+| Monad Mainnet | 143      | Live in the production multichain indexer               |
+| Ethereum      | 1        | Live for sUSDS reserve-yield accounting                 |
+| Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars |
+| Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars |
 
 ## Getting Started
 
@@ -208,6 +208,9 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | Variable                                 | Description                                                                                                |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo, Monad, and Ethereum sUSDS reserve-yield data)                 |
+| `NEXT_PUBLIC_HASURA_URL_TESTNET`         | Optional Monad Testnet Envio GraphQL endpoint                                                              |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`    | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
+| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`      | Set to `true` with the per-testnet endpoint URL to show hosted testnet networks                            |
 | `HASURA_SECRET_CELO_SEPOLIA_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-sepolia-local` proxy                               |
 | `HASURA_SECRET_CELO_MAINNET_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-mainnet-local` proxy                               |
 | `HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL` | Optional upstream URL override for local sepolia Hasura proxy (default `http://localhost:8080/v1/graphql`) |

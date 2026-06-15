@@ -13,6 +13,7 @@ describe("chainSlug", () => {
     [42220, "celo"],
     [143, "monad"],
     [11142220, "celo-sepolia"],
+    [10143, "monad-testnet"],
   ])("maps chainId %i to %s", (chainId, expected) => {
     expect(chainSlug(chainId)).toBe(expected);
   });
@@ -27,6 +28,7 @@ describe("chainLabel", () => {
     [42220, "Celo"],
     [143, "Monad"],
     [11142220, "Celo Sepolia"],
+    [10143, "Monad Testnet"],
   ])("maps chainId %i to %s", (chainId, expected) => {
     expect(chainLabel(chainId)).toBe(expected);
   });
@@ -37,7 +39,7 @@ describe("chainLabel", () => {
 });
 
 describe("hasChain", () => {
-  it.each([42220, 143, 11142220])(
+  it.each([42220, 143, 11142220, 10143])(
     "returns true for registered chainId %i",
     (chainId) => {
       expect(hasChain(chainId)).toBe(true);
@@ -80,6 +82,7 @@ describe("explorerTxUrl", () => {
     [42220, "https://celoscan.io/tx/0xtx"],
     [143, "https://monadscan.com/tx/0xtx"],
     [11142220, "https://celo-sepolia.blockscout.com/tx/0xtx"],
+    [10143, "https://testnet.monadscan.com/tx/0xtx"],
   ])("builds tx URL for chainId %i", (chainId, expected) => {
     expect(explorerTxUrl(chainId, "0xtx")).toBe(expected);
   });

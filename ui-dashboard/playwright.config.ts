@@ -38,7 +38,9 @@ function detectSandbox(): boolean {
   }
 }
 
-const inSandbox = detectSandbox();
+const forceSingleProcess =
+  process.env.PLAYWRIGHT_FORCE_SINGLE_PROCESS === "true";
+const inSandbox = detectSandbox() || forceSingleProcess;
 
 export default defineConfig({
   testDir: "./tests/browser",

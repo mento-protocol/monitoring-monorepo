@@ -5,7 +5,7 @@ templates for Mento monitoring.
 
 ## Scope
 
-- **In this module:** protocol `grafana_rule_group` resources for FPMM pool health, oracle report quality, oracle relayers, reserve balances, trading modes, trading limits, indexer health, CDP (Liquity v2) markets, and metrics-bridge liveness, plus the Aegis service-health rule group (relocated in #706). This stack also owns the singleton `grafana_notification_policy`, protocol/Aegis contact points, message templates, mute timings, and protocol folders.
+- **In this module:** protocol `grafana_rule_group` resources for FPMM pool health, oracle report quality, oracle relayers, reserve balances, trading modes, trading limits, indexer health, CDP (Liquity v2) markets, and metrics-bridge liveness, plus Aegis service-health and Aegis testnet-health rule groups. This stack also owns the singleton `grafana_notification_policy`, protocol/Aegis contact points, message templates, mute timings, and protocol folders.
 - **Not in this module:** the Aegis dashboard and the Aegis Grafana folder. Those stay in [`aegis/terraform`](../../aegis/terraform); the relocated rule group references the Aegis folder via a data source.
 - **Folder convention:** one folder per `service` label (`FPMMs`, `Oracles`, `Indexer`, `Metrics Bridge`, `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`, `CDPs`).
 
@@ -37,11 +37,19 @@ All rule/routing secrets live in `alerts/rules/terraform.tfvars` (gitignored). M
 
 ## Smoke test
 
+Before applying Aegis testnet-health rules, confirm Aegis has recently emitted
+successful `view_call_query_duration_count` samples for `celoSepolia` and
+`monadTestnet`. The no-successful-poll rules intentionally use
+`no_data_state = "Alerting"` with a 5m grace, so a never-published series can
+fire immediately after apply.
+
 After `apply`, temporarily drop one threshold (e.g. set `params = [0.0]` on the Deviation Breach rule) and `terraform apply` again. Within ~2m, `#alerts-pools` should receive a fire, then a resolve after reverting the change. For deviation state transitions, the bridge emits a short-lived transition marker and the transition contact points intentionally do not send a second resolve message.
 
 ## Service label routing
 
-v3 FPMM/indexer/metrics-bridge rules use rule-level `notification_settings`.
-Protocol relayer/reserve/trading/Aegis service-health rules use the global
-notification policy and route by `service`, `severity`, `chain`, and
-`rateFeed` labels.
+v3 FPMM/indexer/metrics-bridge/Aegis testnet-health rules use rule-level
+`notification_settings`. Protocol relayer/reserve/trading/Aegis service-health
+rules use the global notification policy and route by `service`, `severity`,
+`chain`, and `rateFeed` labels. Aegis testnet-health rules route to
+`#alerts-testnet` via `service=aegis-testnet` and do not depend on a testnet
+metrics bridge or hosted testnet pool indexer.

@@ -57,8 +57,8 @@ export function Tooltip({
         role="tooltip"
         aria-hidden={!visible}
         className={[
-          "pointer-events-none absolute top-full z-30 mt-1 w-72 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
-          visible ? "opacity-100" : "",
+          "pointer-events-none absolute top-full z-30 mt-1 w-72 opacity-0 transition-opacity group-hover:block group-hover:opacity-100 group-focus-within:block group-focus-within:opacity-100",
+          visible ? "block opacity-100" : "hidden",
           alignClass[align],
           tooltipClassName,
         ].join(" ")}

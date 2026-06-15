@@ -18,6 +18,8 @@ locals {
   #   explorer        → block-explorer host for address links in alert copy
   #   chain_id            → EVM chain ID; used to build pool URLs like
   #                         `monitoring.mento.org/pool/<chain_id>-<pool_address>`
+  #   aegis_chain         → Aegis self-metric chain label used by
+  #                         `view_call_query_duration_count`
   #   chainlink_feed_path → `data.chain.link/feeds/<chainlink_feed_path>/...` two-segment
   #                         path component. Celo uses `celo/mainnet`, Monad uses
   #                         `monad/monad` (the network segment is the literal "monad",
@@ -34,6 +36,7 @@ locals {
       threshold           = 10
       explorer            = "celoscan.io"
       chain_id            = "42220"
+      aegis_chain         = "celo"
       chainlink_feed_path = "celo/mainnet"
     }
     "celo-sepolia" = {
@@ -44,6 +47,7 @@ locals {
       threshold           = 10
       explorer            = "sepolia.celoscan.io"
       chain_id            = "11142220"
+      aegis_chain         = "celoSepolia"
       chainlink_feed_path = ""
     }
     "monad" = {
@@ -54,6 +58,7 @@ locals {
       threshold           = 50
       explorer            = "monadscan.com"
       chain_id            = "143"
+      aegis_chain         = "monad"
       chainlink_feed_path = "monad/monad"
     }
     "monad-testnet" = {
@@ -64,6 +69,7 @@ locals {
       threshold           = 50
       explorer            = "testnet.monadscan.com"
       chain_id            = "10143"
+      aegis_chain         = "monadTestnet"
       chainlink_feed_path = ""
     }
   }
