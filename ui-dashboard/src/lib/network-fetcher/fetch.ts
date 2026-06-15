@@ -183,9 +183,10 @@ const PARTIAL_PAGE_THROTTLE_MS = 60_000;
 export const partialPageLastCapturedAt = new Map<string, number>();
 
 /**
- * Generic paginated fetcher with the Hasura fail-open contract documented on
- * `SNAPSHOT_PAGE_SIZE`: hard-fail on page 0, preserve and flag truncated on
- * mid-loop failure, log cap exhaustion once per (network, responseKey).
+ * Generic paginated fetcher with the Hasura fail-open contract documented
+ * above: hard-fail on page 0, preserve and flag truncated on mid-loop failure,
+ * log cap exhaustion once per (network, responseKey). `pageSize` must match the
+ * GraphQL `limit` passed by `variablesFor`; it is the short-page sentinel.
  *
  * Callers parameterize: variables shape per page, response key, and a dedup
  * key extractor — offset pagination over an append-only table is unstable
@@ -203,13 +204,22 @@ export async function fetchPaginatedRows<TRow, TVars>(args: {
   query: string;
   responseKey: string;
   network: string;
+  pageSize: number;
   variablesFor: (page: number) => TVars;
   dedupKey: (row: TRow) => string;
   /** Extra payload merged into the Sentry capture for this responseKey. */
   extra?: Record<string, unknown>;
 }): Promise<PaginatedPageResult<TRow>> {
-  const { client, query, responseKey, network, variablesFor, dedupKey, extra } =
-    args;
+  const {
+    client,
+    query,
+    responseKey,
+    network,
+    pageSize,
+    variablesFor,
+    dedupKey,
+    extra,
+  } = args;
   const seen = new Set<string>();
   const rows: TRow[] = [];
   // Sequential pagination — each iteration breaks early when the page
@@ -255,7 +265,7 @@ export async function fetchPaginatedRows<TRow, TVars>(args: {
       seen.add(key);
       rows.push(row);
     }
-    if (batch.length < SNAPSHOT_PAGE_SIZE) {
+    if (batch.length < pageSize) {
       return { rows, truncated: false, error: null };
     }
   }
@@ -270,7 +280,7 @@ export async function fetchPaginatedRows<TRow, TVars>(args: {
       extra: {
         rowsFetched: rows.length,
         maxPages: SNAPSHOT_MAX_PAGES,
-        pageSize: SNAPSHOT_PAGE_SIZE,
+        pageSize,
         ...extra,
       },
     });
@@ -292,6 +302,7 @@ async function fetchAllDailySnapshotPages(
     query: POOL_DAILY_SNAPSHOTS_ALL,
     responseKey: "PoolDailySnapshot",
     network,
+    pageSize: SNAPSHOT_PAGE_SIZE,
     variablesFor: (page) => ({
       poolIds,
       limit: SNAPSHOT_PAGE_SIZE,
@@ -318,6 +329,7 @@ async function fetchAllBrokerDailySnapshotPages(
     query: BROKER_DAILY_SNAPSHOTS_ALL,
     responseKey: "BrokerDailySnapshot",
     network,
+    pageSize: SNAPSHOT_PAGE_SIZE,
     variablesFor: (page) => ({
       chainId,
       limit: SNAPSHOT_PAGE_SIZE,
@@ -347,6 +359,7 @@ async function fetchAllLpAddressPages(
     query: UNIQUE_LP_ADDRESSES,
     responseKey: "LiquidityPosition",
     network,
+    pageSize: SNAPSHOT_PAGE_SIZE,
     variablesFor: (page) => ({
       poolIds,
       limit: SNAPSHOT_PAGE_SIZE,
@@ -376,6 +389,7 @@ export async function fetchAllFeeSnapshotPages(
     query: POOL_DAILY_FEE_SNAPSHOTS_PAGE,
     responseKey: "PoolDailyFeeSnapshot",
     network,
+    pageSize: SNAPSHOT_PAGE_SIZE,
     variablesFor: (page) => ({
       chainId,
       limit: SNAPSHOT_PAGE_SIZE,

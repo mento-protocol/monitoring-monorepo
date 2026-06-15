@@ -87,6 +87,7 @@ describe("fetchPaginatedRows — AbortSignal.timeout per page", () => {
       query: "query { TestKey { id } }",
       responseKey: "TestKey",
       network: "celo-mainnet",
+      pageSize: PAGE_SIZE,
       variablesFor: (page) => ({ limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
       dedupKey: (r: { id: string }) => r.id,
     });
@@ -126,6 +127,7 @@ describe("fetchPaginatedRows — AbortSignal.timeout per page", () => {
       query: "query { TestKey { id } }",
       responseKey: "TestKey",
       network: "celo-mainnet",
+      pageSize: PAGE_SIZE,
       variablesFor: (page) => ({ limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
       dedupKey: (r: { id: string }) => r.id,
     });
@@ -168,6 +170,7 @@ describe("fetchPaginatedRows — boundary-duplicate dedup", () => {
       query: "query { TestKey { id } }",
       responseKey: "TestKey",
       network: "celo-mainnet",
+      pageSize: PAGE_SIZE,
       variablesFor: (page) => ({ limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
       dedupKey: (r: { id: string }) => r.id,
     });
@@ -204,6 +207,7 @@ describe("fetchPaginatedRows — boundary-duplicate dedup", () => {
       query: "query { TestKey { id } }",
       responseKey: "TestKey",
       network: "celo-mainnet",
+      pageSize: PAGE_SIZE,
       variablesFor: (page) => ({ limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
       dedupKey: (r: { id: string }) => r.id,
     });
@@ -211,5 +215,36 @@ describe("fetchPaginatedRows — boundary-duplicate dedup", () => {
     const uniqueIds = new Set(result.rows.map((r) => r.id));
     expect(result.rows).toHaveLength(uniqueIds.size);
     expect(result.rows).toHaveLength(PAGE_SIZE * 2 + 1);
+  });
+
+  it("uses the caller pageSize as the short-page sentinel", async () => {
+    const client = makeClient();
+    const PAGE_SIZE = 2;
+
+    vi.mocked(client.request)
+      .mockResolvedValueOnce({ TestKey: [{ id: "r0" }, { id: "r1" }] })
+      .mockResolvedValueOnce({ TestKey: [{ id: "r2" }, { id: "r3" }] })
+      .mockResolvedValueOnce({ TestKey: [{ id: "r4" }] });
+
+    const result = await fetchPaginatedRows({
+      client,
+      query: "query { TestKey { id } }",
+      responseKey: "TestKey",
+      network: "celo-mainnet",
+      pageSize: PAGE_SIZE,
+      variablesFor: (page) => ({ limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+      dedupKey: (r: { id: string }) => r.id,
+    });
+
+    expect(client.request).toHaveBeenCalledTimes(3);
+    expect(result.rows.map((row) => row.id)).toEqual([
+      "r0",
+      "r1",
+      "r2",
+      "r3",
+      "r4",
+    ]);
+    expect(result.truncated).toBe(false);
+    expect(result.error).toBeNull();
   });
 });

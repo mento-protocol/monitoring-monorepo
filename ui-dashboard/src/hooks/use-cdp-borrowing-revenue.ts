@@ -252,6 +252,7 @@ async function fetchAllBracketPages(
     query: CDP_BORROWING_REVENUE_BRACKETS,
     responseKey: "InterestRateBracket",
     network,
+    pageSize: CDP_PAGE_SIZE,
     variablesFor: (page) => ({
       collateralIds,
       limit: CDP_PAGE_SIZE,
@@ -273,6 +274,7 @@ async function fetchAllFeeEventPages(
     query: CDP_BORROWING_FEE_EVENTS,
     responseKey: "TroveOperationEvent",
     network,
+    pageSize: CDP_PAGE_SIZE,
     variablesFor: (page) => ({
       chainId,
       limit: CDP_PAGE_SIZE,
@@ -319,6 +321,7 @@ async function paginateDailySnapshots<T extends { id: string }>(
     query,
     responseKey: "LiquityBorrowingRevenueDailySnapshot",
     network,
+    pageSize: CDP_PAGE_SIZE,
     variablesFor: (page) => ({
       chainId,
       limit: CDP_PAGE_SIZE,
