@@ -1090,6 +1090,9 @@ while IFS= read -r path; do
       # `shared-config/**` entry in `.github/workflows/size-limit.yml`.
       add_ui_size_limit "shared-config exports feed the dashboard bundle"
       case "$path" in
+        shared-config/src/thresholds.ts)
+          add_command "node scripts/check-deviation-threshold-drift.mjs" "shared deviation threshold source changed"
+          ;;
         shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
           add_all_indexer_codegen "shared-config vendored indexer fixture changed"
           add_package_quality_commands "@mento-protocol/indexer-envio" "shared-config vendored indexer fixture changed"
@@ -1147,6 +1150,11 @@ while IFS= read -r path; do
     alerts/rules/*)
       add_surface "alerts-rules"
       add_terraform_validate_commands "alerts/rules" "alerts/rules Terraform changed"
+      case "$path" in
+        alerts/rules/main.tf|alerts/rules/rules-fpmms.tf)
+          add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold Terraform consumer changed"
+          ;;
+      esac
       ;;
     alerts/infra/onchain-event-handler/*)
       add_surface "alerts-infra"
@@ -1331,6 +1339,13 @@ while IFS= read -r path; do
           ;;
         scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
           add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"
+          ;;
+        scripts/check-deviation-threshold-drift.mjs)
+          add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold drift checker changed"
+          add_command "node scripts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker changed"
+          ;;
+        scripts/check-deviation-threshold-drift.test.mjs)
+          add_command "node scripts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker test changed"
           ;;
         scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
           add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"

@@ -10,12 +10,11 @@
 # that's what the separate metrics-bridge rule group is for.
 #
 # DEVIATION THRESHOLDS — the bare `1.01` (warn) and `1.05` (critical) literals
-# below mirror the TS canonical source at `shared-config/src/thresholds.ts`
-# (`DEVIATION_TOLERANCE_RATIO` / `DEVIATION_CRITICAL_RATIO`). HCL can't import
-# TS, so any threshold change is a coordinated edit across packages: bump the
-# TS constants, then mirror them here. The dashboard, metrics-bridge probe,
-# and the indexer's bigint num/den pairs all derive from the same canonical
-# values.
+# in this file plus the PromQL literals in main.tf mirror the TS canonical
+# source at `shared-config/src/thresholds.ts` (`DEVIATION_TOLERANCE_RATIO` /
+# `DEVIATION_CRITICAL_RATIO`). HCL can't import TS, so any threshold change is a
+# coordinated edit across packages: bump the TS constants, then mirror them in
+# Terraform. `scripts/check-deviation-threshold-drift.mjs` enforces that mirror.
 
 # ── Oracle liveness ──────────────────────────────────────────────────────────
 resource "grafana_rule_group" "fpmms_oracle" {

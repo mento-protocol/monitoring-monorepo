@@ -1281,6 +1281,13 @@ run_gate "alerts/rules/rules-fpmms.tf"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
+assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
+
+run_gate "alerts/rules/main.tf"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
+assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
 
 run_gate "alerts/infra/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
@@ -1398,6 +1405,11 @@ assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the das
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
+
+run_gate "shared-config/src/thresholds.ts"
+assert_contains "- node scripts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
+assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
+assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
@@ -2150,6 +2162,13 @@ assert_contains "- node scripts/check-pr-description.test.mjs (PR description va
 
 run_gate "scripts/check-pr-description.test.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
+
+run_gate "scripts/check-deviation-threshold-drift.mjs"
+assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold drift checker changed)"
+assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker changed)"
+
+run_gate "scripts/check-deviation-threshold-drift.test.mjs"
+assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker test changed)"
 
 run_gate "scripts/agent-autoreview.sh"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
