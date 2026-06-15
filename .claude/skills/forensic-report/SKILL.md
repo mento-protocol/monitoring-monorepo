@@ -43,7 +43,7 @@ So split the work into two legs and pick tools per leg:
 Two artefacts:
 
 1. **Local draft** at `.investigations/<address>-<slug>.md` (slug = first-3 words of derived display name, lowercase, kebab-cased). The `.investigations/` folder is gitignored — never commit drafts.
-2. **Optional production upload**: an atomic Lua upsert (`EVAL`) against the `reports` hash in the `address-labels` Upstash database, called via `mcp__upstash__redis_database_run_redis_commands`. The script — same one `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts` runs — increments `version`, preserves `createdAt` from any prior record, and stamps `updatedAt` inside a single Redis execution. Atomicity matters: the editor route uses the same script, and a split read-modify-write here would let two writers both observe `v=N` and both write `v=N+1`. The skill stamps `source: "claude"` so the editor can distinguish skill-produced from hand-typed reports.
+2. **Optional production upload**: an atomic Lua upsert (`EVAL`) against the `reports` hash in the `address-labels` Upstash database, called via `mcp__upstash__redis_database_run_redis_commands`. The script mirrors the atomic upsert pattern `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts` uses — increments `version`, preserves `createdAt` from any prior record, and stamps `updatedAt` inside a single Redis execution — but is a **simplified, non-CAS variant**: the live route additionally takes an `expectedVersion` base-version precondition and returns an `{ok, report}` envelope, whereas this skill does a fire-and-forget always-wins write and returns the bare encoded payload (exact script in the Lua section below). Atomicity still matters: a split read-modify-write here would let two writers both observe `v=N` and both write `v=N+1`. The skill stamps `source: "claude"` so the editor can distinguish skill-produced from hand-typed reports.
 
 ## Output template
 
@@ -530,7 +530,7 @@ _Provenance: Celo head block <N> (hash <0x…>), RPC forno.celo.org, cast <versi
 
 ### Step 10 — Push to production (only on user confirmation)
 
-By default the skill stops at the local draft and asks the user to review. On `--upload` (or after the user explicitly says "ship it"), upload to Upstash via the SAME atomic Lua upsert the API route uses — never split-read-modify-write, which races the editor and any other skill invocation.
+By default the skill stops at the local draft and asks the user to review. On `--upload` (or after the user explicitly says "ship it"), upload to Upstash via the same atomic Lua upsert pattern the API route uses (the simplified non-CAS variant — see the Output section) — never split-read-modify-write, which races the editor and any other skill invocation.
 
 Keep `mcp__upstash__redis_database_run_redis_commands` out of repo-shared auto-allow lists. The MCP approval prompt is the production write guard for this path.
 
@@ -575,7 +575,7 @@ const partial = {
 };
 ```
 
-**Write it via Lua EVAL** (atomic — same script as `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts`):
+**Write it via Lua EVAL** (atomic — the same upsert pattern as `upsertReport()` in `ui-dashboard/src/lib/address-reports.ts`, minus the optimistic-concurrency `expectedVersion` check; this skill always wins and returns the bare encoded payload):
 
 ```js
 const UPSERT_SCRIPT = `
