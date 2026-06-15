@@ -15,8 +15,9 @@
  *      registry is configured (i.e. all packages resolve from the default
  *      https://registry.npmjs.org).
  *
- *   3. Override floor gate: `pnpm.overrides` ranges in package.json and
- *      every pnpm-workspace.yaml must not use unbounded minimum ranges.
+ *   3. Override floor gate: `pnpm.overrides` / `resolutions` ranges in
+ *      package.json and every pnpm-workspace.yaml must not use unbounded
+ *      minimum ranges.
  *
  * No external dependencies — parses the lockfile with pure Node.js regex on
  * the known-structured pnpm v9 format.
@@ -438,8 +439,11 @@ function isUnboundedMinimumOverrideValue(value) {
     .filter(Boolean);
   return branches.some(
     (branch) =>
-      /(?:^|\s)=?>=?\s*v?\d/i.test(branch) &&
-      !/(?:^|\s)<[=]?\s*v?\d/i.test(branch),
+      /(?:^|\s)v?\d+(?:\.\d+){0,2}(?:[-+][0-9A-Za-z.-]+)?\s+-\s*(?:[*xX](?:\.[*xX]){0,2})(?:\s|$)/.test(
+        branch,
+      ) ||
+      (/(?:^|\s)=?>=?\s*v?\d/i.test(branch) &&
+        !/(?:^|\s)<[=]?\s*v?\d/i.test(branch)),
   );
 }
 
@@ -545,6 +549,7 @@ function splitYamlMapEntry(text) {
 function splitYamlInlineMapItems(text) {
   const items = [];
   let quote = "";
+  let depth = 0;
   let start = 0;
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
@@ -556,13 +561,33 @@ function splitYamlInlineMapItems(text) {
       quote = char;
       continue;
     }
-    if (char === ",") {
+    if (char === "{" || char === "[") {
+      depth++;
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (char === "," && depth === 0) {
       items.push(text.slice(start, index).trim());
       start = index + 1;
     }
   }
   items.push(text.slice(start).trim());
   return items.filter(Boolean);
+}
+
+/**
+ * @param {string} value
+ */
+function stripYamlAnchor(value) {
+  const trimmed = value
+    .trim()
+    .replace(/^![^\s]+\s+/, "")
+    .trim();
+  const match = /^&[A-Za-z0-9_-]+(?:\s+(.*))?$/.exec(trimmed);
+  return match ? (match[1] ?? "").trim() : trimmed;
 }
 
 /**
@@ -580,7 +605,9 @@ function extractInlineWorkspaceMapEntries(value, line) {
       const entry = splitYamlMapEntry(item);
       if (!entry) return null;
       const selector = unquote(entry.key);
-      const replacement = unquote(stripYamlInlineComment(entry.value));
+      const replacement = unquote(
+        stripYamlAnchor(stripYamlInlineComment(entry.value)),
+      );
       return selector && replacement ? { selector, replacement, line } : null;
     })
     .filter((entry) => entry !== null);
@@ -605,8 +632,10 @@ function extractWorkspaceMapEntries(absPath, mapName) {
     if (/^\S/.test(line)) {
       const mapMatch = mapHeader.exec(trimmed);
       if (mapMatch) {
-        const inlineValue = stripYamlInlineComment(mapMatch[1]);
-        if (!inlineValue || inlineValue.startsWith("&")) {
+        const inlineValue = stripYamlAnchor(
+          stripYamlInlineComment(mapMatch[1]),
+        );
+        if (!inlineValue) {
           inTargetMap = true;
         } else if (inlineValue.startsWith("{") && inlineValue.endsWith("}")) {
           mapEntries.push(
@@ -627,7 +656,9 @@ function extractWorkspaceMapEntries(absPath, mapName) {
     if (!entry) continue;
 
     const selector = unquote(entry.key);
-    const replacement = unquote(stripYamlInlineComment(entry.value));
+    const replacement = unquote(
+      stripYamlAnchor(stripYamlInlineComment(entry.value)),
+    );
     if (selector && replacement) {
       mapEntries.push({ selector, replacement, line: i + 1 });
     }
@@ -653,6 +684,147 @@ function extractWorkspaceCatalog(absPath) {
       ({ selector, replacement }) => [selector, replacement],
     ),
   );
+}
+
+/**
+ * @param {Map<string, Map<string, string>>} catalogs
+ * @param {string} name
+ * @param {Array<{ selector: string; replacement: string }>} entries
+ */
+function addNamedCatalogEntries(catalogs, name, entries) {
+  let catalog = catalogs.get(name);
+  if (!catalog) {
+    catalog = new Map();
+    catalogs.set(name, catalog);
+  }
+  for (const { selector, replacement } of entries) {
+    catalog.set(selector, replacement);
+  }
+}
+
+/**
+ * @param {string} value
+ * @returns {Map<string, Map<string, string>>}
+ */
+function extractInlineWorkspaceNamedCatalogs(value) {
+  const named = new Map();
+  const trimmed = stripYamlInlineComment(value);
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return named;
+  }
+  for (const item of splitYamlInlineMapItems(trimmed.slice(1, -1))) {
+    const entry = splitYamlMapEntry(item);
+    if (!entry) continue;
+    const name = unquote(entry.key);
+    const catalogValue = stripYamlAnchor(stripYamlInlineComment(entry.value));
+    if (!name || !catalogValue) continue;
+    addNamedCatalogEntries(
+      named,
+      name,
+      extractInlineWorkspaceMapEntries(catalogValue, 0),
+    );
+  }
+  return named;
+}
+
+/**
+ * @param {string} absPath
+ * @returns {Map<string, Map<string, string>>}
+ */
+function extractWorkspaceNamedCatalogs(absPath) {
+  const content = readFileSync(absPath, "utf8");
+  const named = new Map();
+  const catalogsHeader = /^['"]?catalogs['"]?\s*:\s*(.*)$/;
+  let inCatalogs = false;
+  let currentCatalog = "";
+  let currentCatalogIndent = 0;
+
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    if (/^\S/.test(line)) {
+      const catalogsMatch = catalogsHeader.exec(trimmed);
+      if (catalogsMatch) {
+        const inlineValue = stripYamlAnchor(
+          stripYamlInlineComment(catalogsMatch[1]),
+        );
+        if (!inlineValue) {
+          inCatalogs = true;
+          currentCatalog = "";
+        } else if (inlineValue.startsWith("{") && inlineValue.endsWith("}")) {
+          for (const [name, catalog] of extractInlineWorkspaceNamedCatalogs(
+            inlineValue,
+          )) {
+            addNamedCatalogEntries(
+              named,
+              name,
+              Array.from(catalog, ([selector, replacement]) => ({
+                selector,
+                replacement,
+              })),
+            );
+          }
+          inCatalogs = false;
+        } else {
+          inCatalogs = false;
+        }
+      } else {
+        inCatalogs = false;
+      }
+      continue;
+    }
+    if (!inCatalogs) continue;
+
+    const indent = line.length - line.trimStart().length;
+    const entry = splitYamlMapEntry(trimmed);
+    if (!entry) continue;
+
+    const value = stripYamlAnchor(stripYamlInlineComment(entry.value));
+    if (!currentCatalog || indent <= currentCatalogIndent) {
+      const name = unquote(entry.key);
+      if (!name) {
+        currentCatalog = "";
+        continue;
+      }
+      if (!value) {
+        currentCatalog = name;
+        currentCatalogIndent = indent;
+        addNamedCatalogEntries(named, currentCatalog, []);
+      } else if (value.startsWith("{") && value.endsWith("}")) {
+        addNamedCatalogEntries(
+          named,
+          name,
+          extractInlineWorkspaceMapEntries(value, 0),
+        );
+        currentCatalog = "";
+      } else {
+        currentCatalog = "";
+      }
+      continue;
+    }
+
+    const selector = unquote(entry.key);
+    const replacement = unquote(value);
+    if (selector && replacement) {
+      addNamedCatalogEntries(named, currentCatalog, [
+        { selector, replacement },
+      ]);
+    }
+  }
+
+  return named;
+}
+
+/**
+ * @param {string} absPath
+ */
+function extractWorkspaceCatalogs(absPath) {
+  return {
+    default: extractWorkspaceCatalog(absPath),
+    named: extractWorkspaceNamedCatalogs(absPath),
+  };
 }
 
 /**
@@ -682,14 +854,27 @@ function npmAliasRange(value) {
 }
 
 /**
+ * @param {string} value
+ */
+function isYamlAliasOverrideValue(value) {
+  return /^\*[A-Za-z0-9_-]+$/.test(value.trim());
+}
+
+/**
  * @param {string} selector
  * @param {unknown} replacement
- * @param {Map<string, string>} catalog
+ * @param {{ default: Map<string, string>; named: Map<string, Map<string, string>> }} catalogs
  */
-function effectiveOverrideReplacement(selector, replacement, catalog) {
-  if (replacement !== "catalog:") return replacement;
+function effectiveOverrideReplacement(selector, replacement, catalogs) {
+  if (typeof replacement !== "string") return replacement;
+  const catalogMatch = /^catalog:(.*)$/.exec(replacement.trim());
+  if (!catalogMatch) return replacement;
   const packageName = packageNameFromOverrideSelector(selector);
-  return catalog.get(packageName) ?? replacement;
+  const catalogName = catalogMatch[1].trim();
+  const catalog = catalogName
+    ? catalogs.named.get(catalogName)
+    : catalogs.default;
+  return catalog?.get(packageName) ?? replacement;
 }
 
 /**
@@ -710,6 +895,14 @@ function validatePnpmOverrideEntry(source, selector, replacement) {
     }
   }
   if (typeof replacement === "string") {
+    if (isYamlAliasOverrideValue(replacement)) {
+      fail(
+        `${source}["${selector}"] uses YAML alias "${replacement}". Inline ` +
+          "the override replacement so lockfile:lint can validate the resolved range.",
+      );
+      errors++;
+      return errors;
+    }
     const replacementRanges = [replacement];
     const aliasRange = npmAliasRange(replacement);
     if (aliasRange) replacementRanges.push(aliasRange);
@@ -729,9 +922,9 @@ function validatePnpmOverrideEntry(source, selector, replacement) {
 
 const packageJsonPath = resolve(ROOT, "package.json");
 const rootWorkspacePath = resolve(ROOT, "pnpm-workspace.yaml");
-const rootCatalog = existsSync(rootWorkspacePath)
-  ? extractWorkspaceCatalog(rootWorkspacePath)
-  : new Map();
+const rootCatalogs = existsSync(rootWorkspacePath)
+  ? extractWorkspaceCatalogs(rootWorkspacePath)
+  : { default: new Map(), named: new Map() };
 let overrideRangeErrors = 0;
 
 if (existsSync(packageJsonPath)) {
@@ -753,7 +946,23 @@ if (existsSync(packageJsonPath)) {
       overrideRangeErrors += validatePnpmOverrideEntry(
         "package.json pnpm.overrides",
         selector,
-        effectiveOverrideReplacement(selector, replacement, rootCatalog),
+        effectiveOverrideReplacement(selector, replacement, rootCatalogs),
+      );
+    }
+  }
+
+  if (
+    packageJson?.resolutions &&
+    typeof packageJson.resolutions === "object" &&
+    !Array.isArray(packageJson.resolutions)
+  ) {
+    for (const [selector, replacement] of Object.entries(
+      packageJson.resolutions,
+    )) {
+      overrideRangeErrors += validatePnpmOverrideEntry(
+        "package.json resolutions",
+        selector,
+        effectiveOverrideReplacement(selector, replacement, rootCatalogs),
       );
     }
   }
@@ -761,20 +970,20 @@ if (existsSync(packageJsonPath)) {
 
 for (const absPath of workspaceFiles) {
   const rel = relative(ROOT, absPath);
-  const catalog = extractWorkspaceCatalog(absPath);
+  const catalogs = extractWorkspaceCatalogs(absPath);
   for (const { selector, replacement, line } of extractWorkspaceOverrides(
     absPath,
   )) {
     overrideRangeErrors += validatePnpmOverrideEntry(
       `${rel}:${line} overrides`,
       selector,
-      effectiveOverrideReplacement(selector, replacement, catalog),
+      effectiveOverrideReplacement(selector, replacement, catalogs),
     );
   }
 }
 
 if (overrideRangeErrors === 0) {
-  ok("No unbounded minimum pnpm override values detected.");
+  ok("No unbounded minimum pnpm override/resolution values detected.");
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────────
