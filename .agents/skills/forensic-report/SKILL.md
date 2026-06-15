@@ -33,7 +33,7 @@ Two facts shape every tool choice in this skill:
 
 So split the work into two legs and pick tools per leg:
 
-- **On-chain behaviour leg** (what the address _does_ — swaps, storage, capital, venues): use Celo/Monad-native sources (the Mento Envio indexer, Blockscout, Dune `celo.*`/`monad.*`, GeckoTerminal, `cast` vs forno). These are the only ones that actually see the target chain.
+- **On-chain behaviour leg** (what the address _does_ — swaps, storage, capital, venues): use Celo/Monad-native sources (the Mento Envio indexer, Blockscout, Dune `celo.*`/`monad.*`, GeckoTerminal (Celo; no Monad) / DexScreener, `cast` vs the chain's RPC). These are the only ones that actually see the target chain.
 - **Cross-chain identity leg** (who is _behind_ the address): pivot the operator EOA onto the chains the heavyweight attributors cover and let them work there.
 
 **Corollary — never drop a source just because it lacks Celo.** A Celo-blind tool (Nansen, EigenPhi, GoPlus, Across, …) is still the right tool for the identity leg, for Monad, and for Polygon/Ethereum once we deploy there. The **Tooling matrix** near the end of this file records what each source covers and which leg it serves — consult it instead of assuming "no Celo = useless".
@@ -85,7 +85,7 @@ cast --version                                   # tool version, for the footer
 # Note the RPC endpoint, $HEAD_BLOCK, and the UTC timestamp of each Sim/DefiLlama query.
 ```
 
-For the attribution-anchoring storage reads in Step 3, pin them with `cast call <addr> <sig> --block $HEAD_BLOCK --rpc-url $RPC` so a future reader gets the same bytes.
+For the attribution-anchoring storage reads in Step 3, pin them with `cast call "$ADDR" "<sig>" --block "$HEAD_BLOCK" --rpc-url "$RPC"` (quote the `<sig>` placeholder so bash doesn't read it as a redirection) so a future reader gets the same bytes.
 
 Check whether a report already exists (we may be UPDATING, not creating):
 
@@ -153,7 +153,7 @@ mcp__upstash__redis_database_run_redis_commands({
 
 Cache sizes (as of 2026-05-20): `intel_deep` 529 entries, `intel_transfers` 60, `intel_wealth` 80, `intel_entities` 161, `intel_entity_cps` 161.
 
-**These caches ARE the cross-chain identity leg** (see the chain doctrine): they're populated from the target's activity on chains Arkham covers — i.e. NOT Celo/Monad. For a Celo-native address they're often empty, and that emptiness is itself the finding ("no Ethereum/L2 footprint Arkham can see"). When they hit, they're the fastest path to who's behind the address.
+**These caches ARE the cross-chain identity leg** (see the chain doctrine): they're populated from the target's activity on chains Arkham covers — i.e. NOT Celo/Monad. For a Celo-native address they're often empty, and that emptiness is itself the finding ("no Ethereum/L2 footprint Arkham can see"). When they hit, they're the fastest path to who's behind the address — **but only consume a hit keyed on the target's own address as identity for an EOA target.** For a CONTRACT target, the same 20-byte address on the chains these caches cover is usually an unrelated account, so a target-address cache hit would mis-attribute the report; run the identity leg on the deployer/operator EOA instead (Step 2), unless shared-deployment is proven.
 
 **Don't treat the payloads as opaque blobs** — the typed accessors in `ui-dashboard/src/lib/` give exact field paths:
 
@@ -168,12 +168,15 @@ Cache sizes (as of 2026-05-20): `intel_deep` 529 entries, `intel_transfers` 60, 
 HASURA=https://indexer.hyperindex.xyz/2f3dd15/v1/graphql   # public, no key, POST application/json
 # Sanity-check the deployment is serving before trusting any EMPTY result — parallel Envio
 # deploys can prune an entry mid-serve, so a 404/empty endpoint is NOT a "no activity" finding:
-# Scope the probe to the TARGET chain. A generic SwapEvent(limit:1) passes on Celo data even when the
-# target chain is missing/unsynced — which would later make an empty battery look EMPTY (covered, found
-# nothing) when it's really NOT-COVERED (chain absent). If this returns 0 rows, mark the indexer
-# NOT-COVERED for $CHAIN, not EMPTY.
+# (a) Liveness: confirm the endpoint serves at all.
 curl -s "$HASURA" -H 'content-type: application/json' \
-  --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}}, limit:1){ id } }\"}" | jq .
+  --data '{"query":"{ SwapEvent(limit:1){ id } }"}' | jq .
+# (b) Chain coverage: probe several core entity types for $CHAIN_ID — a quiet/new chain may have
+#     bridge/CDP/supply activity but zero swaps, so DON'T equate 0 SwapEvent rows with NOT-COVERED.
+curl -s "$HASURA" -H 'content-type: application/json' \
+  --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} LiquidityEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StableSupplyChangeEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} }\"}" | jq .
+# Mark the indexer NOT-COVERED for $CHAIN only if the FULL Step 1.6 battery (all entity types) is empty
+# AND $CHAIN isn't in the indexer's configured chain list; otherwise an empty result is EMPTY (real signal).
 ```
 
 Run a small battery keyed on the target address (all fields verified against `indexer-envio/schema.graphql`). `caller` = `tx.from` (the signing EOA — the volume-attribution primary key); `sender`/`brokerCaller` = `msg.sender` to the pool/broker (often a router); `txTo` = entry-point contract (identifies the aggregator router). All three are in each row, so you disambiguate EOA-vs-router on the spot.
@@ -415,11 +418,16 @@ Before concluding "no interesting getters", do three things:
 1. **Proxy check** (zero new dependency). Read the standard slots — a non-zero value means you've been reading an empty shell and must analyse the _implementation_ instead:
 
    ```bash
-   # EIP-1967 impl / admin / beacon, then EIP-1822 (UUPS). Non-zero → last 20 bytes = the address to analyse.
+   # EIP-1967 impl / admin / beacon, then EIP-1822 (UUPS). For impl/admin/EIP-1822, non-zero → last 20
+   # bytes IS the address to analyse. The BEACON slot is different: its last 20 bytes are the BEACON
+   # contract, not the impl — call beacon.implementation() and analyse THAT (see below).
    cast storage $ADDR 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --rpc-url $RPC  # impl
    cast storage $ADDR 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103 --rpc-url $RPC  # admin
    cast storage $ADDR 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50 --rpc-url $RPC  # beacon
    cast storage $ADDR 0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7 --rpc-url $RPC  # EIP-1822
+   # If the beacon slot was non-zero, resolve the real implementation from the beacon contract:
+   BEACON=0x…   # last 20 bytes of the beacon slot value above
+   cast call "$BEACON" "implementation()(address)" --rpc-url "$RPC"
    ```
 
 2. **Verified-source check before decompiling** — exact source beats pseudo-source. Sourcify is multichain, free, no key: `GET https://sourcify.dev/server/v2/contract/$CHAIN_ID/{addr}?fields=all` (use `$CHAIN_ID` from Step 1 — `42220` for Celo, `143` Monad, etc.; cross-check the chain's explorer: Celoscan / Monadscan / Polygonscan / Etherscan).
@@ -443,7 +451,7 @@ WHERE topic0 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b92
   AND topic1 = <32-byte left-padded owner> LIMIT 100;   -- events are grant HISTORY; for live use eth_call allowance()
 ```
 
-If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real human signers — `cast call <safe> 'getOwners()(address[])'` + `'getThreshold()(uint256)'` — and link Safes by intersecting owner sets. Free hosted Safe tx-service (keyless reads) is per-chain — `https://api.safe.global/tx-service/<safe-slug>/api/v1/safes/<safe>/`, where `<safe-slug>` is the chain's Safe short-name (celo→`celo`, polygon→`pol`, ethereum→`eth`); not every chain has one (Monad doesn't), so don't copy the `celo` slug for a non-Celo target. This exposes the people behind a treasury/managed-bot the proxy address would otherwise hide.
+If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real human signers — `cast call "$ADDR" 'getOwners()(address[])' --rpc-url "$RPC"` + `'getThreshold()(uint256)'` (use the in-scope `$ADDR`/`$RPC`, not a bare `<safe>` token) — and link Safes by intersecting owner sets. Free hosted Safe tx-service (keyless reads) is per-chain — `https://api.safe.global/tx-service/<safe-slug>/api/v1/safes/<safe>/`, where `<safe-slug>` is the chain's Safe short-name (celo→`celo`, polygon→`pol`, ethereum→`eth`); not every chain has one (Monad doesn't), so don't copy the `celo` slug for a non-Celo target. This exposes the people behind a treasury/managed-bot the proxy address would otherwise hide.
 
 ### Step 4 — Transaction anatomy
 
@@ -510,7 +518,7 @@ Caveats — surface them in the report when they bite:
 
 Free-form prose, but be specific. Don't say "arbitrage" — say which mispricing (`Mento broker is oracle-priced, Uniswap V3 is AMM-priced — the spread between them is the alpha`). Don't say "MEV" — say which kind (statistical arb / sandwich / liquidation / JIT).
 
-**Name the venue, don't guess it.** Resolve any non-Mento pool or token the target touched via two free, no-key, Celo+Monad-covering APIs — turns "an unknown pool" into "USDC/CELO 0.01% on Uniswap V3 Celo, $X TVL":
+**Name the venue, don't guess it.** Resolve any non-Mento pool or token the target touched via two free, no-key APIs — turns "an unknown pool" into "USDC/CELO 0.01% on Uniswap V3 Celo, $X TVL". GeckoTerminal covers Celo + many EVM chains but **not Monad** (its `$GT_NS` arm stays empty for Monad — that's correct, skip it); DexScreener is the broader fallback there:
 
 ```bash
 # GeckoTerminal uses its own network slugs (NOT chain ids) — select per $CHAIN, like $BS in Step 4.
@@ -731,18 +739,18 @@ Pick the tool that covers the chain you're on and the leg you're working. **A bl
 
 **On-chain behaviour leg — Celo/Monad-native (free, the workhorses):**
 
-| Source                       | Celo              | Monad | Access            | Answers                                                     |
-| ---------------------------- | ----------------- | ----- | ----------------- | ----------------------------------------------------------- |
-| Mento Envio indexer          | ✅                | ✅    | free, no key      | per-address Mento swaps/rebalances/LP/CDP/bridge (Step 1.6) |
-| Blockscout v2 REST/MCP       | ✅                | —     | free, no key      | call tree + state-changes + tx/address data (Step 4)        |
-| Dune `celo.*`/`monad.*`      | ✅                | ✅    | existing Dune key | funder graph, fleet clustering, fingerprints, `dex.trades`  |
-| Sim (Dune Sim)               | ✅                | ✅    | existing key      | real-time balances/activity                                 |
-| GeckoTerminal                | ✅                | ✅    | free, no key      | pool/token → dex, pair, TVL, volume (Step 6)                |
-| DexScreener                  | ✅                | ✅    | free, no key      | token → all pairs, liquidity, volume                        |
-| DefiLlama coins              | ✅                | ⚠️    | free, no key      | historical + current USD price (Step 5.5)                   |
-| Sourcify                     | ✅                | ✅    | free, no key      | verified source (Step 3)                                    |
-| `cast` vs forno              | ✅                | n/a   | free              | storage/getter reads, codehash — **no trace methods**       |
-| Dedaub / heimdall / WhatsABI | bytecode-agnostic |       | free / OSS        | decompile unverified contracts (Step 3)                     |
+| Source                       | Celo              | Monad | Access            | Answers                                                                        |
+| ---------------------------- | ----------------- | ----- | ----------------- | ------------------------------------------------------------------------------ |
+| Mento Envio indexer          | ✅                | ✅    | free, no key      | per-address Mento swaps/rebalances/LP/CDP/bridge (Step 1.6)                    |
+| Blockscout v2 REST/MCP       | ✅                | —     | free, no key      | call tree + state-changes + tx/address data (Step 4)                           |
+| Dune `celo.*`/`monad.*`      | ✅                | ✅    | existing Dune key | funder graph, fleet clustering, fingerprints, `dex.trades`                     |
+| Sim (Dune Sim)               | ✅                | ✅    | existing key      | real-time balances/activity                                                    |
+| GeckoTerminal                | ✅                | ❌    | free, no key      | pool/token → dex, pair, TVL, volume (Step 6); no Monad — use DexScreener there |
+| DexScreener                  | ✅                | ✅    | free, no key      | token → all pairs, liquidity, volume                                           |
+| DefiLlama coins              | ✅                | ⚠️    | free, no key      | historical + current USD price (Step 5.5)                                      |
+| Sourcify                     | ✅                | ✅    | free, no key      | verified source (Step 3)                                                       |
+| `cast` vs forno              | ✅                | n/a   | free              | storage/getter reads, codehash — **no trace methods**                          |
+| Dedaub / heimdall / WhatsABI | bytecode-agnostic |       | free / OSS        | decompile unverified contracts (Step 3)                                        |
 
 **Cross-chain identity leg — Celo-blind but valuable on the operator's other-chain footprint:**
 
