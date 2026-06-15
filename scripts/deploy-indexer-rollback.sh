@@ -80,6 +80,8 @@ if [[ -n "$REGISTERED" ]]; then
     fi
   fi
 
+  # `envio-cloud deployment promote` supports --yes; this wrapper already asked
+  # the operator to confirm before delegating to the promote wrapper.
   pnpm deploy:indexer:promote "$REGISTERED" --yes
   exit 0
 fi
