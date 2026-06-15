@@ -12,10 +12,8 @@ import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import {
   CDP_BORROWING_FEE_EVENTS,
   CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
-  CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY,
   CDP_BORROWING_REVENUE_BRACKETS,
   CDP_BORROWING_REVENUE_MARKETS,
-  CDP_BORROWING_REVENUE_MARKETS_LEGACY,
   ORACLE_RATES,
 } from "@/lib/queries";
 import {
@@ -48,50 +46,6 @@ type MarketsResponse = {
   LiquityInstance: CdpBorrowingRevenueInstance[];
 };
 
-type LegacyMarketsResponse = {
-  LiquityCollateral: CdpBorrowingRevenueCollateral[];
-  LiquityInstance: Array<
-    Omit<CdpBorrowingRevenueInstance, "borrowingFeeCollectedCum">
-  >;
-};
-
-function isMissingCollectedFieldError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.includes("borrowingFeeCollectedCum");
-}
-
-// Old-schema compatibility: production Hasura predating the
-// `borrowingFeeCollectedCum` field rejects the full markets query with a
-// validation error. Retry with the legacy shape and default collected to 0
-// so the CDP tile degrades (collected bar empty) instead of blanking —
-// mirrors the daily-snapshot entity fallback below.
-async function fetchMarketsWithCompat(
-  client: GraphQLClient,
-  chainId: number,
-): Promise<MarketsResponse> {
-  try {
-    return await requestWithTimeout<MarketsResponse>(
-      client,
-      CDP_BORROWING_REVENUE_MARKETS,
-      { chainId },
-    );
-  } catch (err) {
-    if (!isMissingCollectedFieldError(err)) throw err;
-    const legacy = await requestWithTimeout<LegacyMarketsResponse>(
-      client,
-      CDP_BORROWING_REVENUE_MARKETS_LEGACY,
-      { chainId },
-    );
-    return {
-      LiquityCollateral: legacy.LiquityCollateral ?? [],
-      LiquityInstance: (legacy.LiquityInstance ?? []).map((instance) => ({
-        ...instance,
-        borrowingFeeCollectedCum: "0",
-      })),
-    };
-  }
-}
-
 type BracketPageResult = {
   rows: CdpBorrowingRevenueBracket[];
   truncated: boolean;
@@ -106,9 +60,6 @@ type DailySnapshotPageResult = {
   rows: CdpBorrowingRevenueDailySnapshot[];
   truncated: boolean;
   unavailable: boolean;
-  // Snapshot rows exist but the schema predates the `collected` field —
-  // earned history is real, collected mints default to 0.
-  collectedUnavailable: boolean;
 };
 
 type NetworkCdpBorrowingRevenue = {
@@ -117,7 +68,6 @@ type NetworkCdpBorrowingRevenue = {
   markets: CdpBorrowingRevenueMarket[];
   dailySeries: CdpBorrowingFeeSeriesPoint[];
   dailySeriesTruncated: boolean;
-  dailySeriesApproximate: boolean;
   dailySeriesFailed: boolean;
   error: Error | null;
 };
@@ -127,7 +77,6 @@ export type CdpBorrowingRevenueResult = {
   markets: CdpBorrowingRevenueMarket[];
   dailySeries: CdpBorrowingFeeSeriesPoint[];
   dailySeriesTruncated: boolean;
-  dailySeriesApproximate: boolean;
   dailySeriesFailed: boolean;
   isLoading: boolean;
   hasError: boolean;
@@ -288,19 +237,11 @@ async function fetchAllFeeEventPages(
 
 function isMissingDailySnapshotEntityError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return message.includes("LiquityBorrowingRevenueDailySnapshot");
-}
-
-// Hasura's missing-field validation error names BOTH the field and the entity
-// (`field 'collected' not found in type: 'LiquityBorrowingRevenueDailySnapshot'`),
-// so this check must run BEFORE the entity-missing check above — otherwise a
-// schema that merely predates `collected` would be misread as having no
-// snapshots at all and degrade to the fee-event reconstruction.
-function isMissingSnapshotCollectedFieldError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return (
-    message.includes("'collected'") &&
-    message.includes("LiquityBorrowingRevenueDailySnapshot")
+  // Only the root field being absent means an older indexer schema. Missing
+  // child fields on the entity are incompatible schema drift and must fail
+  // visibly instead of silently falling back to reconstructed fee events.
+  return /(?:field|Cannot query field)\s+["']LiquityBorrowingRevenueDailySnapshot["']\s+(?:not found in|on)\s+type:?\s+["']query_root["']/i.test(
+    message,
   );
 }
 
@@ -351,26 +292,13 @@ async function fetchAllDailySnapshotPages(
       CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS,
       network,
     );
-    return { ...page, unavailable: false, collectedUnavailable: false };
+    return { ...page, unavailable: false };
   } catch (err) {
-    // Specific-first: the missing-`collected` message also names the entity.
-    if (isMissingSnapshotCollectedFieldError(err)) {
-      const legacy = await paginateDailySnapshots<
-        Omit<CdpBorrowingRevenueDailySnapshot, "collected">
-      >(client, chainId, CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS_LEGACY, network);
-      return {
-        rows: legacy.rows.map((row) => ({ ...row, collected: "0" })),
-        truncated: legacy.truncated,
-        unavailable: false,
-        collectedUnavailable: true,
-      };
-    }
     if (isMissingDailySnapshotEntityError(err)) {
       return {
         rows: [],
         truncated: false,
         unavailable: true,
-        collectedUnavailable: true,
       };
     }
     throw err;
@@ -378,13 +306,13 @@ async function fetchAllDailySnapshotPages(
 }
 
 // The daily series feeds only the time-series chart. A failure fetching it (a
-// transient error, or fallback fee-event pagination timing out while production
-// is still on the old schema) must NOT blank the summary tiles and market
-// tables that the caller's market/bracket/rate queries already produced. We
-// degrade the series to empty and flag `failed` so the caller can fail-closed
-// the chart (which can't show a meaningful swap+borrowing total without it)
-// while keeping the tiles/tables intact. `failed` is distinct from
-// `truncated`/`approximate`: those mean "mostly there", a failure means "gone".
+// transient error, or fallback fee-event pagination timing out when snapshot
+// rows are unavailable) must NOT blank the summary tiles and market tables that
+// the caller's market/bracket/rate queries already produced. We degrade the
+// series to empty and flag `failed` so the caller can fail-closed the chart
+// (which can't show a meaningful swap+borrowing total without it) while keeping
+// the tiles/tables intact. `failed` is distinct from `truncated`: truncated
+// means "mostly there", a failure means "gone".
 async function resolveDailyBorrowingFeeSeries(
   client: GraphQLClient,
   chainId: number,
@@ -399,7 +327,6 @@ async function resolveDailyBorrowingFeeSeries(
 ): Promise<{
   points: CdpBorrowingFeeSeriesPoint[];
   truncated: boolean;
-  approximate: boolean;
   failed: boolean;
 }> {
   try {
@@ -424,11 +351,10 @@ async function resolveDailyBorrowingFeeSeries(
             }),
       truncated:
         fallbackFeeEventPages?.truncated ?? dailySnapshotPages.truncated,
-      approximate: dailySnapshotPages.collectedUnavailable,
       failed: false,
     };
   } catch {
-    return { points: [], truncated: false, approximate: false, failed: true };
+    return { points: [], truncated: false, failed: true };
   }
 }
 
@@ -442,7 +368,6 @@ async function fetchRevenueForNetwork(
       markets: [],
       dailySeries: [],
       dailySeriesTruncated: false,
-      dailySeriesApproximate: false,
       dailySeriesFailed: false,
       error: new Error(`Hasura URL not configured for "${network.label}"`),
     };
@@ -450,9 +375,10 @@ async function fetchRevenueForNetwork(
 
   try {
     const client = new GraphQLClient(network.hasuraUrl);
-    const marketsResponse = await fetchMarketsWithCompat(
+    const marketsResponse = await requestWithTimeout<MarketsResponse>(
       client,
-      network.chainId,
+      CDP_BORROWING_REVENUE_MARKETS,
+      { chainId: network.chainId },
     );
     const collaterals = marketsResponse.LiquityCollateral ?? [];
     const instances = marketsResponse.LiquityInstance ?? [];
@@ -468,7 +394,6 @@ async function fetchRevenueForNetwork(
         markets: [],
         dailySeries: [],
         dailySeriesTruncated: false,
-        dailySeriesApproximate: false,
         dailySeriesFailed: false,
         error: null,
       };
@@ -509,7 +434,6 @@ async function fetchRevenueForNetwork(
       markets: aggregateCdpBorrowingRevenueMarkets(aggregateArgs),
       dailySeries: daily.points,
       dailySeriesTruncated: daily.truncated,
-      dailySeriesApproximate: daily.approximate,
       dailySeriesFailed: daily.failed,
       error: null,
     };
@@ -520,7 +444,6 @@ async function fetchRevenueForNetwork(
       markets: [],
       dailySeries: [],
       dailySeriesTruncated: false,
-      dailySeriesApproximate: false,
       dailySeriesFailed: false,
       error: err instanceof Error ? err : new Error(String(err)),
     };
@@ -552,7 +475,6 @@ export function useCdpBorrowingRevenue(): CdpBorrowingRevenueResult {
     markets: data === undefined ? [] : mergeMarkets(rows),
     dailySeries: data === undefined ? [] : mergeDailySeries(rows),
     dailySeriesTruncated: rows.some((row) => row.dailySeriesTruncated),
-    dailySeriesApproximate: rows.some((row) => row.dailySeriesApproximate),
     dailySeriesFailed: rows.some((row) => row.dailySeriesFailed),
     isLoading,
     hasError: error !== undefined || rows.some((row) => row.error !== null),

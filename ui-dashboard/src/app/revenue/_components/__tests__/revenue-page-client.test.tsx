@@ -255,7 +255,6 @@ function renderRevenue({
     markets: CdpBorrowingRevenueMarket[];
     dailySeries: CdpBorrowingFeeSeriesPoint[];
     dailySeriesTruncated: boolean;
-    dailySeriesApproximate: boolean;
     dailySeriesFailed: boolean;
     isLoading: boolean;
     hasError: boolean;
@@ -277,7 +276,6 @@ function renderRevenue({
     markets: [],
     dailySeries: [],
     dailySeriesTruncated: false,
-    dailySeriesApproximate: false,
     dailySeriesFailed: false,
     isLoading: false,
     hasError: false,
