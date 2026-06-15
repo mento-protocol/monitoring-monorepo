@@ -92,7 +92,8 @@ commit:
      | jq -r '.data.deployments[] | [.commit_hash, (.prod_status // "-"), .created_time] | @tsv'
    ```
 
-   Cross-check against the deploy-branch history: `git log --oneline origin/envio`.
+   The rollback script also fetches `origin/envio` and refuses slow rollbacks to
+   commits outside that deploy-branch history.
 
 2. Run the rollback. Preview the plan first with `--dry-run`:
 
@@ -103,10 +104,12 @@ commit:
 
    - **Fast path** - the last-good deployment is still one of Envio's live
      deployments: the script re-promotes it directly. No resync; takes seconds.
-   - **Slow path** - the deployment was pruned: the script force-pushes the
-     last-good SHA to the `envio` branch and prints the resync-then-promote
-     checklist. Budget 10-30+ minutes for the from-genesis resync. If Envio
-     already has 3 live deployments, delete a stale non-prod deployment first
+   - **Slow path** - the deployment was pruned: the script requires the
+     last-good SHA to be in `origin/envio` history, refuses to push while Envio
+     already has 3 live deployments, then force-pushes the last-good SHA to the
+     `envio` branch and prints the resync-then-promote checklist. Budget
+     10-30+ minutes for the from-genesis resync. If Envio is at capacity,
+     delete a stale non-prod deployment first
      ([envio.dev/app](https://envio.dev/app/mento-protocol/mento)).
 
 3. Verify [monitoring.mento.org](https://monitoring.mento.org) loads data.

@@ -14,6 +14,7 @@ set -euo pipefail
 ENVIO_ORG="mento-protocol"
 ENVIO_INDEXER="mento"
 DEPLOY_BRANCH="envio"
+ENVIO_MAX_DEPLOYMENTS=3
 
 REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
@@ -50,6 +51,7 @@ fi
 DEPLOYMENTS_JSON=$(pnpm --silent exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json)
 CURRENT_PROD=$(printf "%s" "$DEPLOYMENTS_JSON" \
   | jq -r 'first(.data.deployments[]? | select(.prod_status == "prod") | .commit_hash) // "unknown"')
+DEPLOYMENT_COUNT=$(printf "%s" "$DEPLOYMENTS_JSON" | jq -r '(.data.deployments // []) | length')
 REGISTERED=$(printf "%s" "$DEPLOYMENTS_JSON" | node scripts/resolve-envio-deployment.mjs "$TARGET")
 
 echo "Indexer rollback"
@@ -87,6 +89,7 @@ if [[ -n "$REGISTERED" ]]; then
 fi
 
 FULL_SHA=""
+git fetch --quiet origin "+refs/heads/$DEPLOY_BRANCH:refs/remotes/origin/$DEPLOY_BRANCH"
 if ! FULL_SHA=$(git rev-parse --verify --quiet "$TARGET^{commit}"); then
   echo "Target $TARGET is not registered on Envio and is not a commit in this clone."
   echo "Run 'git fetch origin' and retry, or pick a SHA from:"
@@ -95,13 +98,27 @@ if ! FULL_SHA=$(git rev-parse --verify --quiet "$TARGET^{commit}"); then
 fi
 SHORT_SHA=$(git rev-parse --short=7 "$FULL_SHA")
 
+if ! git merge-base --is-ancestor "$FULL_SHA" "origin/$DEPLOY_BRANCH"; then
+  echo "Target $SHORT_SHA is not in origin/$DEPLOY_BRANCH history."
+  echo "Refusing slow rollback to a commit that is not known on the deploy branch."
+  echo "Pick a last-good deployed commit from:"
+  echo "  git log --oneline origin/$DEPLOY_BRANCH"
+  exit 1
+fi
+
 echo "Deployment $TARGET is no longer registered on Envio: slow rollback."
 echo "   Plan: force-push $SHORT_SHA to '$DEPLOY_BRANCH', wait for full resync, then promote."
-echo "   If Envio already has 3 live deployments, delete a stale non-prod deployment first:"
-echo "   https://envio.dev/app/$ENVIO_ORG/$ENVIO_INDEXER"
+echo "   Envio live deployments: $DEPLOYMENT_COUNT/$ENVIO_MAX_DEPLOYMENTS"
 echo ""
 echo "   git push --force-with-lease origin $FULL_SHA:refs/heads/$DEPLOY_BRANCH"
 echo ""
+
+if (( DEPLOYMENT_COUNT >= ENVIO_MAX_DEPLOYMENTS )); then
+  echo "Envio already has $DEPLOYMENT_COUNT live deployments."
+  echo "Delete a stale non-prod deployment first, then rerun rollback before pushing:"
+  echo "  https://envio.dev/app/$ENVIO_ORG/$ENVIO_INDEXER"
+  exit 1
+fi
 
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "Dry run: nothing pushed."
