@@ -2145,6 +2145,12 @@ assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Action
 run_gate "scripts/check-github-action-pins.test.mjs"
 assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
 
+run_gate "scripts/check-pr-description.mjs"
+assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
+
+run_gate "scripts/check-pr-description.test.mjs"
+assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
+
 run_gate "scripts/agent-autoreview.sh"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
 
