@@ -490,9 +490,10 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
   when `NEXT_PUBLIC_HASURA_URL` is unset, so fresh worktrees should verify
   against real pool/CDP data by default. Set `NEXT_PUBLIC_HASURA_URL` only when
   a task explicitly needs a non-prod or fixture endpoint. Hosted testnet
-  networks require both `NEXT_PUBLIC_HASURA_URL_TESTNET` and
-  `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true`; leave them unset unless the task
-  explicitly needs testnet UI coverage. Real
+  networks require `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true` plus the
+  per-network endpoint env (`NEXT_PUBLIC_HASURA_URL_TESTNET` for Monad Testnet
+  or `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` for Celo Sepolia); leave them unset
+  unless the task explicitly needs testnet UI coverage. Real
   address-label/authenticated surfaces also need `UPSTASH_REDIS_REST_URL`,
   `UPSTASH_REDIS_REST_TOKEN`, and local Auth.js placeholders (`AUTH_SECRET`,
   `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`). See `ui-dashboard/AGENTS.md` for the
