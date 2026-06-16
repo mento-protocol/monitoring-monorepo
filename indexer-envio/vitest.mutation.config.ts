@@ -20,7 +20,12 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
-      include: ["src/helpers.ts", "src/tradingLimits.ts"],
+      include: [
+        "src/helpers.ts",
+        "src/tradingLimits.ts",
+        "src/handlers/stables/classifyKind.ts",
+        "src/handlers/stables/dailyFlush.ts",
+      ],
       exclude: ["test/**", "**/*.d.ts"],
     },
   },

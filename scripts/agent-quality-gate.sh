@@ -1027,7 +1027,7 @@ while IFS= read -r path; do
           ;;
       esac
       case "$path" in
-        indexer-envio/stryker.config.mjs|indexer-envio/vitest.mutation.config.ts|indexer-envio/src/helpers.ts|indexer-envio/src/tradingLimits.ts|indexer-envio/test/code-quality-invariants.test.ts|indexer-envio/test/pool-helpers.test.ts|indexer-envio/test/tradingLimits.test.ts)
+        indexer-envio/stryker.config.mjs|indexer-envio/vitest.mutation.config.ts|indexer-envio/src/helpers.ts|indexer-envio/src/tradingLimits.ts|indexer-envio/src/handlers/stables/classifyKind.ts|indexer-envio/src/handlers/stables/dailyFlush.ts|indexer-envio/test/code-quality-invariants.test.ts|indexer-envio/test/pool-helpers.test.ts|indexer-envio/test/tradingLimits.test.ts|indexer-envio/test/stables.test.ts|indexer-envio/config/*.json)
           add_checklist "docs/pr-checklists/mutation-testing.md" "indexer mutation baseline changed"
           add_indexer_mutation_baseline "indexer mutation baseline changed"
           ;;
