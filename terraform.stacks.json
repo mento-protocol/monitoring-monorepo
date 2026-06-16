@@ -42,9 +42,9 @@
       "ci": {
         "validate": "changed-paths",
         "plan": "pull-request",
-        "apply": "push-main-production-environment"
+        "apply": "push-main-production-infra-environment"
       },
-      "applyPolicy": "ci-production-environment-approved",
+      "applyPolicy": "ci-production-infra-environment-approved",
       "changedPathPatterns": [
         "alerts/rules/**",
         "terraform.stacks.json",
@@ -79,9 +79,9 @@
       "ci": {
         "validate": "changed-paths",
         "plan": "pull-request",
-        "apply": "push-main-production-environment"
+        "apply": "push-main-production-infra-environment"
       },
-      "applyPolicy": "ci-production-environment-approved",
+      "applyPolicy": "ci-production-infra-environment-approved",
       "changedPathPatterns": [
         "alerts/infra/**",
         "terraform.stacks.json",
@@ -106,9 +106,9 @@
       "ci": {
         "validate": "changed-paths",
         "plan": "pull-request",
-        "apply": "push-main-production-environment"
+        "apply": "push-main-production-infra-environment"
       },
-      "applyPolicy": "ci-production-environment-approved",
+      "applyPolicy": "ci-production-infra-environment-approved",
       "changedPathPatterns": [
         "aegis/terraform/**",
         "terraform.stacks.json",

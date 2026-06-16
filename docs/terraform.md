@@ -14,9 +14,9 @@ Use it instead of inferring ownership from directory names.
 | Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                                     | Plan/apply policy                                                                                                                                          |
 | --------------------- | ---------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, CI WIF/IAM                                                                                | Manual plan; human-approved local apply                                                                                                                    |
-| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + the Aegis service-health rule group, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                                 | PR plan; `main` apply through the `production` GitHub Environment                                                                                          |
-| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources                                                                          | PR plan; `main` apply through the `production` GitHub Environment                                                                                          |
-| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                                 | PR plan; `main` apply through the `production` GitHub Environment                                                                                          |
+| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + the Aegis service-health rule group, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                                 | PR plan; `main` apply through the `production-infra` GitHub Environment                                                                                    |
+| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources                                                                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                                                                    |
+| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                                 | PR plan; `main` apply through the `production-infra` GitHub Environment                                                                                    |
 | `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project (project factory), the watchdog Cloud Function + source archive, Secret Manager secrets, QuickNode webhooks/filters, Cloud Scheduler health check, log-based monitoring/alerts | Manual plan (`pnpm gov-watchdog:tf:plan`); human-approved local apply via `pnpm gov-watchdog:deploy`; daily read-only drift plan via `terraform-drift.yml` |
 
 ## Commands
@@ -43,11 +43,11 @@ pnpm gov-watchdog:tf:plan
 `terraform validate`.
 
 For stacks where `terraform.stacks.json` declares
-`ci.apply == "push-main-production-environment"`, local
+`ci.apply == "push-main-production-infra-environment"`, local
 `pnpm tf apply <stack-id>` is guarded. It runs only when the checkout is on
 `main`, the worktree is clean, and `HEAD == origin/main`, unless the operator
 passes the deliberate override `--force-local-apply`. The expected safe path is
-to merge to `main` and let GitHub Actions apply through the `production`
+to merge to `main` and let GitHub Actions apply through the `production-infra`
 Environment approval.
 
 ## CI Model
@@ -63,7 +63,7 @@ in `terraform.stacks.json` rather than duplicating stack ownership in workflow
 YAML.
 
 `alerts-rules`, `alerts-delivery`, and `aegis` have CI apply behavior on
-`main`, gated by the `production` GitHub Environment. Their plan jobs can run
+`main`, gated by the `production-infra` GitHub Environment. Their plan jobs can run
 for workflow/notifier edits too, but the apply jobs only become eligible when
 the stack root changed or a maintainer used `workflow_dispatch`. The platform
 and `governance-watchdog` stacks remain manual-plan/manual-apply only —
@@ -71,6 +71,11 @@ governance-watchdog lives in its own GCP project and applies stay operator-run
 (`pnpm gov-watchdog:deploy`, which guards against dirty trees). It opts into
 scheduled drift detection, where CI runs a read-only plan under `org-terraform`
 impersonation without applying changes.
+
+Routine service deploy workflows use the separate `production-services` GitHub
+Environment. That environment records deploy history and scopes production
+secrets, but should not require routine manual approval; PR review plus
+required CI before merge is the approval path for normal service rollouts.
 
 When one of those CI-applied stacks plans real changes on `main`, the plan job
 posts a Slack apply-pending summary before the environment-gated apply job waits
@@ -81,6 +86,37 @@ exact resource address. Attribute values are intentionally omitted from Slack;
 use the workflow run for the full sanitized plan. The default destination is
 `#ci-failures`; set the repository variable `TERRAFORM_APPLY_SLACK_CHANNEL` to
 route these summaries to another public channel.
+
+## GitHub Environment Setup
+
+Pre-merge requirement for the production-environment split in issue #762:
+repo admins must create both environments in Settings -> Environments before
+merging the workflow change that first references them. GitHub auto-creates a
+missing environment on first workflow use with no protection rules, so
+`production-infra` must already have required reviewers, prevent self-review,
+administrator bypass disabled, and the protected-`main` branch restriction
+before any Terraform-changing commit can land on `main`. The Terraform apply
+workflows also verify this configuration before cloud authentication so an
+accidentally auto-created or bypassable environment fails closed before
+`terraform apply`.
+
+Repo admins should keep exactly two production GitHub Environments for this
+repo's Actions workflows:
+
+- `production-infra`: used by Terraform apply jobs in `alerts-infra.yml`,
+  `alerts-rules.yml`, and `aegis-terraform.yml`. Copy the required reviewers
+  from the old `production` environment, enable prevent self-review, disable
+  administrator bypass, and limit deployment branches to protected `main`.
+- `production-services`: used by routine service deploy jobs such as
+  `metrics-bridge.yml` and `aegis-app-engine.yml`. Limit deployment branches to
+  protected `main`, but leave required reviewers unset by default so green
+  `main` deploys do not require an extra human approval.
+
+Keep the old `production` environment only as a temporary migration shim while
+older workflow runs drain. Once no workflow references it, remove or deprecate
+it in the repository settings. Do not move or recreate secrets with CLI
+commands; any environment-scoped secret changes must go through the owning IaC
+or a documented repo-admin settings change.
 
 ## Grafana Alert Ownership Migration
 

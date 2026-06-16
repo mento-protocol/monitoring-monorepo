@@ -19,6 +19,8 @@ const expectedScripts = {
   "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
   "tf": "node scripts/tf-stacks.mjs",
   "tf:test": "node scripts/tf-stacks.test.mjs",
+  "alerts:rules:lint": "node scripts/alert-rules-lint.mjs",
+  "alerts:rules:lint:test": "node scripts/alert-rules-lint.test.mjs",
   "lockfile:lint": "node scripts/lockfile-lint.mjs",
   "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
   "skew:check": "node scripts/version-skew-check.mjs",
