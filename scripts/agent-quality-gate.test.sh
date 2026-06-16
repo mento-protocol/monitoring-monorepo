@@ -1141,6 +1141,7 @@ assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Clou
 run_gate "metrics-bridge/src/metrics.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+assert_contains "- pnpm alerts:rules:lint (metrics-bridge gauge registry changed (alerts cross-check))"
 
 run_gate "metrics-bridge/src/rpc.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
@@ -1314,6 +1315,7 @@ run_gate "alerts/rules/rules-fpmms.tf"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
+assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
 
 run_gate "alerts/rules/main.tf"
@@ -2247,6 +2249,12 @@ assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Action
 run_gate "scripts/check-github-action-pins.test.mjs"
 assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
 
+run_gate "scripts/alert-rules-lint.mjs"
+assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
+
+run_gate "scripts/alert-rules-lint.test.mjs"
+assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
+
 run_gate "scripts/check-pr-description.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
 
@@ -2259,6 +2267,12 @@ assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviat
 
 run_gate "scripts/check-deviation-threshold-drift.test.mjs"
 assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker test changed)"
+
+run_gate "scripts/verify-github-environment-protection.mjs"
+assert_contains "- node scripts/verify-github-environment-protection.test.mjs (GitHub environment protection checker changed)"
+
+run_gate "scripts/verify-github-environment-protection.test.mjs"
+assert_contains "- node scripts/verify-github-environment-protection.test.mjs (GitHub environment protection checker changed)"
 
 run_gate "scripts/agent-autoreview.sh"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"

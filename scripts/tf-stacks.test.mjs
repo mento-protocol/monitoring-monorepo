@@ -389,7 +389,8 @@ function autoAppliedStackWorkflowPaths(stacks) {
     ...new Set(
       stacks
         .filter(
-          (stack) => stack.ci?.apply === "push-main-production-environment",
+          (stack) =>
+            stack.ci?.apply === "push-main-production-infra-environment",
         )
         .flatMap((stack) =>
           (stack.changedPathPatterns ?? []).filter((pattern) =>

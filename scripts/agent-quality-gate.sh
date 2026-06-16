@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -1085,6 +1085,11 @@ while IFS= read -r path; do
           ;;
       esac
       case "$path" in
+        metrics-bridge/src/metrics.ts|metrics-bridge/src/cdp-metrics.ts)
+          add_command "pnpm alerts:rules:lint" "metrics-bridge gauge registry changed (alerts cross-check)"
+          ;;
+      esac
+      case "$path" in
         metrics-bridge/Dockerfile|metrics-bridge/.dockerignore)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run runtime changed"
           ;;
@@ -1199,6 +1204,7 @@ while IFS= read -r path; do
     alerts/rules/*)
       add_surface "alerts-rules"
       add_terraform_validate_commands "alerts/rules" "alerts/rules Terraform changed"
+      add_command "pnpm alerts:rules:lint" "alerts/rules PromQL lint + metric cross-check"
       case "$path" in
         alerts/rules/main.tf|alerts/rules/rules-fpmms.tf)
           add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold Terraform consumer changed"
@@ -1389,6 +1395,9 @@ while IFS= read -r path; do
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
           ;;
+        scripts/alert-rules-lint.mjs|scripts/alert-rules-lint.test.mjs)
+          add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"
+          ;;
         scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
           add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"
           ;;
@@ -1401,6 +1410,9 @@ while IFS= read -r path; do
           ;;
         scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
           add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
+          ;;
+        scripts/verify-github-environment-protection.mjs|scripts/verify-github-environment-protection.test.mjs)
+          add_command "node scripts/verify-github-environment-protection.test.mjs" "GitHub environment protection checker changed"
           ;;
         scripts/eslint-baseline-diff.mjs)
           # The lint wrapper. A regression here would mask all per-package
