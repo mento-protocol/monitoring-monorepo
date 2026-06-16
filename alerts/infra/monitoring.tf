@@ -17,14 +17,17 @@ resource "google_logging_metric" "onchain_handler_errors" {
     resource.labels.service_name="${module.onchain_event_handler.function_name}"
     (
       jsonPayload.message.message="Error processing log" OR
-      jsonPayload.message.message="No notification channel found"
+      jsonPayload.message="Error processing log" OR
+      jsonPayload.message.message="No notification channel found" OR
+      jsonPayload.message="No notification channel found"
     )
   EOF
 }
 
 # Counts events skipped because the processing budget elapsed. These are logged
-# at WARNING with a stable reason field nested under LogSync's message payload,
-# so the ERROR metric above does not see them.
+# at WARNING with a stable reason field, so the ERROR metric above does not see
+# them. Match both direct structured-logger fields and LogSync's nested message
+# payload shape.
 resource "google_logging_metric" "onchain_handler_budget_skips" {
   project     = local.project_id
   name        = "onchain_event_handler_budget_skips"
@@ -33,7 +36,10 @@ resource "google_logging_metric" "onchain_handler_budget_skips" {
     severity="WARNING"
     resource.type="cloud_run_revision"
     resource.labels.service_name="${module.onchain_event_handler.function_name}"
-    jsonPayload.message.reason="skipped_due_to_timeout"
+    (
+      jsonPayload.message.reason="skipped_due_to_timeout" OR
+      jsonPayload.reason="skipped_due_to_timeout"
+    )
   EOF
 }
 
@@ -54,7 +60,7 @@ resource "google_monitoring_alert_policy" "onchain_handler_errors_policy" {
       Safe transactions manually.
 
       **View recent error logs:**
-      https://console.cloud.google.com/logs/query;query=severity%3E%3DERROR%20AND%20resource.labels.service_name%3D%22${module.onchain_event_handler.function_name}%22%20AND%20(jsonPayload.message.message%3D%22Error%20processing%20log%22%20OR%20jsonPayload.message.message%3D%22No%20notification%20channel%20found%22);duration=PT24H
+      https://console.cloud.google.com/logs/query;query=severity%3E%3DERROR%20AND%20resource.labels.service_name%3D%22${module.onchain_event_handler.function_name}%22%20AND%20(jsonPayload.message.message%3D%22Error%20processing%20log%22%20OR%20jsonPayload.message%3D%22Error%20processing%20log%22%20OR%20jsonPayload.message.message%3D%22No%20notification%20channel%20found%22%20OR%20jsonPayload.message%3D%22No%20notification%20channel%20found%22);duration=PT24H
     EOT
     mime_type = "text/markdown"
   }
@@ -109,7 +115,7 @@ resource "google_monitoring_alert_policy" "onchain_handler_budget_skips_policy" 
       recent Safe multisig activity manually.
 
       **View recent budget-skip logs:**
-      https://console.cloud.google.com/logs/query;query=jsonPayload.message.reason%3D%22skipped_due_to_timeout%22%20AND%20resource.labels.service_name%3D%22${module.onchain_event_handler.function_name}%22;duration=PT24H
+      https://console.cloud.google.com/logs/query;query=(jsonPayload.message.reason%3D%22skipped_due_to_timeout%22%20OR%20jsonPayload.reason%3D%22skipped_due_to_timeout%22)%20AND%20resource.labels.service_name%3D%22${module.onchain_event_handler.function_name}%22;duration=PT24H
     EOT
     mime_type = "text/markdown"
   }
