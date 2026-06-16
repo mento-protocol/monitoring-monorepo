@@ -135,22 +135,26 @@ therefore needs both:
   `BiPoolManager.oracleHasValidMedian()` gates:
   `SortedOracles.isOldestReportExpired(feed)`,
   `SortedOracles.numRates(feed)`, and the wrapped exchange's `minimumReports`.
-  If a callable contract predicate is available, prefer that predicate and store
-  its result. Otherwise treat `oracleMedianLive=true` only when the median rate
-  pair is nonzero, the timestamp is positive, the oldest report is not expired,
-  `numRates >= minimumReports`, `minimumReports > 0`, and
-  `medianTimestamp + oracleFreshnessWindow > now`. Treat definitive gate
-  failures (zero median, oldest report expired, too few reports, or expired
-  reset-frequency window) as `oracleMedianLive=false`; treat failed/null reads
-  or missing/zero `minimumReports` as source unavailable rather than live.
-  Refresh this state from the `SortedOracles.OracleReported` and
-  `MedianUpdated` workers for VP pools returned by `getPoolsByFeed`, so
-  flat-feed reporter refreshes can update `oracleMedianTimestamp` and the
-  validity gates even without `MedianUpdated`. Also refresh it from VP
-  self-heal/linking paths once `referenceRateFeedID` becomes known. If that
-  source is absent during schema or RPC rollout, the UI returns `N/A` and the
-  bridge skips the VP series instead of deriving a page from
-  `lastOracleReportAt`.
+  Do not collapse those gates into a single predicate unless the implementation
+  can still distinguish **median-validity** failures from **reset-window**
+  expiry. Store `oracleMedianLive=false` only for definitive median-invalid
+  states such as zero median, oldest report expired, or
+  `numRates < minimumReports`; those should page even during FX weekends.
+  Store `oracleMedianLive=true` only when the median rate pair is nonzero, the
+  timestamp is positive, the oldest report is not expired, `minimumReports > 0`,
+  and `numRates >= minimumReports`. Then compute reset-window freshness
+  separately from `oracleMedianTimestamp + oracleFreshnessWindow > now`.
+  `oracleFreshnessWindow <= 0` means the reset window is unavailable, not stale,
+  unless an independent median-validity gate already failed. Failed/null reads
+  must preserve existing non-null `oracleMedianLive`/`oracleMedianTimestamp` on
+  already-healed rows; only never-known rows degrade to unavailable. Refresh
+  this state from the `SortedOracles.OracleReported` and `MedianUpdated` workers
+  for VP pools returned by `getPoolsByFeed`, so flat-feed reporter refreshes can
+  update `oracleMedianTimestamp` and the validity gates even without
+  `MedianUpdated`. Also refresh it from VP self-heal/linking paths once
+  `referenceRateFeedID` becomes known. If that source is absent during schema or
+  RPC rollout, the UI returns `N/A` and the bridge skips the VP series instead
+  of deriving a page from `lastOracleReportAt`.
 
 **Recommended wiring:** add a new `Pool.oracleFreshnessWindow: BigInt!`
 (defaults `0n` = unknown). Populate it:
@@ -190,7 +194,8 @@ Three files mirror each other:
 - `indexer-envio/test/healthStatusParity.test.ts`
 
 The UI already has weekend reclassification: `computeHealthStatus` returns
-`"WEEKEND"` when stale and `isWeekend()` (`ui health.ts:249-254`). Existing FPMM
+`"WEEKEND"` for expected reset-window staleness when `isWeekend()`
+(`ui health.ts:249-254`). Existing FPMM
 branches still diverge intentionally: the UI uses **wall-clock +
 `oracleExpiry`** (`isOracleFresh`, `ui health.ts:197-209`) while the indexer uses
 event-time flags, and that divergence is explicitly **not** covered by the parity
@@ -296,10 +301,12 @@ short-circuit VPs (`health.ts:246`).
   # (FPMM pools, or VP whose wrapped exchange isn't linked yet).
   oracleFreshnessWindow: BigInt!
 
-  # VP-only contract median state. Null means the current-state/RPC source was
-  # not available yet, so UI/metrics degrade instead of paging from
-  # lastOracleReportAt. oracleMedianLive=false means the contract sees no valid
-  # median and the VP is stale immediately.
+  # VP-only median-validity state. Null means the current-state/RPC source was
+  # never available yet, so UI/metrics degrade instead of paging from
+  # lastOracleReportAt. oracleMedianLive=false means an independent validity
+  # gate failed (zero median, oldest report expired, or too few reports) and the
+  # VP is stale immediately. Reset-window expiry is computed separately from
+  # oracleMedianTimestamp + oracleFreshnessWindow.
   oracleMedianLive: Boolean
   oracleMedianTimestamp: BigInt
 ```
@@ -360,7 +367,7 @@ export function computeHealthStatus(pool, chainId?, nowSeconds = ...): HealthSta
         ? null
         : Number(pool.oracleMedianTimestamp);
     if (pool.oracleMedianLive === false) {
-      return isWeekend() ? "WEEKEND" : "CRITICAL";
+      return "CRITICAL";
     }
     if (window > 0 && pool.oracleMedianLive === true && medianTs) {
       const stale = medianTs + window <= nowSeconds;
@@ -372,8 +379,10 @@ export function computeHealthStatus(pool, chainId?, nowSeconds = ...): HealthSta
 }
 ```
 
-So a weekend-stale CADm VP renders `WEEKEND`, a weekday-stale one renders
-`CRITICAL`. `computeEffectiveStatus` / `worstStatus` already handle the result.
+So a weekend reset-window-stale CADm VP renders `WEEKEND`, a weekday
+reset-window-stale one renders `CRITICAL`, and a median-invalid VP renders
+`CRITICAL` regardless of weekend state. `computeEffectiveStatus` / `worstStatus`
+already handle the result.
 Also remove the remaining VP-only UI gates that force `N/A`: update
 `ui-dashboard/src/components/health-panel.tsx` so virtual pools call the same
 health function instead of hard-coding `"N/A"` / "VirtualPool — no oracle data",
@@ -412,30 +421,38 @@ This is the load-bearing addition — without it no series exists to alert on.
   filter). Cleanest is a **companion** `BRIDGE_VP_POOLS_QUERY` selecting
   `source _like "%virtual%"` OR `wrappedExchangeId _neq ""`, with fields
   `id, chainId, token0, token1, source, wrappedExchangeId,
-oracleFreshnessWindow, oracleMedianLive, oracleMedianTimestamp`. Companion so a
-  schema-mismatch only drops VP gauges, not all FPMM gauges (mirrors the
-  existing companion-query rationale at `graphql.ts:1-7`).
+oracleFreshnessWindow, oracleMedianLive, oracleMedianTimestamp`, plus enough
+  lifecycle/exchange state to prove the VP is active. Filter out deprecated
+  wrappers before emitting gauges, e.g. require the joined
+  `BiPoolExchange.isDeprecated == false` for `wrappedExchangeId` or a latest
+  `VirtualPoolLifecycle.action != "deprecated"` state. `PoolDeprecated` and
+  `ExchangeDestroyed` leave rows identifiable as VPs, but they intentionally
+  route no live swaps and must not page. Companion so a schema-mismatch only
+  drops VP gauges, not all FPMM gauges (mirrors the existing companion-query
+  rationale at `graphql.ts:1-7`).
 - **Poller** (`poller.ts:100`): in addition to `data.Pool.filter(isFpmmPool)`,
   process the VP rows through a new `recordVpOracleMetrics`.
-- **Metrics** (`metrics.ts`): add a dedicated gauge, e.g.
-  `mento_pool_vp_oracle_fresh` with the existing `poolLabels` set
-  (`chain_id, chain_name, pair, pool_id, pool_address_short`). Use this decision
-  tree so the gauge cannot page while health/UI are degraded:
-  - emit `0` immediately when `oracleMedianLive === false` (including zero
-    median, oldest-report-expired, too-few-reports, or reset-window-expired
-    contract states);
-  - skip emission when `oracleMedianLive !== true`, because the contract median
-    source is unavailable/unknown;
-  - skip emission when `oracleMedianTimestamp == null` or
-    `oracleMedianTimestamp <= 0`, matching the health/UI degraded mode for
-    missing contract timestamps;
-  - skip emission when `oracleFreshnessWindow <= 0` (unknown window); and
-  - otherwise emit `1` when
-    `oracleMedianTimestamp + oracleFreshnessWindow > now`, else `0` for the
-    known-live-but-expired case.
+- **Metrics** (`metrics.ts`): add two dedicated gauges with the existing
+  `poolLabels` set (`chain_id, chain_name, pair, pool_id, pool_address_short`):
+  - `mento_pool_vp_oracle_valid` for definitive median-validity failures. Emit
+    `0` immediately when `oracleMedianLive === false` (zero median,
+    oldest-report-expired, or too-few-reports), emit `1` when
+    `oracleMedianLive === true`, and skip when the median source is never known.
+    This signal is not weekend-suppressed.
+  - `mento_pool_vp_oracle_fresh` for reset-window freshness only. Emit it only
+    when `oracleMedianLive === true`, `oracleMedianTimestamp > 0`, and
+    `oracleFreshnessWindow > 0`; otherwise skip to match health/UI degraded mode.
+    Emit `1` when `oracleMedianTimestamp + oracleFreshnessWindow > now`, else
+    `0` for the known-valid-median-but-expired reset-window case. This is the
+    only VP gauge that the FX weekend gate may suppress.
+
+    Failed/null median-state reads must not clear existing non-null Pool median
+    fields. Because the bridge resets pool gauges on each poll and the alert
+    uses `no_data_state = "OK"`, overwriting a known stale `0` with "unknown"
+    would clear a real incident. Only never-known rows should be absent.
     Optionally also emit `mento_pool_vp_oracle_freshness_window` (the 360s value)
-    for dashboards. The `pair` label (e.g. `CADm/USDm`) is what the FX weekend gate
-    matches on.
+    for dashboards. The `pair` label (e.g. `CADm/USDm`) is what the FX weekend
+    gate matches on.
 
 ### 7. Alert rule: new `alerts/rules/rules-vp-oracles.tf`
 
@@ -449,10 +466,26 @@ bypass the policy tree. If the rule uses direct `notification_settings`, the
 contact point must be selected from `rule.value.env` explicitly.
 
 ```hcl
-# Virtual-pool oracle staleness: the wrapped exchange's median is older than
-# its referenceRateResetFrequency, so BiPoolManager.oracleHasValidMedian
-# reverts and the swap app can't price the pair (e.g. USDm->CADm). FX-weekend
-# gated so closed-market staleness is expected, not paged.
+# Virtual-pool median validity: zero median, oldest report expired, or too few
+# reports. Not FX-weekend gated; these are not normal closed-market conditions.
+expr = <<-EOT
+mento_pool_vp_oracle_valid{chain_name="${rule.key}"} < 0.5
+EOT
+for            = "5m"
+no_data_state  = "OK"
+exec_err_state = "Error"
+labels = {
+  service  = "vp-oracles"
+  chain    = rule.key
+  severity = rule.value.env == "prod" ? "page" : "warning"
+}
+annotations = {
+  summary = "Virtual pool {{ $labels.pair }} on {{ $labels.chain_name }} has no valid median; swaps for this pair will revert with \"no valid median\"."
+}
+
+# Virtual-pool reset-window freshness: the wrapped exchange's median timestamp
+# is older than referenceRateResetFrequency. FX-weekend gated so closed-market
+# staleness is expected, not paged.
 expr = <<-EOT
 (
   mento_pool_vp_oracle_fresh{chain_name="${rule.key}"} < 0.5
@@ -471,14 +504,17 @@ labels = {
   severity = rule.value.env == "prod" ? "page" : "warning"
 }
 annotations = {
-  summary = "Virtual pool {{ $labels.pair }} on {{ $labels.chain_name }} has a stale oracle (older than its reset frequency); swaps for this pair will revert with \"no valid median\"."
+  summary = "Virtual pool {{ $labels.pair }} on {{ $labels.chain_name }} has a stale oracle timestamp (older than its reset frequency); swaps for this pair will revert with \"no valid median\"."
 }
 ```
 
-The RHS reuses the existing time gate (`main.tf:101`) but first selects only FX
-VP series and then matches back on `chain_id, pool_id, pair`. This mirrors the
-existing FPMM suppressor shape and prevents the label-less weekend gate from
-suppressing USD-pegged/non-FX VP incidents.
+The reset-window rule RHS reuses the existing time gate (`main.tf:101`) but
+first selects only FX VP series and then matches back on
+`chain_id, pool_id, pair`. This mirrors the existing FPMM suppressor shape and
+prevents the label-less weekend gate from suppressing USD-pegged/non-FX VP
+incidents. Do not apply that weekend gate to `mento_pool_vp_oracle_valid`; a
+zero median, expired oldest report, or too-few-reports condition should still
+page during FX weekends.
 
 `no_data_state = "OK"` is part of the rule contract because the rule iterates
 all `local.chains`, while some chains may have no VP series yet and unknown
@@ -505,19 +541,26 @@ have parallel policies that deliver to:
 - `grafana_contact_point.splunk_on_call` for on-call paging; and
 - `grafana_contact_point.slack_alerts_critical` for `#alerts-critical`.
 
+When using parallel policies, make the first prod matcher set `continue = true`
+so Grafana evaluates the subsequent `#alerts-critical` matcher after the Splunk
+On-Call matcher. Mirror the existing trading-mode fan-out pattern in
+`alerts/rules/notification-policies.tf` rather than relying on sibling policies
+to both fire by default.
+
 Do not use a single rule-level `notification_settings` contact point for prod VP
 pages unless the PR also adds a combined contact point that intentionally
 delivers to both Splunk On-Call and `#alerts-critical`; otherwise direct settings
 would bypass one of the required destinations. Staging VP warnings can still
 route to `grafana_contact_point.slack_alerts_testnet`.
 
-Also add the VP alert names to the template dispatch table in
+Also add both VP alert-name families to the template dispatch table in
 `alerts/rules/protocol-routing-locals.tf` `local.alert_types`, for example names
-generated as `Virtual Pool Oracle Stale [${c.title}]` from `local.chains`. The
-entry must point at Slack and VictorOps/Splunk templates, and the PR must add the
-matching templates in `message-templates-slack.tf` and
-`message-templates-victorops.tf` so Slack/on-call messages include the VP summary
-and action text instead of falling back to only the alert name/common labels.
+generated as `Virtual Pool Oracle Invalid [${c.title}]` and
+`Virtual Pool Oracle Stale [${c.title}]` from `local.chains`. Each entry must
+point at Slack and VictorOps/Splunk templates, and the PR must add the matching
+templates in `message-templates-slack.tf` and `message-templates-victorops.tf`
+so Slack/on-call messages include the VP summary and action text instead of
+falling back to only the alert name/common labels.
 
 ---
 
@@ -535,9 +578,11 @@ and action text instead of falling back to only the alert name/common labels.
 - OG/pool metadata helper tests — assert virtual pools return the same stale
   oracle health reason used by the dashboard rather than an empty reason set.
 - `metrics-bridge/test/*` — any snapshot of emitted gauge names will change;
-  add coverage for `mento_pool_vp_oracle_fresh` (fresh=1, stale=0,
-  zero-median/down=0 immediately, unknown contract source skipped, live median
-  with missing/zero contract timestamp skipped).
+  add coverage for `mento_pool_vp_oracle_valid` (valid=1, zero median /
+  oldest-report-expired / too-few-reports = 0, unknown contract source skipped)
+  and `mento_pool_vp_oracle_fresh` (fresh=1, reset-window stale=0, missing/zero
+  window or missing/zero contract timestamp skipped). Include a deprecated VP
+  fixture and assert no VP gauges are emitted for it.
 - `metrics-bridge/test/deviation-alert-state.test.ts` enforces the
   `USD_PEGGED_SYMBOLS` ↔ `main.tf` drift guard — no change needed (we reuse the
   exclusion-based FX classifier), but re-run it.
@@ -555,26 +600,34 @@ and action text instead of falling back to only the alert name/common labels.
   window 360s, now" yields `healthStatus="CRITICAL"`.
 - Metrics bridge: a flat-feed reporter refresh with a fresh contract median
   timestamp must keep `mento_pool_vp_oracle_fresh=1` even when
-  `lastOracleReportAt` is old; a zero-median/current median down signal must
-  emit `0` immediately.
+  `lastOracleReportAt` is old; a reset-window-expired median must emit
+  `mento_pool_vp_oracle_fresh=0`; zero median, oldest-report-expired, and
+  too-few-reports states must emit `mento_pool_vp_oracle_valid=0` and remain
+  independent from the weekend gate.
 - RPC/current-state: unit-test the new VP median-state effect against
   `SortedOracles.medianTimestamp`, `medianRate`, `isOldestReportExpired`,
-  `numRates`, and wrapped-exchange `minimumReports` responses (live, zero
-  median, oldest report expired, too few reports, reset-window expired,
-  failed/null read), and handler-test that both `OracleReported` and
-  `MedianUpdated` refresh `oracleMedianTimestamp`/`oracleMedianLive` for VP
-  pools returned by `getPoolsByFeed`.
+  `numRates`, wrapped-exchange `minimumReports`, and
+  `oracleFreshnessWindow` responses (live, zero median, oldest report expired,
+  too few reports, zero/unknown window, reset-window expired, failed/null read),
+  and handler-test that both `OracleReported` and `MedianUpdated` refresh
+  `oracleMedianTimestamp`/`oracleMedianLive` for VP pools returned by
+  `getPoolsByFeed`. Include an already-known stale row with a transient failed
+  read and assert the non-null median state is preserved.
 - Window preservation: simulate `BucketsUpdated` / wrapped-exchange refresh where
   the existing Pool has `oracleFreshnessWindow=360n` and the RPC struct returns
   `referenceRateResetFrequency=0n`; assert the Pool keeps `360n`.
 - Alert rule unit test (if the repo has promtool/terraform alert tests): assert
-  the VP-oracle expr fires for a stale FX VP, is suppressed for that FX VP during
-  the weekend window, and still fires for a stale non-FX/US-dollar VP during the
-  weekend. Include the no-series case and assert `no_data_state="OK"`.
+  the VP reset-window freshness expr fires for a stale FX VP, is suppressed for
+  that FX VP during the weekend window, and still fires for a stale
+  non-FX/US-dollar VP during the weekend. Separately assert the
+  `mento_pool_vp_oracle_valid` expr fires for a zero-median/too-few-reports FX
+  VP during the weekend. Include the no-series case and assert
+  `no_data_state="OK"`.
 - Routing/template test: assert prod `service="vp-oracles"`/`severity="page"`
-  fans out to both Splunk On-Call and `#alerts-critical`, staging routes to
-  `#alerts-testnet`, and the VP alert name appears in `local.alert_types` with
-  Slack and VictorOps templates.
+  fans out to both Splunk On-Call and `#alerts-critical` through a
+  `continue = true` first matcher, staging routes to `#alerts-testnet`, and both
+  VP alert-name families appear in `local.alert_types` with Slack and VictorOps
+  templates.
 
 **Live validation against celo-sepolia CAD**
 
@@ -585,30 +638,42 @@ and action text instead of falling back to only the alert name/common labels.
   `oracleMedianLive` / `oracleMedianTimestamp` reflect the contract median state,
   and `wrappedExchangeId` is set.
 - Confirm
+  `mento_pool_vp_oracle_valid{pair="CADm/USDm",chain_name="celo-sepolia"}` is
+  published and reads `1` while the median-validity gates pass, then reads `0`
+  for zero median / oldest-report-expired / too-few-reports fixtures.
+- Confirm
   `mento_pool_vp_oracle_fresh{pair="CADm/USDm",chain_name="celo-sepolia"}` is
-  published and reads `0` while the CADm/USDm contract median is stale/down, and
-  `1` after a fresh median. Keep `USDm->CADm` in operator examples because that
-  is the user-facing swap path; use `CADm/USDm` for the Prometheus pair label.
+  published and reads `0` while the CADm/USDm contract median timestamp is older
+  than the reset window, and `1` after a fresh median. Keep `USDm->CADm` in
+  operator examples because that is the user-facing swap path; use `CADm/USDm`
+  for the Prometheus pair label.
 - Confirm the alert preserves the chain label and routes the celo-sepolia case to
   `#alerts-testnet` (fire a test/silence check), prod `severity="page"` routes to
-  the pager/`#alerts-critical` path, and FX pairs are suppressed during the
-  weekend window.
+  the pager/`#alerts-critical` path, FX reset-window staleness is suppressed
+  during the weekend window, and median-validity failures are not weekend
+  suppressed.
 
 ---
 
 ## Risks / edge cases
 
-- **Weekend false-positives and false-suppression.** The VP staleness alert MUST
-  wrap FX pairs in `fx_oracle_pause_gate_promql`, and the suppressor RHS MUST
-  restrict itself to FX pairs (`pair!~usd_pegged_pair_regex`). Without the weekend
-  gate, CAD/GHS/etc. would page every Saturday when the FX oracle legitimately
-  stops reporting; without the FX-only RHS, non-FX VP incidents would be hidden
-  during the weekend too. The UI's `WEEKEND` reclassification (`isWeekend()`)
-  handles the dashboard side.
+- **Weekend false-positives and false-suppression.** The VP reset-window
+  freshness alert MUST wrap FX pairs in `fx_oracle_pause_gate_promql`, and the
+  suppressor RHS MUST restrict itself to FX pairs
+  (`pair!~usd_pegged_pair_regex`). Without the weekend gate, CAD/GHS/etc. would
+  page every Saturday when the FX oracle legitimately stops reporting; without
+  the FX-only RHS, non-FX VP incidents would be hidden during the weekend too.
+  Do not weekend-suppress definitive median-validity failures
+  (`mento_pool_vp_oracle_valid=0`) such as zero median, oldest report expired, or
+  too few reports. The UI's `WEEKEND` reclassification (`isWeekend()`) handles
+  expected reset-window staleness on the dashboard side.
 - **`referenceRateResetFrequency = 0` (unknown / backfill).** Default on RPC
   failure (`biPoolManager.ts:345,468`). Timestamp-expiry checks must decline to
   fire while the window is unknown: health returns `N/A` and the gauge skips the
-  live-timestamp comparison. A known `oracleMedianLive=false` still emits stale
+  live-timestamp comparison. `oracleFreshnessWindow <= 0` must not be folded
+  into `oracleMedianLive=false`; otherwise a healthy median with an unknown
+  window would page before the window backfill lands. A known
+  `oracleMedianLive=false` from an independent validity gate still emits stale
   immediately because the contract has no valid median, independent of reset
   frequency. Self-heal will populate the window on a later event; until then, a
   VP with no contract median source stays `N/A`, which is the safe pre-fix
@@ -623,6 +688,12 @@ and action text instead of falling back to only the alert name/common labels.
   failure must preserve the known window. Treat `0n` as "never known" or
   "current read unavailable", not as an instruction to erase a previously
   correct reset frequency.
+- **Median-state read failures after healing.** Once a VP has non-null
+  `oracleMedianLive`/`oracleMedianTimestamp`, later failed/null current-state
+  reads must preserve those fields. Only never-known rows should degrade to
+  source-unavailable. This prevents the bridge's per-poll gauge reset plus
+  `no_data_state="OK"` from clearing a previously emitted stale `0` during a
+  transient RPC failure.
 - **`lastOracleReportAt` under-bound.** It advances only on `MedianUpdated`
   (`sortedOracles.ts:542-544`) and freezes on zero-median outages. That makes it
   useful as a derive-path lower-bound and investigation clue, but unsafe as a
