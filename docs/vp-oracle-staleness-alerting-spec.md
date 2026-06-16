@@ -1,6 +1,16 @@
+---
+title: Virtual Pool Oracle Staleness Alerting Spec
+status: draft
+owner: eng
+canonical: false
+last_verified: 2026-06-16
+---
+
 # Spec: Close the virtual-pool oracle-staleness alerting gap
 
-Status: investigation complete, implementable. No code changed yet.
+Status: investigation complete, implementable follow-up plan. This is
+non-canonical context; verify current code/config before treating any proposed
+field, rule, or workflow as operating truth.
 
 ## TL;DR decision
 
@@ -114,10 +124,23 @@ therefore needs both:
 
 - the correct **360s** window, not the 1-week `oracleExpiry`; and
 - a contract-accurate current median source, e.g. VP-only Pool fields such as
-  `oracleMedianLive` + `oracleMedianTimestamp` populated from the same
-  RPC/contract state used by `tryDeriveRebalanceState`. If that source is absent
-  during schema or RPC rollout, the UI returns `N/A` and the bridge skips the VP
-  series instead of deriving a page from `lastOracleReportAt`.
+  `oracleMedianLive` + `oracleMedianTimestamp` populated by a new RPC effect,
+  for example `vpMedianStateEffect`. Do not reuse `rebalancingStateEffect`
+  directly: its current shape returns oracle price, threshold, and price
+  difference, but not the median timestamp or live/valid flag. The new effect
+  should read `SortedOracles.medianTimestamp(feed)` and
+  `SortedOracles.medianRate(feed)` (or
+  `medianRateWithoutEquivalentMapping(feed)` if equivalent mapping must be
+  bypassed for a feed). Treat a nonzero median rate pair plus a positive
+  timestamp as `oracleMedianLive=true`; a zero median rate as
+  `oracleMedianLive=false`; and failed/null reads as source unavailable. Refresh
+  this state from the `SortedOracles.OracleReported` and `MedianUpdated` workers
+  for VP pools returned by `getPoolsByFeed`, so flat-feed reporter refreshes can
+  update `oracleMedianTimestamp` even without `MedianUpdated`. Also refresh it
+  from VP self-heal/linking paths once `referenceRateFeedID` becomes known. If
+  that source is absent during schema or RPC rollout, the UI returns `N/A` and
+  the bridge skips the VP series instead of deriving a page from
+  `lastOracleReportAt`.
 
 **Recommended wiring:** add a new `Pool.oracleFreshnessWindow: BigInt!`
 (defaults `0n` = unknown). Populate it:
@@ -300,8 +323,12 @@ Mirror `referenceRateResetFrequency` onto the VP Pool wherever
   refreshed reset frequency to that Pool.
 
 Edge: when `referenceRateResetFrequency === 0n` (RPC-struct failure default,
-`biPoolManager.ts:345`), leave `oracleFreshnessWindow` at `0n` — the health
-check's `> 0n` guard then declines to fire (no false page on unknown window).
+`biPoolManager.ts:345`), write `oracleFreshnessWindow = 0n` only for rows whose
+window has never been known. A refresh failure must preserve an existing nonzero
+Pool window; otherwise a transient `BucketsUpdated`/RPC failure could clobber a
+known 360s VP window back to unknown and disable health/bridge paging until a
+later successful refresh. The health check's `> 0n` guard then declines to fire
+only for genuinely unknown windows, not for previously healed rows.
 
 ### 4. UI health: `ui-dashboard/src/lib/health.ts`
 
@@ -450,25 +477,35 @@ incidents.
 
 ### 8. Routing: prod + staging `alerts/rules/notification-policies.tf`
 
-If the rule omits rule-level `notification_settings`, add an `#alerts-testnet`
-policy that matches `service="vp-oracles"` plus the preserved per-series chain
-identity. The preferred shape is a `local.staging_chains` fan-out matching
-`service` + `chain` where the rule label sets `chain = rule.key`; alternatively
-match the existing metric label `chain_name` directly. Either way, the route must
-preserve chain identity from the firing series. It must never hard-code
-`celo-sepolia` on a generic rule.
+Use the policy tree for VP oracle routing so prod pages fan out to both required
+destinations. Add an `#alerts-testnet` policy that matches `service="vp-oracles"`
+plus the preserved per-series chain identity. The preferred shape is a
+`local.staging_chains` fan-out matching `service` + `chain` where the rule label
+sets `chain = rule.key`; alternatively match the existing metric label
+`chain_name` directly. Either way, the route must preserve chain identity from
+the firing series. It must never hard-code `celo-sepolia` on a generic rule.
 
 Also add production routing for `service="vp-oracles"` + `severity="page"`.
 The current root policy defaults unmatched alerts to `#alerts-infra`, and the
-existing pager/critical routes are service-specific, so prod VP oracle pages must
-either:
+existing pager/critical routes are service-specific. Prod VP oracle pages must
+have parallel policies that deliver to:
 
-- have a prod `vp-oracles` policy that routes to the same Splunk/on-call and
-  `#alerts-critical` destination pattern used by other page-severity protocol
-  alerts; or
-- use rule-level `notification_settings` selected by `rule.value.env`, with prod
-  pointing at the pager/critical contact point and staging pointing at
-  `#alerts-testnet`.
+- `grafana_contact_point.splunk_on_call` for on-call paging; and
+- `grafana_contact_point.slack_alerts_critical` for `#alerts-critical`.
+
+Do not use a single rule-level `notification_settings` contact point for prod VP
+pages unless the PR also adds a combined contact point that intentionally
+delivers to both Splunk On-Call and `#alerts-critical`; otherwise direct settings
+would bypass one of the required destinations. Staging VP warnings can still
+route to `grafana_contact_point.slack_alerts_testnet`.
+
+Also add the VP alert names to the template dispatch table in
+`alerts/rules/protocol-routing-locals.tf` `local.alert_types`, for example names
+generated as `Virtual Pool Oracle Stale [${c.title}]` from `local.chains`. The
+entry must point at Slack and VictorOps/Splunk templates, and the PR must add the
+matching templates in `message-templates-slack.tf` and
+`message-templates-victorops.tf` so Slack/on-call messages include the VP summary
+and action text instead of falling back to only the alert name/common labels.
 
 ---
 
@@ -508,10 +545,22 @@ either:
   timestamp must keep `mento_pool_vp_oracle_fresh=1` even when
   `lastOracleReportAt` is old; a zero-median/current median down signal must
   emit `0` immediately.
+- RPC/current-state: unit-test the new VP median-state effect against
+  `SortedOracles.medianTimestamp` + `medianRate` responses (live, zero median,
+  failed/null read), and handler-test that both `OracleReported` and
+  `MedianUpdated` refresh `oracleMedianTimestamp`/`oracleMedianLive` for VP pools
+  returned by `getPoolsByFeed`.
+- Window preservation: simulate `BucketsUpdated` / wrapped-exchange refresh where
+  the existing Pool has `oracleFreshnessWindow=360n` and the RPC struct returns
+  `referenceRateResetFrequency=0n`; assert the Pool keeps `360n`.
 - Alert rule unit test (if the repo has promtool/terraform alert tests): assert
   the VP-oracle expr fires for a stale FX VP, is suppressed for that FX VP during
   the weekend window, and still fires for a stale non-FX/US-dollar VP during the
   weekend. Include the no-series case and assert `no_data_state="OK"`.
+- Routing/template test: assert prod `service="vp-oracles"`/`severity="page"`
+  fans out to both Splunk On-Call and `#alerts-critical`, staging routes to
+  `#alerts-testnet`, and the VP alert name appears in `local.alert_types` with
+  Slack and VictorOps templates.
 
 **Live validation against celo-sepolia CAD**
 
@@ -555,6 +604,11 @@ either:
   have a window. It will surface `N/A` until self-heal lands
   (`self-heal.ts:183-399`) — acceptable; the alert simply doesn't exist for that
   pool yet rather than mis-firing.
+- **Refresh failures after healing.** Once a VP has a known nonzero
+  `oracleFreshnessWindow`, later refreshes that return `0n` from an RPC-struct
+  failure must preserve the known window. Treat `0n` as "never known" or
+  "current read unavailable", not as an instruction to erase a previously
+  correct reset frequency.
 - **`lastOracleReportAt` under-bound.** It advances only on `MedianUpdated`
   (`sortedOracles.ts:542-544`) and freezes on zero-median outages. That makes it
   useful as a derive-path lower-bound and investigation clue, but unsafe as a
