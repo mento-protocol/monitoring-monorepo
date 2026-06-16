@@ -33,11 +33,17 @@ import {
   findPendingScratch,
   findAndDrainPendingScratch,
 } from "../../wormhole/pairing.js";
+import {
+  warnUnmatchedScratchDrain,
+  type ScratchDrainEvent,
+} from "../../wormhole/scratchWarnings.js";
 import type { WormholeHandlerContext } from "../../wormhole/handlerContext.js";
 
 const PROVIDER = "WORMHOLE" as const;
 
-type HandlerContext = WormholeHandlerContext;
+type HandlerContext = WormholeHandlerContext & {
+  log: { warn: (message: string) => void };
+};
 
 /** Generated entity row types carry `readonly` on every field; the delta
  * builders below start as partial and mutate, then spread into the final
@@ -216,6 +222,13 @@ indexer.onEvent(
         currentLogIndex: event.logIndex,
       },
     );
+    if (!pending) {
+      warnUnmatchedScratchDrain(
+        context as HandlerContext,
+        event,
+        "WormholeTransferPending",
+      );
+    }
 
     const mgr = await ensureNttManagerSeed(
       context as HandlerContext,
@@ -456,6 +469,7 @@ indexer.onEvent(
         context as HandlerContext,
         event,
         mgr?.transceiver,
+        { warnOnMiss: false },
       );
     }
     const detailDelta: WormholeDetailDelta = {};
@@ -520,20 +534,18 @@ function applyDestPendingToDelta(
 /** Drain the scratch written by the earlier-in-tx ReceivedMessage. Pass
  * `transceiver` when the caller can identify it (MessageAttestedTo) so a
  * multi-transceiver tx doesn't cross-pair; TransferRedeemed passes undefined
- * because its payload lacks that identifier. */
+ * because its payload lacks that identifier. `warnOnMiss` is disabled only
+ * for callers that already emitted a more specific fallback warning. */
 async function drainDestPending(
   context: HandlerContext,
-  event: {
-    chainId: number;
-    transaction: { hash: string };
-    logIndex: number;
-  },
+  event: ScratchDrainEvent,
   transceiver?: string,
+  options: { warnOnMiss?: boolean } = {},
 ): Promise<
   Awaited<ReturnType<HandlerContext["WormholeDestPending"]["get"]>> | undefined
 > {
   const transceiverLower = transceiver?.toLowerCase();
-  return findAndDrainPendingScratch(
+  const row = await findAndDrainPendingScratch(
     context.WormholeDestPending,
     {
       chainId: event.chainId,
@@ -544,6 +556,10 @@ async function drainDestPending(
       ? (row) => row.destTransceiver.toLowerCase() === transceiverLower
       : undefined,
   );
+  if (!row && options.warnOnMiss !== false) {
+    warnUnmatchedScratchDrain(context, event, "WormholeDestPending");
+  }
+  return row;
 }
 
 indexer.onEvent(
