@@ -234,6 +234,47 @@ describe("runIntegrationProbes", () => {
     expect(snapshot.summary.failingChainChecks).toBe(1);
   });
 
+  it("uses the budget next step for partial chains with exhausted budget", async () => {
+    let quoteFetches = 0;
+    const snapshot = await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [
+        {
+          ...passingAdapter(),
+          id: "partial-budgeted",
+          label: "Partial Budgeted",
+          maxQuoteRequestsPerRun: 1,
+          quote: (input) => ({
+            url: `https://partial-budgeted.test/${input.direction}`,
+          }),
+        },
+      ],
+      pairConcurrency: 1,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(
+            JSON.stringify({ data: { Pool: [poolRow(POOL, "EURm")] } }),
+          );
+        }
+        quoteFetches += 1;
+        return new Response(
+          JSON.stringify({ transactionRequest: { to: ROUTER_V300 } }),
+        );
+      },
+    });
+
+    const chain = snapshot.aggregators[0]?.chains[0];
+    expect(quoteFetches).toBe(1);
+    expect(chain?.status).toBe("partial");
+    expect(chain?.pairs.map((pair) => pair.status)).toEqual([
+      "pass",
+      "budget_exhausted",
+    ]);
+    expect(chain?.nextStep).toContain("maxQuoteRequestsPerRun");
+  });
+
   it("logs a per-adapter quote-budget summary line", async () => {
     const lines: string[] = [];
     await runIntegrationProbes({
