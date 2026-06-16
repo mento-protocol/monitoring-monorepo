@@ -24,6 +24,10 @@ vi.mock("@/lib/networks", async () => {
     ...actual,
     isConfiguredNetworkId: (v: string): v is IndexerNetworkId =>
       v in actual.NETWORKS,
+    configuredNetworkIdForChainId: (chainId: number): IndexerNetworkId | null =>
+      actual
+        .networkIdsForChainId(chainId)
+        .find((id) => id in actual.NETWORKS) ?? null,
   };
 });
 

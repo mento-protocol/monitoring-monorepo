@@ -534,6 +534,844 @@ test("fails when .npmrc uses userconfig= indirection", () => {
   );
 });
 
+// 26. Root pnpm override floors like `>=1.2.3` can fresh-resolve the whole
+// graph to future majors. Reject unbounded minimum values.
+test("fails when package.json has an unbounded minimum pnpm override value", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            flatted: ">=3.4.2",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected override range rejection: ${out}`,
+  );
+});
+
+// 27. Each `||` branch must carry its own upper bound.
+test("fails when one pnpm override union branch has an unbounded minimum", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            example: ">=1.2.3 <2 || >=3.0.0",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected override range rejection: ${out}`,
+  );
+});
+
+// 28. Strict-greater floors are also unbounded on fresh resolves.
+test("fails strict-greater pnpm override values", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            example: ">3.0.0",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected strict-greater range rejection: ${out}`,
+  );
+});
+
+// 29. Loose semver lower-bound spellings are still unbounded floors.
+test("fails loose-semver pnpm override values", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            example: ">=v3.4.2",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected loose-semver range rejection: ${out}`,
+  );
+});
+
+// 30. npm alias replacement ranges still need the same floor guard.
+test("fails unbounded npm alias override replacement ranges", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            quux: "npm:@myorg/quux@>=1.0.0",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected npm alias range rejection: ${out}`,
+  );
+});
+
+// 31. Selector ranges can also be unbounded and match future majors.
+test("fails when package.json has an unbounded minimum pnpm override selector", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "diff@>=6": "8.0.3",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected selector range rejection: ${out}`,
+  );
+});
+
+// 32. Bare `>` selector floors are also unbounded on fresh resolves.
+test("fails strict-greater pnpm override selector ranges", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "diff@>6": "8.0.3",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected strict-greater selector range rejection: ${out}`,
+  );
+});
+
+// 33. Loose selector floors are also unbounded on fresh resolves.
+test("fails loose-semver pnpm override selector ranges", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "diff@=>6": "8.0.3",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected loose-semver selector range rejection: ${out}`,
+  );
+});
+
+// 34. pnpm-workspace.yaml override values need the same floor guard.
+test("fails when pnpm-workspace.yaml has an unbounded minimum override value", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        "packages:\n  - .\noverrides:\n  flatted: >=3.4.2\n",
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:4") &&
+      out.includes("unbounded minimum range"),
+    `expected workspace override range rejection: ${out}`,
+  );
+});
+
+// 35. End-of-line comments on the overrides header still start a block map.
+test("fails when pnpm-workspace.yaml overrides header comment has unbounded block values", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        "packages:\n  - .\noverrides: # security pins\n  flatted: >=3.4.2\n",
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:4") &&
+      out.includes("unbounded minimum range"),
+    `expected commented workspace override header rejection: ${out}`,
+  );
+});
+
+// 36. Anchored overrides headers still start a block map.
+test("fails when pnpm-workspace.yaml anchored overrides block has unbounded values", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\noverrides: &pins\n  flatted: ">=3.4.2"\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:4") &&
+      out.includes("unbounded minimum range"),
+    `expected anchored workspace override header rejection: ${out}`,
+  );
+});
+
+// 37. pnpm-workspace.yaml inline override maps need the same floor guard.
+test("fails when pnpm-workspace.yaml has an inline unbounded override map", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\noverrides: { flatted: ">=3.4.2" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:3") &&
+      out.includes("unbounded minimum range"),
+    `expected inline workspace override range rejection: ${out}`,
+  );
+});
+
+// 38. catalog: override replacements resolve before floor validation.
+test("fails when pnpm-workspace.yaml catalog override replacement is unbounded", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalog: { flatted: ">=3.4.2" }\noverrides: { flatted: "catalog:" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:4") &&
+      out.includes("unbounded minimum range"),
+    `expected catalog override replacement rejection: ${out}`,
+  );
+});
+
+// 39. Bounded catalog override replacements are fine.
+test("passes bounded pnpm-workspace.yaml catalog override replacements", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalog: { flatted: "3.4.2" }\noverrides: { flatted: "catalog:" }\n',
+    },
+  );
+  assert(
+    exitCode === 0,
+    `Expected exit 0, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
+// 40. Standalone deploy roots can carry their own pnpm-workspace.yaml.
+test("fails nested pnpm-workspace.yaml unbounded override selectors", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "deploy-root/pnpm-workspace.yaml":
+        'packages:\n  - .\noverrides:\n  "diff@>=6": 8.0.3\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("deploy-root/pnpm-workspace.yaml:4") &&
+      out.includes("unbounded minimum range"),
+    `expected nested workspace selector range rejection: ${out}`,
+  );
+});
+
+// 41. Peer-qualified selectors need the child package range checked.
+test("fails when peer-qualified pnpm override selector range is unbounded", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "parent>child@>=1": "1.2.3",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected peer-qualified selector range rejection: ${out}`,
+  );
+});
+
+// 42. Peer-qualified selectors need the parent package range checked too.
+test("fails when peer-qualified pnpm override parent selector range is unbounded", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "parent@>=1>child": "1.2.3",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected peer-qualified parent selector range rejection: ${out}`,
+  );
+});
+
+// 43. Bounded selector keys and same-major/capped replacement values are fine.
+test("passes bounded and same-major pnpm override replacements", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "flatted@<3.4.2": "3.4.2",
+            "ajv@^8.0.0": "^8.18.0",
+            "form-data@>=3.0.0 <3.0.5": "3.0.5",
+            "parent>child@>=1 <2": "1.2.3",
+            "parent@>=1 <2>child@>=1 <2": "1.2.3",
+            "loose@=>6 <9": "8.0.3",
+            "hyphen-selector@1.2.3 - 1.9.9": "1.9.9",
+            alias: "npm:@myorg/quux@>=1.0.0 <2",
+            example: ">=1.2.3 <2 || >=3.0.0 <4",
+            "hyphen-value": "1.2.3 - 1.9.9",
+            loose: ">=v1.2.3 <v2",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode === 0,
+    `Expected exit 0, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  assert(
+    stdout.includes(
+      "No unbounded minimum pnpm override/resolution values detected",
+    ),
+    `expected override range success: ${stdout}`,
+  );
+});
+
+// 44. Named catalog override replacements resolve before floor validation.
+test("fails when named catalog override replacement is unbounded", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalogs:\n  security:\n    flatted: ">=3.4.2"\noverrides: { flatted: "catalog:security" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:6") &&
+      out.includes("unbounded minimum range"),
+    `expected named catalog override replacement rejection: ${out}`,
+  );
+});
+
+// 45. Open hyphen ranges normalize to unbounded minimum floors.
+test("fails open hyphen pnpm override values", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            flatted: "3.4.2 - *",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected open hyphen override value rejection: ${out}`,
+  );
+});
+
+// 46. Open hyphen selector ranges need the same floor guard.
+test("fails open hyphen pnpm override selector ranges", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        pnpm: {
+          overrides: {
+            "flatted@3.4.2 - x": "3.4.2",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unbounded minimum range"),
+    `expected open hyphen selector rejection: ${out}`,
+  );
+});
+
+// 47. pnpm merges package.json resolutions into the override map.
+test("fails unbounded package.json resolutions", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        resolutions: {
+          flatted: ">=3.4.2",
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("package.json resolutions") &&
+      out.includes("unbounded minimum range"),
+    `expected resolutions range rejection: ${out}`,
+  );
+});
+
+// 48. Anchored inline override maps must be parsed, not treated as block-only.
+test("fails when pnpm-workspace.yaml anchored inline override map is unbounded", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\noverrides: &pins { flatted: ">=3.4.2" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:3") &&
+      out.includes("unbounded minimum range"),
+    `expected anchored inline workspace override rejection: ${out}`,
+  );
+});
+
+// 49. Anchored scalar values in block override maps must be validated.
+test("fails when pnpm-workspace.yaml block override scalar anchor is unbounded", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\noverrides:\n  flatted: &floor ">=3.4.2"\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:4") &&
+      out.includes("unbounded minimum range"),
+    `expected anchored block scalar override rejection: ${out}`,
+  );
+});
+
+// 50. Anchored scalar values in inline override maps must be validated.
+test("fails when pnpm-workspace.yaml inline override scalar anchor is unbounded", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\noverrides: { flatted: &floor ">=3.4.2" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:3") &&
+      out.includes("unbounded minimum range"),
+    `expected anchored inline scalar override rejection: ${out}`,
+  );
+});
+
+// 51. Anchored scalar values inside named catalogs must resolve before validation.
+test("fails when named catalog scalar anchor resolves to an unbounded override", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalogs:\n  security:\n    flatted: &floor ">=3.4.2"\noverrides: { flatted: "catalog:security" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:6") &&
+      out.includes("unbounded minimum range"),
+    `expected anchored named catalog override rejection: ${out}`,
+  );
+});
+
+// 52. YAML aliases are rejected instead of reimplemented by the audit parser.
+test("fails when pnpm-workspace.yaml override uses a YAML alias value", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalog:\n  floor: &floor ">=3.4.2"\noverrides:\n  flatted: *floor\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(out.includes("YAML alias"), `expected YAML alias rejection: ${out}`);
+});
+
+// 53. Catalog resolution cannot hide YAML aliases either.
+test("fails when named catalog resolves an override to a YAML alias", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalogs:\n  security:\n    floor: &floor ">=3.4.2"\n    flatted: *floor\noverrides: { flatted: "catalog:security" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(out.includes("YAML alias"), `expected YAML alias rejection: ${out}`);
+});
+
+// 54. Tagged scalar anchors are still anchors and must not hide floors.
+test("fails when pnpm-workspace.yaml override has a tagged scalar anchor", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\noverrides:\n  flatted: !!str &floor ">=3.4.2"\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:4") &&
+      out.includes("unbounded minimum range"),
+    `expected tagged scalar anchor override rejection: ${out}`,
+  );
+});
+
+// 55. Tagged scalar anchors inside named catalogs must resolve before validation.
+test("fails when named catalog tagged scalar anchor resolves to an unbounded override", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalogs:\n  security:\n    flatted: !!str &floor ">=3.4.2"\noverrides: { flatted: "catalog:security" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm-workspace.yaml:6") &&
+      out.includes("unbounded minimum range"),
+    `expected tagged named catalog override rejection: ${out}`,
+  );
+});
+
+// 56. Unresolved default catalog override values fail closed.
+test("fails when default catalog override replacement is missing", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalog: { other: "1.2.3" }\noverrides: { flatted: "catalog:" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unresolved catalog override"),
+    `expected unresolved default catalog rejection: ${out}`,
+  );
+});
+
+// 57. Unresolved named catalog override values fail closed.
+test("fails when named catalog override replacement is missing", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalogs:\n  security: { other: "1.2.3" }\noverrides: { flatted: "catalog:security" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unresolved catalog override"),
+    `expected unresolved named catalog rejection: ${out}`,
+  );
+});
+
+// 58. Missing named catalogs fail closed too.
+test("fails when named catalog override references a missing catalog", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\ncatalogs:\n  security: { flatted: "1.2.3" }\noverrides: { flatted: "catalog:missing" }\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("unresolved catalog override"),
+    `expected missing named catalog rejection: ${out}`,
+  );
+});
+
+// 59. YAML aliases for the entire overrides map are rejected fail-closed.
+test("fails when pnpm-workspace.yaml override map uses a YAML alias", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\npins: &pins { flatted: ">=3.4.2" }\noverrides: *pins\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(out.includes("YAML alias"), `expected map alias rejection: ${out}`);
+});
+
+// 60. YAML block scalar override values are rejected fail-closed.
+test("fails when pnpm-workspace.yaml override value uses a block scalar", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        "packages:\n  - .\noverrides:\n  flatted: >-\n    >=3.4.2\n",
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("YAML block scalar"),
+    `expected block scalar rejection: ${out}`,
+  );
+});
+
+// 61. pnpm $ override references are rejected instead of followed.
+test("fails when package.json override replacement uses a pnpm $ reference", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        dependencies: {
+          foo: ">=1.2.3",
+        },
+        pnpm: {
+          overrides: {
+            bar: "$foo",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm override reference"),
+    `expected pnpm reference rejection: ${out}`,
+  );
+});
+
+// 62. Local agent worktrees are ignored during recursive workspace scans.
+test("ignores pnpm-workspace.yaml files under .claude worktrees", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      ".claude/worktrees/scratch/pnpm-workspace.yaml":
+        "packages:\n  - .\noverrides:\n  flatted: >=3.4.2\n",
+    },
+  );
+  assert(
+    exitCode === 0,
+    `Expected exit 0, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
+// 63. Local agent worktree .npmrc files are ignored during registry scans.
+test("ignores .npmrc files under .claude worktrees", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      ".claude/worktrees/scratch/.npmrc":
+        "registry=https://evil.example.com/\n",
+    },
+  );
+  assert(
+    exitCode === 0,
+    `Expected exit 0, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
 // ── summary ───────────────────────────────────────────────────────────────────
 
 console.log(

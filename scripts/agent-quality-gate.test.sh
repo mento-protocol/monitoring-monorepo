@@ -116,6 +116,14 @@ assert_contains() {
   fail "expected output to contain: $expected"
 }
 
+assert_raw_contains() {
+  local expected="$1"
+  if grep -Fq -- "$expected" "$output_file"; then
+    return
+  fi
+  fail "expected output to contain: $expected"
+}
+
 assert_occurrences() {
   local expected_count="$1"
   local expected="$2"
@@ -465,6 +473,7 @@ assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_PORT"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_FIXTURE_PORT"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_COMMAND"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_NEXT_TIMEOUT_MS"
+assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_FORCE_SINGLE_PROCESS"
 assert_turbo_task_has_env "test:browser" "PLAYWRIGHT_REUSE_FIXTURE_SERVER"
 assert_turbo_task_has_env "test:browser" "CI"
 assert_turbo_task_has_env "test:browser" "NEXT_TELEMETRY_DISABLED"
@@ -618,33 +627,38 @@ assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/metrics-bri
 assert_not_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
 
 run_gate_expect_failure "ui-dashboard/package.json"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "re-run with --allow-package-script-changes if they are safe."
 
 run_gate_expect_failure "pnpm-lock.yaml"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 
 run_gate_expect_failure "pnpm-workspace.yaml"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 
+run_gate_expect_failure "patches/@lhci__utils@0.15.1.patch"
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
+assert_contains "dependency install scripts"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
+
 run_gate_expect_failure ".npmrc"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 
 run_gate_expect_failure "indexer-envio/.npmrc"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
 run_gate_expect_failure "pnpmfile.cjs"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
 run_gate_expect_failure ".pnpmfile.cjs"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 
@@ -673,6 +687,13 @@ assert_order \
 assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
   "- pnpm --filter @mento-protocol/indexer-envio lint (package manager config changed)"
+
+run_gate "patches/@lhci__utils@0.15.1.patch"
+assert_contains "- pnpm install --frozen-lockfile (pnpm patch changed)"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (pnpm patch changed)"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (pnpm patch changed)"
+assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (pnpm patch changed)"
+assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (pnpm patch changed)"
 
 run_gate "package.json"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (agent quality gate package script changed)"
@@ -1281,6 +1302,13 @@ run_gate "alerts/rules/rules-fpmms.tf"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
+assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
+
+run_gate "alerts/rules/main.tf"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
+assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
 
 run_gate "alerts/infra/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
@@ -1398,6 +1426,12 @@ assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the das
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
+
+run_gate "shared-config/src/thresholds.ts"
+assert_contains "- node scripts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
+assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync (shared deviation threshold source changed)"
+assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
+assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
@@ -1997,7 +2031,7 @@ rename_repo="$(mktemp -d)"
   [[ "$exit_code" -ne 0 ]]
 )
 rm -rf "$rename_repo"
-assert_contains "Refusing to run because package manifests or lockfile changed."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
 
 scripts/agent-quality-gate.sh \
@@ -2150,6 +2184,13 @@ assert_contains "- node scripts/check-pr-description.test.mjs (PR description va
 
 run_gate "scripts/check-pr-description.test.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
+
+run_gate "scripts/check-deviation-threshold-drift.mjs"
+assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold drift checker changed)"
+assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker changed)"
+
+run_gate "scripts/check-deviation-threshold-drift.test.mjs"
+assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker test changed)"
 
 run_gate "scripts/agent-autoreview.sh"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"

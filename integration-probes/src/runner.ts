@@ -18,11 +18,33 @@ import {
   type IntegrationProbeSnapshot,
   type PairProbeResult,
   type ProbeChainId,
+  type ProbeStatus,
 } from "./types.js";
 import { volumeSignalsForAdapters } from "./volumeSignals.js";
 
 const DEFAULT_ADAPTER_CONCURRENCY = 3;
 const DEFAULT_PAIR_CONCURRENCY = 4;
+
+const ERROR_FIRST_NEXT_STEP_STATUSES = new Set<ProbeStatus>([
+  "needs_key",
+  "unsupported",
+  "rate_limited",
+  "no_liquidity",
+  "error",
+]);
+
+const FALLBACK_NEXT_STEPS: Record<Exclude<ProbeStatus, "pass">, string> = {
+  partial:
+    "Inspect failing route evidence for pairs that still lack Mento v3 address evidence.",
+  fail: "Inspect route evidence and ask aggregator to route through Mento v3.",
+  needs_key: "Configure adapter credentials.",
+  unsupported: "Confirm chain support with the aggregator.",
+  rate_limited: "Inspect raw probe response.",
+  no_liquidity: "Inspect raw probe response.",
+  error: "Inspect raw probe response.",
+  budget_exhausted:
+    "Raise the adapter's maxQuoteRequestsPerRun or reduce probed pairs; the aggregator did not rate-limit us.",
+};
 
 type BeforeQuoteRequest = () => Promise<void>;
 
@@ -39,6 +61,7 @@ export type RunProbeOptions = {
   pairLimit?: number | undefined;
   adapterConcurrency?: number | undefined;
   pairConcurrency?: number | undefined;
+  log?: ((line: string) => void) | undefined;
 };
 
 export async function runIntegrationProbes(
@@ -48,6 +71,8 @@ export async function runIntegrationProbes(
   const amountUsd = options.amountUsd ?? "1";
   const env = options.env ?? process.env;
   const now = options.now ?? new Date();
+  const log =
+    options.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const chainConfigs = await buildChainProbeConfigs({
     hasuraUrl: firstNonEmpty(
       options.hasuraUrl,
@@ -78,6 +103,7 @@ export async function runIntegrationProbes(
       options.pairConcurrency,
       DEFAULT_PAIR_CONCURRENCY,
     ),
+    log,
   });
 
   return {
@@ -161,6 +187,7 @@ async function probeAdapters(args: {
   volumeSignals: ReadonlyMap<string, AggregatorProbeResult["volumeSignal"]>;
   adapterConcurrency: number;
   pairConcurrency: number;
+  log: (line: string) => void;
 }): Promise<AggregatorProbeResult[]> {
   return mapConcurrent(
     args.adapters,
@@ -174,6 +201,12 @@ async function probeAdapters(args: {
         quoteBudget,
         beforeQuoteRequest,
       });
+      if (adapter.maxQuoteRequestsPerRun !== undefined) {
+        const used = adapter.maxQuoteRequestsPerRun - quoteBudget!.remaining;
+        args.log(
+          `[integration-probes] adapter=${adapter.id} quoteAttempts=${used}/${adapter.maxQuoteRequestsPerRun} remainingBudget=${quoteBudget!.remaining}`,
+        );
+      }
       return {
         id: adapter.id,
         label: adapter.label,
@@ -352,16 +385,19 @@ function nextStepFor(
   pairs: readonly PairProbeResult[],
 ): string | null {
   if (status === "pass") return null;
+  const nonPassingPairs = pairs.filter((pair) => pair.status !== "pass");
+  if (
+    status === "partial" &&
+    nonPassingPairs.length > 0 &&
+    nonPassingPairs.every((pair) => pair.status === "budget_exhausted")
+  ) {
+    return FALLBACK_NEXT_STEPS.budget_exhausted;
+  }
   const firstError = pairs.find((pair) => pair.error)?.error;
-  if (status === "needs_key")
-    return firstError ?? "Configure adapter credentials.";
-  if (status === "unsupported")
-    return firstError ?? "Confirm chain support with the aggregator.";
-  if (status === "partial")
-    return "Inspect failing route evidence for pairs that still lack Mento v3 address evidence.";
-  if (status === "fail")
-    return "Inspect route evidence and ask aggregator to route through Mento v3.";
-  return firstError ?? "Inspect raw probe response.";
+  if (!ERROR_FIRST_NEXT_STEP_STATUSES.has(status)) {
+    return FALLBACK_NEXT_STEPS[status];
+  }
+  return firstError ?? FALLBACK_NEXT_STEPS[status];
 }
 
 function summarizeSnapshot(
@@ -375,8 +411,9 @@ function summarizeSnapshot(
       .length,
     partialChainChecks: chains.filter((chain) => chain.status === "partial")
       .length,
-    failingChainChecks: chains.filter((chain) => chain.status === "fail")
-      .length,
+    failingChainChecks: chains.filter(
+      (chain) => chain.status === "fail" || chain.status === "budget_exhausted",
+    ).length,
     needsKeyChainChecks: chains.filter((chain) => chain.status === "needs_key")
       .length,
     unsupportedChainChecks: chains.filter(

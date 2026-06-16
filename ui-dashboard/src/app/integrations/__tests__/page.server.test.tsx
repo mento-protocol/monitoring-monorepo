@@ -78,4 +78,53 @@ describe("IntegrationsPage", () => {
     expect(html).toContain("Redis offline");
     expect(html).not.toContain("No integration probe snapshot");
   });
+
+  it("renders a stale snapshot banner when the latest snapshot is older than 48 hours", async () => {
+    mockGetIntegrationProbeSnapshot.mockResolvedValue({
+      snapshot: snapshotFixture(
+        new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      ),
+      error: null,
+    });
+
+    const html = renderToStaticMarkup(await IntegrationsPage());
+
+    expect(html).toContain("Snapshot is stale");
+  });
+
+  it("hides the stale snapshot banner for a fresh snapshot", async () => {
+    mockGetIntegrationProbeSnapshot.mockResolvedValue({
+      snapshot: snapshotFixture(new Date().toISOString()),
+      error: null,
+    });
+
+    const html = renderToStaticMarkup(await IntegrationsPage());
+
+    expect(html).not.toContain("Snapshot is stale");
+  });
 });
+
+function snapshotFixture(generatedAt: string) {
+  return {
+    schemaVersion: 1 as const,
+    generatedAt,
+    amountUsd: "1",
+    takerAddress: "0x000000000000000000000000000000000000dEaD",
+    pairSource: {
+      kind: "hasura" as const,
+      hasuraUrlConfigured: true,
+      note: "fixture",
+    },
+    chains: [],
+    aggregators: [],
+    summary: {
+      aggregators: 0,
+      chainChecks: 0,
+      passingChainChecks: 0,
+      partialChainChecks: 0,
+      failingChainChecks: 0,
+      needsKeyChainChecks: 0,
+      unsupportedChainChecks: 0,
+    },
+  };
+}

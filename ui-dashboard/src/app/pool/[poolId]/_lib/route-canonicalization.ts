@@ -1,4 +1,4 @@
-import { isConfiguredNetworkId, networkIdForChainId } from "@/lib/networks";
+import { configuredNetworkIdForChainId } from "@/lib/networks";
 import {
   extractChainIdFromPoolId,
   isNamespacedPoolId,
@@ -8,8 +8,7 @@ import {
 import { isValidAddress } from "@/lib/validators";
 
 function isRoutableChainId(chainId: number): boolean {
-  const networkId = networkIdForChainId(chainId);
-  return networkId !== null && isConfiguredNetworkId(networkId);
+  return configuredNetworkIdForChainId(chainId) !== null;
 }
 
 function parseNamespacedChainId(poolId: string): number | null {

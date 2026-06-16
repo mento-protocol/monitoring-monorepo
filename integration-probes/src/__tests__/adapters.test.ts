@@ -328,7 +328,7 @@ describe("probeAdapterPair", () => {
       quoteBudget: { remaining: 0 },
     });
 
-    expect(result.status).toBe("rate_limited");
+    expect(result.status).toBe("budget_exhausted");
     expect(result.attemptCount).toBe(0);
     expect(builtRequests).toBe(false);
   });
@@ -929,7 +929,7 @@ describe("probeAdapterPair", () => {
     expect(calls).toBe(2);
   });
 
-  it("marks route discovery as rate-limited when the quote-attempt budget is exhausted", async () => {
+  it("marks route discovery as budget_exhausted when the quote-attempt budget is exhausted", async () => {
     const adapter: AggregatorAdapter = {
       id: "multi-attempt",
       label: "Multi Attempt",
@@ -964,15 +964,15 @@ describe("probeAdapterPair", () => {
       quoteBudget: { remaining: 1 },
     });
 
-    expect(result.status).toBe("rate_limited");
+    expect(result.status).toBe("budget_exhausted");
     expect(result.requestUrl).toBeNull();
     expect(result.error).toBe("Adapter quote-attempt budget exhausted.");
     expect(result.attemptCount).toBe(1);
-    expect(blockingReason(result.status)).toContain("request budget");
+    expect(blockingReason(result.status)).toContain("quote-request budget");
     expect(calls).toBe(1);
   });
 
-  it("marks budget exhaustion before the first quote as rate-limited", async () => {
+  it("marks budget exhaustion before the first quote as budget_exhausted", async () => {
     const adapter: AggregatorAdapter = {
       id: "multi-attempt",
       label: "Multi Attempt",
@@ -1005,7 +1005,7 @@ describe("probeAdapterPair", () => {
       quoteBudget: { remaining: 0 },
     });
 
-    expect(result.status).toBe("rate_limited");
+    expect(result.status).toBe("budget_exhausted");
     expect(result.requestUrl).toBeNull();
     expect(result.routeVariant).toBeNull();
     expect(result.sourceLabels).toEqual([]);
@@ -1287,6 +1287,12 @@ describe("aggregatePairStatus", () => {
     expect(aggregatePairStatus([{ status: "pass" }, { status: "error" }])).toBe(
       "partial",
     );
+    expect(
+      aggregatePairStatus([{ status: "pass" }, { status: "budget_exhausted" }]),
+    ).toBe("partial");
+    expect(
+      aggregatePairStatus([{ status: "fail" }, { status: "budget_exhausted" }]),
+    ).toBe("budget_exhausted");
     expect(
       aggregatePairStatus([{ status: "pass" }, { status: "needs_key" }]),
     ).toBe("needs_key");

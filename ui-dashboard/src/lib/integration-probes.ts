@@ -11,6 +11,7 @@ const StatusSchema = z.enum([
   "needs_key",
   "no_liquidity",
   "rate_limited",
+  "budget_exhausted",
   "error",
 ]);
 

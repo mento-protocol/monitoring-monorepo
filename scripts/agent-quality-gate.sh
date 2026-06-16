@@ -598,7 +598,7 @@ add_workspace_quality_commands() {
   add_ui_react_doctor_full_score "$reason"
   # Bundle size budget mirrors the workspace-wide CI gate in
   # `.github/workflows/size-limit.yml` — root package-manager files
-  # (`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.npmrc`,
+  # (`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.npmrc`, patches,
   # `.node-version`) appear in that workflow's filter because dep/runtime
   # changes can alter the emitted JS/CSS. Codex P2 review on PR #446
   # caught the local gate diverging from CI here.
@@ -672,7 +672,7 @@ trunk_requires_full_scan() {
   while IFS= read -r path; do
     [[ -e "$path" ]] || return 0
     case "$path" in
-      .trunk/*|tools/trunk|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.npmrc|*/.npmrc|pnpmfile.cjs|.pnpmfile.cjs|.node-version|*/package.json)
+      .trunk/*|tools/trunk|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|patches/*|.npmrc|*/.npmrc|pnpmfile.cjs|.pnpmfile.cjs|.node-version|*/package.json)
         return 0
         ;;
     esac
@@ -873,6 +873,12 @@ while IFS= read -r path; do
       ;;
     pnpm-lock.yaml|pnpm-workspace.yaml)
       package_script_risk_changed=true
+      ;;
+    patches/*)
+      package_script_risk_changed=true
+      add_preflight_command "pnpm install --frozen-lockfile" "pnpm patch changed"
+      add_surface "workspace"
+      add_workspace_quality_commands "pnpm patch changed"
       ;;
     .dependency-cruiser.cjs)
       add_surface "tooling"
@@ -1090,6 +1096,10 @@ while IFS= read -r path; do
       # `shared-config/**` entry in `.github/workflows/size-limit.yml`.
       add_ui_size_limit "shared-config exports feed the dashboard bundle"
       case "$path" in
+        shared-config/src/thresholds.ts)
+          add_command "node scripts/check-deviation-threshold-drift.mjs" "shared deviation threshold source changed"
+          add_command "pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync" "shared deviation threshold source changed"
+          ;;
         shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
           add_all_indexer_codegen "shared-config vendored indexer fixture changed"
           add_package_quality_commands "@mento-protocol/indexer-envio" "shared-config vendored indexer fixture changed"
@@ -1147,6 +1157,11 @@ while IFS= read -r path; do
     alerts/rules/*)
       add_surface "alerts-rules"
       add_terraform_validate_commands "alerts/rules" "alerts/rules Terraform changed"
+      case "$path" in
+        alerts/rules/main.tf|alerts/rules/rules-fpmms.tf)
+          add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold Terraform consumer changed"
+          ;;
+      esac
       ;;
     alerts/infra/onchain-event-handler/*)
       add_surface "alerts-infra"
@@ -1332,6 +1347,13 @@ while IFS= read -r path; do
         scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
           add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"
           ;;
+        scripts/check-deviation-threshold-drift.mjs)
+          add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold drift checker changed"
+          add_command "node scripts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker changed"
+          ;;
+        scripts/check-deviation-threshold-drift.test.mjs)
+          add_command "node scripts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker test changed"
+          ;;
         scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
           add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
           ;;
@@ -1396,6 +1418,11 @@ while IFS= read -r path; do
       add_surface "workspace"
       add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
       add_workspace_quality_commands "workspace dependency/config changed"
+      ;;
+    patches/*)
+      add_surface "workspace"
+      add_preflight_command "pnpm install --frozen-lockfile" "pnpm patch changed"
+      add_workspace_quality_commands "pnpm patch changed"
       ;;
     .node-version)
       add_surface "workspace"
@@ -1571,7 +1598,7 @@ if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
 fi
 
 if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
-  echo "Refusing to run because package manifests or lockfile changed." >&2
+  echo "Refusing to run because package manifests, patches, or lockfile changed." >&2
   echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
   exit 2
 fi

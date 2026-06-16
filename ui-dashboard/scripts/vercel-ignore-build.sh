@@ -11,6 +11,7 @@ dashboard_paths=(
   "package.json"
   "pnpm-lock.yaml"
   "pnpm-workspace.yaml"
+  "patches"
   # `.lighthouserc.cjs` must trigger a Vercel preview so the matching
   # `.github/workflows/lighthouse.yml` filter (which also includes this
   # file) actually has a deployment to audit when the lhci config
