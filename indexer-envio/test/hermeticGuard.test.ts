@@ -1,3 +1,4 @@
+import http, { get as namedHttpGet } from "node:http";
 import { describe, expect, it } from "vitest";
 
 import { waitForHttpTestRpc } from "../src/rpc/http-test-mocks.js";
@@ -18,9 +19,34 @@ describe("hermetic test guard", () => {
     );
   });
 
-  it("rejects outbound requests to non-loopback hosts", async () => {
-    await expect(fetch("https://forno.celo.org")).rejects.toThrow(
-      "[hermetic-test-guard]",
+  it("rejects outbound fetch requests to non-loopback hosts without leaking paths", async () => {
+    const error = await fetch("https://forno.celo.org/rpc/secret-token").catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(
+      "[hermetic-test-guard] Blocked outbound request to https://forno.celo.org.",
+    );
+    expect((error as Error).message).not.toContain("secret-token");
+  });
+
+  it("rejects outbound Node HTTP clients to non-loopback hosts", () => {
+    expect(() =>
+      http.get(
+        "http://metadata.google.internal/computeMetadata/v1/secret-token",
+      ),
+    ).toThrow(
+      "[hermetic-test-guard] Blocked outbound request to http://metadata.google.internal.",
+    );
+  });
+
+  it("rejects outbound Node HTTP named imports to non-loopback hosts", () => {
+    expect(() =>
+      namedHttpGet(
+        "http://metadata.google.internal/computeMetadata/v1/secret-token",
+      ),
+    ).toThrow(
+      "[hermetic-test-guard] Blocked outbound request to http://metadata.google.internal.",
     );
   });
 
