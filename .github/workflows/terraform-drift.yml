@@ -145,6 +145,7 @@ jobs:
       GOV_WATCHDOG_TF_VAR_X_AUTH_TOKEN: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
       GOV_WATCHDOG_TF_VAR_QUICKNODE_SECURITY_TOKEN: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
       GOV_WATCHDOG_TF_VAR_VICTOROPS_WEBHOOK_URL: ${{ secrets.TF_VAR_VICTOROPS_WEBHOOK_URL }}
+      GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID }}
       TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID }}
     defaults:
       run:
@@ -228,6 +229,7 @@ jobs:
             export TF_VAR_x_auth_token="${GOV_WATCHDOG_TF_VAR_X_AUTH_TOKEN:-}"
             export TF_VAR_quicknode_security_token="${GOV_WATCHDOG_TF_VAR_QUICKNODE_SECURITY_TOKEN:-}"
             export TF_VAR_victorops_webhook_url="${GOV_WATCHDOG_TF_VAR_VICTOROPS_WEBHOOK_URL:-}"
+            export TF_VAR_slack_notification_channel_id="${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID:-}"
           fi
 
           # Bootstrap guard: TF_VAR_org_id is governance-watchdog-owned,

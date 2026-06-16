@@ -36,6 +36,9 @@ victorops_webhook_url = ""
 
 # Slack notification channel ID for error alerts. Leave empty for the initial
 # deployment; the channel can only be created after the GCP project exists.
+# Mirrored by pnpm gov-watchdog:deploy to the stack-specific
+# TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID repo secret for
+# scheduled drift. Do not reuse the alerts-owned TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID secret.
 # slack_notification_channel_id = ""
 
 # --- GitHub Actions secret mirror ---
