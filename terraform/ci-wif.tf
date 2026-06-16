@@ -81,12 +81,18 @@ resource "google_service_account" "metrics_bridge_deployer" {
   depends_on = [google_project_service.iam]
 }
 
-# Any workflow in the repo can impersonate the deployer SA. Tighten later by
-# swapping principalSet → principal with a workflow-ref attribute mapping.
+# Ref-gated: only workflow runs whose OIDC `ref` claim is `refs/heads/main`
+# can impersonate the write-capable deployer SA: push-to-main deploys,
+# scheduled drift runs, and `workflow_dispatch` from main. The repo gate is
+# enforced upstream by the provider's `attribute_condition` above
+# (repository == mento-protocol/monitoring-monorepo); binding + condition
+# together enforce repo and ref. Dispatching a deployer-consuming workflow
+# from a non-main ref now fails at the auth step by design; PR jobs use the
+# read-only plan SA below.
 resource "google_service_account_iam_member" "deployer_wif_binding" {
   service_account_id = google_service_account.metrics_bridge_deployer.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.repository/mento-protocol/monitoring-monorepo"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.ref/refs/heads/main"
 }
 
 # Project-level grants the CI SA needs for the full deploy flow:
@@ -215,10 +221,10 @@ resource "google_service_account" "metrics_bridge_plan_readonly" {
   depends_on = [google_project_service.iam]
 }
 
-# Same WIF binding shape as `deployer_wif_binding` above — the GitHub repo
-# is the upstream gate. Same "tighten later by swapping principalSet → principal
-# with a workflow-ref attribute mapping" note applies here; revisit alongside
-# the deployer-binding tightening.
+# Repo-scoped: deliberately not ref-gated like `deployer_wif_binding` above.
+# PR plan jobs run from PR merge refs (`refs/pull/<n>/merge`), so this binding
+# must stay on `attribute.repository`. The SA is read-only; worst case a rogue
+# repo workflow reads Terraform state, not write infra.
 resource "google_service_account_iam_member" "plan_readonly_wif_binding" {
   service_account_id = google_service_account.metrics_bridge_plan_readonly.name
   role               = "roles/iam.workloadIdentityUser"
