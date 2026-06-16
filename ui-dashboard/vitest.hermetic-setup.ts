@@ -58,15 +58,14 @@ const bracketIpv6Hostname = (hostname: string) =>
     : hostname;
 
 const requestAuthority = (options: RequestOptionsLike) => {
-  const host = valueAsString(options.host);
-  if (host) return host;
-
   const hostname = valueAsString(options.hostname);
-  if (!hostname) return undefined;
+  if (hostname) {
+    const port = valueAsString(options.port);
+    const authority = bracketIpv6Hostname(hostname);
+    return port ? `${authority}:${port}` : authority;
+  }
 
-  const port = valueAsString(options.port);
-  const authority = bracketIpv6Hostname(hostname);
-  return port ? `${authority}:${port}` : authority;
+  return valueAsString(options.host);
 };
 
 const applyRequestOptions = (
@@ -105,10 +104,13 @@ const requestUrlFromOptions = (
   const protocol = normalizeProtocol(
     valueAsString(options.protocol) ?? defaultProtocol,
   );
-  const authority = requestAuthority(options) ?? "127.0.0.1";
-  const url = new URL(`${protocol}//${authority}/`);
+  const authority = requestAuthority(options);
+  const url = new URL(`${protocol}//${authority ?? "127.0.0.1"}/`);
   const path = valueAsString(options.path ?? options.pathname);
   if (path) {
+    if (authority === undefined && isAbsoluteHttpUrl(path)) {
+      return new URL(path);
+    }
     try {
       applyRequestPath(url, path);
     } catch {

@@ -72,6 +72,27 @@ describe("hermetic test guard", () => {
     );
   });
 
+  it("rejects Node HTTP options whose absolute path names a non-loopback host", () => {
+    expect(() =>
+      http.request({
+        path: "http://metadata.google.internal/computeMetadata/v1/secret-token",
+      }),
+    ).toThrow(
+      "[hermetic-test-guard] Blocked outbound request to http://metadata.google.internal.",
+    );
+  });
+
+  it("rejects Node HTTP options using hostname over a loopback host alias", () => {
+    expect(() =>
+      http.request({
+        host: "127.0.0.1",
+        hostname: "metadata.google.internal",
+      }),
+    ).toThrow(
+      "[hermetic-test-guard] Blocked outbound request to http://metadata.google.internal.",
+    );
+  });
+
   it("rejects outbound Node HTTP clients even when request options are invalid", () => {
     expect(() =>
       http.get("http://metadata.google.internal/computeMetadata/v1", {
