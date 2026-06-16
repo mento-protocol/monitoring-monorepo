@@ -35,6 +35,17 @@ pnpm alerts:rules:plan
 
 All rule/routing secrets live in `alerts/rules/terraform.tfvars` (gitignored). Matches the pattern of `terraform/terraform.tfvars` — one file, one place per stack.
 
+### Static checks
+
+Run `pnpm alerts:rules:lint` after changing alert rules or metrics-bridge gauge
+names. The check parses extracted PromQL expressions from `alerts/rules/*.tf`
+and cross-checks every referenced `mento_pool_*` / `mento_cdp_*` metric against
+the gauges registered in `metrics-bridge/src/metrics.ts` and
+`metrics-bridge/src/cdp-metrics.ts`.
+
+CI runs this in the `CI / Lint + test root scripts` job, along with
+`pnpm alerts:rules:lint:test` for extractor and failure-case coverage.
+
 ## Smoke test
 
 Before applying Aegis testnet-health rules, confirm Aegis has recently emitted

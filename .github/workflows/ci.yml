@@ -212,6 +212,12 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - scripts/**/*.sh
+              # Alert-rules lint inputs: the scripts job parses alerts/rules
+              # PromQL and cross-checks metric names against the metrics-bridge
+              # gauge registry.
+              - alerts/rules/**
+              - metrics-bridge/src/metrics.ts
+              - metrics-bridge/src/cdp-metrics.ts
               - terraform.stacks.json
               - eslint.config.mjs
               - .dependency-cruiser.cjs
@@ -858,6 +864,10 @@ jobs:
         # check). The wrapper is now load-bearing CI policy; routing tests
         # alone don't prove it behaves correctly.
         run: node scripts/eslint-baseline-diff.test.mjs
+      - name: Alert-rules PromQL lint + metric cross-check
+        run: pnpm alerts:rules:lint
+      - name: Alert-rules lint self-test
+        run: pnpm alerts:rules:lint:test
       - name: Notifier coverage unit tests
         # Behavioral coverage of scripts/check-notifier-coverage.mjs:
         # parse helpers (hasPushMain inline + block-sequence, hasSchedule,
