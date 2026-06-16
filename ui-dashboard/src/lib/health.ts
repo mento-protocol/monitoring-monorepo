@@ -548,17 +548,20 @@ type IndexedLimitStatus = Extract<
   "N/A" | "OK" | "WARN" | "CRITICAL"
 >;
 
-const INDEXED_LIMIT_STATUSES: Record<IndexedLimitStatus, true> = {
-  "N/A": true,
-  OK: true,
-  WARN: true,
-  CRITICAL: true,
-};
+const INDEXED_LIMIT_STATUSES = new Set<IndexedLimitStatus>([
+  "N/A",
+  "OK",
+  "WARN",
+  "CRITICAL",
+]);
 
 function isIndexedLimitStatus(
   value: string | undefined,
 ): value is IndexedLimitStatus {
-  return value !== undefined && value in INDEXED_LIMIT_STATUSES;
+  return (
+    value !== undefined &&
+    INDEXED_LIMIT_STATUSES.has(value as IndexedLimitStatus)
+  );
 }
 
 /** Resolve a pool's effective limit status. Reads the indexer-stored

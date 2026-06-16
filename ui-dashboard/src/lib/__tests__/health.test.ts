@@ -1042,6 +1042,25 @@ describe("computeEffectiveStatus", () => {
     ).toBe("WARN");
   });
 
+  it("rejects inherited object keys from indexed limitStatus", () => {
+    expect(
+      resolveLimitStatus({
+        source: "fpmm_factory",
+        limitStatus: "constructor",
+        limitPressure0: "1.05",
+        limitPressure1: "0",
+      }),
+    ).toBe("CRITICAL");
+    expect(
+      resolveLimitStatus({
+        source: "fpmm_factory",
+        limitStatus: "toString",
+        limitPressure0: "0",
+        limitPressure1: "0.85",
+      }),
+    ).toBe("WARN");
+  });
+
   it("passes degenerate reserve state through the effective status type", () => {
     expect(
       computeEffectiveStatus({

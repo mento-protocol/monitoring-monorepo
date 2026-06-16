@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 
 function timingSafeStringEquals(a: string, b: string): boolean {
-  const encoder = new TextEncoder();
-  const aBytes = encoder.encode(a);
-  const bBytes = encoder.encode(b);
-  return aBytes.length === bBytes.length && timingSafeEqual(aBytes, bBytes);
+  const key = Buffer.from(b);
+  const aDigest = createHmac("sha256", key).update(a).digest();
+  const bDigest = createHmac("sha256", key).update(b).digest();
+  return timingSafeEqual(aDigest, bDigest);
 }
 
 /**

@@ -58,6 +58,9 @@ describe("requireCronAuth", () => {
     await expect(
       requireCronAuth(makeReq("Bearer  secret"), "test"),
     ).resolves.toMatchObject({ status: 401 });
+    await expect(
+      requireCronAuth(makeReq("Bearer secret-extra"), "test"),
+    ).resolves.toMatchObject({ status: 401 });
   });
 
   it("401s when no Authorization header is present", async () => {
