@@ -387,7 +387,13 @@ Also remove the remaining VP-only UI gates that force `N/A`: update
 `ui-dashboard/src/components/health-panel.tsx` so virtual pools call the same
 health function instead of hard-coding `"N/A"` / "VirtualPool — no oracle data",
 and update the OG/pool metadata helper so stale VP health reasons render
-consistently on detail and share-card surfaces.
+consistently on detail and share-card surfaces. Also update
+`ui-dashboard/src/lib/pool-table-utils.ts`: the global pool-table tooltip path
+must classify VP oracle staleness from
+`oracleMedianTimestamp + oracleFreshnessWindow`, not from
+`oracleFreshnessTimestamp()` / `oracleExpiry`, and a VP whose only critical
+condition is reset-window expiry must not fall through to deviation copy such as
+`Rebalance overdue`.
 
 ### 5. Parity test: `indexer-envio/test/healthStatusParity.test.ts`
 
@@ -426,12 +432,14 @@ oracleFreshnessWindow, oracleMedianLive, oracleMedianTimestamp`, plus enough
   wrappers before emitting gauges with a conservative AND rule: when the wrapped
   exchange row is available, require `BiPoolExchange.isDeprecated == false`; when
   lifecycle state is available, require the latest
-  `VirtualPoolLifecycle.action != "deprecated"`; if either source says
-  deprecated, do not emit VP gauges. Do not use an OR between those sources.
-  `PoolDeprecated` and `ExchangeDestroyed` leave rows identifiable as VPs, but
-  they intentionally route no live swaps and must not page. Companion so a
-  schema-mismatch only drops VP gauges, not all FPMM gauges (mirrors the existing
-  companion-query rationale at `graphql.ts:1-7`).
+  `VirtualPoolLifecycle.action != "DEPRECATED"` using the exact uppercase action
+  string stored by the indexer; do not use a lowercase compare unless the bridge
+  normalizes the stored action first. If either source says deprecated, do not
+  emit VP gauges. Do not use an OR between those sources. `PoolDeprecated` and
+  `ExchangeDestroyed` leave rows identifiable as VPs, but they intentionally
+  route no live swaps and must not page. Companion so a schema-mismatch only
+  drops VP gauges, not all FPMM gauges (mirrors the existing companion-query
+  rationale at `graphql.ts:1-7`).
 - **Poller** (`poller.ts:100`): in addition to `data.Pool.filter(isFpmmPool)`,
   process the VP rows through a new `recordVpOracleMetrics`.
 - **Metrics** (`metrics.ts`): add two dedicated gauges with the existing
@@ -577,6 +585,11 @@ falling back to only the alert name/common labels.
 - `ui-dashboard/src/components/__tests__/health-panel*.test.tsx` (or the
   nearest component test) — assert virtual pools no longer bypass
   `computeHealthStatus`, and that stale VP copy/reasons match the detail status.
+- `ui-dashboard/src/lib/__tests__/pool-table-utils*.test.ts` (or the nearest
+  pool-table tooltip test) — assert a VP that is `CRITICAL` only because
+  `oracleMedianTimestamp + oracleFreshnessWindow` expired gets the oracle
+  staleness tooltip/reason, not the `oracleFreshnessTimestamp()` /
+  `oracleExpiry` path and not the deviation fallback copy (`Rebalance overdue`).
 - OG/pool metadata helper tests — assert virtual pools return the same stale
   oracle health reason used by the dashboard rather than an empty reason set.
 - `metrics-bridge/test/*` — any snapshot of emitted gauge names will change;
@@ -584,7 +597,8 @@ falling back to only the alert name/common labels.
   oldest-report-expired / too-few-reports = 0, unknown contract source skipped)
   and `mento_pool_vp_oracle_fresh` (fresh=1, reset-window stale=0, missing/zero
   window or missing/zero contract timestamp skipped). Include a deprecated VP
-  fixture and assert no VP gauges are emitted for it.
+  fixture with latest lifecycle action `DEPRECATED` and assert no VP gauges are
+  emitted for it.
 - `metrics-bridge/test/deviation-alert-state.test.ts` enforces the
   `USD_PEGGED_SYMBOLS` ↔ `main.tf` drift guard — no change needed (we reuse the
   exclusion-based FX classifier), but re-run it.
