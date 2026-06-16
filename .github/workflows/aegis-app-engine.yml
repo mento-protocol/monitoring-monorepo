@@ -34,8 +34,12 @@ jobs:
   deploy:
     name: Deploy (aegis)
     if: github.ref == 'refs/heads/main'
+    # GitHub Environment: records production deploy history and scopes
+    # production secrets. The `production-services` environment should not
+    # require routine human approval; PR review + required CI before merge are
+    # the service-deploy approval path.
     environment:
-      name: production
+      name: production-services
       url: https://mento-monitoring.uc.r.appspot.com
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15

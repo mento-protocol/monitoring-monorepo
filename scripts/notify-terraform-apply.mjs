@@ -478,7 +478,8 @@ async function main(env = process.env) {
   const runUrl = `${serverUrl}/${repo}/actions/runs/${env.GITHUB_RUN_ID}`;
   const commitUrl = sha ? `${serverUrl}/${repo}/commit/${sha}` : "";
   const stackLabel = env.TERRAFORM_STACK_LABEL || "terraform";
-  const targetEnvironment = env.TERRAFORM_TARGET_ENVIRONMENT || "production";
+  const targetEnvironment =
+    env.TERRAFORM_TARGET_ENVIRONMENT || "production-infra";
   const slackChannel = env.SLACK_CHANNEL || DEFAULT_SLACK_CHANNEL;
 
   if (!env.SLACK_BOT_TOKEN) {

@@ -40,11 +40,12 @@ jobs:
     # run from main so it inherits the trust-main quality gate enforced by
     # the `CI / ci` required check on PRs merging to main.
     if: github.ref == 'refs/heads/main'
-    # GitHub Environment gate: adds deployment history in the Environments
-    # tab, and lets us optionally add required-reviewer / wait-timer rules
-    # in the repo Environments settings without workflow changes.
+    # GitHub Environment: records production deploy history and scopes
+    # production secrets. The `production-services` environment should not
+    # require routine human approval; PR review + required CI before merge are
+    # the service-deploy approval path.
     environment:
-      name: production
+      name: production-services
       url: https://console.cloud.google.com/run?project=mento-monitoring
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 15
