@@ -201,10 +201,10 @@ async function probeAdapters(args: {
         quoteBudget,
         beforeQuoteRequest,
       });
-      if (quoteBudget && adapter.maxQuoteRequestsPerRun !== undefined) {
-        const used = adapter.maxQuoteRequestsPerRun - quoteBudget.remaining;
+      if (adapter.maxQuoteRequestsPerRun !== undefined) {
+        const used = adapter.maxQuoteRequestsPerRun - quoteBudget!.remaining;
         args.log(
-          `[integration-probes] adapter=${adapter.id} quoteAttempts=${used}/${adapter.maxQuoteRequestsPerRun} remainingBudget=${quoteBudget.remaining}`,
+          `[integration-probes] adapter=${adapter.id} quoteAttempts=${used}/${adapter.maxQuoteRequestsPerRun} remainingBudget=${quoteBudget!.remaining}`,
         );
       }
       return {

@@ -62,7 +62,7 @@ function IntegrationsContent({
     <>
       {snapshotIsStale(snapshot.generatedAt, nowMs) && (
         <div
-          role="status"
+          role="alert"
           className="rounded-lg border border-amber-900/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-300"
         >
           Snapshot is stale: last successful probe run was{" "}

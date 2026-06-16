@@ -1288,6 +1288,9 @@ describe("aggregatePairStatus", () => {
       "partial",
     );
     expect(
+      aggregatePairStatus([{ status: "pass" }, { status: "budget_exhausted" }]),
+    ).toBe("budget_exhausted");
+    expect(
       aggregatePairStatus([{ status: "pass" }, { status: "needs_key" }]),
     ).toBe("needs_key");
     expect(
