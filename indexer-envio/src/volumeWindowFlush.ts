@@ -1,26 +1,28 @@
 // Heartbeat-driven flush of VolumeWindowSnapshot /
 // BrokerVolumeWindowSnapshot rows. The first swap of a new UTC day
-// flushes all closed days since the last finalized one for all four
+// flushes all closed days since the last finalized one for all five
 // windowKeys. Today's row is intentionally never written by the indexer —
 // the dashboard adds today's partial from a small TraderDailySnapshot
 // query (see ui-dashboard/src/lib/queries/volume.ts).
 //
-// Cost: one chainId getWhere per UTC-day rollover per chain (not per
-// event), reused across all 4 in-memory window aggregations. Roughly
-// O(active_traders × days_indexed) memory at flush time, ~21k rows /
-// 100ms wall on Celo's "all" window — within Envio's per-event handler
-// budget.
+// Cost: one <=89-day daily-row getWhere plus one O(distinct-traders) lifetime
+// getWhere per UTC-day rollover per chain (not per event), reused across all
+// window aggregations. The "all" window reads the lifetime rollup, so flush
+// memory no longer grows with days indexed.
 
 import type {
   BrokerVolumeWindowSnapshot,
   BrokerTraderDailySnapshot,
+  BrokerTraderAllTimeAggregate,
   VolumeChainState,
   VolumeWindowSnapshot,
   TraderDailySnapshot,
+  TraderAllTimeAggregate,
 } from "envio";
 import { SECONDS_PER_DAY, dayBucket } from "./helpers.js";
 import {
   WINDOW_KEYS,
+  allTimeToWindowAggregates,
   aggregatePerWindow,
   buildVolumeWindowSnapshot,
   windowStartDay,
@@ -33,8 +35,13 @@ import {
 export type V3FlushContext = {
   TraderDailySnapshot: {
     getWhere: (query: {
-      chainId: { _eq: number };
+      timestamp: { _gte: bigint };
     }) => Promise<TraderDailySnapshot[]>;
+  };
+  TraderAllTimeAggregate: {
+    getWhere: (query: {
+      chainId: { _eq: number };
+    }) => Promise<TraderAllTimeAggregate[]>;
   };
   VolumeChainState: {
     get: (id: string) => Promise<VolumeChainState | undefined>;
@@ -45,7 +52,7 @@ export type V3FlushContext = {
   };
 };
 
-/** Flush all 4 window snapshots for a single (chainId, snapshotDay).
+/** Flush all 5 window snapshots for a single (chainId, snapshotDay).
  *  Idempotent: re-running with the same args overwrites with identical rows. */
 export async function flushV3VolumeWindowSnapshots(args: {
   context: V3FlushContext;
@@ -54,17 +61,29 @@ export async function flushV3VolumeWindowSnapshots(args: {
   blockNumber: bigint;
   updatedAtTimestamp: bigint;
 }): Promise<void> {
-  const rows = await args.context.TraderDailySnapshot.getWhere({
-    chainId: { _eq: args.chainId },
-  });
+  // Rolling windows (7d/30d/90d; 24h is empty by construction) need at most
+  // the last 89 closed days — 90d has the widest lower bound. The "all" window
+  // reads the O(distinct-traders) lifetime rollup instead of rescanning every
+  // daily row (#860).
+  const [rows, allTimeRows] = await Promise.all([
+    args.context.TraderDailySnapshot.getWhere({
+      timestamp: { _gte: windowStartDay(args.snapshotDay, "90d") },
+    }),
+    args.context.TraderAllTimeAggregate.getWhere({
+      chainId: { _eq: args.chainId },
+    }),
+  ]);
   const grouped = aggregatePerWindow(rows, args.chainId, args.snapshotDay);
+  const allAggregates = allTimeToWindowAggregates(allTimeRows, args.chainId);
   for (const w of WINDOW_KEYS) {
+    // grouped.all is computed from bounded daily rows and is incomplete by
+    // design. The all window must always use lifetime aggregates.
     const snap = buildVolumeWindowSnapshot({
       chainId: args.chainId,
       windowKey: w,
       snapshotDay: args.snapshotDay,
       windowStartDay: windowStartDay(args.snapshotDay, w),
-      aggregates: grouped[w],
+      aggregates: w === "all" ? allAggregates : grouped[w],
       blockNumber: args.blockNumber,
       updatedAtTimestamp: args.updatedAtTimestamp,
     });
@@ -119,8 +138,13 @@ export async function maybeHeartbeatFlushV3(args: {
 export type V2FlushContext = {
   BrokerTraderDailySnapshot: {
     getWhere: (query: {
-      chainId: { _eq: number };
+      timestamp: { _gte: bigint };
     }) => Promise<BrokerTraderDailySnapshot[]>;
+  };
+  BrokerTraderAllTimeAggregate: {
+    getWhere: (query: {
+      chainId: { _eq: number };
+    }) => Promise<BrokerTraderAllTimeAggregate[]>;
   };
   VolumeChainState: {
     get: (id: string) => Promise<VolumeChainState | undefined>;
@@ -138,9 +162,14 @@ export async function flushV2VolumeWindowSnapshots(args: {
   blockNumber: bigint;
   updatedAtTimestamp: bigint;
 }): Promise<void> {
-  const rows = await args.context.BrokerTraderDailySnapshot.getWhere({
-    chainId: { _eq: args.chainId },
-  });
+  const [rows, allTimeRows] = await Promise.all([
+    args.context.BrokerTraderDailySnapshot.getWhere({
+      timestamp: { _gte: windowStartDay(args.snapshotDay, "90d") },
+    }),
+    args.context.BrokerTraderAllTimeAggregate.getWhere({
+      chainId: { _eq: args.chainId },
+    }),
+  ]);
   // BrokerTraderDailySnapshot keys by `caller` (tx.from / signer EOA), but
   // the shared `aggregatePerWindow` helper expects a `trader` field on each
   // row (named for v3's TraderDailySnapshot). Map `caller → trader` here so
@@ -158,7 +187,19 @@ export async function flushV2VolumeWindowSnapshots(args: {
     args.chainId,
     args.snapshotDay,
   );
+  const allAggregates = allTimeToWindowAggregates(
+    allTimeRows.map((r) => ({
+      chainId: r.chainId,
+      trader: r.caller,
+      volumeUsdWei: r.volumeUsdWei,
+      swapCount: r.swapCount,
+      isProtocolActor: r.isProtocolActor,
+    })),
+    args.chainId,
+  );
   for (const w of WINDOW_KEYS) {
+    // grouped.all is computed from bounded daily rows and is incomplete by
+    // design. The all window must always use lifetime aggregates.
     // BrokerVolumeWindowSnapshot is structurally identical to
     // VolumeWindowSnapshot — see schema.graphql.
     const snap: BrokerVolumeWindowSnapshot = buildVolumeWindowSnapshot({
@@ -166,7 +207,7 @@ export async function flushV2VolumeWindowSnapshots(args: {
       windowKey: w,
       snapshotDay: args.snapshotDay,
       windowStartDay: windowStartDay(args.snapshotDay, w),
-      aggregates: grouped[w],
+      aggregates: w === "all" ? allAggregates : grouped[w],
       blockNumber: args.blockNumber,
       updatedAtTimestamp: args.updatedAtTimestamp,
     });

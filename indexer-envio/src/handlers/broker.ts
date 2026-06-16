@@ -403,6 +403,7 @@ async function writeBrokerProducerRollups(args: {
     isProtocolOwnedAddress(chainId, caller) ||
     isProtocolActorEntryPoint(chainId, txTo);
   const callerDayId = `${chainId}-${caller}-${dayTs}`;
+  const allTimeId = `${chainId}-${caller}`;
   const aggregator = classifyBrokerEntryPoint(chainId, txTo);
   const aggDayId = `${chainId}-${aggregator}-${dayTs}`;
   const aggCallerMarkerId = `${chainId}-${aggregator}-${caller}-${dayTs}`;
@@ -412,11 +413,13 @@ async function writeBrokerProducerRollups(args: {
     existingAggCallerMarker,
     existingAggDay,
     existingTraderRouterMarker,
+    existingAllTime,
   ] = await Promise.all([
     context.BrokerTraderDailySnapshot.get(callerDayId),
     context.BrokerAggregatorTraderDayMarker.get(aggCallerMarkerId),
     context.BrokerAggregatorDailySnapshot.get(aggDayId),
     context.BrokerTraderRouterDayMarker.get(traderRouterMarkerId),
+    context.BrokerTraderAllTimeAggregate.get(allTimeId),
   ]);
 
   const traderDayState = upsertBrokerTraderDailySnapshot(context, {
@@ -466,6 +469,24 @@ async function writeBrokerProducerRollups(args: {
     aggCallerMarkerId,
     existingAggCallerMarker,
     callerDayIsProtocolActor: traderDayState.callerDayIsProtocolActor,
+  });
+
+  // Lifetime rollup for the v2 "all" window (#860). Safe ordering is
+  // structural here: maybeHeartbeatFlushV2 already ran earlier in the
+  // Broker.Swap handler, so flushed closed days never see this swap.
+  const prevAllTime = existingAllTime ?? {
+    volumeUsdWei: 0n,
+    swapCount: 0,
+    isProtocolActor: false,
+  };
+  context.BrokerTraderAllTimeAggregate.set({
+    id: allTimeId,
+    chainId,
+    caller,
+    volumeUsdWei: prevAllTime.volumeUsdWei + volumeUsdWei,
+    swapCount: prevAllTime.swapCount + 1,
+    isProtocolActor: prevAllTime.isProtocolActor || callerIsProtocolActor,
+    updatedAtTimestamp: blockTimestamp,
   });
 }
 

@@ -1,7 +1,9 @@
 import { strict as assert } from "assert";
 import type {
+  BrokerTraderAllTimeAggregate,
   BrokerVolumeWindowSnapshot,
   BrokerTraderDailySnapshot,
+  TraderAllTimeAggregate,
   VolumeChainState,
   VolumeWindowSnapshot,
   TraderDailySnapshot,
@@ -672,7 +674,31 @@ describe("aggregatePerWindow — firstDay slice", () => {
 // Heartbeat smoke tests against a Map-backed mock context.
 // ---------------------------------------------------------------------------
 
-function makeV3Context(traderRows: TraderDailySnapshot[] = []): {
+function deriveAllTimeV3(
+  traderRows: ReadonlyArray<TraderDailySnapshot>,
+): TraderAllTimeAggregate[] {
+  const byTrader = new Map<string, TraderAllTimeAggregate>();
+  for (const row of traderRows) {
+    const id = `${row.chainId}-${row.trader}`;
+    const existing = byTrader.get(id);
+    byTrader.set(id, {
+      id,
+      chainId: row.chainId,
+      trader: row.trader,
+      volumeUsdWei: (existing?.volumeUsdWei ?? 0n) + row.volumeUsdWei,
+      swapCount: (existing?.swapCount ?? 0) + row.swapCount,
+      isProtocolActor:
+        (existing?.isProtocolActor ?? false) || row.isProtocolActor,
+      updatedAtTimestamp: row.lastSeenTimestamp,
+    });
+  }
+  return Array.from(byTrader.values());
+}
+
+function makeV3Context(
+  traderRows: TraderDailySnapshot[] = [],
+  allTimeRows: TraderAllTimeAggregate[] = deriveAllTimeV3(traderRows),
+): {
   context: V3FlushContext;
   store: {
     VolumeWindowSnapshot: Map<string, VolumeWindowSnapshot>;
@@ -692,8 +718,12 @@ function makeV3Context(traderRows: TraderDailySnapshot[] = []): {
   return {
     context: {
       TraderDailySnapshot: {
-        getWhere: async (query: { chainId?: { _eq?: number } }) =>
-          traderRows.filter((r) => r.chainId === query.chainId?._eq),
+        getWhere: async (query: { timestamp: { _gte: bigint } }) =>
+          traderRows.filter((r) => r.timestamp >= query.timestamp._gte),
+      },
+      TraderAllTimeAggregate: {
+        getWhere: async (query: { chainId: { _eq: number } }) =>
+          allTimeRows.filter((r) => r.chainId === query.chainId._eq),
       },
       VolumeChainState: wrap(store.VolumeChainState),
       VolumeWindowSnapshot: wrap(store.VolumeWindowSnapshot),
@@ -725,7 +755,7 @@ function fakeTraderDay(
 }
 
 describe("flushV3VolumeWindowSnapshots", () => {
-  it("writes 4 rows (one per windowKey) for the same snapshotDay", async () => {
+  it("writes 5 rows (one per windowKey) for the same snapshotDay", async () => {
     const { context, store } = makeV3Context([
       fakeTraderDay(TRADER_A, DAY_2026_05_06, 100n),
       fakeTraderDay(TRADER_B, DAY_2026_05_06, 50n),
@@ -839,7 +869,7 @@ describe("maybeHeartbeatFlushV3", () => {
       blockTimestamp: DAY_2026_05_07 + 60n * 60n * 12n,
       blockNumber: 100n,
     });
-    // 2 days × 4 windowKeys = 8 rows
+    // 2 days × 5 windowKeys = 10 rows
     assert.equal(store.VolumeWindowSnapshot.size, 10);
     assert(store.VolumeWindowSnapshot.has(`${CHAIN}-7d-${DAY_2026_05_05}`));
     assert(store.VolumeWindowSnapshot.has(`${CHAIN}-7d-${DAY_2026_05_06}`));
@@ -872,12 +902,16 @@ describe("maybeHeartbeatFlushV3", () => {
   });
 
   it("excludes today's rows from window aggregates (upper bound = snapshotDay)", async () => {
-    const { context, store } = makeV3Context([
-      // Yesterday — should appear in 7d/30d/all snapshots
-      fakeTraderDay(TRADER_A, DAY_2026_05_06, 100n),
-      // Today — should NOT appear (timestamp > snapshotDay = yesterday)
-      fakeTraderDay(TRADER_C, DAY_2026_05_07, 999n),
-    ]);
+    const yesterday = fakeTraderDay(TRADER_A, DAY_2026_05_06, 100n);
+    const { context, store } = makeV3Context(
+      [
+        // Yesterday — should appear in rolling snapshots
+        yesterday,
+        // Today — should NOT appear (timestamp > snapshotDay = yesterday)
+        fakeTraderDay(TRADER_C, DAY_2026_05_07, 999n),
+      ],
+      deriveAllTimeV3([yesterday]),
+    );
     await maybeHeartbeatFlushV3({
       context,
       chainId: CHAIN,
@@ -896,6 +930,65 @@ describe("maybeHeartbeatFlushV3", () => {
     );
     assert.equal(snap24h?.totalVolumeUsdWei, 0n);
     assert.equal(snap24h?.uniqueTraders, 0);
+    const snapAll = store.VolumeWindowSnapshot.get(
+      `${CHAIN}-all-${DAY_2026_05_06}`,
+    );
+    assert.equal(snapAll?.totalVolumeUsdWei, 100n * ONE_USD);
+    assert.equal(snapAll?.uniqueTraders, 1);
+  });
+
+  it("all window comes from lifetime rollups, not bounded daily rows", async () => {
+    const { context, store } = makeV3Context(
+      [fakeTraderDay(TRADER_A, DAY_2026_05_06, 100n)],
+      [
+        {
+          id: `${CHAIN}-${TRADER_A}`,
+          chainId: CHAIN,
+          trader: TRADER_A,
+          volumeUsdWei: 5_000n * ONE_USD,
+          swapCount: 7,
+          isProtocolActor: false,
+          updatedAtTimestamp: DAY_2026_05_06,
+        },
+      ],
+    );
+    await flushV3VolumeWindowSnapshots({
+      context,
+      chainId: CHAIN,
+      snapshotDay: DAY_2026_05_06,
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    const snapAll = store.VolumeWindowSnapshot.get(
+      `${CHAIN}-all-${DAY_2026_05_06}`,
+    );
+    const snap7d = store.VolumeWindowSnapshot.get(
+      `${CHAIN}-7d-${DAY_2026_05_06}`,
+    );
+    assert.equal(snapAll?.totalVolumeUsdWei, 5_000n * ONE_USD);
+    assert.equal(snapAll?.totalSwapCount, 7);
+    assert.equal(snap7d?.totalVolumeUsdWei, 100n * ONE_USD);
+    assert.equal(snap7d?.totalSwapCount, 1);
+  });
+
+  it("bounds daily fetches to the 90d window", async () => {
+    let recordedQuery: { timestamp: { _gte: bigint } } | undefined;
+    const { context } = makeV3Context();
+    context.TraderDailySnapshot.getWhere = async (query) => {
+      recordedQuery = query;
+      return [];
+    };
+    await flushV3VolumeWindowSnapshots({
+      context,
+      chainId: CHAIN,
+      snapshotDay: DAY_2026_05_06,
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.equal(
+      recordedQuery?.timestamp._gte,
+      windowStartDay(DAY_2026_05_06, "90d"),
+    );
   });
 });
 
@@ -906,7 +999,31 @@ describe("maybeHeartbeatFlushV3", () => {
 // v2 side end-to-end.
 // ---------------------------------------------------------------------------
 
-function makeV2Context(traderRows: BrokerTraderDailySnapshot[] = []): {
+function deriveAllTimeV2(
+  traderRows: ReadonlyArray<BrokerTraderDailySnapshot>,
+): BrokerTraderAllTimeAggregate[] {
+  const byCaller = new Map<string, BrokerTraderAllTimeAggregate>();
+  for (const row of traderRows) {
+    const id = `${row.chainId}-${row.caller}`;
+    const existing = byCaller.get(id);
+    byCaller.set(id, {
+      id,
+      chainId: row.chainId,
+      caller: row.caller,
+      volumeUsdWei: (existing?.volumeUsdWei ?? 0n) + row.volumeUsdWei,
+      swapCount: (existing?.swapCount ?? 0) + row.swapCount,
+      isProtocolActor:
+        (existing?.isProtocolActor ?? false) || row.isProtocolActor,
+      updatedAtTimestamp: row.lastSeenTimestamp,
+    });
+  }
+  return Array.from(byCaller.values());
+}
+
+function makeV2Context(
+  traderRows: BrokerTraderDailySnapshot[] = [],
+  allTimeRows: BrokerTraderAllTimeAggregate[] = deriveAllTimeV2(traderRows),
+): {
   context: V2FlushContext;
   store: {
     BrokerVolumeWindowSnapshot: Map<string, BrokerVolumeWindowSnapshot>;
@@ -926,8 +1043,12 @@ function makeV2Context(traderRows: BrokerTraderDailySnapshot[] = []): {
   return {
     context: {
       BrokerTraderDailySnapshot: {
-        getWhere: async (query: { chainId?: { _eq?: number } }) =>
-          traderRows.filter((r) => r.chainId === query.chainId?._eq),
+        getWhere: async (query: { timestamp: { _gte: bigint } }) =>
+          traderRows.filter((r) => r.timestamp >= query.timestamp._gte),
+      },
+      BrokerTraderAllTimeAggregate: {
+        getWhere: async (query: { chainId: { _eq: number } }) =>
+          allTimeRows.filter((r) => r.chainId === query.chainId._eq),
       },
       VolumeChainState: wrap(store.VolumeChainState),
       BrokerVolumeWindowSnapshot: wrap(store.BrokerVolumeWindowSnapshot),
@@ -948,6 +1069,7 @@ function fakeBrokerTraderDay(
     caller,
     timestamp,
     swapCount: 1,
+    aggregatorKeys: ["broker"],
     volumeUsdWei: volumeUsd * ONE_USD,
     isProtocolActor,
     lastSeenTimestamp: timestamp,
@@ -955,7 +1077,7 @@ function fakeBrokerTraderDay(
 }
 
 describe("flushV2VolumeWindowSnapshots", () => {
-  it("writes 4 rows (one per windowKey) for the same snapshotDay", async () => {
+  it("writes 5 rows (one per windowKey) for the same snapshotDay", async () => {
     const { context, store } = makeV2Context([
       fakeBrokerTraderDay(TRADER_A, DAY_2026_05_06, 100n),
       fakeBrokerTraderDay(TRADER_B, DAY_2026_05_06, 50n),
@@ -1039,7 +1161,7 @@ describe("maybeHeartbeatFlushV2", () => {
       blockTimestamp: DAY_2026_05_07 + 60n * 60n * 12n,
       blockNumber: 100n,
     });
-    // 2 days × 4 windowKeys = 8 rows
+    // 2 days × 5 windowKeys = 10 rows
     assert.equal(store.BrokerVolumeWindowSnapshot.size, 10);
     assert(
       store.BrokerVolumeWindowSnapshot.has(`${CHAIN}-7d-${DAY_2026_05_05}`),
