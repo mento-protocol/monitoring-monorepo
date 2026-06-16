@@ -1043,6 +1043,11 @@ while IFS= read -r path; do
           ;;
       esac
       case "$path" in
+        metrics-bridge/src/metrics.ts|metrics-bridge/src/cdp-metrics.ts)
+          add_command "pnpm alerts:rules:lint" "metrics-bridge gauge registry changed (alerts cross-check)"
+          ;;
+      esac
+      case "$path" in
         metrics-bridge/Dockerfile|metrics-bridge/.dockerignore)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run runtime changed"
           ;;
@@ -1157,6 +1162,7 @@ while IFS= read -r path; do
     alerts/rules/*)
       add_surface "alerts-rules"
       add_terraform_validate_commands "alerts/rules" "alerts/rules Terraform changed"
+      add_command "pnpm alerts:rules:lint" "alerts/rules PromQL lint + metric cross-check"
       case "$path" in
         alerts/rules/main.tf|alerts/rules/rules-fpmms.tf)
           add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold Terraform consumer changed"

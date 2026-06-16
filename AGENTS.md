@@ -460,6 +460,7 @@ pnpm infra:apply              # Apply infrastructure changes
 pnpm alerts:infra:init / alerts:infra:plan
 pnpm alerts:oncall:typecheck / alerts:oncall:test / alerts:oncall:build
 # Grafana metric alert rules (v3 Slack rules):
+pnpm alerts:rules:lint
 pnpm alerts:rules:init / alerts:rules:plan
 # Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
 # Production gate enforces required-reviewer approval.
