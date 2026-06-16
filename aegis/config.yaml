@@ -299,7 +299,8 @@ metrics:
       - [XOFUSD]
       - [ZARUSD]
   # Checks Celo Sepolia-only gas-payment rate feed trading modes. These feeds do
-  # not back current production Celo trading-mode alerts.
+  # not back current production Celo trading-mode alerts. EURXOF is omitted here
+  # too because it is not a CELO-quoted gas-payment feed and has no live pool.
   - source: BreakerBox.getRateFeedTradingMode(address rateFeed)(uint8)
     schedule: 0/10 * * * * *
     type: gauge
