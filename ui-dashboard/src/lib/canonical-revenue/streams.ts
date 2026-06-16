@@ -5,18 +5,14 @@ import type {
   RevenueForecastKey,
   RevenuePeriodKey,
 } from "./types";
+import { streamKeyToNeedle } from "./utils";
 import type { ReserveYieldResponse } from "@/lib/reserve-yield";
 
 function partialReasonsForStream(args: {
   streamKey: CanonicalRevenueStream["key"];
   reasons: readonly string[];
 }): string[] {
-  const needle =
-    args.streamKey === "cdp"
-      ? "cdp"
-      : args.streamKey === "swap"
-        ? "swap"
-        : "reserve";
+  const needle = streamKeyToNeedle(args.streamKey);
   return [
     ...new Set(
       args.reasons.filter((reason) => reason.toLowerCase().includes(needle)),

@@ -187,7 +187,7 @@ export function CdpBorrowingFeesByMarketTable({
   isLoading,
   hasError,
 }: {
-  markets: CdpBorrowingRevenueMarket[];
+  markets: ReadonlyArray<CdpBorrowingRevenueMarket>;
   isLoading: boolean;
   hasError: boolean;
 }) {

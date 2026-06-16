@@ -1,4 +1,5 @@
 import { Tooltip } from "@/components/tooltip";
+import { streamKeyToNeedle } from "@/lib/canonical-revenue/utils";
 import { formatUSD } from "@/lib/format";
 import type {
   CanonicalRevenueForecast,
@@ -280,8 +281,7 @@ function partialReasonsForStream(
   streamKey: CanonicalRevenueStream["key"],
   reasons: readonly string[],
 ): string[] {
-  const needle =
-    streamKey === "cdp" ? "cdp" : streamKey === "swap" ? "swap" : "reserve";
+  const needle = streamKeyToNeedle(streamKey);
   return [
     ...new Set(
       reasons.filter((reason) => reason.toLowerCase().includes(needle)),

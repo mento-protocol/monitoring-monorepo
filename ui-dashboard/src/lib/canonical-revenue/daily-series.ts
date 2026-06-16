@@ -29,7 +29,6 @@ function addBucketValue(
 ): void {
   if (timestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return;
   const bucketKey = dayBucket(timestamp);
-  if (bucketKey < V3_REVENUE_LAUNCH_TIMESTAMP) return;
   const bucket = buckets.get(bucketKey) ?? emptyRevenueBucket();
   bucket.reserveYieldUsd += value.reserveYieldUsd ?? 0;
   bucket.swapFeesUsd += value.swapFeesUsd ?? 0;
