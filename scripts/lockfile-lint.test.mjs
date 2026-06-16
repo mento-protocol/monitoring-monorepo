@@ -1277,6 +1277,101 @@ test("fails when named catalog override references a missing catalog", () => {
   );
 });
 
+// 59. YAML aliases for the entire overrides map are rejected fail-closed.
+test("fails when pnpm-workspace.yaml override map uses a YAML alias", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        'packages:\n  - .\npins: &pins { flatted: ">=3.4.2" }\noverrides: *pins\n',
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(out.includes("YAML alias"), `expected map alias rejection: ${out}`);
+});
+
+// 60. YAML block scalar override values are rejected fail-closed.
+test("fails when pnpm-workspace.yaml override value uses a block scalar", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "pnpm-workspace.yaml":
+        "packages:\n  - .\noverrides:\n  flatted: >-\n    >=3.4.2\n",
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("YAML block scalar"),
+    `expected block scalar rejection: ${out}`,
+  );
+});
+
+// 61. pnpm $ override references are rejected instead of followed.
+test("fails when package.json override replacement uses a pnpm $ reference", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      "package.json": JSON.stringify({
+        dependencies: {
+          foo: ">=1.2.3",
+        },
+        pnpm: {
+          overrides: {
+            bar: "$foo",
+          },
+        },
+      }),
+    },
+  );
+  assert(
+    exitCode !== 0,
+    `Expected non-zero exit, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  const out = stdout + stderr;
+  assert(
+    out.includes("pnpm override reference"),
+    `expected pnpm reference rejection: ${out}`,
+  );
+});
+
+// 62. Local agent worktrees are ignored during recursive workspace scans.
+test("ignores pnpm-workspace.yaml files under .claude worktrees", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      ".claude/worktrees/scratch/pnpm-workspace.yaml":
+        "packages:\n  - .\noverrides:\n  flatted: >=3.4.2\n",
+    },
+  );
+  assert(
+    exitCode === 0,
+    `Expected exit 0, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
+// 63. Local agent worktree .npmrc files are ignored during registry scans.
+test("ignores .npmrc files under .claude worktrees", () => {
+  const { exitCode, stdout, stderr } = run(
+    makeLockfile([{ name: "typescript@5.0.0", integrity: VALID_SHA512 }]),
+    {
+      ".claude/worktrees/scratch/.npmrc":
+        "registry=https://evil.example.com/\n",
+    },
+  );
+  assert(
+    exitCode === 0,
+    `Expected exit 0, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+});
+
 // ── summary ───────────────────────────────────────────────────────────────────
 
 console.log(

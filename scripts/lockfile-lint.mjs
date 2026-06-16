@@ -226,7 +226,7 @@ if (expectedRegistryEntries !== totalPackages) {
 // Workspace `link:` and `file:` protocol entries are fine — they are internal
 // refs, not registry fetches.
 
-// Walk the repo for every `.npmrc` (excluding `.git/` and `node_modules/`)
+// Walk the repo for every `.npmrc` (excluding `.git/`, `.claude/`, and `node_modules/`)
 // — pnpm reads `.npmrc` from every package directory it finds, so a future
 // workspace adding its own `.npmrc` with `registry=...` would silently
 // bypass a fixed allowlist.
@@ -242,7 +242,13 @@ function findNpmrcs(dir, out) {
     return;
   }
   for (const entry of entries) {
-    if (entry.name === ".git" || entry.name === "node_modules") continue;
+    if (
+      entry.name === ".git" ||
+      entry.name === ".claude" ||
+      entry.name === "node_modules"
+    ) {
+      continue;
+    }
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       findNpmrcs(full, out);
@@ -358,7 +364,13 @@ function findPnpmWorkspaces(dir, out) {
     return;
   }
   for (const entry of entries) {
-    if (entry.name === ".git" || entry.name === "node_modules") continue;
+    if (
+      entry.name === ".git" ||
+      entry.name === ".claude" ||
+      entry.name === "node_modules"
+    ) {
+      continue;
+    }
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       findPnpmWorkspaces(full, out);
@@ -643,6 +655,11 @@ function extractWorkspaceMapEntries(absPath, mapName) {
           );
           inTargetMap = false;
         } else {
+          mapEntries.push({
+            selector: `${mapName} map`,
+            replacement: inlineValue,
+            line: i + 1,
+          });
           inTargetMap = false;
         }
       } else {
@@ -863,8 +880,22 @@ function isYamlAliasOverrideValue(value) {
 /**
  * @param {string} value
  */
+function isYamlBlockScalarOverrideValue(value) {
+  return /^[>|][-+]?$/.test(value.trim());
+}
+
+/**
+ * @param {string} value
+ */
 function isUnresolvedCatalogOverrideValue(value) {
   return /^catalog:(?:[A-Za-z0-9._-]+)?$/.test(value.trim());
+}
+
+/**
+ * @param {string} value
+ */
+function isPnpmOverrideReferenceValue(value) {
+  return /^\$[A-Za-z0-9._@/-]+$/.test(value.trim());
 }
 
 /**
@@ -911,10 +942,27 @@ function validatePnpmOverrideEntry(source, selector, replacement) {
       errors++;
       return errors;
     }
+    if (isPnpmOverrideReferenceValue(replacement)) {
+      fail(
+        `${source}["${selector}"] uses pnpm override reference ` +
+          `"${replacement}". Inline the referenced spec so lockfile:lint can ` +
+          "validate the resolved range.",
+      );
+      errors++;
+      return errors;
+    }
     if (isYamlAliasOverrideValue(replacement)) {
       fail(
         `${source}["${selector}"] uses YAML alias "${replacement}". Inline ` +
           "the override replacement so lockfile:lint can validate the resolved range.",
+      );
+      errors++;
+      return errors;
+    }
+    if (isYamlBlockScalarOverrideValue(replacement)) {
+      fail(
+        `${source}["${selector}"] uses YAML block scalar "${replacement}". ` +
+          "Inline the override replacement so lockfile:lint can validate the resolved range.",
       );
       errors++;
       return errors;
