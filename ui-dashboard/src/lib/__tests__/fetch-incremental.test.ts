@@ -65,7 +65,7 @@ function poolSnapshotRow(
   };
 }
 
-describe("incremental fee snapshot pagination", () => {
+describe("fee snapshot pagination", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(REQUEST_DAY_MS));
@@ -79,7 +79,7 @@ describe("incremental fee snapshot pagination", () => {
     vi.useRealTimers();
   });
 
-  it("first call paginates with afterTimestamp 0 and seeds the cache", async () => {
+  it("paginates with afterTimestamp 0 and does not seed the incremental cache", async () => {
     requestMock.mockResolvedValueOnce({
       PoolDailyFeeSnapshot: [feeRow("today", TODAY_MIDNIGHT_SECONDS)],
     });
@@ -101,19 +101,19 @@ describe("incremental fee snapshot pagination", () => {
     });
     expect(
       incrementalRowCache.get("celo-mainnet:PoolDailyFeeSnapshot"),
-    ).toBeDefined();
+    ).toBeUndefined();
   });
 
-  it("second call fetches the mutable tail and merges newest-first", async () => {
-    const cachedToday = feeRow("today", TODAY_MIDNIGHT_SECONDS, "1");
-    const old = feeRow("old", TODAY_MIDNIGHT_SECONDS - 10 * 86_400, "2");
-    const freshToday = feeRow("today", TODAY_MIDNIGHT_SECONDS, "9");
-    const yesterday = feeRow("yesterday", YESTERDAY_MIDNIGHT_SECONDS, "3");
+  it("second call still performs full pagination so healed older rows are visible", async () => {
+    const unresolvedOld = feeRow(
+      "old",
+      TODAY_MIDNIGHT_SECONDS - 10 * 86_400,
+      "0",
+    );
+    const healedOld = feeRow("old", TODAY_MIDNIGHT_SECONDS - 10 * 86_400, "7");
     requestMock
-      .mockResolvedValueOnce({ PoolDailyFeeSnapshot: [cachedToday, old] })
-      .mockResolvedValueOnce({
-        PoolDailyFeeSnapshot: [freshToday, yesterday],
-      });
+      .mockResolvedValueOnce({ PoolDailyFeeSnapshot: [unresolvedOld] })
+      .mockResolvedValueOnce({ PoolDailyFeeSnapshot: [healedOld] });
 
     await fetchAllFeeSnapshotPages(makeClient(), 42220, "celo-mainnet");
     const result = await fetchAllFeeSnapshotPages(
@@ -124,122 +124,13 @@ describe("incremental fee snapshot pagination", () => {
 
     expect(variablesAt(1)).toMatchObject({
       chainId: 42220,
-      afterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
+      afterTimestamp: 0,
       limit: 1000,
       offset: 0,
     });
     expect(result.truncated).toBe(false);
     expect(result.error).toBeNull();
-    expect(result.rows.map((row) => row.id)).toEqual([
-      "today",
-      "yesterday",
-      "old",
-    ]);
-    expect(result.rows[0]!.feesUsdWei).toBe("9");
-  });
-
-  it("incremental first-page rejection returns cached fee rows without blanking fees", async () => {
-    const cached = feeRow("today", TODAY_MIDNIGHT_SECONDS);
-    const upstreamError = new Error("tail timeout");
-    requestMock
-      .mockResolvedValueOnce({ PoolDailyFeeSnapshot: [cached] })
-      .mockRejectedValueOnce(upstreamError);
-
-    await fetchAllFeeSnapshotPages(makeClient(), 42220, "celo-mainnet");
-    const result = await fetchAllFeeSnapshotPages(
-      makeClient(),
-      42220,
-      "celo-mainnet",
-    );
-
-    expect(result.rows).toEqual([cached]);
-    expect(result.truncated).toBe(true);
-    expect(result.error).toBeNull();
-    expect(upstreamError.message).toBe("tail timeout");
-  });
-
-  it("resumes from the last refreshed mutable cutoff after missed poll days", async () => {
-    const cachedToday = feeRow("today", TODAY_MIDNIGHT_SECONDS, "1");
-    requestMock
-      .mockResolvedValueOnce({
-        PoolDailyFeeSnapshot: [cachedToday],
-      })
-      .mockResolvedValueOnce({
-        PoolDailyFeeSnapshot: [
-          feeRow("two-days-later", TODAY_MIDNIGHT_SECONDS + 2 * 86_400, "2"),
-        ],
-      });
-
-    await fetchAllFeeSnapshotPages(makeClient(), 42220, "celo-mainnet");
-    vi.setSystemTime(new Date(REQUEST_DAY_MS + 2 * 86_400_000));
-    const result = await fetchAllFeeSnapshotPages(
-      makeClient(),
-      42220,
-      "celo-mainnet",
-    );
-
-    expect(variablesAt(1)).toMatchObject({
-      chainId: 42220,
-      afterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
-      limit: 1000,
-      offset: 0,
-    });
-    expect(result.error).toBeNull();
-    expect(result.rows.map((row) => row.id)).toEqual([
-      "two-days-later",
-      "today",
-    ]);
-  });
-
-  it("uses the newest indexed row as the cutoff while history is stale", async () => {
-    const staleTimestamp = TODAY_MIDNIGHT_SECONDS - 10 * 86_400;
-    requestMock
-      .mockResolvedValueOnce({
-        PoolDailyFeeSnapshot: [feeRow("stale", staleTimestamp)],
-      })
-      .mockResolvedValueOnce({
-        PoolDailyFeeSnapshot: [feeRow("catch-up", staleTimestamp + 86_400)],
-      })
-      .mockResolvedValueOnce({
-        PoolDailyFeeSnapshot: [
-          feeRow("catch-up-2", staleTimestamp + 2 * 86_400),
-        ],
-      });
-
-    await fetchAllFeeSnapshotPages(makeClient(), 42220, "celo-mainnet");
-    const result = await fetchAllFeeSnapshotPages(
-      makeClient(),
-      42220,
-      "celo-mainnet",
-    );
-
-    expect(variablesAt(1)).toMatchObject({
-      chainId: 42220,
-      afterTimestamp: staleTimestamp,
-      limit: 1000,
-      offset: 0,
-    });
-    expect(result.error).toBeNull();
-    expect(result.rows.map((row) => row.id)).toEqual(["catch-up", "stale"]);
-
-    const nextResult = await fetchAllFeeSnapshotPages(
-      makeClient(),
-      42220,
-      "celo-mainnet",
-    );
-
-    expect(variablesAt(2)).toMatchObject({
-      chainId: 42220,
-      afterTimestamp: staleTimestamp + 86_400,
-      limit: 1000,
-      offset: 0,
-    });
-    expect(nextResult.error).toBeNull();
-    expect(nextResult.rows.map((row) => row.id)).toEqual([
-      "catch-up-2",
-      "catch-up",
-      "stale",
-    ]);
+    expect(result.rows).toEqual([healedOld]);
   });
 
   it("does not cache an empty complete history while the indexer backfills", async () => {
@@ -296,51 +187,7 @@ describe("incremental fee snapshot pagination", () => {
     });
   });
 
-  it("suppresses incremental fee tail page errors while returning cached and partial rows", async () => {
-    const cachedOld = feeRow(
-      "cached-old",
-      TODAY_MIDNIGHT_SECONDS - 10 * 86_400,
-      "1",
-    );
-    const tailPage = Array.from({ length: 1000 }, (_, index) =>
-      feeRow(
-        `tail-${index}`,
-        TODAY_MIDNIGHT_SECONDS - (index % 2) * 86_400,
-        String(index + 2),
-      ),
-    );
-    requestMock
-      .mockResolvedValueOnce({ PoolDailyFeeSnapshot: [cachedOld] })
-      .mockResolvedValueOnce({ PoolDailyFeeSnapshot: tailPage })
-      .mockRejectedValueOnce(new Error("page 2 timeout"));
-
-    await fetchAllFeeSnapshotPages(makeClient(), 42220, "celo-mainnet");
-    const result = await fetchAllFeeSnapshotPages(
-      makeClient(),
-      42220,
-      "celo-mainnet",
-    );
-
-    expect(variablesAt(1)).toMatchObject({
-      chainId: 42220,
-      afterTimestamp: Number(cachedOld.timestamp),
-      limit: 1000,
-      offset: 0,
-    });
-    expect(variablesAt(2)).toMatchObject({
-      chainId: 42220,
-      afterTimestamp: Number(cachedOld.timestamp),
-      limit: 1000,
-      offset: 1000,
-    });
-    expect(result.truncated).toBe(true);
-    expect(result.error).toBeNull();
-    expect(result.rows).toHaveLength(1001);
-    expect(result.rows.some((row) => row.id === "cached-old")).toBe(true);
-    expect(result.rows.some((row) => row.id === "tail-0")).toBe(true);
-  });
-
-  it("changing non-timestamp variables forces a full re-fetch", async () => {
+  it("paginates each chain from the full-history cursor", async () => {
     requestMock
       .mockResolvedValueOnce({
         PoolDailyFeeSnapshot: [feeRow("celo", TODAY_MIDNIGHT_SECONDS)],
@@ -568,6 +415,8 @@ describe("incremental pool daily snapshot pagination", () => {
     );
 
     expect(result.truncated).toBe(true);
+    expect(result.error?.message).toBe("tail failed");
+    expect(result.mutableTailError?.message).toBe("tail failed");
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0]!.swapVolume0).toBe("9");
   });

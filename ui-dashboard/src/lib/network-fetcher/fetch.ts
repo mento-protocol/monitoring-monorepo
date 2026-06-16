@@ -383,19 +383,9 @@ export function seedIncrementalRowCacheFromNetworkData(
       });
     }
 
-    if (
-      data.feeSnapshotsError === null &&
-      !data.feeSnapshotsTruncated &&
-      data.feeSnapshots.length > 0
-    ) {
-      seedIncrementalRows({
-        cacheKey: `${data.network.id}:PoolDailyFeeSnapshot`,
-        variablesKey: String(data.network.chainId),
-        rows: data.feeSnapshots,
-        dedupKey: (row) => (row as PoolDailyFeeSnapshot).id,
-        timestampOf: (row) => Number((row as PoolDailyFeeSnapshot).timestamp),
-      });
-    }
+    // Intentionally do not seed `PoolDailyFeeSnapshot`: older fee rows can be
+    // healed later when token metadata resolves, so fee history must keep using
+    // full pagination until the source exposes a version/invalidation cursor.
   }
 }
 
@@ -528,6 +518,7 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
       rows: cachedRows,
       truncated: true,
       error: surfacedIncrementalError(error, surfaceIncrementalError),
+      mutableTailError: error,
     };
   }
 
@@ -557,6 +548,11 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
     rows,
     truncated: tail.truncated,
     error: surfacedIncrementalError(tail.error, surfaceIncrementalError),
+    mutableTailError:
+      tail.error ??
+      (tail.truncated
+        ? new Error("Snapshot incremental tail pagination truncated")
+        : null),
   };
 }
 
@@ -660,25 +656,20 @@ export async function fetchAllFeeSnapshotPages(
   client: GraphQLClient,
   chainId: number,
   network: string,
-  nowMs?: number,
 ): Promise<PaginatedPageResult<PoolDailyFeeSnapshot>> {
-  return fetchPaginatedRowsIncremental<PoolDailyFeeSnapshot, unknown>({
+  return fetchPaginatedRows<PoolDailyFeeSnapshot, unknown>({
     client,
     query: POOL_DAILY_FEE_SNAPSHOTS_PAGE,
     responseKey: "PoolDailyFeeSnapshot",
     network,
     pageSize: SNAPSHOT_PAGE_SIZE,
-    variablesKey: String(chainId),
-    variablesFor: (page, afterTimestamp) => ({
+    variablesFor: (page) => ({
       chainId,
-      afterTimestamp,
+      afterTimestamp: 0,
       limit: SNAPSHOT_PAGE_SIZE,
       offset: page * SNAPSHOT_PAGE_SIZE,
     }),
     dedupKey: (s) => s.id,
-    timestampOf: (s) => Number(s.timestamp),
-    ...(nowMs !== undefined ? { nowMs } : {}),
-    surfaceIncrementalError: false,
   });
 }
 
@@ -736,12 +727,7 @@ export async function fetchNetworkData(
     indexedCdpPoolsResult,
     fallbackStrategiesResult,
   ] = await Promise.allSettled([
-    fetchAllFeeSnapshotPages(
-      client,
-      network.chainId,
-      network.id,
-      snapshotTailNowMs,
-    ),
+    fetchAllFeeSnapshotPages(client, network.chainId, network.id),
     shouldQueryPoolSnapshots(poolIds)
       ? fetchAllDailySnapshotPages(
           client,
@@ -982,13 +968,20 @@ export async function fetchNetworkData(
           "Snapshot pagination truncated before reaching the requested window",
         )
       : null);
-  const windowError = (windowFrom: number): Error | null =>
-    paginationIssue !== null && oldestFetchedTs > windowFrom
-      ? paginationIssue
+  const mutableTailIssue: Error | null =
+    snapshotsAllDailyResult.status === "fulfilled"
+      ? (snapshotsAllDailyResult.value.mutableTailError ?? null)
       : null;
-  const snapshotsError = windowError(dw24h.from);
-  const snapshots7dError = windowError(dw7d.from);
-  const snapshots30dError = windowError(dw30d.from);
+  const mutableTailFrom = mutableDayCutoff(snapshotTailNowMs);
+  const windowError = (windowFrom: number, windowTo: number): Error | null =>
+    mutableTailIssue !== null && windowTo > mutableTailFrom
+      ? mutableTailIssue
+      : paginationIssue !== null && oldestFetchedTs > windowFrom
+        ? paginationIssue
+        : null;
+  const snapshotsError = windowError(dw24h.from, dw24h.to);
+  const snapshots7dError = windowError(dw7d.from, dw7d.to);
+  const snapshots30dError = windowError(dw30d.from, dw30d.to);
 
   // fetchAllLpAddressPages deduplicates by address.toLowerCase() internally,
   // so the rows are already unique — no second Set pass needed.

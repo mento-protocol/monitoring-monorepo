@@ -154,6 +154,13 @@ export type PaginatedPageResult<T> = {
   rows: T[];
   truncated: boolean;
   error: Error | null;
+  /**
+   * Set when an incremental refresh of mutable tail rows failed or was capped.
+   * Older cached history can still cover a window's lower timestamp bound, but
+   * windows that include the mutable UTC-day buckets must degrade because those
+   * rows may now be stale.
+   */
+  mutableTailError?: Error | null;
 };
 
 export type SnapshotPageResult = PaginatedPageResult<PoolSnapshotWindow>;

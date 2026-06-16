@@ -737,6 +737,48 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     expect(result.snapshotsAllDaily).toHaveLength(1000);
   });
 
+  it("marks current windows degraded when incremental tail refresh fails", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const todayMidnight = Math.floor(now / 86400) * 86400;
+    const cachedRows = [
+      makeDaily(todayMidnight, "pool-tail"),
+      makeDaily(todayMidnight - 60 * 86400, "pool-tail"),
+    ];
+    incrementalRowCache.set("celo-mainnet:PoolDailySnapshot", {
+      variablesKey: "pool-tail",
+      rows: cachedRows,
+      refreshAfterTimestamp: todayMidnight - 86400,
+    });
+    const tailErr = new Error("incremental tail timeout");
+
+    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mockReset()
+      .mockImplementation((...args: unknown[]) => {
+        const query = extractQuery(args[0]);
+        if (query.includes("PoolDailySnapshot")) return Promise.reject(tailErr);
+        if (query.includes("PoolDailyFeeSnapshotsPage"))
+          return Promise.resolve({ PoolDailyFeeSnapshot: [] });
+        if (query.includes("LiquidityPosition"))
+          return Promise.resolve({ LiquidityPosition: [] });
+        if (query.includes("Pool"))
+          return Promise.resolve({ Pool: [makePool("pool-tail")] });
+        return Promise.resolve({});
+      });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: now - 86400, to: now },
+      w7d: { from: now - 7 * 86400, to: now },
+      w30d: { from: now - 30 * 86400, to: now },
+    });
+
+    expect(result.snapshotsAllDaily).toEqual(cachedRows);
+    expect(result.snapshotsAllDailyError).toBe(tailErr);
+    expect(result.snapshotsError).toBe(tailErr);
+    expect(result.snapshots7dError).toBe(tailErr);
+    expect(result.snapshots30dError).toBe(tailErr);
+    expect(isNetworkDataFullyHealthy(result)).toBe(false);
+  });
+
   it("sets snapshotsAllDailyError and returns empty rows on first-page failure", async () => {
     // No rows accumulated yet → nothing to salvage; caller should see an
     // explicit error state rather than a confident-but-empty dashboard.

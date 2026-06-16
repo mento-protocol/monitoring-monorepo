@@ -55,7 +55,6 @@ async function fetchFeesForNetwork(
     });
   }
   const client = new GraphQLClient(network.hasuraUrl);
-  const snapshotTailNowMs = windows.w24h.to * 1000;
 
   // `allSettled` so any single failure doesn't blank the others. A labels-only
   // failure is non-fatal — the table falls back to truncated-address
@@ -77,12 +76,7 @@ async function fetchFeesForNetwork(
       // open (return what we fetched + flag error inside the result), so
       // the helper itself never rejects from a partial outage — the only
       // path to rejection is a first-page failure or a network/abort error.
-      fetchAllFeeSnapshotPages(
-        client,
-        network.chainId,
-        network.id,
-        snapshotTailNowMs,
-      ),
+      fetchAllFeeSnapshotPages(client, network.chainId, network.id),
     ],
   );
 

@@ -13,6 +13,7 @@ const MAX_PAGES = 100;
 // sub-minute polling adds Hasura load without adding chart resolution.
 const REFRESH_MS = 60_000;
 const POLL_TIMEOUT_MS = 8_000;
+const POLL_OVERALL_TIMEOUT_MS = 55_000;
 
 type PoolVolumePage = {
   PoolDailyVolumeSnapshot: PoolDailyVolumeRow[];
@@ -23,6 +24,15 @@ type PoolVolumeResult = {
   partial: boolean;
 };
 
+function finishAfterDeadline(
+  rows: readonly PoolDailyVolumeRow[],
+): PoolVolumeResult {
+  if (rows.length === 0) {
+    throw new Error("Pool volume snapshot pagination exceeded its budget");
+  }
+  return { rows: [...rows], partial: true };
+}
+
 export async function fetchPoolVolumeSnapshots(
   hasuraUrl: string,
   afterTimestamp: number,
@@ -30,12 +40,18 @@ export async function fetchPoolVolumeSnapshots(
   const client = new GraphQLClient(hasuraUrl);
   const rows: PoolDailyVolumeRow[] = [];
   const seen = new Set<string>();
+  const deadlineMs = Date.now() + POLL_OVERALL_TIMEOUT_MS;
 
   // Sequential pagination with a fresh per-page abort budget (matches
-  // fetchPaginatedRows in src/lib/network-fetcher/fetch.ts) — a shared signal
-  // flips the all-range fetch permanently partial once history outgrows one 8s
-  // budget.
+  // fetchPaginatedRows in src/lib/network-fetcher/fetch.ts), plus an overall
+  // budget below the 60s refresh interval so multi-page ranges cannot stack
+  // pageCount × 8s worth of overlapping polls.
   for (let page = 0; page <= MAX_PAGES; page += 1) {
+    const remainingMs = deadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      return finishAfterDeadline(rows);
+    }
+
     let batch: PoolDailyVolumeRow[];
     try {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop
@@ -46,7 +62,7 @@ export async function fetchPoolVolumeSnapshots(
           limit: PAGE_SIZE,
           offset: page * PAGE_SIZE,
         },
-        signal: AbortSignal.timeout(POLL_TIMEOUT_MS),
+        signal: AbortSignal.timeout(Math.min(POLL_TIMEOUT_MS, remainingMs)),
       });
       batch = result.PoolDailyVolumeSnapshot ?? [];
     } catch (err) {
