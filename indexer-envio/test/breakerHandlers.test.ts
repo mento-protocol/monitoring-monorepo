@@ -1043,5 +1043,14 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
       "healthy sibling pool still receives the oracle update",
     );
     assert.equal(goodPool?.lastFreshReporterAt, 1_700_001_900n);
+
+    const failingPool = mockDb.entities.Pool.get(failingPoolId) as
+      | { lastFreshReporterAt: bigint }
+      | undefined;
+    assert.notEqual(
+      failingPool?.lastFreshReporterAt,
+      1_700_001_900n,
+      "failing pool must not be updated via holdCursor - pre-write failure path must be taken",
+    );
   });
 });

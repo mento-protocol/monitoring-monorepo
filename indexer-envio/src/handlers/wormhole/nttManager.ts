@@ -469,6 +469,7 @@ indexer.onEvent(
         context as HandlerContext,
         event,
         mgr?.transceiver,
+        { warnOnMiss: false },
       );
     }
     const detailDelta: WormholeDetailDelta = {};
@@ -533,11 +534,13 @@ function applyDestPendingToDelta(
 /** Drain the scratch written by the earlier-in-tx ReceivedMessage. Pass
  * `transceiver` when the caller can identify it (MessageAttestedTo) so a
  * multi-transceiver tx doesn't cross-pair; TransferRedeemed passes undefined
- * because its payload lacks that identifier. */
+ * because its payload lacks that identifier. `warnOnMiss` is disabled only
+ * for callers that already emitted a more specific fallback warning. */
 async function drainDestPending(
   context: HandlerContext,
   event: ScratchDrainEvent,
   transceiver?: string,
+  options: { warnOnMiss?: boolean } = {},
 ): Promise<
   Awaited<ReturnType<HandlerContext["WormholeDestPending"]["get"]>> | undefined
 > {
@@ -553,7 +556,7 @@ async function drainDestPending(
       ? (row) => row.destTransceiver.toLowerCase() === transceiverLower
       : undefined,
   );
-  if (!row) {
+  if (!row && options.warnOnMiss !== false) {
     warnUnmatchedScratchDrain(context, event, "WormholeDestPending");
   }
   return row;

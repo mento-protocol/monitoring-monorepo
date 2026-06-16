@@ -23,6 +23,10 @@ describe("wormhole scratch warnings", () => {
 
     assert.match(warning, /WormholeDestPending/);
     assert.match(warning, /chain=143/);
+    assert.match(
+      warning,
+      /txHash=0x3333333333333333333333333333333333333333333333333333333333333333/,
+    );
     assert.match(warning, /logIndex=7/);
     assert.match(warning, /should be 0 in steady state/);
   });

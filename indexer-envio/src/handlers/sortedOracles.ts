@@ -154,7 +154,8 @@ async function processOracleReportedPool(
   } catch (error) {
     // These reads/effects happen before this pool queues any writes, so one
     // pool's malformed id or transient RPC self-heal failure can be skipped
-    // without committing partial state for that pool.
+    // without committing partial state for that pool. The self-heal helpers
+    // return modified Pool objects and do not call Pool.set.
     throw new OracleReportedPreWriteFailure(poolId, error);
   }
 
