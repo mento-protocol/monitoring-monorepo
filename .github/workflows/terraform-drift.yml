@@ -70,7 +70,7 @@ jobs:
               const stdin = require("fs").readFileSync(0, "utf8");
               const { stacks } = JSON.parse(stdin);
               const filtered = stacks
-                .filter(s => s.ci.apply === "push-main-production-environment" || s.ci.drift === "scheduled")
+                .filter(s => s.ci.apply === "push-main-production-infra-environment" || s.ci.drift === "scheduled")
                 // `planSa` routes each leg to the least-privileged SA that can
                 // still run a full-refresh drift plan. A stack whose only GCP
                 // touch is the GCS backend (no google* provider) refreshes fine

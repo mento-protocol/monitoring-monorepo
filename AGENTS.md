@@ -198,7 +198,8 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:autoreview`, `scripts.pr:feedback-state`,
 `scripts.pr:feedback-state:test`, `scripts.pr:ready-state`,
 `scripts.pr:ready-state:test`,
-`scripts.tf`, `scripts.tf:test`, `scripts.lockfile:lint`,
+`scripts.tf`, `scripts.tf:test`, `scripts.alerts:rules:lint`,
+`scripts.alerts:rules:lint:test`, `scripts.lockfile:lint`,
 `scripts.lockfile:lint:test`, `scripts.skew:check`, or
 `scripts.skew:check:test`; the gate treats that as tooling-only and runs an
 entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
@@ -449,7 +450,7 @@ pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
 pnpm aegis:agent:seed-secrets # Seed/rotate Alloy remote-write Secret Manager versions
 pnpm aegis:agent:deploy       # Deploy the Grafana Alloy App Engine collector
 pnpm aegis:tf:init / aegis:tf:plan
-# Apply runs in CI on merge to main (aegis-terraform.yml; production gate).
+# Apply runs in CI on merge to main (aegis-terraform.yml; production-infra gate).
 
 # Infrastructure (Terraform)
 pnpm tf list                  # Registered Terraform stacks from terraform.stacks.json
@@ -461,9 +462,10 @@ pnpm infra:apply              # Apply infrastructure changes
 pnpm alerts:infra:init / alerts:infra:plan
 pnpm alerts:oncall:typecheck / alerts:oncall:test / alerts:oncall:build
 # Grafana metric alert rules (v3 Slack rules):
+pnpm alerts:rules:lint
 pnpm alerts:rules:init / alerts:rules:plan
 # Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
-# Production gate enforces required-reviewer approval.
+# The production-infra gate enforces non-bypassable required-reviewer approval.
 ```
 
 Terraform stack ownership is registered in `terraform.stacks.json` and
@@ -477,7 +479,7 @@ terraform init -reconfigure   # GCS backend needs reinit in a fresh worktree
 terraform plan  -var-file=<main-checkout>/terraform/terraform.tfvars
 ```
 
-Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead. For stacks whose registry entry has `ci.apply == "push-main-production-environment"`, local `pnpm tf apply <stack>` is guarded: it only runs from a clean `main` checkout at `origin/main` or with the deliberate `--force-local-apply` override. CI-driven applies for those stacks are gated by the `production` GitHub Environment manual approval, which counts as explicit human approval.
+Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead. For stacks whose registry entry has `ci.apply == "push-main-production-infra-environment"`, local `pnpm tf apply <stack>` is guarded: it only runs from a clean `main` checkout at `origin/main` or with the deliberate `--force-local-apply` override. CI-driven applies for those stacks are gated by the `production-infra` GitHub Environment manual approval, which counts as explicit human approval.
 
 ## Package routing index
 
