@@ -131,15 +131,25 @@ therefore needs both:
   should read `SortedOracles.medianTimestamp(feed)` and
   `SortedOracles.medianRate(feed)` (or
   `medianRateWithoutEquivalentMapping(feed)` if equivalent mapping must be
-  bypassed for a feed). Treat a nonzero median rate pair plus a positive
-  timestamp as `oracleMedianLive=true`; a zero median rate as
-  `oracleMedianLive=false`; and failed/null reads as source unavailable. Refresh
-  this state from the `SortedOracles.OracleReported` and `MedianUpdated` workers
-  for VP pools returned by `getPoolsByFeed`, so flat-feed reporter refreshes can
-  update `oracleMedianTimestamp` even without `MedianUpdated`. Also refresh it
-  from VP self-heal/linking paths once `referenceRateFeedID` becomes known. If
-  that source is absent during schema or RPC rollout, the UI returns `N/A` and
-  the bridge skips the VP series instead of deriving a page from
+  bypassed for a feed), plus the remaining
+  `BiPoolManager.oracleHasValidMedian()` gates:
+  `SortedOracles.isOldestReportExpired(feed)`,
+  `SortedOracles.numRates(feed)`, and the wrapped exchange's `minimumReports`.
+  If a callable contract predicate is available, prefer that predicate and store
+  its result. Otherwise treat `oracleMedianLive=true` only when the median rate
+  pair is nonzero, the timestamp is positive, the oldest report is not expired,
+  `numRates >= minimumReports`, `minimumReports > 0`, and
+  `medianTimestamp + oracleFreshnessWindow > now`. Treat definitive gate
+  failures (zero median, oldest report expired, too few reports, or expired
+  reset-frequency window) as `oracleMedianLive=false`; treat failed/null reads
+  or missing/zero `minimumReports` as source unavailable rather than live.
+  Refresh this state from the `SortedOracles.OracleReported` and
+  `MedianUpdated` workers for VP pools returned by `getPoolsByFeed`, so
+  flat-feed reporter refreshes can update `oracleMedianTimestamp` and the
+  validity gates even without `MedianUpdated`. Also refresh it from VP
+  self-heal/linking paths once `referenceRateFeedID` becomes known. If that
+  source is absent during schema or RPC rollout, the UI returns `N/A` and the
+  bridge skips the VP series instead of deriving a page from
   `lastOracleReportAt`.
 
 **Recommended wiring:** add a new `Pool.oracleFreshnessWindow: BigInt!`
@@ -411,7 +421,9 @@ oracleFreshnessWindow, oracleMedianLive, oracleMedianTimestamp`. Companion so a
   `mento_pool_vp_oracle_fresh` with the existing `poolLabels` set
   (`chain_id, chain_name, pair, pool_id, pool_address_short`). Use this decision
   tree so the gauge cannot page while health/UI are degraded:
-  - emit `0` immediately when `oracleMedianLive === false`;
+  - emit `0` immediately when `oracleMedianLive === false` (including zero
+    median, oldest-report-expired, too-few-reports, or reset-window-expired
+    contract states);
   - skip emission when `oracleMedianLive !== true`, because the contract median
     source is unavailable/unknown;
   - skip emission when `oracleMedianTimestamp == null` or
@@ -546,10 +558,12 @@ and action text instead of falling back to only the alert name/common labels.
   `lastOracleReportAt` is old; a zero-median/current median down signal must
   emit `0` immediately.
 - RPC/current-state: unit-test the new VP median-state effect against
-  `SortedOracles.medianTimestamp` + `medianRate` responses (live, zero median,
+  `SortedOracles.medianTimestamp`, `medianRate`, `isOldestReportExpired`,
+  `numRates`, and wrapped-exchange `minimumReports` responses (live, zero
+  median, oldest report expired, too few reports, reset-window expired,
   failed/null read), and handler-test that both `OracleReported` and
-  `MedianUpdated` refresh `oracleMedianTimestamp`/`oracleMedianLive` for VP pools
-  returned by `getPoolsByFeed`.
+  `MedianUpdated` refresh `oracleMedianTimestamp`/`oracleMedianLive` for VP
+  pools returned by `getPoolsByFeed`.
 - Window preservation: simulate `BucketsUpdated` / wrapped-exchange refresh where
   the existing Pool has `oracleFreshnessWindow=360n` and the RPC struct returns
   `referenceRateResetFrequency=0n`; assert the Pool keeps `360n`.
