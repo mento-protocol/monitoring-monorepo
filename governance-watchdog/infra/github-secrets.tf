@@ -14,6 +14,8 @@
 # governance-watchdog Slack channel is project-specific, so it is mirrored under
 # TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID and exported as
 # TF_VAR_slack_notification_channel_id only in the governance-watchdog drift leg.
+# The drift workflow keeps the pre-existing workflow-level Slack value as a
+# transition fallback only until this stack-specific secret has been mirrored.
 # This stack's tfvars must hold the same shared Billing/QuickNode/GitHub values.
 
 locals {

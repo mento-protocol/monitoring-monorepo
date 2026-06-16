@@ -134,8 +134,8 @@ jobs:
       # governance-watchdog/infra/github-secrets.tf on each
       # `pnpm gov-watchdog:deploy`. Keep these under stack-scoped env names
       # and export them only in the governance-watchdog leg below; otherwise
-      # missing bootstrap secrets expand to empty TF_VAR_* inputs for sibling
-      # stacks and override their defaults.
+      # missing bootstrap secrets expand to empty TF_VAR_* inputs and override
+      # defaults or legacy workflow-level fallbacks.
       GOV_WATCHDOG_TF_VAR_ORG_ID: ${{ secrets.TF_VAR_ORG_ID }}
       GOV_WATCHDOG_TF_VAR_DISCORD_WEBHOOK_URL: ${{ secrets.TF_VAR_DISCORD_WEBHOOK_URL }}
       GOV_WATCHDOG_TF_VAR_DISCORD_TEST_WEBHOOK_URL: ${{ secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL }}
@@ -229,7 +229,11 @@ jobs:
             export TF_VAR_x_auth_token="${GOV_WATCHDOG_TF_VAR_X_AUTH_TOKEN:-}"
             export TF_VAR_quicknode_security_token="${GOV_WATCHDOG_TF_VAR_QUICKNODE_SECURITY_TOKEN:-}"
             export TF_VAR_victorops_webhook_url="${GOV_WATCHDOG_TF_VAR_VICTOROPS_WEBHOOK_URL:-}"
-            export TF_VAR_slack_notification_channel_id="${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID:-}"
+            if [ -n "${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID:-}" ]; then
+              export TF_VAR_slack_notification_channel_id="${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID}"
+            elif [ -n "${TF_VAR_slack_notification_channel_id:-}" ]; then
+              echo "::notice::governance-watchdog drift leg using legacy TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID fallback until the stack-specific Slack secret is mirrored"
+            fi
           fi
 
           # Bootstrap guard: TF_VAR_org_id is governance-watchdog-owned,
