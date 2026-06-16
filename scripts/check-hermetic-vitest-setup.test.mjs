@@ -144,6 +144,32 @@ export default {
   );
 });
 
+test("ignores export default text inside ordinary strings", () => {
+  assert.equal(
+    setupFilesLoadsGuard(`
+const example = 'export default { test: { setupFiles: ["./vitest.hermetic-setup.ts"] } }';
+export default {
+  test: {
+    environment: "node",
+  },
+};
+`),
+    false,
+  );
+
+  assert.equal(
+    setupFilesLoadsGuard(`
+const example = 'export default { test: { setupFiles: ["./other-setup.ts"] } }';
+export default {
+  test: {
+    setupFiles: ["./vitest.hermetic-setup.ts"],
+  },
+};
+`),
+    true,
+  );
+});
+
 test("does not accept partial setup path matches", () => {
   assert.equal(
     setupFilesLoadsGuard(`

@@ -10,6 +10,8 @@ import { afterEach } from "vitest";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
+process.env.METADATA_SERVER_DETECTION ??= "none";
+
 const realFetch = globalThis.fetch.bind(globalThis);
 const realHttpRequest = http.request.bind(http) as RequestFunction;
 const realHttpGet = http.get.bind(http) as RequestFunction;

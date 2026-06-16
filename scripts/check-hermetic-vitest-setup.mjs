@@ -261,11 +261,43 @@ function directPropertyValueStartsInObject(source, propertyName) {
   return starts;
 }
 
-function exportedConfigObject(source) {
-  const exportIndex = source.indexOf("export default");
-  if (exportIndex === -1) return null;
+function exportDefaultValueStart(source) {
+  let index = 0;
 
-  let index = skipWhitespace(source, exportIndex + "export default".length);
+  while (index < source.length) {
+    const char = source[index];
+    if (char === "'" || char === '"' || char === "`") {
+      const literal = readStringLiteral(source, index);
+      if (!literal) return null;
+      index = literal.end;
+      continue;
+    }
+
+    if (
+      source.startsWith("export", index) &&
+      !isIdentifierChar(source[index - 1]) &&
+      !isIdentifierChar(source[index + "export".length])
+    ) {
+      const defaultIndex = skipWhitespace(source, index + "export".length);
+      if (
+        source.startsWith("default", defaultIndex) &&
+        !isIdentifierChar(source[defaultIndex - 1]) &&
+        !isIdentifierChar(source[defaultIndex + "default".length])
+      ) {
+        return skipWhitespace(source, defaultIndex + "default".length);
+      }
+    }
+
+    index++;
+  }
+
+  return null;
+}
+
+function exportedConfigObject(source) {
+  let index = exportDefaultValueStart(source);
+  if (index === null) return null;
+
   if (source.startsWith("defineConfig", index)) {
     index = skipWhitespace(source, index + "defineConfig".length);
     if (source[index] !== "(") return null;

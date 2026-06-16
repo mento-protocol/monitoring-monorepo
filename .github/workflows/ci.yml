@@ -214,6 +214,7 @@ jobs:
               - scripts/**/*.sh
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
+              - "**/vitest.mutation.config.ts"
               # Alert-rules lint inputs: the scripts job parses alerts/rules
               # PromQL and cross-checks metric names against the metrics-bridge
               # gauge registry.
