@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
-import { USD_PEGGED_SYMBOLS } from "../src/deviation-alert-state.js";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  observeDeviationAlertState,
+  resetDeviationAlertStateForTests,
+  USD_PEGGED_SYMBOLS,
+} from "../src/deviation-alert-state.js";
+import { makePool } from "./fixtures.js";
 
 function repoFile(path: string): string {
   return readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
@@ -40,5 +45,36 @@ describe("USD_PEGGED_SYMBOLS drift protection", () => {
 
     expect(sortSymbols(USD_PEGGED_SYMBOLS)).toEqual(dashboardSymbols);
     expect(terraformSymbols).toEqual(dashboardSymbols);
+  });
+});
+
+describe("deviation alert transition rehydration", () => {
+  afterEach(() => {
+    resetDeviationAlertStateForTests();
+  });
+
+  it("uses persisted breach start after restart so recovery context is not suppressed", () => {
+    const warning = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.02",
+      }),
+      "GBPm/USDm",
+      1713202000,
+    );
+
+    expect(warning.state).toBe("warning");
+
+    const recovered = observeDeviationAlertState(
+      makePool(),
+      "GBPm/USDm",
+      1713202030,
+    );
+
+    expect(recovered.newTransitions).toHaveLength(1);
+    expect(recovered.newTransitions[0]).toMatchObject({
+      reason: "recovered",
+      breachStartedAt: 1713200000,
+    });
   });
 });

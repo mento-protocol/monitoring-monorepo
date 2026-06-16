@@ -267,8 +267,15 @@ function buildCurrentSnapshot(
     currentState.criticalSignal
       ? currentState.criticalSignal
       : currentState.state;
-  const enteredAt =
-    previous && previous.state === state ? previous.enteredAt : nowSeconds;
+  const enteredAt = previous
+    ? previous.state === state
+      ? previous.enteredAt
+      : nowSeconds
+    : // Process restart (liveness probe): no in-memory snapshot exists, but
+      // the indexer-persisted breach start survives. Seed enteredAt from it
+      // so alertCouldHaveFired() does not reset to process start and suppress
+      // the next transition's Slack context.
+      Math.min(currentState.breachStartedAt ?? nowSeconds, nowSeconds);
 
   return {
     ...currentState,

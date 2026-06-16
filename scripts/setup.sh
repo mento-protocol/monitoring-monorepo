@@ -3,7 +3,8 @@
 #
 # What it does:
 #   1. Install all pnpm workspace dependencies
-#   2. Run Envio codegen (required for indexer-envio TypeScript to compile)
+#   2. Install Playwright Chromium for ui-dashboard browser tests
+#   3. Run Envio codegen (required for indexer-envio TypeScript to compile)
 #
 # Why codegen is needed:
 #   The indexer-envio package imports from a `generated/` directory that Envio
@@ -22,6 +23,9 @@ echo "  core.hooksPath → .trunk/hooks"
 
 echo "▶ Installing dependencies..."
 pnpm install --frozen-lockfile
+
+echo "▶ Installing Playwright Chromium (ui-dashboard browser tests)..."
+pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium
 
 echo "▶ Verifying ui-dashboard dependency resolution..."
 pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
