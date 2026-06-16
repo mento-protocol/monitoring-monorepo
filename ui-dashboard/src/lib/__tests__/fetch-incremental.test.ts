@@ -382,4 +382,75 @@ describe("incremental pool daily snapshot pagination", () => {
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0]!.swapVolume0).toBe("9");
   });
+
+  it("does not overwrite a warm cache with older SSR fallback rows", async () => {
+    const polledToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "9");
+    const ssrToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "1");
+
+    incrementalRowCache.set("celo-mainnet:PoolDailySnapshot", {
+      variablesKey: "pool-a",
+      rows: [polledToday],
+    });
+    seedIncrementalRowCacheFromNetworkData([
+      {
+        network: NETWORKS["celo-mainnet"],
+        pools: [{ id: "pool-a" }],
+        snapshotsAllDaily: [ssrToday],
+        snapshotsAllDailyError: null,
+        snapshotsAllDailyTruncated: false,
+        feeSnapshots: [],
+        feeSnapshotsError: null,
+        feeSnapshotsTruncated: false,
+      } as unknown as NetworkData,
+    ]);
+    requestMock.mockRejectedValueOnce(new Error("tail failed"));
+
+    const result = await fetchAllDailySnapshotPages(
+      makeClient(),
+      ["pool-a"],
+      "celo-mainnet",
+    );
+
+    expect(result.truncated).toBe(true);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]!.swapVolume0).toBe("9");
+  });
+
+  it("does not seed the cache from degraded or empty SSR slices", () => {
+    seedIncrementalRowCacheFromNetworkData([
+      {
+        network: NETWORKS["celo-mainnet"],
+        pools: [{ id: "pool-a" }],
+        snapshotsAllDaily: [poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS)],
+        snapshotsAllDailyError: null,
+        snapshotsAllDailyTruncated: true,
+        feeSnapshots: [],
+        feeSnapshotsError: null,
+        feeSnapshotsTruncated: false,
+      } as unknown as NetworkData,
+      {
+        network: NETWORKS["monad-mainnet"],
+        pools: [{ id: "pool-b" }],
+        snapshotsAllDaily: [poolSnapshotRow("pool-b", TODAY_MIDNIGHT_SECONDS)],
+        snapshotsAllDailyError: new Error("snapshot failed"),
+        snapshotsAllDailyTruncated: false,
+        feeSnapshots: [feeRow("fee-b", TODAY_MIDNIGHT_SECONDS)],
+        feeSnapshotsError: new Error("fees failed"),
+        feeSnapshotsTruncated: false,
+      } as unknown as NetworkData,
+    ]);
+
+    expect(
+      incrementalRowCache.get("celo-mainnet:PoolDailySnapshot"),
+    ).toBeUndefined();
+    expect(
+      incrementalRowCache.get("celo-mainnet:PoolDailyFeeSnapshot"),
+    ).toBeUndefined();
+    expect(
+      incrementalRowCache.get("monad-mainnet:PoolDailySnapshot"),
+    ).toBeUndefined();
+    expect(
+      incrementalRowCache.get("monad-mainnet:PoolDailyFeeSnapshot"),
+    ).toBeUndefined();
+  });
 });

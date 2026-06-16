@@ -305,6 +305,16 @@ export const incrementalRowCache = new Map<
 const poolIdsVariablesKey = (poolIds: readonly string[]) =>
   [...poolIds].sort().join(",");
 
+function seedIncrementalRows(
+  cacheKey: string,
+  variablesKey: string,
+  rows: unknown[],
+): void {
+  const existing = incrementalRowCache.get(cacheKey);
+  if (existing !== undefined && existing.variablesKey === variablesKey) return;
+  incrementalRowCache.set(cacheKey, { variablesKey, rows });
+}
+
 export function seedIncrementalRowCacheFromNetworkData(
   networkData: readonly NetworkData[],
 ): void {
@@ -314,17 +324,23 @@ export function seedIncrementalRowCacheFromNetworkData(
       !data.snapshotsAllDailyTruncated &&
       data.pools.length > 0
     ) {
-      incrementalRowCache.set(`${data.network.id}:PoolDailySnapshot`, {
-        variablesKey: poolIdsVariablesKey(data.pools.map((pool) => pool.id)),
-        rows: data.snapshotsAllDaily,
-      });
+      seedIncrementalRows(
+        `${data.network.id}:PoolDailySnapshot`,
+        poolIdsVariablesKey(data.pools.map((pool) => pool.id)),
+        data.snapshotsAllDaily,
+      );
     }
 
-    if (data.feeSnapshotsError === null && !data.feeSnapshotsTruncated) {
-      incrementalRowCache.set(`${data.network.id}:PoolDailyFeeSnapshot`, {
-        variablesKey: String(data.network.chainId),
-        rows: data.feeSnapshots,
-      });
+    if (
+      data.feeSnapshotsError === null &&
+      !data.feeSnapshotsTruncated &&
+      data.feeSnapshots.length > 0
+    ) {
+      seedIncrementalRows(
+        `${data.network.id}:PoolDailyFeeSnapshot`,
+        String(data.network.chainId),
+        data.feeSnapshots,
+      );
     }
   }
 }
@@ -351,6 +367,7 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
   variablesFor: (page: number, afterTimestamp: number) => TVars;
   dedupKey: (row: TRow) => string;
   timestampOf: (row: TRow) => number;
+  nowMs?: number;
   extra?: Record<string, unknown>;
 }): Promise<PaginatedPageResult<TRow>> {
   const {
@@ -363,6 +380,7 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
     variablesFor,
     dedupKey,
     timestampOf,
+    nowMs = Date.now(),
     extra,
   } = args;
   const cacheKey = `${network}:${responseKey}`;
@@ -392,7 +410,7 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
   const cachedRows = cached.rows as TRow[];
   let tail: PaginatedPageResult<TRow>;
   try {
-    tail = await paginate(mutableDayCutoff(Date.now()));
+    tail = await paginate(mutableDayCutoff(nowMs));
   } catch (err) {
     // First-page failure on the incremental path: degrade to cached history
     // (mirrors the mid-loop fail-open contract on SNAPSHOT_PAGE_SIZE).
@@ -428,6 +446,7 @@ export async function fetchAllDailySnapshotPages(
   client: GraphQLClient,
   poolIds: string[],
   network: string,
+  nowMs?: number,
 ): Promise<SnapshotPageResult> {
   return fetchPaginatedRowsIncremental<PoolSnapshotWindow, unknown>({
     client,
@@ -444,6 +463,7 @@ export async function fetchAllDailySnapshotPages(
     }),
     dedupKey: (s) => `${s.poolId}-${s.timestamp}`,
     timestampOf: (s) => Number(s.timestamp),
+    ...(nowMs !== undefined ? { nowMs } : {}),
     extra: { poolCount: poolIds.length },
   });
 }
@@ -518,6 +538,7 @@ export async function fetchAllFeeSnapshotPages(
   client: GraphQLClient,
   chainId: number,
   network: string,
+  nowMs?: number,
 ): Promise<PaginatedPageResult<PoolDailyFeeSnapshot>> {
   return fetchPaginatedRowsIncremental<PoolDailyFeeSnapshot, unknown>({
     client,
@@ -534,6 +555,7 @@ export async function fetchAllFeeSnapshotPages(
     }),
     dedupKey: (s) => s.id,
     timestampOf: (s) => Number(s.timestamp),
+    ...(nowMs !== undefined ? { nowMs } : {}),
   });
 }
 
@@ -572,6 +594,7 @@ export async function fetchNetworkData(
 
   const poolIds = pools.map((p) => p.id);
   const fpmmPoolIds = pools.flatMap((p) => (isFpmm(p) ? [p.id] : []));
+  const snapshotTailNowMs = windows.w24h.to * 1000;
 
   const emptySnapshotPage: SnapshotPageResult = {
     rows: [],
@@ -590,9 +613,19 @@ export async function fetchNetworkData(
     indexedCdpPoolsResult,
     fallbackStrategiesResult,
   ] = await Promise.allSettled([
-    fetchAllFeeSnapshotPages(client, network.chainId, network.id),
+    fetchAllFeeSnapshotPages(
+      client,
+      network.chainId,
+      network.id,
+      snapshotTailNowMs,
+    ),
     shouldQueryPoolSnapshots(poolIds)
-      ? fetchAllDailySnapshotPages(client, poolIds, network.id)
+      ? fetchAllDailySnapshotPages(
+          client,
+          poolIds,
+          network.id,
+          snapshotTailNowMs,
+        )
       : Promise.resolve(emptySnapshotPage),
     // Legacy v2 daily volume rollup (Broker.Swap with `routedViaV3Router=false`).
     // Filtered server-side by chainId — only Celo has a Broker today, but
@@ -791,20 +824,19 @@ export async function fetchNetworkData(
   // `windows.w24h.to` is the caller's snapshot of "now", so deriving
   // todayMidnight from it keeps all three windows consistent with the same
   // clock tick rather than calling Date.now() again.
-  const SECS_PER_DAY = 86400;
   const todayMidnight =
-    Math.floor(windows.w24h.to / SECS_PER_DAY) * SECS_PER_DAY;
+    Math.floor(windows.w24h.to / SECONDS_PER_DAY) * SECONDS_PER_DAY;
   const dw24h: TimeRange = {
     from: todayMidnight,
-    to: todayMidnight + SECS_PER_DAY,
+    to: todayMidnight + SECONDS_PER_DAY,
   };
   const dw7d: TimeRange = {
-    from: todayMidnight - 6 * SECS_PER_DAY,
-    to: todayMidnight + SECS_PER_DAY,
+    from: todayMidnight - 6 * SECONDS_PER_DAY,
+    to: todayMidnight + SECONDS_PER_DAY,
   };
   const dw30d: TimeRange = {
-    from: todayMidnight - 29 * SECS_PER_DAY,
-    to: todayMidnight + SECS_PER_DAY,
+    from: todayMidnight - 29 * SECONDS_PER_DAY,
+    to: todayMidnight + SECONDS_PER_DAY,
   };
 
   const snapshots7d = filterSnapshotsToWindow(snapshotsAllDaily, dw7d);
