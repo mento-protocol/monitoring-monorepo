@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 import http from "node:http";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-const { values } = parseArgs({
-  options: {
-    port: { type: "string", default: "3211" },
-  },
-});
-
-const port = Number(values.port);
+const isMain =
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 const DAY_SECONDS = 86_400;
 const FIXED_1 = "1000000000000000000000000";
 
@@ -766,7 +764,11 @@ function rowsByPoolIds(poolIds) {
   );
 }
 
-function handleGraphQL({ query, variables = {} }) {
+function dailySnapshotLowerBound(variables) {
+  return Number(variables.afterTimestamp ?? variables.since ?? 0);
+}
+
+export function handleGraphQL({ query, variables = {} }) {
   const op = operationName(query ?? "");
   switch (op) {
     case "PoolsForVolume":
@@ -873,8 +875,7 @@ function handleGraphQL({ query, variables = {} }) {
     case "HomepageOgDailySnapshots":
       return {
         PoolDailySnapshot: rowsByPoolIds(variables.poolIds).filter(
-          (row) =>
-            Number(row.timestamp) >= Number(variables.afterTimestamp ?? 0),
+          (row) => Number(row.timestamp) >= dailySnapshotLowerBound(variables),
         ),
       };
     case "PoolDailySnapshotsChart":
@@ -1087,51 +1088,65 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-const server = http.createServer((req, res) => {
-  if (req.method === "OPTIONS") {
-    sendJson(res, 204, {});
-    return;
-  }
-  if (req.url === "/health") {
-    sendJson(res, 200, { ok: true });
-    return;
-  }
-  if (req.url !== "/graphql" || req.method !== "POST") {
-    sendJson(res, 404, { error: "not found" });
-    return;
-  }
-
-  let raw = "";
-  req.setEncoding("utf8");
-  req.on("data", (chunk) => {
-    raw += chunk;
-  });
-  req.on("end", () => {
-    try {
-      const body = JSON.parse(raw);
-      const result = handleGraphQL(body);
-      if (result.__fixtureErrors) {
-        sendJson(res, 200, { errors: result.__fixtureErrors });
-        return;
-      }
-      sendJson(res, 200, { data: result });
-    } catch (error) {
-      sendJson(res, 500, {
-        errors: [
-          {
-            message:
-              error instanceof Error ? error.message : "fixture server error",
-          },
-        ],
-      });
+function startServer(port) {
+  const server = http.createServer((req, res) => {
+    if (req.method === "OPTIONS") {
+      sendJson(res, 204, {});
+      return;
     }
+    if (req.url === "/health") {
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.url !== "/graphql" || req.method !== "POST") {
+      sendJson(res, 404, { error: "not found" });
+      return;
+    }
+
+    let raw = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      raw += chunk;
+    });
+    req.on("end", () => {
+      try {
+        const body = JSON.parse(raw);
+        const result = handleGraphQL(body);
+        if (result.__fixtureErrors) {
+          sendJson(res, 200, { errors: result.__fixtureErrors });
+          return;
+        }
+        sendJson(res, 200, { data: result });
+      } catch (error) {
+        sendJson(res, 500, {
+          errors: [
+            {
+              message:
+                error instanceof Error ? error.message : "fixture server error",
+            },
+          ],
+        });
+      }
+    });
   });
-});
 
-server.listen(port, "127.0.0.1", () => {
-  process.stdout.write(`Hasura fixture server listening on ${port}\n`);
-});
+  server.listen(port, "127.0.0.1", () => {
+    process.stdout.write(`Hasura fixture server listening on ${port}\n`);
+  });
 
-process.on("SIGTERM", () => {
-  server.close(() => process.exit(0));
-});
+  process.on("SIGTERM", () => {
+    server.close(() => process.exit(0));
+  });
+
+  return server;
+}
+
+if (isMain) {
+  const { values } = parseArgs({
+    options: {
+      port: { type: "string", default: "3211" },
+    },
+  });
+
+  startServer(Number(values.port));
+}

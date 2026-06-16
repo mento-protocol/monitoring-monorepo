@@ -355,6 +355,7 @@ function seedIncrementalRows({
     });
     return;
   }
+  if (existing !== undefined) return;
   incrementalRowCache.set(cacheKey, {
     variablesKey,
     rows,
