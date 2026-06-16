@@ -120,7 +120,7 @@ Testnet polling stops or records repeated view-call errors. See
 1. Update the [config.yaml](./config.yaml):
    - Add the new rate feed IDs and relayer signer wallets to `global.vars`
    - Add the new rate feeds as variants to the `SortedOracles.isOldestReportExpired()` metric
-   - Add the new rate feeds as variants to the `BreakerBox.getRateFeedTradingMode()` metric
+   - Add the new rate feeds as variants to the `BreakerBox.getRateFeedTradingMode()` metric only for chains where the feed backs a live tradable pool or exchange. A feed can exist in SortedOracles or BreakerBox without being a production trading-halt alert target.
    - Add the new relayer signer as variants to the `CELOToken.balanceOf()` metric
 1. [optional] If it's an FX rate feed with disabled trading on weekends because we don't get new price data on weekends:
    - Add the rate feed name to the `weekend_disabled_feeds` array in [alerts/rules/protocol-routing-locals.tf](../alerts/rules/protocol-routing-locals.tf)
