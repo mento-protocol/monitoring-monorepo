@@ -1445,8 +1445,57 @@ assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest r
 assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 
-run_gate "ui-dashboard/vitest.hermetic-setup.ts"
-assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup changed)"
+assert_hermetic_setup_routes() {
+  local path="$1"
+  local package_name="$2"
+  local reason="$3"
+
+  run_gate "$path"
+  assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup changed)"
+  assert_contains "- pnpm --filter $package_name typecheck ($reason)"
+  assert_contains "- pnpm --filter $package_name test:coverage ($reason (coverage floor))"
+}
+
+assert_hermetic_setup_routes \
+  "alerts/infra/oncall-announcer/vitest.hermetic-setup.ts" \
+  "@mento-protocol/alerts-oncall-announcer" \
+  "alerts oncall-announcer hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "alerts/infra/onchain-event-handler/vitest.hermetic-setup.ts" \
+  "@mento-protocol/alerts-onchain-event-handler" \
+  "alerts onchain-event-handler hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "governance-watchdog/vitest.hermetic-setup.ts" \
+  "@mento-protocol/governance-watchdog" \
+  "governance-watchdog hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "indexer-envio/vitest.hermetic-setup.ts" \
+  "@mento-protocol/indexer-envio" \
+  "indexer-envio hermetic Vitest setup changed"
+assert_contains "- pnpm indexer:codegen (indexer-envio hermetic Vitest setup changed (codegen needed before indexer typecheck))"
+
+assert_hermetic_setup_routes \
+  "integration-probes/vitest.hermetic-setup.ts" \
+  "@mento-protocol/integration-probes" \
+  "integration-probes hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "metrics-bridge/vitest.hermetic-setup.ts" \
+  "@mento-protocol/metrics-bridge" \
+  "metrics-bridge hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "shared-config/vitest.hermetic-setup.ts" \
+  "@mento-protocol/monitoring-config" \
+  "shared-config hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "ui-dashboard/vitest.hermetic-setup.ts" \
+  "@mento-protocol/ui-dashboard" \
+  "ui-dashboard hermetic Vitest setup changed"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"

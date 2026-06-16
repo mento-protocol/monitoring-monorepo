@@ -29,6 +29,19 @@ type RequestOptionsLike = {
 const isRequestOptions = (value: unknown): value is RequestOptionsLike =>
   value !== null && typeof value === "object" && !(value instanceof URL);
 
+const isAbsoluteHttpUrl = (value: string) => /^https?:/i.test(value);
+
+const parseUrlInput = (
+  input: string | URL,
+  defaultProtocol: "http:" | "https:",
+) => {
+  const rawUrl = input instanceof URL ? input.href : input;
+  if (isAbsoluteHttpUrl(rawUrl)) {
+    return new URL(rawUrl);
+  }
+  return new URL(rawUrl, `${defaultProtocol}//127.0.0.1/`);
+};
+
 const valueAsString = (value: unknown): string | undefined => {
   if (typeof value === "string" || typeof value === "number") {
     return String(value);
@@ -75,13 +88,14 @@ const applyRequestOptions = (
 
   const path = valueAsString(options.path ?? options.pathname);
   if (path) {
-    const pathUrl = new URL(
-      path,
-      `${url.protocol}//${url.host || "127.0.0.1"}/`,
-    );
-    url.pathname = pathUrl.pathname;
-    url.search = pathUrl.search;
+    applyRequestPath(url, path);
   }
+};
+
+const applyRequestPath = (url: URL, path: string) => {
+  const pathUrl = new URL(path, `${url.protocol}//${url.host || "127.0.0.1"}/`);
+  url.pathname = pathUrl.pathname;
+  url.search = pathUrl.search;
 };
 
 const requestUrlFromOptions = (
@@ -92,8 +106,16 @@ const requestUrlFromOptions = (
     valueAsString(options.protocol) ?? defaultProtocol,
   );
   const authority = requestAuthority(options) ?? "127.0.0.1";
-  const path = valueAsString(options.path ?? options.pathname) ?? "/";
-  return new URL(path, `${protocol}//${authority}`);
+  const url = new URL(`${protocol}//${authority}/`);
+  const path = valueAsString(options.path ?? options.pathname);
+  if (path) {
+    try {
+      applyRequestPath(url, path);
+    } catch {
+      return url;
+    }
+  }
+  return url;
 };
 
 const requestUrlFromArgs = (
@@ -103,7 +125,7 @@ const requestUrlFromArgs = (
   try {
     const [input, maybeOptions] = args;
     if (typeof input === "string" || input instanceof URL) {
-      const url = new URL(input, `${defaultProtocol}//127.0.0.1/`);
+      const url = parseUrlInput(input, defaultProtocol);
       if (isRequestOptions(maybeOptions)) {
         try {
           applyRequestOptions(url, maybeOptions, defaultProtocol);
@@ -164,7 +186,7 @@ globalThis.fetch = ((
         : input.url;
   let url: URL;
   try {
-    url = new URL(rawUrl, "http://127.0.0.1/");
+    url = parseUrlInput(rawUrl, "http:");
   } catch {
     return realFetch(input, init);
   }

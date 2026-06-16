@@ -30,6 +30,17 @@ describe("hermetic test guard", () => {
     expect((error as Error).message).not.toContain("secret-token");
   });
 
+  it("rejects slash-less absolute HTTP fetch URLs without parsing them against loopback", async () => {
+    const error = await fetch(
+      "http:metadata.google.internal/computeMetadata/v1/secret-token",
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(
+      "[hermetic-test-guard] Blocked outbound request to http://metadata.google.internal.",
+    );
+    expect((error as Error).message).not.toContain("secret-token");
+  });
+
   it("rejects outbound Node HTTP clients to non-loopback hosts", () => {
     expect(() =>
       http.get(
@@ -45,6 +56,17 @@ describe("hermetic test guard", () => {
       namedHttpGet(
         "http://metadata.google.internal/computeMetadata/v1/secret-token",
       ),
+    ).toThrow(
+      "[hermetic-test-guard] Blocked outbound request to http://metadata.google.internal.",
+    );
+  });
+
+  it("rejects Node HTTP options whose hostname is non-loopback even when path looks loopback", () => {
+    expect(() =>
+      http.request({
+        hostname: "metadata.google.internal",
+        path: "http://127.0.0.1/computeMetadata/v1/secret-token",
+      }),
     ).toThrow(
       "[hermetic-test-guard] Blocked outbound request to http://metadata.google.internal.",
     );
