@@ -385,9 +385,11 @@ function nextStepFor(
   pairs: readonly PairProbeResult[],
 ): string | null {
   if (status === "pass") return null;
+  const nonPassingPairs = pairs.filter((pair) => pair.status !== "pass");
   if (
     status === "partial" &&
-    pairs.some((pair) => pair.status === "budget_exhausted")
+    nonPassingPairs.length > 0 &&
+    nonPassingPairs.every((pair) => pair.status === "budget_exhausted")
   ) {
     return FALLBACK_NEXT_STEPS.budget_exhausted;
   }

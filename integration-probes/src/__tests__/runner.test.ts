@@ -275,6 +275,54 @@ describe("runIntegrationProbes", () => {
     expect(chain?.nextStep).toContain("maxQuoteRequestsPerRun");
   });
 
+  it("keeps the generic partial next step when budget exhaustion follows failed routes", async () => {
+    let quoteFetches = 0;
+    const rows = [
+      poolRow(POOL, "EURm"),
+      poolRow("42220-0x4444444444444444444444444444444444444444", "GBPm"),
+    ];
+    const snapshot = await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [
+        {
+          ...passingAdapter(),
+          id: "partial-failed-budgeted",
+          label: "Partial Failed Budgeted",
+          maxQuoteRequestsPerRun: 2,
+          quote: (input) => ({
+            url: `https://partial-failed-budgeted.test/${input.pairId}/${input.direction}`,
+          }),
+        },
+      ],
+      pairConcurrency: 1,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(JSON.stringify({ data: { Pool: rows } }));
+        }
+        quoteFetches += 1;
+        return new Response(
+          quoteFetches === 1
+            ? JSON.stringify({ transactionRequest: { to: ROUTER_V300 } })
+            : JSON.stringify({ route: [{ protocol: "Other" }] }),
+        );
+      },
+    });
+
+    const chain = snapshot.aggregators[0]?.chains[0];
+    expect(quoteFetches).toBe(2);
+    expect(chain?.status).toBe("partial");
+    expect(chain?.pairs.map((pair) => pair.status)).toEqual([
+      "pass",
+      "fail",
+      "budget_exhausted",
+      "budget_exhausted",
+    ]);
+    expect(chain?.nextStep).toContain("route evidence");
+    expect(chain?.nextStep).not.toContain("maxQuoteRequestsPerRun");
+  });
+
   it("logs a per-adapter quote-budget summary line", async () => {
     const lines: string[] = [];
     await runIntegrationProbes({
