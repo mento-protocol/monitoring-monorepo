@@ -2,6 +2,7 @@ import type { Request } from "@google-cloud/functions-framework";
 import crypto from "crypto";
 import config from "../config.js";
 import getSecret from "./get-secret.js";
+import { verifyQuickNodeHmac } from "./quicknode-hmac.js";
 
 /**
  * Maximum allowed age (and future clock skew) of the x-qn-timestamp header.
@@ -54,7 +55,7 @@ export async function isFromQuicknode(req: Request): Promise<boolean> {
       config.QUICKNODE_SECURITY_TOKEN_SECRET_ID,
     );
     const payloadString = req.rawBody.toString();
-    const isValid = verifySignature(
+    const isValid = verifyQuickNodeHmac(
       quicknodeSecurityToken,
       payloadString,
       nonce,
@@ -120,63 +121,4 @@ function isTimestampFresh(timestamp: string): boolean {
   return (
     Math.abs(Date.now() - timestampMs) <= MAX_TIMESTAMP_SKEW_SECONDS * 1000
   );
-}
-
-// Taken from https://www.quicknode.com/guides/quicknode-products/streams/validating-incoming-streams-webhook-messages
-function verifySignature(
-  secretKey: string,
-  payload: string,
-  nonce: string,
-  timestamp: string,
-  givenSignature: string,
-): boolean {
-  // First concatenate signature inputs as strings
-  const signatureData = nonce + timestamp + payload;
-
-  // Use string directly instead of Buffer to avoid type errors with crypto.createHmac
-  // in strict TypeScript environments (GCP build uses locked @types/node that triggers this)
-  const hmac = crypto.createHmac("sha256", secretKey);
-  hmac.update(signatureData);
-  const computedSignature = hmac.digest("hex");
-
-  if (process.env.DEBUG) {
-    console.log("\nSignature Debug:");
-    console.log("Message components:");
-    console.log("- Nonce:", nonce);
-    console.log("- Timestamp:", timestamp);
-    console.log("- Payload first 100 chars:", payload.substring(0, 100));
-    console.log("\nSignatures:");
-    console.log("- Computed:", computedSignature);
-    console.log("- Given:", givenSignature);
-  }
-
-  // Reject signatures of the wrong length before converting: timingSafeEqual
-  // throws on length-mismatched buffers and hexToBytes throws on odd-length hex,
-  // turning a malformed x-qn-signature into a noisy TypeError instead of a clean
-  // reject. The expected length is fixed (64 hex chars for HMAC-SHA256), so this
-  // comparison leaks nothing secret.
-  if (givenSignature.length !== computedSignature.length) {
-    return false;
-  }
-
-  // Convert to Uint8Array manually to satisfy timingSafeEqual's ArrayBufferView requirement
-  // without Buffer's type issues
-  return crypto.timingSafeEqual(
-    hexToBytes(computedSignature),
-    hexToBytes(givenSignature),
-  );
-}
-
-/**
- * Helper to convert hex string to Uint8Array.
- * We use this instead of Buffer to avoid type mismatches in newer @types/node versions,
- * which introduce stricter ArrayBufferLike checks that Buffer doesn't fully satisfy
- * (due to SharedArrayBuffer compatibility issues).
- */
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
 }

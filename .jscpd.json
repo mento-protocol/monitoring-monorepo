@@ -5,7 +5,7 @@
   "minLines": 5,
   "mode": "strict",
   "format": ["typescript", "tsx", "javascript", "jsx"],
-  "pattern": "{shared-config,ui-dashboard,indexer-envio,metrics-bridge,aegis}/src/**/*.{ts,tsx,js,jsx}",
+  "pattern": "{shared-config,ui-dashboard,indexer-envio,metrics-bridge,aegis,governance-watchdog,alerts/infra/onchain-event-handler,alerts/infra/oncall-announcer}/src/**/*.{ts,tsx,js,jsx}",
   "ignore": [
     "**/node_modules/**",
     "**/.next/**",
@@ -17,6 +17,8 @@
     "**/__tests__/**",
     "**/*.test.{ts,tsx}",
     "**/test/**",
+    "**/quicknode-hmac.ts",
+    "**/gcp-logger.ts",
     "**/indexer-envio/src/handlers/**",
     "**/ui-dashboard/src/app/**/page.tsx",
     "**/ui-dashboard/src/app/**/layout.tsx",
