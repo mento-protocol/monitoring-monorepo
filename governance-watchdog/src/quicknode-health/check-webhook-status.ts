@@ -46,6 +46,24 @@ const EXPECTED_WEBHOOKS = [
 ];
 
 /**
+ * Safe-multisig webhooks provisioned by alerts/infra (one per chain). Their
+ * names carry a config-hash suffix — `safe-multisig-monitor-<chain>-<hash8>`,
+ * see `webhook_name` in alerts/infra/main.tf and the name construction in
+ * alerts/infra/onchain-event-listeners/main.tf — so they are matched by prefix
+ * + network instead of exact name. Healthy = at least one ACTIVE webhook per
+ * prefix; a paused old webhook lingering next to its active replacement
+ * (QuickNode recreate flow) must not alarm. Keep in sync with the chains in
+ * alerts/infra `var.multisigs`.
+ */
+const EXPECTED_WEBHOOK_PREFIXES = [
+  { namePrefix: "safe-multisig-monitor-celo-", network: "celo-mainnet" },
+  {
+    namePrefix: "safe-multisig-monitor-ethereum-",
+    network: "ethereum-mainnet",
+  },
+];
+
+/**
  * The webhooks endpoint is paginated (default limit 20), so we page through
  * every result — an expected webhook beyond the first page must not be
  * reported as missing.
@@ -154,8 +172,21 @@ export const checkWebhookStatus = async (): Promise<WebhookHealthResult> => {
       ),
   );
 
+  const missingPrefixWebhooks = EXPECTED_WEBHOOK_PREFIXES.filter(
+    (expected) =>
+      !webhooks.some(
+        (webhook) =>
+          webhook.name.startsWith(expected.namePrefix) &&
+          webhook.network === expected.network &&
+          HEALTHY_STATUSES.includes(webhook.status.toLowerCase()),
+      ),
+  );
+
   const unhealthyWebhooks = [
     ...missingWebhooks.map((expected) => `${expected.name} (missing)`),
+    ...missingPrefixWebhooks.map(
+      (expected) => `${expected.namePrefix}* (missing or inactive)`,
+    ),
     ...webhooks
       .filter(
         (webhook) =>

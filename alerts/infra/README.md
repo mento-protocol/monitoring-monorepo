@@ -9,6 +9,7 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 ├── main.tf                 # Root configuration and module orchestration
 ├── variables.tf            # Shared variable definitions
 ├── outputs.tf              # Aggregated outputs
+├── monitoring.tf           # Log-based drop metrics + alert policies for onchain-event-handler
 │
 ├── channels/
 │   ├── sentry-bridge/      # Sentry JS error monitoring (Sentry → Slack bridge)

@@ -128,6 +128,17 @@ variable "oncall_support_usergroup_id" {
   }
 }
 
+variable "slack_notification_channel_id" {
+  description = "GCP Monitoring Slack notification channel ID for onchain-event-handler drop alerts (numeric suffix from projects/.../notificationChannels/<id>). Leave empty to skip creating the alert policies until the channel exists."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.slack_notification_channel_id == "" || can(regex("^[0-9]+$", var.slack_notification_channel_id))
+    error_message = "slack_notification_channel_id must be empty or a GCP Monitoring notification channel ID such as 7755148860700532944."
+  }
+}
+
 variable "splunk_on_call_api_base_url" {
   description = "Base URL for the Splunk On-Call public API. The historical VictorOps API host remains the canonical endpoint."
   type        = string
