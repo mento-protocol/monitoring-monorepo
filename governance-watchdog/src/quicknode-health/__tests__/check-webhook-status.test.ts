@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock getSecret so no Secret Manager calls happen
@@ -29,6 +31,44 @@ function fakePage(webhooks: FakeWebhook[]) {
 
 function mockWebhooksResponse(webhooks: FakeWebhook[]) {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(fakePage(webhooks)));
+}
+
+function repoRoot() {
+  return process.cwd().endsWith("governance-watchdog")
+    ? join(process.cwd(), "..")
+    : process.cwd();
+}
+
+function alertsInfraMultisigChains() {
+  const variables = readFileSync(
+    join(repoRoot(), "alerts", "infra", "variables.tf"),
+    "utf8",
+  );
+  const defaultBlockPattern = new RegExp(
+    [
+      'variable "multisigs"[\\s\\S]*?default = \\{',
+      "(?<body>[\\s\\S]*?)",
+      "\\n[ ]{2}\\}\\n\\n[ ]{2}validation",
+    ].join(""),
+  );
+  const defaultBlock = defaultBlockPattern.exec(variables)?.groups?.body;
+  if (!defaultBlock) {
+    throw new Error(
+      "Unable to locate alerts/infra var.multisigs default block",
+    );
+  }
+
+  const chains = new Set<string>();
+  const chainPattern = /chain\s+=\s+"([^"]+)"/g;
+  for (
+    let match = chainPattern.exec(defaultBlock);
+    match;
+    match = chainPattern.exec(defaultBlock)
+  ) {
+    chains.add(match[1]);
+  }
+
+  return [...chains].sort();
 }
 
 const ACTIVE_WEBHOOKS: FakeWebhook[] = [
@@ -234,6 +274,10 @@ describe("checkWebhookStatus", () => {
     expect(result.unhealthyWebhooks).toEqual([
       "safe-multisig-monitor-ethereum-* (missing or inactive)",
     ]);
+  });
+
+  it("documents Safe webhook prefixes for every alerts/infra multisig chain", () => {
+    expect(alertsInfraMultisigChains()).toEqual(["celo", "ethereum"]);
   });
 
   it("reads the API key secret id from config", async () => {

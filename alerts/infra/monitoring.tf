@@ -25,7 +25,7 @@ resource "google_logging_metric" "onchain_handler_budget_skips" {
   name        = "onchain_event_handler_budget_skips"
   description = "Log entries reporting events skipped by the onchain-event-handler processing budget"
   filter      = <<EOF
-    severity>=WARNING
+    severity="WARNING"
     resource.type="cloud_run_revision"
     resource.labels.service_name="${module.onchain_event_handler.function_name}"
     jsonPayload.reason="skipped_due_to_timeout"
@@ -49,7 +49,7 @@ resource "google_monitoring_alert_policy" "onchain_handler_errors_policy" {
       Safe transactions manually.
 
       **View recent error logs:**
-      https://console.cloud.google.com/logs/query;query=severity%3E%3DERROR%20AND%20resource.labels.service_name%3D%22${module.onchain_event_handler.function_name}%22;duration=PT3H
+      https://console.cloud.google.com/logs/query;query=severity%3E%3DERROR%20AND%20resource.labels.service_name%3D%22${module.onchain_event_handler.function_name}%22;duration=PT24H
     EOT
     mime_type = "text/markdown"
   }
@@ -104,7 +104,7 @@ resource "google_monitoring_alert_policy" "onchain_handler_budget_skips_policy" 
       recent Safe multisig activity manually.
 
       **View recent budget-skip logs:**
-      https://console.cloud.google.com/logs/query;query=jsonPayload.reason%3D%22skipped_due_to_timeout%22%20AND%20resource.labels.service_name%3D%22${module.onchain_event_handler.function_name}%22;duration=PT3H
+      https://console.cloud.google.com/logs/query;query=jsonPayload.reason%3D%22skipped_due_to_timeout%22%20AND%20resource.labels.service_name%3D%22${module.onchain_event_handler.function_name}%22;duration=PT24H
     EOT
     mime_type = "text/markdown"
   }
