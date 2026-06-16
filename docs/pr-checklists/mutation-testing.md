@@ -31,7 +31,7 @@ one of the current mutation targets.
   | ---------------- | ----------------------------------- | ------: | -------: | --------------------------------- |
   | `metrics-bridge` | `metrics-bridge/stryker.config.mjs` |      84 |   86.01% | `bridge-rebalance-probe-baseline` |
   | `ui-dashboard`   | `ui-dashboard/stryker.config.mjs`   |      86 |   88.81% | `dashboard-logic-baseline`        |
-  | `indexer-envio`  | `indexer-envio/stryker.config.mjs`  |      92 |   94.78% | `indexer-logic-baseline`          |
+  | `indexer-envio`  | `indexer-envio/stryker.config.mjs`  |      92 |   94.19% | `indexer-logic-baseline`          |
 
   When a mutation step runs and the score drops below the package's
   `break` floor, the job fails. If your PR fails the gate, treat any new

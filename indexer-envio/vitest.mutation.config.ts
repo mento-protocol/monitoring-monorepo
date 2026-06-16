@@ -8,6 +8,7 @@ export default defineConfig({
       "test/code-quality-invariants.test.ts",
       "test/pool-helpers.test.ts",
       "test/tradingLimits.test.ts",
+      "test/stables.test.ts",
     ],
     env: {
       ENVIO_START_BLOCK_CELO: "0",

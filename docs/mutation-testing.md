@@ -4,6 +4,8 @@ Mutation testing is intentionally scoped to proven pure-logic targets:
 
 - `indexer-envio/src/helpers.ts`
 - `indexer-envio/src/tradingLimits.ts`
+- `indexer-envio/src/handlers/stables/classifyKind.ts`
+- `indexer-envio/src/handlers/stables/dailyFlush.ts`
 - `ui-dashboard/src/lib/weekend.ts`
 - `ui-dashboard/src/lib/pool-id.ts`
 - `metrics-bridge/src/rebalance-probe.ts`
@@ -20,26 +22,30 @@ pnpm bridge:mutation
 
 Each command runs StrykerJS with the Vitest runner and a dedicated mutation
 Vitest config so each baseline executes only the direct unit tests for the
-mutated files.
+mutated files. The indexer baseline writes Stryker's temp sandbox to the repo
+root under `.stryker-tmp/indexer-envio` so the package lint gate can run in
+parallel without scanning transient mutation files.
 
 Latest indexer result:
 
-- Runtime: 7s on the final root-script run (5-9s observed locally)
-- Mutation score: 94.78% total / covered
-- Mutants: 127 killed, 0 timed out, 7 survived, 0 no coverage
+- Runtime: 15s on the final root-script run (15-26s observed locally)
+- Mutation score: 94.19% total / covered
+- Mutants: 162 killed, 0 timed out, 10 survived, 0 no coverage
 - Per-file: `helpers.ts` 91.11% total / covered; `tradingLimits.ts`
-  96.63% total / covered
+  96.63% total / covered; `stables/classifyKind.ts` 90.00% total /
+  covered; `stables/dailyFlush.ts` 100.00% total / covered
 - `indexer-envio/stryker.config.mjs` sets `break: 92` (current baseline
-  94.78% with the standard 2-pt margin). All remaining survivors are
+  94.19% with the standard 2-pt margin). All remaining survivors are
   classified as equivalent mutants or accepted noise — see the
   Survivor Classification section below.
 
-The initial indexer scope is limited to deterministic helpers with direct tests:
-chain/event/pool/snapshot ID helpers and trading-limit derivation. A trial that
-also mutated `healthScore.ts` and `priceDifference.ts` ran in 1m07s but scored
-65.19% total / 79.03% covered because broad branchy math helpers produced many
-survivors/no-coverage mutants. Revisit those one file at a time after adding
-smaller direct tests; adding them now would dilute the baseline.
+The indexer scope is limited to deterministic helpers with direct tests:
+chain/event/pool/snapshot ID helpers, trading-limit derivation, and stables
+classification/daily-flush helpers. A trial that also mutated `healthScore.ts`
+and `priceDifference.ts` ran in 1m07s but scored 65.19% total / 79.03% covered
+because broad branchy math helpers produced many survivors/no-coverage mutants.
+Revisit those one file at a time after adding smaller direct tests; adding them
+now would dilute the baseline.
 
 Latest dashboard result:
 
@@ -186,6 +192,13 @@ Remaining indexer survivors are accepted noise for this baseline:
   capture-group match succeeds; it is defensive against future regex edits.
 - Trading-limit `<` to `<=` absolute-value mutants are equivalent for zero,
   because negating `0n` still yields `0n`.
+- `classifyStableSupplyChangeKind()` broker-cache branch mutants are accepted
+  noise: the test suite already proves first-call classification for broker,
+  NTT helper, NTT transceiver, unknown, null, and cross-chain broker inputs; the
+  surviving mutants only change the cached-repeat path or collapse to the same
+  returned address/null semantics.
+- `_resetBrokerAddressCacheForTest()` body removal affects test cleanup only,
+  not production behavior.
 
 ## Expansion Guidance
 
@@ -197,6 +210,10 @@ Concrete expansion plan:
 
 - Add one file at a time to an existing package baseline only after a trial run
   shows real assertion gaps or a covered score near/above the low threshold.
+- `src/handlers/liquity/math.ts` and `src/handlers/liquity/troves.ts` were
+  trialed on 2026-06-16 and deferred: the combined run scored 64.64% total /
+  85.12% covered, with `math.ts` at 54.93% total and `troves.ts` at 45.96%
+  total because direct tests do not cover enough helper branches yet.
 - Keep `rebalance-check.ts` out until decoder helpers are split or directly
   tested; otherwise the baseline is dominated by defensive-decoder noise.
 - Prefer small formatting, classification, time math, and runner-gating helpers.

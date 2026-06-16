@@ -127,10 +127,12 @@ jobs:
         with:
           filters: |
             # Anything that can affect the result of `pnpm indexer:mutation`.
-            # The mutated files are `src/helpers.ts` + `src/tradingLimits.ts`;
-            # `src/**` is broader so sibling helpers reachable via local
-            # imports are picked up. Tests include both the direct unit
-            # tests and the `code-quality-invariants.test.ts` covered by
+            # The mutated files are `src/helpers.ts`, `src/tradingLimits.ts`,
+            # `src/handlers/stables/classifyKind.ts`, and
+            # `src/handlers/stables/dailyFlush.ts`; `src/**` is broader so
+            # sibling helpers reachable via local imports are picked up.
+            # Tests include both the direct unit tests and the
+            # `code-quality-invariants.test.ts` covered by
             # `vitest.mutation.config.ts`. `schema.graphql` is in the filter
             # because `tradingLimits.ts` imports `type { TradingLimit }` from
             # the `envio` package, which re-exports the codegen-generated
@@ -140,6 +142,7 @@ jobs:
             indexer:
               - indexer-envio/src/**
               - indexer-envio/test/**
+              - indexer-envio/config/**
               - indexer-envio/schema.graphql
               - indexer-envio/stryker.config.mjs
               - indexer-envio/vitest.mutation.config.ts
