@@ -89,6 +89,14 @@ route these summaries to another public channel.
 
 ## GitHub Environment Setup
 
+Pre-merge requirement for the production-environment split in issue #762:
+repo admins must create both environments in Settings -> Environments before
+merging the workflow change that first references them. GitHub auto-creates a
+missing environment on first workflow use with no protection rules, so
+`production-infra` must already have required reviewers, prevent self-review,
+and the protected-`main` branch restriction before any Terraform-changing
+commit can land on `main`.
+
 Repo admins should keep exactly two production GitHub Environments for this
 repo's Actions workflows:
 
