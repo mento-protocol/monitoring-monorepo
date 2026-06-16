@@ -382,17 +382,21 @@ oracleFreshnessWindow, oracleMedianLive, oracleMedianTimestamp`. Companion so a
   process the VP rows through a new `recordVpOracleMetrics`.
 - **Metrics** (`metrics.ts`): add a dedicated gauge, e.g.
   `mento_pool_vp_oracle_fresh` with the existing `poolLabels` set
-  (`chain_id, chain_name, pair, pool_id, pool_address_short`). Emit `0`
-  immediately when `oracleMedianLive === false`. Emit `1` when
-  `oracleMedianLive === true`, `oracleMedianTimestamp > 0`,
-  `oracleFreshnessWindow > 0`, and
-  `oracleMedianTimestamp + oracleFreshnessWindow > now`; otherwise emit `0` for
-  the known-but-expired case. Skip emission when the contract median source is
-  null/unavailable, and skip live-timestamp comparisons while
-  `oracleFreshnessWindow == 0` (unknown — avoids false `0`).
-  Optionally also emit `mento_pool_vp_oracle_freshness_window` (the 360s value)
-  for dashboards. The `pair` label (e.g. `CADm/USDm`) is what the FX weekend gate
-  matches on.
+  (`chain_id, chain_name, pair, pool_id, pool_address_short`). Use this decision
+  tree so the gauge cannot page while health/UI are degraded:
+  - emit `0` immediately when `oracleMedianLive === false`;
+  - skip emission when `oracleMedianLive !== true`, because the contract median
+    source is unavailable/unknown;
+  - skip emission when `oracleMedianTimestamp == null` or
+    `oracleMedianTimestamp <= 0`, matching the health/UI degraded mode for
+    missing contract timestamps;
+  - skip emission when `oracleFreshnessWindow <= 0` (unknown window); and
+  - otherwise emit `1` when
+    `oracleMedianTimestamp + oracleFreshnessWindow > now`, else `0` for the
+    known-live-but-expired case.
+    Optionally also emit `mento_pool_vp_oracle_freshness_window` (the 360s value)
+    for dashboards. The `pair` label (e.g. `CADm/USDm`) is what the FX weekend gate
+    matches on.
 
 ### 7. Alert rule: new `alerts/rules/rules-vp-oracles.tf`
 
@@ -483,7 +487,8 @@ either:
   oracle health reason used by the dashboard rather than an empty reason set.
 - `metrics-bridge/test/*` — any snapshot of emitted gauge names will change;
   add coverage for `mento_pool_vp_oracle_fresh` (fresh=1, stale=0,
-  zero-median/down=0 immediately, unknown contract source skipped).
+  zero-median/down=0 immediately, unknown contract source skipped, live median
+  with missing/zero contract timestamp skipped).
 - `metrics-bridge/test/deviation-alert-state.test.ts` enforces the
   `USD_PEGGED_SYMBOLS` ↔ `main.tf` drift guard — no change needed (we reuse the
   exclusion-based FX classifier), but re-run it.
