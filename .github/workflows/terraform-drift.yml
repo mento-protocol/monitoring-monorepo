@@ -144,9 +144,11 @@ jobs:
           # (`alerts/infra`) stay on the write-capable deployer because a
           # full-refresh drift plan reads GCP resources the read-only seed SA
           # has no project roles to see. `==` yields a real boolean, so the
-          # ternary can't misfire on a stringified matrix value. The
-          # repo-scoped WIF binding (terraform/ci-wif.tf) lets any workflow in
-          # this repo mint either token — no IAM change was needed to swap.
+          # ternary can't misfire on a stringified matrix value. The deployer
+          # WIF binding (terraform/ci-wif.tf) is ref-gated to refs/heads/main:
+          # schedule runs and main dispatches still authenticate, while a
+          # non-main dispatch intentionally fails the write leg at auth. The
+          # plan-SA binding stays repo-scoped for read-only PR/ref checks.
           service_account: ${{ matrix.planSa == 'readonly' && secrets.GCP_SERVICE_ACCOUNT_PLAN || secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
