@@ -89,6 +89,9 @@ resource "google_service_account" "metrics_bridge_deployer" {
 # together enforce repo and ref. Dispatching a deployer-consuming workflow
 # from a non-main ref now fails at the auth step by design; PR jobs use the
 # read-only plan SA below.
+# Invariant: repo scope relies on the provider's `attribute_condition` above.
+# If that condition ever allows another repo, that repo's refs/heads/main
+# workflows would also match this binding. Review both resources together.
 resource "google_service_account_iam_member" "deployer_wif_binding" {
   service_account_id = google_service_account.metrics_bridge_deployer.name
   role               = "roles/iam.workloadIdentityUser"
