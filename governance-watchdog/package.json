@@ -22,7 +22,7 @@
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,js,json}\"",
     "gcp-build": "pnpm run build",
-    "generate:env": "terraform -chdir=infra apply -target=local_file.env_file",
+    "generate:env": "node ./bin/generate-env.mjs",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
     "lint": "eslint src/",

@@ -172,7 +172,7 @@ This service lives in its own dedicated GCP project (not `mento-alerts` or
    slack_notification_channel_id = "<slack-channel-id>"
    ```
 
-1. Auto-generate a local `.env` file by running `pnpm run generate:env` — we'll need this to run the cloud function locally
+1. Auto-generate a local `.env` file by running `pnpm run generate:env` — we'll need this to run the cloud function locally. The command reads Terraform state and `infra/terraform.tfvars`; it does not run `terraform apply`.
 
 1. Verify that everything works
 
