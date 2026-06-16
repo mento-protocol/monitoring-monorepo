@@ -423,13 +423,15 @@ This is the load-bearing addition — without it no series exists to alert on.
   `id, chainId, token0, token1, source, wrappedExchangeId,
 oracleFreshnessWindow, oracleMedianLive, oracleMedianTimestamp`, plus enough
   lifecycle/exchange state to prove the VP is active. Filter out deprecated
-  wrappers before emitting gauges, e.g. require the joined
-  `BiPoolExchange.isDeprecated == false` for `wrappedExchangeId` or a latest
-  `VirtualPoolLifecycle.action != "deprecated"` state. `PoolDeprecated` and
-  `ExchangeDestroyed` leave rows identifiable as VPs, but they intentionally
-  route no live swaps and must not page. Companion so a schema-mismatch only
-  drops VP gauges, not all FPMM gauges (mirrors the existing companion-query
-  rationale at `graphql.ts:1-7`).
+  wrappers before emitting gauges with a conservative AND rule: when the wrapped
+  exchange row is available, require `BiPoolExchange.isDeprecated == false`; when
+  lifecycle state is available, require the latest
+  `VirtualPoolLifecycle.action != "deprecated"`; if either source says
+  deprecated, do not emit VP gauges. Do not use an OR between those sources.
+  `PoolDeprecated` and `ExchangeDestroyed` leave rows identifiable as VPs, but
+  they intentionally route no live swaps and must not page. Companion so a
+  schema-mismatch only drops VP gauges, not all FPMM gauges (mirrors the existing
+  companion-query rationale at `graphql.ts:1-7`).
 - **Poller** (`poller.ts:100`): in addition to `data.Pool.filter(isFpmmPool)`,
   process the VP rows through a new `recordVpOracleMetrics`.
 - **Metrics** (`metrics.ts`): add two dedicated gauges with the existing
