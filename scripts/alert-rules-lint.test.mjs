@@ -101,13 +101,25 @@ resource "grafana_rule_group" "fixture" {
         ])
       })
     }
+    data {
+      model = jsonencode({
+        expr = format(
+          "%s unless (%s)",
+          join(" and ", [
+            "last_over_time(mento_pool_rebalance_effectiveness[1h])",
+            "mento_pool_limit_pressure",
+          ]),
+          local.window,
+        )
+      })
+    }
   }
 }
 `);
   const expressions = extractExpressions("fixture.tf", fixture);
   assert(
-    expressions.length === 6,
-    `expected 6 expressions, got ${expressions.length}: ${JSON.stringify(expressions)}`,
+    expressions.length === 9,
+    `expected 9 expressions, got ${expressions.length}: ${JSON.stringify(expressions)}`,
   );
   assert(
     expressions.some(
@@ -124,6 +136,14 @@ resource "grafana_rule_group" "fixture" {
   assert(
     !expressions.some((entry) => entry.expr === "comment_only_metric"),
     "full-line comments should not be extracted",
+  );
+  assert(
+    expressions.some(
+      (entry) =>
+        entry.kind === "join-elem" &&
+        entry.expr === "last_over_time(mento_pool_rebalance_effectiveness[1h])",
+    ),
+    "expected format-wrapped join fragment with a range selector",
   );
 });
 

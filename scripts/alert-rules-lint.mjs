@@ -59,6 +59,66 @@ export const neutralize = (expr) =>
     .replace(/%[dfg]/g, "1")
     .replaceAll(LITERAL_PERCENT, "%");
 
+function findClosingBracket(text, openIndex) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = openIndex; i < text.length; i += 1) {
+    const char = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === "[") {
+      depth += 1;
+    } else if (char === "]") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+
+  return -1;
+}
+
+function extractJoinFragments(file, text) {
+  const out = [];
+  const assignment = /^\s*expr\s*=/gm;
+  for (const match of text.matchAll(assignment)) {
+    const bodyStart = match.index + match[0].length;
+    const nextAssignment = /^\s*[A-Za-z0-9_]+\s*=/gm;
+    nextAssignment.lastIndex = bodyStart;
+    const next = nextAssignment.exec(text);
+    const bodyEnd = next ? next.index : text.length;
+    const body = text.slice(bodyStart, bodyEnd);
+    const joinCall = /join\(\s*"[^"]*"\s*,\s*\[/g;
+
+    for (const join of body.matchAll(joinCall)) {
+      const open = join.index + join[0].lastIndexOf("[");
+      const close = findClosingBracket(body, open);
+      if (close === -1) continue;
+
+      const listBody = body.slice(open + 1, close);
+      const elem = new RegExp(String.raw`^\s*${QUOTED},?\s*$`, "gm");
+      for (const element of listBody.matchAll(elem)) {
+        out.push({ file, kind: "join-elem", expr: unescapeHcl(element[1]) });
+      }
+    }
+  }
+
+  return out;
+}
+
 // `text` must already be comment-stripped.
 export function extractExpressions(file, text) {
   const out = [];
@@ -101,18 +161,12 @@ export function extractExpressions(file, text) {
     out.push({ file, kind: "heredoc", expr: match[1] });
   }
 
-  // Pass D: quoted fragments of `expr = join("...", [ ... ])` lists. Each
-  // fragment is a standalone PromQL expression by construction.
-  const joinBlock = new RegExp(
-    String.raw`^\s*expr\s*=\s*(?:format\([\s\S]*?)?join\("[^"]*",\s*\[([\s\S]*?)\]`,
-    "gm",
-  );
-  for (const match of text.matchAll(joinBlock)) {
-    const elem = new RegExp(String.raw`^\s*${QUOTED},?\s*$`, "gm");
-    for (const element of match[1].matchAll(elem)) {
-      out.push({ file, kind: "join-elem", expr: unescapeHcl(element[1]) });
-    }
-  }
+  // Pass D: quoted fragments of join("...", [ ... ]) lists inside expr
+  // assignments, including format(..., join(...)) wrappers. HCL has no raw
+  // string escapes inside the bracket list, so scan for the matching closing
+  // bracket while ignoring PromQL range-selector brackets inside quoted
+  // fragments.
+  out.push(...extractJoinFragments(file, text));
 
   return out;
 }
@@ -155,7 +209,7 @@ function main() {
     const cleaned = stripComments(
       readFileSync(path.join(rulesDir, file), "utf8"),
     );
-    expressions = expressions.concat(extractExpressions(file, cleaned));
+    expressions.push(...extractExpressions(file, cleaned));
     for (const name of referencedMetricNames(cleaned)) referenced.add(name);
   }
 

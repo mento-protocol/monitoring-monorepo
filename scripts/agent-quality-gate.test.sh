@@ -2193,6 +2193,12 @@ assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Action
 run_gate "scripts/check-github-action-pins.test.mjs"
 assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
 
+run_gate "scripts/alert-rules-lint.mjs"
+assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
+
+run_gate "scripts/alert-rules-lint.test.mjs"
+assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
+
 run_gate "scripts/check-pr-description.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
 

@@ -198,7 +198,8 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:autoreview`, `scripts.pr:feedback-state`,
 `scripts.pr:feedback-state:test`, `scripts.pr:ready-state`,
 `scripts.pr:ready-state:test`,
-`scripts.tf`, `scripts.tf:test`, `scripts.lockfile:lint`,
+`scripts.tf`, `scripts.tf:test`, `scripts.alerts:rules:lint`,
+`scripts.alerts:rules:lint:test`, `scripts.lockfile:lint`,
 `scripts.lockfile:lint:test`, `scripts.skew:check`, or
 `scripts.skew:check:test`; the gate treats that as tooling-only and runs an
 entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
