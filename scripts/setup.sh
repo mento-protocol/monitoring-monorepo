@@ -25,7 +25,10 @@ echo "▶ Installing dependencies..."
 pnpm install --frozen-lockfile
 
 echo "▶ Installing Playwright Chromium (ui-dashboard browser tests)..."
-pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium
+if ! pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium; then
+	echo "  ⚠ Playwright Chromium install failed; continuing setup." >&2
+	echo "    Run 'pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium' before browser tests." >&2
+fi
 
 echo "▶ Verifying ui-dashboard dependency resolution..."
 pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"

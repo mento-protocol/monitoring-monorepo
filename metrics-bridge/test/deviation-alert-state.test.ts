@@ -160,4 +160,84 @@ describe("deviation alert transition rehydration", () => {
       breachStartedAt: 1713200000,
     });
   });
+
+  it("does not inherit weekend-suppressed FX breach age after restart", () => {
+    const reopened = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713564000",
+        lastDeviationRatio: "1.02",
+      }),
+      "GBPm/USDm",
+      1713740400,
+    );
+
+    expect(reopened.state).toBe("warning");
+    expect(reopened.newTransitions).toHaveLength(0);
+
+    const recovered = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "0",
+        lastDeviationRatio: "1.00",
+      }),
+      "GBPm/USDm",
+      1713740700,
+    );
+
+    expect(recovered.state).toBe("ok");
+    expect(recovered.newTransitions).toHaveLength(0);
+  });
+
+  it("clears restored critical dwell when the critical signal clears", () => {
+    const restoredWarning = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713204000,
+    );
+
+    expect(restoredWarning.state).toBe("warning");
+    expect(restoredWarning.newTransitions).toHaveLength(0);
+
+    const belowCritical = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.02",
+      }),
+      "GBPm/USDm",
+      1713204050,
+    );
+
+    expect(belowCritical.state).toBe("warning");
+    expect(belowCritical.newTransitions).toHaveLength(0);
+
+    const criticalSignalReturned = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713204080,
+    );
+
+    expect(criticalSignalReturned.state).toBe("warning");
+    expect(criticalSignalReturned.newTransitions).toHaveLength(0);
+
+    const critical = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713204142,
+    );
+
+    expect(critical.state).toBe("critical");
+    expect(critical.newTransitions).toHaveLength(1);
+    expect(critical.newTransitions[0]).toMatchObject({
+      reason: "escalated_to_critical",
+      breachStartedAt: 1713200000,
+    });
+  });
 });

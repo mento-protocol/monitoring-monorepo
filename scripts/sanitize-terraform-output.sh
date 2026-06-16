@@ -13,7 +13,7 @@ sed -E \
 	-e 's#(https://discord(app)?\.com/api(/v[0-9]+)?/webhooks/[0-9]+/)[^"[:space:]\\]+#\1[REDACTED]#g' \
 	-e 's#https://[^"[:space:]\\]*(victorops|splunk)[^"[:space:]\\]*#[REDACTED]#g' \
 	-e 's#(\\?"token\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
-	-e 's#(\\?"api_key\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
+	-e 's#(\\?"[A-Za-z0-9_-]*api[-_]key\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
 	-e 's#(api_key[[:space:]]*[:=][[:space:]]*)[^"[:space:]\\]+#\1[REDACTED]#g' \
 	-e 's#(\\?"[A-Za-z0-9_-]*api[-_]key\\?"[[:space:]]*=[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
 	-e 's#(_key[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \

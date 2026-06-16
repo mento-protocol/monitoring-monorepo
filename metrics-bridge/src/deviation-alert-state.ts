@@ -253,12 +253,32 @@ function criticalStateCanFire(
   return nowSeconds - conditionEnteredAt > DEVIATION_CRITICAL_PENDING_SECONDS;
 }
 
+function lastFxReopenAtOrBefore(nowSeconds: number): number {
+  const date = new Date(nowSeconds * 1000);
+  const secondsSinceWeekStart =
+    date.getUTCDay() * 86_400 +
+    date.getUTCHours() * 3_600 +
+    date.getUTCMinutes() * 60 +
+    date.getUTCSeconds();
+  const sundayReopen = 23 * 3_600;
+  const delta =
+    secondsSinceWeekStart >= sundayReopen
+      ? secondsSinceWeekStart - sundayReopen
+      : secondsSinceWeekStart + 7 * 86_400 - sundayReopen;
+  return nowSeconds - delta;
+}
+
 function initialEnteredAt(
   currentState: ClassifiedDeviationAlertState,
+  pair: string,
   nowSeconds: number,
 ): number {
   if (currentState.state === "warning" && currentState.breachStartedAt) {
-    return Math.min(currentState.breachStartedAt, nowSeconds);
+    const persistedStart = Math.min(currentState.breachStartedAt, nowSeconds);
+    if (isFxPair(pair)) {
+      return Math.max(persistedStart, lastFxReopenAtOrBefore(nowSeconds));
+    }
+    return persistedStart;
   }
   return nowSeconds;
 }
@@ -281,6 +301,7 @@ function isRestartRestoredCriticalWarning(
 function buildCurrentSnapshot(
   previous: StateSnapshot | undefined,
   currentState: ClassifiedDeviationAlertState,
+  pair: string,
   nowSeconds: number,
 ): StateSnapshot {
   const signalEnteredAt = criticalSignalEnteredAt(
@@ -302,17 +323,21 @@ function buildCurrentSnapshot(
       // so alertCouldHaveFired() does not reset to process start and suppress
       // the next recovery's Slack context. Data-gap states intentionally start
       // now: a stale breach start is not evidence that ratio data has been
-      // missing long enough for the data-gap alert to fire.
-      initialEnteredAt(currentState, nowSeconds);
+      // missing long enough for the data-gap alert to fire. FX pairs clamp to
+      // the latest Sunday 23:00 UTC reopen, because weekend-suppressed breach
+      // age cannot count toward warning dwell after markets reopen.
+      initialEnteredAt(currentState, pair, nowSeconds);
 
   return {
     ...currentState,
     state,
     enteredAt,
     criticalSignalEnteredAt: signalEnteredAt,
-    restoredWarningDwell: previous
-      ? previous.state === state && previous.restoredWarningDwell
-      : isRestartRestoredCriticalWarning(previous, currentState, nowSeconds),
+    restoredWarningDwell:
+      currentState.criticalSignal !== null &&
+      (previous
+        ? previous.state === state && previous.restoredWarningDwell
+        : isRestartRestoredCriticalWarning(previous, currentState, nowSeconds)),
   };
 }
 
@@ -392,7 +417,12 @@ export function observeDeviationAlertState(
 
   const currentState = classifyDeviationAlertState(pool, pair, nowSeconds);
   const previous = previousStates.get(pool.id);
-  const current = buildCurrentSnapshot(previous, currentState, nowSeconds);
+  const current = buildCurrentSnapshot(
+    previous,
+    currentState,
+    pair,
+    nowSeconds,
+  );
 
   const newTransitions: DeviationAlertTransition[] = [];
   if (
