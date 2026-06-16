@@ -25,7 +25,7 @@ Result before enabling the compiler:
 - Next compile phase: 9.7s.
 - TypeScript phase: 8.3s.
 
-The same command failed inside the Codex sandbox before escalation because Turbopack attempted to bind a local port and macOS denied it with `Operation not permitted`.
+The same command can fail in restricted local sandboxes when Turbopack attempts to bind a local port and macOS denies it with `Operation not permitted`.
 
 ## Compiler-enabled evidence
 

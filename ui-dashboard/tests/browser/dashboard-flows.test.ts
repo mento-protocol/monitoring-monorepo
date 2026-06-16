@@ -359,9 +359,13 @@ test.describe("dashboard browser flows", () => {
   test("filters pools swaps by raw address while preserving table sort URL state", async ({
     page,
   }) => {
-    await page.goto("/pools?poolsSort=tvl&poolsDir=asc");
+    await page.goto("/pools");
 
     await expect(page.getByRole("heading", { name: "Pools" })).toBeVisible();
+    await page.getByRole("button", { name: /TVL/ }).click();
+    await expect(page).toHaveURL(/poolsSort=tvl/);
+    await expect(page).toHaveURL(/poolsDir=asc/);
+
     await page
       .getByLabel("Filter swaps by pool ID or pool address")
       .fill("0x462fe04b4fd719cbd04c0310365d421d02aaa19e");
