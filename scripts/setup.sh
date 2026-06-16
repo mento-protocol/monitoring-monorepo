@@ -24,10 +24,10 @@ echo "  core.hooksPath → .trunk/hooks"
 echo "▶ Installing dependencies..."
 pnpm install --frozen-lockfile
 
-echo "▶ Installing Playwright Chromium (ui-dashboard browser tests)..."
-if ! pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium; then
+echo "▶ Installing Playwright Chromium and host dependencies (ui-dashboard browser tests)..."
+if ! pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
 	echo "  ⚠ Playwright Chromium install failed; continuing setup." >&2
-	echo "    Run 'pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium' before browser tests." >&2
+	echo "    Run 'pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium' before browser tests." >&2
 fi
 
 echo "▶ Verifying ui-dashboard dependency resolution..."

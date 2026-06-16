@@ -105,8 +105,8 @@ describe("deviation alert transition rehydration", () => {
     expect(restored.newTransitions).toHaveLength(0);
   });
 
-  it("does not emit duplicate critical escalation after restart-restored warning", () => {
-    const restoredWarning = observeDeviationAlertState(
+  it("restores already-fired critical breaches without duplicate escalation", () => {
+    const restoredCritical = observeDeviationAlertState(
       makePool({
         deviationBreachStartedAt: "1713200000",
         lastDeviationRatio: "1.08",
@@ -115,8 +115,8 @@ describe("deviation alert transition rehydration", () => {
       1713204000,
     );
 
-    expect(restoredWarning.state).toBe("warning");
-    expect(restoredWarning.newTransitions).toHaveLength(0);
+    expect(restoredCritical.state).toBe("critical");
+    expect(restoredCritical.newTransitions).toHaveLength(0);
 
     const stillCritical = observeDeviationAlertState(
       makePool({
@@ -187,8 +187,8 @@ describe("deviation alert transition rehydration", () => {
     expect(recovered.newTransitions).toHaveLength(0);
   });
 
-  it("clears restored critical dwell when the critical signal clears", () => {
-    const restoredWarning = observeDeviationAlertState(
+  it("preserves critical recovery context after an already-fired critical restart", () => {
+    const restoredCritical = observeDeviationAlertState(
       makePool({
         deviationBreachStartedAt: "1713200000",
         lastDeviationRatio: "1.08",
@@ -197,20 +197,40 @@ describe("deviation alert transition rehydration", () => {
       1713204000,
     );
 
-    expect(restoredWarning.state).toBe("warning");
-    expect(restoredWarning.newTransitions).toHaveLength(0);
+    expect(restoredCritical.state).toBe("critical");
+    expect(restoredCritical.newTransitions).toHaveLength(0);
 
-    const belowCritical = observeDeviationAlertState(
+    const recovered = observeDeviationAlertState(
       makePool({
-        deviationBreachStartedAt: "1713200000",
-        lastDeviationRatio: "1.02",
+        deviationBreachStartedAt: "0",
+        lastDeviationRatio: "1.00",
       }),
       "GBPm/USDm",
       1713204050,
     );
 
-    expect(belowCritical.state).toBe("warning");
-    expect(belowCritical.newTransitions).toHaveLength(0);
+    expect(recovered.state).toBe("ok");
+    expect(recovered.newTransitions).toHaveLength(1);
+    expect(recovered.newTransitions[0]).toMatchObject({
+      from: "critical",
+      to: "ok",
+      reason: "recovered",
+      breachStartedAt: 1713200000,
+    });
+  });
+
+  it("keeps escalation context when a restored critical signal clears and returns", () => {
+    const earlyRestart = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.02",
+      }),
+      "GBPm/USDm",
+      1713204000,
+    );
+
+    expect(earlyRestart.state).toBe("warning");
+    expect(earlyRestart.newTransitions).toHaveLength(0);
 
     const criticalSignalReturned = observeDeviationAlertState(
       makePool({
@@ -218,7 +238,7 @@ describe("deviation alert transition rehydration", () => {
         lastDeviationRatio: "1.08",
       }),
       "GBPm/USDm",
-      1713204080,
+      1713204050,
     );
 
     expect(criticalSignalReturned.state).toBe("warning");
@@ -230,7 +250,7 @@ describe("deviation alert transition rehydration", () => {
         lastDeviationRatio: "1.08",
       }),
       "GBPm/USDm",
-      1713204142,
+      1713204112,
     );
 
     expect(critical.state).toBe("critical");
