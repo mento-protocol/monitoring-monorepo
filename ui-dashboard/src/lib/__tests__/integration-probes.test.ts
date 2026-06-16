@@ -198,4 +198,66 @@ describe("IntegrationProbeSnapshotSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("accepts the budget_exhausted status", () => {
+    const result = IntegrationProbeSnapshotSchema.safeParse({
+      schemaVersion: 1,
+      generatedAt: "2026-06-01T00:00:00.000Z",
+      amountUsd: "1",
+      takerAddress: "0x000000000000000000000000000000000000dEaD",
+      pairSource: {
+        kind: "hasura",
+        hasuraUrlConfigured: true,
+        note: "fixture",
+      },
+      chains: [],
+      aggregators: [
+        {
+          id: "budgeted",
+          label: "Budgeted",
+          kind: "dex",
+          tier: 1,
+          credentialEnv: [],
+          researchNote: "fixture",
+          chains: [
+            {
+              chainId: 42220,
+              chainSlug: "celo",
+              chainLabel: "Celo",
+              status: "budget_exhausted",
+              pairCoverage: { passed: 0, total: 1 },
+              blockingReason: "fixture",
+              nextStep: "fixture",
+              pairs: [
+                {
+                  pairId: "42220:EURm-USDm:42220-0xpool",
+                  poolId: "42220-0xpool",
+                  direction: "base-to-usdm",
+                  sellSymbol: "EURm",
+                  buySymbol: "USDm",
+                  status: "budget_exhausted",
+                  evidence: [],
+                  sourceLabels: [],
+                  txTarget: null,
+                  downstreamProvider: null,
+                  requestUrl: null,
+                  error: "Adapter quote-attempt budget exhausted.",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      summary: {
+        aggregators: 1,
+        chainChecks: 1,
+        passingChainChecks: 0,
+        failingChainChecks: 0,
+        needsKeyChainChecks: 0,
+        unsupportedChainChecks: 0,
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
 });

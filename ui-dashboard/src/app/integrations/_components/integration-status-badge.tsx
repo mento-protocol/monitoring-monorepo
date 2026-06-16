@@ -32,6 +32,10 @@ const STATUS_STYLES: Record<
     label: "Rate-limited",
     className: "bg-cyan-500/20 text-cyan-300",
   },
+  budget_exhausted: {
+    label: "Budget hit",
+    className: "bg-purple-500/20 text-purple-300",
+  },
   error: {
     label: "Error",
     className: "bg-red-500/20 text-red-300",

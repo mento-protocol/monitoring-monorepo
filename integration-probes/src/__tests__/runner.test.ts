@@ -230,6 +230,121 @@ describe("runIntegrationProbes", () => {
     const pairs = snapshot.aggregators[0]?.chains[0]?.pairs ?? [];
     expect(quoteFetches).toBe(3);
     expect(pairs.map((pair) => pair.attemptCount)).toEqual([2, 1]);
+    expect(pairs.map((pair) => pair.status)).toContain("budget_exhausted");
+    expect(snapshot.summary.failingChainChecks).toBe(1);
+  });
+
+  it("uses the budget next step for partial chains with exhausted budget", async () => {
+    let quoteFetches = 0;
+    const snapshot = await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [
+        {
+          ...passingAdapter(),
+          id: "partial-budgeted",
+          label: "Partial Budgeted",
+          maxQuoteRequestsPerRun: 1,
+          quote: (input) => ({
+            url: `https://partial-budgeted.test/${input.direction}`,
+          }),
+        },
+      ],
+      pairConcurrency: 1,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(
+            JSON.stringify({ data: { Pool: [poolRow(POOL, "EURm")] } }),
+          );
+        }
+        quoteFetches += 1;
+        return new Response(
+          JSON.stringify({ transactionRequest: { to: ROUTER_V300 } }),
+        );
+      },
+    });
+
+    const chain = snapshot.aggregators[0]?.chains[0];
+    expect(quoteFetches).toBe(1);
+    expect(chain?.status).toBe("partial");
+    expect(chain?.pairs.map((pair) => pair.status)).toEqual([
+      "pass",
+      "budget_exhausted",
+    ]);
+    expect(chain?.nextStep).toContain("maxQuoteRequestsPerRun");
+  });
+
+  it("keeps the generic partial next step when budget exhaustion follows failed routes", async () => {
+    let quoteFetches = 0;
+    const rows = [
+      poolRow(POOL, "EURm"),
+      poolRow("42220-0x4444444444444444444444444444444444444444", "GBPm"),
+    ];
+    const snapshot = await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [
+        {
+          ...passingAdapter(),
+          id: "partial-failed-budgeted",
+          label: "Partial Failed Budgeted",
+          maxQuoteRequestsPerRun: 2,
+          quote: (input) => ({
+            url: `https://partial-failed-budgeted.test/${input.pairId}/${input.direction}`,
+          }),
+        },
+      ],
+      pairConcurrency: 1,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(JSON.stringify({ data: { Pool: rows } }));
+        }
+        quoteFetches += 1;
+        return new Response(
+          quoteFetches === 1
+            ? JSON.stringify({ transactionRequest: { to: ROUTER_V300 } })
+            : JSON.stringify({ route: [{ protocol: "Other" }] }),
+        );
+      },
+    });
+
+    const chain = snapshot.aggregators[0]?.chains[0];
+    expect(quoteFetches).toBe(2);
+    expect(chain?.status).toBe("partial");
+    expect(chain?.pairs.map((pair) => pair.status)).toEqual([
+      "pass",
+      "fail",
+      "budget_exhausted",
+      "budget_exhausted",
+    ]);
+    expect(chain?.nextStep).toContain("route evidence");
+    expect(chain?.nextStep).not.toContain("maxQuoteRequestsPerRun");
+  });
+
+  it("logs a per-adapter quote-budget summary line", async () => {
+    const lines: string[] = [];
+    await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [budgetedAdapter()],
+      pairConcurrency: 1,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      log: (line) => lines.push(line),
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(
+            JSON.stringify({ data: { Pool: [poolRow(POOL, "EURm")] } }),
+          );
+        }
+        return new Response(JSON.stringify({ route: [{ protocol: "Other" }] }));
+      },
+    });
+
+    expect(lines).toContain(
+      "[integration-probes] adapter=budgeted quoteAttempts=3/3 remainingBudget=0",
+    );
   });
 
   it("serializes budgeted adapter pair probes", async () => {
