@@ -451,6 +451,45 @@ describe("incremental pool daily snapshot pagination", () => {
     expect(result.rows[0]!.swapVolume0).toBe("9");
   });
 
+  it("replaces a thin cache with a fuller complete SSR slice", async () => {
+    const cachedToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "1");
+    const ssrToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "9");
+    const ssrOld = poolSnapshotRow(
+      "pool-a",
+      TODAY_MIDNIGHT_SECONDS - 10 * 86_400,
+      "2",
+    );
+
+    incrementalRowCache.set("celo-mainnet:PoolDailySnapshot", {
+      variablesKey: "pool-a",
+      rows: [cachedToday],
+      refreshAfterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
+    });
+    seedIncrementalRowCacheFromNetworkData([
+      {
+        network: NETWORKS["celo-mainnet"],
+        pools: [{ id: "pool-a" }],
+        snapshotsAllDaily: [ssrToday, ssrOld],
+        snapshotsAllDailyError: null,
+        snapshotsAllDailyTruncated: false,
+        feeSnapshots: [],
+        feeSnapshotsError: null,
+        feeSnapshotsTruncated: false,
+      } as unknown as NetworkData,
+    ]);
+    requestMock.mockRejectedValueOnce(new Error("tail failed"));
+
+    const result = await fetchAllDailySnapshotPages(
+      makeClient(),
+      ["pool-a"],
+      "celo-mainnet",
+    );
+
+    expect(result.truncated).toBe(true);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0]!.swapVolume0).toBe("9");
+  });
+
   it("does not seed the cache from degraded or empty SSR slices", () => {
     seedIncrementalRowCacheFromNetworkData([
       {

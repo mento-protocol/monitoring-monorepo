@@ -312,7 +312,13 @@ function seedIncrementalRows(
   refreshAfterTimestamp = mutableDayCutoff(Date.now()),
 ): void {
   const existing = incrementalRowCache.get(cacheKey);
-  if (existing !== undefined && existing.variablesKey === variablesKey) return;
+  if (
+    existing !== undefined &&
+    existing.variablesKey === variablesKey &&
+    existing.rows.length >= rows.length
+  ) {
+    return;
+  }
   incrementalRowCache.set(cacheKey, {
     variablesKey,
     rows,
