@@ -48,6 +48,18 @@ describe("requireCronAuth", () => {
     expect(res?.status).toBe(401);
   });
 
+  it("401s when the secret is present outside the exact bearer token", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("CRON_SECRET", "secret");
+
+    await expect(
+      requireCronAuth(makeReq("Basic secret"), "test"),
+    ).resolves.toMatchObject({ status: 401 });
+    await expect(
+      requireCronAuth(makeReq("Bearer  secret"), "test"),
+    ).resolves.toMatchObject({ status: 401 });
+  });
+
   it("401s when no Authorization header is present", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("CRON_SECRET", "secret");

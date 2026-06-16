@@ -1,4 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
+
+function timingSafeStringEquals(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const aBytes = encoder.encode(a);
+  const bBytes = encoder.encode(b);
+  return aBytes.length === bBytes.length && timingSafeEqual(aBytes, bBytes);
+}
 
 /**
  * Bearer-only auth gate for cron-triggered GET routes.
@@ -34,7 +42,12 @@ export async function requireCronAuth(
     );
   }
 
-  if (req.headers.get("authorization") === `Bearer ${cronSecret}`) {
+  if (
+    timingSafeStringEquals(
+      req.headers.get("authorization") ?? "",
+      `Bearer ${cronSecret}`,
+    )
+  ) {
     return null;
   }
 

@@ -543,19 +543,37 @@ export function worstStatus(a: HealthStatus, b: HealthStatus): HealthStatus {
   return STATUS_RANK[a] >= STATUS_RANK[b] ? a : b;
 }
 
+type IndexedLimitStatus = Extract<
+  HealthStatus,
+  "N/A" | "OK" | "WARN" | "CRITICAL"
+>;
+
+const INDEXED_LIMIT_STATUSES: Record<IndexedLimitStatus, true> = {
+  "N/A": true,
+  OK: true,
+  WARN: true,
+  CRITICAL: true,
+};
+
+function isIndexedLimitStatus(
+  value: string | undefined,
+): value is IndexedLimitStatus {
+  return value !== undefined && value in INDEXED_LIMIT_STATUSES;
+}
+
 /** Resolve a pool's effective limit status. Reads the indexer-stored
- * `limitStatus` string when present (cast to `HealthStatus` — the indexer
- * only ever writes one of the four values), falling back to the live
- * `computeLimitStatus` for older pools that pre-date the indexed field. */
+ * `limitStatus` string when present and valid, falling back to the live
+ * `computeLimitStatus` for older pools that pre-date the indexed field or
+ * malformed GraphQL payloads. */
 export function resolveLimitStatus(pool: {
   source?: string | undefined;
+  wrappedExchangeId?: string | null | undefined;
   limitStatus?: string | undefined;
   limitPressure0?: string | undefined;
   limitPressure1?: string | undefined;
 }): HealthStatus {
-  return (
-    (pool.limitStatus as HealthStatus | undefined) ?? computeLimitStatus(pool)
-  );
+  if (isIndexedLimitStatus(pool.limitStatus)) return pool.limitStatus;
+  return computeLimitStatus(pool);
 }
 
 /**
@@ -575,6 +593,7 @@ export function resolveLimitStatus(pool: {
 export function computeEffectiveStatus(
   pool: {
     source?: string | undefined;
+    wrappedExchangeId?: string | null | undefined;
     oracleOk?: boolean | undefined;
     oracleTimestamp?: string | undefined;
     oracleExpiry?: string | undefined;
