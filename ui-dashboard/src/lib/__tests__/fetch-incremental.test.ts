@@ -191,6 +191,83 @@ describe("incremental fee snapshot pagination", () => {
     ]);
   });
 
+  it("uses the newest indexed row as the cutoff while history is stale", async () => {
+    const staleTimestamp = TODAY_MIDNIGHT_SECONDS - 10 * 86_400;
+    requestMock
+      .mockResolvedValueOnce({
+        PoolDailyFeeSnapshot: [feeRow("stale", staleTimestamp)],
+      })
+      .mockResolvedValueOnce({
+        PoolDailyFeeSnapshot: [feeRow("catch-up", staleTimestamp + 86_400)],
+      })
+      .mockResolvedValueOnce({
+        PoolDailyFeeSnapshot: [
+          feeRow("catch-up-2", staleTimestamp + 2 * 86_400),
+        ],
+      });
+
+    await fetchAllFeeSnapshotPages(makeClient(), 42220, "celo-mainnet");
+    const result = await fetchAllFeeSnapshotPages(
+      makeClient(),
+      42220,
+      "celo-mainnet",
+    );
+
+    expect(variablesAt(1)).toMatchObject({
+      chainId: 42220,
+      afterTimestamp: staleTimestamp,
+      limit: 1000,
+      offset: 0,
+    });
+    expect(result.error).toBeNull();
+    expect(result.rows.map((row) => row.id)).toEqual(["catch-up", "stale"]);
+
+    const nextResult = await fetchAllFeeSnapshotPages(
+      makeClient(),
+      42220,
+      "celo-mainnet",
+    );
+
+    expect(variablesAt(2)).toMatchObject({
+      chainId: 42220,
+      afterTimestamp: staleTimestamp + 86_400,
+      limit: 1000,
+      offset: 0,
+    });
+    expect(nextResult.error).toBeNull();
+    expect(nextResult.rows.map((row) => row.id)).toEqual([
+      "catch-up-2",
+      "catch-up",
+      "stale",
+    ]);
+  });
+
+  it("does not cache an empty complete history while the indexer backfills", async () => {
+    requestMock
+      .mockResolvedValueOnce({ PoolDailyFeeSnapshot: [] })
+      .mockResolvedValueOnce({
+        PoolDailyFeeSnapshot: [
+          feeRow("backfilled", YESTERDAY_MIDNIGHT_SECONDS),
+        ],
+      });
+
+    await fetchAllFeeSnapshotPages(makeClient(), 42220, "celo-mainnet");
+    const result = await fetchAllFeeSnapshotPages(
+      makeClient(),
+      42220,
+      "celo-mainnet",
+    );
+
+    expect(variablesAt(1)).toMatchObject({
+      chainId: 42220,
+      afterTimestamp: 0,
+      limit: 1000,
+      offset: 0,
+    });
+    expect(result.error).toBeNull();
+    expect(result.rows.map((row) => row.id)).toEqual(["backfilled"]);
+  });
+
   it("full fetch that fails mid-loop does not seed the cache", async () => {
     const fullPage = Array.from({ length: 1000 }, (_, index) =>
       feeRow(`row-${index}`, TODAY_MIDNIGHT_SECONDS - index),
@@ -217,6 +294,50 @@ describe("incremental fee snapshot pagination", () => {
       limit: 1000,
       offset: 0,
     });
+  });
+
+  it("suppresses incremental fee tail page errors while returning cached and partial rows", async () => {
+    const cachedOld = feeRow(
+      "cached-old",
+      TODAY_MIDNIGHT_SECONDS - 10 * 86_400,
+      "1",
+    );
+    const tailPage = Array.from({ length: 1000 }, (_, index) =>
+      feeRow(
+        `tail-${index}`,
+        TODAY_MIDNIGHT_SECONDS - (index % 2) * 86_400,
+        String(index + 2),
+      ),
+    );
+    requestMock
+      .mockResolvedValueOnce({ PoolDailyFeeSnapshot: [cachedOld] })
+      .mockResolvedValueOnce({ PoolDailyFeeSnapshot: tailPage })
+      .mockRejectedValueOnce(new Error("page 2 timeout"));
+
+    await fetchAllFeeSnapshotPages(makeClient(), 42220, "celo-mainnet");
+    const result = await fetchAllFeeSnapshotPages(
+      makeClient(),
+      42220,
+      "celo-mainnet",
+    );
+
+    expect(variablesAt(1)).toMatchObject({
+      chainId: 42220,
+      afterTimestamp: Number(cachedOld.timestamp),
+      limit: 1000,
+      offset: 0,
+    });
+    expect(variablesAt(2)).toMatchObject({
+      chainId: 42220,
+      afterTimestamp: Number(cachedOld.timestamp),
+      limit: 1000,
+      offset: 1000,
+    });
+    expect(result.truncated).toBe(true);
+    expect(result.error).toBeNull();
+    expect(result.rows).toHaveLength(1001);
+    expect(result.rows.some((row) => row.id === "cached-old")).toBe(true);
+    expect(result.rows.some((row) => row.id === "tail-0")).toBe(true);
   });
 
   it("changing non-timestamp variables forces a full re-fetch", async () => {
@@ -451,9 +572,9 @@ describe("incremental pool daily snapshot pagination", () => {
     expect(result.rows[0]!.swapVolume0).toBe("9");
   });
 
-  it("replaces a thin cache with a fuller complete SSR slice", async () => {
-    const cachedToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "1");
-    const ssrToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "9");
+  it("adds historical SSR rows without replacing fresher cached rows", async () => {
+    const cachedToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "9");
+    const ssrToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "1");
     const ssrOld = poolSnapshotRow(
       "pool-a",
       TODAY_MIDNIGHT_SECONDS - 10 * 86_400,
@@ -488,6 +609,7 @@ describe("incremental pool daily snapshot pagination", () => {
     expect(result.truncated).toBe(true);
     expect(result.rows).toHaveLength(2);
     expect(result.rows[0]!.swapVolume0).toBe("9");
+    expect(result.rows[1]!.swapVolume0).toBe("2");
   });
 
   it("does not seed the cache from degraded or empty SSR slices", () => {

@@ -305,18 +305,53 @@ export const incrementalRowCache = new Map<
 const poolIdsVariablesKey = (poolIds: readonly string[]) =>
   [...poolIds].sort().join(",");
 
-function seedIncrementalRows(
-  cacheKey: string,
-  variablesKey: string,
-  rows: unknown[],
-  refreshAfterTimestamp = mutableDayCutoff(Date.now()),
-): void {
+type IncrementalSeedArgs = {
+  cacheKey: string;
+  variablesKey: string;
+  rows: unknown[];
+  dedupKey: (row: unknown) => string;
+  timestampOf: (row: unknown) => number;
+  nowMs?: number;
+};
+
+function seedIncrementalRows({
+  cacheKey,
+  variablesKey,
+  rows,
+  dedupKey,
+  timestampOf,
+  nowMs = Date.now(),
+}: IncrementalSeedArgs): void {
+  if (rows.length === 0) return;
+
+  const refreshAfterTimestamp = refreshAfterTimestampForRows(
+    rows,
+    timestampOf,
+    nowMs,
+  );
   const existing = incrementalRowCache.get(cacheKey);
-  if (
-    existing !== undefined &&
-    existing.variablesKey === variablesKey &&
-    existing.rows.length >= rows.length
-  ) {
+  if (existing !== undefined && existing.variablesKey === variablesKey) {
+    const mergedRows = mergeRowsPreservingExisting(
+      existing.rows,
+      rows,
+      dedupKey,
+      timestampOf,
+    );
+    const mergedRefreshAfterTimestamp = Math.min(
+      existing.refreshAfterTimestamp,
+      refreshAfterTimestampForRows(mergedRows, timestampOf, nowMs),
+    );
+    if (
+      existing.rows.length === mergedRows.length &&
+      existing.refreshAfterTimestamp === mergedRefreshAfterTimestamp
+    ) {
+      return;
+    }
+    incrementalRowCache.set(cacheKey, {
+      variablesKey,
+      rows: mergedRows,
+      refreshAfterTimestamp: mergedRefreshAfterTimestamp,
+    });
     return;
   }
   incrementalRowCache.set(cacheKey, {
@@ -335,11 +370,16 @@ export function seedIncrementalRowCacheFromNetworkData(
       !data.snapshotsAllDailyTruncated &&
       data.pools.length > 0
     ) {
-      seedIncrementalRows(
-        `${data.network.id}:PoolDailySnapshot`,
-        poolIdsVariablesKey(data.pools.map((pool) => pool.id)),
-        data.snapshotsAllDaily,
-      );
+      seedIncrementalRows({
+        cacheKey: `${data.network.id}:PoolDailySnapshot`,
+        variablesKey: poolIdsVariablesKey(data.pools.map((pool) => pool.id)),
+        rows: data.snapshotsAllDaily,
+        dedupKey: (row) => {
+          const snapshot = row as PoolSnapshotWindow;
+          return `${snapshot.poolId}-${snapshot.timestamp}`;
+        },
+        timestampOf: (row) => Number((row as PoolSnapshotWindow).timestamp),
+      });
     }
 
     if (
@@ -347,11 +387,13 @@ export function seedIncrementalRowCacheFromNetworkData(
       !data.feeSnapshotsTruncated &&
       data.feeSnapshots.length > 0
     ) {
-      seedIncrementalRows(
-        `${data.network.id}:PoolDailyFeeSnapshot`,
-        String(data.network.chainId),
-        data.feeSnapshots,
-      );
+      seedIncrementalRows({
+        cacheKey: `${data.network.id}:PoolDailyFeeSnapshot`,
+        variablesKey: String(data.network.chainId),
+        rows: data.feeSnapshots,
+        dedupKey: (row) => (row as PoolDailyFeeSnapshot).id,
+        timestampOf: (row) => Number((row as PoolDailyFeeSnapshot).timestamp),
+      });
     }
   }
 }
@@ -365,6 +407,49 @@ function mutableDayCutoff(nowMs: number): number {
   const todayMidnightUtc =
     Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
   return todayMidnightUtc - SECONDS_PER_DAY;
+}
+
+function refreshAfterTimestampForRows<TRow>(
+  rows: readonly TRow[],
+  timestampOf: (row: TRow) => number,
+  nowMs: number,
+): number {
+  const newestIndexedTimestamp = rows.reduce(
+    (newest, row) => Math.max(newest, timestampOf(row)),
+    0,
+  );
+  return Math.min(mutableDayCutoff(nowMs), newestIndexedTimestamp);
+}
+
+function mergeRowsPreservingExisting<TRow>(
+  existingRows: readonly TRow[],
+  incomingRows: readonly TRow[],
+  dedupKey: (row: TRow) => string,
+  timestampOf: (row: TRow) => number,
+): TRow[] {
+  const merged = new Map<string, TRow>();
+  for (const row of existingRows) merged.set(dedupKey(row), row);
+  for (const row of incomingRows) {
+    const key = dedupKey(row);
+    if (!merged.has(key)) merged.set(key, row);
+  }
+  return [...merged.values()].sort(
+    (a, b) =>
+      timestampOf(b) - timestampOf(a) || dedupKey(b).localeCompare(dedupKey(a)),
+  );
+}
+
+function shouldCacheCompleteRows<TRow>(
+  result: PaginatedPageResult<TRow>,
+): boolean {
+  return !result.truncated && result.error === null && result.rows.length > 0;
+}
+
+function surfacedIncrementalError(
+  error: Error | null,
+  surfaceIncrementalError: boolean,
+): Error | null {
+  return surfaceIncrementalError ? error : null;
 }
 
 async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
@@ -414,11 +499,17 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
     const full = await paginate(0);
     // Only complete results seed the cache — truncated/errored full fetches
     // retry the full pagination next cycle, identical to legacy behavior.
-    if (!full.truncated && full.error === null) {
+    // Empty complete histories are also left uncached so a backfilling indexer
+    // does not skip newly indexed catch-up days on the next poll.
+    if (shouldCacheCompleteRows(full)) {
       incrementalRowCache.set(cacheKey, {
         variablesKey,
         rows: full.rows,
-        refreshAfterTimestamp: mutableDayCutoff(nowMs),
+        refreshAfterTimestamp: refreshAfterTimestampForRows(
+          full.rows,
+          timestampOf,
+          nowMs,
+        ),
       });
     }
     return full;
@@ -435,7 +526,7 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
     return {
       rows: cachedRows,
       truncated: true,
-      error: surfaceIncrementalError ? error : null,
+      error: surfacedIncrementalError(error, surfaceIncrementalError),
     };
   }
 
@@ -449,15 +540,23 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
       timestampOf(b) - timestampOf(a) || dedupKey(b).localeCompare(dedupKey(a)),
   );
 
-  if (!tail.truncated && tail.error === null) {
+  if (shouldCacheCompleteRows(tail)) {
     incrementalRowCache.set(cacheKey, {
       variablesKey,
       rows,
-      refreshAfterTimestamp: mutableDayCutoff(nowMs),
+      refreshAfterTimestamp: refreshAfterTimestampForRows(
+        rows,
+        timestampOf,
+        nowMs,
+      ),
     });
   }
 
-  return { rows, truncated: tail.truncated, error: tail.error };
+  return {
+    rows,
+    truncated: tail.truncated,
+    error: surfacedIncrementalError(tail.error, surfaceIncrementalError),
+  };
 }
 
 /**
