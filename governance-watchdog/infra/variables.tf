@@ -151,3 +151,14 @@ variable "terraform_seed_project_id" {
   description = "The GCP Project ID of the Terraform Seed Project housing the terraform state of all projects"
   default     = "mento-terraform-seed-ffac"
 }
+
+variable "github_token" {
+  description = "Fine-grained GitHub PAT scoped to monitoring-monorepo with Secrets read/write. Used to mirror the TF_VAR_* repo secrets consumed by the drift workflow."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.github_token) > 0
+    error_message = "GitHub PAT must not be empty."
+  }
+}
