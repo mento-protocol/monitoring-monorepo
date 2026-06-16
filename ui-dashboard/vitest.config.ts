@@ -3,6 +3,7 @@ import path from "path";
 
 export default defineConfig({
   test: {
+    setupFiles: ["./vitest.hermetic-setup.ts"],
     environment: "node",
     include: [
       "src/**/*.test.{ts,tsx}",

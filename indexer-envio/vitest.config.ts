@@ -5,6 +5,10 @@ export default defineConfig({
     globals: true,
     testTimeout: 60_000,
     include: ["test/**/*.test.ts"],
+    setupFiles: [
+      "./vitest.hermetic-setup.ts",
+      "./test/setup/publish-test-rpc.ts",
+    ],
     env: {
       // Lower start_blocks so test simulations can use small block numbers
       // without violating the config's mainnet start_block invariants.
