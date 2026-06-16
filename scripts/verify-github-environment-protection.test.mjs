@@ -7,6 +7,7 @@ import {
 } from "./verify-github-environment-protection.mjs";
 
 const protectedEnvironment = {
+  can_admins_bypass: false,
   protection_rules: [
     {
       type: "required_reviewers",
@@ -24,6 +25,7 @@ assert.deepEqual(environmentProtectionFailures(protectedEnvironment), []);
 
 assert.deepEqual(
   environmentProtectionFailures({
+    can_admins_bypass: false,
     protection_rules: [],
     deployment_branch_policy: {
       protected_branches: true,
@@ -38,6 +40,7 @@ assert.deepEqual(
 
 assert.deepEqual(
   environmentProtectionFailures({
+    can_admins_bypass: true,
     protection_rules: [
       {
         type: "required_reviewers",
@@ -51,9 +54,18 @@ assert.deepEqual(
     },
   }),
   [
+    "admin bypass is not disabled",
     "prevent self-review is not enabled",
     "deployment branches are not limited to protected branches",
   ],
+);
+
+assert.deepEqual(
+  environmentProtectionFailures({
+    protection_rules: protectedEnvironment.protection_rules,
+    deployment_branch_policy: protectedEnvironment.deployment_branch_policy,
+  }),
+  ["admin bypass is not disabled"],
 );
 
 assert.equal(

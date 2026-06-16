@@ -11,6 +11,9 @@ export function environmentProtectionFailures(environment) {
   const branchPolicy = environment.deployment_branch_policy;
   const failures = [];
 
+  if (environment.can_admins_bypass !== false) {
+    failures.push("admin bypass is not disabled");
+  }
   if (!reviewers || (reviewers.reviewers ?? []).length === 0) {
     failures.push("required reviewers are not configured");
   }
