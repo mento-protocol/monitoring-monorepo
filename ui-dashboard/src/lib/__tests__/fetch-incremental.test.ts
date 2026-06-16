@@ -612,6 +612,44 @@ describe("incremental pool daily snapshot pagination", () => {
     expect(result.rows[1]!.swapVolume0).toBe("2");
   });
 
+  it("advances stale SSR merge cutoffs when complete data reaches the mutable window", async () => {
+    const staleTimestamp = TODAY_MIDNIGHT_SECONDS - 10 * 86_400;
+    const cachedStale = poolSnapshotRow("pool-a", staleTimestamp, "1");
+    const ssrToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "2");
+
+    incrementalRowCache.set("celo-mainnet:PoolDailySnapshot", {
+      variablesKey: "pool-a",
+      rows: [cachedStale],
+      refreshAfterTimestamp: staleTimestamp,
+    });
+    seedIncrementalRowCacheFromNetworkData([
+      {
+        network: NETWORKS["celo-mainnet"],
+        pools: [{ id: "pool-a" }],
+        snapshotsAllDaily: [ssrToday],
+        snapshotsAllDailyError: null,
+        snapshotsAllDailyTruncated: false,
+        feeSnapshots: [],
+        feeSnapshotsError: null,
+        feeSnapshotsTruncated: false,
+      } as unknown as NetworkData,
+    ]);
+    requestMock.mockResolvedValueOnce({
+      PoolDailySnapshot: [
+        poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "3"),
+      ],
+    });
+
+    await fetchAllDailySnapshotPages(makeClient(), ["pool-a"], "celo-mainnet");
+
+    expect(variablesAt(0)).toMatchObject({
+      poolIds: ["pool-a"],
+      afterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
+      limit: 1000,
+      offset: 0,
+    });
+  });
+
   it("does not seed the cache from degraded or empty SSR slices", () => {
     seedIncrementalRowCacheFromNetworkData([
       {

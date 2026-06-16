@@ -337,9 +337,10 @@ function seedIncrementalRows({
       dedupKey,
       timestampOf,
     );
-    const mergedRefreshAfterTimestamp = Math.min(
-      existing.refreshAfterTimestamp,
-      refreshAfterTimestampForRows(mergedRows, timestampOf, nowMs),
+    const mergedRefreshAfterTimestamp = refreshAfterTimestampForRows(
+      mergedRows,
+      timestampOf,
+      nowMs,
     );
     if (
       existing.rows.length === mergedRows.length &&
