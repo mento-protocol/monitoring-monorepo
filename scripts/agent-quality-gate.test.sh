@@ -2241,6 +2241,12 @@ assert_contains "- pnpm skew:check:test (version skew checker changed)"
 run_gate "scripts/check-hermetic-vitest-setup.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
+assert_contains "- node scripts/check-hermetic-vitest-setup.test.mjs (hermetic Vitest setup checker changed)"
+
+run_gate "scripts/check-hermetic-vitest-setup.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
+assert_contains "- node scripts/check-hermetic-vitest-setup.test.mjs (hermetic Vitest setup checker changed)"
 
 run_gate "scripts/check-github-action-pins.mjs"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions pin checker changed)"

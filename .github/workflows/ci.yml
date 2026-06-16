@@ -213,6 +213,7 @@ jobs:
               - scripts/**/*.js
               - scripts/**/*.sh
               - "**/vitest.hermetic-setup.ts"
+              - "**/vitest.config.ts"
               # Alert-rules lint inputs: the scripts job parses alerts/rules
               # PromQL and cross-checks metric names against the metrics-bridge
               # gauge registry.
@@ -849,6 +850,8 @@ jobs:
         run: pnpm agent:quality-gate:test
       - name: Hermetic Vitest setup consistency
         run: node scripts/check-hermetic-vitest-setup.mjs
+      - name: Hermetic Vitest setup consistency suite
+        run: node scripts/check-hermetic-vitest-setup.test.mjs
       - name: Deviation threshold drift suite
         run: node scripts/check-deviation-threshold-drift.test.mjs
       - name: PR description validator suite
