@@ -95,7 +95,9 @@ merging the workflow change that first references them. GitHub auto-creates a
 missing environment on first workflow use with no protection rules, so
 `production-infra` must already have required reviewers, prevent self-review,
 and the protected-`main` branch restriction before any Terraform-changing
-commit can land on `main`.
+commit can land on `main`. The Terraform apply workflows also verify this
+configuration before cloud authentication so an accidentally auto-created
+environment fails closed before `terraform apply`.
 
 Repo admins should keep exactly two production GitHub Environments for this
 repo's Actions workflows:
