@@ -273,7 +273,7 @@ function isRestartRestoredCriticalWarning(
     currentState.state === "warning" &&
     currentState.breachStartedAt !== null &&
     nowSeconds - currentState.breachStartedAt >=
-      DEVIATION_WARNING_PENDING_SECONDS &&
+      DEVIATION_CRITICAL_FIRING_SECONDS &&
     currentState.criticalSignal !== null
   );
 }

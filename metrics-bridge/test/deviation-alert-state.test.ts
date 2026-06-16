@@ -130,4 +130,34 @@ describe("deviation alert transition rehydration", () => {
     expect(stillCritical.state).toBe("critical");
     expect(stillCritical.newTransitions).toHaveLength(0);
   });
+
+  it("keeps the first critical escalation after an early critical-magnitude restart", () => {
+    const earlyRestart = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713201800,
+    );
+
+    expect(earlyRestart.state).toBe("warning");
+    expect(earlyRestart.newTransitions).toHaveLength(0);
+
+    const critical = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713203662,
+    );
+
+    expect(critical.state).toBe("critical");
+    expect(critical.newTransitions).toHaveLength(1);
+    expect(critical.newTransitions[0]).toMatchObject({
+      reason: "escalated_to_critical",
+      breachStartedAt: 1713200000,
+    });
+  });
 });
