@@ -17,7 +17,12 @@ globalThis.fetch = ((
       : input instanceof URL
         ? input.href
         : input.url;
-  const url = new URL(rawUrl, "http://127.0.0.1/");
+  let url: URL;
+  try {
+    url = new URL(rawUrl, "http://127.0.0.1/");
+  } catch {
+    return realFetch(input, init);
+  }
   if (url.protocol !== "data:" && !LOOPBACK_HOSTS.has(url.hostname)) {
     return Promise.reject(
       new Error(

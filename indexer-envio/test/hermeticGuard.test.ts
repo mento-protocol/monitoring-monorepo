@@ -7,8 +7,14 @@ describe("hermetic test guard", () => {
     expect(process.env.ENVIO_RPC_URL_42220).toMatch(
       /^http:\/\/127\.0\.0\.1:\d+\/42220$/,
     );
+    expect(process.env.ENVIO_RPC_URL_1).toMatch(
+      /^http:\/\/127\.0\.0\.1:\d+\/1$/,
+    );
     expect(process.env.ENVIO_RPC_FALLBACK_URL_42220).toMatch(
       /^http:\/\/127\.0\.0\.1:\d+\/42220$/,
+    );
+    expect(process.env.ENVIO_RPC_FALLBACK_URL_1).toMatch(
+      /^http:\/\/127\.0\.0\.1:\d+\/1$/,
     );
   });
 

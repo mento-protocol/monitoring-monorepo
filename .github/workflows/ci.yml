@@ -212,6 +212,7 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - scripts/**/*.sh
+              - "**/vitest.hermetic-setup.ts"
               - terraform.stacks.json
               - eslint.config.mjs
               - .dependency-cruiser.cjs
@@ -840,6 +841,8 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: Hermetic Vitest setup consistency
+        run: node scripts/check-hermetic-vitest-setup.mjs
       - name: Deviation threshold drift suite
         run: node scripts/check-deviation-threshold-drift.test.mjs
       - name: PR description validator suite

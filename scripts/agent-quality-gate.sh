@@ -930,6 +930,12 @@ while IFS= read -r path; do
       ;;
   esac
   case "$path" in
+    */vitest.hermetic-setup.ts)
+      add_surface "tooling"
+      add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup changed"
+      ;;
+  esac
+  case "$path" in
     ui-dashboard/scripts/*.sh)
       add_surface "ui-dashboard"
       case "$path" in
@@ -1336,6 +1342,9 @@ while IFS= read -r path; do
           ;;
         scripts/version-skew-check.mjs|scripts/version-skew-check.test.mjs)
           add_command "pnpm skew:check:test" "version skew checker changed"
+          ;;
+        scripts/check-hermetic-vitest-setup.mjs)
+          add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup checker changed"
           ;;
         scripts/check-github-action-pins.mjs)
           add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions pin checker changed"

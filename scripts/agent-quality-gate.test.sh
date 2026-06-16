@@ -1445,6 +1445,9 @@ assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest r
 assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 
+run_gate "ui-dashboard/vitest.hermetic-setup.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup changed)"
+
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
 
@@ -2183,6 +2186,10 @@ assert_contains "- pnpm skew:check:test (version skew checker changed)"
 
 run_gate "scripts/version-skew-check.test.mjs"
 assert_contains "- pnpm skew:check:test (version skew checker changed)"
+
+run_gate "scripts/check-hermetic-vitest-setup.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
 
 run_gate "scripts/check-github-action-pins.mjs"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions pin checker changed)"
