@@ -871,7 +871,12 @@ function handleGraphQL({ query, variables = {} }) {
       };
     case "PoolDailySnapshotsAll":
     case "HomepageOgDailySnapshots":
-      return { PoolDailySnapshot: rowsByPoolIds(variables.poolIds) };
+      return {
+        PoolDailySnapshot: rowsByPoolIds(variables.poolIds).filter(
+          (row) =>
+            Number(row.timestamp) >= Number(variables.afterTimestamp ?? 0),
+        ),
+      };
     case "PoolDailySnapshotsChart":
     case "PoolOgDailySnapshots":
       return {
@@ -903,12 +908,15 @@ function handleGraphQL({ query, variables = {} }) {
       };
     case "PoolDailyFeeSnapshotsPage":
       return {
-        PoolDailyFeeSnapshot: poolDailyFeeSnapshotsForChain(
-          variables.chainId,
-        ).slice(
-          variables.offset ?? 0,
-          (variables.offset ?? 0) + variables.limit,
-        ),
+        PoolDailyFeeSnapshot: poolDailyFeeSnapshotsForChain(variables.chainId)
+          .filter(
+            (row) =>
+              Number(row.timestamp) >= Number(variables.afterTimestamp ?? 0),
+          )
+          .slice(
+            variables.offset ?? 0,
+            (variables.offset ?? 0) + variables.limit,
+          ),
       };
     case "CdpBorrowingRevenueMarkets":
       return {

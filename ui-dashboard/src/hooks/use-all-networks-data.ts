@@ -4,6 +4,7 @@ import useSWR, { useSWRConfig } from "swr";
 import {
   fetchAllNetworks,
   isNetworkDataFullyHealthy,
+  seedIncrementalRowCacheFromNetworkData,
   type NetworkData,
 } from "@/lib/fetch-all-networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
@@ -63,6 +64,14 @@ export function useAllNetworksData(
   const isCacheCold = cache.get(SWR_KEY_ALL_NETWORKS_DATA)?.data === undefined;
   const skipRevalidation =
     fallbackData !== undefined && allHealthy && isCacheCold;
+
+  // Seed before `useSWR`: degraded SSR payloads intentionally revalidate on
+  // mount, and that immediate fetch must still use the incremental snapshot
+  // path for any complete slices present in the fallback.
+  if (fallbackData !== undefined) {
+    seedIncrementalRowCacheFromNetworkData(fallbackData);
+  }
+
   const { data, error, isLoading } = useSWR<NetworkData[]>(
     SWR_KEY_ALL_NETWORKS_DATA,
     fetchAllNetworks,

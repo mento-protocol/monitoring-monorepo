@@ -12,12 +12,15 @@ const EXPECTED_EXPORT_NAMES = [
   "REQUEST_TIMEOUT_MS",
   "SNAPSHOT_PAGE_SIZE",
   "blankNetworkData",
+  "fetchAllDailySnapshotPages",
   "fetchAllFeeSnapshotPages",
   "fetchAllNetworks",
   "fetchNetworkData",
   "fetchPaginatedRows",
+  "incrementalRowCache",
   "isNetworkDataFullyHealthy",
   "partialPageLastCapturedAt",
+  "seedIncrementalRowCacheFromNetworkData",
   "warnedCapKeys",
 ] as const;
 
@@ -75,7 +78,8 @@ describe("@/lib/fetch-all-networks — surface contract", () => {
     );
   });
 
-  it("warnedCapKeys is a Set and partialPageLastCapturedAt is a Map (mutable module state)", () => {
+  it("mutable module-state exports expose clearable collections", () => {
+    expect(fetchAllNetworks.incrementalRowCache).toBeInstanceOf(Map);
     expect(fetchAllNetworks.warnedCapKeys).toBeInstanceOf(Set);
     expect(fetchAllNetworks.partialPageLastCapturedAt).toBeInstanceOf(Map);
   });

@@ -86,6 +86,7 @@ vi.mock("graphql-request", () => {
 });
 
 import { GraphQLClient } from "graphql-request";
+import { incrementalRowCache } from "@/lib/fetch-all-networks";
 
 /**
  * Sets up a per-query mock.
@@ -156,6 +157,7 @@ beforeEach(() => {
   });
   // Sentry de-dup maps live at module scope — clear between tests so
   // previous runs don't suppress subsequent captures.
+  incrementalRowCache.clear();
   warnedCapKeys.clear();
   partialPageLastCapturedAt.clear();
 });
@@ -215,6 +217,7 @@ describe("fetchNetworkData — happy path", () => {
     expect(varsFor("Pool(")).toEqual({ chainId: 42220 });
     expect(varsFor("PoolDailyFeeSnapshotsPage")).toEqual({
       chainId: 42220,
+      afterTimestamp: 0,
       limit: 1000,
       offset: 0,
     });
@@ -230,6 +233,7 @@ describe("fetchNetworkData — happy path", () => {
     const snapshotCall = snapshotCalls[0]!;
     expect(extractVariables(snapshotCall[0], snapshotCall[1])).toEqual({
       poolIds: ["pool-1"],
+      afterTimestamp: 0,
       limit: 1000,
       offset: 0,
     });

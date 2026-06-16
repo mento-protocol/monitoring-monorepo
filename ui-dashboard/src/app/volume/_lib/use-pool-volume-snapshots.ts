@@ -9,7 +9,9 @@ import type { PoolDailyVolumeRow } from "@/lib/volume-pool";
 
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 100;
-const REFRESH_MS = 10_000;
+// PoolDailyVolumeSnapshot is a daily rollup — only today's row mutates, so
+// sub-minute polling adds Hasura load without adding chart resolution.
+const REFRESH_MS = 60_000;
 const POLL_TIMEOUT_MS = 8_000;
 
 type PoolVolumePage = {
@@ -28,10 +30,11 @@ export async function fetchPoolVolumeSnapshots(
   const client = new GraphQLClient(hasuraUrl);
   const rows: PoolDailyVolumeRow[] = [];
   const seen = new Set<string>();
-  const signal = AbortSignal.timeout(POLL_TIMEOUT_MS);
 
-  // Sequential pagination keeps the poll bounded by one shared timeout and
-  // stops as soon as Hasura returns a short page.
+  // Sequential pagination with a fresh per-page abort budget (matches
+  // fetchPaginatedRows in src/lib/network-fetcher/fetch.ts) — a shared signal
+  // flips the all-range fetch permanently partial once history outgrows one 8s
+  // budget.
   for (let page = 0; page <= MAX_PAGES; page += 1) {
     let batch: PoolDailyVolumeRow[];
     try {
@@ -43,7 +46,7 @@ export async function fetchPoolVolumeSnapshots(
           limit: PAGE_SIZE,
           offset: page * PAGE_SIZE,
         },
-        signal,
+        signal: AbortSignal.timeout(POLL_TIMEOUT_MS),
       });
       batch = result.PoolDailyVolumeSnapshot ?? [];
     } catch (err) {

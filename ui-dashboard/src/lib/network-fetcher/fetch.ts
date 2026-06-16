@@ -290,27 +290,160 @@ export async function fetchPaginatedRows<TRow, TVars>(args: {
   return { rows, truncated: true, error: null };
 }
 
+// Incremental snapshot cache. Pool×day history is immutable except the current
+// (and, across a midnight boundary, previous) UTC day, so after one successful
+// full-history pagination we only re-fetch the mutable tail and merge.
+// Module-scope on purpose (same lifetime contract as `warnedCapKeys`):
+// client-side it spans the SWR poll loop, server-side it spans ISR
+// regenerations on a warm instance.
+/** @internal Exported for test-scope `.clear()`. */
+export const incrementalRowCache = new Map<
+  string,
+  { variablesKey: string; rows: unknown[] }
+>();
+
+const poolIdsVariablesKey = (poolIds: readonly string[]) =>
+  [...poolIds].sort().join(",");
+
+export function seedIncrementalRowCacheFromNetworkData(
+  networkData: readonly NetworkData[],
+): void {
+  for (const data of networkData) {
+    if (
+      data.snapshotsAllDailyError === null &&
+      !data.snapshotsAllDailyTruncated &&
+      data.pools.length > 0
+    ) {
+      incrementalRowCache.set(`${data.network.id}:PoolDailySnapshot`, {
+        variablesKey: poolIdsVariablesKey(data.pools.map((pool) => pool.id)),
+        rows: data.snapshotsAllDaily,
+      });
+    }
+
+    if (data.feeSnapshotsError === null && !data.feeSnapshotsTruncated) {
+      incrementalRowCache.set(`${data.network.id}:PoolDailyFeeSnapshot`, {
+        variablesKey: String(data.network.chainId),
+        rows: data.feeSnapshots,
+      });
+    }
+  }
+}
+
+const SECONDS_PER_DAY = 86_400;
+
+// Oldest timestamp that can still mutate: today's UTC day bucket, minus one
+// extra day so a poll that crosses midnight still re-fetches the final updates
+// to yesterday's row.
+function mutableDayCutoff(nowMs: number): number {
+  const todayMidnightUtc =
+    Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  return todayMidnightUtc - SECONDS_PER_DAY;
+}
+
+async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
+  client: GraphQLClient;
+  query: string;
+  responseKey: string;
+  network: string;
+  pageSize: number;
+  /** Serialized non-timestamp variables; a change invalidates the cache. */
+  variablesKey: string;
+  variablesFor: (page: number, afterTimestamp: number) => TVars;
+  dedupKey: (row: TRow) => string;
+  timestampOf: (row: TRow) => number;
+  extra?: Record<string, unknown>;
+}): Promise<PaginatedPageResult<TRow>> {
+  const {
+    client,
+    query,
+    responseKey,
+    network,
+    pageSize,
+    variablesKey,
+    variablesFor,
+    dedupKey,
+    timestampOf,
+    extra,
+  } = args;
+  const cacheKey = `${network}:${responseKey}`;
+  const cached = incrementalRowCache.get(cacheKey);
+  const paginate = (afterTimestamp: number) =>
+    fetchPaginatedRows<TRow, TVars>({
+      client,
+      query,
+      responseKey,
+      network,
+      pageSize,
+      variablesFor: (page) => variablesFor(page, afterTimestamp),
+      dedupKey,
+      ...(extra !== undefined ? { extra } : {}),
+    });
+
+  if (cached === undefined || cached.variablesKey !== variablesKey) {
+    const full = await paginate(0);
+    // Only complete results seed the cache — truncated/errored full fetches
+    // retry the full pagination next cycle, identical to legacy behavior.
+    if (!full.truncated && full.error === null) {
+      incrementalRowCache.set(cacheKey, { variablesKey, rows: full.rows });
+    }
+    return full;
+  }
+
+  const cachedRows = cached.rows as TRow[];
+  let tail: PaginatedPageResult<TRow>;
+  try {
+    tail = await paginate(mutableDayCutoff(Date.now()));
+  } catch (err) {
+    // First-page failure on the incremental path: degrade to cached history
+    // (mirrors the mid-loop fail-open contract on SNAPSHOT_PAGE_SIZE).
+    return {
+      rows: cachedRows,
+      truncated: true,
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+
+  const merged = new Map<string, TRow>();
+  for (const row of cachedRows) merged.set(dedupKey(row), row);
+  for (const row of tail.rows) merged.set(dedupKey(row), row);
+  // Keep the legacy newest-first ordering — `fetchNetworkData` reads the LAST
+  // element as the oldest fetched row (`oldestFetchedTs`).
+  const rows = [...merged.values()].sort(
+    (a, b) =>
+      timestampOf(b) - timestampOf(a) || dedupKey(b).localeCompare(dedupKey(a)),
+  );
+
+  if (!tail.truncated && tail.error === null) {
+    incrementalRowCache.set(cacheKey, { variablesKey, rows });
+  }
+
+  return { rows, truncated: tail.truncated, error: tail.error };
+}
+
 /**
  * Daily rollup pagination — ~365 rows/pool/year, so for typical history a
  * few pages cover everything.
  */
-async function fetchAllDailySnapshotPages(
+export async function fetchAllDailySnapshotPages(
   client: GraphQLClient,
   poolIds: string[],
   network: string,
 ): Promise<SnapshotPageResult> {
-  return fetchPaginatedRows<PoolSnapshotWindow, unknown>({
+  return fetchPaginatedRowsIncremental<PoolSnapshotWindow, unknown>({
     client,
     query: POOL_DAILY_SNAPSHOTS_ALL,
     responseKey: "PoolDailySnapshot",
     network,
     pageSize: SNAPSHOT_PAGE_SIZE,
-    variablesFor: (page) => ({
+    variablesKey: poolIdsVariablesKey(poolIds),
+    variablesFor: (page, afterTimestamp) => ({
       poolIds,
+      afterTimestamp,
       limit: SNAPSHOT_PAGE_SIZE,
       offset: page * SNAPSHOT_PAGE_SIZE,
     }),
     dedupKey: (s) => `${s.poolId}-${s.timestamp}`,
+    timestampOf: (s) => Number(s.timestamp),
     extra: { poolCount: poolIds.length },
   });
 }
@@ -386,18 +519,21 @@ export async function fetchAllFeeSnapshotPages(
   chainId: number,
   network: string,
 ): Promise<PaginatedPageResult<PoolDailyFeeSnapshot>> {
-  return fetchPaginatedRows<PoolDailyFeeSnapshot, unknown>({
+  return fetchPaginatedRowsIncremental<PoolDailyFeeSnapshot, unknown>({
     client,
     query: POOL_DAILY_FEE_SNAPSHOTS_PAGE,
     responseKey: "PoolDailyFeeSnapshot",
     network,
     pageSize: SNAPSHOT_PAGE_SIZE,
-    variablesFor: (page) => ({
+    variablesKey: String(chainId),
+    variablesFor: (page, afterTimestamp) => ({
       chainId,
+      afterTimestamp,
       limit: SNAPSHOT_PAGE_SIZE,
       offset: page * SNAPSHOT_PAGE_SIZE,
     }),
     dedupKey: (s) => s.id,
+    timestampOf: (s) => Number(s.timestamp),
   });
 }
 
