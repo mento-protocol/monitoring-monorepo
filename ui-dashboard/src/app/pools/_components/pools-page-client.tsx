@@ -57,6 +57,8 @@ function PoolsContent({
 }: {
   initialNetworkData?: NetworkData[] | undefined;
 }) {
+  "use memo";
+
   // `initialNetworkData` lets first paint render the full pools table from
   // SSR data instead of a 3-row `<Skeleton />` — fixes the 0.49 CLS that
   // lhci flagged on this route (BACKLOG "Lighthouse CI Follow-Ups"). The
