@@ -989,4 +989,59 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
       "dependent pool inherits the tripped dependency's halt via the OracleReported cold-start",
     );
   });
+
+  it("SortedOracles.OracleReported isolates one pool's failure from sibling updates", async () => {
+    let mockDb = MockDb.createMockDb();
+    const goodPoolId = makePoolId(
+      CHAIN_ID,
+      "0x00000000000000000000000000000000000000d3",
+    );
+    // Malformed id forces the per-pool self-heal path to throw when it tries to
+    // extract the raw pool address. The sibling pool must still update.
+    const failingPoolId = `${CHAIN_ID}-bad-pool-id`;
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: goodPoolId,
+        referenceRateFeedID: FEED,
+        invertRateFeedKnown: true,
+        tokenDecimalsKnown: true,
+        oracleExpiry: 1_700_010_000n,
+      }),
+    );
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: failingPoolId,
+        referenceRateFeedID: FEED,
+        invertRateFeedKnown: true,
+        tokenDecimalsKnown: false,
+        oracleExpiry: 1_700_010_000n,
+      }),
+    );
+
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: SortedOracles.OracleReported.createMockEvent({
+        token: FEED,
+        reporter: "0x00000000000000000000000000000000000000aa",
+        value: 1_180_000_000_000_000_000_000_000n,
+        timestamp: 1_700_001_900n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 8,
+          srcAddress: "0xefb84935239dacdecf7c5ba76d8de40b077b7b33",
+          block: { number: 302, timestamp: 1_700_002_000 },
+        },
+      }),
+      mockDb,
+    });
+
+    const goodPool = mockDb.entities.Pool.get(goodPoolId) as
+      | { oraclePrice: bigint; lastFreshReporterAt: bigint }
+      | undefined;
+    assert.equal(
+      goodPool?.oraclePrice,
+      1_180_000_000_000_000_000_000_000n,
+      "healthy sibling pool still receives the oracle update",
+    );
+    assert.equal(goodPool?.lastFreshReporterAt, 1_700_001_900n);
+  });
 });

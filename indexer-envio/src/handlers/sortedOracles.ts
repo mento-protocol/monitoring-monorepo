@@ -105,6 +105,16 @@ interface OracleReportedPoolCtx {
   } | null;
 }
 
+class OracleReportedPreWriteFailure extends Error {
+  constructor(
+    readonly poolId: string,
+    readonly reason: unknown,
+  ) {
+    super(String(reason));
+    this.name = "OracleReportedPreWriteFailure";
+  }
+}
+
 /** Process one pool's OracleReported update: self-heal, advance the oracle
  * cursor (or hold it when decimals are untrusted), then run the
  * breach/health/snapshot pipeline. Extracted from the handler's fan-out so the
@@ -115,28 +125,38 @@ async function processOracleReportedPool(
   poolId: string,
   c: OracleReportedPoolCtx,
 ): Promise<void> {
-  const initial = await context.Pool.get(poolId);
-  if (!initial) return;
-  // Self-heal invertRateFeed before computePriceDifference reads it.
-  // Without this, a pool deployed during an RPC blip whose only event
-  // post-deploy is OracleReported would persist wrong-orientation
-  // priceDifference / health / breach state until an FPMM event runs
-  // upsertPool's heal.
-  const existing = await selfHealTokenDecimals(
-    context,
-    await selfHealInvertRateFeed(context, initial),
-  );
+  let existing: Pool;
+  let oracleExpiry: bigint;
 
-  // Resolve oracleExpiry from DB if already populated, otherwise fetch
-  // via RPC (one-time seed — subsequent events use the DB value).
-  const oracleExpiry =
-    existing.oracleExpiry > 0n
-      ? existing.oracleExpiry
-      : ((await context.effect(reportExpiryEffect, {
-          chainId: c.chainId,
-          rateFeedID: c.rateFeedID,
-          blockNumber: c.blockNumber,
-        })) ?? existing.oracleExpiry);
+  try {
+    const initial = await context.Pool.get(poolId);
+    if (!initial) return;
+    // Self-heal invertRateFeed before computePriceDifference reads it.
+    // Without this, a pool deployed during an RPC blip whose only event
+    // post-deploy is OracleReported would persist wrong-orientation
+    // priceDifference / health / breach state until an FPMM event runs
+    // upsertPool's heal.
+    existing = await selfHealTokenDecimals(
+      context,
+      await selfHealInvertRateFeed(context, initial),
+    );
+
+    // Resolve oracleExpiry from DB if already populated, otherwise fetch
+    // via RPC (one-time seed — subsequent events use the DB value).
+    oracleExpiry =
+      existing.oracleExpiry > 0n
+        ? existing.oracleExpiry
+        : ((await context.effect(reportExpiryEffect, {
+            chainId: c.chainId,
+            rateFeedID: c.rateFeedID,
+            blockNumber: c.blockNumber,
+          })) ?? existing.oracleExpiry);
+  } catch (error) {
+    // These reads/effects happen before this pool queues any writes, so one
+    // pool's malformed id or transient RPC self-heal failure can be skipped
+    // without committing partial state for that pool.
+    throw new OracleReportedPreWriteFailure(poolId, error);
+  }
 
   const oraclePrice = c.oraclePrice;
 
@@ -391,10 +411,22 @@ indexer.onEvent(
     // Each poolId is distinct (getPoolsByFeed returns unique rows) so pool
     // writes don't race. Fan out in parallel — on a rate feed shared by 5-10
     // pools this collapses N sequential awaits into 1 concurrent batch.
+    // Isolate only the pre-write phase: RPC/self-heal failures for one pool
+    // should not drop sibling pool updates, but any failure after entity writes
+    // can have been queued must still fail the event instead of committing
+    // partial state for that pool.
     await Promise.all(
-      poolIds.map((poolId) =>
-        processOracleReportedPool(context, poolId, poolCtx),
-      ),
+      poolIds.map(async (poolId) => {
+        try {
+          await processOracleReportedPool(context, poolId, poolCtx);
+        } catch (error) {
+          if (!(error instanceof OracleReportedPreWriteFailure)) throw error;
+          context.log.warn(
+            `[sortedOracles] OracleReported pool pre-write phase failed for pool=${error.poolId} ` +
+              `feed=${rateFeedID} chain=${event.chainId}: ${String(error.reason)}`,
+          );
+        }
+      }),
     );
     // Cold-start: if this OracleReported is the first event for a feed whose
     // BreakerBox configs predate start_block, the resolve above bootstrapped

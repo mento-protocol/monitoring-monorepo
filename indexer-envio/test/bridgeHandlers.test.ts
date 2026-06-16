@@ -222,6 +222,28 @@ async function processTransferRedeemed(args: {
 }
 
 describe("Bridge-flows handlers — replay idempotency", () => {
+  it("TransferSentDigest continues when no source scratch row can be paired", async () => {
+    const e = pickManifestEntry();
+    let mockDb = MockDb.createMockDb();
+
+    mockDb = await TestWormholeNttManager.TransferSentDigest.processEvent({
+      event: TestWormholeNttManager.TransferSentDigest.createMockEvent({
+        digest: DIGEST_1,
+        mockEventData: mockEventData({
+          chainId: e.chainId,
+          manager: e.nttManagerProxy,
+          logIndex: 5,
+        }),
+      }),
+      mockDb,
+    });
+
+    const transfer = mockDb.entities.BridgeTransfer.get(
+      `wormhole-${DIGEST_1.toLowerCase()}`,
+    );
+    assert.equal(transfer?.sourceChainId, e.chainId);
+  });
+
   it("replaying the same TransferSent pair does not double-count SENT rollups", async () => {
     const e = pickManifestEntry();
     let mockDb = MockDb.createMockDb();
@@ -908,6 +930,34 @@ describe("Bridge-flows handlers — ReceivedMessage (transceiver) interaction", 
     );
     assert.equal(detail?.msgSequence, 42n);
     assert.equal(detail?.sourceWormholeChainId, 14);
+  });
+
+  it("MessageAttestedTo continues when no destination scratch row can be drained", async () => {
+    const monad = findByNttManager(
+      143,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    assert.ok(monad);
+    let mockDb = MockDb.createMockDb();
+
+    mockDb = await TestWormholeNttManager.MessageAttestedTo.processEvent({
+      event: TestWormholeNttManager.MessageAttestedTo.createMockEvent({
+        digest: MANAGER_DIGEST,
+        transceiver: monad!.transceiverProxy,
+        index: 0,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: monad!.nttManagerProxy,
+          logIndex: 7,
+        }),
+      }),
+      mockDb,
+    });
+
+    const transfer = mockDb.entities.BridgeTransfer.get(
+      `wormhole-${MANAGER_DIGEST.toLowerCase()}`,
+    );
+    assert.equal(transfer?.destChainId, 143);
   });
 
   it("replay (no MessageAttestedTo) leaves the scratch but does not pollute BridgeTransfer", async () => {
