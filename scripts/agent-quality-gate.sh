@@ -940,6 +940,10 @@ while IFS= read -r path; do
       ;;
   esac
   case "$path" in
+    */vitest.config.ts|*/vitest.mutation.config.ts)
+      add_surface "tooling"
+      add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest config changed"
+      ;;
     */vitest.hermetic-setup.ts)
       add_surface "tooling"
       add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup changed"

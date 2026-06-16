@@ -98,6 +98,38 @@ export default {
   );
 });
 
+test("requires setupFiles to be under the exported test config", () => {
+  assert.equal(
+    setupFilesLoadsGuard(`
+export default defineConfig({
+  test: {
+    environment: "node",
+  },
+  foo: {
+    setupFiles: ["./vitest.hermetic-setup.ts"],
+  },
+});
+`),
+    false,
+  );
+});
+
+test("requires setupFiles to be a direct test config property", () => {
+  assert.equal(
+    setupFilesLoadsGuard(`
+export default defineConfig({
+  test: {
+    environment: "node",
+    foo: {
+      setupFiles: ["./vitest.hermetic-setup.ts"],
+    },
+  },
+});
+`),
+    false,
+  );
+});
+
 test("ignores setupFiles text inside ordinary strings", () => {
   assert.equal(
     setupFilesLoadsGuard(`
@@ -158,5 +190,29 @@ export default {
     relativePath: "workspace/vitest.config.ts",
     ok: false,
     reason: "missing setupFiles guard",
+  });
+});
+
+test("configLoadsGuard validates an explicit mutation config path", () => {
+  const root = mkdtempSync(join(tmpdir(), "hermetic-vitest-test-"));
+  mkdirSync(join(root, "workspace"), { recursive: true });
+  writeFileSync(
+    join(root, "workspace", "vitest.mutation.config.ts"),
+    `
+export default defineConfig({
+  test: {
+    setupFiles: ["./vitest.hermetic-setup.ts"],
+  },
+});
+`,
+    "utf8",
+  );
+
+  const result = configLoadsGuard(root, "workspace/vitest.mutation.config.ts");
+  rmSync(root, { recursive: true, force: true });
+
+  assert.deepEqual(result, {
+    relativePath: "workspace/vitest.mutation.config.ts",
+    ok: true,
   });
 });

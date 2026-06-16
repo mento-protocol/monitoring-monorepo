@@ -6,6 +6,7 @@
 import http from "node:http";
 import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
+import { afterEach } from "vitest";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -16,6 +17,15 @@ const realHttpsRequest = https.request.bind(https) as RequestFunction;
 const realHttpsGet = https.get.bind(https) as RequestFunction;
 
 type RequestFunction = (...args: unknown[]) => ReturnType<typeof http.request>;
+
+declare global {
+  // Tests that intentionally assert the guard blocks a request must opt in
+  // before making that request, otherwise swallowed probe failures fail teardown.
+  // eslint-disable-next-line no-var
+  var __hermeticTestGuardExpectBlockedRequests:
+    | ((count?: number) => void)
+    | undefined;
+}
 
 type RequestOptionsLike = {
   protocol?: unknown;
@@ -157,11 +167,46 @@ const blockedError = (url: URL) =>
       "Tests must mock network calls; only loopback hosts are allowed.",
   );
 
+const blockedRequests: Error[] = [];
+let expectedBlockedRequests = 0;
+
+globalThis.__hermeticTestGuardExpectBlockedRequests = (count = 1) => {
+  expectedBlockedRequests += count;
+};
+
+const recordBlockedRequest = (url: URL) => {
+  const error = blockedError(url);
+  blockedRequests.push(error);
+  return error;
+};
+
 const assertUrlAllowed = (url: URL) => {
   if (url.protocol !== "data:" && !LOOPBACK_HOSTS.has(url.hostname)) {
-    throw blockedError(url);
+    throw recordBlockedRequest(url);
   }
 };
+
+afterEach(() => {
+  const actual = blockedRequests.length;
+  const expected = expectedBlockedRequests;
+  const firstBlockedMessage = blockedRequests[0]?.message;
+
+  blockedRequests.length = 0;
+  expectedBlockedRequests = 0;
+
+  if (actual !== expected) {
+    const expectation =
+      expected === 0
+        ? "No blocked requests were expected."
+        : `${expected} blocked request(s) were expected.`;
+    throw new Error(
+      `[hermetic-test-guard] ${actual} blocked request(s) observed. ${expectation}` +
+        (firstBlockedMessage
+          ? ` First blocked request: ${firstBlockedMessage}`
+          : ""),
+    );
+  }
+});
 
 const guardRequest =
   (

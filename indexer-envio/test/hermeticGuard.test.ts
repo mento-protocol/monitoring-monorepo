@@ -3,6 +3,14 @@ import { describe, expect, it } from "vitest";
 
 import { waitForHttpTestRpc } from "../src/rpc/http-test-mocks.js";
 
+const expectHermeticBlock = (count = 1) => {
+  (
+    globalThis as typeof globalThis & {
+      __hermeticTestGuardExpectBlockedRequests?: (count?: number) => void;
+    }
+  ).__hermeticTestGuardExpectBlockedRequests?.(count);
+};
+
 describe("hermetic test guard", () => {
   it("publishes loopback RPC URLs before tests run", () => {
     expect(process.env.ENVIO_RPC_URL_42220).toMatch(
@@ -20,6 +28,7 @@ describe("hermetic test guard", () => {
   });
 
   it("rejects outbound fetch requests to non-loopback hosts without leaking paths", async () => {
+    expectHermeticBlock();
     const error = await fetch("https://forno.celo.org/rpc/secret-token").catch(
       (caught: unknown) => caught,
     );
@@ -64,6 +73,7 @@ describe("hermetic test guard", () => {
   });
 
   it("rejects slash-less absolute HTTP fetch URLs without parsing them against loopback", async () => {
+    expectHermeticBlock();
     const error = await fetch(
       "http:metadata.google.internal/computeMetadata/v1/secret-token",
     ).catch((caught: unknown) => caught);
@@ -75,6 +85,7 @@ describe("hermetic test guard", () => {
   });
 
   it("rejects outbound Node HTTP clients to non-loopback hosts", () => {
+    expectHermeticBlock();
     expect(() =>
       http.get(
         "http://metadata.google.internal/computeMetadata/v1/secret-token",
@@ -85,6 +96,7 @@ describe("hermetic test guard", () => {
   });
 
   it("rejects outbound Node HTTP named imports to non-loopback hosts", () => {
+    expectHermeticBlock();
     expect(() =>
       namedHttpGet(
         "http://metadata.google.internal/computeMetadata/v1/secret-token",
@@ -95,6 +107,7 @@ describe("hermetic test guard", () => {
   });
 
   it("rejects Node HTTP options whose hostname is non-loopback even when path looks loopback", () => {
+    expectHermeticBlock();
     expect(() =>
       http.request({
         hostname: "metadata.google.internal",
@@ -106,6 +119,7 @@ describe("hermetic test guard", () => {
   });
 
   it("rejects Node HTTP options whose absolute path names a non-loopback host", () => {
+    expectHermeticBlock();
     expect(() =>
       http.request({
         path: "http://metadata.google.internal/computeMetadata/v1/secret-token",
@@ -116,6 +130,7 @@ describe("hermetic test guard", () => {
   });
 
   it("rejects Node HTTP options using hostname over a loopback host alias", () => {
+    expectHermeticBlock();
     expect(() =>
       http.request({
         host: "127.0.0.1",
@@ -127,6 +142,7 @@ describe("hermetic test guard", () => {
   });
 
   it("rejects outbound Node HTTP clients even when request options are invalid", () => {
+    expectHermeticBlock();
     expect(() =>
       http.get("http://metadata.google.internal/computeMetadata/v1", {
         path: "http://[",

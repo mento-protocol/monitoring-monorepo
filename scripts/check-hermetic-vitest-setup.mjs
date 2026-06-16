@@ -21,6 +21,18 @@ export const SETUP_FILES = WORKSPACES.map(
   (workspace) => `${workspace}/vitest.hermetic-setup.ts`,
 );
 
+export const VITEST_CONFIG_FILES = WORKSPACES.map(
+  (workspace) => `${workspace}/vitest.config.ts`,
+);
+
+export const MUTATION_CONFIG_FILES = [
+  "indexer-envio/vitest.mutation.config.ts",
+  "metrics-bridge/vitest.mutation.config.ts",
+  "ui-dashboard/vitest.mutation.config.ts",
+];
+
+export const CONFIG_FILES = [...VITEST_CONFIG_FILES, ...MUTATION_CONFIG_FILES];
+
 const hashFile = (root, relativePath) => {
   const absolutePath = path.join(root, relativePath);
   if (!existsSync(absolutePath)) {
@@ -139,8 +151,8 @@ function readStringLiteral(source, start) {
   return null;
 }
 
-function readArrayLiteral(source, start) {
-  if (source[start] !== "[") return null;
+function readBalancedLiteral(source, start, open, close) {
+  if (source[start] !== open) return null;
 
   let depth = 0;
   let index = start;
@@ -153,9 +165,9 @@ function readArrayLiteral(source, start) {
       continue;
     }
 
-    if (char === "[") {
+    if (char === open) {
       depth++;
-    } else if (char === "]") {
+    } else if (char === close) {
       depth--;
       if (depth === 0) {
         return source.slice(start, index + 1);
@@ -166,6 +178,12 @@ function readArrayLiteral(source, start) {
 
   return null;
 }
+
+const readArrayLiteral = (source, start) =>
+  readBalancedLiteral(source, start, "[", "]");
+
+const readObjectLiteral = (source, start) =>
+  readBalancedLiteral(source, start, "{", "}");
 
 function stringLiterals(source) {
   const literals = [];
@@ -189,8 +207,11 @@ function isIdentifierChar(char) {
   return typeof char === "string" && /[A-Za-z0-9_$]/.test(char);
 }
 
-function setupFilesValueStarts(source) {
+function directPropertyValueStartsInObject(source, propertyName) {
+  if (source[0] !== "{") return [];
+
   const starts = [];
+  let depth = 0;
   let index = 0;
 
   while (index < source.length) {
@@ -198,7 +219,7 @@ function setupFilesValueStarts(source) {
     if (char === "'" || char === '"' || char === "`") {
       const literal = readStringLiteral(source, index);
       if (!literal) break;
-      if (literal.value === "setupFiles") {
+      if (depth === 1 && literal.value === propertyName) {
         const colonIndex = skipWhitespace(source, literal.end);
         if (source[colonIndex] === ":") {
           starts.push(skipWhitespace(source, colonIndex + 1));
@@ -208,16 +229,29 @@ function setupFilesValueStarts(source) {
       continue;
     }
 
+    if (char === "{" || char === "[" || char === "(") {
+      depth++;
+      index++;
+      continue;
+    }
+
+    if (char === "}" || char === "]" || char === ")") {
+      depth--;
+      index++;
+      continue;
+    }
+
     if (
-      source.startsWith("setupFiles", index) &&
+      depth === 1 &&
+      source.startsWith(propertyName, index) &&
       !isIdentifierChar(source[index - 1]) &&
-      !isIdentifierChar(source[index + "setupFiles".length])
+      !isIdentifierChar(source[index + propertyName.length])
     ) {
-      const colonIndex = skipWhitespace(source, index + "setupFiles".length);
+      const colonIndex = skipWhitespace(source, index + propertyName.length);
       if (source[colonIndex] === ":") {
         starts.push(skipWhitespace(source, colonIndex + 1));
       }
-      index += "setupFiles".length;
+      index += propertyName.length;
       continue;
     }
 
@@ -227,25 +261,54 @@ function setupFilesValueStarts(source) {
   return starts;
 }
 
+function exportedConfigObject(source) {
+  const exportIndex = source.indexOf("export default");
+  if (exportIndex === -1) return null;
+
+  let index = skipWhitespace(source, exportIndex + "export default".length);
+  if (source.startsWith("defineConfig", index)) {
+    index = skipWhitespace(source, index + "defineConfig".length);
+    if (source[index] !== "(") return null;
+    index = skipWhitespace(source, index + 1);
+  }
+
+  if (source[index] !== "{") return null;
+  return readObjectLiteral(source, index);
+}
+
 export function setupFilesLoadsGuard(contents) {
   const source = stripTypeScriptComments(contents);
+  const configObject = exportedConfigObject(source);
+  if (!configObject) return false;
 
-  for (const valueStart of setupFilesValueStarts(source)) {
-    const firstChar = source[valueStart];
+  for (const testStart of directPropertyValueStartsInObject(
+    configObject,
+    "test",
+  )) {
+    if (configObject[testStart] !== "{") continue;
+    const testObject = readObjectLiteral(configObject, testStart);
+    if (!testObject) continue;
 
-    if (firstChar === "'" || firstChar === '"' || firstChar === "`") {
-      const literal = readStringLiteral(source, valueStart);
-      if (literal?.value === guardConfigReference) return true;
-      continue;
-    }
+    for (const valueStart of directPropertyValueStartsInObject(
+      testObject,
+      "setupFiles",
+    )) {
+      const firstChar = testObject[valueStart];
 
-    if (firstChar === "[") {
-      const arrayLiteral = readArrayLiteral(source, valueStart);
-      if (
-        arrayLiteral &&
-        stringLiterals(arrayLiteral).includes(guardConfigReference)
-      ) {
-        return true;
+      if (firstChar === "'" || firstChar === '"' || firstChar === "`") {
+        const literal = readStringLiteral(testObject, valueStart);
+        if (literal?.value === guardConfigReference) return true;
+        continue;
+      }
+
+      if (firstChar === "[") {
+        const arrayLiteral = readArrayLiteral(testObject, valueStart);
+        if (
+          arrayLiteral &&
+          stringLiterals(arrayLiteral).includes(guardConfigReference)
+        ) {
+          return true;
+        }
       }
     }
   }
@@ -253,8 +316,10 @@ export function setupFilesLoadsGuard(contents) {
   return false;
 }
 
-export const configLoadsGuard = (root, workspace) => {
-  const relativePath = `${workspace}/vitest.config.ts`;
+export const configLoadsGuard = (root, workspaceOrRelativePath) => {
+  const relativePath = workspaceOrRelativePath.endsWith(".ts")
+    ? workspaceOrRelativePath
+    : `${workspaceOrRelativePath}/vitest.config.ts`;
   const absolutePath = path.join(root, relativePath);
   if (!existsSync(absolutePath)) {
     return { relativePath, ok: false, reason: "missing config" };
@@ -271,8 +336,8 @@ export function validateHermeticVitestSetup(root = repoRoot) {
     hashFile(root, relativePath),
   );
   const uniqueHashes = new Set(results.map((result) => result.hash));
-  const configResults = WORKSPACES.map((workspace) =>
-    configLoadsGuard(root, workspace),
+  const configResults = CONFIG_FILES.map((relativePath) =>
+    configLoadsGuard(root, relativePath),
   );
 
   return {
@@ -307,7 +372,7 @@ function main() {
   }
 
   console.log(
-    `OK: ${SETUP_FILES.length} vitest.hermetic-setup.ts files are byte-identical (${results[0].hash}) and wired from vitest.config.ts`,
+    `OK: ${SETUP_FILES.length} vitest.hermetic-setup.ts files are byte-identical (${results[0].hash}) and wired from ${CONFIG_FILES.length} Vitest configs`,
   );
 }
 

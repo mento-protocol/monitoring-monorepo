@@ -1220,6 +1220,7 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation ba
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
 run_gate "ui-dashboard/vitest.mutation.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
@@ -1236,6 +1237,7 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutati
 assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
 
 run_gate "metrics-bridge/vitest.mutation.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutation baseline changed)"
 assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
 
@@ -1252,6 +1254,7 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation base
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
 
 run_gate "indexer-envio/vitest.mutation.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
 
@@ -1498,6 +1501,15 @@ assert_hermetic_setup_routes \
   "ui-dashboard/vitest.hermetic-setup.ts" \
   "@mento-protocol/ui-dashboard" \
   "ui-dashboard hermetic Vitest setup changed"
+
+run_gate "ui-dashboard/vitest.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+
+run_gate "metrics-bridge/vitest.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+
+run_gate "indexer-envio/vitest.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
