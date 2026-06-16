@@ -26,6 +26,7 @@ export default async function IntegrationsPage() {
   if (!session?.user?.email?.toLowerCase().endsWith(ALLOWED_DOMAIN)) notFound();
 
   const { snapshot, error } = await getIntegrationProbeSnapshot();
+  const nowMs = Date.now();
   return (
     <div className="space-y-8">
       <header className="space-y-2">
@@ -42,7 +43,7 @@ export default async function IntegrationsPage() {
       )}
 
       {snapshot ? (
-        <IntegrationsContent snapshot={snapshot} />
+        <IntegrationsContent snapshot={snapshot} nowMs={nowMs} />
       ) : error ? null : (
         <EmptyBox message="No integration probe snapshot has been published yet." />
       )}
@@ -51,12 +52,25 @@ export default async function IntegrationsPage() {
 }
 
 function IntegrationsContent({
+  nowMs,
   snapshot,
 }: {
+  nowMs: number;
   snapshot: IntegrationProbeSnapshot;
 }) {
   return (
     <>
+      {snapshotIsStale(snapshot.generatedAt, nowMs) && (
+        <div
+          role="status"
+          className="rounded-lg border border-amber-900/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-300"
+        >
+          Snapshot is stale: last successful probe run was{" "}
+          {formatSnapshotTime(snapshot.generatedAt)}. Probes run daily at 06:17
+          UTC; check the Integration Probes workflow and aggregator API keys.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <Tile
           label="Aggregators"
@@ -105,6 +119,15 @@ function IntegrationsContent({
       </section>
     </>
   );
+}
+
+// Probes run daily at 06:17 UTC in integration-probes.yml; this is 2x cadence.
+const SNAPSHOT_STALE_AFTER_MS = 48 * 60 * 60 * 1000;
+
+function snapshotIsStale(generatedAt: string, nowMs: number): boolean {
+  const generated = new Date(generatedAt).getTime();
+  if (Number.isNaN(generated)) return true;
+  return nowMs - generated > SNAPSHOT_STALE_AFTER_MS;
 }
 
 function formatSnapshotTime(value: string): string {

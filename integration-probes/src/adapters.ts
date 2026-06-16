@@ -144,6 +144,7 @@ export function aggregatePairStatus(
   const statuses = new Set(results.map((result) => result.status));
   if (statuses.size === 1) return results[0]!.status;
   if (statuses.has("rate_limited")) return "rate_limited";
+  if (statuses.has("budget_exhausted")) return "budget_exhausted";
   if (statuses.has("needs_key") && statuses.has("pass")) return "needs_key";
   if (statuses.has("pass")) return "partial";
   return "fail";
@@ -160,7 +161,9 @@ export function blockingReason(status: ProbeStatus): string | null {
     case "needs_key":
       return "Probe credentials are missing.";
     case "rate_limited":
-      return "Aggregator API rate-limited the probe or the probe hit its configured request budget.";
+      return "Aggregator API rate-limited the probe.";
+    case "budget_exhausted":
+      return "Probe exhausted its configured per-run quote-request budget before completing.";
     case "no_liquidity":
       return "Aggregator returned no route or no liquidity.";
     case "error":
@@ -247,7 +250,7 @@ function quoteBudgetExhaustedResult(
   return {
     ...skippedResult(
       input,
-      "rate_limited",
+      "budget_exhausted",
       "Adapter quote-attempt budget exhausted.",
     ),
     attemptCount,
@@ -401,6 +404,7 @@ function fallbackPriority(status: ProbeStatus): number {
       return 4;
     case "error":
       return 3;
+    case "budget_exhausted":
     case "rate_limited":
       return 2;
     case "needs_key":
@@ -412,7 +416,11 @@ function fallbackPriority(status: ProbeStatus): number {
 }
 
 function terminalStatus(status: ProbeStatus): boolean {
-  return status === "needs_key" || status === "rate_limited";
+  return (
+    status === "needs_key" ||
+    status === "rate_limited" ||
+    status === "budget_exhausted"
+  );
 }
 
 function requestErrored(result: PairProbeResult): boolean {

@@ -230,6 +230,31 @@ describe("runIntegrationProbes", () => {
     const pairs = snapshot.aggregators[0]?.chains[0]?.pairs ?? [];
     expect(quoteFetches).toBe(3);
     expect(pairs.map((pair) => pair.attemptCount)).toEqual([2, 1]);
+    expect(pairs.map((pair) => pair.status)).toContain("budget_exhausted");
+  });
+
+  it("logs a per-adapter quote-budget summary line", async () => {
+    const lines: string[] = [];
+    await runIntegrationProbes({
+      chainIds: [42220],
+      adapters: [budgetedAdapter()],
+      pairConcurrency: 1,
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      log: (line) => lines.push(line),
+      fetcher: async (input) => {
+        if (String(input) === "https://hasura.test") {
+          return new Response(
+            JSON.stringify({ data: { Pool: [poolRow(POOL, "EURm")] } }),
+          );
+        }
+        return new Response(JSON.stringify({ route: [{ protocol: "Other" }] }));
+      },
+    });
+
+    expect(lines).toContain(
+      "[integration-probes] adapter=budgeted quoteAttempts=3/3 remainingBudget=0",
+    );
   });
 
   it("serializes budgeted adapter pair probes", async () => {
