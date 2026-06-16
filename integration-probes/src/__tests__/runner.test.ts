@@ -231,6 +231,7 @@ describe("runIntegrationProbes", () => {
     expect(quoteFetches).toBe(3);
     expect(pairs.map((pair) => pair.attemptCount)).toEqual([2, 1]);
     expect(pairs.map((pair) => pair.status)).toContain("budget_exhausted");
+    expect(snapshot.summary.failingChainChecks).toBe(1);
   });
 
   it("logs a per-adapter quote-budget summary line", async () => {

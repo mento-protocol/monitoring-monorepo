@@ -403,8 +403,9 @@ function summarizeSnapshot(
       .length,
     partialChainChecks: chains.filter((chain) => chain.status === "partial")
       .length,
-    failingChainChecks: chains.filter((chain) => chain.status === "fail")
-      .length,
+    failingChainChecks: chains.filter(
+      (chain) => chain.status === "fail" || chain.status === "budget_exhausted",
+    ).length,
     needsKeyChainChecks: chains.filter((chain) => chain.status === "needs_key")
       .length,
     unsupportedChainChecks: chains.filter(
