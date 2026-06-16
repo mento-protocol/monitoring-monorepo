@@ -252,6 +252,16 @@ function criticalStateCanFire(
   return nowSeconds - conditionEnteredAt > DEVIATION_CRITICAL_PENDING_SECONDS;
 }
 
+function initialEnteredAt(
+  currentState: ClassifiedDeviationAlertState,
+  nowSeconds: number,
+): number {
+  if (currentState.state === "warning" && currentState.breachStartedAt) {
+    return Math.min(currentState.breachStartedAt, nowSeconds);
+  }
+  return nowSeconds;
+}
+
 function buildCurrentSnapshot(
   previous: StateSnapshot | undefined,
   currentState: ClassifiedDeviationAlertState,
@@ -274,8 +284,10 @@ function buildCurrentSnapshot(
     : // Process restart (liveness probe): no in-memory snapshot exists, but
       // the indexer-persisted breach start survives. Seed enteredAt from it
       // so alertCouldHaveFired() does not reset to process start and suppress
-      // the next transition's Slack context.
-      Math.min(currentState.breachStartedAt ?? nowSeconds, nowSeconds);
+      // the next recovery's Slack context. Data-gap states intentionally start
+      // now: a stale breach start is not evidence that ratio data has been
+      // missing long enough for the data-gap alert to fire.
+      initialEnteredAt(currentState, nowSeconds);
 
   return {
     ...currentState,

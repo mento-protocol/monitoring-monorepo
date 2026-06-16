@@ -14,8 +14,9 @@ sed -E \
 	-e 's#https://[^"[:space:]\\]*(victorops|splunk)[^"[:space:]\\]*#[REDACTED]#g' \
 	-e 's#(\\?"token\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
 	-e 's#(\\?"api_key\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
-	-e 's#(api_key[[:space:]]*[:=][[:space:]]*)[A-Za-z0-9._-]+#\1[REDACTED]#g' \
-	-e 's#(key[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
+	-e 's#(api_key[[:space:]]*[:=][[:space:]]*)[^"[:space:]\\]+#\1[REDACTED]#g' \
+	-e 's#(\\?"[A-Za-z0-9_-]*api[-_]key\\?"[[:space:]]*=[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
+	-e 's#(_key[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
 	-e 's#(security_token[[:space:]]*[:=][[:space:]]*)[A-Za-z0-9._-]+#\1[REDACTED]#g' \
 	-e 's#("token"[[:space:]]*:[[:space:]]*")[^"]+#\1[REDACTED]#g' \
 	-e 's#(token[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \

@@ -64,6 +64,7 @@ describe("deviation alert transition rehydration", () => {
     );
 
     expect(warning.state).toBe("warning");
+    expect(warning.newTransitions).toHaveLength(0);
 
     const recovered = observeDeviationAlertState(
       makePool(),
@@ -76,5 +77,31 @@ describe("deviation alert transition rehydration", () => {
       reason: "recovered",
       breachStartedAt: 1713200000,
     });
+  });
+
+  it("does not backdate data-gap dwell from breach age after restart", () => {
+    const unavailable = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "-1",
+      }),
+      "GBPm/USDm",
+      1713202000,
+    );
+
+    expect(unavailable.state).toBe("deviation_ratio_unavailable_warning");
+    expect(unavailable.newTransitions).toHaveLength(0);
+
+    const restored = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.02",
+      }),
+      "GBPm/USDm",
+      1713202030,
+    );
+
+    expect(restored.state).toBe("warning");
+    expect(restored.newTransitions).toHaveLength(0);
   });
 });
