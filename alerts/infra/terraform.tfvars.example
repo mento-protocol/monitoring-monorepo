@@ -117,6 +117,12 @@ github_token = "github_pat_..."
 # Optional Settings
 #####################
 
+# Slack notification channel ID for onchain-event-handler drop alerts.
+# Created manually via OAuth in GCP Console (Monitoring → Alerting → Edit
+# Notification Channels) after the project exists. Leave unset to skip creating
+# the alert policies.
+# slack_notification_channel_id = "1234567890123456789"
+
 # Enable debug mode for REST API provider (shows API requests/responses)
 # Useful for troubleshooting REST API provider issues
 # debug_mode = true

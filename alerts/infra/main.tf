@@ -26,6 +26,7 @@ module "project_factory" {
     "cloudscheduler.googleapis.com",
     "storage.googleapis.com",
     "logging.googleapis.com",
+    "monitoring.googleapis.com",
     "run.googleapis.com",              # Required for Cloud Functions Gen2
     "artifactregistry.googleapis.com", # Required for Cloud Functions Gen2
     "secretmanager.googleapis.com",    # Required for Secret Manager
@@ -307,22 +308,27 @@ locals {
     "TF_VAR_SPLUNK_ON_CALL_API_ID",
     "TF_VAR_SPLUNK_ON_CALL_API_KEY",
   ]) : toset([])
+  alerts_infra_ci_monitoring_secret_names = var.slack_notification_channel_id != "" ? toset([
+    "TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID",
+  ]) : toset([])
   alerts_infra_ci_secret_names = setunion(
     local.alerts_infra_ci_base_secret_names,
     local.alerts_infra_ci_oncall_secret_names,
+    local.alerts_infra_ci_monitoring_secret_names,
   )
 
   alerts_infra_ci_secret_values = {
-    TF_VAR_SENTRY_AUTH_TOKEN           = var.sentry_auth_token
-    TF_VAR_BILLING_ACCOUNT             = var.billing_account
-    TF_VAR_QUICKNODE_API_KEY           = var.quicknode_api_key
-    TF_VAR_QUICKNODE_SIGNING_SECRET    = var.quicknode_signing_secret
-    TF_VAR_ONCALL_SLACK_CHANNEL_ID     = var.oncall_slack_channel_id
-    TF_VAR_ONCALL_SUPPORT_USERGROUP_ID = var.oncall_support_usergroup_id
-    TF_VAR_SPLUNK_ON_CALL_API_ID       = var.splunk_on_call_api_id
-    TF_VAR_SPLUNK_ON_CALL_API_KEY      = var.splunk_on_call_api_key
-    TF_VAR_SLACK_BOT_TOKEN             = var.slack_bot_token
-    TF_VAR_GITHUB_TOKEN                = var.github_token
+    TF_VAR_SENTRY_AUTH_TOKEN             = var.sentry_auth_token
+    TF_VAR_BILLING_ACCOUNT               = var.billing_account
+    TF_VAR_QUICKNODE_API_KEY             = var.quicknode_api_key
+    TF_VAR_QUICKNODE_SIGNING_SECRET      = var.quicknode_signing_secret
+    TF_VAR_ONCALL_SLACK_CHANNEL_ID       = var.oncall_slack_channel_id
+    TF_VAR_ONCALL_SUPPORT_USERGROUP_ID   = var.oncall_support_usergroup_id
+    TF_VAR_SPLUNK_ON_CALL_API_ID         = var.splunk_on_call_api_id
+    TF_VAR_SPLUNK_ON_CALL_API_KEY        = var.splunk_on_call_api_key
+    TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID = var.slack_notification_channel_id
+    TF_VAR_SLACK_BOT_TOKEN               = var.slack_bot_token
+    TF_VAR_GITHUB_TOKEN                  = var.github_token
   }
 }
 

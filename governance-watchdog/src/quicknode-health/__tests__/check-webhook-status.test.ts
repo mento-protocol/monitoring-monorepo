@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock getSecret so no Secret Manager calls happen
@@ -31,9 +33,59 @@ function mockWebhooksResponse(webhooks: FakeWebhook[]) {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(fakePage(webhooks)));
 }
 
+function repoRoot() {
+  return process.cwd().endsWith("governance-watchdog")
+    ? join(process.cwd(), "..")
+    : process.cwd();
+}
+
+function alertsInfraMultisigChains() {
+  const variables = readFileSync(
+    join(repoRoot(), "alerts", "infra", "variables.tf"),
+    "utf8",
+  );
+  const defaultBlockPattern = new RegExp(
+    [
+      'variable "multisigs"[\\s\\S]*?default = \\{',
+      "(?<body>[\\s\\S]*?)",
+      "\\n[ ]{2}\\}\\n\\n[ ]{2}validation",
+    ].join(""),
+  );
+  const defaultBlock = defaultBlockPattern.exec(variables)?.groups?.body;
+  if (!defaultBlock) {
+    throw new Error(
+      "Unable to locate alerts/infra var.multisigs default block",
+    );
+  }
+
+  const chains = new Set<string>();
+  const chainPattern = /chain\s+=\s+"([^"]+)"/g;
+  for (
+    let match = chainPattern.exec(defaultBlock);
+    match;
+    match = chainPattern.exec(defaultBlock)
+  ) {
+    chains.add(match[1]);
+  }
+
+  return [...chains].sort();
+}
+
 const ACTIVE_WEBHOOKS: FakeWebhook[] = [
   { id: "1", name: "SortedOracles", status: "active", network: "celo-mainnet" },
   { id: "2", name: "MentoGovernor", status: "active", network: "celo-mainnet" },
+  {
+    id: "3",
+    name: "safe-multisig-monitor-celo-abc12345",
+    status: "active",
+    network: "celo-mainnet",
+  },
+  {
+    id: "4",
+    name: "safe-multisig-monitor-ethereum-abc12345",
+    status: "active",
+    network: "ethereum-mainnet",
+  },
 ];
 
 describe("checkWebhookStatus", () => {
@@ -44,7 +96,7 @@ describe("checkWebhookStatus", () => {
     mockGetSecret.mockResolvedValue("test-api-key");
   });
 
-  it("reports healthy when both expected webhooks are active", async () => {
+  it("reports healthy when all expected webhooks are active", async () => {
     mockWebhooksResponse(ACTIVE_WEBHOOKS);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -64,11 +116,17 @@ describe("checkWebhookStatus", () => {
     expect(result.unhealthyWebhooks).toEqual([
       "SortedOracles (missing)",
       "MentoGovernor (missing)",
+      "safe-multisig-monitor-celo-* (missing or inactive)",
+      "safe-multisig-monitor-ethereum-* (missing or inactive)",
     ]);
   });
 
   it("reports unhealthy when one expected webhook is missing", async () => {
-    mockWebhooksResponse([ACTIVE_WEBHOOKS[0]]);
+    mockWebhooksResponse([
+      ACTIVE_WEBHOOKS[0],
+      ACTIVE_WEBHOOKS[2],
+      ACTIVE_WEBHOOKS[3],
+    ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
     const result = await checkWebhookStatus();
@@ -86,6 +144,8 @@ describe("checkWebhookStatus", () => {
         network: "ethereum-mainnet",
       },
       ACTIVE_WEBHOOKS[1],
+      ACTIVE_WEBHOOKS[2],
+      ACTIVE_WEBHOOKS[3],
     ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -99,7 +159,7 @@ describe("checkWebhookStatus", () => {
     mockWebhooksResponse([
       ...ACTIVE_WEBHOOKS,
       {
-        id: "3",
+        id: "5",
         name: "StagingWebhook",
         status: "paused",
         network: "celo-mainnet",
@@ -122,6 +182,8 @@ describe("checkWebhookStatus", () => {
         status: "paused",
         network: "celo-mainnet",
       },
+      ACTIVE_WEBHOOKS[2],
+      ACTIVE_WEBHOOKS[3],
     ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -154,6 +216,68 @@ describe("checkWebhookStatus", () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain(
       "limit=100&offset=100",
     );
+  });
+
+  it("reports unhealthy when a Safe webhook prefix has no active match", async () => {
+    mockWebhooksResponse([
+      ...ACTIVE_WEBHOOKS.slice(0, 3),
+      {
+        id: "4",
+        name: "safe-multisig-monitor-ethereum-abc12345",
+        status: "paused",
+        network: "ethereum-mainnet",
+      },
+    ]);
+    const { checkWebhookStatus } = await import("../check-webhook-status.js");
+
+    const result = await checkWebhookStatus();
+
+    expect(result.healthy).toBe(false);
+    expect(result.unhealthyWebhooks).toEqual([
+      "safe-multisig-monitor-ethereum-* (missing or inactive)",
+    ]);
+  });
+
+  it("stays healthy when a paused old Safe webhook lingers next to an active replacement", async () => {
+    mockWebhooksResponse([
+      ...ACTIVE_WEBHOOKS,
+      {
+        id: "5",
+        name: "safe-multisig-monitor-celo-deadbeef",
+        status: "paused",
+        network: "celo-mainnet",
+      },
+    ]);
+    const { checkWebhookStatus } = await import("../check-webhook-status.js");
+
+    const result = await checkWebhookStatus();
+
+    expect(result.healthy).toBe(true);
+    expect(result.unhealthyWebhooks).toEqual([]);
+  });
+
+  it("treats a Safe webhook on the wrong network as missing", async () => {
+    mockWebhooksResponse([
+      ...ACTIVE_WEBHOOKS.slice(0, 3),
+      {
+        id: "4",
+        name: "safe-multisig-monitor-ethereum-abc12345",
+        status: "active",
+        network: "celo-mainnet",
+      },
+    ]);
+    const { checkWebhookStatus } = await import("../check-webhook-status.js");
+
+    const result = await checkWebhookStatus();
+
+    expect(result.healthy).toBe(false);
+    expect(result.unhealthyWebhooks).toEqual([
+      "safe-multisig-monitor-ethereum-* (missing or inactive)",
+    ]);
+  });
+
+  it("documents Safe webhook prefixes for every alerts/infra multisig chain", () => {
+    expect(alertsInfraMultisigChains()).toEqual(["celo", "ethereum"]);
   });
 
   it("reads the API key secret id from config", async () => {
