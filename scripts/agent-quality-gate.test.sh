@@ -1258,7 +1258,19 @@ run_gate "indexer-envio/src/helpers.ts"
 assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
 
+run_gate "indexer-envio/src/handlers/stables/classifyKind.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
+assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
+
 run_gate "indexer-envio/test/code-quality-invariants.test.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
+assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
+
+run_gate "indexer-envio/test/stables.test.ts"
+assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
+assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
+
+run_gate "indexer-envio/config/protocolActors.json"
 assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
 

@@ -8,6 +8,7 @@ export default defineConfig({
       "test/code-quality-invariants.test.ts",
       "test/pool-helpers.test.ts",
       "test/tradingLimits.test.ts",
+      "test/stables.test.ts",
     ],
     env: {
       ENVIO_START_BLOCK_CELO: "0",
@@ -19,7 +20,12 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
-      include: ["src/helpers.ts", "src/tradingLimits.ts"],
+      include: [
+        "src/helpers.ts",
+        "src/tradingLimits.ts",
+        "src/handlers/stables/classifyKind.ts",
+        "src/handlers/stables/dailyFlush.ts",
+      ],
       exclude: ["test/**", "**/*.d.ts"],
     },
   },
