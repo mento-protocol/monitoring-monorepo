@@ -27,7 +27,7 @@ name: Alerts Rules
 #   - `apply` job only runs on push/dispatch to main, only when the plan
 #     reported actual changes, and only for stack-root changes or explicit
 #     workflow_dispatch. No-change merges skip apply entirely, so the
-#     `production` Environment approval only fires on eligible real-change
+#     `production-infra` Environment approval only fires on eligible real-change
 #     merges. Workflow/notifier-only edits can still plan, but they do not open
 #     the gate for unrelated drift.
 #   - During the legacy Discord cleanup, the apply job first targets the
@@ -314,7 +314,7 @@ jobs:
           SLACK_CHANNEL: "${{ vars.TERRAFORM_APPLY_SLACK_CHANNEL || '#ci-operations' }}"
           TERRAFORM_PLAN_FILE: /tmp/tf-plan.txt
           TERRAFORM_STACK_LABEL: alerts/rules
-          TERRAFORM_TARGET_ENVIRONMENT: production
+          TERRAFORM_TARGET_ENVIRONMENT: production-infra
         run: node "$GITHUB_WORKSPACE/scripts/notify-terraform-apply.mjs"
 
       - name: Post plan as sticky PR comment
@@ -416,17 +416,17 @@ jobs:
     # Apply when (a) on main, (b) push or dispatch event, (c) plan said
     # there are real changes, AND (d) the stack root changed or a maintainer
     # explicitly dispatched the workflow. Workflow/notifier-only edits can
-    # surface drift in the plan without opening the production approval gate.
+    # surface drift in the plan without opening the production-infra approval gate.
     if: >-
       github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.plan.outputs.has-changes == 'true'
       && (github.event_name == 'workflow_dispatch' || needs.plan.outputs.stack-changed == 'true')
-    # Reuses the existing `production` environment shared with metrics-bridge,
-    # aegis, and alerts/infra. The required-reviewer rule on that environment
-    # gates each apply behind manual approval.
+    # Terraform applies use the dedicated `production-infra` environment so
+    # required reviewers gate only infrastructure mutations, not routine
+    # service deploys.
     environment:
-      name: production
+      name: production-infra
       url: https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 30
@@ -434,6 +434,7 @@ jobs:
       contents: read
       id-token: write
       actions: read
+      deployments: read
     defaults:
       run:
         working-directory: alerts/rules
@@ -446,6 +447,12 @@ jobs:
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Verify production-infra environment protection
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_ENVIRONMENT_NAME: production-infra
+        run: node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
@@ -467,7 +474,7 @@ jobs:
       - name: Apply
         id: apply
         # Re-plans + applies in a single step. The reviewer at the
-        # production-environment gate should read this job's plan output
+        # production-infra environment gate should read this job's plan output
         # before approving — it's the ground truth for what lands.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
         # lock rather than failing the deploy.

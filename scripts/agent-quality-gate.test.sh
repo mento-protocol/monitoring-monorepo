@@ -2204,6 +2204,12 @@ assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviat
 run_gate "scripts/check-deviation-threshold-drift.test.mjs"
 assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker test changed)"
 
+run_gate "scripts/verify-github-environment-protection.mjs"
+assert_contains "- node scripts/verify-github-environment-protection.test.mjs (GitHub environment protection checker changed)"
+
+run_gate "scripts/verify-github-environment-protection.test.mjs"
+assert_contains "- node scripts/verify-github-environment-protection.test.mjs (GitHub environment protection checker changed)"
+
 run_gate "scripts/agent-autoreview.sh"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
 

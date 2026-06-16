@@ -1357,6 +1357,9 @@ while IFS= read -r path; do
         scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
           add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
           ;;
+        scripts/verify-github-environment-protection.mjs|scripts/verify-github-environment-protection.test.mjs)
+          add_command "node scripts/verify-github-environment-protection.test.mjs" "GitHub environment protection checker changed"
+          ;;
         scripts/eslint-baseline-diff.mjs)
           # The lint wrapper. A regression here would mask all per-package
           # baseline drift. Re-run every package's lint to exercise the

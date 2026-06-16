@@ -850,6 +850,8 @@ jobs:
         run: node scripts/check-deploy-root-anchors.test.mjs
       - name: Terraform stack registry suite
         run: pnpm tf:test
+      - name: GitHub environment protection suite
+        run: node scripts/verify-github-environment-protection.test.mjs
       - name: ESLint baseline-diff semantic suite
         # Direct behavioral coverage of scripts/eslint-baseline-diff.mjs
         # (matching, growth detection, line-proximity absorption, merge-base

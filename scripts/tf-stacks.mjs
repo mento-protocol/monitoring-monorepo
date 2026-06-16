@@ -9,7 +9,7 @@ const repoRoot = path.resolve(
   "..",
 );
 const registryPath = path.join(repoRoot, "terraform.stacks.json");
-const AUTO_APPLY_CI_POLICY = "push-main-production-environment";
+const AUTO_APPLY_CI_POLICY = "push-main-production-infra-environment";
 const FORCE_LOCAL_APPLY_ARG = "--force-local-apply";
 const ORIGIN_MAIN_FETCH_REFSPEC = "refs/heads/main:refs/remotes/origin/main";
 
