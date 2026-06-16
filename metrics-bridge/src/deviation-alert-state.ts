@@ -53,6 +53,7 @@ type StateSnapshot = {
   enteredAt: number;
   criticalSignal: CriticalSignalState | null;
   criticalSignalEnteredAt: number | null;
+  restoredWarningDwell: boolean;
 };
 
 type CriticalSignalState = "critical" | "deviation_ratio_unavailable_critical";
@@ -262,6 +263,21 @@ function initialEnteredAt(
   return nowSeconds;
 }
 
+function isRestartRestoredCriticalWarning(
+  previous: StateSnapshot | undefined,
+  currentState: ClassifiedDeviationAlertState,
+  nowSeconds: number,
+): boolean {
+  return (
+    !previous &&
+    currentState.state === "warning" &&
+    currentState.breachStartedAt !== null &&
+    nowSeconds - currentState.breachStartedAt >=
+      DEVIATION_WARNING_PENDING_SECONDS &&
+    currentState.criticalSignal !== null
+  );
+}
+
 function buildCurrentSnapshot(
   previous: StateSnapshot | undefined,
   currentState: ClassifiedDeviationAlertState,
@@ -294,7 +310,22 @@ function buildCurrentSnapshot(
     state,
     enteredAt,
     criticalSignalEnteredAt: signalEnteredAt,
+    restoredWarningDwell: previous
+      ? previous.state === state && previous.restoredWarningDwell
+      : isRestartRestoredCriticalWarning(previous, currentState, nowSeconds),
   };
+}
+
+function canRecordEscalationTransition(
+  previous: StateSnapshot,
+  current: StateSnapshot,
+  nowSeconds: number,
+): boolean {
+  return (
+    !previous.restoredWarningDwell &&
+    alertCouldHaveFired(previous, nowSeconds) &&
+    alertCouldHaveFired(current, nowSeconds)
+  );
 }
 
 function shouldRecordTransition(
@@ -309,10 +340,7 @@ function shouldRecordTransition(
     case "state_changed":
       return false;
     case "escalated_to_critical":
-      return (
-        alertCouldHaveFired(previous, nowSeconds) &&
-        alertCouldHaveFired(current, nowSeconds)
-      );
+      return canRecordEscalationTransition(previous, current, nowSeconds);
     case "recovered":
     case "deescalated_to_warning":
     case "deviation_ratio_unavailable":
