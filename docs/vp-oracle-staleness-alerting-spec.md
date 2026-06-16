@@ -18,19 +18,22 @@ layer, not `health.ts`:
    `data.Pool.filter(isFpmmPool)`). **No `mento_pool_*` series exists for any
    VirtualPool today.** No alert can fire on a series that is never published.
 
-**Scenario decision (task 2): (A) with a caveat.** Virtual-pool `Pool` rows
+**Scenario decision (task 2): (A) with caveats.** Virtual-pool `Pool` rows
 _already_ get `oracleOk` / `lastOracleReportAt` / `oracleExpiry` populated by the
-SortedOracles fan-out (proven below). So the indexer does **not** need new
-freshness-population wiring. BUT `oracleExpiry` is populated from the wrong
-source (1-week token expiry), so a new field carrying the 360s reset-frequency
-window is required for the freshness predicate to be correct for VPs. And the
-metrics-bridge needs a new VP code path because VPs are filtered out before any
-gauge is emitted.
+SortedOracles fan-out (proven below), but those fields are not sufficient for
+paging. `oracleExpiry` is populated from the wrong source (1-week token expiry),
+and `lastOracleReportAt` is only a conservative derive-path under-bound because
+flat feeds can refresh reporter timestamps without emitting `MedianUpdated`.
+Paging must use a contract-accurate VP median validity/timestamp source, or
+degrade/skip the VP alert path while that source is unavailable. The
+metrics-bridge still needs a new VP code path because VPs are filtered out before
+any gauge is emitted.
 
 So the real change set is: **health.ts reorder (×2) + a new
 `oracleFreshnessWindow` field on Pool fed from `referenceRateResetFrequency` +
-a VP gauge path in metrics-bridge + a new alert rule + a testnet route + parity
-test additions.**
+contract-accurate VP median live/timestamp fields + a VP gauge path in
+metrics-bridge + a new alert rule + prod/staging routing + parity test
+additions.**
 
 ---
 
@@ -62,7 +65,7 @@ from `getPoolExchange` and stored at `handlers/biPoolManager.ts:113` and
 `:344-345` (defaulting to `0n` on RPC-struct failure), and in the self-heal seed
 `self-heal.ts:256`.
 
-### Task 2 — Do VP Pool rows get freshness fields populated? **YES (scenario A).**
+### Task 2 — Do VP Pool rows get freshness fields populated? **PARTIALLY (scenario A + contract source).**
 
 `SortedOracles.OracleReported` / `MedianUpdated` fan out over
 `getPoolsByFeed(context, chainId, rateFeedID)` (`sortedOracles.ts:331,432`),
@@ -80,12 +83,14 @@ normal path, but the implementation must also bypass the existing
 `tokenDecimalsKnown` cursor-hold for VPs because VP median freshness does not
 depend on token decimals. Without that exception, a decimal self-heal failure can
 keep a VP looking stale after a fresh median. So freshness data is mostly present
-today; the missing pieces are the VP exception to the cursor hold, the health
-_classification_, and the _expiry window_.
+today for diagnostics/derive fallback; the missing pieces for paging are the VP
+exception to the cursor hold, the health _classification_, the _expiry window_,
+and a contract-accurate current median live/timestamp source.
 
-→ **Conclusion: (A, with one implementation caveat).** No new oracle-event
-source is needed, but the implementation must add (i) the correct window field,
-(ii) the health reorder, and (iii) a VP exception to the token-decimal cursor
+→ **Conclusion: (A, with implementation caveats).** No new oracle-event source
+is needed for the existing fan-out, but the implementation must add (i) the
+correct window field, (ii) a contract-accurate VP median live/timestamp source,
+(iii) the health reorder, and (iv) a VP exception to the token-decimal cursor
 hold so median freshness can advance independently of decimal trust.
 
 ### Task 3 — `oracleExpiry` source & the correct VP window
@@ -98,10 +103,21 @@ virtual pool reverts via `BiPoolManager.oracleHasValidMedian()` when
 `medianTimestamp ≤ now − referenceRateResetFrequency` (360s for CAD). The
 indexer already stores that 360s value on `BiPoolExchange.referenceRateResetFrequency`.
 
-The freshness predicate that should now apply to VPs already exists for the
-derive path: `lastOracleReportAt + window > now`
-(`priceDifference.ts:316-318`). We need that predicate to use **360s**, not the
-1-week `oracleExpiry`, for VPs.
+The derive path already has a conservative under-bound:
+`lastOracleReportAt + window > now` (`priceDifference.ts:316-318`). That is
+acceptable only because the derive path falls back to RPC/current state before
+acting. It must **not** be the paging source: for flat feeds where reporters
+refresh but the median value does not change, `MedianUpdated` may not fire, so
+`lastOracleReportAt` can look stale while the on-chain reporter timestamp that
+`BiPoolManager.oracleHasValidMedian()` checks is still valid. The VP alert path
+therefore needs both:
+
+- the correct **360s** window, not the 1-week `oracleExpiry`; and
+- a contract-accurate current median source, e.g. VP-only Pool fields such as
+  `oracleMedianLive` + `oracleMedianTimestamp` populated from the same
+  RPC/contract state used by `tryDeriveRebalanceState`. If that source is absent
+  during schema or RPC rollout, the UI returns `N/A` and the bridge skips the VP
+  series instead of deriving a page from `lastOracleReportAt`.
 
 **Recommended wiring:** add a new `Pool.oracleFreshnessWindow: BigInt!`
 (defaults `0n` = unknown). Populate it:
@@ -115,7 +131,9 @@ derive path: `lastOracleReportAt + window > now`
 - For FPMMs: leave `0n`; the health code keeps using `oracleExpiry` for FPMMs.
 
 Do **not** overload `oracleExpiry` itself — it is also surfaced as a gauge and
-used by FPMM freshness; repurposing it for VPs would corrupt FPMM semantics.
+used by FPMM freshness; repurposing it for VPs would corrupt FPMM semantics. Do
+not page directly on `lastOracleReportAt` either; keep it as a diagnostic and as
+a safe derive lower-bound only.
 
 ### Task 4 — Health-status semantics for a stale-oracle VP
 
@@ -125,9 +143,10 @@ to keep `isInDeviationBreach`/`effectiveThreshold` out-of-scope:
 failure that breaks USDm→CADm pricing.
 
 **Recommendation: option (a) — reorder so the freshness check runs before the
-`isVirtualPool → "N/A"` short-circuit, using the VP-correct window.** Keep all
-deviation logic gated on `!isVirtualPool` so VPs never enter the deviation tier.
-This keeps one health function, one parity test, and one metric semantic.
+`isVirtualPool → "N/A"` short-circuit, using the VP-correct window and
+contract-accurate median live/timestamp state.** Keep all deviation logic gated
+on `!isVirtualPool` so VPs never enter the deviation tier. This keeps one health
+function, one parity test, and one metric semantic.
 
 ### Task 5 — UI / indexer parity
 
@@ -138,14 +157,15 @@ Three files mirror each other:
 - `indexer-envio/test/healthStatusParity.test.ts`
 
 The UI already has weekend reclassification: `computeHealthStatus` returns
-`"WEEKEND"` when `isOracleStale && isWeekend()` (`ui health.ts:249-254`). The UI
-uses **wall-clock + `oracleExpiry`** (`isOracleFresh`, `ui health.ts:197-209`)
-while the indexer uses the event-time `oracleOk` flag — this divergence is
-explicitly **not** covered by the parity suite (`health.ts:192-205`, parity test
-header `:5-19`). So the VP-freshness addition must be mirrored structurally in
-both, but the parity test only needs new cases for the branches both share
-(the new VP short-circuit ordering and the deviation tier staying out of scope
-for VPs).
+`"WEEKEND"` when stale and `isWeekend()` (`ui health.ts:249-254`). Existing FPMM
+branches still diverge intentionally: the UI uses **wall-clock +
+`oracleExpiry`** (`isOracleFresh`, `ui health.ts:197-209`) while the indexer uses
+event-time flags, and that divergence is explicitly **not** covered by the parity
+suite (`health.ts:192-205`, parity test header `:5-19`). The VP-freshness
+addition is different: both indexer and UI must consume the same
+contract-accurate median live/timestamp fields plus `oracleFreshnessWindow`, and
+parity should pin the shared VP branch ordering and degraded-mode behavior while
+deviation stays out of scope for VPs.
 
 ### Task 6 — Metric + alert rule + weekend gate + routing
 
@@ -191,11 +211,12 @@ for VPs).
 ### 1. Indexer health: `indexer-envio/src/pool/health.ts`
 
 Add a VP-aware freshness check that runs before the `isVirtualPool → "N/A"`
-return, using the VP window. `computeHealthStatus` currently takes
-`(pool, nowSeconds)`. Unknown-window VPs degrade to `N/A` even when the default
-`oracleOk=false` has not been healed yet; once the window is known, the VP is
-stale if `oracleOk=false`, the median timestamp is missing, or the median
-timestamp has reached the inclusive expiry boundary.
+return, using the VP window plus the contract-accurate median state.
+`computeHealthStatus` currently takes `(pool, nowSeconds)`. Unknown-source VPs
+degrade to `N/A` even when the default fields have not been healed yet; once
+median state is known, a zero-median/down feed is immediately stale, and a live
+median is stale when the contract-accurate median timestamp reaches the
+inclusive expiry boundary.
 
 ```ts
 export function computeHealthStatus(
@@ -206,14 +227,19 @@ export function computeHealthStatus(
   // health axis that does. Check it before the VP "N/A" short-circuit.
   // VPs price via BiPoolManager.oracleHasValidMedian, whose window is the
   // wrapped exchange's referenceRateResetFrequency (mirrored to
-  // oracleFreshnessWindow), NOT the 1-week token oracleExpiry.
+  // oracleFreshnessWindow), NOT the 1-week token oracleExpiry. The timestamp
+  // source must be the contract median state, not lastOracleReportAt.
   if (isVirtualPool(pool)) {
-    if (pool.oracleFreshnessWindow === 0n) return "N/A";
+    if (pool.oracleMedianLive === false) return "CRITICAL";
     if (
-      !pool.oracleOk ||
-      pool.lastOracleReportAt === 0n ||
-      pool.lastOracleReportAt + pool.oracleFreshnessWindow <= nowSeconds
+      pool.oracleFreshnessWindow === 0n ||
+      pool.oracleMedianLive == null ||
+      pool.oracleMedianTimestamp == null ||
+      pool.oracleMedianTimestamp === 0n
     ) {
+      return "N/A";
+    }
+    if (pool.oracleMedianTimestamp + pool.oracleFreshnessWindow <= nowSeconds) {
       return "CRITICAL";
     }
     return "N/A"; // deviation/reserve health genuinely doesn't apply
@@ -236,10 +262,23 @@ short-circuit VPs (`health.ts:246`).
   # medianTimestamp <= now - referenceRateResetFrequency (~360s). 0n = unknown
   # (FPMM pools, or VP whose wrapped exchange isn't linked yet).
   oracleFreshnessWindow: BigInt!
+
+  # VP-only contract median state. Null means the current-state/RPC source was
+  # not available yet, so UI/metrics degrade instead of paging from
+  # lastOracleReportAt. oracleMedianLive=false means the contract sees no valid
+  # median and the VP is stale immediately.
+  oracleMedianLive: Boolean
+  oracleMedianTimestamp: BigInt
 ```
 
 Add `oracleFreshnessWindow: 0n` to the Pool defaults (wherever the entity is
-constructed — `pool.ts` `getOrCreate`/defaults).
+constructed — `pool.ts` `getOrCreate`/defaults), but keep it out of
+`DEFAULT_ORACLE_FIELDS` and any `oracleDelta` spread. `VirtualPoolDeployed`
+currently passes `{ ...DEFAULT_ORACLE_FIELDS }` into `upsertPool`, and
+`upsertPool` self-heals the wrapped exchange before spreading `oracleDelta`; a
+default `oracleFreshnessWindow: 0n` in that delta would overwrite a freshly
+mirrored `referenceRateResetFrequency` back to unknown on the same deploy event.
+Initialize the field on the base/default row only.
 
 ### 3. Window population: `indexer-envio/src/pool/self-heal.ts` + biPoolManager handlers
 
@@ -267,24 +306,29 @@ check's `> 0n` guard then declines to fire (no false page on unknown window).
 ### 4. UI health: `ui-dashboard/src/lib/health.ts`
 
 Add the VP staleness branch before the `isVirtualPool → "N/A"` return, with
-weekend reclassification, using the UI's wall-clock model and the new window.
-Add `oracleFreshnessWindow` to `PoolHealthState`, but fetch it with the same
+weekend reclassification, using the UI's wall-clock model, the new window, and
+the contract median state. Add `oracleFreshnessWindow`, `oracleMedianLive`, and
+`oracleMedianTimestamp` to `PoolHealthState`, but fetch them with the same
 schema-lag-safe companion-query/degraded-mode pattern used for other newer Pool
-fields. Do not add it directly to the primary pool list/detail queries until the
-hosted indexer schema has rolled everywhere, or a schema-lag window can blank the
-primary dashboard response.
+fields. Do not add them directly to the primary pool list/detail queries until
+the hosted indexer schema has rolled everywhere, or a schema-lag window can
+blank the primary dashboard response.
 
 ```ts
 export function computeHealthStatus(pool, chainId?, nowSeconds = ...): HealthStatus {
   if (isVirtualPool(pool)) {
     const window = Number(pool.oracleFreshnessWindow ?? "0");
-    const medianTs = Number(pool.lastOracleReportAt ?? "0");
-    const stale =
-      window > 0 &&
-      (pool.oracleOk === false ||
-        medianTs === 0 ||
-        medianTs + window <= nowSeconds);
-    if (stale) return isWeekend() ? "WEEKEND" : "CRITICAL";
+    const medianTs =
+      pool.oracleMedianTimestamp == null
+        ? null
+        : Number(pool.oracleMedianTimestamp);
+    if (pool.oracleMedianLive === false) {
+      return isWeekend() ? "WEEKEND" : "CRITICAL";
+    }
+    if (window > 0 && pool.oracleMedianLive === true && medianTs) {
+      const stale = medianTs + window <= nowSeconds;
+      if (stale) return isWeekend() ? "WEEKEND" : "CRITICAL";
+    }
     return "N/A";
   }
   // ... unchanged FPMM path
@@ -293,23 +337,35 @@ export function computeHealthStatus(pool, chainId?, nowSeconds = ...): HealthSta
 
 So a weekend-stale CADm VP renders `WEEKEND`, a weekday-stale one renders
 `CRITICAL`. `computeEffectiveStatus` / `worstStatus` already handle the result.
+Also remove the remaining VP-only UI gates that force `N/A`: update
+`ui-dashboard/src/components/health-panel.tsx` so virtual pools call the same
+health function instead of hard-coding `"N/A"` / "VirtualPool — no oracle data",
+and update the OG/pool metadata helper so stale VP health reasons render
+consistently on detail and share-card surfaces.
 
 ### 5. Parity test: `indexer-envio/test/healthStatusParity.test.ts`
 
 Add a shared block (and mirror in `ui-dashboard/src/lib/__tests__/health.test.ts`):
 
-- VP with unknown window (`oracleFreshnessWindow=0n`) and `oracleOk=false` → `N/A`
-  (degraded mode, no false page before the reset-frequency window is known).
-- VP with fresh oracle (`oracleOk=true`, `lastOracleReportAt + window > now`) → `N/A`.
-- VP with known window and `oracleOk=false` → `CRITICAL`.
-- VP with known window but `lastOracleReportAt=0n` → `CRITICAL`.
-- VP with `oracleOk=true` but `lastOracleReportAt + window <= now` (e.g.
-  window=360, report 10h ago) → `CRITICAL` (indexer) / `WEEKEND` on weekend (UI).
+- VP with unknown window/source (`oracleFreshnessWindow=0n` or
+  `oracleMedianLive == null`) and stale-looking event fields → `N/A` (degraded
+  mode, no false page before contract median state is known).
+- VP with `oracleMedianLive=false` → `CRITICAL` immediately, even if the previous
+  median timestamp would still be inside the reset window.
+- VP with live median and fresh contract timestamp
+  (`oracleMedianTimestamp + window > now`) → `N/A`.
+- VP with live median but missing/zero contract timestamp → `N/A` degraded
+  rather than paging from `lastOracleReportAt`.
+- VP with live median but `oracleMedianTimestamp + window <= now` (e.g.
+  window=360, contract median timestamp 10h ago) → `CRITICAL` (indexer) /
+  `WEEKEND` on weekend (UI).
 - Existing "returns N/A for virtual pools" cases (`:24-38`) should keep asserting
   the unknown-window degraded mode: `oracleFreshnessWindow=0n` stays `N/A`, even
-  if `oracleOk=false`. Add separate known-window fixtures for the critical path.
+  if event-derived fields look stale. Add separate known-contract-source fixtures
+  for the critical path.
 
-`test/helpers/makePool.ts` needs an `oracleFreshnessWindow` default (`0n`).
+`test/helpers/makePool.ts` needs an `oracleFreshnessWindow` default (`0n`) and
+nullable defaults for the VP median fields.
 
 ### 6. Metrics-bridge: publish VP oracle gauges
 
@@ -318,21 +374,24 @@ This is the load-bearing addition — without it no series exists to alert on.
 - **GraphQL** (`metrics-bridge/src/graphql.ts`): add a VP query (or relax the
   filter). Cleanest is a **companion** `BRIDGE_VP_POOLS_QUERY` selecting
   `source _like "%virtual%"` OR `wrappedExchangeId _neq ""`, with fields
-  `id, chainId, token0, token1, source, wrappedExchangeId, oracleOk,
-oracleTimestamp, lastOracleReportAt, oracleFreshnessWindow`. Companion so a
+  `id, chainId, token0, token1, source, wrappedExchangeId,
+oracleFreshnessWindow, oracleMedianLive, oracleMedianTimestamp`. Companion so a
   schema-mismatch only drops VP gauges, not all FPMM gauges (mirrors the
   existing companion-query rationale at `graphql.ts:1-7`).
 - **Poller** (`poller.ts:100`): in addition to `data.Pool.filter(isFpmmPool)`,
   process the VP rows through a new `recordVpOracleMetrics`.
 - **Metrics** (`metrics.ts`): add a dedicated gauge, e.g.
   `mento_pool_vp_oracle_fresh` with the existing `poolLabels` set
-  (`chain_id, chain_name, pair, pool_id, pool_address_short`). Value `1` when
-  `oracleOk` is true, `lastOracleReportAt > 0`, and
-  `lastOracleReportAt + oracleFreshnessWindow > now`; otherwise `0`. Skip
-  emission when
+  (`chain_id, chain_name, pair, pool_id, pool_address_short`). Emit `0`
+  immediately when `oracleMedianLive === false`. Emit `1` when
+  `oracleMedianLive === true`, `oracleMedianTimestamp > 0`,
+  `oracleFreshnessWindow > 0`, and
+  `oracleMedianTimestamp + oracleFreshnessWindow > now`; otherwise emit `0` for
+  the known-but-expired case. Skip emission when the contract median source is
+  null/unavailable, and skip live-timestamp comparisons while
   `oracleFreshnessWindow == 0` (unknown — avoids false `0`).
   Optionally also emit `mento_pool_vp_oracle_freshness_window` (the 360s value)
-  for dashboards. The `pair` label (e.g. `CADm/USD`) is what the FX weekend gate
+  for dashboards. The `pair` label (e.g. `CADm/USDm`) is what the FX weekend gate
   matches on.
 
 ### 7. Alert rule: new `alerts/rules/rules-vp-oracles.tf`
@@ -360,7 +419,9 @@ unless on(chain_id, pool_id, pair) (
   and on() ${local.fx_oracle_pause_gate_promql}
 )
 EOT
-for  = "5m"
+for            = "5m"
+no_data_state  = "OK"
+exec_err_state = "Error"
 labels = {
   service  = "vp-oracles"
   chain    = rule.key
@@ -376,7 +437,14 @@ VP series and then matches back on `chain_id, pool_id, pair`. This mirrors the
 existing FPMM suppressor shape and prevents the label-less weekend gate from
 suppressing USD-pegged/non-FX VP incidents.
 
-### 8. Testnet routing: `alerts/rules/notification-policies.tf`
+`no_data_state = "OK"` is part of the rule contract because the rule iterates
+all `local.chains`, while some chains may have no VP series yet and unknown
+windows are intentionally skipped during rollout. Use the same explicit
+execution-error state as the surrounding Grafana rules (`exec_err_state =
+"Error"`) so genuine query failures are visible without treating absent series as
+incidents.
+
+### 8. Routing: prod + staging `alerts/rules/notification-policies.tf`
 
 If the rule omits rule-level `notification_settings`, add an `#alerts-testnet`
 policy that matches `service="vp-oracles"` plus the preserved per-series chain
@@ -386,6 +454,18 @@ match the existing metric label `chain_name` directly. Either way, the route mus
 preserve chain identity from the firing series. It must never hard-code
 `celo-sepolia` on a generic rule.
 
+Also add production routing for `service="vp-oracles"` + `severity="page"`.
+The current root policy defaults unmatched alerts to `#alerts-infra`, and the
+existing pager/critical routes are service-specific, so prod VP oracle pages must
+either:
+
+- have a prod `vp-oracles` policy that routes to the same Splunk/on-call and
+  `#alerts-critical` destination pattern used by other page-severity protocol
+  alerts; or
+- use rule-level `notification_settings` selected by `rule.value.env`, with prod
+  pointing at the pager/critical contact point and staging pointing at
+  `#alerts-testnet`.
+
 ---
 
 ## Test plan
@@ -394,42 +474,57 @@ preserve chain identity from the firing series. It must never hard-code
 
 - `indexer-envio/test/healthStatusParity.test.ts:24-38` — keep coverage for
   "virtual pool → N/A" when `oracleFreshnessWindow=0n`, then add the new
-  known-window VP-staleness cases (task-5 list).
+  known-contract-source VP-staleness cases (task-5 list).
 - `ui-dashboard/src/lib/__tests__/health.test.ts` — mirror.
+- `ui-dashboard/src/components/__tests__/health-panel*.test.tsx` (or the
+  nearest component test) — assert virtual pools no longer bypass
+  `computeHealthStatus`, and that stale VP copy/reasons match the detail status.
+- OG/pool metadata helper tests — assert virtual pools return the same stale
+  oracle health reason used by the dashboard rather than an empty reason set.
 - `metrics-bridge/test/*` — any snapshot of emitted gauge names will change;
-  add coverage for `mento_pool_vp_oracle_fresh` (fresh=1, stale=0, unknown-window
-  skipped).
+  add coverage for `mento_pool_vp_oracle_fresh` (fresh=1, stale=0,
+  zero-median/down=0 immediately, unknown contract source skipped).
 - `metrics-bridge/test/deviation-alert-state.test.ts` enforces the
   `USD_PEGGED_SYMBOLS` ↔ `main.tf` drift guard — no change needed (we reuse the
   exclusion-based FX classifier), but re-run it.
 
 **New test cases**
 
-- Indexer parity: VP fresh / known-window `oracleOk=false` / known-window
-  missing median timestamp / window-exceeded / unknown-window degraded mode
-  (above).
+- Indexer parity: VP fresh / `oracleMedianLive=false` immediate stale /
+  known-source missing median timestamp degraded / window-exceeded /
+  unknown-source degraded mode (above).
 - Indexer handler integration: feed an `OracleReported` + `MedianUpdated` for a
   CAD VP and assert `oracleFreshnessWindow` is populated from the wrapped
-  exchange's `referenceRateResetFrequency`, and that a synthetic "report 10h ago,
+  exchange's `referenceRateResetFrequency`, assert the VP deploy/link ordering
+  cannot clobber the mirrored window through `DEFAULT_ORACLE_FIELDS` or
+  `oracleDelta`, and assert a synthetic "contract median timestamp 10h ago,
   window 360s, now" yields `healthStatus="CRITICAL"`.
+- Metrics bridge: a flat-feed reporter refresh with a fresh contract median
+  timestamp must keep `mento_pool_vp_oracle_fresh=1` even when
+  `lastOracleReportAt` is old; a zero-median/current median down signal must
+  emit `0` immediately.
 - Alert rule unit test (if the repo has promtool/terraform alert tests): assert
   the VP-oracle expr fires for a stale FX VP, is suppressed for that FX VP during
   the weekend window, and still fires for a stale non-FX/US-dollar VP during the
-  weekend.
+  weekend. Include the no-series case and assert `no_data_state="OK"`.
 
 **Live validation against celo-sepolia CAD**
 
 - Exchange `referenceRateResetFrequency = 360s`, rate feed
   `0xc9dbD89FCe5710C91c35Ed9af1dc93fA090A28B0`.
 - After deploy, query Hasura for the CADm VP `Pool` row and confirm
-  `oracleFreshnessWindow == 360`, `referenceRateFeedID` matches the feed, and
-  `wrappedExchangeId` is set.
-- Confirm `mento_pool_vp_oracle_fresh{pair="CADm/USD",chain_name="celo-sepolia"}`
-  is published and reads `0` while the CAD/USD oracle is the ~10h-stale state, and
-  `1` after a fresh median.
+  `oracleFreshnessWindow == 360`, `referenceRateFeedID` matches the feed,
+  `oracleMedianLive` / `oracleMedianTimestamp` reflect the contract median state,
+  and `wrappedExchangeId` is set.
+- Confirm
+  `mento_pool_vp_oracle_fresh{pair="CADm/USDm",chain_name="celo-sepolia"}` is
+  published and reads `0` while the CADm/USDm contract median is stale/down, and
+  `1` after a fresh median. Keep `USDm->CADm` in operator examples because that
+  is the user-facing swap path; use `CADm/USDm` for the Prometheus pair label.
 - Confirm the alert preserves the chain label and routes the celo-sepolia case to
-  `#alerts-testnet` (fire a test/silence check), and that it is suppressed during
-  the FX weekend window.
+  `#alerts-testnet` (fire a test/silence check), prod `severity="page"` routes to
+  the pager/`#alerts-critical` path, and FX pairs are suppressed during the
+  weekend window.
 
 ---
 
@@ -443,23 +538,26 @@ preserve chain identity from the firing series. It must never hard-code
   during the weekend too. The UI's `WEEKEND` reclassification (`isWeekend()`)
   handles the dashboard side.
 - **`referenceRateResetFrequency = 0` (unknown / backfill).** Default on RPC
-  failure (`biPoolManager.ts:345,468`). Both the health check (`window === 0n`
-  returns `N/A`) and the gauge (skip when `0`) must decline to fire — never page
-  on an unknown window. Self-heal will populate it on a later event; until then
-  the VP stays `N/A`, which is the safe pre-fix behaviour.
+  failure (`biPoolManager.ts:345,468`). Timestamp-expiry checks must decline to
+  fire while the window is unknown: health returns `N/A` and the gauge skips the
+  live-timestamp comparison. A known `oracleMedianLive=false` still emits stale
+  immediately because the contract has no valid median, independent of reset
+  frequency. Self-heal will populate the window on a later event; until then, a
+  VP with no contract median source stays `N/A`, which is the safe pre-fix
+  behaviour.
 - **Self-heal timing.** A pre-start_block VP whose `wrappedExchangeId` /
   `referenceRateFeedID` aren't linked yet won't be in `getPoolsByFeed` and won't
   have a window. It will surface `N/A` until self-heal lands
   (`self-heal.ts:183-399`) — acceptable; the alert simply doesn't exist for that
   pool yet rather than mis-firing.
 - **`lastOracleReportAt` under-bound.** It advances only on `MedianUpdated`
-  (`sortedOracles.ts:542-544`) and freezes on zero-median outages. This is the
-  _correct_ anchor for VP staleness (it mirrors the contract's median timestamp),
-  and using it under-bounds freshness safely — a single-reporter feed that
-  refreshes without a `MedianUpdated` won't falsely read fresh. (The FPMM gauge
-  deliberately uses `oracleTimestamp` instead, `metrics.ts:425-430`; for the VP
-  path use `lastOracleReportAt` because the median timestamp is what the VP
-  contract checks.)
+  (`sortedOracles.ts:542-544`) and freezes on zero-median outages. That makes it
+  useful as a derive-path lower-bound and investigation clue, but unsafe as a
+  paging source: flat feeds can refresh reporters without a median event, so a
+  healthy contract median can look stale by `lastOracleReportAt`. The VP
+  health/gauge path must use the contract median live/timestamp source (or
+  skip/degrade if unavailable), while the FPMM gauge continues to use
+  `oracleTimestamp` (`metrics.ts:425-430`).
 - **Mainnet vs testnet.** Reset frequencies differ per exchange/chain; the field
   is read per-exchange so this is handled. Severity should be env-aware
   (`var.env`/staging → `warning` to `#alerts-testnet`; prod CAD/GHS → `page`),
@@ -468,8 +566,8 @@ preserve chain identity from the firing series. It must never hard-code
 - **`oracleExpiry` must not be repurposed.** It is emitted as
   `mento_pool_oracle_expiry` and used for FPMM freshness; the new VP window is a
   separate field by design.
-- **Parity-test scope.** The indexer (event-time `oracleOk`) and UI (wall-clock)
-  staleness models already diverge intentionally; the parity suite only pins the
-  shared branches. Don't try to assert wall-clock staleness in the indexer parity
-  test — assert the `oracleOk` / window-vs-`nowSeconds` branches the indexer
-  actually implements.
+- **Parity-test scope.** The existing FPMM indexer/UI staleness models already
+  diverge intentionally, so the parity suite only pins shared branches. For the
+  new VP branch, assert the shared `oracleMedianLive` /
+  `oracleMedianTimestamp + oracleFreshnessWindow` behavior and degraded modes;
+  keep weekend reclassification in the UI-specific tests.
