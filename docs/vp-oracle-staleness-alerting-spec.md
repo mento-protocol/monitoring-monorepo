@@ -75,12 +75,18 @@ by `getPoolsByFeed` and IS processed by the per-pool worker**, which sets
 
 Note the per-pool workers gate the _breach/health/deviation_ pipeline behind
 `isVirtualPool`-aware helpers (`priceDifferenceForOracleSample` skips VPs,
-`sortedOracles.ts:50-58`), but the **oracle freshness cursor is written
-unconditionally** for VPs. So freshness data is present; only the health
-_classification_ and the _expiry window_ are wrong.
+`sortedOracles.ts:50-58`). The oracle freshness cursor is written for VPs in the
+normal path, but the implementation must also bypass the existing
+`tokenDecimalsKnown` cursor-hold for VPs because VP median freshness does not
+depend on token decimals. Without that exception, a decimal self-heal failure can
+keep a VP looking stale after a fresh median. So freshness data is mostly present
+today; the missing pieces are the VP exception to the cursor hold, the health
+_classification_, and the _expiry window_.
 
-→ **Conclusion: (A).** No new freshness-population wiring needed. We only need
-(i) the correct window field, and (ii) the health reorder.
+→ **Conclusion: (A, with one implementation caveat).** No new oracle-event
+source is needed, but the implementation must add (i) the correct window field,
+(ii) the health reorder, and (iii) a VP exception to the token-decimal cursor
+hold so median freshness can advance independently of decimal trust.
 
 ### Task 3 — `oracleExpiry` source & the correct VP window
 
@@ -103,7 +109,9 @@ derive path: `lastOracleReportAt + window > now`
 - For VPs: from the wrapped exchange's `referenceRateResetFrequency`, mirrored
   alongside the existing `mirrorFeedIdToPool` call in `self-heal.ts`
   (`selfHealWrappedExchangeId`, and the BiPoolManager forward/reverse link
-  paths), and refreshed on `BucketsUpdated`/`getPoolExchange` re-reads.
+  paths), and explicitly refreshed when `BucketsUpdated` could change reset
+  frequency. Do not rely only on existing stub-only `getPoolExchange` re-reads;
+  already-populated exchanges need their mirrored Pool window refreshed too.
 - For FPMMs: leave `0n`; the health code keeps using `oracleExpiry` for FPMMs.
 
 Do **not** overload `oracleExpiry` itself — it is also surfaced as a gauge and
@@ -166,7 +174,8 @@ for VPs).
 - **celo-sepolia** = chain id `11142220`, slug `celo-sepolia`
   (`shared-config/chain-metadata.json:12-13`). Metrics-bridge gauges carry
   `chain_name="celo-sepolia"` + `chain_id="11142220"`; Aegis/relayer alerts
-  carry `chain="celo-sepolia"`.
+  carry a `chain` label populated from the chain key (`celo-sepolia` for this
+  specific staging case).
 - **Routing gap.** Testnet routes in `notification-policies.tf` match
   `service` + `chain` over `local.staging_chains` and point at
   `grafana_contact_point.slack_alerts_testnet` (`protocol-contact-points.tf:69-78`,
@@ -183,8 +192,10 @@ for VPs).
 
 Add a VP-aware freshness check that runs before the `isVirtualPool → "N/A"`
 return, using the VP window. `computeHealthStatus` currently takes
-`(pool, nowSeconds)`. The indexer side reads the event-time `oracleOk` flag, so
-for VPs we surface staleness from `oracleOk=false` OR an exceeded VP window.
+`(pool, nowSeconds)`. Unknown-window VPs degrade to `N/A` even when the default
+`oracleOk=false` has not been healed yet; once the window is known, the VP is
+stale if `oracleOk=false`, the median timestamp is missing, or the median
+timestamp has reached the inclusive expiry boundary.
 
 ```ts
 export function computeHealthStatus(
@@ -197,10 +208,10 @@ export function computeHealthStatus(
   // wrapped exchange's referenceRateResetFrequency (mirrored to
   // oracleFreshnessWindow), NOT the 1-week token oracleExpiry.
   if (isVirtualPool(pool)) {
-    if (!pool.oracleOk) return "CRITICAL";
+    if (pool.oracleFreshnessWindow === 0n) return "N/A";
     if (
-      pool.oracleFreshnessWindow > 0n &&
-      pool.lastOracleReportAt > 0n &&
+      !pool.oracleOk ||
+      pool.lastOracleReportAt === 0n ||
       pool.lastOracleReportAt + pool.oracleFreshnessWindow <= nowSeconds
     ) {
       return "CRITICAL";
@@ -243,9 +254,11 @@ Mirror `referenceRateResetFrequency` onto the VP Pool wherever
   the reset frequency from the same `exchange` object, so both forward
   (VirtualPoolDeployed) and reverse (`BiPoolManager.ExchangeCreated`) link paths
   populate it. The seed path `self-heal.ts:256` already has the struct value.
-- On `getPoolExchange` re-reads (`handlers/biPoolManager.ts:113`), if the
-  exchange has a `wrappedByPoolId`, push the refreshed reset frequency to that
-  Pool (handles governance changes to reset frequency).
+- Add an explicit non-stub refresh path for governance changes to
+  `referenceRateResetFrequency`: on `BucketsUpdated`, re-read `getPoolExchange`
+  (or otherwise fetch the current struct even when `referenceRateFeedID` is
+  already populated) and, if the exchange has a `wrappedByPoolId`, push the
+  refreshed reset frequency to that Pool.
 
 Edge: when `referenceRateResetFrequency === 0n` (RPC-struct failure default,
 `biPoolManager.ts:345`), leave `oracleFreshnessWindow` at `0n` — the health
@@ -255,16 +268,22 @@ check's `> 0n` guard then declines to fire (no false page on unknown window).
 
 Add the VP staleness branch before the `isVirtualPool → "N/A"` return, with
 weekend reclassification, using the UI's wall-clock model and the new window.
-Add `oracleFreshnessWindow` to `PoolHealthState` and to the GraphQL pool query.
+Add `oracleFreshnessWindow` to `PoolHealthState`, but fetch it with the same
+schema-lag-safe companion-query/degraded-mode pattern used for other newer Pool
+fields. Do not add it directly to the primary pool list/detail queries until the
+hosted indexer schema has rolled everywhere, or a schema-lag window can blank the
+primary dashboard response.
 
 ```ts
 export function computeHealthStatus(pool, chainId?, nowSeconds = ...): HealthStatus {
   if (isVirtualPool(pool)) {
     const window = Number(pool.oracleFreshnessWindow ?? "0");
-    const ts = oracleFreshnessTimestamp(pool); // existing helper
+    const medianTs = Number(pool.lastOracleReportAt ?? "0");
     const stale =
-      pool.oracleOk === false ||
-      (window > 0 && ts > 0 && nowSeconds - ts > window);
+      window > 0 &&
+      (pool.oracleOk === false ||
+        medianTs === 0 ||
+        medianTs + window <= nowSeconds);
     if (stale) return isWeekend() ? "WEEKEND" : "CRITICAL";
     return "N/A";
   }
@@ -279,16 +298,16 @@ So a weekend-stale CADm VP renders `WEEKEND`, a weekday-stale one renders
 
 Add a shared block (and mirror in `ui-dashboard/src/lib/__tests__/health.test.ts`):
 
+- VP with unknown window (`oracleFreshnessWindow=0n`) and `oracleOk=false` → `N/A`
+  (degraded mode, no false page before the reset-frequency window is known).
 - VP with fresh oracle (`oracleOk=true`, `lastOracleReportAt + window > now`) → `N/A`.
-- VP with `oracleOk=false` → `CRITICAL`.
+- VP with known window and `oracleOk=false` → `CRITICAL`.
+- VP with known window but `lastOracleReportAt=0n` → `CRITICAL`.
 - VP with `oracleOk=true` but `lastOracleReportAt + window <= now` (e.g.
   window=360, report 10h ago) → `CRITICAL` (indexer) / `WEEKEND` on weekend (UI).
-- VP with `oracleFreshnessWindow=0n` (unknown) and a stale-ish report → stays
-  `N/A` (the `> 0n` guard declines).
-- Existing "returns N/A for virtual pools" cases (`:24-38`) must be updated:
-  `makePool({source:"virtual_pool_factory", oracleOk:false})` currently expects
-  `N/A` (`:25-26`) — with the reorder this becomes `CRITICAL`. Change that
-  fixture to `oracleOk:true` (+ no window) to keep asserting the `N/A` path.
+- Existing "returns N/A for virtual pools" cases (`:24-38`) should keep asserting
+  the unknown-window degraded mode: `oracleFreshnessWindow=0n` stays `N/A`, even
+  if `oracleOk=false`. Add separate known-window fixtures for the critical path.
 
 `test/helpers/makePool.ts` needs an `oracleFreshnessWindow` default (`0n`).
 
@@ -308,52 +327,64 @@ oracleTimestamp, lastOracleReportAt, oracleFreshnessWindow`. Companion so a
 - **Metrics** (`metrics.ts`): add a dedicated gauge, e.g.
   `mento_pool_vp_oracle_fresh` with the existing `poolLabels` set
   (`chain_id, chain_name, pair, pool_id, pool_address_short`). Value `1` when
-  `oracleOk && lastOracleReportAt + oracleFreshnessWindow > now`, else `0`. Skip
-  emission when `oracleFreshnessWindow == 0` (unknown — avoids false `0`).
+  `oracleOk` is true, `lastOracleReportAt > 0`, and
+  `lastOracleReportAt + oracleFreshnessWindow > now`; otherwise `0`. Skip
+  emission when
+  `oracleFreshnessWindow == 0` (unknown — avoids false `0`).
   Optionally also emit `mento_pool_vp_oracle_freshness_window` (the 360s value)
   for dashboards. The `pair` label (e.g. `CADm/USD`) is what the FX weekend gate
   matches on.
 
-### 7. Alert rule: `alerts/rules/rules-fpmms.tf` (or a new `rules-vp-oracles.tf`)
+### 7. Alert rule: new `alerts/rules/rules-vp-oracles.tf`
+
+Prefer a separate rule group that iterates `local.chains`, filters the metric by
+the per-chain `chain_name`, and labels the alert with that same chain key. Do
+not stamp a literal `chain="celo-sepolia"` on a generic alert, or production
+series could route as staging. Also do not rely on the root notification policy
+from inside `rules-fpmms.tf` unless this new rule omits rule-level
+`notification_settings`; that file's existing direct notification settings
+bypass the policy tree. If the rule uses direct `notification_settings`, the
+contact point must be selected from `rule.value.env` explicitly.
 
 ```hcl
 # Virtual-pool oracle staleness: the wrapped exchange's median is older than
 # its referenceRateResetFrequency, so BiPoolManager.oracleHasValidMedian
 # reverts and the swap app can't price the pair (e.g. USDm->CADm). FX-weekend
 # gated so closed-market staleness is expected, not paged.
-expr = "(mento_pool_vp_oracle_fresh < 0.5) unless on() (${local.fx_oracle_pause_gate_promql})"
+expr = <<-EOT
+(
+  mento_pool_vp_oracle_fresh{chain_name="${rule.key}"} < 0.5
+)
+unless on(chain_id, pool_id, pair) (
+  mento_pool_vp_oracle_fresh{chain_name="${rule.key}", pair!~"${local.usd_pegged_pair_regex}", pair=~".+/.+"}
+  and on() ${local.fx_oracle_pause_gate_promql}
+)
+EOT
 for  = "5m"
 labels = {
-  service  = "fpmms"        # or a new "vp-oracles" if a matching route is added
-  severity = "warning"      # testnet → warning; prod CAD/GHS would be "page"
+  service  = "vp-oracles"
+  chain    = rule.key
+  severity = rule.value.env == "prod" ? "page" : "warning"
 }
 annotations = {
   summary = "Virtual pool {{ $labels.pair }} on {{ $labels.chain_name }} has a stale oracle (older than its reset frequency); swaps for this pair will revert with \"no valid median\"."
 }
 ```
 
-The `unless on() (fx_oracle_pause_gate_promql)` reuses the existing time gate
-(`main.tf:101`), wrapping the whole VP-oracle expr. Because the metric carries
-`pair`, the gate suppresses all FX VP pairs Fri 21:00–Sun 23:00 UTC (plus the
-reopen grace). USD-pegged VPs (if any) won't be FX-classified, but for VP
-staleness we can additionally restrict the selector to FX pairs with
-`pair!~"${local.usd_pegged_pair_regex}", pair=~".+/.+"` to mirror the FPMM
-suppressors exactly.
+The RHS reuses the existing time gate (`main.tf:101`) but first selects only FX
+VP series and then matches back on `chain_id, pool_id, pair`. This mirrors the
+existing FPMM suppressor shape and prevents the label-less weekend gate from
+suppressing USD-pegged/non-FX VP incidents.
 
 ### 8. Testnet routing: `alerts/rules/notification-policies.tf`
 
-Add an `#alerts-testnet` policy that matches the new alert. Two options:
-
-- **Reuse `service`/`chain`:** label the alert `chain="celo-sepolia"` (in
-  addition to the metric's `chain_name`) and add a `service="fpmms"` (or
-  `service="vp-oracles"`) staging policy in the `local.staging_chains` fan-out,
-  matching `service` + `chain`, routed to `slack_alerts_testnet`
-  (mirror `:413-432`).
-- **Match on `chain_name`:** add a policy matching `service=<new>` +
-  `chain_name="celo-sepolia"`.
-
-Option 1 is more consistent with the existing fan-out. Confirm the exact
-`matchers` block against `notification-policies.tf:288-342`.
+If the rule omits rule-level `notification_settings`, add an `#alerts-testnet`
+policy that matches `service="vp-oracles"` plus the preserved per-series chain
+identity. The preferred shape is a `local.staging_chains` fan-out matching
+`service` + `chain` where the rule label sets `chain = rule.key`; alternatively
+match the existing metric label `chain_name` directly. Either way, the route must
+preserve chain identity from the firing series. It must never hard-code
+`celo-sepolia` on a generic rule.
 
 ---
 
@@ -361,11 +392,9 @@ Option 1 is more consistent with the existing fan-out. Confirm the exact
 
 **Existing tests that must change**
 
-- `indexer-envio/test/healthStatusParity.test.ts:24-38` — the two
-  "virtual pool → N/A" fixtures currently set `oracleOk:false` and expect `N/A`;
-  with the reorder they become `CRITICAL`. Flip the fixtures to `oracleOk:true`
-  (no window) to keep asserting the `N/A` branch, and add the new VP-staleness
-  cases (task-5 list).
+- `indexer-envio/test/healthStatusParity.test.ts:24-38` — keep coverage for
+  "virtual pool → N/A" when `oracleFreshnessWindow=0n`, then add the new
+  known-window VP-staleness cases (task-5 list).
 - `ui-dashboard/src/lib/__tests__/health.test.ts` — mirror.
 - `metrics-bridge/test/*` — any snapshot of emitted gauge names will change;
   add coverage for `mento_pool_vp_oracle_fresh` (fresh=1, stale=0, unknown-window
@@ -376,15 +405,17 @@ Option 1 is more consistent with the existing fan-out. Confirm the exact
 
 **New test cases**
 
-- Indexer parity: VP fresh / `oracleOk=false` / window-exceeded / unknown-window
+- Indexer parity: VP fresh / known-window `oracleOk=false` / known-window
+  missing median timestamp / window-exceeded / unknown-window degraded mode
   (above).
 - Indexer handler integration: feed an `OracleReported` + `MedianUpdated` for a
   CAD VP and assert `oracleFreshnessWindow` is populated from the wrapped
   exchange's `referenceRateResetFrequency`, and that a synthetic "report 10h ago,
   window 360s, now" yields `healthStatus="CRITICAL"`.
 - Alert rule unit test (if the repo has promtool/terraform alert tests): assert
-  the VP-oracle expr fires for a stale FX VP and is suppressed during the weekend
-  window.
+  the VP-oracle expr fires for a stale FX VP, is suppressed for that FX VP during
+  the weekend window, and still fires for a stale non-FX/US-dollar VP during the
+  weekend.
 
 **Live validation against celo-sepolia CAD**
 
@@ -396,23 +427,26 @@ Option 1 is more consistent with the existing fan-out. Confirm the exact
 - Confirm `mento_pool_vp_oracle_fresh{pair="CADm/USD",chain_name="celo-sepolia"}`
   is published and reads `0` while the CAD/USD oracle is the ~10h-stale state, and
   `1` after a fresh median.
-- Confirm the alert routes to `#alerts-testnet` (fire a test/silence check), and
-  that it is suppressed during the FX weekend window.
+- Confirm the alert preserves the chain label and routes the celo-sepolia case to
+  `#alerts-testnet` (fire a test/silence check), and that it is suppressed during
+  the FX weekend window.
 
 ---
 
 ## Risks / edge cases
 
-- **Weekend false-positives.** The VP staleness alert MUST be wrapped in
-  `fx_oracle_pause_gate_promql` and ideally restrict its selector to FX pairs
-  (`pair!~usd_pegged_pair_regex`). Otherwise CAD/GHS/etc. would page every
-  Saturday when the FX oracle legitimately stops reporting. The UI's `WEEKEND`
-  reclassification (`isWeekend()`) handles the dashboard side.
+- **Weekend false-positives and false-suppression.** The VP staleness alert MUST
+  wrap FX pairs in `fx_oracle_pause_gate_promql`, and the suppressor RHS MUST
+  restrict itself to FX pairs (`pair!~usd_pegged_pair_regex`). Without the weekend
+  gate, CAD/GHS/etc. would page every Saturday when the FX oracle legitimately
+  stops reporting; without the FX-only RHS, non-FX VP incidents would be hidden
+  during the weekend too. The UI's `WEEKEND` reclassification (`isWeekend()`)
+  handles the dashboard side.
 - **`referenceRateResetFrequency = 0` (unknown / backfill).** Default on RPC
-  failure (`biPoolManager.ts:345,468`). Both the health check (`> 0n` guard) and
-  the gauge (skip when `0`) must decline to fire — never page on an unknown
-  window. Self-heal will populate it on a later event; until then the VP stays
-  `N/A`, which is the safe pre-fix behaviour.
+  failure (`biPoolManager.ts:345,468`). Both the health check (`window === 0n`
+  returns `N/A`) and the gauge (skip when `0`) must decline to fire — never page
+  on an unknown window. Self-heal will populate it on a later event; until then
+  the VP stays `N/A`, which is the safe pre-fix behaviour.
 - **Self-heal timing.** A pre-start_block VP whose `wrappedExchangeId` /
   `referenceRateFeedID` aren't linked yet won't be in `getPoolsByFeed` and won't
   have a window. It will surface `N/A` until self-heal lands
