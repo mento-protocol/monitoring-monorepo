@@ -76,6 +76,8 @@ test("extractExpressions covers supported HCL shapes", () => {
 locals {
   # expr = "comment_only_metric"
   ratio_promql = "up == 1"
+  inline_comment_expr = "up == 1" # valid HCL inline comment
+  slash_comment_expr = "sum(rate(http_requests_total{url=\\"https://example.test\\"}[5m]))" // valid HCL inline comment
   foo_regex = format("^%s$", local.foo)
   age_expr = format(
     "floor(((%s) %% 86400) / 3600)",
@@ -118,8 +120,18 @@ resource "grafana_rule_group" "fixture" {
 `);
   const expressions = extractExpressions("fixture.tf", fixture);
   assert(
-    expressions.length === 9,
-    `expected 9 expressions, got ${expressions.length}: ${JSON.stringify(expressions)}`,
+    expressions.length === 13,
+    `expected 13 expressions, got ${expressions.length}: ${JSON.stringify(expressions)}`,
+  );
+  assert(
+    expressions.some((entry) => entry.expr === "up == 1"),
+    "expected single-line expression with inline HCL comment",
+  );
+  assert(
+    expressions.some((entry) =>
+      entry.expr.includes('url="https://example.test"'),
+    ),
+    "expected // inside a quoted string to be preserved",
   );
   assert(
     expressions.some(
@@ -144,6 +156,36 @@ resource "grafana_rule_group" "fixture" {
         entry.expr === "last_over_time(mento_pool_rebalance_effectiveness[1h])",
     ),
     "expected format-wrapped join fragment with a range selector",
+  );
+  assert(
+    expressions.some(
+      (entry) =>
+        entry.kind === "join" &&
+        entry.expr ===
+          "last_over_time(mento_pool_rebalance_effectiveness[1h]) and mento_pool_limit_pressure",
+    ),
+    "expected full joined PromQL expression",
+  );
+});
+
+test("extractExpressions parses rendered join() syntax", () => {
+  const fixture = stripComments(`
+data {
+  model = jsonencode({
+    expr = join(" ;; ", [
+      "up == 1",
+      "up == 0",
+    ])
+  })
+}
+`);
+  const joined = extractExpressions("bad-join.tf", fixture).find(
+    (entry) => entry.kind === "join",
+  );
+  assert(joined !== undefined, "expected joined PromQL expression");
+  assert(
+    lintPromql(neutralize(joined.expr)) !== null,
+    `expected invalid join separator to fail parsing, got: ${joined.expr}`,
   );
 });
 

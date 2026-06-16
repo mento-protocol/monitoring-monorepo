@@ -39,11 +39,38 @@ const intEnv = (name, fallback) => {
 // An HCL double-quoted string body. Handles \" escapes inside jsonencode.
 const QUOTED = String.raw`"((?:[^"\\]|\\.)*)"`;
 
+function stripLineComment(line) {
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === "#") {
+      return line.slice(0, i).trimEnd();
+    } else if (char === "/" && line[i + 1] === "/") {
+      return line.slice(0, i).trimEnd();
+    }
+  }
+
+  return line;
+}
+
 export const stripComments = (text) =>
-  text
-    .split("\n")
-    .filter((line) => !/^\s*#/.test(line))
-    .join("\n");
+  text.split("\n").map(stripLineComment).join("\n");
 
 export const unescapeHcl = (value) => value.replace(/\\(["\\])/g, "$1");
 
@@ -91,7 +118,7 @@ function findClosingBracket(text, openIndex) {
   return -1;
 }
 
-function extractJoinFragments(file, text) {
+function extractJoinExpressions(file, text) {
   const out = [];
   const assignment = /^\s*expr\s*=/gm;
   for (const match of text.matchAll(assignment)) {
@@ -101,17 +128,24 @@ function extractJoinFragments(file, text) {
     const next = nextAssignment.exec(text);
     const bodyEnd = next ? next.index : text.length;
     const body = text.slice(bodyStart, bodyEnd);
-    const joinCall = /join\(\s*"[^"]*"\s*,\s*\[/g;
+    const joinCall = new RegExp(String.raw`join\(\s*${QUOTED}\s*,\s*\[`, "g");
 
     for (const join of body.matchAll(joinCall)) {
+      const separator = unescapeHcl(join[1]);
       const open = join.index + join[0].lastIndexOf("[");
       const close = findClosingBracket(body, open);
       if (close === -1) continue;
 
       const listBody = body.slice(open + 1, close);
       const elem = new RegExp(String.raw`^\s*${QUOTED},?\s*$`, "gm");
+      const fragments = [];
       for (const element of listBody.matchAll(elem)) {
-        out.push({ file, kind: "join-elem", expr: unescapeHcl(element[1]) });
+        const fragment = unescapeHcl(element[1]);
+        fragments.push(fragment);
+        out.push({ file, kind: "join-elem", expr: fragment });
+      }
+      if (fragments.length > 0) {
+        out.push({ file, kind: "join", expr: fragments.join(separator) });
       }
     }
   }
@@ -166,7 +200,7 @@ export function extractExpressions(file, text) {
   // string escapes inside the bracket list, so scan for the matching closing
   // bracket while ignoring PromQL range-selector brackets inside quoted
   // fragments.
-  out.push(...extractJoinFragments(file, text));
+  out.push(...extractJoinExpressions(file, text));
 
   return out;
 }
