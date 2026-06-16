@@ -138,7 +138,7 @@ describe("incremental fee snapshot pagination", () => {
     expect(result.rows[0]!.feesUsdWei).toBe("9");
   });
 
-  it("incremental first-page rejection returns cached rows plus an error", async () => {
+  it("incremental first-page rejection returns cached fee rows without blanking fees", async () => {
     const cached = feeRow("today", TODAY_MIDNIGHT_SECONDS);
     const upstreamError = new Error("tail timeout");
     requestMock
@@ -154,7 +154,41 @@ describe("incremental fee snapshot pagination", () => {
 
     expect(result.rows).toEqual([cached]);
     expect(result.truncated).toBe(true);
-    expect(result.error).toBe(upstreamError);
+    expect(result.error).toBeNull();
+    expect(upstreamError.message).toBe("tail timeout");
+  });
+
+  it("resumes from the last refreshed mutable cutoff after missed poll days", async () => {
+    const cachedToday = feeRow("today", TODAY_MIDNIGHT_SECONDS, "1");
+    requestMock
+      .mockResolvedValueOnce({
+        PoolDailyFeeSnapshot: [cachedToday],
+      })
+      .mockResolvedValueOnce({
+        PoolDailyFeeSnapshot: [
+          feeRow("two-days-later", TODAY_MIDNIGHT_SECONDS + 2 * 86_400, "2"),
+        ],
+      });
+
+    await fetchAllFeeSnapshotPages(makeClient(), 42220, "celo-mainnet");
+    vi.setSystemTime(new Date(REQUEST_DAY_MS + 2 * 86_400_000));
+    const result = await fetchAllFeeSnapshotPages(
+      makeClient(),
+      42220,
+      "celo-mainnet",
+    );
+
+    expect(variablesAt(1)).toMatchObject({
+      chainId: 42220,
+      afterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
+      limit: 1000,
+      offset: 0,
+    });
+    expect(result.error).toBeNull();
+    expect(result.rows.map((row) => row.id)).toEqual([
+      "two-days-later",
+      "today",
+    ]);
   });
 
   it("full fetch that fails mid-loop does not seed the cache", async () => {
@@ -390,6 +424,7 @@ describe("incremental pool daily snapshot pagination", () => {
     incrementalRowCache.set("celo-mainnet:PoolDailySnapshot", {
       variablesKey: "pool-a",
       rows: [polledToday],
+      refreshAfterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
     });
     seedIncrementalRowCacheFromNetworkData([
       {

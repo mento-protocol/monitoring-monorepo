@@ -299,7 +299,7 @@ export async function fetchPaginatedRows<TRow, TVars>(args: {
 /** @internal Exported for test-scope `.clear()`. */
 export const incrementalRowCache = new Map<
   string,
-  { variablesKey: string; rows: unknown[] }
+  { variablesKey: string; rows: unknown[]; refreshAfterTimestamp: number }
 >();
 
 const poolIdsVariablesKey = (poolIds: readonly string[]) =>
@@ -309,10 +309,15 @@ function seedIncrementalRows(
   cacheKey: string,
   variablesKey: string,
   rows: unknown[],
+  refreshAfterTimestamp = mutableDayCutoff(Date.now()),
 ): void {
   const existing = incrementalRowCache.get(cacheKey);
   if (existing !== undefined && existing.variablesKey === variablesKey) return;
-  incrementalRowCache.set(cacheKey, { variablesKey, rows });
+  incrementalRowCache.set(cacheKey, {
+    variablesKey,
+    rows,
+    refreshAfterTimestamp,
+  });
 }
 
 export function seedIncrementalRowCacheFromNetworkData(
@@ -368,6 +373,7 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
   dedupKey: (row: TRow) => string;
   timestampOf: (row: TRow) => number;
   nowMs?: number;
+  surfaceIncrementalError?: boolean;
   extra?: Record<string, unknown>;
 }): Promise<PaginatedPageResult<TRow>> {
   const {
@@ -381,6 +387,7 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
     dedupKey,
     timestampOf,
     nowMs = Date.now(),
+    surfaceIncrementalError = true,
     extra,
   } = args;
   const cacheKey = `${network}:${responseKey}`;
@@ -402,7 +409,11 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
     // Only complete results seed the cache — truncated/errored full fetches
     // retry the full pagination next cycle, identical to legacy behavior.
     if (!full.truncated && full.error === null) {
-      incrementalRowCache.set(cacheKey, { variablesKey, rows: full.rows });
+      incrementalRowCache.set(cacheKey, {
+        variablesKey,
+        rows: full.rows,
+        refreshAfterTimestamp: mutableDayCutoff(nowMs),
+      });
     }
     return full;
   }
@@ -410,14 +421,15 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
   const cachedRows = cached.rows as TRow[];
   let tail: PaginatedPageResult<TRow>;
   try {
-    tail = await paginate(mutableDayCutoff(nowMs));
+    tail = await paginate(cached.refreshAfterTimestamp);
   } catch (err) {
     // First-page failure on the incremental path: degrade to cached history
     // (mirrors the mid-loop fail-open contract on SNAPSHOT_PAGE_SIZE).
+    const error = err instanceof Error ? err : new Error(String(err));
     return {
       rows: cachedRows,
       truncated: true,
-      error: err instanceof Error ? err : new Error(String(err)),
+      error: surfaceIncrementalError ? error : null,
     };
   }
 
@@ -432,7 +444,11 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
   );
 
   if (!tail.truncated && tail.error === null) {
-    incrementalRowCache.set(cacheKey, { variablesKey, rows });
+    incrementalRowCache.set(cacheKey, {
+      variablesKey,
+      rows,
+      refreshAfterTimestamp: mutableDayCutoff(nowMs),
+    });
   }
 
   return { rows, truncated: tail.truncated, error: tail.error };
@@ -556,6 +572,7 @@ export async function fetchAllFeeSnapshotPages(
     dedupKey: (s) => s.id,
     timestampOf: (s) => Number(s.timestamp),
     ...(nowMs !== undefined ? { nowMs } : {}),
+    surfaceIncrementalError: false,
   });
 }
 
