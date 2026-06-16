@@ -176,6 +176,18 @@ const guardRequest =
     return realRequest(...args);
   };
 
+const guardedFetchInit = (
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+): Parameters<typeof fetch>[1] => {
+  const redirectMode =
+    init?.redirect ?? (input instanceof Request ? input.redirect : undefined);
+  if (redirectMode === "manual" || redirectMode === "error") {
+    return init;
+  }
+  return { ...init, redirect: "manual" };
+};
+
 globalThis.fetch = ((
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
@@ -197,7 +209,7 @@ globalThis.fetch = ((
   } catch (error) {
     return Promise.reject(error);
   }
-  return realFetch(input, init);
+  return realFetch(input, guardedFetchInit(input, init));
 }) as typeof fetch;
 
 http.request = guardRequest("http:", realHttpRequest) as typeof http.request;

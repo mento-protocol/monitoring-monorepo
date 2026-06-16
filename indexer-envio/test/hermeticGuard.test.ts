@@ -30,6 +30,39 @@ describe("hermetic test guard", () => {
     expect((error as Error).message).not.toContain("secret-token");
   });
 
+  it("does not auto-follow loopback redirects to non-loopback hosts", async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(302, {
+        location: "https://forno.celo.org/rpc/secret-token",
+      });
+      res.end();
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = server.address();
+      expect(address).not.toBeNull();
+      expect(typeof address).not.toBe("string");
+      const port = typeof address === "string" ? 0 : address!.port;
+
+      const response = await fetch(`http://127.0.0.1:${port}/redirect`);
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe(
+        "https://forno.celo.org/rpc/secret-token",
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+    }
+  });
+
   it("rejects slash-less absolute HTTP fetch URLs without parsing them against loopback", async () => {
     const error = await fetch(
       "http:metadata.google.internal/computeMetadata/v1/secret-token",
