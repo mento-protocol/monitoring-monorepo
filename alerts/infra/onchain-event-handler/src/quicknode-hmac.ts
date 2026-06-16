@@ -41,6 +41,9 @@ export function verifyQuickNodeHmac(
   hmac.update(signatureData);
   const computedSignature = hmac.digest("hex");
 
+  // Intentional parity between standalone function roots: DEBUG logs signature
+  // metadata and the first payload bytes for operator debugging. This path is
+  // disabled unless DEBUG is set on the function.
   if (process.env.DEBUG) {
     console.log("\nSignature Debug:");
     console.log("Message components:");

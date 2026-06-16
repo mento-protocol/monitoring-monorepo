@@ -2,9 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Vitest runs with cwd = this package root, both locally (`pnpm test`) and
-// in CI (working-directory). The repo root is three levels up.
-const packageRoot = process.cwd();
+const packageRoot = join(__dirname, "..");
 const repoRoot = join(packageRoot, "..", "..", "..");
 
 const read = (path: string) => readFileSync(path, "utf8");
