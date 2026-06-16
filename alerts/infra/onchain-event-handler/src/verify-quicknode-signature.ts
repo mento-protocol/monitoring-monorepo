@@ -5,8 +5,8 @@
  * Reference: https://www.quicknode.com/guides/quicknode-products/streams/validating-incoming-streams-webhook-messages
  */
 
-import crypto from "crypto";
 import { logger } from "./logger";
+import { verifyQuickNodeHmac } from "./quicknode-hmac";
 
 /**
  * Maximum allowed timestamp difference in milliseconds (±5 minutes)
@@ -55,54 +55,5 @@ export function verifyQuickNodeSignature(
     return false;
   }
 
-  // Concatenate signature inputs as strings (nonce + timestamp + payload)
-  const signatureData = nonce + timestamp + payload;
-
-  // Compute HMAC-SHA256 signature
-  const hmac = crypto.createHmac("sha256", secret);
-  hmac.update(signatureData);
-  const computedSignature = hmac.digest("hex");
-
-  // Validate that both signatures are valid hex strings with even length
-  // HMAC-SHA256 produces 64 hex characters (32 bytes)
-  if (
-    !isValidHex(computedSignature) ||
-    !isValidHex(givenSignature) ||
-    computedSignature.length !== givenSignature.length
-  ) {
-    return false;
-  }
-
-  // Use timing-safe comparison to prevent timing attacks
-  return crypto.timingSafeEqual(
-    hexToBytes(computedSignature),
-    hexToBytes(givenSignature),
-  );
-}
-
-/**
- * Validate that a string is a valid hex string with even length
- * @param hex - String to validate
- * @returns true if valid hex string with even length
- */
-function isValidHex(hex: string): boolean {
-  return /^[0-9a-fA-F]+$/.test(hex) && hex.length % 2 === 0;
-}
-
-/**
- * Helper to convert hex string to Uint8Array for timing-safe comparison
- *
- * We use this instead of Buffer to avoid type mismatches in newer @types/node versions,
- * which introduce stricter ArrayBufferLike checks that Buffer doesn't fully satisfy
- * (due to SharedArrayBuffer compatibility issues).
- *
- * @param hex - Hex string to convert (must be valid hex with even length)
- * @returns Uint8Array representation of the hex string
- */
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
+  return verifyQuickNodeHmac(secret, payload, nonce, timestamp, givenSignature);
 }
