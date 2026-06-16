@@ -38,6 +38,11 @@ If for whatever reason service account impersonation doesn't work, you'll need a
 
 ### Deployment
 
+The GCP project ID is `project_name` plus a random suffix chosen at create time
+(`random_project_id = true` in `infra/main.tf`). After the first
+`terraform apply`, read it with `terraform -chdir=infra output project_id`, then
+run `pnpm run cache:clear` so local scripts pick it up.
+
 <!-- markdown-link-check-disable -->
 
 1. Run `./bin/set-up-terraform.sh` to check required permissions and provision all required terraform providers and modules
@@ -59,6 +64,15 @@ If for whatever reason service account impersonation doesn't work, you'll need a
    # Required for creating new GCP projects
    # Get it via `gcloud billing accounts list` (pick the GmbH account)
    billing_account      = "<our-billing-account-id>"
+   ```
+
+1. Add a fine-grained GitHub PAT scoped to
+   `mento-protocol/monitoring-monorepo` with Secrets read/write permission.
+   This is the same value as `alerts/infra`'s `github_token` and lets
+   Terraform mirror the drift workflow's repo secrets.
+
+   ```hcl
+   github_token = "<github-token>"
    ```
 
 1. [Create a Discord Webhook URL](https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks) for the channel you want to receive notifications in
@@ -171,6 +185,11 @@ If for whatever reason service account impersonation doesn't work, you'll need a
      ```hcl
      slack_notification_channel_id = "<channel-id>"
      ```
+
+     `pnpm gov-watchdog:deploy` mirrors this value to the stack-specific
+     `TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID` repo secret
+     for scheduled drift. Do not reuse the alerts-owned
+     `TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID` secret.
 
    - Run `terraform apply` again to create the error alerting policy
 

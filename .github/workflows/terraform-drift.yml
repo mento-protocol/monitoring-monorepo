@@ -1,7 +1,7 @@
 name: Terraform Drift Detection
 
-# Daily scheduled `terraform plan -detailed-exitcode` for every Terraform stack
-# whose `ci.apply == "push-main-production-environment"` in
+# Daily scheduled `terraform plan -detailed-exitcode` for every auto-applied
+# Terraform stack plus any stack opting in via `ci.drift == "scheduled"` in
 # `terraform.stacks.json`. Read-only — never applies. On exit-2 ("changes
 # pending"), opens or updates a GitHub issue labelled `drift-detection` +
 # `stack:<id>` with the sanitized plan tail.
@@ -40,7 +40,7 @@ concurrency:
 
 jobs:
   discover:
-    name: Discover auto-applied stacks
+    name: Discover drift-checked stacks
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
     permissions:
@@ -51,12 +51,11 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Filter registry to auto-applied stacks
+      - name: Filter registry to drift-checked stacks
         id: filter
         # Read `terraform.stacks.json` via `node scripts/tf-stacks.mjs list
-        # --json`, keep only stacks whose
-        # `ci.apply == "push-main-production-environment"`, emit a
-        # matrix.include payload.
+        # --json`, keep auto-applied stacks plus manual-apply stacks that opt
+        # in with `ci.drift == "scheduled"`, emit a matrix.include payload.
         #
         # We invoke the script via `node` directly rather than `pnpm tf list`
         # because pnpm isn't pre-installed on GitHub/Blacksmith Ubuntu 24.04
@@ -71,7 +70,7 @@ jobs:
               const stdin = require("fs").readFileSync(0, "utf8");
               const { stacks } = JSON.parse(stdin);
               const filtered = stacks
-                .filter(s => s.ci.apply === "push-main-production-environment")
+                .filter(s => s.ci.apply === "push-main-production-environment" || s.ci.drift === "scheduled")
                 // `planSa` routes each leg to the least-privileged SA that can
                 // still run a full-refresh drift plan. A stack whose only GCP
                 // touch is the GCS backend (no google* provider) refreshes fine
@@ -111,11 +110,12 @@ jobs:
       issues: write
       actions: read
     env:
-      # Union of every TF_VAR_* secret across the auto-applied stacks. Each
-      # `terraform plan` only reads the vars its stack declares — extra vars
-      # are harmless. Keep this block in sync with the env blocks in
-      # `.github/workflows/alerts-rules.yml`, `alerts-infra.yml`, and
-      # `aegis-terraform.yml`.
+      # Shared TF_VAR_* secrets across the drift-checked stacks plus
+      # stack-scoped staging vars for governance-watchdog. Each `terraform
+      # plan` only reads the exported TF_VAR_* values its stack declares.
+      # Keep this block in sync with the env blocks in
+      # `.github/workflows/alerts-rules.yml`, `alerts-infra.yml`,
+      # `aegis-terraform.yml`, and the governance-watchdog mirror below.
       TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
@@ -128,8 +128,25 @@ jobs:
       TF_VAR_splunk_on_call_api_key: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_KEY }}
       TF_VAR_oncall_slack_channel_id: ${{ secrets.TF_VAR_ONCALL_SLACK_CHANNEL_ID }}
       TF_VAR_oncall_support_usergroup_id: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
-      TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID }}
       TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+      # governance-watchdog drift leg (manual-apply stack opted in via
+      # `ci.drift` in the registry). Mirrored from the operator's tfvars by
+      # governance-watchdog/infra/github-secrets.tf on each
+      # `pnpm gov-watchdog:deploy`. Keep these under stack-scoped env names
+      # and export them only in the governance-watchdog leg below; otherwise
+      # missing bootstrap secrets expand to empty TF_VAR_* inputs and override
+      # defaults or legacy workflow-level fallbacks.
+      GOV_WATCHDOG_TF_VAR_ORG_ID: ${{ secrets.TF_VAR_ORG_ID }}
+      GOV_WATCHDOG_TF_VAR_DISCORD_WEBHOOK_URL: ${{ secrets.TF_VAR_DISCORD_WEBHOOK_URL }}
+      GOV_WATCHDOG_TF_VAR_DISCORD_TEST_WEBHOOK_URL: ${{ secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL }}
+      GOV_WATCHDOG_TF_VAR_TELEGRAM_CHAT_ID: ${{ secrets.TF_VAR_TELEGRAM_CHAT_ID }}
+      GOV_WATCHDOG_TF_VAR_TELEGRAM_TEST_CHAT_ID: ${{ secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID }}
+      GOV_WATCHDOG_TF_VAR_TELEGRAM_BOT_TOKEN: ${{ secrets.TF_VAR_TELEGRAM_BOT_TOKEN }}
+      GOV_WATCHDOG_TF_VAR_X_AUTH_TOKEN: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
+      GOV_WATCHDOG_TF_VAR_QUICKNODE_SECURITY_TOKEN: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
+      GOV_WATCHDOG_TF_VAR_VICTOROPS_WEBHOOK_URL: ${{ secrets.TF_VAR_VICTOROPS_WEBHOOK_URL }}
+      GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID }}
+      TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID }}
     defaults:
       run:
         working-directory: ${{ matrix.path }}
@@ -202,6 +219,35 @@ jobs:
           STACK_ID: ${{ matrix.id }}
           PLAN_SA: ${{ matrix.planSa }}
         run: |
+          if [ "$STACK_ID" = "governance-watchdog" ]; then
+            export TF_VAR_org_id="${GOV_WATCHDOG_TF_VAR_ORG_ID:-}"
+            export TF_VAR_discord_webhook_url="${GOV_WATCHDOG_TF_VAR_DISCORD_WEBHOOK_URL:-}"
+            export TF_VAR_discord_test_webhook_url="${GOV_WATCHDOG_TF_VAR_DISCORD_TEST_WEBHOOK_URL:-}"
+            export TF_VAR_telegram_chat_id="${GOV_WATCHDOG_TF_VAR_TELEGRAM_CHAT_ID:-}"
+            export TF_VAR_telegram_test_chat_id="${GOV_WATCHDOG_TF_VAR_TELEGRAM_TEST_CHAT_ID:-}"
+            export TF_VAR_telegram_bot_token="${GOV_WATCHDOG_TF_VAR_TELEGRAM_BOT_TOKEN:-}"
+            export TF_VAR_x_auth_token="${GOV_WATCHDOG_TF_VAR_X_AUTH_TOKEN:-}"
+            export TF_VAR_quicknode_security_token="${GOV_WATCHDOG_TF_VAR_QUICKNODE_SECURITY_TOKEN:-}"
+            export TF_VAR_victorops_webhook_url="${GOV_WATCHDOG_TF_VAR_VICTOROPS_WEBHOOK_URL:-}"
+            if [ -n "${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID:-}" ]; then
+              export TF_VAR_slack_notification_channel_id="${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID}"
+            elif [ -n "${TF_VAR_slack_notification_channel_id:-}" ]; then
+              echo "::notice::governance-watchdog drift leg using legacy TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID fallback until the stack-specific Slack secret is mirrored"
+            fi
+          fi
+
+          # Bootstrap guard: TF_VAR_org_id is governance-watchdog-owned,
+          # GCP-specific, and mirrored by github-secrets.tf, so it cannot come
+          # from a sibling stack. Until the operator's first
+          # `pnpm gov-watchdog:deploy` mirrors this stack's TF_VAR_* values to
+          # repo secrets, skip with a warning instead of failing every
+          # scheduled run.
+          if [ "$STACK_ID" = "governance-watchdog" ] && [ -z "${TF_VAR_org_id:-}" ]; then
+            echo "::warning::governance-watchdog drift leg skipped — TF_VAR_* repo secrets not bootstrapped yet (add github_token to governance-watchdog/infra/terraform.tfvars and run pnpm gov-watchdog:deploy)"
+            echo "exitcode=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           set +e
           # Read-only legs must pass `-lock=false`: the read-only seed SA holds
           # `objectViewer` on the state bucket and can't write the GCS lock

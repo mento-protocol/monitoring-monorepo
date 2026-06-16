@@ -6,6 +6,7 @@ A system that monitors Mento Governance events on-chain and sends notifications 
 
 <!-- markdown-link-check-enable -->
 
+- [GCP Project Setup](#gcp-project-setup)
 - [Local Setup](#local-setup)
 - [Running and testing the Cloud Function locally](#running-and-testing-the-cloud-function-locally)
 - [Testing the Deployed Cloud Function](#testing-the-deployed-cloud-function)
@@ -16,6 +17,30 @@ A system that monitors Mento Governance events on-chain and sends notifications 
   - [Filter Function Structure](#filter-function-structure)
 
 ![Architecture Diagram](arch-diagram.png)
+
+## GCP Project Setup
+
+This service lives in its own dedicated GCP project (not `mento-alerts` or
+`mento-monitoring`). The project is created **by Terraform**, not by hand:
+[`infra/main.tf`](./infra/main.tf) feeds `var.project_name`
+(`governance-watchdog`) into the project-factory module with
+`random_project_id = true`, so the real project ID carries a random suffix
+(e.g. `governance-watchdog-b2a6`) and is only knowable **after** the first
+`terraform apply`.
+
+- **Existing deployment (the normal case):** the project already exists. Find
+  its ID via
+  `gcloud projects list --filter="name:governance-watchdog" --format="value(projectId)"`
+  or `terraform -chdir=infra output project_id`. `pnpm run cache:clear`
+  performs this lookup and caches it (see `bin/get-project-vars.sh`).
+- **No project yet (from-scratch bootstrap):** follow
+  [DEPLOY_FROM_SCRATCH.md](./DEPLOY_FROM_SCRATCH.md) **first**. You need the
+  org ID and billing account (`gcloud organizations list`,
+  `gcloud billing accounts list`) plus `roles/iam.serviceAccountTokenCreator`
+  on the shared Terraform service account; `terraform apply` then creates the
+  project and everything in it. Every Local Setup step below that runs
+  `gcloud secrets versions access` or `terraform state show` fails until that
+  first apply has succeeded.
 
 ## Local Setup
 
@@ -67,6 +92,8 @@ A system that monitors Mento Governance events on-chain and sends notifications 
 
 1. Set your local `gcloud` project and cache project values used in shell scripts:
 
+   > Requires the GCP project to already exist — see [GCP Project Setup](#gcp-project-setup).
+
    ```sh
    # Will set the correct gcloud project in your terminal and populate a local cache with values frequently used in shell scripts
    pnpm run cache:clear
@@ -81,6 +108,8 @@ A system that monitors Mento Governance events on-chain and sends notifications 
 
 1. Add the following values to your `terraform.tfvars`. You can either follow the instructions in the comments to look up each value, or you can ask another dev to share his local `terraform.tfvars` with you
 
+   > These lookups read from the **deployed** project; for a from-scratch bootstrap use [DEPLOY_FROM_SCRATCH.md](./DEPLOY_FROM_SCRATCH.md) instead.
+
    ```hcl
    # Required for creating new GCP projects
    # Get it via `gcloud organizations list`
@@ -89,6 +118,10 @@ A system that monitors Mento Governance events on-chain and sends notifications 
    # Required for creating new GCP projects
    # Get it via `gcloud billing accounts list` (pick the GmbH account)
    billing_account      = "<our-billing-account-id>"
+
+   # Fine-grained GitHub PAT scoped to monitoring-monorepo with Secrets read/write.
+   # Use the same value as alerts/infra's github_token.
+   github_token         = "<github-token>"
 
    # The Discord Channel where we post mainnet notifications to
    # Get it via `gcloud secrets versions access latest --secret discord-webhook-url`
@@ -130,6 +163,10 @@ A system that monitors Mento Governance events on-chain and sends notifications 
 
    # Slack notification channel ID for error alerts
    # This channel is created via OAuth in GCP Console (not managed by Terraform)
+   # `pnpm gov-watchdog:deploy` mirrors this to the stack-specific
+   # TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID repo secret for
+   # scheduled drift. Do not reuse the alerts-owned
+   # TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID secret.
    # To find the ID:
    #   `gcloud beta monitoring channels list --project=governance-watchdog-b2a6 --format='table(name,displayName,type)'`
    # Or via UI:
@@ -139,7 +176,7 @@ A system that monitors Mento Governance events on-chain and sends notifications 
    slack_notification_channel_id = "<slack-channel-id>"
    ```
 
-1. Auto-generate a local `.env` file by running `pnpm run generate:env` — we'll need this to run the cloud function locally
+1. Auto-generate a local `.env` file by running `pnpm run generate:env` — we'll need this to run the cloud function locally. The command reads Terraform state and `infra/terraform.tfvars`; it does not run `terraform apply`.
 
 1. Verify that everything works
 

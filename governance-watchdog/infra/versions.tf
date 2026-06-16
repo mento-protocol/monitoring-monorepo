@@ -14,9 +14,9 @@ terraform {
       source  = "hashicorp/archive"
       version = ">= 2.6.0"
     }
-    local = {
-      source  = "hashicorp/local"
-      version = ">= 2.5.1"
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
     }
   }
 
@@ -29,6 +29,15 @@ terraform {
 
 provider "google" {
   impersonate_service_account = var.terraform_service_account
+}
+
+# GitHub provider — used solely to mirror this stack's TF_VAR_* tfvars to
+# repo Actions secrets consumed by .github/workflows/terraform-drift.yml
+# (see github-secrets.tf). PAT: fine-grained, scoped to monitoring-monorepo,
+# Secrets: Read and write only — same PAT as alerts/infra's github_token.
+provider "github" {
+  token = var.github_token
+  owner = "mento-protocol"
 }
 
 # Configure the REST API provider for QuickNode.
