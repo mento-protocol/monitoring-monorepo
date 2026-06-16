@@ -105,7 +105,11 @@ const requestUrlFromArgs = (
     if (typeof input === "string" || input instanceof URL) {
       const url = new URL(input, `${defaultProtocol}//127.0.0.1/`);
       if (isRequestOptions(maybeOptions)) {
-        applyRequestOptions(url, maybeOptions, defaultProtocol);
+        try {
+          applyRequestOptions(url, maybeOptions, defaultProtocol);
+        } catch {
+          return url;
+        }
       }
       return url;
     }

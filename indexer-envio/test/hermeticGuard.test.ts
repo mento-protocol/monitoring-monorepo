@@ -50,6 +50,16 @@ describe("hermetic test guard", () => {
     );
   });
 
+  it("rejects outbound Node HTTP clients even when request options are invalid", () => {
+    expect(() =>
+      http.get("http://metadata.google.internal/computeMetadata/v1", {
+        path: "http://[",
+      }),
+    ).toThrow(
+      "[hermetic-test-guard] Blocked outbound request to http://metadata.google.internal.",
+    );
+  });
+
   it("allows loopback requests to the local test RPC", async () => {
     await waitForHttpTestRpc();
     const res = await fetch(String(process.env.ENVIO_RPC_URL_42220), {
