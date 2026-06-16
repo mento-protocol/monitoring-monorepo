@@ -9,6 +9,11 @@
 // getWhere per UTC-day rollover per chain (not per event), reused across all
 // window aggregations. The "all" window reads the lifetime rollup, so flush
 // memory no longer grows with days indexed.
+//
+// Multi-day catch-up invariant: if the loop below flushes more than one closed
+// day, there were no swaps on the later unflushed days. A swap on an
+// intermediate UTC day would have invoked this heartbeat then and advanced the
+// cursor. Therefore the current lifetime rollup is valid for every missed day.
 
 import type {
   BrokerVolumeWindowSnapshot,
@@ -66,6 +71,8 @@ export async function flushV3VolumeWindowSnapshots(args: {
   // reads the O(distinct-traders) lifetime rollup instead of rescanning every
   // daily row (#860).
   const [rows, allTimeRows] = await Promise.all([
+    // Envio getWhere accepts one predicate key here. Fetch by the bounded
+    // timestamp window and let aggregatePerWindow drop cross-chain rows.
     args.context.TraderDailySnapshot.getWhere({
       timestamp: { _gte: windowStartDay(args.snapshotDay, "90d") },
     }),
@@ -163,6 +170,8 @@ export async function flushV2VolumeWindowSnapshots(args: {
   updatedAtTimestamp: bigint;
 }): Promise<void> {
   const [rows, allTimeRows] = await Promise.all([
+    // Envio getWhere accepts one predicate key here. Fetch by the bounded
+    // timestamp window and let aggregatePerWindow drop cross-chain rows.
     args.context.BrokerTraderDailySnapshot.getWhere({
       timestamp: { _gte: windowStartDay(args.snapshotDay, "90d") },
     }),

@@ -877,6 +877,35 @@ describe("maybeHeartbeatFlushV3", () => {
     assert.equal(state?.lastFlushedDay, DAY_2026_05_06);
   });
 
+  it("multi-day all snapshots use the same lifetime total because skipped days had no swaps", async () => {
+    const DAY_2026_05_04 = DAY_2026_05_07 - 3n * SECONDS_PER_DAY;
+    const { context, store } = makeV3Context([
+      fakeTraderDay(TRADER_A, DAY_2026_05_05, 100n),
+    ]);
+    store.VolumeChainState.set(`${CHAIN}`, {
+      id: `${CHAIN}`,
+      chainId: CHAIN,
+      lastFlushedDay: DAY_2026_05_04,
+      lastFlushedDayBroker: 0n,
+      updatedAtTimestamp: 0n,
+    });
+
+    await maybeHeartbeatFlushV3({
+      context,
+      chainId: CHAIN,
+      blockTimestamp: DAY_2026_05_07 + 60n * 60n * 12n,
+      blockNumber: 100n,
+    });
+
+    for (const snapshotDay of [DAY_2026_05_05, DAY_2026_05_06]) {
+      const snapAll = store.VolumeWindowSnapshot.get(
+        `${CHAIN}-all-${snapshotDay}`,
+      );
+      assert.equal(snapAll?.totalVolumeUsdWei, 100n * ONE_USD);
+      assert.equal(snapAll?.totalSwapCount, 1);
+    }
+  });
+
   it("preserves lastFlushedDayBroker when advancing v3 cursor", async () => {
     const { context, store } = makeV3Context();
     store.VolumeChainState.set(`${CHAIN}`, {
@@ -1098,6 +1127,63 @@ describe("flushV2VolumeWindowSnapshots", () => {
       assert.equal(snap.totalVolumeUsdWei, 150n * ONE_USD);
       assert.equal(snap.uniqueTraders, 2);
     }
+  });
+
+  it("all window comes from lifetime rollups, not bounded daily rows", async () => {
+    const { context, store } = makeV2Context(
+      [fakeBrokerTraderDay(TRADER_A, DAY_2026_05_06, 100n)],
+      [
+        {
+          id: `${CHAIN}-${TRADER_A}`,
+          chainId: CHAIN,
+          caller: TRADER_A,
+          volumeUsdWei: 5_000n * ONE_USD,
+          swapCount: 7,
+          isProtocolActor: false,
+          updatedAtTimestamp: DAY_2026_05_06,
+        },
+      ],
+    );
+    await flushV2VolumeWindowSnapshots({
+      context,
+      chainId: CHAIN,
+      snapshotDay: DAY_2026_05_06,
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+
+    const snapAll = store.BrokerVolumeWindowSnapshot.get(
+      `${CHAIN}-all-${DAY_2026_05_06}`,
+    );
+    const snap7d = store.BrokerVolumeWindowSnapshot.get(
+      `${CHAIN}-7d-${DAY_2026_05_06}`,
+    );
+    assert.equal(snapAll?.totalVolumeUsdWei, 5_000n * ONE_USD);
+    assert.equal(snapAll?.totalSwapCount, 7);
+    assert.equal(snap7d?.totalVolumeUsdWei, 100n * ONE_USD);
+    assert.equal(snap7d?.totalSwapCount, 1);
+  });
+
+  it("bounds daily fetches to the 90d window", async () => {
+    let recordedQuery: { timestamp: { _gte: bigint } } | undefined;
+    const { context } = makeV2Context();
+    context.BrokerTraderDailySnapshot.getWhere = async (query) => {
+      recordedQuery = query;
+      return [];
+    };
+
+    await flushV2VolumeWindowSnapshots({
+      context,
+      chainId: CHAIN,
+      snapshotDay: DAY_2026_05_06,
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+
+    assert.equal(
+      recordedQuery?.timestamp._gte,
+      windowStartDay(DAY_2026_05_06, "90d"),
+    );
   });
 });
 
