@@ -37,8 +37,13 @@ const aegisPackage = JSON.parse(fs.readFileSync(aegisPackagePath, 'utf8'));
 const deployPackage = {
   ...aegisPackage,
   packageManager: rootPackage.packageManager,
-  pnpm: rootPackage.pnpm,
+  pnpm: { ...rootPackage.pnpm },
 };
+
+// The App Engine source bundle does not include the patches/ directory, and
+// aegis does not depend on any patched package. Drop patchedDependencies so the
+// Cloud Build `pnpm install` doesn't fail trying to read a missing patch file.
+delete deployPackage.pnpm.patchedDependencies;
 
 if (deployPackage.scripts) {
   delete deployPackage.scripts.build;
@@ -81,8 +86,22 @@ for (let index = aegisIndex + 1; index < packagesIndex; index += 1) {
 const aegisImporter = lines.slice(aegisIndex, aegisEndIndex);
 aegisImporter[0] = '  .:';
 
+// Strip the top-level patchedDependencies block from the lockfile head. The
+// patches/ directory is not uploaded with the App Engine source and aegis does
+// not depend on any patched package, so referencing it would break the Cloud
+// Build `pnpm install` with a missing-file error.
+const head = lines.slice(0, importersIndex + 1);
+const patchedIndex = head.findIndex((line) => line === 'patchedDependencies:');
+if (patchedIndex !== -1) {
+  let patchedEnd = patchedIndex + 1;
+  while (patchedEnd < head.length && /^\s/.test(head[patchedEnd])) {
+    patchedEnd += 1;
+  }
+  head.splice(patchedIndex, patchedEnd - patchedIndex);
+}
+
 const deployLock = [
-  ...lines.slice(0, importersIndex + 1),
+  ...head,
   '',
   ...aegisImporter,
   '',
