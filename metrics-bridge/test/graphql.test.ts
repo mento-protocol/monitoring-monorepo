@@ -143,6 +143,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -191,8 +194,60 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
         return Promise.resolve({
           BiPoolExchange: [],
+        });
+      }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({
           VirtualPoolLifecycle: [{ poolId: BASE_POOL.id }],
         });
+      }
+      return Promise.resolve({ Pool: [BASE_POOL] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      oracleFreshnessWindow: "360",
+      tokenDecimalsKnown: true,
+      wrappedExchangeDeprecated: true,
+    });
+  });
+
+  it("keeps exchange deprecation rows when lifecycle rows are not tracked yet", async () => {
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsOracleLineage")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsVpFreshness")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: BASE_POOL.id,
+              oracleFreshnessWindow: "360",
+              tokenDecimalsKnown: true,
+            },
+          ],
+        });
+      }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({
+          BiPoolExchange: [
+            {
+              wrappedByPoolId: BASE_POOL.id,
+              isDeprecated: true,
+            },
+          ],
+        });
+      }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.reject(unknownFieldError("VirtualPoolLifecycle"));
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
@@ -227,6 +282,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
         return Promise.resolve({ BiPoolExchange: [] });
+      }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
@@ -275,6 +333,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
         return Promise.resolve({ BiPoolExchange: [] });
       }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -308,6 +369,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
         return Promise.resolve({ BiPoolExchange: [] });
       }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -335,6 +399,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
         return Promise.resolve({ BiPoolExchange: [] });
+      }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
@@ -397,6 +464,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -431,6 +501,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
         return Promise.resolve({ BiPoolExchange: [] });
+      }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });

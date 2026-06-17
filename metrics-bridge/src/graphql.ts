@@ -125,6 +125,11 @@ export const BRIDGE_POOLS_VP_EXCHANGE_DEPRECATION_QUERY = gql`
       wrappedByPoolId
       isDeprecated
     }
+  }
+`;
+
+export const BRIDGE_POOLS_VP_LIFECYCLE_DEPRECATION_QUERY = gql`
+  query BridgePoolsVpLifecycleDeprecation {
     VirtualPoolLifecycle(
       where: { action: { _eq: "DEPRECATED" } }
       limit: 1000
@@ -199,7 +204,9 @@ type BridgePoolCompanionResponses = {
   vpFreshness: { Pool: VpFreshnessRow[] };
   vpExchangeDeprecation: {
     BiPoolExchange: VpExchangeDeprecationRow[];
-    VirtualPoolLifecycle?: VpLifecycleDeprecationRow[];
+  };
+  vpLifecycleDeprecation: {
+    VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
   };
 };
 
@@ -226,6 +233,7 @@ const unknownFieldWarnings = {
   oracleTx: false,
   vpFreshness: false,
   vpExchangeDeprecation: false,
+  vpLifecycleDeprecation: false,
 };
 
 async function requestOptionalPoolRows<T>(
@@ -250,22 +258,41 @@ async function requestOptionalVpExchangeDeprecationRows(
   signal: AbortSignal,
 ): Promise<{
   BiPoolExchange: VpExchangeDeprecationRow[];
-  VirtualPoolLifecycle?: VpLifecycleDeprecationRow[];
 }> {
   try {
     return await client.request<{
       BiPoolExchange: VpExchangeDeprecationRow[];
-      VirtualPoolLifecycle?: VpLifecycleDeprecationRow[];
     }>({ document: BRIDGE_POOLS_VP_EXCHANGE_DEPRECATION_QUERY, signal });
   } catch (err) {
     if (!isUnknownFieldError(err)) throw err;
     if (!unknownFieldWarnings.vpExchangeDeprecation) {
       unknownFieldWarnings.vpExchangeDeprecation = true;
       console.warn(
-        "[metrics-bridge] Hasura schema missing VP exchange deprecation state; deprecated VirtualPool staleness suppression disabled until indexer catches up.",
+        "[metrics-bridge] Hasura schema missing VP exchange deprecation state; exchange-retired VirtualPool staleness suppression disabled until indexer catches up.",
       );
     }
-    return { BiPoolExchange: [], VirtualPoolLifecycle: [] };
+    return { BiPoolExchange: [] };
+  }
+}
+
+async function requestOptionalVpLifecycleDeprecationRows(
+  signal: AbortSignal,
+): Promise<{
+  VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
+}> {
+  try {
+    return await client.request<{
+      VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
+    }>({ document: BRIDGE_POOLS_VP_LIFECYCLE_DEPRECATION_QUERY, signal });
+  } catch (err) {
+    if (!isUnknownFieldError(err)) throw err;
+    if (!unknownFieldWarnings.vpLifecycleDeprecation) {
+      unknownFieldWarnings.vpLifecycleDeprecation = true;
+      console.warn(
+        "[metrics-bridge] Hasura schema missing VP lifecycle deprecation state; factory-retired VirtualPool staleness suppression disabled until indexer catches up.",
+      );
+    }
+    return { VirtualPoolLifecycle: [] };
   }
 }
 
@@ -279,6 +306,7 @@ async function requestBridgePoolCompanions(
     oracleTx,
     vpFreshness,
     vpExchangeDeprecation,
+    vpLifecycleDeprecation,
   ] = await Promise.all([
     client.request<BridgePoolsBaseResponse>({
       document: BRIDGE_POOLS_QUERY,
@@ -309,6 +337,7 @@ async function requestBridgePoolCompanions(
       "[metrics-bridge] Hasura schema missing VP oracle freshness field; VirtualPool oracle staleness metric disabled until indexer catches up.",
     ),
     requestOptionalVpExchangeDeprecationRows(signal),
+    requestOptionalVpLifecycleDeprecationRows(signal),
   ]);
   return {
     base,
@@ -317,6 +346,7 @@ async function requestBridgePoolCompanions(
     oracleTx,
     vpFreshness,
     vpExchangeDeprecation,
+    vpLifecycleDeprecation,
   };
 }
 
@@ -327,6 +357,7 @@ function mergeBridgePoolCompanions({
   oracleTx,
   vpFreshness,
   vpExchangeDeprecation,
+  vpLifecycleDeprecation,
 }: BridgePoolCompanionResponses): BridgePoolsResponse {
   const lineageById = new Map(lineage.Pool.map((p) => [p.id, p]));
   const openBreachById = new Map(openBreach.Pool.map((p) => [p.id, p]));
@@ -340,7 +371,7 @@ function mergeBridgePoolCompanions({
       deprecatedVpPoolIds.add(e.wrappedByPoolId);
     }
   }
-  for (const lifecycle of vpExchangeDeprecation.VirtualPoolLifecycle ?? []) {
+  for (const lifecycle of vpLifecycleDeprecation.VirtualPoolLifecycle) {
     deprecatedVpPoolIds.add(lifecycle.poolId);
   }
   return {
