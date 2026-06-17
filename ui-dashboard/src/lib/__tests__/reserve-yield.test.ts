@@ -121,6 +121,7 @@ describe("reserve yield parsing and math", () => {
       sourceType: "wallet",
       sourceLabel: "Reserve Safe",
       balance: 2000,
+      hasTokenBalance: true,
       principalUsd: 2200,
     });
     expect(extracted.holdings[1]).toMatchObject({
@@ -129,6 +130,7 @@ describe("reserve yield parsing and math", () => {
       sourceType: "wallet",
       sourceLabel: "Ops Safe",
       balance: 1500,
+      hasTokenBalance: true,
       principalUsd: 1500,
     });
     expect(
@@ -218,12 +220,48 @@ describe("reserve yield parsing and math", () => {
       assetSymbol: "stETH",
       sourceLabel: "Custodian",
       balance: 150,
+      hasTokenBalance: true,
       principalUsd: 252_000,
     });
     expect(extracted.holdings[1]).toMatchObject({
       assetSymbol: "stETH",
       sourceLabel: "Reserve Safe",
       balance: 100,
+      hasTokenBalance: true,
+      principalUsd: 168_000,
+    });
+  });
+
+  it("tracks when stETH rows use USD fallback instead of token balances", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "250",
+            usd_value: 420_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Partial Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                usd_value: 168_000,
+                custodian_type: "cold",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Partial Reserve Safe",
+      balance: 168_000,
+      hasTokenBalance: false,
       principalUsd: 168_000,
     });
   });

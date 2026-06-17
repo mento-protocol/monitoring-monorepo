@@ -8,7 +8,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 
 | Package                                         | Description                                                                          |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad + Ethereum sUSDS multichain                  |
+| [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad + Ethereum reserve-yield multichain          |
 | [`ui-dashboard`](./ui-dashboard/)               | Next.js 16 + Plotly.js dashboard with multi-chain network switching                  |
 | [`metrics-bridge`](./metrics-bridge/)           | Hasura → Prometheus exporter for v3 alert rules                                      |
 | [`shared-config`](./shared-config/)             | Shared deployment config (chain ID → treb namespace mappings)                        |
@@ -30,7 +30,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
                                                         └─────────────┘
 ```
 
-Celo Mainnet (42220), Monad Mainnet (143), and Ethereum Mainnet (1) sUSDS reserve-yield events are served from a single Envio project (`mento`) using `config.multichain.mainnet.yaml`. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions.
+Celo Mainnet (42220), Monad Mainnet (143), and Ethereum Mainnet (1) reserve-yield events for sUSDS and stETH are served from a single Envio project (`mento`) using `config.multichain.mainnet.yaml`. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions.
 
 **Static production endpoint:** `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`
 
@@ -40,7 +40,7 @@ Celo Mainnet (42220), Monad Mainnet (143), and Ethereum Mainnet (1) sUSDS reserv
 | ------------- | -------- | ------------------------------------------------------- |
 | Celo Mainnet  | 42220    | Live in the production multichain indexer               |
 | Monad Mainnet | 143      | Live in the production multichain indexer               |
-| Ethereum      | 1        | Live for sUSDS reserve-yield accounting                 |
+| Ethereum      | 1        | Live for sUSDS and stETH reserve-yield accounting       |
 | Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars |
 | Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars |
 
@@ -103,7 +103,7 @@ pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentr
 ### Run the Indexer (local)
 
 ```bash
-# Multichain mainnet (Celo + Monad + Ethereum sUSDS) — default
+# Multichain mainnet (Celo + Monad + Ethereum reserve yield) — default
 pnpm indexer:codegen && pnpm indexer:dev
 
 # Multichain testnet (Celo Sepolia + Monad testnet)
@@ -207,7 +207,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 | Variable                                 | Description                                                                                                |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo, Monad, and Ethereum sUSDS reserve-yield data)                 |
+| `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo, Monad, and Ethereum sUSDS/stETH reserve-yield data)           |
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`         | Optional Monad Testnet Envio GraphQL endpoint                                                              |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`    | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
 | `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`      | Set to `true` with the per-testnet endpoint URL to show hosted testnet networks                            |

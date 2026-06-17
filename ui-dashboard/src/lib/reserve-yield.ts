@@ -119,6 +119,7 @@ function aggregateHoldings(
     bySource.set(key, {
       ...existing,
       balance: existing.balance + holding.balance,
+      hasTokenBalance: existing.hasTokenBalance && holding.hasTokenBalance,
       principalUsd: existing.principalUsd + holding.principalUsd,
       earnedYieldUsd:
         existing.earnedYieldUsd !== null && holding.earnedYieldUsd !== null
@@ -201,7 +202,8 @@ function sourceHoldingFromRecord({
     source,
     symbol: assetSymbol,
   });
-  const balance = numericField(source.balance) ?? principalUsd;
+  const tokenBalance = numericField(source.balance);
+  const balance = tokenBalance ?? principalUsd;
   if (principalUsd === null || balance === null) return null;
 
   const chain = stringField(asset.chain, "unknown");
@@ -225,6 +227,7 @@ function sourceHoldingFromRecord({
     identifier,
     custodianType,
     balance,
+    hasTokenBalance: tokenBalance !== null,
     principalUsd,
     earnedYieldUsd: null,
     apyPercent: null,
@@ -242,7 +245,8 @@ function assetFallbackHolding(
 ): ReserveYieldHolding | null {
   const assetSymbol = stringField(asset.symbol, "unknown");
   const principalUsd = principalUsdFromAsset(asset, assetSymbol);
-  const balance = numericField(asset.balance) ?? principalUsd;
+  const tokenBalance = numericField(asset.balance);
+  const balance = tokenBalance ?? principalUsd;
   if (principalUsd === null || balance === null) return null;
 
   const chain = stringField(asset.chain, "unknown");
@@ -255,6 +259,7 @@ function assetFallbackHolding(
     identifier: null,
     custodianType: null,
     balance,
+    hasTokenBalance: tokenBalance !== null,
     principalUsd,
     earnedYieldUsd: null,
     apyPercent: null,

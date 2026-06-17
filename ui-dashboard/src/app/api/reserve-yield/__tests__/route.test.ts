@@ -431,6 +431,69 @@ describe("GET /api/reserve-yield", () => {
     );
   });
 
+  it("does not refresh indexed stETH yield from USD fallback balances", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              RESERVE_WITH_STETH.collateral.assets[0],
+              {
+                ...currentStethAsset,
+                sources: currentStethAsset.sources.map((source) => {
+                  const withoutBalance: Record<string, unknown> = {
+                    ...source,
+                  };
+                  delete withoutBalance.balance;
+                  return withoutBalance;
+                }),
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [STETH_LEDGER_SUMMARY],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+    const stethHolding = body.holdings.find(
+      (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
+    );
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldUsd).toBeNull();
+    expect(body.realizedYieldUsd).toBeNull();
+    expect(body.unrealizedYieldUsd).toBeNull();
+    expect(body.earnedYieldError).toContain("missing token balance");
+    expect(stethHolding).toMatchObject({
+      assetSymbol: "stETH",
+      principalUsd: 419_495.97,
+      earnedYieldUsd: null,
+      apyPercent: 2.95,
+    });
+  });
+
   it("keeps stETH forecasts visible when the stETH ledger is pending", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     vi.spyOn(globalThis, "fetch")

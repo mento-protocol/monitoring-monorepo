@@ -34,6 +34,8 @@ const TRACKED_STETH_WALLET_IDENTIFIERS = new Set([
 ]);
 const STALE_INDEXED_STETH_WARNING =
   "stETH earned-yield ledger: current indexed reserve balance is below indexed ledger balance; using indexed ledger value without current-balance refresh.";
+const MISSING_INDEXED_STETH_BALANCE_WARNING =
+  "stETH earned-yield ledger: current reserve stETH row is missing token balance; using indexed ledger value without current-balance refresh.";
 
 function validateStethMeta(meta: unknown): void {
   if (!isRecord(meta)) {
@@ -83,6 +85,16 @@ function isIndexedStethHolding(holding: ReserveYieldHolding): boolean {
   const identifier = holding.identifier?.toLowerCase() ?? null;
   return (
     isStethHolding(holding) &&
+    holding.hasTokenBalance &&
+    identifier !== null &&
+    TRACKED_STETH_WALLET_IDENTIFIERS.has(identifier)
+  );
+}
+
+function isTrackedStethHolding(holding: ReserveYieldHolding): boolean {
+  const identifier = holding.identifier?.toLowerCase() ?? null;
+  return (
+    isStethHolding(holding) &&
     identifier !== null &&
     TRACKED_STETH_WALLET_IDENTIFIERS.has(identifier)
   );
@@ -109,6 +121,14 @@ function currentIndexedStethValueUsd(holdings: ReserveYieldHolding[]): number {
 function hasUnindexedStethHolding(holdings: ReserveYieldHolding[]): boolean {
   return holdings.some(
     (holding) => isStethHolding(holding) && !isIndexedStethHolding(holding),
+  );
+}
+
+function hasTrackedStethHoldingWithoutTokenBalance(
+  holdings: ReserveYieldHolding[],
+): boolean {
+  return holdings.some(
+    (holding) => isTrackedStethHolding(holding) && !holding.hasTokenBalance,
   );
 }
 
@@ -169,6 +189,13 @@ function refreshStethUnrealizedYield(
   if (!useCurrentReserveBalance) return { ledger, unitPriceUsd, warning: null };
   const indexedBalance = currentIndexedStethBalance(holdings);
   const totalBalance = currentStethBalance(holdings);
+  if (hasTrackedStethHoldingWithoutTokenBalance(holdings)) {
+    return {
+      ledger,
+      unitPriceUsd: null,
+      warning: MISSING_INDEXED_STETH_BALANCE_WARNING,
+    };
+  }
   if (hasUnindexedStethHolding(holdings)) {
     if (totalBalance <= ledger.currentBalanceSteth) {
       return { ledger, unitPriceUsd, warning: null };

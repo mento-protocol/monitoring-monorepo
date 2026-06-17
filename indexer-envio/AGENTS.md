@@ -10,7 +10,7 @@ last_verified: 2026-05-20
 
 ## What This Is
 
-Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain), plus Ethereum sUSDS reserve-yield accounting. Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split.
+Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain), plus Ethereum sUSDS and stETH reserve-yield accounting. Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split.
 
 ## Before Opening PRs
 
@@ -22,9 +22,9 @@ This is mandatory for cross-layer/stateful data work. Do not assume the UI/query
 
 ## Key Files
 
-- `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad + Ethereum sUSDS)
+- `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad + Ethereum reserve yield)
 - `config.multichain.testnet.yaml` — Testnet multichain config
-- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, sUSDS yield ledger)
+- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, sUSDS and stETH yield ledgers)
 - `src/EventHandlers.ts` — Event processing logic
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
 - `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
@@ -86,7 +86,7 @@ Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route
 
 > **Note:** These RPC URLs are only used for contract reads (`eth_call`). Envio's event syncing uses HyperSync, configured in the YAML files.
 
-Mainnet (Celo + Monad + Ethereum sUSDS): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`.
+Mainnet (Celo + Monad + Ethereum reserve yield): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`.
 
 ## Local dev gotchas
 
