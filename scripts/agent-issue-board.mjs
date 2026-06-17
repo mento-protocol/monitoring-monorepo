@@ -475,10 +475,85 @@ function findField(project, name) {
   return project.fields.find((field) => field.name === name);
 }
 
-function findIssueProjectItem(issue, project) {
-  for (const item of issue.projectItems ?? []) {
+function findIssueProjectItemInNodes(nodes, project) {
+  for (const item of nodes ?? []) {
     if (item?.id && item?.project?.id === project.id) return item.id;
     if (item?.id && item?.project?.title === project.title) return item.id;
+  }
+  return null;
+}
+
+async function findIssueProjectItem(options, issue, project) {
+  const localItem = findIssueProjectItemInNodes(issue.projectItems, project);
+  if (localItem) return localItem;
+
+  const response = await ghGraphql(
+    `query($issue:ID!){
+      node(id:$issue){
+        ... on Issue {
+          projectItems(first:50) {
+            nodes {
+              id
+              project {
+                id
+                title
+              }
+            }
+          }
+        }
+      }
+    }`,
+    { issue: issue.id },
+  );
+  return findIssueProjectItemInNodes(
+    response?.data?.node?.projectItems?.nodes,
+    project,
+  );
+}
+
+async function readProjectTextField(options, itemId, fieldId) {
+  const response = await ghGraphql(
+    `query($item:ID!){
+      node(id:$item){
+        ... on ProjectV2Item {
+          fieldValues(first:50) {
+            nodes {
+              ... on ProjectV2ItemFieldTextValue {
+                text
+                field {
+                  ... on ProjectV2FieldCommon {
+                    id
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }`,
+    { item: itemId },
+  );
+  const values = response?.data?.node?.fieldValues?.nodes ?? [];
+  const match = values.find((value) => value?.field?.id === fieldId);
+  return match?.text ?? null;
+}
+
+async function verifyClaimOwnership(options, project, itemId, issue, metadata) {
+  if (options.dryRun) return;
+  const claimField = findField(project, OPTIONAL_PROJECT_FIELDS.claimId);
+  if (claimField?.dataType !== "TEXT") return;
+  const claimId = await readProjectTextField(options, itemId, claimField.id);
+  if (claimId !== metadata.claimId) {
+    throw new Error(
+      `Issue #${issue.number} claim was overwritten; project Claim ID is ${claimId ?? "<empty>"} instead of ${metadata.claimId}`,
+    );
+  }
+}
+
+export function chooseUntriedCandidate(candidates, triedNumbers) {
+  for (const item of candidates ?? []) {
+    if (!triedNumbers.has(item.number)) return item;
   }
   return null;
 }
@@ -497,7 +572,7 @@ async function addIssueToProject(options, project, issue) {
 }
 
 async function ensureProjectItem(options, project, issue) {
-  const existing = findIssueProjectItem(issue, project);
+  const existing = await findIssueProjectItem(options, issue, project);
   if (existing) return existing;
   if (options.dryRun) return "dry-run-project-item";
   try {
@@ -506,7 +581,11 @@ async function ensureProjectItem(options, project, issue) {
     const message = err instanceof Error ? err.message : String(err);
     if (!/already|exists|duplicate/i.test(message)) throw err;
     const refreshed = await getIssue(options, issue.number);
-    const refreshedItem = findIssueProjectItem(refreshed, project);
+    const refreshedItem = await findIssueProjectItem(
+      options,
+      refreshed,
+      project,
+    );
     if (refreshedItem) return refreshedItem;
     throw err;
   }
@@ -529,8 +608,28 @@ async function updateSingleSelect(options, project, itemId, fieldId, optionId) {
   );
 }
 
+async function clearProjectField(options, project, itemId, fieldId) {
+  await ghGraphql(
+    `mutation($project:ID!,$item:ID!,$field:ID!){
+      clearProjectV2ItemFieldValue(input:{
+        projectId:$project
+        itemId:$item
+        fieldId:$field
+      }) {
+        projectV2Item { id }
+      }
+    }`,
+    { project: project.id, item: itemId, field: fieldId },
+    { dryRun: options.dryRun, mutates: true },
+  );
+}
+
 async function updateTextField(options, project, itemId, fieldId, text) {
-  if (!text) return;
+  if (text === undefined) return;
+  if (text === null || text === "") {
+    await clearProjectField(options, project, itemId, fieldId);
+    return;
+  }
   await ghGraphql(
     `mutation($project:ID!,$item:ID!,$field:ID!,$text:String!){
       updateProjectV2ItemFieldValue(input:{
@@ -548,7 +647,11 @@ async function updateTextField(options, project, itemId, fieldId, text) {
 }
 
 async function updateDateField(options, project, itemId, fieldId, date) {
-  if (!date) return;
+  if (date === undefined) return;
+  if (date === null || date === "") {
+    await clearProjectField(options, project, itemId, fieldId);
+    return;
+  }
   await ghGraphql(
     `mutation($project:ID!,$item:ID!,$field:ID!,$date:Date!){
       updateProjectV2ItemFieldValue(input:{
@@ -575,12 +678,21 @@ async function updateProjectFields(options, project, itemId, state, metadata) {
     statusOption.id,
   );
 
-  const textValues = {
-    [OPTIONAL_PROJECT_FIELDS.agent]: metadata.agent,
-    [OPTIONAL_PROJECT_FIELDS.branch]: metadata.branch,
-    [OPTIONAL_PROJECT_FIELDS.claimId]: metadata.claimId,
-    [OPTIONAL_PROJECT_FIELDS.pr]: metadata.pr ? `#${metadata.pr}` : "",
-  };
+  const textValues = {};
+  if (Object.hasOwn(metadata, "agent")) {
+    textValues[OPTIONAL_PROJECT_FIELDS.agent] = metadata.agent;
+  }
+  if (Object.hasOwn(metadata, "branch")) {
+    textValues[OPTIONAL_PROJECT_FIELDS.branch] = metadata.branch;
+  }
+  if (Object.hasOwn(metadata, "claimId")) {
+    textValues[OPTIONAL_PROJECT_FIELDS.claimId] = metadata.claimId;
+  }
+  if (Object.hasOwn(metadata, "pr")) {
+    textValues[OPTIONAL_PROJECT_FIELDS.pr] = metadata.pr
+      ? `#${metadata.pr}`
+      : "";
+  }
   for (const [fieldName, value] of Object.entries(textValues)) {
     const field = findField(project, fieldName);
     if (field?.dataType === "TEXT") {
@@ -589,7 +701,10 @@ async function updateProjectFields(options, project, itemId, state, metadata) {
   }
 
   const claimedAtField = findField(project, OPTIONAL_PROJECT_FIELDS.claimedAt);
-  if (claimedAtField?.dataType === "DATE") {
+  if (
+    claimedAtField?.dataType === "DATE" &&
+    Object.hasOwn(metadata, "claimedAt")
+  ) {
     await updateDateField(
       options,
       project,
@@ -671,6 +786,7 @@ async function transitionIssue(options, project, issue, state, metadata) {
   await editIssueLabels(options, issue, state);
   const itemId = await ensureProjectItem(options, project, issue);
   await updateProjectFields(options, project, itemId, state, metadata);
+  return itemId;
 }
 
 function claimMetadata(options, branch) {
@@ -689,11 +805,18 @@ async function claimIssue(options, project, issue, metadata) {
       `Issue #${issue.number} is not claimable; expected open agent-ready without agent-active/in-pr`,
     );
   }
-  await transitionIssue(options, project, issue, "active", metadata);
+  const itemId = await transitionIssue(
+    options,
+    project,
+    issue,
+    "active",
+    metadata,
+  );
   if (options.dryRun) {
     await commentOnIssue(options, issue, buildClaimComment(metadata, issue));
     return { number: issue.number, title: issue.title, state: "active" };
   }
+  await verifyClaimOwnership(options, project, itemId, issue, metadata);
   const verified = await getIssue(options, issue.number);
   if (!labelNames(verified).has("agent-active")) {
     throw new Error(`Issue #${issue.number} did not retain agent-active`);
@@ -715,22 +838,37 @@ async function claimIssue(options, project, issue, metadata) {
 async function claim(options) {
   const branch = options.branch || (await getGitBranch());
   const project = await getProject(options);
-  const metadata = claimMetadata(options, branch);
   const results = [];
   if (options.issues.length > 0) {
     for (const number of options.issues) {
       const issue = await getIssue(options, number);
-      results.push(await claimIssue(options, project, issue, metadata));
+      results.push(
+        await claimIssue(
+          options,
+          project,
+          issue,
+          claimMetadata(options, branch),
+        ),
+      );
     }
     return results;
   }
 
+  const triedNumbers = new Set();
+  const candidateLimit = Math.min(Math.max(options.count * 5, 10), 100);
   while (results.length < options.count) {
-    const candidates = await listReadyIssues({ ...options, count: 1 });
-    if (candidates.length === 0) break;
-    const issue = await getIssue(options, candidates[0].number);
+    const candidates = await listReadyIssues({
+      ...options,
+      count: candidateLimit,
+    });
+    const candidate = chooseUntriedCandidate(candidates, triedNumbers);
+    if (!candidate) break;
+    triedNumbers.add(candidate.number);
+    const issue = await getIssue(options, candidate.number);
     if (!isClaimable(issue)) continue;
-    results.push(await claimIssue(options, project, issue, metadata));
+    results.push(
+      await claimIssue(options, project, issue, claimMetadata(options, branch)),
+    );
   }
 
   if (results.length === 0) {
@@ -825,13 +963,7 @@ async function sync(options) {
     const state = stateFromLabels(issue);
     if (!state) continue;
     const itemId = await ensureProjectItem(options, project, issue);
-    await updateProjectFields(options, project, itemId, state, {
-      agent: "",
-      branch: "",
-      claimId: "",
-      claimedAt: "",
-      pr: null,
-    });
+    await updateProjectFields(options, project, itemId, state, {});
     results.push({ number: issue.number, title: issue.title, state });
   }
   return results;

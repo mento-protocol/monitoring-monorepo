@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {
   buildClaimComment,
+  chooseUntriedCandidate,
   isClaimable,
   labelsForState,
   parseArgs,
@@ -88,6 +89,19 @@ test("review falls back to In Progress when In Review is absent", () => {
   assertEqual(option.id, "progress");
 });
 
+test("review prefers In Review when it is available", () => {
+  const option = selectStatusOption(
+    [
+      { id: "todo", name: "Todo" },
+      { id: "review", name: "In Review" },
+      { id: "progress", name: "In Progress" },
+    ],
+    "review",
+  );
+
+  assertEqual(option.id, "review");
+});
+
 test("grooming prefers Needs Grooming over Blocked", () => {
   const option = selectStatusOption(
     [
@@ -99,6 +113,16 @@ test("grooming prefers Needs Grooming over Blocked", () => {
   );
 
   assertEqual(option.id, "grooming");
+});
+
+test("claim candidate selector skips already tried issues", () => {
+  const option = chooseUntriedCandidate(
+    [{ number: 901 }, { number: 902 }],
+    new Set([901]),
+  );
+
+  assertEqual(option.number, 902);
+  assertEqual(chooseUntriedCandidate([{ number: 901 }], new Set([901])), null);
 });
 
 test("active label transition claims the issue and removes stale state", () => {
