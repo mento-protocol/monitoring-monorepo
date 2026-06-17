@@ -10,6 +10,8 @@ import {
   makeRateFeedId,
   normalizeReporters,
 } from "../oracleReporters.js";
+import { maybePreloadPool } from "../pool.js";
+import { getPoolsByFeed, updatePoolsOracleNumReporters } from "../rpc.js";
 import { rateFeedOraclesEffect } from "../rpc/effects.js";
 
 type RateFeedContext = Pick<EvmOnEventContext, "RateFeed" | "effect">;
@@ -96,10 +98,28 @@ async function syncOrApplyReporterDelta(args: {
   blockNumber: bigint;
   blockTimestamp: bigint;
   action: "add" | "remove";
-}): Promise<void> {
+}): Promise<RateFeed> {
   const synced = await syncRateFeedFromRpc(args);
-  if (synced) return;
-  await applyReporterFallback(args);
+  if (synced) return synced;
+  return applyReporterFallback(args);
+}
+
+async function syncPoolReporterCount(args: {
+  context: EvmOnEventContext;
+  poolIds: string[];
+  rateFeed: RateFeed;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+}): Promise<void> {
+  await updatePoolsOracleNumReporters({
+    context: args.context,
+    poolIds: args.poolIds,
+    oracleNumReporters: args.rateFeed.reportersComplete
+      ? args.rateFeed.reporters.length
+      : null,
+    blockNumber: args.blockNumber,
+    blockTimestamp: args.blockTimestamp,
+  });
 }
 
 indexer.onEvent(
@@ -107,18 +127,31 @@ indexer.onEvent(
   async ({ event, context }) => {
     const feedAddress = asAddress(event.params.token);
     const reporterAddress = asAddress(event.params.oracleAddress);
+    const poolIds = await getPoolsByFeed(context, event.chainId, feedAddress);
     if (context.isPreload) {
-      await preloadRateFeed(context, event.chainId, feedAddress);
+      await Promise.all([
+        preloadRateFeed(context, event.chainId, feedAddress),
+        maybePreloadPool(context, poolIds),
+      ]);
       return;
     }
-    await syncOrApplyReporterDelta({
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
+    const rateFeed = await syncOrApplyReporterDelta({
       context,
       chainId: event.chainId,
       feedAddress,
       reporterAddress,
-      blockNumber: asBigInt(event.block.number),
-      blockTimestamp: asBigInt(event.block.timestamp),
+      blockNumber,
+      blockTimestamp,
       action: "add",
+    });
+    await syncPoolReporterCount({
+      context,
+      poolIds,
+      rateFeed,
+      blockNumber,
+      blockTimestamp,
     });
   },
 );
@@ -128,18 +161,31 @@ indexer.onEvent(
   async ({ event, context }) => {
     const feedAddress = asAddress(event.params.token);
     const reporterAddress = asAddress(event.params.oracleAddress);
+    const poolIds = await getPoolsByFeed(context, event.chainId, feedAddress);
     if (context.isPreload) {
-      await preloadRateFeed(context, event.chainId, feedAddress);
+      await Promise.all([
+        preloadRateFeed(context, event.chainId, feedAddress),
+        maybePreloadPool(context, poolIds),
+      ]);
       return;
     }
-    await syncOrApplyReporterDelta({
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
+    const rateFeed = await syncOrApplyReporterDelta({
       context,
       chainId: event.chainId,
       feedAddress,
       reporterAddress,
-      blockNumber: asBigInt(event.block.number),
-      blockTimestamp: asBigInt(event.block.timestamp),
+      blockNumber,
+      blockTimestamp,
       action: "remove",
+    });
+    await syncPoolReporterCount({
+      context,
+      poolIds,
+      rateFeed,
+      blockNumber,
+      blockTimestamp,
     });
   },
 );

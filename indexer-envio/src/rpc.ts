@@ -174,6 +174,31 @@ export async function updatePoolsOracleExpiry(
   }
 }
 
+export async function updatePoolsOracleNumReporters(args: {
+  context: EvmOnEventContext;
+  poolIds: string[];
+  oracleNumReporters: number | null | undefined;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+}): Promise<void> {
+  if (args.oracleNumReporters == null || args.poolIds.length === 0) return;
+
+  for (const poolId of args.poolIds) {
+    const existing = await args.context.Pool.get(poolId);
+    if (!existing || existing.oracleNumReporters === args.oracleNumReporters) {
+      continue;
+    }
+
+    const updatedPool: Pool = {
+      ...existing,
+      oracleNumReporters: args.oracleNumReporters,
+      updatedAtBlock: args.blockNumber,
+      updatedAtTimestamp: args.blockTimestamp,
+    };
+    args.context.Pool.set(updatedPool);
+  }
+}
+
 /** Same in-memory filter rationale as getPoolsByFeed above — Envio getWhere is
  * single-field only, so we fetch all pools with a non-empty referenceRateFeedID
  * and filter by chainId locally. Result set is always small. */
