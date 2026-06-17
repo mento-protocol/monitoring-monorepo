@@ -187,11 +187,11 @@ Field expectations:
   needs `kind`, `name`, `state`, and `required: false`.
 - `gates`: named repo-policy gates that are not obvious from raw check status.
   Each gate should say whether it is required for readiness.
-- `codexReviewSignal`: current-head Codex review-request state. Values are
+- `codexReviewSignal`: current-head Codex review state. Values are
   `missing`, `requested`, `in_flight`, `stale`, and `approved`. `requested`
   means a current-head `@codex review` request exists but no bot reaction or
-  review has been observed yet. `in_flight` means the current-head request has
-  a Codex `eyes` reaction, a current-head Codex review, or a current-head Codex
+  review has been observed yet. `in_flight` means the current head has a Codex
+  `eyes` reaction, a current-head Codex review, or a current-head Codex
   top-level result. `approved` means the final PR-description `+1` gate is
   present. `stale` means only older-head Codex signals exist.
 - `requiredStatusContexts[]`: required check contexts from classic branch
@@ -241,9 +241,14 @@ existing current-head request is `requested`, `in_flight`, or `approved`. A
 manual `@codex review` is only a fallback when the current head has no Codex
 signal after the normal automatic-review window.
 If `chatgpt-codex-connector[bot]` replies that code-review usage limits are
-reached, stop posting further `@codex review` requests. The Codex
-PR-description approval remains externally blocked until quota/settings are
-restored or the gate is intentionally overridden.
+reached, stop posting duplicate `@codex review` requests and inspect whether
+the limit reply is the current-head Codex result. If it is current-head and
+approval is still missing, treat the Codex PR-description approval as
+externally blocked even if `codexReviewSignal` reports `in_flight`; quota or
+settings must change, or the gate must be intentionally overridden. If the
+limit reply is only historical and the current head is `requested` or
+`in_flight` for another Codex signal, keep watching until Codex approves, posts
+new feedback, or the signal becomes stale.
 
 ## Babysitting Speed Discipline
 
