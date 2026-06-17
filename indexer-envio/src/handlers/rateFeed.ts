@@ -2,9 +2,14 @@
 // SortedOracles reporter membership -> RateFeed entity
 // ---------------------------------------------------------------------------
 
-import type { EvmOnEventContext, RateFeed } from "envio";
+import type { EvmOnEventContext, Pool, RateFeed } from "envio";
+import { UNKNOWN_ORACLE_REPORTERS } from "../constants.js";
 import { indexer } from "../indexer.js";
-import { asAddress, asBigInt } from "../helpers.js";
+import {
+  asAddress,
+  asBigInt,
+  needsOracleReporterCountRefresh,
+} from "../helpers.js";
 import {
   buildRateFeedEntity,
   makeRateFeedId,
@@ -66,11 +71,17 @@ export async function ensureRateFeed(args: {
     makeRateFeedId(args.chainId, args.feedAddress),
   );
   if (existing?.reportersComplete) {
-    await syncUnknownPoolReporterCounts(args);
+    await syncUnknownPoolReporterCounts({
+      ...args,
+      fallbackOracleNumReporters: existing.reporters.length,
+    });
     return existing;
   }
   const synced = await syncRateFeedFromRpc(args);
-  await syncPoolsReporterCountForLinkedPools(args);
+  await syncPoolsReporterCountForLinkedPools({
+    ...args,
+    fallbackOracleNumReporters: synced?.reporters.length,
+  });
   return synced ?? existing ?? null;
 }
 
@@ -81,6 +92,7 @@ async function syncPoolsReporterCountForLinkedPools(args: {
   blockNumber: bigint;
   blockTimestamp: bigint;
   poolIds?: string[];
+  fallbackOracleNumReporters?: number | undefined;
 }): Promise<void> {
   if (!args.poolIds || args.poolIds.length === 0) return;
   await syncPoolsReporterCountFromRpc({
@@ -90,6 +102,7 @@ async function syncPoolsReporterCountForLinkedPools(args: {
     poolIds: args.poolIds,
     blockNumber: args.blockNumber,
     blockTimestamp: args.blockTimestamp,
+    fallbackOracleNumReporters: args.fallbackOracleNumReporters,
   });
 }
 
@@ -100,12 +113,17 @@ async function syncUnknownPoolReporterCounts(args: {
   blockNumber: bigint;
   blockTimestamp: bigint;
   poolIds?: string[];
+  fallbackOracleNumReporters?: number | undefined;
 }): Promise<void> {
   if (args.poolIds && args.poolIds.length > 0) {
     const pools = await Promise.all(
       args.poolIds.map((poolId) => args.context.Pool.get(poolId)),
     );
-    if (pools.some((pool) => pool && pool.oracleNumReporters < 0)) {
+    if (
+      pools.some((pool: Pool | undefined) =>
+        pool ? needsOracleReporterCountRefresh(pool) : false,
+      )
+    ) {
       await syncPoolsReporterCountForLinkedPools(args);
     }
   }
@@ -154,12 +172,17 @@ export async function syncPoolsReporterCountFromRpc(args: {
   poolIds: string[];
   blockNumber: bigint;
   blockTimestamp: bigint;
+  fallbackOracleNumReporters?: number | undefined;
 }): Promise<void> {
-  const oracleNumReporters = await args.context.effect(numReportersEffect, {
+  const rpcOracleNumReporters = await args.context.effect(numReportersEffect, {
     chainId: args.chainId,
     rateFeedID: args.feedAddress,
     blockNumber: args.blockNumber,
   });
+  const oracleNumReporters =
+    rpcOracleNumReporters ??
+    args.fallbackOracleNumReporters ??
+    UNKNOWN_ORACLE_REPORTERS;
   await updatePoolsOracleNumReporters({
     context: args.context,
     poolIds: args.poolIds,
@@ -184,7 +207,7 @@ indexer.onEvent(
     }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    await syncOrApplyReporterDelta({
+    const rateFeed = await syncOrApplyReporterDelta({
       context,
       chainId: event.chainId,
       feedAddress,
@@ -200,6 +223,9 @@ indexer.onEvent(
       poolIds,
       blockNumber,
       blockTimestamp,
+      fallbackOracleNumReporters: rateFeed.reportersComplete
+        ? rateFeed.reporters.length
+        : undefined,
     });
   },
 );
@@ -219,7 +245,7 @@ indexer.onEvent(
     }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    await syncOrApplyReporterDelta({
+    const rateFeed = await syncOrApplyReporterDelta({
       context,
       chainId: event.chainId,
       feedAddress,
@@ -235,6 +261,9 @@ indexer.onEvent(
       poolIds,
       blockNumber,
       blockTimestamp,
+      fallbackOracleNumReporters: rateFeed.reportersComplete
+        ? rateFeed.reporters.length
+        : undefined,
     });
   },
 );

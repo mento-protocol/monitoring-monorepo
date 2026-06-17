@@ -974,6 +974,75 @@ describe("BiPoolManager handlers", () => {
       assert.equal(repairedExchange.referenceRateResetFrequency, 360n);
     });
 
+    it("repairs already-linked VirtualPools whose reporter count is a legacy zero", async function () {
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      _setMockNumReporters(CHAIN_ID, FEED_ID, 2);
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const firstSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: firstSwap,
+        mockDb,
+      });
+
+      const linkedPool = mockDb.entities.Pool.get(poolId)!;
+      mockDb = mockDb.entities.Pool.set({
+        ...linkedPool,
+        oracleNumReporters: 0,
+      });
+
+      const secondSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(2, 300, 1_700_002_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: secondSwap,
+        mockDb,
+      });
+
+      const repaired = mockDb.entities.Pool.get(poolId) as
+        | { oracleNumReporters: number }
+        | undefined;
+      assert.ok(repaired);
+      assert.equal(repaired!.oracleNumReporters, 2);
+    });
+
     it("repairs already-linked VirtualPools whose Pool feed is stale", async function () {
       _setMockPoolExchange(
         CHAIN_ID,

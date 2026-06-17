@@ -1,7 +1,11 @@
 import type { BiPoolExchange, EffectCaller, Pool } from "envio";
 import { UNKNOWN_ORACLE_REPORTERS, ZERO_ADDRESS } from "../constants.js";
 import { lookupPricingModuleName } from "../contractAddresses.js";
-import { extractAddressFromPoolId, isVirtualPool } from "../helpers.js";
+import {
+  extractAddressFromPoolId,
+  isVirtualPool,
+  needsOracleReporterCountRefresh,
+} from "../helpers.js";
 import {
   parseDecimalsPair,
   scalingFactorToDecimals,
@@ -252,7 +256,8 @@ export async function mirrorVirtualPoolOracleConfig(
     freshnessWindow,
   );
   const feedChanged = pool.referenceRateFeedID !== feedId;
-  const needsReporterRefresh = feedChanged || pool.oracleNumReporters < 0;
+  const needsReporterRefresh =
+    feedChanged || needsOracleReporterCountRefresh(pool);
   const numReporters = needsReporterRefresh
     ? await context.effect(numReportersEffect, {
         chainId: pool.chainId,
@@ -503,7 +508,7 @@ async function hasCompleteWrappedExchangeLink(
   if (
     existing.referenceRateFeedID !== ZERO_ADDRESS &&
     existing.minimumReports > 0n &&
-    pool.oracleNumReporters < 0
+    needsOracleReporterCountRefresh(pool)
   ) {
     return false;
   }
