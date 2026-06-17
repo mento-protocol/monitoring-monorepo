@@ -473,7 +473,12 @@ async function getOrSeedWrappedExchange(
     args;
   const exchangeRowId = `${pool.chainId}-${exchangeId}`;
   const existing = await context.BiPoolExchange.get(exchangeRowId);
-  if (existing && !isWrappedExchangeConfigStub(existing)) return existing;
+  if (
+    existing &&
+    (!isWrappedExchangeConfigStub(existing) || existing.isDeprecated)
+  ) {
+    return existing;
+  }
   const struct = await context.effect(poolExchangeEffect, {
     chainId: pool.chainId,
     exchangeProvider,

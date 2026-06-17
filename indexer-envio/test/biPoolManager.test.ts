@@ -920,6 +920,70 @@ describe("BiPoolManager handlers", () => {
       assert.equal(repairedExchange.referenceRateResetFrequency, 360n);
     });
 
+    it("links deprecated exchange stubs during VirtualPool heal", async function () {
+      _setMockPoolExchange(CHAIN_ID, BIPOOL_MANAGER_ADDRESS, EXCHANGE_ID, null);
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const destroyed = BiPoolManager.ExchangeDestroyed.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeDestroyed.processEvent({
+        event: destroyed,
+        mockDb,
+      });
+
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const healedPool = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0: string;
+            token1: string;
+            tokenDecimalsKnown: boolean;
+            oracleFreshnessWindow: bigint;
+          }
+        | undefined;
+      assert.ok(healedPool);
+      assert.equal(healedPool!.token0, ASSET0);
+      assert.equal(healedPool!.token1, ASSET1);
+      assert.equal(healedPool!.tokenDecimalsKnown, true);
+      assert.equal(healedPool!.oracleFreshnessWindow, 0n);
+
+      const linkedExchange = mockDb.entities.BiPoolExchange.get(
+        `${CHAIN_ID}-${EXCHANGE_ID}`,
+      ) as
+        | {
+            isDeprecated: boolean;
+            wrappedByPoolId: string;
+            referenceRateFeedID: string;
+            referenceRateResetFrequency: bigint;
+          }
+        | undefined;
+      assert.ok(linkedExchange);
+      assert.equal(linkedExchange!.isDeprecated, true);
+      assert.equal(linkedExchange!.wrappedByPoolId, poolId);
+      assert.equal(linkedExchange!.referenceRateFeedID, ZERO_ADDRESS);
+      assert.equal(linkedExchange!.referenceRateResetFrequency, 0n);
+    });
+
     it("reverse-link backfill: ExchangeCreated AFTER VP heals fills tokens+decimals via mirrorTokensAndDecimalsToPool", async function () {
       // Codex P2 round 2 #3: the heal-before-exchange ordering. VP self-
       // heals first (via VirtualPool.Swap → `selfHealWrappedExchangeId`)

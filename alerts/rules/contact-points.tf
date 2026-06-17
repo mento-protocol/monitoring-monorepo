@@ -359,16 +359,6 @@ locals {
     repeat_interval = "4h"
   }
 
-  notify_vp_oracle_testnet = {
-    contact_point = grafana_contact_point.slack_testnet.name
-    # Pool-family testnet rule. These metrics carry chain_id/pool_id, not the
-    # Aegis `chain` label used by notify_warning_testnet.
-    group_by        = ["grafana_folder", "chain_id", "pool_id"]
-    group_wait      = "1m"
-    group_interval  = "10m"
-    repeat_interval = "4h"
-  }
-
   # CDP (service=cdps) rules group by `collateral_id` — the per-market key the
   # bridge carries on every `mento_cdp_*` series — instead of `pool_id` (CDP
   # markets are not FPMM pools). Criticals page #alerts-critical alongside every
