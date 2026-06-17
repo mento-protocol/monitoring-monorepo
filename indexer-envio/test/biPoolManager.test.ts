@@ -15,6 +15,8 @@ import {
   _clearMockERC20Decimals,
   _setMockTokenDecimalsScaling,
   _clearMockTokenDecimalsScaling,
+  _setMockNumReporters,
+  _clearMockNumReporters,
 } from "../src/EventHandlers.ts";
 import {
   extractVpExchangeIdFromBytecode,
@@ -137,6 +139,7 @@ describe("BiPoolManager handlers", () => {
     _clearMockVpExchangeIds();
     _clearMockERC20Decimals();
     _clearMockTokenDecimalsScaling();
+    _clearMockNumReporters();
     _setRpcClientForTests(CHAIN_ID, null);
     _clearPricingModuleIndex();
   });
@@ -592,6 +595,7 @@ describe("BiPoolManager handlers", () => {
         EXCHANGE_ID,
         fullStruct(),
       );
+      _setMockNumReporters(CHAIN_ID, FEED_ID, 2);
       const create = BiPoolManager.ExchangeCreated.createMockEvent({
         exchangeId: EXCHANGE_ID,
         asset0: ASSET0,
@@ -611,10 +615,11 @@ describe("BiPoolManager handlers", () => {
       assert.equal(exchange!.wrappedByPoolId, poolId);
 
       const pool1 = mockDb.entities.Pool.get(poolId) as
-        | { referenceRateFeedID: string }
+        | { referenceRateFeedID: string; oracleNumReporters: number }
         | undefined;
       assert.ok(pool1);
       assert.equal(pool1!.referenceRateFeedID, FEED_ID);
+      assert.equal(pool1!.oracleNumReporters, 2);
     });
 
     it("repairs a checked exchange-first row that missed the VP back-reference once the Pool is otherwise fully healed", async function () {

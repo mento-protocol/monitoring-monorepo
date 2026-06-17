@@ -9,6 +9,7 @@ import {
 import {
   decodeInvertRateFeedEffectResult,
   invertRateFeedEffect,
+  numReportersEffect,
   poolExchangeEffect,
   rebalanceThresholdsEffect,
   tokenDecimalsScalingEffect,
@@ -231,7 +232,7 @@ type MirrorVirtualPoolOracleConfigArgs = {
 };
 
 export async function mirrorVirtualPoolOracleConfig(
-  context: { Pool: PoolContext["Pool"] },
+  context: { Pool: PoolContext["Pool"]; effect: EffectCaller },
   args: MirrorVirtualPoolOracleConfigArgs,
 ): Promise<void> {
   const { poolId, feedId, freshnessWindow, blockNumber, blockTimestamp } = args;
@@ -242,9 +243,21 @@ export async function mirrorVirtualPoolOracleConfig(
     pool.oracleFreshnessWindow,
     freshnessWindow,
   );
+  const feedChanged = pool.referenceRateFeedID !== feedId;
+  const numReporters =
+    feedChanged || pool.oracleNumReporters === 0
+      ? await context.effect(numReportersEffect, {
+          chainId: pool.chainId,
+          rateFeedID: feedId,
+          blockNumber,
+        })
+      : null;
+  const nextOracleNumReporters =
+    numReporters ?? (feedChanged ? 0 : pool.oracleNumReporters);
   if (
     pool.referenceRateFeedID === feedId &&
-    pool.oracleFreshnessWindow === nextFreshnessWindow
+    pool.oracleFreshnessWindow === nextFreshnessWindow &&
+    pool.oracleNumReporters === nextOracleNumReporters
   ) {
     return;
   }
@@ -252,6 +265,7 @@ export async function mirrorVirtualPoolOracleConfig(
     ...pool,
     referenceRateFeedID: feedId,
     oracleFreshnessWindow: nextFreshnessWindow,
+    oracleNumReporters: nextOracleNumReporters,
     updatedAtBlock: blockNumber,
     updatedAtTimestamp: blockTimestamp,
   });

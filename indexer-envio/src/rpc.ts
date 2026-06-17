@@ -55,6 +55,8 @@ export {
   _clearMockReportExpiry,
   _setMockRateFeedOracles,
   _clearMockRateFeedOracles,
+  _setMockNumReporters,
+  _clearMockNumReporters,
   fetchReferenceRateFeedID,
   fetchNumReporters,
   fetchRateFeedOracles,
