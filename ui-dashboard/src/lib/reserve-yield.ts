@@ -187,6 +187,30 @@ function principalUsdFromSource({
   return assetUsdValue * (sourceBalance / assetBalance);
 }
 
+function tokenBalanceFromSource({
+  asset,
+  source,
+}: {
+  asset: Record<string, unknown>;
+  source: Record<string, unknown>;
+}): number | null {
+  const sourceBalance = numericField(source.balance);
+  if (sourceBalance !== null) return sourceBalance;
+
+  const sourceUsdValue = numericField(source.usd_value);
+  const assetUsdValue = numericField(asset.usd_value);
+  const assetBalance = numericField(asset.balance);
+  if (
+    sourceUsdValue === null ||
+    assetUsdValue === null ||
+    assetBalance === null ||
+    assetUsdValue <= 0
+  ) {
+    return null;
+  }
+  return assetBalance * (sourceUsdValue / assetUsdValue);
+}
+
 function sourceHoldingFromRecord({
   asset,
   source,
@@ -202,7 +226,7 @@ function sourceHoldingFromRecord({
     source,
     symbol: assetSymbol,
   });
-  const tokenBalance = numericField(source.balance);
+  const tokenBalance = tokenBalanceFromSource({ asset, source });
   const balance = tokenBalance ?? principalUsd;
   if (principalUsd === null || balance === null) return null;
 

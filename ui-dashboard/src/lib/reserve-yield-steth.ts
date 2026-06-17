@@ -35,7 +35,7 @@ const TRACKED_STETH_WALLET_IDENTIFIERS = new Set([
 const STALE_INDEXED_STETH_WARNING =
   "stETH earned-yield ledger: current indexed reserve balance is below indexed ledger balance; using indexed ledger value without current-balance refresh.";
 const MISSING_INDEXED_STETH_BALANCE_WARNING =
-  "stETH earned-yield ledger: current reserve stETH row is missing token balance; using indexed ledger value without current-balance refresh.";
+  "stETH earned-yield ledger: current reserve stETH row is missing token balance, so indexed stETH yield cannot be marked to current USD.";
 
 function validateStethMeta(meta: unknown): void {
   if (!isRecord(meta)) {

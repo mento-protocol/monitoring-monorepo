@@ -431,7 +431,7 @@ describe("GET /api/reserve-yield", () => {
     );
   });
 
-  it("does not refresh indexed stETH yield from USD fallback balances", async () => {
+  it("derives missing stETH source balances from asset totals before refreshing indexed yield", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
     vi.spyOn(globalThis, "fetch")
@@ -482,10 +482,78 @@ describe("GET /api/reserve-yield", () => {
     );
 
     expect(res.status).toBe(200);
+    const stethUnitPrice =
+      currentStethAsset.usd_value / Number(currentStethAsset.balance);
+    expect(body.earnedYieldUsd).toBeCloseTo(
+      (5 + (251.59825779325257 - 240)) * stethUnitPrice,
+      6,
+    );
+    expect(body.realizedYieldUsd).toBeCloseTo(5 * stethUnitPrice, 6);
+    expect(body.unrealizedYieldUsd).toBeCloseTo(
+      (251.59825779325257 - 240) * stethUnitPrice,
+      6,
+    );
+    expect(body.earnedYieldError).toBeNull();
+    expect(stethHolding.earnedYieldUsd).toBeCloseTo(body.earnedYieldUsd, 6);
+  });
+
+  it("does not refresh indexed stETH yield from USD fallback balances", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
+    const stethAssetWithoutBalance: Record<string, unknown> = {
+      ...currentStethAsset,
+      sources: currentStethAsset.sources.map((source) => {
+        const withoutBalance: Record<string, unknown> = {
+          ...source,
+        };
+        delete withoutBalance.balance;
+        return withoutBalance;
+      }),
+    };
+    delete stethAssetWithoutBalance.balance;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              RESERVE_WITH_STETH.collateral.assets[0],
+              stethAssetWithoutBalance,
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [STETH_LEDGER_SUMMARY],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+    const stethHolding = body.holdings.find(
+      (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
+    );
+
+    expect(res.status).toBe(200);
     expect(body.earnedYieldUsd).toBeNull();
     expect(body.realizedYieldUsd).toBeNull();
     expect(body.unrealizedYieldUsd).toBeNull();
-    expect(body.earnedYieldError).toContain("missing token balance");
+    expect(body.earnedYieldError).toContain("cannot be marked to current USD");
     expect(stethHolding).toMatchObject({
       assetSymbol: "stETH",
       principalUsd: 419_495.97,

@@ -232,7 +232,7 @@ describe("reserve yield parsing and math", () => {
     });
   });
 
-  it("tracks when stETH rows use USD fallback instead of token balances", () => {
+  it("derives stETH source token balances from asset totals", () => {
     const extracted = extractReserveYieldHoldings({
       collateral: {
         assets: [
@@ -240,6 +240,39 @@ describe("reserve yield parsing and math", () => {
             symbol: "stETH",
             chain: "ethereum",
             balance: "250",
+            usd_value: 420_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Partial Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                usd_value: 168_000,
+                custodian_type: "cold",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Partial Reserve Safe",
+      hasTokenBalance: true,
+      principalUsd: 168_000,
+    });
+    expect(extracted.holdings[0]?.balance).toBeCloseTo(100, 12);
+  });
+
+  it("tracks when stETH rows use USD fallback instead of token balances", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
             usd_value: 420_000,
             sources: [
               {
