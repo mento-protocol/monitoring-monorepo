@@ -187,11 +187,11 @@ Field expectations:
   needs `kind`, `name`, `state`, and `required: false`.
 - `gates`: named repo-policy gates that are not obvious from raw check status.
   Each gate should say whether it is required for readiness.
-- `codexReviewSignal`: current-head Codex review-request state. Values are
+- `codexReviewSignal`: current-head Codex review state. Values are
   `missing`, `requested`, `in_flight`, `stale`, and `approved`. `requested`
   means a current-head `@codex review` request exists but no bot reaction or
-  review has been observed yet. `in_flight` means the current-head request has
-  a Codex `eyes` reaction, a current-head Codex review, or a current-head Codex
+  review has been observed yet. `in_flight` means the current head has a Codex
+  `eyes` reaction, a current-head Codex review, or a current-head Codex
   top-level result. `approved` means the final PR-description `+1` gate is
   present. `stale` means only older-head Codex signals exist.
 - `requiredStatusContexts[]`: required check contexts from classic branch
@@ -246,7 +246,7 @@ reached, stop posting duplicate `@codex review` requests and let
 `requested` or `in_flight`, keep watching until Codex approves, posts new
 feedback, or the signal becomes stale. Treat the Codex PR-description approval
 as externally blocked only when approval is still missing and no current-head
-review request is in progress; it remains blocked until quota/settings are
+Codex signal is in progress; it remains blocked until quota/settings are
 restored or the gate is intentionally overridden.
 
 ## Babysitting Speed Discipline
