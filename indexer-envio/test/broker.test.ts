@@ -17,6 +17,7 @@ type MockDb = MockDbWith<{
   BrokerDailySnapshot: EntityReader;
   BrokerExchangeDailySnapshot: EntityReader;
   BrokerTraderDailySnapshot: EntityReader;
+  BrokerTraderAllTimeAggregate: EntityReader;
   BrokerAggregatorDailySnapshot: EntityReader;
   BrokerAggregatorTraderDayMarker: EntityReader;
   BrokerTraderRouterDayMarker: EntityReader;
@@ -451,6 +452,26 @@ describe("Broker.Swap handler", () => {
     // lastSeenTimestamp tracks the most recent swap's block timestamp
     // (not the day bucket) for sub-day "Last active" precision.
     assert.equal(row!.lastSeenTimestamp, 1_700_000_500n);
+
+    const lifetime = mockDb.entities.BrokerTraderAllTimeAggregate.get(
+      `${CHAIN_CELO}-${SIGNER_EOA.toLowerCase()}`,
+    ) as
+      | {
+          chainId: number;
+          caller: string;
+          swapCount: number;
+          volumeUsdWei: bigint;
+          isProtocolActor: boolean;
+          updatedAtTimestamp: bigint;
+        }
+      | undefined;
+    assert.isOk(lifetime, "BrokerTraderAllTimeAggregate missing");
+    assert.equal(lifetime!.chainId, CHAIN_CELO);
+    assert.equal(lifetime!.caller, SIGNER_EOA.toLowerCase());
+    assert.equal(lifetime!.swapCount, 2);
+    assert.equal(lifetime!.volumeUsdWei, 1_500n * 10n ** 18n);
+    assert.equal(lifetime!.isProtocolActor, false);
+    assert.equal(lifetime!.updatedAtTimestamp, 1_700_000_500n);
   });
 
   it("does NOT flag isProtocolActor on brokerCaller-side match (avoids hiding MentoRouter users as protocol actor volume)", async () => {

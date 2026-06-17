@@ -97,10 +97,9 @@ export interface TraderDailyRow {
 
 /** Group raw daily-snapshot rows by trader, summed across each window's
  *  [windowStartDay, snapshotDay] inclusive range. Out-of-range and
- *  cross-chain rows are dropped defensively in case `getWhere({chainId:
- *  {_eq:n}})` ever surfaces rows the caller doesn't want under Envio's
- *  index internals — same belt-and-suspenders pattern used in
- *  handlers/feeToken.ts.
+ *  cross-chain rows are dropped defensively in case the caller's broader
+ *  `getWhere` fetch surfaces rows outside the target chain under Envio's index
+ *  internals — same belt-and-suspenders pattern used in handlers/feeToken.ts.
  *
  *  Also tracks per-trader first-day slice (volume + swap count on
  *  `windowStartDay`) and an `activeOutsideFirstDay` flag so the snapshot
@@ -166,6 +165,37 @@ export function aggregatePerWindow(
     out[w] = Array.from(byTrader.values());
   }
   return out;
+}
+
+/** Minimal subset of TraderAllTimeAggregate / BrokerTraderAllTimeAggregate
+ *  fields the "all"-window builder needs (v2 rows map caller -> trader). */
+export interface TraderAllTimeRow {
+  chainId: number;
+  trader: string;
+  volumeUsdWei: bigint;
+  swapCount: number;
+  isProtocolActor: boolean;
+}
+
+/** Build the "all" window's per-trader aggregates from lifetime rollup rows.
+ *  firstDay* fields are forced neutral: "all" has no first-day boundary
+ *  (mirrors aggregatePerWindow). Cross-chain rows are dropped defensively, same
+ *  belt-and-suspenders as aggregatePerWindow. */
+export function allTimeToWindowAggregates(
+  rows: ReadonlyArray<TraderAllTimeRow>,
+  chainId: number,
+): TraderWindowAggregate[] {
+  return rows
+    .filter((r) => r.chainId === chainId)
+    .map((r) => ({
+      trader: r.trader,
+      volumeUsdWei: r.volumeUsdWei,
+      swapCount: r.swapCount,
+      isProtocolActor: r.isProtocolActor,
+      firstDayVolumeUsdWei: 0n,
+      firstDaySwapCount: 0,
+      activeOutsideFirstDay: true,
+    }));
 }
 
 export interface BuildSnapshotArgs {
