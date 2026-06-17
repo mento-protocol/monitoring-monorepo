@@ -131,11 +131,11 @@ resource "grafana_rule_group" "vp_oracle_staleness" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning_oracles_pool.contact_point
-      group_by        = local.notify_warning_oracles_pool.group_by
-      group_wait      = local.notify_warning_oracles_pool.group_wait
-      group_interval  = local.notify_warning_oracles_pool.group_interval
-      repeat_interval = local.notify_warning_oracles_pool.repeat_interval
+      contact_point   = local.notify_critical_pool.contact_point
+      group_by        = local.notify_critical_pool.group_by
+      group_wait      = local.notify_critical_pool.group_wait
+      group_interval  = local.notify_critical_pool.group_interval
+      repeat_interval = local.notify_critical_pool.repeat_interval
     }
   }
 }

@@ -43,6 +43,9 @@ export interface PoolRow {
   // FPMM). Filtered out by `isFpmmPool` before any gauge/probe work.
   // Schema: `Pool.wrappedExchangeId: String! @index` (schema.graphql:181).
   wrappedExchangeId: string;
+  // Optional companion state from BiPoolExchange. Deprecated wrappers should
+  // not publish stale VP oracle gauges because swaps are expected to stop.
+  wrappedExchangeDeprecated: boolean;
 }
 
 export function isVirtualPool(pool: PoolRow): boolean {

@@ -131,6 +131,16 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({
+          BiPoolExchange: [
+            {
+              wrappedByPoolId: BASE_POOL.id,
+              isDeprecated: true,
+            },
+          ],
+        });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -143,6 +153,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       oracleTxHash:
         "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       oracleFreshnessWindow: "360",
+      wrappedExchangeDeprecated: true,
       prevMedianPrice: "1120000000000000000000000",
       prevMedianAt: "1713199580",
       currentOpenBreachPeak: "15000",
@@ -169,6 +180,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({ Pool: [] });
       }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({ BiPoolExchange: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -181,6 +195,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       lastMedianPrice: "1150000000000000000000000",
       oracleTxHash: "",
       oracleFreshnessWindow: "0",
+      wrappedExchangeDeprecated: false,
       prevMedianPrice: "0",
       prevMedianAt: "0",
       lastOracleJumpBps: "3.0000",
@@ -212,6 +227,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({ Pool: [] });
       }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({ BiPoolExchange: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -223,6 +241,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       currentOpenBreachPeak: "0",
       currentOpenBreachEntryThreshold: 0,
       oracleFreshnessWindow: "0",
+      wrappedExchangeDeprecated: false,
     });
   });
 
@@ -240,6 +259,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.reject(unknownFieldError("oracleFreshnessWindow"));
+      }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({ BiPoolExchange: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
@@ -265,6 +287,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({ BiPoolExchange: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
@@ -317,6 +342,16 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({
+          BiPoolExchange: [
+            {
+              wrappedByPoolId: "different-pool-id",
+              isDeprecated: true,
+            },
+          ],
+        });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -330,6 +365,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       currentOpenBreachPeak: "0",
       currentOpenBreachEntryThreshold: 0,
       oracleFreshnessWindow: "0",
+      wrappedExchangeDeprecated: false,
     });
   });
 
@@ -347,6 +383,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({ BiPoolExchange: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });

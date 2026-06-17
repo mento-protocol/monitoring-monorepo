@@ -49,6 +49,7 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     rebalancerAddress: "0x0000000000000000000000000000000000000beef",
     // "" = native FPMM; non-empty = healed VirtualPool. Default to FPMM.
     wrappedExchangeId: "",
+    wrappedExchangeDeprecated: false,
     ...overrides,
   };
 }

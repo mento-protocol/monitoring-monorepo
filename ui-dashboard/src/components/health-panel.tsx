@@ -38,10 +38,10 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   // health data isn't trusted yet — the halt must surface regardless. Keying on
   // the resolved status (not the raw flag) keeps it consistent with the fleet
   // chip: stale / weekend pools resolve to CRITICAL / WEEKEND, not HALTED.
-  const computed = isVirtual
-    ? "N/A"
-    : computeHealthStatus(pool, network.chainId);
+  const computed = computeHealthStatus(pool, network.chainId);
   const showHalted = computed === "HALTED";
+  const showVirtualOracleIncident =
+    isVirtual && (computed === "CRITICAL" || computed === "WEEKEND");
   // No-data pools otherwise resolve to a misleading CRITICAL from the indexer's
   // zero-initialised stale timestamp — suppress that to N/A (matching the
   // virtual-pool branch). Never suppress a real halt.
@@ -58,9 +58,26 @@ export function HealthPanel({ pool }: HealthPanelProps) {
         <HealthBadge status={badgeStatus} />
       </div>
 
-      {isVirtual ? (
+      {showVirtualOracleIncident ? (
+        <div className="flex items-start gap-3 rounded-lg border border-red-700/50 bg-red-950/30 px-4 py-3 text-sm text-red-100">
+          <span
+            className="text-base leading-5 flex-shrink-0"
+            aria-hidden="true"
+          >
+            !
+          </span>
+          <span>
+            <span className="font-medium text-red-200">
+              VirtualPool oracle is stale.
+            </span>{" "}
+            The wrapped exchange has not received a fresh oracle report within
+            its reset window, so swaps may revert until a fresh report arrives.
+          </span>
+        </div>
+      ) : isVirtual ? (
         <p className="text-sm text-slate-400">
-          VirtualPool — no oracle data. Health monitoring is not applicable.
+          VirtualPool oracle freshness is monitored once the wrapped exchange
+          reset window is indexed.
         </p>
       ) : showHalted ? (
         <div className="flex items-start gap-3 rounded-lg border border-orange-700/50 bg-orange-900/20 px-4 py-3 text-sm text-orange-100">

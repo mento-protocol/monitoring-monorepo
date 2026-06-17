@@ -134,6 +134,22 @@ describe("HealthPanel weekend mode", () => {
     expect(html).not.toContain("Deviation vs Threshold");
     expect(html).toBe("");
   });
+
+  it("surfaces stale VirtualPool oracle state instead of saying monitoring is not applicable", () => {
+    const virtualPool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      lastOracleReportAt: STALE_TS,
+      oracleFreshnessWindow: "300",
+    };
+    const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
+
+    expect(html).toContain("VirtualPool oracle is stale");
+    expect(html).toContain("swaps may revert");
+    expect(html).not.toContain("Health monitoring is not applicable");
+  });
 });
 
 describe("HealthPanel breaker halt", () => {

@@ -61,7 +61,7 @@ describe("updateMetrics", () => {
         source: "virtual_pool_factory",
         wrappedExchangeId:
           "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-        lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 120),
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
         oracleFreshnessWindow: "360",
       }),
     ]);
@@ -79,7 +79,7 @@ describe("updateMetrics", () => {
         source: "virtual_pool_factory",
         wrappedExchangeId:
           "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-        lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 600),
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 600),
         oracleFreshnessWindow: "360",
       }),
     ]);
@@ -88,13 +88,45 @@ describe("updateMetrics", () => {
     ).toBe(0);
   });
 
-  it("skips virtual-pool oracle freshness when the VP window is unknown", async () => {
+  it("uses the live VP oracle cursor when median updates lag flat reports", async () => {
     updateMetrics([
       makePool({
         source: "virtual_pool_factory",
         wrappedExchangeId:
           "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
         lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 600),
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(1);
+  });
+
+  it("suppresses virtual-pool oracle freshness for deprecated wrappers", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 600),
+        oracleFreshnessWindow: "360",
+        wrappedExchangeDeprecated: true,
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+  });
+
+  it("skips virtual-pool oracle freshness when the VP window is unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 600),
         oracleFreshnessWindow: "0",
       }),
     ]);

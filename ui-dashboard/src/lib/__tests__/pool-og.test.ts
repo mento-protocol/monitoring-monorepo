@@ -482,4 +482,34 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.tvlSeries).toEqual([]);
     expect(result!.volumeSeries).toEqual([]);
   });
+
+  it("merges VP freshness extension before computing OG health", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const virtualPool = makeDetailPool({
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      lastOracleReportAt: "0",
+      oracleFreshnessWindow: "0",
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolVpOracleFreshnessExt")) {
+        return {
+          Pool: [
+            {
+              id: POOL_ID,
+              lastOracleReportAt: String(nowSec - 600),
+              oracleFreshnessWindow: "300",
+            },
+          ],
+        };
+      }
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [virtualPool] };
+    });
+
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("CRITICAL");
+  });
 });

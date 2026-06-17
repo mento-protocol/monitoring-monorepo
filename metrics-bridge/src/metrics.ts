@@ -447,6 +447,7 @@ function recordStatusAndOracleMetrics(
 }
 
 function recordVpOracleMetrics(pool: PoolRow, nowSeconds: number): void {
+  if (pool.wrappedExchangeDeprecated) return;
   const freshness = vpOracleFreshness(pool, nowSeconds);
   if (freshness === null) return;
   const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
@@ -455,20 +456,20 @@ function recordVpOracleMetrics(pool: PoolRow, nowSeconds: number): void {
 }
 
 export function vpOracleFreshness(
-  pool: Pick<PoolRow, "oracleFreshnessWindow" | "lastOracleReportAt">,
+  pool: Pick<PoolRow, "oracleFreshnessWindow" | "oracleTimestamp">,
   nowSeconds: number,
 ): number | null {
   const freshnessWindow = Number(pool.oracleFreshnessWindow);
-  const lastReportAt = Number(pool.lastOracleReportAt);
+  const liveReportAt = Number(pool.oracleTimestamp);
   if (
     !Number.isFinite(freshnessWindow) ||
     freshnessWindow <= 0 ||
-    !Number.isFinite(lastReportAt) ||
-    lastReportAt <= 0
+    !Number.isFinite(liveReportAt) ||
+    liveReportAt <= 0
   ) {
     return null;
   }
-  return nowSeconds - lastReportAt <= freshnessWindow ? 1 : 0;
+  return nowSeconds - liveReportAt <= freshnessWindow ? 1 : 0;
 }
 
 export function isOracleLive(
