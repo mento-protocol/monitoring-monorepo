@@ -52,9 +52,26 @@ assert.deepEqual(
   }),
   [
     "admin bypass is not disabled",
-    "self-review is not enabled for required reviewers",
+    "self-review is not allowed for required reviewers",
     "deployment branches are not limited to protected branches",
   ],
+);
+
+assert.deepEqual(
+  environmentProtectionFailures({
+    can_admins_bypass: false,
+    protection_rules: [
+      {
+        type: "required_reviewers",
+        reviewers: [{ type: "User", reviewer: { login: "approver" } }],
+      },
+    ],
+    deployment_branch_policy: {
+      protected_branches: true,
+      custom_branch_policies: false,
+    },
+  }),
+  ["self-review is not allowed for required reviewers"],
 );
 
 assert.deepEqual(

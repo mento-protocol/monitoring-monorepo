@@ -52,6 +52,7 @@ on:
       - scripts/sanitize-terraform-output.sh
       - scripts/notify-terraform-apply.mjs
       - scripts/verify-github-environment-protection.mjs
+      - scripts/verify-github-environment-protection.test.mjs
       - .github/workflows/aegis-terraform.yml
   push:
     branches: [main]
@@ -60,6 +61,7 @@ on:
       - scripts/sanitize-terraform-output.sh
       - scripts/notify-terraform-apply.mjs
       - scripts/verify-github-environment-protection.mjs
+      - scripts/verify-github-environment-protection.test.mjs
       - .github/workflows/aegis-terraform.yml
 
 # PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR

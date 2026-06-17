@@ -18,7 +18,7 @@ export function environmentProtectionFailures(environment) {
     failures.push("required reviewers are not configured");
   }
   if (reviewers && reviewers.prevent_self_review !== false) {
-    failures.push("self-review is not enabled for required reviewers");
+    failures.push("self-review is not allowed for required reviewers");
   }
   if (
     branchPolicy?.protected_branches !== true ||
