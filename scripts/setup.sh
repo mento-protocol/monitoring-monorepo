@@ -50,6 +50,11 @@ playwright_chromium_present() {
     >/dev/null 2>&1
 }
 
+dashboard_sentry_present() {
+  pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')" \
+    >/dev/null 2>&1
+}
+
 echo "▶ Configuring git hooks..."
 if [ "$(git config --get core.hooksPath || true)" = ".trunk/hooks" ]; then
   echo "  core.hooksPath already .trunk/hooks"
@@ -63,6 +68,7 @@ fi
 
 echo "▶ Installing dependencies..."
 deps_marker="node_modules/.setup-deps.sha256"
+deps_marker_pending=0
 deps_hash="$(
   hash_inputs \
     pnpm-lock.yaml \
@@ -78,14 +84,19 @@ deps_hash="$(
 )"
 if [ -d node_modules ] && [ -s shared-config/dist/chains.js ] &&
   [ -n "$deps_hash" ] &&
-  [ "$(cat "$deps_marker" 2>/dev/null)" = "$deps_hash" ]; then
+  [ "$(cat "$deps_marker" 2>/dev/null)" = "$deps_hash" ] &&
+  dashboard_sentry_present; then
   echo "  deps + shared-config build are up to date; skipping pnpm install"
 else
   CI=true pnpm install --frozen-lockfile --prefer-offline
   pnpm --filter @mento-protocol/monitoring-config build
-  if [ -n "$deps_hash" ]; then
-    printf '%s' "$deps_hash" >"$deps_marker"
-  fi
+  deps_marker_pending=1
+fi
+
+echo "▶ Verifying ui-dashboard dependency resolution..."
+dashboard_sentry_present
+if [ "$deps_marker_pending" -eq 1 ] && [ -n "$deps_hash" ]; then
+  printf '%s' "$deps_hash" >"$deps_marker"
 fi
 
 echo "▶ Installing Playwright Chromium and host dependencies (ui-dashboard browser tests)..."
@@ -105,9 +116,6 @@ else
     echo "    Run 'pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium' before browser tests." >&2
   fi
 fi
-
-echo "▶ Verifying ui-dashboard dependency resolution..."
-pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
 
 echo "▶ Running Envio codegen (multichain config)..."
 codegen_marker="node_modules/.setup-codegen.sha256"
