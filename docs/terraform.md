@@ -113,11 +113,10 @@ repo's Actions workflows:
   protected `main`, but leave required reviewers unset by default so green
   `main` deploys do not require an extra human approval.
 
-Keep the old `production` environment only as a temporary migration shim while
-older workflow runs drain. Once no workflow references it, remove or deprecate
-it in the repository settings. Do not move or recreate secrets with CLI
-commands; any environment-scoped secret changes must go through the owning IaC
-or a documented repo-admin settings change.
+The old `Production` migration-shim environment was removed on 2026-06-17 after
+workflow references drained. Do not recreate it. Do not move or recreate secrets
+with CLI commands; any environment-scoped secret changes must go through the
+owning IaC or a documented repo-admin settings change.
 
 ## Grafana Alert Ownership Migration
 
