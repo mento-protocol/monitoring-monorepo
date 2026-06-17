@@ -88,6 +88,8 @@ describe("computeHealthStatus", () => {
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
           medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -111,6 +113,8 @@ describe("computeHealthStatus", () => {
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
           medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -152,6 +156,8 @@ describe("computeHealthStatus", () => {
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
           medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -175,6 +181,8 @@ describe("computeHealthStatus", () => {
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
           medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -212,6 +220,8 @@ describe("computeHealthStatus", () => {
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
           medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -240,7 +250,7 @@ describe("computeHealthStatus", () => {
     ).toBe("CRITICAL");
   });
 
-  it('returns "CRITICAL" for VirtualPools with missing medianLive', () => {
+  it('returns "N/A" for VirtualPools with unknown medianLive', () => {
     const now = Math.floor(Date.now() / 1000);
     expect(
       computeHealthStatus(
@@ -253,6 +263,44 @@ describe("computeHealthStatus", () => {
           wrappedExchangeMinimumReports: "1",
           priceDifference: "0",
           rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it("keeps explicit VirtualPool median failures critical while decimals are unknown", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          medianLive: false,
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: false,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("keeps known VirtualPool quorum failures critical while decimals are unknown", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          medianLive: true,
+          oracleNumReporters: 1,
+          wrappedExchangeMinimumReports: "2",
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: false,
         },
         undefined,
         now,
@@ -1582,6 +1630,8 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
           medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
         },
         frozenNowSec,
         42220,
@@ -1619,6 +1669,8 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
           oracleFreshnessWindow: "0",
           tokenDecimalsKnown: true,
           medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
         },
         frozenNowSec,
         42220,

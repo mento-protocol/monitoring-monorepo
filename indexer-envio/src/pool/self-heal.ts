@@ -529,10 +529,9 @@ async function getOrSeedWrappedExchange(
     args;
   const exchangeRowId = `${pool.chainId}-${exchangeId}`;
   const existing = await context.BiPoolExchange.get(exchangeRowId);
-  if (
-    existing &&
-    (!isWrappedExchangeConfigStub(existing) || existing.isDeprecated)
-  ) {
+  const existingIsConfigStub =
+    existing !== undefined && isWrappedExchangeConfigStub(existing);
+  if (existing && (!existingIsConfigStub || existing.isDeprecated)) {
     return existing;
   }
   const struct = await context.effect(poolExchangeEffect, {
@@ -541,7 +540,7 @@ async function getOrSeedWrappedExchange(
     exchangeId,
     blockNumber,
   });
-  if (!struct || struct.pricingModule === ZERO_ADDRESS) return undefined;
+  if (!struct || struct.pricingModule === ZERO_ADDRESS) return existing;
   const seeded: BiPoolExchange = {
     id: exchangeRowId,
     chainId: pool.chainId,

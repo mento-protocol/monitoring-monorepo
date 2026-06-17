@@ -234,8 +234,13 @@ export function isOracleFresh(
   nowSeconds = Math.floor(Date.now() / 1000),
   chainId?: number,
 ): boolean {
-  if (isVirtualPool(pool) && pool.tokenDecimalsKnown !== true) return true;
-  if (isVirtualPool(pool) && vpMedianValidity(pool) === false) return false;
+  if (isVirtualPool(pool)) {
+    const medianValidity = vpMedianValidity(pool);
+    if (medianValidity === false) return false;
+    if (medianValidity === null || pool.tokenDecimalsKnown !== true) {
+      return true;
+    }
+  }
   const oracleTs = oracleFreshnessTimestamp(pool);
   const stalenessThreshold = getOracleStalenessThreshold(pool, chainId);
   if (isVirtualPool(pool) && stalenessThreshold <= 0) return true;
@@ -280,18 +285,17 @@ function isVirtualPoolResetWindowStale(
 function vpMedianValidity(pool: {
   medianLive?: boolean | undefined;
   oracleNumReporters?: number | undefined;
-  tokenDecimalsKnown?: boolean | undefined;
   wrappedExchangeMinimumReports?: string | undefined;
 }): boolean | null {
-  if (pool.tokenDecimalsKnown !== true) return null;
-  if (pool.medianLive !== true) return false;
+  if (pool.medianLive === false) return false;
   const minimumReports = Number(pool.wrappedExchangeMinimumReports ?? "0");
   if (!Number.isFinite(minimumReports) || minimumReports <= 0) return null;
   const oracleNumReporters = Number(pool.oracleNumReporters);
   if (!Number.isFinite(oracleNumReporters) || oracleNumReporters < 0) {
     return null;
   }
-  return oracleNumReporters >= minimumReports;
+  if (oracleNumReporters < minimumReports) return false;
+  return pool.medianLive === true ? true : null;
 }
 
 export function isVirtualPoolMedianInvalid(pool: {
@@ -309,7 +313,9 @@ function computeVirtualPoolHealthStatus(
   nowSeconds: number,
 ): HealthStatus {
   if (pool.wrappedExchangeDeprecated === true) return "N/A";
-  if (vpMedianValidity(pool) === false) return "CRITICAL";
+  const medianValidity = vpMedianValidity(pool);
+  if (medianValidity === false) return "CRITICAL";
+  if (medianValidity === null) return "N/A";
   if (!isVirtualPoolResetWindowStale(pool, nowSeconds)) return "N/A";
   const usdPeggedPair = isUsdPeggedVirtualPoolPair(pool, chainId);
   return isWeekend() && usdPeggedPair === false ? "WEEKEND" : "CRITICAL";

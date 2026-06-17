@@ -145,6 +145,8 @@ describe("HealthPanel weekend mode", () => {
       oracleFreshnessWindow: "300",
       tokenDecimalsKnown: true,
       medianLive: true,
+      oracleNumReporters: 2,
+      wrappedExchangeMinimumReports: "1",
     };
     const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
 
@@ -187,6 +189,8 @@ describe("HealthPanel weekend mode", () => {
       oracleFreshnessWindow: "300",
       tokenDecimalsKnown: true,
       medianLive: true,
+      oracleNumReporters: 2,
+      wrappedExchangeMinimumReports: "1",
     };
     const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
 
@@ -208,6 +212,8 @@ describe("HealthPanel weekend mode", () => {
       oracleFreshnessWindow: "300",
       tokenDecimalsKnown: true,
       medianLive: true,
+      oracleNumReporters: 2,
+      wrappedExchangeMinimumReports: "1",
     };
     const container = document.createElement("div");
     const root = createRoot(container);
