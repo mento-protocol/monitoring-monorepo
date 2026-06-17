@@ -28,13 +28,6 @@
     "linePreview": "const label = PRICING_MODULE_LABELS[rawName]; | if (label && entry.address) { | index.set(entry.address.toLowerCase(), label);"
   },
   {
-    "file": "src/handlers/biPoolManager.ts",
-    "ruleId": "complexity",
-    "message": "Async arrow function has a complexity of 26. Maximum allowed is 25.",
-    "line": 261,
-    "linePreview": "{ contract: \"BiPoolManager\", event: \"ExchangeCreated\" }, | async ({ event, context }) => { | const id = exchangeRowId(event.chainId, event.params.exchangeId);"
-  },
-  {
     "file": "src/healthScore.ts",
     "ruleId": "max-params",
     "message": "Function 'recordHealthSample' has too many parameters (5). Maximum allowed is 4.",

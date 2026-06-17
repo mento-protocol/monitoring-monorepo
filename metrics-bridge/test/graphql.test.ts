@@ -32,6 +32,7 @@ const BASE_POOL = {
   healthStatus: "OK",
   oracleOk: true,
   oracleTimestamp: "1713200000",
+  lastOracleReportAt: "1713199900",
   oracleTxHash:
     "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   oracleExpiry: "300",
@@ -138,6 +139,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
     expect(res.Pool[0]).toMatchObject({
       id: BASE_POOL.id,
       lastMedianPrice: "1150000000000000000000000",
+      lastOracleReportAt: "1713199900",
       oracleTxHash:
         "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       oracleFreshnessWindow: "360",

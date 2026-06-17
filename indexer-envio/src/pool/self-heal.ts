@@ -234,19 +234,6 @@ export async function mirrorVirtualPoolOracleConfig(
   context: { Pool: PoolContext["Pool"] },
   args: MirrorVirtualPoolOracleConfigArgs,
 ): Promise<void> {
-  await mirrorPoolOracleConfig(context, args);
-}
-
-async function mirrorPoolOracleConfig(
-  context: { Pool: PoolContext["Pool"] },
-  args: {
-    poolId: string;
-    feedId: string;
-    freshnessWindow?: bigint;
-    blockNumber: bigint;
-    blockTimestamp: bigint;
-  },
-): Promise<void> {
   const { poolId, feedId, freshnessWindow, blockNumber, blockTimestamp } = args;
   if (!feedId || feedId === ZERO_ADDRESS) return;
   const pool = await context.Pool.get(poolId);
@@ -465,8 +452,10 @@ async function hasCompleteWrappedExchangeLink(
   const existing = await context.BiPoolExchange.get(exchangeRowId);
   if (existing?.wrappedByPoolId !== pool.id) return false;
   return (
-    existing.referenceRateResetFrequency <= 0n ||
-    pool.oracleFreshnessWindow === existing.referenceRateResetFrequency
+    (existing.referenceRateResetFrequency <= 0n &&
+      existing.referenceRateFeedID !== ZERO_ADDRESS) ||
+    (existing.referenceRateResetFrequency > 0n &&
+      pool.oracleFreshnessWindow === existing.referenceRateResetFrequency)
   );
 }
 
@@ -484,7 +473,7 @@ async function getOrSeedWrappedExchange(
     args;
   const exchangeRowId = `${pool.chainId}-${exchangeId}`;
   const existing = await context.BiPoolExchange.get(exchangeRowId);
-  if (existing) return existing;
+  if (existing && !isWrappedExchangeConfigStub(existing)) return existing;
   const struct = await context.effect(poolExchangeEffect, {
     chainId: pool.chainId,
     exchangeProvider,
@@ -520,6 +509,13 @@ async function getOrSeedWrappedExchange(
   };
   context.BiPoolExchange.set(seeded);
   return seeded;
+}
+
+function isWrappedExchangeConfigStub(exchange: BiPoolExchange): boolean {
+  return (
+    exchange.referenceRateFeedID === ZERO_ADDRESS &&
+    exchange.referenceRateResetFrequency <= 0n
+  );
 }
 
 type WrappedExchangeMirrorState = VpTokenBackfillState & {

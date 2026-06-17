@@ -27,6 +27,7 @@ import { fetchTokenDecimalsScaling } from "../src/rpc/pool-state.ts";
 import { _setRpcClientForTests, _testHooks } from "../src/rpc.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
 import { isVirtualPool, makePoolId } from "../src/helpers.ts";
+import { ZERO_ADDRESS } from "../src/constants.ts";
 
 type MockDb = MockDbWith<{
   Pool: WritableEntity;
@@ -270,7 +271,7 @@ describe("BiPoolManager handlers", () => {
       assert.equal(row!.bucket1, 2_000_000n);
       assert.equal(row!.lastBucketUpdate, 1_700_001_000n);
       assert.equal(row!.isDeprecated, false);
-      assert.equal(row!.wrappedByPoolId, undefined);
+      assert.equal(row!.wrappedByPoolId, "");
       assert.equal(row!.wrappedByPoolIdChecked, true);
     });
 
@@ -884,6 +885,14 @@ describe("BiPoolManager handlers", () => {
         ...linkedPool,
         oracleFreshnessWindow: 0n,
       });
+      const linkedExchange = mockDb.entities.BiPoolExchange.get(
+        `${CHAIN_ID}-${EXCHANGE_ID}`,
+      )!;
+      mockDb = mockDb.entities.BiPoolExchange.set({
+        ...linkedExchange,
+        referenceRateFeedID: ZERO_ADDRESS,
+        referenceRateResetFrequency: 0n,
+      });
 
       const secondSwap = VirtualPool.Swap.createMockEvent({
         sender: ASSET0,
@@ -904,6 +913,11 @@ describe("BiPoolManager handlers", () => {
         | undefined;
       assert.ok(repaired);
       assert.equal(repaired!.oracleFreshnessWindow, 360n);
+      const repairedExchange = mockDb.entities.BiPoolExchange.get(
+        `${CHAIN_ID}-${EXCHANGE_ID}`,
+      ) as { referenceRateFeedID: string; referenceRateResetFrequency: bigint };
+      assert.equal(repairedExchange.referenceRateFeedID, FEED_ID);
+      assert.equal(repairedExchange.referenceRateResetFrequency, 360n);
     });
 
     it("reverse-link backfill: ExchangeCreated AFTER VP heals fills tokens+decimals via mirrorTokensAndDecimalsToPool", async function () {

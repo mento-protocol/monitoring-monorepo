@@ -22,6 +22,7 @@ import {
 } from "../pool.js";
 import { poolExchangeEffect } from "../rpc/effects.js";
 import { lookupPricingModuleName } from "../contractAddresses.js";
+import type { PoolExchangeStruct } from "../rpc/biPoolManager.js";
 
 function exchangeRowId(chainId: number, exchangeId: string): string {
   return `${chainId}-${exchangeId.toLowerCase()}`;
@@ -256,6 +257,90 @@ async function ensureBiPoolExchange(
 // directions without an explicit `.contractRegister` orchestration.
 // ---------------------------------------------------------------------------
 
+function makeExchangeCreatedRow({
+  id,
+  chainId,
+  exchangeId,
+  exchangeProvider,
+  params,
+  struct,
+  wrappedByPoolId,
+  blockNumber,
+  blockTimestamp,
+}: {
+  id: string;
+  chainId: number;
+  exchangeId: string;
+  exchangeProvider: string;
+  params: {
+    asset0: string;
+    asset1: string;
+    pricingModule: string;
+  };
+  struct: PoolExchangeStruct | null;
+  wrappedByPoolId: string;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+}): BiPoolExchange {
+  const pricingModule =
+    struct?.pricingModule ?? asAddress(params.pricingModule);
+  return {
+    id,
+    chainId,
+    exchangeId,
+    exchangeProvider,
+    asset0: struct?.asset0 ?? asAddress(params.asset0),
+    asset1: struct?.asset1 ?? asAddress(params.asset1),
+    pricingModule,
+    pricingModuleName:
+      lookupPricingModuleName(chainId, pricingModule) ?? undefined,
+    spread: struct?.spread ?? BigInt(0),
+    referenceRateFeedID: struct?.referenceRateFeedID ?? ZERO_ADDRESS,
+    referenceRateResetFrequency:
+      struct?.referenceRateResetFrequency ?? BigInt(0),
+    minimumReports: struct?.minimumReports ?? BigInt(0),
+    stablePoolResetSize: struct?.stablePoolResetSize ?? BigInt(0),
+    bucket0: struct?.bucket0 ?? BigInt(0),
+    bucket1: struct?.bucket1 ?? BigInt(0),
+    lastBucketUpdate: struct?.lastBucketUpdate ?? BigInt(0),
+    isDeprecated: false,
+    wrappedByPoolId,
+    wrappedByPoolIdChecked: true,
+    createdAtBlock: blockNumber,
+    createdAtTimestamp: blockTimestamp,
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  };
+}
+
+async function syncWrappedPoolFromCreatedExchange(
+  context: EvmOnEventContext,
+  row: BiPoolExchange,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<void> {
+  if (!row.wrappedByPoolId) return;
+  await mirrorVirtualPoolOracleConfig(context, {
+    poolId: row.wrappedByPoolId,
+    feedId: row.referenceRateFeedID,
+    freshnessWindow: row.referenceRateResetFrequency,
+    blockNumber,
+    blockTimestamp,
+  });
+  // VP-deployed-before-exchange ordering: the wrapping VP self-healed
+  // (or set its forward link via `VirtualPoolDeployed`) before this
+  // exchange row existed. Its `selfHealWrappedExchangeId` couldn't
+  // mirror tokens because the row wasn't there yet — backfill them
+  // now that we just persisted asset0/asset1.
+  await mirrorTokensAndDecimalsToPool(context, {
+    poolId: row.wrappedByPoolId,
+    asset0: row.asset0,
+    asset1: row.asset1,
+    blockNumber,
+    blockTimestamp,
+  });
+}
+
 indexer.onEvent(
   { contract: "BiPoolManager", event: "ExchangeCreated" },
   async ({ event, context }) => {
@@ -293,60 +378,25 @@ indexer.onEvent(
       exchangeId,
     );
 
-    const pricingModule =
-      struct?.pricingModule ?? asAddress(event.params.pricingModule);
-
-    const row: BiPoolExchange = {
+    const row = makeExchangeCreatedRow({
       id,
       chainId: event.chainId,
       exchangeId,
       exchangeProvider,
-      asset0: struct?.asset0 ?? asAddress(event.params.asset0),
-      asset1: struct?.asset1 ?? asAddress(event.params.asset1),
-      pricingModule,
-      pricingModuleName:
-        lookupPricingModuleName(event.chainId, pricingModule) ?? undefined,
-      spread: struct?.spread ?? BigInt(0),
-      referenceRateFeedID: struct?.referenceRateFeedID ?? ZERO_ADDRESS,
-      referenceRateResetFrequency:
-        struct?.referenceRateResetFrequency ?? BigInt(0),
-      minimumReports: struct?.minimumReports ?? BigInt(0),
-      stablePoolResetSize: struct?.stablePoolResetSize ?? BigInt(0),
-      bucket0: struct?.bucket0 ?? BigInt(0),
-      bucket1: struct?.bucket1 ?? BigInt(0),
-      lastBucketUpdate: struct?.lastBucketUpdate ?? BigInt(0),
-      isDeprecated: false,
-      wrappedByPoolId,
-      wrappedByPoolIdChecked: true,
-      createdAtBlock: blockNumber,
-      createdAtTimestamp: blockTimestamp,
-      updatedAtBlock: blockNumber,
-      updatedAtTimestamp: blockTimestamp,
-    };
+      params: event.params,
+      struct,
+      wrappedByPoolId: wrappedByPoolId ?? "",
+      blockNumber,
+      blockTimestamp,
+    });
 
     context.BiPoolExchange.set(row);
-
-    if (wrappedByPoolId) {
-      await mirrorVirtualPoolOracleConfig(context, {
-        poolId: wrappedByPoolId,
-        feedId: row.referenceRateFeedID,
-        freshnessWindow: row.referenceRateResetFrequency,
-        blockNumber,
-        blockTimestamp,
-      });
-      // VP-deployed-before-exchange ordering: the wrapping VP self-healed
-      // (or set its forward link via `VirtualPoolDeployed`) before this
-      // exchange row existed. Its `selfHealWrappedExchangeId` couldn't
-      // mirror tokens because the row wasn't there yet — backfill them
-      // now that we just persisted asset0/asset1.
-      await mirrorTokensAndDecimalsToPool(context, {
-        poolId: wrappedByPoolId,
-        asset0: row.asset0,
-        asset1: row.asset1,
-        blockNumber,
-        blockTimestamp,
-      });
-    }
+    await syncWrappedPoolFromCreatedExchange(
+      context,
+      row,
+      blockNumber,
+      blockTimestamp,
+    );
   },
 );
 
