@@ -360,9 +360,9 @@ export const POOL_LIQUIDITY_COUNT = `
 // chart. Still paginated (across all pools the row count exceeds 1000 after a few
 // years), but pagination cost is ~20× lower than the hourly cross-pool query.
 export const POOL_DAILY_SNAPSHOTS_ALL = `
-  query PoolDailySnapshotsAll($poolIds: [String!]!, $limit: Int!, $offset: Int!) {
+  query PoolDailySnapshotsAll($poolIds: [String!]!, $afterTimestamp: numeric!, $limit: Int!, $offset: Int!) {
     PoolDailySnapshot(
-      where: { poolId: { _in: $poolIds } }
+      where: { poolId: { _in: $poolIds }, timestamp: { _gte: $afterTimestamp } }
       order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
       offset: $offset

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PoolDailyVolumeRow } from "@/lib/volume-pool";
 
 const { requestMock } = vi.hoisted(() => ({
@@ -31,6 +31,11 @@ function row(id: string): PoolDailyVolumeRow {
 describe("fetchPoolVolumeSnapshots", () => {
   beforeEach(() => {
     requestMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("paginates pool-day rows until the first short page", async () => {
@@ -74,7 +79,7 @@ describe("fetchPoolVolumeSnapshots", () => {
     expect(result.rows).toHaveLength(1001);
   });
 
-  it("uses one abort deadline for the whole paginated poll", async () => {
+  it("uses a fresh abort deadline per page", async () => {
     requestMock
       .mockResolvedValueOnce({
         PoolDailyVolumeSnapshot: Array.from({ length: 1000 }, (_, i) =>
@@ -85,9 +90,31 @@ describe("fetchPoolVolumeSnapshots", () => {
 
     await fetchPoolVolumeSnapshots("https://hasura.test", 123);
 
-    expect(requestMock.mock.calls[0]![0].signal).toBe(
+    expect(requestMock.mock.calls[0]![0].signal).not.toBe(
       requestMock.mock.calls[1]![0].signal,
     );
+  });
+
+  it("caps later page abort deadlines to the overall poll budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-16T12:00:00Z"));
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    requestMock
+      .mockImplementationOnce(() => {
+        vi.setSystemTime(new Date("2026-06-16T12:00:54Z"));
+        return Promise.resolve({
+          PoolDailyVolumeSnapshot: Array.from({ length: 1000 }, (_, i) =>
+            row(String(i)),
+          ),
+        });
+      })
+      .mockResolvedValueOnce({ PoolDailyVolumeSnapshot: [row("1000")] });
+
+    const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+
+    expect(result.partial).toBe(false);
+    expect(timeoutSpy.mock.calls[0]?.[0]).toBe(8000);
+    expect(timeoutSpy.mock.calls[1]?.[0]).toBe(1000);
   });
 
   it("returns partial rows when a later page fails", async () => {
@@ -103,6 +130,34 @@ describe("fetchPoolVolumeSnapshots", () => {
 
     expect(result.partial).toBe(true);
     expect(result.rows).toHaveLength(1000);
+  });
+
+  it("returns partial rows instead of starting another request after the overall deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-16T12:00:00Z"));
+    requestMock
+      .mockImplementationOnce(() => {
+        vi.setSystemTime(new Date("2026-06-16T12:00:54Z"));
+        return Promise.resolve({
+          PoolDailyVolumeSnapshot: Array.from({ length: 1000 }, (_, i) =>
+            row(String(i)),
+          ),
+        });
+      })
+      .mockImplementationOnce(() => {
+        vi.setSystemTime(new Date("2026-06-16T12:00:56Z"));
+        return Promise.resolve({
+          PoolDailyVolumeSnapshot: Array.from({ length: 1000 }, (_, i) =>
+            row(String(1000 + i)),
+          ),
+        });
+      });
+
+    const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+
+    expect(result.partial).toBe(true);
+    expect(result.rows).toHaveLength(2000);
+    expect(requestMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not mark the result partial when the max page boundary is exact", async () => {

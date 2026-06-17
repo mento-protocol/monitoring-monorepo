@@ -358,6 +358,12 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
 
   it("POOL_DAILY_SNAPSHOTS_ALL paginates by [timestamp desc, id desc] across pools", () => {
     expect(queries.POOL_DAILY_SNAPSHOTS_ALL).toContain("$poolIds: [String!]!");
+    expect(queries.POOL_DAILY_SNAPSHOTS_ALL).toContain(
+      "$afterTimestamp: numeric!",
+    );
+    expect(normalize(queries.POOL_DAILY_SNAPSHOTS_ALL)).toContain(
+      "where: { poolId: { _in: $poolIds }, timestamp: { _gte: $afterTimestamp } }",
+    );
     expect(normalize(queries.POOL_DAILY_SNAPSHOTS_ALL)).toContain(
       "order_by: [{ timestamp: desc }, { id: desc }]",
     );
@@ -525,8 +531,14 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
 
   it("POOL_DAILY_FEE_SNAPSHOTS_PAGE paginates by [timestamp desc, id desc] scoped to chainId", () => {
     expect(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE).toContain("$chainId: Int!");
+    expect(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE).toContain(
+      "$afterTimestamp: numeric!",
+    );
     expect(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE).toContain("$limit: Int!");
     expect(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE).toContain("$offset: Int!");
+    expect(normalize(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE)).toContain(
+      "where: { chainId: { _eq: $chainId }, timestamp: { _gte: $afterTimestamp } }",
+    );
     expect(normalize(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE)).toContain(
       "order_by: [{ timestamp: desc }, { id: desc }]",
     );
