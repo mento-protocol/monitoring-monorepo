@@ -3,6 +3,7 @@ import {
   buildClaimComment,
   chooseUntriedCandidate,
   isClaimable,
+  isReleasable,
   isRecoverableClaimRaceError,
   isReviewable,
   labelsForState,
@@ -13,6 +14,7 @@ import {
   selectStatusOption,
   shouldRollbackFailedTransition,
   stateFromLabels,
+  validateOpenPr,
 } from "./agent-issue-board.mjs";
 
 let passed = 0;
@@ -50,6 +52,21 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function assertThrows(fn, pattern) {
+  try {
+    fn();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!pattern.test(message)) {
+      throw new Error(`expected ${message} to match ${pattern}`, {
+        cause: err,
+      });
+    }
+    return;
+  }
+  throw new Error("expected function to throw");
+}
+
 test("parses repeated, comma-separated, and URL issue references", () => {
   assertDeepEqual(
     parseIssueNumbers([
@@ -58,6 +75,17 @@ test("parses repeated, comma-separated, and URL issue references", () => {
       "https://github.com/mento-protocol/monitoring-monorepo/issues/904",
     ]),
     [901, 902, 903, 904],
+  );
+});
+
+test("rejects issue URLs from another repository", () => {
+  assertThrows(
+    () =>
+      parseIssueNumbers(
+        ["https://github.com/other/repo/issues/904"],
+        "mento-protocol/monitoring-monorepo",
+      ),
+    /does not match selected repo/,
   );
 });
 
@@ -80,6 +108,32 @@ test("parses claim options for the monitoring workboard", () => {
   assertEqual(args.projectOwner, "mento-protocol");
   assertEqual(args.projectNumber, 12);
   assertEqual(args.dryRun, true);
+});
+
+test("review PR guard requires an open PR", () => {
+  assertEqual(
+    validateOpenPr(
+      { id: "PR_123", state: "OPEN" },
+      { pr: 984, repo: "mento-protocol/monitoring-monorepo" },
+    ).id,
+    "PR_123",
+  );
+  assertThrows(
+    () =>
+      validateOpenPr(null, {
+        pr: 984,
+        repo: "mento-protocol/monitoring-monorepo",
+      }),
+    /was not found/,
+  );
+  assertThrows(
+    () =>
+      validateOpenPr(
+        { id: "PR_123", state: "CLOSED" },
+        { pr: 984, repo: "mento-protocol/monitoring-monorepo" },
+      ),
+    /requires an open PR/,
+  );
 });
 
 test("review falls back to In Progress when In Review is absent", () => {
@@ -211,6 +265,44 @@ test("review guard only accepts open agent-active issues", () => {
     isReviewable({
       state: "CLOSED",
       labels: [{ name: "agent-active" }],
+    }),
+    false,
+  );
+});
+
+test("release guard only accepts open active or review queue issues", () => {
+  assertEqual(
+    isReleasable({
+      state: "OPEN",
+      labels: [{ name: "agent-active" }],
+    }),
+    true,
+  );
+  assertEqual(
+    isReleasable({
+      state: "OPEN",
+      labels: [{ name: "in-pr" }],
+    }),
+    true,
+  );
+  assertEqual(
+    isReleasable({
+      state: "OPEN",
+      labels: [{ name: "agent-ready" }],
+    }),
+    false,
+  );
+  assertEqual(
+    isReleasable({
+      state: "OPEN",
+      labels: [{ name: "agent-active" }, { name: "in-pr" }],
+    }),
+    false,
+  );
+  assertEqual(
+    isReleasable({
+      state: "CLOSED",
+      labels: [{ name: "in-pr" }],
     }),
     false,
   );

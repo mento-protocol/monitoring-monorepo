@@ -78,19 +78,34 @@ function unique(values) {
   return [...new Set(values)];
 }
 
-export function parseIssueNumbers(values) {
+export function parseIssueNumbers(values, repo = DEFAULT_REPO) {
+  const expectedRepo = splitRepo(repo).nameWithOwner.toLowerCase();
   const numbers = [];
   for (const value of values) {
     for (const part of String(value).split(",")) {
       const trimmed = part.trim();
       if (!trimmed) continue;
-      const match =
-        trimmed.match(/^#?(\d+)$/) ??
-        trimmed.match(/github\.com\/[^/]+\/[^/]+\/issues\/(\d+)/);
-      if (!match) {
-        throw new Error(`Invalid issue reference: ${trimmed}`);
+      const numberMatch = trimmed.match(/^#?(\d+)$/);
+      if (numberMatch) {
+        numbers.push(Number(numberMatch[1]));
+        continue;
       }
-      numbers.push(Number(match[1]));
+
+      const urlMatch = trimmed.match(
+        /github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)/,
+      );
+      if (urlMatch) {
+        const actualRepo = `${urlMatch[1]}/${urlMatch[2]}`;
+        if (actualRepo.toLowerCase() !== expectedRepo) {
+          throw new Error(
+            `Issue URL repository ${actualRepo} does not match selected repo ${repo}: ${trimmed}`,
+          );
+        }
+        numbers.push(Number(urlMatch[3]));
+        continue;
+      }
+
+      throw new Error(`Invalid issue reference: ${trimmed}`);
     }
   }
   return unique(numbers);
@@ -200,7 +215,7 @@ export function parseArgs(argv, env = process.env) {
     throw new Error("--count must be a positive integer");
   }
 
-  options.issues = parseIssueNumbers(options.issueValues);
+  options.issues = parseIssueNumbers(options.issueValues, options.repo);
   return options;
 }
 
@@ -343,6 +358,30 @@ export function isReviewable(issue) {
   );
 }
 
+export function isReleasable(issue) {
+  const labels = labelNames(issue);
+  const hasActiveClaim = labels.has("agent-active");
+  const hasReviewClaim = labels.has("in-pr");
+  return (
+    issue.state === "OPEN" &&
+    hasActiveClaim !== hasReviewClaim &&
+    !labels.has("agent-ready") &&
+    !labels.has("needs-grooming")
+  );
+}
+
+export function validateOpenPr(pr, options) {
+  if (!pr?.id) {
+    throw new Error(`PR #${options.pr} was not found in ${options.repo}`);
+  }
+  if (pr.state !== "OPEN") {
+    throw new Error(
+      `PR #${options.pr} is ${pr.state}; issue:review requires an open PR in ${options.repo}`,
+    );
+  }
+  return pr;
+}
+
 export function projectPrFieldValue(pr) {
   return pr == null || pr === "" ? null : `#${pr}`;
 }
@@ -455,6 +494,8 @@ async function getPrIssues(options) {
     `query($owner:String!,$repo:String!,$number:Int!){
       repository(owner:$owner,name:$repo){
         pullRequest(number:$number){
+          id
+          state
           closingIssuesReferences(first:100){
             nodes {
               number
@@ -468,10 +509,7 @@ async function getPrIssues(options) {
     }`,
     { owner: repo.owner, repo: repo.name, number: options.pr },
   );
-  const pr = response?.data?.repository?.pullRequest;
-  if (!pr) {
-    throw new Error(`PR #${options.pr} was not found in ${options.repo}`);
-  }
+  const pr = validateOpenPr(response?.data?.repository?.pullRequest, options);
   const issues = pr.closingIssuesReferences?.nodes ?? [];
   return issues
     .filter((issue) => issue?.repository?.nameWithOwner === repo.nameWithOwner)
@@ -487,14 +525,13 @@ async function ensurePrExists(options) {
       repository(owner:$owner,name:$repo){
         pullRequest(number:$number){
           id
+          state
         }
       }
     }`,
     { owner: repo.owner, repo: repo.name, number: options.pr },
   );
-  if (!response?.data?.repository?.pullRequest?.id) {
-    throw new Error(`PR #${options.pr} was not found in ${options.repo}`);
-  }
+  validateOpenPr(response?.data?.repository?.pullRequest, options);
 }
 
 async function getProject(options) {
@@ -1073,6 +1110,11 @@ async function release(options) {
   const results = [];
   for (const number of options.issues) {
     const issue = await getIssue(options, number);
+    if (!isReleasable(issue)) {
+      throw new Error(
+        `Issue #${issue.number} is not releasable; expected open agent-active or in-pr without agent-ready/needs-grooming`,
+      );
+    }
     await transitionIssue(
       options,
       project,
