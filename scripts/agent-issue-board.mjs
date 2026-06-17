@@ -347,8 +347,17 @@ export function projectPrFieldValue(pr) {
   return pr == null || pr === "" ? null : `#${pr}`;
 }
 
-export function shouldRollbackFailedTransition(state, previousState) {
-  return state !== "active" && Boolean(previousState);
+export function projectDateFieldValue(value) {
+  return value == null || value === "" ? null : value.slice(0, 10);
+}
+
+export function shouldRollbackFailedTransition(
+  state,
+  previousState,
+  observedDifferentClaim = false,
+) {
+  if (!previousState) return false;
+  return state !== "active" || !observedDifferentClaim;
 }
 
 function sleep(ms) {
@@ -459,13 +468,33 @@ async function getPrIssues(options) {
     }`,
     { owner: repo.owner, repo: repo.name, number: options.pr },
   );
-  const issues =
-    response?.data?.repository?.pullRequest?.closingIssuesReferences?.nodes ??
-    [];
+  const pr = response?.data?.repository?.pullRequest;
+  if (!pr) {
+    throw new Error(`PR #${options.pr} was not found in ${options.repo}`);
+  }
+  const issues = pr.closingIssuesReferences?.nodes ?? [];
   return issues
     .filter((issue) => issue?.repository?.nameWithOwner === repo.nameWithOwner)
     .map((issue) => issue.number)
     .filter(Number.isInteger);
+}
+
+async function ensurePrExists(options) {
+  if (!options.pr) return;
+  const repo = splitRepo(options.repo);
+  const response = await ghGraphql(
+    `query($owner:String!,$repo:String!,$number:Int!){
+      repository(owner:$owner,name:$repo){
+        pullRequest(number:$number){
+          id
+        }
+      }
+    }`,
+    { owner: repo.owner, repo: repo.name, number: options.pr },
+  );
+  if (!response?.data?.repository?.pullRequest?.id) {
+    throw new Error(`PR #${options.pr} was not found in ${options.repo}`);
+  }
 }
 
 async function getProject(options) {
@@ -590,13 +619,35 @@ async function readProjectTextField(options, itemId, fieldId) {
 
 async function verifyClaimOwnership(options, project, itemId, issue, metadata) {
   if (options.dryRun) return;
-  const claimField = findField(project, OPTIONAL_PROJECT_FIELDS.claimId);
-  if (claimField?.dataType !== "TEXT") return;
+  const claimField = requireClaimIdField(project);
   const claimId = await readProjectTextField(options, itemId, claimField.id);
   if (claimId !== metadata.claimId) {
     throw new Error(
       `Issue #${issue.number} claim was overwritten; project Claim ID is ${claimId ?? "<empty>"} instead of ${metadata.claimId}`,
     );
+  }
+}
+
+function requireClaimIdField(project) {
+  const claimField = findField(project, OPTIONAL_PROJECT_FIELDS.claimId);
+  if (claimField?.dataType !== "TEXT") {
+    throw new Error(
+      "Project must have a text Claim ID field before agents can claim issues",
+    );
+  }
+  return claimField;
+}
+
+async function hasDifferentClaimId(options, project, issue, expectedClaimId) {
+  try {
+    const claimField = requireClaimIdField(project);
+    const current = await getIssue(options, issue.number);
+    const itemId = await findIssueProjectItem(options, current, project);
+    if (!itemId) return false;
+    const claimId = await readProjectTextField(options, itemId, claimField.id);
+    return Boolean(claimId && claimId !== expectedClaimId);
+  } catch {
+    return false;
   }
 }
 
@@ -757,7 +808,7 @@ async function updateProjectFields(options, project, itemId, state, metadata) {
       project,
       itemId,
       claimedAtField.id,
-      metadata.claimedAt ? metadata.claimedAt.slice(0, 10) : "",
+      projectDateFieldValue(metadata.claimedAt),
     );
   }
 }
@@ -837,11 +888,17 @@ async function transitionIssue(options, project, issue, state, metadata) {
     await updateProjectFields(options, project, itemId, state, metadata);
     return itemId;
   } catch (err) {
-    // Claim failures cannot prove ownership of the active label; rolling back
-    // could re-open a claim that another session already won.
+    const observedDifferentClaim =
+      !options.dryRun && state === "active"
+        ? await hasDifferentClaimId(options, project, issue, metadata.claimId)
+        : false;
     if (
       !options.dryRun &&
-      shouldRollbackFailedTransition(state, previousState)
+      shouldRollbackFailedTransition(
+        state,
+        previousState,
+        observedDifferentClaim,
+      )
     ) {
       const current = await getIssue(options, issue.number);
       await editIssueLabels(options, current, previousState);
@@ -871,6 +928,7 @@ export function isRecoverableClaimRaceError(err) {
 }
 
 async function claimIssue(options, project, issue, metadata) {
+  requireClaimIdField(project);
   if (!isClaimable(issue)) {
     throw new Error(
       `Issue #${issue.number} is not claimable; expected open agent-ready without agent-active/in-pr`,
@@ -965,6 +1023,9 @@ async function review(options) {
     throw new Error(
       "review requires --pr so reviewed issues are linked to a pull request",
     );
+  }
+  if (options.issues.length > 0) {
+    await ensurePrExists(options);
   }
   const project = await getProject(options);
   const inferredIssues =
@@ -1061,10 +1122,10 @@ async function sync(options) {
         ? await findIssueProjectItem(options, issue, project)
         : await ensureProjectItem(options, project, issue);
     if (!itemId) continue;
+    await updateProjectFields(options, project, itemId, state, {});
     if (state === "done") {
       await editIssueLabels(options, issue, state);
     }
-    await updateProjectFields(options, project, itemId, state, {});
     results.push({ number: issue.number, title: issue.title, state });
   }
   return results;

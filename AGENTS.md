@@ -167,7 +167,8 @@ Queue state labels are mutually exclusive:
 
 When starting issue work, run `pnpm issue:claim` before substantive edits; it
 removes `agent-ready`, adds `agent-active`, adds the issue to the repo workboard,
-and moves the item to `In Progress`. When opening the PR, run
+and moves the item to `In Progress`. The repo workboard must have a text
+`Claim ID` field so claim ownership can be verified safely. When opening the PR, run
 `pnpm issue:review --pr <number> --issue <issue>` to remove `agent-active`, add
 `in-pr`, and project the issue into review on the workboard.
 Use `Closes #123` only for issues whose "Done means" is fully satisfied by the

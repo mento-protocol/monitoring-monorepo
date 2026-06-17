@@ -94,10 +94,10 @@ numbers. `pnpm issue:review` can infer same-repository issues from
 pass explicit `--issue` arguments when the PR uses `Refs` or has mixed
 complete/partial scope.
 
-The helper populates optional Project fields named `Agent`, `Branch`,
-`Claim ID`, `Claimed At`, and `PR` when those fields exist. Missing optional
-fields are ignored so a fresh Project with only the default `Status` field still
-works.
+The helper requires a text Project field named `Claim ID` before it will claim
+issues; this field is the ownership token that prevents two agents from both
+winning the same issue. It also populates optional Project fields named `Agent`,
+`Branch`, `Claimed At`, and `PR` when those fields exist.
 
 ## PR Body Rules
 

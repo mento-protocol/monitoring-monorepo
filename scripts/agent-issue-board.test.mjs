@@ -8,6 +8,7 @@ import {
   labelsForState,
   parseArgs,
   parseIssueNumbers,
+  projectDateFieldValue,
   projectPrFieldValue,
   selectStatusOption,
   shouldRollbackFailedTransition,
@@ -221,8 +222,15 @@ test("PR project field formatting clears null releases", () => {
   assertEqual(projectPrFieldValue(undefined), null);
 });
 
-test("failed claim transitions do not roll labels back", () => {
-  assertEqual(shouldRollbackFailedTransition("active", "ready"), false);
+test("Claimed At project field formatting clears null releases", () => {
+  assertEqual(projectDateFieldValue("2026-06-17T10:00:00.000Z"), "2026-06-17");
+  assertEqual(projectDateFieldValue(null), null);
+  assertEqual(projectDateFieldValue(undefined), null);
+});
+
+test("failed claim setup rolls back unless another claim is observed", () => {
+  assertEqual(shouldRollbackFailedTransition("active", "ready"), true);
+  assertEqual(shouldRollbackFailedTransition("active", "ready", true), false);
   assertEqual(shouldRollbackFailedTransition("review", "active"), true);
   assertEqual(shouldRollbackFailedTransition("ready", null), false);
 });
