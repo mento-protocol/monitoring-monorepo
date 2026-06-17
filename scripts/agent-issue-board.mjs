@@ -347,6 +347,10 @@ export function projectPrFieldValue(pr) {
   return pr == null || pr === "" ? null : `#${pr}`;
 }
 
+export function shouldRollbackFailedTransition(state, previousState) {
+  return state !== "active" && Boolean(previousState);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -833,7 +837,12 @@ async function transitionIssue(options, project, issue, state, metadata) {
     await updateProjectFields(options, project, itemId, state, metadata);
     return itemId;
   } catch (err) {
-    if (!options.dryRun && previousState) {
+    // Claim failures cannot prove ownership of the active label; rolling back
+    // could re-open a claim that another session already won.
+    if (
+      !options.dryRun &&
+      shouldRollbackFailedTransition(state, previousState)
+    ) {
       const current = await getIssue(options, issue.number);
       await editIssueLabels(options, current, previousState);
     }

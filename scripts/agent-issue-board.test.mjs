@@ -10,6 +10,7 @@ import {
   parseIssueNumbers,
   projectPrFieldValue,
   selectStatusOption,
+  shouldRollbackFailedTransition,
   stateFromLabels,
 } from "./agent-issue-board.mjs";
 
@@ -218,6 +219,12 @@ test("PR project field formatting clears null releases", () => {
   assertEqual(projectPrFieldValue(984), "#984");
   assertEqual(projectPrFieldValue(null), null);
   assertEqual(projectPrFieldValue(undefined), null);
+});
+
+test("failed claim transitions do not roll labels back", () => {
+  assertEqual(shouldRollbackFailedTransition("active", "ready"), false);
+  assertEqual(shouldRollbackFailedTransition("review", "active"), true);
+  assertEqual(shouldRollbackFailedTransition("ready", null), false);
 });
 
 test("claim queue treats stale claim races as recoverable", () => {
