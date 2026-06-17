@@ -110,6 +110,40 @@ test("parses claim options for the monitoring workboard", () => {
   assertEqual(args.dryRun, true);
 });
 
+test("parses PR URLs only for the selected repository", () => {
+  assertEqual(
+    parseArgs([
+      "review",
+      "--repo",
+      "mento-protocol/monitoring-monorepo",
+      "--pr",
+      "https://github.com/mento-protocol/monitoring-monorepo/pull/984",
+    ]).pr,
+    984,
+  );
+  assertEqual(
+    parseArgs([
+      "review",
+      "--pr",
+      "https://github.com/other/repo/pull/123",
+      "--repo",
+      "other/repo",
+    ]).pr,
+    123,
+  );
+  assertThrows(
+    () =>
+      parseArgs([
+        "review",
+        "--repo",
+        "mento-protocol/monitoring-monorepo",
+        "--pr",
+        "https://github.com/other/repo/pull/123",
+      ]),
+    /does not match selected repo/,
+  );
+});
+
 test("review PR guard requires an open PR", () => {
   assertEqual(
     validateOpenPr(

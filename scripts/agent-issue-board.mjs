@@ -111,13 +111,24 @@ export function parseIssueNumbers(values, repo = DEFAULT_REPO) {
   return unique(numbers);
 }
 
-function parsePr(value) {
+function parsePr(value, repo = DEFAULT_REPO) {
   const trimmed = String(value).trim();
-  const match =
-    trimmed.match(/^#?(\d+)$/) ??
-    trimmed.match(/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/);
-  if (!match) throw new Error(`Invalid PR reference: ${trimmed}`);
-  return Number(match[1]);
+  const numberMatch = trimmed.match(/^#?(\d+)$/);
+  if (numberMatch) return Number(numberMatch[1]);
+
+  const urlMatch = trimmed.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  if (urlMatch) {
+    const expectedRepo = splitRepo(repo).nameWithOwner.toLowerCase();
+    const actualRepo = `${urlMatch[1]}/${urlMatch[2]}`;
+    if (actualRepo.toLowerCase() !== expectedRepo) {
+      throw new Error(
+        `PR URL repository ${actualRepo} does not match selected repo ${repo}: ${trimmed}`,
+      );
+    }
+    return Number(urlMatch[3]);
+  }
+
+  throw new Error(`Invalid PR reference: ${trimmed}`);
 }
 
 function defaultAgent(env = process.env) {
@@ -138,6 +149,7 @@ export function parseArgs(argv, env = process.env) {
     agent: defaultAgent(env),
     branch: env.AGENT_BRANCH ?? "",
     pr: null,
+    prValue: null,
     dryRun: false,
     json: false,
     comment: true,
@@ -184,7 +196,7 @@ export function parseArgs(argv, env = process.env) {
         options.branch = readValue();
         break;
       case "--pr":
-        options.pr = parsePr(readValue());
+        options.prValue = readValue();
         break;
       case "--needs-grooming":
         options.releaseState = "grooming";
@@ -215,6 +227,10 @@ export function parseArgs(argv, env = process.env) {
     throw new Error("--count must be a positive integer");
   }
 
+  if (options.prValue) {
+    options.pr = parsePr(options.prValue, options.repo);
+  }
+  delete options.prValue;
   options.issues = parseIssueNumbers(options.issueValues, options.repo);
   return options;
 }
