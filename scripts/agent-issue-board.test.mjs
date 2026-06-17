@@ -3,6 +3,7 @@ import {
   buildClaimComment,
   chooseUntriedCandidate,
   isClaimable,
+  isRecoverableClaimRaceError,
   labelsForState,
   parseArgs,
   parseIssueNumbers,
@@ -169,6 +170,19 @@ test("claim guard only accepts open agent-ready issues", () => {
       state: "CLOSED",
       labels: [{ name: "agent-ready" }],
     }),
+    false,
+  );
+});
+
+test("claim queue treats stale claim races as recoverable", () => {
+  assertEqual(
+    isRecoverableClaimRaceError(
+      new Error("Issue #901 claim was overwritten; project Claim ID is other"),
+    ),
+    true,
+  );
+  assertEqual(
+    isRecoverableClaimRaceError(new Error("gh api graphql failed")),
     false,
   );
 });

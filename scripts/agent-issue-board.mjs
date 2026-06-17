@@ -648,8 +648,8 @@ async function clearProjectField(options, project, itemId, fieldId) {
 }
 
 async function updateTextField(options, project, itemId, fieldId, text) {
-  if (text === undefined) return;
-  if (text === null || text === "") {
+  if (text === undefined || text === "") return;
+  if (text === null) {
     await clearProjectField(options, project, itemId, fieldId);
     return;
   }
@@ -670,8 +670,8 @@ async function updateTextField(options, project, itemId, fieldId, text) {
 }
 
 async function updateDateField(options, project, itemId, fieldId, date) {
-  if (date === undefined) return;
-  if (date === null || date === "") {
+  if (date === undefined || date === "") return;
+  if (date === null) {
     await clearProjectField(options, project, itemId, fieldId);
     return;
   }
@@ -815,11 +815,21 @@ async function transitionIssue(options, project, issue, state, metadata) {
 function claimMetadata(options, branch) {
   return {
     agent: options.agent,
-    branch,
+    branch: branch || undefined,
     claimId: claimIdFor(options),
     claimedAt: new Date().toISOString(),
-    pr: options.pr,
+    pr: options.pr ?? null,
   };
+}
+
+export function isRecoverableClaimRaceError(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes("is not claimable") ||
+    message.includes("claim was overwritten") ||
+    message.includes("did not retain agent-active") ||
+    message.includes("has conflicting state labels")
+  );
 }
 
 async function claimIssue(options, project, issue, metadata) {
@@ -889,9 +899,20 @@ async function claim(options) {
     triedNumbers.add(candidate.number);
     const issue = await getIssue(options, candidate.number);
     if (!isClaimable(issue)) continue;
-    results.push(
-      await claimIssue(options, project, issue, claimMetadata(options, branch)),
-    );
+    try {
+      results.push(
+        await claimIssue(
+          options,
+          project,
+          issue,
+          claimMetadata(options, branch),
+        ),
+      );
+    } catch (err) {
+      if (!isRecoverableClaimRaceError(err)) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`Skipped #${issue.number}: ${message}\n`);
+    }
   }
 
   if (results.length === 0) {
@@ -914,9 +935,7 @@ async function review(options) {
   const branch = options.branch || (await getGitBranch());
   const metadata = {
     agent: options.agent,
-    branch,
-    claimId: "",
-    claimedAt: "",
+    branch: branch || undefined,
     pr: options.pr,
   };
   const results = [];
@@ -937,10 +956,10 @@ async function release(options) {
   }
   const project = await getProject(options);
   const metadata = {
-    agent: "",
-    branch: "",
-    claimId: "",
-    claimedAt: "",
+    agent: null,
+    branch: null,
+    claimId: null,
+    claimedAt: null,
     pr: null,
   };
   const results = [];
