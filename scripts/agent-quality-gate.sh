@@ -523,6 +523,16 @@ add_package_quality_commands() {
   add_checklist "docs/pr-checklists/code-health.md" "$reason (code-health gates fire on this change)"
 }
 
+add_package_vitest_typecheck_commands() {
+  local package_name="$1"
+  local reason="$2"
+  if [[ "$package_name" == "@mento-protocol/indexer-envio" ]]; then
+    add_indexer_mainnet_codegen "$reason (codegen needed before indexer typecheck)"
+  fi
+  add_turbo_package_task "$package_name" "typecheck" "$reason"
+  add_command "pnpm --filter $package_name test:coverage" "$reason (coverage floor)"
+}
+
 add_dashboard_quality_commands() {
   local reason="$1"
   add_package_quality_commands "@mento-protocol/ui-dashboard" "$reason"
@@ -927,6 +937,42 @@ while IFS= read -r path; do
       if [[ -f "$path" ]]; then
         add_command "bash -n $(quote_path "$path")" "shell script changed"
       fi
+      ;;
+  esac
+  case "$path" in
+    */vitest.config.ts|*/vitest.mutation.config.ts)
+      add_surface "tooling"
+      add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest config changed"
+      ;;
+    */vitest.hermetic-setup.ts)
+      add_surface "tooling"
+      add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup changed"
+      case "$path" in
+        alerts/infra/oncall-announcer/vitest.hermetic-setup.ts)
+          add_package_vitest_typecheck_commands "@mento-protocol/alerts-oncall-announcer" "alerts oncall-announcer hermetic Vitest setup changed"
+          ;;
+        alerts/infra/onchain-event-handler/vitest.hermetic-setup.ts)
+          add_package_vitest_typecheck_commands "@mento-protocol/alerts-onchain-event-handler" "alerts onchain-event-handler hermetic Vitest setup changed"
+          ;;
+        governance-watchdog/vitest.hermetic-setup.ts)
+          add_package_vitest_typecheck_commands "@mento-protocol/governance-watchdog" "governance-watchdog hermetic Vitest setup changed"
+          ;;
+        indexer-envio/vitest.hermetic-setup.ts)
+          add_package_vitest_typecheck_commands "@mento-protocol/indexer-envio" "indexer-envio hermetic Vitest setup changed"
+          ;;
+        integration-probes/vitest.hermetic-setup.ts)
+          add_package_vitest_typecheck_commands "@mento-protocol/integration-probes" "integration-probes hermetic Vitest setup changed"
+          ;;
+        metrics-bridge/vitest.hermetic-setup.ts)
+          add_package_vitest_typecheck_commands "@mento-protocol/metrics-bridge" "metrics-bridge hermetic Vitest setup changed"
+          ;;
+        shared-config/vitest.hermetic-setup.ts)
+          add_package_vitest_typecheck_commands "@mento-protocol/monitoring-config" "shared-config hermetic Vitest setup changed"
+          ;;
+        ui-dashboard/vitest.hermetic-setup.ts)
+          add_package_vitest_typecheck_commands "@mento-protocol/ui-dashboard" "ui-dashboard hermetic Vitest setup changed"
+          ;;
+      esac
       ;;
   esac
   case "$path" in
@@ -1342,6 +1388,10 @@ while IFS= read -r path; do
           ;;
         scripts/version-skew-check.mjs|scripts/version-skew-check.test.mjs)
           add_command "pnpm skew:check:test" "version skew checker changed"
+          ;;
+        scripts/check-hermetic-vitest-setup.mjs|scripts/check-hermetic-vitest-setup.test.mjs)
+          add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup checker changed"
+          add_command "node scripts/check-hermetic-vitest-setup.test.mjs" "hermetic Vitest setup checker changed"
           ;;
         scripts/check-github-action-pins.mjs)
           add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions pin checker changed"

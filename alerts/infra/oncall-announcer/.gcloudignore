@@ -12,6 +12,7 @@ dist
 **/*.test.js
 
 vitest.config.ts
+vitest.hermetic-setup.ts
 eslint.config.mjs
 knip.json
 .prettierrc.json

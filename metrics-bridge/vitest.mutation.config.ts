@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    setupFiles: ["./vitest.hermetic-setup.ts"],
     environment: "node",
     include: ["test/rebalance-probe.test.ts"],
     coverage: {

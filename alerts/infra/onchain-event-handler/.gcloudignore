@@ -34,6 +34,7 @@ node_modules
 # schema and the .sh files reveal internal gcloud + Terraform invocations.
 scripts
 vitest.config.ts
+vitest.hermetic-setup.ts
 eslint.config.mjs
 knip.json
 .prettierrc.json

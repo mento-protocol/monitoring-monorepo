@@ -18,6 +18,7 @@
 
 commitlint.config.mjs
 eslint.config.mjs
+vitest.hermetic-setup.ts
 infra
 
 #!include:.gitignore

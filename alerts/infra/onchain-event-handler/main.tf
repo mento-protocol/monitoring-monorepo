@@ -219,6 +219,7 @@ data "archive_file" "function_source" {
     "scripts",
     "scripts/**",
     "vitest.config.ts",
+    "vitest.hermetic-setup.ts",
     "eslint.config.mjs",
     "knip.json",
     ".prettierrc.json",

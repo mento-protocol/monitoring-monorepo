@@ -84,6 +84,7 @@ data "archive_file" "function_source" {
     "dist",
     "commitlint.config.mjs",
     "eslint.config.mjs",
+    "vitest.hermetic-setup.ts",
     "infra",
     "node_modules",
     "function-source.zip",

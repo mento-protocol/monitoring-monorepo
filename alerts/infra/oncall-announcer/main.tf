@@ -170,6 +170,7 @@ data "archive_file" "function_source" {
     ".env",
     ".env.*",
     "vitest.config.ts",
+    "vitest.hermetic-setup.ts",
     "eslint.config.mjs",
     "knip.json",
     ".prettierrc.json",

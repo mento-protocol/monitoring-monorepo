@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    setupFiles: ["./vitest.hermetic-setup.ts"],
     environment: "node",
     include: [
       "src/lib/__tests__/pool-id.test.ts",

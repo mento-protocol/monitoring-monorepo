@@ -1220,6 +1220,7 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation ba
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
 run_gate "ui-dashboard/vitest.mutation.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
@@ -1236,6 +1237,7 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutati
 assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
 
 run_gate "metrics-bridge/vitest.mutation.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutation baseline changed)"
 assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
 
@@ -1252,6 +1254,7 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation base
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
 
 run_gate "indexer-envio/vitest.mutation.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
 
@@ -1446,6 +1449,67 @@ assert_contains "- node scripts/check-deviation-threshold-drift.mjs (shared devi
 assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync (shared deviation threshold source changed)"
 assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
+
+assert_hermetic_setup_routes() {
+  local path="$1"
+  local package_name="$2"
+  local reason="$3"
+
+  run_gate "$path"
+  assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup changed)"
+  assert_contains "- pnpm --filter $package_name typecheck ($reason)"
+  assert_contains "- pnpm --filter $package_name test:coverage ($reason (coverage floor))"
+}
+
+assert_hermetic_setup_routes \
+  "alerts/infra/oncall-announcer/vitest.hermetic-setup.ts" \
+  "@mento-protocol/alerts-oncall-announcer" \
+  "alerts oncall-announcer hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "alerts/infra/onchain-event-handler/vitest.hermetic-setup.ts" \
+  "@mento-protocol/alerts-onchain-event-handler" \
+  "alerts onchain-event-handler hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "governance-watchdog/vitest.hermetic-setup.ts" \
+  "@mento-protocol/governance-watchdog" \
+  "governance-watchdog hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "indexer-envio/vitest.hermetic-setup.ts" \
+  "@mento-protocol/indexer-envio" \
+  "indexer-envio hermetic Vitest setup changed"
+assert_contains "- pnpm indexer:codegen (indexer-envio hermetic Vitest setup changed (codegen needed before indexer typecheck))"
+
+assert_hermetic_setup_routes \
+  "integration-probes/vitest.hermetic-setup.ts" \
+  "@mento-protocol/integration-probes" \
+  "integration-probes hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "metrics-bridge/vitest.hermetic-setup.ts" \
+  "@mento-protocol/metrics-bridge" \
+  "metrics-bridge hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "shared-config/vitest.hermetic-setup.ts" \
+  "@mento-protocol/monitoring-config" \
+  "shared-config hermetic Vitest setup changed"
+
+assert_hermetic_setup_routes \
+  "ui-dashboard/vitest.hermetic-setup.ts" \
+  "@mento-protocol/ui-dashboard" \
+  "ui-dashboard hermetic Vitest setup changed"
+
+run_gate "ui-dashboard/vitest.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+
+run_gate "metrics-bridge/vitest.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+
+run_gate "indexer-envio/vitest.config.ts"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
@@ -2185,6 +2249,16 @@ assert_contains "- pnpm skew:check:test (version skew checker changed)"
 
 run_gate "scripts/version-skew-check.test.mjs"
 assert_contains "- pnpm skew:check:test (version skew checker changed)"
+
+run_gate "scripts/check-hermetic-vitest-setup.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
+assert_contains "- node scripts/check-hermetic-vitest-setup.test.mjs (hermetic Vitest setup checker changed)"
+
+run_gate "scripts/check-hermetic-vitest-setup.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
+assert_contains "- node scripts/check-hermetic-vitest-setup.test.mjs (hermetic Vitest setup checker changed)"
 
 run_gate "scripts/check-github-action-pins.mjs"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions pin checker changed)"

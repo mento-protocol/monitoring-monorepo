@@ -420,6 +420,7 @@ pnpm agent:autoreview              # Structured closeout review; Codex sandbox d
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
+node scripts/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
