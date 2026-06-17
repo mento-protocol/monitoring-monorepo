@@ -3,6 +3,7 @@ import {
   assertStartBlocksValid,
   FPMM_FIRST_DEPLOY_BLOCK,
   START_BLOCK_ENV_NAME,
+  STETH_FIRST_TRACKED_EVENT_BLOCK,
   SUSDS_FIRST_TRACKED_EVENT_BLOCK,
 } from "../src/EventHandlers.js";
 
@@ -85,16 +86,29 @@ describe("assertStartBlocksValid", () => {
     );
   });
 
-  it("throws for Ethereum sUSDS when the start block misses tracked history", () => {
-    const tooHigh = SUSDS_FIRST_TRACKED_EVENT_BLOCK + 1;
+  it("throws for Ethereum stETH when the start block misses tracked history", () => {
+    const tooHigh = STETH_FIRST_TRACKED_EVENT_BLOCK + 1;
     assert.throws(
       () => assertStartBlocksValid({ [ETHEREUM]: String(tooHigh) }, true),
       (err: unknown) => {
         assert(err instanceof Error);
         assert(err.message.includes(START_BLOCK_ENV_NAME[ETHEREUM]));
-        assert(err.message.includes(String(SUSDS_FIRST_TRACKED_EVENT_BLOCK)));
+        assert(err.message.includes(String(STETH_FIRST_TRACKED_EVENT_BLOCK)));
         return true;
       },
+    );
+  });
+
+  it("allows Ethereum start blocks that cover both stETH and sUSDS tracked history", () => {
+    assert(
+      STETH_FIRST_TRACKED_EVENT_BLOCK < SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+      "stETH should remain the earliest Ethereum reserve-yield event",
+    );
+    assert.doesNotThrow(() =>
+      assertStartBlocksValid(
+        { [ETHEREUM]: String(STETH_FIRST_TRACKED_EVENT_BLOCK) },
+        true,
+      ),
     );
   });
 

@@ -52,6 +52,10 @@ const ALLOWLIST = new Map([
     "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
     { chainId: 1, reason: "Sky sUSDS token for reserve-yield accounting" },
   ],
+  [
+    "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+    { chainId: 1, reason: "Lido stETH token for reserve-yield accounting" },
+  ],
   // Testnet FPMM pool instances. Mainnet uses dynamic registration via
   // `FPMMFactory.FPMMDeployed.contractRegister`; testnet hand-lists them.
   [

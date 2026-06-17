@@ -48,3 +48,21 @@ export const SUSDS_YIELD_SUMMARY_QUERY = /* GraphQL */ `
     }
   }
 `;
+
+// Consumed by lib/reserve-yield-steth.ts. Defined here so the GraphQL contract
+// test covers it (the contract test imports this queries module directly).
+export const STETH_YIELD_SUMMARY_QUERY = /* GraphQL */ `
+  query StethYieldSummary($id: String!) {
+    StethYieldSummary(where: { id: { _eq: $id } }, limit: 1) {
+      id
+      currentBalance
+      remainingPrincipalAmount
+      realizedYieldAmount
+      transferredOutYieldAmount
+      unrealizedYieldAmount
+      totalEarnedYieldAmount
+      lastUpdatedBlock
+      lastUpdatedTimestamp
+    }
+  }
+`;

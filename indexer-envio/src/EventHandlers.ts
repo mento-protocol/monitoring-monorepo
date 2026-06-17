@@ -31,6 +31,7 @@ import "./handlers/biPoolManager.js";
 import "./handlers/feeToken.js";
 import "./handlers/stables/transfer.js";
 import "./handlers/susds.js";
+import "./handlers/steth.js";
 import "./handlers/openLiquidityStrategy.js";
 import "./handlers/liquity/collateralRegistry.js";
 import "./handlers/liquity/bootstrapHandler.js";
@@ -125,5 +126,6 @@ export {
   assertStartBlocksValid,
   FPMM_FIRST_DEPLOY_BLOCK,
   START_BLOCK_ENV_NAME,
+  STETH_FIRST_TRACKED_EVENT_BLOCK,
   SUSDS_FIRST_TRACKED_EVENT_BLOCK,
 } from "./startupChecks.js";

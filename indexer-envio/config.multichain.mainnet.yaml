@@ -224,6 +224,15 @@ contracts:
       - event: Deposit
       - event: Withdraw
 
+  # Lido stETH — Ethereum reserve-yield accounting. Rebasing rewards have no
+  # reward Transfer event, so the handler tracks FIFO principal from transfers
+  # and the dashboard refreshes current unrealized yield from reserve balances.
+  - name: Steth
+    abi_file_path: abis/ERC20.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: Transfer
+
   # Circuit Breakers (BreakerBox + MedianDelta + ValueDelta).
   # MarketHoursBreaker is registered on-chain but emits no events; we
   # represent it as a Breaker row (kind=MARKET_HOURS) seeded by BreakerAdded.
@@ -296,11 +305,14 @@ chains:
   # Ethereum Mainnet (chain 1) — HyperSync: https://1.hypersync.xyz
   # ---------------------------------------------------------------------------
   - id: 1
-    start_block: ${ENVIO_START_BLOCK_ETHEREUM:-22990000} # Covers the first known Mento reserve sUSDS deposit at block 22994825.
+    start_block: ${ENVIO_START_BLOCK_ETHEREUM:-19111760} # Covers the first known Mento reserve stETH mint at block 19111760 and sUSDS deposit at block 22994825.
     contracts:
       - name: Susds
         address:
           - 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD
+      - name: Steth
+        address:
+          - 0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84
       - name: Broker
         address: []
       - name: FPMMFactory
@@ -455,6 +467,8 @@ chains:
           - 0xc45ecf20f3cd864b32d9794d6f76814ae8892e20 # JPYm (NTT lock custody)
       - name: Susds
         address: []
+      - name: Steth
+        address: []
       - name: BreakerBox
         address:
           - 0x303ED1df62Fa067659B586EbEe8De0EcE824Ab39
@@ -512,6 +526,8 @@ chains:
           - 0xf64e91ffef7ef43aa314f0bc2ac39f770797990c # CHFm
           - 0x22f6a6752800eab67b84748fefc3cc658384af72 # JPYm
       - name: Susds
+        address: []
+      - name: Steth
         address: []
       - name: OpenLiquidityStrategy
         address:

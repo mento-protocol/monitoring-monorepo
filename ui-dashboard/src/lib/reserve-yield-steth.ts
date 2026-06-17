@@ -1,11 +1,35 @@
-import { fetchJson, isRecord, numericField } from "@/lib/reserve-yield-shared";
-import type { FetchImpl } from "@/lib/reserve-yield-types";
+import { weiToUsd } from "@/lib/format";
+import { STETH_YIELD_SUMMARY_QUERY } from "@/lib/queries/reserve-yield";
+import {
+  asArray,
+  bigintField,
+  errorMessage,
+  fetchGraphql,
+  fetchJson,
+  isRecord,
+  joinErrors,
+  numericField,
+  unixSecondsToIso,
+} from "@/lib/reserve-yield-shared";
+import {
+  FORECASTABLE_STETH_SYMBOL,
+  type FetchImpl,
+  type ReserveYieldHolding,
+  type StethYieldLedger,
+  type StethYieldLedgerResult,
+  type StethYieldState,
+} from "@/lib/reserve-yield-types";
 
 const LIDO_STETH_APR_URL = "https://eth-api.lido.fi/v1/protocol/steth/apr/last";
 
 const STETH_CHAIN_ID = 1;
 const STETH_SYMBOL = "STETH";
 const STETH_ADDRESS = "0xae7ab96520de3a18e5e111b5eaab095312d7fe84";
+const STETH_YIELD_SUMMARY_ID = "1-steth";
+const TRACKED_STETH_WALLET_IDENTIFIERS = new Set([
+  "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+  "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1",
+]);
 
 function validateStethMeta(meta: unknown): void {
   if (!isRecord(meta)) {
@@ -45,4 +69,248 @@ export async function fetchLidoStethApr(fetchImpl: FetchImpl): Promise<number> {
   return fetchJson(fetchImpl, LIDO_STETH_APR_URL).then(
     parseLidoStethAprPercent,
   );
+}
+
+function isStethHolding(holding: ReserveYieldHolding): boolean {
+  return holding.assetSymbol.toUpperCase() === FORECASTABLE_STETH_SYMBOL;
+}
+
+function isIndexedStethHolding(holding: ReserveYieldHolding): boolean {
+  const identifier = holding.identifier?.toLowerCase() ?? null;
+  return (
+    isStethHolding(holding) &&
+    identifier !== null &&
+    TRACKED_STETH_WALLET_IDENTIFIERS.has(identifier)
+  );
+}
+
+function currentStethBalance(holdings: ReserveYieldHolding[]): number {
+  return holdings
+    .filter(isStethHolding)
+    .reduce((sum, holding) => sum + holding.balance, 0);
+}
+
+function currentIndexedStethBalance(holdings: ReserveYieldHolding[]): number {
+  return holdings
+    .filter(isIndexedStethHolding)
+    .reduce((sum, holding) => sum + holding.balance, 0);
+}
+
+function currentIndexedStethValueUsd(holdings: ReserveYieldHolding[]): number {
+  return holdings
+    .filter(isIndexedStethHolding)
+    .reduce((sum, holding) => sum + holding.principalUsd, 0);
+}
+
+function hasUnindexedStethHolding(holdings: ReserveYieldHolding[]): boolean {
+  return holdings.some(
+    (holding) => isStethHolding(holding) && !isIndexedStethHolding(holding),
+  );
+}
+
+function currentStethUnitPriceUsd(
+  holdings: ReserveYieldHolding[],
+): number | null {
+  const balance = currentIndexedStethBalance(holdings);
+  if (balance <= 0) return null;
+  return currentIndexedStethValueUsd(holdings) / balance;
+}
+
+function markStethYieldToUsd(
+  amountSteth: number,
+  unitPriceUsd: number,
+): number {
+  return amountSteth * unitPriceUsd;
+}
+
+function applyStethYieldLedger(
+  holdings: ReserveYieldHolding[],
+  ledger: StethYieldLedger | null,
+  unitPriceUsd: number | null,
+): ReserveYieldHolding[] {
+  if (ledger === null || unitPriceUsd === null) return holdings;
+  const indexedBalance = currentIndexedStethBalance(holdings);
+  if (indexedBalance <= 0) return holdings;
+
+  return holdings.map((holding) => {
+    if (!isIndexedStethHolding(holding)) {
+      return holding;
+    }
+    return {
+      ...holding,
+      earnedYieldUsd:
+        markStethYieldToUsd(ledger.earnedYieldSteth, unitPriceUsd) *
+        (holding.balance / indexedBalance),
+      yieldModel:
+        "Lido stETH APR forecast; earned yield is token-unit stETH staking yield marked to current USD, not ETH price appreciation",
+    };
+  });
+}
+
+function refreshStethUnrealizedYield(
+  holdings: ReserveYieldHolding[],
+  ledger: StethYieldLedger,
+  useCurrentReserveBalance: boolean,
+): {
+  ledger: StethYieldLedger;
+  unitPriceUsd: number | null;
+  warning: string | null;
+} {
+  const unitPriceUsd = currentStethUnitPriceUsd(holdings);
+  if (!useCurrentReserveBalance) return { ledger, unitPriceUsd, warning: null };
+  const indexedBalance = currentIndexedStethBalance(holdings);
+  const totalBalance = currentStethBalance(holdings);
+  if (hasUnindexedStethHolding(holdings)) {
+    if (totalBalance <= ledger.currentBalanceSteth) {
+      return { ledger, unitPriceUsd, warning: null };
+    }
+    return {
+      ledger,
+      unitPriceUsd,
+      warning:
+        "stETH earned-yield ledger: current reserve includes stETH rows outside indexed wallets; using indexed ledger value without current-balance refresh.",
+    };
+  }
+
+  if (indexedBalance <= 0 || unitPriceUsd === null) {
+    return { ledger, unitPriceUsd, warning: null };
+  }
+  const unrealizedYieldSteth = Math.max(
+    indexedBalance - ledger.remainingPrincipalSteth,
+    0,
+  );
+  return {
+    ledger: {
+      ...ledger,
+      currentBalanceSteth: indexedBalance,
+      earnedYieldSteth: ledger.realizedYieldSteth + unrealizedYieldSteth,
+      unrealizedYieldSteth,
+    },
+    unitPriceUsd,
+    warning: null,
+  };
+}
+
+function parseStethYieldLedger(payload: unknown): StethYieldLedgerResult {
+  if (!isRecord(payload)) {
+    throw new Error("Hasura response was not an object");
+  }
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    const first = payload.errors[0];
+    const message =
+      isRecord(first) && typeof first.message === "string"
+        ? first.message
+        : "GraphQL error";
+    throw new Error(message);
+  }
+  const data = isRecord(payload.data) ? payload.data : null;
+  const rows = data ? asArray(data.StethYieldSummary) : [];
+  const row = rows.find(isRecord);
+  if (!row) {
+    return {
+      ledger: null,
+      error: "stETH earned-yield ledger pending: no indexed summary row yet.",
+    };
+  }
+
+  const earnedYieldWei = bigintField(
+    row.totalEarnedYieldAmount,
+    "totalEarnedYieldAmount",
+  );
+  const realizedYieldWei = bigintField(
+    row.realizedYieldAmount,
+    "realizedYieldAmount",
+  );
+  const unrealizedYieldWei = bigintField(
+    row.unrealizedYieldAmount,
+    "unrealizedYieldAmount",
+  );
+  const remainingPrincipalWei = bigintField(
+    row.remainingPrincipalAmount,
+    "remainingPrincipalAmount",
+  );
+  const currentBalanceWei = bigintField(row.currentBalance, "currentBalance");
+  const lastUpdatedTimestamp = bigintField(
+    row.lastUpdatedTimestamp,
+    "lastUpdatedTimestamp",
+  );
+  return {
+    ledger: {
+      earnedYieldSteth: weiToUsd(earnedYieldWei),
+      realizedYieldSteth: weiToUsd(realizedYieldWei),
+      unrealizedYieldSteth: weiToUsd(unrealizedYieldWei),
+      remainingPrincipalSteth: weiToUsd(remainingPrincipalWei),
+      currentBalanceSteth: weiToUsd(currentBalanceWei),
+      asOf: unixSecondsToIso(lastUpdatedTimestamp),
+    },
+    error: null,
+  };
+}
+
+export async function fetchStethYieldLedger(
+  fetchImpl: FetchImpl,
+): Promise<StethYieldLedgerResult> {
+  return fetchGraphql(fetchImpl, STETH_YIELD_SUMMARY_QUERY, {
+    id: STETH_YIELD_SUMMARY_ID,
+  }).then(parseStethYieldLedger);
+}
+
+export function applyStethYieldLedgerResult(
+  holdings: ReserveYieldHolding[],
+  result: PromiseSettledResult<StethYieldLedgerResult>,
+  useCurrentReserveBalance: boolean,
+  hasCurrentStethAsset: boolean,
+): StethYieldState {
+  const hasVisibleStethHolding = currentStethBalance(holdings) > 0;
+  const shouldSurfaceLedgerError =
+    hasVisibleStethHolding || hasCurrentStethAsset || !useCurrentReserveBalance;
+  const emptyState = {
+    holdings,
+    earnedYieldUsd: null,
+    realizedYieldUsd: null,
+    unrealizedYieldUsd: null,
+    earnedYieldAsOf: null,
+  };
+  if (result.status === "rejected") {
+    return {
+      ...emptyState,
+      earnedYieldError: shouldSurfaceLedgerError
+        ? errorMessage("stETH earned-yield ledger", result.reason)
+        : null,
+    };
+  }
+
+  const { ledger: rawLedger, error } = result.value;
+  if (rawLedger === null) {
+    return {
+      ...emptyState,
+      earnedYieldError: shouldSurfaceLedgerError ? error : null,
+    };
+  }
+  const { ledger, unitPriceUsd, warning } = refreshStethUnrealizedYield(
+    holdings,
+    rawLedger,
+    useCurrentReserveBalance,
+  );
+  const realizedYieldUsd =
+    unitPriceUsd === null
+      ? null
+      : markStethYieldToUsd(ledger.realizedYieldSteth, unitPriceUsd);
+  const unrealizedYieldUsd =
+    unitPriceUsd === null
+      ? null
+      : markStethYieldToUsd(ledger.unrealizedYieldSteth, unitPriceUsd);
+  const earnedYieldUsd =
+    realizedYieldUsd === null || unrealizedYieldUsd === null
+      ? null
+      : realizedYieldUsd + unrealizedYieldUsd;
+
+  return {
+    holdings: applyStethYieldLedger(holdings, ledger, unitPriceUsd),
+    earnedYieldUsd,
+    realizedYieldUsd,
+    unrealizedYieldUsd,
+    earnedYieldAsOf: ledger.asOf,
+    earnedYieldError: joinErrors(warning),
+  };
 }

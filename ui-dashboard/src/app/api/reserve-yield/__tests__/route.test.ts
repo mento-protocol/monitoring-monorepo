@@ -70,6 +70,18 @@ const SUSDS_LEDGER_SUMMARY = {
   lastUpdatedTimestamp: "1780483271",
 };
 
+const STETH_LEDGER_SUMMARY = {
+  id: "1-steth",
+  currentBalance: "250000000000000000000",
+  remainingPrincipalAmount: "240000000000000000000",
+  realizedYieldAmount: "5000000000000000000",
+  transferredOutYieldAmount: "5000000000000000000",
+  unrealizedYieldAmount: "10000000000000000000",
+  totalEarnedYieldAmount: "15000000000000000000",
+  lastUpdatedBlock: "25236329",
+  lastUpdatedTimestamp: "1780483271",
+};
+
 const RESERVE_WITH_ONLY_AUSD = {
   collateral: {
     assets: [RESERVE_WITH_YIELD_COMPONENTS.collateral.assets[0]],
@@ -239,6 +251,109 @@ describe("GET /api/reserve-yield", () => {
     expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
   });
 
+  it("merges indexed stETH token-unit yield using the current reserve USD mark", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_STETH))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [STETH_LEDGER_SUMMARY],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+    const stethHolding = body.holdings.find(
+      (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
+    );
+    const reserveStethAsset = RESERVE_WITH_STETH.collateral.assets[1];
+    expect(reserveStethAsset).toBeDefined();
+    const stethUnitPrice =
+      reserveStethAsset!.usd_value / Number(reserveStethAsset!.balance);
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    const stethGraphqlBody = JSON.parse(
+      String(fetchMock.mock.calls[4]?.[1]?.body),
+    ) as { query: string; variables: Record<string, unknown> };
+    expect(stethGraphqlBody.query).toContain(
+      "query StethYieldSummary($id: String!)",
+    );
+    expect(stethGraphqlBody.variables.id).toBe("1-steth");
+    expect(body.earnedYieldUsd).toBeCloseTo(
+      (5 + (251.59825779325257 - 240)) * stethUnitPrice,
+      6,
+    );
+    expect(body.realizedYieldUsd).toBeCloseTo(5 * stethUnitPrice, 6);
+    expect(body.unrealizedYieldUsd).toBeCloseTo(
+      (251.59825779325257 - 240) * stethUnitPrice,
+      6,
+    );
+    expect(body.earnedYieldError).toBeNull();
+    expect(stethHolding.earnedYieldUsd).toBeCloseTo(body.earnedYieldUsd, 6);
+    expect(stethHolding.yieldModel).toContain(
+      "token-unit stETH staking yield marked to current USD",
+    );
+    expect(stethHolding.yieldModel).toContain("not ETH price appreciation");
+  });
+
+  it("keeps stETH forecasts visible when the stETH ledger is pending", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_STETH))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          errors: [{ message: "field 'StethYieldSummary' not found" }],
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+    const stethHolding = body.holdings.find(
+      (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
+    );
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldUsd).toBeNull();
+    expect(body.earnedYieldError).toContain("stETH earned-yield ledger");
+    expect(body.earnedYieldError).toContain("StethYieldSummary");
+    expect(stethHolding).toMatchObject({
+      assetSymbol: "stETH",
+      earnedYieldUsd: null,
+      apyPercent: 2.95,
+    });
+    expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
+  });
+
   it("keeps stETH balances visible when Lido APR is unavailable", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -289,6 +404,13 @@ describe("GET /api/reserve-yield", () => {
             SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
           },
         }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [],
+          },
+        }),
       );
     const { GET } = await loadRoute();
 
@@ -296,7 +418,7 @@ describe("GET /api/reserve-yield", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(fetchMock.mock.calls[3]?.[0]).toBe(
       "https://hasura.example/v1/graphql",
     );
@@ -362,6 +484,13 @@ describe("GET /api/reserve-yield", () => {
             SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
           },
         }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [],
+          },
+        }),
       );
     const { GET } = await loadRoute();
 
@@ -408,6 +537,13 @@ describe("GET /api/reserve-yield", () => {
             ],
           },
         }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [],
+          },
+        }),
       );
     const { GET } = await loadRoute();
 
@@ -451,6 +587,13 @@ describe("GET /api/reserve-yield", () => {
         Response.json({
           data: {
             SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [],
           },
         }),
       );
@@ -504,6 +647,13 @@ describe("GET /api/reserve-yield", () => {
             SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
           },
         }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [],
+          },
+        }),
       );
     const { GET } = await loadRoute();
 
@@ -552,6 +702,13 @@ describe("GET /api/reserve-yield", () => {
         Response.json({
           errors: [{ message: "field 'SusdsYieldSummary' not found" }],
         }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [],
+          },
+        }),
       );
     const { GET } = await loadRoute();
 
@@ -576,6 +733,13 @@ describe("GET /api/reserve-yield", () => {
       .mockResolvedValueOnce(
         Response.json({
           errors: [{ message: "field 'SusdsYieldSummary' not found" }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [],
+          },
         }),
       );
     const { GET } = await loadRoute();

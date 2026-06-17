@@ -9,7 +9,9 @@ import {
   fetchSusdsYieldLedger,
 } from "@/lib/reserve-yield-susds";
 import {
+  applyStethYieldLedgerResult,
   fetchLidoStethApr,
+  fetchStethYieldLedger,
   parseLidoStethAprPercent,
 } from "@/lib/reserve-yield-steth";
 import {
@@ -39,6 +41,7 @@ import {
   type ReserveYieldExtraction,
   type ReserveYieldHolding,
   type ReserveYieldResponse,
+  type SkySavingsRateObservation,
   type SkySavingsRateSource,
 } from "@/lib/reserve-yield-types";
 
@@ -274,6 +277,7 @@ export function extractReserveYieldHoldings(
   let malformedCount = 0;
   let trackedAssetCount = 0;
   let susdsAssetCount = 0;
+  let stethAssetCount = 0;
 
   assets.forEach((assetValue, assetIndex) => {
     if (!isRecord(assetValue)) return;
@@ -282,6 +286,9 @@ export function extractReserveYieldHoldings(
     trackedAssetCount += 1;
     if (isSusdsSymbol(symbol)) {
       susdsAssetCount += 1;
+    }
+    if (isStethSymbol(symbol)) {
+      stethAssetCount += 1;
     }
 
     const sources: Record<string, unknown>[] = [];
@@ -317,6 +324,7 @@ export function extractReserveYieldHoldings(
     malformedCount,
     trackedAssetCount,
     susdsAssetCount,
+    stethAssetCount,
   };
 }
 
@@ -351,9 +359,11 @@ function applyForecastModels(
         ...holding,
         apyPercent: apyBySymbol.stethAprPercent,
         yieldModel:
-          apyBySymbol.stethAprPercent === null
-            ? "Lido stETH APR source pending; stETH mark-to-market changes are not counted as earned revenue"
-            : "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
+          holding.earnedYieldUsd !== null
+            ? holding.yieldModel
+            : apyBySymbol.stethAprPercent === null
+              ? "Lido stETH APR source pending; stETH mark-to-market changes are not counted as earned revenue"
+              : "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
       };
     }
     return {
@@ -466,6 +476,7 @@ function reserveHoldingsState(
       holdingsAsOf: null,
       holdingsError: errorMessage("Reserve API", reserveResult.reason),
       hasCurrentSusdsAsset: false,
+      hasCurrentStethAsset: false,
     };
   }
 
@@ -487,7 +498,92 @@ function reserveHoldingsState(
     holdingsAsOf: fetchedAt,
     holdingsError,
     hasCurrentSusdsAsset: extracted.susdsAssetCount > 0,
+    hasCurrentStethAsset: extracted.stethAssetCount > 0,
   };
+}
+
+function sumNullable(...values: Array<number | null>): number | null {
+  const present = values.filter((value): value is number => value !== null);
+  return present.length === 0
+    ? null
+    : present.reduce((sum, value) => sum + value, 0);
+}
+
+function latestIso(...values: Array<string | null>): string | null {
+  const present = values.filter((value): value is string => value !== null);
+  if (present.length === 0) return null;
+  return present.reduce((latest, value) =>
+    value.localeCompare(latest) > 0 ? value : latest,
+  );
+}
+
+type FedFundsState = {
+  grossApyPercent: number | null;
+  fedfundsAsOf: string | null;
+  fedfundsError: string | null;
+};
+
+function fedFundsState(
+  result: PromiseSettledResult<FredObservation>,
+): FedFundsState {
+  if (result.status === "fulfilled") {
+    return {
+      grossApyPercent: result.value.grossApyPercent,
+      fedfundsAsOf: result.value.date,
+      fedfundsError: null,
+    };
+  }
+  return {
+    grossApyPercent: null,
+    fedfundsAsOf: null,
+    fedfundsError: errorMessage("FRED FEDFUNDS", result.reason),
+  };
+}
+
+type SkyRateState = {
+  skySavingsRateApyPercent: number | null;
+  skySavingsRateSource: SkySavingsRateSource | null;
+  skyRateError: string | null;
+};
+
+function skyRateState(
+  result: PromiseSettledResult<SkySavingsRateObservation>,
+): SkyRateState {
+  if (result.status === "fulfilled") {
+    return {
+      skySavingsRateApyPercent: result.value.apyPercent,
+      skySavingsRateSource: result.value.source,
+      skyRateError: null,
+    };
+  }
+  return {
+    skySavingsRateApyPercent: null,
+    skySavingsRateSource: null,
+    skyRateError: errorMessage("Sky Savings Rate", result.reason),
+  };
+}
+
+async function stethAprState(
+  holdings: ReserveYieldHolding[],
+  fetchImpl: FetchImpl,
+): Promise<{ stethAprPercent: number | null; stethRateError: string | null }> {
+  if (!hasStethHolding(holdings)) {
+    return { stethAprPercent: null, stethRateError: null };
+  }
+  try {
+    // Lido is fetched only after the reserve payload proves stETH is held.
+    // Starting it speculatively would reduce one RTT for current reserves, but
+    // would also call Lido on every request even when stETH is absent.
+    return {
+      stethAprPercent: await fetchLidoStethApr(fetchImpl),
+      stethRateError: null,
+    };
+  } catch (err) {
+    return {
+      stethAprPercent: null,
+      stethRateError: errorMessage("Lido stETH APR", err),
+    };
+  }
 }
 
 export async function fetchReserveYieldSnapshot({
@@ -497,39 +593,25 @@ export async function fetchReserveYieldSnapshot({
   fetchImpl?: FetchImpl;
   now?: Date;
 } = {}): Promise<ReserveYieldResponse> {
-  const [reserveResult, fedfundsResult, skyRateResult, susdsLedgerResult] =
-    await Promise.allSettled([
-      fetchJson(fetchImpl, RESERVE_API_URL),
-      fetchText(fetchImpl, FEDFUNDS_CSV_URL).then(parseFredFedFundsCsv),
-      fetchSkySavingsRate(fetchImpl),
-      fetchSusdsYieldLedger(fetchImpl),
-    ]);
+  const [
+    reserveResult,
+    fedfundsResult,
+    skyRateResult,
+    susdsLedgerResult,
+    stethLedgerResult,
+  ] = await Promise.allSettled([
+    fetchJson(fetchImpl, RESERVE_API_URL),
+    fetchText(fetchImpl, FEDFUNDS_CSV_URL).then(parseFredFedFundsCsv),
+    fetchSkySavingsRate(fetchImpl),
+    fetchSusdsYieldLedger(fetchImpl),
+    fetchStethYieldLedger(fetchImpl),
+  ]);
 
   const fetchedAt = now.toISOString();
   const reserveState = reserveHoldingsState(reserveResult, fetchedAt);
   let { holdings } = reserveState;
-
-  let grossApyPercent: number | null = null;
-  let fedfundsAsOf: string | null = null;
-  let fedfundsError: string | null = null;
-
-  if (fedfundsResult.status === "fulfilled") {
-    grossApyPercent = fedfundsResult.value.grossApyPercent;
-    fedfundsAsOf = fedfundsResult.value.date;
-  } else {
-    fedfundsError = errorMessage("FRED FEDFUNDS", fedfundsResult.reason);
-  }
-
-  let skySavingsRateApyPercent: number | null = null;
-  let skySavingsRateSource: SkySavingsRateSource | null = null;
-  let skyRateError: string | null = null;
-
-  if (skyRateResult.status === "fulfilled") {
-    skySavingsRateApyPercent = skyRateResult.value.apyPercent;
-    skySavingsRateSource = skyRateResult.value.source;
-  } else {
-    skyRateError = errorMessage("Sky Savings Rate", skyRateResult.reason);
-  }
+  const fedFunds = fedFundsState(fedfundsResult);
+  const skyRate = skyRateState(skyRateResult);
 
   const susdsYield = applySusdsYieldLedgerResult(
     holdings,
@@ -538,47 +620,58 @@ export async function fetchReserveYieldSnapshot({
     reserveState.hasCurrentSusdsAsset,
   );
   holdings = susdsYield.holdings;
+  const stethYield = applyStethYieldLedgerResult(
+    holdings,
+    stethLedgerResult,
+    reserveResult.status === "fulfilled",
+    reserveState.hasCurrentStethAsset,
+  );
+  holdings = stethYield.holdings;
 
-  let stethAprPercent: number | null = null;
-  let stethRateError: string | null = null;
-  if (hasStethHolding(holdings)) {
-    try {
-      // Lido is fetched only after the reserve payload proves stETH is held.
-      // Starting it speculatively would reduce one RTT for current reserves, but
-      // would also call Lido on every request even when stETH is absent.
-      stethAprPercent = await fetchLidoStethApr(fetchImpl);
-    } catch (err) {
-      stethRateError = errorMessage("Lido stETH APR", err);
-    }
-  }
+  const { stethAprPercent, stethRateError } = await stethAprState(
+    holdings,
+    fetchImpl,
+  );
 
   const netMentoApyPercent =
-    grossApyPercent === null
+    fedFunds.grossApyPercent === null
       ? null
-      : computeNetMentoApyPercent(grossApyPercent);
+      : computeNetMentoApyPercent(fedFunds.grossApyPercent);
   const forecast = buildForecastTotals(holdings, {
     ausdNetMentoApyPercent: netMentoApyPercent,
-    susdsApyPercent: skySavingsRateApyPercent,
-    susdsApySource: skySavingsRateSource,
+    susdsApyPercent: skyRate.skySavingsRateApyPercent,
+    susdsApySource: skyRate.skySavingsRateSource,
     stethAprPercent,
   });
 
   return {
     principalUsd: reserveState.principalUsd,
     forecastPrincipalUsd: forecast.forecastPrincipalUsd,
-    earnedYieldUsd: susdsYield.earnedYieldUsd,
-    realizedYieldUsd: susdsYield.realizedYieldUsd,
-    unrealizedYieldUsd: susdsYield.unrealizedYieldUsd,
-    earnedYieldAsOf: susdsYield.earnedYieldAsOf,
+    earnedYieldUsd: sumNullable(
+      susdsYield.earnedYieldUsd,
+      stethYield.earnedYieldUsd,
+    ),
+    realizedYieldUsd: sumNullable(
+      susdsYield.realizedYieldUsd,
+      stethYield.realizedYieldUsd,
+    ),
+    unrealizedYieldUsd: sumNullable(
+      susdsYield.unrealizedYieldUsd,
+      stethYield.unrealizedYieldUsd,
+    ),
+    earnedYieldAsOf: latestIso(
+      susdsYield.earnedYieldAsOf,
+      stethYield.earnedYieldAsOf,
+    ),
     holdings: forecast.modeledHoldings,
     holdingsAsOf: reserveState.holdingsAsOf,
-    grossApyPercent,
-    fedfundsAsOf,
+    grossApyPercent: fedFunds.grossApyPercent,
+    fedfundsAsOf: fedFunds.fedfundsAsOf,
     expenseBps: RESERVE_YIELD_EXPENSE_BPS,
     revenueShareBps: RESERVE_YIELD_REVENUE_SHARE_BPS,
     netMentoApyPercent,
-    skySavingsRateApyPercent,
-    skySavingsRateSource,
+    skySavingsRateApyPercent: skyRate.skySavingsRateApyPercent,
+    skySavingsRateSource: skyRate.skySavingsRateSource,
     dailyRunRateUsd: forecast.dailyRunRateUsd,
     next30dUsd: forecast.next30dUsd,
     next365dUsd: forecast.next365dUsd,
@@ -587,10 +680,13 @@ export async function fetchReserveYieldSnapshot({
     holdingsError: reserveState.holdingsError,
     rateError: rateErrorForUnavailableForecasts(
       forecast.forecastUnavailableSymbols,
-      fedfundsError,
-      skyRateError,
+      fedFunds.fedfundsError,
+      skyRate.skyRateError,
       stethRateError,
     ),
-    earnedYieldError: susdsYield.earnedYieldError,
+    earnedYieldError: joinErrors(
+      susdsYield.earnedYieldError,
+      stethYield.earnedYieldError,
+    ),
   };
 }
