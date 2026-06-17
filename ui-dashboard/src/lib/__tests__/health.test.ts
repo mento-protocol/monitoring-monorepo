@@ -87,6 +87,7 @@ describe("computeHealthStatus", () => {
           oracleTimestamp: String(now - 600),
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
+          medianLive: true,
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -109,6 +110,7 @@ describe("computeHealthStatus", () => {
           oracleTimestamp: String(now - 600),
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
+          medianLive: true,
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -149,6 +151,7 @@ describe("computeHealthStatus", () => {
           oracleTimestamp: String(now - 600),
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
+          medianLive: true,
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -171,6 +174,7 @@ describe("computeHealthStatus", () => {
           oracleTimestamp: String(now - 600),
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
+          medianLive: true,
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -206,6 +210,8 @@ describe("computeHealthStatus", () => {
           lastOracleReportAt: String(now - 600),
           oracleTimestamp: String(now - 120),
           oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          medianLive: true,
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -225,6 +231,26 @@ describe("computeHealthStatus", () => {
           oracleTimestamp: String(now - 120),
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it('returns "CRITICAL" for VirtualPools with missing medianLive', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
@@ -1555,6 +1581,7 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
           oracleExpiry: "300",
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
+          medianLive: true,
         },
         frozenNowSec,
         42220,
@@ -1591,6 +1618,7 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
           oracleExpiry: "300",
           oracleFreshnessWindow: "0",
           tokenDecimalsKnown: true,
+          medianLive: true,
         },
         frozenNowSec,
         42220,

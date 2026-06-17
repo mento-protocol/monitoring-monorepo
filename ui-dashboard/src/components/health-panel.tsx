@@ -2,7 +2,11 @@
 
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
-import { computeHealthStatus, isOracleFresh } from "@/lib/health";
+import {
+  computeHealthStatus,
+  isOracleFresh,
+  isVirtualPoolMedianInvalid,
+} from "@/lib/health";
 import { useIsWeekend } from "@/hooks/use-is-weekend";
 import { useNetwork } from "@/components/network-provider";
 
@@ -11,6 +15,7 @@ interface HealthPanelProps {
 }
 
 type HealthPanelMode =
+  | "virtual-oracle-median-incident"
   | "virtual-oracle-incident"
   | "weekend"
   | "virtual"
@@ -21,6 +26,7 @@ interface HealthPanelModeInput {
   hasHealthData: boolean;
   isVirtual: boolean;
   showHalted: boolean;
+  showVirtualOracleMedianIncident: boolean;
   showVirtualOracleIncident: boolean;
   showWeekendPause: boolean;
   weekendPause: boolean;
@@ -30,20 +36,44 @@ function resolveHealthPanelMode({
   hasHealthData,
   isVirtual,
   showHalted,
+  showVirtualOracleMedianIncident,
   showVirtualOracleIncident,
   showWeekendPause,
   weekendPause,
 }: HealthPanelModeInput): HealthPanelMode | null {
+  if (showVirtualOracleMedianIncident) {
+    return "virtual-oracle-median-incident";
+  }
+  if (showWeekendPause && isVirtual) return "weekend";
   if (showVirtualOracleIncident) return "virtual-oracle-incident";
-  if (showWeekendPause && (isVirtual || weekendPause)) return "weekend";
   if (isVirtual) return "virtual";
   if (showHalted) return "halted";
   if (!hasHealthData) return "missing-data";
+  if (showWeekendPause && weekendPause) return "weekend";
   return null;
 }
 
 function HealthPanelContent({ mode }: { mode: HealthPanelMode }) {
   switch (mode) {
+    case "virtual-oracle-median-incident":
+      return (
+        <div className="flex items-start gap-3 rounded-lg border border-red-700/50 bg-red-950/30 px-4 py-3 text-sm text-red-100">
+          <span
+            className="text-base leading-5 flex-shrink-0"
+            aria-hidden="true"
+          >
+            !
+          </span>
+          <span>
+            <span className="font-medium text-red-200">
+              VirtualPool median or quorum is invalid.
+            </span>{" "}
+            The wrapped exchange oracle has not produced a valid median with
+            enough active reporters, so swaps may revert until the feed quorum
+            is restored.
+          </span>
+        </div>
+      );
     case "virtual-oracle-incident":
       return (
         <div className="flex items-start gap-3 rounded-lg border border-red-700/50 bg-red-950/30 px-4 py-3 text-sm text-red-100">
@@ -146,8 +176,14 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   // chip: stale / weekend pools resolve to CRITICAL / WEEKEND, not HALTED.
   const computed = computeHealthStatus(pool, network.chainId);
   const showHalted = computed === "HALTED";
-  const showVirtualOracleIncident = isVirtual && computed === "CRITICAL";
-  const showWeekendPause = computed === "WEEKEND" || weekendPause;
+  const showVirtualOracleMedianIncident =
+    isVirtual &&
+    pool.wrappedExchangeDeprecated !== true &&
+    isVirtualPoolMedianInvalid(pool);
+  const showVirtualOracleIncident =
+    isVirtual && computed === "CRITICAL" && !showVirtualOracleMedianIncident;
+  const showWeekendPause =
+    computed === "WEEKEND" || (!isVirtual && weekendPause);
   // No-data pools otherwise resolve to a misleading CRITICAL from the indexer's
   // zero-initialised stale timestamp — suppress that to N/A (matching the
   // virtual-pool branch). Never suppress a real halt.
@@ -158,6 +194,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     hasHealthData,
     isVirtual,
     showHalted,
+    showVirtualOracleMedianIncident,
     showVirtualOracleIncident,
     showWeekendPause,
     weekendPause,

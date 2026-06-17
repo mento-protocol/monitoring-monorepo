@@ -284,7 +284,7 @@ function vpMedianValidity(pool: {
   wrappedExchangeMinimumReports?: string | undefined;
 }): boolean | null {
   if (pool.tokenDecimalsKnown !== true) return null;
-  if (pool.medianLive === false) return false;
+  if (pool.medianLive !== true) return false;
   const minimumReports = Number(pool.wrappedExchangeMinimumReports ?? "0");
   if (!Number.isFinite(minimumReports) || minimumReports <= 0) return null;
   const oracleNumReporters = Number(pool.oracleNumReporters);
@@ -292,6 +292,15 @@ function vpMedianValidity(pool: {
     return null;
   }
   return oracleNumReporters >= minimumReports;
+}
+
+export function isVirtualPoolMedianInvalid(pool: {
+  medianLive?: boolean | undefined;
+  oracleNumReporters?: number | undefined;
+  tokenDecimalsKnown?: boolean | undefined;
+  wrappedExchangeMinimumReports?: string | undefined;
+}): boolean {
+  return vpMedianValidity(pool) === false;
 }
 
 function computeVirtualPoolHealthStatus(

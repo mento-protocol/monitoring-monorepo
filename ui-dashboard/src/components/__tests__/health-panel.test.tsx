@@ -144,12 +144,34 @@ describe("HealthPanel weekend mode", () => {
       oracleTimestamp: STALE_TS,
       oracleFreshnessWindow: "300",
       tokenDecimalsKnown: true,
+      medianLive: true,
     };
     const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
 
     expect(html).toContain("VirtualPool oracle is stale");
     expect(html).toContain("swaps may revert");
     expect(html).not.toContain("Health monitoring is not applicable");
+  });
+
+  it("surfaces invalid VirtualPool medians separately from stale reports", () => {
+    const virtualPool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      oracleTimestamp: FRESH_TS,
+      oracleFreshnessWindow: "300",
+      tokenDecimalsKnown: true,
+      medianLive: false,
+      oracleNumReporters: 2,
+      wrappedExchangeMinimumReports: "1",
+    };
+    const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
+
+    expect(html).toContain("VirtualPool median or quorum is invalid");
+    expect(html).toContain("valid median with enough active reporters");
+    expect(html).not.toContain("VirtualPool oracle is stale");
+    expect(html).not.toContain("fresh oracle report within");
   });
 
   it("keeps stale VirtualPool weekend closures on the weekend explanation", async () => {
@@ -164,11 +186,66 @@ describe("HealthPanel weekend mode", () => {
       oracleTimestamp: STALE_TS,
       oracleFreshnessWindow: "300",
       tokenDecimalsKnown: true,
+      medianLive: true,
     };
     const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
 
     expect(html).toContain("Trading is paused for the weekend");
     expect(html).not.toContain("VirtualPool oracle is stale");
+  });
+
+  it("keeps critical VirtualPool stale incidents ahead of mounted weekend copy", async () => {
+    const weekend = await import("@/lib/weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValue(true);
+
+    const virtualPool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      token1: "0x0000000000000000000000000000000000000bad",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      oracleTimestamp: STALE_TS,
+      oracleFreshnessWindow: "300",
+      tokenDecimalsKnown: true,
+      medianLive: true,
+    };
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<HealthPanel pool={virtualPool} />);
+    });
+
+    expect(container.textContent).toContain("VirtualPool oracle is stale");
+    expect(container.textContent).not.toContain(
+      "Trading is paused for the weekend",
+    );
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("keeps missing health data ahead of non-VirtualPool weekend copy", async () => {
+    const weekend = await import("@/lib/weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValue(true);
+
+    const staleNoDataPool: Pool = {
+      ...BASE_POOL,
+      hasHealthData: false,
+      oracleTimestamp: STALE_TS,
+    };
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<HealthPanel pool={staleNoDataPool} />);
+    });
+
+    expect(container.textContent).toContain("Oracle health data not yet");
+    expect(container.textContent).not.toContain(
+      "Trading is paused for the weekend",
+    );
+    await act(async () => {
+      root.unmount();
+    });
   });
 
   it("does not show a stale-oracle incident for deprecated VirtualPool wrappers", () => {
