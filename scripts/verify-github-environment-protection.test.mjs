@@ -11,7 +11,7 @@ const protectedEnvironment = {
   protection_rules: [
     {
       type: "required_reviewers",
-      prevent_self_review: true,
+      prevent_self_review: false,
       reviewers: [{ type: "User", reviewer: { login: "approver" } }],
     },
   ],
@@ -32,10 +32,7 @@ assert.deepEqual(
       custom_branch_policies: false,
     },
   }),
-  [
-    "required reviewers are not configured",
-    "prevent self-review is not enabled",
-  ],
+  ["required reviewers are not configured"],
 );
 
 assert.deepEqual(
@@ -44,7 +41,7 @@ assert.deepEqual(
     protection_rules: [
       {
         type: "required_reviewers",
-        prevent_self_review: false,
+        prevent_self_review: true,
         reviewers: [{ type: "User", reviewer: { login: "approver" } }],
       },
     ],
@@ -55,7 +52,7 @@ assert.deepEqual(
   }),
   [
     "admin bypass is not disabled",
-    "prevent self-review is not enabled",
+    "self-review is not enabled for required reviewers",
     "deployment branches are not limited to protected branches",
   ],
 );

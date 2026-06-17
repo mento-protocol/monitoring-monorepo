@@ -93,8 +93,8 @@ Pre-merge requirement for the production-environment split in issue #762:
 repo admins must create both environments in Settings -> Environments before
 merging the workflow change that first references them. GitHub auto-creates a
 missing environment on first workflow use with no protection rules, so
-`production-infra` must already have required reviewers, prevent self-review,
-administrator bypass disabled, and the protected-`main` branch restriction
+`production-infra` must already have required reviewers, self-review allowed
+for the required reviewer, administrator bypass disabled, and the protected-`main` branch restriction
 before any Terraform-changing commit can land on `main`. The Terraform apply
 workflows also verify this configuration before cloud authentication so an
 accidentally auto-created or bypassable environment fails closed before
@@ -105,8 +105,9 @@ repo's Actions workflows:
 
 - `production-infra`: used by Terraform apply jobs in `alerts-infra.yml`,
   `alerts-rules.yml`, and `aegis-terraform.yml`. Copy the required reviewers
-  from the old `production` environment, enable prevent self-review, disable
-  administrator bypass, and limit deployment branches to protected `main`.
+  from the old `production` environment, allow self-review for the required
+  reviewer, disable administrator bypass, and limit deployment branches to
+  protected `main`.
 - `production-services`: used by routine service deploy jobs such as
   `metrics-bridge.yml` and `aegis-app-engine.yml`. Limit deployment branches to
   protected `main`, but leave required reviewers unset by default so green

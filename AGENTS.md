@@ -465,7 +465,8 @@ pnpm alerts:oncall:typecheck / alerts:oncall:test / alerts:oncall:build
 pnpm alerts:rules:lint
 pnpm alerts:rules:init / alerts:rules:plan
 # Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
-# The production-infra gate enforces non-bypassable required-reviewer approval.
+# The production-infra gate enforces required-reviewer approval and allows
+# self-review for the sole-maintainer workflow.
 ```
 
 Terraform stack ownership is registered in `terraform.stacks.json` and
