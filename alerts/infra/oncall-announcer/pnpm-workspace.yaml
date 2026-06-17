@@ -8,13 +8,17 @@ minimumReleaseAgeExclude:
   - "@envio-dev/envio-cloud-*"
   # Security override floors for the 2026-06-15 advisory batch may be younger
   # than the 3-day release-age gate.
+  - "@esbuild/*"
   - form-data
+  - esbuild
   - js-yaml
   - protobufjs
   - vite
 
 overrides:
+  "@grpc/grpc-js": 1.14.4
   body-parser@<1.20.5: 1.20.5
+  esbuild: 0.28.1
   express: 4.22.2
   form-data@<2.5.6: 2.5.6
   "form-data@>=4.0.0 <4.0.6": 4.0.6
