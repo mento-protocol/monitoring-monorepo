@@ -144,6 +144,13 @@ Use this query for the next ready item:
 is:issue is:open label:agent-ready -label:agent-active -label:in-pr
 ```
 
+Agent sessions should normally claim work through the repo helper, which keeps
+the labels and the repo pilot workboard in sync:
+
+```bash
+pnpm issue:claim --count 3 --agent codex
+```
+
 `BACKLOG.md` is transition storage only: when a backlog item is migrated, keep
 the active task in Issues and leave durable context in `AGENTS.md`,
 `docs/pr-checklists/`, `docs/notes/`, or tests. Do not keep the same active
@@ -158,12 +165,19 @@ Queue state labels are mutually exclusive:
   opening a PR.
 - `in-pr` — implementation is open in a PR; do not pick up as new work.
 
-When starting issue work, remove `agent-ready` and add `agent-active` before
-substantive edits. When opening the PR, remove `agent-active` and add `in-pr`.
+When starting issue work, run `pnpm issue:claim` before substantive edits; it
+removes `agent-ready`, adds `agent-active`, adds the issue to the repo workboard,
+and moves the item to `In Progress`. The repo workboard must have a text
+`Claim ID` field so claim ownership can be verified safely. When opening the PR, run
+`pnpm issue:review --pr <number> --issue <issue>` to remove `agent-active`, add
+`in-pr`, and project the issue into review on the workboard.
 Use `Closes #123` only for issues whose "Done means" is fully satisfied by the
-PR; otherwise use `Refs #123`. If a PR closes unmerged or only partially ships,
-remove `in-pr` and restore `agent-ready` only when the remaining acceptance
-criteria are still clear; otherwise use `needs-grooming`.
+PR; otherwise use `Refs #123`. After merge, `pnpm issue:board sync` moves
+closed `in-pr` issues that are already on the workboard to `Done` and clears
+the queue label. If a PR closes unmerged or only partially ships, run
+`pnpm issue:release --issue <issue>` to restore `agent-ready` only when the
+remaining acceptance criteria are still clear; otherwise use
+`pnpm issue:release --issue <issue> --needs-grooming`.
 
 New agent-ready issues should use `.github/ISSUE_TEMPLATE/agent-task.yml` and
 carry routing/risk labels such as `source:backlog`, `pkg:*`, `kind:*`, and
@@ -195,7 +209,9 @@ Terraform apply. If any package manifest, `pnpm-lock.yaml`,
 edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:quality-gate:test`, `scripts.agent:prewarm`,
 `scripts.agent:prewarm:test`, `scripts.agent:context-check`,
-`scripts.agent:autoreview`, `scripts.pr:feedback-state`,
+`scripts.agent:autoreview`, `scripts.issue:board`,
+`scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
+`scripts.issue:release`, `scripts.pr:feedback-state`,
 `scripts.pr:feedback-state:test`, `scripts.pr:ready-state`,
 `scripts.pr:ready-state:test`,
 `scripts.tf`, `scripts.tf:test`, `scripts.alerts:rules:lint`,
@@ -438,6 +454,13 @@ pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge r
 pnpm integrations:probe        # Quote-only Mento v3 route coverage snapshot
 pnpm integrations:probe --write-upstash  # Publish latest snapshot for /integrations
 pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
+
+# Agent issue workboard
+pnpm issue:claim --count 3 --agent codex       # Claim ready issues and move them to In Progress
+pnpm issue:review --pr 123 --issue 901         # Move claimed issue to in-pr / review
+pnpm issue:release --issue 901                 # Release a mistaken claim back to agent-ready
+pnpm issue:board sync                          # Re-project labels and close merged in-pr board items
+pnpm issue:board:test                          # Offline tests for the issue-board helper
 
 # Aegis
 pnpm aegis:dev                # Start the NestJS App Engine service locally

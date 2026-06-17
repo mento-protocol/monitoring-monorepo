@@ -5,6 +5,7 @@ were migrated to GitHub Issues (label `source:backlog`) and its completed work
 is preserved in git history.
 
 - Active-work queue → GitHub Issues: `is:issue is:open label:agent-ready -label:agent-active -label:in-pr`
+- Pilot workboard → GitHub Project #12: <https://github.com/orgs/mento-protocol/projects/12>
 - Transition storage + pointers → root [`BACKLOG.md`](../BACKLOG.md)
 - Workflow → [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md)
 
