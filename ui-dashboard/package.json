@@ -59,6 +59,7 @@
     "@types/react-plotly.js": "^2.6.4",
     "@vitest/coverage-v8": "^4.1.0",
     "axe-core": "^4.11.4",
+    "babel-plugin-react-compiler": "^1.0.0",
     "eslint": "^10.0.3",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-react-you-might-not-need-an-effect": "0.10.1",

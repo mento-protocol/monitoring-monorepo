@@ -2,6 +2,9 @@ import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  reactCompiler: {
+    compilationMode: "annotation",
+  },
   // Drop the `x-powered-by: Next.js` fingerprint header.
   poweredByHeader: false,
   env: {
