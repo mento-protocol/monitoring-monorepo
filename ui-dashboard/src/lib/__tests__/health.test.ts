@@ -144,6 +144,24 @@ describe("computeHealthStatus", () => {
     ).toBe("N/A");
   });
 
+  it('returns "CRITICAL" for VirtualPools with invalid live medians', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          medianLive: false,
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
   it('returns "N/A" for stale deprecated VirtualPool wrappers', () => {
     const now = Math.floor(Date.now() / 1000);
     expect(

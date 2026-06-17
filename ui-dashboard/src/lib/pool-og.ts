@@ -28,6 +28,7 @@ import {
   // queries/pools.ts so the GraphQL contract test covers it.
   POOL_OG_DAILY_SNAPSHOTS,
   POOL_THRESHOLDS_KNOWN_EXT,
+  POOL_VP_DEPRECATION_EXT,
   POOL_VP_ORACLE_FRESHNESS_EXT,
 } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
@@ -113,6 +114,7 @@ export async function fetchPoolOgDataUncached(
     allPoolsResult,
     thresholdsResult,
     vpFreshnessResult,
+    vpDeprecationResult,
   } = await requestPoolOgInputs(client, {
     poolId,
     chainId,
@@ -126,6 +128,7 @@ export async function fetchPoolOgDataUncached(
     rawPool,
     thresholdsResult,
     vpFreshnessResult,
+    vpDeprecationResult,
   );
 
   return buildPoolOgData({
@@ -422,10 +425,17 @@ type PoolOgThresholdsExtRow = {
 type PoolOgVpFreshnessExtRow = {
   id: string;
   lastOracleReportAt?: string;
+  medianLive?: boolean;
   oracleFreshnessWindow?: string;
 };
 
 type PoolOgSettled<T> = PromiseSettledResult<{ Pool: T[] }>;
+type PoolOgExchangeSettled<T> = PromiseSettledResult<{ BiPoolExchange: T[] }>;
+
+type PoolOgVpDeprecationExtRow = {
+  id: string;
+  isDeprecated?: boolean;
+};
 
 async function requestPoolOgInputs(
   client: OgGraphQLClient,
@@ -438,6 +448,7 @@ async function requestPoolOgInputs(
     allPoolsResult,
     thresholdsResult,
     vpFreshnessResult,
+    vpDeprecationResult,
   ] = await Promise.allSettled([
     client.request<{ Pool: Pool[] }>({
       document: POOL_DETAIL_WITH_HEALTH,
@@ -464,6 +475,11 @@ async function requestPoolOgInputs(
       variables: { id: poolId, chainId },
       signal,
     }),
+    client.request<{ BiPoolExchange: PoolOgVpDeprecationExtRow[] }>({
+      document: POOL_VP_DEPRECATION_EXT,
+      variables: { id: poolId, chainId },
+      signal,
+    }),
   ]);
   return {
     detailResult,
@@ -471,6 +487,7 @@ async function requestPoolOgInputs(
     allPoolsResult,
     thresholdsResult,
     vpFreshnessResult,
+    vpDeprecationResult,
   };
 }
 
@@ -478,13 +495,21 @@ function firstSettledPool<T>(result: PoolOgSettled<T>): T | null {
   return result.status === "fulfilled" ? (result.value.Pool[0] ?? null) : null;
 }
 
+function firstSettledExchange<T>(result: PoolOgExchangeSettled<T>): T | null {
+  return result.status === "fulfilled"
+    ? (result.value.BiPoolExchange?.[0] ?? null)
+    : null;
+}
+
 function mergePoolOgExtensions(
   rawPool: Pool,
   thresholdsResult: PoolOgSettled<PoolOgThresholdsExtRow>,
   vpFreshnessResult: PoolOgSettled<PoolOgVpFreshnessExtRow>,
+  vpDeprecationResult: PoolOgExchangeSettled<PoolOgVpDeprecationExtRow>,
 ): Pool {
   const ext = firstSettledPool(thresholdsResult);
   const vpFreshnessExt = firstSettledPool(vpFreshnessResult);
+  const vpDeprecationExt = firstSettledExchange(vpDeprecationResult);
   return {
     ...rawPool,
     ...(ext
@@ -500,7 +525,13 @@ function mergePoolOgExtensions(
     ...(vpFreshnessExt
       ? {
           lastOracleReportAt: vpFreshnessExt.lastOracleReportAt,
+          medianLive: vpFreshnessExt.medianLive,
           oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
+        }
+      : {}),
+    ...(vpDeprecationExt
+      ? {
+          wrappedExchangeDeprecated: vpDeprecationExt.isDeprecated,
         }
       : {}),
   };

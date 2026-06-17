@@ -513,4 +513,60 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result).not.toBeNull();
     expect(result!.health).toBe("CRITICAL");
   });
+
+  it("uses medianLive from the VP extension before computing OG health", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const virtualPool = makeDetailPool({
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      oracleTimestamp: String(nowSec - 120),
+      lastOracleReportAt: "0",
+      oracleFreshnessWindow: "0",
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolVpOracleFreshnessExt")) {
+        return {
+          Pool: [
+            {
+              id: POOL_ID,
+              lastOracleReportAt: String(nowSec - 120),
+              medianLive: false,
+              oracleFreshnessWindow: "300",
+            },
+          ],
+        };
+      }
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [virtualPool] };
+    });
+
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("CRITICAL");
+  });
+
+  it("merges VP deprecation extension before computing OG health", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const virtualPool = makeDetailPool({
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      oracleTimestamp: String(nowSec - 600),
+      oracleFreshnessWindow: "300",
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolVpDeprecationExt")) {
+        return {
+          BiPoolExchange: [{ id: "exchange", isDeprecated: true }],
+        };
+      }
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [virtualPool] };
+    });
+
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("N/A");
+  });
 });

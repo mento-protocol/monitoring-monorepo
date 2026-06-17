@@ -74,6 +74,16 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     assert.equal(computeHealthStatus(pool, NOW), "N/A");
   });
 
+  it("returns 'CRITICAL' for virtual pools with invalid live medians", () => {
+    const pool = makePool({
+      source: "virtual_pool_factory",
+      medianLive: false,
+      oracleTimestamp: NOW - 120n,
+      oracleFreshnessWindow: 360n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
+  });
+
   it("returns 'OK' when devRatio is well below 1.0", () => {
     // 3000/5000 = 0.6
     const pool = makePool({ priceDifference: 3000n });

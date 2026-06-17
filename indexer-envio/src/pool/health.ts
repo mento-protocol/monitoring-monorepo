@@ -239,14 +239,14 @@ export function computeHealthStatus(
 }
 
 export function isVirtualPoolOracleStale(
-  pool: Pick<Pool, "oracleTimestamp" | "oracleFreshnessWindow">,
+  pool: Pick<Pool, "oracleTimestamp" | "oracleFreshnessWindow" | "medianLive">,
   nowSeconds: bigint,
 ): boolean {
-  return (
-    pool.oracleFreshnessWindow > 0n &&
-    pool.oracleTimestamp > 0n &&
-    nowSeconds - pool.oracleTimestamp > pool.oracleFreshnessWindow
-  );
+  if (pool.oracleFreshnessWindow <= 0n || pool.oracleTimestamp <= 0n) {
+    return false;
+  }
+  if (!pool.medianLive) return true;
+  return nowSeconds - pool.oracleTimestamp > pool.oracleFreshnessWindow;
 }
 
 // Strict `>` at the tolerance line matches `computeHealthStatus`. Oracle

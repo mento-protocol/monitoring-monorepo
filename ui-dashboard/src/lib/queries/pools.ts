@@ -94,7 +94,18 @@ export const ALL_POOLS_VP_ORACLE_FRESHNESS = `
     Pool(where: { chainId: { _eq: $chainId } }) {
       id
       lastOracleReportAt
+      medianLive
       oracleFreshnessWindow
+    }
+    BiPoolExchange(
+      where: {
+        chainId: { _eq: $chainId }
+        wrappedByPoolId: { _neq: "" }
+      }
+      limit: 1000
+    ) {
+      wrappedByPoolId
+      isDeprecated
     }
   }
 `;

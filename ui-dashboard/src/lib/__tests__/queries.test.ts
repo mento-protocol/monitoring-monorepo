@@ -203,9 +203,13 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain(
       "lastOracleReportAt",
     );
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain("medianLive");
     expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain(
       "oracleFreshnessWindow",
     );
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain("BiPoolExchange");
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain("wrappedByPoolId");
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain("isDeprecated");
     expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
       "rebalanceThresholdsKnown",
     );
@@ -245,6 +249,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain(
       "lastOracleReportAt",
     );
+    expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain("medianLive");
     expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain(
       "oracleFreshnessWindow",
     );

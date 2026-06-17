@@ -56,6 +56,7 @@ interface PoolHealthState {
   oracleOk?: boolean | undefined;
   oracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
+  medianLive?: boolean | undefined;
   oracleExpiry?: string | undefined;
   oracleFreshnessWindow?: string | undefined;
   priceDifference?: string | undefined;
@@ -213,19 +214,23 @@ export function isOracleFresh(
 function isVirtualPoolOracleStale(
   pool: {
     oracleTimestamp?: string | undefined;
+    medianLive?: boolean | undefined;
     oracleFreshnessWindow?: string | undefined;
   },
   nowSeconds: number,
 ): boolean {
   const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
   const liveReportAt = Number(pool.oracleTimestamp ?? "0");
-  return (
-    Number.isFinite(freshnessWindow) &&
-    freshnessWindow > 0 &&
-    Number.isFinite(liveReportAt) &&
-    liveReportAt > 0 &&
-    nowSeconds - liveReportAt > freshnessWindow
-  );
+  if (
+    !Number.isFinite(freshnessWindow) ||
+    freshnessWindow <= 0 ||
+    !Number.isFinite(liveReportAt) ||
+    liveReportAt <= 0
+  ) {
+    return false;
+  }
+  if (pool.medianLive === false) return true;
+  return nowSeconds - liveReportAt > freshnessWindow;
 }
 
 /**
@@ -623,7 +628,10 @@ export function computeEffectiveStatus(
     wrappedExchangeId?: string | null | undefined;
     oracleOk?: boolean | undefined;
     oracleTimestamp?: string | undefined;
+    medianLive?: boolean | undefined;
     oracleExpiry?: string | undefined;
+    oracleFreshnessWindow?: string | undefined;
+    wrappedExchangeDeprecated?: boolean | undefined;
     priceDifference?: string | undefined;
     rebalanceThreshold?: number | undefined;
     rebalanceThresholdAbove?: number | undefined;

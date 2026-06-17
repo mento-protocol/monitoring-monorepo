@@ -33,6 +33,7 @@ type ThresholdsExtRow = {
 type VpOracleFreshnessExtRow = {
   id: string;
   lastOracleReportAt?: string;
+  medianLive?: boolean;
   oracleFreshnessWindow?: string;
 };
 
@@ -106,6 +107,7 @@ export function usePoolWithThresholds(
       ...(vpFreshnessExt
         ? {
             lastOracleReportAt: vpFreshnessExt.lastOracleReportAt,
+            medianLive: vpFreshnessExt.medianLive,
             oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
           }
         : {}),

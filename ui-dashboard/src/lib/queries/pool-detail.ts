@@ -64,6 +64,7 @@ export const POOL_VP_ORACLE_FRESHNESS_EXT = `
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
       id
       lastOracleReportAt
+      medianLive
       oracleFreshnessWindow
     }
   }

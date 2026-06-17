@@ -792,7 +792,12 @@ export async function fetchNetworkData(
       Pool: {
         id: string;
         lastOracleReportAt?: string;
+        medianLive?: boolean;
         oracleFreshnessWindow?: string;
+      }[];
+      BiPoolExchange?: {
+        wrappedByPoolId?: string;
+        isDeprecated?: boolean;
       }[];
     }>(ALL_POOLS_VP_ORACLE_FRESHNESS, { chainId: network.chainId }),
     // CDP badges are Celo-only and come from indexed CdpPool rows. The
@@ -876,7 +881,24 @@ export async function fetchNetworkData(
         : {
             ...p,
             lastOracleReportAt: r.lastOracleReportAt,
+            medianLive: r.medianLive,
             oracleFreshnessWindow: r.oracleFreshnessWindow,
+          };
+    });
+    const deprecatedByPoolId = new Map<
+      string,
+      { wrappedByPoolId?: string; isDeprecated?: boolean }
+    >();
+    for (const row of vpOracleFreshnessResult.value.BiPoolExchange ?? []) {
+      if (row.wrappedByPoolId) deprecatedByPoolId.set(row.wrappedByPoolId, row);
+    }
+    pools = pools.map((p) => {
+      const r = deprecatedByPoolId.get(p.id);
+      return r == null
+        ? p
+        : {
+            ...p,
+            wrappedExchangeDeprecated: r.isDeprecated,
           };
     });
   }

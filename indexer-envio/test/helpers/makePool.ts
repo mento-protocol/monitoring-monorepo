@@ -28,6 +28,7 @@ export function makePool(overrides: Partial<Pool> = {}): Pool {
     oracleOk: true,
     oracleTimestamp: 1_700_000_000n,
     lastOracleReportAt: 1_700_000_000n,
+    medianLive: true,
     oracleFreshnessWindow: 0n,
     rebalanceThreshold: 5000,
     // Default fixture is a "real, symmetric, fully-indexed" threshold so

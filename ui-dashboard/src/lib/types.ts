@@ -49,6 +49,7 @@ export type Pool = {
   oraclePrice?: string | undefined;
   oracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
+  medianLive?: boolean | undefined;
   oracleTxHash?: string | undefined;
   oracleExpiry?: string | undefined;
   oracleFreshnessWindow?: string | undefined;
