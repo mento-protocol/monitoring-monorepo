@@ -241,8 +241,12 @@ existing current-head request is `requested`, `in_flight`, or `approved`. A
 manual `@codex review` is only a fallback when the current head has no Codex
 signal after the normal automatic-review window.
 If `chatgpt-codex-connector[bot]` replies that code-review usage limits are
-reached, stop posting further `@codex review` requests. The Codex
-PR-description approval remains externally blocked until quota/settings are
+reached, stop posting duplicate `@codex review` requests and let
+`codexReviewSignal` decide the next action. If the current head is already
+`requested` or `in_flight`, keep watching until Codex approves, posts new
+feedback, or the signal becomes stale. Treat the Codex PR-description approval
+as externally blocked only when approval is still missing and no current-head
+review request is in progress; it remains blocked until quota/settings are
 restored or the gate is intentionally overridden.
 
 ## Babysitting Speed Discipline
