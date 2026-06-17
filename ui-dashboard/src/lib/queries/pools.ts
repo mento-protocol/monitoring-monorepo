@@ -88,7 +88,8 @@ export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
 
 // VP oracle freshness is newer than the trust-field companion above. Keep it
 // separate so a dashboard-before-indexer rollout degrades only VP staleness
-// status, not thresholds, USD trust, breaker, or degenerate-health fields.
+// status, not thresholds, USD trust, breaker, degenerate-health fields, or the
+// deprecated-wrapper companion below.
 export const ALL_POOLS_VP_ORACLE_FRESHNESS = `
   query AllPoolsVpOracleFreshness($chainId: Int!) {
     Pool(where: { chainId: { _eq: $chainId } }) {
@@ -97,6 +98,14 @@ export const ALL_POOLS_VP_ORACLE_FRESHNESS = `
       medianLive
       oracleFreshnessWindow
     }
+  }
+`;
+
+// Deprecated-wrapper state lives on BiPoolExchange, not Pool. Keep it separate
+// from VP freshness so BiPoolExchange schema lag cannot drop oracle-staleness
+// fields from the all-pools/dashboard fan-out.
+export const ALL_POOLS_VP_DEPRECATION = `
+  query AllPoolsVpDeprecation($chainId: Int!) {
     BiPoolExchange(
       where: {
         chainId: { _eq: $chainId }

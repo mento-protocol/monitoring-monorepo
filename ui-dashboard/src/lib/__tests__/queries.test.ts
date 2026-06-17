@@ -8,6 +8,7 @@ const EXPECTED_EXPORT_NAMES = [
   "ALL_POOLS_HEALTH_CURSOR",
   "ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN",
   "ALL_POOLS_VP_ORACLE_FRESHNESS",
+  "ALL_POOLS_VP_DEPRECATION",
   "ORACLE_RATES",
   "RECENT_SWAPS",
   "POOL_SWAPS",
@@ -207,14 +208,31 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain(
       "oracleFreshnessWindow",
     );
-    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain("BiPoolExchange");
-    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain("wrappedByPoolId");
-    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain("isDeprecated");
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
+      "BiPoolExchange",
+    );
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
+      "wrappedByPoolId",
+    );
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain("isDeprecated");
     expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
       "rebalanceThresholdsKnown",
     );
     expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
       "tokenDecimalsKnown",
+    );
+  });
+
+  it("ALL_POOLS_VP_DEPRECATION isolates deprecated wrapper state", () => {
+    expect(queries.ALL_POOLS_VP_DEPRECATION).toContain("BiPoolExchange");
+    expect(queries.ALL_POOLS_VP_DEPRECATION).toContain("wrappedByPoolId");
+    expect(queries.ALL_POOLS_VP_DEPRECATION).toContain("isDeprecated");
+    expect(queries.ALL_POOLS_VP_DEPRECATION).not.toContain(
+      "lastOracleReportAt",
+    );
+    expect(queries.ALL_POOLS_VP_DEPRECATION).not.toContain("medianLive");
+    expect(queries.ALL_POOLS_VP_DEPRECATION).not.toContain(
+      "oracleFreshnessWindow",
     );
   });
 

@@ -16,6 +16,7 @@ import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
 import {
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+  ALL_POOLS_VP_DEPRECATION,
   ALL_POOLS_VP_ORACLE_FRESHNESS,
   ALL_POOLS_WITH_HEALTH,
   // OG-specific homepage daily snapshot query. Lives in queries/pools.ts so
@@ -126,17 +127,21 @@ type VpDeprecationRow = {
   isDeprecated?: boolean;
 };
 type SettledRows<T> = PromiseSettledResult<{ Pool: T[] }>;
-type SettledVpRows = PromiseSettledResult<{
-  Pool: VpFreshnessRow[];
-  BiPoolExchange?: VpDeprecationRow[];
+type SettledVpFreshnessRows = SettledRows<VpFreshnessRow>;
+type SettledVpDeprecationRows = PromiseSettledResult<{
+  BiPoolExchange: VpDeprecationRow[];
 }>;
 
 async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   if (!network.hasuraUrl) return null;
   const client = makeOgGraphQLClient(network);
 
-  const { poolsResult, thresholdsResult, vpFreshnessResult } =
-    await requestChainPoolInputs(client, network);
+  const {
+    poolsResult,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+  } = await requestChainPoolInputs(client, network);
 
   if (poolsResult.status !== "fulfilled") {
     // Chain pool query failed entirely — treat as offline. Aggregator
@@ -146,6 +151,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   const pools = mergeHomepagePoolExtensions(poolsResult.value.Pool ?? [], {
     thresholdsResult,
     vpFreshnessResult,
+    vpDeprecationResult,
   });
 
   if (pools.length === 0) {
@@ -208,6 +214,48 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     daily,
     rates: buildOracleRateMap(pools, network),
     dailyDegraded,
+  };
+}
+
+async function requestChainPoolInputs(
+  client: HomepageOgClient,
+  network: Network,
+) {
+  // Parallelizing these saves ~200ms p50 on the success path; serializing
+  // would only help if the main pool query failed, which is < 1% of calls.
+  // react-doctor-disable-next-line react-doctor/async-defer-await
+  const [
+    poolsResult,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+  ] = await Promise.allSettled([
+    client.request<{ Pool: Pool[] }>({
+      document: ALL_POOLS_WITH_HEALTH,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+    client.request<{ Pool: ThresholdsRow[] }>({
+      document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+    client.request<{ Pool: VpFreshnessRow[] }>({
+      document: ALL_POOLS_VP_ORACLE_FRESHNESS,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+    client.request<{ BiPoolExchange: VpDeprecationRow[] }>({
+      document: ALL_POOLS_VP_DEPRECATION,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+  ]);
+  return {
+    poolsResult,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
   };
 }
 
@@ -392,46 +440,12 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   };
 }
 
-async function requestChainPoolInputs(
-  client: HomepageOgClient,
-  network: Network,
-) {
-  // Parallelizing these saves ~200ms p50 on the success path; serializing
-  // would only help if the main pool query failed, which is < 1% of calls.
-  // react-doctor-disable-next-line react-doctor/async-defer-await
-  const [poolsResult, thresholdsResult, vpFreshnessResult] =
-    await Promise.allSettled([
-      client.request<{ Pool: Pool[] }>({
-        document: ALL_POOLS_WITH_HEALTH,
-        variables: { chainId: network.chainId },
-        signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
-      }),
-      client.request<{ Pool: ThresholdsRow[] }>({
-        document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
-        variables: { chainId: network.chainId },
-        signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
-      }),
-      client.request<{
-        Pool: VpFreshnessRow[];
-        BiPoolExchange?: VpDeprecationRow[];
-      }>({
-        document: ALL_POOLS_VP_ORACLE_FRESHNESS,
-        variables: { chainId: network.chainId },
-        signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
-      }),
-    ]);
-  return {
-    poolsResult,
-    thresholdsResult,
-    vpFreshnessResult,
-  };
-}
-
 function mergeHomepagePoolExtensions(
   pools: Pool[],
   results: {
     thresholdsResult: SettledRows<ThresholdsRow>;
-    vpFreshnessResult: SettledVpRows;
+    vpFreshnessResult: SettledVpFreshnessRows;
+    vpDeprecationResult: SettledVpDeprecationRows;
   },
 ): Pool[] {
   return mergeHomepageVpDeprecation(
@@ -439,7 +453,7 @@ function mergeHomepagePoolExtensions(
       mergeHomepageThresholds(pools, results.thresholdsResult),
       results.vpFreshnessResult,
     ),
-    results.vpFreshnessResult,
+    results.vpDeprecationResult,
   );
 }
 
@@ -467,7 +481,7 @@ function mergeHomepageThresholds(
 
 function mergeHomepageVpFreshness(
   pools: Pool[],
-  result: SettledVpRows,
+  result: SettledVpFreshnessRows,
 ): Pool[] {
   if (result.status !== "fulfilled") return pools;
   const byId = new Map((result.value.Pool ?? []).map((r) => [r.id, r]));
@@ -486,7 +500,7 @@ function mergeHomepageVpFreshness(
 
 function mergeHomepageVpDeprecation(
   pools: Pool[],
-  result: SettledVpRows,
+  result: SettledVpDeprecationRows,
 ): Pool[] {
   if (result.status !== "fulfilled") return pools;
   const byPoolId = new Map<string, VpDeprecationRow>();

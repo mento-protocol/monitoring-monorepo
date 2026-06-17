@@ -472,21 +472,21 @@
     "file": "src/lib/homepage-og.ts",
     "ruleId": "complexity",
     "message": "Async function 'fetchHomepageOgDataUncached' has a complexity of 35. Maximum allowed is 15.",
-    "line": 217,
+    "line": 262,
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'fetchHomepageOgDataUncached' has too many lines (141). Maximum allowed is 100.",
-    "line": 217,
+    "line": 262,
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
-    "line": 217,
+    "line": 262,
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {

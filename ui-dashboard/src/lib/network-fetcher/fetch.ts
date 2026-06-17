@@ -15,6 +15,7 @@ import {
   ALL_POOLS_BREACH_ROLLUP,
   ALL_POOLS_HEALTH_CURSOR,
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+  ALL_POOLS_VP_DEPRECATION,
   ALL_POOLS_VP_ORACLE_FRESHNESS,
   ALL_POOLS_WITH_HEALTH,
   ALL_OLS_POOLS,
@@ -727,6 +728,7 @@ export async function fetchNetworkData(
     healthCursorResult,
     rebalanceThresholdsKnownResult,
     vpOracleFreshnessResult,
+    vpDeprecationResult,
     indexedCdpPoolsResult,
     fallbackStrategiesResult,
   ] = await Promise.allSettled([
@@ -786,8 +788,7 @@ export async function fetchNetworkData(
         breakerTripped?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
-    // VP oracle freshness fields are newer than the trust companion above.
-    // Isolate them so schema-lag drops only VP staleness state.
+    // Isolate VP freshness so schema lag drops only VP staleness state.
     timed<{
       Pool: {
         id: string;
@@ -795,11 +796,10 @@ export async function fetchNetworkData(
         medianLive?: boolean;
         oracleFreshnessWindow?: string;
       }[];
-      BiPoolExchange?: {
-        wrappedByPoolId?: string;
-        isDeprecated?: boolean;
-      }[];
     }>(ALL_POOLS_VP_ORACLE_FRESHNESS, { chainId: network.chainId }),
+    timed<{
+      BiPoolExchange: { wrappedByPoolId?: string; isDeprecated?: boolean }[];
+    }>(ALL_POOLS_VP_DEPRECATION, { chainId: network.chainId }),
     // CDP badges are Celo-only and come from indexed CdpPool rows. The
     // runtime probe is a non-Celo Reserve fallback and must not produce CDP
     // badges.
@@ -885,13 +885,14 @@ export async function fetchNetworkData(
             oracleFreshnessWindow: r.oracleFreshnessWindow,
           };
     });
-    const deprecatedByPoolId = new Map<
-      string,
-      { wrappedByPoolId?: string; isDeprecated?: boolean }
-    >();
-    for (const row of vpOracleFreshnessResult.value.BiPoolExchange ?? []) {
-      if (row.wrappedByPoolId) deprecatedByPoolId.set(row.wrappedByPoolId, row);
-    }
+  }
+
+  if (vpDeprecationResult.status === "fulfilled") {
+    const deprecatedByPoolId = new Map(
+      (vpDeprecationResult.value.BiPoolExchange ?? []).flatMap((row) =>
+        row.wrappedByPoolId ? [[row.wrappedByPoolId, row] as const] : [],
+      ),
+    );
     pools = pools.map((p) => {
       const r = deprecatedByPoolId.get(p.id);
       return r == null
