@@ -7,6 +7,7 @@ import {
   parseArgs,
   parseIssueNumbers,
   selectStatusOption,
+  stateFromLabels,
 } from "./agent-issue-board.mjs";
 
 let passed = 0;
@@ -130,6 +131,21 @@ test("active label transition claims the issue and removes stale state", () => {
     addLabels: ["agent-active"],
     removeLabels: ["agent-ready", "in-pr", "needs-grooming"],
     statusOptions: ["In Progress"],
+  });
+});
+
+test("closed in-pr issues sync to done and clear state labels", () => {
+  assertEqual(
+    stateFromLabels({
+      state: "CLOSED",
+      labels: [{ name: "in-pr" }],
+    }),
+    "done",
+  );
+  assertDeepEqual(labelsForState("done"), {
+    addLabels: [],
+    removeLabels: ["agent-ready", "agent-active", "in-pr", "needs-grooming"],
+    statusOptions: ["Done"],
   });
 });
 

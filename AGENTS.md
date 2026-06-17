@@ -171,8 +171,10 @@ and moves the item to `In Progress`. When opening the PR, run
 `pnpm issue:review --pr <number> --issue <issue>` to remove `agent-active`, add
 `in-pr`, and project the issue into review on the workboard.
 Use `Closes #123` only for issues whose "Done means" is fully satisfied by the
-PR; otherwise use `Refs #123`. If a PR closes unmerged or only partially ships,
-run `pnpm issue:release --issue <issue>` to restore `agent-ready` only when the
+PR; otherwise use `Refs #123`. After merge, `pnpm issue:board sync` moves
+closed `in-pr` issues that are already on the workboard to `Done` and clears
+the queue label. If a PR closes unmerged or only partially ships, run
+`pnpm issue:release --issue <issue>` to restore `agent-ready` only when the
 remaining acceptance criteria are still clear; otherwise use
 `pnpm issue:release --issue <issue> --needs-grooming`.
 
@@ -456,7 +458,7 @@ pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
 pnpm issue:claim --count 3 --agent codex       # Claim ready issues and move them to In Progress
 pnpm issue:review --pr 123 --issue 901         # Move claimed issue to in-pr / review
 pnpm issue:release --issue 901                 # Release a mistaken claim back to agent-ready
-pnpm issue:board sync                          # Re-project current issue labels onto Project #12
+pnpm issue:board sync                          # Re-project labels and close merged in-pr board items
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 
 # Aegis

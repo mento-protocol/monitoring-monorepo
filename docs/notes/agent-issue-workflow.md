@@ -65,7 +65,10 @@ Routing labels:
    `agent-active`, adds `in-pr`, and moves the Project item into review when
    the Project has an `In Review` status option. With the default GitHub status
    options, it falls back to `In Progress`.
-6. On merge, GitHub closes issues referenced with closing keywords.
+6. On merge, GitHub closes issues referenced with closing keywords. Run
+   `pnpm issue:board sync` after merge, or on a schedule, to move closed
+   `in-pr` issues that are already on Project #12 to `Done` and clear the
+   queue label.
 7. If the PR closes unmerged, run `pnpm issue:release --issue <issue>` and
    restore `agent-ready` only when the remaining work is still clear; otherwise
    run `pnpm issue:release --issue <issue> --needs-grooming`.
@@ -86,9 +89,10 @@ pnpm issue:board:test
 ```
 
 `pnpm issue:claim` can claim from the live ready queue or claim explicit issue
-numbers. `pnpm issue:review` can infer issues from `closingIssuesReferences`
-when a PR uses closing keywords, but agents should pass explicit `--issue`
-arguments when the PR uses `Refs` or has mixed complete/partial scope.
+numbers. `pnpm issue:review` can infer same-repository issues from
+`closingIssuesReferences` when a PR uses closing keywords, but agents should
+pass explicit `--issue` arguments when the PR uses `Refs` or has mixed
+complete/partial scope.
 
 The helper populates optional Project fields named `Agent`, `Branch`,
 `Claim ID`, `Claimed At`, and `PR` when those fields exist. Missing optional

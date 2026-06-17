@@ -36,7 +36,7 @@ const STATE_TRANSITIONS = {
   },
   done: {
     addLabels: [],
-    removeLabels: ["agent-ready", "agent-active", "in-pr"],
+    removeLabels: ["agent-ready", "agent-active", "in-pr", "needs-grooming"],
     statusOptions: ["Done"],
   },
 };
@@ -311,8 +311,9 @@ function labelNames(issue) {
   return new Set((issue.labels ?? []).map((label) => label.name));
 }
 
-function stateFromLabels(issue) {
+export function stateFromLabels(issue) {
   const labels = labelNames(issue);
+  if (issue.state === "CLOSED" && labels.has("in-pr")) return "done";
   if (labels.has("in-pr")) return "review";
   if (labels.has("agent-active")) return "active";
   if (labels.has("agent-ready")) return "ready";
@@ -376,20 +377,28 @@ async function listReadyIssues(options) {
   return issues ?? [];
 }
 
-async function listIssuesByLabel(options, label) {
+async function listIssuesByLabel(options, label, { state = "open" } = {}) {
   const issues = await ghJson([
     "issue",
     "list",
     "-R",
     options.repo,
     "--search",
-    `is:issue is:open label:${label}`,
+    `is:issue is:${state} label:${label}`,
     "--limit",
     "100",
     "--json",
     "id,number,title,url,labels,state,projectItems",
   ]);
   return issues ?? [];
+}
+
+function splitRepo(repo) {
+  const [owner, name, extra] = repo.split("/");
+  if (!owner || !name || extra) {
+    throw new Error(`Repository must be owner/name, got: ${repo}`);
+  }
+  return { owner, name, nameWithOwner: `${owner}/${name}` };
 }
 
 async function getIssue(options, number) {
@@ -406,17 +415,31 @@ async function getIssue(options, number) {
 
 async function getPrIssues(options) {
   if (!options.pr) return [];
-  const pr = await ghJson([
-    "pr",
-    "view",
-    String(options.pr),
-    "-R",
-    options.repo,
-    "--json",
-    "number,url,title,headRefName,closingIssuesReferences",
-  ]);
-  const issues = pr?.closingIssuesReferences ?? [];
-  return issues.map((issue) => issue.number).filter(Number.isInteger);
+  const repo = splitRepo(options.repo);
+  const response = await ghGraphql(
+    `query($owner:String!,$repo:String!,$number:Int!){
+      repository(owner:$owner,name:$repo){
+        pullRequest(number:$number){
+          closingIssuesReferences(first:100){
+            nodes {
+              number
+              repository {
+                nameWithOwner
+              }
+            }
+          }
+        }
+      }
+    }`,
+    { owner: repo.owner, repo: repo.name, number: options.pr },
+  );
+  const issues =
+    response?.data?.repository?.pullRequest?.closingIssuesReferences?.nodes ??
+    [];
+  return issues
+    .filter((issue) => issue?.repository?.nameWithOwner === repo.nameWithOwner)
+    .map((issue) => issue.number)
+    .filter(Number.isInteger);
 }
 
 async function getProject(options) {
@@ -957,12 +980,24 @@ async function sync(options) {
       byNumber.set(issue.number, issue);
     }
   }
+  for (const issue of await listIssuesByLabel(options, "in-pr", {
+    state: "closed",
+  })) {
+    byNumber.set(issue.number, issue);
+  }
 
   const results = [];
   for (const issue of byNumber.values()) {
     const state = stateFromLabels(issue);
     if (!state) continue;
-    const itemId = await ensureProjectItem(options, project, issue);
+    const itemId =
+      state === "done"
+        ? await findIssueProjectItem(options, issue, project)
+        : await ensureProjectItem(options, project, issue);
+    if (!itemId) continue;
+    if (state === "done") {
+      await editIssueLabels(options, issue, state);
+    }
     await updateProjectFields(options, project, itemId, state, {});
     results.push({ number: issue.number, title: issue.title, state });
   }
