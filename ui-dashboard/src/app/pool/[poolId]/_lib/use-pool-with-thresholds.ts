@@ -41,6 +41,7 @@ type VpOracleFreshnessExtRow = {
 type VpDeprecationExtRow = {
   id: string;
   isDeprecated?: boolean;
+  minimumReports?: string;
 };
 
 type VpLifecycleDeprecationExtRow = {
@@ -87,6 +88,9 @@ function mergePoolExtensions(
         }
       : {}),
     ...(wrappedExchangeDeprecated ? { wrappedExchangeDeprecated } : {}),
+    ...(vpDeprecationExt?.minimumReports !== undefined
+      ? { wrappedExchangeMinimumReports: vpDeprecationExt.minimumReports }
+      : {}),
   };
 }
 

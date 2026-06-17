@@ -1,6 +1,11 @@
 export type VpExchangeDeprecationRow = {
   wrappedByPoolId?: string;
   isDeprecated?: boolean;
+  minimumReports?: string;
+};
+
+export type VpExchangeDeprecationResult = {
+  BiPoolExchange: VpExchangeDeprecationRow[];
 };
 
 export type VpLifecycleDeprecationRow = {
@@ -32,10 +37,24 @@ export function mergeDeprecatedVirtualPools<TPool extends { id: string }>(
     exchangeRows,
     lifecycleRows,
   );
-  if (deprecatedPoolIds.size === 0) return pools.slice();
-  return pools.map((pool) =>
-    deprecatedPoolIds.has(pool.id)
-      ? { ...pool, wrappedExchangeDeprecated: true }
-      : pool,
-  );
+  const exchangeByPoolId = new Map<string, VpExchangeDeprecationRow>();
+  for (const row of exchangeRows) {
+    if (row.wrappedByPoolId) exchangeByPoolId.set(row.wrappedByPoolId, row);
+  }
+  if (deprecatedPoolIds.size === 0 && exchangeByPoolId.size === 0) {
+    return pools.slice();
+  }
+  return pools.map((pool) => {
+    const exchange = exchangeByPoolId.get(pool.id);
+    if (!exchange && !deprecatedPoolIds.has(pool.id)) return pool;
+    return {
+      ...pool,
+      ...(deprecatedPoolIds.has(pool.id)
+        ? { wrappedExchangeDeprecated: true }
+        : {}),
+      ...(exchange?.minimumReports !== undefined
+        ? { wrappedExchangeMinimumReports: exchange.minimumReports }
+        : {}),
+    };
+  });
 }

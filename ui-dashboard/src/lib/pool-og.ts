@@ -441,6 +441,7 @@ type PoolOgLifecycleSettled<T> = PromiseSettledResult<{
 type PoolOgVpDeprecationExtRow = {
   id: string;
   isDeprecated?: boolean;
+  minimumReports?: string;
 };
 type PoolOgVpLifecycleDeprecationExtRow = {
   id: string;
@@ -565,6 +566,9 @@ function mergePoolOgExtensions(
       ? {
           wrappedExchangeDeprecated,
         }
+      : {}),
+    ...(vpDeprecationExt?.minimumReports !== undefined
+      ? { wrappedExchangeMinimumReports: vpDeprecationExt.minimumReports }
       : {}),
   };
 }

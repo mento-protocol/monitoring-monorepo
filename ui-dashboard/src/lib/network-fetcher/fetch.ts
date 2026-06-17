@@ -39,19 +39,27 @@ import type {
   Pool,
   PoolDailyFeeSnapshot,
   PoolSnapshotWindow,
-  OlsPool,
   CdpPool,
 } from "@/lib/types";
 import { isFpmm, buildOracleRateMap } from "@/lib/tokens";
 import type {
   BrokerDailySnapshotRow,
   NetworkData,
+  OlsPoolsResult,
   PaginatedPageResult,
+  PoolBreachRollupResult,
+  PoolHealthCursorResult,
+  PoolRebalanceThresholdsKnownResult,
+  PoolsVpOracleFreshnessResult,
   SerializableError,
   SnapshotPageResult,
+  VpLifecycleDeprecationResult,
 } from "./types";
 import { SNAPSHOT_PAGE_SIZE } from "./constants";
-import { mergeDeprecatedVirtualPools } from "./vp-deprecation";
+import {
+  mergeDeprecatedVirtualPools,
+  type VpExchangeDeprecationResult,
+} from "./vp-deprecation";
 
 export { SNAPSHOT_PAGE_SIZE } from "./constants";
 
@@ -685,6 +693,7 @@ export async function fetchNetworkData(
   windows: { w24h: TimeRange; w7d: TimeRange; w30d: TimeRange },
 ): Promise<NetworkData> {
   const client = new GraphQLClient(network.hasuraUrl);
+  const chainVariables = { chainId: network.chainId };
 
   // Helper to bind a per-request AbortSignal.timeout without repeating the
   // object-form at every call site. Re-binds on every invocation so each
@@ -699,9 +708,10 @@ export async function fetchNetworkData(
 
   let pools: Pool[];
   try {
-    const poolsRes = await timed<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH, {
-      chainId: network.chainId,
-    });
+    const poolsRes = await timed<{ Pool: Pool[] }>(
+      ALL_POOLS_WITH_HEALTH,
+      chainVariables,
+    );
     pools = poolsRes.Pool ?? [];
   } catch (err) {
     return emptyNetworkData(
@@ -755,57 +765,32 @@ export async function fetchNetworkData(
           truncated: false,
           error: null,
         }),
-    timed<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS, {
-      chainId: network.chainId,
-    }),
+    timed<OlsPoolsResult>(ALL_OLS_POOLS, chainVariables),
     // Uptime rollup — isolated from ALL_POOLS_WITH_HEALTH so a schema-
     // lag fail degrades just the uptime column to "—", not the entire
     // pools page.
-    timed<{
-      Pool: {
-        id: string;
-        breachCount?: number;
-        healthBinarySeconds?: string;
-        healthTotalSeconds?: string;
-      }[];
-    }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
+    timed<PoolBreachRollupResult>(ALL_POOLS_BREACH_ROLLUP, chainVariables),
     // Live-tail cursor is isolated so schema-lag does not hide persisted uptime counters.
-    timed<{
-      Pool: {
-        id: string;
-        lastOracleSnapshotTimestamp?: string;
-        lastDeviationRatio?: string;
-      }[];
-    }>(ALL_POOLS_HEALTH_CURSOR, { chainId: network.chainId }),
+    timed<PoolHealthCursorResult>(ALL_POOLS_HEALTH_CURSOR, chainVariables),
     // Data-trust / degenerate-classification flags. Isolated so schema-lag
     // degrades thresholds, USD math, and degenerate health without failing
     // the main pool list; split sides are needed for `isNeverRebalance`.
-    timed<{
-      Pool: {
-        id: string;
-        rebalanceThresholdAbove?: number;
-        rebalanceThresholdBelow?: number;
-        rebalanceThresholdsKnown?: boolean;
-        tokenDecimalsKnown?: boolean;
-        degenerateReserves?: boolean;
-        breakerTripped?: boolean;
-      }[];
-    }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
+    timed<PoolRebalanceThresholdsKnownResult>(
+      ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+      chainVariables,
+    ),
     // Isolate VP freshness so schema lag drops only VP staleness state.
-    timed<{
-      Pool: {
-        id: string;
-        lastOracleReportAt?: string;
-        medianLive?: boolean;
-        oracleFreshnessWindow?: string;
-      }[];
-    }>(ALL_POOLS_VP_ORACLE_FRESHNESS, { chainId: network.chainId }),
-    timed<{
-      BiPoolExchange: { wrappedByPoolId?: string; isDeprecated?: boolean }[];
-    }>(ALL_POOLS_VP_DEPRECATION, { chainId: network.chainId }),
-    timed<{ VirtualPoolLifecycle: { poolId?: string }[] }>(
+    timed<PoolsVpOracleFreshnessResult>(
+      ALL_POOLS_VP_ORACLE_FRESHNESS,
+      chainVariables,
+    ),
+    timed<VpExchangeDeprecationResult>(
+      ALL_POOLS_VP_DEPRECATION,
+      chainVariables,
+    ),
+    timed<VpLifecycleDeprecationResult>(
       ALL_POOLS_VP_LIFECYCLE_DEPRECATION,
-      { chainId: network.chainId },
+      chainVariables,
     ),
     // CDP badges are Celo-only and come from indexed CdpPool rows. The
     // runtime probe is a non-Celo Reserve fallback and must not produce CDP
@@ -1126,7 +1111,7 @@ type StrategyIdsArgs = {
 
 type StrategyErrorArgs = {
   network: Network;
-  olsResult: PromiseSettledResult<{ OlsPool: Pick<OlsPool, "poolId">[] }>;
+  olsResult: PromiseSettledResult<OlsPoolsResult>;
   indexedCdpPoolsResult: PromiseSettledResult<CdpPoolsResponse>;
   fallbackStrategiesResult: PromiseSettledResult<Readonly<ProbedStrategies>>;
 };

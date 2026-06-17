@@ -115,6 +115,7 @@ export const ALL_POOLS_VP_DEPRECATION = `
     ) {
       wrappedByPoolId
       isDeprecated
+      minimumReports
     }
   }
 `;

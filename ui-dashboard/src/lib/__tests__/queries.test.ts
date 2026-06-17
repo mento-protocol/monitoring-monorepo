@@ -229,6 +229,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_VP_DEPRECATION).toContain("BiPoolExchange");
     expect(queries.ALL_POOLS_VP_DEPRECATION).toContain("wrappedByPoolId");
     expect(queries.ALL_POOLS_VP_DEPRECATION).toContain("isDeprecated");
+    expect(queries.ALL_POOLS_VP_DEPRECATION).toContain("minimumReports");
     expect(queries.ALL_POOLS_VP_DEPRECATION).not.toContain(
       "VirtualPoolLifecycle",
     );
@@ -303,6 +304,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_VP_DEPRECATION_EXT).toContain("BiPoolExchange");
     expect(queries.POOL_VP_DEPRECATION_EXT).toContain("wrappedByPoolId");
     expect(queries.POOL_VP_DEPRECATION_EXT).toContain("isDeprecated");
+    expect(queries.POOL_VP_DEPRECATION_EXT).toContain("minimumReports");
     expect(queries.POOL_VP_DEPRECATION_EXT).not.toContain(
       "VirtualPoolLifecycle",
     );

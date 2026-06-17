@@ -63,6 +63,8 @@ interface PoolHealthState {
   medianLive?: boolean | undefined;
   oracleExpiry?: string | undefined;
   oracleFreshnessWindow?: string | undefined;
+  oracleNumReporters?: number | undefined;
+  wrappedExchangeMinimumReports?: string | undefined;
   // True once the indexer has read the VP's token decimals and the
   // self-healing freshness cursor is trustworthy. False/missing means the
   // VP oracle timestamp can be held at an older value while fresh reports
@@ -224,12 +226,16 @@ export function isOracleFresh(
     lastOracleReportAt?: string | undefined;
     oracleExpiry?: string | undefined;
     oracleFreshnessWindow?: string | undefined;
+    medianLive?: boolean | undefined;
     tokenDecimalsKnown?: boolean | undefined;
+    oracleNumReporters?: number | undefined;
+    wrappedExchangeMinimumReports?: string | undefined;
   },
   nowSeconds = Math.floor(Date.now() / 1000),
   chainId?: number,
 ): boolean {
   if (isVirtualPool(pool) && pool.tokenDecimalsKnown !== true) return true;
+  if (isVirtualPool(pool) && vpMedianValidity(pool) === false) return false;
   const oracleTs = oracleFreshnessTimestamp(pool);
   const stalenessThreshold = getOracleStalenessThreshold(pool, chainId);
   if (isVirtualPool(pool) && stalenessThreshold <= 0) return true;
@@ -250,10 +256,9 @@ function isUsdPeggedVirtualPoolPair(
   return Boolean(sym0 && sym1 && isUsdPegged(sym0) && isUsdPegged(sym1));
 }
 
-function isVirtualPoolOracleStale(
+function isVirtualPoolResetWindowStale(
   pool: {
     oracleTimestamp?: string | undefined;
-    medianLive?: boolean | undefined;
     oracleFreshnessWindow?: string | undefined;
     tokenDecimalsKnown?: boolean | undefined;
   },
@@ -262,16 +267,43 @@ function isVirtualPoolOracleStale(
   if (pool.tokenDecimalsKnown !== true) return false;
   const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
   const liveReportAt = Number(pool.oracleTimestamp ?? "0");
-  if (
-    !Number.isFinite(freshnessWindow) ||
-    freshnessWindow <= 0 ||
-    !Number.isFinite(liveReportAt) ||
-    liveReportAt <= 0
-  ) {
-    return false;
+  return (
+    Number.isFinite(freshnessWindow) &&
+    freshnessWindow > 0 &&
+    Number.isFinite(liveReportAt) &&
+    liveReportAt > 0 &&
+    nowSeconds - liveReportAt > freshnessWindow
+  );
+}
+
+function vpMedianValidity(pool: {
+  medianLive?: boolean | undefined;
+  oracleNumReporters?: number | undefined;
+  tokenDecimalsKnown?: boolean | undefined;
+  wrappedExchangeMinimumReports?: string | undefined;
+}): boolean | null {
+  if (pool.tokenDecimalsKnown !== true) return null;
+  if (pool.medianLive === false) return false;
+  const minimumReports = Number(pool.wrappedExchangeMinimumReports ?? "0");
+  if (!Number.isFinite(minimumReports) || minimumReports <= 0) return null;
+  const oracleNumReporters = Number(pool.oracleNumReporters);
+  if (!Number.isFinite(oracleNumReporters) || oracleNumReporters < 0) {
+    return null;
   }
-  if (pool.medianLive === false) return true;
-  return nowSeconds - liveReportAt > freshnessWindow;
+  return oracleNumReporters >= minimumReports;
+}
+
+function computeVirtualPoolHealthStatus(
+  pool: PoolHealthState,
+  chainId: number | undefined,
+  nowSeconds: number,
+): HealthStatus {
+  if (pool.wrappedExchangeDeprecated === true) return "N/A";
+  if (vpMedianValidity(pool) === false) return "CRITICAL";
+  if (!isVirtualPoolResetWindowStale(pool, nowSeconds)) return "N/A";
+  return isWeekend() && !isUsdPeggedVirtualPoolPair(pool, chainId)
+    ? "WEEKEND"
+    : "CRITICAL";
 }
 
 /**
@@ -308,11 +340,7 @@ export function computeHealthStatus(
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
   if (isVirtualPool(pool)) {
-    if (pool.wrappedExchangeDeprecated === true) return "N/A";
-    if (!isVirtualPoolOracleStale(pool, nowSeconds)) return "N/A";
-    return isWeekend() && !isUsdPeggedVirtualPoolPair(pool, chainId)
-      ? "WEEKEND"
-      : "CRITICAL";
+    return computeVirtualPoolHealthStatus(pool, chainId, nowSeconds);
   }
   // Oracle-staleness is an alertable freshness incident — keep it ABOVE
   // the hasHealthData gate so a stale-oracle pool doesn't get masked into
@@ -676,6 +704,8 @@ export function computeEffectiveStatus(
     medianLive?: boolean | undefined;
     oracleExpiry?: string | undefined;
     oracleFreshnessWindow?: string | undefined;
+    oracleNumReporters?: number | undefined;
+    wrappedExchangeMinimumReports?: string | undefined;
     wrappedExchangeDeprecated?: boolean | undefined;
     tokenDecimalsKnown?: boolean | undefined;
     priceDifference?: string | undefined;

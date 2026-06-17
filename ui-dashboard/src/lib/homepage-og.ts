@@ -126,6 +126,7 @@ type VpFreshnessRow = {
 type VpDeprecationRow = {
   wrappedByPoolId?: string;
   isDeprecated?: boolean;
+  minimumReports?: string;
 };
 type VpLifecycleDeprecationRow = {
   poolId?: string;
@@ -527,8 +528,10 @@ function mergeHomepageVpDeprecation(
     return pools;
   }
   const deprecatedPoolIds = new Set<string>();
+  const exchangeByPoolId = new Map<string, VpDeprecationRow>();
   if (result.status === "fulfilled") {
     for (const row of result.value.BiPoolExchange ?? []) {
+      if (row.wrappedByPoolId) exchangeByPoolId.set(row.wrappedByPoolId, row);
       if (row.wrappedByPoolId && row.isDeprecated) {
         deprecatedPoolIds.add(row.wrappedByPoolId);
       }
@@ -540,9 +543,17 @@ function mergeHomepageVpDeprecation(
     }
   }
   return pools.map((pool) => {
-    return deprecatedPoolIds.has(pool.id)
-      ? { ...pool, wrappedExchangeDeprecated: true }
-      : pool;
+    const exchange = exchangeByPoolId.get(pool.id);
+    if (!exchange && !deprecatedPoolIds.has(pool.id)) return pool;
+    return {
+      ...pool,
+      ...(deprecatedPoolIds.has(pool.id)
+        ? { wrappedExchangeDeprecated: true }
+        : {}),
+      ...(exchange?.minimumReports !== undefined
+        ? { wrappedExchangeMinimumReports: exchange.minimumReports }
+        : {}),
+    };
   });
 }
 

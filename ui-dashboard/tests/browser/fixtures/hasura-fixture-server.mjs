@@ -311,6 +311,15 @@ function breachRollupRows(rows) {
   }));
 }
 
+function vpOracleFreshnessRows(rows) {
+  return rows.map((pool) => ({
+    id: pool.id,
+    lastOracleReportAt: pool.oracleTimestamp,
+    medianLive: true,
+    oracleFreshnessWindow: pool.oracleExpiry,
+  }));
+}
+
 function dailySnapshotsFor(poolId) {
   const pool = poolsById.get(poolId);
   if (!pool) return [];
@@ -816,6 +825,8 @@ export function handleGraphQL({ query, variables = {} }) {
       return { volumeYesterdayTraders: [] };
     case "BrokerVolumeYesterdayTraders":
       return { brokerVolumeYesterdayTraders: [] };
+    case "BridgeDailySnapshot":
+      return { BridgeDailySnapshot: [] };
     case "AllPoolsWithHealth":
       return { Pool: poolRowsForChain(variables.chainId) };
     case "OracleRates":
@@ -834,6 +845,14 @@ export function handleGraphQL({ query, variables = {} }) {
           lastDeviationRatio: null,
         })),
       };
+    case "AllPoolsVpOracleFreshness":
+      return {
+        Pool: vpOracleFreshnessRows(poolRowsForChain(variables.chainId)),
+      };
+    case "AllPoolsVpDeprecation":
+      return { BiPoolExchange: [] };
+    case "AllPoolsVpLifecycleDeprecation":
+      return { VirtualPoolLifecycle: [] };
     case "AllCdpPools":
       return {
         CdpPool:
@@ -861,6 +880,28 @@ export function handleGraphQL({ query, variables = {} }) {
       const pool = poolsById.get(String(variables.id));
       return { Pool: pool ? breachRollupRows([pool]) : [] };
     }
+    case "PoolHealthCursor": {
+      const pool = poolsById.get(String(variables.id));
+      return {
+        Pool: pool
+          ? [
+              {
+                id: pool.id,
+                lastOracleSnapshotTimestamp: null,
+                lastDeviationRatio: null,
+              },
+            ]
+          : [],
+      };
+    }
+    case "PoolVpOracleFreshnessExt": {
+      const pool = poolsById.get(String(variables.id));
+      return { Pool: pool ? vpOracleFreshnessRows([pool]) : [] };
+    }
+    case "PoolVpDeprecationExt":
+      return { BiPoolExchange: [] };
+    case "PoolVpLifecycleDeprecationExt":
+      return { VirtualPoolLifecycle: [] };
     case "PoolHealth7dAnchor":
       return {
         PoolDailySnapshot: [
@@ -907,6 +948,8 @@ export function handleGraphQL({ query, variables = {} }) {
           (snapshot) => ({ id: snapshot.id }),
         ),
       };
+    case "OraclePriceDaily":
+      return { OraclePriceDailySnapshot: [] };
     case "PoolDailyFeeSnapshotsPage":
       return {
         PoolDailyFeeSnapshot: poolDailyFeeSnapshotsForChain(variables.chainId)

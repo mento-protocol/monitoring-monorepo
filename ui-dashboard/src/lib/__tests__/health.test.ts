@@ -209,6 +209,51 @@ describe("computeHealthStatus", () => {
     ).toBe("CRITICAL");
   });
 
+  it("does not downgrade invalid VirtualPool medians to weekend", async () => {
+    const weekend = await import("../weekend");
+    const isWeekendMock = vi.mocked(weekend.isWeekend);
+    isWeekendMock.mockReturnValue(true);
+    const now = Math.floor(Date.now() / 1000);
+    try {
+      expect(
+        computeHealthStatus(
+          {
+            source: "virtual_pool_factory",
+            medianLive: false,
+            oracleTimestamp: String(now - 120),
+            oracleFreshnessWindow: "360",
+            tokenDecimalsKnown: true,
+            token0: USDC_ADDR,
+            token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf",
+          },
+          CELO_CHAIN_ID,
+          now,
+        ),
+      ).toBe("CRITICAL");
+    } finally {
+      isWeekendMock.mockReturnValue(false);
+    }
+  });
+
+  it("returns CRITICAL for VirtualPools below the wrapped exchange minimum reports", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          medianLive: true,
+          oracleNumReporters: 1,
+          wrappedExchangeMinimumReports: "2",
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+        },
+        CELO_CHAIN_ID,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
   it('returns "N/A" for stale deprecated VirtualPool wrappers', () => {
     const now = Math.floor(Date.now() / 1000);
     expect(
@@ -1490,6 +1535,24 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
         42220,
       ),
     ).toBe(true);
+  });
+
+  it("treats invalid VirtualPool medians as not fresh", () => {
+    const ts120 = String(frozenNowSec - 120);
+    expect(
+      isOracleFresh(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeId: "0xexchange",
+          medianLive: false,
+          oracleTimestamp: ts120,
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+        },
+        frozenNowSec,
+        42220,
+      ),
+    ).toBe(false);
   });
 
   it("does not fall back to generic expiry when a VirtualPool reset window is unknown", () => {

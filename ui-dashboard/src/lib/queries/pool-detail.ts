@@ -84,6 +84,7 @@ export const POOL_VP_DEPRECATION_EXT = `
     ) {
       id
       isDeprecated
+      minimumReports
     }
   }
 `;

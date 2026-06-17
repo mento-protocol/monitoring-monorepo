@@ -98,6 +98,10 @@ export type Pool = {
   // destroyed/deprecated, so stale oracle incidents are expected and should not
   // render as active-wrapper failures.
   wrappedExchangeDeprecated?: boolean | undefined;
+  // Optional VP exchange extension. Minimum reporter count required by the
+  // wrapped v2 exchange; used to mirror the bridge's median-validity signal in
+  // dashboard health.
+  wrappedExchangeMinimumReports?: string | undefined;
 };
 
 export type RateFeed = {
