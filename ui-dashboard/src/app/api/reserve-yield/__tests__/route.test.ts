@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const SKY_SSR_APY_PERCENT = 3.600000425292;
 const TRACKED_SUSDS_WALLET = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+const TRACKED_STETH_CUSTODIAN = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
 const SKY_SSR_RPC_RESPONSE = {
   jsonrpc: "2.0",
   id: 1,
@@ -495,6 +496,73 @@ describe("GET /api/reserve-yield", () => {
     );
     expect(body.earnedYieldError).toBeNull();
     expect(stethHolding.earnedYieldUsd).toBeCloseTo(body.earnedYieldUsd, 6);
+  });
+
+  it("caps derived stETH source balances before refreshing indexed yield", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
+    const overSummedSources = [
+      {
+        ...currentStethAsset.sources[0]!,
+        usd_value: currentStethAsset.usd_value,
+      },
+      {
+        ...currentStethAsset.sources[0]!,
+        label: "Custodian",
+        identifier: TRACKED_STETH_CUSTODIAN,
+        usd_value: currentStethAsset.usd_value,
+      },
+    ].map((source) => {
+      const withoutBalance: Record<string, unknown> = { ...source };
+      delete withoutBalance.balance;
+      return withoutBalance;
+    });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              RESERVE_WITH_STETH.collateral.assets[0],
+              {
+                ...currentStethAsset,
+                sources: overSummedSources,
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [STETH_LEDGER_SUMMARY],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    const stethUnitPrice =
+      currentStethAsset.usd_value / Number(currentStethAsset.balance);
+    expect(body.earnedYieldUsd).toBeCloseTo(
+      (5 + (251.59825779325257 - 240)) * stethUnitPrice,
+      6,
+    );
+    expect(body.earnedYieldError).toBeNull();
   });
 
   it("does not refresh indexed stETH yield from USD fallback balances", async () => {

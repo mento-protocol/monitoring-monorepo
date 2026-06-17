@@ -266,6 +266,92 @@ describe("reserve yield parsing and math", () => {
     expect(extracted.holdings[0]?.balance).toBeCloseTo(100, 12);
   });
 
+  it("does not derive stETH token balances from zero asset balances", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "0",
+            usd_value: 420_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                usd_value: 420_000,
+                custodian_type: "cold",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Reserve Safe",
+      balance: 420_000,
+      hasTokenBalance: false,
+      principalUsd: 420_000,
+    });
+  });
+
+  it("caps derived stETH source balances to the asset token total", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "100",
+            usd_value: 100_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                usd_value: 80_000,
+              },
+              {
+                type: "wallet",
+                label: "Custodian",
+                identifier: "0x0000000000000000000000000000000000000001",
+                usd_value: 80_000,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(2);
+    const reserveSafe = extracted.holdings.find(
+      (holding) => holding.sourceLabel === "Reserve Safe",
+    );
+    const custodian = extracted.holdings.find(
+      (holding) => holding.sourceLabel === "Custodian",
+    );
+    expect(reserveSafe).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Reserve Safe",
+      hasTokenBalance: true,
+      principalUsd: 50_000,
+    });
+    expect(custodian).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Custodian",
+      hasTokenBalance: true,
+      principalUsd: 50_000,
+    });
+    expect(reserveSafe?.balance).toBeCloseTo(50, 12);
+    expect(custodian?.balance).toBeCloseTo(50, 12);
+  });
+
   it("tracks when stETH rows use USD fallback instead of token balances", () => {
     const extracted = extractReserveYieldHoldings({
       collateral: {

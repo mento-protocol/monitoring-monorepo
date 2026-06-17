@@ -165,15 +165,29 @@ function principalUsdFromAsset(
 
 function principalUsdFromSource({
   asset,
+  principalUsdBudget,
   source,
   symbol,
 }: {
   asset: Record<string, unknown>;
+  principalUsdBudget: SourcePrincipalUsdBudget | null;
   source: Record<string, unknown>;
   symbol: string;
 }): number | null {
   const sourceUsdValue = numericField(source.usd_value);
-  if (sourceUsdValue !== null) return sourceUsdValue;
+  if (sourceUsdValue !== null) {
+    if (
+      principalUsdBudget !== null &&
+      requiresExplicitUsdValue(symbol) &&
+      sourceUsdValue > 0
+    ) {
+      return (
+        principalUsdBudget.assetUsdValue *
+        (sourceUsdValue / principalUsdBudget.denominatorUsd)
+      );
+    }
+    return sourceUsdValue;
+  }
 
   const sourceBalance = numericField(source.balance);
   if (!requiresExplicitUsdValue(symbol)) return sourceBalance;
@@ -187,46 +201,130 @@ function principalUsdFromSource({
   return assetUsdValue * (sourceBalance / assetBalance);
 }
 
-function tokenBalanceFromSource({
+type SourcePrincipalUsdBudget = {
+  assetUsdValue: number;
+  denominatorUsd: number;
+};
+
+function principalUsdBudgetForAsset({
   asset,
-  source,
+  sources,
 }: {
   asset: Record<string, unknown>;
+  sources: Record<string, unknown>[];
+}): SourcePrincipalUsdBudget | null {
+  const assetUsdValue = numericField(asset.usd_value);
+  if (assetUsdValue === null || assetUsdValue <= 0) return null;
+  const sourceUsdTotal = sources.reduce((sum, source) => {
+    const sourceUsdValue = numericField(source.usd_value);
+    return sourceUsdValue !== null && sourceUsdValue > 0
+      ? sum + sourceUsdValue
+      : sum;
+  }, 0);
+  if (sourceUsdTotal <= assetUsdValue) return null;
+  return {
+    assetUsdValue,
+    denominatorUsd: sourceUsdTotal,
+  };
+}
+
+function tokenBalanceFromSource({
+  source,
+  derivation,
+}: {
   source: Record<string, unknown>;
+  derivation: SourceTokenBalanceDerivation | null;
 }): number | null {
   const sourceBalance = numericField(source.balance);
   if (sourceBalance !== null) return sourceBalance;
 
   const sourceUsdValue = numericField(source.usd_value);
-  const assetUsdValue = numericField(asset.usd_value);
-  const assetBalance = numericField(asset.balance);
   if (
     sourceUsdValue === null ||
-    assetUsdValue === null ||
-    assetBalance === null ||
-    assetUsdValue <= 0
+    sourceUsdValue <= 0 ||
+    derivation === null ||
+    derivation.denominatorUsd <= 0 ||
+    derivation.remainingAssetBalance <= 0
   ) {
     return null;
   }
-  return assetBalance * (sourceUsdValue / assetUsdValue);
+  return (
+    derivation.remainingAssetBalance *
+    (sourceUsdValue / derivation.denominatorUsd)
+  );
+}
+
+type SourceTokenBalanceDerivation = {
+  remainingAssetBalance: number;
+  denominatorUsd: number;
+};
+
+function tokenBalanceDerivationForAsset({
+  asset,
+  sources,
+}: {
+  asset: Record<string, unknown>;
+  sources: Record<string, unknown>[];
+}): SourceTokenBalanceDerivation | null {
+  const assetUsdValue = numericField(asset.usd_value);
+  const assetBalance = numericField(asset.balance);
+  if (
+    assetUsdValue === null ||
+    assetUsdValue <= 0 ||
+    assetBalance === null ||
+    assetBalance <= 0
+  ) {
+    return null;
+  }
+
+  let explicitSourceBalance = 0;
+  let explicitSourceUsd = 0;
+  let missingBalanceSourceUsd = 0;
+  for (const source of sources) {
+    const sourceUsdValue = numericField(source.usd_value);
+    const sourceBalance = numericField(source.balance);
+    if (sourceBalance !== null) {
+      explicitSourceBalance += Math.max(sourceBalance, 0);
+      if (sourceUsdValue !== null && sourceUsdValue > 0) {
+        explicitSourceUsd += sourceUsdValue;
+      }
+      continue;
+    }
+    if (sourceUsdValue !== null && sourceUsdValue > 0) {
+      missingBalanceSourceUsd += sourceUsdValue;
+    }
+  }
+
+  const remainingAssetBalance = assetBalance - explicitSourceBalance;
+  if (remainingAssetBalance <= 0 || missingBalanceSourceUsd <= 0) return null;
+  const remainingAssetUsd = Math.max(assetUsdValue - explicitSourceUsd, 0);
+  return {
+    remainingAssetBalance,
+    denominatorUsd: Math.max(remainingAssetUsd, missingBalanceSourceUsd),
+  };
 }
 
 function sourceHoldingFromRecord({
   asset,
+  derivation,
+  principalUsdBudget,
   source,
   sourceIndex,
 }: {
   asset: Record<string, unknown>;
+  derivation: SourceTokenBalanceDerivation | null;
+  principalUsdBudget: SourcePrincipalUsdBudget | null;
   source: Record<string, unknown>;
   sourceIndex: number;
 }): ReserveYieldHolding | null {
   const assetSymbol = stringField(asset.symbol, "unknown");
   const principalUsd = principalUsdFromSource({
     asset,
+    principalUsdBudget,
     source,
     symbol: assetSymbol,
   });
-  const tokenBalance = tokenBalanceFromSource({ asset, source });
+  const tokenBalance = tokenBalanceFromSource({ source, derivation });
   const balance = tokenBalance ?? principalUsd;
   if (principalUsd === null || balance === null) return null;
 
@@ -325,9 +423,19 @@ export function extractReserveYieldHoldings(
       if (isRecord(source)) sources.push(source);
     }
     const sourceHoldings: ReserveYieldHolding[] = [];
+    const derivation = tokenBalanceDerivationForAsset({
+      asset: assetValue,
+      sources,
+    });
+    const principalUsdBudget = principalUsdBudgetForAsset({
+      asset: assetValue,
+      sources,
+    });
     sources.forEach((source, sourceIndex) => {
       const holding = sourceHoldingFromRecord({
         asset: assetValue,
+        derivation,
+        principalUsdBudget,
         source,
         sourceIndex,
       });
