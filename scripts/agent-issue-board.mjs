@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const GH_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
+const CLAIM_SETTLE_MS = 1500;
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_PROJECT_OWNER = "mento-protocol";
@@ -331,6 +332,27 @@ export function isClaimable(issue) {
   );
 }
 
+export function isReviewable(issue) {
+  const labels = labelNames(issue);
+  return (
+    issue.state === "OPEN" &&
+    labels.has("agent-active") &&
+    !labels.has("agent-ready") &&
+    !labels.has("in-pr") &&
+    !labels.has("needs-grooming")
+  );
+}
+
+export function projectPrFieldValue(pr) {
+  return pr == null || pr === "" ? null : `#${pr}`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function getGitBranch() {
   try {
     const stdout = await new Promise((resolve, reject) => {
@@ -386,7 +408,7 @@ async function listIssuesByLabel(options, label, { state = "open" } = {}) {
     "--search",
     `is:issue is:${state} label:${label}`,
     "--limit",
-    "100",
+    "1000",
     "--json",
     "id,number,title,url,labels,state,projectItems",
   ]);
@@ -712,9 +734,7 @@ async function updateProjectFields(options, project, itemId, state, metadata) {
     textValues[OPTIONAL_PROJECT_FIELDS.claimId] = metadata.claimId;
   }
   if (Object.hasOwn(metadata, "pr")) {
-    textValues[OPTIONAL_PROJECT_FIELDS.pr] = metadata.pr
-      ? `#${metadata.pr}`
-      : "";
+    textValues[OPTIONAL_PROJECT_FIELDS.pr] = projectPrFieldValue(metadata.pr);
   }
   for (const [fieldName, value] of Object.entries(textValues)) {
     const field = findField(project, fieldName);
@@ -806,10 +826,19 @@ function claimIdFor(options, now = new Date()) {
 }
 
 async function transitionIssue(options, project, issue, state, metadata) {
+  const previousState = stateFromLabels(issue);
   await editIssueLabels(options, issue, state);
-  const itemId = await ensureProjectItem(options, project, issue);
-  await updateProjectFields(options, project, itemId, state, metadata);
-  return itemId;
+  try {
+    const itemId = await ensureProjectItem(options, project, issue);
+    await updateProjectFields(options, project, itemId, state, metadata);
+    return itemId;
+  } catch (err) {
+    if (!options.dryRun && previousState) {
+      const current = await getIssue(options, issue.number);
+      await editIssueLabels(options, current, previousState);
+    }
+    throw err;
+  }
 }
 
 function claimMetadata(options, branch) {
@@ -849,6 +878,7 @@ async function claimIssue(options, project, issue, metadata) {
     await commentOnIssue(options, issue, buildClaimComment(metadata, issue));
     return { number: issue.number, title: issue.title, state: "active" };
   }
+  await sleep(CLAIM_SETTLE_MS);
   await verifyClaimOwnership(options, project, itemId, issue, metadata);
   const verified = await getIssue(options, issue.number);
   if (!labelNames(verified).has("agent-active")) {
@@ -922,6 +952,11 @@ async function claim(options) {
 }
 
 async function review(options) {
+  if (!options.pr) {
+    throw new Error(
+      "review requires --pr so reviewed issues are linked to a pull request",
+    );
+  }
   const project = await getProject(options);
   const inferredIssues =
     options.issues.length > 0 ? [] : await getPrIssues(options);
@@ -941,10 +976,13 @@ async function review(options) {
   const results = [];
   for (const number of issueNumbers) {
     const issue = await getIssue(options, number);
-    await transitionIssue(options, project, issue, "review", metadata);
-    if (options.pr) {
-      await commentOnIssue(options, issue, buildReviewComment(metadata, issue));
+    if (!isReviewable(issue)) {
+      throw new Error(
+        `Issue #${issue.number} is not reviewable; expected open agent-active without agent-ready/in-pr`,
+      );
     }
+    await transitionIssue(options, project, issue, "review", metadata);
+    await commentOnIssue(options, issue, buildReviewComment(metadata, issue));
     results.push({ number: issue.number, title: issue.title, state: "review" });
   }
   return results;

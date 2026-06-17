@@ -4,9 +4,11 @@ import {
   chooseUntriedCandidate,
   isClaimable,
   isRecoverableClaimRaceError,
+  isReviewable,
   labelsForState,
   parseArgs,
   parseIssueNumbers,
+  projectPrFieldValue,
   selectStatusOption,
   stateFromLabels,
 } from "./agent-issue-board.mjs";
@@ -172,6 +174,50 @@ test("claim guard only accepts open agent-ready issues", () => {
     }),
     false,
   );
+});
+
+test("review guard only accepts open agent-active issues", () => {
+  assertEqual(
+    isReviewable({
+      state: "OPEN",
+      labels: [{ name: "agent-active" }],
+    }),
+    true,
+  );
+  assertEqual(
+    isReviewable({
+      state: "OPEN",
+      labels: [{ name: "agent-ready" }],
+    }),
+    false,
+  );
+  assertEqual(
+    isReviewable({
+      state: "OPEN",
+      labels: [{ name: "agent-active" }, { name: "in-pr" }],
+    }),
+    false,
+  );
+  assertEqual(
+    isReviewable({
+      state: "OPEN",
+      labels: [{ name: "agent-active" }, { name: "needs-grooming" }],
+    }),
+    false,
+  );
+  assertEqual(
+    isReviewable({
+      state: "CLOSED",
+      labels: [{ name: "agent-active" }],
+    }),
+    false,
+  );
+});
+
+test("PR project field formatting clears null releases", () => {
+  assertEqual(projectPrFieldValue(984), "#984");
+  assertEqual(projectPrFieldValue(null), null);
+  assertEqual(projectPrFieldValue(undefined), null);
 });
 
 test("claim queue treats stale claim races as recoverable", () => {
