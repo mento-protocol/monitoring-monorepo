@@ -37,6 +37,7 @@ const BASE_POOL = {
   oracleTxHash:
     "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   oracleExpiry: "300",
+  oracleNumReporters: 1,
   lastDeviationRatio: "0.42",
   deviationBreachStartedAt: "0",
   currentOpenBreachPeak: "0",
@@ -139,6 +140,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
             {
               wrappedByPoolId: BASE_POOL.id,
               isDeprecated: true,
+              minimumReports: "2",
             },
           ],
         });
@@ -161,10 +163,61 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       oracleFreshnessWindow: "360",
       tokenDecimalsKnown: true,
       wrappedExchangeDeprecated: true,
+      wrappedExchangeMinimumReports: "2",
       prevMedianPrice: "1120000000000000000000000",
       prevMedianAt: "1713199580",
       currentOpenBreachPeak: "15000",
       currentOpenBreachEntryThreshold: 5000,
+    });
+  });
+
+  it("joins wrapped exchange minimumReports without requiring deprecation", async () => {
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsOracleLineage")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsVpFreshness")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: BASE_POOL.id,
+              oracleFreshnessWindow: "360",
+              tokenDecimalsKnown: true,
+            },
+          ],
+        });
+      }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({
+          BiPoolExchange: [
+            {
+              wrappedByPoolId: BASE_POOL.id,
+              isDeprecated: false,
+              minimumReports: "3",
+            },
+          ],
+        });
+      }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
+      }
+      return Promise.resolve({ Pool: [BASE_POOL] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      oracleFreshnessWindow: "360",
+      tokenDecimalsKnown: true,
+      wrappedExchangeDeprecated: false,
+      wrappedExchangeMinimumReports: "3",
     });
   });
 
@@ -210,6 +263,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       oracleFreshnessWindow: "360",
       tokenDecimalsKnown: true,
       wrappedExchangeDeprecated: true,
+      wrappedExchangeMinimumReports: "0",
     });
   });
 
@@ -242,6 +296,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
             {
               wrappedByPoolId: BASE_POOL.id,
               isDeprecated: true,
+              minimumReports: "2",
             },
           ],
         });
@@ -258,6 +313,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       oracleFreshnessWindow: "360",
       tokenDecimalsKnown: true,
       wrappedExchangeDeprecated: true,
+      wrappedExchangeMinimumReports: "2",
     });
   });
 
@@ -299,6 +355,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       oracleTxHash: "",
       oracleFreshnessWindow: "0",
       wrappedExchangeDeprecated: false,
+      wrappedExchangeMinimumReports: "0",
       prevMedianPrice: "0",
       prevMedianAt: "0",
       lastOracleJumpBps: "3.0000",
@@ -348,6 +405,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       currentOpenBreachEntryThreshold: 0,
       oracleFreshnessWindow: "0",
       wrappedExchangeDeprecated: false,
+      wrappedExchangeMinimumReports: "0",
     });
   });
 
@@ -460,6 +518,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
             {
               wrappedByPoolId: "different-pool-id",
               isDeprecated: true,
+              minimumReports: "2",
             },
           ],
         });
@@ -481,6 +540,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       currentOpenBreachEntryThreshold: 0,
       oracleFreshnessWindow: "0",
       wrappedExchangeDeprecated: false,
+      wrappedExchangeMinimumReports: "0",
     });
   });
 

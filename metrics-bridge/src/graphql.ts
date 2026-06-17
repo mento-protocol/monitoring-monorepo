@@ -38,6 +38,7 @@ export const BRIDGE_POOLS_QUERY = gql`
       oracleOk
       oracleTimestamp
       oracleExpiry
+      oracleNumReporters
       lastOracleReportAt
       medianLive
       lastDeviationRatio
@@ -115,15 +116,16 @@ export const BRIDGE_POOLS_VP_FRESHNESS_QUERY = gql`
   }
 `;
 
-// Optional companion query for deprecated VirtualPool wrappers. A deprecated
+// Optional companion query for wrapped VirtualPool exchange state. A deprecated
 // backing exchange OR factory lifecycle deprecation means the VP is retired,
 // so stale freshness gauges should stop publishing instead of paging on
-// expected inactivity.
+// expected inactivity. `minimumReports` feeds the VP median-validity gate.
 export const BRIDGE_POOLS_VP_EXCHANGE_DEPRECATION_QUERY = gql`
   query BridgePoolsVpExchangeDeprecation {
     BiPoolExchange(where: { wrappedByPoolId: { _is_null: false } }) {
       wrappedByPoolId
       isDeprecated
+      minimumReports
     }
   }
 `;
@@ -157,6 +159,7 @@ type VpFreshnessRow = Pick<
 type VpExchangeDeprecationRow = {
   wrappedByPoolId: string | null;
   isDeprecated: boolean;
+  minimumReports?: string | null;
 };
 type VpLifecycleDeprecationRow = {
   poolId: string;
@@ -194,6 +197,7 @@ const VP_FRESHNESS_DEFAULTS = {
   oracleFreshnessWindow: "0",
   tokenDecimalsKnown: false,
   wrappedExchangeDeprecated: false,
+  wrappedExchangeMinimumReports: "0",
 } as const;
 
 type BridgePoolCompanionResponses = {
@@ -366,7 +370,11 @@ function mergeBridgePoolCompanions({
   );
   const vpFreshnessById = new Map(vpFreshness.Pool.map((p) => [p.id, p]));
   const deprecatedVpPoolIds = new Set<string>();
+  const vpMinimumReportsByPoolId = new Map<string, string>();
   for (const e of vpExchangeDeprecation.BiPoolExchange) {
+    if (e.wrappedByPoolId && e.minimumReports) {
+      vpMinimumReportsByPoolId.set(e.wrappedByPoolId, e.minimumReports);
+    }
     if (e.wrappedByPoolId && e.isDeprecated) {
       deprecatedVpPoolIds.add(e.wrappedByPoolId);
     }
@@ -386,6 +394,9 @@ function mergeBridgePoolCompanions({
       ...oracleTxById.get(p.id),
       ...vpFreshnessById.get(p.id),
       wrappedExchangeDeprecated: deprecatedVpPoolIds.has(p.id),
+      wrappedExchangeMinimumReports:
+        vpMinimumReportsByPoolId.get(p.id) ??
+        VP_FRESHNESS_DEFAULTS.wrappedExchangeMinimumReports,
     })),
   };
 }

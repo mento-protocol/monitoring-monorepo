@@ -69,6 +69,13 @@ describe("updateMetrics", () => {
       await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
     ).toBe(1);
     expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBe(1);
+    expect(
       await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
     ).toBeUndefined();
   });
@@ -102,6 +109,13 @@ describe("updateMetrics", () => {
     expect(
       await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
     ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
   });
 
   it("uses the live VP oracle cursor when median updates lag flat reports", async () => {
@@ -134,6 +148,37 @@ describe("updateMetrics", () => {
     expect(
       await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
     ).toBe(0);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBe(0);
+  });
+
+  it("marks virtual-pool oracle freshness stale when reporters are below minimumReports", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleNumReporters: 2,
+        wrappedExchangeMinimumReports: "3",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBe(0);
   });
 
   it("suppresses virtual-pool oracle freshness for deprecated wrappers", async () => {
@@ -150,6 +195,13 @@ describe("updateMetrics", () => {
     expect(
       await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
     ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
   });
 
   it("skips virtual-pool oracle freshness when the VP window is unknown", async () => {
@@ -165,6 +217,60 @@ describe("updateMetrics", () => {
     expect(
       await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
     ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBe(1);
+  });
+
+  it("skips virtual-pool oracle freshness when minimumReports is unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        wrappedExchangeMinimumReports: "0",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("still publishes invalid median when minimumReports is unknown but medianLive is false", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        medianLive: false,
+        wrappedExchangeMinimumReports: "0",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBe(0);
   });
 
   it("sets oracle_contract_ok to the raw event-time contract flag", async () => {

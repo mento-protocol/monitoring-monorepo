@@ -3,9 +3,14 @@
 # separate from FPMM SortedOracles expiry alerts.
 
 locals {
-  vp_oracle_fresh_prod_promql = "mento_pool_vp_oracle_fresh{chain_name=\"celo\"}"
+  vp_oracle_fresh_prod_promql        = "mento_pool_vp_oracle_fresh{chain_name=\"celo\"}"
+  vp_oracle_median_valid_prod_promql = "mento_pool_vp_oracle_median_valid{chain_name=\"celo\"}"
 
-  vp_oracle_fresh_prod_fx_pause_promql = "(1 - mento_pool_vp_oracle_fresh{chain_name=\"celo\", pair!~\"${local.usd_pegged_pair_regex}\", pair=~\".+/.+\"}) and on() ${local.fx_oracle_pause_gate_promql}"
+  vp_oracle_reset_window_stale_prod_promql = "(1 - ${local.vp_oracle_fresh_prod_promql}) and on(chain_id, pool_id, pair) (${local.vp_oracle_median_valid_prod_promql} == 1)"
+
+  vp_oracle_reset_window_stale_fx_pause_promql = "(1 - mento_pool_vp_oracle_fresh{chain_name=\"celo\", pair!~\"${local.usd_pegged_pair_regex}\", pair=~\".+/.+\"}) and on(chain_id, pool_id, pair) (${local.vp_oracle_median_valid_prod_promql} == 1) and on() ${local.fx_oracle_pause_gate_promql}"
+
+  vp_oracle_median_invalid_prod_promql = "(1 - ${local.vp_oracle_median_valid_prod_promql})"
 }
 
 resource "grafana_rule_group" "vp_oracle_staleness" {
@@ -22,9 +27,9 @@ resource "grafana_rule_group" "vp_oracle_staleness" {
 
     annotations = {
       title            = "VirtualPool Oracle Stale"
-      summary          = "A production VirtualPool oracle report is older than its on-chain reset frequency, so swaps may revert."
+      summary          = "A production VirtualPool oracle is stale or its median is invalid, so swaps may revert."
       resolved_title   = "VirtualPool Oracle Recovered"
-      resolved_summary = "The VirtualPool oracle report is fresh again."
+      resolved_summary = "The VirtualPool oracle report is fresh and median-valid again."
     }
 
     labels = {
@@ -41,7 +46,7 @@ resource "grafana_rule_group" "vp_oracle_staleness" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "(1 - ${local.vp_oracle_fresh_prod_promql}) unless on(chain_id, pool_id, pair) (${local.vp_oracle_fresh_prod_fx_pause_promql})"
+        expr    = "((${local.vp_oracle_reset_window_stale_prod_promql}) unless on(chain_id, pool_id, pair) (${local.vp_oracle_reset_window_stale_fx_pause_promql})) or on(chain_id, pool_id, pair) (${local.vp_oracle_median_invalid_prod_promql})"
         instant = true
       })
     }

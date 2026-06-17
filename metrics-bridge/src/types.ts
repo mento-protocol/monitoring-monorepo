@@ -9,6 +9,7 @@ export interface PoolRow {
   oracleTimestamp: string;
   oracleTxHash: string;
   oracleExpiry: string;
+  oracleNumReporters: number;
   oracleFreshnessWindow: string;
   tokenDecimalsKnown: boolean;
   lastOracleReportAt: string;
@@ -48,6 +49,10 @@ export interface PoolRow {
   // Optional companion state from BiPoolExchange. Deprecated wrappers should
   // not publish stale VP oracle gauges because swaps are expected to stop.
   wrappedExchangeDeprecated: boolean;
+  // Optional companion state from BiPoolExchange. 0 means the bridge could not
+  // join the wrapped exchange config yet, so VP freshness must not publish a
+  // misleading "fresh" sample.
+  wrappedExchangeMinimumReports: string;
 }
 
 export function isVirtualPool(pool: PoolRow): boolean {

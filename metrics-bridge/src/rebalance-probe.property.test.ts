@@ -46,6 +46,7 @@ function eligiblePool(overrides: Partial<PoolRow> = {}): PoolRow {
     oracleTxHash:
       "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     oracleExpiry: "300",
+    oracleNumReporters: 1,
     oracleFreshnessWindow: "0",
     tokenDecimalsKnown: true,
     lastOracleReportAt: "1713200000",
@@ -75,6 +76,7 @@ function eligiblePool(overrides: Partial<PoolRow> = {}): PoolRow {
     rebalancerAddress: "0x0000000000000000000000000000000000000beef",
     wrappedExchangeId: "",
     wrappedExchangeDeprecated: false,
+    wrappedExchangeMinimumReports: "1",
     ...overrides,
   };
 }

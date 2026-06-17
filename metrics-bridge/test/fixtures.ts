@@ -17,6 +17,7 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     oracleTxHash:
       "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     oracleExpiry: "300",
+    oracleNumReporters: 1,
     oracleFreshnessWindow: "0",
     tokenDecimalsKnown: true,
     lastOracleReportAt: "1713200000",
@@ -52,6 +53,7 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     // "" = native FPMM; non-empty = healed VirtualPool. Default to FPMM.
     wrappedExchangeId: "",
     wrappedExchangeDeprecated: false,
+    wrappedExchangeMinimumReports: "1",
     ...overrides,
   };
 }

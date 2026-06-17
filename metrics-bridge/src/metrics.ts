@@ -181,7 +181,13 @@ export const gauges = {
   }),
   vpOracleFresh: new Gauge({
     name: "mento_pool_vp_oracle_fresh",
-    help: "VirtualPool oracle freshness derived from trusted oracleTimestamp, medianLive, and oracleFreshnessWindow (1=fresh, 0=stale). Unknown window or untrusted cursor publishes no series.",
+    help: "VirtualPool oracle usability derived from trusted oracleTimestamp, median validity, and oracleFreshnessWindow (1=fresh and valid, 0=stale or invalid). Unknown window, untrusted cursor, or unknown median validity publishes no series.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  vpOracleMedianValid: new Gauge({
+    name: "mento_pool_vp_oracle_median_valid",
+    help: "VirtualPool median validity from indexed SortedOracles medianLive, active reporter count, and wrapped exchange minimumReports (1=valid, 0=invalid). Unknown wrapped exchange config or untrusted cursor publishes no series.",
     labelNames: poolLabels,
     registers: [register],
   }),
@@ -448,11 +454,40 @@ function recordStatusAndOracleMetrics(
 
 function recordVpOracleMetrics(pool: PoolRow, nowSeconds: number): void {
   if (pool.wrappedExchangeDeprecated) return;
+  const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
+  const labels = poolDisplayLabels(pool, derivedPair);
+  const medianValid = vpOracleMedianValidity(pool);
+  if (medianValid !== null) {
+    gauges.vpOracleMedianValid.set(labels, medianValid);
+  }
   const freshness = vpOracleFreshness(pool, nowSeconds);
   if (freshness === null) return;
-  const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
   warnIfUnknown(pool, derivedPair);
-  gauges.vpOracleFresh.set(poolDisplayLabels(pool, derivedPair), freshness);
+  gauges.vpOracleFresh.set(labels, freshness);
+}
+
+export function vpOracleMedianValidity(
+  pool: Pick<
+    PoolRow,
+    | "medianLive"
+    | "oracleNumReporters"
+    | "tokenDecimalsKnown"
+    | "wrappedExchangeMinimumReports"
+  >,
+): number | null {
+  if (pool.tokenDecimalsKnown !== true) return null;
+  if (!pool.medianLive) return 0;
+  const minimumReports = Number(pool.wrappedExchangeMinimumReports);
+  const oracleNumReporters = Number(pool.oracleNumReporters);
+  if (
+    !Number.isFinite(minimumReports) ||
+    minimumReports <= 0 ||
+    !Number.isFinite(oracleNumReporters) ||
+    oracleNumReporters < 0
+  ) {
+    return null;
+  }
+  return oracleNumReporters >= minimumReports ? 1 : 0;
 }
 
 export function vpOracleFreshness(
@@ -461,11 +496,15 @@ export function vpOracleFreshness(
     | "oracleFreshnessWindow"
     | "oracleTimestamp"
     | "medianLive"
+    | "oracleNumReporters"
     | "tokenDecimalsKnown"
+    | "wrappedExchangeMinimumReports"
   >,
   nowSeconds: number,
 ): number | null {
-  if (pool.tokenDecimalsKnown !== true) return null;
+  const medianValid = vpOracleMedianValidity(pool);
+  if (medianValid === null) return null;
+  if (medianValid === 0) return 0;
   const freshnessWindow = Number(pool.oracleFreshnessWindow);
   const liveReportAt = Number(pool.oracleTimestamp);
   if (
@@ -476,7 +515,6 @@ export function vpOracleFreshness(
   ) {
     return null;
   }
-  if (!pool.medianLive) return 0;
   return nowSeconds - liveReportAt <= freshnessWindow ? 1 : 0;
 }
 
