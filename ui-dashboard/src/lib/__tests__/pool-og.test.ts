@@ -569,4 +569,31 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result).not.toBeNull();
     expect(result!.health).toBe("N/A");
   });
+
+  it("merges VP lifecycle deprecation before computing OG health", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const virtualPool = makeDetailPool({
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      oracleTimestamp: String(nowSec - 600),
+      oracleFreshnessWindow: "300",
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolVpDeprecationExt")) {
+        return { BiPoolExchange: [] };
+      }
+      if (q.includes("PoolVpLifecycleDeprecationExt")) {
+        return {
+          VirtualPoolLifecycle: [{ id: "deprecated", poolId: POOL_ID }],
+        };
+      }
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [virtualPool] };
+    });
+
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("N/A");
+  });
 });

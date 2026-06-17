@@ -14,6 +14,8 @@ export type HealthStatus =
 
 import { isWeekend, tradingSecondsInRange } from "./weekend";
 import { isVirtualPool } from "./types";
+import { isUsdPegged } from "./tokens";
+import { chainTokenSymbols } from "@mento-protocol/monitoring-config/tokens";
 import {
   DEVIATION_TOLERANCE_RATIO,
   DEVIATION_CRITICAL_RATIO,
@@ -53,12 +55,19 @@ interface PoolHealthState {
   // Both feed `isVirtualPool`, which gates the "N/A" branch below.
   wrappedExchangeId?: string | null | undefined;
   wrappedExchangeDeprecated?: boolean | undefined;
+  token0?: string | null | undefined;
+  token1?: string | null | undefined;
   oracleOk?: boolean | undefined;
   oracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
   medianLive?: boolean | undefined;
   oracleExpiry?: string | undefined;
   oracleFreshnessWindow?: string | undefined;
+  // True once the indexer has read the VP's token decimals and the
+  // self-healing freshness cursor is trustworthy. False/missing means the
+  // VP oracle timestamp can be held at an older value while fresh reports
+  // still arrive, so VP staleness must degrade to N/A instead of paging.
+  tokenDecimalsKnown?: boolean | undefined;
   priceDifference?: string | undefined;
   degenerateReserves?: boolean | undefined;
   rebalanceThreshold?: number | undefined;
@@ -185,9 +194,18 @@ export const effectiveThreshold = (pool: {
 };
 
 export function getOracleStalenessThreshold(
-  pool: { oracleExpiry?: string | undefined },
+  pool: {
+    source?: string | undefined;
+    wrappedExchangeId?: string | null | undefined;
+    oracleExpiry?: string | undefined;
+    oracleFreshnessWindow?: string | undefined;
+  },
   chainId?: number,
 ): number {
+  if (isVirtualPool(pool)) {
+    const vpWindow = Number(pool.oracleFreshnessWindow ?? "0");
+    if (Number.isFinite(vpWindow) && vpWindow > 0) return vpWindow;
+  }
   const indexed = Number(pool.oracleExpiry ?? "0");
   if (indexed > 0) return indexed;
   return (
@@ -199,16 +217,35 @@ export function getOracleStalenessThreshold(
 
 export function isOracleFresh(
   pool: {
+    source?: string | undefined;
+    wrappedExchangeId?: string | null | undefined;
     oracleTimestamp?: string | undefined;
     lastOracleReportAt?: string | undefined;
     oracleExpiry?: string | undefined;
+    oracleFreshnessWindow?: string | undefined;
+    tokenDecimalsKnown?: boolean | undefined;
   },
   nowSeconds = Math.floor(Date.now() / 1000),
   chainId?: number,
 ): boolean {
+  if (isVirtualPool(pool) && pool.tokenDecimalsKnown !== true) return true;
   const oracleTs = oracleFreshnessTimestamp(pool);
   const stalenessThreshold = getOracleStalenessThreshold(pool, chainId);
   return oracleTs !== 0 && nowSeconds - oracleTs <= stalenessThreshold;
+}
+
+function isUsdPeggedVirtualPoolPair(
+  pool: {
+    token0?: string | null | undefined;
+    token1?: string | null | undefined;
+  },
+  chainId?: number,
+): boolean {
+  if (chainId === undefined || !pool.token0 || !pool.token1) return false;
+  const symbols = chainTokenSymbols(chainId);
+  const sym0 = symbols[pool.token0.toLowerCase()];
+  const sym1 = symbols[pool.token1.toLowerCase()];
+  return Boolean(sym0 && sym1 && isUsdPegged(sym0) && isUsdPegged(sym1));
 }
 
 function isVirtualPoolOracleStale(
@@ -216,9 +253,11 @@ function isVirtualPoolOracleStale(
     oracleTimestamp?: string | undefined;
     medianLive?: boolean | undefined;
     oracleFreshnessWindow?: string | undefined;
+    tokenDecimalsKnown?: boolean | undefined;
   },
   nowSeconds: number,
 ): boolean {
+  if (pool.tokenDecimalsKnown !== true) return false;
   const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
   const liveReportAt = Number(pool.oracleTimestamp ?? "0");
   if (
@@ -269,7 +308,9 @@ export function computeHealthStatus(
   if (isVirtualPool(pool)) {
     if (pool.wrappedExchangeDeprecated === true) return "N/A";
     if (!isVirtualPoolOracleStale(pool, nowSeconds)) return "N/A";
-    return isWeekend() ? "WEEKEND" : "CRITICAL";
+    return isWeekend() && !isUsdPeggedVirtualPoolPair(pool, chainId)
+      ? "WEEKEND"
+      : "CRITICAL";
   }
   // Oracle-staleness is an alertable freshness incident — keep it ABOVE
   // the hasHealthData gate so a stale-oracle pool doesn't get masked into
@@ -626,12 +667,15 @@ export function computeEffectiveStatus(
   pool: {
     source?: string | undefined;
     wrappedExchangeId?: string | null | undefined;
+    token0?: string | null | undefined;
+    token1?: string | null | undefined;
     oracleOk?: boolean | undefined;
     oracleTimestamp?: string | undefined;
     medianLive?: boolean | undefined;
     oracleExpiry?: string | undefined;
     oracleFreshnessWindow?: string | undefined;
     wrappedExchangeDeprecated?: boolean | undefined;
+    tokenDecimalsKnown?: boolean | undefined;
     priceDifference?: string | undefined;
     rebalanceThreshold?: number | undefined;
     rebalanceThresholdAbove?: number | undefined;

@@ -16,6 +16,7 @@ import { useGQL } from "@/lib/graphql";
 import {
   POOL_THRESHOLDS_KNOWN_EXT,
   POOL_VP_DEPRECATION_EXT,
+  POOL_VP_LIFECYCLE_DEPRECATION_EXT,
   POOL_VP_ORACLE_FRESHNESS_EXT,
 } from "@/lib/queries";
 import type { Pool } from "@/lib/types";
@@ -41,6 +42,57 @@ type VpDeprecationExtRow = {
   id: string;
   isDeprecated?: boolean;
 };
+
+type VpLifecycleDeprecationExtRow = {
+  id: string;
+  poolId?: string;
+};
+
+function mergePoolExtensions(
+  rawPool: Pool | null,
+  args: {
+    thresholdsExt: ThresholdsExtRow | null;
+    vpFreshnessExt: VpOracleFreshnessExtRow | null;
+    vpDeprecationExt: VpDeprecationExtRow | null;
+    vpLifecycleDeprecationExt: VpLifecycleDeprecationExtRow | null;
+  },
+): Pool | null {
+  if (!rawPool) return null;
+  const {
+    thresholdsExt,
+    vpFreshnessExt,
+    vpDeprecationExt,
+    vpLifecycleDeprecationExt,
+  } = args;
+  const wrappedExchangeDeprecated =
+    vpDeprecationExt?.isDeprecated === true ||
+    vpLifecycleDeprecationExt !== null;
+  return {
+    ...rawPool,
+    ...(thresholdsExt
+      ? {
+          rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
+          rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
+          rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
+          tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
+          degenerateReserves: thresholdsExt.degenerateReserves,
+          breakerTripped: thresholdsExt.breakerTripped,
+        }
+      : {}),
+    ...(vpFreshnessExt
+      ? {
+          lastOracleReportAt: vpFreshnessExt.lastOracleReportAt,
+          medianLive: vpFreshnessExt.medianLive,
+          oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
+        }
+      : {}),
+    ...(wrappedExchangeDeprecated ? { wrappedExchangeDeprecated } : {}),
+  };
+}
+
+function anyLoading(...states: boolean[]): boolean {
+  return states.some(Boolean);
+}
 
 export type PoolWithThresholdsResult = {
   pool: Pool | null;
@@ -89,39 +141,38 @@ export function usePoolWithThresholds(
     timeoutMs: 5000,
   });
   const vpDeprecationExt = vpDeprecationData?.BiPoolExchange?.[0] ?? null;
+  const {
+    data: vpLifecycleDeprecationData,
+    isLoading: vpLifecycleDeprecationLoading,
+  } = useGQL<{
+    VirtualPoolLifecycle: VpLifecycleDeprecationExtRow[];
+  }>(POOL_VP_LIFECYCLE_DEPRECATION_EXT, { id: poolId, chainId }, undefined, {
+    timeoutMs: 5000,
+  });
+  const vpLifecycleDeprecationExt =
+    vpLifecycleDeprecationData?.VirtualPoolLifecycle?.[0] ?? null;
   const pool = useMemo<Pool | null>(() => {
-    if (!rawPool) return null;
-    if (!thresholdsExt && !vpFreshnessExt && !vpDeprecationExt) return rawPool;
-    return {
-      ...rawPool,
-      ...(thresholdsExt
-        ? {
-            rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
-            rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
-            rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
-            tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
-            degenerateReserves: thresholdsExt.degenerateReserves,
-            breakerTripped: thresholdsExt.breakerTripped,
-          }
-        : {}),
-      ...(vpFreshnessExt
-        ? {
-            lastOracleReportAt: vpFreshnessExt.lastOracleReportAt,
-            medianLive: vpFreshnessExt.medianLive,
-            oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
-          }
-        : {}),
-      ...(vpDeprecationExt
-        ? {
-            wrappedExchangeDeprecated: vpDeprecationExt.isDeprecated,
-          }
-        : {}),
-    };
-  }, [rawPool, thresholdsExt, vpFreshnessExt, vpDeprecationExt]);
+    return mergePoolExtensions(rawPool, {
+      thresholdsExt,
+      vpFreshnessExt,
+      vpDeprecationExt,
+      vpLifecycleDeprecationExt,
+    });
+  }, [
+    rawPool,
+    thresholdsExt,
+    vpFreshnessExt,
+    vpDeprecationExt,
+    vpLifecycleDeprecationExt,
+  ]);
   return {
     pool,
-    thresholdsLoading:
-      thresholdsLoading || vpFreshnessLoading || vpDeprecationLoading,
+    thresholdsLoading: anyLoading(
+      thresholdsLoading,
+      vpFreshnessLoading,
+      vpDeprecationLoading,
+      vpLifecycleDeprecationLoading,
+    ),
     thresholdsError,
   };
 }

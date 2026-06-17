@@ -143,6 +143,7 @@ describe("HealthPanel weekend mode", () => {
         "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
       oracleTimestamp: STALE_TS,
       oracleFreshnessWindow: "300",
+      tokenDecimalsKnown: true,
     };
     const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
 
@@ -162,6 +163,7 @@ describe("HealthPanel weekend mode", () => {
         "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
       oracleTimestamp: STALE_TS,
       oracleFreshnessWindow: "300",
+      tokenDecimalsKnown: true,
     };
     const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
 

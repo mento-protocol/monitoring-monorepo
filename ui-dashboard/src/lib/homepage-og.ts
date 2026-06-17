@@ -17,6 +17,7 @@ import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
 import {
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
   ALL_POOLS_VP_DEPRECATION,
+  ALL_POOLS_VP_LIFECYCLE_DEPRECATION,
   ALL_POOLS_VP_ORACLE_FRESHNESS,
   ALL_POOLS_WITH_HEALTH,
   // OG-specific homepage daily snapshot query. Lives in queries/pools.ts so
@@ -126,10 +127,16 @@ type VpDeprecationRow = {
   wrappedByPoolId?: string;
   isDeprecated?: boolean;
 };
+type VpLifecycleDeprecationRow = {
+  poolId?: string;
+};
 type SettledRows<T> = PromiseSettledResult<{ Pool: T[] }>;
 type SettledVpFreshnessRows = SettledRows<VpFreshnessRow>;
 type SettledVpDeprecationRows = PromiseSettledResult<{
   BiPoolExchange: VpDeprecationRow[];
+}>;
+type SettledVpLifecycleDeprecationRows = PromiseSettledResult<{
+  VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
 }>;
 
 async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
@@ -141,6 +148,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     thresholdsResult,
     vpFreshnessResult,
     vpDeprecationResult,
+    vpLifecycleDeprecationResult,
   } = await requestChainPoolInputs(client, network);
 
   if (poolsResult.status !== "fulfilled") {
@@ -152,6 +160,7 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     thresholdsResult,
     vpFreshnessResult,
     vpDeprecationResult,
+    vpLifecycleDeprecationResult,
   });
 
   if (pools.length === 0) {
@@ -229,6 +238,7 @@ async function requestChainPoolInputs(
     thresholdsResult,
     vpFreshnessResult,
     vpDeprecationResult,
+    vpLifecycleDeprecationResult,
   ] = await Promise.allSettled([
     client.request<{ Pool: Pool[] }>({
       document: ALL_POOLS_WITH_HEALTH,
@@ -250,12 +260,20 @@ async function requestChainPoolInputs(
       variables: { chainId: network.chainId },
       signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
     }),
+    client.request<{
+      VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
+    }>({
+      document: ALL_POOLS_VP_LIFECYCLE_DEPRECATION,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
   ]);
   return {
     poolsResult,
     thresholdsResult,
     vpFreshnessResult,
     vpDeprecationResult,
+    vpLifecycleDeprecationResult,
   };
 }
 
@@ -446,6 +464,7 @@ function mergeHomepagePoolExtensions(
     thresholdsResult: SettledRows<ThresholdsRow>;
     vpFreshnessResult: SettledVpFreshnessRows;
     vpDeprecationResult: SettledVpDeprecationRows;
+    vpLifecycleDeprecationResult: SettledVpLifecycleDeprecationRows;
   },
 ): Pool[] {
   return mergeHomepageVpDeprecation(
@@ -454,6 +473,7 @@ function mergeHomepagePoolExtensions(
       results.vpFreshnessResult,
     ),
     results.vpDeprecationResult,
+    results.vpLifecycleDeprecationResult,
   );
 }
 
@@ -501,17 +521,28 @@ function mergeHomepageVpFreshness(
 function mergeHomepageVpDeprecation(
   pools: Pool[],
   result: SettledVpDeprecationRows,
+  lifecycleResult: SettledVpLifecycleDeprecationRows,
 ): Pool[] {
-  if (result.status !== "fulfilled") return pools;
-  const byPoolId = new Map<string, VpDeprecationRow>();
-  for (const row of result.value.BiPoolExchange ?? []) {
-    if (row.wrappedByPoolId) byPoolId.set(row.wrappedByPoolId, row);
+  if (result.status !== "fulfilled" && lifecycleResult.status !== "fulfilled") {
+    return pools;
+  }
+  const deprecatedPoolIds = new Set<string>();
+  if (result.status === "fulfilled") {
+    for (const row of result.value.BiPoolExchange ?? []) {
+      if (row.wrappedByPoolId && row.isDeprecated) {
+        deprecatedPoolIds.add(row.wrappedByPoolId);
+      }
+    }
+  }
+  if (lifecycleResult.status === "fulfilled") {
+    for (const row of lifecycleResult.value.VirtualPoolLifecycle ?? []) {
+      if (row.poolId) deprecatedPoolIds.add(row.poolId);
+    }
   }
   return pools.map((pool) => {
-    const ext = byPoolId.get(pool.id);
-    return ext == null
-      ? pool
-      : { ...pool, wrappedExchangeDeprecated: ext.isDeprecated };
+    return deprecatedPoolIds.has(pool.id)
+      ? { ...pool, wrappedExchangeDeprecated: true }
+      : pool;
   });
 }
 

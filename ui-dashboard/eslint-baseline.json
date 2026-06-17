@@ -465,7 +465,7 @@
     "file": "src/lib/health.ts",
     "ruleId": "complexity",
     "message": "Function 'liveHealthCounters' has a complexity of 23. Maximum allowed is 15.",
-    "line": 397,
+    "line": 438,
     "linePreview": "*/ | export function liveHealthCounters( | pool: HealthCounterState,"
   },
   {

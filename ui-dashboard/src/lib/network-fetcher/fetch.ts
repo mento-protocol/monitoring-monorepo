@@ -16,6 +16,7 @@ import {
   ALL_POOLS_HEALTH_CURSOR,
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
   ALL_POOLS_VP_DEPRECATION,
+  ALL_POOLS_VP_LIFECYCLE_DEPRECATION,
   ALL_POOLS_VP_ORACLE_FRESHNESS,
   ALL_POOLS_WITH_HEALTH,
   ALL_OLS_POOLS,
@@ -50,6 +51,7 @@ import type {
   SnapshotPageResult,
 } from "./types";
 import { SNAPSHOT_PAGE_SIZE } from "./constants";
+import { mergeDeprecatedVirtualPools } from "./vp-deprecation";
 
 export { SNAPSHOT_PAGE_SIZE } from "./constants";
 
@@ -729,6 +731,7 @@ export async function fetchNetworkData(
     rebalanceThresholdsKnownResult,
     vpOracleFreshnessResult,
     vpDeprecationResult,
+    vpLifecycleDeprecationResult,
     indexedCdpPoolsResult,
     fallbackStrategiesResult,
   ] = await Promise.allSettled([
@@ -800,6 +803,10 @@ export async function fetchNetworkData(
     timed<{
       BiPoolExchange: { wrappedByPoolId?: string; isDeprecated?: boolean }[];
     }>(ALL_POOLS_VP_DEPRECATION, { chainId: network.chainId }),
+    timed<{ VirtualPoolLifecycle: { poolId?: string }[] }>(
+      ALL_POOLS_VP_LIFECYCLE_DEPRECATION,
+      { chainId: network.chainId },
+    ),
     // CDP badges are Celo-only and come from indexed CdpPool rows. The
     // runtime probe is a non-Celo Reserve fallback and must not produce CDP
     // badges.
@@ -887,22 +894,15 @@ export async function fetchNetworkData(
     });
   }
 
-  if (vpDeprecationResult.status === "fulfilled") {
-    const deprecatedByPoolId = new Map(
-      (vpDeprecationResult.value.BiPoolExchange ?? []).flatMap((row) =>
-        row.wrappedByPoolId ? [[row.wrappedByPoolId, row] as const] : [],
-      ),
-    );
-    pools = pools.map((p) => {
-      const r = deprecatedByPoolId.get(p.id);
-      return r == null
-        ? p
-        : {
-            ...p,
-            wrappedExchangeDeprecated: r.isDeprecated,
-          };
-    });
-  }
+  pools = mergeDeprecatedVirtualPools(
+    pools,
+    vpDeprecationResult.status === "fulfilled"
+      ? (vpDeprecationResult.value.BiPoolExchange ?? [])
+      : [],
+    vpLifecycleDeprecationResult.status === "fulfilled"
+      ? (vpLifecycleDeprecationResult.value.VirtualPoolLifecycle ?? [])
+      : [],
+  );
 
   const rates = buildOracleRateMap(pools, network);
 

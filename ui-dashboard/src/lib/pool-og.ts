@@ -29,6 +29,7 @@ import {
   POOL_OG_DAILY_SNAPSHOTS,
   POOL_THRESHOLDS_KNOWN_EXT,
   POOL_VP_DEPRECATION_EXT,
+  POOL_VP_LIFECYCLE_DEPRECATION_EXT,
   POOL_VP_ORACLE_FRESHNESS_EXT,
 } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
@@ -115,6 +116,7 @@ export async function fetchPoolOgDataUncached(
     thresholdsResult,
     vpFreshnessResult,
     vpDeprecationResult,
+    vpLifecycleDeprecationResult,
   } = await requestPoolOgInputs(client, {
     poolId,
     chainId,
@@ -129,6 +131,7 @@ export async function fetchPoolOgDataUncached(
     thresholdsResult,
     vpFreshnessResult,
     vpDeprecationResult,
+    vpLifecycleDeprecationResult,
   );
 
   return buildPoolOgData({
@@ -431,10 +434,17 @@ type PoolOgVpFreshnessExtRow = {
 
 type PoolOgSettled<T> = PromiseSettledResult<{ Pool: T[] }>;
 type PoolOgExchangeSettled<T> = PromiseSettledResult<{ BiPoolExchange: T[] }>;
+type PoolOgLifecycleSettled<T> = PromiseSettledResult<{
+  VirtualPoolLifecycle: T[];
+}>;
 
 type PoolOgVpDeprecationExtRow = {
   id: string;
   isDeprecated?: boolean;
+};
+type PoolOgVpLifecycleDeprecationExtRow = {
+  id: string;
+  poolId?: string;
 };
 
 async function requestPoolOgInputs(
@@ -449,6 +459,7 @@ async function requestPoolOgInputs(
     thresholdsResult,
     vpFreshnessResult,
     vpDeprecationResult,
+    vpLifecycleDeprecationResult,
   ] = await Promise.allSettled([
     client.request<{ Pool: Pool[] }>({
       document: POOL_DETAIL_WITH_HEALTH,
@@ -480,6 +491,13 @@ async function requestPoolOgInputs(
       variables: { id: poolId, chainId },
       signal,
     }),
+    client.request<{
+      VirtualPoolLifecycle: PoolOgVpLifecycleDeprecationExtRow[];
+    }>({
+      document: POOL_VP_LIFECYCLE_DEPRECATION_EXT,
+      variables: { id: poolId, chainId },
+      signal,
+    }),
   ]);
   return {
     detailResult,
@@ -488,6 +506,7 @@ async function requestPoolOgInputs(
     thresholdsResult,
     vpFreshnessResult,
     vpDeprecationResult,
+    vpLifecycleDeprecationResult,
   };
 }
 
@@ -501,15 +520,28 @@ function firstSettledExchange<T>(result: PoolOgExchangeSettled<T>): T | null {
     : null;
 }
 
+function firstSettledLifecycle<T>(result: PoolOgLifecycleSettled<T>): T | null {
+  return result.status === "fulfilled"
+    ? (result.value.VirtualPoolLifecycle?.[0] ?? null)
+    : null;
+}
+
 function mergePoolOgExtensions(
   rawPool: Pool,
   thresholdsResult: PoolOgSettled<PoolOgThresholdsExtRow>,
   vpFreshnessResult: PoolOgSettled<PoolOgVpFreshnessExtRow>,
   vpDeprecationResult: PoolOgExchangeSettled<PoolOgVpDeprecationExtRow>,
+  vpLifecycleDeprecationResult: PoolOgLifecycleSettled<PoolOgVpLifecycleDeprecationExtRow>,
 ): Pool {
   const ext = firstSettledPool(thresholdsResult);
   const vpFreshnessExt = firstSettledPool(vpFreshnessResult);
   const vpDeprecationExt = firstSettledExchange(vpDeprecationResult);
+  const vpLifecycleDeprecationExt = firstSettledLifecycle(
+    vpLifecycleDeprecationResult,
+  );
+  const wrappedExchangeDeprecated =
+    vpDeprecationExt?.isDeprecated === true ||
+    vpLifecycleDeprecationExt !== null;
   return {
     ...rawPool,
     ...(ext
@@ -529,9 +561,9 @@ function mergePoolOgExtensions(
           oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
         }
       : {}),
-    ...(vpDeprecationExt
+    ...(wrappedExchangeDeprecated
       ? {
-          wrappedExchangeDeprecated: vpDeprecationExt.isDeprecated,
+          wrappedExchangeDeprecated,
         }
       : {}),
   };

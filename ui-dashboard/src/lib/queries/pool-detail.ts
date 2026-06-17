@@ -88,6 +88,22 @@ export const POOL_VP_DEPRECATION_EXT = `
   }
 `;
 
+export const POOL_VP_LIFECYCLE_DEPRECATION_EXT = `
+  query PoolVpLifecycleDeprecationExt($id: String!, $chainId: Int!) {
+    VirtualPoolLifecycle(
+      where: {
+        poolId: { _eq: $id }
+        chainId: { _eq: $chainId }
+        action: { _eq: "DEPRECATED" }
+      }
+      limit: 1
+    ) {
+      id
+      poolId
+    }
+  }
+`;
+
 // Isolated from POOL_DETAIL_WITH_HEALTH (same rationale as POOL_BREACH_ROLLUP):
 // new indexer field, hosted Hasura rejects it during the deploy+resync window,
 // so the page survives and the reward tile degrades to "—".

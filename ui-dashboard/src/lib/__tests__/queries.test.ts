@@ -9,6 +9,7 @@ const EXPECTED_EXPORT_NAMES = [
   "ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN",
   "ALL_POOLS_VP_ORACLE_FRESHNESS",
   "ALL_POOLS_VP_DEPRECATION",
+  "ALL_POOLS_VP_LIFECYCLE_DEPRECATION",
   "ORACLE_RATES",
   "RECENT_SWAPS",
   "POOL_SWAPS",
@@ -28,6 +29,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_THRESHOLDS_KNOWN_EXT",
   "POOL_VP_ORACLE_FRESHNESS_EXT",
   "POOL_VP_DEPRECATION_EXT",
+  "POOL_VP_LIFECYCLE_DEPRECATION_EXT",
   "POOL_CONFIG_EXT",
   "POOL_RATE_FEED_EXT",
   "POOL_V2_EXCHANGE",
@@ -228,10 +230,29 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_VP_DEPRECATION).toContain("wrappedByPoolId");
     expect(queries.ALL_POOLS_VP_DEPRECATION).toContain("isDeprecated");
     expect(queries.ALL_POOLS_VP_DEPRECATION).not.toContain(
+      "VirtualPoolLifecycle",
+    );
+    expect(queries.ALL_POOLS_VP_DEPRECATION).not.toContain(
       "lastOracleReportAt",
     );
     expect(queries.ALL_POOLS_VP_DEPRECATION).not.toContain("medianLive");
     expect(queries.ALL_POOLS_VP_DEPRECATION).not.toContain(
+      "oracleFreshnessWindow",
+    );
+  });
+
+  it("ALL_POOLS_VP_LIFECYCLE_DEPRECATION isolates factory-deprecated VP state", () => {
+    expect(queries.ALL_POOLS_VP_LIFECYCLE_DEPRECATION).toContain(
+      "VirtualPoolLifecycle",
+    );
+    expect(queries.ALL_POOLS_VP_LIFECYCLE_DEPRECATION).toContain(
+      'action: { _eq: "DEPRECATED" }',
+    );
+    expect(queries.ALL_POOLS_VP_LIFECYCLE_DEPRECATION).toContain("poolId");
+    expect(queries.ALL_POOLS_VP_LIFECYCLE_DEPRECATION).not.toContain(
+      "BiPoolExchange",
+    );
+    expect(queries.ALL_POOLS_VP_LIFECYCLE_DEPRECATION).not.toContain(
       "oracleFreshnessWindow",
     );
   });
@@ -283,10 +304,30 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_VP_DEPRECATION_EXT).toContain("wrappedByPoolId");
     expect(queries.POOL_VP_DEPRECATION_EXT).toContain("isDeprecated");
     expect(queries.POOL_VP_DEPRECATION_EXT).not.toContain(
+      "VirtualPoolLifecycle",
+    );
+    expect(queries.POOL_VP_DEPRECATION_EXT).not.toContain(
       "referenceRateFeedID",
     );
     expect(queries.POOL_VP_DEPRECATION_EXT).toContain("$id: String!");
     expect(queries.POOL_VP_DEPRECATION_EXT).toContain("$chainId: Int!");
+  });
+
+  it("POOL_VP_LIFECYCLE_DEPRECATION_EXT isolates factory-deprecated wrapper state", () => {
+    expect(queries.POOL_VP_LIFECYCLE_DEPRECATION_EXT).toContain(
+      "VirtualPoolLifecycle",
+    );
+    expect(queries.POOL_VP_LIFECYCLE_DEPRECATION_EXT).toContain(
+      'action: { _eq: "DEPRECATED" }',
+    );
+    expect(queries.POOL_VP_LIFECYCLE_DEPRECATION_EXT).toContain("poolId");
+    expect(queries.POOL_VP_LIFECYCLE_DEPRECATION_EXT).not.toContain(
+      "BiPoolExchange",
+    );
+    expect(queries.POOL_VP_LIFECYCLE_DEPRECATION_EXT).toContain("$id: String!");
+    expect(queries.POOL_VP_LIFECYCLE_DEPRECATION_EXT).toContain(
+      "$chainId: Int!",
+    );
   });
 
   it("ALL_POOLS_BREACH_ROLLUP is isolated (rationale: phased schema rollout)", () => {

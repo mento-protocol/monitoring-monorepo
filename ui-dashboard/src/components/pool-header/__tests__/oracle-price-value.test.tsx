@@ -148,6 +148,26 @@ describe("OraclePriceValue", () => {
     expect(html).toContain("· stale");
   });
 
+  it("uses the VirtualPool reset window for stale coloring and expiry copy", () => {
+    const ts340 = String(Math.floor(Date.now() / 1000) - 340);
+    const pool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: ts340,
+      oracleExpiry: "300",
+      oracleFreshnessWindow: "360",
+      tokenDecimalsKnown: true,
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+    expect(html).toContain("/ 6m expiry");
+    expect(html).not.toContain("· stale");
+    expect(html).not.toContain("text-red-400");
+  });
+
   it("uses oracleTimestamp for freshness when lastOracleReportAt is older", () => {
     const staleLiveTs = String(Math.floor(Date.now() / 1000) - 3600);
     const freshRawTs = String(Math.floor(Date.now() / 1000) - 60);
