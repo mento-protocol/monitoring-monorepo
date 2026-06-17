@@ -15,6 +15,17 @@ queue is:
 is:issue is:open label:agent-ready -label:agent-active -label:in-pr
 ```
 
+The repo pilot workboard is:
+
+```text
+https://github.com/orgs/mento-protocol/projects/12
+```
+
+Labels remain the source of truth. The Project board is a visibility layer that
+the repo helper keeps in sync. `needs-grooming` issues project to
+`Needs Grooming`, not `Blocked`; reserve `Blocked` for work that is otherwise
+ready but waiting on an external dependency or explicit human decision.
+
 `BACKLOG.md` is transition storage only. When an item is migrated, the active
 task should live in one issue, not in both places.
 
@@ -45,15 +56,44 @@ Routing labels:
 1. Create or migrate the issue with the Agent Task issue form.
 2. Add routing/risk labels and exactly one state label.
 3. Put ready issues in `agent-ready`; put unclear issues in `needs-grooming`.
-4. When an agent starts work, remove `agent-ready` and add `agent-active` before
-   substantive edits.
-5. When opening a PR, remove `agent-active` and add `in-pr`.
+4. When an agent starts work, run `pnpm issue:claim --count <n> --agent <name>`
+   before substantive edits. The helper removes `agent-ready`, adds
+   `agent-active`, adds the issue to Project #12, moves the Project item to
+   `In Progress`, and posts a claim comment.
+5. When opening a PR, run `pnpm issue:review --pr <pr> --issue <issue>` for
+   every fully or partially represented issue. The helper removes
+   `agent-active`, adds `in-pr`, and moves the Project item into review when
+   the Project has an `In Review` status option. With the default GitHub status
+   options, it falls back to `In Progress`.
 6. On merge, GitHub closes issues referenced with closing keywords.
-7. If the PR closes unmerged, remove `in-pr` and restore `agent-ready` only when
-   the remaining work is still clear; otherwise use `needs-grooming`.
+7. If the PR closes unmerged, run `pnpm issue:release --issue <issue>` and
+   restore `agent-ready` only when the remaining work is still clear; otherwise
+   run `pnpm issue:release --issue <issue> --needs-grooming`.
 
 For partial work, keep the issue open. Remove `in-pr` after merge and set
 `agent-ready` or `needs-grooming` based on the remaining acceptance criteria.
+
+## Workboard Commands
+
+```bash
+pnpm issue:claim --count 3 --agent codex
+pnpm issue:claim --issue 901 --agent claude
+pnpm issue:review --pr 123 --issue 901
+pnpm issue:release --issue 901
+pnpm issue:release --issue 901 --needs-grooming
+pnpm issue:board sync
+pnpm issue:board:test
+```
+
+`pnpm issue:claim` can claim from the live ready queue or claim explicit issue
+numbers. `pnpm issue:review` can infer issues from `closingIssuesReferences`
+when a PR uses closing keywords, but agents should pass explicit `--issue`
+arguments when the PR uses `Refs` or has mixed complete/partial scope.
+
+The helper populates optional Project fields named `Agent`, `Branch`,
+`Claim ID`, `Claimed At`, and `PR` when those fields exist. Missing optional
+fields are ignored so a fresh Project with only the default `Status` field still
+works.
 
 ## PR Body Rules
 
