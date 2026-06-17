@@ -789,6 +789,7 @@ describe("BiPoolManager handlers", () => {
         exchangeId: EXCHANGE_ID,
       });
       mockVpTokenDecimalsScaling();
+      _setMockNumReporters(CHAIN_ID, FEED_ID, 2);
 
       let mockDb = MockDb.createMockDb();
       // Step 1: ExchangeCreated seeds BiPoolExchange (asset0, asset1, feedID)
@@ -829,6 +830,7 @@ describe("BiPoolManager handlers", () => {
             wrappedExchangeId?: string;
             referenceRateFeedID: string;
             oracleFreshnessWindow: bigint;
+            oracleNumReporters: number;
           }
         | undefined;
       assert.ok(pool);
@@ -844,6 +846,7 @@ describe("BiPoolManager handlers", () => {
       // Side-effect of the same heal path: feedID also mirrors over.
       assert.equal(pool!.referenceRateFeedID, FEED_ID);
       assert.equal(pool!.oracleFreshnessWindow, 360n);
+      assert.equal(pool!.oracleNumReporters, 2);
     });
 
     it("repairs already-linked VirtualPools whose oracle freshness window is still unknown", async function () {

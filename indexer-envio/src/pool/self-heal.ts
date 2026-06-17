@@ -215,6 +215,7 @@ export async function selfHealWrappedExchangeId(
     wrappedExchangeId: result.exchangeId,
     referenceRateFeedID: healed.feedId,
     oracleFreshnessWindow: healed.oracleFreshnessWindow,
+    oracleNumReporters: healed.oracleNumReporters,
     token0: healed.token0,
     token1: healed.token1,
     token0Decimals: healed.token0Decimals,
@@ -225,20 +226,27 @@ export async function selfHealWrappedExchangeId(
 
 type MirrorVirtualPoolOracleConfigArgs = {
   poolId: string;
+  pool?: Pool;
   feedId: string;
   freshnessWindow: bigint;
   blockNumber: bigint;
   blockTimestamp: bigint;
 };
 
+type MirroredVirtualPoolOracleConfig = {
+  feedId: string;
+  oracleFreshnessWindow: bigint;
+  oracleNumReporters: number;
+};
+
 export async function mirrorVirtualPoolOracleConfig(
   context: { Pool: PoolContext["Pool"]; effect: EffectCaller },
   args: MirrorVirtualPoolOracleConfigArgs,
-): Promise<void> {
+): Promise<MirroredVirtualPoolOracleConfig | null> {
   const { poolId, feedId, freshnessWindow, blockNumber, blockTimestamp } = args;
-  if (!feedId || feedId === ZERO_ADDRESS) return;
-  const pool = await context.Pool.get(poolId);
-  if (!pool) return;
+  if (!feedId || feedId === ZERO_ADDRESS) return null;
+  const pool = args.pool ?? (await context.Pool.get(poolId));
+  if (!pool) return null;
   const nextFreshnessWindow = preferPositiveFreshnessWindow(
     pool.oracleFreshnessWindow,
     freshnessWindow,
@@ -254,21 +262,29 @@ export async function mirrorVirtualPoolOracleConfig(
       : null;
   const nextOracleNumReporters =
     numReporters ?? (feedChanged ? 0 : pool.oracleNumReporters);
+  const mirrored = {
+    feedId,
+    oracleFreshnessWindow: nextFreshnessWindow,
+    oracleNumReporters: nextOracleNumReporters,
+  };
   if (
     pool.referenceRateFeedID === feedId &&
     pool.oracleFreshnessWindow === nextFreshnessWindow &&
     pool.oracleNumReporters === nextOracleNumReporters
   ) {
-    return;
+    return mirrored;
   }
-  context.Pool.set({
-    ...pool,
-    referenceRateFeedID: feedId,
-    oracleFreshnessWindow: nextFreshnessWindow,
-    oracleNumReporters: nextOracleNumReporters,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  });
+  if (!args.pool) {
+    context.Pool.set({
+      ...pool,
+      referenceRateFeedID: feedId,
+      oracleFreshnessWindow: nextFreshnessWindow,
+      oracleNumReporters: nextOracleNumReporters,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    });
+  }
+  return mirrored;
 }
 
 function preferPositiveFreshnessWindow(
@@ -483,6 +499,13 @@ async function hasCompleteWrappedExchangeLink(
   ) {
     return false;
   }
+  if (
+    existing.referenceRateFeedID !== ZERO_ADDRESS &&
+    existing.minimumReports > 0n &&
+    pool.oracleNumReporters <= 0
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -553,6 +576,7 @@ function isWrappedExchangeConfigStub(exchange: BiPoolExchange): boolean {
 type WrappedExchangeMirrorState = VpTokenBackfillState & {
   feedId: string;
   oracleFreshnessWindow: bigint;
+  oracleNumReporters: number;
 };
 
 async function mirrorWrappedExchangeConfig(
@@ -575,6 +599,7 @@ async function mirrorWrappedExchangeConfig(
     token1Decimals: pool.token1Decimals,
     fetchedDec0: false,
     fetchedDec1: false,
+    oracleNumReporters: pool.oracleNumReporters,
   };
   if (!exchange) return state;
   if (exchange.wrappedByPoolId !== pool.id) {
@@ -586,20 +611,25 @@ async function mirrorWrappedExchangeConfig(
       updatedAtTimestamp: blockTimestamp,
     });
   }
-  await mirrorVirtualPoolOracleConfig(context, {
+  const mirrored = await mirrorVirtualPoolOracleConfig(context, {
     poolId: pool.id,
+    pool,
     feedId: exchange.referenceRateFeedID,
     freshnessWindow: exchange.referenceRateResetFrequency,
     blockNumber,
     blockTimestamp,
   });
-  if (exchange.referenceRateFeedID !== ZERO_ADDRESS) {
+  if (mirrored) {
+    state.feedId = mirrored.feedId;
+    state.oracleFreshnessWindow = mirrored.oracleFreshnessWindow;
+    state.oracleNumReporters = mirrored.oracleNumReporters;
+  } else if (exchange.referenceRateFeedID !== ZERO_ADDRESS) {
     state.feedId = exchange.referenceRateFeedID;
+    state.oracleFreshnessWindow = preferPositiveFreshnessWindow(
+      state.oracleFreshnessWindow,
+      exchange.referenceRateResetFrequency,
+    );
   }
-  state.oracleFreshnessWindow = preferPositiveFreshnessWindow(
-    state.oracleFreshnessWindow,
-    exchange.referenceRateResetFrequency,
-  );
   return {
     ...state,
     ...(await backfillMissingVpTokens(context, {
