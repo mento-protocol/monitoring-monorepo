@@ -50,6 +50,11 @@ tldr: rename/remove resources REQUIRE a `moved` block (`deletion_protection = tr
 
 tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) MUST NOT use `paths:`/`paths-ignore:` (skipped runs = pending forever); **advisory** workflows SHOULD use `paths:` to avoid booting a runner on irrelevant PRs (CI-cost control). Deploy jobs MUST gate on `if: github.ref == 'refs/heads/main'`. Third-party actions MUST be SHA-pinned; `node scripts/check-github-action-pins.mjs` enforces this in Code Quality. Concurrency group with `cancel-in-progress: false`. Cache keys MUST include every input that affects the cached output. Full rules in the linked checklist.
 
+### Marker-based setup/cache scripts
+
+- If a setup/cache script uses marker files or input hashes to skip work, the skip condition MUST verify the actual output that downstream commands need, not just the marker. Examples: dependency skips should verify a representative package resolves, Playwright skips should verify the browser executable exists, and codegen skips should verify the generated facade file exists.
+- Write marker files only after every validation step represented by that marker has passed. A failed post-install validation must not leave a fresh marker that makes the next run skip the install or rebuild path.
+
 ### File-size budget
 
 - Source files MUST stay under **600 lines** (soft cap, advisory). If your change would push a file over 600 lines, split it in the same PR — extract sub-components, helpers, or per-domain modules. Don't append "just one more thing" to a file that's already drifting up.
