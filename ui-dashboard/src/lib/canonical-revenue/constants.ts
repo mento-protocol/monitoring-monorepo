@@ -1,0 +1,2 @@
+export const V3_REVENUE_LAUNCH_TIMESTAMP = 1_772_496_000;
+export const V3_REVENUE_LAUNCH_LABEL = "Mar 3, 2026";

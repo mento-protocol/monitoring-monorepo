@@ -55,7 +55,8 @@ Celo Mainnet (42220), Monad Mainnet (143), and Ethereum Mainnet (1) sUSDS reserv
 ### Install
 
 For a fresh clone or manually-created worktree, prefer the setup script so
-workspace deps, postinstall hooks, and Envio codegen are handled in one place:
+workspace deps, postinstall hooks, Playwright Chromium, and Envio codegen are
+handled in one place:
 
 ```bash
 ./scripts/setup.sh

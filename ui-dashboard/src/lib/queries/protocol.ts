@@ -18,9 +18,9 @@
  * `updatedAtTimestamp`, `poolId` — none of which are read here.
  */
 export const POOL_DAILY_FEE_SNAPSHOTS_PAGE = `
-  query PoolDailyFeeSnapshotsPage($chainId: Int!, $limit: Int!, $offset: Int!) {
+  query PoolDailyFeeSnapshotsPage($chainId: Int!, $afterTimestamp: numeric!, $limit: Int!, $offset: Int!) {
     PoolDailyFeeSnapshot(
-      where: { chainId: { _eq: $chainId } }
+      where: { chainId: { _eq: $chainId }, timestamp: { _gte: $afterTimestamp } }
       order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
       offset: $offset

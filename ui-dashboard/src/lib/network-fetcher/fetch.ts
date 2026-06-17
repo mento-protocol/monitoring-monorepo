@@ -290,27 +290,299 @@ export async function fetchPaginatedRows<TRow, TVars>(args: {
   return { rows, truncated: true, error: null };
 }
 
+// Incremental snapshot cache. Pool×day history is immutable except the current
+// (and, across a midnight boundary, previous) UTC day, so after one successful
+// full-history pagination we only re-fetch the mutable tail and merge.
+// Module-scope on purpose (same lifetime contract as `warnedCapKeys`):
+// client-side it spans the SWR poll loop, server-side it spans ISR
+// regenerations on a warm instance.
+/** @internal Exported for test-scope `.clear()`. */
+export const incrementalRowCache = new Map<
+  string,
+  { variablesKey: string; rows: unknown[]; refreshAfterTimestamp: number }
+>();
+
+const poolIdsVariablesKey = (poolIds: readonly string[]) =>
+  [...poolIds].sort().join(",");
+
+type IncrementalSeedArgs = {
+  cacheKey: string;
+  variablesKey: string;
+  rows: unknown[];
+  dedupKey: (row: unknown) => string;
+  timestampOf: (row: unknown) => number;
+  nowMs?: number;
+};
+
+function seedIncrementalRows({
+  cacheKey,
+  variablesKey,
+  rows,
+  dedupKey,
+  timestampOf,
+  nowMs = Date.now(),
+}: IncrementalSeedArgs): void {
+  if (rows.length === 0) return;
+
+  const refreshAfterTimestamp = refreshAfterTimestampForRows(
+    rows,
+    timestampOf,
+    nowMs,
+  );
+  const existing = incrementalRowCache.get(cacheKey);
+  if (existing !== undefined && existing.variablesKey === variablesKey) {
+    const mergedRows = mergeRowsPreservingExisting(
+      existing.rows,
+      rows,
+      dedupKey,
+      timestampOf,
+    );
+    const mergedRefreshAfterTimestamp = refreshAfterTimestampForRows(
+      mergedRows,
+      timestampOf,
+      nowMs,
+    );
+    if (
+      existing.rows.length === mergedRows.length &&
+      existing.refreshAfterTimestamp === mergedRefreshAfterTimestamp
+    ) {
+      return;
+    }
+    incrementalRowCache.set(cacheKey, {
+      variablesKey,
+      rows: mergedRows,
+      refreshAfterTimestamp: mergedRefreshAfterTimestamp,
+    });
+    return;
+  }
+  if (existing !== undefined) return;
+  incrementalRowCache.set(cacheKey, {
+    variablesKey,
+    rows,
+    refreshAfterTimestamp,
+  });
+}
+
+export function seedIncrementalRowCacheFromNetworkData(
+  networkData: readonly NetworkData[],
+): void {
+  for (const data of networkData) {
+    if (
+      data.snapshotsAllDailyError === null &&
+      !data.snapshotsAllDailyTruncated &&
+      data.pools.length > 0
+    ) {
+      seedIncrementalRows({
+        cacheKey: `${data.network.id}:PoolDailySnapshot`,
+        variablesKey: poolIdsVariablesKey(data.pools.map((pool) => pool.id)),
+        rows: data.snapshotsAllDaily,
+        dedupKey: (row) => {
+          const snapshot = row as PoolSnapshotWindow;
+          return `${snapshot.poolId}-${snapshot.timestamp}`;
+        },
+        timestampOf: (row) => Number((row as PoolSnapshotWindow).timestamp),
+      });
+    }
+
+    // Intentionally do not seed `PoolDailyFeeSnapshot`: older fee rows can be
+    // healed later when token metadata resolves, so fee history must keep using
+    // full pagination until the source exposes a version/invalidation cursor.
+  }
+}
+
+const SECONDS_PER_DAY = 86_400;
+
+// Oldest timestamp that can still mutate: today's UTC day bucket, minus one
+// extra day so a poll that crosses midnight still re-fetches the final updates
+// to yesterday's row.
+function mutableDayCutoff(nowMs: number): number {
+  const todayMidnightUtc =
+    Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  return todayMidnightUtc - SECONDS_PER_DAY;
+}
+
+function refreshAfterTimestampForRows<TRow>(
+  rows: readonly TRow[],
+  timestampOf: (row: TRow) => number,
+  nowMs: number,
+): number {
+  const newestIndexedTimestamp = rows.reduce(
+    (newest, row) => Math.max(newest, timestampOf(row)),
+    0,
+  );
+  return Math.min(mutableDayCutoff(nowMs), newestIndexedTimestamp);
+}
+
+function mergeRowsPreservingExisting<TRow>(
+  existingRows: readonly TRow[],
+  incomingRows: readonly TRow[],
+  dedupKey: (row: TRow) => string,
+  timestampOf: (row: TRow) => number,
+): TRow[] {
+  const merged = new Map<string, TRow>();
+  for (const row of existingRows) merged.set(dedupKey(row), row);
+  for (const row of incomingRows) {
+    const key = dedupKey(row);
+    if (!merged.has(key)) merged.set(key, row);
+  }
+  return [...merged.values()].sort(
+    (a, b) =>
+      timestampOf(b) - timestampOf(a) || dedupKey(b).localeCompare(dedupKey(a)),
+  );
+}
+
+function shouldCacheCompleteRows<TRow>(
+  result: PaginatedPageResult<TRow>,
+): boolean {
+  return !result.truncated && result.error === null && result.rows.length > 0;
+}
+
+function surfacedIncrementalError(
+  error: Error | null,
+  surfaceIncrementalError: boolean,
+): Error | null {
+  return surfaceIncrementalError ? error : null;
+}
+
+async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
+  client: GraphQLClient;
+  query: string;
+  responseKey: string;
+  network: string;
+  pageSize: number;
+  /** Serialized non-timestamp variables; a change invalidates the cache. */
+  variablesKey: string;
+  variablesFor: (page: number, afterTimestamp: number) => TVars;
+  dedupKey: (row: TRow) => string;
+  timestampOf: (row: TRow) => number;
+  nowMs?: number;
+  surfaceIncrementalError?: boolean;
+  extra?: Record<string, unknown>;
+}): Promise<PaginatedPageResult<TRow>> {
+  const {
+    client,
+    query,
+    responseKey,
+    network,
+    pageSize,
+    variablesKey,
+    variablesFor,
+    dedupKey,
+    timestampOf,
+    nowMs = Date.now(),
+    surfaceIncrementalError = true,
+    extra,
+  } = args;
+  const cacheKey = `${network}:${responseKey}`;
+  const cached = incrementalRowCache.get(cacheKey);
+  const paginate = (afterTimestamp: number) =>
+    fetchPaginatedRows<TRow, TVars>({
+      client,
+      query,
+      responseKey,
+      network,
+      pageSize,
+      variablesFor: (page) => variablesFor(page, afterTimestamp),
+      dedupKey,
+      ...(extra !== undefined ? { extra } : {}),
+    });
+
+  if (cached === undefined || cached.variablesKey !== variablesKey) {
+    const full = await paginate(0);
+    // Only complete results seed the cache — truncated/errored full fetches
+    // retry the full pagination next cycle, identical to legacy behavior.
+    // Empty complete histories are also left uncached so a backfilling indexer
+    // does not skip newly indexed catch-up days on the next poll.
+    if (shouldCacheCompleteRows(full)) {
+      incrementalRowCache.set(cacheKey, {
+        variablesKey,
+        rows: full.rows,
+        refreshAfterTimestamp: refreshAfterTimestampForRows(
+          full.rows,
+          timestampOf,
+          nowMs,
+        ),
+      });
+    }
+    return full;
+  }
+
+  const cachedRows = cached.rows as TRow[];
+  let tail: PaginatedPageResult<TRow>;
+  try {
+    tail = await paginate(cached.refreshAfterTimestamp);
+  } catch (err) {
+    // First-page failure on the incremental path: degrade to cached history
+    // (mirrors the mid-loop fail-open contract on SNAPSHOT_PAGE_SIZE).
+    const error = err instanceof Error ? err : new Error(String(err));
+    return {
+      rows: cachedRows,
+      truncated: true,
+      error: surfacedIncrementalError(error, surfaceIncrementalError),
+      mutableTailError: error,
+    };
+  }
+
+  const merged = new Map<string, TRow>();
+  for (const row of cachedRows) merged.set(dedupKey(row), row);
+  for (const row of tail.rows) merged.set(dedupKey(row), row);
+  // Keep the legacy newest-first ordering — `fetchNetworkData` reads the LAST
+  // element as the oldest fetched row (`oldestFetchedTs`).
+  const rows = [...merged.values()].sort(
+    (a, b) =>
+      timestampOf(b) - timestampOf(a) || dedupKey(b).localeCompare(dedupKey(a)),
+  );
+
+  if (shouldCacheCompleteRows(tail)) {
+    incrementalRowCache.set(cacheKey, {
+      variablesKey,
+      rows,
+      refreshAfterTimestamp: refreshAfterTimestampForRows(
+        rows,
+        timestampOf,
+        nowMs,
+      ),
+    });
+  }
+
+  return {
+    rows,
+    truncated: tail.truncated,
+    error: surfacedIncrementalError(tail.error, surfaceIncrementalError),
+    mutableTailError:
+      tail.error ??
+      (tail.truncated
+        ? new Error("Snapshot incremental tail pagination truncated")
+        : null),
+  };
+}
+
 /**
  * Daily rollup pagination — ~365 rows/pool/year, so for typical history a
  * few pages cover everything.
  */
-async function fetchAllDailySnapshotPages(
+export async function fetchAllDailySnapshotPages(
   client: GraphQLClient,
   poolIds: string[],
   network: string,
+  nowMs?: number,
 ): Promise<SnapshotPageResult> {
-  return fetchPaginatedRows<PoolSnapshotWindow, unknown>({
+  return fetchPaginatedRowsIncremental<PoolSnapshotWindow, unknown>({
     client,
     query: POOL_DAILY_SNAPSHOTS_ALL,
     responseKey: "PoolDailySnapshot",
     network,
     pageSize: SNAPSHOT_PAGE_SIZE,
-    variablesFor: (page) => ({
+    variablesKey: poolIdsVariablesKey(poolIds),
+    variablesFor: (page, afterTimestamp) => ({
       poolIds,
+      afterTimestamp,
       limit: SNAPSHOT_PAGE_SIZE,
       offset: page * SNAPSHOT_PAGE_SIZE,
     }),
     dedupKey: (s) => `${s.poolId}-${s.timestamp}`,
+    timestampOf: (s) => Number(s.timestamp),
+    ...(nowMs !== undefined ? { nowMs } : {}),
     extra: { poolCount: poolIds.length },
   });
 }
@@ -394,6 +666,7 @@ export async function fetchAllFeeSnapshotPages(
     pageSize: SNAPSHOT_PAGE_SIZE,
     variablesFor: (page) => ({
       chainId,
+      afterTimestamp: 0,
       limit: SNAPSHOT_PAGE_SIZE,
       offset: page * SNAPSHOT_PAGE_SIZE,
     }),
@@ -436,6 +709,7 @@ export async function fetchNetworkData(
 
   const poolIds = pools.map((p) => p.id);
   const fpmmPoolIds = pools.flatMap((p) => (isFpmm(p) ? [p.id] : []));
+  const snapshotTailNowMs = windows.w24h.to * 1000;
 
   const emptySnapshotPage: SnapshotPageResult = {
     rows: [],
@@ -456,7 +730,12 @@ export async function fetchNetworkData(
   ] = await Promise.allSettled([
     fetchAllFeeSnapshotPages(client, network.chainId, network.id),
     shouldQueryPoolSnapshots(poolIds)
-      ? fetchAllDailySnapshotPages(client, poolIds, network.id)
+      ? fetchAllDailySnapshotPages(
+          client,
+          poolIds,
+          network.id,
+          snapshotTailNowMs,
+        )
       : Promise.resolve(emptySnapshotPage),
     // Legacy v2 daily volume rollup (Broker.Swap with `routedViaV3Router=false`).
     // Filtered server-side by chainId — only Celo has a Broker today, but
@@ -655,20 +934,19 @@ export async function fetchNetworkData(
   // `windows.w24h.to` is the caller's snapshot of "now", so deriving
   // todayMidnight from it keeps all three windows consistent with the same
   // clock tick rather than calling Date.now() again.
-  const SECS_PER_DAY = 86400;
   const todayMidnight =
-    Math.floor(windows.w24h.to / SECS_PER_DAY) * SECS_PER_DAY;
+    Math.floor(windows.w24h.to / SECONDS_PER_DAY) * SECONDS_PER_DAY;
   const dw24h: TimeRange = {
     from: todayMidnight,
-    to: todayMidnight + SECS_PER_DAY,
+    to: todayMidnight + SECONDS_PER_DAY,
   };
   const dw7d: TimeRange = {
-    from: todayMidnight - 6 * SECS_PER_DAY,
-    to: todayMidnight + SECS_PER_DAY,
+    from: todayMidnight - 6 * SECONDS_PER_DAY,
+    to: todayMidnight + SECONDS_PER_DAY,
   };
   const dw30d: TimeRange = {
-    from: todayMidnight - 29 * SECS_PER_DAY,
-    to: todayMidnight + SECS_PER_DAY,
+    from: todayMidnight - 29 * SECONDS_PER_DAY,
+    to: todayMidnight + SECONDS_PER_DAY,
   };
 
   const snapshots7d = filterSnapshotsToWindow(snapshotsAllDaily, dw7d);
@@ -691,13 +969,20 @@ export async function fetchNetworkData(
           "Snapshot pagination truncated before reaching the requested window",
         )
       : null);
-  const windowError = (windowFrom: number): Error | null =>
-    paginationIssue !== null && oldestFetchedTs > windowFrom
-      ? paginationIssue
+  const mutableTailIssue: Error | null =
+    snapshotsAllDailyResult.status === "fulfilled"
+      ? (snapshotsAllDailyResult.value.mutableTailError ?? null)
       : null;
-  const snapshotsError = windowError(dw24h.from);
-  const snapshots7dError = windowError(dw7d.from);
-  const snapshots30dError = windowError(dw30d.from);
+  const mutableTailFrom = mutableDayCutoff(snapshotTailNowMs);
+  const windowError = (windowFrom: number, windowTo: number): Error | null =>
+    mutableTailIssue !== null && windowTo > mutableTailFrom
+      ? mutableTailIssue
+      : paginationIssue !== null && oldestFetchedTs > windowFrom
+        ? paginationIssue
+        : null;
+  const snapshotsError = windowError(dw24h.from, dw24h.to);
+  const snapshots7dError = windowError(dw7d.from, dw7d.to);
+  const snapshots30dError = windowError(dw30d.from, dw30d.to);
 
   // fetchAllLpAddressPages deduplicates by address.toLowerCase() internally,
   // so the rows are already unique — no second Set pass needed.

@@ -6,6 +6,7 @@ import type {
   VolumeWindowSnapshot,
   Pool,
   PoolDailyVolumeSnapshot,
+  TraderAllTimeAggregate,
   TraderDailySnapshot,
   TraderPoolDailySnapshot,
   TraderPoolDayMarker,
@@ -38,6 +39,7 @@ function makeContext(): {
   context: VolumeContext;
   store: {
     TraderDailySnapshot: Map<string, TraderDailySnapshot>;
+    TraderAllTimeAggregate: Map<string, TraderAllTimeAggregate>;
     TraderPoolDailySnapshot: Map<string, TraderPoolDailySnapshot>;
     PoolDailyVolumeSnapshot: Map<string, PoolDailyVolumeSnapshot>;
     AggregatorDailySnapshot: Map<string, AggregatorDailySnapshot>;
@@ -49,6 +51,7 @@ function makeContext(): {
 } {
   const store = {
     TraderDailySnapshot: new Map<string, TraderDailySnapshot>(),
+    TraderAllTimeAggregate: new Map<string, TraderAllTimeAggregate>(),
     TraderPoolDailySnapshot: new Map<string, TraderPoolDailySnapshot>(),
     PoolDailyVolumeSnapshot: new Map<string, PoolDailyVolumeSnapshot>(),
     AggregatorDailySnapshot: new Map<string, AggregatorDailySnapshot>(),
@@ -67,9 +70,16 @@ function makeContext(): {
     context: {
       TraderDailySnapshot: {
         ...wrap(store.TraderDailySnapshot),
-        getWhere: async (query: { chainId?: { _eq?: number } }) =>
+        getWhere: async (query: { timestamp: { _gte: bigint } }) =>
           Array.from(store.TraderDailySnapshot.values()).filter(
-            (r) => r.chainId === query.chainId?._eq,
+            (r) => r.timestamp >= query.timestamp._gte,
+          ),
+      },
+      TraderAllTimeAggregate: {
+        ...wrap(store.TraderAllTimeAggregate),
+        getWhere: async (query: { chainId: { _eq: number } }) =>
+          Array.from(store.TraderAllTimeAggregate.values()).filter(
+            (r) => r.chainId === query.chainId._eq,
           ),
       },
       TraderPoolDailySnapshot: wrap(store.TraderPoolDailySnapshot),
@@ -192,6 +202,14 @@ describe("applyVolumeSnapshots", () => {
     assert.equal(td.feesPaidUsdWei, (1_000n * ONE_USD * 30n) / 10_000n); // 3.0 USD
     assert.equal(td.isProtocolActor, false);
     assert.equal(td.lastSeenTimestamp, DAY_2026_05_04 + 3600n);
+
+    // TraderAllTimeAggregate feeds the "all" volume window.
+    const lifetime = store.TraderAllTimeAggregate.get(`${CHAIN}-${TRADER_A}`);
+    assert.ok(lifetime, "TraderAllTimeAggregate row written");
+    assert.equal(lifetime.volumeUsdWei, 1_000n * ONE_USD);
+    assert.equal(lifetime.swapCount, 1);
+    assert.equal(lifetime.isProtocolActor, false);
+    assert.equal(lifetime.updatedAtTimestamp, DAY_2026_05_04 + 3600n);
 
     // TraderPoolDailySnapshot
     const tpd = store.TraderPoolDailySnapshot.get(

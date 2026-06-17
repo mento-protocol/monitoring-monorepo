@@ -9,6 +9,7 @@ import {
   liveHealthCounters,
   computeRebalancerLiveness,
   worstStatus,
+  resolveLimitStatus,
 } from "../health";
 
 // Mock weekend.ts so health tests are deterministic regardless of real-world day.
@@ -1001,6 +1002,61 @@ describe("computeEffectiveStatus", () => {
         limitStatus: "WARN",
         limitPressure0: "0",
         limitPressure1: "0",
+      }),
+    ).toBe("WARN");
+  });
+
+  it("falls back to live pressure when indexed limitStatus is malformed", () => {
+    expect(
+      resolveLimitStatus({
+        source: "fpmm_factory",
+        limitStatus: "ok",
+        limitPressure0: "1.05",
+        limitPressure1: "0",
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("does not let malformed limitStatus poison effective status", () => {
+    expect(
+      computeEffectiveStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        limitStatus: "BROKEN",
+        limitPressure0: "0",
+        limitPressure1: "0",
+      }),
+    ).toBe("OK");
+  });
+
+  it("rejects non-limit health statuses from indexed limitStatus", () => {
+    expect(
+      resolveLimitStatus({
+        source: "fpmm_factory",
+        limitStatus: "HALTED",
+        limitPressure0: "0",
+        limitPressure1: "0.85",
+      }),
+    ).toBe("WARN");
+  });
+
+  it("rejects inherited object keys from indexed limitStatus", () => {
+    expect(
+      resolveLimitStatus({
+        source: "fpmm_factory",
+        limitStatus: "constructor",
+        limitPressure0: "1.05",
+        limitPressure1: "0",
+      }),
+    ).toBe("CRITICAL");
+    expect(
+      resolveLimitStatus({
+        source: "fpmm_factory",
+        limitStatus: "toString",
+        limitPressure0: "0",
+        limitPressure1: "0.85",
       }),
     ).toBe("WARN");
   });

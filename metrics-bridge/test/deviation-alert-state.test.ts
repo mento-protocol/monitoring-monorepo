@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
-import { USD_PEGGED_SYMBOLS } from "../src/deviation-alert-state.js";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  observeDeviationAlertState,
+  resetDeviationAlertStateForTests,
+  USD_PEGGED_SYMBOLS,
+} from "../src/deviation-alert-state.js";
+import { makePool } from "./fixtures.js";
 
 function repoFile(path: string): string {
   return readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
@@ -40,5 +45,219 @@ describe("USD_PEGGED_SYMBOLS drift protection", () => {
 
     expect(sortSymbols(USD_PEGGED_SYMBOLS)).toEqual(dashboardSymbols);
     expect(terraformSymbols).toEqual(dashboardSymbols);
+  });
+});
+
+describe("deviation alert transition rehydration", () => {
+  afterEach(() => {
+    resetDeviationAlertStateForTests();
+  });
+
+  it("uses persisted breach start after restart so recovery context is not suppressed", () => {
+    const warning = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.02",
+      }),
+      "GBPm/USDm",
+      1713202000,
+    );
+
+    expect(warning.state).toBe("warning");
+    expect(warning.newTransitions).toHaveLength(0);
+
+    const recovered = observeDeviationAlertState(
+      makePool(),
+      "GBPm/USDm",
+      1713202030,
+    );
+
+    expect(recovered.newTransitions).toHaveLength(1);
+    expect(recovered.newTransitions[0]).toMatchObject({
+      reason: "recovered",
+      breachStartedAt: 1713200000,
+    });
+  });
+
+  it("does not backdate data-gap dwell from breach age after restart", () => {
+    const unavailable = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "-1",
+      }),
+      "GBPm/USDm",
+      1713202000,
+    );
+
+    expect(unavailable.state).toBe("deviation_ratio_unavailable_warning");
+    expect(unavailable.newTransitions).toHaveLength(0);
+
+    const restored = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.02",
+      }),
+      "GBPm/USDm",
+      1713202030,
+    );
+
+    expect(restored.state).toBe("warning");
+    expect(restored.newTransitions).toHaveLength(0);
+  });
+
+  it("restores already-fired critical breaches without duplicate escalation", () => {
+    const restoredCritical = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713204000,
+    );
+
+    expect(restoredCritical.state).toBe("critical");
+    expect(restoredCritical.newTransitions).toHaveLength(0);
+
+    const stillCritical = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713204070,
+    );
+
+    expect(stillCritical.state).toBe("critical");
+    expect(stillCritical.newTransitions).toHaveLength(0);
+  });
+
+  it("keeps the first critical escalation after an early critical-magnitude restart", () => {
+    const earlyRestart = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713201800,
+    );
+
+    expect(earlyRestart.state).toBe("warning");
+    expect(earlyRestart.newTransitions).toHaveLength(0);
+
+    const critical = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713203662,
+    );
+
+    expect(critical.state).toBe("critical");
+    expect(critical.newTransitions).toHaveLength(1);
+    expect(critical.newTransitions[0]).toMatchObject({
+      reason: "escalated_to_critical",
+      breachStartedAt: 1713200000,
+    });
+  });
+
+  it("does not inherit weekend-suppressed FX breach age after restart", () => {
+    const reopened = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713564000",
+        lastDeviationRatio: "1.02",
+      }),
+      "GBPm/USDm",
+      1713740400,
+    );
+
+    expect(reopened.state).toBe("warning");
+    expect(reopened.newTransitions).toHaveLength(0);
+
+    const recovered = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "0",
+        lastDeviationRatio: "1.00",
+      }),
+      "GBPm/USDm",
+      1713740700,
+    );
+
+    expect(recovered.state).toBe("ok");
+    expect(recovered.newTransitions).toHaveLength(0);
+  });
+
+  it("preserves critical recovery context after an already-fired critical restart", () => {
+    const restoredCritical = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713204000,
+    );
+
+    expect(restoredCritical.state).toBe("critical");
+    expect(restoredCritical.newTransitions).toHaveLength(0);
+
+    const recovered = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "0",
+        lastDeviationRatio: "1.00",
+      }),
+      "GBPm/USDm",
+      1713204050,
+    );
+
+    expect(recovered.state).toBe("ok");
+    expect(recovered.newTransitions).toHaveLength(1);
+    expect(recovered.newTransitions[0]).toMatchObject({
+      from: "critical",
+      to: "ok",
+      reason: "recovered",
+      breachStartedAt: 1713200000,
+    });
+  });
+
+  it("keeps escalation context when a restored critical signal clears and returns", () => {
+    const earlyRestart = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.02",
+      }),
+      "GBPm/USDm",
+      1713204000,
+    );
+
+    expect(earlyRestart.state).toBe("warning");
+    expect(earlyRestart.newTransitions).toHaveLength(0);
+
+    const criticalSignalReturned = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713204050,
+    );
+
+    expect(criticalSignalReturned.state).toBe("warning");
+    expect(criticalSignalReturned.newTransitions).toHaveLength(0);
+
+    const critical = observeDeviationAlertState(
+      makePool({
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.08",
+      }),
+      "GBPm/USDm",
+      1713204112,
+    );
+
+    expect(critical.state).toBe("critical");
+    expect(critical.newTransitions).toHaveLength(1);
+    expect(critical.newTransitions[0]).toMatchObject({
+      reason: "escalated_to_critical",
+      breachStartedAt: 1713200000,
+    });
   });
 });

@@ -22,21 +22,25 @@
  * 14. buildVolumeWindowSnapshot: id has deterministic format
  * 15. maybeHeartbeatFlushV3: never decreases lastFlushedDay
  * 16. maybeHeartbeatFlushV3: written snapshot count = closed days × WINDOW_KEYS length
+ * 17. lifetime rollup "all" snapshot equals from-scratch daily aggregation
  */
 
 import { describe, it } from "vitest";
 import { strict as assert } from "assert";
 import * as fc from "fast-check";
 import type {
+  TraderAllTimeAggregate,
   VolumeChainState,
   VolumeWindowSnapshot,
   TraderDailySnapshot,
 } from "envio";
 import {
   WINDOW_KEYS,
+  allTimeToWindowAggregates,
   aggregatePerWindow,
   buildVolumeWindowSnapshot,
   windowStartDay,
+  type TraderAllTimeRow,
   type TraderDailyRow,
   type TraderWindowAggregate,
 } from "../src/volumeWindowSnapshot.js";
@@ -557,11 +561,105 @@ describe("buildVolumeWindowSnapshot — deterministic ID", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 17. Lifetime rollup "all" snapshot equals from-scratch daily aggregation
+// ---------------------------------------------------------------------------
+
+describe("allTimeToWindowAggregates — equivalent all-window snapshot", () => {
+  it("matches aggregatePerWindow(...).all for arbitrary historical rows", () => {
+    fc.assert(
+      fc.property(
+        arbDayTimestamp,
+        fc.array(
+          fc.record({
+            daysAgo: fc.integer({ min: 0, max: 120 }),
+            trader: arbAddress(),
+            volumeUsdWei: arbAmount,
+            swapCount: arbSwapCount,
+            isProtocolActor: fc.boolean(),
+          }),
+          { maxLength: 60 },
+        ),
+        (snapshotDay, entries) => {
+          const rows: TraderDailyRow[] = entries.map((entry) => ({
+            chainId: CHAIN,
+            trader: entry.trader,
+            timestamp: snapshotDay - BigInt(entry.daysAgo) * SECONDS_PER_DAY,
+            volumeUsdWei: entry.volumeUsdWei,
+            swapCount: entry.swapCount,
+            isProtocolActor: entry.isProtocolActor,
+          }));
+          const lifetimeRows = Array.from(
+            rows
+              .reduce((byTrader, row) => {
+                const existing = byTrader.get(row.trader);
+                byTrader.set(row.trader, {
+                  chainId: row.chainId,
+                  trader: row.trader,
+                  volumeUsdWei:
+                    (existing?.volumeUsdWei ?? 0n) + row.volumeUsdWei,
+                  swapCount: (existing?.swapCount ?? 0) + row.swapCount,
+                  isProtocolActor:
+                    (existing?.isProtocolActor ?? false) || row.isProtocolActor,
+                });
+                return byTrader;
+              }, new Map<string, TraderAllTimeRow>())
+              .values(),
+          );
+          const fromScratch = buildVolumeWindowSnapshot({
+            chainId: CHAIN,
+            windowKey: "all",
+            snapshotDay,
+            windowStartDay: windowStartDay(snapshotDay, "all"),
+            aggregates: aggregatePerWindow(rows, CHAIN, snapshotDay).all,
+            blockNumber: 1n,
+            updatedAtTimestamp: 1n,
+          });
+          const fromLifetime = buildVolumeWindowSnapshot({
+            chainId: CHAIN,
+            windowKey: "all",
+            snapshotDay,
+            windowStartDay: windowStartDay(snapshotDay, "all"),
+            aggregates: allTimeToWindowAggregates(lifetimeRows, CHAIN),
+            blockNumber: 1n,
+            updatedAtTimestamp: 1n,
+          });
+          assert.deepEqual(fromLifetime, fromScratch);
+        },
+      ),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 15 & 16. maybeHeartbeatFlushV3: lastFlushedDay never decreases;
 //           written snapshot count = closedDays × WINDOW_KEYS.length
 // ---------------------------------------------------------------------------
 
-function makeV3Context(traderRows: TraderDailySnapshot[] = []): {
+function deriveAllTimeV3(
+  traderRows: ReadonlyArray<TraderDailySnapshot>,
+): TraderAllTimeAggregate[] {
+  const byTrader = new Map<string, TraderAllTimeAggregate>();
+  for (const row of traderRows) {
+    const id = `${row.chainId}-${row.trader}`;
+    const existing = byTrader.get(id);
+    byTrader.set(id, {
+      id,
+      chainId: row.chainId,
+      trader: row.trader,
+      volumeUsdWei: (existing?.volumeUsdWei ?? 0n) + row.volumeUsdWei,
+      swapCount: (existing?.swapCount ?? 0) + row.swapCount,
+      isProtocolActor:
+        (existing?.isProtocolActor ?? false) || row.isProtocolActor,
+      updatedAtTimestamp: row.lastSeenTimestamp,
+    });
+  }
+  return Array.from(byTrader.values());
+}
+
+function makeV3Context(
+  traderRows: TraderDailySnapshot[] = [],
+  allTimeRows: TraderAllTimeAggregate[] = deriveAllTimeV3(traderRows),
+): {
   context: V3FlushContext;
   store: {
     VolumeWindowSnapshot: Map<string, VolumeWindowSnapshot>;
@@ -581,8 +679,12 @@ function makeV3Context(traderRows: TraderDailySnapshot[] = []): {
   return {
     context: {
       TraderDailySnapshot: {
-        getWhere: async (query: { chainId?: { _eq?: number } }) =>
-          traderRows.filter((r) => r.chainId === query.chainId?._eq),
+        getWhere: async (query: { timestamp: { _gte: bigint } }) =>
+          traderRows.filter((r) => r.timestamp >= query.timestamp._gte),
+      },
+      TraderAllTimeAggregate: {
+        getWhere: async (query: { chainId: { _eq: number } }) =>
+          allTimeRows.filter((r) => r.chainId === query.chainId._eq),
       },
       VolumeChainState: wrap(store.VolumeChainState),
       VolumeWindowSnapshot: wrap(store.VolumeWindowSnapshot),

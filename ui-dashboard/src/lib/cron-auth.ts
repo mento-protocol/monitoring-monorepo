@@ -1,4 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHmac, timingSafeEqual } from "crypto";
+
+function timingSafeStringEquals(a: string, b: string): boolean {
+  const key = Buffer.from(b);
+  const aDigest = createHmac("sha256", key).update(a).digest();
+  const bDigest = createHmac("sha256", key).update(b).digest();
+  return timingSafeEqual(aDigest, bDigest);
+}
 
 /**
  * Bearer-only auth gate for cron-triggered GET routes.
@@ -34,7 +42,12 @@ export async function requireCronAuth(
     );
   }
 
-  if (req.headers.get("authorization") === `Bearer ${cronSecret}`) {
+  if (
+    timingSafeStringEquals(
+      req.headers.get("authorization") ?? "",
+      `Bearer ${cronSecret}`,
+    )
+  ) {
     return null;
   }
 

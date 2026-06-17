@@ -514,6 +514,21 @@ type BrokerTraderDailySnapshot
   lastSeenTimestamp: BigInt!
 }
 
+# Per-(chainId, caller) lifetime rollup feeding the "all" window in
+# volumeWindowFlush.ts without rescanning every BrokerTraderDailySnapshot row
+# (#860). maybeHeartbeatFlushV2 runs before this row is written for the
+# current swap, so a flushed closed day never includes today's swap.
+type BrokerTraderAllTimeAggregate {
+  id: ID! # "{chainId}-{caller}"
+  chainId: Int! @index # exposed to getWhere for the "all"-window flush
+  caller: String!
+  volumeUsdWei: BigInt! @config(precision: 78)
+  swapCount: Int!
+  # Sticky-true for life — mirrors aggregatePerWindow's per-window OR.
+  isProtocolActor: Boolean!
+  updatedAtTimestamp: BigInt!
+}
+
 type BrokerAggregatorDailySnapshot {
   id: ID! # "{chainId}-{aggregator}-{day}"
   chainId: Int!
@@ -1933,6 +1948,21 @@ type TraderDailySnapshot @index(fields: ["chainId", "trader", "timestamp"]) {
   # the volume table's "Last active" column at sub-day precision (the day bucket
   # alone would show every active trader as "today").
   lastSeenTimestamp: BigInt!
+}
+
+# Per-(chainId, trader) lifetime rollup feeding the "all" window in
+# volumeWindowFlush.ts without rescanning every TraderDailySnapshot row
+# (#860). Written in applyVolumeSnapshots AFTER the heartbeat flush so a
+# flushed closed day never includes the current (today's) swap.
+type TraderAllTimeAggregate {
+  id: ID! # "{chainId}-{trader}"
+  chainId: Int! @index # exposed to getWhere for the "all"-window flush
+  trader: String!
+  volumeUsdWei: BigInt! @config(precision: 78)
+  swapCount: Int!
+  # Sticky-true for life — mirrors aggregatePerWindow's per-window OR.
+  isProtocolActor: Boolean!
+  updatedAtTimestamp: BigInt!
 }
 
 type TraderPoolDailySnapshot {

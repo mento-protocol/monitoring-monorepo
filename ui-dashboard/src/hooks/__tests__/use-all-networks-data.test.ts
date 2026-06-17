@@ -86,6 +86,7 @@ vi.mock("graphql-request", () => {
 });
 
 import { GraphQLClient } from "graphql-request";
+import { incrementalRowCache } from "@/lib/fetch-all-networks";
 
 /**
  * Sets up a per-query mock.
@@ -156,6 +157,7 @@ beforeEach(() => {
   });
   // Sentry de-dup maps live at module scope — clear between tests so
   // previous runs don't suppress subsequent captures.
+  incrementalRowCache.clear();
   warnedCapKeys.clear();
   partialPageLastCapturedAt.clear();
 });
@@ -215,6 +217,7 @@ describe("fetchNetworkData — happy path", () => {
     expect(varsFor("Pool(")).toEqual({ chainId: 42220 });
     expect(varsFor("PoolDailyFeeSnapshotsPage")).toEqual({
       chainId: 42220,
+      afterTimestamp: 0,
       limit: 1000,
       offset: 0,
     });
@@ -230,6 +233,7 @@ describe("fetchNetworkData — happy path", () => {
     const snapshotCall = snapshotCalls[0]!;
     expect(extractVariables(snapshotCall[0], snapshotCall[1])).toEqual({
       poolIds: ["pool-1"],
+      afterTimestamp: 0,
       limit: 1000,
       offset: 0,
     });
@@ -731,6 +735,48 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     expect(result.snapshots30dError).toBeNull();
     // Preserved rows still drive the derived window arrays.
     expect(result.snapshotsAllDaily).toHaveLength(1000);
+  });
+
+  it("marks current windows degraded when incremental tail refresh fails", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const todayMidnight = Math.floor(now / 86400) * 86400;
+    const cachedRows = [
+      makeDaily(todayMidnight, "pool-tail"),
+      makeDaily(todayMidnight - 60 * 86400, "pool-tail"),
+    ];
+    incrementalRowCache.set("celo-mainnet:PoolDailySnapshot", {
+      variablesKey: "pool-tail",
+      rows: cachedRows,
+      refreshAfterTimestamp: todayMidnight - 86400,
+    });
+    const tailErr = new Error("incremental tail timeout");
+
+    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mockReset()
+      .mockImplementation((...args: unknown[]) => {
+        const query = extractQuery(args[0]);
+        if (query.includes("PoolDailySnapshot")) return Promise.reject(tailErr);
+        if (query.includes("PoolDailyFeeSnapshotsPage"))
+          return Promise.resolve({ PoolDailyFeeSnapshot: [] });
+        if (query.includes("LiquidityPosition"))
+          return Promise.resolve({ LiquidityPosition: [] });
+        if (query.includes("Pool"))
+          return Promise.resolve({ Pool: [makePool("pool-tail")] });
+        return Promise.resolve({});
+      });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: now - 86400, to: now },
+      w7d: { from: now - 7 * 86400, to: now },
+      w30d: { from: now - 30 * 86400, to: now },
+    });
+
+    expect(result.snapshotsAllDaily).toEqual(cachedRows);
+    expect(result.snapshotsAllDailyError).toBe(tailErr);
+    expect(result.snapshotsError).toBe(tailErr);
+    expect(result.snapshots7dError).toBe(tailErr);
+    expect(result.snapshots30dError).toBe(tailErr);
+    expect(isNetworkDataFullyHealthy(result)).toBe(false);
   });
 
   it("sets snapshotsAllDailyError and returns empty rows on first-page failure", async () => {

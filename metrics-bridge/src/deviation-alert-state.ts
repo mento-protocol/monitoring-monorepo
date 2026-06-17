@@ -225,6 +225,7 @@ function isCriticalAlertState(
 function criticalSignalEnteredAt(
   previous: StateSnapshot | undefined,
   currentState: ClassifiedDeviationAlertState,
+  enteredAt: number,
   nowSeconds: number,
 ): number | null {
   if (!currentState.criticalSignal) return null;
@@ -233,6 +234,9 @@ function criticalSignalEnteredAt(
   }
   if (previous && isCriticalAlertState(previous.state)) {
     return previous.criticalSignalEnteredAt ?? previous.enteredAt;
+  }
+  if (!previous && currentState.state === "warning") {
+    return enteredAt;
   }
   return nowSeconds;
 }
@@ -252,14 +256,61 @@ function criticalStateCanFire(
   return nowSeconds - conditionEnteredAt > DEVIATION_CRITICAL_PENDING_SECONDS;
 }
 
+function lastFxReopenAtOrBefore(nowSeconds: number): number {
+  const date = new Date(nowSeconds * 1000);
+  const secondsSinceWeekStart =
+    date.getUTCDay() * 86_400 +
+    date.getUTCHours() * 3_600 +
+    date.getUTCMinutes() * 60 +
+    date.getUTCSeconds();
+  const sundayReopen = 23 * 3_600;
+  const delta =
+    secondsSinceWeekStart >= sundayReopen
+      ? secondsSinceWeekStart - sundayReopen
+      : secondsSinceWeekStart + 7 * 86_400 - sundayReopen;
+  return nowSeconds - delta;
+}
+
+function initialEnteredAt(
+  currentState: ClassifiedDeviationAlertState,
+  pair: string,
+  nowSeconds: number,
+): number {
+  if (currentState.state === "warning" && currentState.breachStartedAt) {
+    const persistedStart = Math.min(currentState.breachStartedAt, nowSeconds);
+    if (isFxPair(pair)) {
+      return Math.max(persistedStart, lastFxReopenAtOrBefore(nowSeconds));
+    }
+    return persistedStart;
+  }
+  return nowSeconds;
+}
+
 function buildCurrentSnapshot(
   previous: StateSnapshot | undefined,
   currentState: ClassifiedDeviationAlertState,
+  pair: string,
   nowSeconds: number,
 ): StateSnapshot {
+  const enteredAt = previous
+    ? previous.state === currentState.state ||
+      (isCriticalAlertState(previous.state) &&
+        previous.state === currentState.criticalSignal)
+      ? previous.enteredAt
+      : nowSeconds
+    : // Process restart (liveness probe): no in-memory snapshot exists, but
+      // the indexer-persisted breach start survives. Seed enteredAt from it
+      // so alertCouldHaveFired() does not reset to process start and suppress
+      // the next recovery's Slack context. Data-gap states intentionally start
+      // now: a stale breach start is not evidence that ratio data has been
+      // missing long enough for the data-gap alert to fire. FX pairs clamp to
+      // the latest Sunday 23:00 UTC reopen, because weekend-suppressed breach
+      // age cannot count toward warning dwell after markets reopen.
+      initialEnteredAt(currentState, pair, nowSeconds);
   const signalEnteredAt = criticalSignalEnteredAt(
     previous,
     currentState,
+    enteredAt,
     nowSeconds,
   );
   const state: DeviationAlertState =
@@ -267,8 +318,6 @@ function buildCurrentSnapshot(
     currentState.criticalSignal
       ? currentState.criticalSignal
       : currentState.state;
-  const enteredAt =
-    previous && previous.state === state ? previous.enteredAt : nowSeconds;
 
   return {
     ...currentState,
@@ -276,6 +325,17 @@ function buildCurrentSnapshot(
     enteredAt,
     criticalSignalEnteredAt: signalEnteredAt,
   };
+}
+
+function canRecordEscalationTransition(
+  previous: StateSnapshot,
+  current: StateSnapshot,
+  nowSeconds: number,
+): boolean {
+  return (
+    alertCouldHaveFired(previous, nowSeconds) &&
+    alertCouldHaveFired(current, nowSeconds)
+  );
 }
 
 function shouldRecordTransition(
@@ -290,10 +350,7 @@ function shouldRecordTransition(
     case "state_changed":
       return false;
     case "escalated_to_critical":
-      return (
-        alertCouldHaveFired(previous, nowSeconds) &&
-        alertCouldHaveFired(current, nowSeconds)
-      );
+      return canRecordEscalationTransition(previous, current, nowSeconds);
     case "recovered":
     case "deescalated_to_warning":
     case "deviation_ratio_unavailable":
@@ -345,7 +402,12 @@ export function observeDeviationAlertState(
 
   const currentState = classifyDeviationAlertState(pool, pair, nowSeconds);
   const previous = previousStates.get(pool.id);
-  const current = buildCurrentSnapshot(previous, currentState, nowSeconds);
+  const current = buildCurrentSnapshot(
+    previous,
+    currentState,
+    pair,
+    nowSeconds,
+  );
 
   const newTransitions: DeviationAlertTransition[] = [];
   if (

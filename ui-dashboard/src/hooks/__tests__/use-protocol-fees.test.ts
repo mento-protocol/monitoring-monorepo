@@ -34,6 +34,7 @@ vi.mock("graphql-request", () => {
 });
 
 import { GraphQLClient } from "graphql-request";
+import { incrementalRowCache } from "@/lib/fetch-all-networks";
 
 // ---------------------------------------------------------------------------
 // @/lib/networks mock — `vi.hoisted` shares mutable state with the hoisted
@@ -172,6 +173,7 @@ function setupSuccessfulMock() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  incrementalRowCache.clear();
   capturedFetcher = null;
   mocks.networkIds = ["celo-mainnet", "monad-mainnet"];
   mocks.networks = {

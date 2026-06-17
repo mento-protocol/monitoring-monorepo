@@ -465,7 +465,8 @@ pnpm alerts:oncall:typecheck / alerts:oncall:test / alerts:oncall:build
 pnpm alerts:rules:lint
 pnpm alerts:rules:init / alerts:rules:plan
 # Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
-# The production-infra gate enforces non-bypassable required-reviewer approval.
+# The production-infra gate enforces required-reviewer approval and allows
+# self-review for the sole-maintainer workflow.
 ```
 
 Terraform stack ownership is registered in `terraform.stacks.json` and
@@ -619,8 +620,9 @@ After creating a new worktree manually or cloning the repo, run:
 ./scripts/setup.sh
 ```
 
-This ensures deps are installed and Envio codegen has produced the generated
-type facade required for `indexer-envio` TypeScript to compile.
+This ensures deps are installed, Playwright Chromium is available for dashboard
+browser tests, and Envio codegen has produced the generated type facade
+required for `indexer-envio` TypeScript to compile.
 Worktrunk-created worktrees (`wt switch --create` / `wt switch -c`) run the
 same setup script automatically through `.config/wt.toml` as a blocking
 `pre-start` hook before any `--execute` command starts.

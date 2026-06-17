@@ -3,6 +3,7 @@ import type {
   AggregatorTraderDayMarker,
   Pool,
   PoolDailyVolumeSnapshot,
+  TraderAllTimeAggregate,
   TraderDailySnapshot,
   TraderPoolDailySnapshot,
   TraderPoolDayMarker,
@@ -26,6 +27,10 @@ export type VolumeContext = V3FlushContext & {
   TraderDailySnapshot: {
     get: (id: string) => Promise<TraderDailySnapshot | undefined>;
     set: (entity: TraderDailySnapshot) => void;
+  };
+  TraderAllTimeAggregate: {
+    get: (id: string) => Promise<TraderAllTimeAggregate | undefined>;
+    set: (entity: TraderAllTimeAggregate) => void;
   };
   TraderPoolDailySnapshot: {
     get: (id: string) => Promise<TraderPoolDailySnapshot | undefined>;
@@ -93,6 +98,7 @@ interface SnapContext {
   day: bigint;
   dayKey: string;
   traderDayId: string;
+  traderAllTimeId: string;
   traderPoolDayId: string;
   poolDayId: string;
   aggregator: string;
@@ -111,6 +117,7 @@ interface ExistingEntries {
   traderPoolMarker: TraderPoolDayMarker | undefined;
   aggTraderMarker: AggregatorTraderDayMarker | undefined;
   traderDay: TraderDailySnapshot | undefined;
+  traderAllTime: TraderAllTimeAggregate | undefined;
   traderPoolDay: TraderPoolDailySnapshot | undefined;
   poolDay: PoolDailyVolumeSnapshot | undefined;
   aggDay: AggregatorDailySnapshot | undefined;
@@ -197,13 +204,12 @@ export async function applyVolumeSnapshots(
     traderDayState.traderDayIsProtocolActor,
   );
 
-  // Heartbeat: flush VolumeWindowSnapshot rows for any closed UTC days
-  // since the last flush. Reads only TraderDailySnapshot (already-written
-  // including this swap's row), filters by [windowStartDay, snapshotDay]
-  // inclusive — today's row is excluded by the upper bound, so we never write
-  // a "today" snapshot. The dashboard adds today's partial from a small direct
-  // query.
+  // Heartbeat: flush VolumeWindowSnapshot rows for any closed UTC days since
+  // the last flush. Rolling windows read a bounded daily range; "all" reads
+  // TraderAllTimeAggregate. That lifetime row must be updated only after the
+  // flush so a closed-day snapshot never includes the current swap.
   await flushVolumeWindow();
+  upsertTraderAllTimeAggregate(context, snap, existing.traderAllTime);
 }
 
 function buildSnapContext(args: ApplyVolumeSnapshotsArgs): SnapContext {
@@ -245,6 +251,7 @@ function buildSnapContext(args: ApplyVolumeSnapshotsArgs): SnapContext {
     day,
     dayKey,
     traderDayId: `${chainId}-${caller}-${dayKey}`,
+    traderAllTimeId: `${chainId}-${caller}`,
     traderPoolDayId: `${chainId}-${caller}-${poolId}-${dayKey}`,
     poolDayId: `${chainId}-${poolId}-${dayKey}`,
     aggregator,
@@ -277,6 +284,7 @@ async function loadExistingEntries(
     traderPoolMarker,
     aggTraderMarker,
     traderDay,
+    traderAllTime,
     traderPoolDay,
     poolDay,
     aggDay,
@@ -284,6 +292,7 @@ async function loadExistingEntries(
     context.TraderPoolDayMarker.get(snap.traderPoolDayId),
     context.AggregatorTraderDayMarker.get(snap.aggTraderDayMarkerId),
     context.TraderDailySnapshot.get(snap.traderDayId),
+    context.TraderAllTimeAggregate.get(snap.traderAllTimeId),
     context.TraderPoolDailySnapshot.get(snap.traderPoolDayId),
     context.PoolDailyVolumeSnapshot.get(snap.poolDayId),
     context.AggregatorDailySnapshot.get(snap.aggDayId),
@@ -292,6 +301,7 @@ async function loadExistingEntries(
     traderPoolMarker,
     aggTraderMarker,
     traderDay,
+    traderAllTime,
     traderPoolDay,
     poolDay,
     aggDay,
@@ -305,6 +315,12 @@ const EMPTY_TRADER_DAY = {
   poolIds: [] as readonly string[],
   volumeUsdWei: 0n,
   feesPaidUsdWei: 0n,
+  isProtocolActor: false,
+};
+
+const EMPTY_TRADER_ALL_TIME = {
+  volumeUsdWei: 0n,
+  swapCount: 0,
   isProtocolActor: false,
 };
 
@@ -348,6 +364,23 @@ function upsertTraderDailySnapshot(
     aggregatorKeys,
     poolIds,
   };
+}
+
+function upsertTraderAllTimeAggregate(
+  context: VolumeContext,
+  snap: SnapContext,
+  existing: TraderAllTimeAggregate | undefined,
+) {
+  const prev = existing ?? EMPTY_TRADER_ALL_TIME;
+  context.TraderAllTimeAggregate.set({
+    id: snap.traderAllTimeId,
+    chainId: snap.chainId,
+    trader: snap.caller,
+    volumeUsdWei: prev.volumeUsdWei + snap.volumeUsdWei,
+    swapCount: prev.swapCount + 1,
+    isProtocolActor: prev.isProtocolActor || snap.callerIsProtocolActor,
+    updatedAtTimestamp: snap.blockTimestamp,
+  });
 }
 
 const EMPTY_TRADER_POOL_DAY = {

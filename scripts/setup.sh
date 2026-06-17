@@ -3,7 +3,8 @@
 #
 # What it does:
 #   1. Install all pnpm workspace dependencies when needed
-#   2. Run Envio codegen when needed
+#   2. Install Playwright Chromium for ui-dashboard browser tests when needed
+#   3. Run Envio codegen when needed
 #
 # Why codegen is needed:
 #   The indexer-envio package imports Envio's generated type facade from
@@ -78,6 +79,23 @@ else
   pnpm --filter @mento-protocol/monitoring-config build
   if [ -n "$deps_hash" ]; then
     printf '%s' "$deps_hash" >"$deps_marker"
+  fi
+fi
+
+echo "▶ Installing Playwright Chromium and host dependencies (ui-dashboard browser tests)..."
+playwright_marker="node_modules/.setup-playwright-chromium.sha256"
+playwright_hash="$(hash_inputs pnpm-lock.yaml ui-dashboard/package.json || true)"
+if [ -n "$playwright_hash" ] &&
+  [ "$(cat "$playwright_marker" 2>/dev/null)" = "$playwright_hash" ]; then
+  echo "  Playwright Chromium install is up to date; skipping"
+else
+  if pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
+    if [ -n "$playwright_hash" ]; then
+      printf '%s' "$playwright_hash" >"$playwright_marker"
+    fi
+  else
+    echo "  ⚠ Playwright Chromium install failed; continuing setup." >&2
+    echo "    Run 'pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium' before browser tests." >&2
   fi
 fi
 
