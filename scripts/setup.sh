@@ -44,6 +44,12 @@ hash_inputs() {
   printf '%s\n' "$hash"
 }
 
+playwright_chromium_present() {
+  pnpm --filter @mento-protocol/ui-dashboard exec node -e \
+    "const { chromium } = require('@playwright/test'); require('fs').accessSync(chromium.executablePath());" \
+    >/dev/null 2>&1
+}
+
 echo "▶ Configuring git hooks..."
 if [ "$(git config --get core.hooksPath || true)" = ".trunk/hooks" ]; then
   echo "  core.hooksPath already .trunk/hooks"
@@ -86,7 +92,8 @@ echo "▶ Installing Playwright Chromium and host dependencies (ui-dashboard bro
 playwright_marker="node_modules/.setup-playwright-chromium.sha256"
 playwright_hash="$(hash_inputs pnpm-lock.yaml ui-dashboard/package.json || true)"
 if [ -n "$playwright_hash" ] &&
-  [ "$(cat "$playwright_marker" 2>/dev/null)" = "$playwright_hash" ]; then
+  [ "$(cat "$playwright_marker" 2>/dev/null)" = "$playwright_hash" ] &&
+  playwright_chromium_present; then
   echo "  Playwright Chromium install is up to date; skipping"
 else
   if pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
