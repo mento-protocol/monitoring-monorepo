@@ -100,7 +100,7 @@ export async function consumePrincipalLots(
   amount: bigint,
   meta: EventMeta,
   requiredPrincipal: bigint = amount,
-): Promise<bigint | null> {
+): Promise<bigint> {
   if (amount <= ZERO) return ZERO;
 
   const lots = await context.StethCostBasisLot.getWhere({
@@ -123,7 +123,12 @@ export async function consumePrincipalLots(
     ZERO,
   );
   if (availablePrincipal < requiredPrincipal) {
-    return null;
+    throw new Error(
+      `[stETH] insufficient cost-basis lots for ${wallet}: ` +
+        `needed ${requiredPrincipal}, missing ${
+          requiredPrincipal - availablePrincipal
+        }. Check start_block and tracked wallets.`,
+    );
   }
 
   let remaining = amount;

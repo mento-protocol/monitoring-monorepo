@@ -36,6 +36,15 @@ const STALE_INDEXED_STETH_WARNING =
   "stETH earned-yield ledger: current indexed reserve balance is below indexed ledger balance; using indexed ledger value without current-balance refresh.";
 const MISSING_INDEXED_STETH_BALANCE_WARNING =
   "stETH earned-yield ledger: current reserve stETH row is missing token balance, so indexed stETH yield cannot be marked to current USD.";
+const STETH_SCHEMA_PENDING_ERROR =
+  "stETH earned-yield ledger pending: indexer schema has not exposed StethYieldSummary yet.";
+
+function isMissingStethSummaryField(message: string): boolean {
+  return (
+    message.includes("StethYieldSummary") &&
+    message.toLowerCase().includes("not found")
+  );
+}
 
 function validateStethMeta(meta: unknown): void {
   if (!isRecord(meta)) {
@@ -249,6 +258,12 @@ function parseStethYieldLedger(payload: unknown): StethYieldLedgerResult {
       isRecord(first) && typeof first.message === "string"
         ? first.message
         : "GraphQL error";
+    if (isMissingStethSummaryField(message)) {
+      return {
+        ledger: null,
+        error: STETH_SCHEMA_PENDING_ERROR,
+      };
+    }
     throw new Error(message);
   }
   const data = isRecord(payload.data) ? payload.data : null;

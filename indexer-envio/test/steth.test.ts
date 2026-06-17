@@ -186,7 +186,9 @@ describe("stETH reserve-yield ledger", () => {
       lastUpdatedTimestamp: 1_700_000_099n,
     });
 
-    await transfer(mockDb, 100, 1, RESERVE_SAFE, EXTERNAL, steth(40));
+    await assert.rejects(
+      transfer(mockDb, 100, 1, RESERVE_SAFE, EXTERNAL, steth(40)),
+    );
     assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 0);
     assert.equal(mockDb.entities.StethYieldSummary.get("1-steth"), undefined);
   });
@@ -205,7 +207,9 @@ describe("stETH reserve-yield ledger", () => {
       lastUpdatedTimestamp: 1_700_000_099n,
     });
 
-    await transfer(mockDb, 100, 1, RESERVE_SAFE, OPS_SAFE, steth(40));
+    await assert.rejects(
+      transfer(mockDb, 100, 1, RESERVE_SAFE, OPS_SAFE, steth(40)),
+    );
     assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 0);
     assert.equal(mockDb.entities.StethCostBasisLot.getAll().length, 0);
     assert.equal(mockDb.entities.StethYieldSummary.get("1-steth"), undefined);

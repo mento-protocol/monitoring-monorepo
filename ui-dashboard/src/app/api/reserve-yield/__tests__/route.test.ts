@@ -661,13 +661,17 @@ describe("GET /api/reserve-yield", () => {
 
     expect(res.status).toBe(200);
     expect(body.earnedYieldUsd).toBeNull();
-    expect(body.earnedYieldError).toContain("stETH earned-yield ledger");
-    expect(body.earnedYieldError).toContain("StethYieldSummary");
+    expect(body.earnedYieldError).toBe(
+      "stETH earned-yield ledger pending: indexer schema has not exposed StethYieldSummary yet.",
+    );
     expect(stethHolding).toMatchObject({
       assetSymbol: "stETH",
       earnedYieldUsd: null,
       apyPercent: 2.95,
     });
+    expect(JSON.stringify(body)).not.toContain(
+      "field 'StethYieldSummary' not found",
+    );
     expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
   });
 

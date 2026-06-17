@@ -54,7 +54,6 @@ export async function recordTransfer(
       meta,
       principalRequiredForOutflow(fromPosition, amount),
     );
-    if (consumedPrincipal === null) return false;
     principalAmount = consumedPrincipal;
     const toPosition = await getPosition(context, meta.chainId, to, meta);
     setPosition(
@@ -94,7 +93,6 @@ export async function recordTransfer(
       meta,
       principalRequiredForOutflow(position, amount),
     );
-    if (consumedPrincipal === null) return false;
     principalAmount = consumedPrincipal;
     yieldAmount = amount - principalAmount;
     setPosition(

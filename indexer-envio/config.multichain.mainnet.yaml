@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: mento-multichain-mainnet
-description: Mento multichain mainnet indexer — Celo (42220) + Monad (143) + Ethereum sUSDS (1)
+description: Mento multichain mainnet indexer — Celo (42220) + Monad (143) + Ethereum sUSDS/stETH (1)
 
 # Disable v3's `src/handlers/` auto-loading. Each contract below explicitly
 # points at `src/EventHandlers.ts`, which side-effect imports the same
