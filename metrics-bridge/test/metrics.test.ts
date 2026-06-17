@@ -181,6 +181,30 @@ describe("updateMetrics", () => {
     ).toBe(0);
   });
 
+  it("suppresses virtual-pool oracle freshness when reporter count is unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleNumReporters: -1,
+        wrappedExchangeMinimumReports: "3",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
   it("suppresses virtual-pool oracle freshness for deprecated wrappers", async () => {
     updateMetrics([
       makePool({

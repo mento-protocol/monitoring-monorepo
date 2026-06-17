@@ -33,6 +33,7 @@ const FRESH_TS = String(Math.floor(Date.now() / 1000) - 120);
 const STALE_TS = String(Math.floor(Date.now() / 1000) - 600);
 const CELO_CHAIN_ID = 42220;
 const USDM_ADDR = "0x765de816845861e75a25fca122bb6898b8b1282a";
+const GBPM_ADDR = "0xccf663b1ff11028f0b19058d0f7b674004a40746";
 const USDC_ADDR = "0xceba9300f2b948710d2653dd7b07f33a8b32118c";
 
 describe("computeHealthStatus", () => {
@@ -103,13 +104,15 @@ describe("computeHealthStatus", () => {
       computeHealthStatus(
         {
           source: "virtual_pool_factory",
+          token0: GBPM_ADDR,
+          token1: USDM_ADDR,
           oracleTimestamp: String(now - 600),
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
-        undefined,
+        CELO_CHAIN_ID,
         now,
       ),
     ).toBe("WEEKEND");
@@ -143,6 +146,28 @@ describe("computeHealthStatus", () => {
           source: "virtual_pool_factory",
           token0: USDM_ADDR,
           token1: USDC_ADDR,
+          oracleTimestamp: String(now - 600),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        CELO_CHAIN_ID,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("keeps stale VirtualPools critical when weekend pair classification is unknown", async () => {
+    const weekend = await import("../weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValueOnce(true);
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          token0: USDM_ADDR,
+          token1: "0x0000000000000000000000000000000000000bad",
           oracleTimestamp: String(now - 600),
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,

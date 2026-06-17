@@ -6,6 +6,11 @@
  *  destroyed exchanges, schema defaults for unknown feeds, etc. */
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
+/** Sentinel for an oracle reporter count that has not been read yet.
+ * A real `SortedOracles.numRates()` value can be zero, so unknown must not
+ * share the schema default with "known invalid". */
+export const UNKNOWN_ORACLE_REPORTERS = -1;
+
 /** V3 hub USDm collateral on Celo — distinct on-chain contract from V2
  *  cUSD-USDm (`0x765de8…`). Hardcoded here because `@mento-protocol/contracts`
  *  still maps the bare "USDm" key to Celo cUSD; once the upstream package

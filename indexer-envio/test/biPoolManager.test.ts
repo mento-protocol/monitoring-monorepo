@@ -29,7 +29,7 @@ import { fetchTokenDecimalsScaling } from "../src/rpc/pool-state.ts";
 import { _setRpcClientForTests, _testHooks } from "../src/rpc.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
 import { isVirtualPool, makePoolId } from "../src/helpers.ts";
-import { ZERO_ADDRESS } from "../src/constants.ts";
+import { UNKNOWN_ORACLE_REPORTERS, ZERO_ADDRESS } from "../src/constants.ts";
 
 type MockDb = MockDbWith<{
   Pool: WritableEntity;
@@ -620,6 +620,50 @@ describe("BiPoolManager handlers", () => {
       assert.ok(pool1);
       assert.equal(pool1!.referenceRateFeedID, FEED_ID);
       assert.equal(pool1!.oracleNumReporters, 2);
+    });
+
+    it("keeps VP reporter counts unknown when numRates fails during feed mirror", async function () {
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+      _setMockNumReporters(CHAIN_ID, FEED_ID, null);
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const deploy = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+        pool: VP_ADDRESS,
+        token0: ASSET0,
+        token1: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000),
+      });
+      mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+        event: deploy,
+        mockDb,
+      });
+
+      const pool = mockDb.entities.Pool.get(makePoolId(CHAIN_ID, VP_ADDRESS));
+      assert.ok(pool);
+      assert.equal(pool.referenceRateFeedID, FEED_ID);
+      assert.equal(pool.oracleNumReporters, UNKNOWN_ORACLE_REPORTERS);
     });
 
     it("repairs a checked exchange-first row that missed the VP back-reference once the Pool is otherwise fully healed", async function () {

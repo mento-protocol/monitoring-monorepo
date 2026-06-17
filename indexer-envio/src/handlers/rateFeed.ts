@@ -12,7 +12,7 @@ import {
 } from "../oracleReporters.js";
 import { maybePreloadPool } from "../pool.js";
 import { getPoolsByFeed, updatePoolsOracleNumReporters } from "../rpc.js";
-import { rateFeedOraclesEffect } from "../rpc/effects.js";
+import { numReportersEffect, rateFeedOraclesEffect } from "../rpc/effects.js";
 
 type RateFeedContext = Pick<EvmOnEventContext, "RateFeed" | "effect">;
 
@@ -55,17 +55,60 @@ export async function syncRateFeedFromRpc(args: {
 }
 
 export async function ensureRateFeed(args: {
-  context: RateFeedContext;
+  context: EvmOnEventContext;
   chainId: number;
   feedAddress: string;
   blockNumber: bigint;
   blockTimestamp: bigint;
+  poolIds?: string[];
 }): Promise<RateFeed | null> {
   const existing = await args.context.RateFeed.get(
     makeRateFeedId(args.chainId, args.feedAddress),
   );
-  if (existing?.reportersComplete) return existing;
-  return (await syncRateFeedFromRpc(args)) ?? existing ?? null;
+  if (existing?.reportersComplete) {
+    await syncUnknownPoolReporterCounts(args);
+    return existing;
+  }
+  const synced = await syncRateFeedFromRpc(args);
+  await syncPoolsReporterCountForLinkedPools(args);
+  return synced ?? existing ?? null;
+}
+
+async function syncPoolsReporterCountForLinkedPools(args: {
+  context: EvmOnEventContext;
+  chainId: number;
+  feedAddress: string;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  poolIds?: string[];
+}): Promise<void> {
+  if (!args.poolIds || args.poolIds.length === 0) return;
+  await syncPoolsReporterCountFromRpc({
+    context: args.context,
+    chainId: args.chainId,
+    feedAddress: args.feedAddress,
+    poolIds: args.poolIds,
+    blockNumber: args.blockNumber,
+    blockTimestamp: args.blockTimestamp,
+  });
+}
+
+async function syncUnknownPoolReporterCounts(args: {
+  context: EvmOnEventContext;
+  chainId: number;
+  feedAddress: string;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  poolIds?: string[];
+}): Promise<void> {
+  if (args.poolIds && args.poolIds.length > 0) {
+    const pools = await Promise.all(
+      args.poolIds.map((poolId) => args.context.Pool.get(poolId)),
+    );
+    if (pools.some((pool) => pool && pool.oracleNumReporters < 0)) {
+      await syncPoolsReporterCountForLinkedPools(args);
+    }
+  }
 }
 
 async function applyReporterFallback(args: {
@@ -104,19 +147,23 @@ async function syncOrApplyReporterDelta(args: {
   return applyReporterFallback(args);
 }
 
-async function syncPoolReporterCount(args: {
+export async function syncPoolsReporterCountFromRpc(args: {
   context: EvmOnEventContext;
+  chainId: number;
+  feedAddress: string;
   poolIds: string[];
-  rateFeed: RateFeed;
   blockNumber: bigint;
   blockTimestamp: bigint;
 }): Promise<void> {
+  const oracleNumReporters = await args.context.effect(numReportersEffect, {
+    chainId: args.chainId,
+    rateFeedID: args.feedAddress,
+    blockNumber: args.blockNumber,
+  });
   await updatePoolsOracleNumReporters({
     context: args.context,
     poolIds: args.poolIds,
-    oracleNumReporters: args.rateFeed.reportersComplete
-      ? args.rateFeed.reporters.length
-      : null,
+    oracleNumReporters,
     blockNumber: args.blockNumber,
     blockTimestamp: args.blockTimestamp,
   });
@@ -137,7 +184,7 @@ indexer.onEvent(
     }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const rateFeed = await syncOrApplyReporterDelta({
+    await syncOrApplyReporterDelta({
       context,
       chainId: event.chainId,
       feedAddress,
@@ -146,10 +193,11 @@ indexer.onEvent(
       blockTimestamp,
       action: "add",
     });
-    await syncPoolReporterCount({
+    await syncPoolsReporterCountFromRpc({
       context,
+      chainId: event.chainId,
+      feedAddress,
       poolIds,
-      rateFeed,
       blockNumber,
       blockTimestamp,
     });
@@ -171,7 +219,7 @@ indexer.onEvent(
     }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const rateFeed = await syncOrApplyReporterDelta({
+    await syncOrApplyReporterDelta({
       context,
       chainId: event.chainId,
       feedAddress,
@@ -180,10 +228,11 @@ indexer.onEvent(
       blockTimestamp,
       action: "remove",
     });
-    await syncPoolReporterCount({
+    await syncPoolsReporterCountFromRpc({
       context,
+      chainId: event.chainId,
+      feedAddress,
       poolIds,
-      rateFeed,
       blockNumber,
       blockTimestamp,
     });

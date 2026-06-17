@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Pool } from "envio";
+import { UNKNOWN_ORACLE_REPORTERS } from "./constants.js";
 import { extractAddressFromPoolId, isVirtualPool } from "./helpers.js";
 import {
   classifyExactZeroReserves,
@@ -133,10 +134,10 @@ export const DEFAULT_ORACLE_FIELDS = {
   oracleTimestamp: 0n,
   oracleTxHash: "",
   oracleExpiry: 0n,
-  oracleNumReporters: 0,
+  oracleNumReporters: UNKNOWN_ORACLE_REPORTERS,
   lastMedianPrice: 0n,
   lastMedianAt: 0n,
-  medianLive: false,
+  medianLive: true,
   lastOracleReportAt: 0n,
   prevMedianPrice: 0n,
   prevMedianAt: 0n,

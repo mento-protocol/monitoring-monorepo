@@ -38,6 +38,7 @@ import {
   _setMockTokenDecimalsScaling,
   _setMockVpExchangeId,
 } from "../src/EventHandlers.ts";
+import { UNKNOWN_ORACLE_REPORTERS } from "../src/constants.js";
 import { VP_PROBE_RPC_ERROR } from "../src/rpc/biPoolManager.js";
 
 type MockDb = MockDbWith<{
@@ -239,5 +240,7 @@ describe("Dynamic contract registration — handler smoke tests", () => {
       pool,
       `Pool entity must exist after VirtualPoolDeployed (id: ${poolId})`,
     );
+    assert.equal(pool.medianLive, true);
+    assert.equal(pool.oracleNumReporters, UNKNOWN_ORACLE_REPORTERS);
   });
 });
