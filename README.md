@@ -54,12 +54,16 @@ Celo Mainnet (42220), Monad Mainnet (143), and Ethereum Mainnet (1) sUSDS reserv
 
 ### Install
 
-For a fresh clone or worktree, prefer the setup script so workspace deps,
-postinstall hooks, and Envio codegen all run in one place:
+For a fresh clone or manually-created worktree, prefer the setup script so
+workspace deps, postinstall hooks, and Envio codegen are handled in one place:
 
 ```bash
 ./scripts/setup.sh
 ```
+
+When creating worktrees through Worktrunk (`wt switch --create` / `wt switch
+-c`), the committed `.config/wt.toml` runs this setup script automatically as a
+blocking `pre-start` hook before any `--execute` command starts.
 
 For a Codex Cloud environment, configure the environment setup script to run:
 

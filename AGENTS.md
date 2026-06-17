@@ -613,13 +613,17 @@ For commands that watch a long-running external process (Envio sync, PR CI, depl
 
 ## New Worktree / Clone Setup
 
-After creating a new worktree or cloning the repo, run:
+After creating a new worktree manually or cloning the repo, run:
 
 ```bash
 ./scripts/setup.sh
 ```
 
-This installs deps and runs Envio codegen (required for `indexer-envio` TypeScript to compile — the `generated/` dir is gitignored).
+This ensures deps are installed and Envio codegen has produced the generated
+type facade required for `indexer-envio` TypeScript to compile.
+Worktrunk-created worktrees (`wt switch --create` / `wt switch -c`) run the
+same setup script automatically through `.config/wt.toml` as a blocking
+`pre-start` hook before any `--execute` command starts.
 
 ## Claude Code on the web setup
 
