@@ -110,18 +110,26 @@ export const BRIDGE_POOLS_VP_FRESHNESS_QUERY = gql`
     Pool {
       id
       oracleFreshnessWindow
+      tokenDecimalsKnown
     }
   }
 `;
 
 // Optional companion query for deprecated VirtualPool wrappers. A deprecated
-// backing exchange means the VP is retired, so stale freshness gauges should
-// stop publishing instead of paging on expected inactivity.
+// backing exchange OR factory lifecycle deprecation means the VP is retired,
+// so stale freshness gauges should stop publishing instead of paging on
+// expected inactivity.
 export const BRIDGE_POOLS_VP_EXCHANGE_DEPRECATION_QUERY = gql`
   query BridgePoolsVpExchangeDeprecation {
     BiPoolExchange(where: { wrappedByPoolId: { _is_null: false } }) {
       wrappedByPoolId
       isDeprecated
+    }
+    VirtualPoolLifecycle(
+      where: { action: { _eq: "DEPRECATED" } }
+      limit: 1000
+    ) {
+      poolId
     }
   }
 `;
@@ -137,10 +145,16 @@ type OpenBreachRow = Pick<
 >;
 
 type OracleTxRow = Pick<PoolRow, "id" | "oracleTxHash">;
-type VpFreshnessRow = Pick<PoolRow, "id" | "oracleFreshnessWindow">;
+type VpFreshnessRow = Pick<
+  PoolRow,
+  "id" | "oracleFreshnessWindow" | "tokenDecimalsKnown"
+>;
 type VpExchangeDeprecationRow = {
   wrappedByPoolId: string | null;
   isDeprecated: boolean;
+};
+type VpLifecycleDeprecationRow = {
+  poolId: string;
 };
 
 type BridgePoolsBaseResponse = {
@@ -148,6 +162,7 @@ type BridgePoolsBaseResponse = {
     PoolRow,
     | "oracleTxHash"
     | "oracleFreshnessWindow"
+    | "tokenDecimalsKnown"
     | "prevMedianPrice"
     | "prevMedianAt"
     | "currentOpenBreachPeak"
@@ -172,6 +187,7 @@ const ORACLE_TX_DEFAULTS = {
 
 const VP_FRESHNESS_DEFAULTS = {
   oracleFreshnessWindow: "0",
+  tokenDecimalsKnown: false,
   wrappedExchangeDeprecated: false,
 } as const;
 
@@ -181,7 +197,10 @@ type BridgePoolCompanionResponses = {
   openBreach: { Pool: OpenBreachRow[] };
   oracleTx: { Pool: OracleTxRow[] };
   vpFreshness: { Pool: VpFreshnessRow[] };
-  vpExchangeDeprecation: { BiPoolExchange: VpExchangeDeprecationRow[] };
+  vpExchangeDeprecation: {
+    BiPoolExchange: VpExchangeDeprecationRow[];
+    VirtualPoolLifecycle?: VpLifecycleDeprecationRow[];
+  };
 };
 
 const client = new GraphQLClient(HASURA_URL);
@@ -229,10 +248,14 @@ async function requestOptionalPoolRows<T>(
 
 async function requestOptionalVpExchangeDeprecationRows(
   signal: AbortSignal,
-): Promise<{ BiPoolExchange: VpExchangeDeprecationRow[] }> {
+): Promise<{
+  BiPoolExchange: VpExchangeDeprecationRow[];
+  VirtualPoolLifecycle?: VpLifecycleDeprecationRow[];
+}> {
   try {
     return await client.request<{
       BiPoolExchange: VpExchangeDeprecationRow[];
+      VirtualPoolLifecycle?: VpLifecycleDeprecationRow[];
     }>({ document: BRIDGE_POOLS_VP_EXCHANGE_DEPRECATION_QUERY, signal });
   } catch (err) {
     if (!isUnknownFieldError(err)) throw err;
@@ -242,7 +265,7 @@ async function requestOptionalVpExchangeDeprecationRows(
         "[metrics-bridge] Hasura schema missing VP exchange deprecation state; deprecated VirtualPool staleness suppression disabled until indexer catches up.",
       );
     }
-    return { BiPoolExchange: [] };
+    return { BiPoolExchange: [], VirtualPoolLifecycle: [] };
   }
 }
 
@@ -311,11 +334,15 @@ function mergeBridgePoolCompanions({
     oracleTx.Pool.filter((p) => p.oracleTxHash).map((p) => [p.id, p]),
   );
   const vpFreshnessById = new Map(vpFreshness.Pool.map((p) => [p.id, p]));
-  const vpExchangeDeprecatedByPoolId = new Map(
-    vpExchangeDeprecation.BiPoolExchange.flatMap((e) =>
-      e.wrappedByPoolId ? [[e.wrappedByPoolId, e.isDeprecated]] : [],
-    ),
-  );
+  const deprecatedVpPoolIds = new Set<string>();
+  for (const e of vpExchangeDeprecation.BiPoolExchange) {
+    if (e.wrappedByPoolId && e.isDeprecated) {
+      deprecatedVpPoolIds.add(e.wrappedByPoolId);
+    }
+  }
+  for (const lifecycle of vpExchangeDeprecation.VirtualPoolLifecycle ?? []) {
+    deprecatedVpPoolIds.add(lifecycle.poolId);
+  }
   return {
     Pool: base.Pool.map((p) => ({
       ...p,
@@ -327,8 +354,7 @@ function mergeBridgePoolCompanions({
       ...openBreachById.get(p.id),
       ...oracleTxById.get(p.id),
       ...vpFreshnessById.get(p.id),
-      wrappedExchangeDeprecated:
-        vpExchangeDeprecatedByPoolId.get(p.id) ?? false,
+      wrappedExchangeDeprecated: deprecatedVpPoolIds.has(p.id),
     })),
   };
 }

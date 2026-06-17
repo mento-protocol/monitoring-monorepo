@@ -10,6 +10,7 @@ export interface PoolRow {
   oracleTxHash: string;
   oracleExpiry: string;
   oracleFreshnessWindow: string;
+  tokenDecimalsKnown: boolean;
   lastOracleReportAt: string;
   medianLive: boolean;
   lastDeviationRatio: string;

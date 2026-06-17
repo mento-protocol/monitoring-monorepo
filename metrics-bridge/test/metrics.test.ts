@@ -88,6 +88,22 @@ describe("updateMetrics", () => {
     ).toBe(0);
   });
 
+  it("suppresses virtual-pool oracle freshness while the VP cursor is untrusted", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        tokenDecimalsKnown: false,
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 600),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+  });
+
   it("uses the live VP oracle cursor when median updates lag flat reports", async () => {
     updateMetrics([
       makePool({

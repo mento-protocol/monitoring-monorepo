@@ -128,6 +128,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
             {
               id: BASE_POOL.id,
               oracleFreshnessWindow: "360",
+              tokenDecimalsKnown: true,
             },
           ],
         });
@@ -155,11 +156,53 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       oracleTxHash:
         "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       oracleFreshnessWindow: "360",
+      tokenDecimalsKnown: true,
       wrappedExchangeDeprecated: true,
       prevMedianPrice: "1120000000000000000000000",
       prevMedianAt: "1713199580",
       currentOpenBreachPeak: "15000",
       currentOpenBreachEntryThreshold: 5000,
+    });
+  });
+
+  it("marks factory-deprecated VirtualPools from lifecycle rows", async () => {
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsOracleLineage")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsVpFreshness")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: BASE_POOL.id,
+              oracleFreshnessWindow: "360",
+              tokenDecimalsKnown: true,
+            },
+          ],
+        });
+      }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({
+          BiPoolExchange: [],
+          VirtualPoolLifecycle: [{ poolId: BASE_POOL.id }],
+        });
+      }
+      return Promise.resolve({ Pool: [BASE_POOL] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      oracleFreshnessWindow: "360",
+      tokenDecimalsKnown: true,
+      wrappedExchangeDeprecated: true,
     });
   });
 
