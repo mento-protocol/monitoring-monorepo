@@ -4,13 +4,20 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture_repo="$(mktemp -d)"
 output_file="$(mktemp)"
-trap 'rm -rf "$fixture_repo"; rm -f "$output_file"' EXIT
+mock_server_pid=""
+mock_api_base=""
+trap '[[ -z "$mock_server_pid" ]] || kill "$mock_server_pid" 2>/dev/null || true; rm -rf "$fixture_repo"; rm -f "$output_file"' EXIT
 
 fail() {
   echo "vercel-ignore-build test failed: $*" >&2
   echo >&2
   echo "Last output:" >&2
   sed 's/^/  /' "$output_file" >&2
+  if [[ -f "$fixture_repo/mock-github-api.log" ]]; then
+    echo >&2
+    echo "Mock GitHub API log:" >&2
+    sed 's/^/  /' "$fixture_repo/mock-github-api.log" >&2
+  fi
   exit 1
 }
 
@@ -40,6 +47,89 @@ assert_output_contains() {
   local expected="$1"
   grep -Fq "$expected" "$output_file" ||
     fail "expected output to contain: ${expected}"
+}
+
+start_mock_github_api() {
+  local port_file="$fixture_repo/mock-github-api-port"
+
+  cat >"$fixture_repo/mock-github-api.mjs" <<'NODE'
+import http from "node:http";
+import { writeFileSync } from "node:fs";
+
+const portFile = process.argv[2];
+
+const responses = new Map([
+  [
+    "/repos/mento-protocol/monitoring-monorepo/pulls/982/files",
+    [{ filename: "docs/pr-checklists/recurring-review-patterns.md" }],
+  ],
+  [
+    "/repos/mento-protocol/monitoring-monorepo/pulls/983/files",
+    [{ filename: "ui-dashboard/src/app/page.tsx" }],
+  ],
+  [
+    "/repos/mento-protocol/monitoring-monorepo/compare/main...sha-docs",
+    {
+      ahead_by: 1,
+      files: [{ filename: "docs/pr-checklists/recurring-review-patterns.md" }],
+    },
+  ],
+  [
+    "/repos/mento-protocol/monitoring-monorepo/compare/main...sha-dashboard",
+    { ahead_by: 1, files: [{ filename: "ui-dashboard/src/app/page.tsx" }] },
+  ],
+  [
+    "/repos/mento-protocol/monitoring-monorepo/compare/main...sha-multi-docs",
+    {
+      ahead_by: 2,
+      files: [{ filename: "docs/pr-checklists/recurring-review-patterns.md" }],
+    },
+  ],
+  [
+    "/repos/mento-protocol/monitoring-monorepo/compare/previous-sha...sha-docs",
+    {
+      ahead_by: 1,
+      files: [{ filename: "docs/pr-checklists/recurring-review-patterns.md" }],
+    },
+  ],
+  [
+    "/repos/mento-protocol/monitoring-monorepo/compare/previous-sha...sha-dashboard",
+    { ahead_by: 1, files: [{ filename: "ui-dashboard/src/app/page.tsx" }] },
+  ],
+]);
+
+const server = http.createServer((request, response) => {
+  const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  console.error(url.pathname);
+  const body = responses.get(url.pathname);
+
+  if (!body) {
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: `no fixture for ${url.pathname}` }));
+    return;
+  }
+
+  response.writeHead(200, { "content-type": "application/json" });
+  response.end(JSON.stringify(body));
+});
+
+server.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("mock server did not bind to a TCP port");
+  }
+  writeFileSync(portFile, String(address.port));
+});
+NODE
+
+  node "$fixture_repo/mock-github-api.mjs" "$port_file" >"$fixture_repo/mock-github-api.log" 2>&1 &
+  mock_server_pid=$!
+  for _ in {1..50}; do
+    [[ -s "$port_file" ]] && break
+    sleep 0.1
+  done
+  [[ -s "$port_file" ]] || fail "mock GitHub API did not start"
+  mock_api_base="http://127.0.0.1:$(cat "$port_file")"
 }
 
 mkdir -p "$fixture_repo/ui-dashboard/scripts" "$fixture_repo/shared-config"
@@ -100,12 +190,77 @@ expect_build "branch fallback only triggers on non-main commit ref" \
   VERCEL_GIT_COMMIT_REF=main
 assert_output_contains "No VERCEL_GIT_PREVIOUS_SHA; building dashboard."
 
+start_mock_github_api
+nogit_repo="$fixture_repo/no-git"
+mkdir -p "$nogit_repo/ui-dashboard/scripts"
+cp "$repo_root/ui-dashboard/scripts/vercel-ignore-build.sh" "$nogit_repo/ui-dashboard/scripts/vercel-ignore-build.sh"
+
+cd "$nogit_repo"
+
+expect_skip "PR docs-only changes skip without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PULL_REQUEST_ID=982
+assert_output_contains "No dashboard-affecting changes in PR #982"
+
+expect_build "PR dashboard changes build without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PULL_REQUEST_ID=983
+assert_output_contains "Dashboard-affecting changes detected in PR #983"
+
+expect_skip "branch first push docs-only change skips without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_COMMIT_REF=docs-only \
+  VERCEL_GIT_COMMIT_SHA=sha-docs
+assert_output_contains "No dashboard-affecting changes on branch docs-only vs main"
+
+expect_build "branch first push dashboard change builds without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_COMMIT_REF=dashboard-pr \
+  VERCEL_GIT_COMMIT_SHA=sha-dashboard
+assert_output_contains "Dashboard-affecting changes detected on branch dashboard-pr vs main"
+
+expect_build "branch first push multi-commit fallback builds without local git" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_COMMIT_REF=docs-only \
+  VERCEL_GIT_COMMIT_SHA=sha-multi-docs
+assert_output_contains "Could not resolve origin/main for branch docs-only"
+
+expect_skip "previous SHA docs-only change skips without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PREVIOUS_SHA=previous-sha \
+  VERCEL_GIT_COMMIT_SHA=sha-docs
+assert_output_contains "No dashboard-affecting changes since previous successful Vercel deployment"
+
+expect_build "previous SHA dashboard change builds without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PREVIOUS_SHA=previous-sha \
+  VERCEL_GIT_COMMIT_SHA=sha-dashboard
+assert_output_contains "Dashboard-affecting changes detected since previous successful Vercel deployment"
+
+cd "$fixture_repo"
+
 git update-ref -d refs/remotes/origin/main
 expect_build "PR falls back to build when origin/main is unavailable" \
+  GITHUB_API_BASE_URL=http://127.0.0.1:9 \
   VERCEL_GIT_PULL_REQUEST_ID=409
 assert_output_contains "Could not resolve origin/main for PR #409; building dashboard."
 
 expect_build "branch fallback falls back to build when origin/main is unavailable" \
+  GITHUB_API_BASE_URL=http://127.0.0.1:9 \
   VERCEL_GIT_COMMIT_REF=docs-only
 assert_output_contains "Could not resolve origin/main for branch docs-only; building dashboard."
 

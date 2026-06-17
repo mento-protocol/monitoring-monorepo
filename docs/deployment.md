@@ -129,11 +129,15 @@ The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](
 
 Terraform stack ownership is registered in [`terraform.stacks.json`](../terraform.stacks.json) and summarized in [`docs/terraform.md`](./terraform.md). The dashboard/platform stack lives in [`terraform/`](../terraform/). The team-level Vercel Blob store is managed through Vercel Storage and linked to the project outside Terraform. The platform stack covers:
 
-- Vercel project creation and configuration (`root_directory`, `ignore_command`, Git integration)
+- Vercel project creation and configuration (`root_directory`, Git integration)
 - All Terraform-managed environment variables (Hasura URLs, Upstash Redis credentials)
 - Custom domain (`monitoring.mento.org`)
 - Upstash Redis database (address labels storage)
 - Monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, and CI WIF/IAM
+
+The path-aware Vercel ignore command lives in
+[`ui-dashboard/vercel.json`](../ui-dashboard/vercel.json), not Terraform, so the
+script can be reviewed and tested with dashboard changes.
 
 **State is stored remotely** in GCS at `gs://mento-terraform-tfstate-6ed6/monitoring-monorepo/`. No local backup is needed — GCS is the source of truth and has object versioning enabled.
 
@@ -344,22 +348,26 @@ envio
 The dashboard project intentionally skips builds when no dashboard-affecting
 files changed. The skip script is `ui-dashboard/scripts/vercel-ignore-build.sh`;
 it watches `ui-dashboard/`, `shared-config/`, and workspace dependency metadata.
-The script tries three anchors in order:
+The script uses local Git metadata when available, then falls back to GitHub's
+API when Vercel has stripped `.git` from the uploaded source. It tries three
+anchors in order:
 
 1. **PR preview deployments** — Vercel provides `VERCEL_GIT_PULL_REQUEST_ID`,
-   and the script diffs from the merge base with `origin/main`.
+   and the script diffs from the merge base with `origin/main` or, without local
+   Git metadata, from GitHub's paginated PR file list.
 2. **First-push branch fallback** — when Vercel ships neither
    `VERCEL_GIT_PULL_REQUEST_ID` nor `VERCEL_GIT_PREVIOUS_SHA` (which happens
-   when `git push` outruns `gh pr create`), the script falls back to the
-   merge base with `origin/main` as long as `VERCEL_GIT_COMMIT_REF` points
-   at a non-`main` branch.
+   when `git push` outruns `gh pr create`), the script falls back to the merge
+   base with `origin/main` when local Git exists. Without local Git, it uses the
+   GitHub compare API only for single-commit branch pushes; multi-commit branch
+   fallbacks build to avoid false skips.
 3. **Subsequent branch / production deployments** — `VERCEL_GIT_PREVIOUS_SHA`
-   is set, so the script diffs from that SHA to keep the resource-saving
-   behavior.
+   is set, so the script diffs from that SHA locally or through GitHub compare
+   to keep the resource-saving behavior.
 
-If a dashboard-affecting change was skipped, check that the relevant base
-commit is present in the shallow clone. For env-only changes that require a
-fresh production runtime, run the manual deploy from the monorepo root:
+If the script cannot prove a deployment is dashboard-clean, it builds. For
+env-only changes that require a fresh production runtime, run the manual deploy
+from the monorepo root:
 
 ```bash
 vercel deploy --prod --force --with-cache --archive=tgz --yes
