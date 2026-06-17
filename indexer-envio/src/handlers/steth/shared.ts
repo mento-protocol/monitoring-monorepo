@@ -3,6 +3,8 @@ import { asAddress } from "../../helpers.js";
 
 export const ETHEREUM_CHAIN_ID = 1;
 export const STETH_ADDRESS = "0xae7ab96520de3a18e5e111b5eaab095312d7fe84";
+// Mirror: ui-dashboard/src/lib/reserve-yield-steth.ts TRACKED_STETH_WALLET_IDENTIFIERS.
+// Keep both in sync when tracked reserve wallets change.
 export const TRACKED_STETH_WALLETS = [
   "0xd0697f70e79476195b742d5afab14be50f98cc1e",
   "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1",

@@ -62,7 +62,10 @@ export async function recordTransfer(
       {
         ...fromPosition,
         balance: subtractFloor(fromPosition.balance, amount),
-        principalAmount: fromPosition.principalAmount - principalAmount,
+        principalAmount: subtractFloor(
+          fromPosition.principalAmount,
+          principalAmount,
+        ),
       },
       meta,
     );
@@ -99,7 +102,10 @@ export async function recordTransfer(
       {
         ...position,
         balance: subtractFloor(position.balance, amount),
-        principalAmount: position.principalAmount - principalAmount,
+        principalAmount: subtractFloor(
+          position.principalAmount,
+          principalAmount,
+        ),
         realizedYieldAmount: position.realizedYieldAmount + yieldAmount,
         transferredOutYieldAmount:
           position.transferredOutYieldAmount + yieldAmount,

@@ -26,6 +26,8 @@ const STETH_CHAIN_ID = 1;
 const STETH_SYMBOL = "STETH";
 const STETH_ADDRESS = "0xae7ab96520de3a18e5e111b5eaab095312d7fe84";
 const STETH_YIELD_SUMMARY_ID = "1-steth";
+// Mirror: indexer-envio/src/handlers/steth/shared.ts TRACKED_STETH_WALLETS.
+// Keep both in sync when tracked reserve wallets change.
 const TRACKED_STETH_WALLET_IDENTIFIERS = new Set([
   "0xd0697f70e79476195b742d5afab14be50f98cc1e",
   "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1",
@@ -123,6 +125,11 @@ function markStethYieldToUsd(
   unitPriceUsd: number,
 ): number {
   return amountSteth * unitPriceUsd;
+}
+
+// weiToUsd is the shared 1e18 scaler; these ledger fields are stETH units.
+function weiToSteth(value: bigint): number {
+  return weiToUsd(value);
 }
 
 function applyStethYieldLedger(
@@ -239,6 +246,8 @@ function parseStethYieldLedger(payload: unknown): StethYieldLedgerResult {
     row.unrealizedYieldAmount,
     "unrealizedYieldAmount",
   );
+  // The query keeps transferredOutYieldAmount for future UI decomposition; this
+  // aggregate currently reports realized, unrealized, and total earned stETH.
   const remainingPrincipalWei = bigintField(
     row.remainingPrincipalAmount,
     "remainingPrincipalAmount",
@@ -250,11 +259,11 @@ function parseStethYieldLedger(payload: unknown): StethYieldLedgerResult {
   );
   return {
     ledger: {
-      earnedYieldSteth: weiToUsd(earnedYieldWei),
-      realizedYieldSteth: weiToUsd(realizedYieldWei),
-      unrealizedYieldSteth: weiToUsd(unrealizedYieldWei),
-      remainingPrincipalSteth: weiToUsd(remainingPrincipalWei),
-      currentBalanceSteth: weiToUsd(currentBalanceWei),
+      earnedYieldSteth: weiToSteth(earnedYieldWei),
+      realizedYieldSteth: weiToSteth(realizedYieldWei),
+      unrealizedYieldSteth: weiToSteth(unrealizedYieldWei),
+      remainingPrincipalSteth: weiToSteth(remainingPrincipalWei),
+      currentBalanceSteth: weiToSteth(currentBalanceWei),
       asOf: unixSecondsToIso(lastUpdatedTimestamp),
     },
     error: null,
