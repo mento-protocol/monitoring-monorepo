@@ -23,12 +23,16 @@ type Pool {
   notionalVolume1: BigInt!
   rebalanceCount: Int!
 
-  # Oracle state (FPMM pools only; VirtualPools default to N/A)
+  # Oracle state. FPMM pools use oracleExpiry (SortedOracles report expiry).
+  # VirtualPools use oracleFreshnessWindow, mirrored from their wrapping
+  # BiPoolExchange.referenceRateResetFrequency; 0 means unknown and must not
+  # fire freshness alerts.
   oracleOk: Boolean!
   oraclePrice: BigInt!
   oracleTimestamp: BigInt!
   oracleTxHash: String!
   oracleExpiry: BigInt!
+  oracleFreshnessWindow: BigInt!
   oracleNumReporters: Int!
   referenceRateFeedID: String! @index
 

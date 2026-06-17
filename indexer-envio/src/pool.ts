@@ -52,7 +52,7 @@ export {
 export type { IndexerHealthStatus } from "./pool/health.js";
 export type { PoolUpdateSource } from "./pool/sources.js";
 export {
-  mirrorFeedIdToPool,
+  mirrorVirtualPoolOracleConfig,
   mirrorTokensAndDecimalsToPool,
   selfHealInvertRateFeed,
   selfHealRebalanceThresholds,
@@ -122,7 +122,7 @@ export async function maybePreloadPool(
  *
  * Excludes `referenceRateFeedID` on purpose — that's a static-config field
  * set ONCE at pool creation (factory `referenceRateFeedIDEffect`) or via
- * the BiPoolExchange→Pool mirror (`mirrorFeedIdToPool`). Including it here
+ * the BiPoolExchange→Pool mirror (`mirrorVirtualPoolOracleConfig`). Including it here
  * would mean callers spreading `{...DEFAULT_ORACLE_FIELDS, ...overrides}`
  * as `oracleDelta` would clobber a healed feedID back to "" via the
  * `next` builder's spread order. `defaultPool` initializes the field
@@ -134,6 +134,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   oracleTimestamp: 0n,
   oracleTxHash: "",
   oracleExpiry: 0n,
+  oracleFreshnessWindow: 0n,
   oracleNumReporters: 0,
   lastMedianPrice: 0n,
   lastMedianAt: 0n,

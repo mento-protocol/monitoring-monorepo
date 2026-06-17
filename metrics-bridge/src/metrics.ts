@@ -20,7 +20,7 @@ import {
   pruneDeviationAlertStates,
 } from "./deviation-alert-state.js";
 import { classifyFxMarketPause } from "./fx-market.js";
-import type { PoolRow } from "./types.js";
+import { isFpmmPool, isVirtualPool, type PoolRow } from "./types.js";
 
 // SortedOracles fixed-point scale — keep in sync with
 // `indexer-envio/src/priceDifference.ts:SORTED_ORACLES_DECIMALS` and the
@@ -177,6 +177,12 @@ export const gauges = {
     name: "mento_pool_oracle_expiry",
     help: "Oracle report expiry window in seconds",
     labelNames: oracleUpdateLabels,
+    registers: [register],
+  }),
+  vpOracleFresh: new Gauge({
+    name: "mento_pool_vp_oracle_fresh",
+    help: "VirtualPool oracle freshness derived from lastOracleReportAt plus oracleFreshnessWindow (1=fresh, 0=stale). Unknown window publishes no series.",
+    labelNames: poolLabels,
     registers: [register],
   }),
   deviationRatio: new Gauge({
@@ -347,13 +353,16 @@ export function updateMetrics(
 ): void {
   resetPollGauges();
 
-  // `pools` is already filtered to FPMM-only rows by `isFpmmPool` at the poller
-  // boundary (see `pollPools`), so healed VirtualPools never reach gauge
-  // publication here.
   const activePoolIds = new Set<string>();
   for (const pool of pools) {
-    activePoolIds.add(pool.id);
-    updatePoolMetrics(pool, nowSeconds);
+    if (isVirtualPool(pool)) {
+      recordVpOracleMetrics(pool, nowSeconds);
+      continue;
+    }
+    if (isFpmmPool(pool)) {
+      activePoolIds.add(pool.id);
+      updatePoolMetrics(pool, nowSeconds);
+    }
   }
   pruneDeviationAlertStates(activePoolIds);
 }
@@ -435,6 +444,31 @@ function recordStatusAndOracleMetrics(
   gauges.oracleTimestamp.set(oracleLabels, Number(pool.oracleTimestamp));
   gauges.oracleLiveTimestamp.set(labels, Number(pool.oracleTimestamp));
   gauges.oracleExpiry.set(oracleLabels, oracleExpirySeconds(pool));
+}
+
+function recordVpOracleMetrics(pool: PoolRow, nowSeconds: number): void {
+  const freshness = vpOracleFreshness(pool, nowSeconds);
+  if (freshness === null) return;
+  const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
+  warnIfUnknown(pool, derivedPair);
+  gauges.vpOracleFresh.set(poolDisplayLabels(pool, derivedPair), freshness);
+}
+
+export function vpOracleFreshness(
+  pool: Pick<PoolRow, "oracleFreshnessWindow" | "lastOracleReportAt">,
+  nowSeconds: number,
+): number | null {
+  const freshnessWindow = Number(pool.oracleFreshnessWindow);
+  const lastReportAt = Number(pool.lastOracleReportAt);
+  if (
+    !Number.isFinite(freshnessWindow) ||
+    freshnessWindow <= 0 ||
+    !Number.isFinite(lastReportAt) ||
+    lastReportAt <= 0
+  ) {
+    return null;
+  }
+  return nowSeconds - lastReportAt <= freshnessWindow ? 1 : 0;
 }
 
 export function isOracleLive(

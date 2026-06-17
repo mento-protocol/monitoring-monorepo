@@ -245,10 +245,10 @@ describe("poll", () => {
     errorSpy.mockRestore();
   });
 
-  it("excludes healed VirtualPools from BOTH gauge publication and the rebalance probe", async () => {
-    // Regression: the VP filter must live at the poll boundary, not only in
-    // updateMetrics. A VP with a non-empty rebalancerAddress would otherwise
-    // still be probed and publish a phantom mento_pool_rebalance_blocked gauge.
+  it("keeps VirtualPools out of rebalance probes while still passing them to metrics", async () => {
+    // Regression: VP rows must reach updateMetrics so the dedicated
+    // mento_pool_vp_oracle_fresh gauge can publish, but a VP with a non-empty
+    // rebalancerAddress must never be probed as a phantom FPMM.
     const fpmm = makePool({ id: "42220-0xfpmm", wrappedExchangeId: "" });
     const vp = makePool({
       id: "42220-0xdead",
@@ -262,7 +262,7 @@ describe("poll", () => {
     await poll();
 
     const updateArg = updateSpy.mock.calls[0]?.[0];
-    expect(updateArg?.map((p) => p.id)).toEqual([fpmm.id]);
+    expect(updateArg?.map((p) => p.id)).toEqual([fpmm.id, vp.id]);
     const probeArg = mockRunRebalanceProbes.mock.calls[0]?.[0];
     expect(probeArg?.map((p) => p.id)).toEqual([fpmm.id]);
     updateSpy.mockRestore();

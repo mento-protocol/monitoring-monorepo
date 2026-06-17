@@ -37,6 +37,33 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     assert.equal(computeHealthStatus(pool, NOW), "N/A");
   });
 
+  it("returns 'N/A' for fresh virtual-pool oracle reports", () => {
+    const pool = makePool({
+      source: "virtual_pool_factory",
+      lastOracleReportAt: NOW - 120n,
+      oracleFreshnessWindow: 360n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "N/A");
+  });
+
+  it("returns 'CRITICAL' for stale virtual-pool oracle reports", () => {
+    const pool = makePool({
+      source: "virtual_pool_factory",
+      lastOracleReportAt: NOW - 600n,
+      oracleFreshnessWindow: 360n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
+  });
+
+  it("returns 'N/A' for virtual pools with unknown freshness windows", () => {
+    const pool = makePool({
+      source: "virtual_pool_factory",
+      lastOracleReportAt: NOW - 600n,
+      oracleFreshnessWindow: 0n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "N/A");
+  });
+
   it("returns 'OK' when devRatio is well below 1.0", () => {
     // 3000/5000 = 0.6
     const pool = makePool({ priceDifference: 3000n });

@@ -56,6 +56,19 @@ export const POOL_THRESHOLDS_KNOWN_EXT = `
   }
 `;
 
+// Single-pool sibling of `ALL_POOLS_VP_ORACLE_FRESHNESS`. Kept separate from
+// POOL_THRESHOLDS_KNOWN_EXT so new VP freshness schema-lag cannot drop
+// unrelated trust/threshold fields.
+export const POOL_VP_ORACLE_FRESHNESS_EXT = `
+  query PoolVpOracleFreshnessExt($id: String!, $chainId: Int!) {
+    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
+      id
+      lastOracleReportAt
+      oracleFreshnessWindow
+    }
+  }
+`;
+
 // Isolated from POOL_DETAIL_WITH_HEALTH (same rationale as POOL_BREACH_ROLLUP):
 // new indexer field, hosted Hasura rejects it during the deploy+resync window,
 // so the page survives and the reward tile degrades to "—".

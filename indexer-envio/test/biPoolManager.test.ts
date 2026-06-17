@@ -820,6 +820,7 @@ describe("BiPoolManager handlers", () => {
             token1Decimals: number;
             wrappedExchangeId?: string;
             referenceRateFeedID: string;
+            oracleFreshnessWindow: bigint;
           }
         | undefined;
       assert.ok(pool);
@@ -834,6 +835,75 @@ describe("BiPoolManager handlers", () => {
       assert.equal(pool!.token1Decimals, 18);
       // Side-effect of the same heal path: feedID also mirrors over.
       assert.equal(pool!.referenceRateFeedID, FEED_ID);
+      assert.equal(pool!.oracleFreshnessWindow, 360n);
+    });
+
+    it("repairs already-linked VirtualPools whose oracle freshness window is still unknown", async function () {
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const firstSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: firstSwap,
+        mockDb,
+      });
+
+      const linkedPool = mockDb.entities.Pool.get(poolId)!;
+      mockDb = mockDb.entities.Pool.set({
+        ...linkedPool,
+        oracleFreshnessWindow: 0n,
+      });
+
+      const secondSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(2, 300, 1_700_002_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: secondSwap,
+        mockDb,
+      });
+
+      const repaired = mockDb.entities.Pool.get(poolId) as
+        | { oracleFreshnessWindow: bigint }
+        | undefined;
+      assert.ok(repaired);
+      assert.equal(repaired!.oracleFreshnessWindow, 360n);
     });
 
     it("reverse-link backfill: ExchangeCreated AFTER VP heals fills tokens+decimals via mirrorTokensAndDecimalsToPool", async function () {

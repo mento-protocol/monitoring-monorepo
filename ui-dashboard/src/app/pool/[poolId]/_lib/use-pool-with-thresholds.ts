@@ -13,7 +13,10 @@
 
 import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
-import { POOL_THRESHOLDS_KNOWN_EXT } from "@/lib/queries";
+import {
+  POOL_THRESHOLDS_KNOWN_EXT,
+  POOL_VP_ORACLE_FRESHNESS_EXT,
+} from "@/lib/queries";
 import type { Pool } from "@/lib/types";
 
 type ThresholdsExtRow = {
@@ -24,6 +27,12 @@ type ThresholdsExtRow = {
   tokenDecimalsKnown?: boolean;
   degenerateReserves?: boolean;
   breakerTripped?: boolean;
+};
+
+type VpOracleFreshnessExtRow = {
+  id: string;
+  lastOracleReportAt?: string;
+  oracleFreshnessWindow?: string;
 };
 
 export type PoolWithThresholdsResult = {
@@ -61,18 +70,38 @@ export function usePoolWithThresholds(
     { timeoutMs: 5000 },
   );
   const thresholdsExt = thresholdsData?.Pool?.[0] ?? null;
+  const { data: vpFreshnessData, isLoading: vpFreshnessLoading } = useGQL<{
+    Pool: VpOracleFreshnessExtRow[];
+  }>(POOL_VP_ORACLE_FRESHNESS_EXT, { id: poolId, chainId }, undefined, {
+    timeoutMs: 5000,
+  });
+  const vpFreshnessExt = vpFreshnessData?.Pool?.[0] ?? null;
   const pool = useMemo<Pool | null>(() => {
     if (!rawPool) return null;
-    if (!thresholdsExt) return rawPool;
+    if (!thresholdsExt && !vpFreshnessExt) return rawPool;
     return {
       ...rawPool,
-      rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
-      rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
-      rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
-      tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
-      degenerateReserves: thresholdsExt.degenerateReserves,
-      breakerTripped: thresholdsExt.breakerTripped,
+      ...(thresholdsExt
+        ? {
+            rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
+            rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
+            rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
+            tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
+            degenerateReserves: thresholdsExt.degenerateReserves,
+            breakerTripped: thresholdsExt.breakerTripped,
+          }
+        : {}),
+      ...(vpFreshnessExt
+        ? {
+            lastOracleReportAt: vpFreshnessExt.lastOracleReportAt,
+            oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
+          }
+        : {}),
     };
-  }, [rawPool, thresholdsExt]);
-  return { pool, thresholdsLoading, thresholdsError };
+  }, [rawPool, thresholdsExt, vpFreshnessExt]);
+  return {
+    pool,
+    thresholdsLoading: thresholdsLoading || vpFreshnessLoading,
+    thresholdsError,
+  };
 }

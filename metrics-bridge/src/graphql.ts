@@ -5,7 +5,7 @@ import type { BridgePoolsResponse, PoolRow } from "./types.js";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // `BRIDGE_POOLS_QUERY` is the load-bearing one — base pool state for every
-// FPMM gauge. Schema-stable: every field on it has been live in production
+// FPMM gauge plus VP identity and report timestamps. Schema-stable: every field on it has been live in production
 // for >1 release. NEW indexer columns MUST land in an isolated companion
 // query so a deploy-window schema mismatch only loses the new annotation or
 // alert refinement, not every pool gauge — `fetchPools` falls back to base
@@ -17,14 +17,14 @@ const REQUEST_TIMEOUT_MS = 15_000;
 //
 // Companion-query exception: `wrappedExchangeId` stays on the BASE query even
 // though it is "new" relative to most callers. It is load-bearing for
-// CORRECTNESS, not just annotation — `isFpmmPool` filters healed VirtualPools
-// on it. Missing field → filter can't run → VPs leak as phantom FPMM gauges,
-// which is WORSE than the base query failing loudly. A companion query with a
-// graceful `""` fallback would silently re-introduce that bug. Schema-stable
-// since VP Phase 2 (see PR #853); fail-loud is the correct posture here.
+// CORRECTNESS, not just annotation — `isFpmmPool` filters VirtualPools on it
+// together with `source.includes("virtual")`. Missing field → filter can't run
+// → VPs leak as phantom FPMM gauges, which is WORSE than the base query failing
+// loudly. Schema-stable since VP Phase 2 (see PR #853); fail-loud is the
+// correct posture here.
 export const BRIDGE_POOLS_QUERY = gql`
   query BridgePools {
-    Pool(where: { source: { _like: "%fpmm%" } }) {
+    Pool {
       id
       chainId
       token0
@@ -38,6 +38,7 @@ export const BRIDGE_POOLS_QUERY = gql`
       oracleOk
       oracleTimestamp
       oracleExpiry
+      lastOracleReportAt
       lastDeviationRatio
       deviationBreachStartedAt
       limitStatus
@@ -100,6 +101,18 @@ export const BRIDGE_POOLS_ORACLE_TX_QUERY = gql`
   }
 `;
 
+// Optional companion query for the VP-specific freshness window. If the bridge
+// deploys before the indexer schema, only the new VP freshness metric degrades;
+// FPMM gauges keep publishing.
+export const BRIDGE_POOLS_VP_FRESHNESS_QUERY = gql`
+  query BridgePoolsVpFreshness {
+    Pool {
+      id
+      oracleFreshnessWindow
+    }
+  }
+`;
+
 type OracleLineageRow = Pick<
   PoolRow,
   "id" | "prevMedianPrice" | "prevMedianAt"
@@ -111,11 +124,13 @@ type OpenBreachRow = Pick<
 >;
 
 type OracleTxRow = Pick<PoolRow, "id" | "oracleTxHash">;
+type VpFreshnessRow = Pick<PoolRow, "id" | "oracleFreshnessWindow">;
 
 type BridgePoolsBaseResponse = {
   Pool: Omit<
     PoolRow,
     | "oracleTxHash"
+    | "oracleFreshnessWindow"
     | "prevMedianPrice"
     | "prevMedianAt"
     | "currentOpenBreachPeak"
@@ -135,6 +150,10 @@ const OPEN_BREACH_DEFAULTS = {
 
 const ORACLE_TX_DEFAULTS = {
   oracleTxHash: "",
+} as const;
+
+const VP_FRESHNESS_DEFAULTS = {
+  oracleFreshnessWindow: "0",
 } as const;
 
 const client = new GraphQLClient(HASURA_URL);
@@ -158,6 +177,7 @@ const unknownFieldWarnings = {
   oracleLineage: false,
   openBreach: false,
   oracleTx: false,
+  vpFreshness: false,
 };
 
 async function requestOptionalPoolRows<T>(
@@ -180,7 +200,7 @@ async function requestOptionalPoolRows<T>(
 
 export async function fetchPools(): Promise<BridgePoolsResponse> {
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  const [base, lineage, openBreach, oracleTx] = await Promise.all([
+  const [base, lineage, openBreach, oracleTx, vpFreshness] = await Promise.all([
     client.request<BridgePoolsBaseResponse>({
       document: BRIDGE_POOLS_QUERY,
       signal,
@@ -203,6 +223,12 @@ export async function fetchPools(): Promise<BridgePoolsResponse> {
       "oracleTx",
       "[metrics-bridge] Hasura schema missing oracle tx hash field; oracle alert transaction links disabled until indexer catches up.",
     ),
+    requestOptionalPoolRows<VpFreshnessRow>(
+      BRIDGE_POOLS_VP_FRESHNESS_QUERY,
+      signal,
+      "vpFreshness",
+      "[metrics-bridge] Hasura schema missing VP oracle freshness field; VirtualPool oracle staleness metric disabled until indexer catches up.",
+    ),
   ]);
 
   const lineageById = new Map(lineage.Pool.map((p) => [p.id, p]));
@@ -210,15 +236,18 @@ export async function fetchPools(): Promise<BridgePoolsResponse> {
   const oracleTxById = new Map(
     oracleTx.Pool.filter((p) => p.oracleTxHash).map((p) => [p.id, p]),
   );
+  const vpFreshnessById = new Map(vpFreshness.Pool.map((p) => [p.id, p]));
   return {
     Pool: base.Pool.map((p) => ({
       ...p,
       ...ORACLE_TX_DEFAULTS,
+      ...VP_FRESHNESS_DEFAULTS,
       ...LINEAGE_DEFAULTS,
       ...OPEN_BREACH_DEFAULTS,
       ...lineageById.get(p.id),
       ...openBreachById.get(p.id),
       ...oracleTxById.get(p.id),
+      ...vpFreshnessById.get(p.id),
     })),
   };
 }

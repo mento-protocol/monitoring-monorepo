@@ -56,6 +56,7 @@ interface PoolHealthState {
   oracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
   oracleExpiry?: string | undefined;
+  oracleFreshnessWindow?: string | undefined;
   priceDifference?: string | undefined;
   degenerateReserves?: boolean | undefined;
   rebalanceThreshold?: number | undefined;
@@ -208,6 +209,24 @@ export function isOracleFresh(
   return oracleTs !== 0 && nowSeconds - oracleTs <= stalenessThreshold;
 }
 
+function isVirtualPoolOracleStale(
+  pool: {
+    lastOracleReportAt?: string | undefined;
+    oracleFreshnessWindow?: string | undefined;
+  },
+  nowSeconds: number,
+): boolean {
+  const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
+  const lastReportAt = Number(pool.lastOracleReportAt ?? "0");
+  return (
+    Number.isFinite(freshnessWindow) &&
+    freshnessWindow > 0 &&
+    Number.isFinite(lastReportAt) &&
+    lastReportAt > 0 &&
+    nowSeconds - lastReportAt > freshnessWindow
+  );
+}
+
 /**
  * Compute the health status for a pool. Returns:
  *  - "N/A" for VirtualPools (no oracle), and for FPMM pools whose indexer
@@ -241,7 +260,10 @@ export function computeHealthStatus(
   chainId?: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
-  if (isVirtualPool(pool)) return "N/A";
+  if (isVirtualPool(pool)) {
+    if (!isVirtualPoolOracleStale(pool, nowSeconds)) return "N/A";
+    return isWeekend() ? "WEEKEND" : "CRITICAL";
+  }
   // Oracle-staleness is an alertable freshness incident — keep it ABOVE
   // the hasHealthData gate so a stale-oracle pool doesn't get masked into
   // "N/A" just because the deviation accrual is also untrusted (codex P2

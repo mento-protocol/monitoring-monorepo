@@ -15,6 +15,7 @@ import {
   ALL_POOLS_BREACH_ROLLUP,
   ALL_POOLS_HEALTH_CURSOR,
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+  ALL_POOLS_VP_ORACLE_FRESHNESS,
   ALL_POOLS_WITH_HEALTH,
   ALL_OLS_POOLS,
   ALL_CDP_POOLS,
@@ -725,6 +726,7 @@ export async function fetchNetworkData(
     breachRollupResult,
     healthCursorResult,
     rebalanceThresholdsKnownResult,
+    vpOracleFreshnessResult,
     indexedCdpPoolsResult,
     fallbackStrategiesResult,
   ] = await Promise.allSettled([
@@ -784,6 +786,15 @@ export async function fetchNetworkData(
         breakerTripped?: boolean;
       }[];
     }>(ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN, { chainId: network.chainId }),
+    // VP oracle freshness fields are newer than the trust companion above.
+    // Isolate them so schema-lag drops only VP staleness state.
+    timed<{
+      Pool: {
+        id: string;
+        lastOracleReportAt?: string;
+        oracleFreshnessWindow?: string;
+      }[];
+    }>(ALL_POOLS_VP_ORACLE_FRESHNESS, { chainId: network.chainId }),
     // CDP badges are Celo-only and come from indexed CdpPool rows. The
     // runtime probe is a non-Celo Reserve fallback and must not produce CDP
     // badges.
@@ -850,6 +861,22 @@ export async function fetchNetworkData(
             tokenDecimalsKnown: r.tokenDecimalsKnown,
             degenerateReserves: r.degenerateReserves,
             breakerTripped: r.breakerTripped,
+          };
+    });
+  }
+
+  if (vpOracleFreshnessResult.status === "fulfilled") {
+    const freshnessById = new Map(
+      (vpOracleFreshnessResult.value.Pool ?? []).map((r) => [r.id, r]),
+    );
+    pools = pools.map((p) => {
+      const r = freshnessById.get(p.id);
+      return r == null
+        ? p
+        : {
+            ...p,
+            lastOracleReportAt: r.lastOracleReportAt,
+            oracleFreshnessWindow: r.oracleFreshnessWindow,
           };
     });
   }

@@ -94,10 +94,7 @@ async function pollPools(): Promise<void> {
   let pools: PoolRow[];
   try {
     const data = await fetchPools();
-    // Exclude healed VirtualPools at the boundary so BOTH gauge publication and
-    // the rebalance probe see FPMM-only rows. See `isFpmmPool` for why the
-    // `source: { _like: "%fpmm%" }` query filter alone is insufficient.
-    pools = data.Pool.filter(isFpmmPool);
+    pools = data.Pool;
   } catch (error) {
     recordPollError(
       "hasura_query",
@@ -131,7 +128,7 @@ async function pollPools(): Promise<void> {
     return;
   }
 
-  await maybeRunRebalanceProbe(pools);
+  await maybeRunRebalanceProbe(pools.filter(isFpmmPool));
   // Increment AFTER the probe check so cycle 0 (cold start) fires the
   // probe. A failed Hasura poll leaves the counter unchanged so the probe
   // attaches to the next successful cycle. Probe failures are recorded but do

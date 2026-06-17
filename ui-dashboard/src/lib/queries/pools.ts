@@ -86,6 +86,19 @@ export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
   }
 `;
 
+// VP oracle freshness is newer than the trust-field companion above. Keep it
+// separate so a dashboard-before-indexer rollout degrades only VP staleness
+// status, not thresholds, USD trust, breaker, or degenerate-health fields.
+export const ALL_POOLS_VP_ORACLE_FRESHNESS = `
+  query AllPoolsVpOracleFreshness($chainId: Int!) {
+    Pool(where: { chainId: { _eq: $chainId } }) {
+      id
+      lastOracleReportAt
+      oracleFreshnessWindow
+    }
+  }
+`;
+
 // Per-pool breach rollup counters, scoped to a chain. Kept OFF the
 // shared ALL_POOLS_WITH_HEALTH query on purpose: these fields are
 // deployed in a phased indexer rollout, and a schema-lag fail would

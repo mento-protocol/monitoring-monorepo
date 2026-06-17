@@ -7,6 +7,7 @@ const EXPECTED_EXPORT_NAMES = [
   "ALL_POOLS_BREACH_ROLLUP",
   "ALL_POOLS_HEALTH_CURSOR",
   "ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN",
+  "ALL_POOLS_VP_ORACLE_FRESHNESS",
   "ORACLE_RATES",
   "RECENT_SWAPS",
   "POOL_SWAPS",
@@ -24,6 +25,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_LIQUIDITY_COUNT",
   "POOL_DETAIL_WITH_HEALTH",
   "POOL_THRESHOLDS_KNOWN_EXT",
+  "POOL_VP_ORACLE_FRESHNESS_EXT",
   "POOL_CONFIG_EXT",
   "POOL_RATE_FEED_EXT",
   "POOL_V2_EXCHANGE",
@@ -176,6 +178,12 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).toContain(
       "breakerTripped",
     );
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
+      "lastOracleReportAt",
+    );
+    expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
+      "oracleFreshnessWindow",
+    );
     // No heavy / unrelated fields piggybacking — isolation must stay tight
     // so a schema-lag failure on the rollup query degrades only `isNeverRebalance`,
     // not the entire pools page.
@@ -184,6 +192,24 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     );
     expect(queries.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN).not.toContain(
       "oraclePrice",
+    );
+    expect(queries.ALL_POOLS_WITH_HEALTH).not.toContain(
+      "oracleFreshnessWindow",
+    );
+  });
+
+  it("ALL_POOLS_VP_ORACLE_FRESHNESS isolates new VP freshness fields", () => {
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain(
+      "lastOracleReportAt",
+    );
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain(
+      "oracleFreshnessWindow",
+    );
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
+      "rebalanceThresholdsKnown",
+    );
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
+      "tokenDecimalsKnown",
     );
   });
 
@@ -198,11 +224,34 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
       "rebalanceThresholdBelow",
     );
     expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain("degenerateReserves");
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain(
+      "lastOracleReportAt",
+    );
+    expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain(
+      "oracleFreshnessWindow",
+    );
     expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain("healthStatus");
     expect(queries.POOL_THRESHOLDS_KNOWN_EXT).not.toContain("oraclePrice");
+    expect(queries.POOL_DETAIL_WITH_HEALTH).not.toContain(
+      "oracleFreshnessWindow",
+    );
     // Keyed by id + chainId — single-pool variant of the all-pools query.
     expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain("$id: String!");
     expect(queries.POOL_THRESHOLDS_KNOWN_EXT).toContain("$chainId: Int!");
+  });
+
+  it("POOL_VP_ORACLE_FRESHNESS_EXT isolates new VP freshness fields", () => {
+    expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain(
+      "lastOracleReportAt",
+    );
+    expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain(
+      "oracleFreshnessWindow",
+    );
+    expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).not.toContain(
+      "rebalanceThresholdsKnown",
+    );
+    expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain("$id: String!");
+    expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain("$chainId: Int!");
   });
 
   it("ALL_POOLS_BREACH_ROLLUP is isolated (rationale: phased schema rollout)", () => {

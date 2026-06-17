@@ -55,6 +55,54 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
+  it("publishes virtual-pool oracle freshness from the VP freshness window", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
+    ).toBeUndefined();
+  });
+
+  it("marks virtual-pool oracle freshness stale after the VP window", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 600),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(0);
+  });
+
+  it("skips virtual-pool oracle freshness when the VP window is unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 600),
+        oracleFreshnessWindow: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+  });
+
   it("sets oracle_contract_ok to the raw event-time contract flag", async () => {
     updateMetrics([makePool()]);
     expect(

@@ -56,6 +56,76 @@ describe("computeHealthStatus", () => {
     ).toBe("N/A");
   });
 
+  it('returns "N/A" for fresh VirtualPool oracle reports', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          lastOracleReportAt: String(now - 120),
+          oracleFreshnessWindow: "360",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it('returns "CRITICAL" for stale VirtualPool oracle reports', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          lastOracleReportAt: String(now - 600),
+          oracleFreshnessWindow: "360",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it('returns "WEEKEND" for stale VirtualPool oracle reports during weekend', async () => {
+    const weekend = await import("../weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValueOnce(true);
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          lastOracleReportAt: String(now - 600),
+          oracleFreshnessWindow: "360",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("WEEKEND");
+  });
+
+  it('returns "N/A" for VirtualPools with unknown freshness windows', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          lastOracleReportAt: String(now - 600),
+          oracleFreshnessWindow: "0",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
   it('returns "CRITICAL" when oracleOk is false', () => {
     expect(
       computeHealthStatus({

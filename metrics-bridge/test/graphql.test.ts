@@ -120,6 +120,16 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsVpFreshness")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: BASE_POOL.id,
+              oracleFreshnessWindow: "360",
+            },
+          ],
+        });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -130,6 +140,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       lastMedianPrice: "1150000000000000000000000",
       oracleTxHash:
         "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      oracleFreshnessWindow: "360",
       prevMedianPrice: "1120000000000000000000000",
       prevMedianAt: "1713199580",
       currentOpenBreachPeak: "15000",
@@ -153,6 +164,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsOracleTx")) {
         return Promise.resolve({ Pool: [] });
       }
+      if (doc.includes("BridgePoolsVpFreshness")) {
+        return Promise.resolve({ Pool: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -164,6 +178,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       // keeps working in degraded mode.
       lastMedianPrice: "1150000000000000000000000",
       oracleTxHash: "",
+      oracleFreshnessWindow: "0",
       prevMedianPrice: "0",
       prevMedianAt: "0",
       lastOracleJumpBps: "3.0000",
@@ -192,6 +207,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsOracleTx")) {
         return Promise.resolve({ Pool: [] });
       }
+      if (doc.includes("BridgePoolsVpFreshness")) {
+        return Promise.resolve({ Pool: [] });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -202,6 +220,32 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       prevMedianAt: "1713199580",
       currentOpenBreachPeak: "0",
       currentOpenBreachEntryThreshold: 0,
+      oracleFreshnessWindow: "0",
+    });
+  });
+
+  it("falls back to unknown VP freshness when Hasura reports an unknown field", async () => {
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsOracleLineage")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOpenBreach")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsVpFreshness")) {
+        return Promise.reject(unknownFieldError("oracleFreshnessWindow"));
+      }
+      return Promise.resolve({ Pool: [BASE_POOL] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      oracleFreshnessWindow: "0",
     });
   });
 
@@ -215,6 +259,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
         return Promise.resolve({ Pool: [] });
       }
       if (doc.includes("BridgePoolsOracleTx")) {
+        return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({ Pool: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
@@ -258,6 +305,16 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolsVpFreshness")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: "different-pool-id",
+              oracleFreshnessWindow: "1",
+            },
+          ],
+        });
+      }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });
 
@@ -270,6 +327,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       prevMedianAt: "0",
       currentOpenBreachPeak: "0",
       currentOpenBreachEntryThreshold: 0,
+      oracleFreshnessWindow: "0",
     });
   });
 
@@ -284,6 +342,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsOracleTx")) {
         return Promise.reject(unknownFieldError("oracleTxHash"));
+      }
+      if (doc.includes("BridgePoolsVpFreshness")) {
+        return Promise.resolve({ Pool: [] });
       }
       return Promise.resolve({ Pool: [BASE_POOL] });
     });

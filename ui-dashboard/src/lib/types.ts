@@ -51,6 +51,7 @@ export type Pool = {
   lastOracleReportAt?: string | undefined;
   oracleTxHash?: string | undefined;
   oracleExpiry?: string | undefined;
+  oracleFreshnessWindow?: string | undefined;
   oracleNumReporters?: number | undefined;
   referenceRateFeedID?: string | undefined;
   priceDifference?: string | undefined;
