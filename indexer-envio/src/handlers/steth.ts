@@ -53,7 +53,8 @@ indexer.onEvent(
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
     if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
-    await recordTransfer(context, meta, from, to, event.params.value);
-    await updateSummary(context, meta);
+    if (await recordTransfer(context, meta, from, to, event.params.value)) {
+      await updateSummary(context, meta);
+    }
   },
 );

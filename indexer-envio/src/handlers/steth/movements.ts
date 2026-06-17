@@ -24,13 +24,20 @@ function subtractFloor(value: bigint, amount: bigint): bigint {
   return value > amount ? value - amount : ZERO;
 }
 
+function principalRequiredForOutflow(
+  position: { principalAmount: bigint },
+  amount: bigint,
+): bigint {
+  return position.principalAmount < amount ? position.principalAmount : amount;
+}
+
 export async function recordTransfer(
   context: StethContext,
   meta: EventMeta,
   from: string,
   to: string,
   amount: bigint,
-): Promise<void> {
+): Promise<boolean> {
   const fromTracked = isTrackedWallet(from);
   const toTracked = isTrackedWallet(to);
   let kind = "transfer_in";
@@ -39,8 +46,16 @@ export async function recordTransfer(
 
   if (fromTracked && toTracked) {
     kind = "internal_transfer";
-    principalAmount = await consumePrincipalLots(context, from, amount, meta);
     const fromPosition = await getPosition(context, meta.chainId, from, meta);
+    const consumedPrincipal = await consumePrincipalLots(
+      context,
+      from,
+      amount,
+      meta,
+      principalRequiredForOutflow(fromPosition, amount),
+    );
+    if (consumedPrincipal === null) return false;
+    principalAmount = consumedPrincipal;
     const toPosition = await getPosition(context, meta.chainId, to, meta);
     setPosition(
       context,
@@ -68,9 +83,17 @@ export async function recordTransfer(
     );
   } else if (fromTracked) {
     kind = "transfer_out";
-    principalAmount = await consumePrincipalLots(context, from, amount, meta);
-    yieldAmount = amount - principalAmount;
     const position = await getPosition(context, meta.chainId, from, meta);
+    const consumedPrincipal = await consumePrincipalLots(
+      context,
+      from,
+      amount,
+      meta,
+      principalRequiredForOutflow(position, amount),
+    );
+    if (consumedPrincipal === null) return false;
+    principalAmount = consumedPrincipal;
+    yieldAmount = amount - principalAmount;
     setPosition(
       context,
       {
@@ -101,7 +124,7 @@ export async function recordTransfer(
       meta,
     );
   } else {
-    return;
+    return false;
   }
 
   context.StethYieldMovement.set({
@@ -117,4 +140,5 @@ export async function recordTransfer(
     blockNumber: meta.blockNumber,
     blockTimestamp: meta.blockTimestamp,
   });
+  return true;
 }

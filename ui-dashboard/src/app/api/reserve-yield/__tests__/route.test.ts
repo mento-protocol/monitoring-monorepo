@@ -313,6 +313,124 @@ describe("GET /api/reserve-yield", () => {
     expect(stethHolding.yieldModel).toContain("not ETH price appreciation");
   });
 
+  it("does not shrink indexed stETH yield when current reserve balance is stale", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
+    const staleReserve = {
+      collateral: {
+        assets: [
+          RESERVE_WITH_STETH.collateral.assets[0],
+          {
+            ...currentStethAsset,
+            balance: "200",
+            usd_value:
+              (currentStethAsset.usd_value /
+                Number(currentStethAsset.balance)) *
+              200,
+            sources: currentStethAsset.sources.map((source) => ({
+              ...source,
+              balance: "200",
+              usd_value:
+                (currentStethAsset.usd_value /
+                  Number(currentStethAsset.balance)) *
+                200,
+            })),
+          },
+        ],
+      },
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(staleReserve))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [STETH_LEDGER_SUMMARY],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+    const staleStethAsset = staleReserve.collateral.assets[1]!;
+    const stethUnitPrice =
+      staleStethAsset.usd_value / Number(staleStethAsset.balance);
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldUsd).toBeCloseTo(15 * stethUnitPrice, 6);
+    expect(body.realizedYieldUsd).toBeCloseTo(5 * stethUnitPrice, 6);
+    expect(body.unrealizedYieldUsd).toBeCloseTo(10 * stethUnitPrice, 6);
+    expect(body.earnedYieldError).toContain(
+      "current indexed reserve balance is below indexed ledger balance",
+    );
+  });
+
+  it("surfaces stale indexed stETH yield when current reserve balance is zero", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              RESERVE_WITH_STETH.collateral.assets[0],
+              {
+                ...currentStethAsset,
+                balance: "0",
+                usd_value: 0,
+                sources: currentStethAsset.sources.map((source) => ({
+                  ...source,
+                  balance: "0",
+                  usd_value: 0,
+                })),
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldSummary: [STETH_LEDGER_SUMMARY],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldUsd).toBeNull();
+    expect(body.earnedYieldError).toContain(
+      "current indexed reserve balance is below indexed ledger balance",
+    );
+  });
+
   it("keeps stETH forecasts visible when the stETH ledger is pending", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     vi.spyOn(globalThis, "fetch")

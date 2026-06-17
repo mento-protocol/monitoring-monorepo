@@ -99,7 +99,8 @@ export async function consumePrincipalLots(
   wallet: string,
   amount: bigint,
   meta: EventMeta,
-): Promise<bigint> {
+  requiredPrincipal: bigint = amount,
+): Promise<bigint | null> {
   if (amount <= ZERO) return ZERO;
 
   const lots = await context.StethCostBasisLot.getWhere({
@@ -116,6 +117,14 @@ export async function consumePrincipalLots(
       }
       return a.id.localeCompare(b.id);
     });
+
+  const availablePrincipal = activeLots.reduce(
+    (sum, lot) => sum + lot.remainingAmount,
+    ZERO,
+  );
+  if (availablePrincipal < requiredPrincipal) {
+    return null;
+  }
 
   let remaining = amount;
   let consumedPrincipal = ZERO;

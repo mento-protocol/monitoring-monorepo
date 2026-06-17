@@ -30,6 +30,8 @@ const TRACKED_STETH_WALLET_IDENTIFIERS = new Set([
   "0xd0697f70e79476195b742d5afab14be50f98cc1e",
   "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1",
 ]);
+const STALE_INDEXED_STETH_WARNING =
+  "stETH earned-yield ledger: current indexed reserve balance is below indexed ledger balance; using indexed ledger value without current-balance refresh.";
 
 function validateStethMeta(meta: unknown): void {
   if (!isRecord(meta)) {
@@ -173,7 +175,19 @@ function refreshStethUnrealizedYield(
   }
 
   if (indexedBalance <= 0 || unitPriceUsd === null) {
-    return { ledger, unitPriceUsd, warning: null };
+    return {
+      ledger,
+      unitPriceUsd,
+      warning:
+        ledger.currentBalanceSteth > 0 ? STALE_INDEXED_STETH_WARNING : null,
+    };
+  }
+  if (indexedBalance < ledger.currentBalanceSteth) {
+    return {
+      ledger,
+      unitPriceUsd,
+      warning: STALE_INDEXED_STETH_WARNING,
+    };
   }
   const unrealizedYieldSteth = Math.max(
     indexedBalance - ledger.remainingPrincipalSteth,

@@ -172,6 +172,45 @@ describe("stETH reserve-yield ledger", () => {
     assert.equal(summary(mockDb).remainingPrincipalAmount, steth(100));
   });
 
+  it("rejects tracked outflows when position principal is not backed by FIFO lots", async () => {
+    const mockDb = MockDb.createMockDb();
+    mockDb.entities.StethPosition.set({
+      id: `1-${RESERVE_SAFE}`,
+      chainId: 1,
+      wallet: RESERVE_SAFE,
+      balance: steth(100),
+      principalAmount: steth(100),
+      realizedYieldAmount: 0n,
+      transferredOutYieldAmount: 0n,
+      lastUpdatedBlock: 99n,
+      lastUpdatedTimestamp: 1_700_000_099n,
+    });
+
+    await transfer(mockDb, 100, 1, RESERVE_SAFE, EXTERNAL, steth(40));
+    assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 0);
+    assert.equal(mockDb.entities.StethYieldSummary.get("1-steth"), undefined);
+  });
+
+  it("rejects internal transfers when position principal is not backed by FIFO lots", async () => {
+    const mockDb = MockDb.createMockDb();
+    mockDb.entities.StethPosition.set({
+      id: `1-${RESERVE_SAFE}`,
+      chainId: 1,
+      wallet: RESERVE_SAFE,
+      balance: steth(100),
+      principalAmount: steth(100),
+      realizedYieldAmount: 0n,
+      transferredOutYieldAmount: 0n,
+      lastUpdatedBlock: 99n,
+      lastUpdatedTimestamp: 1_700_000_099n,
+    });
+
+    await transfer(mockDb, 100, 1, RESERVE_SAFE, OPS_SAFE, steth(40));
+    assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 0);
+    assert.equal(mockDb.entities.StethCostBasisLot.getAll().length, 0);
+    assert.equal(mockDb.entities.StethYieldSummary.get("1-steth"), undefined);
+  });
+
   it("ignores transfers that do not touch tracked wallets", async () => {
     const mockDb = await transfer(
       MockDb.createMockDb(),
