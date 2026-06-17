@@ -10,6 +10,112 @@ interface HealthPanelProps {
   pool: Pool;
 }
 
+type HealthPanelMode =
+  | "virtual-oracle-incident"
+  | "weekend"
+  | "virtual"
+  | "halted"
+  | "missing-data";
+
+interface HealthPanelModeInput {
+  hasHealthData: boolean;
+  isVirtual: boolean;
+  showHalted: boolean;
+  showVirtualOracleIncident: boolean;
+  showWeekendPause: boolean;
+  weekendPause: boolean;
+}
+
+function resolveHealthPanelMode({
+  hasHealthData,
+  isVirtual,
+  showHalted,
+  showVirtualOracleIncident,
+  showWeekendPause,
+  weekendPause,
+}: HealthPanelModeInput): HealthPanelMode | null {
+  if (showVirtualOracleIncident) return "virtual-oracle-incident";
+  if (showWeekendPause && (isVirtual || weekendPause)) return "weekend";
+  if (isVirtual) return "virtual";
+  if (showHalted) return "halted";
+  if (!hasHealthData) return "missing-data";
+  return null;
+}
+
+function HealthPanelContent({ mode }: { mode: HealthPanelMode }) {
+  switch (mode) {
+    case "virtual-oracle-incident":
+      return (
+        <div className="flex items-start gap-3 rounded-lg border border-red-700/50 bg-red-950/30 px-4 py-3 text-sm text-red-100">
+          <span
+            className="text-base leading-5 flex-shrink-0"
+            aria-hidden="true"
+          >
+            !
+          </span>
+          <span>
+            <span className="font-medium text-red-200">
+              VirtualPool oracle is stale.
+            </span>{" "}
+            The wrapped exchange has not received a fresh oracle report within
+            its reset window, so swaps may revert until a fresh report arrives.
+          </span>
+        </div>
+      );
+    case "weekend":
+      return (
+        <div className="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
+          <span
+            className="text-base leading-5 flex-shrink-0"
+            aria-hidden="true"
+          >
+            🌙
+          </span>
+          <span>
+            <span className="font-medium text-slate-200">
+              Trading is paused for the weekend.
+            </span>{" "}
+            FX markets are closed and no fresh oracle data is available. Pool
+            trading will resume automatically when markets reopen (~Sunday 23:00
+            UTC).
+          </span>
+        </div>
+      );
+    case "virtual":
+      return (
+        <p className="text-sm text-slate-400">
+          VirtualPool oracle freshness is monitored once the wrapped exchange
+          reset window is indexed.
+        </p>
+      );
+    case "halted":
+      return (
+        <div className="flex items-start gap-3 rounded-lg border border-orange-700/50 bg-orange-900/20 px-4 py-3 text-sm text-orange-100">
+          <span
+            className="text-base leading-5 flex-shrink-0"
+            aria-hidden="true"
+          >
+            🛑
+          </span>
+          <span>
+            <span className="font-medium text-orange-200">
+              Trading is halted.
+            </span>{" "}
+            A price circuit breaker is tripped for this rate feed, so swaps are
+            paused until it resets — see the breaker panel below for the live
+            threshold and cooldown.
+          </span>
+        </div>
+      );
+    case "missing-data":
+      return (
+        <p className="text-sm text-slate-400">
+          Oracle health data not yet available — indexer schema update pending.
+        </p>
+      );
+  }
+}
+
 /**
  * Exception-only panel — the pool header owns the primary health surface
  * (DeviationCell, Rebalance Status cell, metric grid). Rebalance diagnostics
@@ -40,16 +146,23 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   // chip: stale / weekend pools resolve to CRITICAL / WEEKEND, not HALTED.
   const computed = computeHealthStatus(pool, network.chainId);
   const showHalted = computed === "HALTED";
-  const showVirtualOracleIncident =
-    isVirtual && (computed === "CRITICAL" || computed === "WEEKEND");
+  const showVirtualOracleIncident = isVirtual && computed === "CRITICAL";
+  const showWeekendPause = computed === "WEEKEND" || weekendPause;
   // No-data pools otherwise resolve to a misleading CRITICAL from the indexer's
   // zero-initialised stale timestamp — suppress that to N/A (matching the
   // virtual-pool branch). Never suppress a real halt.
   const badgeStatus =
     !isVirtual && !hasHealthData && !showHalted ? "N/A" : computed;
 
-  const hasContent = isVirtual || showHalted || !hasHealthData || weekendPause;
-  if (!hasContent) return null;
+  const mode = resolveHealthPanelMode({
+    hasHealthData,
+    isVirtual,
+    showHalted,
+    showVirtualOracleIncident,
+    showWeekendPause,
+    weekendPause,
+  });
+  if (mode === null) return null;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -58,66 +171,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
         <HealthBadge status={badgeStatus} />
       </div>
 
-      {showVirtualOracleIncident ? (
-        <div className="flex items-start gap-3 rounded-lg border border-red-700/50 bg-red-950/30 px-4 py-3 text-sm text-red-100">
-          <span
-            className="text-base leading-5 flex-shrink-0"
-            aria-hidden="true"
-          >
-            !
-          </span>
-          <span>
-            <span className="font-medium text-red-200">
-              VirtualPool oracle is stale.
-            </span>{" "}
-            The wrapped exchange has not received a fresh oracle report within
-            its reset window, so swaps may revert until a fresh report arrives.
-          </span>
-        </div>
-      ) : isVirtual ? (
-        <p className="text-sm text-slate-400">
-          VirtualPool oracle freshness is monitored once the wrapped exchange
-          reset window is indexed.
-        </p>
-      ) : showHalted ? (
-        <div className="flex items-start gap-3 rounded-lg border border-orange-700/50 bg-orange-900/20 px-4 py-3 text-sm text-orange-100">
-          <span
-            className="text-base leading-5 flex-shrink-0"
-            aria-hidden="true"
-          >
-            🛑
-          </span>
-          <span>
-            <span className="font-medium text-orange-200">
-              Trading is halted.
-            </span>{" "}
-            A price circuit breaker is tripped for this rate feed, so swaps are
-            paused until it resets — see the breaker panel below for the live
-            threshold and cooldown.
-          </span>
-        </div>
-      ) : !hasHealthData ? (
-        <p className="text-sm text-slate-400">
-          Oracle health data not yet available — indexer schema update pending.
-        </p>
-      ) : (
-        <div className="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
-          <span
-            className="text-base leading-5 flex-shrink-0"
-            aria-hidden="true"
-          >
-            🌙
-          </span>
-          <span>
-            <span className="font-medium text-slate-200">
-              Trading is paused for the weekend.
-            </span>{" "}
-            FX markets are closed and no fresh oracle data is available. Pool
-            trading will resume automatically when markets reopen (~Sunday 23:00
-            UTC).
-          </span>
-        </div>
-      )}
+      <HealthPanelContent mode={mode} />
     </div>
   );
 }

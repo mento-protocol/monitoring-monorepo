@@ -28,6 +28,7 @@ export function makePool(overrides: Partial<Pool> = {}): Pool {
     oracleOk: true,
     oracleTimestamp: 1_700_000_000n,
     lastOracleReportAt: 1_700_000_000n,
+    oracleFreshnessWindow: 0n,
     rebalanceThreshold: 5000,
     // Default fixture is a "real, symmetric, fully-indexed" threshold so
     // tests exercising the standard breach/health path don't have to

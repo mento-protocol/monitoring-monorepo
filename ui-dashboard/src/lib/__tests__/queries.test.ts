@@ -26,6 +26,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_DETAIL_WITH_HEALTH",
   "POOL_THRESHOLDS_KNOWN_EXT",
   "POOL_VP_ORACLE_FRESHNESS_EXT",
+  "POOL_VP_DEPRECATION_EXT",
   "POOL_CONFIG_EXT",
   "POOL_RATE_FEED_EXT",
   "POOL_V2_EXCHANGE",
@@ -252,6 +253,17 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     );
     expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain("$id: String!");
     expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain("$chainId: Int!");
+  });
+
+  it("POOL_VP_DEPRECATION_EXT isolates deprecated wrapper state", () => {
+    expect(queries.POOL_VP_DEPRECATION_EXT).toContain("BiPoolExchange");
+    expect(queries.POOL_VP_DEPRECATION_EXT).toContain("wrappedByPoolId");
+    expect(queries.POOL_VP_DEPRECATION_EXT).toContain("isDeprecated");
+    expect(queries.POOL_VP_DEPRECATION_EXT).not.toContain(
+      "referenceRateFeedID",
+    );
+    expect(queries.POOL_VP_DEPRECATION_EXT).toContain("$id: String!");
+    expect(queries.POOL_VP_DEPRECATION_EXT).toContain("$chainId: Int!");
   });
 
   it("ALL_POOLS_BREACH_ROLLUP is isolated (rationale: phased schema rollout)", () => {

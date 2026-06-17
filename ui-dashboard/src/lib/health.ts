@@ -52,6 +52,7 @@ interface PoolHealthState {
   // priority alignment); `wrappedExchangeId` is the canonical VP signal.
   // Both feed `isVirtualPool`, which gates the "N/A" branch below.
   wrappedExchangeId?: string | null | undefined;
+  wrappedExchangeDeprecated?: boolean | undefined;
   oracleOk?: boolean | undefined;
   oracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
@@ -211,19 +212,19 @@ export function isOracleFresh(
 
 function isVirtualPoolOracleStale(
   pool: {
-    lastOracleReportAt?: string | undefined;
+    oracleTimestamp?: string | undefined;
     oracleFreshnessWindow?: string | undefined;
   },
   nowSeconds: number,
 ): boolean {
   const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
-  const lastReportAt = Number(pool.lastOracleReportAt ?? "0");
+  const liveReportAt = Number(pool.oracleTimestamp ?? "0");
   return (
     Number.isFinite(freshnessWindow) &&
     freshnessWindow > 0 &&
-    Number.isFinite(lastReportAt) &&
-    lastReportAt > 0 &&
-    nowSeconds - lastReportAt > freshnessWindow
+    Number.isFinite(liveReportAt) &&
+    liveReportAt > 0 &&
+    nowSeconds - liveReportAt > freshnessWindow
   );
 }
 
@@ -261,6 +262,7 @@ export function computeHealthStatus(
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
   if (isVirtualPool(pool)) {
+    if (pool.wrappedExchangeDeprecated === true) return "N/A";
     if (!isVirtualPoolOracleStale(pool, nowSeconds)) return "N/A";
     return isWeekend() ? "WEEKEND" : "CRITICAL";
   }

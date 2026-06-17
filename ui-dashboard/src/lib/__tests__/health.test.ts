@@ -62,7 +62,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus(
         {
           source: "virtual_pool_factory",
-          lastOracleReportAt: String(now - 120),
+          oracleTimestamp: String(now - 120),
           oracleFreshnessWindow: "360",
           priceDifference: "0",
           rebalanceThreshold: 5000,
@@ -79,7 +79,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus(
         {
           source: "virtual_pool_factory",
-          lastOracleReportAt: String(now - 600),
+          oracleTimestamp: String(now - 600),
           oracleFreshnessWindow: "360",
           priceDifference: "0",
           rebalanceThreshold: 5000,
@@ -98,7 +98,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus(
         {
           source: "virtual_pool_factory",
-          lastOracleReportAt: String(now - 600),
+          oracleTimestamp: String(now - 600),
           oracleFreshnessWindow: "360",
           priceDifference: "0",
           rebalanceThreshold: 5000,
@@ -115,8 +115,44 @@ describe("computeHealthStatus", () => {
       computeHealthStatus(
         {
           source: "virtual_pool_factory",
-          lastOracleReportAt: String(now - 600),
+          oracleTimestamp: String(now - 600),
           oracleFreshnessWindow: "0",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it("uses oracleTimestamp for VirtualPool freshness when lastOracleReportAt is older", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          lastOracleReportAt: String(now - 600),
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it('returns "N/A" for stale deprecated VirtualPool wrappers', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeDeprecated: true,
+          oracleTimestamp: String(now - 600),
+          oracleFreshnessWindow: "360",
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },

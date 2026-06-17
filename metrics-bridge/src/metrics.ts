@@ -181,7 +181,7 @@ export const gauges = {
   }),
   vpOracleFresh: new Gauge({
     name: "mento_pool_vp_oracle_fresh",
-    help: "VirtualPool oracle freshness derived from lastOracleReportAt plus oracleFreshnessWindow (1=fresh, 0=stale). Unknown window publishes no series.",
+    help: "VirtualPool oracle freshness derived from oracleTimestamp, medianLive, and oracleFreshnessWindow (1=fresh, 0=stale). Unknown window publishes no series.",
     labelNames: poolLabels,
     registers: [register],
   }),
@@ -456,7 +456,10 @@ function recordVpOracleMetrics(pool: PoolRow, nowSeconds: number): void {
 }
 
 export function vpOracleFreshness(
-  pool: Pick<PoolRow, "oracleFreshnessWindow" | "oracleTimestamp">,
+  pool: Pick<
+    PoolRow,
+    "oracleFreshnessWindow" | "oracleTimestamp" | "medianLive"
+  >,
   nowSeconds: number,
 ): number | null {
   const freshnessWindow = Number(pool.oracleFreshnessWindow);
@@ -469,6 +472,7 @@ export function vpOracleFreshness(
   ) {
     return null;
   }
+  if (!pool.medianLive) return 0;
   return nowSeconds - liveReportAt <= freshnessWindow ? 1 : 0;
 }
 

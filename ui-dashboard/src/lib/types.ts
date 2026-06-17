@@ -93,6 +93,10 @@ export type Pool = {
   // deploy-time RPC failed (the next event's self-heal is not wired here —
   // tracked as Phase 2 follow-up if any pre-Phase-2 VP shows up missing it).
   wrappedExchangeId?: string | undefined;
+  // Optional detail-page extension. True means the wrapped v2 exchange was
+  // destroyed/deprecated, so stale oracle incidents are expected and should not
+  // render as active-wrapper failures.
+  wrappedExchangeDeprecated?: boolean | undefined;
 };
 
 export type RateFeed = {

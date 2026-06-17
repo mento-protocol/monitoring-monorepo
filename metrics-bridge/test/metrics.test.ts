@@ -104,6 +104,22 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
+  it("marks virtual-pool oracle freshness stale when the live median is invalid", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        medianLive: false,
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(0);
+  });
+
   it("suppresses virtual-pool oracle freshness for deprecated wrappers", async () => {
     updateMetrics([
       makePool({

@@ -239,13 +239,13 @@ export function computeHealthStatus(
 }
 
 export function isVirtualPoolOracleStale(
-  pool: Pick<Pool, "lastOracleReportAt" | "oracleFreshnessWindow">,
+  pool: Pick<Pool, "oracleTimestamp" | "oracleFreshnessWindow">,
   nowSeconds: bigint,
 ): boolean {
   return (
     pool.oracleFreshnessWindow > 0n &&
-    pool.lastOracleReportAt > 0n &&
-    nowSeconds - pool.lastOracleReportAt > pool.oracleFreshnessWindow
+    pool.oracleTimestamp > 0n &&
+    nowSeconds - pool.oracleTimestamp > pool.oracleFreshnessWindow
   );
 }
 

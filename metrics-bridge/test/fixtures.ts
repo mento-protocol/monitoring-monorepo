@@ -19,6 +19,7 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     oracleExpiry: "300",
     oracleFreshnessWindow: "0",
     lastOracleReportAt: "1713200000",
+    medianLive: true,
     lastDeviationRatio: "0.420000",
     deviationBreachStartedAt: "0",
     currentOpenBreachPeak: "0",

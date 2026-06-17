@@ -40,7 +40,7 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
   it("returns 'N/A' for fresh virtual-pool oracle reports", () => {
     const pool = makePool({
       source: "virtual_pool_factory",
-      lastOracleReportAt: NOW - 120n,
+      oracleTimestamp: NOW - 120n,
       oracleFreshnessWindow: 360n,
     });
     assert.equal(computeHealthStatus(pool, NOW), "N/A");
@@ -49,7 +49,7 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
   it("returns 'CRITICAL' for stale virtual-pool oracle reports", () => {
     const pool = makePool({
       source: "virtual_pool_factory",
-      lastOracleReportAt: NOW - 600n,
+      oracleTimestamp: NOW - 600n,
       oracleFreshnessWindow: 360n,
     });
     assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
@@ -58,8 +58,18 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
   it("returns 'N/A' for virtual pools with unknown freshness windows", () => {
     const pool = makePool({
       source: "virtual_pool_factory",
-      lastOracleReportAt: NOW - 600n,
+      oracleTimestamp: NOW - 600n,
       oracleFreshnessWindow: 0n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "N/A");
+  });
+
+  it("uses oracleTimestamp for virtual-pool freshness when lastOracleReportAt is older", () => {
+    const pool = makePool({
+      source: "virtual_pool_factory",
+      lastOracleReportAt: NOW - 600n,
+      oracleTimestamp: NOW - 120n,
+      oracleFreshnessWindow: 360n,
     });
     assert.equal(computeHealthStatus(pool, NOW), "N/A");
   });

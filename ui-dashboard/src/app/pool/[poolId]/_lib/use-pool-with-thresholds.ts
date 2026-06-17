@@ -15,6 +15,7 @@ import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
 import {
   POOL_THRESHOLDS_KNOWN_EXT,
+  POOL_VP_DEPRECATION_EXT,
   POOL_VP_ORACLE_FRESHNESS_EXT,
 } from "@/lib/queries";
 import type { Pool } from "@/lib/types";
@@ -33,6 +34,11 @@ type VpOracleFreshnessExtRow = {
   id: string;
   lastOracleReportAt?: string;
   oracleFreshnessWindow?: string;
+};
+
+type VpDeprecationExtRow = {
+  id: string;
+  isDeprecated?: boolean;
 };
 
 export type PoolWithThresholdsResult = {
@@ -76,9 +82,15 @@ export function usePoolWithThresholds(
     timeoutMs: 5000,
   });
   const vpFreshnessExt = vpFreshnessData?.Pool?.[0] ?? null;
+  const { data: vpDeprecationData, isLoading: vpDeprecationLoading } = useGQL<{
+    BiPoolExchange: VpDeprecationExtRow[];
+  }>(POOL_VP_DEPRECATION_EXT, { id: poolId, chainId }, undefined, {
+    timeoutMs: 5000,
+  });
+  const vpDeprecationExt = vpDeprecationData?.BiPoolExchange?.[0] ?? null;
   const pool = useMemo<Pool | null>(() => {
     if (!rawPool) return null;
-    if (!thresholdsExt && !vpFreshnessExt) return rawPool;
+    if (!thresholdsExt && !vpFreshnessExt && !vpDeprecationExt) return rawPool;
     return {
       ...rawPool,
       ...(thresholdsExt
@@ -97,11 +109,17 @@ export function usePoolWithThresholds(
             oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
           }
         : {}),
+      ...(vpDeprecationExt
+        ? {
+            wrappedExchangeDeprecated: vpDeprecationExt.isDeprecated,
+          }
+        : {}),
     };
-  }, [rawPool, thresholdsExt, vpFreshnessExt]);
+  }, [rawPool, thresholdsExt, vpFreshnessExt, vpDeprecationExt]);
   return {
     pool,
-    thresholdsLoading: thresholdsLoading || vpFreshnessLoading,
+    thresholdsLoading:
+      thresholdsLoading || vpFreshnessLoading || vpDeprecationLoading,
     thresholdsError,
   };
 }

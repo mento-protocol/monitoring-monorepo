@@ -141,7 +141,7 @@ describe("HealthPanel weekend mode", () => {
       source: "virtual_pool_factory",
       wrappedExchangeId:
         "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-      lastOracleReportAt: STALE_TS,
+      oracleTimestamp: STALE_TS,
       oracleFreshnessWindow: "300",
     };
     const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
@@ -149,6 +149,42 @@ describe("HealthPanel weekend mode", () => {
     expect(html).toContain("VirtualPool oracle is stale");
     expect(html).toContain("swaps may revert");
     expect(html).not.toContain("Health monitoring is not applicable");
+  });
+
+  it("keeps stale VirtualPool weekend closures on the weekend explanation", async () => {
+    const weekend = await import("@/lib/weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValue(true);
+
+    const virtualPool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      oracleTimestamp: STALE_TS,
+      oracleFreshnessWindow: "300",
+    };
+    const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
+
+    expect(html).toContain("Trading is paused for the weekend");
+    expect(html).not.toContain("VirtualPool oracle is stale");
+  });
+
+  it("does not show a stale-oracle incident for deprecated VirtualPool wrappers", () => {
+    const deprecatedVirtualPool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      wrappedExchangeDeprecated: true,
+      oracleTimestamp: STALE_TS,
+      oracleFreshnessWindow: "300",
+    };
+    const html = renderToStaticMarkup(
+      <HealthPanel pool={deprecatedVirtualPool} />,
+    );
+
+    expect(html).not.toContain("VirtualPool oracle is stale");
+    expect(html).toContain("VirtualPool oracle freshness is monitored");
   });
 });
 

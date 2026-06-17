@@ -39,6 +39,7 @@ export const BRIDGE_POOLS_QUERY = gql`
       oracleTimestamp
       oracleExpiry
       lastOracleReportAt
+      medianLive
       lastDeviationRatio
       deviationBreachStartedAt
       limitStatus

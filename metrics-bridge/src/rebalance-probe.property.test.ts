@@ -48,6 +48,7 @@ function eligiblePool(overrides: Partial<PoolRow> = {}): PoolRow {
     oracleExpiry: "300",
     oracleFreshnessWindow: "0",
     lastOracleReportAt: "1713200000",
+    medianLive: true,
     lastDeviationRatio: "1.10", // > REBALANCE_PROBE_DEVIATION_THRESHOLD (1.05)
     deviationBreachStartedAt: "1713100000", // > 0
     currentOpenBreachPeak: "0",

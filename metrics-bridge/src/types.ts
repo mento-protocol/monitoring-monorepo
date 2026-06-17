@@ -11,6 +11,7 @@ export interface PoolRow {
   oracleExpiry: string;
   oracleFreshnessWindow: string;
   lastOracleReportAt: string;
+  medianLive: boolean;
   lastDeviationRatio: string;
   deviationBreachStartedAt: string;
   currentOpenBreachPeak: string;

@@ -451,12 +451,25 @@ async function hasCompleteWrappedExchangeLink(
   const exchangeRowId = `${pool.chainId}-${pool.wrappedExchangeId}`;
   const existing = await context.BiPoolExchange.get(exchangeRowId);
   if (existing?.wrappedByPoolId !== pool.id) return false;
-  return (
-    (existing.referenceRateResetFrequency <= 0n &&
-      existing.referenceRateFeedID !== ZERO_ADDRESS) ||
-    (existing.referenceRateResetFrequency > 0n &&
-      pool.oracleFreshnessWindow === existing.referenceRateResetFrequency)
-  );
+  if (
+    existing.referenceRateFeedID === ZERO_ADDRESS &&
+    existing.referenceRateResetFrequency <= 0n
+  ) {
+    return existing.isDeprecated;
+  }
+  if (
+    existing.referenceRateFeedID !== ZERO_ADDRESS &&
+    pool.referenceRateFeedID !== existing.referenceRateFeedID
+  ) {
+    return false;
+  }
+  if (
+    existing.referenceRateResetFrequency > 0n &&
+    pool.oracleFreshnessWindow !== existing.referenceRateResetFrequency
+  ) {
+    return false;
+  }
+  return true;
 }
 
 async function getOrSeedWrappedExchange(

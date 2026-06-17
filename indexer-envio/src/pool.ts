@@ -120,21 +120,19 @@ export async function maybePreloadPool(
 
 /** Default oracle field values (for VirtualPools or when RPC call fails).
  *
- * Excludes `referenceRateFeedID` on purpose — that's a static-config field
- * set ONCE at pool creation (factory `referenceRateFeedIDEffect`) or via
- * the BiPoolExchange→Pool mirror (`mirrorVirtualPoolOracleConfig`). Including it here
- * would mean callers spreading `{...DEFAULT_ORACLE_FIELDS, ...overrides}`
- * as `oracleDelta` would clobber a healed feedID back to "" via the
- * `next` builder's spread order. `defaultPool` initializes the field
- * directly below; persisted updates flow via the dedicated mirror /
- * heal helpers. */
+ * Excludes static VP oracle config (`referenceRateFeedID`,
+ * `oracleFreshnessWindow`) on purpose — those are set ONCE at pool creation
+ * or via the BiPoolExchange→Pool mirror. Including them here would mean
+ * callers spreading `{...DEFAULT_ORACLE_FIELDS, ...overrides}` as
+ * `oracleDelta` could clobber healed values back to defaults via the `next`
+ * builder's spread order. `defaultPool` initializes those fields directly
+ * below; persisted updates flow via the dedicated mirror / heal helpers. */
 export const DEFAULT_ORACLE_FIELDS = {
   oracleOk: false,
   oraclePrice: 0n,
   oracleTimestamp: 0n,
   oracleTxHash: "",
   oracleExpiry: 0n,
-  oracleFreshnessWindow: 0n,
   oracleNumReporters: 0,
   lastMedianPrice: 0n,
   lastMedianAt: 0n,
@@ -242,6 +240,7 @@ const defaultPool = (
   // the spread-clobber bug — callers' `oracleDelta` must NOT carry the
   // power to overwrite these on every event.
   referenceRateFeedID: "",
+  oracleFreshnessWindow: 0n,
   // Excluded from DEFAULT_ORACLE_FIELDS for the same spread-clobber reason:
   // `syncPoolsBreakerHalt` writes this directly off BreakerBox events, so an
   // `oracleDelta` spread must never reset it.

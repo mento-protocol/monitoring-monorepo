@@ -489,6 +489,7 @@ describe("fetchPoolOgDataUncached", () => {
       source: "virtual_pool_factory",
       wrappedExchangeId:
         "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      oracleTimestamp: String(nowSec - 600),
       lastOracleReportAt: "0",
       oracleFreshnessWindow: "0",
     });
