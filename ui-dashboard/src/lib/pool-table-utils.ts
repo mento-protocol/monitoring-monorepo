@@ -1,9 +1,10 @@
 import {
+  isVirtualPoolMedianInvalid,
   ORACLE_STALE_SECONDS_BY_CHAIN,
   oracleFreshnessTimestamp,
 } from "@/lib/health";
 import type { Network } from "@/lib/networks";
-import type { Pool } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
 import { formatDurationShort } from "@/lib/bridge-status";
 
@@ -18,6 +19,24 @@ function openBreachDuration(p: Pool): string | null {
   const now = Math.floor(Date.now() / 1000);
   if (now <= start) return null;
   return formatDurationShort(now - start);
+}
+
+function criticalHealthTooltip(args: {
+  pool: Pool;
+  oracleIsStale: boolean;
+}): string {
+  const { pool, oracleIsStale } = args;
+  if (isVirtualPoolMedianInvalid(pool)) {
+    return "VirtualPool median or quorum invalid — swaps may revert until a valid median with enough active reporters is restored";
+  }
+  if (isVirtualPool(pool)) {
+    return "VirtualPool oracle stale — no fresh report within the reset window";
+  }
+  if (oracleIsStale) return "Oracle stale — last update expired";
+  const duration = openBreachDuration(pool);
+  return duration
+    ? `Rebalance overdue — deviation above threshold for ${duration}`
+    : "Rebalance overdue — deviation above threshold for more than 1h";
 }
 
 // Status-only tooltips (no oracle/breach context needed). A lookup instead of
@@ -44,13 +63,8 @@ function healthTooltip(status: string, p: Pool, chainId?: number): string {
   const isOracleStale =
     oracleTs === 0 ||
     Math.floor(Date.now() / 1000) - oracleTs > stalenessThreshold;
-  if (status === "CRITICAL" && isOracleStale)
-    return "Oracle stale — last update expired";
   if (status === "CRITICAL") {
-    const duration = openBreachDuration(p);
-    return duration
-      ? `Rebalance overdue — deviation above threshold for ${duration}`
-      : "Rebalance overdue — deviation above threshold for more than 1h";
+    return criticalHealthTooltip({ pool: p, oracleIsStale: isOracleStale });
   }
   if (status === "WARN") {
     const duration = openBreachDuration(p);

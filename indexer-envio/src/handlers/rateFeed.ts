@@ -180,9 +180,23 @@ export async function syncPoolsReporterCountFromRpc(args: {
     blockNumber: args.blockNumber,
   });
   const oracleNumReporters =
-    rpcOracleNumReporters ??
-    args.fallbackOracleNumReporters ??
-    UNKNOWN_ORACLE_REPORTERS;
+    rpcOracleNumReporters ?? args.fallbackOracleNumReporters;
+  if (oracleNumReporters === undefined) {
+    const pools = await Promise.all(
+      args.poolIds.map((poolId) => args.context.Pool.get(poolId)),
+    );
+    const poolIdsNeedingRefresh = pools.flatMap((pool) =>
+      pool && needsOracleReporterCountRefresh(pool) ? [pool.id] : [],
+    );
+    await updatePoolsOracleNumReporters({
+      context: args.context,
+      poolIds: poolIdsNeedingRefresh,
+      oracleNumReporters: UNKNOWN_ORACLE_REPORTERS,
+      blockNumber: args.blockNumber,
+      blockTimestamp: args.blockTimestamp,
+    });
+    return;
+  }
   await updatePoolsOracleNumReporters({
     context: args.context,
     poolIds: args.poolIds,

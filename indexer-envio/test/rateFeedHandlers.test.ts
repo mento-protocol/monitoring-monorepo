@@ -187,7 +187,7 @@ describe("RateFeed handlers", () => {
     assert.equal(pool.updatedAtTimestamp, 1_700_000_120n);
   });
 
-  it("marks linked pools unknown when reporter count refresh fails without a complete fallback", async () => {
+  it("preserves known pool reporter counts when refresh fails without a complete fallback", async () => {
     _setMockRateFeedOracles(CELO, CELO_GBP_FEED, null);
     _setMockNumReporters(CELO, CELO_GBP_FEED, null);
     const poolId = makePoolId(
@@ -220,9 +220,47 @@ describe("RateFeed handlers", () => {
 
     const pool = mockDb.entities.Pool.get(poolId);
     assert.ok(pool);
+    assert.equal(pool.oracleNumReporters, 2);
+    assert.equal(pool.updatedAtBlock, 0n);
+    assert.equal(pool.updatedAtTimestamp, 0n);
+  });
+
+  it("marks unknown or legacy-zero reporter counts unknown when refresh fails", async () => {
+    _setMockRateFeedOracles(CELO, CELO_GBP_FEED, null);
+    _setMockNumReporters(CELO, CELO_GBP_FEED, null);
+    const poolId = makePoolId(
+      CELO,
+      "0x8c0014afe032e4574481d8934504100bf23fcb56",
+    );
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CELO,
+        source: "virtual_pool_factory",
+        referenceRateFeedID: CELO_GBP_FEED,
+        oracleNumReporters: 0,
+      }),
+    );
+
+    mockDb = await SortedOracles.OracleAdded.processEvent({
+      event: SortedOracles.OracleAdded.createMockEvent({
+        token: CELO_GBP_FEED,
+        oracleAddress: CELO_GBP_REPORTER,
+        mockEventData: {
+          chainId: CELO,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 104, timestamp: 1_700_000_240 },
+        },
+      }),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId);
+    assert.ok(pool);
     assert.equal(pool.oracleNumReporters, UNKNOWN_ORACLE_REPORTERS);
-    assert.equal(pool.updatedAtBlock, 103n);
-    assert.equal(pool.updatedAtTimestamp, 1_700_000_180n);
+    assert.equal(pool.updatedAtBlock, 104n);
+    assert.equal(pool.updatedAtTimestamp, 1_700_000_240n);
   });
 
   it("falls back to the OracleAdded event when reporter RPC is unavailable", async () => {
