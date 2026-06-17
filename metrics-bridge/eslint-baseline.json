@@ -3,21 +3,14 @@
     "file": "src/deviation-alert-state.ts",
     "ruleId": "complexity",
     "message": "Function 'classifyDeviationAlertState' has a complexity of 16. Maximum allowed is 10.",
-    "line": 138,
+    "line": 114,
     "linePreview": " | export function classifyDeviationAlertState( | pool: PoolRow,"
   },
   {
     "file": "src/deviation-alert-state.ts",
     "ruleId": "complexity",
-    "message": "Function 'shouldRecordTransition' has a complexity of 11. Maximum allowed is 10.",
-    "line": 306,
-    "linePreview": " | function shouldRecordTransition( | previous: StateSnapshot,"
-  },
-  {
-    "file": "src/deviation-alert-state.ts",
-    "ruleId": "complexity",
     "message": "Function 'transitionReason' has a complexity of 17. Maximum allowed is 10.",
-    "line": 187,
+    "line": 163,
     "linePreview": " | function transitionReason( | from: DeviationAlertState,"
   },
   {
