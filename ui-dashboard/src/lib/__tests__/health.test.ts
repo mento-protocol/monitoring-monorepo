@@ -1492,6 +1492,24 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
     ).toBe(true);
   });
 
+  it("does not fall back to generic expiry when a VirtualPool reset window is unknown", () => {
+    const ts600 = String(frozenNowSec - 600);
+    expect(
+      isOracleFresh(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeId: "0xexchange",
+          oracleTimestamp: ts600,
+          oracleExpiry: "300",
+          oracleFreshnessWindow: "0",
+          tokenDecimalsKnown: true,
+        },
+        frozenNowSec,
+        42220,
+      ),
+    ).toBe(true);
+  });
+
   it("unknown chainId falls back to 300s default", () => {
     const ts301 = String(frozenNowSec - 301);
     expect(

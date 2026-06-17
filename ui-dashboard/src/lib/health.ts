@@ -205,6 +205,7 @@ export function getOracleStalenessThreshold(
   if (isVirtualPool(pool)) {
     const vpWindow = Number(pool.oracleFreshnessWindow ?? "0");
     if (Number.isFinite(vpWindow) && vpWindow > 0) return vpWindow;
+    return 0;
   }
   const indexed = Number(pool.oracleExpiry ?? "0");
   if (indexed > 0) return indexed;
@@ -231,6 +232,7 @@ export function isOracleFresh(
   if (isVirtualPool(pool) && pool.tokenDecimalsKnown !== true) return true;
   const oracleTs = oracleFreshnessTimestamp(pool);
   const stalenessThreshold = getOracleStalenessThreshold(pool, chainId);
+  if (isVirtualPool(pool) && stalenessThreshold <= 0) return true;
   return oracleTs !== 0 && nowSeconds - oracleTs <= stalenessThreshold;
 }
 
