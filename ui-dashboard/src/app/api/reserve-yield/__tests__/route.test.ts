@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const SKY_SSR_APY_PERCENT = 3.600000425292;
 const TRACKED_SUSDS_WALLET = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
-const TRACKED_STETH_CUSTODIAN = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
 const SKY_SSR_RPC_RESPONSE = {
   jsonrpc: "2.0",
   id: 1,
@@ -67,18 +66,6 @@ const SUSDS_LEDGER_SUMMARY = {
   unrealizedYieldUsdWei: "100000000000000000000",
   totalEarnedYieldUsdWei: "200000000000000000000",
   sharePriceUsdWei: "1050000000000000000",
-  lastUpdatedBlock: "25236329",
-  lastUpdatedTimestamp: "1780483271",
-};
-
-const STETH_LEDGER_SUMMARY = {
-  id: "1-steth",
-  currentBalance: "250000000000000000000",
-  remainingPrincipalAmount: "240000000000000000000",
-  realizedYieldAmount: "5000000000000000000",
-  transferredOutYieldAmount: "5000000000000000000",
-  unrealizedYieldAmount: "10000000000000000000",
-  totalEarnedYieldAmount: "15000000000000000000",
   lastUpdatedBlock: "25236329",
   lastUpdatedTimestamp: "1780483271",
 };
@@ -252,7 +239,7 @@ describe("GET /api/reserve-yield", () => {
     expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
   });
 
-  it("merges indexed stETH token-unit yield using the current reserve USD mark", async () => {
+  it("keeps stETH forecast-only instead of querying ledger actuals", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -268,13 +255,6 @@ describe("GET /api/reserve-yield", () => {
           },
         }),
       )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [STETH_LEDGER_SUMMARY],
-          },
-        }),
-      )
       .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
     const { GET } = await loadRoute();
 
@@ -283,394 +263,28 @@ describe("GET /api/reserve-yield", () => {
     const stethHolding = body.holdings.find(
       (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
     );
-    const reserveStethAsset = RESERVE_WITH_STETH.collateral.assets[1];
-    expect(reserveStethAsset).toBeDefined();
-    const stethUnitPrice =
-      reserveStethAsset!.usd_value / Number(reserveStethAsset!.balance);
 
     expect(res.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(6);
-    const stethGraphqlBody = JSON.parse(
-      String(fetchMock.mock.calls[4]?.[1]?.body),
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    const susdsGraphqlBody = JSON.parse(
+      String(fetchMock.mock.calls[3]?.[1]?.body),
     ) as { query: string; variables: Record<string, unknown> };
-    expect(stethGraphqlBody.query).toContain(
-      "query StethYieldSummary($id: String!)",
+    expect(susdsGraphqlBody.query).toContain(
+      "query SusdsYieldSummary($id: String!)",
     );
-    expect(stethGraphqlBody.variables.id).toBe("1-steth");
-    expect(body.earnedYieldUsd).toBeCloseTo(
-      (5 + (251.59825779325257 - 240)) * stethUnitPrice,
-      6,
-    );
-    expect(body.realizedYieldUsd).toBeCloseTo(5 * stethUnitPrice, 6);
-    expect(body.unrealizedYieldUsd).toBeCloseTo(
-      (251.59825779325257 - 240) * stethUnitPrice,
-      6,
-    );
-    expect(body.earnedYieldError).toBeNull();
-    expect(stethHolding.earnedYieldUsd).toBeCloseTo(body.earnedYieldUsd, 6);
-    expect(stethHolding.yieldModel).toContain(
-      "token-unit stETH staking yield marked to current USD",
-    );
-    expect(stethHolding.yieldModel).toContain("not ETH price appreciation");
-  });
-
-  it("does not shrink indexed stETH yield when current reserve balance is stale", async () => {
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
-    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
-    const staleReserve = {
-      collateral: {
-        assets: [
-          RESERVE_WITH_STETH.collateral.assets[0],
-          {
-            ...currentStethAsset,
-            balance: "200",
-            usd_value:
-              (currentStethAsset.usd_value /
-                Number(currentStethAsset.balance)) *
-              200,
-            sources: currentStethAsset.sources.map((source) => ({
-              ...source,
-              balance: "200",
-              usd_value:
-                (currentStethAsset.usd_value /
-                  Number(currentStethAsset.balance)) *
-                200,
-            })),
-          },
-        ],
-      },
-    };
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json(staleReserve))
-      .mockResolvedValueOnce(
-        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
-      )
-      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            SusdsYieldSummary: [],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [STETH_LEDGER_SUMMARY],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
-    const { GET } = await loadRoute();
-
-    const res = await GET();
-    const body = await res.json();
-    const staleStethAsset = staleReserve.collateral.assets[1]!;
-    const stethUnitPrice =
-      staleStethAsset.usd_value / Number(staleStethAsset.balance);
-
-    expect(res.status).toBe(200);
-    expect(body.earnedYieldUsd).toBeCloseTo(15 * stethUnitPrice, 6);
-    expect(body.realizedYieldUsd).toBeCloseTo(5 * stethUnitPrice, 6);
-    expect(body.unrealizedYieldUsd).toBeCloseTo(10 * stethUnitPrice, 6);
-    expect(body.earnedYieldError).toContain(
-      "current indexed reserve balance is below indexed ledger balance",
-    );
-  });
-
-  it("surfaces stale indexed stETH yield when current reserve balance is zero", async () => {
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
-    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        Response.json({
-          collateral: {
-            assets: [
-              RESERVE_WITH_STETH.collateral.assets[0],
-              {
-                ...currentStethAsset,
-                balance: "0",
-                usd_value: 0,
-                sources: currentStethAsset.sources.map((source) => ({
-                  ...source,
-                  balance: "0",
-                  usd_value: 0,
-                })),
-              },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
-      )
-      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            SusdsYieldSummary: [],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [STETH_LEDGER_SUMMARY],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
-    const { GET } = await loadRoute();
-
-    const res = await GET();
-    const body = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(body.earnedYieldUsd).toBeNull();
-    expect(body.earnedYieldError).toContain(
-      "current indexed reserve balance is below indexed ledger balance",
-    );
-  });
-
-  it("derives missing stETH source balances from asset totals before refreshing indexed yield", async () => {
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
-    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        Response.json({
-          collateral: {
-            assets: [
-              RESERVE_WITH_STETH.collateral.assets[0],
-              {
-                ...currentStethAsset,
-                sources: currentStethAsset.sources.map((source) => {
-                  const withoutBalance: Record<string, unknown> = {
-                    ...source,
-                  };
-                  delete withoutBalance.balance;
-                  return withoutBalance;
-                }),
-              },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
-      )
-      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            SusdsYieldSummary: [],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [STETH_LEDGER_SUMMARY],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
-    const { GET } = await loadRoute();
-
-    const res = await GET();
-    const body = await res.json();
-    const stethHolding = body.holdings.find(
-      (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
-    );
-
-    expect(res.status).toBe(200);
-    const stethUnitPrice =
-      currentStethAsset.usd_value / Number(currentStethAsset.balance);
-    expect(body.earnedYieldUsd).toBeCloseTo(
-      (5 + (251.59825779325257 - 240)) * stethUnitPrice,
-      6,
-    );
-    expect(body.realizedYieldUsd).toBeCloseTo(5 * stethUnitPrice, 6);
-    expect(body.unrealizedYieldUsd).toBeCloseTo(
-      (251.59825779325257 - 240) * stethUnitPrice,
-      6,
-    );
-    expect(body.earnedYieldError).toBeNull();
-    expect(stethHolding.earnedYieldUsd).toBeCloseTo(body.earnedYieldUsd, 6);
-  });
-
-  it("caps derived stETH source balances before refreshing indexed yield", async () => {
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
-    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
-    const overSummedSources = [
-      {
-        ...currentStethAsset.sources[0]!,
-        usd_value: currentStethAsset.usd_value,
-      },
-      {
-        ...currentStethAsset.sources[0]!,
-        label: "Custodian",
-        identifier: TRACKED_STETH_CUSTODIAN,
-        usd_value: currentStethAsset.usd_value,
-      },
-    ].map((source) => {
-      const withoutBalance: Record<string, unknown> = { ...source };
-      delete withoutBalance.balance;
-      return withoutBalance;
-    });
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        Response.json({
-          collateral: {
-            assets: [
-              RESERVE_WITH_STETH.collateral.assets[0],
-              {
-                ...currentStethAsset,
-                sources: overSummedSources,
-              },
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
-      )
-      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            SusdsYieldSummary: [],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [STETH_LEDGER_SUMMARY],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
-    const { GET } = await loadRoute();
-
-    const res = await GET();
-    const body = await res.json();
-
-    expect(res.status).toBe(200);
-    const stethUnitPrice =
-      currentStethAsset.usd_value / Number(currentStethAsset.balance);
-    expect(body.earnedYieldUsd).toBeCloseTo(
-      (5 + (251.59825779325257 - 240)) * stethUnitPrice,
-      6,
-    );
-    expect(body.earnedYieldError).toBeNull();
-  });
-
-  it("does not refresh indexed stETH yield from USD fallback balances", async () => {
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
-    const currentStethAsset = RESERVE_WITH_STETH.collateral.assets[1]!;
-    const stethAssetWithoutBalance: Record<string, unknown> = {
-      ...currentStethAsset,
-      sources: currentStethAsset.sources.map((source) => {
-        const withoutBalance: Record<string, unknown> = {
-          ...source,
-        };
-        delete withoutBalance.balance;
-        return withoutBalance;
-      }),
-    };
-    delete stethAssetWithoutBalance.balance;
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        Response.json({
-          collateral: {
-            assets: [
-              RESERVE_WITH_STETH.collateral.assets[0],
-              stethAssetWithoutBalance,
-            ],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
-      )
-      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            SusdsYieldSummary: [],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [STETH_LEDGER_SUMMARY],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
-    const { GET } = await loadRoute();
-
-    const res = await GET();
-    const body = await res.json();
-    const stethHolding = body.holdings.find(
-      (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
-    );
-
-    expect(res.status).toBe(200);
+    expect(susdsGraphqlBody.variables.id).toBe("1-susds");
+    expect(String(fetchMock.mock.calls[4]?.[0])).toContain("eth-api.lido.fi");
     expect(body.earnedYieldUsd).toBeNull();
     expect(body.realizedYieldUsd).toBeNull();
     expect(body.unrealizedYieldUsd).toBeNull();
-    expect(body.earnedYieldError).toContain("cannot be marked to current USD");
+    expect(body.earnedYieldError).toBeNull();
+    expect(stethHolding.earnedYieldUsd).toBeNull();
     expect(stethHolding).toMatchObject({
       assetSymbol: "stETH",
-      principalUsd: 419_495.97,
-      earnedYieldUsd: null,
       apyPercent: 2.95,
     });
-  });
-
-  it("keeps stETH forecasts visible when the stETH ledger is pending", async () => {
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json(RESERVE_WITH_STETH))
-      .mockResolvedValueOnce(
-        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
-      )
-      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            SusdsYieldSummary: [],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          errors: [{ message: "field 'StethYieldSummary' not found" }],
-        }),
-      )
-      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
-    const { GET } = await loadRoute();
-
-    const res = await GET();
-    const body = await res.json();
-    const stethHolding = body.holdings.find(
-      (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
-    );
-
-    expect(res.status).toBe(200);
-    expect(body.earnedYieldUsd).toBeNull();
-    expect(body.earnedYieldError).toBe(
-      "stETH earned-yield ledger pending: indexer schema has not exposed StethYieldSummary yet.",
-    );
-    expect(stethHolding).toMatchObject({
-      assetSymbol: "stETH",
-      earnedYieldUsd: null,
-      apyPercent: 2.95,
-    });
-    expect(JSON.stringify(body)).not.toContain(
-      "field 'StethYieldSummary' not found",
+    expect(stethHolding.yieldModel).toContain(
+      "stETH mark-to-market changes are not counted as earned revenue",
     );
     expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
   });
@@ -725,13 +339,6 @@ describe("GET /api/reserve-yield", () => {
             SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
           },
         }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [],
-          },
-        }),
       );
     const { GET } = await loadRoute();
 
@@ -739,7 +346,7 @@ describe("GET /api/reserve-yield", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[3]?.[0]).toBe(
       "https://hasura.example/v1/graphql",
     );
@@ -805,13 +412,6 @@ describe("GET /api/reserve-yield", () => {
             SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
           },
         }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [],
-          },
-        }),
       );
     const { GET } = await loadRoute();
 
@@ -858,13 +458,6 @@ describe("GET /api/reserve-yield", () => {
             ],
           },
         }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [],
-          },
-        }),
       );
     const { GET } = await loadRoute();
 
@@ -908,13 +501,6 @@ describe("GET /api/reserve-yield", () => {
         Response.json({
           data: {
             SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [],
           },
         }),
       );
@@ -968,13 +554,6 @@ describe("GET /api/reserve-yield", () => {
             SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
           },
         }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [],
-          },
-        }),
       );
     const { GET } = await loadRoute();
 
@@ -1023,13 +602,6 @@ describe("GET /api/reserve-yield", () => {
         Response.json({
           errors: [{ message: "field 'SusdsYieldSummary' not found" }],
         }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [],
-          },
-        }),
       );
     const { GET } = await loadRoute();
 
@@ -1054,13 +626,6 @@ describe("GET /api/reserve-yield", () => {
       .mockResolvedValueOnce(
         Response.json({
           errors: [{ message: "field 'SusdsYieldSummary' not found" }],
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            StethYieldSummary: [],
-          },
         }),
       );
     const { GET } = await loadRoute();

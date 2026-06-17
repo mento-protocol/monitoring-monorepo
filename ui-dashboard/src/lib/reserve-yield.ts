@@ -9,9 +9,7 @@ import {
   fetchSusdsYieldLedger,
 } from "@/lib/reserve-yield-susds";
 import {
-  applyStethYieldLedgerResult,
   fetchLidoStethApr,
-  fetchStethYieldLedger,
   parseLidoStethAprPercent,
 } from "@/lib/reserve-yield-steth";
 import {
@@ -236,7 +234,6 @@ function reserveHoldingsState(
       holdingsAsOf: null,
       holdingsError: errorMessage("Reserve API", reserveResult.reason),
       hasCurrentSusdsAsset: false,
-      hasCurrentStethAsset: false,
     };
   }
 
@@ -258,7 +255,6 @@ function reserveHoldingsState(
     holdingsAsOf: fetchedAt,
     holdingsError,
     hasCurrentSusdsAsset: extracted.susdsAssetCount > 0,
-    hasCurrentStethAsset: extracted.stethAssetCount > 0,
   };
 }
 
@@ -267,14 +263,6 @@ function sumNullable(...values: Array<number | null>): number | null {
   return present.length === 0
     ? null
     : present.reduce((sum, value) => sum + value, 0);
-}
-
-function latestIso(...values: Array<string | null>): string | null {
-  const present = values.filter((value): value is string => value !== null);
-  if (present.length === 0) return null;
-  return present.reduce((latest, value) =>
-    value.localeCompare(latest) > 0 ? value : latest,
-  );
 }
 
 type FedFundsState = {
@@ -353,19 +341,13 @@ export async function fetchReserveYieldSnapshot({
   fetchImpl?: FetchImpl;
   now?: Date;
 } = {}): Promise<ReserveYieldResponse> {
-  const [
-    reserveResult,
-    fedfundsResult,
-    skyRateResult,
-    susdsLedgerResult,
-    stethLedgerResult,
-  ] = await Promise.allSettled([
-    fetchJson(fetchImpl, RESERVE_API_URL),
-    fetchText(fetchImpl, FEDFUNDS_CSV_URL).then(parseFredFedFundsCsv),
-    fetchSkySavingsRate(fetchImpl),
-    fetchSusdsYieldLedger(fetchImpl),
-    fetchStethYieldLedger(fetchImpl),
-  ]);
+  const [reserveResult, fedfundsResult, skyRateResult, susdsLedgerResult] =
+    await Promise.allSettled([
+      fetchJson(fetchImpl, RESERVE_API_URL),
+      fetchText(fetchImpl, FEDFUNDS_CSV_URL).then(parseFredFedFundsCsv),
+      fetchSkySavingsRate(fetchImpl),
+      fetchSusdsYieldLedger(fetchImpl),
+    ]);
 
   const fetchedAt = now.toISOString();
   const reserveState = reserveHoldingsState(reserveResult, fetchedAt);
@@ -380,14 +362,9 @@ export async function fetchReserveYieldSnapshot({
     reserveState.hasCurrentSusdsAsset,
   );
   holdings = susdsYield.holdings;
-  const stethYield = applyStethYieldLedgerResult(
-    holdings,
-    stethLedgerResult,
-    reserveResult.status === "fulfilled",
-    reserveState.hasCurrentStethAsset,
-  );
-  holdings = stethYield.holdings;
 
+  // stETH remains forecast-only until launch-aligned daily actuals and
+  // wallet-level yield allocation exist. See issue #987.
   const { stethAprPercent, stethRateError } = await stethAprState(
     holdings,
     fetchImpl,
@@ -407,22 +384,10 @@ export async function fetchReserveYieldSnapshot({
   return {
     principalUsd: reserveState.principalUsd,
     forecastPrincipalUsd: forecast.forecastPrincipalUsd,
-    earnedYieldUsd: sumNullable(
-      susdsYield.earnedYieldUsd,
-      stethYield.earnedYieldUsd,
-    ),
-    realizedYieldUsd: sumNullable(
-      susdsYield.realizedYieldUsd,
-      stethYield.realizedYieldUsd,
-    ),
-    unrealizedYieldUsd: sumNullable(
-      susdsYield.unrealizedYieldUsd,
-      stethYield.unrealizedYieldUsd,
-    ),
-    earnedYieldAsOf: latestIso(
-      susdsYield.earnedYieldAsOf,
-      stethYield.earnedYieldAsOf,
-    ),
+    earnedYieldUsd: sumNullable(susdsYield.earnedYieldUsd),
+    realizedYieldUsd: sumNullable(susdsYield.realizedYieldUsd),
+    unrealizedYieldUsd: sumNullable(susdsYield.unrealizedYieldUsd),
+    earnedYieldAsOf: susdsYield.earnedYieldAsOf,
     holdings: forecast.modeledHoldings,
     holdingsAsOf: reserveState.holdingsAsOf,
     grossApyPercent: fedFunds.grossApyPercent,
@@ -444,9 +409,6 @@ export async function fetchReserveYieldSnapshot({
       skyRate.skyRateError,
       stethRateError,
     ),
-    earnedYieldError: joinErrors(
-      susdsYield.earnedYieldError,
-      stethYield.earnedYieldError,
-    ),
+    earnedYieldError: joinErrors(susdsYield.earnedYieldError),
   };
 }

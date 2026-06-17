@@ -520,44 +520,6 @@ describe("RevenuePageClient canonical revenue layout", () => {
     );
   });
 
-  it("renders ledger-backed stETH earned yield with current-mark copy", () => {
-    const html = renderRevenue({
-      reserveYield: {
-        ...RESERVE_YIELD,
-        principalUsd:
-          (RESERVE_YIELD.principalUsd ?? 0) + STETH_HOLDING.principalUsd,
-        forecastPrincipalUsd:
-          (RESERVE_YIELD.forecastPrincipalUsd ?? 0) +
-          STETH_HOLDING.principalUsd,
-        earnedYieldUsd: (RESERVE_YIELD.earnedYieldUsd ?? 0) + 27_664.2,
-        holdings: [
-          ...RESERVE_YIELD.holdings,
-          {
-            ...STETH_HOLDING,
-            earnedYieldUsd: 27_664.2,
-            yieldModel:
-              "Lido stETH APR forecast; earned yield is token-unit stETH staking yield marked to current USD, not ETH price appreciation",
-          },
-        ],
-        next30dUsd:
-          (RESERVE_YIELD.next30dUsd ?? 0) + (STETH_HOLDING.next30dUsd ?? 0),
-        next365dUsd:
-          (RESERVE_YIELD.next365dUsd ?? 0) + (STETH_HOLDING.next365dUsd ?? 0),
-        annualRunRateUsd:
-          (RESERVE_YIELD.annualRunRateUsd ?? 0) +
-          (STETH_HOLDING.annualRunRateUsd ?? 0),
-      },
-      reserveRows: [reserveSnapshot(currentDayTimestamp(), 45)],
-    });
-
-    expect(html).toContain("stETH");
-    expect(html).toContain("$27.7K");
-    expect(html).toContain(
-      "token-unit stETH staking yield marked to current USD",
-    );
-    expect(html).toContain("not ETH price appreciation");
-  });
-
   it("marks stETH forecasts partial when the Lido APR source is unavailable", () => {
     const html = renderRevenue({
       reserveYield: {
