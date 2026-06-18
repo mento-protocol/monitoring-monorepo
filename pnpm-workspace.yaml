@@ -41,6 +41,7 @@ minimumReleaseAgeExclude:
   - multer@2.2.0
   - protobufjs
   - tar
+  - undici@7.28.0
   - vite
 
 ignoredBuiltDependencies:

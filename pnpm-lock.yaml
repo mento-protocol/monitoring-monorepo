@@ -57,6 +57,7 @@ overrides:
   '@lhci/cli>tmp': 0.2.7
   external-editor>tmp: 0.2.7
   uuid@<11.1.1: 11.1.1
+  undici@>=7.23.0 <7.28.0: 7.28.0
   webpack@>=5.0.0 <5.104.1: 5.106.2
   lighthouse>ws: 7.5.11
   ws@>=8.0.0 <8.21.0: 8.21.0
@@ -9836,8 +9837,8 @@ packages:
     resolution: {integrity: sha512-4yqz8a3n5HmGTlsbADNtr/dJlhkh/55Rq798G6ibiULcXbDtaLpTl1pvdqcbFfeoj3iSi52lePFM7h9H21cw/A==}
     engines: {node: '>=18.17'}
 
-  undici@7.27.2:
-    resolution: {integrity: sha512-uZsKNuzQxDMUY6M3pIMvy5tvlGmtq8XJ2oLAkfRKGNu+1VQAIvLy2xIVG5ATZl5wDXl/tddByAWCizRbOme+TA==}
+  undici@7.28.0:
+    resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
     engines: {node: '>=20.18.1'}
 
   unicorn-magic@0.1.0:
@@ -17818,7 +17819,7 @@ snapshots:
       saxes: 6.0.0
       symbol-tree: 3.2.4
       tough-cookie: 6.0.1
-      undici: 7.27.2
+      undici: 7.28.0
       w3c-xmlserializer: 5.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
@@ -21084,7 +21085,7 @@ snapshots:
 
   undici@6.26.0: {}
 
-  undici@7.27.2: {}
+  undici@7.28.0: {}
 
   unicorn-magic@0.1.0: {}
 
