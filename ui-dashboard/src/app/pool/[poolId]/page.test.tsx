@@ -30,7 +30,6 @@ import {
   POOL_REBALANCES_PAGE,
   POOL_REBALANCES_USD_EXT,
   POOL_RESERVES,
-  POOL_SNAPSHOTS_CHART,
   POOL_SWAPS,
   POOL_SWAPS_COUNT,
   POOL_SWAPS_PAGE,
@@ -452,8 +451,6 @@ beforeEach(() => {
         return makeGqlResult({ SwapEvent: swaps });
       if (query === POOL_SWAPS_COUNT)
         return makeGqlResult({ SwapEvent: swaps.map((s) => ({ id: s.id })) });
-      if (query === POOL_SNAPSHOTS_CHART)
-        return makeGqlResult({ PoolSnapshot: poolSnapshots });
       if (query === POOL_DAILY_SNAPSHOTS_CHART)
         return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
       if (query === POOL_RESERVES)
@@ -1046,8 +1043,6 @@ describe("Pool detail tab search", () => {
           return makeGqlResult({ SwapEvent: swaps });
         if (query === POOL_SWAPS_COUNT)
           return makeGqlResult({ SwapEvent: swaps.map((s) => ({ id: s.id })) });
-        if (query === POOL_SNAPSHOTS_CHART)
-          return makeGqlResult({ PoolSnapshot: poolSnapshots });
         if (query === POOL_DAILY_SNAPSHOTS_CHART)
           return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
         if (query === POOL_RESERVES)
@@ -1084,9 +1079,7 @@ describe("Pool detail tab search", () => {
     );
     const html = renderWithParams({});
     const chartCalls = useGQLMock.mock.calls.filter(
-      (args: unknown[]) =>
-        args[0] === POOL_SNAPSHOTS_CHART ||
-        args[0] === POOL_DAILY_SNAPSHOTS_CHART,
+      (args: unknown[]) => args[0] === POOL_DAILY_SNAPSHOTS_CHART,
     );
     expect(chartCalls).toHaveLength(0);
     expect(html).not.toContain("snapshot-chart");
