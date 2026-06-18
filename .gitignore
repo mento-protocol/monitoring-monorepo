@@ -48,7 +48,7 @@ CLAUDE.md
 # get uploaded to Upstash via the `/forensic-report` skill — not git.
 .investigations/
 
-# clawpatch.ai — review-tool state stays local (untracked in #874)
+# clawpatch.ai — review-tool state stays local, not committed.
 .clawpatch/
 
 # Arkham marathon — output JSONLs (raw API responses, progress checkpoints).
