@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "description": "A monitoring tool to expose the result of on-chain view calls as prometheus metrics that get ingested into grafana.",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-only",
   "author": "Mento Labs <eng@mentolabs.xyz>",
   "scripts": {
     "build": "nest build",
