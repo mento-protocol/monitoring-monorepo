@@ -1665,6 +1665,24 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
     ).toBe(false);
   });
 
+  it("treats explicit VirtualPool median failures as not fresh while rollout inputs are unknown", () => {
+    const ts120 = String(frozenNowSec - 120);
+    expect(
+      isOracleFresh(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeId: "0xexchange",
+          medianLive: false,
+          oracleTimestamp: ts120,
+          oracleFreshnessWindow: "0",
+          tokenDecimalsKnown: false,
+        },
+        frozenNowSec,
+        42220,
+      ),
+    ).toBe(false);
+  });
+
   it("does not fall back to generic expiry when a VirtualPool reset window is unknown", () => {
     const ts600 = String(frozenNowSec - 600);
     expect(

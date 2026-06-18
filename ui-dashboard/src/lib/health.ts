@@ -235,6 +235,7 @@ export function isOracleFresh(
   chainId?: number,
 ): boolean {
   if (isVirtualPool(pool)) {
+    if (pool.medianLive === false) return false;
     const medianValidity = vpMedianValidity(pool);
     if (medianValidity === false) return false;
     if (medianValidity === null || pool.tokenDecimalsKnown !== true) {
