@@ -8,12 +8,15 @@ cd "$repo_root"
 dashboard_paths=(
   "ui-dashboard"
   "shared-config"
-  # Root package.json is intentionally NOT watched: it only carries workspace
-  # scripts and root devDeps, which never enter the dashboard build. A
-  # build-relevant root change (e.g. a `pnpm.overrides` edit that re-pins a
-  # dashboard dependency) always co-changes `pnpm-lock.yaml`, which IS watched —
-  # so we skip the frequent script/devDep-only root edits (agent tooling, alert
-  # linters) without losing real coverage.
+  # Root package.json IS watched: it pins `packageManager` (the pnpm version
+  # Vercel installs/builds the dashboard with) and carries `pnpm.overrides` /
+  # `pnpm.patchedDependencies`, all of which shape the dashboard build
+  # environment. A `packageManager`-only bump (and some override/patch edits)
+  # changes that toolchain WITHOUT touching `pnpm-lock.yaml`, so watching the
+  # lockfile alone would false-skip a real build-environment change. Matches as
+  # an exact filename via the `"$dashboard_path"` case below (no `/*` children,
+  # same as `pnpm-lock.yaml`).
+  "package.json"
   "pnpm-lock.yaml"
   "pnpm-workspace.yaml"
   "patches"

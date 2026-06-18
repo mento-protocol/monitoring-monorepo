@@ -196,15 +196,17 @@ expect_build "PR first push with dashboard change builds against origin/main" \
   VERCEL_GIT_PULL_REQUEST_ID=408
 assert_output_contains "Dashboard-affecting changes detected in PR #408"
 
-# Root package.json is not a watched path: a script/devDep-only root edit (no
-# dashboard code) must skip even though it changes the repo's top-level manifest.
+# Root package.json IS a watched path: it pins `packageManager` and carries
+# pnpm overrides/patches that shape the dashboard build environment, so a
+# root-package.json-only change must BUILD even though it touches no dashboard
+# code (a `packageManager` bump changes the toolchain without a lockfile diff).
 git switch -c root-pkg-only "$main_sha" >/dev/null 2>&1
 printf '{ "name": "root", "scripts": { "a": "echo a", "b": "echo b" } }\n' > package.json
 git commit -am "chore: add a root script" -q
 
-expect_skip "PR root package.json-only change skips" \
+expect_build "PR root package.json-only change builds" \
   VERCEL_GIT_PULL_REQUEST_ID=413
-assert_output_contains "No dashboard-affecting changes in PR #413"
+assert_output_contains "Dashboard-affecting changes detected in PR #413"
 
 # Restore HEAD for the branch-fallback tests below, which assume the dashboard
 # branch is checked out.
