@@ -88,13 +88,42 @@ const responses = new Map([
   [
     "/repos/mento-protocol/monitoring-monorepo/compare/previous-sha...sha-docs",
     {
+      status: "ahead",
       ahead_by: 1,
+      behind_by: 0,
       files: [{ filename: "docs/pr-checklists/recurring-review-patterns.md" }],
     },
   ],
   [
     "/repos/mento-protocol/monitoring-monorepo/compare/previous-sha...sha-dashboard",
-    { ahead_by: 1, files: [{ filename: "ui-dashboard/src/app/page.tsx" }] },
+    {
+      status: "ahead",
+      ahead_by: 1,
+      behind_by: 0,
+      files: [{ filename: "ui-dashboard/src/app/page.tsx" }],
+    },
+  ],
+  // Diverged history (e.g. after a PR branch rebase/force-push): the previous
+  // deployment SHA is NOT an ancestor of head, so this THREE-DOT compare only
+  // reports the docs-only head-side change and OMITS any diverged dashboard
+  // change. The ancestry guard (behind_by > 0) must reject this file list and
+  // force a build rather than a false skip.
+  [
+    "/repos/mento-protocol/monitoring-monorepo/compare/diverged-prev...sha-diverged",
+    {
+      status: "diverged",
+      ahead_by: 1,
+      behind_by: 2,
+      files: [{ filename: "docs/x.md" }],
+    },
+  ],
+  // PR-vs-main file list for the diverged PR. It reports ONLY the docs-only
+  // head, so the PR-files fallback WOULD authorize a skip — the script must
+  // fail closed on the unusable previous-deployment SHA before ever consulting
+  // this list, otherwise the diverged dashboard build on the alias goes stale.
+  [
+    "/repos/mento-protocol/monitoring-monorepo/pulls/986/files",
+    [{ filename: "docs/x.md" }],
   ],
 ]);
 
@@ -143,6 +172,7 @@ git config user.name "Vercel Ignore Test"
 printf 'dashboard v1\n' > ui-dashboard/app.txt
 printf 'shared v1\n' > shared-config/config.txt
 printf 'docs v1\n' > AGENTS.md
+printf '{ "name": "root", "scripts": { "a": "echo a" } }\n' > package.json
 git add .
 git commit -qm "initial dashboard"
 previous_sha="$(git rev-parse --verify HEAD)"
@@ -156,9 +186,9 @@ git switch -c docs-only >/dev/null 2>&1
 printf 'docs v2\n' > AGENTS.md
 git commit -am "docs-only PR change" -q
 
-expect_skip "PR docs-only changes skip from origin/main" \
-  VERCEL_GIT_PULL_REQUEST_ID=407 \
-  VERCEL_GIT_PREVIOUS_SHA="$previous_sha"
+expect_skip "PR first push with docs-only change skips against origin/main" \
+  VERCEL_GIT_PULL_REQUEST_ID=407
+assert_output_contains "No dashboard-affecting changes in PR #407"
 
 expect_build "non-PR deployments still compare from previous successful SHA" \
   VERCEL_GIT_PREVIOUS_SHA="$previous_sha"
@@ -170,9 +200,25 @@ git switch -c dashboard-pr "$main_sha" >/dev/null 2>&1
 printf 'dashboard v3\n' > ui-dashboard/app.txt
 git commit -am "dashboard PR change" -q
 
-expect_build "PR dashboard changes build from origin/main" \
-  VERCEL_GIT_PULL_REQUEST_ID=408 \
-  VERCEL_GIT_PREVIOUS_SHA="$main_sha"
+expect_build "PR first push with dashboard change builds against origin/main" \
+  VERCEL_GIT_PULL_REQUEST_ID=408
+assert_output_contains "Dashboard-affecting changes detected in PR #408"
+
+# Root package.json IS a watched path: it pins `packageManager` and carries
+# pnpm overrides/patches that shape the dashboard build environment, so a
+# root-package.json-only change must BUILD even though it touches no dashboard
+# code (a `packageManager` bump changes the toolchain without a lockfile diff).
+git switch -c root-pkg-only "$main_sha" >/dev/null 2>&1
+printf '{ "name": "root", "scripts": { "a": "echo a", "b": "echo b" } }\n' > package.json
+git commit -am "chore: add a root script" -q
+
+expect_build "PR root package.json-only change builds" \
+  VERCEL_GIT_PULL_REQUEST_ID=413
+assert_output_contains "Dashboard-affecting changes detected in PR #413"
+
+# Restore HEAD for the branch-fallback tests below, which assume the dashboard
+# branch is checked out.
+git switch dashboard-pr >/dev/null 2>&1
 
 # First push of a branch can race ahead of GitHub's PR registration — Vercel
 # then ships neither VERCEL_GIT_PULL_REQUEST_ID nor VERCEL_GIT_PREVIOUS_SHA.
@@ -189,6 +235,31 @@ assert_output_contains "No dashboard-affecting changes on branch docs-only vs ma
 expect_build "branch fallback only triggers on non-main commit ref" \
   VERCEL_GIT_COMMIT_REF=main
 assert_output_contains "No VERCEL_GIT_PREVIOUS_SHA; building dashboard."
+
+# Incremental preview diff: a branch whose first commit changed the dashboard
+# (already deployed), then a docs-only follow-up push. The full branch-vs-main
+# diff still shows the dashboard change, so the merge-base path would rebuild,
+# but the diff against the previous branch deployment does not — so the
+# redundant follow-up push skips.
+git switch -c pr-incremental "$main_sha" >/dev/null 2>&1
+printf 'dashboard v3\n' > ui-dashboard/app.txt
+git commit -am "dashboard change in PR" -q
+pr_prev_sha="$(git rev-parse --verify HEAD)"
+printf 'docs v3\n' > AGENTS.md
+git commit -am "docs-only follow-up in PR" -q
+
+expect_skip "PR docs-only follow-up skips against previous branch deployment" \
+  VERCEL_GIT_PULL_REQUEST_ID=410 \
+  VERCEL_GIT_PREVIOUS_SHA="$pr_prev_sha"
+assert_output_contains "No dashboard-affecting changes since previous deployment for PR #410"
+
+printf 'dashboard v4\n' > ui-dashboard/app.txt
+git commit -am "more dashboard work in PR" -q
+
+expect_build "PR dashboard follow-up builds against previous branch deployment" \
+  VERCEL_GIT_PULL_REQUEST_ID=410 \
+  VERCEL_GIT_PREVIOUS_SHA="$pr_prev_sha"
+assert_output_contains "Dashboard-affecting changes detected since previous deployment for PR #410"
 
 start_mock_github_api
 nogit_repo="$fixture_repo/no-git"
@@ -250,6 +321,40 @@ expect_build "previous SHA dashboard change builds without local git via GitHub 
   VERCEL_GIT_PREVIOUS_SHA=previous-sha \
   VERCEL_GIT_COMMIT_SHA=sha-dashboard
 assert_output_contains "Dashboard-affecting changes detected since previous successful Vercel deployment"
+
+expect_skip "PR incremental docs-only change skips without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PULL_REQUEST_ID=984 \
+  VERCEL_GIT_PREVIOUS_SHA=previous-sha \
+  VERCEL_GIT_COMMIT_SHA=sha-docs
+assert_output_contains "No dashboard-affecting changes since previous deployment for PR #984"
+
+expect_build "PR incremental dashboard change builds without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PULL_REQUEST_ID=985 \
+  VERCEL_GIT_PREVIOUS_SHA=previous-sha \
+  VERCEL_GIT_COMMIT_SHA=sha-dashboard
+assert_output_contains "Dashboard-affecting changes detected since previous deployment for PR #985"
+
+# Diverged history after a rebase/force-push: the previous deployment SHA is not
+# an ancestor of head, so the THREE-DOT gitless compare returns only the
+# docs-only head-side file and omits the diverged dashboard change. The ancestry
+# guard rejects that compare, and because a previous deployment exists but can't
+# be compared, the script MUST fail closed and build here — even though the
+# PR-vs-main file list (fixture #986) reports docs-only and would otherwise
+# authorize a skip that strands the diverged dashboard build on the alias.
+expect_build "PR incremental diverged compare fails closed to build (no PR-files false skip)" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PULL_REQUEST_ID=986 \
+  VERCEL_GIT_PREVIOUS_SHA=diverged-prev \
+  VERCEL_GIT_COMMIT_SHA=sha-diverged
+assert_output_contains "Previous deployment diverged-prev could not be compared to HEAD for PR #986; building dashboard."
 
 cd "$fixture_repo"
 

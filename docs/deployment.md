@@ -121,7 +121,7 @@ commit:
 
 ## Dashboard Deployment (Vercel)
 
-**Vercel's native Git integration watches `main`** — every push that changes dashboard-affecting files triggers an automatic production deploy. Pushes that only touch unrelated directories (e.g. `terraform/`, `indexer-envio/`) are skipped by `ui-dashboard/scripts/vercel-ignore-build.sh`. PR preview deployments compare the PR diff against `origin/main`, so docs-only PRs skip even when `main` has had dashboard changes since the last successful production deployment.
+**Vercel's native Git integration watches `main`** — every push that changes dashboard-affecting files triggers an automatic production deploy. Pushes that only touch unrelated directories (e.g. `terraform/`, `indexer-envio/`) are skipped by `ui-dashboard/scripts/vercel-ignore-build.sh`. PR preview deployments diff each push incrementally against that branch's previous preview deployment (falling back to the merge base with `origin/main` on a branch's first push). So a docs-only PR skips, and once a branch's dashboard change has been previewed, later non-dashboard commits on the same branch skip too instead of rebuilding the whole branch on every push.
 
 The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](https://monitoring.mento.org).
 
@@ -352,9 +352,13 @@ The script uses local Git metadata when available, then falls back to GitHub's
 API when Vercel has stripped `.git` from the uploaded source. It tries three
 anchors in order:
 
-1. **PR preview deployments** — Vercel provides `VERCEL_GIT_PULL_REQUEST_ID`,
-   and the script diffs from the merge base with `origin/main` or, without local
-   Git metadata, from GitHub's paginated PR file list.
+1. **PR preview deployments** — Vercel provides `VERCEL_GIT_PULL_REQUEST_ID`.
+   When the branch already has a previous deployment (`VERCEL_GIT_PREVIOUS_SHA`),
+   the script diffs incrementally from that SHA — locally or via GitHub compare —
+   so intermediate pushes that don't touch the dashboard skip instead of
+   rebuilding the whole branch. On the first push (no previous deployment) it
+   diffs from the merge base with `origin/main`, or, without local Git metadata,
+   from GitHub's paginated PR file list.
 2. **First-push branch fallback** — when Vercel ships neither
    `VERCEL_GIT_PULL_REQUEST_ID` nor `VERCEL_GIT_PREVIOUS_SHA` (which happens
    when `git push` outruns `gh pr create`), the script falls back to the merge

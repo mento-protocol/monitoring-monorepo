@@ -8,6 +8,14 @@ cd "$repo_root"
 dashboard_paths=(
   "ui-dashboard"
   "shared-config"
+  # Root package.json IS watched: it pins `packageManager` (the pnpm version
+  # Vercel installs/builds the dashboard with) and carries `pnpm.overrides` /
+  # `pnpm.patchedDependencies`, all of which shape the dashboard build
+  # environment. A `packageManager`-only bump (and some override/patch edits)
+  # changes that toolchain WITHOUT touching `pnpm-lock.yaml`, so watching the
+  # lockfile alone would false-skip a real build-environment change. Matches as
+  # an exact filename via the `"$dashboard_path"` case below (no `/*` children,
+  # same as `pnpm-lock.yaml`).
   "package.json"
   "pnpm-lock.yaml"
   "pnpm-workspace.yaml"
@@ -24,6 +32,7 @@ dashboard_paths=(
 pull_request_id="${VERCEL_GIT_PULL_REQUEST_ID:-}"
 commit_ref="${VERCEL_GIT_COMMIT_REF:-}"
 commit_sha="${VERCEL_GIT_COMMIT_SHA:-}"
+previous_sha="${VERCEL_GIT_PREVIOUS_SHA:-}"
 repo_owner="${VERCEL_GIT_REPO_OWNER:-mento-protocol}"
 repo_slug="${VERCEL_GIT_REPO_SLUG:-monitoring-monorepo}"
 github_api_base="${GITHUB_API_BASE_URL:-https://api.github.com}"
@@ -122,6 +131,27 @@ async function compareFiles(base, head, singleCommitOnly) {
     `/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
   );
   const comparison = await fetchJson(url);
+  // GitHub's /compare/base...head endpoint is THREE-DOT (merge-base) semantics:
+  // its file list only reflects head-side changes since the merge-base. After a
+  // PR branch rebase/force-push the previous-deployment `base` is no longer an
+  // ancestor of `head`, so a dashboard change present in the deployed preview
+  // but diverged from head can be OMITTED from this list — authorizing a FALSE
+  // SKIP that serves stale dashboard code. The file list is only a safe basis
+  // for a skip when `base` is proven an ancestor of `head`: status "ahead"/
+  // "identical" with behind_by === 0. If histories diverged ("diverged"/
+  // "behind", behind_by > 0), fail closed so the bash caller falls through to
+  // the full-PR-files diff / merge-base / build. An absent `behind_by` is
+  // treated as 0 (assume ancestor); GitHub always includes the field on a real
+  // compare response, so this only matters for callers/fixtures that omit it.
+  if ((comparison.behind_by ?? 0) > 0) {
+    throw new Error(
+      `compare base is not an ancestor of head (behind_by=${comparison.behind_by}, status=${comparison.status}); build instead of risking a false skip`,
+    );
+  }
+  // singleCommitOnly is irrelevant once behind_by === 0 proves `base` is an
+  // ancestor of `head`: three-dot then collapses to two-dot, so the net diff
+  // over N commits is a safe basis for a skip. It only guards branch-first mode,
+  // where no ancestry is established.
   if (singleCommitOnly && comparison.ahead_by > 1) {
     throw new Error(
       `branch fallback has ${comparison.ahead_by} commits; build instead of risking a false skip`,
@@ -182,6 +212,41 @@ resolve_main_merge_base() {
 }
 
 if [[ -n "$pull_request_id" ]]; then
+  # Prefer an incremental diff against this branch's previous successful
+  # deployment so intermediate WIP pushes that don't touch the dashboard skip,
+  # instead of rebuilding the whole branch on every commit. The preview alias
+  # keeps the last built output, which already reflects HEAD's dashboard state,
+  # so skipping here never serves a stale dashboard. Falls through to the full
+  # branch diff below on the first push (no previous deployment) or when the
+  # previous SHA can't be resolved.
+  if [[ -n "$previous_sha" ]]; then
+    if git cat-file -e "${previous_sha}^{commit}" 2>/dev/null; then
+      skip_or_build_from_base \
+        "$previous_sha" \
+        "No dashboard-affecting changes since previous deployment for PR #${pull_request_id}; skipping build." \
+        "Dashboard-affecting changes detected since previous deployment for PR #${pull_request_id}; building dashboard."
+    fi
+
+    if [[ -n "$commit_sha" ]] &&
+      changed_files="$(github_changed_files compare "$previous_sha" "$commit_sha")"; then
+      skip_or_build_from_files \
+        "$changed_files" \
+        "No dashboard-affecting changes since previous deployment for PR #${pull_request_id}; skipping build." \
+        "Dashboard-affecting changes detected since previous deployment for PR #${pull_request_id}; building dashboard."
+    fi
+
+    # We have a previous deployment for this branch but could not compare it to
+    # HEAD: the previous SHA is absent from this (gitless/shallow) clone AND the
+    # GitHub compare was rejected — either because the histories diverged
+    # (compareFiles fails closed on a non-ancestor base after a force-push) or
+    # the compare API was unreachable. Do NOT fall through to the PR-vs-main
+    # diff: the preview alias still serves the previous build, which may carry
+    # dashboard changes HEAD no longer has, so a PR-vs-main skip would strand a
+    # stale dashboard preview. Fail closed and build.
+    echo "Previous deployment ${previous_sha} could not be compared to HEAD for PR #${pull_request_id}; building dashboard."
+    exit 1
+  fi
+
   if pr_base_sha="$(resolve_main_merge_base)"; then
     skip_or_build_from_base \
       "$pr_base_sha" \
@@ -200,7 +265,7 @@ if [[ -n "$pull_request_id" ]]; then
   exit 1
 fi
 
-base_sha="${VERCEL_GIT_PREVIOUS_SHA:-}"
+base_sha="$previous_sha"
 
 if [[ -z "$base_sha" ]]; then
   # First push of a feature branch can outrun GitHub's PR registration, so Vercel
