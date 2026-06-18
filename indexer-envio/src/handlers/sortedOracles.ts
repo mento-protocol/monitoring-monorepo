@@ -376,6 +376,7 @@ indexer.onEvent(
       context,
       chainId: event.chainId,
       feedAddress: rateFeedID,
+      poolIds,
       blockNumber,
       blockTimestamp,
     });
@@ -489,6 +490,7 @@ indexer.onEvent(
       context,
       chainId: event.chainId,
       feedAddress: rateFeedID,
+      poolIds,
       blockNumber,
       blockTimestamp,
     });

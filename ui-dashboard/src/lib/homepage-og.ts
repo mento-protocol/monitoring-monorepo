@@ -16,6 +16,9 @@ import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
 import {
   ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+  ALL_POOLS_VP_DEPRECATION,
+  ALL_POOLS_VP_LIFECYCLE_DEPRECATION,
+  ALL_POOLS_VP_ORACLE_FRESHNESS,
   ALL_POOLS_WITH_HEALTH,
   // OG-specific homepage daily snapshot query. Lives in queries/pools.ts so
   // the GraphQL contract test covers it.
@@ -104,70 +107,62 @@ type ChainSlice = {
   dailyDegraded: boolean;
 };
 
+type HomepageOgClient = ReturnType<typeof makeOgGraphQLClient>;
+type ThresholdsRow = {
+  id: string;
+  rebalanceThresholdAbove?: number;
+  rebalanceThresholdBelow?: number;
+  rebalanceThresholdsKnown?: boolean;
+  tokenDecimalsKnown?: boolean;
+  degenerateReserves?: boolean;
+  breakerTripped?: boolean;
+};
+type VpFreshnessRow = {
+  id: string;
+  lastOracleReportAt?: string;
+  medianLive?: boolean;
+  oracleFreshnessWindow?: string;
+};
+type VpDeprecationRow = {
+  wrappedByPoolId?: string;
+  isDeprecated?: boolean;
+  minimumReports?: string;
+};
+type VpLifecycleDeprecationRow = {
+  poolId?: string;
+};
+type SettledRows<T> = PromiseSettledResult<{ Pool: T[] }>;
+type SettledVpFreshnessRows = SettledRows<VpFreshnessRow>;
+type SettledVpDeprecationRows = PromiseSettledResult<{
+  BiPoolExchange: VpDeprecationRow[];
+}>;
+type SettledVpLifecycleDeprecationRows = PromiseSettledResult<{
+  VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
+}>;
+
 async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   if (!network.hasuraUrl) return null;
   const client = makeOgGraphQLClient(network);
 
-  // Fire main pools query + isolated trust-flag query in parallel — the
-  // trust-flag fetch is fail-open so its 5s timeout shouldn't tack on to
-  // the homepage OG critical path. Pool query is the only required
-  // result; if that one fails, treat the chain as offline.
-  type ThresholdsRow = {
-    id: string;
-    rebalanceThresholdAbove?: number;
-    rebalanceThresholdBelow?: number;
-    rebalanceThresholdsKnown?: boolean;
-    tokenDecimalsKnown?: boolean;
-    degenerateReserves?: boolean;
-    breakerTripped?: boolean;
-  };
-  // Parallelizing both saves ~200ms p50 on the success path; serializing
-  // would only help if `poolsResult` failed, which is < 1% of calls.
-  // react-doctor-disable-next-line react-doctor/async-defer-await
-  const [poolsResult, thresholdsResult] = await Promise.allSettled([
-    client.request<{ Pool: Pool[] }>({
-      document: ALL_POOLS_WITH_HEALTH,
-      variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
-    }),
-    client.request<{ Pool: ThresholdsRow[] }>({
-      document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
-      variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
-    }),
-  ]);
+  const {
+    poolsResult,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+    vpLifecycleDeprecationResult,
+  } = await requestChainPoolInputs(client, network);
 
   if (poolsResult.status !== "fulfilled") {
     // Chain pool query failed entirely — treat as offline. Aggregator
     // will surface this via `partial` / `offlineChains`.
     return null;
   }
-  let pools: Pool[] = poolsResult.value.Pool ?? [];
-
-  // Merge trust flags fail-open — on miss/schema-lag, the fields stay
-  // undefined and `isNeverRebalance` returns false (under-bound).
-  // Without this merge, a 0/0 never-rebalance pool would appear in
-  // WARN/CRITICAL attention lists on the homepage OG card; degenerate
-  // reserve rows also stay conservatively visible until the ext field lands.
-  if (thresholdsResult.status === "fulfilled") {
-    const thresholdsById = new Map(
-      (thresholdsResult.value.Pool ?? []).map((r) => [r.id, r]),
-    );
-    pools = pools.map((p) => {
-      const t = thresholdsById.get(p.id);
-      return t == null
-        ? p
-        : {
-            ...p,
-            rebalanceThresholdAbove: t.rebalanceThresholdAbove,
-            rebalanceThresholdBelow: t.rebalanceThresholdBelow,
-            rebalanceThresholdsKnown: t.rebalanceThresholdsKnown,
-            tokenDecimalsKnown: t.tokenDecimalsKnown,
-            degenerateReserves: t.degenerateReserves,
-            breakerTripped: t.breakerTripped,
-          };
-    });
-  }
+  const pools = mergeHomepagePoolExtensions(poolsResult.value.Pool ?? [], {
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+    vpLifecycleDeprecationResult,
+  });
 
   if (pools.length === 0) {
     return {
@@ -229,6 +224,57 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     daily,
     rates: buildOracleRateMap(pools, network),
     dailyDegraded,
+  };
+}
+
+async function requestChainPoolInputs(
+  client: HomepageOgClient,
+  network: Network,
+) {
+  // Parallelizing these saves ~200ms p50 on the success path; serializing
+  // would only help if the main pool query failed, which is < 1% of calls.
+  // react-doctor-disable-next-line react-doctor/async-defer-await
+  const [
+    poolsResult,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+    vpLifecycleDeprecationResult,
+  ] = await Promise.allSettled([
+    client.request<{ Pool: Pool[] }>({
+      document: ALL_POOLS_WITH_HEALTH,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+    client.request<{ Pool: ThresholdsRow[] }>({
+      document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+    client.request<{ Pool: VpFreshnessRow[] }>({
+      document: ALL_POOLS_VP_ORACLE_FRESHNESS,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+    client.request<{ BiPoolExchange: VpDeprecationRow[] }>({
+      document: ALL_POOLS_VP_DEPRECATION,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+    client.request<{
+      VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
+    }>({
+      document: ALL_POOLS_VP_LIFECYCLE_DEPRECATION,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+    }),
+  ]);
+  return {
+    poolsResult,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+    vpLifecycleDeprecationResult,
   };
 }
 
@@ -411,6 +457,104 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     partial,
     offlineChains,
   };
+}
+
+function mergeHomepagePoolExtensions(
+  pools: Pool[],
+  results: {
+    thresholdsResult: SettledRows<ThresholdsRow>;
+    vpFreshnessResult: SettledVpFreshnessRows;
+    vpDeprecationResult: SettledVpDeprecationRows;
+    vpLifecycleDeprecationResult: SettledVpLifecycleDeprecationRows;
+  },
+): Pool[] {
+  return mergeHomepageVpDeprecation(
+    mergeHomepageVpFreshness(
+      mergeHomepageThresholds(pools, results.thresholdsResult),
+      results.vpFreshnessResult,
+    ),
+    results.vpDeprecationResult,
+    results.vpLifecycleDeprecationResult,
+  );
+}
+
+function mergeHomepageThresholds(
+  pools: Pool[],
+  result: SettledRows<ThresholdsRow>,
+): Pool[] {
+  if (result.status !== "fulfilled") return pools;
+  const byId = new Map((result.value.Pool ?? []).map((r) => [r.id, r]));
+  return pools.map((pool) => {
+    const ext = byId.get(pool.id);
+    return ext == null
+      ? pool
+      : {
+          ...pool,
+          rebalanceThresholdAbove: ext.rebalanceThresholdAbove,
+          rebalanceThresholdBelow: ext.rebalanceThresholdBelow,
+          rebalanceThresholdsKnown: ext.rebalanceThresholdsKnown,
+          tokenDecimalsKnown: ext.tokenDecimalsKnown,
+          degenerateReserves: ext.degenerateReserves,
+          breakerTripped: ext.breakerTripped,
+        };
+  });
+}
+
+function mergeHomepageVpFreshness(
+  pools: Pool[],
+  result: SettledVpFreshnessRows,
+): Pool[] {
+  if (result.status !== "fulfilled") return pools;
+  const byId = new Map((result.value.Pool ?? []).map((r) => [r.id, r]));
+  return pools.map((pool) => {
+    const ext = byId.get(pool.id);
+    return ext == null
+      ? pool
+      : {
+          ...pool,
+          lastOracleReportAt: ext.lastOracleReportAt,
+          medianLive: ext.medianLive,
+          oracleFreshnessWindow: ext.oracleFreshnessWindow,
+        };
+  });
+}
+
+function mergeHomepageVpDeprecation(
+  pools: Pool[],
+  result: SettledVpDeprecationRows,
+  lifecycleResult: SettledVpLifecycleDeprecationRows,
+): Pool[] {
+  if (result.status !== "fulfilled" && lifecycleResult.status !== "fulfilled") {
+    return pools;
+  }
+  const deprecatedPoolIds = new Set<string>();
+  const exchangeByPoolId = new Map<string, VpDeprecationRow>();
+  if (result.status === "fulfilled") {
+    for (const row of result.value.BiPoolExchange ?? []) {
+      if (row.wrappedByPoolId) exchangeByPoolId.set(row.wrappedByPoolId, row);
+      if (row.wrappedByPoolId && row.isDeprecated) {
+        deprecatedPoolIds.add(row.wrappedByPoolId);
+      }
+    }
+  }
+  if (lifecycleResult.status === "fulfilled") {
+    for (const row of lifecycleResult.value.VirtualPoolLifecycle ?? []) {
+      if (row.poolId) deprecatedPoolIds.add(row.poolId);
+    }
+  }
+  return pools.map((pool) => {
+    const exchange = exchangeByPoolId.get(pool.id);
+    if (!exchange && !deprecatedPoolIds.has(pool.id)) return pool;
+    return {
+      ...pool,
+      ...(deprecatedPoolIds.has(pool.id)
+        ? { wrappedExchangeDeprecated: true }
+        : {}),
+      ...(exchange?.minimumReports !== undefined
+        ? { wrappedExchangeMinimumReports: exchange.minimumReports }
+        : {}),
+    };
+  });
 }
 
 type PriceableEntry = { pool: Pool; slice: ChainSlice };

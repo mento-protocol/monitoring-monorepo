@@ -5,7 +5,7 @@ import type { BridgePoolsResponse, PoolRow } from "./types.js";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // `BRIDGE_POOLS_QUERY` is the load-bearing one — base pool state for every
-// FPMM gauge. Schema-stable: every field on it has been live in production
+// FPMM gauge plus VP identity and report timestamps. Schema-stable: every field on it has been live in production
 // for >1 release. NEW indexer columns MUST land in an isolated companion
 // query so a deploy-window schema mismatch only loses the new annotation or
 // alert refinement, not every pool gauge — `fetchPools` falls back to base
@@ -17,14 +17,14 @@ const REQUEST_TIMEOUT_MS = 15_000;
 //
 // Companion-query exception: `wrappedExchangeId` stays on the BASE query even
 // though it is "new" relative to most callers. It is load-bearing for
-// CORRECTNESS, not just annotation — `isFpmmPool` filters healed VirtualPools
-// on it. Missing field → filter can't run → VPs leak as phantom FPMM gauges,
-// which is WORSE than the base query failing loudly. A companion query with a
-// graceful `""` fallback would silently re-introduce that bug. Schema-stable
-// since VP Phase 2 (see PR #853); fail-loud is the correct posture here.
+// CORRECTNESS, not just annotation — `isFpmmPool` filters VirtualPools on it
+// together with `source.includes("virtual")`. Missing field → filter can't run
+// → VPs leak as phantom FPMM gauges, which is WORSE than the base query failing
+// loudly. Schema-stable since VP Phase 2 (see PR #853); fail-loud is the
+// correct posture here.
 export const BRIDGE_POOLS_QUERY = gql`
   query BridgePools {
-    Pool(where: { source: { _like: "%fpmm%" } }) {
+    Pool {
       id
       chainId
       token0
@@ -38,6 +38,9 @@ export const BRIDGE_POOLS_QUERY = gql`
       oracleOk
       oracleTimestamp
       oracleExpiry
+      oracleNumReporters
+      lastOracleReportAt
+      medianLive
       lastDeviationRatio
       deviationBreachStartedAt
       limitStatus
@@ -100,6 +103,44 @@ export const BRIDGE_POOLS_ORACLE_TX_QUERY = gql`
   }
 `;
 
+// Optional companion query for the VP-specific freshness window. If the bridge
+// deploys before the indexer schema, only the new VP freshness metric degrades;
+// FPMM gauges keep publishing.
+export const BRIDGE_POOLS_VP_FRESHNESS_QUERY = gql`
+  query BridgePoolsVpFreshness {
+    Pool {
+      id
+      oracleFreshnessWindow
+      tokenDecimalsKnown
+    }
+  }
+`;
+
+// Optional companion query for wrapped VirtualPool exchange state. A deprecated
+// backing exchange OR factory lifecycle deprecation means the VP is retired,
+// so stale freshness gauges should stop publishing instead of paging on
+// expected inactivity. `minimumReports` feeds the VP median-validity gate.
+export const BRIDGE_POOLS_VP_EXCHANGE_DEPRECATION_QUERY = gql`
+  query BridgePoolsVpExchangeDeprecation {
+    BiPoolExchange(where: { wrappedByPoolId: { _is_null: false } }) {
+      wrappedByPoolId
+      isDeprecated
+      minimumReports
+    }
+  }
+`;
+
+export const BRIDGE_POOLS_VP_LIFECYCLE_DEPRECATION_QUERY = gql`
+  query BridgePoolsVpLifecycleDeprecation {
+    VirtualPoolLifecycle(
+      where: { action: { _eq: "DEPRECATED" } }
+      limit: 1000
+    ) {
+      poolId
+    }
+  }
+`;
+
 type OracleLineageRow = Pick<
   PoolRow,
   "id" | "prevMedianPrice" | "prevMedianAt"
@@ -111,15 +152,30 @@ type OpenBreachRow = Pick<
 >;
 
 type OracleTxRow = Pick<PoolRow, "id" | "oracleTxHash">;
+type VpFreshnessRow = Pick<
+  PoolRow,
+  "id" | "oracleFreshnessWindow" | "tokenDecimalsKnown"
+>;
+type VpExchangeDeprecationRow = {
+  wrappedByPoolId: string | null;
+  isDeprecated: boolean;
+  minimumReports?: string | null;
+};
+type VpLifecycleDeprecationRow = {
+  poolId: string;
+};
 
 type BridgePoolsBaseResponse = {
   Pool: Omit<
     PoolRow,
     | "oracleTxHash"
+    | "oracleFreshnessWindow"
+    | "tokenDecimalsKnown"
     | "prevMedianPrice"
     | "prevMedianAt"
     | "currentOpenBreachPeak"
     | "currentOpenBreachEntryThreshold"
+    | "wrappedExchangeDeprecated"
   >[];
 };
 
@@ -136,6 +192,27 @@ const OPEN_BREACH_DEFAULTS = {
 const ORACLE_TX_DEFAULTS = {
   oracleTxHash: "",
 } as const;
+
+const VP_FRESHNESS_DEFAULTS = {
+  oracleFreshnessWindow: "0",
+  tokenDecimalsKnown: false,
+  wrappedExchangeDeprecated: false,
+  wrappedExchangeMinimumReports: "0",
+} as const;
+
+type BridgePoolCompanionResponses = {
+  base: BridgePoolsBaseResponse;
+  lineage: { Pool: OracleLineageRow[] };
+  openBreach: { Pool: OpenBreachRow[] };
+  oracleTx: { Pool: OracleTxRow[] };
+  vpFreshness: { Pool: VpFreshnessRow[] };
+  vpExchangeDeprecation: {
+    BiPoolExchange: VpExchangeDeprecationRow[];
+  };
+  vpLifecycleDeprecation: {
+    VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
+  };
+};
 
 const client = new GraphQLClient(HASURA_URL);
 
@@ -158,6 +235,9 @@ const unknownFieldWarnings = {
   oracleLineage: false,
   openBreach: false,
   oracleTx: false,
+  vpFreshness: false,
+  vpExchangeDeprecation: false,
+  vpLifecycleDeprecation: false,
 };
 
 async function requestOptionalPoolRows<T>(
@@ -178,9 +258,60 @@ async function requestOptionalPoolRows<T>(
   }
 }
 
-export async function fetchPools(): Promise<BridgePoolsResponse> {
-  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  const [base, lineage, openBreach, oracleTx] = await Promise.all([
+async function requestOptionalVpExchangeDeprecationRows(
+  signal: AbortSignal,
+): Promise<{
+  BiPoolExchange: VpExchangeDeprecationRow[];
+}> {
+  try {
+    return await client.request<{
+      BiPoolExchange: VpExchangeDeprecationRow[];
+    }>({ document: BRIDGE_POOLS_VP_EXCHANGE_DEPRECATION_QUERY, signal });
+  } catch (err) {
+    if (!isUnknownFieldError(err)) throw err;
+    if (!unknownFieldWarnings.vpExchangeDeprecation) {
+      unknownFieldWarnings.vpExchangeDeprecation = true;
+      console.warn(
+        "[metrics-bridge] Hasura schema missing VP exchange deprecation state; exchange-retired VirtualPool staleness suppression disabled until indexer catches up.",
+      );
+    }
+    return { BiPoolExchange: [] };
+  }
+}
+
+async function requestOptionalVpLifecycleDeprecationRows(
+  signal: AbortSignal,
+): Promise<{
+  VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
+}> {
+  try {
+    return await client.request<{
+      VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
+    }>({ document: BRIDGE_POOLS_VP_LIFECYCLE_DEPRECATION_QUERY, signal });
+  } catch (err) {
+    if (!isUnknownFieldError(err)) throw err;
+    if (!unknownFieldWarnings.vpLifecycleDeprecation) {
+      unknownFieldWarnings.vpLifecycleDeprecation = true;
+      console.warn(
+        "[metrics-bridge] Hasura schema missing VP lifecycle deprecation state; factory-retired VirtualPool staleness suppression disabled until indexer catches up.",
+      );
+    }
+    return { VirtualPoolLifecycle: [] };
+  }
+}
+
+async function requestBridgePoolCompanions(
+  signal: AbortSignal,
+): Promise<BridgePoolCompanionResponses> {
+  const [
+    base,
+    lineage,
+    openBreach,
+    oracleTx,
+    vpFreshness,
+    vpExchangeDeprecation,
+    vpLifecycleDeprecation,
+  ] = await Promise.all([
     client.request<BridgePoolsBaseResponse>({
       document: BRIDGE_POOLS_QUERY,
       signal,
@@ -203,22 +334,74 @@ export async function fetchPools(): Promise<BridgePoolsResponse> {
       "oracleTx",
       "[metrics-bridge] Hasura schema missing oracle tx hash field; oracle alert transaction links disabled until indexer catches up.",
     ),
+    requestOptionalPoolRows<VpFreshnessRow>(
+      BRIDGE_POOLS_VP_FRESHNESS_QUERY,
+      signal,
+      "vpFreshness",
+      "[metrics-bridge] Hasura schema missing VP oracle freshness field; VirtualPool oracle staleness metric disabled until indexer catches up.",
+    ),
+    requestOptionalVpExchangeDeprecationRows(signal),
+    requestOptionalVpLifecycleDeprecationRows(signal),
   ]);
+  return {
+    base,
+    lineage,
+    openBreach,
+    oracleTx,
+    vpFreshness,
+    vpExchangeDeprecation,
+    vpLifecycleDeprecation,
+  };
+}
 
+function mergeBridgePoolCompanions({
+  base,
+  lineage,
+  openBreach,
+  oracleTx,
+  vpFreshness,
+  vpExchangeDeprecation,
+  vpLifecycleDeprecation,
+}: BridgePoolCompanionResponses): BridgePoolsResponse {
   const lineageById = new Map(lineage.Pool.map((p) => [p.id, p]));
   const openBreachById = new Map(openBreach.Pool.map((p) => [p.id, p]));
   const oracleTxById = new Map(
     oracleTx.Pool.filter((p) => p.oracleTxHash).map((p) => [p.id, p]),
   );
+  const vpFreshnessById = new Map(vpFreshness.Pool.map((p) => [p.id, p]));
+  const deprecatedVpPoolIds = new Set<string>();
+  const vpMinimumReportsByPoolId = new Map<string, string>();
+  for (const e of vpExchangeDeprecation.BiPoolExchange) {
+    if (e.wrappedByPoolId && e.minimumReports) {
+      vpMinimumReportsByPoolId.set(e.wrappedByPoolId, e.minimumReports);
+    }
+    if (e.wrappedByPoolId && e.isDeprecated) {
+      deprecatedVpPoolIds.add(e.wrappedByPoolId);
+    }
+  }
+  for (const lifecycle of vpLifecycleDeprecation.VirtualPoolLifecycle) {
+    deprecatedVpPoolIds.add(lifecycle.poolId);
+  }
   return {
     Pool: base.Pool.map((p) => ({
       ...p,
       ...ORACLE_TX_DEFAULTS,
+      ...VP_FRESHNESS_DEFAULTS,
       ...LINEAGE_DEFAULTS,
       ...OPEN_BREACH_DEFAULTS,
       ...lineageById.get(p.id),
       ...openBreachById.get(p.id),
       ...oracleTxById.get(p.id),
+      ...vpFreshnessById.get(p.id),
+      wrappedExchangeDeprecated: deprecatedVpPoolIds.has(p.id),
+      wrappedExchangeMinimumReports:
+        vpMinimumReportsByPoolId.get(p.id) ??
+        VP_FRESHNESS_DEFAULTS.wrappedExchangeMinimumReports,
     })),
   };
+}
+
+export async function fetchPools(): Promise<BridgePoolsResponse> {
+  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  return mergeBridgePoolCompanions(await requestBridgePoolCompanions(signal));
 }

@@ -10,8 +10,12 @@ import { makePoolId } from "../src/helpers.js";
 import { makeRateFeedId } from "../src/oracleReporters.js";
 import {
   _clearMockRateFeedOracles,
+  _clearMockNumReporters,
   _setMockRateFeedOracles,
+  _setMockNumReporters,
 } from "../src/EventHandlers.ts";
+import { UNKNOWN_ORACLE_REPORTERS } from "../src/constants.js";
+import { syncRateFeedFromRpc } from "../src/handlers/rateFeed.js";
 
 type MockDb = MockDbWith<{
   Pool: WritableEntity<Pool>;
@@ -33,6 +37,7 @@ const SORTED_ORACLES = "0xefb84935239dacdecf7c5ba76d8de40b077b7b33";
 describe("RateFeed handlers", () => {
   afterEach(() => {
     _clearMockRateFeedOracles();
+    _clearMockNumReporters();
   });
 
   it("writes chain-scoped RateFeed rows from OracleAdded", async () => {
@@ -64,6 +69,280 @@ describe("RateFeed handlers", () => {
     assert.deepEqual(row.reporterTypes, ["CHAINLINK", "MANUAL"]);
     assert.equal(row.reportersComplete, true);
     assert.equal(row.updatedAtBlock, 100n);
+  });
+
+  it("syncs a RateFeed row from the RPC helper", async () => {
+    let stored: RateFeed | undefined;
+    const context = {
+      RateFeed: {
+        set(entity: RateFeed) {
+          stored = entity;
+        },
+      },
+      effect: async (
+        _effect: unknown,
+        params: { chainId: number; rateFeedID: string; blockNumber: bigint },
+      ) => {
+        assert.equal(params.chainId, CELO);
+        assert.equal(params.rateFeedID, CELO_GBP_FEED);
+        assert.equal(params.blockNumber, 105n);
+        return [CELO_GBP_REPORTER, UNKNOWN_REPORTER];
+      },
+    } as unknown as Parameters<typeof syncRateFeedFromRpc>[0]["context"];
+
+    const row = await syncRateFeedFromRpc({
+      context,
+      chainId: CELO,
+      feedAddress: CELO_GBP_FEED,
+      blockNumber: 105n,
+      blockTimestamp: 1_700_000_300n,
+    });
+
+    assert.ok(row);
+    assert.equal(stored, row);
+    assert.equal(row.id, makeRateFeedId(CELO, CELO_GBP_FEED));
+    assert.equal(row.pair, "GBP/USD");
+    assert.deepEqual(row.reporters, [CELO_GBP_REPORTER, UNKNOWN_REPORTER]);
+    assert.deepEqual(row.reporterTypes, ["CHAINLINK", "MANUAL"]);
+    assert.equal(row.reportersComplete, true);
+    assert.equal(row.updatedAtBlock, 105n);
+    assert.equal(row.updatedAtTimestamp, 1_700_000_300n);
+  });
+
+  it("updates virtual pool reporter counts from OracleAdded numRates", async () => {
+    _setMockRateFeedOracles(CELO, CELO_GBP_FEED, [
+      CELO_GBP_REPORTER,
+      UNKNOWN_REPORTER,
+    ]);
+    _setMockNumReporters(CELO, CELO_GBP_FEED, 1);
+    const poolId = makePoolId(
+      CELO,
+      "0x8c0014afe032e4574481d8934504100bf23fcb56",
+    );
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CELO,
+        source: "virtual_pool_factory",
+        referenceRateFeedID: CELO_GBP_FEED,
+        oracleNumReporters: 0,
+      }),
+    );
+
+    mockDb = await SortedOracles.OracleAdded.processEvent({
+      event: SortedOracles.OracleAdded.createMockEvent({
+        token: CELO_GBP_FEED,
+        oracleAddress: CELO_GBP_REPORTER,
+        mockEventData: {
+          chainId: CELO,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 100, timestamp: 1_700_000_000 },
+        },
+      }),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId);
+    assert.ok(pool);
+    assert.equal(pool.oracleNumReporters, 1);
+    assert.equal(pool.updatedAtBlock, 100n);
+    assert.equal(pool.updatedAtTimestamp, 1_700_000_000n);
+  });
+
+  it("updates virtual pool reporter counts from OracleRemoved", async () => {
+    _setMockRateFeedOracles(CELO, CELO_GBP_FEED, [CELO_GBP_REPORTER]);
+    _setMockNumReporters(CELO, CELO_GBP_FEED, 1);
+    const poolId = makePoolId(
+      CELO,
+      "0x8c0014afe032e4574481d8934504100bf23fcb56",
+    );
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CELO,
+        source: "virtual_pool_factory",
+        referenceRateFeedID: CELO_GBP_FEED,
+        oracleNumReporters: 2,
+      }),
+    );
+
+    mockDb = await SortedOracles.OracleRemoved.processEvent({
+      event: SortedOracles.OracleRemoved.createMockEvent({
+        token: CELO_GBP_FEED,
+        oracleAddress: UNKNOWN_REPORTER,
+        mockEventData: {
+          chainId: CELO,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 101, timestamp: 1_700_000_060 },
+        },
+      }),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId);
+    assert.ok(pool);
+    assert.equal(pool.oracleNumReporters, 1);
+    assert.equal(pool.updatedAtBlock, 101n);
+    assert.equal(pool.updatedAtTimestamp, 1_700_000_060n);
+  });
+
+  it("uses a complete reporter-list fallback when numRates fails on membership changes", async () => {
+    _setMockRateFeedOracles(CELO, CELO_GBP_FEED, [CELO_GBP_REPORTER]);
+    _setMockNumReporters(CELO, CELO_GBP_FEED, null);
+    const poolId = makePoolId(
+      CELO,
+      "0x8c0014afe032e4574481d8934504100bf23fcb56",
+    );
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CELO,
+        source: "virtual_pool_factory",
+        referenceRateFeedID: CELO_GBP_FEED,
+        oracleNumReporters: 2,
+      }),
+    );
+
+    mockDb = await SortedOracles.OracleRemoved.processEvent({
+      event: SortedOracles.OracleRemoved.createMockEvent({
+        token: CELO_GBP_FEED,
+        oracleAddress: UNKNOWN_REPORTER,
+        mockEventData: {
+          chainId: CELO,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 102, timestamp: 1_700_000_120 },
+        },
+      }),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId);
+    assert.ok(pool);
+    assert.equal(pool.oracleNumReporters, 1);
+    assert.equal(pool.updatedAtBlock, 102n);
+    assert.equal(pool.updatedAtTimestamp, 1_700_000_120n);
+  });
+
+  it("marks linked pool reporter counts unknown when membership changes but count refresh fails", async () => {
+    _setMockRateFeedOracles(CELO, CELO_GBP_FEED, null);
+    _setMockNumReporters(CELO, CELO_GBP_FEED, null);
+    const poolId = makePoolId(
+      CELO,
+      "0x8c0014afe032e4574481d8934504100bf23fcb56",
+    );
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CELO,
+        source: "virtual_pool_factory",
+        referenceRateFeedID: CELO_GBP_FEED,
+        oracleNumReporters: 2,
+      }),
+    );
+
+    mockDb = await SortedOracles.OracleAdded.processEvent({
+      event: SortedOracles.OracleAdded.createMockEvent({
+        token: CELO_GBP_FEED,
+        oracleAddress: CELO_GBP_REPORTER,
+        mockEventData: {
+          chainId: CELO,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 103, timestamp: 1_700_000_180 },
+        },
+      }),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId);
+    assert.ok(pool);
+    assert.equal(pool.oracleNumReporters, UNKNOWN_ORACLE_REPORTERS);
+    assert.equal(pool.updatedAtBlock, 103n);
+    assert.equal(pool.updatedAtTimestamp, 1_700_000_180n);
+  });
+
+  it("preserves known pool reporter counts when non-membership refresh fails", async () => {
+    _setMockRateFeedOracles(CELO, CELO_GBP_FEED, null);
+    _setMockNumReporters(CELO, CELO_GBP_FEED, null);
+    const poolId = makePoolId(
+      CELO,
+      "0x8c0014afe032e4574481d8934504100bf23fcb56",
+    );
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CELO,
+        source: "virtual_pool_factory",
+        referenceRateFeedID: CELO_GBP_FEED,
+        oracleNumReporters: 2,
+        tokenDecimalsKnown: true,
+        invertRateFeedKnown: true,
+        oracleExpiry: 300n,
+        reserves0: 10n ** 18n,
+        reserves1: 10n ** 18n,
+      }),
+    );
+
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: SortedOracles.MedianUpdated.createMockEvent({
+        token: CELO_GBP_FEED,
+        value: 10n ** 24n,
+        mockEventData: {
+          chainId: CELO,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 104, timestamp: 1_700_000_240 },
+        },
+      }),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId);
+    assert.ok(pool);
+    assert.equal(pool.oracleNumReporters, 2);
+    assert.equal(pool.updatedAtBlock, 104n);
+    assert.equal(pool.updatedAtTimestamp, 1_700_000_240n);
+  });
+
+  it("marks unknown or legacy-zero reporter counts unknown when refresh fails", async () => {
+    _setMockRateFeedOracles(CELO, CELO_GBP_FEED, null);
+    _setMockNumReporters(CELO, CELO_GBP_FEED, null);
+    const poolId = makePoolId(
+      CELO,
+      "0x8c0014afe032e4574481d8934504100bf23fcb56",
+    );
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CELO,
+        source: "virtual_pool_factory",
+        referenceRateFeedID: CELO_GBP_FEED,
+        oracleNumReporters: 0,
+      }),
+    );
+
+    mockDb = await SortedOracles.OracleAdded.processEvent({
+      event: SortedOracles.OracleAdded.createMockEvent({
+        token: CELO_GBP_FEED,
+        oracleAddress: CELO_GBP_REPORTER,
+        mockEventData: {
+          chainId: CELO,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 104, timestamp: 1_700_000_240 },
+        },
+      }),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId);
+    assert.ok(pool);
+    assert.equal(pool.oracleNumReporters, UNKNOWN_ORACLE_REPORTERS);
+    assert.equal(pool.updatedAtBlock, 104n);
+    assert.equal(pool.updatedAtTimestamp, 1_700_000_240n);
   });
 
   it("falls back to the OracleAdded event when reporter RPC is unavailable", async () => {
@@ -132,6 +411,7 @@ describe("RateFeed handlers", () => {
 
   it("retries RPC hydration after a partial OracleAdded fallback", async () => {
     _setMockRateFeedOracles(CELO, CELO_GBP_FEED, null);
+    _setMockNumReporters(CELO, CELO_GBP_FEED, null);
     const poolId = makePoolId(
       CELO,
       "0x8c0014afe032e4574481d8934504100bf23fcb56",
@@ -167,11 +447,16 @@ describe("RateFeed handlers", () => {
         ?.reportersComplete,
       false,
     );
+    assert.equal(
+      mockDb.entities.Pool.get(poolId)?.oracleNumReporters,
+      UNKNOWN_ORACLE_REPORTERS,
+    );
 
     _setMockRateFeedOracles(CELO, CELO_GBP_FEED, [
       CELO_GBP_REPORTER,
       UNKNOWN_REPORTER,
     ]);
+    _setMockNumReporters(CELO, CELO_GBP_FEED, 2);
     mockDb = await SortedOracles.MedianUpdated.processEvent({
       event: SortedOracles.MedianUpdated.createMockEvent({
         token: CELO_GBP_FEED,
@@ -193,6 +478,104 @@ describe("RateFeed handlers", () => {
     assert.deepEqual(row.reporterTypes, ["CHAINLINK", "MANUAL"]);
     assert.equal(row.reportersComplete, true);
     assert.equal(row.updatedAtBlock, 102n);
+    assert.equal(mockDb.entities.Pool.get(poolId)?.oracleNumReporters, 2);
+  });
+
+  it("repairs unknown pool reporter counts when the feed row is already complete", async () => {
+    _setMockNumReporters(CELO, CELO_GBP_FEED, 2);
+    const poolId = makePoolId(
+      CELO,
+      "0x8c0014afe032e4574481d8934504100bf23fcb56",
+    );
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.RateFeed.set({
+      id: makeRateFeedId(CELO, CELO_GBP_FEED),
+      chainId: CELO,
+      feedAddress: CELO_GBP_FEED,
+      pair: "GBP/USD",
+      reporters: [CELO_GBP_REPORTER, UNKNOWN_REPORTER],
+      reporterTypes: ["CHAINLINK", "MANUAL"],
+      reportersComplete: true,
+      updatedAtBlock: 100n,
+      updatedAtTimestamp: 1_700_000_000n,
+    });
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CELO,
+        referenceRateFeedID: CELO_GBP_FEED,
+        oracleNumReporters: UNKNOWN_ORACLE_REPORTERS,
+        tokenDecimalsKnown: true,
+        invertRateFeedKnown: true,
+        oracleExpiry: 300n,
+        reserves0: 10n ** 18n,
+        reserves1: 10n ** 18n,
+      }),
+    );
+
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: SortedOracles.MedianUpdated.createMockEvent({
+        token: CELO_GBP_FEED,
+        value: 10n ** 24n,
+        mockEventData: {
+          chainId: CELO,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 103, timestamp: 1_700_000_180 },
+        },
+      }),
+      mockDb,
+    });
+
+    assert.equal(mockDb.entities.Pool.get(poolId)?.oracleNumReporters, 2);
+  });
+
+  it("repairs legacy zero virtual pool reporter counts when the feed row is already complete", async () => {
+    _setMockNumReporters(CELO, CELO_GBP_FEED, 2);
+    const poolId = makePoolId(
+      CELO,
+      "0x8c0014afe032e4574481d8934504100bf23fcb56",
+    );
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.RateFeed.set({
+      id: makeRateFeedId(CELO, CELO_GBP_FEED),
+      chainId: CELO,
+      feedAddress: CELO_GBP_FEED,
+      pair: "GBP/USD",
+      reporters: [CELO_GBP_REPORTER, UNKNOWN_REPORTER],
+      reporterTypes: ["CHAINLINK", "MANUAL"],
+      reportersComplete: true,
+      updatedAtBlock: 100n,
+      updatedAtTimestamp: 1_700_000_000n,
+    });
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: poolId,
+        chainId: CELO,
+        source: "virtual_pool_factory",
+        referenceRateFeedID: CELO_GBP_FEED,
+        oracleNumReporters: 0,
+        tokenDecimalsKnown: true,
+        invertRateFeedKnown: true,
+        oracleExpiry: 300n,
+        reserves0: 10n ** 18n,
+        reserves1: 10n ** 18n,
+      }),
+    );
+
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: SortedOracles.MedianUpdated.createMockEvent({
+        token: CELO_GBP_FEED,
+        value: 10n ** 24n,
+        mockEventData: {
+          chainId: CELO,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 104, timestamp: 1_700_000_240 },
+        },
+      }),
+      mockDb,
+    });
+
+    assert.equal(mockDb.entities.Pool.get(poolId)?.oracleNumReporters, 2);
   });
 
   it("bootstraps an existing feed on MedianUpdated when add/remove events predate start_block", async () => {

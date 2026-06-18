@@ -67,9 +67,9 @@ export function OraclePriceValue({
   const priceColor = fresh ? "text-white" : "text-red-400";
   const subColor = fresh ? "text-slate-500" : "text-red-400";
 
-  const expiryMinutes = Math.round(
-    getOracleStalenessThreshold(pool, network.chainId) / 60,
-  );
+  const expirySeconds = getOracleStalenessThreshold(pool, network.chainId);
+  const expiryMinutes =
+    expirySeconds > 0 ? Math.round(expirySeconds / 60) : null;
   const { updatedTitle, updatedHref, lastLabel } = oracleFreshnessDisplay(
     pool,
     network,
@@ -107,7 +107,7 @@ export function OraclePriceValue({
           ) : (
             <span title={updatedTitle}>{lastLabel}</span>
           )}
-          {` / ${expiryMinutes}m expiry`}
+          {expiryMinutes !== null && ` / ${expiryMinutes}m expiry`}
           {!fresh && " · stale"}
         </span>
       )}

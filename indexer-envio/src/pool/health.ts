@@ -208,7 +208,9 @@ export function computeHealthStatus(
   pool: Pool,
   nowSeconds: bigint,
 ): IndexerHealthStatus {
-  if (isVirtualPool(pool)) return "N/A";
+  if (isVirtualPool(pool)) {
+    return isVirtualPoolOracleStale(pool, nowSeconds) ? "CRITICAL" : "N/A";
+  }
   // `oracleOk=false` is an alertable freshness incident — keep it ABOVE the
   // hasHealthData gate so a stale-oracle pool doesn't get masked into "N/A"
   // just because the deviation accrual is also untrusted (codex P2 PR #370
@@ -234,6 +236,17 @@ export function computeHealthStatus(
   const withinGrace =
     nowSeconds - pool.deviationBreachStartedAt < DEVIATION_BREACH_GRACE_SECONDS;
   return withinGrace ? "WARN" : "CRITICAL";
+}
+
+export function isVirtualPoolOracleStale(
+  pool: Pick<Pool, "oracleTimestamp" | "oracleFreshnessWindow" | "medianLive">,
+  nowSeconds: bigint,
+): boolean {
+  if (pool.oracleFreshnessWindow <= 0n || pool.oracleTimestamp <= 0n) {
+    return false;
+  }
+  if (!pool.medianLive) return true;
+  return nowSeconds - pool.oracleTimestamp > pool.oracleFreshnessWindow;
 }
 
 // Strict `>` at the tolerance line matches `computeHealthStatus`. Oracle

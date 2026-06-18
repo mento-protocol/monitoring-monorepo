@@ -46,6 +46,11 @@ function eligiblePool(overrides: Partial<PoolRow> = {}): PoolRow {
     oracleTxHash:
       "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     oracleExpiry: "300",
+    oracleNumReporters: 1,
+    oracleFreshnessWindow: "0",
+    tokenDecimalsKnown: true,
+    lastOracleReportAt: "1713200000",
+    medianLive: true,
     lastDeviationRatio: "1.10", // > REBALANCE_PROBE_DEVIATION_THRESHOLD (1.05)
     deviationBreachStartedAt: "1713100000", // > 0
     currentOpenBreachPeak: "0",
@@ -70,6 +75,8 @@ function eligiblePool(overrides: Partial<PoolRow> = {}): PoolRow {
     token1Decimals: 18,
     rebalancerAddress: "0x0000000000000000000000000000000000000beef",
     wrappedExchangeId: "",
+    wrappedExchangeDeprecated: false,
+    wrappedExchangeMinimumReports: "1",
     ...overrides,
   };
 }

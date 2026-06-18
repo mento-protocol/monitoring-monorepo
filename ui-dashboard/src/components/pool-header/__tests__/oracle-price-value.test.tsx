@@ -148,6 +148,73 @@ describe("OraclePriceValue", () => {
     expect(html).toContain("· stale");
   });
 
+  it("uses the VirtualPool reset window for stale coloring and expiry copy", () => {
+    const ts340 = String(Math.floor(Date.now() / 1000) - 340);
+    const pool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: ts340,
+      oracleExpiry: "300",
+      oracleFreshnessWindow: "360",
+      tokenDecimalsKnown: true,
+      medianLive: true,
+      oracleNumReporters: 2,
+      wrappedExchangeMinimumReports: "1",
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+    expect(html).toContain("/ 6m expiry");
+    expect(html).not.toContain("· stale");
+    expect(html).not.toContain("text-red-400");
+  });
+
+  it("omits stale fallback copy when a VirtualPool reset window is unknown", () => {
+    const ts600 = String(Math.floor(Date.now() / 1000) - 600);
+    const pool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: ts600,
+      oracleExpiry: "300",
+      oracleFreshnessWindow: "0",
+      tokenDecimalsKnown: true,
+      medianLive: true,
+      oracleNumReporters: 2,
+      wrappedExchangeMinimumReports: "1",
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+    expect(html).not.toContain("expiry");
+    expect(html).not.toContain("· stale");
+    expect(html).not.toContain("text-red-400");
+  });
+
+  it("marks a VirtualPool oracle stale when its median is invalid", () => {
+    const ts120 = String(Math.floor(Date.now() / 1000) - 120);
+    const pool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: ts120,
+      oracleFreshnessWindow: "360",
+      medianLive: false,
+      tokenDecimalsKnown: true,
+      oracleNumReporters: 2,
+      wrappedExchangeMinimumReports: "1",
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+    expect(html).toContain("· stale");
+    expect(html).toContain("text-red-400");
+  });
+
   it("uses oracleTimestamp for freshness when lastOracleReportAt is older", () => {
     const staleLiveTs = String(Math.floor(Date.now() / 1000) - 3600);
     const freshRawTs = String(Math.floor(Date.now() / 1000) - 60);

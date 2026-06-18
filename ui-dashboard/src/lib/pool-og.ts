@@ -28,6 +28,9 @@ import {
   // queries/pools.ts so the GraphQL contract test covers it.
   POOL_OG_DAILY_SNAPSHOTS,
   POOL_THRESHOLDS_KNOWN_EXT,
+  POOL_VP_DEPRECATION_EXT,
+  POOL_VP_LIFECYCLE_DEPRECATION_EXT,
+  POOL_VP_ORACLE_FRESHNESS_EXT,
 } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import { isVirtualPool, type Pool, type PoolSnapshot } from "@/lib/types";
@@ -35,6 +38,7 @@ import { isVirtualPool, type Pool, type PoolSnapshot } from "@/lib/types";
 const SECONDS_PER_DAY = 86_400;
 const SEVEN_DAYS = 7 * SECONDS_PER_DAY;
 const SPARKLINE_DAYS = 14;
+type OgGraphQLClient = ReturnType<typeof makeOgGraphQLClient>;
 
 export type PoolOgData = {
   name: string;
@@ -105,68 +109,54 @@ export async function fetchPoolOgDataUncached(
   // optimization would only help if the detail query failed, which is < 1% of
   // calls — not worth the latency hit on the common case.
   // react-doctor-disable-next-line react-doctor/async-defer-await
-  const [detailResult, dailyResult, allPoolsResult, thresholdsResult] =
-    await Promise.allSettled([
-      client.request<{ Pool: Pool[] }>({
-        document: POOL_DETAIL_WITH_HEALTH,
-        variables: { id: poolId, chainId },
-        signal,
-      }),
-      client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
-        document: POOL_OG_DAILY_SNAPSHOTS,
-        variables: { poolId },
-        signal,
-      }),
-      client.request<{ Pool: Pool[] }>({
-        document: ALL_POOLS_WITH_HEALTH,
-        variables: { chainId },
-        signal,
-      }),
-      // Isolated trust / degenerate flags keep schema-lag from failing the
-      // unfurl; health uses conservative WARN/CRITICAL under-bounds.
-      client.request<{
-        Pool: {
-          id: string;
-          rebalanceThresholdAbove?: number;
-          rebalanceThresholdBelow?: number;
-          rebalanceThresholdsKnown?: boolean;
-          tokenDecimalsKnown?: boolean;
-          degenerateReserves?: boolean;
-        }[];
-      }>({
-        document: POOL_THRESHOLDS_KNOWN_EXT,
-        variables: { id: poolId, chainId },
-        signal,
-      }),
-    ]);
+  const {
+    detailResult,
+    dailyResult,
+    allPoolsResult,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+    vpLifecycleDeprecationResult,
+  } = await requestPoolOgInputs(client, {
+    poolId,
+    chainId,
+    signal,
+  });
 
   if (detailResult.status !== "fulfilled") return null;
   const rawPool = detailResult.value.Pool[0];
   if (!rawPool) return null;
-  let ext: PoolOgThresholdsExtRow | null = null;
-  if (thresholdsResult.status === "fulfilled")
-    ext = thresholdsResult.value.Pool[0] ?? null;
-  const pool: Pool = ext
-    ? {
-        ...rawPool,
-        rebalanceThresholdAbove: ext.rebalanceThresholdAbove,
-        rebalanceThresholdBelow: ext.rebalanceThresholdBelow,
-        rebalanceThresholdsKnown: ext.rebalanceThresholdsKnown,
-        tokenDecimalsKnown: ext.tokenDecimalsKnown,
-        degenerateReserves: ext.degenerateReserves,
-        breakerTripped: ext.breakerTripped,
-      }
-    : rawPool;
+  const pool = mergePoolOgExtensions(
+    rawPool,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+    vpLifecycleDeprecationResult,
+  );
 
-  const dailyRows =
-    dailyResult.status === "fulfilled"
-      ? (dailyResult.value.PoolDailySnapshot ?? [])
-      : [];
-  const allPools =
-    allPoolsResult.status === "fulfilled"
-      ? (allPoolsResult.value.Pool ?? [])
-      : [];
+  return buildPoolOgData({
+    pool,
+    network,
+    chainId,
+    dailyRows:
+      dailyResult.status === "fulfilled"
+        ? (dailyResult.value.PoolDailySnapshot ?? [])
+        : [],
+    allPools:
+      allPoolsResult.status === "fulfilled"
+        ? (allPoolsResult.value.Pool ?? [])
+        : [],
+  });
+}
 
+function buildPoolOgData(args: {
+  pool: Pool;
+  network: Network;
+  chainId: number;
+  dailyRows: PoolSnapshot[];
+  allPools: Pool[];
+}): PoolOgData {
+  const { pool, network, chainId, dailyRows, allPools } = args;
   const rates = buildOracleRateMap(allPools, network);
   const t0 = pool.token0 ?? null;
   const t1 = pool.token1 ?? null;
@@ -183,26 +173,26 @@ export async function fetchPoolOgDataUncached(
   const rawTvlUsd = priceable ? poolTvlUSD(pool, network, rates) : null;
   const nowSec = Math.floor(Date.now() / 1000);
   const volume7dUsd = priceable
-    ? sumVolumeInWindow(
+    ? sumVolumeInWindow({
         dailyRows,
         sym0,
         sym1,
         pool,
         rates,
-        nowSec - SEVEN_DAYS,
-        nowSec,
-      )
+        fromSec: nowSec - SEVEN_DAYS,
+        toSec: nowSec,
+      })
     : null;
   const priorVolume = priceable
-    ? sumVolumeInWindow(
+    ? sumVolumeInWindow({
         dailyRows,
         sym0,
         sym1,
         pool,
         rates,
-        nowSec - 2 * SEVEN_DAYS,
-        nowSec - SEVEN_DAYS,
-      )
+        fromSec: nowSec - 2 * SEVEN_DAYS,
+        toSec: nowSec - SEVEN_DAYS,
+      })
     : null;
   const volume7dWoWPct =
     volume7dUsd != null && priorVolume != null && priorVolume > 0
@@ -317,21 +307,21 @@ function computeHealthReasons(pool: Pool, chainId: number): string[] {
   return items.sort((a, b) => b.severity - a.severity).map((r) => r.text);
 }
 
-// Sum daily USD volume for rows whose timestamp falls in [fromSec, toSec).
-// Used for both the current 7d total and the prior-7d baseline that drives
-// the volume WoW percentage.
-function sumVolumeInWindow(
-  daily: PoolSnapshot[],
-  sym0: string,
-  sym1: string,
-  pool: Pool,
-  rates: OracleRateMap,
-  fromSec: number,
-  toSec: number,
-): number | null {
+type VolumeWindowArgs = {
+  dailyRows: PoolSnapshot[];
+  sym0: string;
+  sym1: string;
+  pool: Pool;
+  rates: OracleRateMap;
+  fromSec: number;
+  toSec: number;
+};
+
+function sumVolumeInWindow(args: VolumeWindowArgs): number | null {
+  const { dailyRows, sym0, sym1, pool, rates, fromSec, toSec } = args;
   // Untrusted-decimals defense — see computeVolumeSeries for rationale.
   if (pool.tokenDecimalsKnown !== true) return null;
-  const rows = daily.filter((s) => {
+  const rows = dailyRows.filter((s) => {
     const ts = Number(s.timestamp);
     return ts >= fromSec && ts < toSec;
   });
@@ -434,6 +424,154 @@ type PoolOgThresholdsExtRow = {
   degenerateReserves?: boolean;
   breakerTripped?: boolean;
 };
+
+type PoolOgVpFreshnessExtRow = {
+  id: string;
+  lastOracleReportAt?: string;
+  medianLive?: boolean;
+  oracleFreshnessWindow?: string;
+};
+
+type PoolOgSettled<T> = PromiseSettledResult<{ Pool: T[] }>;
+type PoolOgExchangeSettled<T> = PromiseSettledResult<{ BiPoolExchange: T[] }>;
+type PoolOgLifecycleSettled<T> = PromiseSettledResult<{
+  VirtualPoolLifecycle: T[];
+}>;
+
+type PoolOgVpDeprecationExtRow = {
+  id: string;
+  isDeprecated?: boolean;
+  minimumReports?: string;
+};
+type PoolOgVpLifecycleDeprecationExtRow = {
+  id: string;
+  poolId?: string;
+};
+
+async function requestPoolOgInputs(
+  client: OgGraphQLClient,
+  args: { poolId: string; chainId: number; signal: AbortSignal },
+) {
+  const { poolId, chainId, signal } = args;
+  const [
+    detailResult,
+    dailyResult,
+    allPoolsResult,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+    vpLifecycleDeprecationResult,
+  ] = await Promise.allSettled([
+    client.request<{ Pool: Pool[] }>({
+      document: POOL_DETAIL_WITH_HEALTH,
+      variables: { id: poolId, chainId },
+      signal,
+    }),
+    client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
+      document: POOL_OG_DAILY_SNAPSHOTS,
+      variables: { poolId },
+      signal,
+    }),
+    client.request<{ Pool: Pool[] }>({
+      document: ALL_POOLS_WITH_HEALTH,
+      variables: { chainId },
+      signal,
+    }),
+    client.request<{ Pool: PoolOgThresholdsExtRow[] }>({
+      document: POOL_THRESHOLDS_KNOWN_EXT,
+      variables: { id: poolId, chainId },
+      signal,
+    }),
+    client.request<{ Pool: PoolOgVpFreshnessExtRow[] }>({
+      document: POOL_VP_ORACLE_FRESHNESS_EXT,
+      variables: { id: poolId, chainId },
+      signal,
+    }),
+    client.request<{ BiPoolExchange: PoolOgVpDeprecationExtRow[] }>({
+      document: POOL_VP_DEPRECATION_EXT,
+      variables: { id: poolId, chainId },
+      signal,
+    }),
+    client.request<{
+      VirtualPoolLifecycle: PoolOgVpLifecycleDeprecationExtRow[];
+    }>({
+      document: POOL_VP_LIFECYCLE_DEPRECATION_EXT,
+      variables: { id: poolId, chainId },
+      signal,
+    }),
+  ]);
+  return {
+    detailResult,
+    dailyResult,
+    allPoolsResult,
+    thresholdsResult,
+    vpFreshnessResult,
+    vpDeprecationResult,
+    vpLifecycleDeprecationResult,
+  };
+}
+
+function firstSettledPool<T>(result: PoolOgSettled<T>): T | null {
+  return result.status === "fulfilled" ? (result.value.Pool[0] ?? null) : null;
+}
+
+function firstSettledExchange<T>(result: PoolOgExchangeSettled<T>): T | null {
+  return result.status === "fulfilled"
+    ? (result.value.BiPoolExchange?.[0] ?? null)
+    : null;
+}
+
+function firstSettledLifecycle<T>(result: PoolOgLifecycleSettled<T>): T | null {
+  return result.status === "fulfilled"
+    ? (result.value.VirtualPoolLifecycle?.[0] ?? null)
+    : null;
+}
+
+function mergePoolOgExtensions(
+  rawPool: Pool,
+  thresholdsResult: PoolOgSettled<PoolOgThresholdsExtRow>,
+  vpFreshnessResult: PoolOgSettled<PoolOgVpFreshnessExtRow>,
+  vpDeprecationResult: PoolOgExchangeSettled<PoolOgVpDeprecationExtRow>,
+  vpLifecycleDeprecationResult: PoolOgLifecycleSettled<PoolOgVpLifecycleDeprecationExtRow>,
+): Pool {
+  const ext = firstSettledPool(thresholdsResult);
+  const vpFreshnessExt = firstSettledPool(vpFreshnessResult);
+  const vpDeprecationExt = firstSettledExchange(vpDeprecationResult);
+  const vpLifecycleDeprecationExt = firstSettledLifecycle(
+    vpLifecycleDeprecationResult,
+  );
+  const wrappedExchangeDeprecated =
+    vpDeprecationExt?.isDeprecated === true ||
+    vpLifecycleDeprecationExt !== null;
+  return {
+    ...rawPool,
+    ...(ext
+      ? {
+          rebalanceThresholdAbove: ext.rebalanceThresholdAbove,
+          rebalanceThresholdBelow: ext.rebalanceThresholdBelow,
+          rebalanceThresholdsKnown: ext.rebalanceThresholdsKnown,
+          tokenDecimalsKnown: ext.tokenDecimalsKnown,
+          degenerateReserves: ext.degenerateReserves,
+          breakerTripped: ext.breakerTripped,
+        }
+      : {}),
+    ...(vpFreshnessExt
+      ? {
+          lastOracleReportAt: vpFreshnessExt.lastOracleReportAt,
+          medianLive: vpFreshnessExt.medianLive,
+          oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
+        }
+      : {}),
+    ...(wrappedExchangeDeprecated
+      ? {
+          wrappedExchangeDeprecated,
+        }
+      : {}),
+    ...(vpDeprecationExt?.minimumReports !== undefined
+      ? { wrappedExchangeMinimumReports: vpDeprecationExt.minimumReports }
+      : {}),
+  };
+}
 
 // 60s TTL — pool health can flip during an incident; a 1h cache meant a
 // link re-shared during rebalance showed stale "Critical" for an hour.

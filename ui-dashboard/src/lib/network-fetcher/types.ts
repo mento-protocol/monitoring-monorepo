@@ -10,6 +10,7 @@ import type { Network } from "@/lib/networks";
 import type { ProtocolFeeSummary } from "@/lib/protocol-fees";
 import type { OracleRateMap } from "@/lib/tokens";
 import type {
+  OlsPool,
   Pool,
   PoolDailyFeeSnapshot,
   PoolSnapshotWindow,
@@ -146,6 +147,52 @@ export type BrokerDailySnapshotRow = {
   /** 18-decimal "USD-wei" — divide by 1e18 to get USD. */
   volumeUsdWei: string;
   swapCount: number;
+};
+
+export type OlsPoolsResult = {
+  OlsPool: Pick<OlsPool, "poolId">[];
+};
+
+export type PoolBreachRollupResult = {
+  Pool: {
+    id: string;
+    breachCount?: number;
+    healthBinarySeconds?: string;
+    healthTotalSeconds?: string;
+  }[];
+};
+
+export type PoolHealthCursorResult = {
+  Pool: {
+    id: string;
+    lastOracleSnapshotTimestamp?: string;
+    lastDeviationRatio?: string;
+  }[];
+};
+
+export type PoolRebalanceThresholdsKnownResult = {
+  Pool: {
+    id: string;
+    rebalanceThresholdAbove?: number;
+    rebalanceThresholdBelow?: number;
+    rebalanceThresholdsKnown?: boolean;
+    tokenDecimalsKnown?: boolean;
+    degenerateReserves?: boolean;
+    breakerTripped?: boolean;
+  }[];
+};
+
+export type PoolsVpOracleFreshnessResult = {
+  Pool: {
+    id: string;
+    lastOracleReportAt?: string;
+    medianLive?: boolean;
+    oracleFreshnessWindow?: string;
+  }[];
+};
+
+export type VpLifecycleDeprecationResult = {
+  VirtualPoolLifecycle: { poolId?: string }[];
 };
 
 export type PoolLabel = Pick<Pool, "id" | "token0" | "token1" | "source">;

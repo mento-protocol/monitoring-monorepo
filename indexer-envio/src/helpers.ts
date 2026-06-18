@@ -80,6 +80,14 @@ export const isVirtualPool = (pool: {
 }): boolean =>
   pool.source.includes("virtual") || Boolean(pool.wrappedExchangeId);
 
+export const needsOracleReporterCountRefresh = (pool: {
+  source: string;
+  wrappedExchangeId?: string | undefined;
+  oracleNumReporters: number;
+}): boolean =>
+  pool.oracleNumReporters < 0 ||
+  (isVirtualPool(pool) && pool.oracleNumReporters === 0);
+
 export const SECONDS_PER_HOUR = 3600n;
 export const SECONDS_PER_DAY = 86400n;
 

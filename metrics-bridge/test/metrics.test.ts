@@ -55,6 +55,321 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
+  it("publishes virtual-pool oracle freshness from the VP freshness window", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", poolLabels),
+    ).toBeUndefined();
+  });
+
+  it("marks virtual-pool oracle freshness stale after the VP window", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 600),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(0);
+  });
+
+  it("suppresses virtual-pool oracle freshness while the VP cursor is untrusted", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        tokenDecimalsKnown: false,
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 600),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("suppresses invalid VirtualPool medians while token decimals are unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        tokenDecimalsKnown: false,
+        medianLive: false,
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("suppresses known VirtualPool quorum failures while token decimals are unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        tokenDecimalsKnown: false,
+        medianLive: true,
+        oracleNumReporters: 1,
+        wrappedExchangeMinimumReports: "2",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("keeps missing VirtualPool median inputs unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        medianLive: undefined,
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("uses the live VP oracle cursor when median updates lag flat reports", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 600),
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(1);
+  });
+
+  it("marks virtual-pool oracle freshness stale when the live median is invalid", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        medianLive: false,
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBe(0);
+  });
+
+  it("marks virtual-pool oracle freshness stale when reporters are below minimumReports", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleNumReporters: 2,
+        wrappedExchangeMinimumReports: "3",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBe(0);
+  });
+
+  it("suppresses virtual-pool oracle freshness when reporter count is unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleNumReporters: -1,
+        wrappedExchangeMinimumReports: "3",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("suppresses virtual-pool oracle freshness for deprecated wrappers", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 600),
+        oracleFreshnessWindow: "360",
+        wrappedExchangeDeprecated: true,
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("skips virtual-pool oracle freshness when the VP window is unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 600),
+        oracleFreshnessWindow: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("skips virtual-pool oracle freshness when minimumReports is unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        wrappedExchangeMinimumReports: "0",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("suppresses invalid median when minimumReports is unknown", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        medianLive: false,
+        wrappedExchangeMinimumReports: "0",
+        oracleTimestamp: String(DEFAULT_NOW_SECONDS - 120),
+        oracleFreshnessWindow: "360",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_vp_oracle_median_valid",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
   it("sets oracle_contract_ok to the raw event-time contract flag", async () => {
     updateMetrics([makePool()]);
     expect(

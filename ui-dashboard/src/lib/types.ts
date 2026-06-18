@@ -49,8 +49,10 @@ export type Pool = {
   oraclePrice?: string | undefined;
   oracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
+  medianLive?: boolean | undefined;
   oracleTxHash?: string | undefined;
   oracleExpiry?: string | undefined;
+  oracleFreshnessWindow?: string | undefined;
   oracleNumReporters?: number | undefined;
   referenceRateFeedID?: string | undefined;
   priceDifference?: string | undefined;
@@ -92,6 +94,14 @@ export type Pool = {
   // deploy-time RPC failed (the next event's self-heal is not wired here —
   // tracked as Phase 2 follow-up if any pre-Phase-2 VP shows up missing it).
   wrappedExchangeId?: string | undefined;
+  // Optional detail-page extension. True means the wrapped v2 exchange was
+  // destroyed/deprecated, so stale oracle incidents are expected and should not
+  // render as active-wrapper failures.
+  wrappedExchangeDeprecated?: boolean | undefined;
+  // Optional VP exchange extension. Minimum reporter count required by the
+  // wrapped v2 exchange; used to mirror the bridge's median-validity signal in
+  // dashboard health.
+  wrappedExchangeMinimumReports?: string | undefined;
 };
 
 export type RateFeed = {

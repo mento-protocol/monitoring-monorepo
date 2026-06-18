@@ -14,6 +14,8 @@ export type HealthStatus =
 
 import { isWeekend, tradingSecondsInRange } from "./weekend";
 import { isVirtualPool } from "./types";
+import { isUsdPegged } from "./tokens";
+import { chainTokenSymbols } from "@mento-protocol/monitoring-config/tokens";
 import {
   DEVIATION_TOLERANCE_RATIO,
   DEVIATION_CRITICAL_RATIO,
@@ -52,10 +54,22 @@ interface PoolHealthState {
   // priority alignment); `wrappedExchangeId` is the canonical VP signal.
   // Both feed `isVirtualPool`, which gates the "N/A" branch below.
   wrappedExchangeId?: string | null | undefined;
+  wrappedExchangeDeprecated?: boolean | undefined;
+  token0?: string | null | undefined;
+  token1?: string | null | undefined;
   oracleOk?: boolean | undefined;
   oracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
+  medianLive?: boolean | undefined;
   oracleExpiry?: string | undefined;
+  oracleFreshnessWindow?: string | undefined;
+  oracleNumReporters?: number | undefined;
+  wrappedExchangeMinimumReports?: string | undefined;
+  // True once the indexer has read the VP's token decimals and the
+  // self-healing freshness cursor is trustworthy. False/missing means the
+  // VP oracle timestamp can be held at an older value while fresh reports
+  // still arrive, so VP staleness must degrade to N/A instead of paging.
+  tokenDecimalsKnown?: boolean | undefined;
   priceDifference?: string | undefined;
   degenerateReserves?: boolean | undefined;
   rebalanceThreshold?: number | undefined;
@@ -182,9 +196,19 @@ export const effectiveThreshold = (pool: {
 };
 
 export function getOracleStalenessThreshold(
-  pool: { oracleExpiry?: string | undefined },
+  pool: {
+    source?: string | undefined;
+    wrappedExchangeId?: string | null | undefined;
+    oracleExpiry?: string | undefined;
+    oracleFreshnessWindow?: string | undefined;
+  },
   chainId?: number,
 ): number {
+  if (isVirtualPool(pool)) {
+    const vpWindow = Number(pool.oracleFreshnessWindow ?? "0");
+    if (Number.isFinite(vpWindow) && vpWindow > 0) return vpWindow;
+    return 0;
+  }
   const indexed = Number(pool.oracleExpiry ?? "0");
   if (indexed > 0) return indexed;
   return (
@@ -196,16 +220,112 @@ export function getOracleStalenessThreshold(
 
 export function isOracleFresh(
   pool: {
+    source?: string | undefined;
+    wrappedExchangeId?: string | null | undefined;
     oracleTimestamp?: string | undefined;
     lastOracleReportAt?: string | undefined;
     oracleExpiry?: string | undefined;
+    oracleFreshnessWindow?: string | undefined;
+    medianLive?: boolean | undefined;
+    tokenDecimalsKnown?: boolean | undefined;
+    oracleNumReporters?: number | undefined;
+    wrappedExchangeMinimumReports?: string | undefined;
   },
   nowSeconds = Math.floor(Date.now() / 1000),
   chainId?: number,
 ): boolean {
+  if (isVirtualPool(pool)) {
+    if (pool.medianLive === false) return false;
+    const medianValidity = vpMedianValidity(pool);
+    if (medianValidity === false) return false;
+    if (medianValidity === null || pool.tokenDecimalsKnown !== true) {
+      return true;
+    }
+  }
   const oracleTs = oracleFreshnessTimestamp(pool);
   const stalenessThreshold = getOracleStalenessThreshold(pool, chainId);
+  if (isVirtualPool(pool) && stalenessThreshold <= 0) return true;
   return oracleTs !== 0 && nowSeconds - oracleTs <= stalenessThreshold;
+}
+
+function isUsdPeggedVirtualPoolPair(
+  pool: {
+    token0?: string | null | undefined;
+    token1?: string | null | undefined;
+  },
+  chainId?: number,
+): boolean | null {
+  if (chainId === undefined || !pool.token0 || !pool.token1) return null;
+  const symbols = chainTokenSymbols(chainId);
+  const sym0 = symbols[pool.token0.toLowerCase()];
+  const sym1 = symbols[pool.token1.toLowerCase()];
+  if (!sym0 || !sym1) return null;
+  return isUsdPegged(sym0) && isUsdPegged(sym1);
+}
+
+function isVirtualPoolResetWindowStale(
+  pool: {
+    oracleTimestamp?: string | undefined;
+    oracleFreshnessWindow?: string | undefined;
+    tokenDecimalsKnown?: boolean | undefined;
+  },
+  nowSeconds: number,
+): boolean {
+  if (pool.tokenDecimalsKnown !== true) return false;
+  const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
+  const liveReportAt = Number(pool.oracleTimestamp ?? "0");
+  return (
+    Number.isFinite(freshnessWindow) &&
+    freshnessWindow > 0 &&
+    Number.isFinite(liveReportAt) &&
+    liveReportAt > 0 &&
+    nowSeconds - liveReportAt > freshnessWindow
+  );
+}
+
+function vpMedianValidity(pool: {
+  medianLive?: boolean | undefined;
+  oracleNumReporters?: number | undefined;
+  oracleFreshnessWindow?: string | undefined;
+  tokenDecimalsKnown?: boolean | undefined;
+  wrappedExchangeMinimumReports?: string | undefined;
+}): boolean | null {
+  if (pool.tokenDecimalsKnown !== true) return null;
+  const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
+  if (!Number.isFinite(freshnessWindow) || freshnessWindow <= 0) return null;
+  const minimumReports = Number(pool.wrappedExchangeMinimumReports ?? "0");
+  if (!Number.isFinite(minimumReports) || minimumReports <= 0) return null;
+  const oracleNumReporters = Number(pool.oracleNumReporters);
+  if (!Number.isFinite(oracleNumReporters) || oracleNumReporters < 0) {
+    return null;
+  }
+  if (pool.medianLive === false) return false;
+  if (oracleNumReporters < minimumReports) return false;
+  return pool.medianLive === true ? true : null;
+}
+
+export function isVirtualPoolMedianInvalid(pool: {
+  medianLive?: boolean | undefined;
+  oracleNumReporters?: number | undefined;
+  oracleFreshnessWindow?: string | undefined;
+  tokenDecimalsKnown?: boolean | undefined;
+  wrappedExchangeMinimumReports?: string | undefined;
+}): boolean {
+  return vpMedianValidity(pool) === false;
+}
+
+function computeVirtualPoolHealthStatus(
+  pool: PoolHealthState,
+  chainId: number | undefined,
+  nowSeconds: number,
+): HealthStatus {
+  if (pool.wrappedExchangeDeprecated === true) return "N/A";
+  const medianValidity = vpMedianValidity(pool);
+  if (medianValidity === false) return "CRITICAL";
+  if (medianValidity === null) return "N/A";
+  if (!isVirtualPoolResetWindowStale(pool, nowSeconds)) return "N/A";
+  const usdPeggedPair = isUsdPeggedVirtualPoolPair(pool, chainId);
+  return isWeekend() && usdPeggedPair === false ? "WEEKEND" : "CRITICAL";
 }
 
 /**
@@ -241,7 +361,9 @@ export function computeHealthStatus(
   chainId?: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
-  if (isVirtualPool(pool)) return "N/A";
+  if (isVirtualPool(pool)) {
+    return computeVirtualPoolHealthStatus(pool, chainId, nowSeconds);
+  }
   // Oracle-staleness is an alertable freshness incident — keep it ABOVE
   // the hasHealthData gate so a stale-oracle pool doesn't get masked into
   // "N/A" just because the deviation accrual is also untrusted (codex P2
@@ -355,6 +477,94 @@ type HealthCounterState = {
   lastDeviationRatio?: string | undefined;
   oracleExpiry?: string | undefined;
 };
+
+type ParsedCounterBase = {
+  baseBinary: number;
+  baseTotal: number;
+};
+
+type LiveCounterInterval = {
+  intervalStart: number;
+  lastTs: number;
+};
+
+function originalHealthCounters(pool: HealthCounterState): {
+  healthBinarySeconds?: string | undefined;
+  healthTotalSeconds?: string | undefined;
+} {
+  return {
+    healthBinarySeconds: pool.healthBinarySeconds,
+    healthTotalSeconds: pool.healthTotalSeconds,
+  };
+}
+
+function parsedCounterBase(pool: HealthCounterState): ParsedCounterBase | null {
+  const baseBinary = Number(pool.healthBinarySeconds);
+  const baseTotal = Number(pool.healthTotalSeconds ?? "0");
+  if (!Number.isFinite(baseBinary) || !Number.isFinite(baseTotal)) return null;
+  return { baseBinary, baseTotal };
+}
+
+function counterBaseResult(base: ParsedCounterBase): {
+  healthBinarySeconds: string;
+  healthTotalSeconds: string;
+} {
+  return {
+    healthBinarySeconds: String(base.baseBinary),
+    healthTotalSeconds: String(base.baseTotal),
+  };
+}
+
+function liveCounterInterval(
+  pool: HealthCounterState,
+  nowSeconds: number,
+  fromSeconds?: number,
+): LiveCounterInterval | null {
+  const lastTs = Number(pool.lastOracleSnapshotTimestamp ?? "0");
+  if (!Number.isFinite(lastTs) || lastTs <= 0 || nowSeconds <= lastTs) {
+    return null;
+  }
+  const floorTs = fromSeconds == null ? lastTs : Number(fromSeconds);
+  if (!Number.isFinite(floorTs)) return null;
+  const intervalStart = Math.max(lastTs, floorTs);
+  if (nowSeconds <= intervalStart) return null;
+  return { intervalStart, lastTs };
+}
+
+function previousDeviationHealthy(
+  prevRatio: string | undefined,
+): boolean | null {
+  const rawRatio = prevRatio ?? "";
+  const parsedRatio = parseFloat(rawRatio);
+  if (
+    rawRatio === "" ||
+    rawRatio === "-1" ||
+    (Number.isFinite(parsedRatio) && parsedRatio < 0)
+  ) {
+    return null;
+  }
+  return (
+    Number.isFinite(parsedRatio) && parsedRatio <= DEVIATION_TOLERANCE_RATIO
+  );
+}
+
+function freshnessCarrySeconds(args: {
+  pool: HealthCounterState;
+  intervalStart: number;
+  lastTs: number;
+  nowSeconds: number;
+}): number {
+  const indexedExpiry = Number(args.pool.oracleExpiry ?? "0");
+  const freshnessLimit = Math.min(
+    indexedExpiry > 0 ? indexedExpiry : MAX_HEALTH_CARRY_SECONDS,
+    MAX_HEALTH_CARRY_SECONDS,
+  );
+  const carryEnd = Math.min(args.nowSeconds, args.lastTs + freshnessLimit);
+  return carryEnd > args.intervalStart
+    ? tradingSecondsInRange(args.intervalStart, carryEnd)
+    : 0;
+}
+
 /** Return the counter pair with the current open interval included.
  *
  * The indexer persists health counters only when a later health sample closes
@@ -373,75 +583,27 @@ export function liveHealthCounters(
   healthBinarySeconds?: string | undefined;
   healthTotalSeconds?: string | undefined;
 } {
-  const baseBinary = Number(pool.healthBinarySeconds);
-  const baseTotal = Number(pool.healthTotalSeconds ?? "0");
-  if (!Number.isFinite(baseBinary) || !Number.isFinite(baseTotal)) {
-    return {
-      healthBinarySeconds: pool.healthBinarySeconds,
-      healthTotalSeconds: pool.healthTotalSeconds,
-    };
-  }
-
-  const lastTs = Number(pool.lastOracleSnapshotTimestamp ?? "0");
-  if (!Number.isFinite(lastTs) || lastTs <= 0 || nowSeconds <= lastTs) {
-    return {
-      healthBinarySeconds: String(baseBinary),
-      healthTotalSeconds: String(baseTotal),
-    };
-  }
-
-  const floorTs = fromSeconds == null ? lastTs : Number(fromSeconds);
-  if (!Number.isFinite(floorTs)) {
-    return {
-      healthBinarySeconds: String(baseBinary),
-      healthTotalSeconds: String(baseTotal),
-    };
-  }
-  const intervalStart = Math.max(lastTs, floorTs);
-  if (nowSeconds <= intervalStart) {
-    return {
-      healthBinarySeconds: String(baseBinary),
-      healthTotalSeconds: String(baseTotal),
-    };
-  }
-
-  const prevRatio = pool.lastDeviationRatio ?? "";
-  const parsedRatio = parseFloat(prevRatio);
-  const prevIsNoData =
-    prevRatio === "" ||
-    prevRatio === "-1" ||
-    (Number.isFinite(parsedRatio) && parsedRatio < 0);
-  if (prevIsNoData) {
-    return {
-      healthBinarySeconds: String(baseBinary),
-      healthTotalSeconds: String(baseTotal),
-    };
-  }
-
-  const duration = tradingSecondsInRange(intervalStart, nowSeconds);
-  if (duration <= 0) {
-    return {
-      healthBinarySeconds: String(baseBinary),
-      healthTotalSeconds: String(baseTotal),
-    };
-  }
-
-  const indexedExpiry = Number(pool.oracleExpiry ?? "0");
-  const freshnessLimit = Math.min(
-    indexedExpiry > 0 ? indexedExpiry : MAX_HEALTH_CARRY_SECONDS,
-    MAX_HEALTH_CARRY_SECONDS,
-  );
-  const carryEnd = Math.min(nowSeconds, lastTs + freshnessLimit);
-  const carrySeconds =
-    carryEnd > intervalStart
-      ? tradingSecondsInRange(intervalStart, carryEnd)
-      : 0;
-  const prevHealthy =
-    Number.isFinite(parsedRatio) && parsedRatio <= DEVIATION_TOLERANCE_RATIO;
+  const base = parsedCounterBase(pool);
+  if (!base) return originalHealthCounters(pool);
+  const baseResult = counterBaseResult(base);
+  const interval = liveCounterInterval(pool, nowSeconds, fromSeconds);
+  if (!interval) return baseResult;
+  const prevHealthy = previousDeviationHealthy(pool.lastDeviationRatio);
+  if (prevHealthy === null) return baseResult;
+  const duration = tradingSecondsInRange(interval.intervalStart, nowSeconds);
+  if (duration <= 0) return baseResult;
+  const carrySeconds = freshnessCarrySeconds({
+    pool,
+    intervalStart: interval.intervalStart,
+    lastTs: interval.lastTs,
+    nowSeconds,
+  });
 
   return {
-    healthBinarySeconds: String(baseBinary + (prevHealthy ? carrySeconds : 0)),
-    healthTotalSeconds: String(baseTotal + duration),
+    healthBinarySeconds: String(
+      base.baseBinary + (prevHealthy ? carrySeconds : 0),
+    ),
+    healthTotalSeconds: String(base.baseTotal + duration),
   };
 }
 
@@ -597,9 +759,17 @@ export function computeEffectiveStatus(
   pool: {
     source?: string | undefined;
     wrappedExchangeId?: string | null | undefined;
+    token0?: string | null | undefined;
+    token1?: string | null | undefined;
     oracleOk?: boolean | undefined;
     oracleTimestamp?: string | undefined;
+    medianLive?: boolean | undefined;
     oracleExpiry?: string | undefined;
+    oracleFreshnessWindow?: string | undefined;
+    oracleNumReporters?: number | undefined;
+    wrappedExchangeMinimumReports?: string | undefined;
+    wrappedExchangeDeprecated?: boolean | undefined;
+    tokenDecimalsKnown?: boolean | undefined;
     priceDifference?: string | undefined;
     rebalanceThreshold?: number | undefined;
     rebalanceThresholdAbove?: number | undefined;

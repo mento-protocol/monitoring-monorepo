@@ -56,6 +56,55 @@ export const POOL_THRESHOLDS_KNOWN_EXT = `
   }
 `;
 
+// Single-pool sibling of `ALL_POOLS_VP_ORACLE_FRESHNESS`. Kept separate from
+// POOL_THRESHOLDS_KNOWN_EXT so new VP freshness schema-lag cannot drop
+// unrelated trust/threshold fields.
+export const POOL_VP_ORACLE_FRESHNESS_EXT = `
+  query PoolVpOracleFreshnessExt($id: String!, $chainId: Int!) {
+    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
+      id
+      lastOracleReportAt
+      medianLive
+      oracleFreshnessWindow
+    }
+  }
+`;
+
+// Deprecated-wrapper state lives on BiPoolExchange, not Pool. Keep this as a
+// tiny companion query so schema-lag in the v2 exchange entity degrades only the
+// retired-wrapper UI suppression instead of the primary pool page.
+export const POOL_VP_DEPRECATION_EXT = `
+  query PoolVpDeprecationExt($id: String!, $chainId: Int!) {
+    BiPoolExchange(
+      where: {
+        wrappedByPoolId: { _eq: $id }
+        chainId: { _eq: $chainId }
+      }
+      limit: 1
+    ) {
+      id
+      isDeprecated
+      minimumReports
+    }
+  }
+`;
+
+export const POOL_VP_LIFECYCLE_DEPRECATION_EXT = `
+  query PoolVpLifecycleDeprecationExt($id: String!, $chainId: Int!) {
+    VirtualPoolLifecycle(
+      where: {
+        poolId: { _eq: $id }
+        chainId: { _eq: $chainId }
+        action: { _eq: "DEPRECATED" }
+      }
+      limit: 1
+    ) {
+      id
+      poolId
+    }
+  }
+`;
+
 // Isolated from POOL_DETAIL_WITH_HEALTH (same rationale as POOL_BREACH_ROLLUP):
 // new indexer field, hosted Hasura rejects it during the deploy+resync window,
 // so the page survives and the reward tile degrades to "—".
