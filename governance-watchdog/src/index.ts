@@ -10,6 +10,7 @@ import { checkWebhookStatus } from "./quicknode-health/index.js";
 import { getCacheSize, isDuplicate } from "./utils/event-deduplication.js";
 import logError from "./utils/log-error.js";
 import parseRequestBody from "./utils/parse-request-body.js";
+import { reserveQuickNodeNonce } from "./utils/quicknode-replay-protection.js";
 import {
   hasAuthToken,
   isFromQuicknode,
@@ -111,6 +112,16 @@ const handleQuicknodeWebhook = async (
     const isHealthCheck = isHealthCheckWebhook(req.body);
 
     if (await isFromQuicknode(req)) {
+      const replay = await reserveQuickNodeNonce(
+        req.headers["x-qn-nonce"] as string,
+        req.headers["x-qn-timestamp"] as string,
+      );
+      if (!replay.valid) {
+        console.warn("QuickNode replay validation failed:", replay);
+        res.status(replay.status).send(replay.message);
+        return;
+      }
+
       // Skip verbose logging for health check webhooks to reduce log noise
       if (!isHealthCheck) {
         console.info("Received QuickNode Webhook:", req.body);

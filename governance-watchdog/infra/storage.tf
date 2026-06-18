@@ -118,3 +118,44 @@ resource "google_storage_bucket" "logging" {
 
   force_destroy = true
 }
+
+# trunk-ignore(checkov/CKV_GCP_62): bucket stores hashed nonce markers only; Cloud Audit Logs cover object writes
+resource "google_storage_bucket" "quicknode_replay_nonces" {
+  project  = module.governance_watchdog.project_id
+  name     = "${module.governance_watchdog.project_id}-quicknode-replay-nonces"
+  location = var.region
+
+  uniform_bucket_level_access = true
+  force_destroy               = true
+  public_access_prevention    = "enforced"
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    condition {
+      age        = 1
+      with_state = "LIVE"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  lifecycle_rule {
+    condition {
+      age        = 1
+      with_state = "ARCHIVED"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+}
+
+resource "google_storage_bucket_iam_member" "runtime_replay_nonce_creator" {
+  bucket = google_storage_bucket.quicknode_replay_nonces.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${module.governance_watchdog.service_account_email}"
+}
