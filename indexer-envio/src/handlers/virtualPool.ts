@@ -11,12 +11,7 @@ import type {
 } from "envio";
 import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
-import {
-  preloadPoolCache,
-  upsertPool,
-  upsertSnapshot,
-  DEFAULT_ORACLE_FIELDS,
-} from "../pool.js";
+import { preloadPoolCache, upsertPool, upsertSnapshot } from "../pool.js";
 import { buildSwapTraderFields } from "../swap.js";
 import { applyVolumeSnapshots } from "../volumeSnapshots.js";
 import { tokenDecimalsScalingEffect } from "../rpc/effects.js";
@@ -90,10 +85,6 @@ indexer.onEvent(
       txHash: event.transaction.hash,
       logIndex: event.logIndex,
       tokenDecimals,
-      oracleDelta: {
-        ...DEFAULT_ORACLE_FIELDS,
-        healthStatus: "N/A",
-      },
     });
 
     const lifecycle: VirtualPoolLifecycle = {

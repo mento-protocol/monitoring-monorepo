@@ -265,9 +265,12 @@ export async function mirrorVirtualPoolOracleConfig(
         blockNumber,
       })
     : null;
-  const nextOracleNumReporters =
-    numReporters ??
-    (feedChanged ? UNKNOWN_ORACLE_REPORTERS : pool.oracleNumReporters);
+  const nextOracleNumReporters = nextMirroredOracleNumReporters({
+    current: pool.oracleNumReporters,
+    feedChanged,
+    needsReporterRefresh,
+    numReporters,
+  });
   const mirrored = {
     feedId,
     oracleFreshnessWindow: nextFreshnessWindow,
@@ -291,6 +294,22 @@ export async function mirrorVirtualPoolOracleConfig(
     });
   }
   return mirrored;
+}
+
+function nextMirroredOracleNumReporters({
+  current,
+  feedChanged,
+  needsReporterRefresh,
+  numReporters,
+}: {
+  current: number;
+  feedChanged: boolean;
+  needsReporterRefresh: boolean;
+  numReporters: number | null;
+}): number {
+  if (numReporters !== null) return numReporters;
+  if (feedChanged || needsReporterRefresh) return UNKNOWN_ORACLE_REPORTERS;
+  return current;
 }
 
 function preferPositiveFreshnessWindow(

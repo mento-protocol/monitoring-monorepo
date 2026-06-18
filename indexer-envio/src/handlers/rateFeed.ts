@@ -93,6 +93,7 @@ async function syncPoolsReporterCountForLinkedPools(args: {
   blockTimestamp: bigint;
   poolIds?: string[];
   fallbackOracleNumReporters?: number | undefined;
+  markAllUnknownOnMissingCount?: boolean | undefined;
 }): Promise<void> {
   if (!args.poolIds || args.poolIds.length === 0) return;
   await syncPoolsReporterCountFromRpc({
@@ -103,6 +104,7 @@ async function syncPoolsReporterCountForLinkedPools(args: {
     blockNumber: args.blockNumber,
     blockTimestamp: args.blockTimestamp,
     fallbackOracleNumReporters: args.fallbackOracleNumReporters,
+    markAllUnknownOnMissingCount: args.markAllUnknownOnMissingCount,
   });
 }
 
@@ -173,6 +175,7 @@ export async function syncPoolsReporterCountFromRpc(args: {
   blockNumber: bigint;
   blockTimestamp: bigint;
   fallbackOracleNumReporters?: number | undefined;
+  markAllUnknownOnMissingCount?: boolean | undefined;
 }): Promise<void> {
   const rpcOracleNumReporters = await args.context.effect(numReportersEffect, {
     chainId: args.chainId,
@@ -182,12 +185,12 @@ export async function syncPoolsReporterCountFromRpc(args: {
   const oracleNumReporters =
     rpcOracleNumReporters ?? args.fallbackOracleNumReporters;
   if (oracleNumReporters === undefined) {
-    const pools = await Promise.all(
-      args.poolIds.map((poolId) => args.context.Pool.get(poolId)),
-    );
-    const poolIdsNeedingRefresh = pools.flatMap((pool) =>
-      pool && needsOracleReporterCountRefresh(pool) ? [pool.id] : [],
-    );
+    const poolIdsNeedingRefresh = args.markAllUnknownOnMissingCount
+      ? args.poolIds
+      : await poolIdsWithStaleOrUnknownReporterCounts(
+          args.context,
+          args.poolIds,
+        );
     await updatePoolsOracleNumReporters({
       context: args.context,
       poolIds: poolIdsNeedingRefresh,
@@ -204,6 +207,18 @@ export async function syncPoolsReporterCountFromRpc(args: {
     blockNumber: args.blockNumber,
     blockTimestamp: args.blockTimestamp,
   });
+}
+
+async function poolIdsWithStaleOrUnknownReporterCounts(
+  context: EvmOnEventContext,
+  poolIds: string[],
+): Promise<string[]> {
+  const pools = await Promise.all(
+    poolIds.map((poolId) => context.Pool.get(poolId)),
+  );
+  return pools.flatMap((pool) =>
+    pool && needsOracleReporterCountRefresh(pool) ? [pool.id] : [],
+  );
 }
 
 indexer.onEvent(
@@ -240,6 +255,7 @@ indexer.onEvent(
       fallbackOracleNumReporters: rateFeed.reportersComplete
         ? rateFeed.reporters.length
         : undefined,
+      markAllUnknownOnMissingCount: true,
     });
   },
 );
@@ -278,6 +294,7 @@ indexer.onEvent(
       fallbackOracleNumReporters: rateFeed.reportersComplete
         ? rateFeed.reporters.length
         : undefined,
+      markAllUnknownOnMissingCount: true,
     });
   },
 );
