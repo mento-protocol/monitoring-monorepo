@@ -187,9 +187,12 @@ export async function syncPoolsReporterCountFromRpc(args: {
   if (oracleNumReporters === undefined) {
     const poolIdsNeedingRefresh = args.markAllUnknownOnMissingCount
       ? args.poolIds
-      : await poolIdsWithStaleOrUnknownReporterCounts(
-          args.context,
-          args.poolIds,
+      : (
+          await Promise.all(
+            args.poolIds.map((poolId) => args.context.Pool.get(poolId)),
+          )
+        ).flatMap((pool) =>
+          pool && needsOracleReporterCountRefresh(pool) ? [pool.id] : [],
         );
     await updatePoolsOracleNumReporters({
       context: args.context,
@@ -207,18 +210,6 @@ export async function syncPoolsReporterCountFromRpc(args: {
     blockNumber: args.blockNumber,
     blockTimestamp: args.blockTimestamp,
   });
-}
-
-async function poolIdsWithStaleOrUnknownReporterCounts(
-  context: EvmOnEventContext,
-  poolIds: string[],
-): Promise<string[]> {
-  const pools = await Promise.all(
-    poolIds.map((poolId) => context.Pool.get(poolId)),
-  );
-  return pools.flatMap((pool) =>
-    pool && needsOracleReporterCountRefresh(pool) ? [pool.id] : [],
-  );
 }
 
 indexer.onEvent(
