@@ -38,6 +38,7 @@ minimumReleaseAgeExclude:
   - "@esbuild/*"
   - form-data
   - js-yaml
+  - multer
   - protobufjs
   - tar
   - vite
