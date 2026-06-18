@@ -137,8 +137,8 @@ jobs:
       has-changes: ${{ steps.detect.outputs.has-changes }}
       stack-changed: ${{ steps.stack_changes.outputs.stack-changed }}
     env:
-      # GCP project bootstrap
-      TF_VAR_org_id: ${{ secrets.TF_VAR_ORG_ID }}
+      # GCP project bootstrap (org_id has a default in variables.tf — shared
+      # across stacks, so it is intentionally NOT a CI env var)
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       # On PRs, point the google provider at the read-only seed SA so provider
       # init impersonates an identity the plan-readonly CI SA can mint a token
@@ -499,7 +499,6 @@ jobs:
       # Provider auth env vars still need to be present at apply time — saved
       # plans don't serialize provider configuration, so init re-evaluates
       # the provider blocks against these values to talk to the upstream APIs.
-      TF_VAR_org_id: ${{ secrets.TF_VAR_ORG_ID }}
       TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       TF_VAR_discord_webhook_url: ${{ secrets.TF_VAR_DISCORD_WEBHOOK_URL }}
       TF_VAR_discord_test_webhook_url: ${{ secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL }}
