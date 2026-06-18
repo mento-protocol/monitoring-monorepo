@@ -9,7 +9,7 @@ const METADATA_TOKEN_REFRESH_SKEW_MS = 60_000;
 type Fetch = typeof fetch;
 
 type ReplayProtectionResult =
-  | { valid: true }
+  | { valid: true; skipped?: string }
   | { valid: false; status: number; message: string; replayed?: boolean };
 
 interface ReplayProtectionOptions {
@@ -26,16 +26,21 @@ export async function reserveQuickNodeNonce(
   timestamp: string,
   options: ReplayProtectionOptions = {},
 ): Promise<ReplayProtectionResult> {
-  const setup = replayProtectionSetup(nonce, timestamp, options);
-  if (!setup.valid) return setup;
+  const bucketName =
+    options.bucketName ?? process.env.QUICKNODE_REPLAY_BUCKET ?? "";
+  if (!bucketName) {
+    // Degrade open: without a configured bucket we cannot dedupe, but failing
+    // every signed webhook (500) would drop governance alerts. Process the
+    // webhook and surface the misconfiguration so the call site can page.
+    return { valid: true, skipped: "QUICKNODE_REPLAY_BUCKET not configured" };
+  }
 
   const {
     fetchImpl,
-    bucketName,
     objectName,
     timestamp: requestTimestamp,
     nonceHash,
-  } = setup;
+  } = replayProtectionSetup(nonce, timestamp, bucketName, options);
 
   try {
     const accessToken = await getMetadataAccessToken(fetchImpl);
@@ -96,33 +101,21 @@ export async function reserveQuickNodeNonce(
 function replayProtectionSetup(
   nonce: string,
   timestamp: string,
+  bucketName: string,
   options: ReplayProtectionOptions,
-):
-  | {
-      valid: true;
-      fetchImpl: Fetch;
-      bucketName: string;
-      objectName: string;
-      timestamp: string;
-      nonceHash: string;
-    }
-  | { valid: false; status: number; message: string } {
-  const bucketName =
-    options.bucketName ?? process.env.QUICKNODE_REPLAY_BUCKET ?? "";
-  if (!bucketName) {
-    console.error("QUICKNODE_REPLAY_BUCKET is not configured");
-    return serverConfigurationError();
-  }
-
+): {
+  fetchImpl: Fetch;
+  objectName: string;
+  timestamp: string;
+  nonceHash: string;
+} {
   const nonceHash = crypto
     .createHash("sha256")
     .update(`${timestamp}:${nonce}`)
     .digest("hex");
 
   return {
-    valid: true,
     fetchImpl: options.fetchImpl ?? fetch,
-    bucketName,
     objectName: `quicknode-replay-nonces/${timestamp}/${nonceHash}.json`,
     timestamp,
     nonceHash,
