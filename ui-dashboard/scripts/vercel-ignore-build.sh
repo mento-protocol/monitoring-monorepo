@@ -8,7 +8,12 @@ cd "$repo_root"
 dashboard_paths=(
   "ui-dashboard"
   "shared-config"
-  "package.json"
+  # Root package.json is intentionally NOT watched: it only carries workspace
+  # scripts and root devDeps, which never enter the dashboard build. A
+  # build-relevant root change (e.g. a `pnpm.overrides` edit that re-pins a
+  # dashboard dependency) always co-changes `pnpm-lock.yaml`, which IS watched —
+  # so we skip the frequent script/devDep-only root edits (agent tooling, alert
+  # linters) without losing real coverage.
   "pnpm-lock.yaml"
   "pnpm-workspace.yaml"
   "patches"
@@ -24,6 +29,7 @@ dashboard_paths=(
 pull_request_id="${VERCEL_GIT_PULL_REQUEST_ID:-}"
 commit_ref="${VERCEL_GIT_COMMIT_REF:-}"
 commit_sha="${VERCEL_GIT_COMMIT_SHA:-}"
+previous_sha="${VERCEL_GIT_PREVIOUS_SHA:-}"
 repo_owner="${VERCEL_GIT_REPO_OWNER:-mento-protocol}"
 repo_slug="${VERCEL_GIT_REPO_SLUG:-monitoring-monorepo}"
 github_api_base="${GITHUB_API_BASE_URL:-https://api.github.com}"
@@ -182,6 +188,30 @@ resolve_main_merge_base() {
 }
 
 if [[ -n "$pull_request_id" ]]; then
+  # Prefer an incremental diff against this branch's previous successful
+  # deployment so intermediate WIP pushes that don't touch the dashboard skip,
+  # instead of rebuilding the whole branch on every commit. The preview alias
+  # keeps the last built output, which already reflects HEAD's dashboard state,
+  # so skipping here never serves a stale dashboard. Falls through to the full
+  # branch diff below on the first push (no previous deployment) or when the
+  # previous SHA can't be resolved.
+  if [[ -n "$previous_sha" ]]; then
+    if git cat-file -e "${previous_sha}^{commit}" 2>/dev/null; then
+      skip_or_build_from_base \
+        "$previous_sha" \
+        "No dashboard-affecting changes since previous deployment for PR #${pull_request_id}; skipping build." \
+        "Dashboard-affecting changes detected since previous deployment for PR #${pull_request_id}; building dashboard."
+    fi
+
+    if [[ -n "$commit_sha" ]] &&
+      changed_files="$(github_changed_files compare "$previous_sha" "$commit_sha")"; then
+      skip_or_build_from_files \
+        "$changed_files" \
+        "No dashboard-affecting changes since previous deployment for PR #${pull_request_id}; skipping build." \
+        "Dashboard-affecting changes detected since previous deployment for PR #${pull_request_id}; building dashboard."
+    fi
+  fi
+
   if pr_base_sha="$(resolve_main_merge_base)"; then
     skip_or_build_from_base \
       "$pr_base_sha" \
@@ -200,7 +230,7 @@ if [[ -n "$pull_request_id" ]]; then
   exit 1
 fi
 
-base_sha="${VERCEL_GIT_PREVIOUS_SHA:-}"
+base_sha="$previous_sha"
 
 if [[ -z "$base_sha" ]]; then
   # First push of a feature branch can outrun GitHub's PR registration, so Vercel

@@ -39,7 +39,6 @@ on:
     paths:
       - ui-dashboard/**
       - shared-config/**
-      - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - patches/**
@@ -113,7 +112,6 @@ jobs:
             dashboard:
               - ui-dashboard/**
               - shared-config/**
-              - package.json
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
               - patches/**
