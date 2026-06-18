@@ -358,3 +358,7 @@ Sourced from the published [`@mento-protocol/contracts`](https://www.npmjs.com/p
 - [`indexer-envio/README.md`](./indexer-envio/README.md) — Indexer reference
 - [`indexer-envio/STATUS.md`](./indexer-envio/STATUS.md) — Static endpoint + deployment reference
 - [`docs/deployment.md`](./docs/deployment.md) — Full deployment guide
+
+## License
+
+[GNU General Public License v3.0 only](./LICENSE)

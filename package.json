@@ -1,6 +1,7 @@
 {
   "name": "@mento-protocol/monitoring-monorepo",
   "private": true,
+  "license": "GPL-3.0-only",
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "postinstall": "pnpm --filter @mento-protocol/monitoring-config build",
