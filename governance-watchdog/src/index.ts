@@ -155,7 +155,10 @@ const handleQuicknodeWebhook = async (
     );
     if (!replay.valid) {
       if (!replay.replayed) {
-        console.error("QuickNode replay protection error:", replay);
+        // Structured ERROR so a replay-protection outage (bad bucket/IAM/env,
+        // metadata token, or Storage API) trips the cloud-function-errors
+        // Slack alert; raw console.error lands below ERROR and is excluded.
+        logError("QuickNode replay protection error:", replay);
       }
       res.status(replay.status).send(replay.message);
       return;

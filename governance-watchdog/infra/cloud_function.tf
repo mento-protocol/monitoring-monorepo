@@ -43,6 +43,11 @@ resource "google_cloudfunctions2_function" "watchdog_notifications" {
       LOG_EXECUTION_ID = true
     }
   }
+
+  # Gate the function on the replay-nonce IAM binding so a first apply cannot
+  # update the live function ahead of the objectCreator grant — otherwise signed
+  # QuickNode webhooks would 500 from replay protection during that window.
+  depends_on = [google_storage_bucket_iam_member.runtime_replay_nonce_creator]
 }
 
 # Allows the Quicknode Webhook service (and everyone else...) to call the cloud function
