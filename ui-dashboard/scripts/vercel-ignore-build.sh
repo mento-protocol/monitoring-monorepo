@@ -140,14 +140,18 @@ async function compareFiles(base, head, singleCommitOnly) {
   // for a skip when `base` is proven an ancestor of `head`: status "ahead"/
   // "identical" with behind_by === 0. If histories diverged ("diverged"/
   // "behind", behind_by > 0), fail closed so the bash caller falls through to
-  // the full-PR-files diff / merge-base / build. Treat a missing/undefined
-  // behind_by conservatively as 0 (ancestor) so callers/fixtures that don't
-  // surface the field still skip on a clean ahead-only compare.
-  if (comparison.behind_by > 0) {
+  // the full-PR-files diff / merge-base / build. An absent `behind_by` is
+  // treated as 0 (assume ancestor); GitHub always includes the field on a real
+  // compare response, so this only matters for callers/fixtures that omit it.
+  if ((comparison.behind_by ?? 0) > 0) {
     throw new Error(
       `compare base is not an ancestor of head (behind_by=${comparison.behind_by}, status=${comparison.status}); build instead of risking a false skip`,
     );
   }
+  // singleCommitOnly is irrelevant once behind_by === 0 proves `base` is an
+  // ancestor of `head`: three-dot then collapses to two-dot, so the net diff
+  // over N commits is a safe basis for a skip. It only guards branch-first mode,
+  // where no ancestry is established.
   if (singleCommitOnly && comparison.ahead_by > 1) {
     throw new Error(
       `branch fallback has ${comparison.ahead_by} commits; build instead of risking a false skip`,
