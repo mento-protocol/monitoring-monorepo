@@ -239,6 +239,39 @@ describe("fetchNetworkData — happy path", () => {
     });
   });
 
+  it("marks factory-deprecated VirtualPools from lifecycle rows", async () => {
+    const pool = {
+      ...makePool("42220-0xvirtual"),
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      oracleTimestamp: String(Math.floor(Date.now() / 1000) - 600),
+      oracleFreshnessWindow: "300",
+      tokenDecimalsKnown: true,
+    };
+    mockRequest((query) => {
+      if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: [] };
+      if (query.includes("VirtualPoolLifecycle")) {
+        return { VirtualPoolLifecycle: [{ poolId: pool.id }] };
+      }
+      if (query.includes("BiPoolExchange")) return { BiPoolExchange: [] };
+      if (query.includes("Pool")) return { Pool: [pool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.pools[0]).toMatchObject({
+      id: pool.id,
+      wrappedExchangeDeprecated: true,
+    });
+  });
+
   it("uses indexed CdpPool rows on Celo without inferring Reserve from unknown strategies", async () => {
     const cdpPool = {
       ...makePool("42220-0x000000000000000000000000000000000000aaaa"),

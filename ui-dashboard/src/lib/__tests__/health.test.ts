@@ -8,6 +8,7 @@ import {
   computeWindowUptimePct,
   liveHealthCounters,
   computeRebalancerLiveness,
+  isOracleFresh,
   worstStatus,
   resolveLimitStatus,
 } from "../health";
@@ -30,6 +31,10 @@ vi.mock("../weekend", () => ({
 const FRESH_TS = String(Math.floor(Date.now() / 1000) - 120);
 /** A stale oracle timestamp (10 minutes ago) — beyond 5-min SortedOracles expiry. */
 const STALE_TS = String(Math.floor(Date.now() / 1000) - 600);
+const CELO_CHAIN_ID = 42220;
+const USDM_ADDR = "0x765de816845861e75a25fca122bb6898b8b1282a";
+const GBPM_ADDR = "0xccf663b1ff11028f0b19058d0f7b674004a40746";
+const USDC_ADDR = "0xceba9300f2b948710d2653dd7b07f33a8b32118c";
 
 describe("computeHealthStatus", () => {
   it('returns "N/A" for VirtualPools (source includes "virtual")', () => {
@@ -53,6 +58,323 @@ describe("computeHealthStatus", () => {
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
+    ).toBe("N/A");
+  });
+
+  it('returns "N/A" for fresh VirtualPool oracle reports', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it('returns "CRITICAL" for stale VirtualPool oracle reports', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          oracleTimestamp: String(now - 600),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it('returns "WEEKEND" for stale VirtualPool oracle reports during weekend', async () => {
+    const weekend = await import("../weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValueOnce(true);
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          token0: GBPM_ADDR,
+          token1: USDM_ADDR,
+          oracleTimestamp: String(now - 600),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        CELO_CHAIN_ID,
+        now,
+      ),
+    ).toBe("WEEKEND");
+  });
+
+  it('returns "N/A" for stale VirtualPools while the freshness cursor is untrusted', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          oracleTimestamp: String(now - 600),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: false,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it("keeps stale USD-pegged VirtualPools critical during weekend pauses", async () => {
+    const weekend = await import("../weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValueOnce(true);
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          token0: USDM_ADDR,
+          token1: USDC_ADDR,
+          oracleTimestamp: String(now - 600),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        CELO_CHAIN_ID,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("keeps stale VirtualPools critical when weekend pair classification is unknown", async () => {
+    const weekend = await import("../weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValueOnce(true);
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          token0: USDM_ADDR,
+          token1: "0x0000000000000000000000000000000000000bad",
+          oracleTimestamp: String(now - 600),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        CELO_CHAIN_ID,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it('returns "N/A" for VirtualPools with unknown freshness windows', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          oracleTimestamp: String(now - 600),
+          oracleFreshnessWindow: "0",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it("uses oracleTimestamp for VirtualPool freshness when lastOracleReportAt is older", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          lastOracleReportAt: String(now - 600),
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it('returns "CRITICAL" for VirtualPools with invalid live medians', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          medianLive: false,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it('returns "N/A" for VirtualPools with unknown medianLive', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it("suppresses explicit VirtualPool median failures while decimals are unknown", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          medianLive: false,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: false,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it("suppresses known VirtualPool quorum failures while decimals are unknown", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          medianLive: true,
+          oracleNumReporters: 1,
+          wrappedExchangeMinimumReports: "2",
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: false,
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("N/A");
+  });
+
+  it("does not downgrade invalid VirtualPool medians to weekend", async () => {
+    const weekend = await import("../weekend");
+    const isWeekendMock = vi.mocked(weekend.isWeekend);
+    isWeekendMock.mockReturnValue(true);
+    const now = Math.floor(Date.now() / 1000);
+    try {
+      expect(
+        computeHealthStatus(
+          {
+            source: "virtual_pool_factory",
+            medianLive: false,
+            oracleNumReporters: 2,
+            wrappedExchangeMinimumReports: "1",
+            oracleTimestamp: String(now - 120),
+            oracleFreshnessWindow: "360",
+            tokenDecimalsKnown: true,
+            token0: USDC_ADDR,
+            token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf",
+          },
+          CELO_CHAIN_ID,
+          now,
+        ),
+      ).toBe("CRITICAL");
+    } finally {
+      isWeekendMock.mockReturnValue(false);
+    }
+  });
+
+  it("returns CRITICAL for VirtualPools below the wrapped exchange minimum reports", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          medianLive: true,
+          oracleNumReporters: 1,
+          wrappedExchangeMinimumReports: "2",
+          oracleTimestamp: String(now - 120),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+        },
+        CELO_CHAIN_ID,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it('returns "N/A" for stale deprecated VirtualPool wrappers', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeDeprecated: true,
+          oracleTimestamp: String(now - 600),
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        undefined,
+        now,
+      ),
     ).toBe("N/A");
   });
 
@@ -1300,6 +1622,86 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
         143,
       ),
     ).toBe("CRITICAL");
+  });
+
+  it("uses the VirtualPool reset window for shared freshness checks", () => {
+    const ts340 = String(frozenNowSec - 340);
+    expect(
+      isOracleFresh(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeId: "0xexchange",
+          oracleTimestamp: ts340,
+          oracleExpiry: "300",
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+          medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+        },
+        frozenNowSec,
+        42220,
+      ),
+    ).toBe(true);
+  });
+
+  it("treats invalid VirtualPool medians as not fresh", () => {
+    const ts120 = String(frozenNowSec - 120);
+    expect(
+      isOracleFresh(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeId: "0xexchange",
+          medianLive: false,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+          oracleTimestamp: ts120,
+          oracleFreshnessWindow: "360",
+          tokenDecimalsKnown: true,
+        },
+        frozenNowSec,
+        42220,
+      ),
+    ).toBe(false);
+  });
+
+  it("treats explicit VirtualPool median failures as not fresh while rollout inputs are unknown", () => {
+    const ts120 = String(frozenNowSec - 120);
+    expect(
+      isOracleFresh(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeId: "0xexchange",
+          medianLive: false,
+          oracleTimestamp: ts120,
+          oracleFreshnessWindow: "0",
+          tokenDecimalsKnown: false,
+        },
+        frozenNowSec,
+        42220,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not fall back to generic expiry when a VirtualPool reset window is unknown", () => {
+    const ts600 = String(frozenNowSec - 600);
+    expect(
+      isOracleFresh(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeId: "0xexchange",
+          oracleTimestamp: ts600,
+          oracleExpiry: "300",
+          oracleFreshnessWindow: "0",
+          tokenDecimalsKnown: true,
+          medianLive: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+        },
+        frozenNowSec,
+        42220,
+      ),
+    ).toBe(true);
   });
 
   it("unknown chainId falls back to 300s default", () => {

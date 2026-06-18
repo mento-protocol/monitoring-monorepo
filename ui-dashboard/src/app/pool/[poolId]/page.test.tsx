@@ -36,6 +36,9 @@ import {
   POOL_SWAPS_PAGE,
   POOL_THRESHOLDS_KNOWN_EXT,
   POOL_V2_EXCHANGE,
+  POOL_VP_DEPRECATION_EXT,
+  POOL_VP_LIFECYCLE_DEPRECATION_EXT,
+  POOL_VP_ORACLE_FRESHNESS_EXT,
   TRADING_LIMITS,
   VIRTUAL_POOL_LIFECYCLE,
 } from "@/lib/queries";
@@ -842,6 +845,34 @@ describe("Pool detail tab search", () => {
       { poolId: "pool-1" },
       SNAPSHOT_REFRESH_MS,
     );
+  });
+
+  it("does not block non-VirtualPool amount tabs on VP companion query loading", () => {
+    const defaultGql = useGQLMock.getMockImplementation();
+    useGQLMock.mockImplementation((query: unknown, ...args: unknown[]) => {
+      if (
+        query === POOL_VP_ORACLE_FRESHNESS_EXT ||
+        query === POOL_VP_DEPRECATION_EXT ||
+        query === POOL_VP_LIFECYCLE_DEPRECATION_EXT
+      ) {
+        return { data: null, error: undefined, isLoading: true };
+      }
+      return defaultGql?.(query, ...args);
+    });
+
+    const html = renderWithParams({ tab: "swaps" });
+
+    expect(html).not.toContain(
+      "Checking token decimal metadata before rendering token amount tab data.",
+    );
+    expect(html).toContain("Treasury Wallet");
+    expect(
+      useGQLMock.mock.calls.some(
+        ([query, variables]) =>
+          query === POOL_SWAPS_PAGE &&
+          (variables as { poolId?: string } | undefined)?.poolId === "pool-1",
+      ),
+    ).toBe(true);
   });
 
   it("renders snapshot chart when snapshots are available on swaps tab", () => {

@@ -13,8 +13,13 @@
 
 import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
-import { POOL_THRESHOLDS_KNOWN_EXT } from "@/lib/queries";
-import type { Pool } from "@/lib/types";
+import {
+  POOL_THRESHOLDS_KNOWN_EXT,
+  POOL_VP_DEPRECATION_EXT,
+  POOL_VP_LIFECYCLE_DEPRECATION_EXT,
+  POOL_VP_ORACLE_FRESHNESS_EXT,
+} from "@/lib/queries";
+import { isVirtualPool, type Pool } from "@/lib/types";
 
 type ThresholdsExtRow = {
   id: string;
@@ -25,6 +30,73 @@ type ThresholdsExtRow = {
   degenerateReserves?: boolean;
   breakerTripped?: boolean;
 };
+
+type VpOracleFreshnessExtRow = {
+  id: string;
+  lastOracleReportAt?: string;
+  medianLive?: boolean;
+  oracleFreshnessWindow?: string;
+};
+
+type VpDeprecationExtRow = {
+  id: string;
+  isDeprecated?: boolean;
+  minimumReports?: string;
+};
+
+type VpLifecycleDeprecationExtRow = {
+  id: string;
+  poolId?: string;
+};
+
+function mergePoolExtensions(
+  rawPool: Pool | null,
+  args: {
+    thresholdsExt: ThresholdsExtRow | null;
+    vpFreshnessExt: VpOracleFreshnessExtRow | null;
+    vpDeprecationExt: VpDeprecationExtRow | null;
+    vpLifecycleDeprecationExt: VpLifecycleDeprecationExtRow | null;
+  },
+): Pool | null {
+  if (!rawPool) return null;
+  const {
+    thresholdsExt,
+    vpFreshnessExt,
+    vpDeprecationExt,
+    vpLifecycleDeprecationExt,
+  } = args;
+  const wrappedExchangeDeprecated =
+    vpDeprecationExt?.isDeprecated === true ||
+    vpLifecycleDeprecationExt !== null;
+  return {
+    ...rawPool,
+    ...(thresholdsExt
+      ? {
+          rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
+          rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
+          rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
+          tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
+          degenerateReserves: thresholdsExt.degenerateReserves,
+          breakerTripped: thresholdsExt.breakerTripped,
+        }
+      : {}),
+    ...(vpFreshnessExt
+      ? {
+          lastOracleReportAt: vpFreshnessExt.lastOracleReportAt,
+          medianLive: vpFreshnessExt.medianLive,
+          oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
+        }
+      : {}),
+    ...(wrappedExchangeDeprecated ? { wrappedExchangeDeprecated } : {}),
+    ...(vpDeprecationExt?.minimumReports !== undefined
+      ? { wrappedExchangeMinimumReports: vpDeprecationExt.minimumReports }
+      : {}),
+  };
+}
+
+function anyLoading(...states: boolean[]): boolean {
+  return states.some(Boolean);
+}
 
 export type PoolWithThresholdsResult = {
   pool: Pool | null;
@@ -61,18 +133,53 @@ export function usePoolWithThresholds(
     { timeoutMs: 5000 },
   );
   const thresholdsExt = thresholdsData?.Pool?.[0] ?? null;
+  const { data: vpFreshnessData, isLoading: vpFreshnessLoading } = useGQL<{
+    Pool: VpOracleFreshnessExtRow[];
+  }>(POOL_VP_ORACLE_FRESHNESS_EXT, { id: poolId, chainId }, undefined, {
+    timeoutMs: 5000,
+  });
+  const vpFreshnessExt = vpFreshnessData?.Pool?.[0] ?? null;
+  const { data: vpDeprecationData, isLoading: vpDeprecationLoading } = useGQL<{
+    BiPoolExchange: VpDeprecationExtRow[];
+  }>(POOL_VP_DEPRECATION_EXT, { id: poolId, chainId }, undefined, {
+    timeoutMs: 5000,
+  });
+  const vpDeprecationExt = vpDeprecationData?.BiPoolExchange?.[0] ?? null;
+  const {
+    data: vpLifecycleDeprecationData,
+    isLoading: vpLifecycleDeprecationLoading,
+  } = useGQL<{
+    VirtualPoolLifecycle: VpLifecycleDeprecationExtRow[];
+  }>(POOL_VP_LIFECYCLE_DEPRECATION_EXT, { id: poolId, chainId }, undefined, {
+    timeoutMs: 5000,
+  });
+  const vpLifecycleDeprecationExt =
+    vpLifecycleDeprecationData?.VirtualPoolLifecycle?.[0] ?? null;
   const pool = useMemo<Pool | null>(() => {
-    if (!rawPool) return null;
-    if (!thresholdsExt) return rawPool;
-    return {
-      ...rawPool,
-      rebalanceThresholdAbove: thresholdsExt.rebalanceThresholdAbove,
-      rebalanceThresholdBelow: thresholdsExt.rebalanceThresholdBelow,
-      rebalanceThresholdsKnown: thresholdsExt.rebalanceThresholdsKnown,
-      tokenDecimalsKnown: thresholdsExt.tokenDecimalsKnown,
-      degenerateReserves: thresholdsExt.degenerateReserves,
-      breakerTripped: thresholdsExt.breakerTripped,
-    };
-  }, [rawPool, thresholdsExt]);
-  return { pool, thresholdsLoading, thresholdsError };
+    return mergePoolExtensions(rawPool, {
+      thresholdsExt,
+      vpFreshnessExt,
+      vpDeprecationExt,
+      vpLifecycleDeprecationExt,
+    });
+  }, [
+    rawPool,
+    thresholdsExt,
+    vpFreshnessExt,
+    vpDeprecationExt,
+    vpLifecycleDeprecationExt,
+  ]);
+  const vpLoading =
+    rawPool && isVirtualPool(rawPool)
+      ? anyLoading(
+          vpFreshnessLoading,
+          vpDeprecationLoading,
+          vpLifecycleDeprecationLoading,
+        )
+      : false;
+  return {
+    pool,
+    thresholdsLoading: anyLoading(thresholdsLoading, vpLoading),
+    thresholdsError,
+  };
 }

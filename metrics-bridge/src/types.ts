@@ -9,6 +9,11 @@ export interface PoolRow {
   oracleTimestamp: string;
   oracleTxHash: string;
   oracleExpiry: string;
+  oracleNumReporters: number;
+  oracleFreshnessWindow: string;
+  tokenDecimalsKnown: boolean;
+  lastOracleReportAt: string;
+  medianLive: boolean;
   lastDeviationRatio: string;
   deviationBreachStartedAt: string;
   currentOpenBreachPeak: string;
@@ -41,25 +46,26 @@ export interface PoolRow {
   // FPMM). Filtered out by `isFpmmPool` before any gauge/probe work.
   // Schema: `Pool.wrappedExchangeId: String! @index` (schema.graphql:181).
   wrappedExchangeId: string;
+  // Optional companion state from BiPoolExchange. Deprecated wrappers should
+  // not publish stale VP oracle gauges because swaps are expected to stop.
+  wrappedExchangeDeprecated: boolean;
+  // Optional companion state from BiPoolExchange. 0 means the bridge could not
+  // join the wrapped exchange config yet, so VP freshness must not publish a
+  // misleading "fresh" sample.
+  wrappedExchangeMinimumReports: string;
+}
+
+export function isVirtualPool(pool: PoolRow): boolean {
+  return pool.source.includes("virtual") || Boolean(pool.wrappedExchangeId);
 }
 
 // Canonical FPMM predicate. Analogous to `isVirtualPool` in
-// `indexer-envio/src/helpers.ts` and `ui-dashboard/src/lib/types.ts`, but
-// simplified: those check two conditions (`source.includes("virtual") ||
-// wrappedExchangeId`), whereas here the GQL query's `source: { _like: "%fpmm%" }`
-// filter has already excluded native VPs (`source: "virtual_pool_factory"`) at
-// the query boundary, leaving `wrappedExchangeId` as the only remaining
-// discriminator. A healed VirtualPool retains its original "fpmm_factory" source
-// until the next re-sync, so the source filter alone is not sufficient —
-// `wrappedExchangeId` is the load-bearing discriminator:
-// "" = native FPMM; non-empty = healed VP. Applied once at the poller boundary
-// so BOTH gauge publication (`updateMetrics`) and the rebalance probe
-// (`runRebalanceProbes`) operate on FPMM-only rows from a single source of
-// truth instead of each re-deriving the guard. `eligibleForProbe` also applies
-// it defensively, since a leaked VP with a non-empty `rebalancerAddress` would
-// otherwise publish a phantom `mento_pool_rebalance_blocked` gauge.
+// `indexer-envio/src/helpers.ts` and `ui-dashboard/src/lib/types.ts`.
+// "" = native FPMM; non-empty or virtual source = VP. Applied before FPMM-only
+// gauges and rebalance probes so VPs only publish their dedicated freshness
+// metric.
 export function isFpmmPool(pool: PoolRow): boolean {
-  return !pool.wrappedExchangeId;
+  return !isVirtualPool(pool);
 }
 
 export interface BridgePoolsResponse {

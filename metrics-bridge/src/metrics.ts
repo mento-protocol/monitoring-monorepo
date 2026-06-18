@@ -20,7 +20,7 @@ import {
   pruneDeviationAlertStates,
 } from "./deviation-alert-state.js";
 import { classifyFxMarketPause } from "./fx-market.js";
-import type { PoolRow } from "./types.js";
+import { isFpmmPool, isVirtualPool, type PoolRow } from "./types.js";
 
 // SortedOracles fixed-point scale — keep in sync with
 // `indexer-envio/src/priceDifference.ts:SORTED_ORACLES_DECIMALS` and the
@@ -177,6 +177,18 @@ export const gauges = {
     name: "mento_pool_oracle_expiry",
     help: "Oracle report expiry window in seconds",
     labelNames: oracleUpdateLabels,
+    registers: [register],
+  }),
+  vpOracleFresh: new Gauge({
+    name: "mento_pool_vp_oracle_fresh",
+    help: "VirtualPool oracle usability derived from trusted oracleTimestamp, median validity, and oracleFreshnessWindow (1=fresh and valid, 0=stale or invalid). Unknown window, untrusted cursor, or unknown median validity publishes no series.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  vpOracleMedianValid: new Gauge({
+    name: "mento_pool_vp_oracle_median_valid",
+    help: "VirtualPool median validity from indexed SortedOracles medianLive, active reporter count, and wrapped exchange minimumReports (1=valid, 0=invalid). Unknown VP freshness/config input publishes no series.",
+    labelNames: poolLabels,
     registers: [register],
   }),
   deviationRatio: new Gauge({
@@ -347,13 +359,16 @@ export function updateMetrics(
 ): void {
   resetPollGauges();
 
-  // `pools` is already filtered to FPMM-only rows by `isFpmmPool` at the poller
-  // boundary (see `pollPools`), so healed VirtualPools never reach gauge
-  // publication here.
   const activePoolIds = new Set<string>();
   for (const pool of pools) {
-    activePoolIds.add(pool.id);
-    updatePoolMetrics(pool, nowSeconds);
+    if (isVirtualPool(pool)) {
+      recordVpOracleMetrics(pool, nowSeconds);
+      continue;
+    }
+    if (isFpmmPool(pool)) {
+      activePoolIds.add(pool.id);
+      updatePoolMetrics(pool, nowSeconds);
+    }
   }
   pruneDeviationAlertStates(activePoolIds);
 }
@@ -435,6 +450,91 @@ function recordStatusAndOracleMetrics(
   gauges.oracleTimestamp.set(oracleLabels, Number(pool.oracleTimestamp));
   gauges.oracleLiveTimestamp.set(labels, Number(pool.oracleTimestamp));
   gauges.oracleExpiry.set(oracleLabels, oracleExpirySeconds(pool));
+}
+
+function recordVpOracleMetrics(pool: PoolRow, nowSeconds: number): void {
+  if (pool.wrappedExchangeDeprecated) return;
+  const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
+  const labels = poolDisplayLabels(pool, derivedPair);
+  const medianValid = vpOracleMedianValidity(pool);
+  if (medianValid !== null) {
+    gauges.vpOracleMedianValid.set(labels, medianValid);
+  }
+  const freshness = vpOracleFreshness(pool, nowSeconds);
+  if (freshness === null) return;
+  warnIfUnknown(pool, derivedPair);
+  gauges.vpOracleFresh.set(labels, freshness);
+}
+
+export function vpOracleMedianValidity(
+  pool: Pick<
+    PoolRow,
+    | "medianLive"
+    | "oracleNumReporters"
+    | "oracleFreshnessWindow"
+    | "tokenDecimalsKnown"
+    | "wrappedExchangeMinimumReports"
+  >,
+): number | null {
+  const inputs = trustedVpOracleMedianInputs(pool);
+  if (inputs === null) return null;
+  if (pool.medianLive === false) return 0;
+  if (inputs.oracleNumReporters < inputs.minimumReports) return 0;
+  return pool.medianLive === true ? 1 : null;
+}
+
+function trustedVpOracleMedianInputs(
+  pool: Pick<
+    PoolRow,
+    | "oracleNumReporters"
+    | "oracleFreshnessWindow"
+    | "tokenDecimalsKnown"
+    | "wrappedExchangeMinimumReports"
+  >,
+): { minimumReports: number; oracleNumReporters: number } | null {
+  if (pool.tokenDecimalsKnown !== true) return null;
+  const freshnessWindow = Number(pool.oracleFreshnessWindow);
+  if (!Number.isFinite(freshnessWindow) || freshnessWindow <= 0) return null;
+  const minimumReports = Number(pool.wrappedExchangeMinimumReports);
+  const oracleNumReporters = Number(pool.oracleNumReporters);
+  if (
+    !Number.isFinite(minimumReports) ||
+    minimumReports <= 0 ||
+    !Number.isFinite(oracleNumReporters) ||
+    oracleNumReporters < 0
+  ) {
+    return null;
+  }
+  return { minimumReports, oracleNumReporters };
+}
+
+export function vpOracleFreshness(
+  pool: Pick<
+    PoolRow,
+    | "oracleFreshnessWindow"
+    | "oracleTimestamp"
+    | "medianLive"
+    | "oracleNumReporters"
+    | "tokenDecimalsKnown"
+    | "wrappedExchangeMinimumReports"
+  >,
+  nowSeconds: number,
+): number | null {
+  const medianValid = vpOracleMedianValidity(pool);
+  if (medianValid === null) return null;
+  if (medianValid === 0) return 0;
+  if (pool.tokenDecimalsKnown !== true) return null;
+  const freshnessWindow = Number(pool.oracleFreshnessWindow);
+  const liveReportAt = Number(pool.oracleTimestamp);
+  if (
+    !Number.isFinite(freshnessWindow) ||
+    freshnessWindow <= 0 ||
+    !Number.isFinite(liveReportAt) ||
+    liveReportAt <= 0
+  ) {
+    return null;
+  }
+  return nowSeconds - liveReportAt <= freshnessWindow ? 1 : 0;
 }
 
 export function isOracleLive(

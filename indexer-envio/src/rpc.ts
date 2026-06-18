@@ -55,6 +55,8 @@ export {
   _clearMockReportExpiry,
   _setMockRateFeedOracles,
   _clearMockRateFeedOracles,
+  _setMockNumReporters,
+  _clearMockNumReporters,
   fetchReferenceRateFeedID,
   fetchNumReporters,
   fetchRateFeedOracles,
@@ -171,6 +173,31 @@ export async function updatePoolsOracleExpiry(
       updatedAtTimestamp: blockTimestamp,
     };
     context.Pool.set(updatedPool);
+  }
+}
+
+export async function updatePoolsOracleNumReporters(args: {
+  context: EvmOnEventContext;
+  poolIds: string[];
+  oracleNumReporters: number | null | undefined;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+}): Promise<void> {
+  if (args.oracleNumReporters == null || args.poolIds.length === 0) return;
+
+  for (const poolId of args.poolIds) {
+    const existing = await args.context.Pool.get(poolId);
+    if (!existing || existing.oracleNumReporters === args.oracleNumReporters) {
+      continue;
+    }
+
+    const updatedPool: Pool = {
+      ...existing,
+      oracleNumReporters: args.oracleNumReporters,
+      updatedAtBlock: args.blockNumber,
+      updatedAtTimestamp: args.blockTimestamp,
+    };
+    args.context.Pool.set(updatedPool);
   }
 }
 

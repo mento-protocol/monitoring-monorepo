@@ -72,6 +72,8 @@ export {
   _clearMockReportExpiry,
   _setMockRateFeedOracles,
   _clearMockRateFeedOracles,
+  _setMockNumReporters,
+  _clearMockNumReporters,
   _setMockFees,
   _clearMockFees,
   _setMockBreakerKind,

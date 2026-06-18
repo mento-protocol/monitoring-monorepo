@@ -73,14 +73,14 @@
     "file": "src/app/page-client.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 35. Maximum allowed is 15.",
-    "line": 166,
+    "line": 167,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 53 to the 18 allowed.",
-    "line": 166,
+    "line": 167,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
@@ -304,14 +304,14 @@
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 58. Maximum allowed is 15.",
-    "line": 78,
+    "line": 84,
     "linePreview": "// react-doctor-disable-next-line react-doctor/js-tosorted-immutable | return [...entries].sort((a, b) => { | const aKey = globalPoolKey(a);"
   },
   {
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 65 to the 18 allowed.",
-    "line": 78,
+    "line": 84,
     "linePreview": "// react-doctor-disable-next-line react-doctor/js-tosorted-immutable | return [...entries].sort((a, b) => { | const aKey = globalPoolKey(a);"
   },
   {
@@ -462,67 +462,32 @@
     "linePreview": " | export async function enrichBatch( | addresses: string[],"
   },
   {
-    "file": "src/lib/health.ts",
-    "ruleId": "complexity",
-    "message": "Function 'liveHealthCounters' has a complexity of 23. Maximum allowed is 15.",
-    "line": 367,
-    "linePreview": "*/ | export function liveHealthCounters( | pool: HealthCounterState,"
-  },
-  {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "complexity",
     "message": "Async function 'fetchHomepageOgDataUncached' has a complexity of 35. Maximum allowed is 15.",
-    "line": 260,
+    "line": 281,
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'fetchHomepageOgDataUncached' has too many lines (141). Maximum allowed is 100.",
-    "line": 260,
+    "line": 281,
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
-    "line": 260,
+    "line": 281,
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/network-fetcher/fetch.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
-    "line": 194,
-    "linePreview": "*/ | async function fetchPaginatedRows<TRow, TVars>(args: { | client: GraphQLClient;"
-  },
-  {
-    "file": "src/lib/pool-og.ts",
-    "ruleId": "complexity",
-    "message": "Async function 'fetchPoolOgDataUncached' has a complexity of 26. Maximum allowed is 15.",
-    "line": 99,
-    "linePreview": "/** @internal Exported for testing — skip the cache wrapper. */ | export async function fetchPoolOgDataUncached( | rawPoolId: string,"
-  },
-  {
-    "file": "src/lib/pool-og.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async function 'fetchPoolOgDataUncached' has too many lines (128). Maximum allowed is 100.",
-    "line": 99,
-    "linePreview": "/** @internal Exported for testing — skip the cache wrapper. */ | export async function fetchPoolOgDataUncached( | rawPoolId: string,"
-  },
-  {
-    "file": "src/lib/pool-og.ts",
-    "ruleId": "max-params",
-    "message": "Function 'sumVolumeInWindow' has too many parameters (7). Maximum allowed is 5.",
-    "line": 340,
-    "linePreview": "// the volume WoW percentage. | function sumVolumeInWindow( | daily: PoolSnapshot[],"
-  },
-  {
-    "file": "src/lib/pool-og.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 18 allowed.",
-    "line": 99,
-    "linePreview": "/** @internal Exported for testing — skip the cache wrapper. */ | export async function fetchPoolOgDataUncached( | rawPoolId: string,"
+    "line": 216,
+    "linePreview": "*/ | export async function fetchPaginatedRows<TRow, TVars>(args: { | client: GraphQLClient;"
   },
   {
     "file": "src/lib/protocol-fee-snapshots.ts",

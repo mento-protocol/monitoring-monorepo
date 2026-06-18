@@ -15,6 +15,8 @@ import {
   _clearMockERC20Decimals,
   _setMockTokenDecimalsScaling,
   _clearMockTokenDecimalsScaling,
+  _setMockNumReporters,
+  _clearMockNumReporters,
 } from "../src/EventHandlers.ts";
 import {
   extractVpExchangeIdFromBytecode,
@@ -27,6 +29,7 @@ import { fetchTokenDecimalsScaling } from "../src/rpc/pool-state.ts";
 import { _setRpcClientForTests, _testHooks } from "../src/rpc.ts";
 import { _clearPricingModuleIndex } from "../src/contractAddresses.ts";
 import { isVirtualPool, makePoolId } from "../src/helpers.ts";
+import { UNKNOWN_ORACLE_REPORTERS, ZERO_ADDRESS } from "../src/constants.ts";
 
 type MockDb = MockDbWith<{
   Pool: WritableEntity;
@@ -136,6 +139,7 @@ describe("BiPoolManager handlers", () => {
     _clearMockVpExchangeIds();
     _clearMockERC20Decimals();
     _clearMockTokenDecimalsScaling();
+    _clearMockNumReporters();
     _setRpcClientForTests(CHAIN_ID, null);
     _clearPricingModuleIndex();
   });
@@ -270,7 +274,7 @@ describe("BiPoolManager handlers", () => {
       assert.equal(row!.bucket1, 2_000_000n);
       assert.equal(row!.lastBucketUpdate, 1_700_001_000n);
       assert.equal(row!.isDeprecated, false);
-      assert.equal(row!.wrappedByPoolId, undefined);
+      assert.equal(row!.wrappedByPoolId, "");
       assert.equal(row!.wrappedByPoolIdChecked, true);
     });
 
@@ -591,6 +595,7 @@ describe("BiPoolManager handlers", () => {
         EXCHANGE_ID,
         fullStruct(),
       );
+      _setMockNumReporters(CHAIN_ID, FEED_ID, 2);
       const create = BiPoolManager.ExchangeCreated.createMockEvent({
         exchangeId: EXCHANGE_ID,
         asset0: ASSET0,
@@ -610,10 +615,99 @@ describe("BiPoolManager handlers", () => {
       assert.equal(exchange!.wrappedByPoolId, poolId);
 
       const pool1 = mockDb.entities.Pool.get(poolId) as
-        | { referenceRateFeedID: string }
+        | { referenceRateFeedID: string; oracleNumReporters: number }
         | undefined;
       assert.ok(pool1);
       assert.equal(pool1!.referenceRateFeedID, FEED_ID);
+      assert.equal(pool1!.oracleNumReporters, 2);
+    });
+
+    it("keeps VP reporter counts unknown when numRates fails during feed mirror", async function () {
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+      _setMockNumReporters(CHAIN_ID, FEED_ID, null);
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const deploy = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+        pool: VP_ADDRESS,
+        token0: ASSET0,
+        token1: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000),
+      });
+      mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+        event: deploy,
+        mockDb,
+      });
+
+      const pool = mockDb.entities.Pool.get(makePoolId(CHAIN_ID, VP_ADDRESS));
+      assert.ok(pool);
+      assert.equal(pool.referenceRateFeedID, FEED_ID);
+      assert.equal(pool.oracleNumReporters, UNKNOWN_ORACLE_REPORTERS);
+    });
+
+    it("keeps mirrored VP reporter counts when VirtualPoolDeployed follows an existing exchange row", async function () {
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+      _setMockNumReporters(CHAIN_ID, FEED_ID, 2);
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const deploy = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+        pool: VP_ADDRESS,
+        token0: ASSET0,
+        token1: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000),
+      });
+      mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+        event: deploy,
+        mockDb,
+      });
+
+      const pool = mockDb.entities.Pool.get(makePoolId(CHAIN_ID, VP_ADDRESS));
+      assert.ok(pool);
+      assert.equal(pool.referenceRateFeedID, FEED_ID);
+      assert.equal(pool.oracleNumReporters, 2);
     });
 
     it("repairs a checked exchange-first row that missed the VP back-reference once the Pool is otherwise fully healed", async function () {
@@ -659,12 +753,14 @@ describe("BiPoolManager handlers", () => {
             token0?: string;
             token1?: string;
             wrappedExchangeId?: string;
+            oracleFreshnessWindow: bigint;
           }
         | undefined;
       assert.ok(poolBefore);
       assert.equal(poolBefore!.token0, ASSET0);
       assert.equal(poolBefore!.token1, ASSET1);
       assert.equal(poolBefore!.wrappedExchangeId, EXCHANGE_ID.toLowerCase());
+      assert.equal(poolBefore!.oracleFreshnessWindow, 360n);
 
       const linkedExchange = mockDb.entities.BiPoolExchange.get(
         exchangeRowId(EXCHANGE_ID),
@@ -781,6 +877,7 @@ describe("BiPoolManager handlers", () => {
         exchangeId: EXCHANGE_ID,
       });
       mockVpTokenDecimalsScaling();
+      _setMockNumReporters(CHAIN_ID, FEED_ID, 2);
 
       let mockDb = MockDb.createMockDb();
       // Step 1: ExchangeCreated seeds BiPoolExchange (asset0, asset1, feedID)
@@ -820,6 +917,8 @@ describe("BiPoolManager handlers", () => {
             token1Decimals: number;
             wrappedExchangeId?: string;
             referenceRateFeedID: string;
+            oracleFreshnessWindow: bigint;
+            oracleNumReporters: number;
           }
         | undefined;
       assert.ok(pool);
@@ -834,6 +933,431 @@ describe("BiPoolManager handlers", () => {
       assert.equal(pool!.token1Decimals, 18);
       // Side-effect of the same heal path: feedID also mirrors over.
       assert.equal(pool!.referenceRateFeedID, FEED_ID);
+      assert.equal(pool!.oracleFreshnessWindow, 360n);
+      assert.equal(pool!.oracleNumReporters, 2);
+    });
+
+    it("repairs already-linked VirtualPools whose oracle freshness window is still unknown", async function () {
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const firstSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: firstSwap,
+        mockDb,
+      });
+
+      const linkedPool = mockDb.entities.Pool.get(poolId)!;
+      mockDb = mockDb.entities.Pool.set({
+        ...linkedPool,
+        oracleFreshnessWindow: 0n,
+      });
+      const linkedExchange = mockDb.entities.BiPoolExchange.get(
+        `${CHAIN_ID}-${EXCHANGE_ID}`,
+      )!;
+      mockDb = mockDb.entities.BiPoolExchange.set({
+        ...linkedExchange,
+        referenceRateFeedID: ZERO_ADDRESS,
+        referenceRateResetFrequency: 0n,
+      });
+
+      const secondSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(2, 300, 1_700_002_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: secondSwap,
+        mockDb,
+      });
+
+      const repaired = mockDb.entities.Pool.get(poolId) as
+        | { oracleFreshnessWindow: bigint }
+        | undefined;
+      assert.ok(repaired);
+      assert.equal(repaired!.oracleFreshnessWindow, 360n);
+      const repairedExchange = mockDb.entities.BiPoolExchange.get(
+        `${CHAIN_ID}-${EXCHANGE_ID}`,
+      ) as { referenceRateFeedID: string; referenceRateResetFrequency: bigint };
+      assert.equal(repairedExchange.referenceRateFeedID, FEED_ID);
+      assert.equal(repairedExchange.referenceRateResetFrequency, 360n);
+    });
+
+    it("repairs already-linked VirtualPools whose reporter count is a legacy zero", async function () {
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      _setMockNumReporters(CHAIN_ID, FEED_ID, 2);
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const firstSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: firstSwap,
+        mockDb,
+      });
+
+      const linkedPool = mockDb.entities.Pool.get(poolId)!;
+      mockDb = mockDb.entities.Pool.set({
+        ...linkedPool,
+        oracleNumReporters: 0,
+      });
+
+      const secondSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(2, 300, 1_700_002_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: secondSwap,
+        mockDb,
+      });
+
+      const repaired = mockDb.entities.Pool.get(poolId) as
+        | { oracleNumReporters: number }
+        | undefined;
+      assert.ok(repaired);
+      assert.equal(repaired!.oracleNumReporters, 2);
+    });
+
+    it("marks already-linked legacy-zero VirtualPool reporter counts unknown when numRates fails", async function () {
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      _setMockNumReporters(CHAIN_ID, FEED_ID, null);
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const firstSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: firstSwap,
+        mockDb,
+      });
+
+      const linkedPool = mockDb.entities.Pool.get(poolId)!;
+      mockDb = mockDb.entities.Pool.set({
+        ...linkedPool,
+        oracleNumReporters: 0,
+      });
+
+      const secondSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(2, 300, 1_700_002_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: secondSwap,
+        mockDb,
+      });
+
+      const repaired = mockDb.entities.Pool.get(poolId) as
+        | { oracleNumReporters: number }
+        | undefined;
+      assert.ok(repaired);
+      assert.equal(repaired!.oracleNumReporters, UNKNOWN_ORACLE_REPORTERS);
+    });
+
+    it("repairs already-linked VirtualPools whose Pool feed is stale", async function () {
+      _setMockPoolExchange(
+        CHAIN_ID,
+        BIPOOL_MANAGER_ADDRESS,
+        EXCHANGE_ID,
+        fullStruct(),
+      );
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const firstSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: firstSwap,
+        mockDb,
+      });
+
+      const linkedPool = mockDb.entities.Pool.get(poolId)!;
+      mockDb = mockDb.entities.Pool.set({
+        ...linkedPool,
+        referenceRateFeedID: "",
+      });
+      const linkedExchange = mockDb.entities.BiPoolExchange.get(
+        `${CHAIN_ID}-${EXCHANGE_ID}`,
+      )!;
+      mockDb = mockDb.entities.BiPoolExchange.set({
+        ...linkedExchange,
+        referenceRateFeedID: FEED_ID,
+        referenceRateResetFrequency: 0n,
+      });
+
+      const secondSwap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(2, 300, 1_700_002_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({
+        event: secondSwap,
+        mockDb,
+      });
+
+      const repaired = mockDb.entities.Pool.get(poolId) as
+        | { referenceRateFeedID: string }
+        | undefined;
+      assert.ok(repaired);
+      assert.equal(repaired!.referenceRateFeedID, FEED_ID);
+    });
+
+    it("links deprecated exchange stubs during VirtualPool heal", async function () {
+      _setMockPoolExchange(CHAIN_ID, BIPOOL_MANAGER_ADDRESS, EXCHANGE_ID, null);
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const destroyed = BiPoolManager.ExchangeDestroyed.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeDestroyed.processEvent({
+        event: destroyed,
+        mockDb,
+      });
+
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const healedPool = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0: string;
+            token1: string;
+            tokenDecimalsKnown: boolean;
+            oracleFreshnessWindow: bigint;
+          }
+        | undefined;
+      assert.ok(healedPool);
+      assert.equal(healedPool!.token0, ASSET0);
+      assert.equal(healedPool!.token1, ASSET1);
+      assert.equal(healedPool!.tokenDecimalsKnown, true);
+      assert.equal(healedPool!.oracleFreshnessWindow, 0n);
+
+      const linkedExchange = mockDb.entities.BiPoolExchange.get(
+        `${CHAIN_ID}-${EXCHANGE_ID}`,
+      ) as
+        | {
+            isDeprecated: boolean;
+            wrappedByPoolId: string;
+            referenceRateFeedID: string;
+            referenceRateResetFrequency: bigint;
+          }
+        | undefined;
+      assert.ok(linkedExchange);
+      assert.equal(linkedExchange!.isDeprecated, true);
+      assert.equal(linkedExchange!.wrappedByPoolId, poolId);
+      assert.equal(linkedExchange!.referenceRateFeedID, ZERO_ADDRESS);
+      assert.equal(linkedExchange!.referenceRateResetFrequency, 0n);
+    });
+
+    it("preserves active exchange stubs during VirtualPool heal", async function () {
+      _setMockPoolExchange(CHAIN_ID, BIPOOL_MANAGER_ADDRESS, EXCHANGE_ID, null);
+      _setMockVpExchangeId(CHAIN_ID, VP_ADDRESS, {
+        exchangeProvider: BIPOOL_MANAGER_ADDRESS,
+        exchangeId: EXCHANGE_ID,
+      });
+      mockVpTokenDecimalsScaling();
+
+      let mockDb = MockDb.createMockDb();
+      const create = BiPoolManager.ExchangeCreated.createMockEvent({
+        exchangeId: EXCHANGE_ID,
+        asset0: ASSET0,
+        asset1: ASSET1,
+        pricingModule: CONSTANT_SUM_MAINNET,
+        mockEventData: mockEventData(0, 100, 1_700_000_000),
+      });
+      mockDb = await BiPoolManager.ExchangeCreated.processEvent({
+        event: create,
+        mockDb,
+      });
+
+      const swap = VirtualPool.Swap.createMockEvent({
+        sender: ASSET0,
+        amount0In: 1_000_000n,
+        amount1In: 0n,
+        amount0Out: 0n,
+        amount1Out: 990_000n,
+        to: ASSET1,
+        mockEventData: mockEventData(1, 200, 1_700_001_000, VP_ADDRESS),
+      });
+      mockDb = await VirtualPool.Swap.processEvent({ event: swap, mockDb });
+
+      const poolId = makePoolId(CHAIN_ID, VP_ADDRESS);
+      const healedPool = mockDb.entities.Pool.get(poolId) as
+        | {
+            token0: string;
+            token1: string;
+            tokenDecimalsKnown: boolean;
+            oracleFreshnessWindow: bigint;
+          }
+        | undefined;
+      assert.ok(healedPool);
+      assert.equal(healedPool!.token0, ASSET0);
+      assert.equal(healedPool!.token1, ASSET1);
+      assert.equal(healedPool!.tokenDecimalsKnown, true);
+      assert.equal(healedPool!.oracleFreshnessWindow, 0n);
+
+      const linkedExchange = mockDb.entities.BiPoolExchange.get(
+        `${CHAIN_ID}-${EXCHANGE_ID}`,
+      ) as
+        | {
+            isDeprecated: boolean;
+            wrappedByPoolId: string;
+            referenceRateFeedID: string;
+            referenceRateResetFrequency: bigint;
+          }
+        | undefined;
+      assert.ok(linkedExchange);
+      assert.equal(linkedExchange!.isDeprecated, false);
+      assert.equal(linkedExchange!.wrappedByPoolId, poolId);
+      assert.equal(linkedExchange!.referenceRateFeedID, ZERO_ADDRESS);
+      assert.equal(linkedExchange!.referenceRateResetFrequency, 0n);
     });
 
     it("reverse-link backfill: ExchangeCreated AFTER VP heals fills tokens+decimals via mirrorTokensAndDecimalsToPool", async function () {

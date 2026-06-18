@@ -19,6 +19,7 @@ on:
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
       - package.json
+      - patches/**
       - .github/workflows/metrics-bridge.yml
 
 # Serialize all deploys: a workflow-name-only group (no SHA, no ref) means

@@ -104,6 +104,8 @@ const BASE_POOL: Pool = {
   limitStatus: "OK",
 };
 
+const TABLE_NOW_SECONDS = 1_713_200_100;
+
 function makeEntry(
   pool: Partial<Pool> = {},
   network: Network = CELO_NETWORK,
@@ -187,6 +189,36 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).not.toMatch(/<button[^>]*title="[^"]*Oracle/);
     expect(html).toContain("sr-only");
     expect(html).toContain("Oracle stale — last update expired");
+  });
+
+  it("uses VP median/quorum tooltip copy for critical VirtualPool incidents", () => {
+    const virtualNetwork: Network = {
+      ...CELO_NETWORK,
+      hasVirtualPools: true,
+    };
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          makeEntry(
+            {
+              source: "virtual_pool_factory",
+              wrappedExchangeId: "0xexchange",
+              healthStatus: "CRITICAL",
+              oracleTimestamp: String(TABLE_NOW_SECONDS - 60),
+              oracleFreshnessWindow: "300",
+              tokenDecimalsKnown: true,
+              medianLive: false,
+              oracleNumReporters: 2,
+              wrappedExchangeMinimumReports: "1",
+            },
+            virtualNetwork,
+          ),
+        ]}
+      />,
+    );
+    expect(html).toContain("VirtualPool median or quorum invalid");
+    expect(html).toContain("valid median with enough active reporters");
+    expect(html).not.toContain("Rebalance overdue");
   });
 
   it("hides Type column when no network has virtual pools", () => {

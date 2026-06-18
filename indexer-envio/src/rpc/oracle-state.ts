@@ -128,6 +128,47 @@ export function _clearMockRateFeedOracles(): void {
   clearTestRpcMockGroup("rateFeedOracles");
 }
 
+const _testNumReporters = new Map<string, number | null>();
+
+/** @internal Test-only: pre-set a mock numRates response for a rateFeedID. */
+export function _setMockNumReporters(
+  chainId: number,
+  rateFeedID: string,
+  numReporters: number | null,
+): void {
+  const key = `${chainId}:${rateFeedID.toLowerCase()}`;
+  _testNumReporters.set(key, numReporters);
+  let sortedOraclesAddress: string | undefined;
+  try {
+    sortedOraclesAddress = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return;
+  }
+  if (numReporters === null) {
+    setTestRpcErrorMock({
+      group: "numReporters",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "numRates",
+      callArgs: [rateFeedID],
+    });
+  } else {
+    setTestRpcMock({
+      group: "numReporters",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "numRates",
+      callArgs: [rateFeedID],
+      result: BigInt(numReporters),
+    });
+  }
+}
+
+export function _clearMockNumReporters(): void {
+  _testNumReporters.clear();
+  clearTestRpcMockGroup("numReporters");
+}
+
 /** Returns SortedOracles address for chainId, throws if not in @mento-protocol/contracts. */
 const SORTED_ORACLES_ADDRESS = SortedOraclesContract.address;
 
@@ -177,6 +218,11 @@ export async function fetchNumReporters(
   blockNumber: bigint,
   log: RpcLogger = consoleLogger,
 ): Promise<number | null> {
+  const mockKey = `${chainId}:${rateFeedID.toLowerCase()}`;
+  if (_testNumReporters.has(mockKey)) {
+    return _testNumReporters.get(mockKey) ?? null;
+  }
+
   let address: `0x${string}`;
   try {
     address = SORTED_ORACLES_ADDRESS(chainId);
