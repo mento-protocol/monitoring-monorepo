@@ -20,6 +20,7 @@ export type ReserveYieldHolding = {
   identifier: string | null;
   custodianType: string | null;
   balance: number;
+  hasTokenBalance: boolean;
   principalUsd: number;
   earnedYieldUsd: number | null;
   apyPercent: number | null;
@@ -61,6 +62,7 @@ export type ReserveYieldExtraction = {
   malformedCount: number;
   trackedAssetCount: number;
   susdsAssetCount: number;
+  stethAssetCount: number;
 };
 
 export type FredObservation = {

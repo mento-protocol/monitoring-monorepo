@@ -10,7 +10,7 @@ last_verified: 2026-05-20
 
 ## What This Is
 
-Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain), plus Ethereum sUSDS reserve-yield accounting. Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split.
+Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain), plus Ethereum sUSDS and stETH reserve-yield accounting. Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split.
 
 ## Before Opening PRs
 
@@ -22,9 +22,9 @@ This is mandatory for cross-layer/stateful data work. Do not assume the UI/query
 
 ## Key Files
 
-- `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad + Ethereum sUSDS)
+- `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad + Ethereum reserve yield)
 - `config.multichain.testnet.yaml` — Testnet multichain config
-- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, sUSDS yield ledger)
+- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, sUSDS and stETH yield ledgers)
 - `src/EventHandlers.ts` — Event processing logic
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
 - `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
@@ -80,13 +80,13 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_RPC_FALLBACK_URL_<chainId>` — (optional) explicit per-chain fallback RPC for `readContractWithBlockFallback`. Used for **both** archive-depth and rate-limit failover, so the fallback must cover the full sync window. When unset, falls back to `RPC_CONFIG_BY_CHAIN[<chainId>].default` only if the primary differs from it; otherwise no fallback is used. Empty-string values are treated as unset. **Caveat:** swapping in a shallow-archive secondary as the fallback (e.g. a tokenized QuickNode URL behind `rpc2.monad.xyz`) only works when the deep-archive primary rarely rate-limits at the indexer's load — otherwise rate-limit failover can leak into archive-depth misses during catch-up.
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
 - `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60710000
-- `ENVIO_START_BLOCK_ETHEREUM` — (optional) Ethereum start block, defaults to 22990000 and must cover the first tracked Mento reserve sUSDS deposit at block 22994825
+- `ENVIO_START_BLOCK_ETHEREUM` — (optional) Ethereum start block, defaults to 19111760 and must cover the first tracked Mento reserve stETH mint at block 19111760 and sUSDS deposit at block 22994825
 
 Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route all chains to the same endpoint and produce incorrect RPC reads for chain-specific calls.
 
 > **Note:** These RPC URLs are only used for contract reads (`eth_call`). Envio's event syncing uses HyperSync, configured in the YAML files.
 
-Mainnet (Celo + Monad + Ethereum sUSDS): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`.
+Mainnet (Celo + Monad + Ethereum reserve yield): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`.
 
 ## Local dev gotchas
 

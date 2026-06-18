@@ -13,15 +13,15 @@ import {
   parseLidoStethAprPercent,
 } from "@/lib/reserve-yield-steth";
 import {
-  asArray,
+  extractReserveYieldHoldings,
+  hasStethHolding,
+} from "@/lib/reserve-yield-holdings";
+import {
   errorMessage,
   fetchJson,
   fetchText,
-  isRecord,
   joinErrors,
-  nullableStringField,
   numericField,
-  stringField,
 } from "@/lib/reserve-yield-shared";
 import {
   FEDFUNDS_CSV_URL,
@@ -36,25 +36,20 @@ import {
   type ForecastTotals,
   type FredObservation,
   type ReserveHoldingsState,
-  type ReserveYieldExtraction,
   type ReserveYieldHolding,
   type ReserveYieldResponse,
+  type SkySavingsRateObservation,
   type SkySavingsRateSource,
 } from "@/lib/reserve-yield-types";
 
 export type { ReserveYieldHolding, ReserveYieldResponse };
 export {
   computeSkySavingsRateApyPercentFromSsr,
+  extractReserveYieldHoldings,
   parseSkySavingsRateApyPercent,
   parseSkySavingsRateSsrApyPercent,
   parseLidoStethAprPercent,
 };
-
-const TRACKED_YIELD_SYMBOLS = new Set([
-  FORECASTABLE_AUSD_SYMBOL,
-  FORECASTABLE_SUSDS_SYMBOL,
-  FORECASTABLE_STETH_SYMBOL,
-]);
 
 function yieldForDays(
   principalUsd: number,
@@ -95,231 +90,6 @@ function estimateHolding(holding: ReserveYieldHolding): ReserveYieldHolding {
   };
 }
 
-function aggregateHoldings(
-  holdings: ReserveYieldHolding[],
-): ReserveYieldHolding[] {
-  const bySource = new Map<string, ReserveYieldHolding>();
-  for (const holding of holdings) {
-    const key = [
-      holding.assetSymbol.toUpperCase(),
-      holding.chain.toLowerCase(),
-      holding.sourceType.toLowerCase(),
-      holding.sourceLabel.toLowerCase(),
-      holding.identifier?.toLowerCase() ?? "",
-      holding.custodianType?.toLowerCase() ?? "",
-    ].join("|");
-    const existing = bySource.get(key);
-    if (!existing) {
-      bySource.set(key, holding);
-      continue;
-    }
-    bySource.set(key, {
-      ...existing,
-      balance: existing.balance + holding.balance,
-      principalUsd: existing.principalUsd + holding.principalUsd,
-      earnedYieldUsd:
-        existing.earnedYieldUsd !== null && holding.earnedYieldUsd !== null
-          ? existing.earnedYieldUsd + holding.earnedYieldUsd
-          : null,
-    });
-  }
-
-  return Array.from(bySource.values()).sort((a, b) => {
-    if (b.principalUsd !== a.principalUsd) {
-      return b.principalUsd - a.principalUsd;
-    }
-    return `${a.chain} ${a.sourceLabel}`.localeCompare(
-      `${b.chain} ${b.sourceLabel}`,
-    );
-  });
-}
-
-function isTrackedYieldAsset(symbol: string): boolean {
-  return TRACKED_YIELD_SYMBOLS.has(symbol.toUpperCase());
-}
-
-function isSusdsSymbol(symbol: string): boolean {
-  return symbol.toUpperCase() === FORECASTABLE_SUSDS_SYMBOL;
-}
-
-function isStethSymbol(symbol: string): boolean {
-  return symbol.toUpperCase() === FORECASTABLE_STETH_SYMBOL;
-}
-
-function requiresExplicitUsdValue(symbol: string): boolean {
-  return isSusdsSymbol(symbol) || isStethSymbol(symbol);
-}
-
-function principalUsdFromAsset(
-  asset: Record<string, unknown>,
-  symbol: string,
-): number | null {
-  const usdValue = numericField(asset.usd_value);
-  if (usdValue !== null) return usdValue;
-  return requiresExplicitUsdValue(symbol) ? null : numericField(asset.balance);
-}
-
-function principalUsdFromSource({
-  asset,
-  source,
-  symbol,
-}: {
-  asset: Record<string, unknown>;
-  source: Record<string, unknown>;
-  symbol: string;
-}): number | null {
-  const sourceUsdValue = numericField(source.usd_value);
-  if (sourceUsdValue !== null) return sourceUsdValue;
-
-  const sourceBalance = numericField(source.balance);
-  if (!requiresExplicitUsdValue(symbol)) return sourceBalance;
-  if (sourceBalance === null) return null;
-
-  const assetUsdValue = numericField(asset.usd_value);
-  const assetBalance = numericField(asset.balance);
-  if (assetUsdValue === null || assetBalance === null || assetBalance <= 0) {
-    return null;
-  }
-  return assetUsdValue * (sourceBalance / assetBalance);
-}
-
-function sourceHoldingFromRecord({
-  asset,
-  source,
-  sourceIndex,
-}: {
-  asset: Record<string, unknown>;
-  source: Record<string, unknown>;
-  sourceIndex: number;
-}): ReserveYieldHolding | null {
-  const assetSymbol = stringField(asset.symbol, "unknown");
-  const principalUsd = principalUsdFromSource({
-    asset,
-    source,
-    symbol: assetSymbol,
-  });
-  const balance = numericField(source.balance) ?? principalUsd;
-  if (principalUsd === null || balance === null) return null;
-
-  const chain = stringField(asset.chain, "unknown");
-  const sourceType = stringField(source.type, "unknown");
-  const sourceLabel = stringField(source.label, "Unlabeled source");
-  const identifier = nullableStringField(source.identifier);
-  const custodianType = nullableStringField(source.custodian_type);
-  return {
-    id: [
-      assetSymbol,
-      chain,
-      sourceType,
-      identifier ?? sourceLabel,
-      custodianType ?? "unknown",
-      sourceIndex,
-    ].join(":"),
-    assetSymbol,
-    chain,
-    sourceType,
-    sourceLabel,
-    identifier,
-    custodianType,
-    balance,
-    principalUsd,
-    earnedYieldUsd: null,
-    apyPercent: null,
-    yieldModel: "Yield source pending",
-    dailyRunRateUsd: null,
-    next30dUsd: null,
-    next365dUsd: null,
-    annualRunRateUsd: null,
-  };
-}
-
-function assetFallbackHolding(
-  asset: Record<string, unknown>,
-  assetIndex: number,
-): ReserveYieldHolding | null {
-  const assetSymbol = stringField(asset.symbol, "unknown");
-  const principalUsd = principalUsdFromAsset(asset, assetSymbol);
-  const balance = numericField(asset.balance) ?? principalUsd;
-  if (principalUsd === null || balance === null) return null;
-
-  const chain = stringField(asset.chain, "unknown");
-  return {
-    id: `${assetSymbol}:${chain}:asset:${assetIndex}`,
-    assetSymbol,
-    chain,
-    sourceType: "asset",
-    sourceLabel: `${assetSymbol} reserve asset`,
-    identifier: null,
-    custodianType: null,
-    balance,
-    principalUsd,
-    earnedYieldUsd: null,
-    apyPercent: null,
-    yieldModel: "Yield source pending",
-    dailyRunRateUsd: null,
-    next30dUsd: null,
-    next365dUsd: null,
-    annualRunRateUsd: null,
-  };
-}
-
-export function extractReserveYieldHoldings(
-  reservePayload: unknown,
-): ReserveYieldExtraction {
-  const collateral = isRecord(reservePayload)
-    ? reservePayload.collateral
-    : null;
-  const assets = isRecord(collateral) ? asArray(collateral.assets) : [];
-  const holdings: ReserveYieldHolding[] = [];
-  let malformedCount = 0;
-  let trackedAssetCount = 0;
-  let susdsAssetCount = 0;
-
-  assets.forEach((assetValue, assetIndex) => {
-    if (!isRecord(assetValue)) return;
-    const symbol = stringField(assetValue.symbol, "");
-    if (!isTrackedYieldAsset(symbol)) return;
-    trackedAssetCount += 1;
-    if (isSusdsSymbol(symbol)) {
-      susdsAssetCount += 1;
-    }
-
-    const sources: Record<string, unknown>[] = [];
-    for (const source of asArray(assetValue.sources)) {
-      if (isRecord(source)) sources.push(source);
-    }
-    const sourceHoldings: ReserveYieldHolding[] = [];
-    sources.forEach((source, sourceIndex) => {
-      const holding = sourceHoldingFromRecord({
-        asset: assetValue,
-        source,
-        sourceIndex,
-      });
-      if (holding !== null) sourceHoldings.push(holding);
-    });
-    malformedCount += sources.length - sourceHoldings.length;
-
-    if (sourceHoldings.length > 0) {
-      holdings.push(...sourceHoldings);
-      return;
-    }
-
-    const fallback = assetFallbackHolding(assetValue, assetIndex);
-    if (fallback) {
-      holdings.push(fallback);
-    } else {
-      malformedCount += 1;
-    }
-  });
-
-  return {
-    holdings: aggregateHoldings(holdings),
-    malformedCount,
-    trackedAssetCount,
-    susdsAssetCount,
-  };
-}
-
 function applyForecastModels(
   holdings: ReserveYieldHolding[],
   apyBySymbol: ForecastApyBySymbol,
@@ -351,9 +121,11 @@ function applyForecastModels(
         ...holding,
         apyPercent: apyBySymbol.stethAprPercent,
         yieldModel:
-          apyBySymbol.stethAprPercent === null
-            ? "Lido stETH APR source pending; stETH mark-to-market changes are not counted as earned revenue"
-            : "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
+          holding.earnedYieldUsd !== null
+            ? holding.yieldModel
+            : apyBySymbol.stethAprPercent === null
+              ? "Lido stETH APR source pending; stETH mark-to-market changes are not counted as earned revenue"
+              : "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
       };
     }
     return {
@@ -451,10 +223,6 @@ function rateErrorForUnavailableForecasts(
   );
 }
 
-function hasStethHolding(holdings: ReserveYieldHolding[]): boolean {
-  return holdings.some((holding) => isStethSymbol(holding.assetSymbol));
-}
-
 function reserveHoldingsState(
   reserveResult: PromiseSettledResult<unknown>,
   fetchedAt: string,
@@ -490,6 +258,82 @@ function reserveHoldingsState(
   };
 }
 
+function sumNullable(...values: Array<number | null>): number | null {
+  const present = values.filter((value): value is number => value !== null);
+  return present.length === 0
+    ? null
+    : present.reduce((sum, value) => sum + value, 0);
+}
+
+type FedFundsState = {
+  grossApyPercent: number | null;
+  fedfundsAsOf: string | null;
+  fedfundsError: string | null;
+};
+
+function fedFundsState(
+  result: PromiseSettledResult<FredObservation>,
+): FedFundsState {
+  if (result.status === "fulfilled") {
+    return {
+      grossApyPercent: result.value.grossApyPercent,
+      fedfundsAsOf: result.value.date,
+      fedfundsError: null,
+    };
+  }
+  return {
+    grossApyPercent: null,
+    fedfundsAsOf: null,
+    fedfundsError: errorMessage("FRED FEDFUNDS", result.reason),
+  };
+}
+
+type SkyRateState = {
+  skySavingsRateApyPercent: number | null;
+  skySavingsRateSource: SkySavingsRateSource | null;
+  skyRateError: string | null;
+};
+
+function skyRateState(
+  result: PromiseSettledResult<SkySavingsRateObservation>,
+): SkyRateState {
+  if (result.status === "fulfilled") {
+    return {
+      skySavingsRateApyPercent: result.value.apyPercent,
+      skySavingsRateSource: result.value.source,
+      skyRateError: null,
+    };
+  }
+  return {
+    skySavingsRateApyPercent: null,
+    skySavingsRateSource: null,
+    skyRateError: errorMessage("Sky Savings Rate", result.reason),
+  };
+}
+
+async function stethAprState(
+  holdings: ReserveYieldHolding[],
+  fetchImpl: FetchImpl,
+): Promise<{ stethAprPercent: number | null; stethRateError: string | null }> {
+  if (!hasStethHolding(holdings)) {
+    return { stethAprPercent: null, stethRateError: null };
+  }
+  try {
+    // Lido is fetched only after the reserve payload proves stETH is held.
+    // Starting it speculatively would reduce one RTT for current reserves, but
+    // would also call Lido on every request even when stETH is absent.
+    return {
+      stethAprPercent: await fetchLidoStethApr(fetchImpl),
+      stethRateError: null,
+    };
+  } catch (err) {
+    return {
+      stethAprPercent: null,
+      stethRateError: errorMessage("Lido stETH APR", err),
+    };
+  }
+}
+
 export async function fetchReserveYieldSnapshot({
   fetchImpl = fetch,
   now = new Date(),
@@ -508,28 +352,8 @@ export async function fetchReserveYieldSnapshot({
   const fetchedAt = now.toISOString();
   const reserveState = reserveHoldingsState(reserveResult, fetchedAt);
   let { holdings } = reserveState;
-
-  let grossApyPercent: number | null = null;
-  let fedfundsAsOf: string | null = null;
-  let fedfundsError: string | null = null;
-
-  if (fedfundsResult.status === "fulfilled") {
-    grossApyPercent = fedfundsResult.value.grossApyPercent;
-    fedfundsAsOf = fedfundsResult.value.date;
-  } else {
-    fedfundsError = errorMessage("FRED FEDFUNDS", fedfundsResult.reason);
-  }
-
-  let skySavingsRateApyPercent: number | null = null;
-  let skySavingsRateSource: SkySavingsRateSource | null = null;
-  let skyRateError: string | null = null;
-
-  if (skyRateResult.status === "fulfilled") {
-    skySavingsRateApyPercent = skyRateResult.value.apyPercent;
-    skySavingsRateSource = skyRateResult.value.source;
-  } else {
-    skyRateError = errorMessage("Sky Savings Rate", skyRateResult.reason);
-  }
+  const fedFunds = fedFundsState(fedfundsResult);
+  const skyRate = skyRateState(skyRateResult);
 
   const susdsYield = applySusdsYieldLedgerResult(
     holdings,
@@ -539,46 +363,40 @@ export async function fetchReserveYieldSnapshot({
   );
   holdings = susdsYield.holdings;
 
-  let stethAprPercent: number | null = null;
-  let stethRateError: string | null = null;
-  if (hasStethHolding(holdings)) {
-    try {
-      // Lido is fetched only after the reserve payload proves stETH is held.
-      // Starting it speculatively would reduce one RTT for current reserves, but
-      // would also call Lido on every request even when stETH is absent.
-      stethAprPercent = await fetchLidoStethApr(fetchImpl);
-    } catch (err) {
-      stethRateError = errorMessage("Lido stETH APR", err);
-    }
-  }
+  // stETH remains forecast-only until launch-aligned daily actuals and
+  // wallet-level yield allocation exist. See issue #987.
+  const { stethAprPercent, stethRateError } = await stethAprState(
+    holdings,
+    fetchImpl,
+  );
 
   const netMentoApyPercent =
-    grossApyPercent === null
+    fedFunds.grossApyPercent === null
       ? null
-      : computeNetMentoApyPercent(grossApyPercent);
+      : computeNetMentoApyPercent(fedFunds.grossApyPercent);
   const forecast = buildForecastTotals(holdings, {
     ausdNetMentoApyPercent: netMentoApyPercent,
-    susdsApyPercent: skySavingsRateApyPercent,
-    susdsApySource: skySavingsRateSource,
+    susdsApyPercent: skyRate.skySavingsRateApyPercent,
+    susdsApySource: skyRate.skySavingsRateSource,
     stethAprPercent,
   });
 
   return {
     principalUsd: reserveState.principalUsd,
     forecastPrincipalUsd: forecast.forecastPrincipalUsd,
-    earnedYieldUsd: susdsYield.earnedYieldUsd,
-    realizedYieldUsd: susdsYield.realizedYieldUsd,
-    unrealizedYieldUsd: susdsYield.unrealizedYieldUsd,
+    earnedYieldUsd: sumNullable(susdsYield.earnedYieldUsd),
+    realizedYieldUsd: sumNullable(susdsYield.realizedYieldUsd),
+    unrealizedYieldUsd: sumNullable(susdsYield.unrealizedYieldUsd),
     earnedYieldAsOf: susdsYield.earnedYieldAsOf,
     holdings: forecast.modeledHoldings,
     holdingsAsOf: reserveState.holdingsAsOf,
-    grossApyPercent,
-    fedfundsAsOf,
+    grossApyPercent: fedFunds.grossApyPercent,
+    fedfundsAsOf: fedFunds.fedfundsAsOf,
     expenseBps: RESERVE_YIELD_EXPENSE_BPS,
     revenueShareBps: RESERVE_YIELD_REVENUE_SHARE_BPS,
     netMentoApyPercent,
-    skySavingsRateApyPercent,
-    skySavingsRateSource,
+    skySavingsRateApyPercent: skyRate.skySavingsRateApyPercent,
+    skySavingsRateSource: skyRate.skySavingsRateSource,
     dailyRunRateUsd: forecast.dailyRunRateUsd,
     next30dUsd: forecast.next30dUsd,
     next365dUsd: forecast.next365dUsd,
@@ -587,10 +405,10 @@ export async function fetchReserveYieldSnapshot({
     holdingsError: reserveState.holdingsError,
     rateError: rateErrorForUnavailableForecasts(
       forecast.forecastUnavailableSymbols,
-      fedfundsError,
-      skyRateError,
+      fedFunds.fedfundsError,
+      skyRate.skyRateError,
       stethRateError,
     ),
-    earnedYieldError: susdsYield.earnedYieldError,
+    earnedYieldError: joinErrors(susdsYield.earnedYieldError),
   };
 }

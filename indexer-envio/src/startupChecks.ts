@@ -21,7 +21,8 @@ import { env } from "./env.js";
  * First factory deployment blocks:
  *   Celo mainnet (42220):  60668100 — initial batch of 4 FPMM pools
  *   Monad mainnet (143):   60759432 — initial batch of 3 FPMM pools
- * First sUSDS tracked reserve movement:
+ * First Ethereum tracked reserve movements:
+ *   Ethereum mainnet (1):   19111760 — initial Mento reserve stETH mint
  *   Ethereum mainnet (1):   22994825 — initial Mento reserve sUSDS deposit
  */
 
@@ -31,10 +32,11 @@ export const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
 };
 
 export const SUSDS_FIRST_TRACKED_EVENT_BLOCK = 22994825;
+export const STETH_FIRST_TRACKED_EVENT_BLOCK = 19111760;
 
 const FIRST_REQUIRED_EVENT_BLOCK: Record<number, number> = {
   ...FPMM_FIRST_DEPLOY_BLOCK,
-  1: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+  1: STETH_FIRST_TRACKED_EVENT_BLOCK,
 };
 
 /** Maps mainnet chain IDs to their dedicated ENVIO_START_BLOCK_* env var name. */

@@ -3,7 +3,7 @@
 ## Deployment Model
 
 Single multichain mainnet indexer (Celo Mainnet `42220` + Monad `143` +
-Ethereum Mainnet `1` sUSDS reserve-yield events) on the Envio Cloud `mento`
+Ethereum Mainnet `1` sUSDS/stETH reserve-yield events) on the Envio Cloud `mento`
 project (org `mento-protocol`), Production Medium tier.
 
 This file documents only facts that stay true across redeployments. For live

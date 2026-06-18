@@ -121,6 +121,7 @@ describe("reserve yield parsing and math", () => {
       sourceType: "wallet",
       sourceLabel: "Reserve Safe",
       balance: 2000,
+      hasTokenBalance: true,
       principalUsd: 2200,
     });
     expect(extracted.holdings[1]).toMatchObject({
@@ -129,6 +130,7 @@ describe("reserve yield parsing and math", () => {
       sourceType: "wallet",
       sourceLabel: "Ops Safe",
       balance: 1500,
+      hasTokenBalance: true,
       principalUsd: 1500,
     });
     expect(
@@ -218,12 +220,268 @@ describe("reserve yield parsing and math", () => {
       assetSymbol: "stETH",
       sourceLabel: "Custodian",
       balance: 150,
+      hasTokenBalance: true,
       principalUsd: 252_000,
     });
     expect(extracted.holdings[1]).toMatchObject({
       assetSymbol: "stETH",
       sourceLabel: "Reserve Safe",
       balance: 100,
+      hasTokenBalance: true,
+      principalUsd: 168_000,
+    });
+  });
+
+  it("derives stETH source token balances from asset totals", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "250",
+            usd_value: 420_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Partial Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                usd_value: 168_000,
+                custodian_type: "cold",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Partial Reserve Safe",
+      hasTokenBalance: true,
+      principalUsd: 168_000,
+    });
+    expect(extracted.holdings[0]?.balance).toBeCloseTo(100, 12);
+  });
+
+  it("derives stETH balances after balance-only sources consume asset principal", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "250",
+            usd_value: 420_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                balance: "100",
+                custodian_type: "cold",
+              },
+              {
+                type: "wallet",
+                label: "Custodian",
+                identifier: "0x0000000000000000000000000000000000000001",
+                usd_value: 252_000,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(2);
+    const reserveSafe = extracted.holdings.find(
+      (holding) => holding.sourceLabel === "Reserve Safe",
+    );
+    const custodian = extracted.holdings.find(
+      (holding) => holding.sourceLabel === "Custodian",
+    );
+    expect(reserveSafe).toMatchObject({
+      sourceLabel: "Reserve Safe",
+      balance: 100,
+      hasTokenBalance: true,
+      principalUsd: 168_000,
+    });
+    expect(custodian).toMatchObject({
+      sourceLabel: "Custodian",
+      hasTokenBalance: true,
+      principalUsd: 252_000,
+    });
+    expect(custodian?.balance).toBeCloseTo(150, 12);
+  });
+
+  it("does not derive stETH token balances from zero asset balances", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "0",
+            usd_value: 420_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                usd_value: 420_000,
+                custodian_type: "cold",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Reserve Safe",
+      balance: 420_000,
+      hasTokenBalance: false,
+      principalUsd: 420_000,
+    });
+  });
+
+  it("caps derived stETH source balances to the asset token total", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "100",
+            usd_value: 100_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                usd_value: 80_000,
+              },
+              {
+                type: "wallet",
+                label: "Custodian",
+                identifier: "0x0000000000000000000000000000000000000001",
+                usd_value: 80_000,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(2);
+    const reserveSafe = extracted.holdings.find(
+      (holding) => holding.sourceLabel === "Reserve Safe",
+    );
+    const custodian = extracted.holdings.find(
+      (holding) => holding.sourceLabel === "Custodian",
+    );
+    expect(reserveSafe).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Reserve Safe",
+      hasTokenBalance: true,
+      principalUsd: 50_000,
+    });
+    expect(custodian).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Custodian",
+      hasTokenBalance: true,
+      principalUsd: 50_000,
+    });
+    expect(reserveSafe?.balance).toBeCloseTo(50, 12);
+    expect(custodian?.balance).toBeCloseTo(50, 12);
+  });
+
+  it("scales balance-derived stETH principals when sources exceed asset USD", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "100",
+            usd_value: 100_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                balance: "50",
+              },
+              {
+                type: "wallet",
+                label: "Custodian",
+                identifier: "0x0000000000000000000000000000000000000001",
+                usd_value: 90_000,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(2);
+    const reserveSafe = extracted.holdings.find(
+      (holding) => holding.sourceLabel === "Reserve Safe",
+    );
+    const custodian = extracted.holdings.find(
+      (holding) => holding.sourceLabel === "Custodian",
+    );
+    expect(reserveSafe).toMatchObject({
+      sourceLabel: "Reserve Safe",
+      balance: 50,
+      hasTokenBalance: true,
+    });
+    expect(reserveSafe?.principalUsd).toBeCloseTo(35_714.285714, 6);
+    expect(custodian).toMatchObject({
+      sourceLabel: "Custodian",
+      hasTokenBalance: true,
+    });
+    expect(custodian?.balance).toBeCloseTo(50, 12);
+    expect(custodian?.principalUsd).toBeCloseTo(64_285.714286, 6);
+  });
+
+  it("tracks when stETH rows use USD fallback instead of token balances", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            usd_value: 420_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Partial Reserve Safe",
+                identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                usd_value: 168_000,
+                custodian_type: "cold",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      assetSymbol: "stETH",
+      sourceLabel: "Partial Reserve Safe",
+      balance: 168_000,
+      hasTokenBalance: false,
       principalUsd: 168_000,
     });
   });

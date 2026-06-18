@@ -239,6 +239,56 @@ describe("GET /api/reserve-yield", () => {
     expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
   });
 
+  it("keeps stETH forecast-only instead of querying ledger actuals", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_STETH))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+    const stethHolding = body.holdings.find(
+      (holding: { assetSymbol: string }) => holding.assetSymbol === "stETH",
+    );
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    const susdsGraphqlBody = JSON.parse(
+      String(fetchMock.mock.calls[3]?.[1]?.body),
+    ) as { query: string; variables: Record<string, unknown> };
+    expect(susdsGraphqlBody.query).toContain(
+      "query SusdsYieldSummary($id: String!)",
+    );
+    expect(susdsGraphqlBody.variables.id).toBe("1-susds");
+    expect(String(fetchMock.mock.calls[4]?.[0])).toContain("eth-api.lido.fi");
+    expect(body.earnedYieldUsd).toBeNull();
+    expect(body.realizedYieldUsd).toBeNull();
+    expect(body.unrealizedYieldUsd).toBeNull();
+    expect(body.earnedYieldError).toBeNull();
+    expect(stethHolding.earnedYieldUsd).toBeNull();
+    expect(stethHolding).toMatchObject({
+      assetSymbol: "stETH",
+      apyPercent: 2.95,
+    });
+    expect(stethHolding.yieldModel).toContain(
+      "stETH mark-to-market changes are not counted as earned revenue",
+    );
+    expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
+  });
+
   it("keeps stETH balances visible when Lido APR is unavailable", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

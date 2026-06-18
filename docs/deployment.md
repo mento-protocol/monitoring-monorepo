@@ -15,9 +15,9 @@ This monorepo deploys two services independently:
 
 The prod multichain indexer is driven by a single deploy branch that Envio watches:
 
-| Network                       | Deploy Branch | Config File                      | Envio Project                  |
-| ----------------------------- | ------------- | -------------------------------- | ------------------------------ |
-| Celo + Monad + Ethereum sUSDS | `envio`       | `config.multichain.mainnet.yaml` | `mento-protocol/mento` (Envio) |
+| Network                               | Deploy Branch | Config File                      | Envio Project                  |
+| ------------------------------------- | ------------- | -------------------------------- | ------------------------------ |
+| Celo + Monad + Ethereum reserve yield | `envio`       | `config.multichain.mainnet.yaml` | `mento-protocol/mento` (Envio) |
 
 ### Endpoint URL
 
@@ -166,7 +166,7 @@ document the source of truth here, and wait for a human-approved plan/apply.
 
 | Variable                              | Source                   | Description                                               |
 | ------------------------------------- | ------------------------ | --------------------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad + Ethereum sUSDS)       |
+| `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad + Ethereum sUSDS/stETH) |
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                     |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                      |
 | `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks |
@@ -333,7 +333,7 @@ main
 └── feature branches → PR → main
 
 envio
-├── 🚀 auto-deploys to Envio (multichain indexer, Celo + Monad + Ethereum sUSDS)
+├── 🚀 auto-deploys to Envio (multichain indexer, Celo + Monad + Ethereum reserve yield)
 └── updated via: pnpm deploy:indexer
 ```
 

@@ -947,6 +947,66 @@ type SusdsYieldDailySnapshot {
   sampledAtTimestamp: BigInt!
 }
 
+# stETH reserve-yield accounting on Ethereum. The ledger stores token-unit
+# principal/yield only; the dashboard marks earned stETH to current USD from the
+# reserve API so ETH/USD price movement on principal is not counted as revenue.
+type StethYieldMovement {
+  id: ID! # eventId(chainId, blockNumber, logIndex)
+  chainId: Int! @index
+  kind: String! @index # transfer_in | transfer_out | internal_transfer
+  from: String!
+  to: String!
+  amount: BigInt! @config(precision: 78)
+  principalAmount: BigInt! @config(precision: 78)
+  yieldAmount: BigInt! @config(precision: 78)
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
+
+type StethCostBasisLot {
+  id: ID!
+  chainId: Int! @index
+  wallet: String! @index
+  originalAmount: BigInt! @config(precision: 78)
+  remainingAmount: BigInt! @config(precision: 78)
+  openedAtBlock: BigInt!
+  openedAtLogIndex: Int!
+  openedTxHash: String!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+type StethPosition {
+  id: ID! # "{chainId}-{wallet}"
+  chainId: Int! @index
+  wallet: String! @index
+  # Transfer-event balance only. Rebasing growth is refreshed from the current
+  # reserve API balance in the dashboard path.
+  balance: BigInt! @config(precision: 78)
+  principalAmount: BigInt! @config(precision: 78)
+  realizedYieldAmount: BigInt! @config(precision: 78)
+  transferredOutYieldAmount: BigInt! @config(precision: 78)
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
+
+type StethYieldSummary {
+  id: ID! # "{chainId}-steth"
+  chainId: Int! @index
+  token: String!
+  trackedWallets: [String!]!
+  currentBalance: BigInt! @config(precision: 78)
+  remainingPrincipalAmount: BigInt! @config(precision: 78)
+  realizedYieldAmount: BigInt! @config(precision: 78)
+  transferredOutYieldAmount: BigInt! @config(precision: 78)
+  unrealizedYieldAmount: BigInt! @config(precision: 78)
+  totalEarnedYieldAmount: BigInt! @config(precision: 78)
+  lastMovementTxHash: String!
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
+
 # Pre-rolled hero metrics for /volume. Bypasses Hasura's 1000-row
 # cap on TraderDailySnapshot for any window-level aggregation.
 # One row per (chainId, windowKey, snapshotDay). The dashboard reads the
