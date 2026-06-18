@@ -16,7 +16,7 @@ variable "org_id" {
   # default). Defaulted so CI needs no TF_VAR_org_id env var: a bare,
   # workspace-wide TF_VAR_org_id in terraform-drift.yml would expand empty
   # pre-bootstrap and clobber the alerts-delivery leg, which also declares
-  # org_id (caught in #1001 review).
+  # org_id with its own matching default.
   default = "599540483579"
 }
 
