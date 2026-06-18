@@ -195,6 +195,23 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     expect(mockDiscordSend).not.toHaveBeenCalled();
   });
 
+  it("returns 500 and suppresses notifications when nonce reservation fails", async () => {
+    mockReserveQuickNodeNonce.mockResolvedValue({
+      valid: false,
+      status: 500,
+      message: "Server configuration error",
+    });
+    const governanceWatchdog = await loadFunction();
+    const res = makeRes();
+
+    await governanceWatchdog(makeReq("/", proposalCreated), res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.send).toHaveBeenCalledWith("Server configuration error");
+    expect(mockDiscordSend).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it("processes requests authenticated via x-auth-token", async () => {
     mockIsFromQuicknode.mockResolvedValue(false);
     mockHasAuthToken.mockResolvedValue(true);
