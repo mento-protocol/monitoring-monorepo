@@ -128,6 +128,23 @@ async function compareFiles(base, head, singleCommitOnly) {
     `/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`,
   );
   const comparison = await fetchJson(url);
+  // GitHub's /compare/base...head endpoint is THREE-DOT (merge-base) semantics:
+  // its file list only reflects head-side changes since the merge-base. After a
+  // PR branch rebase/force-push the previous-deployment `base` is no longer an
+  // ancestor of `head`, so a dashboard change present in the deployed preview
+  // but diverged from head can be OMITTED from this list — authorizing a FALSE
+  // SKIP that serves stale dashboard code. The file list is only a safe basis
+  // for a skip when `base` is proven an ancestor of `head`: status "ahead"/
+  // "identical" with behind_by === 0. If histories diverged ("diverged"/
+  // "behind", behind_by > 0), fail closed so the bash caller falls through to
+  // the full-PR-files diff / merge-base / build. Treat a missing/undefined
+  // behind_by conservatively as 0 (ancestor) so callers/fixtures that don't
+  // surface the field still skip on a clean ahead-only compare.
+  if (comparison.behind_by > 0) {
+    throw new Error(
+      `compare base is not an ancestor of head (behind_by=${comparison.behind_by}, status=${comparison.status}); build instead of risking a false skip`,
+    );
+  }
   if (singleCommitOnly && comparison.ahead_by > 1) {
     throw new Error(
       `branch fallback has ${comparison.ahead_by} commits; build instead of risking a false skip`,

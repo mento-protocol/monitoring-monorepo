@@ -88,13 +88,34 @@ const responses = new Map([
   [
     "/repos/mento-protocol/monitoring-monorepo/compare/previous-sha...sha-docs",
     {
+      status: "ahead",
       ahead_by: 1,
+      behind_by: 0,
       files: [{ filename: "docs/pr-checklists/recurring-review-patterns.md" }],
     },
   ],
   [
     "/repos/mento-protocol/monitoring-monorepo/compare/previous-sha...sha-dashboard",
-    { ahead_by: 1, files: [{ filename: "ui-dashboard/src/app/page.tsx" }] },
+    {
+      status: "ahead",
+      ahead_by: 1,
+      behind_by: 0,
+      files: [{ filename: "ui-dashboard/src/app/page.tsx" }],
+    },
+  ],
+  // Diverged history (e.g. after a PR branch rebase/force-push): the previous
+  // deployment SHA is NOT an ancestor of head, so this THREE-DOT compare only
+  // reports the docs-only head-side change and OMITS any diverged dashboard
+  // change. The ancestry guard (behind_by > 0) must reject this file list and
+  // force a build rather than a false skip.
+  [
+    "/repos/mento-protocol/monitoring-monorepo/compare/diverged-prev...sha-diverged",
+    {
+      status: "diverged",
+      ahead_by: 1,
+      behind_by: 2,
+      files: [{ filename: "docs/x.md" }],
+    },
   ],
 ]);
 
@@ -308,6 +329,20 @@ expect_build "PR incremental dashboard change builds without local git via GitHu
   VERCEL_GIT_PREVIOUS_SHA=previous-sha \
   VERCEL_GIT_COMMIT_SHA=sha-dashboard
 assert_output_contains "Dashboard-affecting changes detected since previous deployment for PR #985"
+
+# Diverged history after a rebase/force-push: the previous deployment SHA is not
+# an ancestor of head, so the THREE-DOT gitless compare returns only the
+# docs-only head-side file and omits the diverged dashboard change. The ancestry
+# guard must reject that file list and fall through to a build, NOT false-skip on
+# the docs-only list.
+expect_build "PR incremental diverged compare builds (no false skip on non-ancestor base)" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PULL_REQUEST_ID=986 \
+  VERCEL_GIT_PREVIOUS_SHA=diverged-prev \
+  VERCEL_GIT_COMMIT_SHA=sha-diverged
+assert_output_contains "Could not resolve origin/main for PR #986; building dashboard."
 
 cd "$fixture_repo"
 
