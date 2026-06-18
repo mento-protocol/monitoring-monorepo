@@ -18,10 +18,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-const keccak = require("keccak");
+import { keccak256, stringToBytes } from "viem";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const moduleDir = join(__dirname, "..");
@@ -52,7 +49,7 @@ const events = abi
       })
       .filter(Boolean);
     const signature = `${item.name}(${paramTypes.join(",")})`;
-    const hash = `0x${keccak("keccak256").update(signature).digest("hex")}`;
+    const hash = keccak256(stringToBytes(signature));
     return { name: item.name, signature, hash };
   })
   .sort((a, b) => a.name.localeCompare(b.name));

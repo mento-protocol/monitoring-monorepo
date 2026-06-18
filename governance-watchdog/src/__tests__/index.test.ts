@@ -10,6 +10,7 @@ const {
   mockGetSecret,
   mockHasAuthToken,
   mockIsFromQuicknode,
+  mockReserveQuickNodeNonce,
 } = vi.hoisted(() => ({
   mockCheckWebhookStatus: vi.fn(),
   mockDiscordSend: vi.fn(),
@@ -17,6 +18,7 @@ const {
   mockGetSecret: vi.fn(),
   mockHasAuthToken: vi.fn(),
   mockIsFromQuicknode: vi.fn(),
+  mockReserveQuickNodeNonce: vi.fn(),
 }));
 
 vi.mock("../config.js", () => ({
@@ -42,6 +44,10 @@ vi.mock("../utils/validate-request-origin.js", () => ({
 
 vi.mock("../quicknode-health/index.js", () => ({
   checkWebhookStatus: mockCheckWebhookStatus,
+}));
+
+vi.mock("../utils/quicknode-replay-protection.js", () => ({
+  reserveQuickNodeNonce: mockReserveQuickNodeNonce,
 }));
 
 vi.mock("discord.js", async (importOriginal) => ({
@@ -104,6 +110,7 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     mockGetSecret.mockResolvedValue("fake-secret");
     mockIsFromQuicknode.mockResolvedValue(true);
     mockHasAuthToken.mockResolvedValue(false);
+    mockReserveQuickNodeNonce.mockResolvedValue({ valid: true });
     mockDiscordSend.mockResolvedValue(undefined);
     mockFetch.mockResolvedValue({
       ok: true,
@@ -165,6 +172,42 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     await governanceWatchdog(makeReq("/", proposalCreated), res);
 
     expect(res.status).toHaveBeenCalledWith(401);
+    expect(mockDiscordSend).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects replayed QuickNode webhooks via the durable nonce", async () => {
+    mockReserveQuickNodeNonce.mockResolvedValue({
+      valid: false,
+      status: 200,
+      message: "Duplicate webhook nonce already processed",
+      replayed: true,
+    });
+    const governanceWatchdog = await loadFunction();
+    const res = makeRes();
+
+    await governanceWatchdog(makeReq("/", proposalCreated), res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.send).toHaveBeenCalledWith(
+      "Duplicate webhook nonce already processed",
+    );
+    expect(mockDiscordSend).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 and suppresses notifications when nonce reservation fails", async () => {
+    mockReserveQuickNodeNonce.mockResolvedValue({
+      valid: false,
+      status: 500,
+      message: "Server configuration error",
+    });
+    const governanceWatchdog = await loadFunction();
+    const res = makeRes();
+
+    await governanceWatchdog(makeReq("/", proposalCreated), res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.send).toHaveBeenCalledWith("Server configuration error");
     expect(mockDiscordSend).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
