@@ -238,6 +238,8 @@ describe("computeHealthStatus", () => {
         {
           source: "virtual_pool_factory",
           medianLive: false,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
           oracleTimestamp: String(now - 120),
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,
@@ -270,13 +272,15 @@ describe("computeHealthStatus", () => {
     ).toBe("N/A");
   });
 
-  it("keeps explicit VirtualPool median failures critical while decimals are unknown", () => {
+  it("suppresses explicit VirtualPool median failures while decimals are unknown", () => {
     const now = Math.floor(Date.now() / 1000);
     expect(
       computeHealthStatus(
         {
           source: "virtual_pool_factory",
           medianLive: false,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
           oracleTimestamp: String(now - 120),
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: false,
@@ -286,10 +290,10 @@ describe("computeHealthStatus", () => {
         undefined,
         now,
       ),
-    ).toBe("CRITICAL");
+    ).toBe("N/A");
   });
 
-  it("keeps known VirtualPool quorum failures critical while decimals are unknown", () => {
+  it("suppresses known VirtualPool quorum failures while decimals are unknown", () => {
     const now = Math.floor(Date.now() / 1000);
     expect(
       computeHealthStatus(
@@ -305,7 +309,7 @@ describe("computeHealthStatus", () => {
         undefined,
         now,
       ),
-    ).toBe("CRITICAL");
+    ).toBe("N/A");
   });
 
   it("does not downgrade invalid VirtualPool medians to weekend", async () => {
@@ -319,6 +323,8 @@ describe("computeHealthStatus", () => {
           {
             source: "virtual_pool_factory",
             medianLive: false,
+            oracleNumReporters: 2,
+            wrappedExchangeMinimumReports: "1",
             oracleTimestamp: String(now - 120),
             oracleFreshnessWindow: "360",
             tokenDecimalsKnown: true,
@@ -1647,6 +1653,8 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
           source: "virtual_pool_factory",
           wrappedExchangeId: "0xexchange",
           medianLive: false,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
           oracleTimestamp: ts120,
           oracleFreshnessWindow: "360",
           tokenDecimalsKnown: true,

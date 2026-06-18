@@ -19,7 +19,7 @@ import {
   POOL_VP_LIFECYCLE_DEPRECATION_EXT,
   POOL_VP_ORACLE_FRESHNESS_EXT,
 } from "@/lib/queries";
-import type { Pool } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
 
 type ThresholdsExtRow = {
   id: string;
@@ -169,14 +169,17 @@ export function usePoolWithThresholds(
     vpDeprecationExt,
     vpLifecycleDeprecationExt,
   ]);
+  const vpLoading =
+    rawPool && isVirtualPool(rawPool)
+      ? anyLoading(
+          vpFreshnessLoading,
+          vpDeprecationLoading,
+          vpLifecycleDeprecationLoading,
+        )
+      : false;
   return {
     pool,
-    thresholdsLoading: anyLoading(
-      thresholdsLoading,
-      vpFreshnessLoading,
-      vpDeprecationLoading,
-      vpLifecycleDeprecationLoading,
-    ),
+    thresholdsLoading: anyLoading(thresholdsLoading, vpLoading),
     thresholdsError,
   };
 }

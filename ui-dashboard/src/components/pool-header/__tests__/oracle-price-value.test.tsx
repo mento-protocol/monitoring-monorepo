@@ -205,6 +205,8 @@ describe("OraclePriceValue", () => {
       oracleFreshnessWindow: "360",
       medianLive: false,
       tokenDecimalsKnown: true,
+      oracleNumReporters: 2,
+      wrappedExchangeMinimumReports: "1",
     };
     const html = renderToStaticMarkup(
       <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,

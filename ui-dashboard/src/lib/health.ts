@@ -285,15 +285,20 @@ function isVirtualPoolResetWindowStale(
 function vpMedianValidity(pool: {
   medianLive?: boolean | undefined;
   oracleNumReporters?: number | undefined;
+  oracleFreshnessWindow?: string | undefined;
+  tokenDecimalsKnown?: boolean | undefined;
   wrappedExchangeMinimumReports?: string | undefined;
 }): boolean | null {
-  if (pool.medianLive === false) return false;
+  if (pool.tokenDecimalsKnown !== true) return null;
+  const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
+  if (!Number.isFinite(freshnessWindow) || freshnessWindow <= 0) return null;
   const minimumReports = Number(pool.wrappedExchangeMinimumReports ?? "0");
   if (!Number.isFinite(minimumReports) || minimumReports <= 0) return null;
   const oracleNumReporters = Number(pool.oracleNumReporters);
   if (!Number.isFinite(oracleNumReporters) || oracleNumReporters < 0) {
     return null;
   }
+  if (pool.medianLive === false) return false;
   if (oracleNumReporters < minimumReports) return false;
   return pool.medianLive === true ? true : null;
 }
@@ -301,6 +306,7 @@ function vpMedianValidity(pool: {
 export function isVirtualPoolMedianInvalid(pool: {
   medianLive?: boolean | undefined;
   oracleNumReporters?: number | undefined;
+  oracleFreshnessWindow?: string | undefined;
   tokenDecimalsKnown?: boolean | undefined;
   wrappedExchangeMinimumReports?: string | undefined;
 }): boolean {

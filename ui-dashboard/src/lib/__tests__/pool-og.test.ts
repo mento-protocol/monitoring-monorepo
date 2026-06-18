@@ -531,6 +531,7 @@ describe("fetchPoolOgDataUncached", () => {
         "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
       oracleTimestamp: String(nowSec - 120),
       lastOracleReportAt: "0",
+      oracleNumReporters: 2,
       oracleFreshnessWindow: "0",
     });
     mockRequest((q) => {
@@ -543,6 +544,13 @@ describe("fetchPoolOgDataUncached", () => {
               medianLive: false,
               oracleFreshnessWindow: "300",
             },
+          ],
+        };
+      }
+      if (q.includes("PoolVpDeprecationExt")) {
+        return {
+          BiPoolExchange: [
+            { id: "exchange", isDeprecated: false, minimumReports: "1" },
           ],
         };
       }

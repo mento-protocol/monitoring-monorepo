@@ -206,6 +206,7 @@ describe("GlobalPoolsTable — column structure", () => {
               healthStatus: "CRITICAL",
               oracleTimestamp: String(TABLE_NOW_SECONDS - 60),
               oracleFreshnessWindow: "300",
+              tokenDecimalsKnown: true,
               medianLive: false,
               oracleNumReporters: 2,
               wrappedExchangeMinimumReports: "1",

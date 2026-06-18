@@ -187,7 +187,7 @@ export const gauges = {
   }),
   vpOracleMedianValid: new Gauge({
     name: "mento_pool_vp_oracle_median_valid",
-    help: "VirtualPool median validity from indexed SortedOracles medianLive, active reporter count, and wrapped exchange minimumReports (1=valid, 0=invalid). Unknown wrapped exchange config publishes no series.",
+    help: "VirtualPool median validity from indexed SortedOracles medianLive, active reporter count, and wrapped exchange minimumReports (1=valid, 0=invalid). Unknown VP freshness/config input publishes no series.",
     labelNames: poolLabels,
     registers: [register],
   }),
@@ -471,11 +471,30 @@ export function vpOracleMedianValidity(
     PoolRow,
     | "medianLive"
     | "oracleNumReporters"
+    | "oracleFreshnessWindow"
     | "tokenDecimalsKnown"
     | "wrappedExchangeMinimumReports"
   >,
 ): number | null {
+  const inputs = trustedVpOracleMedianInputs(pool);
+  if (inputs === null) return null;
   if (pool.medianLive === false) return 0;
+  if (inputs.oracleNumReporters < inputs.minimumReports) return 0;
+  return pool.medianLive === true ? 1 : null;
+}
+
+function trustedVpOracleMedianInputs(
+  pool: Pick<
+    PoolRow,
+    | "oracleNumReporters"
+    | "oracleFreshnessWindow"
+    | "tokenDecimalsKnown"
+    | "wrappedExchangeMinimumReports"
+  >,
+): { minimumReports: number; oracleNumReporters: number } | null {
+  if (pool.tokenDecimalsKnown !== true) return null;
+  const freshnessWindow = Number(pool.oracleFreshnessWindow);
+  if (!Number.isFinite(freshnessWindow) || freshnessWindow <= 0) return null;
   const minimumReports = Number(pool.wrappedExchangeMinimumReports);
   const oracleNumReporters = Number(pool.oracleNumReporters);
   if (
@@ -486,8 +505,7 @@ export function vpOracleMedianValidity(
   ) {
     return null;
   }
-  if (oracleNumReporters < minimumReports) return 0;
-  return pool.medianLive === true ? 1 : null;
+  return { minimumReports, oracleNumReporters };
 }
 
 export function vpOracleFreshness(

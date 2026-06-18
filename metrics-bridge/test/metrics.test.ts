@@ -115,10 +115,10 @@ describe("updateMetrics", () => {
         "mento_pool_vp_oracle_median_valid",
         poolLabels,
       ),
-    ).toBe(1);
+    ).toBeUndefined();
   });
 
-  it("publishes invalid VirtualPool medians while token decimals are unknown", async () => {
+  it("suppresses invalid VirtualPool medians while token decimals are unknown", async () => {
     updateMetrics([
       makePool({
         source: "virtual_pool_factory",
@@ -132,17 +132,17 @@ describe("updateMetrics", () => {
     ]);
     expect(
       await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
-    ).toBe(0);
+    ).toBeUndefined();
     expect(
       await getGaugeValue(
         register,
         "mento_pool_vp_oracle_median_valid",
         poolLabels,
       ),
-    ).toBe(0);
+    ).toBeUndefined();
   });
 
-  it("publishes known VirtualPool quorum failures while token decimals are unknown", async () => {
+  it("suppresses known VirtualPool quorum failures while token decimals are unknown", async () => {
     updateMetrics([
       makePool({
         source: "virtual_pool_factory",
@@ -158,14 +158,14 @@ describe("updateMetrics", () => {
     ]);
     expect(
       await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
-    ).toBe(0);
+    ).toBeUndefined();
     expect(
       await getGaugeValue(
         register,
         "mento_pool_vp_oracle_median_valid",
         poolLabels,
       ),
-    ).toBe(0);
+    ).toBeUndefined();
   });
 
   it("keeps missing VirtualPool median inputs unknown", async () => {
@@ -320,7 +320,7 @@ describe("updateMetrics", () => {
         "mento_pool_vp_oracle_median_valid",
         poolLabels,
       ),
-    ).toBe(1);
+    ).toBeUndefined();
   });
 
   it("skips virtual-pool oracle freshness when minimumReports is unknown", async () => {
@@ -346,7 +346,7 @@ describe("updateMetrics", () => {
     ).toBeUndefined();
   });
 
-  it("still publishes invalid median when minimumReports is unknown but medianLive is false", async () => {
+  it("suppresses invalid median when minimumReports is unknown", async () => {
     updateMetrics([
       makePool({
         source: "virtual_pool_factory",
@@ -360,14 +360,14 @@ describe("updateMetrics", () => {
     ]);
     expect(
       await getGaugeValue(register, "mento_pool_vp_oracle_fresh", poolLabels),
-    ).toBe(0);
+    ).toBeUndefined();
     expect(
       await getGaugeValue(
         register,
         "mento_pool_vp_oracle_median_valid",
         poolLabels,
       ),
-    ).toBe(0);
+    ).toBeUndefined();
   });
 
   it("sets oracle_contract_ok to the raw event-time contract flag", async () => {
