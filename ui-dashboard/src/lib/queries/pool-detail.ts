@@ -332,23 +332,6 @@ export const POOL_DEVIATION_BREACHES_ALL = `
   }
 `;
 
-export const POOL_SNAPSHOTS_CHART = `
-  query PoolSnapshotsChart($poolId: String!) {
-    PoolSnapshot(
-      where: { poolId: { _eq: $poolId } }
-      order_by: { timestamp: desc }
-      limit: 50000
-    ) {
-      id poolId timestamp
-      reserves0 reserves1
-      swapCount swapVolume0 swapVolume1
-      rebalanceCount cumulativeSwapCount
-      cumulativeVolume0 cumulativeVolume1
-      blockNumber
-    }
-  }
-`;
-
 // Daily rollup of PoolSnapshot — one row per pool per UTC day. At ~365 rows per
 // pool per year the full history fits in Hasura's 1000-row cap for ~2.7 years.
 // Older pools lose oldest rows first — fetching newest-first means the chart

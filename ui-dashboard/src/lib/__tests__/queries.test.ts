@@ -40,7 +40,6 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_DEVIATION_BREACHES_PAGE",
   "POOL_DEVIATION_BREACHES_COUNT",
   "POOL_DEVIATION_BREACHES_ALL",
-  "POOL_SNAPSHOTS_CHART",
   "POOL_DAILY_SNAPSHOTS_CHART",
   "POOL_DAILY_SNAPSHOTS_ALL",
   "BROKER_DAILY_SNAPSHOTS_ALL",
@@ -471,10 +470,6 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_LIQUIDITY_PAGE).toContain(
       "$orderBy: [LiquidityEvent_order_by!]!",
     );
-  });
-
-  it("POOL_SNAPSHOTS_CHART caps at 50000 rows", () => {
-    expect(queries.POOL_SNAPSHOTS_CHART).toMatch(/limit:\s*50000\b/);
   });
 
   it("POOL_DAILY_SNAPSHOTS_CHART sorts [timestamp desc, id desc]", () => {
