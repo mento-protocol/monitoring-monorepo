@@ -2,6 +2,7 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY patches/ patches/
 COPY metrics-bridge/package.json metrics-bridge/
 # shared-config is a workspace dep of metrics-bridge. The ROOT `postinstall`
 # builds shared-config/dist via tsc, so the whole package (incl. src/ +
@@ -23,6 +24,7 @@ WORKDIR /app
 RUN addgroup -S bridge && adduser -S bridge -G bridge
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY patches/ patches/
 COPY metrics-bridge/package.json metrics-bridge/
 # Copy shared-config's package.json + runtime JSON exports (the `exports` map
 # points at `./*.json` directly). Covers both the install step below AND the
