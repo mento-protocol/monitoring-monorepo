@@ -230,6 +230,17 @@ if [[ -n "$pull_request_id" ]]; then
         "No dashboard-affecting changes since previous deployment for PR #${pull_request_id}; skipping build." \
         "Dashboard-affecting changes detected since previous deployment for PR #${pull_request_id}; building dashboard."
     fi
+
+    # We have a previous deployment for this branch but could not compare it to
+    # HEAD: the previous SHA is absent from this (gitless/shallow) clone AND the
+    # GitHub compare was rejected — either because the histories diverged
+    # (compareFiles fails closed on a non-ancestor base after a force-push) or
+    # the compare API was unreachable. Do NOT fall through to the PR-vs-main
+    # diff: the preview alias still serves the previous build, which may carry
+    # dashboard changes HEAD no longer has, so a PR-vs-main skip would strand a
+    # stale dashboard preview. Fail closed and build.
+    echo "Previous deployment ${previous_sha} could not be compared to HEAD for PR #${pull_request_id}; building dashboard."
+    exit 1
   fi
 
   if pr_base_sha="$(resolve_main_merge_base)"; then

@@ -117,6 +117,14 @@ const responses = new Map([
       files: [{ filename: "docs/x.md" }],
     },
   ],
+  // PR-vs-main file list for the diverged PR. It reports ONLY the docs-only
+  // head, so the PR-files fallback WOULD authorize a skip — the script must
+  // fail closed on the unusable previous-deployment SHA before ever consulting
+  // this list, otherwise the diverged dashboard build on the alias goes stale.
+  [
+    "/repos/mento-protocol/monitoring-monorepo/pulls/986/files",
+    [{ filename: "docs/x.md" }],
+  ],
 ]);
 
 const server = http.createServer((request, response) => {
@@ -335,16 +343,18 @@ assert_output_contains "Dashboard-affecting changes detected since previous depl
 # Diverged history after a rebase/force-push: the previous deployment SHA is not
 # an ancestor of head, so the THREE-DOT gitless compare returns only the
 # docs-only head-side file and omits the diverged dashboard change. The ancestry
-# guard must reject that file list and fall through to a build, NOT false-skip on
-# the docs-only list.
-expect_build "PR incremental diverged compare builds (no false skip on non-ancestor base)" \
+# guard rejects that compare, and because a previous deployment exists but can't
+# be compared, the script MUST fail closed and build here — even though the
+# PR-vs-main file list (fixture #986) reports docs-only and would otherwise
+# authorize a skip that strands the diverged dashboard build on the alias.
+expect_build "PR incremental diverged compare fails closed to build (no PR-files false skip)" \
   GITHUB_API_BASE_URL="$mock_api_base" \
   GIT_CEILING_DIRECTORIES="$nogit_repo" \
   GIT_DIR="$nogit_repo/.git-missing" \
   VERCEL_GIT_PULL_REQUEST_ID=986 \
   VERCEL_GIT_PREVIOUS_SHA=diverged-prev \
   VERCEL_GIT_COMMIT_SHA=sha-diverged
-assert_output_contains "Could not resolve origin/main for PR #986; building dashboard."
+assert_output_contains "Previous deployment diverged-prev could not be compared to HEAD for PR #986; building dashboard."
 
 cd "$fixture_repo"
 
