@@ -37,10 +37,30 @@ Cloud Run revision names follow RFC 1035: must start with a lowercase letter `[a
 
 Current call sites to verify any new deploy path against:
 
-- `.github/workflows/metrics-bridge.yml:107`
-- `scripts/deploy-bridge.sh:103`
+- `.github/workflows/metrics-bridge.yml:106`
+- `scripts/deploy-bridge.sh:113`
 
-## 4. IAM ordering + dependencies
+## 4. Cloud Build source context
+
+For every deploy path that uses `gcloud builds submit`, a Dockerfile, or another
+trimmed build context:
+
+- [ ] Dockerfile `COPY` steps include every package-manager and build input
+      needed before install/build. Root pnpm `patchedDependencies` makes
+      `patches/**` load-bearing; copy it before every `pnpm install` stage.
+- [ ] `.gcloudignore` does not exclude those same inputs. Keep it aligned with
+      the Dockerfile and any workspace packages the build needs before install
+      (for example `shared-config/` for metrics-bridge).
+- [ ] Deploy workflow `paths:` filters include those inputs so patch-only or
+      build-context-only changes actually redeploy (`patches/**`, lockfiles,
+      package manifests, `cloudbuild.yaml`, Dockerfile, and any workspace deps the
+      deploy image consumes).
+- [ ] Validate build-context fixes with the real build backend, e.g.
+      `gcloud builds submit --config=cloudbuild.yaml ...`. Local package tests and
+      `pnpm install` prove dependency resolution, but they do not prove a reduced
+      Cloud Build upload/Docker context contains the same files.
+
+## 5. IAM ordering + dependencies
 
 This bit me on PRs #197 and #200 — both P1 blockers.
 
@@ -48,27 +68,27 @@ This bit me on PRs #197 and #200 — both P1 blockers.
 - [ ] CI/CD deployer SAs need `roles/iam.serviceAccountTokenCreator` on the runtime SA they impersonate. Without it, Workload Identity Federation (`google-github-actions/auth`) fails at `getAccessToken` time before any Terraform/gcloud command runs
 - [ ] Any new `google_project_iam_member` should be reviewed against the API enablement and SA bindings already present, not added as an isolated grant
 
-## 5. Variable validation
+## 6. Variable validation
 
 For variables that gate critical behavior:
 
 - [ ] Add a `validation` block for non-empty strings (image refs, project IDs, region). An empty string forwarded to a required field fails the apply with a cryptic error and blocks unrelated infra changes
 - [ ] If a previous schema accepted an empty value as "disable this resource", normalize it back to a safe default (or fail loudly with a migration message) — silent breakage of previously-valid `terraform.tfvars` is a hostile change
 
-## 6. Build-artifact retention
+## 7. Build-artifact retention
 
 New GCP project, Cloud Function, or versioned-bucket stacks ship WITH retention — auto-created build resources grow unbounded otherwise (PR #835: 64 images / ~1.9 GB had silently accumulated in governance-watchdog's `gcf-artifacts`).
 
 - [ ] Gen2 Cloud Functions / Cloud Build stacks own their auto-created `gcf-artifacts` repo in Terraform (one-time `import` block, deleted right after the adopting apply) with `cleanup_policies`: `DELETE` older-than + `KEEP` most-recent-versions. Checkov's CMEK finding (CKV_GCP_84) gets an inline skip — the repo is Cloud-Functions-managed and CMEK would force recreation
 - [ ] Versioned GCS buckets have a `lifecycle_rule`. Use age-based `days_since_noncurrent_time` with `with_state = "ARCHIVED"`, NOT `num_newer_versions`, when object names embed a content hash — each deploy writes a new name, so an old name's archived generation never gains newer versions and a generation-count condition never fires (it also counts the live version)
 
-## 7. Pre-apply rituals
+## 8. Pre-apply rituals
 
 - [ ] `pnpm infra:plan` ALWAYS before apply; read every `# ... will be destroyed` line
 - [ ] If the plan touches `google_cloud_run_v2_service`, double-check that image/API bookkeeping drift is ignored and probe paths still match the deployed app
 - [ ] After apply, hit the public URL once and confirm a 200 from `/health` — Cloud Run can return 503s for ~30s while the new revision rolls
 
-## 8. Lessons already paid for
+## 9. Lessons already paid for
 
 - PR #199 — `/healthz` returned a Google-branded 404 because Cloud Run v2 reserves the path; moved bridge health to `/health`
 - PR #197 — bootstrap IAM only gated API enablement, not the project-level grants the impersonated SA needed
@@ -76,3 +96,8 @@ New GCP project, Cloud Function, or versioned-bucket stacks ship WITH retention 
 - PR #200 — Workload Identity Federation deploy failed at `getAccessToken` because deployer SA lacked `roles/iam.serviceAccountTokenCreator` on the runtime SA
 - PR #201 — removing `count` without `moved` blocks would have planned destroy on a `deletion_protection = true` service; default `gcr.io/cloudrun/hello:latest` would have failed `/health` probes; revision suffixes derived from raw SHA can start with a digit and fail the deploy
 - PR #835 — governance-watchdog's auto-created `gcf-artifacts` repo had accumulated 64 build images (~1.9 GB) with no retention; the first lifecycle attempt used `num_newer_versions`, which never fires for hash-named source zips — replaced with age-based expiry in review
+- PR #995 — metrics-bridge Cloud Build failed because root
+  `pnpm.patchedDependencies` referenced `patches/@lhci__utils@0.15.1.patch`,
+  but the Dockerfile's reduced context did not copy `patches/` before
+  `pnpm install`; the deploy workflow also needed `patches/**` in its path
+  filter so patch-only dependency changes rebuild the image.
