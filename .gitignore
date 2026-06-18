@@ -48,11 +48,8 @@ CLAUDE.md
 # get uploaded to Upstash via the `/forensic-report` skill — not git.
 .investigations/
 
-# clawpatch.ai
-.clawpatch/runs/
-.clawpatch/patches/
-.clawpatch/reports/
-.clawpatch/locks/
+# clawpatch.ai — review-tool state stays local, not committed.
+.clawpatch/
 
 # Arkham marathon — output JSONLs (raw API responses, progress checkpoints).
 # Persisted to disk + Vercel Blob; never committed.
