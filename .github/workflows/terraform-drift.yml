@@ -129,22 +129,29 @@ jobs:
       TF_VAR_oncall_slack_channel_id: ${{ secrets.TF_VAR_ONCALL_SLACK_CHANNEL_ID }}
       TF_VAR_oncall_support_usergroup_id: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
       TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
-      # governance-watchdog drift leg (manual-apply stack opted in via
-      # `ci.drift` in the registry). Mirrored from the operator's tfvars by
-      # governance-watchdog/infra/github-secrets.tf on each
-      # `pnpm gov-watchdog:deploy`. Keep these under stack-scoped env names
-      # and export them only in the governance-watchdog leg below; otherwise
-      # missing bootstrap secrets expand to empty TF_VAR_* inputs and override
-      # defaults or legacy workflow-level fallbacks.
-      GOV_WATCHDOG_TF_VAR_ORG_ID: ${{ secrets.TF_VAR_ORG_ID }}
-      GOV_WATCHDOG_TF_VAR_DISCORD_WEBHOOK_URL: ${{ secrets.TF_VAR_DISCORD_WEBHOOK_URL }}
-      GOV_WATCHDOG_TF_VAR_DISCORD_TEST_WEBHOOK_URL: ${{ secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL }}
-      GOV_WATCHDOG_TF_VAR_TELEGRAM_CHAT_ID: ${{ secrets.TF_VAR_TELEGRAM_CHAT_ID }}
-      GOV_WATCHDOG_TF_VAR_TELEGRAM_TEST_CHAT_ID: ${{ secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID }}
-      GOV_WATCHDOG_TF_VAR_TELEGRAM_BOT_TOKEN: ${{ secrets.TF_VAR_TELEGRAM_BOT_TOKEN }}
-      GOV_WATCHDOG_TF_VAR_X_AUTH_TOKEN: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
-      GOV_WATCHDOG_TF_VAR_QUICKNODE_SECURITY_TOKEN: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
-      GOV_WATCHDOG_TF_VAR_VICTOROPS_WEBHOOK_URL: ${{ secrets.TF_VAR_VICTOROPS_WEBHOOK_URL }}
+      # governance-watchdog TF_VAR_* — now an auto-applied stack (see
+      # governance-watchdog.yml), so its inputs match the workspace-wide
+      # convention. These names are governance-watchdog-owned: org_id is
+      # GCP-specific + mirrored by its github-secrets.tf, and the
+      # Discord/Telegram/x-auth/QuickNode-security/VictorOps inputs are unique to
+      # this stack, so exposing them workspace-wide cannot clobber a sibling
+      # stack's drift plan (siblings don't declare them → Terraform ignores the
+      # env value). Until the operator bootstraps these repo secrets they expand
+      # empty and the bootstrap guard below skips the gov-watchdog leg, so a
+      # sibling leg never depends on them anyway.
+      TF_VAR_org_id: ${{ secrets.TF_VAR_ORG_ID }}
+      TF_VAR_discord_webhook_url: ${{ secrets.TF_VAR_DISCORD_WEBHOOK_URL }}
+      TF_VAR_discord_test_webhook_url: ${{ secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL }}
+      TF_VAR_telegram_chat_id: ${{ secrets.TF_VAR_TELEGRAM_CHAT_ID }}
+      TF_VAR_telegram_test_chat_id: ${{ secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID }}
+      TF_VAR_telegram_bot_token: ${{ secrets.TF_VAR_TELEGRAM_BOT_TOKEN }}
+      TF_VAR_x_auth_token: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
+      TF_VAR_quicknode_security_token: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
+      TF_VAR_victorops_webhook_url: ${{ secrets.TF_VAR_VICTOROPS_WEBHOOK_URL }}
+      # slack_notification_channel_id is a shared-name var (the alerts stack also
+      # declares it), so keep gov-watchdog's value stack-scoped + apply it only
+      # in the gov-watchdog leg below — otherwise it would inherit the alerts
+      # channel id from the workspace-level value.
       GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID }}
       TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID }}
     defaults:
@@ -219,16 +226,11 @@ jobs:
           STACK_ID: ${{ matrix.id }}
           PLAN_SA: ${{ matrix.planSa }}
         run: |
+          # governance-watchdog's own TF_VAR_* are exported workspace-wide (see
+          # the env block — gov-watchdog-owned names, safe to expose). Only the
+          # shared-name slack_notification_channel_id needs a stack-scoped
+          # override here so it doesn't inherit the alerts stack's channel id.
           if [ "$STACK_ID" = "governance-watchdog" ]; then
-            export TF_VAR_org_id="${GOV_WATCHDOG_TF_VAR_ORG_ID:-}"
-            export TF_VAR_discord_webhook_url="${GOV_WATCHDOG_TF_VAR_DISCORD_WEBHOOK_URL:-}"
-            export TF_VAR_discord_test_webhook_url="${GOV_WATCHDOG_TF_VAR_DISCORD_TEST_WEBHOOK_URL:-}"
-            export TF_VAR_telegram_chat_id="${GOV_WATCHDOG_TF_VAR_TELEGRAM_CHAT_ID:-}"
-            export TF_VAR_telegram_test_chat_id="${GOV_WATCHDOG_TF_VAR_TELEGRAM_TEST_CHAT_ID:-}"
-            export TF_VAR_telegram_bot_token="${GOV_WATCHDOG_TF_VAR_TELEGRAM_BOT_TOKEN:-}"
-            export TF_VAR_x_auth_token="${GOV_WATCHDOG_TF_VAR_X_AUTH_TOKEN:-}"
-            export TF_VAR_quicknode_security_token="${GOV_WATCHDOG_TF_VAR_QUICKNODE_SECURITY_TOKEN:-}"
-            export TF_VAR_victorops_webhook_url="${GOV_WATCHDOG_TF_VAR_VICTOROPS_WEBHOOK_URL:-}"
             if [ -n "${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID:-}" ]; then
               export TF_VAR_slack_notification_channel_id="${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID}"
             elif [ -n "${TF_VAR_slack_notification_channel_id:-}" ]; then
@@ -238,12 +240,11 @@ jobs:
 
           # Bootstrap guard: TF_VAR_org_id is governance-watchdog-owned,
           # GCP-specific, and mirrored by github-secrets.tf, so it cannot come
-          # from a sibling stack. Until the operator's first
-          # `pnpm gov-watchdog:deploy` mirrors this stack's TF_VAR_* values to
-          # repo secrets, skip with a warning instead of failing every
-          # scheduled run.
+          # from a sibling stack. Until the operator bootstraps this stack's
+          # TF_VAR_* repo/environment secrets, skip with a warning instead of
+          # failing every scheduled run.
           if [ "$STACK_ID" = "governance-watchdog" ] && [ -z "${TF_VAR_org_id:-}" ]; then
-            echo "::warning::governance-watchdog drift leg skipped — TF_VAR_* repo secrets not bootstrapped yet (add github_token to governance-watchdog/infra/terraform.tfvars and run pnpm gov-watchdog:deploy)"
+            echo "::warning::governance-watchdog drift leg skipped — TF_VAR_* repo secrets not bootstrapped yet (add them to the repo's production-infra environment + Actions secrets)"
             echo "exitcode=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
