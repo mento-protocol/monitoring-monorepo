@@ -15,6 +15,7 @@ import {
   _setMockNumReporters,
 } from "../src/EventHandlers.ts";
 import { UNKNOWN_ORACLE_REPORTERS } from "../src/constants.js";
+import { syncRateFeedFromRpc } from "../src/handlers/rateFeed.js";
 
 type MockDb = MockDbWith<{
   Pool: WritableEntity<Pool>;
@@ -68,6 +69,44 @@ describe("RateFeed handlers", () => {
     assert.deepEqual(row.reporterTypes, ["CHAINLINK", "MANUAL"]);
     assert.equal(row.reportersComplete, true);
     assert.equal(row.updatedAtBlock, 100n);
+  });
+
+  it("syncs a RateFeed row from the RPC helper", async () => {
+    let stored: RateFeed | undefined;
+    const context = {
+      RateFeed: {
+        set(entity: RateFeed) {
+          stored = entity;
+        },
+      },
+      effect: async (
+        _effect: unknown,
+        params: { chainId: number; rateFeedID: string; blockNumber: bigint },
+      ) => {
+        assert.equal(params.chainId, CELO);
+        assert.equal(params.rateFeedID, CELO_GBP_FEED);
+        assert.equal(params.blockNumber, 105n);
+        return [CELO_GBP_REPORTER, UNKNOWN_REPORTER];
+      },
+    } as unknown as Parameters<typeof syncRateFeedFromRpc>[0]["context"];
+
+    const row = await syncRateFeedFromRpc({
+      context,
+      chainId: CELO,
+      feedAddress: CELO_GBP_FEED,
+      blockNumber: 105n,
+      blockTimestamp: 1_700_000_300n,
+    });
+
+    assert.ok(row);
+    assert.equal(stored, row);
+    assert.equal(row.id, makeRateFeedId(CELO, CELO_GBP_FEED));
+    assert.equal(row.pair, "GBP/USD");
+    assert.deepEqual(row.reporters, [CELO_GBP_REPORTER, UNKNOWN_REPORTER]);
+    assert.deepEqual(row.reporterTypes, ["CHAINLINK", "MANUAL"]);
+    assert.equal(row.reportersComplete, true);
+    assert.equal(row.updatedAtBlock, 105n);
+    assert.equal(row.updatedAtTimestamp, 1_700_000_300n);
   });
 
   it("updates virtual pool reporter counts from OracleAdded numRates", async () => {
