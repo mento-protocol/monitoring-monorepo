@@ -136,6 +136,17 @@ async function refreshGoogleAccessToken(token: JWT): Promise<JWT> {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Support graceful AUTH_SECRET rotation without invalidating active sessions.
+  // Auth.js uses the first entry to sign new tokens and tries every entry for
+  // verification. Rotation procedure: set AUTH_SECRET_PREV = current AUTH_SECRET,
+  // set AUTH_SECRET = new random value, then deploy. After 30 days (session
+  // maxAge) all cookies signed by AUTH_SECRET_PREV expire and the variable can
+  // be removed. Without this, a rotation forces all active users to re-login
+  // (Sentry ANALYTICS-MENTO-ORG-20).
+  secret: [process.env.AUTH_SECRET, process.env.AUTH_SECRET_PREV].filter(
+    (s): s is string => typeof s === "string" && s.length > 0,
+  ),
+
   // On preview deployments NEXTAUTH_URL is set to the production URL so that
   // the Google OAuth callback always lands on the whitelisted prod domain.
   // AUTH_REDIRECT_PROXY_URL tells NextAuth to forward the session back to the
@@ -180,9 +191,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // cutoff is the ~hourly Google refresh-token probe: when an account is
   // suspended or deleted, Google revokes its refresh token, the probe fails with
   // `invalid_grant`, and the session is marked errored (see the jwt callback and
-  // `getAuthSession`). Deploys do NOT log users out: the JWT lives in the cookie
-  // and is verified with the stable AUTH_SECRET, which a new deployment doesn't
-  // change.
+  // `getAuthSession`). Deploys do NOT log users out: the JWT cookie is verified
+  // against the full secret array above; AUTH_SECRET rotations are handled
+  // gracefully via AUTH_SECRET_PREV (see the `secret` option above).
   session: {
     strategy: "jwt",
     maxAge: 30 * 24 * 60 * 60,
@@ -205,9 +216,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // stale-cookie / AUTH_SECRET-rotation decryption failures, but also a broken
   // jwt/session callback after a bad deploy. Suppressing the whole class would
   // mute exactly the auth-regression signal this logger exists to surface. The
-  // benign rotation noise (Sentry ANALYTICS-MENTO-ORG-1J) is handled at the
-  // Sentry layer via an issue-level ignore instead, which leaves a future
-  // regression (different stack/cause → new fingerprint) free to alert.
+  // benign rotation noise (Sentry ANALYTICS-MENTO-ORG-1J / -20) is handled at
+  // two levels: AUTH_SECRET_PREV (see `secret` above) prevents new events from
+  // future rotations; Sentry issue-level ignores suppress the tail of events
+  // from cookies already in flight. A genuine regression (different cause →
+  // different fingerprint) still surfaces on first occurrence.
   logger: {
     error(error) {
       const key = loggerThrottleKey(error);
