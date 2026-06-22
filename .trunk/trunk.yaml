@@ -36,12 +36,6 @@ lint:
         # scanning this derived artifact would just double-report transitive
         # findings with no fix path.
         - alerts/infra/onchain-event-handler/package-lock.json
-        # governance-watchdog has its own lockfile; these CVEs in undici
-        # (transitive via discord.js@14.26.4) are pre-existing and unrelated
-        # to this PR. The bot sends Discord notifications — it does not run an
-        # HTTP server, so the WebSocket DoS surface (GHSA-vxpw-j846-p89q HIGH)
-        # is not externally reachable. Track undici >=7 upgrade separately.
-        - governance-watchdog/pnpm-lock.yaml
     - linters: [checkov]
       paths:
         - terraform/main.tf
