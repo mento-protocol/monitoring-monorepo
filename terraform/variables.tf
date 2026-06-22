@@ -155,6 +155,19 @@ variable "auth_secret" {
   sensitive   = true
 }
 
+variable "auth_secret_prev" {
+  description = <<-EOT
+    Previous NextAuth.js secret, set only during a graceful AUTH_SECRET rotation.
+    Rotation procedure: set this to the current auth_secret value, set auth_secret
+    to a new random value (openssl rand -base64 32), then apply. Auth.js verifies
+    existing session cookies against both secrets so active users are not logged out.
+    Remove this variable (set to "") after 30 days once all old-signed cookies expire.
+  EOT
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "cron_secret" {
   description = "Shared secret for authenticating Vercel Cron requests to /api/address-labels/backup."
   type        = string
