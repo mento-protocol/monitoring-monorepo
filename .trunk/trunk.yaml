@@ -36,14 +36,6 @@ lint:
         # scanning this derived artifact would just double-report transitive
         # findings with no fix path.
         - alerts/infra/onchain-event-handler/package-lock.json
-        # governance-watchdog uses its own pnpm-lock.yaml. The 4 undici CVEs
-        # (GHSA-vxpw-j846-p89q, GHSA-p88m-4jfj-68fv, GHSA-35p6-xmwp-9g52,
-        # GHSA-g8m3-5g58-fq7m) are pre-existing via discord.js@14.26.4 and are
-        # waived in .osv-scanner.toml for direct osv-scanner runs. This path-
-        # level ignore is required because Trunk invokes osv-scanner without
-        # --config, so .osv-scanner.toml IgnoredVulns are not applied by Trunk.
-        # Track the undici/discord.js upgrade in #1006.
-        - governance-watchdog/pnpm-lock.yaml
     - linters: [checkov]
       paths:
         - terraform/main.tf
