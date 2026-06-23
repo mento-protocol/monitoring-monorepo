@@ -31,6 +31,14 @@ gh api repos/mento-protocol/monitoring-monorepo/rulesets \
   -q '.rules[] | select(.type=="required_status_checks").parameters.required_status_checks[].context'
 ```
 
+After changing a required-status workflow or replacing the tool that reports its
+checks, verify the live PR status rollup with
+`pnpm pr:ready-state --pr <number> --json`. Confirm the intended required
+context is the only tool-owned check GitHub surfaces. PR #1008/#1010 exposed the
+failure mode: an action-created `Trunk Check` Checks API run appeared alongside
+the intended `Code Quality` job, and GitHub grouped the extra failure under the
+advisory schema-diff workflow in the PR UI.
+
 - [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
 - [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern (the workflow-level `paths:` mirrors the in-job `filter` step, which is kept as a fail-closed backstop). **Exception:** a workflow that posts a sticky PR comment AND clears it on revert (e.g. `schema-diff.yml`) must stay unfiltered — a `paths:` skip on a revert PR strands the stale comment because the cleanup step never runs. Keep run/skip in-job there.
 - [ ] If you make an advisory workflow required, add it to the ruleset **and** remove its `paths:` filter in the same change.

@@ -73,6 +73,13 @@ AUTH_GOOGLE_SECRET=local-dev-google-secret \
 pnpm dev --hostname 127.0.0.1 --port 3210
 ```
 
+Vercel preview URLs can redirect agent Chrome sessions to Vercel login/SSO. If
+the PR is not about preview protection, do not treat that redirect as a browser
+verification blocker by itself: use the localhost path above for the manual
+browser smoke, and cite the CI Vercel/Lighthouse checks as the preview-level
+proof. If the PR does touch preview protection or deployment access, verify the
+preview route itself with the configured bypass path from the workflow.
+
 The required local data env is:
 
 - `NEXT_PUBLIC_HASURA_URL` for hosted multichain Hasura data. `pnpm dev`
