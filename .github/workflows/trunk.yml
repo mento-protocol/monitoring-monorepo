@@ -22,10 +22,8 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
-      contents: read
-      pull-requests: write
       actions: read
+      contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -33,18 +31,15 @@ jobs:
       - name: Check GitHub Actions pins
         run: node scripts/check-github-action-pins.mjs
       - uses: ./.trunk/setup-ci
-      - uses: trunk-io/trunk-action@04ba50e7658c81db7356da96657e6e77f220bfa3 # v1.3.1
+      - name: Cache Trunk artifacts
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          arguments: --all
-          # The action's internal ~/.cache/trunk key is
-          # `trunk-<cache-key>-<runner.os>-<hash of .trunk/trunk.yaml>` — no
-          # architecture component. Without an arch discriminator, a
-          # runner-architecture change restores the other arch's tool cache
-          # (same key, immutable entry), trunk re-downloads the right tools
-          # over the restored binaries every run, and the download-then-exec
-          # overlap surfaces as `execve failed: Text file busy` (seen on the
-          # ARM compat PR #821). Keying on runner.arch gives each
-          # architecture its own cache lineage.
-          cache-key: ${{ runner.arch }}
+          path: ~/.cache/trunk
+          # Trunk stores downloaded tool binaries here, so the key must keep
+          # architectures separate. Cross-arch restores caused `execve failed:
+          # Text file busy` on PR #821.
+          key: trunk-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('.trunk/trunk.yaml') }}
+      - name: Run Trunk
+        run: ./tools/trunk check --ci --all
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

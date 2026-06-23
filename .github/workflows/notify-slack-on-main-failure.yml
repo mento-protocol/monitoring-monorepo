@@ -42,6 +42,7 @@ on:
       - Code Health — Duplication
       - Alerts Rules
       - Aegis Terraform
+      - Governance Watchdog Infra
       # Schedule-only or PR-only (no push-to-main) workflows:
       - Supply Chain
       - Integration Probes
