@@ -12,6 +12,12 @@ variable "region" {
 # You can find our org id via `gcloud organizations list`
 variable "org_id" {
   type = string
+  # Same Mento GCP org as every other stack (alerts/infra hardcodes this exact
+  # default). Defaulted so CI needs no TF_VAR_org_id env var: a bare,
+  # workspace-wide TF_VAR_org_id in terraform-drift.yml would expand empty
+  # pre-bootstrap and clobber the alerts-delivery leg, which also declares
+  # org_id with its own matching default.
+  default = "599540483579"
 }
 
 # You can find the billing account via `gcloud billing accounts list` (pick the GmbH account)

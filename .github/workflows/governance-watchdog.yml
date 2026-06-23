@@ -1,0 +1,604 @@
+name: Governance Watchdog Infra
+
+# Terraform plan-on-PR + apply-on-merge for `governance-watchdog/infra/` — the
+# Cloud Function that turns Mento governance on-chain events into Discord +
+# Telegram notifications (plus its QuickNode webhook, Secret Manager secrets,
+# and VictorOps/Slack alerting). This migrates the stack off the manual
+# `pnpm gov-watchdog:deploy` path onto CI apply-on-merge, matching the
+# alerts/infra + aegis stacks. The GCS backend and google provider both
+# impersonate a seed-project SA (see versions.tf). The plan and apply jobs use a
+# read/write split for plan-time blast-radius reduction:
+#   - apply (on merge) authenticates as the write-capable CI deployer SA
+#     (`GCP_SERVICE_ACCOUNT`); the backend AND the google provider impersonate
+#     `org-terraform@…seed` (state writes + locking + full GCP resource ops).
+#     The deployer SA's `roles/iam.serviceAccountTokenCreator` grant on
+#     `org-terraform` lives in `terraform/ci-wif.tf` (shared across CI stacks).
+#   - plan (on PR) authenticates as the read-only CI SA
+#     (`GCP_SERVICE_ACCOUNT_PLAN`), overrides the backend impersonation to
+#     `org-terraform-plan-readonly@…seed` via `-backend-config`, points the
+#     google provider at the same read-only SA via
+#     `TF_VAR_terraform_service_account`, and runs `terraform plan -lock=false
+#     -refresh=false`. `-refresh=false` is load-bearing: this stack's google
+#     provider would otherwise refresh GCP resources the read-only seed SA
+#     (objectViewer on the state bucket only, no project roles) can't read.
+#     Skipping refresh keeps the PR plan to a config-vs-last-state diff needing
+#     only state read + the token the read-only CI SA already holds — zero new
+#     IAM. Tradeoff: the PR plan won't surface out-of-band drift; that's
+#     `terraform-drift.yml`'s job (full refresh, write SA) and the apply-time
+#     re-plan's. The read-only + `-refresh=false` treatment is gated on
+#     `github.event_name == 'pull_request'`: the same plan job on push /
+#     workflow_dispatch keeps the write deployer SA + full refresh + locking.
+#
+# Plan/apply split:
+#   - `plan` job runs on every PR + push/dispatch to main. It runs
+#     `terraform plan -detailed-exitcode` and emits a `has-changes` job
+#     output. On PRs it posts a sticky comment with the plan diff.
+#   - `apply` job only runs on push/dispatch to main, only when the plan
+#     reported actual changes, and only for stack-root changes or explicit
+#     workflow_dispatch, behind the `production-infra` Environment gate.
+#
+# Required repository secrets are this stack's TF_VAR_* values (see the env
+# blocks below): GCP bootstrap (org_id, billing_account), Discord + Telegram
+# notification creds, QuickNode api_key + security_token, x_auth_token,
+# victorops_webhook_url, and the github_token PAT. `github_actions_secret`
+# resources in the stack self-manage the TF_VAR_* mirror consumed by
+# terraform-drift.yml.
+#
+# Note: we intentionally do NOT save the plan as a binary artifact for
+# cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
+# sensitive data in cleartext in the plan file"
+# (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
+# TF_VAR_* env block here carries production Discord/Telegram/QuickNode/GitHub
+# credentials. Uploading the binary plan as a workflow artifact would expose
+# those secrets to anyone with `actions:read`.
+# Instead the apply job re-plans at gate-approval time — the trade-off
+# is the brief "between approval and apply" drift window, which the
+# reviewer can detect by checking the apply-job's plan output before
+# approving.
+#
+# Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
+# (matrix stack `governance-watchdog`). This workflow adds the plan diff comment +
+# the apply gate.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - governance-watchdog/**
+      - scripts/sanitize-terraform-output.sh
+      - scripts/notify-terraform-apply.mjs
+      - scripts/verify-github-environment-protection.mjs
+      - scripts/verify-github-environment-protection.test.mjs
+      - .github/workflows/governance-watchdog.yml
+  push:
+    branches: [main]
+    paths:
+      - governance-watchdog/**
+      - scripts/sanitize-terraform-output.sh
+      - scripts/notify-terraform-apply.mjs
+      - scripts/verify-github-environment-protection.mjs
+      - scripts/verify-github-environment-protection.test.mjs
+      - .github/workflows/governance-watchdog.yml
+
+# PR runs cancel on new pushes to the same PR ref (queue depth of 1 per PR
+# is fine — a newer plan supersedes an older one).
+#
+# Push/dispatch runs share ONE group `<workflow>-deploy` with
+# `cancel-in-progress: false`, so concurrent merges queue and apply
+# strictly in order. Without this, a SHA-unique group would let two
+# close-together merges run `terraform apply` in parallel and the older
+# one could roll the state back to stale config (Cloud Function source,
+# the QuickNode webhook, and Secret Manager versions are all order-sensitive).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Push/dispatch: queue all pending applies (up to 100) so intermediate
+  # main-branch merges don't get silently dropped by GitHub's default
+  # `queue: single` behavior (only one pending; newer-pending cancels
+  # older). For PR events, keep the default `single` — the cancel-on-new-
+  # push semantics there are what we want. `queue: max` + `cancel-in-
+  # progress: true` is invalid per GitHub, so the conditional matches the
+  # cancel-in-progress conditional above. The bundled actionlint version
+  # doesn't recognise the `queue` key yet (added by GitHub in 2025); see
+  # https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs
+  # trunk-ignore(actionlint/syntax-check)
+  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
+
+permissions: read-all
+
+jobs:
+  plan:
+    name: Terraform Plan (governance-watchdog/infra)
+    # Fork PRs and Dependabot PRs don't get repository secrets, so the
+    # GCP auth + TF_VAR_* steps would resolve empty and fail every time.
+    # Skip the job in those contexts — the plan is only meaningful when
+    # secrets are available. Internal PRs + main pushes run.
+    if: >-
+      (github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.fork == false
+        && github.event.pull_request.user.login != 'dependabot[bot]')
+      || (github.ref == 'refs/heads/main'
+        && (github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      # The sticky plan comment uses `github.rest.issues.*` because PR
+      # comments are issue comments in GitHub's REST API.
+      issues: write
+      pull-requests: write
+      actions: read
+    defaults:
+      run:
+        working-directory: governance-watchdog/infra
+    outputs:
+      has-changes: ${{ steps.detect.outputs.has-changes }}
+      stack-changed: ${{ steps.stack_changes.outputs.stack-changed }}
+    env:
+      # GCP project bootstrap (org_id has a default in variables.tf — shared
+      # across stacks, so it is intentionally NOT a CI env var)
+      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
+      # On PRs, point the google provider at the read-only seed SA so provider
+      # init impersonates an identity the plan-readonly CI SA can mint a token
+      # for; with `-refresh=false` (see Plan step) the provider makes no GCP API
+      # calls at plan time, so objectViewer-on-state suffices. On push /
+      # workflow_dispatch this resolves to the write-capable `org-terraform@…seed`
+      # (= the variable default) — those runs full-refresh to gate apply.
+      TF_VAR_terraform_service_account: ${{ github.event_name == 'pull_request' && 'org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com' || 'org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com' }}
+      # Discord (proposal notifications)
+      TF_VAR_discord_webhook_url: ${{ secrets.TF_VAR_DISCORD_WEBHOOK_URL }}
+      TF_VAR_discord_test_webhook_url: ${{ secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL }}
+      # Telegram (proposal notifications)
+      TF_VAR_telegram_chat_id: ${{ secrets.TF_VAR_TELEGRAM_CHAT_ID }}
+      TF_VAR_telegram_test_chat_id: ${{ secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID }}
+      TF_VAR_telegram_bot_token: ${{ secrets.TF_VAR_TELEGRAM_BOT_TOKEN }}
+      # QuickNode (webhook security token + API key)
+      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY }}
+      TF_VAR_quicknode_security_token: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
+      # Production test path (x-auth-token)
+      TF_VAR_x_auth_token: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
+      # VictorOps / Splunk On-Call webhook (GCP Monitoring alert delivery)
+      TF_VAR_victorops_webhook_url: ${{ secrets.TF_VAR_VICTOROPS_WEBHOOK_URL }}
+      # gov-watchdog's GCP Monitoring error-alert Slack channel ID — the
+      # stack-specific secret (NOT the shared alerts-delivery channel); the
+      # variable defaults to "" so this is optional until the channel exists.
+      TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID }}
+      # GitHub (for github_actions_secret resources that self-manage these secrets)
+      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Detect stack path changes
+        id: stack_changes
+        working-directory: ${{ github.workspace }}
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          STACK_PATH: governance-watchdog
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$BASE_SHA" ] || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$STACK_PATH"; then
+            echo "stack-changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stack-changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          # On PRs, authenticate as the read-only plan SA so a malicious PR's
+          # plan-time data source can't mint tokens for the write-capable
+          # deployer. push / workflow_dispatch (the apply-gating path, incl.
+          # drift reconcile) and the apply job keep `GCP_SERVICE_ACCOUNT`.
+          # See file header + `terraform/ci-wif.tf`.
+          service_account: ${{ github.event_name == 'pull_request' && secrets.GCP_SERVICE_ACCOUNT_PLAN || secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+
+      - name: Init
+        # On PRs, override the backend impersonation (hardcoded to the
+        # write-capable `org-terraform@…seed` in versions.tf, used by the apply
+        # job + non-PR plans) to the read-only `org-terraform-plan-readonly@…seed`
+        # SA, which holds only `roles/storage.objectViewer` on the state bucket.
+        # `-backend-config` takes precedence over the backend block; fresh CI
+        # runners have no cached `.terraform`, so no `-reconfigure` is needed.
+        # push / workflow_dispatch keep the default (write) backend impersonation
+        # so the apply-gating plan can full-refresh.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            terraform init -input=false -backend-config="impersonate_service_account=org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+          else
+            terraform init -input=false
+          fi
+
+      - name: Validate
+        run: terraform validate -no-color
+
+      - name: Plan
+        id: plan
+        # `-detailed-exitcode`: 0 = no changes, 1 = error, 2 = changes present.
+        # `set +e` around terraform so exit-2 (changes) doesn't fail the step;
+        # capture terraform's exit before sanitizing output, emit as a step
+        # output for `detect`, and only `exit 1` on real errors.
+        # Plan output is captured raw, sanitized, then written to
+        # `/tmp/tf-plan.txt` for logs and the sticky comment. QuickNode resources
+        # can print provider state such as webhook URLs/tokens, so never tee raw
+        # Terraform output to GitHub logs.
+        # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
+        # (HashiCorp docs); apply re-plans at gate-approval time instead.
+        # PR plans run read-only: `-lock=false` (the read-only plan SA, objectViewer
+        # only, can't write the GCS lock object) + `-refresh=false` (this stack's
+        # google provider would otherwise refresh GCP resources the read-only seed
+        # SA can't read — no project roles). The function-source archive hash is
+        # computed locally from the working tree, so `-refresh=false` still
+        # surfaces code/config changes in the PR plan; only live-resource drift is
+        # deferred to terraform-drift.yml + the apply-time re-plan.
+        # push / workflow_dispatch (the apply-gating path, incl. drift reconcile)
+        # keep full refresh + locking on the write SA, so they detect out-of-band
+        # drift and set `has-changes` correctly. Drift detection also runs in
+        # `terraform-drift.yml` — the `governance-watchdog/infra` leg there keeps full refresh
+        # on the write SA (its grafana-only legs are read-only); apply re-plans fully.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set +e
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            terraform plan -detailed-exitcode -no-color -input=false -lock=false -refresh=false > /tmp/tf-plan.raw 2>&1
+          else
+            terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
+          fi
+          EXITCODE=$?
+          set -e
+          "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-plan.raw /tmp/tf-plan.txt
+          cat /tmp/tf-plan.txt
+          echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
+          case "$EXITCODE" in
+            0) echo "Plan: no changes" ;;
+            2) echo "Plan: changes detected" ;;
+            *) echo "::error::terraform plan failed with exit code $EXITCODE"; exit 1 ;;
+          esac
+
+      - name: Detect changes
+        id: detect
+        if: success()
+        env:
+          # `exitcode` is a system-controlled enum (0/2 here — 1 already
+          # bailed in the previous step). Passing through `env:` rather than
+          # inlining `${{ ... }}` in `run:` keeps this aligned with the
+          # GitHub Actions workflow-injection hardening pattern.
+          EXITCODE: ${{ steps.plan.outputs.exitcode }}
+        run: |
+          if [ "$EXITCODE" = "2" ]; then
+            echo "has-changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Strip refresh noise from plan output
+        # Terraform's plan output starts with a long `Refreshing state...` /
+        # `Reading...` / `Read complete after` preamble — one line per state
+        # entry, easily dominates the plan view when the stack has dozens of
+        # resources. Strip those lines in-place so the Plan summary and the
+        # sticky PR comment (both downstream of /tmp/tf-plan.txt) show only
+        # the actionable diff.
+        if: always()
+        working-directory: /tmp
+        run: |
+          if [ -f tf-plan.txt ]; then
+            awk '
+              /^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after/ { next }
+              NF || found { found=1; print }
+            ' tf-plan.txt | cat -s > tf-plan.clean.txt
+            mv tf-plan.clean.txt tf-plan.txt
+          fi
+
+      - name: Plan summary
+        # Renders the plan diff at the top of the job page so reviewers
+        # don't have to scroll the raw `Plan` step log. Same source data
+        # as the sticky PR comment (`/tmp/tf-plan.txt`), but visible on
+        # `push` runs too where there's no PR to comment on. `if: always()`
+        # so a failed plan still surfaces the error inline.
+        if: always()
+        env:
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+          STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
+        run: |
+          {
+            echo '## Terraform Plan — `governance-watchdog/infra/`'
+            echo
+            if [ "$PLAN_OUTCOME" = "success" ]; then
+              if [ "$HAS_CHANGES" = "true" ]; then
+                if [ "$STACK_CHANGED" = "true" ]; then
+                  echo '**Status:** 📝 changes detected — stack change is eligible for apply'
+                else
+                  echo '**Status:** ⚠️ drift detected — stack path unchanged, apply will skip'
+                fi
+              else
+                echo '**Status:** ✅ no changes — merge will skip apply'
+              fi
+            else
+              case "$PLAN_OUTCOME" in
+                cancelled) echo '**Status:** ⚠️ plan cancelled' ;;
+                skipped)   echo '**Status:** ⚠️ plan skipped' ;;
+                *)         echo '**Status:** ❌ plan failed' ;;
+              esac
+            fi
+            echo
+            echo '<details open><summary>Plan output</summary>'
+            echo
+            echo '```hcl'
+            tail -c 50000 /tmp/tf-plan.txt 2>/dev/null || echo '(no plan output captured)'
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify Slack that Terraform apply is pending
+        if: >-
+          success()
+          && github.ref == 'refs/heads/main'
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && steps.detect.outputs.has-changes == 'true'
+          && (github.event_name == 'workflow_dispatch' || steps.stack_changes.outputs.stack-changed == 'true')
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: "${{ vars.TERRAFORM_APPLY_SLACK_CHANNEL || '#ci-operations' }}"
+          TERRAFORM_PLAN_FILE: /tmp/tf-plan.txt
+          TERRAFORM_STACK_LABEL: governance-watchdog/infra
+          TERRAFORM_TARGET_ENVIRONMENT: production-infra
+        run: node "$GITHUB_WORKSPACE/scripts/notify-terraform-apply.mjs"
+
+      - name: Post plan as sticky PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          # Pass workflow context through env vars instead of `${{ }}`
+          # substitution in the inline script to keep the script free of
+          # template injection points (defensive — `steps.*.outcome` is an
+          # enum controlled by Actions, but env-based passing is the standard
+          # hardening pattern).
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
+          STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
+        with:
+          script: |
+            const fs = require("fs");
+            const planOutput = fs.existsSync("/tmp/tf-plan.txt")
+              ? fs.readFileSync("/tmp/tf-plan.txt", "utf8")
+              : "(Plan did not produce output — check the workflow logs.)";
+
+            // GitHub PR comment hard cap is ~65KB. A fresh governance-watchdog/infra plan
+            // (Cloud Function + QuickNode webhook + Secret Manager) can
+            // easily blow past that. Tail the last 50KB so the apply/destroy
+            // summary stays visible and link to the run for the full log.
+            const MAX = 50_000;
+            const truncated = planOutput.length > MAX;
+            const planBody = truncated
+              ? "... (truncated, see workflow logs)\n" + planOutput.slice(-MAX)
+              : planOutput;
+
+            const planOutcome = process.env.PLAN_OUTCOME || "unknown";
+            const hasChanges = process.env.HAS_CHANGES === "true";
+            const stackChanged = process.env.STACK_CHANGED === "true";
+            const statusIcon = planOutcome === "success"
+              ? (hasChanges ? (stackChanged ? "📝" : "⚠️") : "✅")
+              : "❌";
+            const statusText = planOutcome === "success"
+              ? (hasChanges
+                  ? (stackChanged ? "changes detected — stack change is eligible for apply" : "drift detected — stack path unchanged, apply will skip")
+                  : "no changes — merge will skip apply")
+              : "plan failed";
+
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+
+            const body =
+              `## Terraform Plan — \`governance-watchdog/infra/\`\n\n` +
+              `**Status:** ${statusIcon} ${statusText}\n\n` +
+              `[Full workflow logs](${runUrl})\n\n` +
+              `<details><summary>Plan output${truncated ? " (tail)" : ""}</summary>\n\n` +
+              `\`\`\`hcl\n${planBody}\n\`\`\`\n` +
+              `</details>\n\n` +
+              `<!-- governance-watchdog-plan-comment -->`;
+
+            // Paginate through all PR comments to find the existing
+            // plan-sticky marker. `listComments` caps at 100 per page;
+            // on long-lived PRs the marker could sit past page 1 and
+            // we'd duplicate-create instead of updating. `paginate`
+            // walks every page.
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 100,
+              },
+            );
+
+            const existing = comments.find(c =>
+              c.body && c.body.includes("<!-- governance-watchdog-plan-comment -->"),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  apply:
+    name: Terraform Apply (governance-watchdog/infra)
+    needs: plan
+    # Apply when (a) on main, (b) push or dispatch event, (c) plan said
+    # there are real changes, AND (d) the stack root changed or a maintainer
+    # explicitly dispatched the workflow. Workflow/notifier-only edits can
+    # surface drift in the plan without opening the production-infra approval gate.
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.plan.outputs.has-changes == 'true'
+      && (github.event_name == 'workflow_dispatch' || needs.plan.outputs.stack-changed == 'true')
+    # Terraform applies use the dedicated `production-infra` environment so
+    # required reviewers gate only infrastructure mutations, not routine
+    # service deploys.
+    environment:
+      name: production-infra
+      url: https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+      deployments: read
+    defaults:
+      run:
+        working-directory: governance-watchdog/infra
+    env:
+      # Provider auth env vars still need to be present at apply time — saved
+      # plans don't serialize provider configuration, so init re-evaluates
+      # the provider blocks against these values to talk to the upstream APIs.
+      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
+      TF_VAR_discord_webhook_url: ${{ secrets.TF_VAR_DISCORD_WEBHOOK_URL }}
+      TF_VAR_discord_test_webhook_url: ${{ secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL }}
+      TF_VAR_telegram_chat_id: ${{ secrets.TF_VAR_TELEGRAM_CHAT_ID }}
+      TF_VAR_telegram_test_chat_id: ${{ secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID }}
+      TF_VAR_telegram_bot_token: ${{ secrets.TF_VAR_TELEGRAM_BOT_TOKEN }}
+      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY }}
+      TF_VAR_quicknode_security_token: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
+      TF_VAR_x_auth_token: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
+      TF_VAR_victorops_webhook_url: ${{ secrets.TF_VAR_VICTOROPS_WEBHOOK_URL }}
+      TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID }}
+      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Verify production-infra environment protection
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_ENVIRONMENT_NAME: production-infra
+        run: node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Apply
+        id: apply
+        # Re-plans + applies in a single step. The reviewer at the
+        # production-infra environment gate should read this job's plan output
+        # before approving — it's the ground truth for what lands.
+        # `-lock-timeout=10m`: apply must wait for any in-progress state
+        # lock rather than failing the deploy.
+        # `-no-color`: keep the output free of ANSI escapes so the apply
+        # summary step renders cleanly in the job summary markdown.
+        # Apply output is captured raw, sanitized, then written to
+        # `/tmp/tf-apply.txt` for logs and the apply summary. QuickNode resources
+        # can print provider state such as webhook URLs/tokens, so never tee raw
+        # Terraform output to GitHub logs.
+        run: |
+          set +e
+          terraform apply -auto-approve -no-color -input=false -lock-timeout=10m > /tmp/tf-apply.raw 2>&1
+          EXITCODE=$?
+          set -e
+          "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-apply.raw /tmp/tf-apply.txt
+          cat /tmp/tf-apply.txt
+          exit "$EXITCODE"
+
+      - name: Strip refresh noise from apply output
+        # Same preamble-stripping treatment as the plan step — terraform
+        # apply also refreshes state before showing the action plan. See the
+        # equivalent step under `plan` for the full rationale.
+        if: always()
+        working-directory: /tmp
+        run: |
+          if [ -f tf-apply.txt ]; then
+            awk '
+              /^Acquiring state lock|: Refreshing state\.\.\.|: Reading\.\.\.|: Read complete after/ { next }
+              NF || found { found=1; print }
+            ' tf-apply.txt | cat -s > tf-apply.clean.txt
+            mv tf-apply.clean.txt tf-apply.txt
+          fi
+
+      - name: Apply summary
+        # Renders the apply output at the top of the job page so reviewers
+        # don't have to scroll the raw `Apply` step log to confirm what
+        # actually landed. `if: always()` so a failed apply still surfaces
+        # the error inline.
+        if: always()
+        env:
+          APPLY_OUTCOME: ${{ steps.apply.outcome }}
+        run: |
+          {
+            echo '## Terraform Apply — `governance-watchdog/infra/`'
+            echo
+            case "$APPLY_OUTCOME" in
+              success) echo '**Status:** ✅ applied' ;;
+              failure) echo '**Status:** ❌ apply failed' ;;
+              *)       printf '**Status:** %s\n' "$APPLY_OUTCOME" ;;
+            esac
+            echo
+            echo '<details open><summary>Apply output</summary>'
+            echo
+            echo '```terraform'
+            tail -c 50000 /tmp/tf-apply.txt 2>/dev/null || echo '(no apply output captured)'
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
