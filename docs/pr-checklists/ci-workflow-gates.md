@@ -31,6 +31,14 @@ gh api repos/mento-protocol/monitoring-monorepo/rulesets \
   -q '.rules[] | select(.type=="required_status_checks").parameters.required_status_checks[].context'
 ```
 
+After changing a required-status workflow or replacing the tool that reports its
+checks, verify the live PR status rollup with
+`pnpm pr:ready-state --pr <number> --json`. Confirm the intended required
+context is the only tool-owned check GitHub surfaces. PR #1008/#1010 exposed the
+failure mode: an action-created `Trunk Check` Checks API run appeared alongside
+the intended `Code Quality` job, and GitHub grouped the extra failure under the
+advisory schema-diff workflow in the PR UI.
+
 - [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
 - [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern (the workflow-level `paths:` mirrors the in-job `filter` step, which is kept as a fail-closed backstop). **Exception:** a workflow that posts a sticky PR comment AND clears it on revert (e.g. `schema-diff.yml`) must stay unfiltered — a `paths:` skip on a revert PR strands the stale comment because the cleanup step never runs. Keep run/skip in-job there.
 - [ ] If you make an advisory workflow required, add it to the ruleset **and** remove its `paths:` filter in the same change.
@@ -79,6 +87,12 @@ A cache key that misses an input silently serves stale build artifacts.
 Audit workflows that "tolerate transient errors" become attack surface — an attacker who can wedge the registry can ship malicious deps during the outage window.
 
 - [ ] Audit workflows MUST fail-closed on registry errors. Don't pass `--ignore-registry-errors` or equivalent
+- [ ] High-advisory exceptions MUST be implemented as parsed-audit filters scoped
+      by advisory ID, package, resolved version, and exact dependency path. Do not
+      use broad `pnpm audit --ignore` rules for PR gates. Add fixture coverage for
+      the allowed path and a sibling disallowed path.
+- [ ] If a path-scoped audit gate replaces a required Trunk/OSV lockfile scan,
+      run that replacement in a ruleset-required check such as Code Quality.
 - [ ] If you genuinely need a soft-failure path, gate it behind a manual `workflow_dispatch` with explicit input, not on every PR
 
 ## 7. Dependabot policy
@@ -133,4 +147,4 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 - PR #191 — third-party actions weren't all SHA-pinned, leaving a supply-chain trust gap
 - PR #188 — caching key for indexer codegen missed the codegen scripts; cached output went stale on script-only changes
 - PR #186 — workflow path filter for "bridge changes" missed the workflow file itself, so workflow edits didn't re-run
-- PR #821/#822 — "ARM is 37.5% cheaper" was falsified for CPU-bound jobs: ~2–3.4× slower runtime + round-up billing made them MORE expensive on ARM; only network-bound and sub-minute jobs migrated. Also: trunk-action's cache key has no arch component — cross-arch restore caused `execve failed: Text file busy` until `cache-key: ${{ runner.arch }}` was passed
+- PR #821/#822 — "ARM is 37.5% cheaper" was falsified for CPU-bound jobs: ~2–3.4× slower runtime + round-up billing made them MORE expensive on ARM; only network-bound and sub-minute jobs migrated. Also: Trunk's `~/.cache/trunk` stores architecture-specific binaries — cross-arch restore caused `execve failed: Text file busy`, so the Code Quality cache key includes `${{ runner.arch }}`

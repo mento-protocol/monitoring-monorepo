@@ -27,6 +27,7 @@ import {
   UNIQUE_LP_ADDRESSES,
 } from "@/lib/queries";
 import { aggregateProtocolFees } from "@/lib/protocol-fees";
+import { activeReservePoolIdsFromKnownStrategies } from "@/lib/strategy-contracts";
 import { usesRuntimeStrategyProbe } from "@/lib/strategy-probe-scope";
 import {
   buildSnapshotWindows,
@@ -1185,11 +1186,18 @@ function resolveStrategyIds({
     fallbackStrategiesResult.status === "fulfilled"
       ? fallbackStrategiesResult.value
       : emptyStrategyIds();
+  const knownReservePoolIds = activeReservePoolIdsFromKnownStrategies(
+    network,
+    pools,
+  );
 
   if (!usesIndexedCdpPools(network)) {
     return {
       cdpPoolIds: new Set<string>(),
-      reservePoolIds: fallbackStrategies.reservePoolIds,
+      reservePoolIds: new Set([
+        ...knownReservePoolIds,
+        ...fallbackStrategies.reservePoolIds,
+      ]),
     };
   }
 
@@ -1203,10 +1211,10 @@ function resolveStrategyIds({
 
   return {
     cdpPoolIds,
-    // Indexed Celo has a positive CDP source, but no positive Reserve source.
-    // Unknown active rebalancers stay unbadged instead of being inferred as
-    // Reserve from the absence of an OLS/CDP row.
-    reservePoolIds: new Set<string>(),
+    // Indexed Celo has positive CDP rows and canonical contracts-derived
+    // Reserve strategy addresses. Unknown active rebalancers stay unbadged
+    // instead of being inferred as Reserve from the absence of an OLS/CDP row.
+    reservePoolIds: knownReservePoolIds,
   };
 }
 

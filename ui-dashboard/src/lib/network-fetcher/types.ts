@@ -70,9 +70,9 @@ export type NetworkData = {
   olsPoolIds: Set<string>;
   /**
    * Pool IDs classified as CDP or Reserve for global strategy badges. CDP
-   * badges are Celo-only and come from indexed CdpPool rows. Indexed Celo
-   * intentionally withholds Reserve without a positive indexed Reserve
-   * source; non-Celo fallback probes only contribute Reserve classifications.
+   * badges are Celo-only and come from indexed CdpPool rows. Reserve badges
+   * require a positive signal too: canonical contracts-derived Reserve
+   * strategy addresses on indexed chains, or non-Celo fallback probes.
    */
   cdpPoolIds: Set<string>;
   reservePoolIds: Set<string>;

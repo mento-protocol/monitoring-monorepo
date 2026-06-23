@@ -99,6 +99,7 @@ describe("auth secret config — rotation support", () => {
 
   it("includes only AUTH_SECRET when AUTH_SECRET_PREV is not set", async () => {
     vi.stubEnv("AUTH_SECRET", "primary-secret");
+    vi.stubEnv("AUTH_SECRET_PREV", "");
     await loadAuthWithEnv(proxyUrl);
     expect(capturedConfig.secret).toEqual(["primary-secret"]);
   });
@@ -115,6 +116,13 @@ describe("auth secret config — rotation support", () => {
     vi.stubEnv("AUTH_SECRET_PREV", "");
     await loadAuthWithEnv(proxyUrl);
     expect(capturedConfig.secret).toEqual(["primary-secret"]);
+  });
+
+  it("omits the secret option when no auth secrets are configured", async () => {
+    vi.stubEnv("AUTH_SECRET", "");
+    vi.stubEnv("AUTH_SECRET_PREV", "");
+    await loadAuthWithEnv(proxyUrl);
+    expect(capturedConfig.secret).toBeUndefined();
   });
 });
 

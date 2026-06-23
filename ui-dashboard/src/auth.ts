@@ -135,17 +135,21 @@ async function refreshGoogleAccessToken(token: JWT): Promise<JWT> {
   }
 }
 
+const authSecrets = [
+  process.env.AUTH_SECRET,
+  process.env.AUTH_SECRET_PREV,
+].filter((s): s is string => typeof s === "string" && s.length > 0);
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Support graceful AUTH_SECRET rotation without invalidating active sessions.
   // Auth.js uses the first entry to sign new tokens and tries every entry for
-  // verification. Rotation procedure: set AUTH_SECRET_PREV = current AUTH_SECRET,
-  // set AUTH_SECRET = new random value, then deploy. After 30 days (session
-  // maxAge) all cookies signed by AUTH_SECRET_PREV expire and the variable can
-  // be removed. Without this, a rotation forces all active users to re-login
-  // (Sentry ANALYTICS-MENTO-ORG-20).
-  secret: [process.env.AUTH_SECRET, process.env.AUTH_SECRET_PREV].filter(
-    (s): s is string => typeof s === "string" && s.length > 0,
-  ),
+  // verification. Rotation procedure: set AUTH_SECRET_PREV = current
+  // AUTH_SECRET, set AUTH_SECRET = new random value, apply Terraform, and
+  // redeploy. After 30 days (session maxAge) all cookies signed by
+  // AUTH_SECRET_PREV expire; remove it, apply Terraform, and redeploy again.
+  // Without this, a rotation forces all active users to re-login (Sentry
+  // ANALYTICS-MENTO-ORG-20).
+  secret: authSecrets.length > 0 ? authSecrets : undefined,
 
   // On preview deployments NEXTAUTH_URL is set to the production URL so that
   // the Google OAuth callback always lands on the whitelisted prod domain.
