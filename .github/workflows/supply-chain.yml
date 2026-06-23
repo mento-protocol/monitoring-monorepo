@@ -3,7 +3,11 @@ name: Supply Chain
 # Four gates that protect the dependency supply chain:
 #
 # 1. npm advisory audit — blocks merges when a high/critical advisory exists
-#    against any package in the root or standalone deploy lockfiles.
+#    against any package in the root or standalone deploy lockfiles, except
+#    explicitly documented advisory/version/path-scoped exceptions in
+#    scripts/pnpm-audit-high-gate.mjs. The governance-watchdog high-audit leg is
+#    duplicated in the required Code Quality job because Trunk/OSV cannot express
+#    that path-scoped Discord undici exception safely.
 #
 # 2. lockfile-lint — validates pnpm-lock.yaml structural integrity for the root
 #    workspace lockfile and the package-local Cloud Build lockfiles:
@@ -63,6 +67,8 @@ on:
       # The gate itself — changes to the workflow or the lockfile-lint
       # scripts must self-trigger a run (same pattern as the other gates).
       - .github/workflows/supply-chain.yml
+      - scripts/pnpm-audit-high-gate.mjs
+      - scripts/pnpm-audit-high-gate.test.mjs
       - scripts/lockfile-lint.mjs
       - scripts/lockfile-lint.test.mjs
       - scripts/version-skew-check.mjs
@@ -102,20 +108,19 @@ jobs:
       # Fail closed: no `--ignore-registry-errors`. That flag exits 0 on any
       # registry error — transient 5xx *and* persistent auth/network failures
       # — so an npm outage or misconfig would silently let advisories through.
-      # Both registry errors and advisory findings share exit code 1 in pnpm,
-      # so a bash retry loop can't distinguish them without delaying real
-      # blocks. A rare transient blip → re-run the job manually.
+      # The gate parses pnpm's JSON output so known exceptions can be scoped by
+      # advisory, package, version, and dependency path while registry failures
+      # still stop the job. A rare transient blip → re-run the job manually.
+      - name: pnpm audit high gate self-tests
+        run: node scripts/pnpm-audit-high-gate.test.mjs
       - name: pnpm audit (high+ only)
-        run: pnpm audit --audit-level=high
+        run: node scripts/pnpm-audit-high-gate.mjs --dir . --label root
       - name: pnpm audit handler deploy lockfile (high+ only)
-        working-directory: alerts/infra/onchain-event-handler
-        run: pnpm audit --audit-level=high
+        run: node scripts/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
       - name: pnpm audit on-call announcer deploy lockfile (high+ only)
-        working-directory: alerts/infra/oncall-announcer
-        run: pnpm audit --audit-level=high
+        run: node scripts/pnpm-audit-high-gate.mjs --dir alerts/infra/oncall-announcer --label alerts/infra/oncall-announcer
       - name: pnpm audit governance-watchdog deploy lockfile (high+ only)
-        working-directory: governance-watchdog
-        run: pnpm audit --audit-level=high
+        run: node scripts/pnpm-audit-high-gate.mjs --dir governance-watchdog --label governance-watchdog
 
   lockfile-lint:
     name: lockfile integrity + registry check

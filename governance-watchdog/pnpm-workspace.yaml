@@ -31,7 +31,9 @@ overrides:
   # isows resolves ws@8.20.1 through viem; 8.21.0 contains the GHSA-96hv-2xvq-fx4p
   # fix and stays compatible with isows' ws peer range.
   "ws@<8.21.0": 8.21.0
-  # discord.js and @discordjs/rest still pin undici exactly, so pin the patched
-  # 6.x floor narrowly here. Avoid an unbounded override: undici 8's stricter
-  # Headers webidl broke Discord response wrapping once (issue #833).
-  "undici@<6.27.0": 6.27.0
+  # No undici override: discord.js and @discordjs/rest both pin undici EXACTLY
+  # (6.24.1 as of discord.js 14.26.4). Overriding past their pin is what broke
+  # prod once (undici 8's stricter Headers webidl rejects Symbol(sensitiveHeaders)
+  # in @discordjs/rest's response wrapping — sends deliver but report as failures;
+  # see issue #833). If no patched Discord release exists, keep any high-audit
+  # exception advisory-, version-, and path-scoped in ../scripts/pnpm-audit-high-gate.mjs.

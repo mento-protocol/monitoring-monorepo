@@ -42,6 +42,11 @@ const MOCK_NETWORK: Network = {
   testnet: false,
 };
 
+const CELO_RESERVE_LIQUIDITY_STRATEGY =
+  "0xa0fB8b16ce6AF3634fF9F3f4F40E49E1C1ae4f0B";
+const CELO_SEPOLIA_RESERVE_LIQUIDITY_STRATEGY =
+  "0x734bb3251Ec3f1A83f8f2A8609bcEF649D54EbF8";
+
 const MOCK_NETWORK_2: Network = {
   ...MOCK_NETWORK,
   id: "celo-sepolia-local",
@@ -270,6 +275,74 @@ describe("fetchNetworkData — happy path", () => {
       id: pool.id,
       wrappedExchangeDeprecated: true,
     });
+  });
+
+  it("classifies Celo pools with a canonical ReserveLiquidityStrategy rebalancer as Reserve", async () => {
+    const reservePool = {
+      ...makePool("42220-0x000000000000000000000000000000000000aaaa"),
+      rebalancerAddress: CELO_RESERVE_LIQUIDITY_STRATEGY,
+    };
+    const unknownPool = {
+      ...makePool("42220-0x000000000000000000000000000000000000bbbb"),
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    };
+
+    mockRequest((query) => {
+      if (query.includes("CdpPool")) return { CdpPool: [] };
+      if (query.includes("OlsPool")) return { OlsPool: [] };
+      if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [reservePool, unknownPool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(new Set([reservePool.id]));
+    expect(mockDetectProbedStrategies).not.toHaveBeenCalled();
+  });
+
+  it("classifies non-indexed Celo networks with a canonical ReserveLiquidityStrategy rebalancer as Reserve", async () => {
+    const reservePool = {
+      ...makePool(
+        "11142220-0x000000000000000000000000000000000000aaaa",
+        11142220,
+      ),
+      rebalancerAddress: CELO_SEPOLIA_RESERVE_LIQUIDITY_STRATEGY,
+    };
+
+    mockRequest((query) => {
+      if (query.includes("OlsPool")) return { OlsPool: [] };
+      if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [reservePool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK_2, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(new Set([reservePool.id]));
+    expect(mockDetectProbedStrategies).not.toHaveBeenCalled();
+
+    const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    expect(
+      calls.some((args) => extractQuery(args[0]).includes("AllCdpPools")),
+    ).toBe(false);
   });
 
   it("uses indexed CdpPool rows on Celo without inferring Reserve from unknown strategies", async () => {

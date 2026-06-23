@@ -25,8 +25,9 @@ type DerivedEntries = {
   /** Set of globalPoolKeys classified as CDP by Celo CdpPool rows. */
   cdpPoolKeys: Set<string>;
   /**
-   * Set of globalPoolKeys classified as Reserve. Indexed Celo withholds this
-   * without a positive indexed source; fallback networks use the RPC probe.
+   * Set of globalPoolKeys classified as Reserve. Indexed chains can use
+   * canonical contracts-derived Reserve strategy addresses; fallback networks
+   * use the RPC probe.
    * Pools with a rebalancer that appear in none of {ols, cdp, reserve} are
    * "strategy detection unavailable", not known Reserve.
    */

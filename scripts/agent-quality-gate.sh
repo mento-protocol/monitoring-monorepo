@@ -1390,6 +1390,9 @@ while IFS= read -r path; do
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
           ;;
+        scripts/pnpm-audit-high-gate.mjs|scripts/pnpm-audit-high-gate.test.mjs)
+          add_command "node scripts/pnpm-audit-high-gate.test.mjs" "pnpm audit high gate changed"
+          ;;
         scripts/version-skew-check.mjs|scripts/version-skew-check.test.mjs)
           add_command "pnpm skew:check:test" "version skew checker changed"
           ;;

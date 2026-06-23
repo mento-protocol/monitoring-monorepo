@@ -87,6 +87,12 @@ A cache key that misses an input silently serves stale build artifacts.
 Audit workflows that "tolerate transient errors" become attack surface — an attacker who can wedge the registry can ship malicious deps during the outage window.
 
 - [ ] Audit workflows MUST fail-closed on registry errors. Don't pass `--ignore-registry-errors` or equivalent
+- [ ] High-advisory exceptions MUST be implemented as parsed-audit filters scoped
+      by advisory ID, package, resolved version, and exact dependency path. Do not
+      use broad `pnpm audit --ignore` rules for PR gates. Add fixture coverage for
+      the allowed path and a sibling disallowed path.
+- [ ] If a path-scoped audit gate replaces a required Trunk/OSV lockfile scan,
+      run that replacement in a ruleset-required check such as Code Quality.
 - [ ] If you genuinely need a soft-failure path, gate it behind a manual `workflow_dispatch` with explicit input, not on every PR
 
 ## 7. Dependabot policy
