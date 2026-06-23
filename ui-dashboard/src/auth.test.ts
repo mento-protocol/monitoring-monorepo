@@ -124,6 +124,13 @@ describe("auth secret config — rotation support", () => {
     await loadAuthWithEnv(proxyUrl);
     expect(capturedConfig.secret).toBeUndefined();
   });
+
+  it("does not promote AUTH_SECRET_PREV when AUTH_SECRET is empty", async () => {
+    vi.stubEnv("AUTH_SECRET", "");
+    vi.stubEnv("AUTH_SECRET_PREV", "old-secret");
+    await loadAuthWithEnv(proxyUrl);
+    expect(capturedConfig.secret).toBeUndefined();
+  });
 });
 
 describe("Google provider checks config", () => {

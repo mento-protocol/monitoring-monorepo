@@ -135,17 +135,25 @@ async function refreshGoogleAccessToken(token: JWT): Promise<JWT> {
   }
 }
 
-const authSecrets = [
-  process.env.AUTH_SECRET,
-  process.env.AUTH_SECRET_PREV,
-].filter((s): s is string => typeof s === "string" && s.length > 0);
+const currentAuthSecret = process.env.AUTH_SECRET;
+const previousAuthSecret = process.env.AUTH_SECRET_PREV;
+const hasCurrentAuthSecret =
+  typeof currentAuthSecret === "string" && currentAuthSecret.length > 0;
+const hasPreviousAuthSecret =
+  typeof previousAuthSecret === "string" && previousAuthSecret.length > 0;
+const authSecrets = hasCurrentAuthSecret
+  ? [currentAuthSecret, ...(hasPreviousAuthSecret ? [previousAuthSecret] : [])]
+  : [];
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Support graceful AUTH_SECRET rotation without invalidating active sessions.
   // Auth.js uses the first entry to sign new tokens and tries every entry for
-  // verification. Rotation procedure: set AUTH_SECRET_PREV = current
-  // AUTH_SECRET, set AUTH_SECRET = new random value, apply Terraform, and
-  // redeploy. After 30 days (session maxAge) all cookies signed by
+  // verification. AUTH_SECRET_PREV is intentionally ignored unless
+  // AUTH_SECRET is present so a misconfigured environment cannot promote the
+  // retired secret back to the primary signing key.
+  // Rotation procedure: set AUTH_SECRET_PREV = current AUTH_SECRET, set
+  // AUTH_SECRET = new random value, apply Terraform, and redeploy. After 30
+  // days (session maxAge) all cookies signed by
   // AUTH_SECRET_PREV expire; remove it, apply Terraform, and redeploy again.
   // Without this, a rotation forces all active users to re-login (Sentry
   // ANALYTICS-MENTO-ORG-20).
