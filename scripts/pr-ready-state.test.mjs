@@ -465,7 +465,7 @@ test("groups status check rollup into stable pass/fail/pending/skipped buckets",
 
 test("splits known advisory checks into optional lag when branch protection data is unavailable", () => {
   const split = splitRequiredAndOptionalChecks([
-    { name: "Trunk Check", status: "COMPLETED", conclusion: "SUCCESS" },
+    { name: "Code Quality", status: "COMPLETED", conclusion: "SUCCESS" },
     { name: "Cursor Bugbot", status: "IN_PROGRESS", conclusion: null },
     { name: "GraphQL schema diff", status: "IN_PROGRESS", conclusion: null },
     { name: "jscpd", status: "IN_PROGRESS", conclusion: null },
@@ -477,7 +477,7 @@ test("splits known advisory checks into optional lag when branch protection data
       optional: split.optional.map((check) => `${check.name}:${check.state}`),
     },
     {
-      required: ["Trunk Check:pass"],
+      required: ["Code Quality:pass"],
       optional: [
         "Cursor Bugbot:pending",
         "GraphQL schema diff:pending",
