@@ -10,6 +10,7 @@ import { checkWebhookStatus } from "./quicknode-health/index.js";
 import { getCacheSize, isDuplicate } from "./utils/event-deduplication.js";
 import logError from "./utils/log-error.js";
 import parseRequestBody from "./utils/parse-request-body.js";
+import { reserveQuickNodeNonce } from "./utils/quicknode-replay-protection.js";
 import {
   hasAuthToken,
   isFromQuicknode,
@@ -107,10 +108,13 @@ const handleQuicknodeWebhook = async (
    *  1) Come from QuickNode
    *  2) OR have an auth token (which we use for testing in production)
    */
+  let isQuicknodeWebhook = false;
   if (isProduction) {
     const isHealthCheck = isHealthCheckWebhook(req.body);
 
     if (await isFromQuicknode(req)) {
+      isQuicknodeWebhook = true;
+
       // Skip verbose logging for health check webhooks to reduce log noise
       if (!isHealthCheck) {
         console.info("Received QuickNode Webhook:", req.body);
@@ -137,6 +141,36 @@ const handleQuicknodeWebhook = async (
     );
     res.status(500).send("Something went wrong 🤔");
     return;
+  }
+
+  // Reserve the durable replay nonce only after the payload is confirmed
+  // non-empty and well-formed (mirrors the onchain-event-handler sibling):
+  // reserving earlier would burn the nonce on health-check pings or malformed
+  // envelopes, making a legitimate QuickNode retry look like a duplicate and
+  // permanently suppressing the alert.
+  if (isQuicknodeWebhook) {
+    const replay = await reserveQuickNodeNonce(
+      req.headers["x-qn-nonce"] as string,
+      req.headers["x-qn-timestamp"] as string,
+    );
+    if (!replay.valid) {
+      if (!replay.replayed) {
+        // Structured ERROR so a replay-protection outage (bad bucket/IAM/env,
+        // metadata token, or Storage API) trips the cloud-function-errors
+        // Slack alert; raw console.error lands below ERROR and is excluded.
+        logError("QuickNode replay protection error:", replay);
+      }
+      res.status(replay.status).send(replay.message);
+      return;
+    }
+    if (replay.skipped) {
+      // Bucket misconfigured (e.g. a gcloud-only deploy without the Terraform
+      // env var): the webhook was processed WITHOUT replay protection. Page so
+      // the gap gets fixed, but never drop the alert.
+      logError("QuickNode replay protection disabled:", {
+        reason: replay.skipped,
+      });
+    }
   }
 
   let eventsProcessed = 0;

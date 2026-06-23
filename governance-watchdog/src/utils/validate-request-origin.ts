@@ -11,9 +11,11 @@ import { verifyQuickNodeHmac } from "./quicknode-hmac.js";
  * set by QuickNode — but without a freshness check, a captured request (e.g. from
  * an intermediate proxy or log) could be replayed indefinitely to produce duplicate
  * governance notifications. 5 minutes comfortably covers QuickNode delivery retries
- * and clock skew. We deliberately do NOT track x-qn-nonce values: a nonce cache
- * would live in per-instance memory only, adding little on top of this window and
- * the event-deduplication cache (see ./event-deduplication.ts).
+ * and clock skew. On top of this window, x-qn-nonce values are now durably
+ * reserved in GCS via ./quicknode-replay-protection.js, so a captured request
+ * cannot be replayed even within the freshness window (the per-instance
+ * event-deduplication cache, see ./event-deduplication.ts, only dedupes within
+ * a single warm instance and does not survive restarts).
  */
 const MAX_TIMESTAMP_SKEW_SECONDS = 5 * 60;
 

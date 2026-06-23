@@ -4,7 +4,7 @@
  * Multisig addresses are loaded from environment variables
  */
 
-import keccak from "keccak";
+import { keccak256, stringToBytes } from "viem";
 import { celo, mainnet } from "viem/chains";
 import safeAbi from "./safe-abi.json";
 import config from "./config";
@@ -23,14 +23,6 @@ const SECURITY_EVENT_NAMES = new Set([
   "DisabledModule",
   "ChangedGuard",
 ]);
-
-/**
- * Compute keccak256 hash of a string (for event signatures)
- */
-function keccak256(input: string): string {
-  const hash = keccak("keccak256").update(input).digest("hex");
-  return `0x${hash}`;
-}
 
 /**
  * Extract event signatures from ABI and compute their hashes
@@ -57,7 +49,9 @@ function extractEventSignatures() {
       const signatureStr = `${eventName}(${paramTypes.join(",")})`;
 
       // Compute keccak256 hash
-      const signatureHash = keccak256(signatureStr) as EventSignature;
+      const signatureHash = keccak256(
+        stringToBytes(signatureStr),
+      ) as EventSignature;
 
       // Store mapping
       eventSignatures[signatureHash] = eventName;
