@@ -155,6 +155,11 @@ jobs:
       # channel id from the workspace-level value.
       GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID }}
       TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID }}
+      # quicknode_api_key is likewise a shared-name var (the alerts stack also
+      # declares it). The workspace-level TF_VAR_quicknode_api_key above carries
+      # the alerts value; gov-watchdog's own key stays stack-scoped here and is
+      # applied only in its leg below.
+      GOV_WATCHDOG_TF_VAR_QUICKNODE_API_KEY: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY }}
     defaults:
       run:
         working-directory: ${{ matrix.path }}
@@ -229,13 +234,18 @@ jobs:
         run: |
           # governance-watchdog's own TF_VAR_* are exported workspace-wide (see
           # the env block — gov-watchdog-owned names, safe to expose). Only the
-          # shared-name slack_notification_channel_id needs a stack-scoped
-          # override here so it doesn't inherit the alerts stack's channel id.
+          # shared-name slack_notification_channel_id + quicknode_api_key need a
+          # stack-scoped override here so they don't inherit the alerts stack's values.
           if [ "$STACK_ID" = "governance-watchdog" ]; then
             if [ -n "${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID:-}" ]; then
               export TF_VAR_slack_notification_channel_id="${GOV_WATCHDOG_TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID}"
             elif [ -n "${TF_VAR_slack_notification_channel_id:-}" ]; then
               echo "::notice::governance-watchdog drift leg using legacy TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID fallback until the stack-specific Slack secret is mirrored"
+            fi
+            if [ -n "${GOV_WATCHDOG_TF_VAR_QUICKNODE_API_KEY:-}" ]; then
+              export TF_VAR_quicknode_api_key="${GOV_WATCHDOG_TF_VAR_QUICKNODE_API_KEY}"
+            elif [ -n "${TF_VAR_quicknode_api_key:-}" ]; then
+              echo "::notice::governance-watchdog drift leg using legacy shared TF_VAR_QUICKNODE_API_KEY fallback until the stack-specific QuickNode secret is mirrored"
             fi
           fi
 

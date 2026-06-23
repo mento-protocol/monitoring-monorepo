@@ -155,7 +155,7 @@ jobs:
       TF_VAR_telegram_test_chat_id: ${{ secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID }}
       TF_VAR_telegram_bot_token: ${{ secrets.TF_VAR_TELEGRAM_BOT_TOKEN }}
       # QuickNode (webhook security token + API key)
-      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
+      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY }}
       TF_VAR_quicknode_security_token: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
       # Production test path (x-auth-token)
       TF_VAR_x_auth_token: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
@@ -505,7 +505,7 @@ jobs:
       TF_VAR_telegram_chat_id: ${{ secrets.TF_VAR_TELEGRAM_CHAT_ID }}
       TF_VAR_telegram_test_chat_id: ${{ secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID }}
       TF_VAR_telegram_bot_token: ${{ secrets.TF_VAR_TELEGRAM_BOT_TOKEN }}
-      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
+      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY }}
       TF_VAR_quicknode_security_token: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
       TF_VAR_x_auth_token: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
       TF_VAR_victorops_webhook_url: ${{ secrets.TF_VAR_VICTOROPS_WEBHOOK_URL }}
