@@ -142,17 +142,18 @@
       ],
       "ci": {
         "validate": "changed-paths",
-        "plan": "manual",
-        "apply": "manual",
+        "plan": "pull-request",
+        "apply": "push-main-production-infra-environment",
         "drift": "scheduled"
       },
-      "applyPolicy": "human-review-required",
+      "applyPolicy": "ci-production-infra-environment-approved",
       "changedPathPatterns": [
         "governance-watchdog/**",
         "terraform.stacks.json",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml"
+        ".github/workflows/infra.yml",
+        ".github/workflows/governance-watchdog.yml"
       ],
       "aliases": ["pnpm gov-watchdog:tf:init", "pnpm gov-watchdog:tf:plan"]
     }
