@@ -23,9 +23,11 @@ const DISCORD_UNDICI_ADVISORY_IDS = new Set([
   "GHSA-vxpw-j846-p89q",
   "CVE-2026-12151",
 ]);
-const ALLOWED_DISCORD_UNDICI_PATHS = new Set([
+const ROOT_DISCORD_UNDICI_PATHS = new Set([
   "governance-watchdog>discord.js>undici",
   "governance-watchdog>discord.js>@discordjs/rest>undici",
+]);
+const GOVERNANCE_STANDALONE_DISCORD_UNDICI_PATHS = new Set([
   ".>discord.js>undici",
   ".>discord.js>@discordjs/rest>undici",
   "discord.js>undici",
@@ -155,15 +157,37 @@ function isBlockingSeverity(advisory) {
 }
 
 /**
+ * @param {{dir: string; label: string}} options
+ * @returns {boolean}
+ */
+function isGovernanceWatchdogAudit(options) {
+  const normalizedDir = options.dir.replaceAll("\\", "/").replace(/\/+$/, "");
+  return (
+    normalizedDir === "governance-watchdog" ||
+    normalizedDir.endsWith("/governance-watchdog") ||
+    options.label === "governance-watchdog"
+  );
+}
+
+/**
  * @param {Record<string, any>} advisory
  * @param {Record<string, any>} finding
  * @param {string} path
+ * @param {{dir: string; label: string}} options
  * @returns {boolean}
  */
-function isAllowedDiscordUndiciFinding(advisory, finding, path) {
+function isAllowedDiscordUndiciFinding(advisory, finding, path, options) {
   if (advisory.module_name !== "undici") return false;
   if (finding.version !== "6.24.1") return false;
-  if (!ALLOWED_DISCORD_UNDICI_PATHS.has(path)) return false;
+  if (
+    !ROOT_DISCORD_UNDICI_PATHS.has(path) &&
+    !(
+      isGovernanceWatchdogAudit(options) &&
+      GOVERNANCE_STANDALONE_DISCORD_UNDICI_PATHS.has(path)
+    )
+  ) {
+    return false;
+  }
 
   return advisoryIds(advisory).some((id) =>
     DISCORD_UNDICI_ADVISORY_IDS.has(id),
@@ -191,9 +215,10 @@ function findingPaths(advisory) {
 
 /**
  * @param {Record<string, any>} report
+ * @param {{dir: string; label: string}} options
  * @returns {{allowed: string[]; disallowed: string[]}}
  */
-function evaluateReport(report) {
+function evaluateReport(report, options) {
   if (report.error) {
     const message = report.error.message ?? JSON.stringify(report.error);
     die(`pnpm audit failed: ${message}`);
@@ -214,7 +239,7 @@ function evaluateReport(report) {
     for (const { finding, path } of findingPaths(advisory)) {
       const version = finding.version ?? "unknown-version";
       const summary = `${id} ${severity} ${moduleName}@${version} via ${path}`;
-      if (isAllowedDiscordUndiciFinding(advisory, finding, path)) {
+      if (isAllowedDiscordUndiciFinding(advisory, finding, path, options)) {
         allowed.push(summary);
       } else {
         disallowed.push(summary);
@@ -227,7 +252,7 @@ function evaluateReport(report) {
 
 const options = parseArgs(process.argv.slice(2));
 const report = loadAuditReport(options);
-const { allowed, disallowed } = evaluateReport(report);
+const { allowed, disallowed } = evaluateReport(report, options);
 
 if (disallowed.length > 0) {
   console.error(`${options.label}: disallowed high/critical pnpm advisories:`);

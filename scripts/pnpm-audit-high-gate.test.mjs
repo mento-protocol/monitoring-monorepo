@@ -42,16 +42,17 @@ const SCRIPT = new URL("./pnpm-audit-high-gate.mjs", import.meta.url).pathname;
 
 /**
  * @param {unknown} report
+ * @param {string[]} [args]
  * @returns {{exitCode: number; stdout: string; stderr: string}}
  */
-function run(report) {
+function run(report, args = []) {
   const dir = mkdtempSync(join(tmpdir(), "pnpm-audit-high-gate-test-"));
   try {
     const reportPath = join(dir, "audit.json");
     writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
     const result = spawnSync(
       process.execPath,
-      [SCRIPT, "--audit-json", reportPath, "--label", "fixture"],
+      [SCRIPT, "--audit-json", reportPath, "--label", "fixture", ...args],
       {
         cwd: dir,
         encoding: "utf8",
@@ -102,23 +103,42 @@ test("allows the documented root governance-watchdog Discord undici path", () =>
 });
 
 test("allows the documented standalone governance-watchdog Discord undici path", () => {
-  const { exitCode, stdout, stderr } = run({
-    advisories: {
-      123: undiciCve("discord.js>undici"),
+  const { exitCode, stdout, stderr } = run(
+    {
+      advisories: {
+        123: undiciCve("discord.js>undici"),
+      },
     },
-  });
+    ["--dir", "governance-watchdog", "--label", "governance-watchdog"],
+  );
   assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
   assert(stdout.includes("discord.js>undici"), `stdout: ${stdout}`);
 });
 
 test("allows pnpm's dot-prefixed standalone Discord undici path", () => {
-  const { exitCode, stdout, stderr } = run({
-    advisories: {
-      123: undiciCve(".>discord.js>undici"),
+  const { exitCode, stdout, stderr } = run(
+    {
+      advisories: {
+        123: undiciCve(".>discord.js>undici"),
+      },
     },
-  });
+    ["--dir", "governance-watchdog", "--label", "governance-watchdog"],
+  );
   assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
   assert(stdout.includes(".>discord.js>undici"), `stdout: ${stdout}`);
+});
+
+test("rejects unqualified standalone Discord paths outside governance-watchdog", () => {
+  const { exitCode, stderr } = run(
+    {
+      advisories: {
+        123: undiciCve(".>discord.js>undici"),
+      },
+    },
+    ["--dir", "alerts/infra/oncall-announcer", "--label", "alerts/oncall"],
+  );
+  assert(exitCode !== 0, "expected non-zero exit");
+  assert(stderr.includes(".>discord.js>undici"), `stderr: ${stderr}`);
 });
 
 test("rejects the same undici CVE through a different consumer", () => {
