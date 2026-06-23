@@ -170,6 +170,17 @@ function isGovernanceWatchdogAudit(options) {
 }
 
 /**
+ * @param {{dir: string; label: string}} options
+ * @returns {boolean}
+ */
+function isRootAudit(options) {
+  const normalizedDir = options.dir.replaceAll("\\", "/").replace(/\/+$/, "");
+  return (
+    normalizedDir === "." || normalizedDir === "" || options.label === "root"
+  );
+}
+
+/**
  * @param {Record<string, any>} advisory
  * @param {Record<string, any>} finding
  * @param {string} path
@@ -180,7 +191,7 @@ function isAllowedDiscordUndiciFinding(advisory, finding, path, options) {
   if (advisory.module_name !== "undici") return false;
   if (finding.version !== "6.24.1") return false;
   if (
-    !ROOT_DISCORD_UNDICI_PATHS.has(path) &&
+    !(isRootAudit(options) && ROOT_DISCORD_UNDICI_PATHS.has(path)) &&
     !(
       isGovernanceWatchdogAudit(options) &&
       GOVERNANCE_STANDALONE_DISCORD_UNDICI_PATHS.has(path)
