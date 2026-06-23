@@ -33,6 +33,10 @@ jobs:
       - name: Check GitHub Actions pins
         run: node scripts/check-github-action-pins.mjs
       - uses: ./.trunk/setup-ci
+      - name: pnpm audit high gate self-tests
+        run: node scripts/pnpm-audit-high-gate.test.mjs
+      - name: pnpm audit governance-watchdog deploy lockfile (high+ only)
+        run: node scripts/pnpm-audit-high-gate.mjs --dir governance-watchdog --label governance-watchdog
       - uses: trunk-io/trunk-action@04ba50e7658c81db7356da96657e6e77f220bfa3 # v1.3.1
         with:
           arguments: --all

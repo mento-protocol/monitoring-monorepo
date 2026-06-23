@@ -83,6 +83,8 @@ Audit workflows that "tolerate transient errors" become attack surface — an at
       by advisory ID, package, resolved version, and exact dependency path. Do not
       use broad `pnpm audit --ignore` rules for PR gates. Add fixture coverage for
       the allowed path and a sibling disallowed path.
+- [ ] If a path-scoped audit gate replaces a required Trunk/OSV lockfile scan,
+      run that replacement in a ruleset-required check such as Code Quality.
 - [ ] If you genuinely need a soft-failure path, gate it behind a manual `workflow_dispatch` with explicit input, not on every PR
 
 ## 7. Dependabot policy

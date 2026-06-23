@@ -5,7 +5,9 @@ name: Supply Chain
 # 1. npm advisory audit — blocks merges when a high/critical advisory exists
 #    against any package in the root or standalone deploy lockfiles, except
 #    explicitly documented advisory/version/path-scoped exceptions in
-#    scripts/pnpm-audit-high-gate.mjs.
+#    scripts/pnpm-audit-high-gate.mjs. The governance-watchdog high-audit leg is
+#    duplicated in the required Code Quality job because Trunk/OSV cannot express
+#    that path-scoped Discord undici exception safely.
 #
 # 2. lockfile-lint — validates pnpm-lock.yaml structural integrity for the root
 #    workspace lockfile and the package-local Cloud Build lockfiles:
