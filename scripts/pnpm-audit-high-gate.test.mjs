@@ -105,6 +105,21 @@ test("allows the documented root governance-watchdog Discord undici path", () =>
   assert(stdout.includes("allowed documented"), `stdout: ${stdout}`);
 });
 
+test("allows the documented root Discord ws rest undici path", () => {
+  const { exitCode, stdout, stderr } = run(
+    {
+      advisories: {
+        123: undiciCve(
+          "governance-watchdog>discord.js>@discordjs/ws>@discordjs/rest>undici",
+        ),
+      },
+    },
+    ["--dir", ".", "--label", "root"],
+  );
+  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
+  assert(stdout.includes("@discordjs/ws"), `stdout: ${stdout}`);
+});
+
 test("allows the documented standalone governance-watchdog Discord undici path", () => {
   const { exitCode, stdout, stderr } = run(
     {
@@ -129,6 +144,19 @@ test("allows pnpm's dot-prefixed standalone Discord undici path", () => {
   );
   assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
   assert(stdout.includes(".>discord.js>undici"), `stdout: ${stdout}`);
+});
+
+test("allows the documented standalone Discord ws rest undici path", () => {
+  const { exitCode, stdout, stderr } = run(
+    {
+      advisories: {
+        123: undiciCve(".>discord.js>@discordjs/ws>@discordjs/rest>undici"),
+      },
+    },
+    ["--dir", "governance-watchdog", "--label", "governance-watchdog"],
+  );
+  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
+  assert(stdout.includes("@discordjs/ws"), `stdout: ${stdout}`);
 });
 
 test("rejects unqualified standalone Discord paths outside governance-watchdog", () => {

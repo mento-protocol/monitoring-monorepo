@@ -26,12 +26,15 @@ const DISCORD_UNDICI_ADVISORY_IDS = new Set([
 const ROOT_DISCORD_UNDICI_PATHS = new Set([
   "governance-watchdog>discord.js>undici",
   "governance-watchdog>discord.js>@discordjs/rest>undici",
+  "governance-watchdog>discord.js>@discordjs/ws>@discordjs/rest>undici",
 ]);
 const GOVERNANCE_STANDALONE_DISCORD_UNDICI_PATHS = new Set([
   ".>discord.js>undici",
   ".>discord.js>@discordjs/rest>undici",
+  ".>discord.js>@discordjs/ws>@discordjs/rest>undici",
   "discord.js>undici",
   "discord.js>@discordjs/rest>undici",
+  "discord.js>@discordjs/ws>@discordjs/rest>undici",
 ]);
 
 /**
