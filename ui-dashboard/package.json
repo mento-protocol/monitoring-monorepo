@@ -27,7 +27,7 @@
     "@sentry/nextjs": "^10.49.0",
     "@upstash/redis": "^1.36.3",
     "@vercel/analytics": "^2.0.1",
-    "@vercel/blob": "^2.4.0",
+    "@vercel/blob": "^2.4.1",
     "@web3icons/react": "^4.1.17",
     "graphql": "^16.13.1",
     "graphql-request": "^7.4.0",
