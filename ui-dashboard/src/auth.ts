@@ -149,7 +149,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // AUTH_SECRET_PREV expire; remove it, apply Terraform, and redeploy again.
   // Without this, a rotation forces all active users to re-login (Sentry
   // ANALYTICS-MENTO-ORG-20).
-  secret: authSecrets.length > 0 ? authSecrets : undefined,
+  ...(authSecrets.length > 0 ? { secret: authSecrets } : {}),
 
   // On preview deployments NEXTAUTH_URL is set to the production URL so that
   // the Google OAuth callback always lands on the whitelisted prod domain.
