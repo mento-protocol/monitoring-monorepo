@@ -139,4 +139,4 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 - PR #191 — third-party actions weren't all SHA-pinned, leaving a supply-chain trust gap
 - PR #188 — caching key for indexer codegen missed the codegen scripts; cached output went stale on script-only changes
 - PR #186 — workflow path filter for "bridge changes" missed the workflow file itself, so workflow edits didn't re-run
-- PR #821/#822 — "ARM is 37.5% cheaper" was falsified for CPU-bound jobs: ~2–3.4× slower runtime + round-up billing made them MORE expensive on ARM; only network-bound and sub-minute jobs migrated. Also: trunk-action's cache key has no arch component — cross-arch restore caused `execve failed: Text file busy` until `cache-key: ${{ runner.arch }}` was passed
+- PR #821/#822 — "ARM is 37.5% cheaper" was falsified for CPU-bound jobs: ~2–3.4× slower runtime + round-up billing made them MORE expensive on ARM; only network-bound and sub-minute jobs migrated. Also: Trunk's `~/.cache/trunk` stores architecture-specific binaries — cross-arch restore caused `execve failed: Text file busy`, so the Code Quality cache key includes `${{ runner.arch }}`

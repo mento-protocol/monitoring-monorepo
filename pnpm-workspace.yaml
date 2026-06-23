@@ -17,13 +17,13 @@ catalog:
   # stay equal to this entry.
   viem: 2.50.4
 
-# No undici override on purpose (overrides live in package.json#pnpm.overrides,
-# which can't carry comments): range consumers such as @vercel/blob/jsdom can be
-# bumped or re-resolved when a new advisory floor lands, but discord.js and
-# @discordjs/rest pin undici exactly (6.24.1). A range override forward-resolves
-# the whole graph to undici 8.x on fresh installs, which broke Discord delivery
-# (#831/#833/#837). If no patched Discord release exists, keep the high-audit
-# exception advisory-, version-, and path-scoped in scripts/pnpm-audit-high-gate.mjs.
+# package.json#pnpm.overrides carries bounded undici security pins for root
+# workspace consumers such as @vercel/blob/jsdom. Keep them bounded: unbounded
+# range overrides forward-resolve the whole graph to undici 8.x on fresh
+# installs, which broke Discord delivery (#831/#833/#837). Standalone deploy
+# roots with exact Discord pins, such as governance-watchdog's Cloud Build
+# lockfile, keep no standalone undici override and rely on the path-scoped
+# high-audit exception in scripts/pnpm-audit-high-gate.mjs.
 
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
