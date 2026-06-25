@@ -241,6 +241,8 @@ test("VictorOps trading-mode body stays distinct from the incident title", () =>
     "utf8",
   );
 
+  // These checks intentionally match exact whitespace in the Terraform
+  // template. If you reformat the guarded template lines, update these strings.
   assert(
     source.includes(
       "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ end -}}\n{{ if $chainlinkURL -}}",
