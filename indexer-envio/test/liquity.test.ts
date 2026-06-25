@@ -1,5 +1,6 @@
 import { strict as assert } from "assert";
 import contractsJson from "@mento-protocol/contracts/contracts.json" with { type: "json" };
+import type { LiquityInstance } from "envio";
 import {
   LIQUITY_MARKETS,
   findLiquityMarketByAddressesRegistry,
@@ -39,16 +40,16 @@ import {
 } from "../src/handlers/liquity/stabilityPool";
 import {
   indexerTestHelpers,
+  type EntityCollection,
   type EntityReader,
   type MockDbWith,
+  type WritableEntity,
 } from "./helpers/indexerTestHarness.js";
 
 type LiquityStabilityPoolMockDb = MockDbWith<{
-  LiquityInstance: EntityReader<{
-    id: string;
-    lastEventBlock: bigint;
-    lastEventTimestamp: bigint;
-  }>;
+  LiquityInstance: WritableEntity<LiquityInstance>;
+  LiquityInstanceSnapshot: EntityCollection;
+  LiquityInstanceDailySnapshot: EntityCollection;
   StabilityPoolOperationEvent: EntityReader<{
     id: string;
     operation: number;
@@ -521,7 +522,12 @@ describe("Liquity CDP helpers", () => {
 
     it("touches the market when a paired stability pool operation materializes", async () => {
       const market = LIQUITY_MARKETS[0]!;
+      const collateralId = makeCollateralId(market);
       const mockDb0 = LiquityMockDb.createMockDb();
+      mockDb0.entities.LiquityInstance.set({
+        ...makeLiquityInstance(collateralId, market.chainId, 0n),
+        spDeposits: 123n,
+      });
       const txHash =
         "0x1000000000000000000000000000000000000000000000000000000000000000";
       const depositor = "0x000000000000000000000000000000000000dEaD";
@@ -573,15 +579,18 @@ describe("Liquity CDP helpers", () => {
       const operation = mockDb.entities.StabilityPoolOperationEvent.get(
         `${market.chainId}_101_11`,
       );
-      const instance = mockDb.entities.LiquityInstance.get(
-        makeCollateralId(market),
-      );
+      const instance = mockDb.entities.LiquityInstance.get(collateralId);
       assert.ok(operation);
       assert.equal(operation.operation, 1);
       assert.equal(operation.topUpOrWithdrawal, 0n);
       assert.ok(instance);
       assert.equal(instance.lastEventBlock, 101n);
       assert.equal(instance.lastEventTimestamp, 3_700n);
+      assert.equal(mockDb.entities.LiquityInstanceSnapshot.getAll().length, 0);
+      assert.equal(
+        mockDb.entities.LiquityInstanceDailySnapshot.getAll().length,
+        0,
+      );
     });
 
     it("leaves market last-event fields unchanged for unpaired DepositUpdated rows", async () => {
