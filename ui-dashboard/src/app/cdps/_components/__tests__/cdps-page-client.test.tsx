@@ -370,7 +370,7 @@ describe("CdpsPageClient", () => {
     expect(bodyText(handle!.container)).toContain("Open Trove");
   });
 
-  it("marks 24h counts unknown when the SP companion query fails", () => {
+  it("preserves primary 24h counts when the SP companion query fails", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
         return { data: marketData(), error: null, isLoading: false };
@@ -393,7 +393,7 @@ describe("CdpsPageClient", () => {
 
     render(handle!, <CdpsPageClient />);
 
-    expect(handle!.container.textContent).toContain("— ops in 24h");
+    expect(handle!.container.textContent).toContain("1 ops in 24h");
     expect(handle!.container.textContent).toContain(
       "Stability pool deposit and withdraw events are temporarily unavailable",
     );
