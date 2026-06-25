@@ -31,6 +31,8 @@ import type {
   CdpTroveOpSnapshotRow,
 } from "../../_lib/types";
 import {
+  ADDRESS_FILTER_POOL_EVENT_NOTICE,
+  ADDRESS_FILTER_SP_ONLY_NOTICE,
   CdpTxAddressFilter,
   CdpTxTypeFilter,
   TX_FILTER_TYPE_ORDER,
@@ -102,10 +104,9 @@ export function CdpTransactionsTable({
   );
 }
 
-/** Filter state for the per-market table. Same address-filter gating as
- *  the overview's `useOverviewFilters` (no-op while the snapshot query
- *  hasn't resolved) so the table never pretends to match against
- *  missing owner data. */
+/** Filter state for the per-market table. Trove owner matching waits for the
+ *  isolated snapshot query, but SP operation rows carry their depositor inline
+ *  and can still be filtered while snapshots are unavailable. */
 function usePerMarketFilters(
   rows: CdpTransactionRow[],
   snapshotById: Map<string, CdpTroveOpSnapshotRow>,
@@ -114,7 +115,15 @@ function usePerMarketFilters(
   const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
   const [addressInput, setAddressInput] = useState("");
   const normalizedAddress = normalizeAddressFilter(addressInput);
-  const addressActive = normalizedAddress.length > 0 && snapshotsReady;
+  const hasStabilityPoolRows = rows.some((row) => row.kind === "spOperation");
+  const addressEnabled = snapshotsReady || hasStabilityPoolRows;
+  const addressActive = normalizedAddress.length > 0 && addressEnabled;
+  const addressFilterNotice =
+    addressActive && snapshotsReady
+      ? ADDRESS_FILTER_POOL_EVENT_NOTICE
+      : addressActive
+        ? ADDRESS_FILTER_SP_ONLY_NOTICE
+        : null;
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (addressActive) {
@@ -134,8 +143,47 @@ function usePerMarketFilters(
     setTypeFilter,
     addressInput,
     setAddressInput,
+    addressDisabled: !addressEnabled,
+    addressFilterNotice,
     filteredRows,
   };
+}
+
+function PerMarketFilterBar({
+  typeFilter,
+  onTypeFilterChange,
+  addressInput,
+  onAddressInputChange,
+  addressDisabled,
+  addressFilterNotice,
+}: {
+  typeFilter: BadgeKind | null;
+  onTypeFilterChange: (next: BadgeKind | null) => void;
+  addressInput: string;
+  onAddressInputChange: (next: string) => void;
+  addressDisabled: boolean;
+  addressFilterNotice: string | null;
+}) {
+  return (
+    <div className="mb-3 space-y-2">
+      <CdpTxTypeFilter
+        options={TX_FILTER_TYPE_ORDER}
+        selected={typeFilter}
+        onChange={onTypeFilterChange}
+      />
+      <CdpTxAddressFilter
+        value={addressInput}
+        onChange={onAddressInputChange}
+        disabled={addressDisabled}
+        disabledHint={
+          addressDisabled ? "(unavailable while indexer syncs)" : undefined
+        }
+      />
+      {addressFilterNotice != null && (
+        <p className="px-1 text-xs text-slate-500">{addressFilterNotice}</p>
+      )}
+    </div>
+  );
 }
 
 function TransactionsBody({
@@ -161,6 +209,8 @@ function TransactionsBody({
     setTypeFilter,
     addressInput,
     setAddressInput,
+    addressDisabled,
+    addressFilterNotice,
     filteredRows,
   } = usePerMarketFilters(rows, snapshotById, snapshotsReady);
 
@@ -174,21 +224,14 @@ function TransactionsBody({
 
   return (
     <>
-      <div className="mb-3 space-y-2">
-        <CdpTxTypeFilter
-          options={TX_FILTER_TYPE_ORDER}
-          selected={typeFilter}
-          onChange={setTypeFilter}
-        />
-        <CdpTxAddressFilter
-          value={addressInput}
-          onChange={setAddressInput}
-          disabled={!snapshotsReady}
-          disabledHint={
-            snapshotsReady ? undefined : "(unavailable while indexer syncs)"
-          }
-        />
-      </div>
+      <PerMarketFilterBar
+        typeFilter={typeFilter}
+        onTypeFilterChange={setTypeFilter}
+        addressInput={addressInput}
+        onAddressInputChange={setAddressInput}
+        addressDisabled={addressDisabled}
+        addressFilterNotice={addressFilterNotice}
+      />
       <Table>
         <thead>
           <Row>

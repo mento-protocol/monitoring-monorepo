@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CdpCollateral,
   CdpInstance,
+  CdpStabilityPoolOperationEventRow,
   CdpTroveListRow,
   CdpTroveOpSnapshotRow,
 } from "../../_lib/types";
@@ -196,6 +197,31 @@ function transactionData() {
   };
 }
 
+function stabilityPoolOperation(
+  overrides: Partial<CdpStabilityPoolOperationEventRow> = {},
+): CdpStabilityPoolOperationEventRow {
+  return {
+    id: "sp-op-1",
+    instanceId: "gbpm",
+    depositor: "0xdepositor",
+    operation: 0,
+    depositLossSinceLastOperation: "0",
+    topUpOrWithdrawal: wei(50),
+    yieldGainSinceLastOperation: "0",
+    yieldGainClaimed: "0",
+    ethGainSinceLastOperation: "0",
+    ethGainClaimed: "0",
+    depositBefore: wei(100),
+    depositAfter: wei(150),
+    stashedCollBefore: "0",
+    stashedCollAfter: wei(2),
+    timestamp: String(NOW - 5),
+    blockNumber: "105",
+    txHash: "0xspdeposit",
+    ...overrides,
+  };
+}
+
 function snapshotData(rows: CdpTroveOpSnapshotRow[] = []) {
   return { TroveOperationEvent: rows };
 }
@@ -339,6 +365,35 @@ describe("CdpsPageClient", () => {
     expect(handle!.container.textContent).toContain("Recent CDP Transactions");
     expect(bodyText(handle!.container)).toContain("Open Trove");
   });
+
+  it("keeps base 24h counts when the SP companion query fails", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return { data: transactionData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: undefined,
+          error: new Error("schema still syncing"),
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!, <CdpsPageClient />);
+
+    expect(handle!.container.textContent).toContain("1 ops in 24h");
+    expect(handle!.container.textContent).toContain(
+      "Stability pool deposit and withdraw events are temporarily unavailable",
+    );
+  });
 });
 
 describe("CdpAllTransactionsTable", () => {
@@ -452,5 +507,60 @@ describe("CdpAllTransactionsTable", () => {
       "unavailable while indexer syncs",
     );
     expect(bodyText(handle!.container)).toContain("Open Trove");
+  });
+
+  it("filters overview rows by SP depositor while snapshots fail", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return {
+          data: {
+            LiquidationEvent: [],
+            RedemptionEvent: [],
+            SpRebalanceEvent: [],
+            TroveOperationEvent: [],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: {
+            StabilityPoolOperationEvent: [stabilityPoolOperation()],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: undefined,
+          error: new Error("schema still syncing"),
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[{ id: "gbpm", chainId: 42220, symbol: "GBPm" }]}
+      />,
+    );
+
+    const input = handle!.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
+    );
+    expect(input?.disabled).toBe(false);
+    act(() => {
+      typeInto(input!, "0xdepositor");
+    });
+
+    expect(bodyText(handle!.container)).toContain("SP Deposit");
+    expect(handle!.container.textContent).toContain(
+      "Showing Stability Pool depositor matches only",
+    );
   });
 });

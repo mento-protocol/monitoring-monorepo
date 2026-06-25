@@ -107,6 +107,9 @@ export const CDP_TROVES_LIST_LIMIT = 500;
 // Hosted Envio/Hasura caps a single query branch at 1000 rows. The detail
 // page fetches that full cap and discloses when the result may be incomplete.
 export const CDP_TROVES_DETAIL_LIMIT = 1000;
+// Stability Pool LP rows are wider than list-page troves. Fetch a bounded
+// operator-sized slice and disclose when the table may be truncated.
+export const CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT = 100;
 
 export type CdpDepositor = {
   id: string;

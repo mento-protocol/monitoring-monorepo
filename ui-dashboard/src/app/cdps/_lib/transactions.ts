@@ -154,6 +154,8 @@ export function amountsFor(row: CdpTransactionRow): AmountSlice {
     case "spRebalance":
       return { debt: row.amountStableOut, coll: row.amountCollIn };
     case "spOperation":
+      // SP operation rows normally render through their inline before/after
+      // snapshot. Keep this flat fallback for defensive callers that pass null.
       return {
         debt: row.topUpOrWithdrawal,
         coll: (

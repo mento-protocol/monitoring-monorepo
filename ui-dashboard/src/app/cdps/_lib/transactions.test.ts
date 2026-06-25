@@ -130,6 +130,7 @@ describe("badgeKindFor", () => {
     expect(badgeKindFor(troveOpBadgeRow(1))).toBe("troveClose");
     expect(badgeKindFor(troveOpBadgeRow(2))).toBe("troveAdjust");
     expect(badgeKindFor(troveOpBadgeRow(3))).toBe("troveInterestRateChange");
+    expect(badgeKindFor(troveOpBadgeRow(7))).toBe("troveOpen");
     expect(badgeKindFor(troveOpBadgeRow(8))).toBe("troveBatch");
     // Unknown op → fallback
     expect(badgeKindFor(troveOpBadgeRow(99))).toBe("troveAdjust");

@@ -20,6 +20,12 @@ export const TX_FILTER_TYPE_ORDER: readonly BadgeKind[] = [
   "troveBatch",
 ];
 
+export const ADDRESS_FILTER_POOL_EVENT_NOTICE =
+  "Showing trove and Stability Pool operations only. Pool-level events are hidden while the address filter is active.";
+
+export const ADDRESS_FILTER_SP_ONLY_NOTICE =
+  "Showing Stability Pool depositor matches only until trove owner data finishes syncing. Pool-level events are hidden while the address filter is active.";
+
 /** Single-select pill row with an "All" sentinel — same WAI-ARIA
  *  radiogroup contract as `BridgeStatusFilter`. */
 export function CdpTxTypeFilter({

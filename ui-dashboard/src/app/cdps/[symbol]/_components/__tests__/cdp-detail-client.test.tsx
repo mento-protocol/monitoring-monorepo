@@ -17,7 +17,10 @@ import type {
   CdpTrove,
   CdpTroveListRow,
 } from "../../../_lib/types";
-import { CDP_TROVES_DETAIL_LIMIT } from "../../../_lib/types";
+import {
+  CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT,
+  CDP_TROVES_DETAIL_LIMIT,
+} from "../../../_lib/types";
 
 const mockUseGQL = vi.hoisted(() => vi.fn());
 const networkState = vi.hoisted(() => ({
@@ -454,6 +457,56 @@ describe("CdpDetailClient", () => {
       handle!.container.querySelector('[data-testid="cdp-transactions"]')
         ?.textContent,
     ).toContain("transactions gbpm GBPm");
+  });
+
+  it("discloses when the Stability Pool LP list is capped", () => {
+    const depositors = Array.from(
+      { length: CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT },
+      (_, index) =>
+        depositor({
+          id: `dep-${index}`,
+          address: `0xdepositor${index}`,
+          lastTouchedDeposit: wei(index + 1),
+        }),
+    );
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return {
+          data: marketsData([
+            { id: "t1", collateralId: "gbpm", status: "active" },
+          ]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return { data: troveSchemaData(), error: null, isLoading: false };
+      }
+      if (
+        query === CDP_MARKET_DETAIL ||
+        query === CDP_MARKET_DETAIL_WITH_TROVE_TX
+      ) {
+        return {
+          data: detailData({ depositors }),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+
+    expect(handle!.container.textContent).toContain(
+      `Showing the first ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LPs`,
+    );
   });
 
   it("keeps detail content visible while the tx-hash detail query warms", () => {

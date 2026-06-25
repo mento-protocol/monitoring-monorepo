@@ -293,6 +293,48 @@ describe("CdpTransactionsTable", () => {
     expect(bodyText(handle!.container)).toContain("Open Trove");
   });
 
+  it("filters by SP depositor while trove snapshots are unavailable", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return {
+          data: txData([troveOp("op1")]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: undefined,
+          error: new Error("schema lag"),
+          isLoading: false,
+        };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [spOperation()] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    const input = handle!.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
+    );
+    expect(input?.disabled).toBe(false);
+    act(() => {
+      typeInto(input!, "0xdepositor");
+    });
+
+    expect(bodyText(handle!.container)).toContain("SP Deposit");
+    expect(bodyText(handle!.container)).not.toContain("Open Trove");
+    expect(handle!.container.textContent).toContain(
+      "Showing Stability Pool depositor matches only",
+    );
+  });
+
   it("merges stability pool deposit events from the companion query", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_TRANSACTIONS) {

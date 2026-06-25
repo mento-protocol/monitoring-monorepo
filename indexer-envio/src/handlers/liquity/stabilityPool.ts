@@ -140,6 +140,8 @@ indexer.onEvent(
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
     const depositor = asAddress(event.params._depositor);
+    // Intentionally no isPreload guard: DepositUpdated's preload pass reads
+    // this pending row to declare the correct StabilityPoolDepositor dependency.
     context.PendingDepositOperation.set({
       id: pendingDepositKey(
         event.chainId,

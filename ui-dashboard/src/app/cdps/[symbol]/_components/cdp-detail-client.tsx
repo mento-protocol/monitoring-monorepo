@@ -19,6 +19,7 @@ import { relativeTime, truncateAddress } from "@/lib/format";
 import type { Network } from "@/lib/networks";
 import { explorerAddressUrl } from "@/lib/tokens";
 import {
+  CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT,
   CDP_TROVES_DETAIL_LIMIT,
   type CdpCollateral,
   type CdpDepositor,
@@ -209,13 +210,16 @@ function buildContentProps({
   network: Network;
 }) {
   const openTroves = detail.data?.OpenTrove ?? [];
+  const depositors = detail.data?.StabilityPoolDepositor ?? [];
   return {
     collateral,
     instance: detail.data?.LiquityInstance[0],
     openTroves,
     allTroves: detail.data?.AllTrove ?? [],
     interestBatches: detail.data?.InterestBatch ?? [],
-    depositors: detail.data?.StabilityPoolDepositor ?? [],
+    depositors,
+    depositorsTruncated:
+      depositors.length >= CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT,
     cdpPools: detail.data?.CdpPool ?? [],
     aggregates: aggregateTroves(openTroves, {
       truncated: openTroves.length >= CDP_TROVES_DETAIL_LIMIT,
@@ -234,6 +238,7 @@ function CdpDetailContent({
   allTroves,
   interestBatches,
   depositors,
+  depositorsTruncated,
   cdpPools,
   aggregates,
   snapshots,
@@ -247,6 +252,7 @@ function CdpDetailContent({
   allTroves: CdpTrove[];
   interestBatches: CdpInterestBatch[];
   depositors: CdpDepositor[];
+  depositorsTruncated: boolean;
   cdpPools: CdpPoolRow[];
   aggregates: ReturnType<typeof aggregateTroves>;
   snapshots: CdpInstanceDailySnapshot[];
@@ -308,6 +314,7 @@ function CdpDetailContent({
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <DepositorTable
           depositors={depositors}
+          truncated={depositorsTruncated}
           symbol={collateral.symbol}
           chainId={collateral.chainId}
         />
@@ -446,10 +453,12 @@ function CdpPoolsTable({ cdpPools }: { cdpPools: CdpPoolRow[] }) {
 
 function DepositorTable({
   depositors,
+  truncated,
   symbol,
   chainId,
 }: {
   depositors: CdpDepositor[];
+  truncated: boolean;
   symbol: string;
   chainId: number;
 }) {
@@ -461,6 +470,13 @@ function DepositorTable({
       <p className="mb-3 text-xs text-slate-500">
         Positions reflect the latest indexed depositor operation.
       </p>
+      {truncated && (
+        <p className="mb-3 text-xs text-amber-400">
+          Showing the first{" "}
+          {CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LPs by
+          latest deposit. More LPs may exist.
+        </p>
+      )}
       {depositors.length === 0 ? (
         <EmptyBox message="No stability pool LPs indexed yet." />
       ) : (

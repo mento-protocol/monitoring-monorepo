@@ -29,6 +29,8 @@ import {
 import type { CdpTransactionRow, CdpTroveOpSnapshotRow } from "../_lib/types";
 import { CdpTxAmountCell } from "./cdp-tx-amount-cell";
 import {
+  ADDRESS_FILTER_POOL_EVENT_NOTICE,
+  ADDRESS_FILTER_SP_ONLY_NOTICE,
   CdpTxAddressFilter,
   CdpTxMarketFilter,
   CdpTxTypeFilter,
@@ -143,11 +145,15 @@ function useOverviewFilters(
     return collaterals.some((c) => c.id === marketFilter) ? marketFilter : null;
   }, [collaterals, marketFilter]);
   const normalizedAddress = normalizeAddressFilter(addressInput);
-  // Address filter is only active when the snapshot query has resolved —
-  // owner data lives there. While the isolated query is loading or has
-  // errored, the input is rendered disabled and the predicate is a no-op
-  // so the table doesn't pretend to match against missing owner data.
-  const addressActive = normalizedAddress.length > 0 && snapshotsReady;
+  const hasStabilityPoolRows = rows.some((row) => row.kind === "spOperation");
+  const addressEnabled = snapshotsReady || hasStabilityPoolRows;
+  const addressActive = normalizedAddress.length > 0 && addressEnabled;
+  const addressFilterNotice =
+    addressActive && snapshotsReady
+      ? ADDRESS_FILTER_POOL_EVENT_NOTICE
+      : addressActive
+        ? ADDRESS_FILTER_SP_ONLY_NOTICE
+        : null;
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (addressActive) {
@@ -181,6 +187,8 @@ function useOverviewFilters(
     setMarketFilter,
     addressInput,
     setAddressInput,
+    addressDisabled: !addressEnabled,
+    addressFilterNotice,
     filteredRows,
     filtersActive:
       typeFilter != null || effectiveMarketFilter != null || addressActive,
@@ -200,6 +208,7 @@ function OverviewFilterBar({
   addressInput,
   onAddressInputChange,
   addressDisabled,
+  addressFilterNotice,
 }: {
   collaterals: CollateralSummary[];
   typeFilter: BadgeKind | null;
@@ -209,6 +218,7 @@ function OverviewFilterBar({
   addressInput: string;
   onAddressInputChange: (next: string) => void;
   addressDisabled: boolean;
+  addressFilterNotice: string | null;
 }) {
   return (
     <div className="mb-3 space-y-2">
@@ -230,6 +240,9 @@ function OverviewFilterBar({
           addressDisabled ? "(unavailable while indexer syncs)" : undefined
         }
       />
+      {addressFilterNotice != null && (
+        <p className="px-1 text-xs text-slate-500">{addressFilterNotice}</p>
+      )}
     </div>
   );
 }
@@ -258,6 +271,8 @@ function OverviewBody({
     setMarketFilter,
     addressInput,
     setAddressInput,
+    addressDisabled,
+    addressFilterNotice,
     filteredRows,
     filtersActive,
   } = useOverviewFilters(rows, collaterals, snapshotById, snapshotsReady);
@@ -273,7 +288,8 @@ function OverviewBody({
         onMarketFilterChange={setMarketFilter}
         addressInput={addressInput}
         onAddressInputChange={setAddressInput}
-        addressDisabled={!snapshotsReady}
+        addressDisabled={addressDisabled}
+        addressFilterNotice={addressFilterNotice}
       />
       <Table>
         <thead>

@@ -1,4 +1,5 @@
 import {
+  CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT,
   CDP_TROVE_OPEN_STATUSES,
   CDP_TROVES_DETAIL_LIMIT,
   CDP_TROVES_LIST_LIMIT,
@@ -193,7 +194,7 @@ ${troveRowFields}
     StabilityPoolDepositor(
       where: { collateralId: { _eq: $collateralId } }
       order_by: [{ lastTouchedDeposit: desc }, { lastUpdatedAt: desc }, { id: asc }]
-      limit: 25
+      limit: ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT}
     ) {
       id address lastTouchedDeposit stashedColl lastUpdatedAt
       cumulativeDeposited cumulativeWithdrawn yieldGainClaimedCum ethGainClaimedCum
