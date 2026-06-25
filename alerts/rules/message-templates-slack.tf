@@ -125,9 +125,9 @@ resource "grafana_message_template" "slack_trading_mode_alert_title" {
 {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
 {{ .CommonLabels.alertname -}}
 {{ else if (len .Alerts.Firing) -}}
-🚨 {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker{{ end -}}
+{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}🚨 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker{{ end -}}
 {{- else if (len .Alerts.Resolved) -}}
-✅ {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed{{ end -}}
+{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}✅ {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed{{ end -}}
 {{- end -}}
 {{ end -}}
   EOT
