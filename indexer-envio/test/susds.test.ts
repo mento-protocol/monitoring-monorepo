@@ -26,6 +26,7 @@ import {
   blockTimestampEffect,
   susdsSharePriceEffect,
 } from "../src/rpc/effects.ts";
+import { SUSDS_FIRST_TRACKED_EVENT_BLOCK } from "../src/startupChecks.ts";
 
 type MockDb = MockDbWith<{
   SusdsCostBasisLot: EntityCollection;
@@ -547,6 +548,7 @@ describe("sUSDS reserve yield accounting", () => {
     let mockDb = MockDb.createMockDb();
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
     const day2 = day1 + 86_400n;
+    const heartbeatBlockNumber = BigInt(SUSDS_FIRST_TRACKED_EVENT_BLOCK + 300);
 
     setSharePrice(100, WAD);
     mockDb = await deposit(
@@ -559,8 +561,13 @@ describe("sUSDS reserve yield accounting", () => {
     );
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
-      heartbeatContext(mockDb, day2 + 3_600n, dollars(120) / 100n),
-      300n,
+      heartbeatContext(
+        mockDb,
+        day2 + 3_600n,
+        dollars(120) / 100n,
+        heartbeatBlockNumber,
+      ),
+      heartbeatBlockNumber,
     );
 
     const rows = dailySnapshots(mockDb).sort((a, b) =>
@@ -571,7 +578,7 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.timestamp, day2);
     assert.equal(rows[1]?.totalEarnedYieldUsdWei, dollars(200));
     assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(200));
-    assert.equal(rows[1]?.sampledAtBlock, 300n);
+    assert.equal(rows[1]?.sampledAtBlock, heartbeatBlockNumber);
   });
 
   it("skips the sUSDS heartbeat onBlock handler path while preloading", async () => {
@@ -598,12 +605,30 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(dailySnapshots(mockDb).length, 0);
   });
 
+  it("skips pre-sUSDS heartbeat blocks without reading effects", async () => {
+    const mockDb = MockDb.createMockDb();
+
+    const didWrite = await recordSusdsYieldHeartbeatSnapshot(
+      {
+        ...dailySnapshotContext(mockDb),
+        isPreload: false,
+        effect: async () => {
+          throw new Error("pre-sUSDS heartbeat must not read effects");
+        },
+      } as unknown as Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0],
+      BigInt(SUSDS_FIRST_TRACKED_EVENT_BLOCK - 1),
+    );
+
+    assert.equal(didWrite, false);
+    assert.equal(dailySnapshots(mockDb).length, 0);
+  });
+
   it("runs the sUSDS heartbeat onBlock handler path", async () => {
     let mockDb = MockDb.createMockDb();
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
     const day2 = day1 + 86_400n;
     const depositBlock = 22_990_100;
-    const heartbeatBlock = 22_990_300;
+    const heartbeatBlock = SUSDS_FIRST_TRACKED_EVENT_BLOCK + 300;
     const heartbeatBlockNumber = BigInt(heartbeatBlock);
     const heartbeatTimestamp = day2 + 3_600n;
     const heartbeatSharePrice = dollars(120) / 100n;

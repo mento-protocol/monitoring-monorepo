@@ -15,6 +15,7 @@ import {
   type SusdsContext,
   type SusdsYieldTotals,
 } from "./shared.js";
+import { SUSDS_FIRST_TRACKED_EVENT_BLOCK } from "../../startupChecks.js";
 
 function susdsDailySnapshotId(chainId: number, bucket: bigint): string {
   return `${chainId}-susds-${bucket}`;
@@ -189,6 +190,8 @@ export async function recordSusdsYieldHeartbeatSnapshot(
   context: SusdsContext,
   blockNumber: bigint,
 ): Promise<boolean> {
+  if (blockNumber < BigInt(SUSDS_FIRST_TRACKED_EVENT_BLOCK)) return false;
+
   const blockTimestamp = await context.effect(blockTimestampEffect, {
     chainId: ETHEREUM_CHAIN_ID,
     blockNumber,
