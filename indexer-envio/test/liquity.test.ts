@@ -449,6 +449,7 @@ describe("Liquity CDP helpers", () => {
         txHash: "0xabc",
       });
 
+      assert.ok(event);
       assert.equal(event.id, "evt-1");
       assert.equal(event.operation, 1);
       assert.equal(event.topUpOrWithdrawal, -60n);
@@ -466,7 +467,7 @@ describe("Liquity CDP helpers", () => {
       assert.equal(event.txHash, "0xabc");
     });
 
-    it("handles DepositUpdated rows without a paired DepositOperation as a zero-delta update", () => {
+    it("updates depositors without materializing unpaired DepositUpdated rows as operations", () => {
       const updated = buildStabilityPoolDepositorUpdate({
         chainId: 42220,
         collateralId,
@@ -494,12 +495,7 @@ describe("Liquity CDP helpers", () => {
       assert.equal(updated.firstDepositAt, 2_000n);
       assert.equal(updated.cumulativeDeposited, 0n);
       assert.equal(updated.cumulativeWithdrawn, 0n);
-      assert.equal(event.operation, -1);
-      assert.equal(event.topUpOrWithdrawal, 0n);
-      assert.equal(event.depositBefore, 50n);
-      assert.equal(event.depositAfter, 50n);
-      assert.equal(event.stashedCollBefore, 0n);
-      assert.equal(event.stashedCollAfter, 0n);
+      assert.equal(event, null);
     });
   });
 

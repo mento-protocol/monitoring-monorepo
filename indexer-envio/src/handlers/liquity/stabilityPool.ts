@@ -106,8 +106,9 @@ export function buildStabilityPoolOperationEvent({
   blockNumber: bigint;
   blockTimestamp: bigint;
   txHash: string;
-}): StabilityPoolOperationEvent {
-  const op = pending ?? EMPTY_PENDING_OPERATION;
+}): StabilityPoolOperationEvent | null {
+  if (pending === undefined) return null;
+  const op = pending;
   const retainedYield = op.yieldGainSinceLastOperation - op.yieldGainClaimed;
   return {
     id,
@@ -221,21 +222,22 @@ indexer.onEvent(
       existing,
       pending: op,
     });
-    context.StabilityPoolOperationEvent.set(
-      buildStabilityPoolOperationEvent({
-        id: eventId(event.chainId, event.block.number, event.logIndex),
-        chainId: event.chainId,
-        instanceId: collateralId,
-        depositor,
-        newDeposit: event.params._newDeposit,
-        stashedColl: event.params._stashedColl,
-        existing,
-        pending: op,
-        blockNumber,
-        blockTimestamp,
-        txHash: event.transaction.hash,
-      }),
-    );
+    const operationEvent = buildStabilityPoolOperationEvent({
+      id: eventId(event.chainId, event.block.number, event.logIndex),
+      chainId: event.chainId,
+      instanceId: collateralId,
+      depositor,
+      newDeposit: event.params._newDeposit,
+      stashedColl: event.params._stashedColl,
+      existing,
+      pending: op,
+      blockNumber,
+      blockTimestamp,
+      txHash: event.transaction.hash,
+    });
+    if (operationEvent !== null) {
+      context.StabilityPoolOperationEvent.set(operationEvent);
+    }
     context.StabilityPoolDepositor.set(next);
   },
 );
