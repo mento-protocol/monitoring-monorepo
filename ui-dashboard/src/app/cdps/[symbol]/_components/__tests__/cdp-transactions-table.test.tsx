@@ -365,4 +365,45 @@ describe("CdpTransactionsTable", () => {
     expect(text).toContain("+50.00 GBPm");
     expect(text).toContain("2.00 USDm");
   });
+
+  it("renders claimed amounts for claim-only stability pool events", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return { data: txData([]), error: null, isLoading: false };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: {
+            StabilityPoolOperationEvent: [
+              spOperation({
+                topUpOrWithdrawal: "0",
+                yieldGainClaimed: wei(3),
+                ethGainClaimed: wei(1),
+                depositBefore: wei(100),
+                depositAfter: wei(100),
+                stashedCollBefore: wei(2),
+                stashedCollAfter: wei(2),
+              }),
+            ],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: { TroveOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    const text = bodyText(handle!.container);
+    expect(text).toContain("SP Claim");
+    expect(text).toContain("3.00 GBPm");
+    expect(text).toContain("1.00 USDm");
+  });
 });

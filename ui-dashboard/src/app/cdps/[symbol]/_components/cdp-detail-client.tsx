@@ -468,7 +468,8 @@ function DepositorTable({
         Stability Pool LPs
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Positions reflect the latest indexed depositor operation.
+        Last-touched balances update on LP operations; liquidations can change
+        live exposure before the next LP action.
       </p>
       {truncated && (
         <p className="mb-3 text-xs text-amber-400">
@@ -484,8 +485,8 @@ function DepositorTable({
           <thead>
             <Row>
               <Th>LP</Th>
-              <Th align="right">Debt Position</Th>
-              <Th align="right">Collateral Position</Th>
+              <Th align="right">Last-touched Debt</Th>
+              <Th align="right">Last-touched Collateral</Th>
               <Th align="right">Deposited</Th>
               <Th align="right">Withdrawn</Th>
               <Th align="right">Updated</Th>

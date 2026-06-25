@@ -449,6 +449,9 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("200.00%");
     expect(handle!.container.textContent).toContain("Stability Pool LPs");
     expect(handle!.container.textContent).toContain("0xdepositor");
+    expect(handle!.container.textContent).toContain("Last-touched Debt");
+    expect(handle!.container.textContent).toContain("Last-touched Collateral");
+    expect(handle!.container.textContent).not.toContain("Debt Position");
     expect(handle!.container.textContent).toContain("CDP Pools");
     expect(
       handle!.container.querySelector('[data-testid="sp-chart"]'),

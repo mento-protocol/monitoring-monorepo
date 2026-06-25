@@ -169,6 +169,20 @@ describe("amountsFor", () => {
     expect(coll).toBe("15");
   });
 
+  it("returns claimed gains for claim-only stability pool operations", () => {
+    const { debt, coll } = amountsFor(
+      spOperationRow({
+        topUpOrWithdrawal: "0",
+        yieldGainClaimed: "12",
+        ethGainClaimed: "7",
+        stashedCollBefore: "20",
+        stashedCollAfter: "20",
+      }),
+    );
+    expect(debt).toBe("12");
+    expect(coll).toBe("7");
+  });
+
   it("returns debtChange / collChange for troveOp", () => {
     const { debt, coll } = amountsFor(troveOpBadgeRow(0));
     expect(debt).toBe("100");
@@ -360,6 +374,23 @@ describe("positionSnapshotFor", () => {
     expect(snap.coll.before).toBe("25");
     expect(snap.coll.after).toBe("40");
     expect(snap.coll.delta).toBe("15");
+  });
+
+  it("uses flat claimed amounts for claim-only stability pool operations", () => {
+    expect(
+      positionSnapshotFor(
+        spOperationRow({
+          topUpOrWithdrawal: "0",
+          yieldGainClaimed: "12",
+          ethGainClaimed: "7",
+          depositBefore: "100",
+          depositAfter: "100",
+          stashedCollBefore: "20",
+          stashedCollAfter: "20",
+        }),
+        undefined,
+      ),
+    ).toBeNull();
   });
 
   it("delegates trove operations to the isolated trove snapshot", () => {

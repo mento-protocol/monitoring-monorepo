@@ -153,7 +153,15 @@ export function amountsFor(row: CdpTransactionRow): AmountSlice {
       return { debt: row.actualBoldAmount, coll: row.ETHSent };
     case "spRebalance":
       return { debt: row.amountStableOut, coll: row.amountCollIn };
-    case "spOperation":
+    case "spOperation": {
+      const ZERO = BigInt(0);
+      const isClaim =
+        BigInt(row.topUpOrWithdrawal) === ZERO &&
+        (BigInt(row.yieldGainClaimed) !== ZERO ||
+          BigInt(row.ethGainClaimed) !== ZERO);
+      if (isClaim) {
+        return { debt: row.yieldGainClaimed, coll: row.ethGainClaimed };
+      }
       // SP operation rows normally render through their inline before/after
       // snapshot. Keep this flat fallback for defensive callers that pass null.
       return {
@@ -162,6 +170,7 @@ export function amountsFor(row: CdpTransactionRow): AmountSlice {
           BigInt(row.stashedCollAfter) - BigInt(row.stashedCollBefore)
         ).toString(),
       };
+    }
     case "troveOp":
       // Signed deltas from the ABI — positive = added to trove, negative =
       // removed. Rendered with leading minus for withdrawals/repayments.
@@ -229,6 +238,14 @@ export function positionSnapshotFor(
   snapshot: CdpTroveOpSnapshotRow | undefined,
 ): PositionSnapshot | null {
   if (row.kind === "spOperation") {
+    const ZERO = BigInt(0);
+    if (
+      BigInt(row.topUpOrWithdrawal) === ZERO &&
+      (BigInt(row.yieldGainClaimed) !== ZERO ||
+        BigInt(row.ethGainClaimed) !== ZERO)
+    ) {
+      return null;
+    }
     const debtBefore = BigInt(row.depositBefore);
     const debtAfter = BigInt(row.depositAfter);
     const collBefore = BigInt(row.stashedCollBefore);
