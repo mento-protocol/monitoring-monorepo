@@ -161,6 +161,8 @@ describe("amountsFor", () => {
     const { debt, coll } = amountsFor(
       spOperationRow({
         topUpOrWithdrawal: "-50",
+        depositBefore: "100",
+        depositAfter: "50",
         stashedCollBefore: "20",
         stashedCollAfter: "35",
       }),
@@ -175,6 +177,8 @@ describe("amountsFor", () => {
         topUpOrWithdrawal: "0",
         yieldGainClaimed: "12",
         ethGainClaimed: "7",
+        depositBefore: "100",
+        depositAfter: "100",
         stashedCollBefore: "20",
         stashedCollAfter: "20",
       }),
@@ -391,6 +395,25 @@ describe("positionSnapshotFor", () => {
         undefined,
       ),
     ).toBeNull();
+  });
+
+  it("keeps the before/after snapshot for zero-principal claims with passive losses", () => {
+    const snap = positionSnapshotFor(
+      spOperationRow({
+        topUpOrWithdrawal: "0",
+        yieldGainClaimed: "12",
+        ethGainClaimed: "7",
+        depositLossSinceLastOperation: "25",
+        depositBefore: "125",
+        depositAfter: "100",
+        stashedCollBefore: "20",
+        stashedCollAfter: "22",
+      }),
+      undefined,
+    );
+    if (snap == null) throw new Error("expected resolved snapshot");
+    expect(snap.debt.delta).toBe("-25");
+    expect(snap.coll.delta).toBe("2");
   });
 
   it("keeps the before/after snapshot for combined stability pool claims", () => {

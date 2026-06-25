@@ -130,6 +130,44 @@ export interface AmountSlice {
   coll: string;
 }
 
+function hasClaimedStabilityPoolGains(row: {
+  yieldGainClaimed: string;
+  ethGainClaimed: string;
+}): boolean {
+  const ZERO = BigInt(0);
+  return (
+    BigInt(row.yieldGainClaimed) !== ZERO || BigInt(row.ethGainClaimed) !== ZERO
+  );
+}
+
+function hasStabilityPoolPositionChange(row: {
+  depositBefore: string;
+  depositAfter: string;
+  stashedCollBefore: string;
+  stashedCollAfter: string;
+}): boolean {
+  return (
+    BigInt(row.depositBefore) !== BigInt(row.depositAfter) ||
+    BigInt(row.stashedCollBefore) !== BigInt(row.stashedCollAfter)
+  );
+}
+
+function isClaimOnlyStabilityPoolOperation(row: {
+  topUpOrWithdrawal: string;
+  yieldGainClaimed: string;
+  ethGainClaimed: string;
+  depositBefore: string;
+  depositAfter: string;
+  stashedCollBefore: string;
+  stashedCollAfter: string;
+}): boolean {
+  return (
+    BigInt(row.topUpOrWithdrawal) === BigInt(0) &&
+    hasClaimedStabilityPoolGains(row) &&
+    !hasStabilityPoolPositionChange(row)
+  );
+}
+
 export function amountsFor(row: CdpTransactionRow): AmountSlice {
   switch (row.kind) {
     case "liquidation":
@@ -154,18 +192,13 @@ export function amountsFor(row: CdpTransactionRow): AmountSlice {
     case "spRebalance":
       return { debt: row.amountStableOut, coll: row.amountCollIn };
     case "spOperation": {
-      const ZERO = BigInt(0);
-      const isClaim =
-        BigInt(row.topUpOrWithdrawal) === ZERO &&
-        (BigInt(row.yieldGainClaimed) !== ZERO ||
-          BigInt(row.ethGainClaimed) !== ZERO);
-      if (isClaim) {
+      if (isClaimOnlyStabilityPoolOperation(row)) {
         return { debt: row.yieldGainClaimed, coll: row.ethGainClaimed };
       }
       // SP operation rows normally render through their inline before/after
       // snapshot. Keep this flat fallback for defensive callers that pass null.
       return {
-        debt: row.topUpOrWithdrawal,
+        debt: (BigInt(row.depositAfter) - BigInt(row.depositBefore)).toString(),
         coll: (
           BigInt(row.stashedCollAfter) - BigInt(row.stashedCollBefore)
         ).toString(),
@@ -238,15 +271,11 @@ export function positionSnapshotFor(
   snapshot: CdpTroveOpSnapshotRow | undefined,
 ): PositionSnapshot | null {
   if (row.kind === "spOperation") {
-    const ZERO = BigInt(0);
     // Claim-only SP operations are better rendered as claimed gain totals. A
-    // deposit/withdraw with claims still needs the before/after LP snapshot;
-    // the amount cell appends the claimed gains to that snapshot display.
-    if (
-      BigInt(row.topUpOrWithdrawal) === ZERO &&
-      (BigInt(row.yieldGainClaimed) !== ZERO ||
-        BigInt(row.ethGainClaimed) !== ZERO)
-    ) {
+    // deposit/withdraw, or a zero-principal claim that also realizes passive
+    // balance changes, still needs the before/after LP snapshot; the amount
+    // cell appends claimed gains to that snapshot display.
+    if (isClaimOnlyStabilityPoolOperation(row)) {
       return null;
     }
     const debtBefore = BigInt(row.depositBefore);

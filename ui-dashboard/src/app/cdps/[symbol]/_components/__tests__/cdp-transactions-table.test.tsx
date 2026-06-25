@@ -259,6 +259,14 @@ describe("CdpTransactionsTable", () => {
     expect(handle!.container.textContent).toContain(
       "Stability pool deposit and withdraw events are temporarily unavailable",
     );
+    expect(
+      Array.from(handle!.container.querySelectorAll('[role="status"]')).some(
+        (node) =>
+          node.textContent?.includes(
+            "Stability pool deposit and withdraw events are temporarily unavailable",
+          ),
+      ),
+    ).toBe(true);
   });
 
   it("filters by owner when snapshots are ready and clamps a stale page", () => {

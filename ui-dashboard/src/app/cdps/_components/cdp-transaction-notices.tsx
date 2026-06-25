@@ -24,7 +24,7 @@ export function StabilityPoolEventsUnavailableNotice({
   className?: string;
 }) {
   return (
-    <p className={`${className} text-xs text-amber-400`}>
+    <p className={`${className} text-xs text-amber-400`} role="status">
       {STABILITY_POOL_EVENTS_UNAVAILABLE_MESSAGE}
     </p>
   );
