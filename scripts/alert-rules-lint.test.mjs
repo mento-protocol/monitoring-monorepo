@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -228,6 +228,36 @@ test("CLI passes against the real repository", () => {
   assert(
     /PromQL expressions parsed/.test(result.stdout),
     `expected summary output, got: ${result.stdout}`,
+  );
+});
+
+test("VictorOps trading-mode body stays distinct from the incident title", () => {
+  const source = readFileSync(
+    path.resolve(
+      __dirname,
+      "..",
+      "alerts/rules/message-templates-victorops.tf",
+    ),
+    "utf8",
+  );
+
+  assert(
+    source.includes(
+      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ end -}}\n{{ if $chainlinkURL -}}",
+    ),
+    "single firing alerts should start the body at the next action, not repeat the title",
+  );
+  assert(
+    source.includes(
+      "Trading resumed for {{ $rateFeedWithSlash }} [{{ $chain }}].",
+    ),
+    "resolved trading-mode bodies should use resumed wording",
+  );
+  assert(
+    source.includes(
+      "{{ if eq $firingCount 0 }}No alerts are currently firing.",
+    ),
+    "the resolved footer should use the computed firing count",
   );
 });
 

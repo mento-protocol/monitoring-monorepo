@@ -110,6 +110,9 @@ resource "grafana_message_template" "victorops_trading_mode_alert_message" {
   name     = "VictorOps - Trading Mode Alert Message"
   template = <<-EOT
 {{ define "victorops.trading_mode_alert_message" }}
+{{ $firingCount := len .Alerts.Firing -}}
+{{ $resolvedCount := len .Alerts.Resolved -}}
+{{ $mixedState := and $firingCount $resolvedCount -}}
 {{ range .Alerts.Firing -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
@@ -131,7 +134,9 @@ ${local.monad_chainlink_slug_branches}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
 {{ $chainlinkURL := "" -}}
 {{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
+{{ if or $mixedState (gt $firingCount 1) -}}
 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker
+{{ end -}}
 {{ if $chainlinkURL -}}
 Next action: verify the Chainlink data source, then ack/snooze if the move is real. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
 - Chainlink data source: {{ $chainlinkURL }}
@@ -145,10 +150,10 @@ Alert time: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
-{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed
+Trading resumed for {{ $rateFeedWithSlash }} [{{ $chain }}].
 {{ end -}}
 
-{{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
+{{ if eq $firingCount 0 }}No alerts are currently firing.{{ end }}
 {{ end -}}
 EOT
 }
