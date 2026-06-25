@@ -65,7 +65,7 @@ function mockData(
   });
 }
 
-function setSharePrice(blockNumber: number, priceUsdWei: bigint): void {
+function setSharePrice(blockNumber: number, priceUsdWei: bigint | null): void {
   _setMockSusdsSharePrice(
     ETHEREUM_CHAIN_ID,
     SUSDS_ADDRESS,
@@ -171,7 +171,7 @@ function dailySnapshotContext(
 function heartbeatContext(
   mockDb: MockDb,
   blockTimestamp: bigint | null,
-  sharePriceUsdWei: bigint,
+  sharePriceUsdWei: bigint | null,
   expectedBlockNumber = 300n,
 ): Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0] {
   return {
@@ -324,6 +324,20 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(after.currentShares, beforeCurrentShares);
     assert.equal(after.costBasisUsdWei, beforeCostBasis);
     assert.equal(after.totalEarnedYieldUsdWei, beforeTotalEarnedYield);
+  });
+
+  it("falls back to Deposit assets and shares when the sUSDS share-price RPC is unavailable", async () => {
+    let mockDb = MockDb.createMockDb();
+    setSharePrice(100, null);
+
+    mockDb = await deposit(mockDb, 100, 0, dollars(1060), dollars(1000));
+
+    const movements = mockDb.entities.SusdsYieldMovement.getAll() as Array<{
+      sharePriceUsdWei: bigint;
+    }>;
+    assert.equal(movements.length, 1);
+    assert.equal(movements[0]?.sharePriceUsdWei, dollars(106) / 100n);
+    assert.equal(summary(mockDb).currentValueUsdWei, dollars(1060));
   });
 
   it("writes sUSDS daily snapshots from cumulative yield without double-counting same-day samples", async () => {
@@ -589,6 +603,18 @@ describe("sUSDS reserve yield accounting", () => {
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
       heartbeatContext(mockDb, null, WAD),
+      300n,
+    );
+
+    assert.equal(didWrite, false);
+    assert.equal(dailySnapshots(mockDb).length, 0);
+  });
+
+  it("skips the sUSDS heartbeat snapshot when share-price RPC returns null", async () => {
+    const mockDb = MockDb.createMockDb();
+
+    const didWrite = await recordSusdsYieldHeartbeatSnapshot(
+      heartbeatContext(mockDb, V3_REVENUE_LAUNCH_TIMESTAMP + 1n, null),
       300n,
     );
 

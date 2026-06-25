@@ -5,6 +5,7 @@ import {
   handleSusdsYieldDailySnapshotHeartbeat,
   readSharePrice,
   recordSusdsYieldDailySnapshot,
+  sharePriceFromAssetsAndShares,
 } from "./susds/dailySnapshots.js";
 import {
   recordDeposit,
@@ -76,7 +77,11 @@ indexer.onEvent(
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
     if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
-    const sharePriceUsdWei = await readSharePrice(context, meta);
+    const sharePriceUsdWei = await readSharePrice(
+      context,
+      meta,
+      sharePriceFromAssetsAndShares(event.params.assets, event.params.shares),
+    );
     await recordDeposit(
       context,
       meta,
@@ -108,7 +113,11 @@ indexer.onEvent(
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
     if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
-    const sharePriceUsdWei = await readSharePrice(context, meta);
+    const sharePriceUsdWei = await readSharePrice(
+      context,
+      meta,
+      sharePriceFromAssetsAndShares(event.params.assets, event.params.shares),
+    );
     await recordWithdraw(context, meta, {
       owner,
       receiver: asAddress(event.params.receiver),

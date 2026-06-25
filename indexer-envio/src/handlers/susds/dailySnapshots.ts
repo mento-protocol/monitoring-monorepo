@@ -9,6 +9,7 @@ import {
   ETHEREUM_CHAIN_ID,
   SUSDS_ADDRESS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
+  WAD,
   ZERO,
   type BlockMeta,
   type SusdsContext,
@@ -145,18 +146,38 @@ export async function recordSusdsYieldDailySnapshot(
 export async function readSharePrice(
   context: SusdsContext,
   meta: BlockMeta,
+  fallbackSharePriceUsdWei?: bigint | null,
 ): Promise<bigint> {
+  const sharePriceUsdWei = await readSharePriceOrNull(
+    context,
+    meta,
+    fallbackSharePriceUsdWei,
+  );
+  if (sharePriceUsdWei !== null) return sharePriceUsdWei;
+  throw new Error(
+    `[sUSDS] convertToAssets(1e18) unavailable at block ${meta.blockNumber}`,
+  );
+}
+
+export async function readSharePriceOrNull(
+  context: SusdsContext,
+  meta: BlockMeta,
+  fallbackSharePriceUsdWei?: bigint | null,
+): Promise<bigint | null> {
   const sharePriceUsdWei = await context.effect(susdsSharePriceEffect, {
     chainId: meta.chainId,
     tokenAddress: SUSDS_ADDRESS,
     blockNumber: meta.blockNumber,
   });
-  if (sharePriceUsdWei === null) {
-    throw new Error(
-      `[sUSDS] convertToAssets(1e18) unavailable at block ${meta.blockNumber}`,
-    );
-  }
-  return sharePriceUsdWei;
+  return sharePriceUsdWei ?? fallbackSharePriceUsdWei ?? null;
+}
+
+export function sharePriceFromAssetsAndShares(
+  assets: bigint,
+  shares: bigint,
+): bigint | null {
+  if (shares <= ZERO) return null;
+  return (assets * WAD) / shares;
 }
 
 export async function recordSusdsYieldHeartbeatSnapshot(
@@ -176,7 +197,8 @@ export async function recordSusdsYieldHeartbeatSnapshot(
   };
   if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
 
-  const sharePriceUsdWei = await readSharePrice(context, meta);
+  const sharePriceUsdWei = await readSharePriceOrNull(context, meta);
+  if (sharePriceUsdWei === null) return false;
   await recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
   return true;
 }
