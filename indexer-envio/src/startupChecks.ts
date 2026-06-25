@@ -24,6 +24,7 @@ import { env } from "./env.js";
  * First Ethereum tracked reserve movements:
  *   Ethereum mainnet (1):   19111760 — initial Mento reserve stETH mint
  *   Ethereum mainnet (1):   22994825 — initial Mento reserve sUSDS deposit
+ *   Ethereum mainnet (1):   24573204 — first block at/after v3 revenue launch
  */
 
 export const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
@@ -32,6 +33,10 @@ export const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
 };
 
 export const SUSDS_FIRST_TRACKED_EVENT_BLOCK = 22994825;
+// First Ethereum block at/after 2026-03-03T00:00:00Z. Starting the daily
+// heartbeat here avoids thousands of pre-launch heartbeat blocks that can only
+// read a timestamp and return before writing a snapshot.
+export const SUSDS_REVENUE_LAUNCH_BLOCK = 24573204;
 export const STETH_FIRST_TRACKED_EVENT_BLOCK = 19111760;
 
 const FIRST_REQUIRED_EVENT_BLOCK: Record<number, number> = {

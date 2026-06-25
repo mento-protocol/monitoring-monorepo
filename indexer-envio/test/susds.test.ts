@@ -26,7 +26,7 @@ import {
   blockTimestampEffect,
   susdsSharePriceEffect,
 } from "../src/rpc/effects.ts";
-import { SUSDS_FIRST_TRACKED_EVENT_BLOCK } from "../src/startupChecks.ts";
+import { SUSDS_REVENUE_LAUNCH_BLOCK } from "../src/startupChecks.ts";
 
 type MockDb = MockDbWith<{
   SusdsCostBasisLot: EntityCollection;
@@ -548,7 +548,7 @@ describe("sUSDS reserve yield accounting", () => {
     let mockDb = MockDb.createMockDb();
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
     const day2 = day1 + 86_400n;
-    const heartbeatBlockNumber = BigInt(SUSDS_FIRST_TRACKED_EVENT_BLOCK + 300);
+    const heartbeatBlockNumber = BigInt(SUSDS_REVENUE_LAUNCH_BLOCK + 300);
 
     setSharePrice(100, WAD);
     mockDb = await deposit(
@@ -605,7 +605,7 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(dailySnapshots(mockDb).length, 0);
   });
 
-  it("skips pre-sUSDS heartbeat blocks without reading effects", async () => {
+  it("skips pre-revenue-launch heartbeat blocks without reading effects", async () => {
     const mockDb = MockDb.createMockDb();
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
@@ -613,10 +613,10 @@ describe("sUSDS reserve yield accounting", () => {
         ...dailySnapshotContext(mockDb),
         isPreload: false,
         effect: async () => {
-          throw new Error("pre-sUSDS heartbeat must not read effects");
+          throw new Error("pre-launch heartbeat must not read effects");
         },
       } as unknown as Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0],
-      BigInt(SUSDS_FIRST_TRACKED_EVENT_BLOCK - 1),
+      BigInt(SUSDS_REVENUE_LAUNCH_BLOCK - 1),
     );
 
     assert.equal(didWrite, false);
@@ -628,7 +628,7 @@ describe("sUSDS reserve yield accounting", () => {
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
     const day2 = day1 + 86_400n;
     const depositBlock = 22_990_100;
-    const heartbeatBlock = SUSDS_FIRST_TRACKED_EVENT_BLOCK + 300;
+    const heartbeatBlock = SUSDS_REVENUE_LAUNCH_BLOCK + 300;
     const heartbeatBlockNumber = BigInt(heartbeatBlock);
     const heartbeatTimestamp = day2 + 3_600n;
     const heartbeatSharePrice = dollars(120) / 100n;
