@@ -94,7 +94,15 @@ RESOLVED: Sufficient {{ $token }} balance restored for the {{ .Labels.owner }} (
 resource "grafana_message_template" "victorops_trading_mode_alert_title" {
   name     = "VictorOps - Trading Mode Alert Title"
   template = <<-EOT
-  {{ define "victorops.trading_mode_alert_title" }}{{ if (len .Alerts.Firing) }}Trading halted{{ else }}Trading resumed{{ end }}{{ end -}}
+{{ define "victorops.trading_mode_alert_title" -}}
+{{ if (len .Alerts.Firing) -}}
+{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker{{ end -}}
+{{ else if (len .Alerts.Resolved) -}}
+{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed{{ end -}}
+{{ else -}}
+Trading mode alert
+{{ end -}}
+{{ end -}}
   EOT
 }
 
@@ -121,15 +129,23 @@ ${local.monad_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
-Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}
-- Check for tripped breakers on the {{ if $pool }}{{ $rateFeedWithSlash }} pool{{ else }}alert details{{ end }}: {{ $poolURL }}{{ if and $chainlinkFeedPath $chainlinkSlug }}
-- Check the Chainlink feed for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}: https://data.chain.link/feeds/{{ $chainlinkFeedPath }}/{{ $chainlinkSlug }}{{ end }}
+{{ $chainlinkURL := "" -}}
+{{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
+{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker
+{{ if $chainlinkURL -}}
+Next action: verify the Chainlink data source, then ack/snooze if the move is real. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
+- Chainlink data source: {{ $chainlinkURL }}
+{{ else -}}
+Next action: open breaker status and confirm the underlying rate-feed or market move, then ack/snooze if the halt is expected. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
+{{ end -}}
+- Breaker status: {{ $poolURL }}
+Alert time: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
-Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}
+{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed
 {{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
