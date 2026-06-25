@@ -72,8 +72,9 @@ function useOps24hByInstance(chainId: number) {
   );
   const txData = transactions.data;
   const spData = stabilityPoolEvents.data;
-  const isLoading = transactions.isLoading;
-  const hasError = transactions.error != null;
+  const isLoading = transactions.isLoading || stabilityPoolEvents.isLoading;
+  const hasError =
+    transactions.error != null || stabilityPoolEvents.error != null;
   return useMemo(() => {
     const merged = mergeTransactionRows(
       txData,

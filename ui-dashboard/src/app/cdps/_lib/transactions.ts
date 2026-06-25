@@ -239,6 +239,9 @@ export function positionSnapshotFor(
 ): PositionSnapshot | null {
   if (row.kind === "spOperation") {
     const ZERO = BigInt(0);
+    // Claim-only SP operations are better rendered as claimed gain totals. A
+    // deposit/withdraw with claims still needs the before/after LP snapshot;
+    // the amount cell appends the claimed gains to that snapshot display.
     if (
       BigInt(row.topUpOrWithdrawal) === ZERO &&
       (BigInt(row.yieldGainClaimed) !== ZERO ||

@@ -393,6 +393,24 @@ describe("positionSnapshotFor", () => {
     ).toBeNull();
   });
 
+  it("keeps the before/after snapshot for combined stability pool claims", () => {
+    const snap = positionSnapshotFor(
+      spOperationRow({
+        topUpOrWithdrawal: "50",
+        yieldGainClaimed: "12",
+        ethGainClaimed: "7",
+        depositBefore: "100",
+        depositAfter: "150",
+        stashedCollBefore: "20",
+        stashedCollAfter: "20",
+      }),
+      undefined,
+    );
+    if (snap == null) throw new Error("expected resolved snapshot");
+    expect(snap.debt.delta).toBe("50");
+    expect(snap.coll.delta).toBe("0");
+  });
+
   it("delegates trove operations to the isolated trove snapshot", () => {
     expect(positionSnapshotFor(fullTroveOpRow(), baseSnapshot)).toEqual(
       troveSnapshotFor(fullTroveOpRow(), baseSnapshot),

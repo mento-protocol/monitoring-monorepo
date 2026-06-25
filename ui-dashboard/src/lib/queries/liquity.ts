@@ -192,7 +192,10 @@ ${troveRowFields}
       id collateralId batchManager annualInterestRate updatedAt
     }
     StabilityPoolDepositor(
-      where: { collateralId: { _eq: $collateralId } }
+      where: {
+        collateralId: { _eq: $collateralId }
+        lastTouchedDeposit: { _gt: "0" }
+      }
       order_by: [{ lastTouchedDeposit: desc }, { lastUpdatedAt: desc }, { id: asc }]
       limit: ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT}
     ) {

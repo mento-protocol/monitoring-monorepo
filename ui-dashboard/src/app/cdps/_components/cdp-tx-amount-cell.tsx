@@ -5,6 +5,15 @@ import { formatSignedWei, formatTokenAmount } from "../_lib/format";
 import { amountsFor, type PositionSnapshot } from "../_lib/transactions";
 import type { CdpTransactionRow } from "../_lib/types";
 
+function claimedAmountFor(
+  row: CdpTransactionRow,
+  leg: "debt" | "coll",
+): string | null {
+  if (row.kind !== "spOperation") return null;
+  const value = leg === "debt" ? row.yieldGainClaimed : row.ethGainClaimed;
+  return BigInt(value) === BigInt(0) ? null : value;
+}
+
 /** Renders one of the two amount columns (debt or collateral) on a CDP
  *  transactions row. For rows with a resolved position snapshot it shows
  *  `before → after` with the signed delta below; for pool-level events
@@ -44,6 +53,7 @@ export function CdpTxAmountCell({
     );
   }
   const slice = snapshot[leg];
+  const claimedAmount = claimedAmountFor(row, leg);
   // ES2017 target prohibits 0n literals — coerce via BigInt(0) to stay
   // consistent with the rest of the cdps lib.
   const ZERO = BigInt(0);
@@ -70,6 +80,11 @@ export function CdpTxAmountCell({
               symbol,
             )}
             )
+          </span>
+        )}
+        {claimedAmount != null && (
+          <span className="text-[10px] text-lime-300">
+            claimed {formatTokenAmount(claimedAmount, symbol)}
           </span>
         )}
       </div>
