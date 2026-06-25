@@ -84,6 +84,7 @@ indexer.onEvent(
     const meta = eventMeta(event);
     const owner = asAddress(event.params.owner);
     if (!isTrackedWallet(owner)) return;
+    if (event.params.shares <= 0n) return;
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
     if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
@@ -121,6 +122,7 @@ indexer.onEvent(
     const meta = eventMeta(event);
     const owner = asAddress(event.params.owner);
     if (!isTrackedWallet(owner)) return;
+    if (event.params.shares <= 0n) return;
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
     if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
@@ -158,6 +160,7 @@ indexer.onEvent(
     const to = asAddress(event.params.to);
     if (from === ZERO_ADDRESS || to === ZERO_ADDRESS) return;
     if (from === to) return;
+    if (event.params.value <= 0n) return;
     const meta = eventMeta(event);
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
     if (context.isPreload) return;

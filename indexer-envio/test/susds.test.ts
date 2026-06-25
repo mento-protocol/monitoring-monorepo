@@ -327,6 +327,18 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(after.totalEarnedYieldUsdWei, beforeTotalEarnedYield);
   });
 
+  it("ignores zero-share sUSDS movements without reading share price", async () => {
+    let mockDb = MockDb.createMockDb();
+    setSharePrice(100, null);
+    mockDb = await deposit(mockDb, 100, 0, 0n, 0n);
+    mockDb = await withdraw(mockDb, 101, 1, 0n, 0n);
+    mockDb = await transfer(mockDb, 102, 2, RESERVE_SAFE, EXTERNAL, 0n);
+
+    assert.equal(mockDb.entities.SusdsYieldMovement.getAll().length, 0);
+    assert.equal(mockDb.entities.SusdsYieldDailySnapshot.getAll().length, 0);
+    assert.equal(mockDb.entities.SusdsYieldSummary.get("1-susds"), undefined);
+  });
+
   it("falls back to Deposit assets and shares when the sUSDS share-price RPC is unavailable", async () => {
     let mockDb = MockDb.createMockDb();
     setSharePrice(100, null);
