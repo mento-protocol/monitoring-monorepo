@@ -65,9 +65,14 @@ item required.
   sweep across review comments, review bodies, top-level comments, threads,
   check annotations, and failing check logs before all-clear. Use the root
   `AGENTS.md` reply templates. Do not resolve a thread without a reply first.
-- Codex current-head approval missing or in flight: wait for the existing
-  signal. Do not post duplicate `@codex review` requests while the probe says a
-  current-head request is `requested`, `in_flight`, or `approved`.
+- Codex current-head approval missing, stale, or in flight: wait for the
+  automatic current-head review path before taking action. Codex re-reviews new
+  pushes automatically in this repo; do not post `@codex review` as a routine
+  post-push step, and do not treat a `stale` signal immediately after a push as
+  permission to comment again. Never post duplicate requests while the probe
+  says a current-head request is `requested`, `in_flight`, or `approved`. Use
+  one manual request only as a fallback when the current head still has no
+  Codex signal after the normal automatic-review window.
 
 Never force-push or amend while babysitting.
 
