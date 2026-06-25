@@ -192,6 +192,8 @@ Next action: verify the Chainlink data source, then ack/snooze if the move is re
 Next action: open breaker status and confirm the underlying rate-feed or market move, then ack/snooze if the halt is expected. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
 {{ end -}}
 - <{{ $poolURL }}|Breaker status>{{ if $pool }} for {{ $rateFeedWithSlash }}{{ end }}
+{{ if not $chainlinkURL -}}- Alert time: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
+{{ end -}}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}
