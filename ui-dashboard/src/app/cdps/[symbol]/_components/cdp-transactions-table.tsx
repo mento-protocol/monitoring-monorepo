@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { ErrorBox, Skeleton } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
@@ -38,6 +38,10 @@ import {
   TX_FILTER_TYPE_ORDER,
   normalizeAddressFilter,
 } from "../../_components/cdp-tx-filters";
+import {
+  CdpTransactionsEmptyState,
+  StabilityPoolEventsUnavailableNotice,
+} from "../../_components/cdp-transaction-notices";
 
 const PAGE_SIZE = 20;
 
@@ -75,6 +79,7 @@ export function CdpTransactionsTable({
     [snapshots.data],
   );
   const snapshotsReady = snapshots.data != null && snapshots.error == null;
+  const stabilityPoolEventsUnavailable = stabilityPoolEvents.error != null;
 
   return (
     <section>
@@ -85,17 +90,19 @@ export function CdpTransactionsTable({
         <ErrorBox
           message={`Failed to load CDP transactions — ${error.message}`}
         />
-      ) : isLoading ? (
+      ) : isLoading || (rows.length === 0 && stabilityPoolEvents.isLoading) ? (
         <Skeleton rows={6} />
       ) : rows.length === 0 ? (
-        <EmptyBox message="No CDP transactions indexed yet." />
+        <CdpTransactionsEmptyState
+          stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+        />
       ) : (
         <TransactionsBody
           rows={rows}
           chainId={chainId}
           symbol={symbol}
           capped={capped}
-          stabilityPoolEventsUnavailable={stabilityPoolEvents.error != null}
+          stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
           snapshotById={snapshotById}
           snapshotsReady={snapshotsReady}
         />
@@ -303,10 +310,7 @@ function TransactionFootnotes({
         </p>
       )}
       {stabilityPoolEventsUnavailable && (
-        <p className="px-1 pt-1 text-xs text-amber-400">
-          Stability pool deposit and withdraw events are temporarily unavailable
-          while the indexer schema catches up.
-        </p>
+        <StabilityPoolEventsUnavailableNotice />
       )}
     </>
   );

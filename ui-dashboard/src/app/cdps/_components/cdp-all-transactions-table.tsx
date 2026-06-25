@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { ErrorBox, Skeleton } from "@/components/feedback";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
@@ -37,6 +37,10 @@ import {
   TX_FILTER_TYPE_ORDER,
   normalizeAddressFilter,
 } from "./cdp-tx-filters";
+import {
+  CdpTransactionsEmptyState,
+  StabilityPoolEventsUnavailableNotice,
+} from "./cdp-transaction-notices";
 
 // 100 across all markets is the user-visible cap. We fetch a larger
 // per-kind cap and merge so the latest 100 across kinds is accurate even
@@ -86,6 +90,7 @@ export function CdpAllTransactionsTable({
     [snapshots.data],
   );
   const snapshotsReady = snapshots.data != null && snapshots.error == null;
+  const stabilityPoolEventsUnavailable = stabilityPoolEvents.error != null;
 
   const symbolByInstance = useMemo(() => {
     const m = new Map<string, { symbol: string; chainId: number }>();
@@ -104,17 +109,19 @@ export function CdpAllTransactionsTable({
         <ErrorBox
           message={`Failed to load CDP transactions — ${error.message}`}
         />
-      ) : isLoading ? (
+      ) : isLoading || (rows.length === 0 && stabilityPoolEvents.isLoading) ? (
         <Skeleton rows={6} />
       ) : rows.length === 0 ? (
-        <EmptyBox message="No CDP transactions indexed yet." />
+        <CdpTransactionsEmptyState
+          stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+        />
       ) : (
         <OverviewBody
           rows={rows}
           collaterals={collaterals}
           symbolByInstance={symbolByInstance}
           capped={capped}
-          stabilityPoolEventsUnavailable={stabilityPoolEvents.error != null}
+          stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
           snapshotById={snapshotById}
           snapshotsReady={snapshotsReady}
         />
@@ -377,10 +384,7 @@ function OverviewFootnotes({
         </p>
       )}
       {stabilityPoolEventsUnavailable && (
-        <p className="px-1 pt-1 text-xs text-amber-400">
-          Stability pool deposit and withdraw events are temporarily unavailable
-          while the indexer schema catches up.
-        </p>
+        <StabilityPoolEventsUnavailableNotice />
       )}
     </>
   );

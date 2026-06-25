@@ -509,6 +509,86 @@ describe("CdpAllTransactionsTable", () => {
     expect(bodyText(handle!.container)).toContain("Open Trove");
   });
 
+  it("keeps the overview empty state behind the SP companion query", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return {
+          data: {
+            LiquidationEvent: [],
+            RedemptionEvent: [],
+            SpRebalanceEvent: [],
+            TroveOperationEvent: [],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return { data: undefined, error: null, isLoading: true };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[{ id: "gbpm", chainId: 42220, symbol: "GBPm" }]}
+      />,
+    );
+
+    expect(handle!.container.querySelector('[role="status"]')).not.toBeNull();
+    expect(handle!.container.textContent).not.toContain(
+      "No CDP transactions indexed yet.",
+    );
+  });
+
+  it("shows the overview SP schema-lag notice when only the companion query fails", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return {
+          data: {
+            LiquidationEvent: [],
+            RedemptionEvent: [],
+            SpRebalanceEvent: [],
+            TroveOperationEvent: [],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: undefined,
+          error: new Error("schema still syncing"),
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[{ id: "gbpm", chainId: 42220, symbol: "GBPm" }]}
+      />,
+    );
+
+    expect(handle!.container.textContent).toContain(
+      "No CDP transactions indexed yet.",
+    );
+    expect(handle!.container.textContent).toContain(
+      "Stability pool deposit and withdraw events are temporarily unavailable",
+    );
+  });
+
   it("filters overview rows by SP depositor while snapshots fail", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === ALL_CDP_TRANSACTIONS) {

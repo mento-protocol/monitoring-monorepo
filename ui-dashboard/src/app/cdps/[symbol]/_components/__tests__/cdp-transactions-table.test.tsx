@@ -201,6 +201,62 @@ describe("CdpTransactionsTable", () => {
     );
   });
 
+  it("keeps the empty state behind the SP companion query", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return { data: txData([]), error: null, isLoading: false };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return { data: undefined, error: null, isLoading: true };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: { TroveOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    expect(handle!.container.querySelector('[role="status"]')).not.toBeNull();
+    expect(handle!.container.textContent).not.toContain(
+      "No CDP transactions indexed yet.",
+    );
+  });
+
+  it("shows the SP schema-lag notice when only the companion query fails", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return { data: txData([]), error: null, isLoading: false };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: undefined,
+          error: new Error("schema still syncing"),
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: { TroveOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    expect(handle!.container.textContent).toContain(
+      "No CDP transactions indexed yet.",
+    );
+    expect(handle!.container.textContent).toContain(
+      "Stability pool deposit and withdraw events are temporarily unavailable",
+    );
+  });
+
   it("filters by owner when snapshots are ready and clamps a stale page", () => {
     const rows = Array.from({ length: 21 }, (_, index) =>
       troveOp(`op${index + 1}`, {
