@@ -195,7 +195,13 @@ indexer.onEvent(
       context.StabilityPoolDepositor.get(depositorId),
       context.PendingDepositOperation.get(pendingKey),
     ]);
-    if (context.isPreload) return;
+    if (context.isPreload) {
+      await Promise.all([
+        preloadLiquityMarket(context, market),
+        preloadBorrowingRevenueRollover(context, collateralId, blockTimestamp),
+      ]);
+      return;
+    }
     if (pending !== undefined) {
       context.PendingDepositOperation.deleteUnsafe(pendingKey);
     }
@@ -237,6 +243,24 @@ indexer.onEvent(
     });
     if (operationEvent !== null) {
       context.StabilityPoolOperationEvent.set(operationEvent);
+      const instance = await getOrCreateLiquityInstance(
+        context,
+        market,
+        blockNumber,
+        blockTimestamp,
+      );
+      context.LiquityInstance.set(
+        touchLiquityInstance(
+          await flushLiquitySnapshots(
+            context,
+            instance,
+            blockTimestamp,
+            blockNumber,
+          ),
+          blockNumber,
+          blockTimestamp,
+        ),
+      );
     }
     context.StabilityPoolDepositor.set(next);
   },

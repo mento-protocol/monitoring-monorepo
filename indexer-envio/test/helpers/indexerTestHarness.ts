@@ -82,6 +82,7 @@ export type IndexerTestHelpers<Db extends MockDb = MockDb> = {
   StableToken: ContractTestHelpers<Db>;
   Susds: ContractTestHelpers<Db>;
   Steth: ContractTestHelpers<Db>;
+  LiquityStabilityPool: ContractTestHelpers<Db>;
   BreakerBox: ContractTestHelpers<Db>;
   MedianDeltaBreaker: ContractTestHelpers<Db>;
   SortedOracles: ContractTestHelpers<Db>;
@@ -268,6 +269,7 @@ export const TestHelpers = {
   StableToken: contract("StableToken"),
   Susds: contract("Susds"),
   Steth: contract("Steth"),
+  LiquityStabilityPool: contract("LiquityStabilityPool"),
   BreakerBox: contract("BreakerBox"),
   MedianDeltaBreaker: contract("MedianDeltaBreaker"),
   SortedOracles: contract("SortedOracles"),

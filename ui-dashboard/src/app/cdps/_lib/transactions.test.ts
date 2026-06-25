@@ -112,9 +112,24 @@ describe("badgeKindFor", () => {
     expect(badgeKindFor(spOperationRow({ topUpOrWithdrawal: "-1" }))).toBe(
       "spWithdraw",
     );
-    expect(badgeKindFor(spOperationRow({ topUpOrWithdrawal: "0" }))).toBe(
-      "spClaim",
-    );
+    expect(
+      badgeKindFor(
+        spOperationRow({
+          operation: 2,
+          topUpOrWithdrawal: "0",
+          yieldGainClaimed: "1",
+        }),
+      ),
+    ).toBe("spClaim");
+  });
+
+  it("uses the stability pool operation enum for zero-delta rows without claimed gains", () => {
+    expect(
+      badgeKindFor(spOperationRow({ operation: 0, topUpOrWithdrawal: "0" })),
+    ).toBe("spDeposit");
+    expect(
+      badgeKindFor(spOperationRow({ operation: 1, topUpOrWithdrawal: "0" })),
+    ).toBe("spWithdraw");
   });
 
   it("returns 'userRedemption' for non-rebalance redemptions", () => {

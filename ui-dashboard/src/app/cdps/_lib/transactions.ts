@@ -102,6 +102,15 @@ const TROVE_OP_BADGE: Record<number, BadgeKind> = {
   9: "troveBatch",
 };
 
+// Mirrors `IStabilityPoolEvents.Operation` as emitted in DepositOperation.
+// Signed principal movement still wins for normal deposit/withdraw rows; the
+// enum only disambiguates zero-principal rows that otherwise look like claims.
+const STABILITY_POOL_OP_BADGE: Record<number, BadgeKind> = {
+  0: "spDeposit",
+  1: "spWithdraw",
+  2: "spClaim",
+};
+
 export function badgeKindFor(row: CdpTransactionRow): BadgeKind {
   switch (row.kind) {
     case "liquidation":
@@ -112,7 +121,8 @@ export function badgeKindFor(row: CdpTransactionRow): BadgeKind {
       const delta = BigInt(row.topUpOrWithdrawal);
       if (delta > BigInt(0)) return "spDeposit";
       if (delta < BigInt(0)) return "spWithdraw";
-      return "spClaim";
+      if (hasClaimedStabilityPoolGains(row)) return "spClaim";
+      return STABILITY_POOL_OP_BADGE[row.operation] ?? "spWithdraw";
     }
     case "redemption":
       return row.isRebalance ? "rebalanceRedemption" : "userRedemption";

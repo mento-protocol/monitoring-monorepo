@@ -727,5 +727,8 @@ describe("CdpAllTransactionsTable", () => {
     expect(handle!.container.textContent).toContain(
       "Showing Stability Pool depositor matches only",
     );
+    expect(
+      handle!.container.querySelector('[role="status"]')?.textContent,
+    ).toContain("Showing Stability Pool depositor matches only");
   });
 });

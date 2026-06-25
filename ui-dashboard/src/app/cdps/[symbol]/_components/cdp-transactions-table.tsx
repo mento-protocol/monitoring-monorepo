@@ -187,7 +187,9 @@ function PerMarketFilterBar({
         }
       />
       {addressFilterNotice != null && (
-        <p className="px-1 text-xs text-slate-500">{addressFilterNotice}</p>
+        <p role="status" className="px-1 text-xs text-slate-500">
+          {addressFilterNotice}
+        </p>
       )}
     </div>
   );

@@ -401,6 +401,9 @@ describe("CdpTransactionsTable", () => {
     expect(handle!.container.textContent).toContain(
       "Showing Stability Pool depositor matches only",
     );
+    expect(
+      handle!.container.querySelector('[role="status"]')?.textContent,
+    ).toContain("Showing Stability Pool depositor matches only");
   });
 
   it("keeps SP depositor matches subject to the type filter", () => {
