@@ -121,15 +121,27 @@ EOT
 resource "grafana_message_template" "slack_trading_mode_alert_title" {
   name     = "Slack - Trading Mode Alert Title"
   template = <<-EOT
-  {{ define "slack.trading_mode_alert_title" }}
-  {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
-  {{ .CommonLabels.alertname -}}
-  {{ else if (len .Alerts.Firing) -}}
-  🚨
-  {{- else if (len .Alerts.Resolved) -}}
-  ✅
-  {{- end -}}
-  {{ end -}}
+{{ define "slack.trading_mode_alert_title" }}
+{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
+{{ .CommonLabels.alertname -}}
+{{ else if (len .Alerts.Firing) -}}
+{{ range $i, $alert := .Alerts.Firing -}}
+{{ if $i }}, {{ end -}}
+{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+{{ $chain := .Labels.chain | title -}}
+{{ $breakerKind := "MedianDelta" -}}
+${local.value_delta_breaker_kind_branches}
+🚨 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by {{ $breakerKind }} breaker
+{{ end -}}
+{{- else if (len .Alerts.Resolved) -}}
+{{ range $i, $alert := .Alerts.Resolved -}}
+{{ if $i }}, {{ end -}}
+{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+{{ $chain := .Labels.chain | title -}}
+✅ {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed
+{{ end -}}
+{{- end -}}
+{{ end -}}
   EOT
 }
 
@@ -168,15 +180,21 @@ ${local.monad_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
-*{{ if $mixedState }}🚨 {{ end }}Trading halted for {{ $rateFeedWithSlash }} on {{ $chain }}*
-- Check for tripped breakers on the <{{ $poolURL }}|{{ if $pool }}{{ $rateFeedWithSlash }} pool{{ else }}alert details{{ end }}>{{ if and $chainlinkFeedPath $chainlinkSlug }}
-- Check the <https://data.chain.link/feeds/{{ $chainlinkFeedPath }}/{{ $chainlinkSlug }}|Chainlink feed> for volatility around the alert time at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}{{ end }}
+{{ $breakerKind := "MedianDelta" -}}
+${local.value_delta_breaker_kind_branches}
+{{ $chainlinkURL := "" -}}
+{{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
+*{{ if $mixedState }}🚨 {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by {{ $breakerKind }} breaker*
+Next action: verify the Chainlink data source, then ack/snooze if the move is real. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
+{{ if $chainlinkURL -}}- <{{ $chainlinkURL }}|Chainlink {{ $rateFeedWithSlash }} data source> at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
+{{ end -}}
+- <{{ $poolURL }}|Breaker status>{{ if $pool }} for {{ $rateFeedWithSlash }}{{ end }}
 {{ end -}}
 
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
-*{{ if $mixedState }}✅ {{ end }}Trading resumed for {{ $rateFeedWithSlash }} on {{ $chain }}*
+*{{ if $mixedState }}✅ {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed*
 {{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing 🙂.{{ end }}
