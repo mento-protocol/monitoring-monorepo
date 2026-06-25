@@ -96,19 +96,10 @@ resource "grafana_message_template" "victorops_trading_mode_alert_title" {
   template = <<-EOT
 {{ define "victorops.trading_mode_alert_title" -}}
 {{ if (len .Alerts.Firing) -}}
-{{ range $i, $alert := .Alerts.Firing -}}
-{{ if $i }}, {{ end -}}
-{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
-{{ $chain := .Labels.chain | title -}}
-{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker
+{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker{{ end -}}
 {{ end -}}
 {{ else if (len .Alerts.Resolved) -}}
-{{ range $i, $alert := .Alerts.Resolved -}}
-{{ if $i }}, {{ end -}}
-{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
-{{ $chain := .Labels.chain | title -}}
-{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed
-{{ end -}}
+{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed{{ end -}}
 {{ else -}}
 Trading mode alert
 {{ end -}}
