@@ -123,16 +123,6 @@ export type CdpDepositor = {
   ethGainClaimedCum: string;
 };
 
-export type CdpPoolRow = {
-  id: string;
-  poolId: string;
-  debtToken: string;
-  strategyAddress: string;
-  rebalanceCooldownSec: number;
-  addedAtTimestamp: string;
-  updatedAtTimestamp: string;
-};
-
 export type CdpInstanceDailySnapshot = {
   id: string;
   timestamp: string;

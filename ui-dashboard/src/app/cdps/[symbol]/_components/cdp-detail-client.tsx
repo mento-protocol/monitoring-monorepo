@@ -14,8 +14,7 @@ import {
   CDP_MARKETS,
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
-import { buildPoolDetailHref } from "@/lib/routing";
-import { relativeTime, truncateAddress } from "@/lib/format";
+import { relativeTime } from "@/lib/format";
 import type { Network } from "@/lib/networks";
 import { explorerAddressUrl } from "@/lib/tokens";
 import {
@@ -26,7 +25,6 @@ import {
   type CdpInterestBatch,
   type CdpInstance,
   type CdpInstanceDailySnapshot,
-  type CdpPoolRow,
   type CdpTrove,
   type CdpTroveListRow,
 } from "../../_lib/types";
@@ -54,7 +52,6 @@ type CdpDetailResponse = {
   AllTrove: CdpTrove[];
   InterestBatch: CdpInterestBatch[];
   StabilityPoolDepositor: CdpDepositor[];
-  CdpPool: CdpPoolRow[];
 };
 
 type CdpTroveSchemaFieldsResponse = {
@@ -220,7 +217,6 @@ function buildContentProps({
     depositors,
     depositorsTruncated:
       depositors.length >= CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT,
-    cdpPools: detail.data?.CdpPool ?? [],
     aggregates: aggregateTroves(openTroves, {
       truncated: openTroves.length >= CDP_TROVES_DETAIL_LIMIT,
     }),
@@ -239,7 +235,6 @@ function CdpDetailContent({
   interestBatches,
   depositors,
   depositorsTruncated,
-  cdpPools,
   aggregates,
   snapshots,
   snapshotsLoading,
@@ -253,7 +248,6 @@ function CdpDetailContent({
   interestBatches: CdpInterestBatch[];
   depositors: CdpDepositor[];
   depositorsTruncated: boolean;
-  cdpPools: CdpPoolRow[];
   aggregates: ReturnType<typeof aggregateTroves>;
   snapshots: CdpInstanceDailySnapshot[];
   snapshotsLoading: boolean;
@@ -311,15 +305,12 @@ function CdpDetailContent({
         collateral={collateral}
       />
 
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <DepositorTable
-          depositors={depositors}
-          truncated={depositorsTruncated}
-          symbol={collateral.symbol}
-          chainId={collateral.chainId}
-        />
-        <CdpPoolsTable cdpPools={cdpPools} />
-      </section>
+      <DepositorTable
+        depositors={depositors}
+        truncated={depositorsTruncated}
+        symbol={collateral.symbol}
+        chainId={collateral.chainId}
+      />
 
       <CdpTransactionsTable
         instanceId={collateral.id}
@@ -414,43 +405,6 @@ function RedemptionsSection({
   );
 }
 
-function CdpPoolsTable({ cdpPools }: { cdpPools: CdpPoolRow[] }) {
-  return (
-    <section>
-      <h2 className="text-lg font-semibold text-white mb-3">CDP Pools</h2>
-      {cdpPools.length === 0 ? (
-        <EmptyBox message="No active FPMM pools linked to this CDP market." />
-      ) : (
-        <Table>
-          <thead>
-            <Row>
-              <Th>Pool</Th>
-              <Th align="right">Cooldown</Th>
-              <Th align="right">Updated</Th>
-            </Row>
-          </thead>
-          <tbody>
-            {cdpPools.map((pool) => (
-              <Row key={pool.id}>
-                <Td mono>
-                  <Link
-                    href={buildPoolDetailHref(pool.poolId)}
-                    className="text-indigo-400 hover:text-indigo-300"
-                  >
-                    {truncateAddress(pool.poolId)}
-                  </Link>
-                </Td>
-                <Td align="right">{pool.rebalanceCooldownSec}s</Td>
-                <Td align="right">{relativeTime(pool.updatedAtTimestamp)}</Td>
-              </Row>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </section>
-  );
-}
-
 function DepositorTable({
   depositors,
   truncated,
@@ -468,8 +422,9 @@ function DepositorTable({
         Stability Pool LPs
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Last-touched balances update on LP operations; liquidations can change
-        live exposure before the next LP action.
+        Per-LP balances are snapshots from the latest deposit, withdrawal, or
+        claim; passive liquidations can change live exposure before the next LP
+        action.
       </p>
       {truncated && (
         <p className="mb-3 text-xs text-amber-400">
@@ -485,8 +440,8 @@ function DepositorTable({
           <thead>
             <Row>
               <Th>LP</Th>
-              <Th align="right">Last-touched Debt</Th>
-              <Th align="right">Last-touched Collateral</Th>
+              <Th align="right">Debt Snapshot</Th>
+              <Th align="right">Collateral Snapshot</Th>
               <Th align="right">Deposited</Th>
               <Th align="right">Withdrawn</Th>
               <Th align="right">Updated</Th>

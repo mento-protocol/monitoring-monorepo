@@ -108,6 +108,7 @@ export function buildStabilityPoolOperationEvent({
   txHash: string;
 }): StabilityPoolOperationEvent {
   const op = pending ?? EMPTY_PENDING_OPERATION;
+  const retainedYield = op.yieldGainSinceLastOperation - op.yieldGainClaimed;
   return {
     id,
     chainId,
@@ -120,7 +121,7 @@ export function buildStabilityPoolOperationEvent({
     yieldGainClaimed: op.yieldGainClaimed,
     ethGainSinceLastOperation: op.ethGainSinceLastOperation,
     ethGainClaimed: op.ethGainClaimed,
-    depositBefore: newDeposit - op.topUpOrWithdrawal,
+    depositBefore: newDeposit - op.topUpOrWithdrawal - retainedYield,
     depositAfter: newDeposit,
     stashedCollBefore: existing?.stashedColl ?? 0n,
     stashedCollAfter: stashedColl,

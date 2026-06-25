@@ -13,7 +13,6 @@ import type {
   CdpDepositor,
   CdpInterestBatch,
   CdpInstance,
-  CdpPoolRow,
   CdpTrove,
   CdpTroveListRow,
 } from "../../../_lib/types";
@@ -240,19 +239,6 @@ function depositor(overrides: Partial<CdpDepositor> = {}): CdpDepositor {
   };
 }
 
-function cdpPool(overrides: Partial<CdpPoolRow> = {}): CdpPoolRow {
-  return {
-    id: "cdp-pool-1",
-    poolId: "42220-0xpool",
-    debtToken: "0xdebt",
-    strategyAddress: "0xstrategy",
-    rebalanceCooldownSec: 120,
-    addedAtTimestamp: String(NOW - 100),
-    updatedAtTimestamp: String(NOW),
-    ...overrides,
-  };
-}
-
 function marketsData(troves: CdpTroveListRow[] = []) {
   return {
     LiquityCollateral: [collateral()],
@@ -278,13 +264,11 @@ function detailData({
   allTroves = openTroves,
   interestBatches = [],
   depositors = [depositor()],
-  cdpPools = [cdpPool()],
 }: {
   openTroves?: CdpTrove[];
   allTroves?: CdpTrove[];
   interestBatches?: CdpInterestBatch[];
   depositors?: CdpDepositor[];
-  cdpPools?: CdpPoolRow[];
 } = {}) {
   return {
     LiquityCollateral: [collateral()],
@@ -293,7 +277,6 @@ function detailData({
     AllTrove: allTroves,
     InterestBatch: interestBatches,
     StabilityPoolDepositor: depositors,
-    CdpPool: cdpPools,
   };
 }
 
@@ -431,7 +414,7 @@ describe("CdpDetailClient", () => {
     vi.useRealTimers();
   });
 
-  it("renders detail KPIs, health, redemption split, linked pools, and child tables", () => {
+  it("renders detail KPIs, health, redemption split, and child tables", () => {
     render(handle!);
 
     expect(handle!.container.textContent).toContain("GBPm CDP Market");
@@ -449,10 +432,9 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("200.00%");
     expect(handle!.container.textContent).toContain("Stability Pool LPs");
     expect(handle!.container.textContent).toContain("0xdepositor");
-    expect(handle!.container.textContent).toContain("Last-touched Debt");
-    expect(handle!.container.textContent).toContain("Last-touched Collateral");
+    expect(handle!.container.textContent).toContain("Debt Snapshot");
+    expect(handle!.container.textContent).toContain("Collateral Snapshot");
     expect(handle!.container.textContent).not.toContain("Debt Position");
-    expect(handle!.container.textContent).toContain("CDP Pools");
     expect(
       handle!.container.querySelector('[data-testid="sp-chart"]'),
     ).not.toBeNull();
@@ -518,12 +500,10 @@ describe("CdpDetailClient", () => {
     const legacyDetail = detailData({
       openTroves: [trove({ owner: "0xlegacyowner", troveId: "legacy" })],
       depositors: [],
-      cdpPools: [],
     });
     const upgradedDetail = detailData({
       openTroves: [trove({ owner: "0xupgradedowner", troveId: "upgraded" })],
       depositors: [],
-      cdpPools: [],
     });
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
@@ -581,7 +561,6 @@ describe("CdpDetailClient", () => {
     const legacyDetail = detailData({
       openTroves: [trove({ owner: "0xlegacyowner", troveId: "legacy" })],
       depositors: [],
-      cdpPools: [],
     });
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
@@ -644,7 +623,6 @@ describe("CdpDetailClient", () => {
           data: detailData({
             openTroves: [trove({ troveId })],
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,
@@ -744,7 +722,6 @@ describe("CdpDetailClient", () => {
           data: detailData({
             openTroves: [trove({ lastUpdatedTxHash: null })],
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,
@@ -797,7 +774,6 @@ describe("CdpDetailClient", () => {
             openTroves: [],
             allTroves: [],
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,
@@ -821,9 +797,6 @@ describe("CdpDetailClient", () => {
     );
     expect(handle!.container.textContent).toContain(
       "No stability pool LPs indexed yet.",
-    );
-    expect(handle!.container.textContent).toContain(
-      "No active FPMM pools linked to this CDP market.",
     );
     expect(
       handle!.container.querySelector('[data-testid="sp-chart"]')?.textContent,
@@ -888,7 +861,6 @@ describe("CdpDetailClient", () => {
               }),
             ],
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,
@@ -946,7 +918,6 @@ describe("CdpDetailClient", () => {
           data: detailData({
             openTroves: troves,
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,
@@ -1018,7 +989,6 @@ describe("CdpDetailClient", () => {
             ],
             interestBatches: [],
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,
@@ -1062,7 +1032,6 @@ describe("CdpDetailClient", () => {
               trove({ id: "trove-2", troveId: "42", owner: "0xsecond" }),
             ],
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,
@@ -1125,7 +1094,6 @@ describe("CdpDetailClient", () => {
               }),
             ],
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,
@@ -1212,7 +1180,6 @@ describe("CdpDetailClient", () => {
               }),
             ],
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,
@@ -1271,7 +1238,6 @@ describe("CdpDetailClient", () => {
               }),
             ],
             depositors: [],
-            cdpPools: [],
           }),
           error: null,
           isLoading: false,

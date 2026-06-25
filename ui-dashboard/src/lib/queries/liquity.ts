@@ -194,21 +194,21 @@ ${troveRowFields}
     StabilityPoolDepositor(
       where: {
         collateralId: { _eq: $collateralId }
-        lastTouchedDeposit: { _gt: "0" }
+        _or: [
+          { lastTouchedDeposit: { _gt: "0" } }
+          { stashedColl: { _gt: "0" } }
+        ]
       }
-      order_by: [{ lastTouchedDeposit: desc }, { lastUpdatedAt: desc }, { id: asc }]
+      order_by: [
+        { lastTouchedDeposit: desc }
+        { stashedColl: desc }
+        { lastUpdatedAt: desc }
+        { id: asc }
+      ]
       limit: ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT}
     ) {
       id address lastTouchedDeposit stashedColl lastUpdatedAt
       cumulativeDeposited cumulativeWithdrawn yieldGainClaimedCum ethGainClaimedCum
-    }
-    CdpPool(
-      where: { collateralId: { _eq: $collateralId }, removed: { _eq: false } }
-      order_by: { updatedAtTimestamp: desc }
-      limit: 100
-    ) {
-      id poolId debtToken strategyAddress rebalanceCooldownSec
-      addedAtTimestamp updatedAtTimestamp
     }
   }
 `;

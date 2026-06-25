@@ -611,7 +611,10 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(query).toContain("InterestBatch(");
     expect(query).toContain("limit: 1000");
     expect(query).toContain(
-      "order_by: [{ lastTouchedDeposit: desc }, { lastUpdatedAt: desc }, { id: asc }]",
+      '_or: [ { lastTouchedDeposit: { _gt: "0" } } { stashedColl: { _gt: "0" } } ]',
+    );
+    expect(query).toContain(
+      "order_by: [ { lastTouchedDeposit: desc } { stashedColl: desc } { lastUpdatedAt: desc } { id: asc } ]",
     );
     expect(query).toContain('status: { _nin: ["active", "zombie"] }');
     expect(query).toContain(
@@ -625,6 +628,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(query).toContain(
       "liquidatedDebt liquidatedColl collSurplus priceAtLiquidation",
     );
+    expect(query).not.toContain("CdpPool(");
     expect(query).not.toContain("lastUpdatedTxHash");
   });
 
