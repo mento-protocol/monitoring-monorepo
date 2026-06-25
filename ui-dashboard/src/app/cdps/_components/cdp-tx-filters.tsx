@@ -10,6 +10,9 @@ export const TX_FILTER_TYPE_ORDER: readonly BadgeKind[] = [
   "userRedemption",
   "rebalanceRedemption",
   "spRebalance",
+  "spDeposit",
+  "spWithdraw",
+  "spClaim",
   "troveOpen",
   "troveClose",
   "troveAdjust",
@@ -170,9 +173,10 @@ function pillClasses(active: boolean, isAll: boolean): string {
 }
 
 /** Free-text address filter — when populated, the parent table narrows
- *  to TroveOperationEvent rows whose `owner` matches (case-insensitive,
- *  trimmed). Other event kinds don't have a single-trove owner dimension
- *  so the parent hides them whenever this filter is active.
+ *  to TroveOperationEvent owners and StabilityPoolOperationEvent depositors
+ *  matching the normalized address. Other event kinds don't have a single
+ *  user address dimension, so the parent hides them whenever this filter is
+ *  active.
  *
  *  Trim + lowercase normalization is intentionally done at the
  *  comparison site (in the table) rather than here so the user sees
@@ -186,7 +190,7 @@ export function CdpTxAddressFilter({
 }: {
   value: string;
   onChange: (next: string) => void;
-  /** When the snapshot-isolated query (the source of owner data) hasn't
+  /** When the snapshot-isolated query (the source of trove-owner data) hasn't
    *  resolved yet, render the input disabled with a small hint so users
    *  understand why the filter is unavailable instead of seeing zero
    *  matches after typing an address. */
@@ -195,15 +199,15 @@ export function CdpTxAddressFilter({
 }) {
   return (
     <label className="flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-slate-500">Owner:</span>
+      <span className="text-xs text-slate-500">Address:</span>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="0x… (filter by trove owner)"
+        placeholder="0x... (owner or depositor)"
         spellCheck={false}
         autoComplete="off"
-        aria-label="Filter CDP transactions by trove owner address"
+        aria-label="Filter CDP transactions by owner or depositor address"
         disabled={disabled}
         className="w-72 max-w-full rounded border border-slate-700/60 bg-slate-900/40 px-2 py-1 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
       />

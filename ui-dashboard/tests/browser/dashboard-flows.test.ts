@@ -190,6 +190,16 @@ test.describe("dashboard browser flows", () => {
       page.getByRole("heading", { name: "GBPm CDP Market" }),
     ).toBeVisible();
     await expect(page.getByText("Total Supply (System Debt)")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Stability Pool LPs" }),
+    ).toBeVisible();
+    await expect(
+      page.getByTitle("0x9999999999999999999999999999999999999999"),
+    ).toBeVisible();
+    await expect(page.getByText("150.00 GBPm").first()).toBeVisible();
+    await expect(page.getByText("2.00 USDm").first()).toBeVisible();
+    await expect(page.getByText("SP Deposit").first()).toBeVisible();
+    await expect(page.getByText("SP Withdraw").first()).toBeVisible();
 
     const table = page.getByRole("table", { name: "GBPm troves" });
     await expect(table).toBeVisible();

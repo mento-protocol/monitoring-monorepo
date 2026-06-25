@@ -9,6 +9,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  CdpStabilityPoolOperationEventRow,
   CdpTroveOperationEventRow,
   CdpTroveOpSnapshotRow,
 } from "../../../_lib/types";
@@ -25,7 +26,11 @@ vi.mock("@/components/tx-hash-cell", () => ({
   ),
 }));
 
-import { CDP_TRANSACTIONS, CDP_TROVE_OP_SNAPSHOTS } from "@/lib/queries";
+import {
+  CDP_STABILITY_POOL_EVENTS,
+  CDP_TRANSACTIONS,
+  CDP_TROVE_OP_SNAPSHOTS,
+} from "@/lib/queries";
 import { CdpTransactionsTable } from "../cdp-transactions-table";
 
 const USD_WEI = BigInt(10) ** BigInt(18);
@@ -60,6 +65,30 @@ function txData(rows: CdpTroveOperationEventRow[]) {
     RedemptionEvent: [],
     SpRebalanceEvent: [],
     TroveOperationEvent: rows,
+  };
+}
+
+function spOperation(
+  overrides: Partial<CdpStabilityPoolOperationEventRow> = {},
+): CdpStabilityPoolOperationEventRow {
+  return {
+    id: "sp-op-1",
+    depositor: "0xdepositor",
+    operation: 0,
+    depositLossSinceLastOperation: "0",
+    topUpOrWithdrawal: wei(50),
+    yieldGainSinceLastOperation: "0",
+    yieldGainClaimed: "0",
+    ethGainSinceLastOperation: "0",
+    ethGainClaimed: "0",
+    depositBefore: wei(100),
+    depositAfter: wei(150),
+    stashedCollBefore: "0",
+    stashedCollAfter: wei(2),
+    timestamp: String(NOW - 2),
+    blockNumber: "102",
+    txHash: "0xspdeposit",
+    ...overrides,
   };
 }
 
@@ -182,6 +211,15 @@ describe("CdpTransactionsTable", () => {
       if (query === CDP_TRANSACTIONS) {
         return { data: txData(rows), error: null, isLoading: false };
       }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: {
+            StabilityPoolOperationEvent: [],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
       if (query === CDP_TROVE_OP_SNAPSHOTS) {
         return {
           data: {
@@ -210,7 +248,7 @@ describe("CdpTransactionsTable", () => {
     expect(handle!.container.textContent).not.toContain("page 2 of 1");
 
     const input = handle!.container.querySelector<HTMLInputElement>(
-      'input[aria-label="Filter CDP transactions by trove owner address"]',
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
     );
     act(() => {
       typeInto(input!, "0xowner");
@@ -234,17 +272,55 @@ describe("CdpTransactionsTable", () => {
           isLoading: false,
         };
       }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
       return { data: undefined, error: null, isLoading: false };
     });
     render(handle!);
 
     const input = handle!.container.querySelector<HTMLInputElement>(
-      'input[aria-label="Filter CDP transactions by trove owner address"]',
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
     );
     expect(input?.disabled).toBe(true);
     expect(handle!.container.textContent).toContain(
       "unavailable while indexer syncs",
     );
     expect(bodyText(handle!.container)).toContain("Open Trove");
+  });
+
+  it("merges stability pool deposit events from the companion query", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return { data: txData([]), error: null, isLoading: false };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [spOperation()] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: { TroveOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    const text = bodyText(handle!.container);
+    expect(text).toContain("SP Deposit");
+    expect(text).toContain("100.00 GBPm");
+    expect(text).toContain("150.00 GBPm");
+    expect(text).toContain("+50.00 GBPm");
+    expect(text).toContain("2.00 USDm");
   });
 });

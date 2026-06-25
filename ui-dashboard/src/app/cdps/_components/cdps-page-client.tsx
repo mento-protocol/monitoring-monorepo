@@ -4,7 +4,11 @@ import { useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useGQL } from "@/lib/graphql";
-import { ALL_CDP_TRANSACTIONS, CDP_MARKETS } from "@/lib/queries";
+import {
+  ALL_CDP_STABILITY_POOL_EVENTS,
+  ALL_CDP_TRANSACTIONS,
+  CDP_MARKETS,
+} from "@/lib/queries";
 import {
   CDP_TROVES_LIST_LIMIT,
   type CdpCollateral,
@@ -18,6 +22,7 @@ import {
 } from "../_lib/health";
 import {
   CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+  type CdpStabilityPoolEventsResponse,
   type CdpTransactionsResponse,
   mergeTransactionRows,
 } from "../_lib/transactions";
@@ -61,13 +66,20 @@ function useOps24hByInstance(chainId: number) {
     chainId === 42220 ? ALL_CDP_TRANSACTIONS : null,
     { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
   );
+  const stabilityPoolEvents = useGQL<CdpStabilityPoolEventsResponse>(
+    chainId === 42220 ? ALL_CDP_STABILITY_POOL_EVENTS : null,
+    { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
+  );
   const txData = transactions.data;
+  const spData = stabilityPoolEvents.data;
   const isLoading = transactions.isLoading;
-  const hasError = transactions.error != null;
+  const hasError =
+    transactions.error != null || stabilityPoolEvents.error != null;
   return useMemo(() => {
     const merged = mergeTransactionRows(
       txData,
       CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+      spData,
     );
     const cutoff = Math.floor(Date.now() / 1000) - ONE_DAY_SECONDS;
     const counts = new Map<string, number>();
@@ -80,6 +92,7 @@ function useOps24hByInstance(chainId: number) {
       txData?.LiquidationEvent,
       txData?.RedemptionEvent,
       txData?.SpRebalanceEvent,
+      spData?.StabilityPoolOperationEvent,
       txData?.TroveOperationEvent,
     ].some((rows) => isKindAtCapInWindow(rows, cutoff));
     return {
@@ -88,7 +101,7 @@ function useOps24hByInstance(chainId: number) {
       isLoading,
       hasError,
     };
-  }, [txData, isLoading, hasError]);
+  }, [txData, spData, isLoading, hasError]);
 }
 
 export function CdpsPageClient() {

@@ -1354,8 +1354,12 @@ type PendingDepositOperation @index(fields: ["collateralId", "txHash"]) {
   collateralId: String! @index
   txHash: String! @index
   depositor: String! @index
+  operation: Int!
+  depositLossSinceLastOperation: BigInt!
   topUpOrWithdrawal: BigInt!
+  yieldGainSinceLastOperation: BigInt!
   yieldGainClaimed: BigInt!
+  ethGainSinceLastOperation: BigInt!
   ethGainClaimed: BigInt!
   timestamp: BigInt!
   blockNumber: BigInt!
@@ -1585,6 +1589,33 @@ type SpRebalanceEvent @index(fields: ["instanceId", "timestamp"]) {
   instanceId: String! @index
   amountCollIn: BigInt!
   amountStableOut: BigInt!
+  timestamp: BigInt! @index
+  blockNumber: BigInt!
+  txHash: String!
+}
+
+# Durable StabilityPool depositor operation history. Written from the paired
+# `DepositOperation` + `DepositUpdated` events. The raw ABI keeps the legacy
+# `ethGain*` names even though Mento CDP collateral is USDm.
+type StabilityPoolOperationEvent
+  @index(fields: ["instanceId", "timestamp"])
+  @index(fields: ["chainId", "timestamp"])
+  @index(fields: ["chainId", "depositor"]) {
+  id: ID!
+  chainId: Int!
+  instanceId: String! @index
+  depositor: String! @index
+  operation: Int!
+  depositLossSinceLastOperation: BigInt!
+  topUpOrWithdrawal: BigInt!
+  yieldGainSinceLastOperation: BigInt!
+  yieldGainClaimed: BigInt!
+  ethGainSinceLastOperation: BigInt!
+  ethGainClaimed: BigInt!
+  depositBefore: BigInt!
+  depositAfter: BigInt!
+  stashedCollBefore: BigInt!
+  stashedCollAfter: BigInt!
   timestamp: BigInt! @index
   blockNumber: BigInt!
   txHash: String!

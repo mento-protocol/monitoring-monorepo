@@ -32,6 +32,11 @@ import {
   moveTroveUpdatedInterestRateBracketDebt,
 } from "../src/handlers/liquity/troveUpdates";
 import { OP } from "../src/handlers/liquity/operations";
+import {
+  buildStabilityPoolDepositorUpdate,
+  buildStabilityPoolOperationEvent,
+  type StabilityPoolPendingOperation,
+} from "../src/handlers/liquity/stabilityPool";
 
 describe("Liquity market loader (contracts.json-backed)", () => {
   // Type narrowing for the contracts.json subpath import. The package's
@@ -377,6 +382,124 @@ describe("Liquity CDP helpers", () => {
       });
       assert.equal(snap.debtAfter, 0n);
       assert.equal(snap.collAfter, 0n);
+    });
+  });
+
+  describe("stability pool depositor accounting", () => {
+    const collateralId = "42220-0xsp";
+    const depositor = "0x0000000000000000000000000000000000000abc";
+    const existing = {
+      id: `${collateralId}-${depositor}`,
+      chainId: 42220,
+      collateralId,
+      address: depositor,
+      lastTouchedDeposit: 200n,
+      stashedColl: 1n,
+      yieldGainClaimedCum: 2n,
+      ethGainClaimedCum: 1n,
+      firstDepositAt: 1_000n,
+      lastUpdatedAt: 1_100n,
+      cumulativeDeposited: 250n,
+      cumulativeWithdrawn: 10n,
+    };
+    const withdrawal: StabilityPoolPendingOperation = {
+      operation: 1,
+      depositLossSinceLastOperation: 20n,
+      topUpOrWithdrawal: -60n,
+      yieldGainSinceLastOperation: 5n,
+      yieldGainClaimed: 3n,
+      ethGainSinceLastOperation: 4n,
+      ethGainClaimed: 2n,
+    };
+
+    it("folds signed deposit deltas into current LP position and cumulative totals", () => {
+      const updated = buildStabilityPoolDepositorUpdate({
+        chainId: 42220,
+        collateralId,
+        depositor,
+        newDeposit: 120n,
+        stashedColl: 3n,
+        blockTimestamp: 2_000n,
+        existing,
+        pending: withdrawal,
+      });
+
+      assert.equal(updated.lastTouchedDeposit, 120n);
+      assert.equal(updated.stashedColl, 3n);
+      assert.equal(updated.cumulativeDeposited, 250n);
+      assert.equal(updated.cumulativeWithdrawn, 70n);
+      assert.equal(updated.yieldGainClaimedCum, 5n);
+      assert.equal(updated.ethGainClaimedCum, 3n);
+      assert.equal(updated.firstDepositAt, 1_000n);
+      assert.equal(updated.lastUpdatedAt, 2_000n);
+    });
+
+    it("materializes a durable operation event with before/after debt and collateral positions", () => {
+      const event = buildStabilityPoolOperationEvent({
+        id: "evt-1",
+        chainId: 42220,
+        instanceId: collateralId,
+        depositor,
+        newDeposit: 120n,
+        stashedColl: 3n,
+        existing,
+        pending: withdrawal,
+        blockNumber: 123n,
+        blockTimestamp: 2_000n,
+        txHash: "0xabc",
+      });
+
+      assert.equal(event.id, "evt-1");
+      assert.equal(event.operation, 1);
+      assert.equal(event.topUpOrWithdrawal, -60n);
+      assert.equal(event.depositLossSinceLastOperation, 20n);
+      assert.equal(event.yieldGainSinceLastOperation, 5n);
+      assert.equal(event.yieldGainClaimed, 3n);
+      assert.equal(event.ethGainSinceLastOperation, 4n);
+      assert.equal(event.ethGainClaimed, 2n);
+      assert.equal(event.depositBefore, 180n);
+      assert.equal(event.depositAfter, 120n);
+      assert.equal(event.stashedCollBefore, 1n);
+      assert.equal(event.stashedCollAfter, 3n);
+      assert.equal(event.timestamp, 2_000n);
+      assert.equal(event.blockNumber, 123n);
+      assert.equal(event.txHash, "0xabc");
+    });
+
+    it("handles DepositUpdated rows without a paired DepositOperation as a zero-delta update", () => {
+      const updated = buildStabilityPoolDepositorUpdate({
+        chainId: 42220,
+        collateralId,
+        depositor,
+        newDeposit: 50n,
+        stashedColl: 0n,
+        blockTimestamp: 2_000n,
+        existing: undefined,
+        pending: undefined,
+      });
+      const event = buildStabilityPoolOperationEvent({
+        id: "evt-missing-pending",
+        chainId: 42220,
+        instanceId: collateralId,
+        depositor,
+        newDeposit: 50n,
+        stashedColl: 0n,
+        existing: undefined,
+        pending: undefined,
+        blockNumber: 123n,
+        blockTimestamp: 2_000n,
+        txHash: "0xdef",
+      });
+
+      assert.equal(updated.firstDepositAt, 2_000n);
+      assert.equal(updated.cumulativeDeposited, 0n);
+      assert.equal(updated.cumulativeWithdrawn, 0n);
+      assert.equal(event.operation, -1);
+      assert.equal(event.topUpOrWithdrawal, 0n);
+      assert.equal(event.depositBefore, 50n);
+      assert.equal(event.depositAfter, 50n);
+      assert.equal(event.stashedCollBefore, 0n);
+      assert.equal(event.stashedCollAfter, 0n);
     });
   });
 

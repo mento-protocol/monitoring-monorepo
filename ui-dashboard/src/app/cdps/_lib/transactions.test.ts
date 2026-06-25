@@ -4,10 +4,12 @@ import {
   badgeKindFor,
   indexSnapshotsById,
   mergeTransactionRows,
+  positionSnapshotFor,
   troveSnapshotFor,
   type CdpTransactionsResponse,
 } from "./transactions";
 import type {
+  CdpStabilityPoolOperationEventRow,
   CdpTransactionRow,
   CdpTroveOperationEventRow,
   CdpTroveOpSnapshotRow,
@@ -53,6 +55,36 @@ function spRebalanceRow(): CdpTransactionRow {
   } as unknown as CdpTransactionRow;
 }
 
+function spOperationEventRow(
+  overrides: Partial<CdpStabilityPoolOperationEventRow> = {},
+): CdpStabilityPoolOperationEventRow {
+  return {
+    id: "sp-op-1",
+    timestamp: "750",
+    depositor: "0xdepositor",
+    operation: 0,
+    depositLossSinceLastOperation: "0",
+    topUpOrWithdrawal: "100",
+    yieldGainSinceLastOperation: "0",
+    yieldGainClaimed: "0",
+    ethGainSinceLastOperation: "0",
+    ethGainClaimed: "0",
+    depositBefore: "400",
+    depositAfter: "500",
+    stashedCollBefore: "20",
+    stashedCollAfter: "25",
+    blockNumber: "1",
+    txHash: "0xabc",
+    ...overrides,
+  };
+}
+
+function spOperationRow(
+  overrides: Partial<CdpStabilityPoolOperationEventRow> = {},
+): CdpTransactionRow {
+  return { kind: "spOperation", ...spOperationEventRow(overrides) };
+}
+
 function troveOpBadgeRow(operation: number): CdpTransactionRow {
   return {
     kind: "troveOp",
@@ -71,6 +103,18 @@ describe("badgeKindFor", () => {
 
   it("returns 'spRebalance' for spRebalance rows", () => {
     expect(badgeKindFor(spRebalanceRow())).toBe("spRebalance");
+  });
+
+  it("classifies stability pool operation rows by signed deposit delta", () => {
+    expect(badgeKindFor(spOperationRow({ topUpOrWithdrawal: "1" }))).toBe(
+      "spDeposit",
+    );
+    expect(badgeKindFor(spOperationRow({ topUpOrWithdrawal: "-1" }))).toBe(
+      "spWithdraw",
+    );
+    expect(badgeKindFor(spOperationRow({ topUpOrWithdrawal: "0" }))).toBe(
+      "spClaim",
+    );
   });
 
   it("returns 'userRedemption' for non-rebalance redemptions", () => {
@@ -112,6 +156,18 @@ describe("amountsFor", () => {
     expect(coll).toBe("25");
   });
 
+  it("returns signed debt and collateral deltas for stability pool operations", () => {
+    const { debt, coll } = amountsFor(
+      spOperationRow({
+        topUpOrWithdrawal: "-50",
+        stashedCollBefore: "20",
+        stashedCollAfter: "35",
+      }),
+    );
+    expect(debt).toBe("-50");
+    expect(coll).toBe("15");
+  });
+
   it("returns debtChange / collChange for troveOp", () => {
     const { debt, coll } = amountsFor(troveOpBadgeRow(0));
     expect(debt).toBe("100");
@@ -134,10 +190,17 @@ describe("mergeTransactionRows", () => {
       SpRebalanceEvent: [spRebalanceRow() as never], // timestamp 800
       TroveOperationEvent: [troveOpBadgeRow(0) as never], // timestamp 700
     };
-    const { rows, capped } = mergeTransactionRows(data);
-    expect(rows).toHaveLength(4);
+    const spData = {
+      StabilityPoolOperationEvent: [
+        spOperationEventRow({ timestamp: "750" }) as never,
+      ],
+    };
+    const { rows, capped } = mergeTransactionRows(data, undefined, spData);
+    expect(rows).toHaveLength(5);
     expect(rows[0]!.timestamp).toBe("1000");
-    expect(rows[3]!.timestamp).toBe("700");
+    expect(rows[3]!.timestamp).toBe("750");
+    expect(rows[3]!.kind).toBe("spOperation");
+    expect(rows[4]!.timestamp).toBe("700");
     expect(capped).toBe(false);
   });
 
@@ -151,7 +214,25 @@ describe("mergeTransactionRows", () => {
       SpRebalanceEvent: [],
       TroveOperationEvent: [],
     };
-    const { capped } = mergeTransactionRows(data, 2);
+    const { capped } = mergeTransactionRows(data, 2, {
+      StabilityPoolOperationEvent: [],
+    });
+    expect(capped).toBe(true);
+  });
+
+  it("sets capped=true when the stability pool operation array meets the limit", () => {
+    const data: CdpTransactionsResponse = {
+      LiquidationEvent: [],
+      RedemptionEvent: [],
+      SpRebalanceEvent: [],
+      TroveOperationEvent: [],
+    };
+    const { capped } = mergeTransactionRows(data, 2, {
+      StabilityPoolOperationEvent: [
+        spOperationEventRow({ id: "a" }) as never,
+        spOperationEventRow({ id: "b" }) as never,
+      ],
+    });
     expect(capped).toBe(true);
   });
 });
@@ -257,6 +338,33 @@ describe("troveSnapshotFor", () => {
     if (snap == null) throw new Error("expected resolved snapshot");
     expect(snap.debt.delta).toBe("0");
     expect(snap.coll.delta).toBe("0");
+  });
+});
+
+describe("positionSnapshotFor", () => {
+  it("returns a before/after snapshot for stability pool operations", () => {
+    const snap = positionSnapshotFor(
+      spOperationRow({
+        depositBefore: "1000",
+        depositAfter: "750",
+        stashedCollBefore: "25",
+        stashedCollAfter: "40",
+      }),
+      undefined,
+    );
+    if (snap == null) throw new Error("expected resolved snapshot");
+    expect(snap.debt.before).toBe("1000");
+    expect(snap.debt.after).toBe("750");
+    expect(snap.debt.delta).toBe("-250");
+    expect(snap.coll.before).toBe("25");
+    expect(snap.coll.after).toBe("40");
+    expect(snap.coll.delta).toBe("15");
+  });
+
+  it("delegates trove operations to the isolated trove snapshot", () => {
+    expect(positionSnapshotFor(fullTroveOpRow(), baseSnapshot)).toEqual(
+      troveSnapshotFor(fullTroveOpRow(), baseSnapshot),
+    );
   });
 });
 

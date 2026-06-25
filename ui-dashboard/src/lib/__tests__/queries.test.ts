@@ -60,6 +60,7 @@ const EXPECTED_EXPORT_NAMES = [
   "OLS_LIQUIDITY_EVENTS_COUNT",
   "ALL_OLS_POOLS",
   "ALL_CDP_POOLS",
+  "ALL_CDP_STABILITY_POOL_EVENTS",
   "ALL_CDP_TRANSACTIONS",
   "ALL_CDP_TROVE_OP_SNAPSHOTS",
   "CDP_BORROWING_FEE_EVENTS",
@@ -70,6 +71,7 @@ const EXPECTED_EXPORT_NAMES = [
   "CDP_MARKETS",
   "CDP_MARKET_DETAIL",
   "CDP_MARKET_DETAIL_WITH_TROVE_TX",
+  "CDP_STABILITY_POOL_EVENTS",
   "CDP_TRANSACTIONS",
   "CDP_TROVE_SCHEMA_FIELDS",
   "CDP_TROVE_OP_SNAPSHOTS",
@@ -608,6 +610,9 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(query).toContain("AllTrove: Trove(");
     expect(query).toContain("InterestBatch(");
     expect(query).toContain("limit: 1000");
+    expect(query).toContain(
+      "order_by: [{ lastTouchedDeposit: desc }, { lastUpdatedAt: desc }, { id: asc }]",
+    );
     expect(query).toContain('status: { _nin: ["active", "zombie"] }');
     expect(query).toContain(
       "order_by: [{ interestRate: asc }, { troveId: asc }, { id: asc }]",
@@ -627,6 +632,23 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     const query = normalize(queries.CDP_MARKET_DETAIL_WITH_TROVE_TX);
     expect(query).toContain("query CdpMarketDetailWithTroveTx");
     expect(query).toContain("lastUpdatedAt lastUpdatedTxHash");
+  });
+
+  it("CDP_STABILITY_POOL_EVENTS isolates the new operation entity for schema rollout", () => {
+    const query = normalize(queries.CDP_STABILITY_POOL_EVENTS);
+    expect(query).toContain("StabilityPoolOperationEvent(");
+    expect(query).toContain("instanceId: { _eq: $instanceId }");
+    expect(query).toContain("order_by: [{ timestamp: desc }, { id: desc }]");
+    expect(query).toContain("topUpOrWithdrawal");
+    expect(query).toContain("depositBefore depositAfter");
+    expect(query).toContain("stashedCollBefore stashedCollAfter");
+  });
+
+  it("ALL_CDP_STABILITY_POOL_EVENTS scopes operation history by chain", () => {
+    const query = normalize(queries.ALL_CDP_STABILITY_POOL_EVENTS);
+    expect(query).toContain("StabilityPoolOperationEvent(");
+    expect(query).toContain("chainId: { _eq: $chainId }");
+    expect(query).toContain("depositor");
   });
 
   it("CDP_TROVE_SCHEMA_FIELDS probes tx-hash field availability before selecting it", () => {

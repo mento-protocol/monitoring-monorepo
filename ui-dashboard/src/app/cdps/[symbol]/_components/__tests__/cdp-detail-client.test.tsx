@@ -444,7 +444,7 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("0xowner");
     expect(handle!.container.textContent).toContain("2.50%");
     expect(handle!.container.textContent).toContain("200.00%");
-    expect(handle!.container.textContent).toContain("Last-Touched Depositors");
+    expect(handle!.container.textContent).toContain("Stability Pool LPs");
     expect(handle!.container.textContent).toContain("0xdepositor");
     expect(handle!.container.textContent).toContain("CDP Pools");
     expect(
@@ -764,7 +764,7 @@ describe("CdpDetailClient", () => {
       "No open troves indexed yet.",
     );
     expect(handle!.container.textContent).toContain(
-      "No stability pool depositors indexed yet.",
+      "No stability pool LPs indexed yet.",
     );
     expect(handle!.container.textContent).toContain(
       "No active FPMM pools linked to this CDP market.",

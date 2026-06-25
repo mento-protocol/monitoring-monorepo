@@ -7,6 +7,7 @@ import { TxHashCell } from "@/components/tx-hash-cell";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import {
+  ALL_CDP_STABILITY_POOL_EVENTS,
   ALL_CDP_TRANSACTIONS,
   ALL_CDP_TROVE_OP_SNAPSHOTS,
 } from "@/lib/queries";
@@ -20,7 +21,8 @@ import {
   badgeKindFor,
   indexSnapshotsById,
   mergeTransactionRows,
-  troveSnapshotFor,
+  positionSnapshotFor,
+  type CdpStabilityPoolEventsResponse,
   type CdpTransactionsResponse,
   type CdpTroveOpSnapshotResponse,
 } from "../_lib/transactions";
@@ -56,6 +58,10 @@ export function CdpAllTransactionsTable({
     ALL_CDP_TRANSACTIONS,
     { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
   );
+  const stabilityPoolEvents = useGQL<CdpStabilityPoolEventsResponse>(
+    ALL_CDP_STABILITY_POOL_EVENTS,
+    { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
+  );
   // Isolated query for the schema-lag-fragile fields (owner + before/after).
   // Errors and loading states are tracked independently so the table keeps
   // rendering with flat amounts and a disabled address filter when this
@@ -65,8 +71,13 @@ export function CdpAllTransactionsTable({
     { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
   );
   const { rows, capped } = useMemo(
-    () => mergeTransactionRows(data, CDP_OVERVIEW_PER_KIND_FETCH_LIMIT),
-    [data],
+    () =>
+      mergeTransactionRows(
+        data,
+        CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+        stabilityPoolEvents.data,
+      ),
+    [data, stabilityPoolEvents.data],
   );
   const snapshotById = useMemo(
     () => indexSnapshotsById(snapshots.data),
@@ -101,6 +112,7 @@ export function CdpAllTransactionsTable({
           collaterals={collaterals}
           symbolByInstance={symbolByInstance}
           capped={capped}
+          stabilityPoolEventsUnavailable={stabilityPoolEvents.error != null}
           snapshotById={snapshotById}
           snapshotsReady={snapshotsReady}
         />
@@ -139,9 +151,9 @@ function useOverviewFilters(
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (addressActive) {
-        // Owner is only meaningful for trove-op rows; pool-level events
-        // (liquidation / redemption / SP rebalance) get hidden when the
-        // address filter is active so the visible set stays coherent.
+        if (row.kind === "spOperation") {
+          return row.depositor === normalizedAddress;
+        }
         if (row.kind !== "troveOp") return false;
         const snap = snapshotById.get(row.id);
         if (snap == null || snap.owner !== normalizedAddress) return false;
@@ -227,6 +239,7 @@ function OverviewBody({
   collaterals,
   symbolByInstance,
   capped,
+  stabilityPoolEventsUnavailable,
   snapshotById,
   snapshotsReady,
 }: {
@@ -234,6 +247,7 @@ function OverviewBody({
   collaterals: CollateralSummary[];
   symbolByInstance: Map<string, { symbol: string; chainId: number }>;
   capped: boolean;
+  stabilityPoolEventsUnavailable: boolean;
   snapshotById: Map<string, CdpTroveOpSnapshotRow>;
   snapshotsReady: boolean;
 }) {
@@ -306,11 +320,37 @@ function OverviewBody({
           )}
         </tbody>
       </Table>
-      {visibleRows.length > 0 && (
+      <OverviewFootnotes
+        visibleCount={visibleRows.length}
+        filteredCount={filteredRows.length}
+        filtersActive={filtersActive}
+        capped={capped}
+        stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+      />
+    </>
+  );
+}
+
+function OverviewFootnotes({
+  visibleCount,
+  filteredCount,
+  filtersActive,
+  capped,
+  stabilityPoolEventsUnavailable,
+}: {
+  visibleCount: number;
+  filteredCount: number;
+  filtersActive: boolean;
+  capped: boolean;
+  stabilityPoolEventsUnavailable: boolean;
+}) {
+  return (
+    <>
+      {visibleCount > 0 && (
         <p className="px-1 pt-2 text-xs text-slate-500">
           {filtersActive
-            ? `Showing ${visibleRows.length.toLocaleString()} of ${filteredRows.length.toLocaleString()} matching transactions.`
-            : `Showing the most recent ${visibleRows.length.toLocaleString()} transactions across all CDP markets.`}
+            ? `Showing ${visibleCount.toLocaleString()} of ${filteredCount.toLocaleString()} matching transactions.`
+            : `Showing the most recent ${visibleCount.toLocaleString()} transactions across all CDP markets.`}
         </p>
       )}
       {capped && (
@@ -318,6 +358,12 @@ function OverviewBody({
           Showing the most recent{" "}
           {CDP_OVERVIEW_PER_KIND_FETCH_LIMIT.toLocaleString()} entries per event
           type — older history may exist beyond this range.
+        </p>
+      )}
+      {stabilityPoolEventsUnavailable && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Stability pool deposit and withdraw events are temporarily unavailable
+          while the indexer schema catches up.
         </p>
       )}
     </>
@@ -335,7 +381,7 @@ function OverviewRow({
 }) {
   const kind = badgeKindFor(row);
   const symbol = market?.symbol ?? "—";
-  const resolvedSnapshot = troveSnapshotFor(row, snapshot);
+  const resolvedSnapshot = positionSnapshotFor(row, snapshot);
   return (
     <Row>
       <Td>

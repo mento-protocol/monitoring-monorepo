@@ -28,6 +28,7 @@ const ADDRESSES = {
   recipient: "0x3333333333333333333333333333333333333333",
   troveOwnerA: "0x4444444444444444444444444444444444444444",
   troveOwnerB: "0x5555555555555555555555555555555555555555",
+  stabilityPoolLp: "0x9999999999999999999999999999999999999999",
 };
 
 function nowSeconds() {
@@ -652,6 +653,67 @@ const cdpDailySnapshots = [
   },
 ];
 
+const cdpStabilityPoolDepositors = [
+  {
+    id: `${cdpCollateralId}-${ADDRESSES.stabilityPoolLp}`,
+    chainId: 42220,
+    collateralId: cdpCollateralId,
+    address: ADDRESSES.stabilityPoolLp,
+    lastTouchedDeposit: "150000000000000000000",
+    stashedColl: "2000000000000000000",
+    lastUpdatedAt: String(cdpNow - 120),
+    cumulativeDeposited: "200000000000000000000",
+    cumulativeWithdrawn: "50000000000000000000",
+    yieldGainClaimedCum: "3000000000000000000",
+    ethGainClaimedCum: "1000000000000000000",
+  },
+];
+
+const cdpStabilityPoolOperations = [
+  {
+    id: `${cdpInstanceId}-sp-deposit-1`,
+    chainId: 42220,
+    instanceId: cdpInstanceId,
+    depositor: ADDRESSES.stabilityPoolLp,
+    operation: 0,
+    depositLossSinceLastOperation: "0",
+    topUpOrWithdrawal: "50000000000000000000",
+    yieldGainSinceLastOperation: "0",
+    yieldGainClaimed: "0",
+    ethGainSinceLastOperation: "0",
+    ethGainClaimed: "0",
+    depositBefore: "100000000000000000000",
+    depositAfter: "150000000000000000000",
+    stashedCollBefore: "0",
+    stashedCollAfter: "2000000000000000000",
+    timestamp: String(cdpNow - 500),
+    blockNumber: "12345200",
+    txHash:
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  },
+  {
+    id: `${cdpInstanceId}-sp-withdraw-1`,
+    chainId: 42220,
+    instanceId: cdpInstanceId,
+    depositor: ADDRESSES.stabilityPoolLp,
+    operation: 1,
+    depositLossSinceLastOperation: "0",
+    topUpOrWithdrawal: "-50000000000000000000",
+    yieldGainSinceLastOperation: "0",
+    yieldGainClaimed: "0",
+    ethGainSinceLastOperation: "0",
+    ethGainClaimed: "0",
+    depositBefore: "200000000000000000000",
+    depositAfter: "150000000000000000000",
+    stashedCollBefore: "1000000000000000000",
+    stashedCollAfter: "2000000000000000000",
+    timestamp: String(cdpNow - 650),
+    blockNumber: "12345150",
+    txHash:
+      "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  },
+];
+
 const cdpTransactions = {
   LiquidationEvent: [],
   RedemptionEvent: [
@@ -709,6 +771,18 @@ function cdpRowsForCollateral(rows, collateralId) {
   return rows.filter((row) => row.collateralId === String(collateralId));
 }
 
+function cdpStabilityPoolOperationRowsForInstance(instanceId) {
+  return cdpStabilityPoolOperations.filter(
+    (row) => row.instanceId === String(instanceId),
+  );
+}
+
+function cdpStabilityPoolOperationRowsForChain(chainId) {
+  return cdpStabilityPoolOperations.filter(
+    (row) => row.chainId === Number(chainId),
+  );
+}
+
 function cdpMarketDetailRows(collateralId) {
   return {
     LiquityCollateral: cdpRowsForCollateral(cdpCollaterals, collateralId),
@@ -718,7 +792,10 @@ function cdpMarketDetailRows(collateralId) {
     ),
     AllTrove: cdpRowsForCollateral(cdpTroves, collateralId),
     InterestBatch: cdpRowsForCollateral(cdpInterestBatches, collateralId),
-    StabilityPoolDepositor: [],
+    StabilityPoolDepositor: cdpRowsForCollateral(
+      cdpStabilityPoolDepositors,
+      collateralId,
+    ),
     CdpPool: [
       {
         id: `${collateralId}-${ADDRESSES.celoPool}`,
@@ -1114,6 +1191,18 @@ export function handleGraphQL({ query, variables = {} }) {
       };
     case "CdpTransactions":
       return cdpTransactions;
+    case "CdpStabilityPoolEvents":
+      return {
+        StabilityPoolOperationEvent: cdpStabilityPoolOperationRowsForInstance(
+          variables.instanceId,
+        ).slice(0, variables.limit ?? cdpStabilityPoolOperations.length),
+      };
+    case "AllCdpStabilityPoolEvents":
+      return {
+        StabilityPoolOperationEvent: cdpStabilityPoolOperationRowsForChain(
+          variables.chainId,
+        ).slice(0, variables.limit ?? cdpStabilityPoolOperations.length),
+      };
     case "CdpTroveOpSnapshots":
       return { TroveOperationEvent: cdpTroveOpSnapshots };
     default:

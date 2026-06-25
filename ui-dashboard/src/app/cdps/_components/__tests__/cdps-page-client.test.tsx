@@ -67,6 +67,7 @@ vi.mock("@/components/tx-hash-cell", () => ({
 }));
 
 import {
+  ALL_CDP_STABILITY_POOL_EVENTS,
   ALL_CDP_TRANSACTIONS,
   ALL_CDP_TROVE_OP_SNAPSHOTS,
   CDP_MARKETS,
@@ -259,6 +260,13 @@ describe("CdpsPageClient", () => {
       if (query === ALL_CDP_TRANSACTIONS) {
         return { data: transactionData(), error: null, isLoading: false };
       }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
       if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
         return { data: snapshotData(), error: null, isLoading: false };
       }
@@ -389,7 +397,7 @@ describe("CdpAllTransactionsTable", () => {
     expect(bodyText(handle!.container)).toContain("Liquidation");
 
     const input = handle!.container.querySelector<HTMLInputElement>(
-      'input[aria-label="Filter CDP transactions by trove owner address"]',
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
     );
     expect(input?.disabled).toBe(false);
     act(() => {
@@ -411,6 +419,13 @@ describe("CdpAllTransactionsTable", () => {
       if (query === ALL_CDP_TRANSACTIONS) {
         return { data: transactionData(), error: null, isLoading: false };
       }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
       if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
         return {
           data: undefined,
@@ -430,7 +445,7 @@ describe("CdpAllTransactionsTable", () => {
     );
 
     const input = handle!.container.querySelector<HTMLInputElement>(
-      'input[aria-label="Filter CDP transactions by trove owner address"]',
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
     );
     expect(input?.disabled).toBe(true);
     expect(handle!.container.textContent).toContain(

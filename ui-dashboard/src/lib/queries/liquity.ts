@@ -192,7 +192,7 @@ ${troveRowFields}
     }
     StabilityPoolDepositor(
       where: { collateralId: { _eq: $collateralId } }
-      order_by: { lastUpdatedAt: desc }
+      order_by: [{ lastTouchedDeposit: desc }, { lastUpdatedAt: desc }, { id: asc }]
       limit: 25
     ) {
       id address lastTouchedDeposit stashedColl lastUpdatedAt
@@ -276,6 +276,40 @@ export const CDP_TRANSACTIONS = `
       id troveId operation collChange debtChange
       annualInterestRate debtIncreaseFromUpfrontFee
       timestamp blockNumber txHash
+    }
+  }
+`;
+
+const CDP_STABILITY_POOL_OPERATION_FIELDS = `
+      id instanceId depositor operation depositLossSinceLastOperation
+      topUpOrWithdrawal yieldGainSinceLastOperation yieldGainClaimed
+      ethGainSinceLastOperation ethGainClaimed depositBefore depositAfter
+      stashedCollBefore stashedCollAfter timestamp blockNumber txHash
+`;
+
+// Isolated StabilityPool operation feed. This entity is newer than the base CDP
+// transaction branches, so keep it out of CDP_TRANSACTIONS during rollout; the
+// table merges it only when this companion query resolves.
+export const CDP_STABILITY_POOL_EVENTS = `
+  query CdpStabilityPoolEvents($instanceId: String!, $limit: Int!) {
+    StabilityPoolOperationEvent(
+      where: { instanceId: { _eq: $instanceId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+${CDP_STABILITY_POOL_OPERATION_FIELDS}
+    }
+  }
+`;
+
+export const ALL_CDP_STABILITY_POOL_EVENTS = `
+  query AllCdpStabilityPoolEvents($chainId: Int!, $limit: Int!) {
+    StabilityPoolOperationEvent(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+${CDP_STABILITY_POOL_OPERATION_FIELDS}
     }
   }
 `;

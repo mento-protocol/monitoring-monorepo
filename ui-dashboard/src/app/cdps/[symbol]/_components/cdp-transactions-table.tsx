@@ -8,7 +8,11 @@ import { TxHashCell } from "@/components/tx-hash-cell";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
-import { CDP_TRANSACTIONS, CDP_TROVE_OP_SNAPSHOTS } from "@/lib/queries";
+import {
+  CDP_STABILITY_POOL_EVENTS,
+  CDP_TRANSACTIONS,
+  CDP_TROVE_OP_SNAPSHOTS,
+} from "@/lib/queries";
 import { CdpTxAmountCell } from "../../_components/cdp-tx-amount-cell";
 import {
   BADGE_LABELS,
@@ -17,7 +21,8 @@ import {
   badgeKindFor,
   indexSnapshotsById,
   mergeTransactionRows,
-  troveSnapshotFor,
+  positionSnapshotFor,
+  type CdpStabilityPoolEventsResponse,
   type CdpTransactionsResponse,
   type CdpTroveOpSnapshotResponse,
 } from "../../_lib/transactions";
@@ -47,6 +52,10 @@ export function CdpTransactionsTable({
     CDP_TRANSACTIONS,
     { instanceId, limit: ENVIO_MAX_ROWS },
   );
+  const stabilityPoolEvents = useGQL<CdpStabilityPoolEventsResponse>(
+    CDP_STABILITY_POOL_EVENTS,
+    { instanceId, limit: ENVIO_MAX_ROWS },
+  );
   // Isolated query for the schema-lag-fragile fields (owner + before/after).
   // Errors and loading states are tracked independently from the primary
   // query so the table keeps rendering when this one fails during a
@@ -55,7 +64,10 @@ export function CdpTransactionsTable({
     instanceId,
     limit: ENVIO_MAX_ROWS,
   });
-  const { rows, capped } = useMemo(() => mergeTransactionRows(data), [data]);
+  const { rows, capped } = useMemo(
+    () => mergeTransactionRows(data, ENVIO_MAX_ROWS, stabilityPoolEvents.data),
+    [data, stabilityPoolEvents.data],
+  );
   const snapshotById = useMemo(
     () => indexSnapshotsById(snapshots.data),
     [snapshots.data],
@@ -81,6 +93,7 @@ export function CdpTransactionsTable({
           chainId={chainId}
           symbol={symbol}
           capped={capped}
+          stabilityPoolEventsUnavailable={stabilityPoolEvents.error != null}
           snapshotById={snapshotById}
           snapshotsReady={snapshotsReady}
         />
@@ -105,6 +118,9 @@ function usePerMarketFilters(
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (addressActive) {
+        if (row.kind === "spOperation") {
+          return row.depositor === normalizedAddress;
+        }
         if (row.kind !== "troveOp") return false;
         const snap = snapshotById.get(row.id);
         if (snap == null || snap.owner !== normalizedAddress) return false;
@@ -127,6 +143,7 @@ function TransactionsBody({
   chainId,
   symbol,
   capped,
+  stabilityPoolEventsUnavailable,
   snapshotById,
   snapshotsReady,
 }: {
@@ -134,6 +151,7 @@ function TransactionsBody({
   chainId: number;
   symbol: string;
   capped: boolean;
+  stabilityPoolEventsUnavailable: boolean;
   snapshotById: Map<string, CdpTroveOpSnapshotRow>;
   snapshotsReady: boolean;
 }) {
@@ -218,10 +236,33 @@ function TransactionsBody({
         total={filteredRows.length}
         onPageChange={setPage}
       />
+      <TransactionFootnotes
+        capped={capped}
+        stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+      />
+    </>
+  );
+}
+
+function TransactionFootnotes({
+  capped,
+  stabilityPoolEventsUnavailable,
+}: {
+  capped: boolean;
+  stabilityPoolEventsUnavailable: boolean;
+}) {
+  return (
+    <>
       {capped && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing the most recent {ENVIO_MAX_ROWS.toLocaleString()} entries per
           event type — older history may exist beyond this range.
+        </p>
+      )}
+      {stabilityPoolEventsUnavailable && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Stability pool deposit and withdraw events are temporarily unavailable
+          while the indexer schema catches up.
         </p>
       )}
     </>
@@ -240,7 +281,7 @@ function TransactionRow({
   snapshot: CdpTroveOpSnapshotRow | undefined;
 }) {
   const kind = badgeKindFor(row);
-  const resolvedSnapshot = troveSnapshotFor(row, snapshot);
+  const resolvedSnapshot = positionSnapshotFor(row, snapshot);
   return (
     <Row>
       <Td>

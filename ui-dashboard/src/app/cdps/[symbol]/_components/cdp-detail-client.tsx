@@ -15,7 +15,7 @@ import {
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
 import { buildPoolDetailHref } from "@/lib/routing";
-import { formatWei, relativeTime, truncateAddress } from "@/lib/format";
+import { relativeTime, truncateAddress } from "@/lib/format";
 import type { Network } from "@/lib/networks";
 import { explorerAddressUrl } from "@/lib/tokens";
 import {
@@ -456,17 +456,22 @@ function DepositorTable({
   return (
     <section>
       <h2 className="text-lg font-semibold text-white mb-3">
-        Last-Touched Depositors
+        Stability Pool LPs
       </h2>
+      <p className="mb-3 text-xs text-slate-500">
+        Positions reflect the latest indexed depositor operation.
+      </p>
       {depositors.length === 0 ? (
-        <EmptyBox message="No stability pool depositors indexed yet." />
+        <EmptyBox message="No stability pool LPs indexed yet." />
       ) : (
         <Table>
           <thead>
             <Row>
-              <Th>Depositor</Th>
-              <Th align="right">Deposit</Th>
-              <Th align="right">Stashed Coll</Th>
+              <Th>LP</Th>
+              <Th align="right">Debt Position</Th>
+              <Th align="right">Collateral Position</Th>
+              <Th align="right">Deposited</Th>
+              <Th align="right">Withdrawn</Th>
               <Th align="right">Updated</Th>
             </Row>
           </thead>
@@ -480,7 +485,13 @@ function DepositorTable({
                   {formatTokenAmount(depositor.lastTouchedDeposit, symbol)}
                 </Td>
                 <Td align="right">
-                  {formatWei(depositor.stashedColl, 18, 2)} USDm
+                  {formatTokenAmount(depositor.stashedColl, "USDm")}
+                </Td>
+                <Td align="right">
+                  {formatTokenAmount(depositor.cumulativeDeposited, symbol)}
+                </Td>
+                <Td align="right">
+                  {formatTokenAmount(depositor.cumulativeWithdrawn, symbol)}
                 </Td>
                 <Td align="right">{relativeTime(depositor.lastUpdatedAt)}</Td>
               </Row>

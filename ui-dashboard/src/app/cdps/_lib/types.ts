@@ -184,6 +184,26 @@ export type CdpSpRebalanceEventRow = {
   txHash: string;
 };
 
+export type CdpStabilityPoolOperationEventRow = {
+  id: string;
+  instanceId?: string;
+  depositor: string;
+  operation: number;
+  depositLossSinceLastOperation: string;
+  topUpOrWithdrawal: string;
+  yieldGainSinceLastOperation: string;
+  yieldGainClaimed: string;
+  ethGainSinceLastOperation: string;
+  ethGainClaimed: string;
+  depositBefore: string;
+  depositAfter: string;
+  stashedCollBefore: string;
+  stashedCollAfter: string;
+  timestamp: string;
+  blockNumber: string;
+  txHash: string;
+};
+
 export type CdpTroveOperationEventRow = {
   id: string;
   instanceId?: string;
@@ -231,4 +251,5 @@ export type CdpTransactionRow =
   | ({ kind: "liquidation" } & CdpLiquidationEventRow)
   | ({ kind: "redemption" } & CdpRedemptionEventRow)
   | ({ kind: "spRebalance" } & CdpSpRebalanceEventRow)
+  | ({ kind: "spOperation" } & CdpStabilityPoolOperationEventRow)
   | ({ kind: "troveOp" } & CdpTroveOperationEventRow);
