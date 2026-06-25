@@ -64,6 +64,16 @@ function eventMeta(event: {
   };
 }
 
+async function readEventSharePrice(
+  context: Parameters<typeof readSharePrice>[0],
+  meta: Parameters<typeof readSharePrice>[1],
+  assets: bigint,
+  shares: bigint,
+): Promise<bigint> {
+  const eventSharePrice = sharePriceFromAssetsAndShares(assets, shares);
+  return eventSharePrice ?? readSharePrice(context, meta);
+}
+
 indexer.onEvent(
   {
     contract: "Susds",
@@ -77,10 +87,11 @@ indexer.onEvent(
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
     if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
-    const sharePriceUsdWei = await readSharePrice(
+    const sharePriceUsdWei = await readEventSharePrice(
       context,
       meta,
-      sharePriceFromAssetsAndShares(event.params.assets, event.params.shares),
+      event.params.assets,
+      event.params.shares,
     );
     await recordDeposit(
       context,
@@ -113,10 +124,11 @@ indexer.onEvent(
     const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
     if (context.isPreload) return;
     if (!(await shouldProcess(context, id))) return;
-    const sharePriceUsdWei = await readSharePrice(
+    const sharePriceUsdWei = await readEventSharePrice(
       context,
       meta,
-      sharePriceFromAssetsAndShares(event.params.assets, event.params.shares),
+      event.params.assets,
+      event.params.shares,
     );
     await recordWithdraw(context, meta, {
       owner,
