@@ -146,8 +146,12 @@ ${local.value_delta_breaker_kind_branches}
 {{ $chainlinkURL := "" -}}
 {{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by {{ $breakerKind }} breaker
+{{ if $chainlinkURL -}}
 Next action: verify the Chainlink data source, then ack/snooze if the move is real. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
-{{ if $chainlinkURL -}}- Chainlink data source: {{ $chainlinkURL }}{{ end }}
+- Chainlink data source: {{ $chainlinkURL }}
+{{ else -}}
+Next action: open breaker status and confirm the underlying rate-feed or market move, then ack/snooze if the halt is expected. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
+{{ end -}}
 - Breaker status: {{ $poolURL }}
 Alert time: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ end -}}
