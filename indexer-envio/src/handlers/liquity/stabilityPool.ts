@@ -121,7 +121,11 @@ export function buildStabilityPoolOperationEvent({
     yieldGainClaimed: op.yieldGainClaimed,
     ethGainSinceLastOperation: op.ethGainSinceLastOperation,
     ethGainClaimed: op.ethGainClaimed,
-    depositBefore: newDeposit - op.topUpOrWithdrawal - retainedYield,
+    depositBefore:
+      newDeposit -
+      op.topUpOrWithdrawal -
+      retainedYield +
+      op.depositLossSinceLastOperation,
     depositAfter: newDeposit,
     stashedCollBefore: existing?.stashedColl ?? 0n,
     stashedCollAfter: stashedColl,

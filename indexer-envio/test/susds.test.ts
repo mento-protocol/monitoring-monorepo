@@ -20,6 +20,7 @@ import {
   recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
 } from "../src/handlers/susds.ts";
+import { readSharePrice } from "../src/handlers/susds/dailySnapshots.ts";
 import { ZERO_ADDRESS } from "../src/constants.ts";
 import {
   blockTimestampEffect,
@@ -338,6 +339,39 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(movements.length, 1);
     assert.equal(movements[0]?.sharePriceUsdWei, dollars(106) / 100n);
     assert.equal(summary(mockDb).currentValueUsdWei, dollars(1060));
+  });
+
+  it("prefers canonical sUSDS share price over the Deposit event ratio", async () => {
+    let mockDb = MockDb.createMockDb();
+    setSharePrice(100, dollars(110) / 100n);
+
+    mockDb = await deposit(mockDb, 100, 0, dollars(1060), dollars(1000));
+
+    const movements = mockDb.entities.SusdsYieldMovement.getAll() as Array<{
+      sharePriceUsdWei: bigint;
+    }>;
+    assert.equal(movements.length, 1);
+    assert.equal(movements[0]?.sharePriceUsdWei, dollars(110) / 100n);
+  });
+
+  it("falls back to an event share price when the sUSDS share-price effect throws", async () => {
+    const fallback = dollars(107) / 100n;
+
+    const sharePrice = await readSharePrice(
+      {
+        effect: async () => {
+          throw new Error("rpc down");
+        },
+      } as unknown as Parameters<typeof readSharePrice>[0],
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: 100n,
+        blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP + 1n,
+      },
+      fallback,
+    );
+
+    assert.equal(sharePrice, fallback);
   });
 
   it("writes sUSDS daily snapshots from cumulative yield without double-counting same-day samples", async () => {

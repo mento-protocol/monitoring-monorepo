@@ -71,7 +71,7 @@ async function readEventSharePrice(
   shares: bigint,
 ): Promise<bigint> {
   const eventSharePrice = sharePriceFromAssetsAndShares(assets, shares);
-  return eventSharePrice ?? readSharePrice(context, meta);
+  return readSharePrice(context, meta, eventSharePrice);
 }
 
 indexer.onEvent(

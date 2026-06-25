@@ -164,11 +164,16 @@ export async function readSharePriceOrNull(
   meta: BlockMeta,
   fallbackSharePriceUsdWei?: bigint | null,
 ): Promise<bigint | null> {
-  const sharePriceUsdWei = await context.effect(susdsSharePriceEffect, {
-    chainId: meta.chainId,
-    tokenAddress: SUSDS_ADDRESS,
-    blockNumber: meta.blockNumber,
-  });
+  let sharePriceUsdWei: bigint | null;
+  try {
+    sharePriceUsdWei = await context.effect(susdsSharePriceEffect, {
+      chainId: meta.chainId,
+      tokenAddress: SUSDS_ADDRESS,
+      blockNumber: meta.blockNumber,
+    });
+  } catch {
+    sharePriceUsdWei = null;
+  }
   return sharePriceUsdWei ?? fallbackSharePriceUsdWei ?? null;
 }
 

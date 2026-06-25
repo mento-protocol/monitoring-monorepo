@@ -164,12 +164,12 @@ function useOverviewFilters(
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (addressActive) {
-        if (row.kind === "spOperation") {
-          return row.depositor === normalizedAddress;
-        }
-        if (row.kind !== "troveOp") return false;
-        const snap = snapshotById.get(row.id);
-        if (snap == null || snap.owner !== normalizedAddress) return false;
+        const matchesAddress =
+          row.kind === "spOperation"
+            ? row.depositor === normalizedAddress
+            : row.kind === "troveOp" &&
+              snapshotById.get(row.id)?.owner === normalizedAddress;
+        if (!matchesAddress) return false;
       }
       if (typeFilter != null && badgeKindFor(row) !== typeFilter) return false;
       if (

@@ -434,7 +434,7 @@ describe("Liquity CDP helpers", () => {
       assert.equal(updated.lastUpdatedAt, 2_000n);
     });
 
-    it("materializes a durable operation event that excludes retained yield from the pre-op deposit", () => {
+    it("materializes a durable operation event with passive loss restored to the pre-op deposit", () => {
       const event = buildStabilityPoolOperationEvent({
         id: "evt-1",
         chainId: 42220,
@@ -457,7 +457,7 @@ describe("Liquity CDP helpers", () => {
       assert.equal(event.yieldGainClaimed, 3n);
       assert.equal(event.ethGainSinceLastOperation, 4n);
       assert.equal(event.ethGainClaimed, 2n);
-      assert.equal(event.depositBefore, 178n);
+      assert.equal(event.depositBefore, 198n);
       assert.equal(event.depositAfter, 120n);
       assert.equal(event.stashedCollBefore, 1n);
       assert.equal(event.stashedCollAfter, 3n);

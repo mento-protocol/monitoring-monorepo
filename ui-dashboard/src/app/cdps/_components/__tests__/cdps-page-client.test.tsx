@@ -83,6 +83,10 @@ function wei(amount: number): string {
   return (BigInt(amount) * USD_WEI).toString();
 }
 
+function negWei(amount: number): string {
+  return (-BigInt(amount) * USD_WEI).toString();
+}
+
 function collateral(overrides: Partial<CdpCollateral>): CdpCollateral {
   return {
     id: "gbpm",
@@ -467,6 +471,79 @@ describe("CdpAllTransactionsTable", () => {
     expect(bodyText(handle!.container)).toContain(
       "No transactions match the active filters.",
     );
+  });
+
+  it("keeps overview SP depositor matches subject to type and market filters", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return {
+          data: {
+            LiquidationEvent: [],
+            RedemptionEvent: [],
+            SpRebalanceEvent: [],
+            TroveOperationEvent: [],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: {
+            StabilityPoolOperationEvent: [
+              stabilityPoolOperation({
+                id: "sp-gbpm-deposit",
+                instanceId: "gbpm",
+                txHash: "0xspgbpmdeposit",
+              }),
+              stabilityPoolOperation({
+                id: "sp-chfm-withdraw",
+                instanceId: "chfm",
+                topUpOrWithdrawal: negWei(20),
+                depositBefore: wei(150),
+                depositAfter: wei(130),
+                txHash: "0xspchfmwithdraw",
+              }),
+            ],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: undefined,
+          error: new Error("schema still syncing"),
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[
+          { id: "gbpm", chainId: 42220, symbol: "GBPm" },
+          { id: "chfm", chainId: 42220, symbol: "CHFm" },
+        ]}
+      />,
+    );
+
+    const input = handle!.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
+    );
+    act(() => {
+      typeInto(input!, "0xdepositor");
+      pill(handle!.container, "SP Withdraw").click();
+      pill(handle!.container, "CHFm").click();
+    });
+
+    expect(bodyText(handle!.container)).toContain("SP Withdraw");
+    expect(bodyText(handle!.container)).toContain("CHFm");
+    expect(bodyText(handle!.container)).not.toContain("SP Deposit");
+    expect(bodyText(handle!.container)).not.toContain("GBPm");
   });
 
   it("keeps rows visible and disables owner filtering when snapshots fail", () => {
