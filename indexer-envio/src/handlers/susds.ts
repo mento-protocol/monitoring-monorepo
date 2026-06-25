@@ -20,6 +20,7 @@ import {
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
+import { SUSDS_FIRST_TRACKED_EVENT_BLOCK } from "../startupChecks.js";
 
 export {
   ETHEREUM_CHAIN_ID,
@@ -192,7 +193,7 @@ indexer.onBlock(
         ? {
             block: {
               number: {
-                _gte: chain.startBlock,
+                _gte: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
                 _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
               },
             },
