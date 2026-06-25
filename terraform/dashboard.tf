@@ -181,6 +181,21 @@ resource "vercel_project_environment_variable" "auth_secret" {
   sensitive = true
 }
 
+# Only provisioned during a graceful AUTH_SECRET rotation window (count guard
+# removes it when auth_secret_prev is ""). See var.auth_secret_prev for the
+# full rotation procedure.
+resource "vercel_project_environment_variable" "auth_secret_prev" {
+  count      = var.auth_secret_prev == "" ? 0 : 1
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "AUTH_SECRET_PREV"
+  value      = var.auth_secret_prev
+  # Must match auth_secret's targets: both secrets verify JWTs on prod and
+  # preview deployments during the rotation window.
+  target    = ["production", "preview"]
+  sensitive = true
+}
+
 resource "vercel_project_environment_variable" "cron_secret" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id

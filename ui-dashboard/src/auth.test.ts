@@ -92,6 +92,47 @@ describe("auth config", () => {
   });
 });
 
+describe("auth secret config — rotation support", () => {
+  // Use a proxy URL so loadAuthWithEnv skips vi.unstubAllEnvs(), preserving
+  // the AUTH_SECRET / AUTH_SECRET_PREV stubs we set in each test body.
+  const proxyUrl = "https://monitoring.mento.org/api/auth";
+
+  it("includes only AUTH_SECRET when AUTH_SECRET_PREV is not set", async () => {
+    vi.stubEnv("AUTH_SECRET", "primary-secret");
+    vi.stubEnv("AUTH_SECRET_PREV", "");
+    await loadAuthWithEnv(proxyUrl);
+    expect(capturedConfig.secret).toEqual(["primary-secret"]);
+  });
+
+  it("includes both secrets during rotation when AUTH_SECRET_PREV is set", async () => {
+    vi.stubEnv("AUTH_SECRET", "new-secret");
+    vi.stubEnv("AUTH_SECRET_PREV", "old-secret");
+    await loadAuthWithEnv(proxyUrl);
+    expect(capturedConfig.secret).toEqual(["new-secret", "old-secret"]);
+  });
+
+  it("omits an empty AUTH_SECRET_PREV from the array", async () => {
+    vi.stubEnv("AUTH_SECRET", "primary-secret");
+    vi.stubEnv("AUTH_SECRET_PREV", "");
+    await loadAuthWithEnv(proxyUrl);
+    expect(capturedConfig.secret).toEqual(["primary-secret"]);
+  });
+
+  it("omits the secret option when no auth secrets are configured", async () => {
+    vi.stubEnv("AUTH_SECRET", "");
+    vi.stubEnv("AUTH_SECRET_PREV", "");
+    await loadAuthWithEnv(proxyUrl);
+    expect(capturedConfig.secret).toBeUndefined();
+  });
+
+  it("does not promote AUTH_SECRET_PREV when AUTH_SECRET is empty", async () => {
+    vi.stubEnv("AUTH_SECRET", "");
+    vi.stubEnv("AUTH_SECRET_PREV", "old-secret");
+    await loadAuthWithEnv(proxyUrl);
+    expect(capturedConfig.secret).toBeUndefined();
+  });
+});
+
 describe("Google provider checks config", () => {
   it("uses state-only checks on preview (VERCEL_ENV=preview)", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
