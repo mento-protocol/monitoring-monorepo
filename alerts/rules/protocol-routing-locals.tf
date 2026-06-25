@@ -275,20 +275,6 @@ locals {
     USDTUSD = "usdt-usd"
   }
 
-  # Feeds whose trip-able breaker compares against a fixed reference value.
-  # Notification templates default to MedianDelta for all other feeds.
-  value_delta_rate_feeds = [
-    "AUSDUSD",
-    "EUROCEUR",
-    "USDCUSD",
-    "USDTUSD",
-  ]
-
-  value_delta_breaker_kind_branches = join("\n", [
-    for feed in local.value_delta_rate_feeds :
-    format("{{ if eq .Labels.rateFeed %q -}}{{ $breakerKind = %q -}}{{ end -}}", feed, "ValueDelta")
-  ])
-
   # Pre-rendered template fragments that set `$pool` per rate feed. Built from
   # the maps above using the same independent-branches idiom as the relayer
   # signer branches — Grafana's Sprig subset doesn't expose `dict` / `index`,
