@@ -16,6 +16,7 @@ import {
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
+  SUSDS_DAILY_HEARTBEAT_START_BLOCK,
   handleSusdsYieldDailySnapshotHeartbeat,
   recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
@@ -607,6 +608,7 @@ describe("sUSDS reserve yield accounting", () => {
 
   it("skips pre-revenue-launch heartbeat blocks without reading effects", async () => {
     const mockDb = MockDb.createMockDb();
+    assert.ok(SUSDS_DAILY_HEARTBEAT_START_BLOCK < SUSDS_REVENUE_LAUNCH_BLOCK);
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
       {
@@ -616,7 +618,7 @@ describe("sUSDS reserve yield accounting", () => {
           throw new Error("pre-launch heartbeat must not read effects");
         },
       } as unknown as Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0],
-      BigInt(SUSDS_REVENUE_LAUNCH_BLOCK - 1),
+      BigInt(SUSDS_DAILY_HEARTBEAT_START_BLOCK),
     );
 
     assert.equal(didWrite, false);

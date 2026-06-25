@@ -20,7 +20,7 @@ import {
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
-import { SUSDS_REVENUE_LAUNCH_BLOCK } from "../startupChecks.js";
+import { SUSDS_FIRST_TRACKED_EVENT_BLOCK } from "../startupChecks.js";
 
 export {
   ETHEREUM_CHAIN_ID,
@@ -35,6 +35,8 @@ export {
 } from "./susds/dailySnapshots.js";
 
 const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
+export const SUSDS_DAILY_HEARTBEAT_START_BLOCK =
+  SUSDS_FIRST_TRACKED_EVENT_BLOCK;
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
   { from: address },
@@ -193,7 +195,7 @@ indexer.onBlock(
         ? {
             block: {
               number: {
-                _gte: SUSDS_REVENUE_LAUNCH_BLOCK,
+                _gte: SUSDS_DAILY_HEARTBEAT_START_BLOCK,
                 _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
               },
             },
