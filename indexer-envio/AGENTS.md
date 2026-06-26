@@ -80,7 +80,7 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_RPC_FALLBACK_URL_<chainId>` — (optional) explicit per-chain fallback RPC for `readContractWithBlockFallback`. Used for **both** archive-depth and rate-limit failover, so the fallback must cover the full sync window. When unset, falls back to `RPC_CONFIG_BY_CHAIN[<chainId>].default` only if the primary differs from it; otherwise no fallback is used. Empty-string values are treated as unset. **Caveat:** swapping in a shallow-archive secondary as the fallback (e.g. a tokenized QuickNode URL behind `rpc2.monad.xyz`) only works when the deep-archive primary rarely rate-limits at the indexer's load — otherwise rate-limit failover can leak into archive-depth misses during catch-up.
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
 - `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60710000
-- `ENVIO_START_BLOCK_ETHEREUM` — (optional) Ethereum start block, defaults to 19111760 and must cover the first tracked Mento reserve stETH mint at block 19111760 and sUSDS deposit at block 22994825
+- `ENVIO_START_BLOCK_ETHEREUM` — (optional) Ethereum start block, defaults to 22994000 and must cover the first tracked Mento reserve sUSDS deposit at block 22994825. Historical stETH replay is intentionally skipped; the dashboard treats stETH as forecast-only.
 
 Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route all chains to the same endpoint and produce incorrect RPC reads for chain-specific calls.
 

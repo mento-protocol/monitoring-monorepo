@@ -305,7 +305,7 @@ chains:
   # Ethereum Mainnet (chain 1) — HyperSync: https://1.hypersync.xyz
   # ---------------------------------------------------------------------------
   - id: 1
-    start_block: ${ENVIO_START_BLOCK_ETHEREUM:-22994825} # Covers the first known Mento reserve sUSDS deposit. Historical stETH ledger replay is intentionally skipped; the dashboard treats stETH as forecast-only.
+    start_block: ${ENVIO_START_BLOCK_ETHEREUM:-22994000} # Aligned hosted replay boundary before the first known Mento reserve sUSDS deposit. Historical stETH ledger replay is intentionally skipped; the dashboard treats stETH as forecast-only.
     contracts:
       - name: Susds
         address:
