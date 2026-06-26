@@ -63,18 +63,10 @@ export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
     SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
     chainStartBlock,
   );
-  const preRevenueEnd = SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1;
-  const chainEndBlock = finiteNumber(chain.endBlock);
-  const end =
-    chainEndBlock != null && chainEndBlock > 0
-      ? Math.min(preRevenueEnd, chainEndBlock)
-      : preRevenueEnd;
-  if (start > end) return false;
   return {
     block: {
       number: {
         _gte: start,
-        _lte: end,
         _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
       },
     },
@@ -251,9 +243,9 @@ indexer.onBlock(
     where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
   },
   async () => {
-    // Hosted Envio 3.0.0 needs bounded Ethereum onBlock work to advance from
-    // the old stETH start block before sUSDS revenue launch. Keep this sparse
-    // and no-op; the post-launch heartbeat below writes actual snapshots.
+    // Hosted Envio 3.0.0 needs sparse Ethereum onBlock work to advance from
+    // the old stETH start block. Keep this no-op; the post-launch heartbeat
+    // below writes actual snapshots.
   },
 );
 

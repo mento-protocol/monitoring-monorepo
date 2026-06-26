@@ -651,7 +651,6 @@ describe("sUSDS reserve yield accounting", () => {
         block: {
           number: {
             _gte: SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-            _lte: SUSDS_REVENUE_LAUNCH_BLOCK - 1,
             _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
           },
         },
