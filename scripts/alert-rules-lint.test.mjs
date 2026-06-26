@@ -231,7 +231,7 @@ test("CLI passes against the real repository", () => {
   );
 });
 
-test("VictorOps trading-mode body stays distinct from the incident title", () => {
+test("VictorOps trading-mode title is stable and body carries state", () => {
   const source = readFileSync(
     path.resolve(
       __dirname,
@@ -240,14 +240,37 @@ test("VictorOps trading-mode body stays distinct from the incident title", () =>
     ),
     "utf8",
   );
+  const titleStart = source.indexOf(
+    'resource "grafana_message_template" "victorops_trading_mode_alert_title"',
+  );
+  const titleEnd = source.indexOf(
+    'resource "grafana_message_template" "victorops_trading_mode_alert_message"',
+  );
+  assert(titleStart >= 0 && titleEnd > titleStart, "title template not found");
+
+  const titleTemplate = source.slice(titleStart, titleEnd);
+  assert(
+    !titleTemplate.includes("Trading halted by breaker"),
+    "VictorOps title should be the stable entity label, not the firing state",
+  );
+  assert(
+    !titleTemplate.includes("Trading resumed"),
+    "VictorOps title should be the stable entity label, not the recovery state",
+  );
 
   // These checks intentionally match exact whitespace in the Terraform
   // template. If you reformat the guarded template lines, update these strings.
   assert(
     source.includes(
-      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ end -}}\n{{ if $chainlinkURL -}}",
+      '{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}',
     ),
-    "single firing alerts should start the body at the next action, not repeat the title",
+    "VictorOps firing title should render the affected market only",
+  );
+  assert(
+    source.includes(
+      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ else -}}\nTrading halted by breaker for {{ $rateFeedWithSlash }} [{{ $chain }}].\n{{ end -}}\n{{ if $chainlinkURL -}}",
+    ),
+    "single firing bodies should carry the state without repeating the entity title",
   );
   assert(
     source.includes(
