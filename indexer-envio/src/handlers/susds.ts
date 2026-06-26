@@ -20,7 +20,10 @@ import {
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
-import { SUSDS_FIRST_TRACKED_EVENT_BLOCK } from "../startupChecks.js";
+import {
+  SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+  SUSDS_REVENUE_LAUNCH_BLOCK,
+} from "../startupChecks.js";
 
 export {
   ETHEREUM_CHAIN_ID,
@@ -35,8 +38,9 @@ export {
 } from "./susds/dailySnapshots.js";
 
 const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
-export const SUSDS_DAILY_HEARTBEAT_START_BLOCK =
+export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK =
   SUSDS_FIRST_TRACKED_EVENT_BLOCK;
+export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
   { from: address },
@@ -184,6 +188,27 @@ indexer.onEvent(
       sharePriceUsdWei,
       totals,
     );
+  },
+);
+
+indexer.onBlock(
+  {
+    name: "SusdsChainAdvanceHeartbeat",
+    where: ({ chain }) =>
+      chain.id === ETHEREUM_CHAIN_ID
+        ? {
+            block: {
+              number: {
+                _gte: SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
+                _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
+              },
+            },
+          }
+        : false,
+  },
+  async () => {
+    // Gives hosted Ethereum early onBlock work so indexing advances before
+    // revenue launch, without shifting the daily snapshot grid below.
   },
 );
 

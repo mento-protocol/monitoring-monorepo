@@ -16,6 +16,7 @@ import {
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
+  SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
   SUSDS_DAILY_HEARTBEAT_START_BLOCK,
   handleSusdsYieldDailySnapshotHeartbeat,
   recordSusdsYieldHeartbeatSnapshot,
@@ -608,7 +609,10 @@ describe("sUSDS reserve yield accounting", () => {
 
   it("skips pre-revenue-launch heartbeat blocks without reading effects", async () => {
     const mockDb = MockDb.createMockDb();
-    assert.ok(SUSDS_DAILY_HEARTBEAT_START_BLOCK < SUSDS_REVENUE_LAUNCH_BLOCK);
+    assert.ok(
+      SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK < SUSDS_REVENUE_LAUNCH_BLOCK,
+    );
+    assert.equal(SUSDS_DAILY_HEARTBEAT_START_BLOCK, SUSDS_REVENUE_LAUNCH_BLOCK);
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
       {
@@ -618,7 +622,7 @@ describe("sUSDS reserve yield accounting", () => {
           throw new Error("pre-launch heartbeat must not read effects");
         },
       } as unknown as Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0],
-      BigInt(SUSDS_DAILY_HEARTBEAT_START_BLOCK),
+      BigInt(SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK),
     );
 
     assert.equal(didWrite, false);
@@ -630,7 +634,7 @@ describe("sUSDS reserve yield accounting", () => {
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
     const day2 = day1 + 86_400n;
     const depositBlock = 22_990_100;
-    const heartbeatBlock = SUSDS_REVENUE_LAUNCH_BLOCK + 300;
+    const heartbeatBlock = SUSDS_DAILY_HEARTBEAT_START_BLOCK + 300;
     const heartbeatBlockNumber = BigInt(heartbeatBlock);
     const heartbeatTimestamp = day2 + 3_600n;
     const heartbeatSharePrice = dollars(120) / 100n;
