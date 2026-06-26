@@ -261,7 +261,7 @@ test("VictorOps trading-mode title is stable and body carries state", () => {
   // These checks intentionally match exact whitespace in the Terraform
   // template. If you reformat the guarded template lines, update these strings.
   assert(
-    source.includes(
+    titleTemplate.includes(
       '{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}',
     ),
     "VictorOps firing title should render the affected market only",
