@@ -16,6 +16,7 @@ import {
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
+  SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
   SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
   SUSDS_DAILY_HEARTBEAT_START_BLOCK,
   handleSusdsYieldDailySnapshotHeartbeat,
@@ -612,6 +613,14 @@ describe("sUSDS reserve yield accounting", () => {
     assert.ok(
       SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK < SUSDS_REVENUE_LAUNCH_BLOCK,
     );
+    const preLaunchHeartbeatCount =
+      Math.floor(
+        (SUSDS_REVENUE_LAUNCH_BLOCK -
+          SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK -
+          1) /
+          SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
+      ) + 1;
+    assert.ok(preLaunchHeartbeatCount < 5_000);
     assert.equal(SUSDS_DAILY_HEARTBEAT_START_BLOCK, SUSDS_REVENUE_LAUNCH_BLOCK);
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(

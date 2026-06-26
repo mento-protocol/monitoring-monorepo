@@ -38,6 +38,7 @@ export {
 } from "./susds/dailySnapshots.js";
 
 const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
+export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL = 50_000;
 export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK =
   SUSDS_FIRST_TRACKED_EVENT_BLOCK;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
@@ -200,15 +201,16 @@ indexer.onBlock(
             block: {
               number: {
                 _gte: SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-                _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
+                _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
               },
             },
           }
         : false,
   },
   async () => {
-    // Gives hosted Ethereum early onBlock work so indexing advances before
-    // revenue launch, without shifting the daily snapshot grid below.
+    // Gives hosted Ethereum sparse early onBlock work so indexing advances
+    // before revenue launch, without filling a 5k-event page before the
+    // revenue-aligned daily snapshot grid below starts.
   },
 );
 
