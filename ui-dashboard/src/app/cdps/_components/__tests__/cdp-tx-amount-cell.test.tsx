@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CdpTxAmountCell } from "../cdp-tx-amount-cell";
-import type { TroveSnapshot } from "../../_lib/transactions";
+import {
+  positionSnapshotFor,
+  type TroveSnapshot,
+} from "../../_lib/transactions";
 import type { CdpTransactionRow } from "../../_lib/types";
 
 const troveOpRow: CdpTransactionRow = {
@@ -229,5 +232,23 @@ describe("CdpTxAmountCell", () => {
     expect(text).toContain("→");
     expect(text).toContain("+50.00 GBPm");
     expect(text).toContain("claimed 3.00 GBPm");
+  });
+
+  it("does not render claimed collateral as a negative position delta", () => {
+    const row: CdpTransactionRow = {
+      ...spOperationRow,
+      ethGainClaimed: "2000000000000000000",
+      stashedCollAfter: "0",
+    };
+    const snap = positionSnapshotFor(row, undefined);
+    if (snap == null) throw new Error("expected resolved snapshot");
+    mounted = renderInTable(
+      <CdpTxAmountCell row={row} symbol="USDm" leg="coll" snapshot={snap} />,
+    );
+    const text = mounted.container.textContent ?? "";
+    expect(text).toContain("→");
+    expect(text).toContain("claimed 2.00 USDm");
+    expect(text).not.toContain("(−");
+    expect(mounted.container.querySelector(".text-rose-400")).toBeNull();
   });
 });

@@ -164,6 +164,13 @@ function isClaimOnlyStabilityPoolOperation(row: {
   );
 }
 
+function stabilityPoolCollateralAfterExcludingClaims(row: {
+  stashedCollAfter: string;
+  ethGainClaimed: string;
+}): string {
+  return (BigInt(row.stashedCollAfter) + BigInt(row.ethGainClaimed)).toString();
+}
+
 export function amountsFor(row: CdpTransactionRow): AmountSlice {
   switch (row.kind) {
     case "liquidation":
@@ -277,7 +284,12 @@ export function positionSnapshotFor(
     const debtBefore = BigInt(row.depositBefore);
     const debtAfter = BigInt(row.depositAfter);
     const collBefore = BigInt(row.stashedCollBefore);
-    const collAfter = BigInt(row.stashedCollAfter);
+    // Claimed collateral is rendered separately by the amount cell. Add it
+    // back to the snapshot leg so moving stashed collateral to the wallet does
+    // not appear as a red position loss on combined SP operations.
+    const collAfterExcludingClaims =
+      stabilityPoolCollateralAfterExcludingClaims(row);
+    const collAfter = BigInt(collAfterExcludingClaims);
     return {
       debt: {
         before: row.depositBefore,
@@ -286,7 +298,7 @@ export function positionSnapshotFor(
       },
       coll: {
         before: row.stashedCollBefore,
-        after: row.stashedCollAfter,
+        after: collAfterExcludingClaims,
         delta: (collAfter - collBefore).toString(),
       },
     };

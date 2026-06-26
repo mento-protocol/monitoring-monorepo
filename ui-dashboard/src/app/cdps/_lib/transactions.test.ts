@@ -417,7 +417,7 @@ describe("positionSnapshotFor", () => {
       spOperationRow({
         topUpOrWithdrawal: "0",
         yieldGainClaimed: "12",
-        ethGainClaimed: "7",
+        ethGainClaimed: "0",
         depositLossSinceLastOperation: "25",
         depositBefore: "125",
         depositAfter: "100",
@@ -431,21 +431,23 @@ describe("positionSnapshotFor", () => {
     expect(snap.coll.delta).toBe("2");
   });
 
-  it("keeps the before/after snapshot for combined stability pool claims", () => {
+  it("excludes claimed collateral from combined stability pool snapshot deltas", () => {
     const snap = positionSnapshotFor(
       spOperationRow({
         topUpOrWithdrawal: "50",
         yieldGainClaimed: "12",
-        ethGainClaimed: "7",
+        ethGainClaimed: "20",
         depositBefore: "100",
         depositAfter: "150",
         stashedCollBefore: "20",
-        stashedCollAfter: "20",
+        stashedCollAfter: "0",
       }),
       undefined,
     );
     if (snap == null) throw new Error("expected resolved snapshot");
     expect(snap.debt.delta).toBe("50");
+    expect(snap.coll.before).toBe("20");
+    expect(snap.coll.after).toBe("20");
     expect(snap.coll.delta).toBe("0");
   });
 
