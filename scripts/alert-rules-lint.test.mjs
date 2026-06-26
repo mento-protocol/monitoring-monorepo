@@ -273,6 +273,8 @@ test("VictorOps trading-mode title carries visible state and body carries action
   assert(titleStart >= 0 && titleEnd > titleStart, "title template not found");
 
   const titleTemplate = source.slice(titleStart, titleEnd);
+  // These assertions match exact whitespace in the Terraform template.
+  // If you reformat the guarded template lines, update these strings.
   assert(
     titleTemplate.includes(
       '{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}: Trading halted by breaker',
