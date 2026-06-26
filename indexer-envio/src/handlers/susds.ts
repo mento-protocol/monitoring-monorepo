@@ -34,10 +34,10 @@ export {
   recordSusdsYieldHeartbeatSnapshot,
 } from "./susds/dailySnapshots.js";
 
-export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 1_000;
+export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 5_000;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
 export const ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL = 1_000;
-export const ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT = 3_000;
+export const ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT = 1_600;
 
 type ChainFilterInput = {
   id: number | string;

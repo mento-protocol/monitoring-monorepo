@@ -33,7 +33,7 @@ import {
   susdsSharePriceEffect,
 } from "../src/rpc/effects.ts";
 import {
-  STETH_FIRST_TRACKED_EVENT_BLOCK,
+  SUSDS_FIRST_TRACKED_EVENT_BLOCK,
   SUSDS_REVENUE_LAUNCH_BLOCK,
 } from "../src/startupChecks.ts";
 
@@ -638,14 +638,14 @@ describe("sUSDS reserve yield accounting", () => {
     assert.deepEqual(
       ethereumReserveYieldStartAnchorFilter({
         id: String(ETHEREUM_CHAIN_ID),
-        startBlock: String(STETH_FIRST_TRACKED_EVENT_BLOCK),
+        startBlock: String(SUSDS_FIRST_TRACKED_EVENT_BLOCK),
       }),
       {
         block: {
           number: {
-            _gte: STETH_FIRST_TRACKED_EVENT_BLOCK,
+            _gte: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
             _lte:
-              STETH_FIRST_TRACKED_EVENT_BLOCK +
+              SUSDS_FIRST_TRACKED_EVENT_BLOCK +
               (ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT - 1) *
                 ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL,
             _every: ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL,
@@ -657,7 +657,7 @@ describe("sUSDS reserve yield accounting", () => {
     assert.deepEqual(
       susdsDailySnapshotHeartbeatFilter({
         id: String(ETHEREUM_CHAIN_ID),
-        startBlock: String(STETH_FIRST_TRACKED_EVENT_BLOCK),
+        startBlock: String(SUSDS_FIRST_TRACKED_EVENT_BLOCK),
       }),
       {
         block: {
@@ -672,14 +672,14 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(
       susdsDailySnapshotHeartbeatFilter({
         id: "42220",
-        startBlock: STETH_FIRST_TRACKED_EVENT_BLOCK,
+        startBlock: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
       }),
       false,
     );
     assert.equal(
       ethereumReserveYieldStartAnchorFilter({
         id: "42220",
-        startBlock: STETH_FIRST_TRACKED_EVENT_BLOCK,
+        startBlock: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
       }),
       false,
     );
