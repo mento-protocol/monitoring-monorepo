@@ -34,6 +34,30 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function extractBlockAt(source, startIndex) {
+  const openBrace = source.indexOf("{", startIndex);
+  assert(openBrace >= 0, "block opening brace not found");
+
+  let depth = 0;
+  for (let i = openBrace; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    if (source[i] === "}") depth -= 1;
+    if (depth === 0) return source.slice(startIndex, i + 1);
+  }
+  throw new Error("block closing brace not found");
+}
+
+function blocksFor(source, marker) {
+  const blocks = [];
+  let searchFrom = 0;
+  while (true) {
+    const markerIndex = source.indexOf(marker, searchFrom);
+    if (markerIndex === -1) return blocks;
+    blocks.push(extractBlockAt(source, markerIndex));
+    searchFrom = markerIndex + marker.length;
+  }
+}
+
 function test(name, fn) {
   try {
     fn();
@@ -291,40 +315,47 @@ test("trading-mode Splunk pages repeat slowly per rate feed", () => {
     path.resolve(__dirname, "..", "alerts/rules/notification-policies.tf"),
     "utf8",
   );
-  const splunkPolicyStart = source.indexOf("# Trading-modes prod page alerts");
-  const slackPolicyStart = source.indexOf(
-    "# Trading-modes prod page alerts",
-    splunkPolicyStart + 1,
+  const matchingBlocks = blocksFor(source, 'dynamic "policy"').filter(
+    (block) =>
+      /\bcontact_point\s*=\s*grafana_contact_point\.splunk_on_call\.name/.test(
+        block,
+      ) &&
+      /\blabel\s*=\s*"service"[\s\S]*?\bvalue\s*=\s*"exchanges"/.test(block) &&
+      /\blabel\s*=\s*"severity"[\s\S]*?\bvalue\s*=\s*"page"/.test(block),
   );
   assert(
-    splunkPolicyStart >= 0 && slackPolicyStart > splunkPolicyStart,
-    "trading-mode notification policies not found",
+    matchingBlocks.length === 1,
+    `expected one trading-mode Splunk page policy, got ${matchingBlocks.length}`,
   );
 
-  const splunkPolicy = source.slice(splunkPolicyStart, slackPolicyStart);
+  const [splunkPolicy] = matchingBlocks;
   assert(
-    splunkPolicy.includes(
-      "contact_point   = grafana_contact_point.splunk_on_call.name",
+    /\bcontact_point\s*=\s*grafana_contact_point\.splunk_on_call\.name/.test(
+      splunkPolicy,
     ),
     "trading-mode page policy should route to Splunk On-Call",
   );
   assert(
-    splunkPolicy.includes(
-      'group_by        = ["alertname", "chain", "rateFeed"]',
+    /\bgroup_by\s*=\s*\[\s*"alertname"\s*,\s*"chain"\s*,\s*"rateFeed"\s*\]/.test(
+      splunkPolicy,
     ),
     "trading-mode pages should group by rateFeed so new pairs page immediately",
   );
   assert(
-    splunkPolicy.includes('group_wait      = "30s"'),
+    /\bgroup_wait\s*=\s*"30s"/.test(splunkPolicy),
     "trading-mode pages should keep the initial page fast",
   );
   assert(
-    splunkPolicy.includes('group_interval  = "5m"'),
+    /\bgroup_interval\s*=\s*"5m"/.test(splunkPolicy),
     "trading-mode pages should keep resolve and group updates prompt",
   );
   assert(
-    splunkPolicy.includes('repeat_interval = "24h"'),
+    /\brepeat_interval\s*=\s*"24h"/.test(splunkPolicy),
     "trading-mode pages should not repeat SMS/pager notifications more than daily",
+  );
+  assert(
+    /\bcontinue\s*=\s*true/.test(splunkPolicy),
+    "trading-mode Splunk policy must continue so Slack alerts-critical also fires",
   );
 });
 
