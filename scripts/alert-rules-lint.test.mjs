@@ -292,9 +292,9 @@ test("VictorOps trading-mode title is stable and body carries state", () => {
   );
   assert(
     source.includes(
-      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ else -}}\nTrading halted by breaker for {{ $rateFeedWithSlash }} [{{ $chain }}].\n{{ end -}}\n{{ if $chainlinkURL -}}",
+      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ else -}}\nTrading halted by breaker.\n{{ end -}}\n{{ if $chainlinkURL -}}",
     ),
-    "single firing bodies should carry the state without repeating the entity title",
+    "single firing bodies should carry the state without repeating the market title in SMS",
   );
   assert(
     source.includes(

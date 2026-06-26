@@ -137,7 +137,7 @@ ${local.monad_chainlink_slug_branches}
 {{ if or $mixedState (gt $firingCount 1) -}}
 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker
 {{ else -}}
-Trading halted by breaker for {{ $rateFeedWithSlash }} [{{ $chain }}].
+Trading halted by breaker.
 {{ end -}}
 {{ if $chainlinkURL -}}
 Next action: verify the Chainlink data source, then ack/snooze if the move is real. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
