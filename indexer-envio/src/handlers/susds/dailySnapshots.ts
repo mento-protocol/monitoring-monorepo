@@ -190,6 +190,7 @@ export async function recordSusdsYieldHeartbeatSnapshot(
   context: SusdsContext,
   blockNumber: bigint,
 ): Promise<boolean> {
+  // Hosted replays can visit pre-launch heartbeat blocks; keep this before RPC reads.
   if (blockNumber < BigInt(SUSDS_REVENUE_LAUNCH_BLOCK)) return false;
 
   const blockTimestamp = await context.effect(blockTimestampEffect, {
