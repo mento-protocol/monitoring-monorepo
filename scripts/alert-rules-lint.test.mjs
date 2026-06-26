@@ -296,21 +296,45 @@ test("trading-mode notification templates avoid single-alert duplicate headings"
     "VictorOps title should not repeat resolved state in entity_display_name",
   );
 
+  const messageStart = source.indexOf(
+    'resource "grafana_message_template" "victorops_trading_mode_alert_message"',
+  );
+  const messageEnd = source.indexOf(
+    'resource "grafana_message_template" "victorops_trading_limits_alert_title"',
+  );
   assert(
-    source.includes(
+    messageStart >= 0 && messageEnd > messageStart,
+    "message template not found",
+  );
+  const messageTemplate = source.slice(messageStart, messageEnd);
+  const resolvedStart = messageTemplate.indexOf(
+    "{{ range .Alerts.Resolved -}}",
+  );
+  const resolvedEnd = messageTemplate.indexOf(
+    "{{ if eq $firingCount 0 }}No alerts are currently firing.",
+    resolvedStart,
+  );
+  assert(
+    resolvedStart >= 0 && resolvedEnd > resolvedStart,
+    "resolved message block not found",
+  );
+  const resolvedTemplate = messageTemplate.slice(resolvedStart, resolvedEnd);
+
+  assert(
+    messageTemplate.includes(
       "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ else -}}\nTrading halted by breaker.\n{{ end -}}\n{{ if $chainlinkURL -}}",
     ),
-    "VictorOps state_message should carry firing state for single-alert Slack cards",
+    "VictorOps state_message should carry per-feed firing context when multi-alert or mixed",
   );
   assert(
-    source.includes(
+    messageTemplate.includes(
       "{{ if or $mixedState (gt $resolvedCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed\n{{ else -}}\nTrading resumed.\n{{ end -}}",
     ),
-    "VictorOps state_message should carry resolved state for single-alert Slack cards",
+    "VictorOps state_message should carry resolved state outside entity_display_name",
   );
   assert(
-    source.includes("- Chainlink data source: {{ $chainlinkURL }}"),
-    "VictorOps state_message should include Chainlink URLs when available",
+    resolvedTemplate.includes("- Chainlink data source: {{ $chainlinkURL }}"),
+    "VictorOps resolved state_message should include Chainlink URLs when available",
   );
   assert(
     source.includes(
