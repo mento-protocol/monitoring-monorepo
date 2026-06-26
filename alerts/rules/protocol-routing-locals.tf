@@ -374,7 +374,7 @@ locals {
     },
     aegis_service_issues = {
       names = [
-        "Number of failed rpc calls",
+        "Aegis view-call failures [production]",
         "Aegis does not report new data"
       ],
       slack_title_template       = "slack.aegis_service_alert_title",

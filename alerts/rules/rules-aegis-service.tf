@@ -22,7 +22,7 @@ resource "grafana_rule_group" "aegis_service_alerts" {
   interval_seconds = 60
 
   rule {
-    name      = "Number of failed rpc calls"
+    name      = "Aegis view-call failures [production]"
     condition = "B"
 
     data {
@@ -35,9 +35,12 @@ resource "grafana_rule_group" "aegis_service_alerts" {
 
       datasource_uid = var.prometheus_datasource_uid
       model = jsonencode({
-        disableTextWrap     = false
-        editorMode          = "code"
-        expr                = "sum(increase(view_call_query_duration_count{status=\"error\"}[5m]))"
+        disableTextWrap = false
+        editorMode      = "code"
+        # Testnet poll errors have warning-only rules in rules-aegis-testnet.tf.
+        # Keep this page scoped to production and preserve the failing call
+        # labels so the on-call can see what broke without digging first.
+        expr                = "sum by (chain, contract, functionName) (increase(view_call_query_duration_count{chain=~\"^(celo|monad)$\",status=\"error\"}[5m]))"
         fullMetaSearch      = false
         includeNullMetadata = true
         instant             = true
@@ -79,8 +82,8 @@ resource "grafana_rule_group" "aegis_service_alerts" {
     exec_err_state = "Error"
     for            = "5m"
     annotations = {
-      description = "Tracks the number of error responses from our monitoring service."
-      summary     = "More than 10 errors were detected in a 5-minute timespan."
+      description = "Aegis failed to read {{ $labels.contract }}.{{ $labels.functionName }} on {{ $labels.chain }}. These view calls feed protocol monitoring metrics; sustained failures can delay or suppress downstream alerts."
+      summary     = "Aegis recorded more than 10 failed production view-call samples for {{ $labels.contract }}.{{ $labels.functionName }} on {{ $labels.chain }} in 5 minutes."
     }
     labels = {
       service  = "aegis"
