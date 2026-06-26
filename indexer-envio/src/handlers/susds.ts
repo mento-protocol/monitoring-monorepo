@@ -35,6 +35,7 @@ export {
 
 export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
+export const ETHEREUM_RESERVE_YIELD_CHAIN_ANCHOR_INTERVAL = 10_000_000;
 
 type ChainFilterInput = {
   id: number | string;
@@ -70,7 +71,7 @@ export function ethereumReserveYieldChainAnchorFilter(chain: ChainFilterInput) {
     block: {
       number: {
         _gte: chainStartBlock,
-        _lte: chainStartBlock,
+        _every: ETHEREUM_RESERVE_YIELD_CHAIN_ANCHOR_INTERVAL,
       },
     },
   };
@@ -232,7 +233,8 @@ indexer.onBlock(
   },
   async () => {
     // Hosted Envio 3.0.0 currently needs an Ethereum onBlock registration for
-    // this chain to start, but historical recurring sUSDS heartbeat delivery
-    // wedges on pre-launch blocks. Event-driven sUSDS snapshots still run.
+    // this chain to start. Use a very wide no-op anchor instead of the daily
+    // sUSDS heartbeat; frequent pre-launch onBlock delivery wedges hosted
+    // replays. Event-driven sUSDS snapshots still run.
   },
 );

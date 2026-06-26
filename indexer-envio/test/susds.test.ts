@@ -16,6 +16,7 @@ import {
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
+  ETHEREUM_RESERVE_YIELD_CHAIN_ANCHOR_INTERVAL,
   SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
   SUSDS_DAILY_HEARTBEAT_START_BLOCK,
   handleSusdsYieldDailySnapshotHeartbeat,
@@ -642,7 +643,7 @@ describe("sUSDS reserve yield accounting", () => {
         block: {
           number: {
             _gte: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
-            _lte: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+            _every: ETHEREUM_RESERVE_YIELD_CHAIN_ANCHOR_INTERVAL,
           },
         },
       },
