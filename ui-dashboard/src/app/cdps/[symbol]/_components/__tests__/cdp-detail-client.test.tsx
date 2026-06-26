@@ -432,8 +432,13 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("200.00%");
     expect(handle!.container.textContent).toContain("Stability Pool LPs");
     expect(handle!.container.textContent).toContain("0xdepositor");
-    expect(handle!.container.textContent).toContain("Debt Snapshot");
-    expect(handle!.container.textContent).toContain("Collateral Snapshot");
+    expect(handle!.container.textContent).toContain("Current Deposit");
+    expect(handle!.container.textContent).toContain("Claimable Collateral");
+    expect(handle!.container.textContent).toContain("Gross Deposited");
+    expect(handle!.container.textContent).toContain("User Withdrawn");
+    expect(handle!.container.textContent).toContain("Collateral Claimed");
+    expect(handle!.container.textContent).not.toContain("Debt Snapshot");
+    expect(handle!.container.textContent).not.toContain("Collateral Snapshot");
     expect(handle!.container.textContent).not.toContain("Debt Position");
     expect(
       handle!.container.querySelector('[data-testid="sp-chart"]'),

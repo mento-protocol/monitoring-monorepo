@@ -422,9 +422,10 @@ function DepositorTable({
         Stability Pool LPs
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Per-LP balances are snapshots from the latest deposit, withdrawal, or
-        claim; passive liquidations can change live exposure before the next LP
-        action.
+        Current deposit is the LP&apos;s compounded stability-pool balance after
+        liquidation offsets. Gross deposited and user withdrawn are lifetime
+        wallet actions; claimable collateral and claimed collateral are shown
+        separately.
       </p>
       {truncated && (
         <p className="mb-3 text-xs text-amber-400" role="status">
@@ -440,10 +441,11 @@ function DepositorTable({
           <thead>
             <Row>
               <Th>LP</Th>
-              <Th align="right">Debt Snapshot</Th>
-              <Th align="right">Collateral Snapshot</Th>
-              <Th align="right">Deposited</Th>
-              <Th align="right">Withdrawn</Th>
+              <Th align="right">Current Deposit</Th>
+              <Th align="right">Claimable Collateral</Th>
+              <Th align="right">Gross Deposited</Th>
+              <Th align="right">User Withdrawn</Th>
+              <Th align="right">Collateral Claimed</Th>
               <Th align="right">Updated</Th>
             </Row>
           </thead>
@@ -464,6 +466,9 @@ function DepositorTable({
                 </Td>
                 <Td align="right">
                   {formatTokenAmount(depositor.cumulativeWithdrawn, symbol)}
+                </Td>
+                <Td align="right">
+                  {formatTokenAmount(depositor.ethGainClaimedCum, "USDm")}
                 </Td>
                 <Td align="right">{relativeTime(depositor.lastUpdatedAt)}</Td>
               </Row>
