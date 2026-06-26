@@ -53,14 +53,10 @@ export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
   if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
   const chainStartBlock = finiteNumber(chain.startBlock);
   if (chainStartBlock == null) return false;
-  const heartbeatStartBlock = Math.max(
-    chainStartBlock,
-    SUSDS_DAILY_HEARTBEAT_START_BLOCK,
-  );
   return {
     block: {
       number: {
-        _gte: heartbeatStartBlock,
+        _gte: chainStartBlock,
         _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
       },
     },
@@ -222,8 +218,8 @@ indexer.onBlock(
     where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
   },
   async ({ block, context }) => {
-    // Keep the hosted-proven chain.startBlock + 300-block grid. Pre-launch
-    // calls return before RPC reads; post-launch calls write daily snapshots.
+    // Keep the hosted-proven chain.startBlock grid. Pre-launch calls return
+    // before RPC reads; post-launch calls write daily snapshots.
     await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
   },
 );
