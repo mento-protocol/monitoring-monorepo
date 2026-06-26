@@ -420,20 +420,20 @@ function DepositorTable({
   return (
     <section>
       <h2 className="text-lg font-semibold text-white mb-3">
-        Stability Pool LPs
+        Stability Pool LP Snapshots
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Principal flow reconciles as gross deposited minus principal withdrawn
-        minus net pool offset equals current deposit. Net pool offset is derived
-        from the other GBPm columns and captures passive stability-pool balance
-        changes, including liquidation offsets, net of unclaimed debt-token
-        gain. Collateral columns are separate USDm liquidation gains.
+        Rows are indexed per-LP snapshots from the latest LP operation, not live
+        compounded balances after later passive liquidations. Snapshot flow
+        reconciles as gross deposited minus principal withdrawn minus net
+        accounted offset equals indexed deposit. Collateral columns are separate
+        USDm liquidation gains at that indexed point.
       </p>
       {truncated && (
         <p className="mb-3 text-xs text-amber-400" role="status">
           Showing the first{" "}
-          {CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LPs by
-          latest deposit. More LPs may exist.
+          {CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LP
+          snapshots by indexed deposit. More snapshots may exist.
         </p>
       )}
       {depositors.length === 0 ? (
@@ -445,11 +445,11 @@ function DepositorTable({
               <Th>LP</Th>
               <Th align="right">Gross Deposited</Th>
               <Th align="right">Principal Withdrawn</Th>
-              <Th align="right">Net Pool Offset</Th>
-              <Th align="right">Current Deposit</Th>
+              <Th align="right">Net Accounted Offset</Th>
+              <Th align="right">Indexed Deposit</Th>
               <Th align="right">Claimable Collateral</Th>
               <Th align="right">Collateral Received</Th>
-              <Th align="right">Updated</Th>
+              <Th align="right">Snapshot Updated</Th>
             </Row>
           </thead>
           <tbody>

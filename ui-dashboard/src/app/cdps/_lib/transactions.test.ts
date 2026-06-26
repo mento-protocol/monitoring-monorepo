@@ -405,7 +405,7 @@ describe("positionSnapshotFor", () => {
           depositBefore: "100",
           depositAfter: "100",
           stashedCollBefore: "20",
-          stashedCollAfter: "20",
+          stashedCollAfter: "0",
         }),
         undefined,
       ),

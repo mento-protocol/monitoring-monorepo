@@ -430,17 +430,20 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("0xowner");
     expect(handle!.container.textContent).toContain("2.50%");
     expect(handle!.container.textContent).toContain("200.00%");
-    expect(handle!.container.textContent).toContain("Stability Pool LPs");
+    expect(handle!.container.textContent).toContain(
+      "Stability Pool LP Snapshots",
+    );
     expect(handle!.container.textContent).toContain("0xdepositor");
-    expect(handle!.container.textContent).toContain("Current Deposit");
+    expect(handle!.container.textContent).toContain("Indexed Deposit");
     expect(handle!.container.textContent).toContain("Claimable Collateral");
     expect(handle!.container.textContent).toContain("Gross Deposited");
     expect(handle!.container.textContent).toContain("Principal Withdrawn");
-    expect(handle!.container.textContent).toContain("Net Pool Offset");
+    expect(handle!.container.textContent).toContain("Net Accounted Offset");
     expect(handle!.container.textContent).toContain("Collateral Received");
     expect(handle!.container.textContent).toContain("15.00 GBPm");
     expect(handle!.container.textContent).toContain("5.00 GBPm");
     expect(handle!.container.textContent).toContain("2.00 USDm");
+    expect(handle!.container.textContent).not.toContain("Current Deposit");
     expect(handle!.container.textContent).not.toContain("User Withdrawn");
     expect(handle!.container.textContent).not.toContain("Collateral Claimed");
     expect(handle!.container.textContent).not.toContain("Debt Snapshot");
@@ -502,7 +505,7 @@ describe("CdpDetailClient", () => {
 
     const notice = handle!.container.querySelector('[role="status"]');
     expect(notice?.textContent).toContain(
-      `Showing the first ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LPs`,
+      `Showing the first ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LP snapshots`,
     );
   });
 

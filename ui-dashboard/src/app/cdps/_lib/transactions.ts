@@ -150,31 +150,17 @@ function hasClaimedStabilityPoolGains(row: {
   );
 }
 
-function hasStabilityPoolPositionChange(row: {
-  depositBefore: string;
-  depositAfter: string;
-  stashedCollBefore: string;
-  stashedCollAfter: string;
-}): boolean {
-  return (
-    BigInt(row.depositBefore) !== BigInt(row.depositAfter) ||
-    BigInt(row.stashedCollBefore) !== BigInt(row.stashedCollAfter)
-  );
-}
-
 function isClaimOnlyStabilityPoolOperation(row: {
   topUpOrWithdrawal: string;
   yieldGainClaimed: string;
   ethGainClaimed: string;
   depositBefore: string;
   depositAfter: string;
-  stashedCollBefore: string;
-  stashedCollAfter: string;
 }): boolean {
   return (
     BigInt(row.topUpOrWithdrawal) === BigInt(0) &&
     hasClaimedStabilityPoolGains(row) &&
-    !hasStabilityPoolPositionChange(row)
+    BigInt(row.depositBefore) === BigInt(row.depositAfter)
   );
 }
 

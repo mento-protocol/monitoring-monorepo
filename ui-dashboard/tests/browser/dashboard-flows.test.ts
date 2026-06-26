@@ -191,7 +191,22 @@ test.describe("dashboard browser flows", () => {
     ).toBeVisible();
     await expect(page.getByText("Total Supply (System Debt)")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Stability Pool LPs" }),
+      page.getByRole("heading", { name: "Stability Pool LP Snapshots" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Gross Deposited" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Principal Withdrawn" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Net Accounted Offset" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Indexed Deposit" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Collateral Received" }),
     ).toBeVisible();
     await expect(
       page.getByTitle("0x9999999999999999999999999999999999999999"),
