@@ -2,6 +2,7 @@ import { ZERO_ADDRESS } from "../constants.js";
 import { asAddress, eventId } from "../helpers.js";
 import { indexer } from "../indexer.js";
 import {
+  handleSusdsYieldDailySnapshotHeartbeat,
   readSharePrice,
   recordSusdsYieldDailySnapshot,
   sharePriceFromAssetsAndShares,
@@ -60,6 +61,17 @@ export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
       },
     },
   };
+}
+
+function heartbeatBlockNumber(block: {
+  number?: number | bigint | string | null;
+}): bigint | null {
+  if (block.number == null || block.number === "") return null;
+  try {
+    return BigInt(block.number);
+  } catch {
+    return null;
+  }
 }
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
@@ -211,7 +223,15 @@ indexer.onEvent(
   },
 );
 
-// Hosted Envio 3.0.0 replays wedge at historical pre-launch sUSDS heartbeat
-// blocks on this chain-start grid even when the handler returns before RPC
-// reads. Event-driven sUSDS movements still write daily snapshots; empty-day
-// synthetic snapshots are disabled until the hosted heartbeat path is safe.
+indexer.onBlock(
+  {
+    name: "SusdsYieldDailySnapshotHeartbeat",
+    where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
+  },
+  async ({ block, context }) => {
+    const blockNumber = heartbeatBlockNumber(block);
+    if (blockNumber === null) return;
+    if (blockNumber < BigInt(SUSDS_REVENUE_LAUNCH_BLOCK)) return;
+    await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
+  },
+);
