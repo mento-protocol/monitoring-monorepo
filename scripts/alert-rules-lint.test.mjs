@@ -286,6 +286,48 @@ test("VictorOps trading-mode title is stable and body carries state", () => {
   );
 });
 
+test("trading-mode Splunk pages repeat slowly per rate feed", () => {
+  const source = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/notification-policies.tf"),
+    "utf8",
+  );
+  const splunkPolicyStart = source.indexOf("# Trading-modes prod page alerts");
+  const slackPolicyStart = source.indexOf(
+    "# Trading-modes prod page alerts",
+    splunkPolicyStart + 1,
+  );
+  assert(
+    splunkPolicyStart >= 0 && slackPolicyStart > splunkPolicyStart,
+    "trading-mode notification policies not found",
+  );
+
+  const splunkPolicy = source.slice(splunkPolicyStart, slackPolicyStart);
+  assert(
+    splunkPolicy.includes(
+      "contact_point   = grafana_contact_point.splunk_on_call.name",
+    ),
+    "trading-mode page policy should route to Splunk On-Call",
+  );
+  assert(
+    splunkPolicy.includes(
+      'group_by        = ["alertname", "chain", "rateFeed"]',
+    ),
+    "trading-mode pages should group by rateFeed so new pairs page immediately",
+  );
+  assert(
+    splunkPolicy.includes('group_wait      = "30s"'),
+    "trading-mode pages should keep the initial page fast",
+  );
+  assert(
+    splunkPolicy.includes('group_interval  = "5m"'),
+    "trading-mode pages should keep resolve and group updates prompt",
+  );
+  assert(
+    splunkPolicy.includes('repeat_interval = "24h"'),
+    "trading-mode pages should not repeat SMS/pager notifications more than daily",
+  );
+});
+
 test("CLI reports parse failures and unknown bridge metrics", () => {
   const dir = mkdtempSync(join(tmpdir(), "alert-rules-lint-test-"));
   try {
