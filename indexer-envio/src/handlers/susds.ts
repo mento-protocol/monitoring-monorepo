@@ -20,10 +20,7 @@ import {
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
-import {
-  STETH_FIRST_TRACKED_EVENT_BLOCK,
-  SUSDS_REVENUE_LAUNCH_BLOCK,
-} from "../startupChecks.js";
+import { SUSDS_REVENUE_LAUNCH_BLOCK } from "../startupChecks.js";
 
 export {
   ETHEREUM_CHAIN_ID,
@@ -38,9 +35,13 @@ export {
 } from "./susds/dailySnapshots.js";
 
 export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
-export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL = 3_000;
+export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL =
+  SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL;
+export const SUSDS_CHAIN_ADVANCE_PRE_REVENUE_HEARTBEATS = 4_500;
 export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK =
-  STETH_FIRST_TRACKED_EVENT_BLOCK;
+  SUSDS_REVENUE_LAUNCH_BLOCK -
+  SUSDS_CHAIN_ADVANCE_PRE_REVENUE_HEARTBEATS *
+    SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
 
 type ChainFilterInput = {
@@ -63,37 +64,14 @@ export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
     SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
     chainStartBlock,
   );
-  const preRevenueEnd = SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1;
-  const chainEndBlock = finiteNumber(chain.endBlock);
-  const end =
-    chainEndBlock != null && chainEndBlock > 0
-      ? Math.min(preRevenueEnd, chainEndBlock)
-      : preRevenueEnd;
-  if (start > end) return false;
   return {
     block: {
       number: {
         _gte: start,
-        _lte: end,
         _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
       },
     },
   };
-}
-
-export function susdsDailySnapshotHeartbeatFilter(
-  chain: Pick<ChainFilterInput, "id">,
-) {
-  return finiteNumber(chain.id) === ETHEREUM_CHAIN_ID
-    ? {
-        block: {
-          number: {
-            _gte: SUSDS_DAILY_HEARTBEAT_START_BLOCK,
-            _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
-          },
-        },
-      }
-    : false;
 }
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
@@ -250,18 +228,9 @@ indexer.onBlock(
     name: "SusdsChainAdvanceHeartbeat",
     where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
   },
-  async () => {
-    // Gives hosted Ethereum early bounded onBlock work so indexing advances
-    // before the revenue-aligned daily snapshot grid below starts.
-  },
-);
-
-indexer.onBlock(
-  {
-    name: "SusdsYieldDailySnapshotHeartbeat",
-    where: ({ chain }) => susdsDailySnapshotHeartbeatFilter(chain),
-  },
   async ({ block, context }) => {
+    // Uses the hosted-proven simple _gte + _every shape. Pre-launch calls
+    // return before RPC reads; post-launch calls write the daily snapshot grid.
     await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
   },
 );

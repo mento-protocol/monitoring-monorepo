@@ -18,13 +18,12 @@ import {
   V3_REVENUE_LAUNCH_TIMESTAMP,
   SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
   SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-  SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
+  SUSDS_CHAIN_ADVANCE_PRE_REVENUE_HEARTBEATS,
   SUSDS_DAILY_HEARTBEAT_START_BLOCK,
   handleSusdsYieldDailySnapshotHeartbeat,
   recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
   susdsChainAdvanceHeartbeatFilter,
-  susdsDailySnapshotHeartbeatFilter,
 } from "../src/handlers/susds.ts";
 import { readSharePrice } from "../src/handlers/susds/dailySnapshots.ts";
 import { ZERO_ADDRESS } from "../src/constants.ts";
@@ -33,7 +32,7 @@ import {
   susdsSharePriceEffect,
 } from "../src/rpc/effects.ts";
 import {
-  STETH_FIRST_TRACKED_EVENT_BLOCK,
+  SUSDS_FIRST_TRACKED_EVENT_BLOCK,
   SUSDS_REVENUE_LAUNCH_BLOCK,
 } from "../src/startupChecks.ts";
 
@@ -619,9 +618,21 @@ describe("sUSDS reserve yield accounting", () => {
     assert.ok(
       SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK < SUSDS_REVENUE_LAUNCH_BLOCK,
     );
+    assert.ok(
+      SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK >
+        SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+    );
     assert.equal(
-      SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-      STETH_FIRST_TRACKED_EVENT_BLOCK,
+      SUSDS_CHAIN_ADVANCE_PRE_REVENUE_HEARTBEATS,
+      (SUSDS_DAILY_HEARTBEAT_START_BLOCK -
+        SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK) /
+        SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
+    );
+    assert.equal(
+      (SUSDS_DAILY_HEARTBEAT_START_BLOCK -
+        SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK) %
+        SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
+      0,
     );
     const preLaunchHeartbeatCount =
       Math.floor(
@@ -652,26 +663,13 @@ describe("sUSDS reserve yield accounting", () => {
     assert.deepEqual(
       susdsChainAdvanceHeartbeatFilter({
         id: String(ETHEREUM_CHAIN_ID),
-        startBlock: String(STETH_FIRST_TRACKED_EVENT_BLOCK),
+        startBlock: String(SUSDS_FIRST_TRACKED_EVENT_BLOCK),
       }),
       {
         block: {
           number: {
             _gte: SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-            _lte: SUSDS_REVENUE_LAUNCH_BLOCK - 1,
             _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
-          },
-        },
-      },
-    );
-
-    assert.deepEqual(
-      susdsDailySnapshotHeartbeatFilter({ id: String(ETHEREUM_CHAIN_ID) }),
-      {
-        block: {
-          number: {
-            _gte: SUSDS_DAILY_HEARTBEAT_START_BLOCK,
-            _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
           },
         },
       },
@@ -680,11 +678,10 @@ describe("sUSDS reserve yield accounting", () => {
     assert.equal(
       susdsChainAdvanceHeartbeatFilter({
         id: "42220",
-        startBlock: STETH_FIRST_TRACKED_EVENT_BLOCK,
+        startBlock: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
       }),
       false,
     );
-    assert.equal(susdsDailySnapshotHeartbeatFilter({ id: "42220" }), false);
   });
 
   it("runs the sUSDS heartbeat onBlock handler path", async () => {
