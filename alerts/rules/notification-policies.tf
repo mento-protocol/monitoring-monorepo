@@ -356,10 +356,17 @@ resource "grafana_notification_policy" "all" {
     # Trading-modes prod page alerts → Splunk On-Call (one per prod chain).
     # A prod circuit-breaker engagement is pager-grade — see the
     # severity=page label in alert-rules-trading-modes.tf.
+    # Keep the first page quick, but avoid noisy SMS reminders for market-wide
+    # depegs where the right action is to wait for the market to repeg. Group by
+    # rateFeed so a new breaker on another pair still gets its own immediate page.
     dynamic "policy" {
       for_each = local.prod_chains
       content {
-        contact_point = grafana_contact_point.splunk_on_call.name
+        contact_point   = grafana_contact_point.splunk_on_call.name
+        group_by        = ["alertname", "chain", "rateFeed"]
+        group_wait      = "30s"
+        group_interval  = "5m"
+        repeat_interval = "24h"
 
         matcher {
           label = "severity"

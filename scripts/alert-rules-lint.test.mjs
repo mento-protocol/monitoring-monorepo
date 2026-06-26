@@ -34,6 +34,30 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function extractBlockAt(source, startIndex) {
+  const openBrace = source.indexOf("{", startIndex);
+  assert(openBrace >= 0, "block opening brace not found");
+
+  let depth = 0;
+  for (let i = openBrace; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    if (source[i] === "}") depth -= 1;
+    if (depth === 0) return source.slice(startIndex, i + 1);
+  }
+  throw new Error("block closing brace not found");
+}
+
+function blocksFor(source, marker) {
+  const blocks = [];
+  let searchFrom = 0;
+  while (true) {
+    const markerIndex = source.indexOf(marker, searchFrom);
+    if (markerIndex === -1) return blocks;
+    blocks.push(extractBlockAt(source, markerIndex));
+    searchFrom = markerIndex + marker.length;
+  }
+}
+
 function test(name, fn) {
   try {
     fn();
@@ -268,9 +292,9 @@ test("VictorOps trading-mode title is stable and body carries state", () => {
   );
   assert(
     source.includes(
-      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ else -}}\nTrading halted by breaker for {{ $rateFeedWithSlash }} [{{ $chain }}].\n{{ end -}}\n{{ if $chainlinkURL -}}",
+      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ else -}}\nTrading halted by breaker.\n{{ end -}}\n{{ if $chainlinkURL -}}",
     ),
-    "single firing bodies should carry the state without repeating the entity title",
+    "single firing bodies should carry the state without repeating the market title in SMS",
   );
   assert(
     source.includes(
@@ -283,6 +307,55 @@ test("VictorOps trading-mode title is stable and body carries state", () => {
       "{{ if eq $firingCount 0 }}No alerts are currently firing.",
     ),
     "the resolved footer should use the computed firing count",
+  );
+});
+
+test("trading-mode Splunk pages repeat slowly per rate feed", () => {
+  const source = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/notification-policies.tf"),
+    "utf8",
+  );
+  const matchingBlocks = blocksFor(source, 'dynamic "policy"').filter(
+    (block) =>
+      /\bcontact_point\s*=\s*grafana_contact_point\.splunk_on_call\.name/.test(
+        block,
+      ) &&
+      /\blabel\s*=\s*"service"[\s\S]*?\bvalue\s*=\s*"exchanges"/.test(block) &&
+      /\blabel\s*=\s*"severity"[\s\S]*?\bvalue\s*=\s*"page"/.test(block),
+  );
+  assert(
+    matchingBlocks.length === 1,
+    `expected one trading-mode Splunk page policy, got ${matchingBlocks.length}`,
+  );
+
+  const [splunkPolicy] = matchingBlocks;
+  assert(
+    /\bcontact_point\s*=\s*grafana_contact_point\.splunk_on_call\.name/.test(
+      splunkPolicy,
+    ),
+    "trading-mode page policy should route to Splunk On-Call",
+  );
+  assert(
+    /\bgroup_by\s*=\s*\[\s*"alertname"\s*,\s*"chain"\s*,\s*"rateFeed"\s*\]/.test(
+      splunkPolicy,
+    ),
+    "trading-mode pages should group by rateFeed so new pairs page immediately",
+  );
+  assert(
+    /\bgroup_wait\s*=\s*"30s"/.test(splunkPolicy),
+    "trading-mode pages should keep the initial page fast",
+  );
+  assert(
+    /\bgroup_interval\s*=\s*"5m"/.test(splunkPolicy),
+    "trading-mode pages should keep resolve and group updates prompt",
+  );
+  assert(
+    /\brepeat_interval\s*=\s*"24h"/.test(splunkPolicy),
+    "trading-mode pages should not repeat SMS/pager notifications more than daily",
+  );
+  assert(
+    /\bcontinue\s*=\s*true/.test(splunkPolicy),
+    "trading-mode Splunk policy must continue so Slack alerts-critical also fires",
   );
 });
 
