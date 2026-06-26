@@ -20,10 +20,7 @@ import {
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
-import {
-  STETH_FIRST_TRACKED_EVENT_BLOCK,
-  SUSDS_REVENUE_LAUNCH_BLOCK,
-} from "../startupChecks.js";
+import { STETH_FIRST_TRACKED_EVENT_BLOCK } from "../startupChecks.js";
 
 export {
   ETHEREUM_CHAIN_ID,
@@ -37,10 +34,8 @@ export {
   recordSusdsYieldHeartbeatSnapshot,
 } from "./susds/dailySnapshots.js";
 
-export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
-export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
-export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL = 3_000;
-export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK =
+export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 600;
+export const SUSDS_DAILY_HEARTBEAT_START_BLOCK =
   STETH_FIRST_TRACKED_EVENT_BLOCK;
 
 type ChainFilterInput = {
@@ -55,37 +50,18 @@ function finiteNumber(value: number | string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
+export function susdsDailySnapshotHeartbeatFilter(chain: ChainFilterInput) {
   if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
   const chainStartBlock = finiteNumber(chain.startBlock);
   if (chainStartBlock == null) return false;
-  const start = Math.max(
-    SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-    chainStartBlock,
-  );
   return {
     block: {
       number: {
-        _gte: start,
-        _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
+        _gte: Math.max(SUSDS_DAILY_HEARTBEAT_START_BLOCK, chainStartBlock),
+        _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
       },
     },
   };
-}
-
-export function susdsDailySnapshotHeartbeatFilter(
-  chain: Pick<ChainFilterInput, "id">,
-) {
-  return finiteNumber(chain.id) === ETHEREUM_CHAIN_ID
-    ? {
-        block: {
-          number: {
-            _gte: SUSDS_DAILY_HEARTBEAT_START_BLOCK,
-            _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
-          },
-        },
-      }
-    : false;
 }
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
@@ -234,18 +210,6 @@ indexer.onEvent(
       sharePriceUsdWei,
       totals,
     );
-  },
-);
-
-indexer.onBlock(
-  {
-    name: "SusdsChainAdvanceHeartbeat",
-    where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
-  },
-  async () => {
-    // Hosted Envio 3.0.0 needs sparse Ethereum onBlock work to advance from
-    // the old stETH start block. Keep this no-op; the post-launch heartbeat
-    // below writes actual snapshots.
   },
 );
 

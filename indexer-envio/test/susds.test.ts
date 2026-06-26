@@ -16,14 +16,11 @@ import {
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
-  SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
-  SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
   SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
   SUSDS_DAILY_HEARTBEAT_START_BLOCK,
   handleSusdsYieldDailySnapshotHeartbeat,
   recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
-  susdsChainAdvanceHeartbeatFilter,
   susdsDailySnapshotHeartbeatFilter,
 } from "../src/handlers/susds.ts";
 import { readSharePrice } from "../src/handlers/susds/dailySnapshots.ts";
@@ -616,15 +613,16 @@ describe("sUSDS reserve yield accounting", () => {
 
   it("skips pre-revenue-launch heartbeat blocks without reading effects", async () => {
     const mockDb = MockDb.createMockDb();
-    assert.equal(SUSDS_DAILY_HEARTBEAT_START_BLOCK, SUSDS_REVENUE_LAUNCH_BLOCK);
+    assert.equal(
+      SUSDS_DAILY_HEARTBEAT_START_BLOCK,
+      STETH_FIRST_TRACKED_EVENT_BLOCK,
+    );
     const preLaunchHeartbeatCount =
       Math.floor(
-        (SUSDS_REVENUE_LAUNCH_BLOCK -
-          SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK -
-          1) /
-          SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
+        (SUSDS_REVENUE_LAUNCH_BLOCK - SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1) /
+          SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
       ) + 1;
-    assert.ok(preLaunchHeartbeatCount < 5_000);
+    assert.ok(preLaunchHeartbeatCount < 10_000);
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
       {
@@ -643,23 +641,9 @@ describe("sUSDS reserve yield accounting", () => {
 
   it("accepts hosted string chain fields for sUSDS onBlock filters", () => {
     assert.deepEqual(
-      susdsChainAdvanceHeartbeatFilter({
-        id: String(ETHEREUM_CHAIN_ID),
-        startBlock: String(STETH_FIRST_TRACKED_EVENT_BLOCK),
-      }),
-      {
-        block: {
-          number: {
-            _gte: SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-            _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
-          },
-        },
-      },
-    );
-
-    assert.deepEqual(
       susdsDailySnapshotHeartbeatFilter({
         id: String(ETHEREUM_CHAIN_ID),
+        startBlock: String(STETH_FIRST_TRACKED_EVENT_BLOCK),
       }),
       {
         block: {
@@ -672,13 +656,12 @@ describe("sUSDS reserve yield accounting", () => {
     );
 
     assert.equal(
-      susdsChainAdvanceHeartbeatFilter({
+      susdsDailySnapshotHeartbeatFilter({
         id: "42220",
         startBlock: STETH_FIRST_TRACKED_EVENT_BLOCK,
       }),
       false,
     );
-    assert.equal(susdsDailySnapshotHeartbeatFilter({ id: "42220" }), false);
   });
 
   it("runs the sUSDS heartbeat onBlock handler path", async () => {
@@ -686,7 +669,8 @@ describe("sUSDS reserve yield accounting", () => {
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
     const day2 = day1 + 86_400n;
     const depositBlock = 22_990_100;
-    const heartbeatBlock = SUSDS_DAILY_HEARTBEAT_START_BLOCK + 300;
+    const heartbeatBlock =
+      SUSDS_REVENUE_LAUNCH_BLOCK + SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL;
     const heartbeatBlockNumber = BigInt(heartbeatBlock);
     const heartbeatTimestamp = day2 + 3_600n;
     const heartbeatSharePrice = dollars(120) / 100n;
