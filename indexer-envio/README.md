@@ -1,7 +1,7 @@
 # Mento v3 Envio HyperIndex Indexer
 
-Multichain Envio HyperIndex indexer for Mento v3 — Celo Mainnet (42220), Monad Mainnet (143), and Ethereum Mainnet (1) sUSDS/stETH reserve-yield events.
-Tracks FPMM pool activity, oracle health, trading limits, rebalancer liveness, and reserve-yield accounting.
+Multichain Envio HyperIndex indexer for Mento v3 — Celo Mainnet (42220) and Monad Mainnet (143).
+Tracks FPMM pool activity, oracle health, trading limits, and rebalancer liveness. Ethereum reserve-yield entities and handlers are present but dormant until the hosted-safe replay redesign ships.
 
 ## What It Does
 
@@ -25,26 +25,24 @@ Listens to on-chain events from Mento v3 contracts and writes structured entitie
 | ValueDeltaBreaker     | `DefaultCooldownTimeUpdated`, `RateFeedCooldownTimeUpdated`, `DefaultRateChangeThresholdUpdated`, `RateChangeThresholdUpdated`, `ReferenceValueUpdated`                                                                  |
 | WormholeNttManager    | `TransferSent`, `TransferRedeemed`, `MessageAttestedTo`, `InboundTransferQueued`                                                                                                                                         |
 | WormholeTransceiver   | `ReceivedMessage`                                                                                                                                                                                                        |
-| Susds                 | `Deposit`, `Withdraw`, `Transfer` (Ethereum only; filtered to tracked Mento reserve wallets)                                                                                                                             |
-| Steth                 | `Transfer` (Ethereum only; filtered to tracked Mento reserve wallets)                                                                                                                                                    |
 
 ### Entities Written
 
-| Entity group            | Description                                                                                                                                                                     |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `TradingLimit`                                                                                                            |
-| Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
-| Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
-| Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                           |
-| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                            |
-| Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                |
-| BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                |
-| VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                          |
-| Open Liquidity Strategy | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                             |
-| Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                            |
-| Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
-| Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                             |
-| Reserve yield           | `SusdsYieldMovement`, `SusdsCostBasisLot`, `SusdsPosition`, `SusdsYieldSummary`, `StethYieldMovement`, `StethCostBasisLot`, `StethPosition`, `StethYieldSummary`                |
+| Entity group            | Description                                                                                                                                                                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `TradingLimit`                                                                                                                                        |
+| Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                                                  |
+| Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                                                      |
+| Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                                                       |
+| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                                                        |
+| Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                                            |
+| BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                                            |
+| VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                                                      |
+| Open Liquidity Strategy | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                                                         |
+| Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                                                        |
+| Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending`                             |
+| Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                                                         |
+| Reserve yield           | Dormant schema retained for compatibility: `SusdsYieldMovement`, `SusdsCostBasisLot`, `SusdsPosition`, `SusdsYieldSummary`, `StethYieldMovement`, `StethCostBasisLot`, `StethPosition`, `StethYieldSummary` |
 
 ### Pool ID Format
 
@@ -53,11 +51,11 @@ This prevents collisions when the same contract address is deployed on multiple 
 
 ## Configuration
 
-| File                                 | Networks                                                                 |
-| ------------------------------------ | ------------------------------------------------------------------------ |
-| `config.multichain.mainnet.yaml`     | Celo Mainnet + Monad Mainnet + Ethereum sUSDS/stETH (default/production) |
-| `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                                             |
-| `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness                                     |
+| File                                 | Networks                                          |
+| ------------------------------------ | ------------------------------------------------- |
+| `config.multichain.mainnet.yaml`     | Celo Mainnet + Monad Mainnet (default/production) |
+| `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                      |
+| `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness              |
 
 `config/protocolActors.json` contains manual protocol-controlled caller and
 entry-point overrides for the dashboard volume filter. Pool liquidity-strategy
@@ -79,7 +77,7 @@ Deploy branch: `envio` → triggers hosted reindex on push.
 
 ```bash
 cp indexer-envio/.env.example indexer-envio/.env
-# Mainnet defaults (forno, rpc2.monad.xyz, ethereum.publicnode.com) work out of the box.
+# Mainnet defaults (forno, rpc2.monad.xyz) work out of the box.
 # For testnet, set ENVIO_API_TOKEN or override ENVIO_RPC_URL_10143.
 
 # Generate types + start multichain indexer
@@ -92,7 +90,7 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
 ### Available Commands (from repo root)
 
 ```bash
-pnpm indexer:codegen                # Generate types (multichain mainnet — Celo + Monad + Ethereum sUSDS/stETH)
+pnpm indexer:codegen                # Generate types (multichain mainnet — Celo + Monad)
 pnpm indexer:dev                    # Start local multichain mainnet indexer
 pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev            # Start local multichain testnet indexer
@@ -227,6 +225,6 @@ See [`STATUS.md`](./STATUS.md) for the static endpoint and deployment reference.
 | `src/EventHandlers.ts`              | Event → entity mapping                                  |
 | `src/helpers.ts`                    | `makePoolId`, `poolIdToAddress` utilities               |
 | `src/rpc.ts` + `src/rpc/`           | RPC read helpers (per-chain clients, effects, fallback) |
-| `config.multichain.mainnet.yaml`    | Production config (Celo + Monad + Ethereum sUSDS/stETH) |
+| `config.multichain.mainnet.yaml`    | Production config (Celo + Monad)                        |
 | `config/deployment-namespaces.json` | Vendored namespace map for hosted builds                |
 | `abis/`                             | Vendored contract ABI subsets                           |

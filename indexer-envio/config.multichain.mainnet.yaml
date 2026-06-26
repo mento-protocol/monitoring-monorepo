@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: mento-multichain-mainnet
-description: Mento multichain mainnet indexer — Celo (42220) + Monad (143) + Ethereum sUSDS/stETH (1)
+description: Mento multichain mainnet indexer — Celo (42220) + Monad (143)
 
 # Disable v3's `src/handlers/` auto-loading. Each contract below explicitly
 # points at `src/EventHandlers.ts`, which side-effect imports the same
@@ -31,9 +31,9 @@ handlers: null
 #
 # 5. Keep the old Celo-only endpoint running for ≥1 week as rollback.
 #
-# 6. Per-chain RPC overrides: set ENVIO_RPC_URL_42220, ENVIO_RPC_URL_143,
-#    and ENVIO_RPC_URL_1 independently. Do NOT use the generic ENVIO_RPC_URL
-#    in multichain mode — it routes all chains to the same endpoint.
+# 6. Per-chain RPC overrides: set ENVIO_RPC_URL_42220 and
+#    ENVIO_RPC_URL_143 independently. Do NOT use the generic ENVIO_RPC_URL in
+#    multichain mode — it routes all chains to the same endpoint.
 
 # ---------------------------------------------------------------------------
 # Global contract definitions (shared ABI + handler across all networks)
@@ -213,9 +213,9 @@ contracts:
     events:
       - event: Transfer
 
-  # Sky sUSDS — Ethereum reserve-yield accounting. Handlers apply topic-level
-  # filters for tracked Mento reserve wallets, so only relevant reserve
-  # movements reach the processing path.
+  # Sky sUSDS — reserve-yield handler definition retained for schema/test
+  # compatibility. Production mainnet does not wire an Ethereum chain until the
+  # hosted-safe reserve-yield redesign ships.
   - name: Susds
     abi_file_path: abis/Susds.json
     handler: src/EventHandlers.ts
@@ -224,9 +224,9 @@ contracts:
       - event: Deposit
       - event: Withdraw
 
-  # Lido stETH — Ethereum reserve-yield accounting. Rebasing rewards have no
-  # reward Transfer event, so the handler tracks FIFO principal from transfers
-  # and the dashboard refreshes current unrealized yield from reserve balances.
+  # Lido stETH — reserve-yield handler definition retained for schema/test
+  # compatibility. Production mainnet does not wire an Ethereum chain until the
+  # hosted-safe reserve-yield redesign ships.
   - name: Steth
     abi_file_path: abis/ERC20.json
     handler: src/EventHandlers.ts
@@ -301,67 +301,6 @@ contracts:
       - event: ReceivedMessage(bytes32 digest, uint16 emitterChainId, bytes32 emitterAddress, uint64 sequence)
 
 chains:
-  # ---------------------------------------------------------------------------
-  # Ethereum Mainnet (chain 1) — HyperSync: https://1.hypersync.xyz
-  # ---------------------------------------------------------------------------
-  - id: 1
-    start_block: ${ENVIO_START_BLOCK_ETHEREUM:-22994000} # Aligned hosted replay boundary before the first known Mento reserve sUSDS deposit. Historical stETH ledger replay is intentionally skipped; the dashboard treats stETH as forecast-only.
-    contracts:
-      - name: Susds
-        address:
-          - 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD
-      - name: Steth
-        address:
-          - 0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84
-      - name: Broker
-        address: []
-      - name: FPMMFactory
-        address: []
-      - name: FPMM
-        address: []
-      - name: VirtualPool
-        address: []
-      - name: VirtualPoolFactory
-        address: []
-      - name: SortedOracles
-        address: []
-      - name: BiPoolManager
-        address: []
-      - name: OpenLiquidityStrategy
-        address: []
-      - name: LiquityTroveManager
-        address: []
-      - name: LiquityStabilityPool
-        address: []
-      - name: LiquityTroveNFT
-        address: []
-      - name: LiquityBorrowerOperations
-        address: []
-      - name: LiquityCollateralRegistry
-        address: []
-      - name: CDPLiquidityStrategy
-        address: []
-      - name: ReserveTroveFactory
-        address: []
-      - name: LiquityActivePool
-        address: []
-      - name: LiquityDefaultPool
-        address: []
-      - name: ERC20FeeToken
-        address: []
-      - name: StableToken
-        address: []
-      - name: BreakerBox
-        address: []
-      - name: MedianDeltaBreaker
-        address: []
-      - name: ValueDeltaBreaker
-        address: []
-      - name: WormholeNttManager
-        address: []
-      - name: WormholeTransceiver
-        address: []
-
   # ---------------------------------------------------------------------------
   # Celo Mainnet (chain 42220)
   # ---------------------------------------------------------------------------

@@ -1,11 +1,14 @@
 import type { SusdsYieldDailySnapshot } from "envio";
 import { SECONDS_PER_DAY, dayBucket } from "../../helpers.js";
-import { susdsSharePriceEffect } from "../../rpc/effects.js";
+import {
+  blockTimestampEffect,
+  susdsSharePriceEffect,
+} from "../../rpc/effects.js";
 import { computeYieldTotals } from "./positions.js";
 import {
+  ETHEREUM_CHAIN_ID,
   SUSDS_ADDRESS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
-  WAD,
   ZERO,
   type BlockMeta,
   type SusdsContext,
@@ -142,41 +145,49 @@ export async function recordSusdsYieldDailySnapshot(
 export async function readSharePrice(
   context: SusdsContext,
   meta: BlockMeta,
-  fallbackSharePriceUsdWei?: bigint | null,
 ): Promise<bigint> {
-  const sharePriceUsdWei = await readSharePriceOrNull(
-    context,
-    meta,
-    fallbackSharePriceUsdWei,
-  );
-  if (sharePriceUsdWei !== null) return sharePriceUsdWei;
-  throw new Error(
-    `[sUSDS] convertToAssets(1e18) unavailable at block ${meta.blockNumber}`,
-  );
-}
-
-async function readSharePriceOrNull(
-  context: SusdsContext,
-  meta: BlockMeta,
-  fallbackSharePriceUsdWei?: bigint | null,
-): Promise<bigint | null> {
-  let sharePriceUsdWei: bigint | null;
-  try {
-    sharePriceUsdWei = await context.effect(susdsSharePriceEffect, {
-      chainId: meta.chainId,
-      tokenAddress: SUSDS_ADDRESS,
-      blockNumber: meta.blockNumber,
-    });
-  } catch {
-    sharePriceUsdWei = null;
+  const sharePriceUsdWei = await context.effect(susdsSharePriceEffect, {
+    chainId: meta.chainId,
+    tokenAddress: SUSDS_ADDRESS,
+    blockNumber: meta.blockNumber,
+  });
+  if (sharePriceUsdWei === null) {
+    throw new Error(
+      `[sUSDS] convertToAssets(1e18) unavailable at block ${meta.blockNumber}`,
+    );
   }
-  return sharePriceUsdWei ?? fallbackSharePriceUsdWei ?? null;
+  return sharePriceUsdWei;
 }
 
-export function sharePriceFromAssetsAndShares(
-  assets: bigint,
-  shares: bigint,
-): bigint | null {
-  if (shares <= ZERO) return null;
-  return (assets * WAD) / shares;
+export async function recordSusdsYieldHeartbeatSnapshot(
+  context: SusdsContext,
+  blockNumber: bigint,
+): Promise<boolean> {
+  const blockTimestamp = await context.effect(blockTimestampEffect, {
+    chainId: ETHEREUM_CHAIN_ID,
+    blockNumber,
+  });
+  if (blockTimestamp === null || blockTimestamp <= 0n) return false;
+
+  const meta: BlockMeta = {
+    chainId: ETHEREUM_CHAIN_ID,
+    blockNumber,
+    blockTimestamp,
+  };
+  if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
+
+  const sharePriceUsdWei = await readSharePrice(context, meta);
+  await recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
+  return true;
+}
+
+export async function handleSusdsYieldDailySnapshotHeartbeat({
+  block,
+  context,
+}: {
+  block: { number: number | bigint };
+  context: SusdsContext;
+}): Promise<boolean> {
+  if (context.isPreload) return false;
+  return recordSusdsYieldHeartbeatSnapshot(context, BigInt(block.number));
 }
