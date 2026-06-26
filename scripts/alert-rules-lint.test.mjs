@@ -255,7 +255,7 @@ test("CLI passes against the real repository", () => {
   );
 });
 
-test("VictorOps trading-mode title is stable and body carries state", () => {
+test("VictorOps trading-mode title carries visible state and body carries action", () => {
   const source = readFileSync(
     path.resolve(
       __dirname,
@@ -273,28 +273,32 @@ test("VictorOps trading-mode title is stable and body carries state", () => {
   assert(titleStart >= 0 && titleEnd > titleStart, "title template not found");
 
   const titleTemplate = source.slice(titleStart, titleEnd);
-  assert(
-    !titleTemplate.includes("Trading halted by breaker"),
-    "VictorOps title should be the stable entity label, not the firing state",
-  );
-  assert(
-    !titleTemplate.includes("Trading resumed"),
-    "VictorOps title should be the stable entity label, not the recovery state",
-  );
-
-  // These checks intentionally match exact whitespace in the Terraform
-  // template. If you reformat the guarded template lines, update these strings.
+  // These assertions match exact whitespace in the Terraform template.
+  // If you reformat the guarded template lines, update these strings.
   assert(
     titleTemplate.includes(
-      '{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}',
+      '{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}: Trading halted by breaker',
     ),
-    "VictorOps firing title should render the affected market only",
+    "VictorOps firing title should render the affected market and visible state",
   );
   assert(
-    source.includes(
-      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ else -}}\nTrading halted by breaker.\n{{ end -}}\n{{ if $chainlinkURL -}}",
+    titleTemplate.includes(
+      '{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}: Trading resumed',
     ),
-    "single firing bodies should carry the state without repeating the market title in SMS",
+    "VictorOps resolved title should render the affected market and visible state",
+  );
+
+  assert(
+    source.includes(
+      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ end -}}\n{{ if $chainlinkURL -}}",
+    ),
+    "single firing bodies should start with the next action instead of repeating title state in SMS",
+  );
+  assert(
+    !source.includes(
+      "{{ else -}}\nTrading halted by breaker.\n{{ end -}}\n{{ if $chainlinkURL -}}",
+    ),
+    "single firing bodies should not repeat the state sentence after the title",
   );
   assert(
     source.includes(
