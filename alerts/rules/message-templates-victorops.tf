@@ -223,7 +223,7 @@ Why this matters: Aegis cannot reliably read {{ .Labels.contract }}.{{ .Labels.f
 Next action: open Aegis logs, filter for chain={{ .Labels.chain }} and call={{ .Labels.contract }}.{{ .Labels.functionName }}, and decide whether this is an RPC endpoint outage or a deterministic contract/config failure.
 - If RPC-only: check the configured primary/fallback endpoint health and provider status.
 - If deterministic: fix or revert the metric config; retrying a fallback endpoint will not help.
-- Failed samples in the current 5m window: {{ with index .Values "errorCount" }}{{ printf "%.0f" . }}{{ else }}unknown{{ end }}
+- Failed samples in the current 5m window: {{ with index .Values "errorCount" }}{{ reReplaceAll "\\.[0-9]+$" "" (printf "%v" .) }}{{ else }}unknown{{ end }}
 - Alert details: {{ .GeneratorURL }}&tab=instances
 - Logs: pnpm aegis:logs
 {{ else if eq .Labels.alertname "Aegis does not report new data" }}
