@@ -96,9 +96,9 @@ resource "grafana_message_template" "victorops_trading_mode_alert_title" {
   template = <<-EOT
 {{ define "victorops.trading_mode_alert_title" -}}
 {{ if (len .Alerts.Firing) -}}
-{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}: Trading halted by breaker
+{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}
 {{ else if (len .Alerts.Resolved) -}}
-{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}: Trading resumed
+{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}
 {{ else -}}
 Trading mode alert
 {{ end -}}
@@ -136,6 +136,8 @@ ${local.monad_chainlink_slug_branches}
 {{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
 {{ if or $mixedState (gt $firingCount 1) -}}
 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker
+{{ else -}}
+Trading halted by breaker.
 {{ end -}}
 {{ if $chainlinkURL -}}
 Next action: verify the Chainlink data source, then ack/snooze if the move is real. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
@@ -150,7 +152,34 @@ Alert time: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
-Trading resumed for {{ $rateFeedWithSlash }} [{{ $chain }}].
+{{ $chainId := "" -}}
+${local.chain_id_branches}
+{{ $chainlinkFeedPath := "" -}}
+${local.chainlink_feed_path_branches}
+{{ $pool := "" -}}
+{{ $chainlinkSlug := "" -}}
+{{ if eq .Labels.chain "celo" -}}
+${local.celo_pool_branches}
+${local.celo_chainlink_slug_branches}
+{{ end -}}
+{{ if eq .Labels.chain "monad" -}}
+${local.monad_pool_branches}
+${local.monad_chainlink_slug_branches}
+{{ end -}}
+{{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
+{{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
+{{ $chainlinkURL := "" -}}
+{{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
+{{ if or $mixedState (gt $resolvedCount 1) -}}
+{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed
+{{ else -}}
+Trading resumed.
+{{ end -}}
+{{ if $chainlinkURL -}}
+- Chainlink data source: {{ $chainlinkURL }}
+{{ end -}}
+- Breaker status: {{ $poolURL }}
+Resolved at: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ end -}}
 
 {{ if eq $firingCount 0 }}No alerts are currently firing.{{ end }}
