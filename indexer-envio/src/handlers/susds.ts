@@ -2,6 +2,7 @@ import { ZERO_ADDRESS } from "../constants.js";
 import { asAddress, eventId } from "../helpers.js";
 import { indexer } from "../indexer.js";
 import {
+  handleSusdsYieldDailySnapshotHeartbeat,
   readSharePrice,
   recordSusdsYieldDailySnapshot,
   sharePriceFromAssetsAndShares,
@@ -19,7 +20,10 @@ import {
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
-import { SUSDS_REVENUE_LAUNCH_BLOCK } from "../startupChecks.js";
+import {
+  STETH_FIRST_TRACKED_EVENT_BLOCK,
+  SUSDS_REVENUE_LAUNCH_BLOCK,
+} from "../startupChecks.js";
 
 export {
   ETHEREUM_CHAIN_ID,
@@ -35,7 +39,9 @@ export {
 
 export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
-export const ETHEREUM_RESERVE_YIELD_CHAIN_ANCHOR_INTERVAL = 10_000_000;
+export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL = 3_000;
+export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK =
+  STETH_FIRST_TRACKED_EVENT_BLOCK;
 
 type ChainFilterInput = {
   id: number | string;
@@ -53,28 +59,41 @@ export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
   if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
   const chainStartBlock = finiteNumber(chain.startBlock);
   if (chainStartBlock == null) return false;
+  const start = Math.max(
+    SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
+    chainStartBlock,
+  );
+  const preRevenueEnd = SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1;
+  const chainEndBlock = finiteNumber(chain.endBlock);
+  const end =
+    chainEndBlock != null && chainEndBlock > 0
+      ? Math.min(preRevenueEnd, chainEndBlock)
+      : preRevenueEnd;
+  if (start > end) return false;
   return {
     block: {
       number: {
-        _gte: chainStartBlock,
-        _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
+        _gte: start,
+        _lte: end,
+        _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
       },
     },
   };
 }
 
-export function ethereumReserveYieldChainAnchorFilter(chain: ChainFilterInput) {
-  if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
-  const chainStartBlock = finiteNumber(chain.startBlock);
-  if (chainStartBlock == null) return false;
-  return {
-    block: {
-      number: {
-        _gte: chainStartBlock,
-        _every: ETHEREUM_RESERVE_YIELD_CHAIN_ANCHOR_INTERVAL,
-      },
-    },
-  };
+export function susdsDailySnapshotHeartbeatFilter(
+  chain: Pick<ChainFilterInput, "id">,
+) {
+  return finiteNumber(chain.id) === ETHEREUM_CHAIN_ID
+    ? {
+        block: {
+          number: {
+            _gte: SUSDS_DAILY_HEARTBEAT_START_BLOCK,
+            _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
+          },
+        },
+      }
+    : false;
 }
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
@@ -228,13 +247,22 @@ indexer.onEvent(
 
 indexer.onBlock(
   {
-    name: "EthereumReserveYieldChainAnchor",
-    where: ({ chain }) => ethereumReserveYieldChainAnchorFilter(chain),
+    name: "SusdsChainAdvanceHeartbeat",
+    where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
   },
   async () => {
-    // Hosted Envio 3.0.0 currently needs an Ethereum onBlock registration for
-    // this chain to start. Use a very wide no-op anchor instead of the daily
-    // sUSDS heartbeat; frequent pre-launch onBlock delivery wedges hosted
-    // replays. Event-driven sUSDS snapshots still run.
+    // Hosted Envio 3.0.0 needs bounded Ethereum onBlock work to advance from
+    // the old stETH start block before sUSDS revenue launch. Keep this sparse
+    // and no-op; the post-launch heartbeat below writes actual snapshots.
+  },
+);
+
+indexer.onBlock(
+  {
+    name: "SusdsYieldDailySnapshotHeartbeat",
+    where: ({ chain }) => susdsDailySnapshotHeartbeatFilter(chain),
+  },
+  async ({ block, context }) => {
+    await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
   },
 );
