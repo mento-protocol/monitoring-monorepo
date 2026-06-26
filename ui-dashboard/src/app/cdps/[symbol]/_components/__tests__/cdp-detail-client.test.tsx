@@ -228,13 +228,13 @@ function depositor(overrides: Partial<CdpDepositor> = {}): CdpDepositor {
   return {
     id: "dep-1",
     address: "0xdepositor",
-    lastTouchedDeposit: wei(25),
+    lastTouchedDeposit: wei(15),
     stashedColl: wei(1),
     lastUpdatedAt: String(NOW),
     cumulativeDeposited: wei(25),
-    cumulativeWithdrawn: "0",
+    cumulativeWithdrawn: wei(5),
     yieldGainClaimedCum: "0",
-    ethGainClaimedCum: "0",
+    ethGainClaimedCum: wei(2),
     ...overrides,
   };
 }
@@ -435,8 +435,14 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("Current Deposit");
     expect(handle!.container.textContent).toContain("Claimable Collateral");
     expect(handle!.container.textContent).toContain("Gross Deposited");
-    expect(handle!.container.textContent).toContain("User Withdrawn");
-    expect(handle!.container.textContent).toContain("Collateral Claimed");
+    expect(handle!.container.textContent).toContain("Principal Withdrawn");
+    expect(handle!.container.textContent).toContain("Net Pool Offset");
+    expect(handle!.container.textContent).toContain("Collateral Received");
+    expect(handle!.container.textContent).toContain("15.00 GBPm");
+    expect(handle!.container.textContent).toContain("5.00 GBPm");
+    expect(handle!.container.textContent).toContain("2.00 USDm");
+    expect(handle!.container.textContent).not.toContain("User Withdrawn");
+    expect(handle!.container.textContent).not.toContain("Collateral Claimed");
     expect(handle!.container.textContent).not.toContain("Debt Snapshot");
     expect(handle!.container.textContent).not.toContain("Collateral Snapshot");
     expect(handle!.container.textContent).not.toContain("Debt Position");

@@ -30,6 +30,7 @@ import {
 } from "../../_lib/types";
 import {
   cdpSymbolSlug,
+  formatSignedWei,
   formatTokenAmount,
   redemptionEventSubtitle,
 } from "../../_lib/format";
@@ -422,10 +423,11 @@ function DepositorTable({
         Stability Pool LPs
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Current deposit is the LP&apos;s compounded stability-pool balance after
-        liquidation offsets. Gross deposited and user withdrawn are lifetime
-        wallet actions; claimable collateral and claimed collateral are shown
-        separately.
+        Principal flow reconciles as gross deposited minus principal withdrawn
+        minus net pool offset equals current deposit. Net pool offset is derived
+        from the other GBPm columns and captures passive stability-pool balance
+        changes, including liquidation offsets, net of unclaimed debt-token
+        gain. Collateral columns are separate USDm liquidation gains.
       </p>
       {truncated && (
         <p className="mb-3 text-xs text-amber-400" role="status">
@@ -441,11 +443,12 @@ function DepositorTable({
           <thead>
             <Row>
               <Th>LP</Th>
+              <Th align="right">Gross Deposited</Th>
+              <Th align="right">Principal Withdrawn</Th>
+              <Th align="right">Net Pool Offset</Th>
               <Th align="right">Current Deposit</Th>
               <Th align="right">Claimable Collateral</Th>
-              <Th align="right">Gross Deposited</Th>
-              <Th align="right">User Withdrawn</Th>
-              <Th align="right">Collateral Claimed</Th>
+              <Th align="right">Collateral Received</Th>
               <Th align="right">Updated</Th>
             </Row>
           </thead>
@@ -456,16 +459,19 @@ function DepositorTable({
                   <AddressLink address={depositor.address} chainId={chainId} />
                 </Td>
                 <Td align="right">
-                  {formatTokenAmount(depositor.lastTouchedDeposit, symbol)}
-                </Td>
-                <Td align="right">
-                  {formatTokenAmount(depositor.stashedColl, "USDm")}
-                </Td>
-                <Td align="right">
                   {formatTokenAmount(depositor.cumulativeDeposited, symbol)}
                 </Td>
                 <Td align="right">
                   {formatTokenAmount(depositor.cumulativeWithdrawn, symbol)}
+                </Td>
+                <Td align="right">
+                  {formatSignedWei(depositorNetPoolOffset(depositor), symbol)}
+                </Td>
+                <Td align="right">
+                  {formatTokenAmount(depositor.lastTouchedDeposit, symbol)}
+                </Td>
+                <Td align="right">
+                  {formatTokenAmount(depositor.stashedColl, "USDm")}
                 </Td>
                 <Td align="right">
                   {formatTokenAmount(depositor.ethGainClaimedCum, "USDm")}
@@ -478,4 +484,12 @@ function DepositorTable({
       )}
     </section>
   );
+}
+
+function depositorNetPoolOffset(depositor: CdpDepositor): string {
+  return (
+    BigInt(depositor.cumulativeDeposited) -
+    BigInt(depositor.cumulativeWithdrawn) -
+    BigInt(depositor.lastTouchedDeposit)
+  ).toString();
 }
