@@ -64,6 +64,27 @@ export function susdsDailySnapshotHeartbeatFilter(chain: ChainFilterInput) {
   };
 }
 
+export function ethereumReserveYieldStartAnchorFilter(chain: ChainFilterInput) {
+  if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
+  const chainStartBlock = finiteNumber(chain.startBlock);
+  if (chainStartBlock == null) return false;
+  return {
+    block: {
+      number: {
+        _gte: chainStartBlock,
+        _lte: chainStartBlock,
+      },
+    },
+  };
+}
+
+function blockTimestamp(block: {
+  readonly number: number | bigint;
+  readonly timestamp?: number | bigint;
+}): bigint {
+  return BigInt(block.timestamp ?? 0);
+}
+
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
   { from: address },
   { to: address },
@@ -210,6 +231,21 @@ indexer.onEvent(
       sharePriceUsdWei,
       totals,
     );
+  },
+);
+
+indexer.onBlock(
+  {
+    name: "EthereumReserveYieldStartAnchor",
+    where: ({ chain }) => ethereumReserveYieldStartAnchorFilter(chain),
+  },
+  async ({ block, context }) => {
+    context.EthereumReserveYieldAnchor.set({
+      id: `${ETHEREUM_CHAIN_ID}-reserve-yield-start`,
+      chainId: ETHEREUM_CHAIN_ID,
+      blockNumber: BigInt(block.number),
+      blockTimestamp: blockTimestamp(block),
+    });
   },
 );
 

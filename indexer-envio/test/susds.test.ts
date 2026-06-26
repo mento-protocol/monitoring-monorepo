@@ -18,6 +18,7 @@ import {
   V3_REVENUE_LAUNCH_TIMESTAMP,
   SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
   SUSDS_DAILY_HEARTBEAT_START_BLOCK,
+  ethereumReserveYieldStartAnchorFilter,
   handleSusdsYieldDailySnapshotHeartbeat,
   recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
@@ -642,6 +643,21 @@ describe("sUSDS reserve yield accounting", () => {
 
   it("accepts hosted string chain fields for sUSDS onBlock filters", () => {
     assert.deepEqual(
+      ethereumReserveYieldStartAnchorFilter({
+        id: String(ETHEREUM_CHAIN_ID),
+        startBlock: String(STETH_FIRST_TRACKED_EVENT_BLOCK),
+      }),
+      {
+        block: {
+          number: {
+            _gte: STETH_FIRST_TRACKED_EVENT_BLOCK,
+            _lte: STETH_FIRST_TRACKED_EVENT_BLOCK,
+          },
+        },
+      },
+    );
+
+    assert.deepEqual(
       susdsDailySnapshotHeartbeatFilter({
         id: String(ETHEREUM_CHAIN_ID),
         startBlock: String(STETH_FIRST_TRACKED_EVENT_BLOCK),
@@ -658,6 +674,13 @@ describe("sUSDS reserve yield accounting", () => {
 
     assert.equal(
       susdsDailySnapshotHeartbeatFilter({
+        id: "42220",
+        startBlock: STETH_FIRST_TRACKED_EVENT_BLOCK,
+      }),
+      false,
+    );
+    assert.equal(
+      ethereumReserveYieldStartAnchorFilter({
         id: "42220",
         startBlock: STETH_FIRST_TRACKED_EVENT_BLOCK,
       }),
