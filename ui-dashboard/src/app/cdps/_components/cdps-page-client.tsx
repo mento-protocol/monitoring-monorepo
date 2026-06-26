@@ -74,6 +74,7 @@ function useOps24hByInstance(chainId: number) {
   const spData = stabilityPoolEvents.data;
   const isLoading = transactions.isLoading || stabilityPoolEvents.isLoading;
   const hasError = transactions.error != null;
+  const spEventsUnavailable = stabilityPoolEvents.error != null;
   return useMemo(() => {
     const merged = mergeTransactionRows(
       txData,
@@ -87,20 +88,22 @@ function useOps24hByInstance(chainId: number) {
       if (Number(row.timestamp) < cutoff) continue;
       counts.set(row.instanceId, (counts.get(row.instanceId) ?? 0) + 1);
     }
-    const undercountPossible = [
-      txData?.LiquidationEvent,
-      txData?.RedemptionEvent,
-      txData?.SpRebalanceEvent,
-      spData?.StabilityPoolOperationEvent,
-      txData?.TroveOperationEvent,
-    ].some((rows) => isKindAtCapInWindow(rows, cutoff));
+    const undercountPossible =
+      spEventsUnavailable ||
+      [
+        txData?.LiquidationEvent,
+        txData?.RedemptionEvent,
+        txData?.SpRebalanceEvent,
+        spData?.StabilityPoolOperationEvent,
+        txData?.TroveOperationEvent,
+      ].some((rows) => isKindAtCapInWindow(rows, cutoff));
     return {
       ops24hByInstance: counts,
       txCapped: undercountPossible,
       isLoading,
       hasError,
     };
-  }, [txData, spData, isLoading, hasError]);
+  }, [txData, spData, isLoading, hasError, spEventsUnavailable]);
 }
 
 export function CdpsPageClient() {

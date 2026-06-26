@@ -393,7 +393,7 @@ describe("CdpsPageClient", () => {
 
     render(handle!, <CdpsPageClient />);
 
-    expect(handle!.container.textContent).toContain("1 ops in 24h");
+    expect(handle!.container.textContent).toContain("≥1 ops in 24h");
     expect(handle!.container.textContent).toContain(
       "Stability pool deposit and withdraw events are temporarily unavailable",
     );
