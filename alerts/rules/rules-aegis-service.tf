@@ -146,8 +146,8 @@ resource "grafana_rule_group" "aegis_service_alerts" {
     exec_err_state = "Error"
     for            = "5m"
     annotations = {
-      description = "Triggers if the time between the last aegis update and now is bigger than 5 mins."
-      summary     = "Tracks the time passed since the last update from aegis. \n\nThis alert triggering means aegis did not push any new data for > 5mins.\n\nIt is highly possible that the aegis is down."
+      description = "Aegis has not pushed any new metrics for more than 5 minutes. Protocol alert inputs may be stale."
+      summary     = "Aegis data reporting is stale. Check App Engine service health and Aegis logs immediately."
     }
     labels = {
       service  = "aegis"

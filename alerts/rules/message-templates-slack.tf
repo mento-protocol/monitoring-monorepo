@@ -235,9 +235,9 @@ resource "grafana_message_template" "slack_aegis_service_alert_title" {
 {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
 {{ .CommonLabels.alertname -}}
 {{ else if (len .Alerts.Firing) -}}
-{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ if eq .Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := .Labels.chain | title -}}🚨 {{ $chain }}: Aegis view calls failing for {{ .Labels.contract }}.{{ .Labels.functionName }}{{ else if eq .Labels.alertname "Aegis does not report new data" -}}🚨 Aegis has stopped reporting data{{ else -}}🚨 {{ .Labels.alertname }}{{ end -}}{{ end -}}
+{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}🚨 {{ $chain }}: Aegis view calls failing for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}🚨 Aegis has stopped reporting data{{ else -}}🚨 {{ $alert.Labels.alertname }}{{ end -}}{{ end -}}
 {{- else if (len .Alerts.Resolved) -}}
-{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ if eq .Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := .Labels.chain | title -}}✅ {{ $chain }}: Aegis view calls recovered for {{ .Labels.contract }}.{{ .Labels.functionName }}{{ else if eq .Labels.alertname "Aegis does not report new data" -}}✅ Aegis data reporting recovered{{ else -}}✅ {{ .Labels.alertname }} resolved{{ end -}}{{ end -}}
+{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}✅ {{ $chain }}: Aegis view calls recovered for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}✅ Aegis data reporting recovered{{ else -}}✅ {{ $alert.Labels.alertname }} resolved{{ end -}}{{ end -}}
 {{- end -}}
 {{ end -}}
 EOT
@@ -257,7 +257,7 @@ Why this matters: Aegis cannot reliably read `{{ .Labels.contract }}.{{ .Labels.
 Next action: open Aegis logs, filter for `chain={{ .Labels.chain }}` and `call={{ .Labels.contract }}.{{ .Labels.functionName }}`, and decide whether this is an RPC endpoint outage or a deterministic contract/config failure.
 - If RPC-only: check the configured primary/fallback endpoint health and provider status.
 - If deterministic: fix or revert the metric config; retrying a fallback endpoint will not help.
-- Failed samples in the current 5m window: {{ with index .Values "errorCount" }}{{ . }}{{ else }}unknown{{ end }}
+- Failed samples in the current 5m window: {{ with index .Values "errorCount" }}{{ printf "%.0f" . }}{{ else }}unknown{{ end }}
 - <{{ .GeneratorURL }}&tab=instances|Alert details>
 - Logs: `pnpm aegis:logs`
 {{ else if eq .Labels.alertname "Aegis does not report new data" }}
