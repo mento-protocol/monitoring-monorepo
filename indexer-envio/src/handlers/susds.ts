@@ -2,7 +2,6 @@ import { ZERO_ADDRESS } from "../constants.js";
 import { asAddress, eventId } from "../helpers.js";
 import { indexer } from "../indexer.js";
 import {
-  handleSusdsYieldDailySnapshotHeartbeat,
   readSharePrice,
   recordSusdsYieldDailySnapshot,
   sharePriceFromAssetsAndShares,
@@ -212,14 +211,7 @@ indexer.onEvent(
   },
 );
 
-indexer.onBlock(
-  {
-    name: "SusdsYieldDailySnapshotHeartbeat",
-    where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
-  },
-  async ({ block, context }) => {
-    // Keep the hosted-proven chain.startBlock grid. Pre-launch calls return
-    // before RPC reads; post-launch calls write daily snapshots.
-    await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
-  },
-);
+// Hosted Envio 3.0.0 replays wedge at historical pre-launch sUSDS heartbeat
+// blocks on this chain-start grid even when the handler returns before RPC
+// reads. Event-driven sUSDS movements still write daily snapshots; empty-day
+// synthetic snapshots are disabled until the hosted heartbeat path is safe.
