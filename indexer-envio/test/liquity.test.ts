@@ -586,11 +586,80 @@ describe("Liquity CDP helpers", () => {
       assert.ok(instance);
       assert.equal(instance.lastEventBlock, 101n);
       assert.equal(instance.lastEventTimestamp, 3_700n);
-      assert.equal(mockDb.entities.LiquityInstanceSnapshot.getAll().length, 0);
+      assert.equal(mockDb.entities.LiquityInstanceSnapshot.getAll().length, 1);
       assert.equal(
         mockDb.entities.LiquityInstanceDailySnapshot.getAll().length,
         0,
       );
+    });
+
+    it("flushes snapshots before touching paired stability pool operations across day boundaries", async () => {
+      const market = LIQUITY_MARKETS[0]!;
+      const collateralId = makeCollateralId(market);
+      const mockDb0 = LiquityMockDb.createMockDb();
+      mockDb0.entities.LiquityInstance.set({
+        ...makeLiquityInstance(collateralId, market.chainId, 0n),
+        spDeposits: 123n,
+        systemDebt: 456n,
+      });
+      const txHash =
+        "0x2000000000000000000000000000000000000000000000000000000000000000";
+      const depositor = "0x000000000000000000000000000000000000dEaD";
+      const timestamp = 86_500;
+      const depositOperation =
+        LiquityStabilityPool.DepositOperation.createMockEvent({
+          _depositor: depositor,
+          _operation: 0,
+          _depositLossSinceLastOperation: 0n,
+          _topUpOrWithdrawal: 0n,
+          _yieldGainSinceLastOperation: 1n,
+          _yieldGainClaimed: 1n,
+          _ethGainSinceLastOperation: 0n,
+          _ethGainClaimed: 0n,
+          mockEventData: {
+            chainId: market.chainId,
+            srcAddress: market.stabilityPool,
+            logIndex: 10,
+            block: { number: 100, timestamp },
+            transaction: { hash: txHash },
+          },
+        });
+      const mockDb1 = await LiquityStabilityPool.DepositOperation.processEvent({
+        event: depositOperation,
+        mockDb: mockDb0,
+      });
+      const depositUpdated =
+        LiquityStabilityPool.DepositUpdated.createMockEvent({
+          _depositor: depositor,
+          _newDeposit: 0n,
+          _stashedColl: 0n,
+          _snapshotP: 0n,
+          _snapshotS: 0n,
+          _snapshotB: 0n,
+          _snapshotScale: 0n,
+          mockEventData: {
+            chainId: market.chainId,
+            srcAddress: market.stabilityPool,
+            logIndex: 11,
+            block: { number: 101, timestamp },
+            transaction: { hash: txHash },
+          },
+        });
+
+      const mockDb = await LiquityStabilityPool.DepositUpdated.processEvent({
+        event: depositUpdated,
+        mockDb: mockDb1,
+      });
+
+      const instance = mockDb.entities.LiquityInstance.get(collateralId);
+      const dailySnapshots =
+        mockDb.entities.LiquityInstanceDailySnapshot.getAll();
+      assert.ok(instance);
+      assert.equal(instance.lastEventBlock, 101n);
+      assert.equal(instance.lastEventTimestamp, BigInt(timestamp));
+      assert.equal(instance.currentDayBucket, 86_400n);
+      assert.equal(dailySnapshots.length, 1);
+      assert.equal(dailySnapshots[0]?.timestamp, 0n);
     });
 
     it("leaves market last-event fields unchanged for unpaired DepositUpdated rows", async () => {

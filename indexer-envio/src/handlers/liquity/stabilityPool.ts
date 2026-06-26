@@ -196,7 +196,10 @@ indexer.onEvent(
       context.PendingDepositOperation.get(pendingKey),
     ]);
     if (context.isPreload) {
-      await preloadLiquityMarket(context, market);
+      await Promise.all([
+        preloadLiquityMarket(context, market),
+        preloadBorrowingRevenueRollover(context, collateralId, blockTimestamp),
+      ]);
       return;
     }
     if (pending !== undefined) {
@@ -240,11 +243,17 @@ indexer.onEvent(
     });
     if (operationEvent !== null) {
       context.StabilityPoolOperationEvent.set(operationEvent);
-      const instance = await getOrCreateLiquityInstance(
+      let instance = await getOrCreateLiquityInstance(
         context,
         market,
         blockNumber,
         blockTimestamp,
+      );
+      instance = await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
       );
       context.LiquityInstance.set(
         touchLiquityInstance(instance, blockNumber, blockTimestamp),

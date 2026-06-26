@@ -427,7 +427,7 @@ function DepositorTable({
         action.
       </p>
       {truncated && (
-        <p className="mb-3 text-xs text-amber-400">
+        <p className="mb-3 text-xs text-amber-400" role="status">
           Showing the first{" "}
           {CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LPs by
           latest deposit. More LPs may exist.

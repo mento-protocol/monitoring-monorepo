@@ -489,7 +489,8 @@ describe("CdpDetailClient", () => {
 
     render(handle!);
 
-    expect(handle!.container.textContent).toContain(
+    const notice = handle!.container.querySelector('[role="status"]');
+    expect(notice?.textContent).toContain(
       `Showing the first ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LPs`,
     );
   });
