@@ -21,7 +21,7 @@ import {
   type EventMeta,
 } from "./susds/shared.js";
 import {
-  SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+  STETH_FIRST_TRACKED_EVENT_BLOCK,
   SUSDS_REVENUE_LAUNCH_BLOCK,
 } from "../startupChecks.js";
 
@@ -40,7 +40,7 @@ export {
 const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
 export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL = 50_000;
 export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK =
-  SUSDS_FIRST_TRACKED_EVENT_BLOCK;
+  STETH_FIRST_TRACKED_EVENT_BLOCK;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
@@ -200,7 +200,10 @@ indexer.onBlock(
         ? {
             block: {
               number: {
-                _gte: SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
+                _gte: Math.max(
+                  SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
+                  chain.startBlock,
+                ),
                 _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
               },
             },

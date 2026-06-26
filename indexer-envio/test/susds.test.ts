@@ -29,7 +29,10 @@ import {
   blockTimestampEffect,
   susdsSharePriceEffect,
 } from "../src/rpc/effects.ts";
-import { SUSDS_REVENUE_LAUNCH_BLOCK } from "../src/startupChecks.ts";
+import {
+  STETH_FIRST_TRACKED_EVENT_BLOCK,
+  SUSDS_REVENUE_LAUNCH_BLOCK,
+} from "../src/startupChecks.ts";
 
 type MockDb = MockDbWith<{
   SusdsCostBasisLot: EntityCollection;
@@ -612,6 +615,10 @@ describe("sUSDS reserve yield accounting", () => {
     const mockDb = MockDb.createMockDb();
     assert.ok(
       SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK < SUSDS_REVENUE_LAUNCH_BLOCK,
+    );
+    assert.equal(
+      SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
+      STETH_FIRST_TRACKED_EVENT_BLOCK,
     );
     const preLaunchHeartbeatCount =
       Math.floor(
