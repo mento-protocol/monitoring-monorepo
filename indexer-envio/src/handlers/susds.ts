@@ -2,7 +2,6 @@ import { ZERO_ADDRESS } from "../constants.js";
 import { asAddress, eventId } from "../helpers.js";
 import { indexer } from "../indexer.js";
 import {
-  handleSusdsYieldDailySnapshotHeartbeat,
   readSharePrice,
   recordSusdsYieldDailySnapshot,
   sharePriceFromAssetsAndShares,
@@ -63,15 +62,18 @@ export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
   };
 }
 
-function heartbeatBlockNumber(block: {
-  number?: number | bigint | string | null;
-}): bigint | null {
-  if (block.number == null || block.number === "") return null;
-  try {
-    return BigInt(block.number);
-  } catch {
-    return null;
-  }
+export function ethereumReserveYieldChainAnchorFilter(chain: ChainFilterInput) {
+  if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
+  const chainStartBlock = finiteNumber(chain.startBlock);
+  if (chainStartBlock == null) return false;
+  return {
+    block: {
+      number: {
+        _gte: chainStartBlock,
+        _lte: chainStartBlock,
+      },
+    },
+  };
 }
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
@@ -225,13 +227,12 @@ indexer.onEvent(
 
 indexer.onBlock(
   {
-    name: "SusdsYieldDailySnapshotHeartbeat",
-    where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
+    name: "EthereumReserveYieldChainAnchor",
+    where: ({ chain }) => ethereumReserveYieldChainAnchorFilter(chain),
   },
-  async ({ block, context }) => {
-    const blockNumber = heartbeatBlockNumber(block);
-    if (blockNumber === null) return;
-    if (blockNumber < BigInt(SUSDS_REVENUE_LAUNCH_BLOCK)) return;
-    await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
+  async () => {
+    // Hosted Envio 3.0.0 currently needs an Ethereum onBlock registration for
+    // this chain to start, but historical recurring sUSDS heartbeat delivery
+    // wedges on pre-launch blocks. Event-driven sUSDS snapshots still run.
   },
 );

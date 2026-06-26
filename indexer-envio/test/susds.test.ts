@@ -21,6 +21,7 @@ import {
   handleSusdsYieldDailySnapshotHeartbeat,
   recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
+  ethereumReserveYieldChainAnchorFilter,
   susdsChainAdvanceHeartbeatFilter,
 } from "../src/handlers/susds.ts";
 import { readSharePrice } from "../src/handlers/susds/dailySnapshots.ts";
@@ -632,6 +633,21 @@ describe("sUSDS reserve yield accounting", () => {
   });
 
   it("accepts hosted string chain fields for sUSDS onBlock filters", () => {
+    assert.deepEqual(
+      ethereumReserveYieldChainAnchorFilter({
+        id: String(ETHEREUM_CHAIN_ID),
+        startBlock: String(SUSDS_FIRST_TRACKED_EVENT_BLOCK),
+      }),
+      {
+        block: {
+          number: {
+            _gte: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+            _lte: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+          },
+        },
+      },
+    );
+
     assert.deepEqual(
       susdsChainAdvanceHeartbeatFilter({
         id: String(ETHEREUM_CHAIN_ID),
