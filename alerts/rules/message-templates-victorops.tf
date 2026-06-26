@@ -196,11 +196,15 @@ EOT
 resource "grafana_message_template" "victorops_aegis_service_alert_title" {
   name     = "VictorOps - Aegis Service Alert Title"
   template = <<-EOT
-{{ define "victorops.aegis_service_alert_title" }}
-[{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
-{{ if (len .Alerts.Firing) }}Firing: {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end }}{{ $alert.Labels.alertname }}{{ end }}{{ end }}
-{{ if (len .Alerts.Resolved) }}Resolved: {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end }}{{ $alert.Labels.alertname }}{{ end }}{{ end }}
-{{ end }}
+{{ define "victorops.aegis_service_alert_title" -}}
+{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
+{{ .CommonLabels.alertname -}}
+{{ else if (len .Alerts.Firing) -}}
+{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}{{ $chain }}: Aegis view calls failing for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}Aegis has stopped reporting data{{ else -}}{{ $alert.Labels.alertname }}{{ end -}}{{ end -}}
+{{ else if (len .Alerts.Resolved) -}}
+{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}{{ $chain }}: Aegis view calls recovered for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}Aegis data reporting recovered{{ else -}}{{ $alert.Labels.alertname }} resolved{{ end -}}{{ end -}}
+{{ end -}}
+{{ end -}}
 EOT
 }
 
@@ -208,34 +212,45 @@ resource "grafana_message_template" "victorops_aegis_service_alert_message" {
   name     = "VictorOps - Aegis Service Alert Message"
   template = <<-EOT
 {{ define "victorops.aegis_service_alert_message" }}
-{{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
-{{ range .Alerts.Firing }}
-{{ if eq .Labels.alertname "Number of failed rpc calls" }}
-FIRING: High number of failed RPC calls detected
-- More than 10 errors were detected in a 5-minute timespan
-- Check the Aegis service logs for potential issues via `pnpm aegis:logs`
-- Verify RPC endpoint connectivity and stability
+{{ $firingCount := len .Alerts.Firing -}}
+{{ $mixedState := and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
+{{ range .Alerts.Firing -}}
+{{ if eq .Labels.alertname "Aegis view-call failures [production]" }}
+{{ $chain := .Labels.chain | title -}}
+{{ if $mixedState }}{{ $chain }}: Aegis view calls failing for {{ .Labels.contract }}.{{ .Labels.functionName }}
+{{ end -}}
+Why this matters: Aegis cannot reliably read {{ .Labels.contract }}.{{ .Labels.functionName }} on {{ $chain }}. These reads feed protocol monitoring metrics; if failures continue, downstream oracle, breaker, reserve, or trading-limit alerts can be delayed or suppressed.
+Next action: open Aegis logs, filter for chain={{ .Labels.chain }} and call={{ .Labels.contract }}.{{ .Labels.functionName }}, and decide whether this is an RPC endpoint outage or a deterministic contract/config failure.
+- If RPC-only: check the configured primary/fallback endpoint health and provider status.
+- If deterministic: fix or revert the metric config; retrying a fallback endpoint will not help.
+- Failed samples in the current 5m window: {{ with index .Values "errorCount" }}{{ reReplaceAll "\\.[0-9]+$" "" (printf "%v" .) }}{{ else }}unknown{{ end }}
+- Alert details: {{ .GeneratorURL }}&tab=instances
+- Logs: pnpm aegis:logs
 {{ else if eq .Labels.alertname "Aegis does not report new data" }}
-FIRING: Aegis service is not reporting new data
-- Aegis has not pushed any new data for more than 5 minutes
-- The service may be down or experiencing issues
-- Check Aegis service status and logs immediately
+{{ if $mixedState }}Aegis has stopped reporting data
+{{ end -}}
+Why this matters: Aegis has not pushed any new metrics for more than 5 minutes, so protocol alert inputs may be stale.
+Next action: check App Engine service health and Aegis logs immediately.
+- Alert details: {{ .GeneratorURL }}&tab=instances
+- Logs: pnpm aegis:logs
 {{ else }}
 FIRING: {{ .Labels.alertname }}
 {{ .Annotations.summary }}
 {{ end }}
 {{ end }}
-{{ range .Alerts.Resolved }}
-{{ if eq .Labels.alertname "Number of failed rpc calls" }}
-RESOLVED: RPC call failures have decreased
-- The number of failed RPC calls is now within acceptable limits
+{{ range .Alerts.Resolved -}}
+{{ if eq .Labels.alertname "Aegis view-call failures [production]" }}
+{{ $chain := .Labels.chain | title -}}
+Aegis view calls recovered for {{ .Labels.contract }}.{{ .Labels.functionName }} on {{ $chain }}.
+- The per-call error rate is back below 10 failed samples per 5 minutes.
 {{ else if eq .Labels.alertname "Aegis does not report new data" }}
-RESOLVED: Aegis service is reporting data again
-- Aegis has resumed normal data reporting
+Aegis data reporting recovered.
+- Aegis has resumed normal data reporting.
 {{ else }}
 RESOLVED: {{ .Labels.alertname }}
 {{ end }}
 {{ end }}
+{{ if eq $firingCount 0 }}No alerts are currently firing.{{ end }}
 {{ end }}
 EOT
 }
