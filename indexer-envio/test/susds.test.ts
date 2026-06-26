@@ -13,6 +13,8 @@ import {
 } from "../src/EventHandlers.ts";
 import {
   ETHEREUM_CHAIN_ID,
+  ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT,
+  ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL,
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
@@ -32,7 +34,6 @@ import {
 } from "../src/rpc/effects.ts";
 import {
   STETH_FIRST_TRACKED_EVENT_BLOCK,
-  SUSDS_FIRST_TRACKED_EVENT_BLOCK,
   SUSDS_REVENUE_LAUNCH_BLOCK,
 } from "../src/startupChecks.ts";
 
@@ -615,16 +616,8 @@ describe("sUSDS reserve yield accounting", () => {
 
   it("skips pre-revenue-launch heartbeat blocks without reading effects", async () => {
     const mockDb = MockDb.createMockDb();
-    assert.equal(
-      SUSDS_DAILY_HEARTBEAT_START_BLOCK,
-      SUSDS_FIRST_TRACKED_EVENT_BLOCK,
-    );
-    const preLaunchHeartbeatCount =
-      Math.floor(
-        (SUSDS_REVENUE_LAUNCH_BLOCK - SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1) /
-          SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
-      ) + 1;
-    assert.ok(preLaunchHeartbeatCount < 2_000);
+    assert.equal(SUSDS_DAILY_HEARTBEAT_START_BLOCK, SUSDS_REVENUE_LAUNCH_BLOCK);
+    assert.ok(ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT < 4_000);
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
       {
@@ -634,7 +627,7 @@ describe("sUSDS reserve yield accounting", () => {
           throw new Error("pre-launch heartbeat must not read effects");
         },
       } as unknown as Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0],
-      BigInt(SUSDS_DAILY_HEARTBEAT_START_BLOCK),
+      BigInt(SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1),
     );
 
     assert.equal(didWrite, false);
@@ -651,7 +644,11 @@ describe("sUSDS reserve yield accounting", () => {
         block: {
           number: {
             _gte: STETH_FIRST_TRACKED_EVENT_BLOCK,
-            _lte: STETH_FIRST_TRACKED_EVENT_BLOCK,
+            _lte:
+              STETH_FIRST_TRACKED_EVENT_BLOCK +
+              (ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT - 1) *
+                ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL,
+            _every: ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL,
           },
         },
       },
