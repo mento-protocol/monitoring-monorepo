@@ -20,7 +20,7 @@ import {
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
-import { STETH_FIRST_TRACKED_EVENT_BLOCK } from "../startupChecks.js";
+import { SUSDS_FIRST_TRACKED_EVENT_BLOCK } from "../startupChecks.js";
 
 export {
   ETHEREUM_CHAIN_ID,
@@ -36,7 +36,7 @@ export {
 
 export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 1_000;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK =
-  STETH_FIRST_TRACKED_EVENT_BLOCK;
+  SUSDS_FIRST_TRACKED_EVENT_BLOCK;
 
 type ChainFilterInput = {
   id: number | string;
