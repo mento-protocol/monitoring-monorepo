@@ -13,14 +13,11 @@ import {
 } from "../src/EventHandlers.ts";
 import {
   ETHEREUM_CHAIN_ID,
-  ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT,
-  ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL,
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
   SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
   SUSDS_DAILY_HEARTBEAT_START_BLOCK,
-  ethereumReserveYieldStartAnchorFilter,
   handleSusdsYieldDailySnapshotHeartbeat,
   recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
@@ -616,8 +613,16 @@ describe("sUSDS reserve yield accounting", () => {
 
   it("skips pre-revenue-launch heartbeat blocks without reading effects", async () => {
     const mockDb = MockDb.createMockDb();
-    assert.equal(SUSDS_DAILY_HEARTBEAT_START_BLOCK, SUSDS_REVENUE_LAUNCH_BLOCK);
-    assert.ok(ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT < 4_000);
+    assert.equal(
+      SUSDS_DAILY_HEARTBEAT_START_BLOCK,
+      SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+    );
+    const preLaunchHeartbeatCount =
+      Math.floor(
+        (SUSDS_REVENUE_LAUNCH_BLOCK - SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1) /
+          SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
+      ) + 1;
+    assert.ok(preLaunchHeartbeatCount < 2_000);
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
       {
@@ -636,25 +641,6 @@ describe("sUSDS reserve yield accounting", () => {
 
   it("accepts hosted string chain fields for sUSDS onBlock filters", () => {
     assert.deepEqual(
-      ethereumReserveYieldStartAnchorFilter({
-        id: String(ETHEREUM_CHAIN_ID),
-        startBlock: String(SUSDS_FIRST_TRACKED_EVENT_BLOCK),
-      }),
-      {
-        block: {
-          number: {
-            _gte: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
-            _lte:
-              SUSDS_FIRST_TRACKED_EVENT_BLOCK +
-              (ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT - 1) *
-                ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL,
-            _every: ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL,
-          },
-        },
-      },
-    );
-
-    assert.deepEqual(
       susdsDailySnapshotHeartbeatFilter({
         id: String(ETHEREUM_CHAIN_ID),
         startBlock: String(SUSDS_FIRST_TRACKED_EVENT_BLOCK),
@@ -671,13 +657,6 @@ describe("sUSDS reserve yield accounting", () => {
 
     assert.equal(
       susdsDailySnapshotHeartbeatFilter({
-        id: "42220",
-        startBlock: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
-      }),
-      false,
-    );
-    assert.equal(
-      ethereumReserveYieldStartAnchorFilter({
         id: "42220",
         startBlock: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
       }),

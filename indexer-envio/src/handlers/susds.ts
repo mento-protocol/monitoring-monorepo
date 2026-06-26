@@ -20,7 +20,7 @@ import {
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
-import { SUSDS_REVENUE_LAUNCH_BLOCK } from "../startupChecks.js";
+import { SUSDS_FIRST_TRACKED_EVENT_BLOCK } from "../startupChecks.js";
 
 export {
   ETHEREUM_CHAIN_ID,
@@ -34,10 +34,9 @@ export {
   recordSusdsYieldHeartbeatSnapshot,
 } from "./susds/dailySnapshots.js";
 
-export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 5_000;
-export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
-export const ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL = 1_000;
-export const ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT = 1_600;
+export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 1_000;
+export const SUSDS_DAILY_HEARTBEAT_START_BLOCK =
+  SUSDS_FIRST_TRACKED_EVENT_BLOCK;
 
 type ChainFilterInput = {
   id: number | string;
@@ -63,38 +62,6 @@ export function susdsDailySnapshotHeartbeatFilter(chain: ChainFilterInput) {
       },
     },
   };
-}
-
-export function ethereumReserveYieldStartAnchorFilter(chain: ChainFilterInput) {
-  if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
-  const chainStartBlock = finiteNumber(chain.startBlock);
-  if (chainStartBlock == null) return false;
-  const anchorEndBlock =
-    chainStartBlock +
-    (ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_COUNT - 1) *
-      ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL;
-  const chainEndBlock = finiteNumber(chain.endBlock);
-  const endBlock =
-    chainEndBlock != null && chainEndBlock > 0
-      ? Math.min(anchorEndBlock, chainEndBlock)
-      : anchorEndBlock;
-  if (chainStartBlock > endBlock) return false;
-  return {
-    block: {
-      number: {
-        _gte: chainStartBlock,
-        _lte: endBlock,
-        _every: ETHEREUM_RESERVE_YIELD_START_ANCHOR_BLOCK_INTERVAL,
-      },
-    },
-  };
-}
-
-function blockTimestamp(block: {
-  readonly number: number | bigint;
-  readonly timestamp?: number | bigint;
-}): bigint {
-  return BigInt(block.timestamp ?? 0);
 }
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
@@ -243,21 +210,6 @@ indexer.onEvent(
       sharePriceUsdWei,
       totals,
     );
-  },
-);
-
-indexer.onBlock(
-  {
-    name: "EthereumReserveYieldStartAnchor",
-    where: ({ chain }) => ethereumReserveYieldStartAnchorFilter(chain),
-  },
-  async ({ block, context }) => {
-    context.EthereumReserveYieldAnchor.set({
-      id: `${ETHEREUM_CHAIN_ID}-reserve-yield-start`,
-      chainId: ETHEREUM_CHAIN_ID,
-      blockNumber: BigInt(block.number),
-      blockTimestamp: blockTimestamp(block),
-    });
   },
 );
 

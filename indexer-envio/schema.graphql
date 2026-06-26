@@ -868,13 +868,6 @@ type PoolDailyFeeSnapshot {
 # sUSDS reserve-yield accounting on Ethereum. Rows are intentionally compact:
 # the dashboard reads the singleton summary, while movement/lot rows preserve
 # event-level lineage for audits and future drill-downs.
-type EthereumReserveYieldAnchor {
-  id: ID! # "{chainId}-reserve-yield-start"
-  chainId: Int!
-  blockNumber: BigInt!
-  blockTimestamp: BigInt!
-}
-
 type SusdsYieldMovement {
   id: ID! # eventId(chainId, blockNumber, logIndex)
   chainId: Int! @index
