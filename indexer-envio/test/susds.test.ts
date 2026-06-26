@@ -622,7 +622,7 @@ describe("sUSDS reserve yield accounting", () => {
         (SUSDS_REVENUE_LAUNCH_BLOCK - SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1) /
           SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
       ) + 1;
-    assert.ok(preLaunchHeartbeatCount < 10_000);
+    assert.ok(preLaunchHeartbeatCount < 5_000);
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
       {
