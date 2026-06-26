@@ -38,10 +38,37 @@ export {
 } from "./susds/dailySnapshots.js";
 
 const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
-export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL = 50_000;
+export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL = 3_000;
 export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK =
   STETH_FIRST_TRACKED_EVENT_BLOCK;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
+
+function chainAdvanceHeartbeatFilter(chain: {
+  id: number;
+  startBlock: number;
+  endBlock?: number | undefined;
+}) {
+  if (chain.id !== ETHEREUM_CHAIN_ID) return false;
+  const start = Math.max(
+    SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
+    chain.startBlock,
+  );
+  const preRevenueEnd = SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1;
+  const end =
+    chain.endBlock != null && chain.endBlock > 0
+      ? Math.min(preRevenueEnd, chain.endBlock)
+      : preRevenueEnd;
+  if (start > end) return false;
+  return {
+    block: {
+      number: {
+        _gte: start,
+        _lte: end,
+        _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
+      },
+    },
+  };
+}
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
   { from: address },
@@ -195,25 +222,11 @@ indexer.onEvent(
 indexer.onBlock(
   {
     name: "SusdsChainAdvanceHeartbeat",
-    where: ({ chain }) =>
-      chain.id === ETHEREUM_CHAIN_ID
-        ? {
-            block: {
-              number: {
-                _gte: Math.max(
-                  SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-                  chain.startBlock,
-                ),
-                _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
-              },
-            },
-          }
-        : false,
+    where: ({ chain }) => chainAdvanceHeartbeatFilter(chain),
   },
   async () => {
-    // Gives hosted Ethereum sparse early onBlock work so indexing advances
-    // before revenue launch, without filling a 5k-event page before the
-    // revenue-aligned daily snapshot grid below starts.
+    // Gives hosted Ethereum early bounded onBlock work so indexing advances
+    // before the revenue-aligned daily snapshot grid below starts.
   },
 );
 
