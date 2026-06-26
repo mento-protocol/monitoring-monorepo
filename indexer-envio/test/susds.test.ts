@@ -640,7 +640,7 @@ describe("sUSDS reserve yield accounting", () => {
       {
         block: {
           number: {
-            _gte: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+            _gte: SUSDS_DAILY_HEARTBEAT_START_BLOCK,
             _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
           },
         },

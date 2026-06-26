@@ -53,10 +53,14 @@ export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
   if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
   const chainStartBlock = finiteNumber(chain.startBlock);
   if (chainStartBlock == null) return false;
+  const heartbeatStartBlock = Math.max(
+    chainStartBlock,
+    SUSDS_DAILY_HEARTBEAT_START_BLOCK,
+  );
   return {
     block: {
       number: {
-        _gte: chainStartBlock,
+        _gte: heartbeatStartBlock,
         _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
       },
     },
