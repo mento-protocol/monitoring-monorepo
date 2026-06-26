@@ -16,9 +16,7 @@ import {
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
-  SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
-  SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-  SUSDS_CHAIN_ADVANCE_PRE_REVENUE_HEARTBEATS,
+  SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
   SUSDS_DAILY_HEARTBEAT_START_BLOCK,
   handleSusdsYieldDailySnapshotHeartbeat,
   recordSusdsYieldHeartbeatSnapshot,
@@ -32,6 +30,7 @@ import {
   susdsSharePriceEffect,
 } from "../src/rpc/effects.ts";
 import {
+  STETH_FIRST_TRACKED_EVENT_BLOCK,
   SUSDS_FIRST_TRACKED_EVENT_BLOCK,
   SUSDS_REVENUE_LAUNCH_BLOCK,
 } from "../src/startupChecks.ts";
@@ -615,33 +614,6 @@ describe("sUSDS reserve yield accounting", () => {
 
   it("skips pre-revenue-launch heartbeat blocks without reading effects", async () => {
     const mockDb = MockDb.createMockDb();
-    assert.ok(
-      SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK < SUSDS_REVENUE_LAUNCH_BLOCK,
-    );
-    assert.ok(
-      SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK >
-        SUSDS_FIRST_TRACKED_EVENT_BLOCK,
-    );
-    assert.equal(
-      SUSDS_CHAIN_ADVANCE_PRE_REVENUE_HEARTBEATS,
-      (SUSDS_DAILY_HEARTBEAT_START_BLOCK -
-        SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK) /
-        SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
-    );
-    assert.equal(
-      (SUSDS_DAILY_HEARTBEAT_START_BLOCK -
-        SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK) %
-        SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
-      0,
-    );
-    const preLaunchHeartbeatCount =
-      Math.floor(
-        (SUSDS_REVENUE_LAUNCH_BLOCK -
-          SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK -
-          1) /
-          SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
-      ) + 1;
-    assert.ok(preLaunchHeartbeatCount < 5_000);
     assert.equal(SUSDS_DAILY_HEARTBEAT_START_BLOCK, SUSDS_REVENUE_LAUNCH_BLOCK);
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
@@ -652,7 +624,7 @@ describe("sUSDS reserve yield accounting", () => {
           throw new Error("pre-launch heartbeat must not read effects");
         },
       } as unknown as Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0],
-      BigInt(SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK),
+      BigInt(STETH_FIRST_TRACKED_EVENT_BLOCK),
     );
 
     assert.equal(didWrite, false);
@@ -668,8 +640,8 @@ describe("sUSDS reserve yield accounting", () => {
       {
         block: {
           number: {
-            _gte: SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-            _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
+            _gte: SUSDS_FIRST_TRACKED_EVENT_BLOCK,
+            _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
           },
         },
       },

@@ -35,13 +35,6 @@ export {
 } from "./susds/dailySnapshots.js";
 
 export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
-export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL =
-  SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL;
-export const SUSDS_CHAIN_ADVANCE_PRE_REVENUE_HEARTBEATS = 4_500;
-export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK =
-  SUSDS_REVENUE_LAUNCH_BLOCK -
-  SUSDS_CHAIN_ADVANCE_PRE_REVENUE_HEARTBEATS *
-    SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
 
 type ChainFilterInput = {
@@ -60,15 +53,11 @@ export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
   if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
   const chainStartBlock = finiteNumber(chain.startBlock);
   if (chainStartBlock == null) return false;
-  const start = Math.max(
-    SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-    chainStartBlock,
-  );
   return {
     block: {
       number: {
-        _gte: start,
-        _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
+        _gte: chainStartBlock,
+        _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
       },
     },
   };
@@ -225,12 +214,12 @@ indexer.onEvent(
 
 indexer.onBlock(
   {
-    name: "SusdsChainAdvanceHeartbeat",
+    name: "SusdsYieldDailySnapshotHeartbeat",
     where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
   },
   async ({ block, context }) => {
-    // Uses the hosted-proven simple _gte + _every shape. Pre-launch calls
-    // return before RPC reads; post-launch calls write the daily snapshot grid.
+    // Keep the hosted-proven chain.startBlock + 300-block grid. Pre-launch
+    // calls return before RPC reads; post-launch calls write daily snapshots.
     await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
   },
 );
