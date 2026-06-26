@@ -34,7 +34,7 @@ export {
   recordSusdsYieldHeartbeatSnapshot,
 } from "./susds/dailySnapshots.js";
 
-export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 1_500;
+export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 1_300;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK =
   STETH_FIRST_TRACKED_EVENT_BLOCK;
 
