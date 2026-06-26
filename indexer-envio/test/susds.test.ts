@@ -18,10 +18,13 @@ import {
   V3_REVENUE_LAUNCH_TIMESTAMP,
   SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
   SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
+  SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
   SUSDS_DAILY_HEARTBEAT_START_BLOCK,
   handleSusdsYieldDailySnapshotHeartbeat,
   recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
+  susdsChainAdvanceHeartbeatFilter,
+  susdsDailySnapshotHeartbeatFilter,
 } from "../src/handlers/susds.ts";
 import { readSharePrice } from "../src/handlers/susds/dailySnapshots.ts";
 import { ZERO_ADDRESS } from "../src/constants.ts";
@@ -643,6 +646,45 @@ describe("sUSDS reserve yield accounting", () => {
 
     assert.equal(didWrite, false);
     assert.equal(dailySnapshots(mockDb).length, 0);
+  });
+
+  it("accepts hosted string chain fields for sUSDS onBlock filters", () => {
+    assert.deepEqual(
+      susdsChainAdvanceHeartbeatFilter({
+        id: String(ETHEREUM_CHAIN_ID),
+        startBlock: String(STETH_FIRST_TRACKED_EVENT_BLOCK),
+      }),
+      {
+        block: {
+          number: {
+            _gte: SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
+            _lte: SUSDS_REVENUE_LAUNCH_BLOCK - 1,
+            _every: SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL,
+          },
+        },
+      },
+    );
+
+    assert.deepEqual(
+      susdsDailySnapshotHeartbeatFilter({ id: String(ETHEREUM_CHAIN_ID) }),
+      {
+        block: {
+          number: {
+            _gte: SUSDS_DAILY_HEARTBEAT_START_BLOCK,
+            _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
+          },
+        },
+      },
+    );
+
+    assert.equal(
+      susdsChainAdvanceHeartbeatFilter({
+        id: "42220",
+        startBlock: STETH_FIRST_TRACKED_EVENT_BLOCK,
+      }),
+      false,
+    );
+    assert.equal(susdsDailySnapshotHeartbeatFilter({ id: "42220" }), false);
   });
 
   it("runs the sUSDS heartbeat onBlock handler path", async () => {

@@ -37,26 +37,37 @@ export {
   recordSusdsYieldHeartbeatSnapshot,
 } from "./susds/dailySnapshots.js";
 
-const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
+export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 300;
 export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_BLOCK_INTERVAL = 3_000;
 export const SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK =
   STETH_FIRST_TRACKED_EVENT_BLOCK;
 export const SUSDS_DAILY_HEARTBEAT_START_BLOCK = SUSDS_REVENUE_LAUNCH_BLOCK;
 
-function chainAdvanceHeartbeatFilter(chain: {
-  id: number;
-  startBlock: number;
-  endBlock?: number | undefined;
-}) {
-  if (chain.id !== ETHEREUM_CHAIN_ID) return false;
+type ChainFilterInput = {
+  id: number | string;
+  startBlock: number | string;
+  endBlock?: number | string | undefined;
+};
+
+function finiteNumber(value: number | string | undefined): number | null {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function susdsChainAdvanceHeartbeatFilter(chain: ChainFilterInput) {
+  if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
+  const chainStartBlock = finiteNumber(chain.startBlock);
+  if (chainStartBlock == null) return false;
   const start = Math.max(
     SUSDS_CHAIN_ADVANCE_HEARTBEAT_START_BLOCK,
-    chain.startBlock,
+    chainStartBlock,
   );
   const preRevenueEnd = SUSDS_DAILY_HEARTBEAT_START_BLOCK - 1;
+  const chainEndBlock = finiteNumber(chain.endBlock);
   const end =
-    chain.endBlock != null && chain.endBlock > 0
-      ? Math.min(preRevenueEnd, chain.endBlock)
+    chainEndBlock != null && chainEndBlock > 0
+      ? Math.min(preRevenueEnd, chainEndBlock)
       : preRevenueEnd;
   if (start > end) return false;
   return {
@@ -68,6 +79,21 @@ function chainAdvanceHeartbeatFilter(chain: {
       },
     },
   };
+}
+
+export function susdsDailySnapshotHeartbeatFilter(
+  chain: Pick<ChainFilterInput, "id">,
+) {
+  return finiteNumber(chain.id) === ETHEREUM_CHAIN_ID
+    ? {
+        block: {
+          number: {
+            _gte: SUSDS_DAILY_HEARTBEAT_START_BLOCK,
+            _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
+          },
+        },
+      }
+    : false;
 }
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
@@ -222,7 +248,7 @@ indexer.onEvent(
 indexer.onBlock(
   {
     name: "SusdsChainAdvanceHeartbeat",
-    where: ({ chain }) => chainAdvanceHeartbeatFilter(chain),
+    where: ({ chain }) => susdsChainAdvanceHeartbeatFilter(chain),
   },
   async () => {
     // Gives hosted Ethereum early bounded onBlock work so indexing advances
@@ -233,17 +259,7 @@ indexer.onBlock(
 indexer.onBlock(
   {
     name: "SusdsYieldDailySnapshotHeartbeat",
-    where: ({ chain }) =>
-      chain.id === ETHEREUM_CHAIN_ID
-        ? {
-            block: {
-              number: {
-                _gte: SUSDS_DAILY_HEARTBEAT_START_BLOCK,
-                _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
-              },
-            },
-          }
-        : false,
+    where: ({ chain }) => susdsDailySnapshotHeartbeatFilter(chain),
   },
   async ({ block, context }) => {
     await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
