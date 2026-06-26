@@ -1,12 +1,8 @@
 import type { SusdsYieldDailySnapshot } from "envio";
 import { SECONDS_PER_DAY, dayBucket } from "../../helpers.js";
-import {
-  blockTimestampEffect,
-  susdsSharePriceEffect,
-} from "../../rpc/effects.js";
+import { susdsSharePriceEffect } from "../../rpc/effects.js";
 import { computeYieldTotals } from "./positions.js";
 import {
-  ETHEREUM_CHAIN_ID,
   SUSDS_ADDRESS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
   WAD,
@@ -15,7 +11,6 @@ import {
   type SusdsContext,
   type SusdsYieldTotals,
 } from "./shared.js";
-import { SUSDS_REVENUE_LAUNCH_BLOCK } from "../../startupChecks.js";
 
 function susdsDailySnapshotId(chainId: number, bucket: bigint): string {
   return `${chainId}-susds-${bucket}`;
@@ -160,7 +155,7 @@ export async function readSharePrice(
   );
 }
 
-export async function readSharePriceOrNull(
+async function readSharePriceOrNull(
   context: SusdsContext,
   meta: BlockMeta,
   fallbackSharePriceUsdWei?: bigint | null,
@@ -184,41 +179,4 @@ export function sharePriceFromAssetsAndShares(
 ): bigint | null {
   if (shares <= ZERO) return null;
   return (assets * WAD) / shares;
-}
-
-export async function recordSusdsYieldHeartbeatSnapshot(
-  context: SusdsContext,
-  blockNumber: bigint,
-): Promise<boolean> {
-  // Hosted replays can visit pre-launch heartbeat blocks; keep this before RPC reads.
-  if (blockNumber < BigInt(SUSDS_REVENUE_LAUNCH_BLOCK)) return false;
-
-  const blockTimestamp = await context.effect(blockTimestampEffect, {
-    chainId: ETHEREUM_CHAIN_ID,
-    blockNumber,
-  });
-  if (blockTimestamp === null || blockTimestamp <= 0n) return false;
-
-  const meta: BlockMeta = {
-    chainId: ETHEREUM_CHAIN_ID,
-    blockNumber,
-    blockTimestamp,
-  };
-  if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
-
-  const sharePriceUsdWei = await readSharePriceOrNull(context, meta);
-  if (sharePriceUsdWei === null) return false;
-  await recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
-  return true;
-}
-
-export async function handleSusdsYieldDailySnapshotHeartbeat({
-  block,
-  context,
-}: {
-  block: { number: number | bigint };
-  context: SusdsContext;
-}): Promise<boolean> {
-  if (context.isPreload) return false;
-  return recordSusdsYieldHeartbeatSnapshot(context, BigInt(block.number));
 }

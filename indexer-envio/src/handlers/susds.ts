@@ -2,7 +2,6 @@ import { ZERO_ADDRESS } from "../constants.js";
 import { asAddress, eventId } from "../helpers.js";
 import { indexer } from "../indexer.js";
 import {
-  handleSusdsYieldDailySnapshotHeartbeat,
   readSharePrice,
   recordSusdsYieldDailySnapshot,
   sharePriceFromAssetsAndShares,
@@ -15,12 +14,10 @@ import {
 } from "./susds/movements.js";
 import { updateSummary } from "./susds/positions.js";
 import {
-  ETHEREUM_CHAIN_ID,
   TRACKED_SUSDS_WALLETS,
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
-import { SUSDS_FIRST_TRACKED_EVENT_BLOCK } from "../startupChecks.js";
 
 export {
   ETHEREUM_CHAIN_ID,
@@ -28,41 +25,7 @@ export {
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
 } from "./susds/shared.js";
-export {
-  handleSusdsYieldDailySnapshotHeartbeat,
-  recordSusdsYieldDailySnapshot,
-  recordSusdsYieldHeartbeatSnapshot,
-} from "./susds/dailySnapshots.js";
-
-export const SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL = 1_000;
-export const SUSDS_DAILY_HEARTBEAT_START_BLOCK =
-  SUSDS_FIRST_TRACKED_EVENT_BLOCK;
-
-type ChainFilterInput = {
-  id: number | string;
-  startBlock: number | string;
-  endBlock?: number | string | undefined;
-};
-
-function finiteNumber(value: number | string | undefined): number | null {
-  if (value == null || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-export function susdsDailySnapshotHeartbeatFilter(chain: ChainFilterInput) {
-  if (finiteNumber(chain.id) !== ETHEREUM_CHAIN_ID) return false;
-  const chainStartBlock = finiteNumber(chain.startBlock);
-  if (chainStartBlock == null) return false;
-  return {
-    block: {
-      number: {
-        _gte: Math.max(SUSDS_DAILY_HEARTBEAT_START_BLOCK, chainStartBlock),
-        _every: SUSDS_DAILY_HEARTBEAT_BLOCK_INTERVAL,
-      },
-    },
-  };
-}
+export { recordSusdsYieldDailySnapshot } from "./susds/dailySnapshots.js";
 
 const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
   { from: address },
@@ -210,15 +173,5 @@ indexer.onEvent(
       sharePriceUsdWei,
       totals,
     );
-  },
-);
-
-indexer.onBlock(
-  {
-    name: "SusdsYieldDailySnapshotHeartbeat",
-    where: ({ chain }) => susdsDailySnapshotHeartbeatFilter(chain),
-  },
-  async ({ block, context }) => {
-    await handleSusdsYieldDailySnapshotHeartbeat({ block, context });
   },
 );
