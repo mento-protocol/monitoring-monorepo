@@ -599,8 +599,13 @@ Configure the optional Codex Cloud environment maintenance script as:
 Codex Cloud setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for GitHub
 CLI-backed PR workflows, installs GitHub CLI from the official apt repository if
 the base image lacks it, configures git to use `gh` credentials for fetch/push,
-and refreshes `origin/main` before agent work starts. It also
-prewarms the pinned Trunk CLI and runs `./tools/trunk install` so
+and refreshes `origin/main` before agent work starts. It also fails fast when
+the global autoreview helper is missing; install or mount the helper at
+`~/.agents/skills/autoreview/scripts/autoreview`, or set `AUTOREVIEW_HELPER` to
+its executable path, so `pnpm agent:autoreview` works during closeout. Set
+`CODEX_CLOUD_AUTOREVIEW_REQUIRED=false` only for throwaway environments where
+closeout review is intentionally unavailable. Finally,
+it prewarms the pinned Trunk CLI and runs `./tools/trunk install` so
 Trunk-managed linters/runtimes are available before a task starts. If the cloud
 proxy blocks Trunk, allowlist
 `https://trunk.io/releases/`; if direct egress is available but the proxy is the
