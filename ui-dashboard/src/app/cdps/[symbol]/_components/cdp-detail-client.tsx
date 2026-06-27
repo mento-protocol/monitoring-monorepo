@@ -423,11 +423,11 @@ function DepositorTable({
         Stability Pool LP Snapshots
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Debt-token flow per row: gross deposited minus principal withdrawn minus
-        net liquidation offset equals the deposit snapshot. Net liquidation
-        offset is liquidation loss net of retained debt-token yield. Collateral
-        columns are separate USDm liquidation proceeds: unclaimed at the
-        snapshot and lifetime claimed.
+        Debt-token flow per row: current deposit snapshot equals gross deposited
+        minus principal withdrawn minus deposit offset by liquidations. The
+        liquidation-offset deposit is net of retained debt-token yield.
+        Unclaimed collateral is the separate USDm liquidation gain currently
+        indexed for the LP.
       </p>
       {truncated && (
         <p className="mb-3 text-xs text-amber-400" role="status">
@@ -443,12 +443,11 @@ function DepositorTable({
           <thead>
             <Row>
               <Th>LP</Th>
+              <Th align="right">Current Deposit Snapshot</Th>
               <Th align="right">Gross Deposited (+)</Th>
               <Th align="right">Principal Withdrawn (-)</Th>
-              <Th align="right">Net Liquidation Offset</Th>
-              <Th align="right">Deposit Snapshot (=)</Th>
+              <Th align="right">Deposit Offset by Liquidations (-)</Th>
               <Th align="right">Unclaimed Collateral</Th>
-              <Th align="right">Claimed Collateral Proceeds</Th>
               <Th align="right">Snapshot Updated</Th>
             </Row>
           </thead>
@@ -459,6 +458,9 @@ function DepositorTable({
                   <AddressLink address={depositor.address} chainId={chainId} />
                 </Td>
                 <Td align="right">
+                  {formatTokenAmount(depositor.lastTouchedDeposit, symbol)}
+                </Td>
+                <Td align="right">
                   {formatTokenAmount(depositor.cumulativeDeposited, symbol)}
                 </Td>
                 <Td align="right">
@@ -466,18 +468,12 @@ function DepositorTable({
                 </Td>
                 <Td align="right">
                   {formatSignedWei(
-                    depositorNetLiquidationOffset(depositor),
+                    depositorDepositUsedInLiquidations(depositor),
                     symbol,
                   )}
                 </Td>
                 <Td align="right">
-                  {formatTokenAmount(depositor.lastTouchedDeposit, symbol)}
-                </Td>
-                <Td align="right">
                   {formatTokenAmount(depositor.stashedColl, "USDm")}
-                </Td>
-                <Td align="right">
-                  {formatTokenAmount(depositor.ethGainClaimedCum, "USDm")}
                 </Td>
                 <Td align="right">{relativeTime(depositor.lastUpdatedAt)}</Td>
               </Row>
@@ -489,7 +485,7 @@ function DepositorTable({
   );
 }
 
-function depositorNetLiquidationOffset(depositor: CdpDepositor): string {
+function depositorDepositUsedInLiquidations(depositor: CdpDepositor): string {
   return (
     BigInt(depositor.cumulativeDeposited) -
     BigInt(depositor.cumulativeWithdrawn) -

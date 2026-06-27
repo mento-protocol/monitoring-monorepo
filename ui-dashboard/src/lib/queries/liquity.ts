@@ -208,7 +208,7 @@ ${troveRowFields}
       limit: ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT}
     ) {
       id address lastTouchedDeposit stashedColl lastUpdatedAt
-      cumulativeDeposited cumulativeWithdrawn yieldGainClaimedCum ethGainClaimedCum
+      cumulativeDeposited cumulativeWithdrawn
     }
   }
 `;

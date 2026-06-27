@@ -664,8 +664,6 @@ const cdpStabilityPoolDepositors = [
     lastUpdatedAt: String(cdpNow - 120),
     cumulativeDeposited: "200000000000000000000",
     cumulativeWithdrawn: "50000000000000000000",
-    yieldGainClaimedCum: "3000000000000000000",
-    ethGainClaimedCum: "1000000000000000000",
   },
 ];
 

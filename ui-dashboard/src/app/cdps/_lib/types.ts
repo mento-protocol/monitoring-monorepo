@@ -119,8 +119,6 @@ export type CdpDepositor = {
   lastUpdatedAt: string;
   cumulativeDeposited: string;
   cumulativeWithdrawn: string;
-  yieldGainClaimedCum: string;
-  ethGainClaimedCum: string;
 };
 
 export type CdpInstanceDailySnapshot = {

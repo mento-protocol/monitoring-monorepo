@@ -200,15 +200,15 @@ test.describe("dashboard browser flows", () => {
       page.getByRole("columnheader", { name: "Principal Withdrawn (-)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Net Liquidation Offset" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("columnheader", { name: "Deposit Snapshot (=)" }),
-    ).toBeVisible();
-    await expect(
       page.getByRole("columnheader", {
-        name: "Claimed Collateral Proceeds",
+        name: "Deposit Offset by Liquidations (-)",
       }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Current Deposit Snapshot" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Unclaimed Collateral" }),
     ).toBeVisible();
     await expect(
       page.getByTitle("0x9999999999999999999999999999999999999999"),

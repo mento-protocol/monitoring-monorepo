@@ -233,8 +233,6 @@ function depositor(overrides: Partial<CdpDepositor> = {}): CdpDepositor {
     lastUpdatedAt: String(NOW),
     cumulativeDeposited: wei(25),
     cumulativeWithdrawn: wei(5),
-    yieldGainClaimedCum: "0",
-    ethGainClaimedCum: wei(2),
     ...overrides,
   };
 }
@@ -434,18 +432,16 @@ describe("CdpDetailClient", () => {
       "Stability Pool LP Snapshots",
     );
     expect(handle!.container.textContent).toContain("0xdepositor");
-    expect(handle!.container.textContent).toContain("Deposit Snapshot");
+    expect(handle!.container.textContent).toContain("Current Deposit Snapshot");
     expect(handle!.container.textContent).toContain("Unclaimed Collateral");
     expect(handle!.container.textContent).toContain("Gross Deposited");
     expect(handle!.container.textContent).toContain("Principal Withdrawn");
-    expect(handle!.container.textContent).toContain("Net Liquidation Offset");
     expect(handle!.container.textContent).toContain(
-      "Claimed Collateral Proceeds",
+      "Deposit Offset by Liquidations",
     );
     expect(handle!.container.textContent).toContain("15.00 GBPm");
     expect(handle!.container.textContent).toContain("5.00 GBPm");
-    expect(handle!.container.textContent).toContain("2.00 USDm");
-    expect(handle!.container.textContent).not.toContain("Current Deposit");
+    expect(handle!.container.textContent).toContain("1.00 USDm");
     expect(handle!.container.textContent).not.toContain("User Withdrawn");
     expect(handle!.container.textContent).not.toContain("Collateral Claimed");
     expect(handle!.container.textContent).not.toContain("Debt Snapshot");
@@ -453,7 +449,13 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).not.toContain("Debt Position");
     expect(handle!.container.textContent).not.toContain("Indexed Deposit");
     expect(handle!.container.textContent).not.toContain("Net Accounted Offset");
+    expect(handle!.container.textContent).not.toContain(
+      "Net Liquidation Offset",
+    );
     expect(handle!.container.textContent).not.toContain("Collateral Received");
+    expect(handle!.container.textContent).not.toContain(
+      "Claimed Collateral Proceeds",
+    );
     expect(
       handle!.container.querySelector('[data-testid="sp-chart"]'),
     ).not.toBeNull();
