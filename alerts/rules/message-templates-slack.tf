@@ -148,7 +148,9 @@ resource "grafana_message_template" "slack_trading_mode_alert_message" {
   # the per-feed allowlist comes from `reference-data-directory.vercel.app/feeds-<chain>-mainnet.json`.
   template = <<-EOT
 {{ define "slack.trading_mode_alert_message" }}
-{{ $mixedState := and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
+{{ $firingCount := len .Alerts.Firing -}}
+{{ $resolvedCount := len .Alerts.Resolved -}}
+{{ $mixedState := and $firingCount $resolvedCount -}}
 {{ range .Alerts.Firing -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
@@ -170,7 +172,9 @@ ${local.monad_chainlink_slug_branches}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
 {{ $chainlinkURL := "" -}}
 {{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
+{{ if or $mixedState (gt $firingCount 1) -}}
 *{{ if $mixedState }}🚨 {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker*
+{{ end -}}
 {{ if $chainlinkURL -}}
 Next action: verify the Chainlink data source, then ack/snooze if the move is real. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
 - <{{ $chainlinkURL }}|Chainlink {{ $rateFeedWithSlash }} data source> at {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
@@ -185,10 +189,12 @@ Next action: open breaker status and confirm the underlying rate-feed or market 
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
+{{ if or $mixedState (gt $resolvedCount 1) -}}
 *{{ if $mixedState }}✅ {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed*
 {{ end -}}
+{{ end -}}
 
-{{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing 🙂.{{ end }}
+{{ if eq $firingCount 0 }}No alerts are currently firing 🙂.{{ end }}
 {{ end -}}
 EOT
 }

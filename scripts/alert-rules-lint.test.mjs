@@ -255,7 +255,7 @@ test("CLI passes against the real repository", () => {
   );
 });
 
-test("VictorOps trading-mode title carries visible state and body carries action", () => {
+test("trading-mode notification templates avoid single-alert duplicate headings", () => {
   const source = readFileSync(
     path.resolve(
       __dirname,
@@ -277,40 +277,95 @@ test("VictorOps trading-mode title carries visible state and body carries action
   // If you reformat the guarded template lines, update these strings.
   assert(
     titleTemplate.includes(
-      '{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}: Trading halted by breaker',
+      '{{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}',
     ),
-    "VictorOps firing title should render the affected market and visible state",
+    "VictorOps firing title should render the stable affected market",
   );
   assert(
     titleTemplate.includes(
-      '{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}: Trading resumed',
+      '{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ $rateFeedWithSlash }} [{{ $chain }}]{{ end -}}',
     ),
-    "VictorOps resolved title should render the affected market and visible state",
+    "VictorOps resolved title should render the stable affected market",
+  );
+  assert(
+    !titleTemplate.includes(": Trading halted by breaker"),
+    "VictorOps title should not repeat state in entity_display_name",
+  );
+  assert(
+    !titleTemplate.includes(": Trading resumed"),
+    "VictorOps title should not repeat resolved state in entity_display_name",
   );
 
-  assert(
-    source.includes(
-      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ end -}}\n{{ if $chainlinkURL -}}",
-    ),
-    "single firing bodies should start with the next action instead of repeating title state in SMS",
+  const messageStart = source.indexOf(
+    'resource "grafana_message_template" "victorops_trading_mode_alert_message"',
+  );
+  const messageEnd = source.indexOf(
+    'resource "grafana_message_template" "victorops_trading_limits_alert_title"',
   );
   assert(
-    !source.includes(
-      "{{ else -}}\nTrading halted by breaker.\n{{ end -}}\n{{ if $chainlinkURL -}}",
-    ),
-    "single firing bodies should not repeat the state sentence after the title",
+    messageStart >= 0 && messageEnd > messageStart,
+    "message template not found",
+  );
+  const messageTemplate = source.slice(messageStart, messageEnd);
+  const resolvedStart = messageTemplate.indexOf(
+    "{{ range .Alerts.Resolved -}}",
+  );
+  const resolvedEnd = messageTemplate.indexOf(
+    "{{ if eq $firingCount 0 }}No alerts are currently firing.",
+    resolvedStart,
   );
   assert(
-    source.includes(
-      "Trading resumed for {{ $rateFeedWithSlash }} [{{ $chain }}].",
+    resolvedStart >= 0 && resolvedEnd > resolvedStart,
+    "resolved message block not found",
+  );
+  const resolvedTemplate = messageTemplate.slice(resolvedStart, resolvedEnd);
+
+  assert(
+    messageTemplate.includes(
+      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ else -}}\nTrading halted by breaker.\n{{ end -}}\n{{ if $chainlinkURL -}}",
     ),
-    "resolved trading-mode bodies should use resumed wording",
+    "VictorOps state_message should carry per-feed firing context when multi-alert or mixed",
+  );
+  assert(
+    messageTemplate.includes(
+      "{{ if or $mixedState (gt $resolvedCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed\n{{ else -}}\nTrading resumed.\n{{ end -}}",
+    ),
+    "VictorOps state_message should carry resolved state outside entity_display_name",
+  );
+  assert(
+    resolvedTemplate.includes("- Chainlink data source: {{ $chainlinkURL }}"),
+    "VictorOps resolved state_message should include Chainlink URLs when available",
   );
   assert(
     source.includes(
       "{{ if eq $firingCount 0 }}No alerts are currently firing.",
     ),
     "the resolved footer should use the computed firing count",
+  );
+});
+
+test("Slack trading-mode bodies suppress duplicate single-alert headings", () => {
+  const source = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/message-templates-slack.tf"),
+    "utf8",
+  );
+  assert(
+    source.includes(
+      "{{ if or $mixedState (gt $firingCount 1) -}}\n*{{ if $mixedState }}🚨 {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker*\n{{ end -}}\n{{ if $chainlinkURL -}}",
+    ),
+    "single firing Slack bodies should start with next action instead of repeating the title",
+  );
+  assert(
+    source.includes(
+      "{{ if or $mixedState (gt $resolvedCount 1) -}}\n*{{ if $mixedState }}✅ {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed*\n{{ end -}}\n{{ end -}}\n\n{{ if eq $firingCount 0 }}No alerts are currently firing",
+    ),
+    "single resolved Slack bodies should not repeat the resolved title line",
+  );
+  assert(
+    source.includes(
+      "<{{ $chainlinkURL }}|Chainlink {{ $rateFeedWithSlash }} data source>",
+    ),
+    "native Slack trading-mode firing body should keep Chainlink links",
   );
 });
 
