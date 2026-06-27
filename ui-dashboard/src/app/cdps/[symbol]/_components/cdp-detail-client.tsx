@@ -423,11 +423,11 @@ function DepositorTable({
         Stability Pool LP Snapshots
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Rows are indexed per-LP snapshots from the latest LP operation, not live
-        compounded balances after later passive liquidations. Snapshot flow
-        reconciles as gross deposited minus principal withdrawn minus net
-        accounted offset equals indexed deposit. Collateral columns are separate
-        USDm liquidation gains at that indexed point.
+        Debt-token flow per row: gross deposited minus principal withdrawn minus
+        net liquidation offset equals the deposit snapshot. Net liquidation
+        offset is liquidation loss net of retained debt-token yield. Collateral
+        columns are separate USDm liquidation proceeds: unclaimed at the
+        snapshot and lifetime claimed.
       </p>
       {truncated && (
         <p className="mb-3 text-xs text-amber-400" role="status">
@@ -443,12 +443,12 @@ function DepositorTable({
           <thead>
             <Row>
               <Th>LP</Th>
-              <Th align="right">Gross Deposited</Th>
-              <Th align="right">Principal Withdrawn</Th>
-              <Th align="right">Net Accounted Offset</Th>
-              <Th align="right">Indexed Deposit</Th>
-              <Th align="right">Claimable Collateral</Th>
-              <Th align="right">Collateral Received</Th>
+              <Th align="right">Gross Deposited (+)</Th>
+              <Th align="right">Principal Withdrawn (-)</Th>
+              <Th align="right">Net Liquidation Offset</Th>
+              <Th align="right">Deposit Snapshot (=)</Th>
+              <Th align="right">Unclaimed Collateral</Th>
+              <Th align="right">Claimed Collateral Proceeds</Th>
               <Th align="right">Snapshot Updated</Th>
             </Row>
           </thead>
@@ -465,7 +465,10 @@ function DepositorTable({
                   {formatTokenAmount(depositor.cumulativeWithdrawn, symbol)}
                 </Td>
                 <Td align="right">
-                  {formatSignedWei(depositorNetPoolOffset(depositor), symbol)}
+                  {formatSignedWei(
+                    depositorNetLiquidationOffset(depositor),
+                    symbol,
+                  )}
                 </Td>
                 <Td align="right">
                   {formatTokenAmount(depositor.lastTouchedDeposit, symbol)}
@@ -486,7 +489,7 @@ function DepositorTable({
   );
 }
 
-function depositorNetPoolOffset(depositor: CdpDepositor): string {
+function depositorNetLiquidationOffset(depositor: CdpDepositor): string {
   return (
     BigInt(depositor.cumulativeDeposited) -
     BigInt(depositor.cumulativeWithdrawn) -

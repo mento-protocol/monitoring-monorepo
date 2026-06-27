@@ -194,19 +194,21 @@ test.describe("dashboard browser flows", () => {
       page.getByRole("heading", { name: "Stability Pool LP Snapshots" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Gross Deposited" }),
+      page.getByRole("columnheader", { name: "Gross Deposited (+)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Principal Withdrawn" }),
+      page.getByRole("columnheader", { name: "Principal Withdrawn (-)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Net Accounted Offset" }),
+      page.getByRole("columnheader", { name: "Net Liquidation Offset" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Indexed Deposit" }),
+      page.getByRole("columnheader", { name: "Deposit Snapshot (=)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Collateral Received" }),
+      page.getByRole("columnheader", {
+        name: "Claimed Collateral Proceeds",
+      }),
     ).toBeVisible();
     await expect(
       page.getByTitle("0x9999999999999999999999999999999999999999"),

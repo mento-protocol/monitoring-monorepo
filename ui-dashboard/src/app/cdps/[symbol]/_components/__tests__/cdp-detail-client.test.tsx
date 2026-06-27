@@ -434,12 +434,14 @@ describe("CdpDetailClient", () => {
       "Stability Pool LP Snapshots",
     );
     expect(handle!.container.textContent).toContain("0xdepositor");
-    expect(handle!.container.textContent).toContain("Indexed Deposit");
-    expect(handle!.container.textContent).toContain("Claimable Collateral");
+    expect(handle!.container.textContent).toContain("Deposit Snapshot");
+    expect(handle!.container.textContent).toContain("Unclaimed Collateral");
     expect(handle!.container.textContent).toContain("Gross Deposited");
     expect(handle!.container.textContent).toContain("Principal Withdrawn");
-    expect(handle!.container.textContent).toContain("Net Accounted Offset");
-    expect(handle!.container.textContent).toContain("Collateral Received");
+    expect(handle!.container.textContent).toContain("Net Liquidation Offset");
+    expect(handle!.container.textContent).toContain(
+      "Claimed Collateral Proceeds",
+    );
     expect(handle!.container.textContent).toContain("15.00 GBPm");
     expect(handle!.container.textContent).toContain("5.00 GBPm");
     expect(handle!.container.textContent).toContain("2.00 USDm");
@@ -449,6 +451,9 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).not.toContain("Debt Snapshot");
     expect(handle!.container.textContent).not.toContain("Collateral Snapshot");
     expect(handle!.container.textContent).not.toContain("Debt Position");
+    expect(handle!.container.textContent).not.toContain("Indexed Deposit");
+    expect(handle!.container.textContent).not.toContain("Net Accounted Offset");
+    expect(handle!.container.textContent).not.toContain("Collateral Received");
     expect(
       handle!.container.querySelector('[data-testid="sp-chart"]'),
     ).not.toBeNull();
