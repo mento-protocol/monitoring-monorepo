@@ -651,6 +651,27 @@ describe("Liquity CDP helpers", () => {
       assert.equal(loss.rebalance + loss.liquidation, 150n);
     });
 
+    it("does not divide by zero for legacy depositor snapshots", () => {
+      const depositorSnapshot = {
+        ...existing,
+        lastTouchedDeposit: 1_000n,
+        depositSnapshotP: 0n,
+        depositSnapshotScale: 0n,
+        rebalanceLossSnapshot: 0n,
+        liquidationLossSnapshot: 0n,
+      } satisfies StabilityPoolDepositor;
+
+      const loss = deriveSourceLossSinceSnapshot({
+        depositor: depositorSnapshot,
+        scales: [],
+        emittedLoss: 150n,
+      });
+
+      assert.equal(loss.rebalance, 150n);
+      assert.equal(loss.liquidation, 0n);
+      assert.equal(loss.rebalance + loss.liquidation, 150n);
+    });
+
     it("records and classifies rebalance StabilityPool loss index deltas", async () => {
       const { context, accumulators, scales, pending } = makeLossContext();
       const txHash = "0xrebalance";

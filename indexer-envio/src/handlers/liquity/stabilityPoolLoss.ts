@@ -338,6 +338,9 @@ export function deriveSourceLossSinceSnapshot({
   if (depositor === undefined || emittedLoss === 0n) {
     return { rebalance: 0n, liquidation: 0n };
   }
+  if (depositor.depositSnapshotP === 0n) {
+    return reconcileSourceLoss({ rebalance: 0n, liquidation: 0n }, emittedLoss);
+  }
   const raw = {
     rebalance: sourceLossForDepositor(depositor, scales, "rebalance"),
     liquidation: sourceLossForDepositor(depositor, scales, "liquidation"),
