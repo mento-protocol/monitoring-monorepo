@@ -50,6 +50,43 @@ MSG
   return 1
 }
 
+
+is_disabled() {
+  case "${1,,}" in
+    0|false|no|n|off)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ensure_autoreview_helper() {
+  if is_disabled "${CODEX_CLOUD_AUTOREVIEW_REQUIRED:-true}"; then
+    echo "==> Skipping autoreview helper check because CODEX_CLOUD_AUTOREVIEW_REQUIRED=${CODEX_CLOUD_AUTOREVIEW_REQUIRED}"
+    return 0
+  fi
+
+  local helper="${AUTOREVIEW_HELPER:-$HOME/.agents/skills/autoreview/scripts/autoreview}"
+
+  echo "==> Verifying autoreview helper"
+  if [[ -x "$helper" ]]; then
+    return 0
+  fi
+
+  cat >&2 <<EOF
+error: agent autoreview helper is missing or not executable:
+  $helper
+
+Cached Codex Cloud containers do not inherit a developer's local ~/.agents
+directory. Install or mount the global autoreview skill in the base image at the
+path above, or set AUTOREVIEW_HELPER to the executable helper path. Without
+this, \`pnpm agent:autoreview\` fails during PR closeout.
+EOF
+  return 1
+}
+
 activate_package_manager() {
   echo "==> Activating package manager from package.json"
   if command -v corepack >/dev/null 2>&1; then
@@ -69,6 +106,8 @@ refresh_origin_main
 
 echo "==> Configuring repository git hooks"
 git config core.hooksPath .trunk/hooks
+
+ensure_autoreview_helper
 
 activate_package_manager
 

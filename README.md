@@ -78,6 +78,13 @@ Also configure the optional maintenance script for cached container resumes:
 ./scripts/codex-cloud-maintenance.sh
 ```
 
+The cloud image also needs GitHub auth (`GH_TOKEN` or `GITHUB_TOKEN`), egress to
+`trunk.io`/`https://trunk.io/releases/` or the documented Trunk tarball mirror
+environment variables, and the global autoreview helper installed at
+`~/.agents/skills/autoreview/scripts/autoreview` or exposed through
+`AUTOREVIEW_HELPER`; set `CODEX_CLOUD_AUTOREVIEW_REQUIRED=false` only for
+throwaway environments where closeout review is intentionally unavailable.
+
 That path performs the frozen install, Envio codegen, and agent-context check
 inside the cloud container, while relying only on repo-visible files. The
 maintenance path runs after Codex checks out the task branch in a cached
