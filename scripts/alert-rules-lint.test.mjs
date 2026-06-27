@@ -409,12 +409,27 @@ test("trading-mode Splunk pages repeat slowly per rate feed", () => {
     "trading-mode pages should keep resolve and group updates prompt",
   );
   assert(
-    /\brepeat_interval\s*=\s*"24h"/.test(splunkPolicy),
+    /\brepeat_interval\s*=\s*"1d"/.test(splunkPolicy),
     "trading-mode pages should not repeat SMS/pager notifications more than daily",
   );
   assert(
     /\bcontinue\s*=\s*true/.test(splunkPolicy),
     "trading-mode Splunk policy must continue so Slack alerts-critical also fires",
+  );
+});
+
+test("trading-mode alerts keep incidents open across short flaps", () => {
+  const tradingModeRules = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/rules-trading-modes.tf"),
+    "utf8",
+  );
+  assert(
+    /^(?![ \t]*#).*\bfor\s*=\s*"5m"/m.test(tradingModeRules),
+    "trading-mode alerts should still page quickly after a sustained halt",
+  );
+  assert(
+    /^(?![ \t]*#).*\bkeep_firing_for\s*=\s*"1h"/m.test(tradingModeRules),
+    "trading-mode alerts should keep incidents open across short breaker flaps",
   );
 });
 

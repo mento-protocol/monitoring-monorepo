@@ -7,11 +7,15 @@ resource "grafana_rule_group" "trading_modes" {
     for_each = local.chains
 
     content {
-      name           = "Trading Mode Alert [${rule.value.title}]"
-      condition      = "isTradingHalted"
-      for            = "5m"
-      exec_err_state = "Error"
-      no_data_state  = "NoData"
+      name      = "Trading Mode Alert [${rule.value.title}]"
+      condition = "isTradingHalted"
+      for       = "5m"
+      # USDT/USD can hover around the breaker threshold and briefly repeg before
+      # tripping again. Keep the incident open across short healthy dips so
+      # Splunk On-Call does not create a fresh SMS page for every flap.
+      keep_firing_for = "1h"
+      exec_err_state  = "Error"
+      no_data_state   = "NoData"
 
       annotations = {
         summary = "Trading is halted for the {{ $labels.rateFeed }} rate feed on {{ $labels.chain | title }}. Check if a breaker tripped."
