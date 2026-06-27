@@ -55,6 +55,14 @@ const EMPTY_PENDING_OPERATION: StabilityPoolPendingOperation = {
   ethGainClaimed: 0n,
 };
 
+const unpairedDepositLossSinceSnapshot = (
+  existing: StabilityPoolDepositor | undefined,
+  newDeposit: bigint,
+): bigint =>
+  existing !== undefined && existing.lastTouchedDeposit > newDeposit
+    ? existing.lastTouchedDeposit - newDeposit
+    : 0n;
+
 export function buildStabilityPoolDepositorUpdate({
   chainId,
   collateralId,
@@ -264,10 +272,13 @@ indexer.onEvent(
             ethGainSinceLastOperation: pending.ethGainSinceLastOperation,
             ethGainClaimed: pending.ethGainClaimed,
           } satisfies StabilityPoolPendingOperation);
+    const depositLossSinceSnapshot =
+      op?.depositLossSinceLastOperation ??
+      unpairedDepositLossSinceSnapshot(existing, event.params._newDeposit);
     const sourceLoss = deriveSourceLossSinceSnapshot({
       depositor: existing,
       scales: lossScales,
-      emittedLoss: op?.depositLossSinceLastOperation ?? 0n,
+      emittedLoss: depositLossSinceSnapshot,
     });
     const nextLossSnapshots = nextStabilityPoolLossSnapshots({
       scale: currentLossScale,

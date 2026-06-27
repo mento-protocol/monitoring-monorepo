@@ -305,11 +305,7 @@ export async function loadLossScalesForDepositor(
   context: Pick<StabilityPoolLossContext, "StabilityPoolLossScale">,
   depositor: StabilityPoolDepositor | undefined,
 ): Promise<Array<StabilityPoolLossScale | undefined>> {
-  if (
-    depositor === undefined ||
-    depositor.lastTouchedDeposit === 0n ||
-    depositor.depositSnapshotP === 0n
-  ) {
+  if (depositor === undefined || depositor.lastTouchedDeposit === 0n) {
     return [];
   }
   const reads: Array<Promise<StabilityPoolLossScale | undefined>> = [];
@@ -338,13 +334,24 @@ export function deriveSourceLossSinceSnapshot({
   if (depositor === undefined || emittedLoss === 0n) {
     return { rebalance: 0n, liquidation: 0n };
   }
-  if (depositor.depositSnapshotP === 0n) {
-    return reconcileSourceLoss({ rebalance: 0n, liquidation: 0n }, emittedLoss);
-  }
-  const raw = {
-    rebalance: sourceLossForDepositor(depositor, scales, "rebalance"),
-    liquidation: sourceLossForDepositor(depositor, scales, "liquidation"),
-  };
+  const raw =
+    depositor.depositSnapshotP === 0n
+      ? {
+          rebalance: sourceLossWeightSinceSnapshot(
+            depositor,
+            scales,
+            "rebalance",
+          ),
+          liquidation: sourceLossWeightSinceSnapshot(
+            depositor,
+            scales,
+            "liquidation",
+          ),
+        }
+      : {
+          rebalance: sourceLossForDepositor(depositor, scales, "rebalance"),
+          liquidation: sourceLossForDepositor(depositor, scales, "liquidation"),
+        };
   return reconcileSourceLoss(raw, emittedLoss);
 }
 
@@ -385,6 +392,18 @@ const sourceLossForDepositor = (
   scales: Array<StabilityPoolLossScale | undefined>,
   source: StabilityPoolLossSource,
 ): bigint => {
+  return (
+    (depositor.lastTouchedDeposit *
+      sourceLossWeightSinceSnapshot(depositor, scales, source)) /
+    depositor.depositSnapshotP
+  );
+};
+
+const sourceLossWeightSinceSnapshot = (
+  depositor: StabilityPoolDepositor,
+  scales: Array<StabilityPoolLossScale | undefined>,
+  source: StabilityPoolLossSource,
+): bigint => {
   let normalizedLoss = 0n;
   for (let offset = 0; offset < scales.length; offset += 1) {
     const scale = scales[offset];
@@ -402,9 +421,7 @@ const sourceLossForDepositor = (
     normalizedLoss +=
       offset === 0 ? delta : delta / SCALE_FACTOR ** BigInt(offset);
   }
-  return (
-    (depositor.lastTouchedDeposit * normalizedLoss) / depositor.depositSnapshotP
-  );
+  return normalizedLoss;
 };
 
 const reconcileSourceLoss = (
@@ -414,7 +431,7 @@ const reconcileSourceLoss = (
   const rawTotal = raw.rebalance + raw.liquidation;
   if (rawTotal === emittedLoss) return raw;
   if (rawTotal === 0n) {
-    return { rebalance: emittedLoss, liquidation: 0n };
+    return { rebalance: 0n, liquidation: emittedLoss };
   }
   if (rawTotal < emittedLoss) {
     const residual = emittedLoss - rawTotal;
