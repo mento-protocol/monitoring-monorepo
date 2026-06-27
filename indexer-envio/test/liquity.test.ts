@@ -3,6 +3,7 @@ import contractsJson from "@mento-protocol/contracts/contracts.json" with { type
 import type {
   LiquityInstance,
   PendingStabilityPoolConsumption,
+  PendingStabilityPoolConsumptionSource,
   StabilityPoolDepositor,
   StabilityPoolLossAccumulator,
   StabilityPoolLossScale,
@@ -47,11 +48,13 @@ import {
 import {
   beginStabilityPoolConsumption,
   classifyPendingStabilityPoolConsumption,
+  classifyMarkedPendingStabilityPoolConsumption,
   deriveSourceLossSinceSnapshot,
   loadLossScalesForDepositor,
   loadPendingStabilityPoolConsumption,
   loadStabilityPoolLossAccumulator,
   loadStabilityPoolLossScale,
+  markPendingStabilityPoolConsumptionSource,
   nextStabilityPoolLossSnapshots,
   preloadPendingStabilityPoolConsumptionClassification,
   recordStabilityPoolPUpdate,
@@ -76,6 +79,7 @@ type LiquityStabilityPoolMockDb = MockDbWith<{
   StabilityPoolDepositor: WritableEntity<StabilityPoolDepositor>;
   StabilityPoolLossScale: WritableEntity<StabilityPoolLossScale>;
   PendingStabilityPoolConsumption: EntityReader<PendingStabilityPoolConsumption>;
+  PendingStabilityPoolConsumptionSource: EntityReader<PendingStabilityPoolConsumptionSource>;
   StabilityPoolOperationEvent: EntityReader<{
     id: string;
     operation: number;
@@ -84,7 +88,11 @@ type LiquityStabilityPoolMockDb = MockDbWith<{
 }>;
 
 const LiquityTestHelpers = indexerTestHelpers<LiquityStabilityPoolMockDb>();
-const { MockDb: LiquityMockDb, LiquityStabilityPool } = LiquityTestHelpers;
+const {
+  MockDb: LiquityMockDb,
+  LiquityStabilityPool,
+  LiquityTroveManager,
+} = LiquityTestHelpers;
 
 describe("Liquity market loader (contracts.json-backed)", () => {
   // Type narrowing for the contracts.json subpath import. The package's
@@ -470,6 +478,7 @@ describe("Liquity CDP helpers", () => {
       const accumulators = new Map<string, StabilityPoolLossAccumulator>();
       const scales = new Map<string, StabilityPoolLossScale>();
       const pending = new Map<string, PendingStabilityPoolConsumption>();
+      const sources = new Map<string, PendingStabilityPoolConsumptionSource>();
       const context: StabilityPoolLossContext = {
         StabilityPoolLossAccumulator: {
           get: async (id) => accumulators.get(id),
@@ -484,8 +493,13 @@ describe("Liquity CDP helpers", () => {
           set: (entity) => pending.set(entity.id, entity),
           deleteUnsafe: (id) => pending.delete(id),
         },
+        PendingStabilityPoolConsumptionSource: {
+          get: async (id) => sources.get(id),
+          set: (entity) => sources.set(entity.id, entity),
+          deleteUnsafe: (id) => sources.delete(id),
+        },
       };
-      return { context, accumulators, scales, pending };
+      return { context, accumulators, scales, pending, sources };
     };
 
     it("folds signed deposit deltas into current LP position and cumulative totals", () => {
@@ -852,6 +866,152 @@ describe("Liquity CDP helpers", () => {
       assert.equal(accumulators.get(collateralId)?.currentScale, 1n);
       assert.equal(scales.get(`${collateralId}-0`)?.rebalanceLossSum, 0n);
       assert.equal(scales.get(`${collateralId}-0`)?.liquidationLossSum, 200n);
+    });
+
+    it("defers marked liquidation classification until P and scale show loss", async () => {
+      const { context, scales, pending, sources } = makeLossContext();
+      const txHash = "0xdeferred-liquidation";
+      context.StabilityPoolLossAccumulator.set({
+        id: collateralId,
+        chainId: 42220,
+        collateralId,
+        currentP: 1_000n,
+        currentScale: 0n,
+        totalBoldDeposits: 10_000n,
+      });
+
+      markPendingStabilityPoolConsumptionSource(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        source: "liquidation",
+        blockNumber: 10n,
+        blockTimestamp: 20n,
+      });
+      await beginStabilityPoolConsumption(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        blockNumber: 10n,
+        blockTimestamp: 20n,
+      });
+      await recordStabilityPoolScaleUpdate(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        currentScale: 1n,
+      });
+
+      assert.equal(
+        await classifyMarkedPendingStabilityPoolConsumption(context, {
+          chainId: 42220,
+          collateralId,
+          txHash,
+        }),
+        false,
+      );
+      assert.equal(pending.size, 1);
+      assert.equal(sources.size, 1);
+
+      await recordStabilityPoolPUpdate(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        currentP: 800n * 10n ** 9n,
+      });
+
+      assert.equal(
+        await classifyMarkedPendingStabilityPoolConsumption(context, {
+          chainId: 42220,
+          collateralId,
+          txHash,
+        }),
+        true,
+      );
+      assert.equal(pending.size, 0);
+      assert.equal(sources.size, 0);
+      assert.equal(scales.get(`${collateralId}-0`)?.rebalanceLossSum, 0n);
+      assert.equal(scales.get(`${collateralId}-0`)?.liquidationLossSum, 200n);
+    });
+
+    it("classifies liquidation source after TroveManager logs before StabilityPool logs", async () => {
+      const market = LIQUITY_MARKETS[0]!;
+      const marketCollateralId = makeCollateralId(market);
+      const mockDb = LiquityMockDb.createMockDb();
+      const txHash =
+        "0x4000000000000000000000000000000000000000000000000000000000000000";
+      const mockEventData = (
+        logIndex: number,
+        srcAddress: string,
+        chainId = market.chainId,
+      ) => ({
+        chainId,
+        srcAddress,
+        logIndex,
+        block: { number: 100, timestamp: 200 },
+        transaction: { hash: txHash },
+      });
+      mockDb.entities.StabilityPoolLossAccumulator.set({
+        id: marketCollateralId,
+        chainId: market.chainId,
+        collateralId: marketCollateralId,
+        currentP: 1_000n,
+        currentScale: 0n,
+        totalBoldDeposits: 10_000n,
+      });
+
+      await processMockEvents({
+        mockDb,
+        events: [
+          LiquityTroveManager.Liquidation.createMockEvent({
+            _debtOffsetBySP: 1_000n,
+            _debtRedistributed: 0n,
+            _boldGasCompensation: 0n,
+            _collGasCompensation: 0n,
+            _collSentToSP: 0n,
+            _collRedistributed: 0n,
+            _collSurplus: 0n,
+            _L_ETH: 0n,
+            _L_boldDebt: 0n,
+            _price: 1n,
+            mockEventData: mockEventData(1, market.troveManager),
+          }),
+          LiquityStabilityPool.S_Updated.createMockEvent({
+            _S: 0n,
+            mockEventData: mockEventData(2, market.stabilityPool),
+          }),
+          LiquityStabilityPool.ScaleUpdated.createMockEvent({
+            _currentScale: 1n,
+            mockEventData: mockEventData(3, market.stabilityPool),
+          }),
+          LiquityStabilityPool.P_Updated.createMockEvent({
+            _P: 800n * 10n ** 9n,
+            mockEventData: mockEventData(4, market.stabilityPool),
+          }),
+          LiquityStabilityPool.StabilityPoolBoldBalanceUpdated.createMockEvent({
+            _newBalance: 9_000n,
+            mockEventData: mockEventData(5, market.stabilityPool),
+          }),
+        ],
+      });
+
+      const scale = mockDb.entities.StabilityPoolLossScale.get(
+        `${marketCollateralId}-0`,
+      );
+      assert.equal(scale?.rebalanceLossSum, 0n);
+      assert.equal(scale?.liquidationLossSum, 200n);
+      assert.equal(
+        mockDb.entities.PendingStabilityPoolConsumption.get(
+          `${market.chainId}-${txHash}-${marketCollateralId}`,
+        ),
+        undefined,
+      );
+      assert.equal(
+        mockDb.entities.PendingStabilityPoolConsumptionSource.get(
+          `${market.chainId}-${txHash}-${marketCollateralId}`,
+        ),
+        undefined,
+      );
     });
 
     it("loads default loss tracker rows and depositor loss scales", async () => {

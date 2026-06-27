@@ -1,5 +1,6 @@
 import type {
   PendingStabilityPoolConsumption,
+  PendingStabilityPoolConsumptionSource,
   StabilityPoolDepositor,
   StabilityPoolLossAccumulator,
   StabilityPoolLossScale,
@@ -32,10 +33,19 @@ type PendingConsumptionEntity = {
   deleteUnsafe: (id: string) => void;
 };
 
+type PendingConsumptionSourceEntity = {
+  get: (
+    id: string,
+  ) => Promise<PendingStabilityPoolConsumptionSource | undefined>;
+  set: (entity: PendingStabilityPoolConsumptionSource) => void;
+  deleteUnsafe: (id: string) => void;
+};
+
 export type StabilityPoolLossContext = {
   StabilityPoolLossAccumulator: LossAccumulatorEntity;
   StabilityPoolLossScale: LossScaleEntity;
   PendingStabilityPoolConsumption: PendingConsumptionEntity;
+  PendingStabilityPoolConsumptionSource: PendingConsumptionSourceEntity;
 };
 
 const consumptionId = (
@@ -104,6 +114,46 @@ export async function loadPendingStabilityPoolConsumption(
   return context.PendingStabilityPoolConsumption.get(
     consumptionId(chainId, txHash, collateralId),
   );
+}
+
+export async function loadPendingStabilityPoolConsumptionSource(
+  context: StabilityPoolLossContext,
+  chainId: number,
+  txHash: string,
+  collateralId: string,
+): Promise<PendingStabilityPoolConsumptionSource | undefined> {
+  return context.PendingStabilityPoolConsumptionSource.get(
+    consumptionId(chainId, txHash, collateralId),
+  );
+}
+
+export function markPendingStabilityPoolConsumptionSource(
+  context: StabilityPoolLossContext,
+  {
+    chainId,
+    collateralId,
+    txHash,
+    source,
+    blockNumber,
+    blockTimestamp,
+  }: {
+    chainId: number;
+    collateralId: string;
+    txHash: string;
+    source: StabilityPoolLossSource;
+    blockNumber: bigint;
+    blockTimestamp: bigint;
+  },
+): void {
+  context.PendingStabilityPoolConsumptionSource.set({
+    id: consumptionId(chainId, txHash, collateralId),
+    chainId,
+    collateralId,
+    txHash,
+    source,
+    timestamp: blockTimestamp,
+    blockNumber,
+  });
 }
 
 export async function beginStabilityPoolConsumption(
@@ -248,26 +298,30 @@ export async function classifyPendingStabilityPoolConsumption(
     collateralId,
     txHash,
     source,
+    requireLossDelta = false,
   }: {
     chainId: number;
     collateralId: string;
     txHash: string;
     source: StabilityPoolLossSource;
+    requireLossDelta?: boolean;
   },
-): Promise<void> {
+): Promise<boolean> {
   const pending = await loadPendingStabilityPoolConsumption(
     context,
     chainId,
     txHash,
     collateralId,
   );
-  if (pending === undefined) return;
+  if (pending === undefined) return false;
   const scale = await context.StabilityPoolLossScale.get(
     scaleId(collateralId, pending.scaleBefore),
   );
   const currentScale =
     scale ?? makeScale(chainId, collateralId, pending.scaleBefore);
   const lossDelta = lossProductDelta(pending);
+  if (requireLossDelta && pending.pBefore === pending.pAfter) return false;
+  if (requireLossDelta && lossDelta === 0n) return false;
   context.StabilityPoolLossScale.set({
     ...currentScale,
     rebalanceLossSum:
@@ -280,6 +334,39 @@ export async function classifyPendingStabilityPoolConsumption(
         : currentScale.liquidationLossSum,
   });
   context.PendingStabilityPoolConsumption.deleteUnsafe(pending.id);
+  return true;
+}
+
+export async function classifyMarkedPendingStabilityPoolConsumption(
+  context: StabilityPoolLossContext,
+  {
+    chainId,
+    collateralId,
+    txHash,
+  }: {
+    chainId: number;
+    collateralId: string;
+    txHash: string;
+  },
+): Promise<boolean> {
+  const source = await loadPendingStabilityPoolConsumptionSource(
+    context,
+    chainId,
+    txHash,
+    collateralId,
+  );
+  if (source === undefined) return false;
+  const classified = await classifyPendingStabilityPoolConsumption(context, {
+    chainId,
+    collateralId,
+    txHash,
+    source: source.source as StabilityPoolLossSource,
+    requireLossDelta: true,
+  });
+  if (classified) {
+    context.PendingStabilityPoolConsumptionSource.deleteUnsafe(source.id);
+  }
+  return classified;
 }
 
 export async function preloadPendingStabilityPoolConsumptionClassification(
@@ -287,13 +374,24 @@ export async function preloadPendingStabilityPoolConsumptionClassification(
   chainId: number,
   txHash: string,
   collateralId: string,
+  {
+    requireSource = false,
+  }: {
+    requireSource?: boolean;
+  } = {},
 ): Promise<void> {
-  const pending = await loadPendingStabilityPoolConsumption(
-    context,
-    chainId,
-    txHash,
-    collateralId,
-  );
+  const [pending, source] = await Promise.all([
+    loadPendingStabilityPoolConsumption(context, chainId, txHash, collateralId),
+    requireSource
+      ? loadPendingStabilityPoolConsumptionSource(
+          context,
+          chainId,
+          txHash,
+          collateralId,
+        )
+      : Promise.resolve(undefined),
+  ]);
+  if (requireSource && source === undefined) return;
   if (pending !== undefined) {
     await context.StabilityPoolLossScale.get(
       scaleId(collateralId, pending.scaleBefore),

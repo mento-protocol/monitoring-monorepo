@@ -1382,6 +1382,17 @@ type PendingStabilityPoolConsumption
   blockNumber: BigInt!
 }
 
+type PendingStabilityPoolConsumptionSource
+  @index(fields: ["collateralId", "txHash"]) {
+  id: ID!
+  chainId: Int!
+  collateralId: String! @index
+  txHash: String! @index
+  source: String!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+}
+
 type StabilityPoolLossAccumulator {
   id: ID!
   chainId: Int!

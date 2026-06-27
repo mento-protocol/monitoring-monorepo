@@ -13,6 +13,7 @@ import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import {
   beginStabilityPoolConsumption,
+  classifyMarkedPendingStabilityPoolConsumption,
   classifyPendingStabilityPoolConsumption,
   deriveSourceLossSinceSnapshot,
   loadLossScalesForDepositor,
@@ -393,11 +394,12 @@ indexer.onEvent(
     const collateralId = makeCollateralId(market);
     await Promise.all([
       loadStabilityPoolLossAccumulator(context, event.chainId, collateralId),
-      loadPendingStabilityPoolConsumption(
+      preloadPendingStabilityPoolConsumptionClassification(
         context,
         event.chainId,
         event.transaction.hash,
         collateralId,
+        { requireSource: true },
       ),
     ]);
     if (context.isPreload) return;
@@ -406,6 +408,11 @@ indexer.onEvent(
       collateralId,
       txHash: event.transaction.hash,
       currentP: event.params._P,
+    });
+    await classifyMarkedPendingStabilityPoolConsumption(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
     });
   },
 );
@@ -424,11 +431,12 @@ indexer.onEvent(
     const collateralId = makeCollateralId(market);
     await Promise.all([
       loadStabilityPoolLossAccumulator(context, event.chainId, collateralId),
-      loadPendingStabilityPoolConsumption(
+      preloadPendingStabilityPoolConsumptionClassification(
         context,
         event.chainId,
         event.transaction.hash,
         collateralId,
+        { requireSource: true },
       ),
     ]);
     if (context.isPreload) {
@@ -448,6 +456,11 @@ indexer.onEvent(
       collateralId,
       txHash: event.transaction.hash,
       newBalance: event.params._newBalance,
+    });
+    await classifyMarkedPendingStabilityPoolConsumption(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
     });
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
