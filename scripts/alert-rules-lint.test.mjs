@@ -416,17 +416,19 @@ test("trading-mode Splunk pages repeat slowly per rate feed", () => {
     /\bcontinue\s*=\s*true/.test(splunkPolicy),
     "trading-mode Splunk policy must continue so Slack alerts-critical also fires",
   );
+});
 
+test("trading-mode alerts keep incidents open across short flaps", () => {
   const tradingModeRules = readFileSync(
     path.resolve(__dirname, "..", "alerts/rules/rules-trading-modes.tf"),
     "utf8",
   );
   assert(
-    /\bfor\s*=\s*"5m"/.test(tradingModeRules),
+    /^(?![ \t]*#).*\bfor\s*=\s*"5m"/m.test(tradingModeRules),
     "trading-mode alerts should still page quickly after a sustained halt",
   );
   assert(
-    /\bkeep_firing_for\s*=\s*"1h"/.test(tradingModeRules),
+    /^(?![ \t]*#).*\bkeep_firing_for\s*=\s*"1h"/m.test(tradingModeRules),
     "trading-mode alerts should keep incidents open across short breaker flaps",
   );
 });
