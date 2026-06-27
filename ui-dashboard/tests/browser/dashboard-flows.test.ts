@@ -201,7 +201,12 @@ test.describe("dashboard browser flows", () => {
     ).toBeVisible();
     await expect(
       page.getByRole("columnheader", {
-        name: "Deposit Offset by Liquidations (-)",
+        name: "Rebalance Used (-)",
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", {
+        name: "Liquidation Used (-)",
       }),
     ).toBeVisible();
     await expect(

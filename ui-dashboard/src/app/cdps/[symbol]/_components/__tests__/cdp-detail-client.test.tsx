@@ -109,7 +109,9 @@ vi.mock("../cdp-transactions-table", () => ({
 import {
   CDP_INSTANCE_DAILY_SNAPSHOTS,
   CDP_MARKET_DETAIL,
+  CDP_MARKET_DETAIL_WITH_SP_SOURCE,
   CDP_MARKET_DETAIL_WITH_TROVE_TX,
+  CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE,
   CDP_MARKETS,
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
@@ -124,6 +126,15 @@ function wei(amount: number): string {
 
 function rateBps(bps: number): string {
   return ((BigInt(bps) * USD_WEI) / BigInt(10_000)).toString();
+}
+
+function isCdpDetailQuery(query: string | null): boolean {
+  return (
+    query === CDP_MARKET_DETAIL ||
+    query === CDP_MARKET_DETAIL_WITH_SP_SOURCE ||
+    query === CDP_MARKET_DETAIL_WITH_TROVE_TX ||
+    query === CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE
+  );
 }
 
 function collateral(overrides: Partial<CdpCollateral> = {}): CdpCollateral {
@@ -233,8 +244,19 @@ function depositor(overrides: Partial<CdpDepositor> = {}): CdpDepositor {
     lastUpdatedAt: String(NOW),
     cumulativeDeposited: wei(25),
     cumulativeWithdrawn: wei(5),
+    cumulativeRebalanceUsed: wei(4),
+    cumulativeLiquidationUsed: wei(1),
     ...overrides,
   };
+}
+
+function depositorWithoutSourceSplit(
+  overrides: Partial<CdpDepositor> = {},
+): CdpDepositor {
+  const row = depositor(overrides);
+  delete row.cumulativeRebalanceUsed;
+  delete row.cumulativeLiquidationUsed;
+  return row;
 }
 
 function marketsData(troves: CdpTroveListRow[] = []) {
@@ -245,13 +267,27 @@ function marketsData(troves: CdpTroveListRow[] = []) {
   };
 }
 
-function troveSchemaData(hasLastUpdatedTxHash = true) {
+function troveSchemaData(
+  hasLastUpdatedTxHash = true,
+  hasStabilityPoolSourceSplit = true,
+) {
   return {
-    __type: {
+    TroveType: {
       fields: [
         { name: "id" },
         { name: "lastUpdatedAt" },
         ...(hasLastUpdatedTxHash ? [{ name: "lastUpdatedTxHash" }] : []),
+      ],
+    },
+    StabilityPoolDepositorType: {
+      fields: [
+        { name: "id" },
+        ...(hasStabilityPoolSourceSplit
+          ? [
+              { name: "cumulativeRebalanceUsed" },
+              { name: "cumulativeLiquidationUsed" },
+            ]
+          : []),
       ],
     },
   };
@@ -382,10 +418,7 @@ describe("CdpDetailClient", () => {
       if (query === CDP_TROVE_SCHEMA_FIELDS) {
         return { data: troveSchemaData(), error: null, isLoading: false };
       }
-      if (
-        query === CDP_MARKET_DETAIL ||
-        query === CDP_MARKET_DETAIL_WITH_TROVE_TX
-      ) {
+      if (isCdpDetailQuery(query)) {
         return {
           data: detailData({
             openTroves: [trove({ interestRate: rateBps(250) })],
@@ -436,12 +469,14 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("Unclaimed Collateral");
     expect(handle!.container.textContent).toContain("Gross Deposited");
     expect(handle!.container.textContent).toContain("Principal Withdrawn");
-    expect(handle!.container.textContent).toContain(
-      "Deposit Offset by Liquidations",
-    );
+    expect(handle!.container.textContent).toContain("Rebalance Used");
+    expect(handle!.container.textContent).toContain("Liquidation Used");
     expect(handle!.container.textContent).toContain("15.00 GBPm");
     expect(handle!.container.textContent).toContain("5.00 GBPm");
+    expect(handle!.container.textContent).toContain("4.00 GBPm");
+    expect(handle!.container.textContent).toContain("1.00 GBPm");
     expect(handle!.container.textContent).toContain("1.00 USDm");
+    expect(handle!.container.textContent).not.toContain("Deposit Consumed");
     expect(handle!.container.textContent).not.toContain("User Withdrawn");
     expect(handle!.container.textContent).not.toContain("Collateral Claimed");
     expect(handle!.container.textContent).not.toContain("Debt Snapshot");
@@ -456,6 +491,10 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).not.toContain(
       "Claimed Collateral Proceeds",
     );
+    expect(handle!.container.textContent).not.toContain(
+      "Deposit Offset by Liquidations",
+    );
+    expect(handle!.container.textContent).not.toContain("Net Deposit Offset");
     expect(
       handle!.container.querySelector('[data-testid="sp-chart"]'),
     ).not.toBeNull();
@@ -488,10 +527,7 @@ describe("CdpDetailClient", () => {
       if (query === CDP_TROVE_SCHEMA_FIELDS) {
         return { data: troveSchemaData(), error: null, isLoading: false };
       }
-      if (
-        query === CDP_MARKET_DETAIL ||
-        query === CDP_MARKET_DETAIL_WITH_TROVE_TX
-      ) {
+      if (isCdpDetailQuery(query)) {
         return {
           data: detailData({ depositors }),
           error: null,
@@ -539,7 +575,7 @@ describe("CdpDetailClient", () => {
       }
       if (query === CDP_TROVE_SCHEMA_FIELDS) {
         return {
-          data: troveSchemaData(supportsTxHash),
+          data: troveSchemaData(supportsTxHash, false),
           error: null,
           isLoading: false,
         };
@@ -577,6 +613,149 @@ describe("CdpDetailClient", () => {
     expect(handle!.container.textContent).toContain("0xupgradedowner");
   });
 
+  it("does not fabricate source-split zeroes while the source detail query warms", () => {
+    let supportsSourceSplit = false;
+    let sourceQueryLoading = true;
+    const legacyDepositor = depositorWithoutSourceSplit({
+      id: "dep-legacy",
+      address: "0xlegacydepositor",
+    });
+    const legacyDetail = detailData({
+      openTroves: [trove()],
+      depositors: [legacyDepositor],
+    });
+    const upgradedDetail = detailData({
+      openTroves: [trove()],
+      depositors: [
+        depositor({ id: "dep-upgraded", address: "0xupgradeddepositor" }),
+      ],
+    });
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return {
+          data: marketsData([
+            { id: "t1", collateralId: "gbpm", status: "active" },
+          ]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return {
+          data: troveSchemaData(false, supportsSourceSplit),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return { data: legacyDetail, error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL_WITH_SP_SOURCE) {
+        return {
+          data: sourceQueryLoading ? undefined : upgradedDetail,
+          error: null,
+          isLoading: sourceQueryLoading,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+    expect(handle!.container.textContent).toContain("0xlegacydepositor");
+    expect(handle!.container.textContent).not.toContain("Rebalance Used");
+    expect(handle!.container.textContent).not.toContain("Liquidation Used");
+
+    supportsSourceSplit = true;
+    render(handle!);
+    expect(handle!.container.textContent).toContain("0xlegacydepositor");
+    expect(handle!.container.textContent).not.toContain("Rebalance Used");
+    expect(handle!.container.textContent).not.toContain("Liquidation Used");
+    expect(handle!.container.textContent).not.toContain("Not indexed");
+
+    sourceQueryLoading = false;
+    render(handle!);
+    expect(handle!.container.textContent).toContain("0xupgradeddepositor");
+    expect(handle!.container.textContent).toContain("Rebalance Used");
+    expect(handle!.container.textContent).toContain("Liquidation Used");
+    expect(handle!.container.textContent).toContain("4.00 GBPm");
+    expect(handle!.container.textContent).toContain("1.00 GBPm");
+  });
+
+  it("surfaces source-split query failures while showing stale LP content", () => {
+    let supportsSourceSplit = false;
+    let sourceQueryError: Error | null = null;
+    const legacyDepositor = depositorWithoutSourceSplit({
+      id: "dep-legacy",
+      address: "0xlegacydepositor",
+    });
+    const legacyDetail = detailData({
+      openTroves: [trove()],
+      depositors: [legacyDepositor],
+    });
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return {
+          data: marketsData([
+            { id: "t1", collateralId: "gbpm", status: "active" },
+          ]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_SCHEMA_FIELDS) {
+        return {
+          data: troveSchemaData(false, supportsSourceSplit),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_MARKET_DETAIL) {
+        return { data: legacyDetail, error: null, isLoading: false };
+      }
+      if (query === CDP_MARKET_DETAIL_WITH_SP_SOURCE) {
+        return {
+          data: undefined,
+          error: sourceQueryError,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_INSTANCE_DAILY_SNAPSHOTS) {
+        return {
+          data: { LiquityInstanceDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!);
+    expect(handle!.container.textContent).toContain("0xlegacydepositor");
+
+    supportsSourceSplit = true;
+    sourceQueryError = new Error("source split query failed");
+    render(handle!);
+    expect(handle!.container.textContent).toContain("0xlegacydepositor");
+    expect(handle!.container.textContent).toContain(
+      "Rebalance/liquidation split unavailable",
+    );
+    expect(handle!.container.textContent).toContain(
+      "source split query failed",
+    );
+    expect(handle!.container.textContent).not.toContain(
+      "Failed to load CDP market",
+    );
+    expect(handle!.container.textContent).not.toContain("Rebalance Used");
+    expect(handle!.container.textContent).not.toContain("Liquidation Used");
+  });
+
   it("keeps prior detail content visible when the tx-hash detail query errors", () => {
     let supportsTxHash = false;
     let txQueryError: Error | null = null;
@@ -596,7 +775,7 @@ describe("CdpDetailClient", () => {
       }
       if (query === CDP_TROVE_SCHEMA_FIELDS) {
         return {
-          data: troveSchemaData(supportsTxHash),
+          data: troveSchemaData(supportsTxHash, false),
           error: null,
           isLoading: false,
         };
@@ -737,7 +916,11 @@ describe("CdpDetailClient", () => {
         return { data: marketsData(), error: null, isLoading: false };
       }
       if (query === CDP_TROVE_SCHEMA_FIELDS) {
-        return { data: troveSchemaData(false), error: null, isLoading: false };
+        return {
+          data: troveSchemaData(false, false),
+          error: null,
+          isLoading: false,
+        };
       }
       if (query === CDP_MARKET_DETAIL) {
         return {
@@ -932,10 +1115,7 @@ describe("CdpDetailClient", () => {
       if (query === CDP_TROVE_SCHEMA_FIELDS) {
         return { data: troveSchemaData(), error: null, isLoading: false };
       }
-      if (
-        query === CDP_MARKET_DETAIL ||
-        query === CDP_MARKET_DETAIL_WITH_TROVE_TX
-      ) {
+      if (isCdpDetailQuery(query)) {
         return {
           data: detailData({
             openTroves: troves,

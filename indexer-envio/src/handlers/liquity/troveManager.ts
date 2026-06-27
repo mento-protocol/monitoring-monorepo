@@ -24,6 +24,10 @@ import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
 import { pendingTroveKey } from "./keys.js";
 import { computeTroveIcrBps, negativeToPositive } from "./math.js";
 import { loadLiquityPrice } from "./priceFeed.js";
+import {
+  classifyPendingStabilityPoolConsumption,
+  preloadPendingStabilityPoolConsumptionClassification,
+} from "./stabilityPoolLoss.js";
 import type {
   PendingBatchedTroveUpdateRow,
   TroveManagerPreloadContext,
@@ -816,13 +820,22 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    const collateralId = makeCollateralId(market);
     if (context.isPreload) {
-      await preloadLiquityMarket(context, market);
-      await preloadBorrowingRevenueRollover(
-        context,
-        makeCollateralId(market),
-        asBigInt(event.block.timestamp),
-      );
+      await Promise.all([
+        preloadLiquityMarket(context, market),
+        preloadBorrowingRevenueRollover(
+          context,
+          collateralId,
+          asBigInt(event.block.timestamp),
+        ),
+        preloadPendingStabilityPoolConsumptionClassification(
+          context,
+          event.chainId,
+          event.transaction.hash,
+          collateralId,
+        ),
+      ]);
       return;
     }
     const blockNumber = asBigInt(event.block.number);
@@ -833,6 +846,12 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
+    await classifyPendingStabilityPoolConsumption(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
+      source: "liquidation",
+    });
     context.LiquidationEvent.set({
       id: eventId(event.chainId, event.block.number, event.logIndex),
       chainId: event.chainId,

@@ -236,6 +236,58 @@ function makeEventProcessor(contractName: string, eventName: string) {
   };
 }
 
+export async function processMockEvents<Db extends MockDb>({
+  events,
+  mockDb,
+}: {
+  events: unknown[];
+  mockDb: Db;
+}): Promise<Db> {
+  if (events.length === 0) return mockDb;
+  await waitForHttpTestRpc();
+  const mockEvents = events as MockEvent[];
+  const indexer = createTestIndexer();
+  seedIndexer(indexer, mockDb);
+  const chains: Record<
+    number,
+    {
+      startBlock: number;
+      endBlock: number;
+      simulate: Array<{
+        contract: string;
+        event: string;
+        srcAddress: string;
+        logIndex: number;
+        block: { number: number; timestamp: number };
+        transaction: Record<string, unknown>;
+        params: Record<string, unknown>;
+      }>;
+    }
+  > = {};
+  for (const event of mockEvents) {
+    const block = Number(event.block.number);
+    const chain = (chains[event.chainId] ??= {
+      startBlock: block,
+      endBlock: block,
+      simulate: [],
+    });
+    chain.startBlock = Math.min(chain.startBlock, block);
+    chain.endBlock = Math.max(chain.endBlock, block);
+    chain.simulate.push({
+      contract: event.contractName,
+      event: event.eventName,
+      srcAddress: event.srcAddress,
+      logIndex: event.logIndex,
+      block: event.block,
+      transaction: event.transaction,
+      params: event.params,
+    });
+  }
+  const result = await indexer.process({ chains });
+  applyChanges(mockDb, result.changes);
+  return mockDb;
+}
+
 /** Build a contract's event helpers lazily: any accessed event name resolves to
  * a cached `makeEventProcessor`. Event names are NOT enumerated here —
  * `processEvent` dispatches to whatever handler the indexer registered for

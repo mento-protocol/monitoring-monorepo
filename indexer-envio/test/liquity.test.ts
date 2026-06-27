@@ -1,6 +1,12 @@
 import { strict as assert } from "assert";
 import contractsJson from "@mento-protocol/contracts/contracts.json" with { type: "json" };
-import type { LiquityInstance } from "envio";
+import type {
+  LiquityInstance,
+  PendingStabilityPoolConsumption,
+  StabilityPoolDepositor,
+  StabilityPoolLossAccumulator,
+  StabilityPoolLossScale,
+} from "envio";
 import {
   LIQUITY_MARKETS,
   findLiquityMarketByAddressesRegistry,
@@ -39,7 +45,23 @@ import {
   type StabilityPoolPendingOperation,
 } from "../src/handlers/liquity/stabilityPool";
 import {
+  beginStabilityPoolConsumption,
+  classifyPendingStabilityPoolConsumption,
+  deriveSourceLossSinceSnapshot,
+  loadLossScalesForDepositor,
+  loadPendingStabilityPoolConsumption,
+  loadStabilityPoolLossAccumulator,
+  loadStabilityPoolLossScale,
+  nextStabilityPoolLossSnapshots,
+  preloadPendingStabilityPoolConsumptionClassification,
+  recordStabilityPoolPUpdate,
+  recordStabilityPoolScaleUpdate,
+  recordStabilityPoolTotalDepositUpdate,
+  type StabilityPoolLossContext,
+} from "../src/handlers/liquity/stabilityPoolLoss";
+import {
   indexerTestHelpers,
+  processMockEvents,
   type EntityCollection,
   type EntityReader,
   type MockDbWith,
@@ -50,6 +72,9 @@ type LiquityStabilityPoolMockDb = MockDbWith<{
   LiquityInstance: WritableEntity<LiquityInstance>;
   LiquityInstanceSnapshot: EntityCollection;
   LiquityInstanceDailySnapshot: EntityCollection;
+  StabilityPoolLossAccumulator: WritableEntity<StabilityPoolLossAccumulator>;
+  StabilityPoolLossScale: EntityReader<StabilityPoolLossScale>;
+  PendingStabilityPoolConsumption: EntityReader<PendingStabilityPoolConsumption>;
   StabilityPoolOperationEvent: EntityReader<{
     id: string;
     operation: number;
@@ -423,6 +448,12 @@ describe("Liquity CDP helpers", () => {
       lastUpdatedAt: 1_100n,
       cumulativeDeposited: 250n,
       cumulativeWithdrawn: 10n,
+      cumulativeRebalanceUsed: 7n,
+      cumulativeLiquidationUsed: 3n,
+      depositSnapshotP: 10n ** 36n,
+      depositSnapshotScale: 0n,
+      rebalanceLossSnapshot: 0n,
+      liquidationLossSnapshot: 0n,
     };
     const withdrawal: StabilityPoolPendingOperation = {
       operation: 1,
@@ -432,6 +463,28 @@ describe("Liquity CDP helpers", () => {
       yieldGainClaimed: 3n,
       ethGainSinceLastOperation: 4n,
       ethGainClaimed: 2n,
+    };
+    const sourceLoss = { rebalance: 15n, liquidation: 5n };
+    const makeLossContext = () => {
+      const accumulators = new Map<string, StabilityPoolLossAccumulator>();
+      const scales = new Map<string, StabilityPoolLossScale>();
+      const pending = new Map<string, PendingStabilityPoolConsumption>();
+      const context: StabilityPoolLossContext = {
+        StabilityPoolLossAccumulator: {
+          get: async (id) => accumulators.get(id),
+          set: (entity) => accumulators.set(entity.id, entity),
+        },
+        StabilityPoolLossScale: {
+          get: async (id) => scales.get(id),
+          set: (entity) => scales.set(entity.id, entity),
+        },
+        PendingStabilityPoolConsumption: {
+          get: async (id) => pending.get(id),
+          set: (entity) => pending.set(entity.id, entity),
+          deleteUnsafe: (id) => pending.delete(id),
+        },
+      };
+      return { context, accumulators, scales, pending };
     };
 
     it("folds signed deposit deltas into current LP position and cumulative totals", () => {
@@ -444,12 +497,23 @@ describe("Liquity CDP helpers", () => {
         blockTimestamp: 2_000n,
         existing,
         pending: withdrawal,
+        sourceLoss,
+        snapshotP: 9n * 10n ** 35n,
+        snapshotScale: 0n,
+        rebalanceLossSnapshot: 15n,
+        liquidationLossSnapshot: 5n,
       });
 
       assert.equal(updated.lastTouchedDeposit, 120n);
       assert.equal(updated.stashedColl, 3n);
       assert.equal(updated.cumulativeDeposited, 250n);
       assert.equal(updated.cumulativeWithdrawn, 70n);
+      assert.equal(updated.cumulativeRebalanceUsed, 22n);
+      assert.equal(updated.cumulativeLiquidationUsed, 8n);
+      assert.equal(updated.depositSnapshotP, 9n * 10n ** 35n);
+      assert.equal(updated.depositSnapshotScale, 0n);
+      assert.equal(updated.rebalanceLossSnapshot, 15n);
+      assert.equal(updated.liquidationLossSnapshot, 5n);
       assert.equal(updated.yieldGainClaimedCum, 5n);
       assert.equal(updated.ethGainClaimedCum, 3n);
       assert.equal(updated.firstDepositAt, 1_000n);
@@ -466,6 +530,7 @@ describe("Liquity CDP helpers", () => {
         stashedColl: 3n,
         existing,
         pending: withdrawal,
+        sourceLoss,
         blockNumber: 123n,
         blockTimestamp: 2_000n,
         txHash: "0xabc",
@@ -476,6 +541,8 @@ describe("Liquity CDP helpers", () => {
       assert.equal(event.operation, 1);
       assert.equal(event.topUpOrWithdrawal, -60n);
       assert.equal(event.depositLossSinceLastOperation, 20n);
+      assert.equal(event.rebalanceLossSinceLastOperation, 15n);
+      assert.equal(event.liquidationLossSinceLastOperation, 5n);
       assert.equal(event.yieldGainSinceLastOperation, 5n);
       assert.equal(event.yieldGainClaimed, 3n);
       assert.equal(event.ethGainSinceLastOperation, 4n);
@@ -499,6 +566,11 @@ describe("Liquity CDP helpers", () => {
         blockTimestamp: 2_000n,
         existing: undefined,
         pending: undefined,
+        sourceLoss: { rebalance: 0n, liquidation: 0n },
+        snapshotP: 10n ** 36n,
+        snapshotScale: 0n,
+        rebalanceLossSnapshot: 0n,
+        liquidationLossSnapshot: 0n,
       });
       const event = buildStabilityPoolOperationEvent({
         id: "evt-missing-pending",
@@ -509,6 +581,7 @@ describe("Liquity CDP helpers", () => {
         stashedColl: 0n,
         existing: undefined,
         pending: undefined,
+        sourceLoss: { rebalance: 0n, liquidation: 0n },
         blockNumber: 123n,
         blockTimestamp: 2_000n,
         txHash: "0xdef",
@@ -518,6 +591,268 @@ describe("Liquity CDP helpers", () => {
       assert.equal(updated.cumulativeDeposited, 0n);
       assert.equal(updated.cumulativeWithdrawn, 0n);
       assert.equal(event, null);
+    });
+
+    it("splits emitted deposit loss by source-specific StabilityPool loss indexes", () => {
+      const depositorSnapshot = {
+        ...existing,
+        lastTouchedDeposit: 1_000n,
+        depositSnapshotP: 1_000n,
+        depositSnapshotScale: 0n,
+        rebalanceLossSnapshot: 10n,
+        liquidationLossSnapshot: 5n,
+      } satisfies StabilityPoolDepositor;
+      const scale = {
+        id: `${collateralId}-0`,
+        chainId: 42220,
+        collateralId,
+        scale: 0n,
+        rebalanceLossSum: 130n,
+        liquidationLossSum: 35n,
+      } satisfies StabilityPoolLossScale;
+
+      const loss = deriveSourceLossSinceSnapshot({
+        depositor: depositorSnapshot,
+        scales: [scale],
+        emittedLoss: 150n,
+      });
+
+      assert.equal(loss.rebalance, 120n);
+      assert.equal(loss.liquidation, 30n);
+      assert.equal(loss.rebalance + loss.liquidation, 150n);
+    });
+
+    it("reconciles rounding residuals back to the contract-emitted deposit loss", () => {
+      const depositorSnapshot = {
+        ...existing,
+        lastTouchedDeposit: 1_000n,
+        depositSnapshotP: 1_000n,
+        depositSnapshotScale: 0n,
+        rebalanceLossSnapshot: 0n,
+        liquidationLossSnapshot: 0n,
+      } satisfies StabilityPoolDepositor;
+      const scale = {
+        id: `${collateralId}-0`,
+        chainId: 42220,
+        collateralId,
+        scale: 0n,
+        rebalanceLossSum: 119n,
+        liquidationLossSum: 30n,
+      } satisfies StabilityPoolLossScale;
+
+      const loss = deriveSourceLossSinceSnapshot({
+        depositor: depositorSnapshot,
+        scales: [scale],
+        emittedLoss: 150n,
+      });
+
+      assert.equal(loss.rebalance, 120n);
+      assert.equal(loss.liquidation, 30n);
+      assert.equal(loss.rebalance + loss.liquidation, 150n);
+    });
+
+    it("records and classifies rebalance StabilityPool loss index deltas", async () => {
+      const { context, accumulators, scales, pending } = makeLossContext();
+      const txHash = "0xrebalance";
+      context.StabilityPoolLossAccumulator.set({
+        id: collateralId,
+        chainId: 42220,
+        collateralId,
+        currentP: 1_000n,
+        currentScale: 0n,
+        totalBoldDeposits: 10_000n,
+      });
+
+      await beginStabilityPoolConsumption(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        blockNumber: 10n,
+        blockTimestamp: 20n,
+      });
+      await recordStabilityPoolPUpdate(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        currentP: 900n,
+      });
+      await recordStabilityPoolTotalDepositUpdate(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        newBalance: 9_000n,
+      });
+      await preloadPendingStabilityPoolConsumptionClassification(
+        context,
+        42220,
+        txHash,
+        collateralId,
+      );
+      await classifyPendingStabilityPoolConsumption(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        source: "rebalance",
+      });
+
+      assert.equal(accumulators.get(collateralId)?.currentP, 900n);
+      assert.equal(accumulators.get(collateralId)?.totalBoldDeposits, 9_000n);
+      assert.equal(pending.size, 0);
+      assert.equal(scales.get(`${collateralId}-0`)?.rebalanceLossSum, 100n);
+      assert.equal(scales.get(`${collateralId}-0`)?.liquidationLossSum, 0n);
+    });
+
+    it("preloads same-transaction rebalance consumption dependencies", async () => {
+      const market = LIQUITY_MARKETS[0]!;
+      const marketCollateralId = makeCollateralId(market);
+      const mockDb = LiquityMockDb.createMockDb();
+      const txHash =
+        "0x3000000000000000000000000000000000000000000000000000000000000000";
+      const mockEventData = (logIndex: number) => ({
+        chainId: market.chainId,
+        srcAddress: market.stabilityPool,
+        logIndex,
+        block: { number: 100, timestamp: 200 },
+        transaction: { hash: txHash },
+      });
+      mockDb.entities.StabilityPoolLossAccumulator.set({
+        id: marketCollateralId,
+        chainId: market.chainId,
+        collateralId: marketCollateralId,
+        currentP: 1_000n,
+        currentScale: 0n,
+        totalBoldDeposits: 10_000n,
+      });
+
+      await processMockEvents({
+        mockDb,
+        events: [
+          LiquityStabilityPool.S_Updated.createMockEvent({
+            _S: 0n,
+            mockEventData: mockEventData(1),
+          }),
+          LiquityStabilityPool.P_Updated.createMockEvent({
+            _P: 900n,
+            mockEventData: mockEventData(2),
+          }),
+          LiquityStabilityPool.StabilityPoolBoldBalanceUpdated.createMockEvent({
+            _newBalance: 9_000n,
+            mockEventData: mockEventData(3),
+          }),
+          LiquityStabilityPool.RebalanceExecuted.createMockEvent({
+            amountCollIn: 20n,
+            amountStableOut: 1_000n,
+            mockEventData: mockEventData(4),
+          }),
+        ],
+      });
+
+      const scale = mockDb.entities.StabilityPoolLossScale.get(
+        `${marketCollateralId}-0`,
+      );
+      assert.equal(scale?.rebalanceLossSum, 100n);
+      assert.equal(scale?.liquidationLossSum, 0n);
+      assert.equal(
+        mockDb.entities.PendingStabilityPoolConsumption.get(
+          `${market.chainId}-${txHash}-${marketCollateralId}`,
+        ),
+        undefined,
+      );
+    });
+
+    it("records scale changes and classifies liquidation loss indexes", async () => {
+      const { context, accumulators, scales } = makeLossContext();
+      const txHash = "0xliquidation";
+      context.StabilityPoolLossAccumulator.set({
+        id: collateralId,
+        chainId: 42220,
+        collateralId,
+        currentP: 1_000n,
+        currentScale: 0n,
+        totalBoldDeposits: 10_000n,
+      });
+
+      await beginStabilityPoolConsumption(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        blockNumber: 10n,
+        blockTimestamp: 20n,
+      });
+      await recordStabilityPoolScaleUpdate(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        currentScale: 1n,
+      });
+      await recordStabilityPoolPUpdate(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        currentP: 800n * 10n ** 9n,
+      });
+      await classifyPendingStabilityPoolConsumption(context, {
+        chainId: 42220,
+        collateralId,
+        txHash,
+        source: "liquidation",
+      });
+
+      assert.equal(accumulators.get(collateralId)?.currentScale, 1n);
+      assert.equal(scales.get(`${collateralId}-0`)?.rebalanceLossSum, 0n);
+      assert.equal(scales.get(`${collateralId}-0`)?.liquidationLossSum, 200n);
+    });
+
+    it("loads default loss tracker rows and depositor loss scales", async () => {
+      const { context } = makeLossContext();
+      const accumulator = await loadStabilityPoolLossAccumulator(
+        context,
+        42220,
+        collateralId,
+      );
+      const scale = await loadStabilityPoolLossScale(
+        context,
+        42220,
+        collateralId,
+        0n,
+      );
+      const depositorSnapshot = {
+        ...existing,
+        lastTouchedDeposit: 1_000n,
+        depositSnapshotP: 1_000n,
+        depositSnapshotScale: 0n,
+        rebalanceLossSnapshot: 0n,
+        liquidationLossSnapshot: 0n,
+      } satisfies StabilityPoolDepositor;
+      context.StabilityPoolLossScale.set({
+        ...scale,
+        rebalanceLossSum: 10n,
+        liquidationLossSum: 2n,
+      });
+      const loadedScales = await loadLossScalesForDepositor(
+        context,
+        depositorSnapshot,
+      );
+      const snapshots = nextStabilityPoolLossSnapshots({
+        scale: loadedScales[0]!,
+      });
+      const missing = await loadPendingStabilityPoolConsumption(
+        context,
+        42220,
+        "0xmissing",
+        collateralId,
+      );
+
+      assert.equal(accumulator.currentP, 10n ** 36n);
+      assert.equal(accumulator.currentScale, 0n);
+      assert.equal(loadedScales.length, 9);
+      assert.equal(snapshots.rebalanceLossSnapshot, 10n);
+      assert.equal(snapshots.liquidationLossSnapshot, 2n);
+      assert.equal(missing, undefined);
+      assert.deepEqual(
+        await loadLossScalesForDepositor(context, undefined),
+        [],
+      );
     });
 
     it("touches the market when a paired stability pool operation materializes", async () => {

@@ -10,7 +10,9 @@ import { useGQL } from "@/lib/graphql";
 import {
   CDP_INSTANCE_DAILY_SNAPSHOTS,
   CDP_MARKET_DETAIL,
+  CDP_MARKET_DETAIL_WITH_SP_SOURCE,
   CDP_MARKET_DETAIL_WITH_TROVE_TX,
+  CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE,
   CDP_MARKETS,
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
@@ -56,7 +58,10 @@ type CdpDetailResponse = {
 };
 
 type CdpTroveSchemaFieldsResponse = {
-  __type: {
+  TroveType: {
+    fields: Array<{ name: string }>;
+  } | null;
+  StabilityPoolDepositorType: {
     fields: Array<{ name: string }>;
   } | null;
 };
@@ -86,22 +91,40 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
   );
   const supportsTroveLastUpdatedTxHash = useMemo(
     () =>
-      troveSchema.data?.__type?.fields.some(
+      troveSchema.data?.TroveType?.fields.some(
         (field) => field.name === "lastUpdatedTxHash",
       ) === true,
     [troveSchema.data],
   );
+  const supportsStabilityPoolSourceSplit = useMemo(() => {
+    const fields = troveSchema.data?.StabilityPoolDepositorType?.fields;
+    return (
+      fields?.some((field) => field.name === "cumulativeRebalanceUsed") ===
+        true &&
+      fields.some((field) => field.name === "cumulativeLiquidationUsed") ===
+        true
+    );
+  }, [troveSchema.data]);
   const detailQuery =
     collateral == null
       ? null
       : supportsTroveLastUpdatedTxHash
-        ? CDP_MARKET_DETAIL_WITH_TROVE_TX
-        : CDP_MARKET_DETAIL;
+        ? supportsStabilityPoolSourceSplit
+          ? CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE
+          : CDP_MARKET_DETAIL_WITH_TROVE_TX
+        : supportsStabilityPoolSourceSplit
+          ? CDP_MARKET_DETAIL_WITH_SP_SOURCE
+          : CDP_MARKET_DETAIL;
   const rawDetail = useGQL<CdpDetailResponse>(
     detailQuery,
     collateral == null ? undefined : { collateralId: collateral.id },
   );
   const detail = useStableCdpDetail(rawDetail, collateral?.id);
+  const sourceSplitWarning = sourceSplitLoadWarning({
+    supportsStabilityPoolSourceSplit,
+    rawDetail,
+    detail,
+  });
   const snapshots = useGQL<CdpDailySnapshotsResponse>(
     collateral == null ? null : CDP_INSTANCE_DAILY_SNAPSHOTS,
     collateral == null ? undefined : { instanceId: collateral.id },
@@ -119,8 +142,24 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
       snapshots={snapshots}
       collateral={collateral}
       network={network}
+      sourceSplitWarning={sourceSplitWarning}
     />
   );
+}
+
+function sourceSplitLoadWarning({
+  supportsStabilityPoolSourceSplit,
+  rawDetail,
+  detail,
+}: {
+  supportsStabilityPoolSourceSplit: boolean;
+  rawDetail: ReturnType<typeof useGQL<CdpDetailResponse>>;
+  detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
+}): string | null {
+  if (!supportsStabilityPoolSourceSplit) return null;
+  if (rawDetail.error == null || rawDetail.data != null) return null;
+  if (detail.data == null) return null;
+  return `Rebalance/liquidation split unavailable — ${rawDetail.error.message}`;
 }
 
 function useStableCdpDetail(
@@ -154,12 +193,14 @@ function CdpDetailState({
   snapshots,
   collateral,
   network,
+  sourceSplitWarning,
 }: {
   markets: ReturnType<typeof useGQL<CdpMarketsResponse>>;
   detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
   snapshots: ReturnType<typeof useGQL<CdpDailySnapshotsResponse>>;
   collateral: CdpCollateral | undefined;
   network: Network;
+  sourceSplitWarning: string | null;
 }) {
   if (
     markets.isLoading ||
@@ -191,6 +232,7 @@ function CdpDetailState({
         snapshots,
         collateral,
         network,
+        sourceSplitWarning,
       })}
     />
   );
@@ -201,11 +243,13 @@ function buildContentProps({
   snapshots,
   collateral,
   network,
+  sourceSplitWarning,
 }: {
   detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
   snapshots: ReturnType<typeof useGQL<CdpDailySnapshotsResponse>>;
   collateral: CdpCollateral;
   network: Network;
+  sourceSplitWarning: string | null;
 }) {
   const openTroves = detail.data?.OpenTrove ?? [];
   const depositors = detail.data?.StabilityPoolDepositor ?? [];
@@ -225,6 +269,7 @@ function buildContentProps({
     snapshotsLoading: snapshots.isLoading,
     snapshotsError: snapshots.error != null,
     network,
+    sourceSplitWarning,
   };
 }
 
@@ -241,6 +286,7 @@ function CdpDetailContent({
   snapshotsLoading,
   snapshotsError,
   network,
+  sourceSplitWarning,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
@@ -254,6 +300,7 @@ function CdpDetailContent({
   snapshotsLoading: boolean;
   snapshotsError: boolean;
   network: Network;
+  sourceSplitWarning: string | null;
 }) {
   return (
     <div className="space-y-8">
@@ -311,6 +358,7 @@ function CdpDetailContent({
         truncated={depositorsTruncated}
         symbol={collateral.symbol}
         chainId={collateral.chainId}
+        sourceSplitWarning={sourceSplitWarning}
       />
 
       <CdpTransactionsTable
@@ -411,31 +459,26 @@ function DepositorTable({
   truncated,
   symbol,
   chainId,
+  sourceSplitWarning,
 }: {
   depositors: CdpDepositor[];
   truncated: boolean;
   symbol: string;
   chainId: number;
+  sourceSplitWarning: string | null;
 }) {
+  const hasSourceSplitData = depositors.some(
+    (depositor) =>
+      depositor.cumulativeRebalanceUsed !== undefined &&
+      depositor.cumulativeLiquidationUsed !== undefined,
+  );
+
   return (
     <section>
-      <h2 className="text-lg font-semibold text-white mb-3">
-        Stability Pool LP Snapshots
-      </h2>
-      <p className="mb-3 text-xs text-slate-500">
-        Debt-token flow per row: current deposit snapshot equals gross deposited
-        minus principal withdrawn minus deposit offset by liquidations. The
-        liquidation-offset deposit is net of retained debt-token yield.
-        Unclaimed collateral is the separate USDm liquidation gain currently
-        indexed for the LP.
-      </p>
-      {truncated && (
-        <p className="mb-3 text-xs text-amber-400" role="status">
-          Showing the first{" "}
-          {CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LP
-          snapshots by indexed deposit. More snapshots may exist.
-        </p>
-      )}
+      <DepositorTableIntro
+        truncated={truncated}
+        sourceSplitWarning={sourceSplitWarning}
+      />
       {depositors.length === 0 ? (
         <EmptyBox message="No stability pool LPs indexed yet." />
       ) : (
@@ -446,7 +489,10 @@ function DepositorTable({
               <Th align="right">Current Deposit Snapshot</Th>
               <Th align="right">Gross Deposited (+)</Th>
               <Th align="right">Principal Withdrawn (-)</Th>
-              <Th align="right">Deposit Offset by Liquidations (-)</Th>
+              {hasSourceSplitData && <Th align="right">Rebalance Used (-)</Th>}
+              {hasSourceSplitData && (
+                <Th align="right">Liquidation Used (-)</Th>
+              )}
               <Th align="right">Unclaimed Collateral</Th>
               <Th align="right">Snapshot Updated</Th>
             </Row>
@@ -466,12 +512,26 @@ function DepositorTable({
                 <Td align="right">
                   {formatTokenAmount(depositor.cumulativeWithdrawn, symbol)}
                 </Td>
-                <Td align="right">
-                  {formatSignedWei(
-                    depositorDepositUsedInLiquidations(depositor),
-                    symbol,
-                  )}
-                </Td>
+                {hasSourceSplitData && (
+                  <Td align="right">
+                    {depositor.cumulativeRebalanceUsed === undefined
+                      ? "Not indexed"
+                      : formatSignedWei(
+                          depositor.cumulativeRebalanceUsed,
+                          symbol,
+                        )}
+                  </Td>
+                )}
+                {hasSourceSplitData && (
+                  <Td align="right">
+                    {depositor.cumulativeLiquidationUsed === undefined
+                      ? "Not indexed"
+                      : formatSignedWei(
+                          depositor.cumulativeLiquidationUsed,
+                          symbol,
+                        )}
+                  </Td>
+                )}
                 <Td align="right">
                   {formatTokenAmount(depositor.stashedColl, "USDm")}
                 </Td>
@@ -485,10 +545,37 @@ function DepositorTable({
   );
 }
 
-function depositorDepositUsedInLiquidations(depositor: CdpDepositor): string {
+function DepositorTableIntro({
+  truncated,
+  sourceSplitWarning,
+}: {
+  truncated: boolean;
+  sourceSplitWarning: string | null;
+}) {
   return (
-    BigInt(depositor.cumulativeDeposited) -
-    BigInt(depositor.cumulativeWithdrawn) -
-    BigInt(depositor.lastTouchedDeposit)
-  ).toString();
+    <>
+      <h2 className="text-lg font-semibold text-white mb-3">
+        Stability Pool LP Snapshots
+      </h2>
+      <p className="mb-3 text-xs text-slate-500">
+        Debt-token flow per row: current deposit snapshot equals gross deposited
+        minus principal withdrawn minus debt-token deposit used by CDP
+        rebalances and Liquity liquidations, net of retained debt-token yield.
+        Redemptions do not consume Stability Pool deposits. Unclaimed collateral
+        is the separate USDm gain currently indexed for the LP.
+      </p>
+      {sourceSplitWarning != null && (
+        <p className="mb-3 text-xs text-amber-400" role="status">
+          {sourceSplitWarning}
+        </p>
+      )}
+      {truncated && (
+        <p className="mb-3 text-xs text-amber-400" role="status">
+          Showing the first{" "}
+          {CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LP
+          snapshots by indexed deposit. More snapshots may exist.
+        </p>
+      )}
+    </>
+  );
 }

@@ -662,8 +662,10 @@ const cdpStabilityPoolDepositors = [
     lastTouchedDeposit: "150000000000000000000",
     stashedColl: "2000000000000000000",
     lastUpdatedAt: String(cdpNow - 120),
-    cumulativeDeposited: "200000000000000000000",
+    cumulativeDeposited: "210000000000000000000",
     cumulativeWithdrawn: "50000000000000000000",
+    cumulativeRebalanceUsed: "8000000000000000000",
+    cumulativeLiquidationUsed: "2000000000000000000",
   },
 ];
 
@@ -1162,13 +1164,20 @@ export function handleGraphQL({ query, variables = {} }) {
           })),
       };
     }
-    case "CdpTroveSchemaFields":
+    case "CdpSchemaFields":
       return {
-        __type: {
+        TroveType: {
           fields: [
             { name: "id" },
             { name: "lastUpdatedAt" },
             { name: "lastUpdatedTxHash" },
+          ],
+        },
+        StabilityPoolDepositorType: {
+          fields: [
+            { name: "id" },
+            { name: "cumulativeRebalanceUsed" },
+            { name: "cumulativeLiquidationUsed" },
           ],
         },
       };
@@ -1177,6 +1186,14 @@ export function handleGraphQL({ query, variables = {} }) {
       return cdpMarketDetailRows(collateralId);
     }
     case "CdpMarketDetailWithTroveTx": {
+      const collateralId = String(variables.collateralId);
+      return cdpMarketDetailRows(collateralId);
+    }
+    case "CdpMarketDetailWithSpSource": {
+      const collateralId = String(variables.collateralId);
+      return cdpMarketDetailRows(collateralId);
+    }
+    case "CdpMarketDetailWithTroveTxAndSpSource": {
       const collateralId = String(variables.collateralId);
       return cdpMarketDetailRows(collateralId);
     }

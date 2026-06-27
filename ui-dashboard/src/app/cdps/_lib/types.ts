@@ -119,6 +119,8 @@ export type CdpDepositor = {
   lastUpdatedAt: string;
   cumulativeDeposited: string;
   cumulativeWithdrawn: string;
+  cumulativeRebalanceUsed?: string;
+  cumulativeLiquidationUsed?: string;
 };
 
 export type CdpInstanceDailySnapshot = {

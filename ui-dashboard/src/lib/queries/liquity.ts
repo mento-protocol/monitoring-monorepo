@@ -21,10 +21,24 @@ const CDP_TROVE_ROW_FIELDS_WITH_TX = `
       priceAtLiquidation redemptionCount redeemedDebt redeemedColl
       redemptionFeePaidCum
 `;
+const CDP_STABILITY_POOL_DEPOSITOR_FIELDS = `
+      id address lastTouchedDeposit stashedColl lastUpdatedAt
+      cumulativeDeposited cumulativeWithdrawn
+`;
+const CDP_STABILITY_POOL_DEPOSITOR_FIELDS_WITH_SOURCE = `
+      id address lastTouchedDeposit stashedColl lastUpdatedAt
+      cumulativeDeposited cumulativeWithdrawn
+      cumulativeRebalanceUsed cumulativeLiquidationUsed
+`;
 
 export const CDP_TROVE_SCHEMA_FIELDS = `
-  query CdpTroveSchemaFields {
-    __type(name: "Trove") {
+  query CdpSchemaFields {
+    TroveType: __type(name: "Trove") {
+      fields {
+        name
+      }
+    }
+    StabilityPoolDepositorType: __type(name: "StabilityPoolDepositor") {
       fields {
         name
       }
@@ -148,6 +162,7 @@ export const CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS = `
 const cdpMarketDetailQuery = (
   operationName: string,
   troveRowFields: string,
+  stabilityPoolDepositorFields: string,
 ): string => `
   query ${operationName}($collateralId: String!) {
     LiquityCollateral(where: { id: { _eq: $collateralId } }, limit: 1) {
@@ -207,8 +222,7 @@ ${troveRowFields}
       ]
       limit: ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT}
     ) {
-      id address lastTouchedDeposit stashedColl lastUpdatedAt
-      cumulativeDeposited cumulativeWithdrawn
+${stabilityPoolDepositorFields}
     }
   }
 `;
@@ -216,12 +230,27 @@ ${troveRowFields}
 export const CDP_MARKET_DETAIL = cdpMarketDetailQuery(
   "CdpMarketDetail",
   CDP_TROVE_ROW_FIELDS,
+  CDP_STABILITY_POOL_DEPOSITOR_FIELDS,
 );
 
 export const CDP_MARKET_DETAIL_WITH_TROVE_TX = cdpMarketDetailQuery(
   "CdpMarketDetailWithTroveTx",
   CDP_TROVE_ROW_FIELDS_WITH_TX,
+  CDP_STABILITY_POOL_DEPOSITOR_FIELDS,
 );
+
+export const CDP_MARKET_DETAIL_WITH_SP_SOURCE = cdpMarketDetailQuery(
+  "CdpMarketDetailWithSpSource",
+  CDP_TROVE_ROW_FIELDS,
+  CDP_STABILITY_POOL_DEPOSITOR_FIELDS_WITH_SOURCE,
+);
+
+export const CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE =
+  cdpMarketDetailQuery(
+    "CdpMarketDetailWithTroveTxAndSpSource",
+    CDP_TROVE_ROW_FIELDS_WITH_TX,
+    CDP_STABILITY_POOL_DEPOSITOR_FIELDS_WITH_SOURCE,
+  );
 
 // Daily rollup of LiquityInstanceSnapshot — one row per CDP market per UTC day.
 // At ~365 rows per market per year the full history fits well under Hasura's
