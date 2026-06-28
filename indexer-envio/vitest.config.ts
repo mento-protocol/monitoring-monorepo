@@ -14,7 +14,6 @@ export default defineConfig({
       // without violating the config's mainnet start_block invariants.
       ENVIO_START_BLOCK_CELO: "0",
       ENVIO_START_BLOCK_MONAD: "0",
-      ENVIO_START_BLOCK_ETHEREUM: "0",
       ENVIO_START_BLOCK_CELO_SEPOLIA: "0",
       ENVIO_START_BLOCK_MONAD_TESTNET: "0",
     },
@@ -22,7 +21,17 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "lcov"],
       include: ["src/**/*.ts"],
-      exclude: ["src/**/*.test.ts", "src/**/*.d.ts"],
+      exclude: [
+        "src/**/*.test.ts",
+        "src/**/*.d.ts",
+        // Dormant while Ethereum reserve-yield indexing is deferred from the
+        // production config. #1017 owns re-enabling these modules and tests.
+        "src/handlers/susds.ts",
+        "src/handlers/susds/**/*.ts",
+        "src/handlers/steth.ts",
+        "src/handlers/steth/**/*.ts",
+        "src/rpc/susds.ts",
+      ],
       // Floors = floor(measured) - 2, measured 2026-06-15.
       //
       // The ~12.4k lines under src/handlers/** were previously excluded from

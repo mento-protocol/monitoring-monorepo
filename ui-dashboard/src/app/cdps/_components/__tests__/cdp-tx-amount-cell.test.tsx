@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CdpTxAmountCell } from "../cdp-tx-amount-cell";
-import type { TroveSnapshot } from "../../_lib/transactions";
+import {
+  positionSnapshotFor,
+  type TroveSnapshot,
+} from "../../_lib/transactions";
 import type { CdpTransactionRow } from "../../_lib/types";
 
 const troveOpRow: CdpTransactionRow = {
@@ -37,6 +40,27 @@ const redemptionRow: CdpTransactionRow = {
   timestamp: "1000",
   blockNumber: "1",
   txHash: "0xdef",
+};
+
+const spOperationRow: CdpTransactionRow = {
+  kind: "spOperation",
+  id: "sp-1",
+  instanceId: "inst-1",
+  depositor: "0x0000000000000000000000000000000000000123",
+  operation: 0,
+  depositLossSinceLastOperation: "0",
+  topUpOrWithdrawal: "50000000000000000000",
+  yieldGainSinceLastOperation: "0",
+  yieldGainClaimed: "3000000000000000000",
+  ethGainSinceLastOperation: "0",
+  ethGainClaimed: "1000000000000000000",
+  depositBefore: "100000000000000000000",
+  depositAfter: "150000000000000000000",
+  stashedCollBefore: "2000000000000000000",
+  stashedCollAfter: "2000000000000000000",
+  timestamp: "1000",
+  blockNumber: "1",
+  txHash: "0x123",
 };
 
 function renderInTable(node: React.ReactElement): {
@@ -181,5 +205,50 @@ describe("CdpTxAmountCell", () => {
     expect(text).toContain("(−");
     const deltaSpan = mounted.container.querySelector(".text-rose-400");
     expect(deltaSpan).not.toBeNull();
+  });
+
+  it("shows claimed rewards alongside combined stability pool deposit snapshots", () => {
+    const snap: TroveSnapshot = {
+      debt: {
+        before: spOperationRow.depositBefore,
+        after: spOperationRow.depositAfter,
+        delta: spOperationRow.topUpOrWithdrawal,
+      },
+      coll: {
+        before: spOperationRow.stashedCollBefore,
+        after: spOperationRow.stashedCollAfter,
+        delta: "0",
+      },
+    };
+    mounted = renderInTable(
+      <CdpTxAmountCell
+        row={spOperationRow}
+        symbol="GBPm"
+        leg="debt"
+        snapshot={snap}
+      />,
+    );
+    const text = mounted.container.textContent ?? "";
+    expect(text).toContain("→");
+    expect(text).toContain("+50.00 GBPm");
+    expect(text).toContain("claimed 3.00 GBPm");
+  });
+
+  it("does not render claimed collateral as a negative position delta", () => {
+    const row: CdpTransactionRow = {
+      ...spOperationRow,
+      ethGainClaimed: "2000000000000000000",
+      stashedCollAfter: "0",
+    };
+    const snap = positionSnapshotFor(row, undefined);
+    if (snap == null) throw new Error("expected resolved snapshot");
+    mounted = renderInTable(
+      <CdpTxAmountCell row={row} symbol="USDm" leg="coll" snapshot={snap} />,
+    );
+    const text = mounted.container.textContent ?? "";
+    expect(text).toContain("→");
+    expect(text).toContain("claimed 2.00 USDm");
+    expect(text).not.toContain("(−");
+    expect(mounted.container.querySelector(".text-rose-400")).toBeNull();
   });
 });

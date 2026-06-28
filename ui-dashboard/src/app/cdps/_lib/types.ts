@@ -107,6 +107,9 @@ export const CDP_TROVES_LIST_LIMIT = 500;
 // Hosted Envio/Hasura caps a single query branch at 1000 rows. The detail
 // page fetches that full cap and discloses when the result may be incomplete.
 export const CDP_TROVES_DETAIL_LIMIT = 1000;
+// Stability Pool LP rows are wider than list-page troves. Fetch a bounded
+// operator-sized slice and disclose when the table may be truncated.
+export const CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT = 100;
 
 export type CdpDepositor = {
   id: string;
@@ -116,18 +119,8 @@ export type CdpDepositor = {
   lastUpdatedAt: string;
   cumulativeDeposited: string;
   cumulativeWithdrawn: string;
-  yieldGainClaimedCum: string;
-  ethGainClaimedCum: string;
-};
-
-export type CdpPoolRow = {
-  id: string;
-  poolId: string;
-  debtToken: string;
-  strategyAddress: string;
-  rebalanceCooldownSec: number;
-  addedAtTimestamp: string;
-  updatedAtTimestamp: string;
+  cumulativeRebalanceUsed?: string;
+  cumulativeLiquidationUsed?: string;
 };
 
 export type CdpInstanceDailySnapshot = {
@@ -184,6 +177,26 @@ export type CdpSpRebalanceEventRow = {
   txHash: string;
 };
 
+export type CdpStabilityPoolOperationEventRow = {
+  id: string;
+  instanceId?: string;
+  depositor: string;
+  operation: number;
+  depositLossSinceLastOperation: string;
+  topUpOrWithdrawal: string;
+  yieldGainSinceLastOperation: string;
+  yieldGainClaimed: string;
+  ethGainSinceLastOperation: string;
+  ethGainClaimed: string;
+  depositBefore: string;
+  depositAfter: string;
+  stashedCollBefore: string;
+  stashedCollAfter: string;
+  timestamp: string;
+  blockNumber: string;
+  txHash: string;
+};
+
 export type CdpTroveOperationEventRow = {
   id: string;
   instanceId?: string;
@@ -231,4 +244,5 @@ export type CdpTransactionRow =
   | ({ kind: "liquidation" } & CdpLiquidationEventRow)
   | ({ kind: "redemption" } & CdpRedemptionEventRow)
   | ({ kind: "spRebalance" } & CdpSpRebalanceEventRow)
+  | ({ kind: "spOperation" } & CdpStabilityPoolOperationEventRow)
   | ({ kind: "troveOp" } & CdpTroveOperationEventRow);

@@ -164,7 +164,7 @@ indexer.onBlock(
   {
     name: "SusdsYieldDailySnapshotHeartbeat",
     where: ({ chain }) =>
-      chain.id === ETHEREUM_CHAIN_ID
+      Number(chain.id) === ETHEREUM_CHAIN_ID
         ? {
             block: {
               number: {

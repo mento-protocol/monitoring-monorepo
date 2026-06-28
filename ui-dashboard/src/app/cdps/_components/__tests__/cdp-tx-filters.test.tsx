@@ -301,7 +301,7 @@ describe("CdpTxAddressFilter", () => {
     // The aria-label is the load-bearing accessible name; if a future
     // refactor strips it the screen-reader experience regresses silently.
     expect(input.getAttribute("aria-label")).toBe(
-      "Filter CDP transactions by trove owner address",
+      "Filter CDP transactions by owner or depositor address",
     );
   });
 

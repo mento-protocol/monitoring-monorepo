@@ -1,14 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { ErrorBox, Skeleton } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
-import { CDP_TRANSACTIONS, CDP_TROVE_OP_SNAPSHOTS } from "@/lib/queries";
+import {
+  CDP_STABILITY_POOL_EVENTS,
+  CDP_TRANSACTIONS,
+  CDP_TROVE_OP_SNAPSHOTS,
+} from "@/lib/queries";
 import { CdpTxAmountCell } from "../../_components/cdp-tx-amount-cell";
 import {
   BADGE_LABELS,
@@ -17,7 +21,8 @@ import {
   badgeKindFor,
   indexSnapshotsById,
   mergeTransactionRows,
-  troveSnapshotFor,
+  positionSnapshotFor,
+  type CdpStabilityPoolEventsResponse,
   type CdpTransactionsResponse,
   type CdpTroveOpSnapshotResponse,
 } from "../../_lib/transactions";
@@ -26,11 +31,17 @@ import type {
   CdpTroveOpSnapshotRow,
 } from "../../_lib/types";
 import {
+  ADDRESS_FILTER_POOL_EVENT_NOTICE,
+  ADDRESS_FILTER_SP_ONLY_NOTICE,
   CdpTxAddressFilter,
   CdpTxTypeFilter,
   TX_FILTER_TYPE_ORDER,
   normalizeAddressFilter,
 } from "../../_components/cdp-tx-filters";
+import {
+  CdpTransactionsEmptyState,
+  StabilityPoolEventsUnavailableNotice,
+} from "../../_components/cdp-transaction-notices";
 
 const PAGE_SIZE = 20;
 
@@ -47,6 +58,10 @@ export function CdpTransactionsTable({
     CDP_TRANSACTIONS,
     { instanceId, limit: ENVIO_MAX_ROWS },
   );
+  const stabilityPoolEvents = useGQL<CdpStabilityPoolEventsResponse>(
+    CDP_STABILITY_POOL_EVENTS,
+    { instanceId, limit: ENVIO_MAX_ROWS },
+  );
   // Isolated query for the schema-lag-fragile fields (owner + before/after).
   // Errors and loading states are tracked independently from the primary
   // query so the table keeps rendering when this one fails during a
@@ -55,12 +70,16 @@ export function CdpTransactionsTable({
     instanceId,
     limit: ENVIO_MAX_ROWS,
   });
-  const { rows, capped } = useMemo(() => mergeTransactionRows(data), [data]);
+  const { rows, capped } = useMemo(
+    () => mergeTransactionRows(data, ENVIO_MAX_ROWS, stabilityPoolEvents.data),
+    [data, stabilityPoolEvents.data],
+  );
   const snapshotById = useMemo(
     () => indexSnapshotsById(snapshots.data),
     [snapshots.data],
   );
   const snapshotsReady = snapshots.data != null && snapshots.error == null;
+  const stabilityPoolEventsUnavailable = stabilityPoolEvents.error != null;
 
   return (
     <section>
@@ -71,16 +90,19 @@ export function CdpTransactionsTable({
         <ErrorBox
           message={`Failed to load CDP transactions — ${error.message}`}
         />
-      ) : isLoading ? (
+      ) : isLoading || (rows.length === 0 && stabilityPoolEvents.isLoading) ? (
         <Skeleton rows={6} />
       ) : rows.length === 0 ? (
-        <EmptyBox message="No CDP transactions indexed yet." />
+        <CdpTransactionsEmptyState
+          stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+        />
       ) : (
         <TransactionsBody
           rows={rows}
           chainId={chainId}
           symbol={symbol}
           capped={capped}
+          stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
           snapshotById={snapshotById}
           snapshotsReady={snapshotsReady}
         />
@@ -89,10 +111,9 @@ export function CdpTransactionsTable({
   );
 }
 
-/** Filter state for the per-market table. Same address-filter gating as
- *  the overview's `useOverviewFilters` (no-op while the snapshot query
- *  hasn't resolved) so the table never pretends to match against
- *  missing owner data. */
+/** Filter state for the per-market table. Trove owner matching waits for the
+ *  isolated snapshot query, but SP operation rows carry their depositor inline
+ *  and can still be filtered while snapshots are unavailable. */
 function usePerMarketFilters(
   rows: CdpTransactionRow[],
   snapshotById: Map<string, CdpTroveOpSnapshotRow>,
@@ -101,13 +122,24 @@ function usePerMarketFilters(
   const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
   const [addressInput, setAddressInput] = useState("");
   const normalizedAddress = normalizeAddressFilter(addressInput);
-  const addressActive = normalizedAddress.length > 0 && snapshotsReady;
+  const hasStabilityPoolRows = rows.some((row) => row.kind === "spOperation");
+  const addressEnabled = snapshotsReady || hasStabilityPoolRows;
+  const addressActive = normalizedAddress.length > 0 && addressEnabled;
+  const addressFilterNotice =
+    addressActive && snapshotsReady
+      ? ADDRESS_FILTER_POOL_EVENT_NOTICE
+      : addressActive
+        ? ADDRESS_FILTER_SP_ONLY_NOTICE
+        : null;
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (addressActive) {
-        if (row.kind !== "troveOp") return false;
-        const snap = snapshotById.get(row.id);
-        if (snap == null || snap.owner !== normalizedAddress) return false;
+        const matchesAddress =
+          row.kind === "spOperation"
+            ? row.depositor === normalizedAddress
+            : row.kind === "troveOp" &&
+              snapshotById.get(row.id)?.owner === normalizedAddress;
+        if (!matchesAddress) return false;
       }
       if (typeFilter != null && badgeKindFor(row) !== typeFilter) return false;
       return true;
@@ -118,8 +150,49 @@ function usePerMarketFilters(
     setTypeFilter,
     addressInput,
     setAddressInput,
+    addressDisabled: !addressEnabled,
+    addressFilterNotice,
     filteredRows,
   };
+}
+
+function PerMarketFilterBar({
+  typeFilter,
+  onTypeFilterChange,
+  addressInput,
+  onAddressInputChange,
+  addressDisabled,
+  addressFilterNotice,
+}: {
+  typeFilter: BadgeKind | null;
+  onTypeFilterChange: (next: BadgeKind | null) => void;
+  addressInput: string;
+  onAddressInputChange: (next: string) => void;
+  addressDisabled: boolean;
+  addressFilterNotice: string | null;
+}) {
+  return (
+    <div className="mb-3 space-y-2">
+      <CdpTxTypeFilter
+        options={TX_FILTER_TYPE_ORDER}
+        selected={typeFilter}
+        onChange={onTypeFilterChange}
+      />
+      <CdpTxAddressFilter
+        value={addressInput}
+        onChange={onAddressInputChange}
+        disabled={addressDisabled}
+        disabledHint={
+          addressDisabled ? "(unavailable while indexer syncs)" : undefined
+        }
+      />
+      {addressFilterNotice != null && (
+        <p role="status" className="px-1 text-xs text-slate-500">
+          {addressFilterNotice}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function TransactionsBody({
@@ -127,6 +200,7 @@ function TransactionsBody({
   chainId,
   symbol,
   capped,
+  stabilityPoolEventsUnavailable,
   snapshotById,
   snapshotsReady,
 }: {
@@ -134,6 +208,7 @@ function TransactionsBody({
   chainId: number;
   symbol: string;
   capped: boolean;
+  stabilityPoolEventsUnavailable: boolean;
   snapshotById: Map<string, CdpTroveOpSnapshotRow>;
   snapshotsReady: boolean;
 }) {
@@ -143,6 +218,8 @@ function TransactionsBody({
     setTypeFilter,
     addressInput,
     setAddressInput,
+    addressDisabled,
+    addressFilterNotice,
     filteredRows,
   } = usePerMarketFilters(rows, snapshotById, snapshotsReady);
 
@@ -156,21 +233,14 @@ function TransactionsBody({
 
   return (
     <>
-      <div className="mb-3 space-y-2">
-        <CdpTxTypeFilter
-          options={TX_FILTER_TYPE_ORDER}
-          selected={typeFilter}
-          onChange={setTypeFilter}
-        />
-        <CdpTxAddressFilter
-          value={addressInput}
-          onChange={setAddressInput}
-          disabled={!snapshotsReady}
-          disabledHint={
-            snapshotsReady ? undefined : "(unavailable while indexer syncs)"
-          }
-        />
-      </div>
+      <PerMarketFilterBar
+        typeFilter={typeFilter}
+        onTypeFilterChange={setTypeFilter}
+        addressInput={addressInput}
+        onAddressInputChange={setAddressInput}
+        addressDisabled={addressDisabled}
+        addressFilterNotice={addressFilterNotice}
+      />
       <Table>
         <thead>
           <Row>
@@ -218,11 +288,31 @@ function TransactionsBody({
         total={filteredRows.length}
         onPageChange={setPage}
       />
+      <TransactionFootnotes
+        capped={capped}
+        stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+      />
+    </>
+  );
+}
+
+function TransactionFootnotes({
+  capped,
+  stabilityPoolEventsUnavailable,
+}: {
+  capped: boolean;
+  stabilityPoolEventsUnavailable: boolean;
+}) {
+  return (
+    <>
       {capped && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing the most recent {ENVIO_MAX_ROWS.toLocaleString()} entries per
           event type — older history may exist beyond this range.
         </p>
+      )}
+      {stabilityPoolEventsUnavailable && (
+        <StabilityPoolEventsUnavailableNotice />
       )}
     </>
   );
@@ -240,7 +330,7 @@ function TransactionRow({
   snapshot: CdpTroveOpSnapshotRow | undefined;
 }) {
   const kind = badgeKindFor(row);
-  const resolvedSnapshot = troveSnapshotFor(row, snapshot);
+  const resolvedSnapshot = positionSnapshotFor(row, snapshot);
   return (
     <Row>
       <Td>

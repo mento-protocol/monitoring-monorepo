@@ -2,14 +2,23 @@
 
 import { Td } from "@/components/table";
 import { formatSignedWei, formatTokenAmount } from "../_lib/format";
-import { amountsFor, type TroveSnapshot } from "../_lib/transactions";
+import { amountsFor, type PositionSnapshot } from "../_lib/transactions";
 import type { CdpTransactionRow } from "../_lib/types";
 
+function claimedAmountFor(
+  row: CdpTransactionRow,
+  leg: "debt" | "coll",
+): string | null {
+  if (row.kind !== "spOperation") return null;
+  const value = leg === "debt" ? row.yieldGainClaimed : row.ethGainClaimed;
+  return BigInt(value) === BigInt(0) ? null : value;
+}
+
 /** Renders one of the two amount columns (debt or collateral) on a CDP
- *  transactions row. For trove-op rows with a resolved snapshot it shows
+ *  transactions row. For rows with a resolved position snapshot it shows
  *  `before → after` with the signed delta below; for pool-level events
- *  (liquidation / redemption / SP rebalance) or trove-ops whose snapshot
- *  hasn't resolved yet (deploy+resync window / backfill catching up) it
+ *  (liquidation / redemption / SP rebalance) or trove-ops whose isolated
+ *  snapshot hasn't resolved yet (deploy+resync window / backfill catching up) it
  *  falls back to the existing flat amount so the table keeps rendering.
  *
  *  Shared between the per-market table (`/cdps/[symbol]`) and the
@@ -24,9 +33,9 @@ export function CdpTxAmountCell({
   row: CdpTransactionRow;
   symbol: string;
   leg: "debt" | "coll";
-  /** Resolved snapshot from `troveSnapshotFor`. `null` triggers the flat
+  /** Resolved snapshot from the transaction helpers. `null` triggers the flat
    *  fallback rendering — see comment on the function for the cases. */
-  snapshot: TroveSnapshot | null;
+  snapshot: PositionSnapshot | null;
 }) {
   if (snapshot == null) {
     // troveOp rows carry signed int256 deltas (collChange/debtChange); the
@@ -44,6 +53,7 @@ export function CdpTxAmountCell({
     );
   }
   const slice = snapshot[leg];
+  const claimedAmount = claimedAmountFor(row, leg);
   // ES2017 target prohibits 0n literals — coerce via BigInt(0) to stay
   // consistent with the rest of the cdps lib.
   const ZERO = BigInt(0);
@@ -70,6 +80,11 @@ export function CdpTxAmountCell({
               symbol,
             )}
             )
+          </span>
+        )}
+        {claimedAmount != null && (
+          <span className="text-[10px] text-lime-300">
+            claimed {formatTokenAmount(claimedAmount, symbol)}
           </span>
         )}
       </div>

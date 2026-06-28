@@ -1,4 +1,5 @@
 import {
+  CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT,
   CDP_TROVE_OPEN_STATUSES,
   CDP_TROVES_DETAIL_LIMIT,
   CDP_TROVES_LIST_LIMIT,
@@ -20,10 +21,24 @@ const CDP_TROVE_ROW_FIELDS_WITH_TX = `
       priceAtLiquidation redemptionCount redeemedDebt redeemedColl
       redemptionFeePaidCum
 `;
+const CDP_STABILITY_POOL_DEPOSITOR_FIELDS = `
+      id address lastTouchedDeposit stashedColl lastUpdatedAt
+      cumulativeDeposited cumulativeWithdrawn
+`;
+const CDP_STABILITY_POOL_DEPOSITOR_FIELDS_WITH_SOURCE = `
+      id address lastTouchedDeposit stashedColl lastUpdatedAt
+      cumulativeDeposited cumulativeWithdrawn
+      cumulativeRebalanceUsed cumulativeLiquidationUsed
+`;
 
 export const CDP_TROVE_SCHEMA_FIELDS = `
-  query CdpTroveSchemaFields {
-    __type(name: "Trove") {
+  query CdpSchemaFields {
+    TroveType: __type(name: "Trove") {
+      fields {
+        name
+      }
+    }
+    StabilityPoolDepositorType: __type(name: "StabilityPoolDepositor") {
       fields {
         name
       }
@@ -147,6 +162,7 @@ export const CDP_BORROWING_REVENUE_DAILY_SNAPSHOTS = `
 const cdpMarketDetailQuery = (
   operationName: string,
   troveRowFields: string,
+  stabilityPoolDepositorFields: string,
 ): string => `
   query ${operationName}($collateralId: String!) {
     LiquityCollateral(where: { id: { _eq: $collateralId } }, limit: 1) {
@@ -191,20 +207,22 @@ ${troveRowFields}
       id collateralId batchManager annualInterestRate updatedAt
     }
     StabilityPoolDepositor(
-      where: { collateralId: { _eq: $collateralId } }
-      order_by: { lastUpdatedAt: desc }
-      limit: 25
+      where: {
+        collateralId: { _eq: $collateralId }
+        _or: [
+          { lastTouchedDeposit: { _gt: "0" } }
+          { stashedColl: { _gt: "0" } }
+        ]
+      }
+      order_by: [
+        { lastTouchedDeposit: desc }
+        { stashedColl: desc }
+        { lastUpdatedAt: desc }
+        { id: asc }
+      ]
+      limit: ${CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT}
     ) {
-      id address lastTouchedDeposit stashedColl lastUpdatedAt
-      cumulativeDeposited cumulativeWithdrawn yieldGainClaimedCum ethGainClaimedCum
-    }
-    CdpPool(
-      where: { collateralId: { _eq: $collateralId }, removed: { _eq: false } }
-      order_by: { updatedAtTimestamp: desc }
-      limit: 100
-    ) {
-      id poolId debtToken strategyAddress rebalanceCooldownSec
-      addedAtTimestamp updatedAtTimestamp
+${stabilityPoolDepositorFields}
     }
   }
 `;
@@ -212,12 +230,27 @@ ${troveRowFields}
 export const CDP_MARKET_DETAIL = cdpMarketDetailQuery(
   "CdpMarketDetail",
   CDP_TROVE_ROW_FIELDS,
+  CDP_STABILITY_POOL_DEPOSITOR_FIELDS,
 );
 
 export const CDP_MARKET_DETAIL_WITH_TROVE_TX = cdpMarketDetailQuery(
   "CdpMarketDetailWithTroveTx",
   CDP_TROVE_ROW_FIELDS_WITH_TX,
+  CDP_STABILITY_POOL_DEPOSITOR_FIELDS,
 );
+
+export const CDP_MARKET_DETAIL_WITH_SP_SOURCE = cdpMarketDetailQuery(
+  "CdpMarketDetailWithSpSource",
+  CDP_TROVE_ROW_FIELDS,
+  CDP_STABILITY_POOL_DEPOSITOR_FIELDS_WITH_SOURCE,
+);
+
+export const CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE =
+  cdpMarketDetailQuery(
+    "CdpMarketDetailWithTroveTxAndSpSource",
+    CDP_TROVE_ROW_FIELDS_WITH_TX,
+    CDP_STABILITY_POOL_DEPOSITOR_FIELDS_WITH_SOURCE,
+  );
 
 // Daily rollup of LiquityInstanceSnapshot — one row per CDP market per UTC day.
 // At ~365 rows per market per year the full history fits well under Hasura's
@@ -276,6 +309,40 @@ export const CDP_TRANSACTIONS = `
       id troveId operation collChange debtChange
       annualInterestRate debtIncreaseFromUpfrontFee
       timestamp blockNumber txHash
+    }
+  }
+`;
+
+const CDP_STABILITY_POOL_OPERATION_FIELDS = `
+      id instanceId depositor operation depositLossSinceLastOperation
+      topUpOrWithdrawal yieldGainSinceLastOperation yieldGainClaimed
+      ethGainSinceLastOperation ethGainClaimed depositBefore depositAfter
+      stashedCollBefore stashedCollAfter timestamp blockNumber txHash
+`;
+
+// Isolated StabilityPool operation feed. This entity is newer than the base CDP
+// transaction branches, so keep it out of CDP_TRANSACTIONS during rollout; the
+// table merges it only when this companion query resolves.
+export const CDP_STABILITY_POOL_EVENTS = `
+  query CdpStabilityPoolEvents($instanceId: String!, $limit: Int!) {
+    StabilityPoolOperationEvent(
+      where: { instanceId: { _eq: $instanceId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+${CDP_STABILITY_POOL_OPERATION_FIELDS}
+    }
+  }
+`;
+
+export const ALL_CDP_STABILITY_POOL_EVENTS = `
+  query AllCdpStabilityPoolEvents($chainId: Int!, $limit: Int!) {
+    StabilityPoolOperationEvent(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+    ) {
+${CDP_STABILITY_POOL_OPERATION_FIELDS}
     }
   }
 `;

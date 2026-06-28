@@ -3,6 +3,7 @@ import type {
   CdpLiquidationEventRow,
   CdpRedemptionEventRow,
   CdpSpRebalanceEventRow,
+  CdpStabilityPoolOperationEventRow,
   CdpTransactionRow,
   CdpTroveOperationEventRow,
   CdpTroveOpSnapshotRow,
@@ -39,11 +40,18 @@ export type CdpTransactionsResponse = {
   TroveOperationEvent: CdpTroveOperationEventRow[];
 };
 
+export type CdpStabilityPoolEventsResponse = {
+  StabilityPoolOperationEvent: CdpStabilityPoolOperationEventRow[];
+};
+
 export type BadgeKind =
   | "liquidation"
   | "userRedemption"
   | "rebalanceRedemption"
   | "spRebalance"
+  | "spDeposit"
+  | "spWithdraw"
+  | "spClaim"
   | "troveOpen"
   | "troveClose"
   | "troveAdjust"
@@ -55,6 +63,9 @@ export const BADGE_STYLES: Record<BadgeKind, string> = {
   userRedemption: "bg-indigo-500/10 text-indigo-300 border-indigo-700/40",
   rebalanceRedemption: "bg-slate-500/10 text-slate-300 border-slate-600/40",
   spRebalance: "bg-cyan-500/10 text-cyan-300 border-cyan-700/40",
+  spDeposit: "bg-teal-500/10 text-teal-300 border-teal-700/40",
+  spWithdraw: "bg-orange-500/10 text-orange-300 border-orange-700/40",
+  spClaim: "bg-lime-500/10 text-lime-300 border-lime-700/40",
   troveOpen: "bg-emerald-500/10 text-emerald-300 border-emerald-700/40",
   troveClose: "bg-rose-500/10 text-rose-300 border-rose-700/40",
   troveAdjust: "bg-sky-500/10 text-sky-300 border-sky-700/40",
@@ -68,6 +79,9 @@ export const BADGE_LABELS: Record<BadgeKind, string> = {
   userRedemption: "Redemption",
   rebalanceRedemption: "Rebalance Redemption",
   spRebalance: "Rebalance",
+  spDeposit: "SP Deposit",
+  spWithdraw: "SP Withdraw",
+  spClaim: "SP Claim",
   troveOpen: "Open Trove",
   troveClose: "Close Trove",
   troveAdjust: "Adjust Trove",
@@ -88,12 +102,28 @@ const TROVE_OP_BADGE: Record<number, BadgeKind> = {
   9: "troveBatch",
 };
 
+// Mirrors `IStabilityPoolEvents.Operation` as emitted in DepositOperation.
+// Signed principal movement still wins for normal deposit/withdraw rows; the
+// enum only disambiguates zero-principal rows that otherwise look like claims.
+const STABILITY_POOL_OP_BADGE: Record<number, BadgeKind> = {
+  0: "spDeposit",
+  1: "spWithdraw",
+  2: "spClaim",
+};
+
 export function badgeKindFor(row: CdpTransactionRow): BadgeKind {
   switch (row.kind) {
     case "liquidation":
       return "liquidation";
     case "spRebalance":
       return "spRebalance";
+    case "spOperation": {
+      const delta = BigInt(row.topUpOrWithdrawal);
+      if (delta > BigInt(0)) return "spDeposit";
+      if (delta < BigInt(0)) return "spWithdraw";
+      if (hasClaimedStabilityPoolGains(row)) return "spClaim";
+      return STABILITY_POOL_OP_BADGE[row.operation] ?? "spWithdraw";
+    }
     case "redemption":
       return row.isRebalance ? "rebalanceRedemption" : "userRedemption";
     case "troveOp":
@@ -108,6 +138,37 @@ function sumWei(...parts: string[]): string {
 export interface AmountSlice {
   debt: string;
   coll: string;
+}
+
+function hasClaimedStabilityPoolGains(row: {
+  yieldGainClaimed: string;
+  ethGainClaimed: string;
+}): boolean {
+  const ZERO = BigInt(0);
+  return (
+    BigInt(row.yieldGainClaimed) !== ZERO || BigInt(row.ethGainClaimed) !== ZERO
+  );
+}
+
+function isClaimOnlyStabilityPoolOperation(row: {
+  topUpOrWithdrawal: string;
+  yieldGainClaimed: string;
+  ethGainClaimed: string;
+  depositBefore: string;
+  depositAfter: string;
+}): boolean {
+  return (
+    BigInt(row.topUpOrWithdrawal) === BigInt(0) &&
+    hasClaimedStabilityPoolGains(row) &&
+    BigInt(row.depositBefore) === BigInt(row.depositAfter)
+  );
+}
+
+function stabilityPoolCollateralAfterExcludingClaims(row: {
+  stashedCollAfter: string;
+  ethGainClaimed: string;
+}): string {
+  return (BigInt(row.stashedCollAfter) + BigInt(row.ethGainClaimed)).toString();
 }
 
 export function amountsFor(row: CdpTransactionRow): AmountSlice {
@@ -133,6 +194,19 @@ export function amountsFor(row: CdpTransactionRow): AmountSlice {
       return { debt: row.actualBoldAmount, coll: row.ETHSent };
     case "spRebalance":
       return { debt: row.amountStableOut, coll: row.amountCollIn };
+    case "spOperation": {
+      if (isClaimOnlyStabilityPoolOperation(row)) {
+        return { debt: row.yieldGainClaimed, coll: row.ethGainClaimed };
+      }
+      // SP operation rows normally render through their inline before/after
+      // snapshot. Keep this flat fallback for defensive callers that pass null.
+      return {
+        debt: (BigInt(row.depositAfter) - BigInt(row.depositBefore)).toString(),
+        coll: (
+          BigInt(row.stashedCollAfter) - BigInt(row.stashedCollBefore)
+        ).toString(),
+      };
+    }
     case "troveOp":
       // Signed deltas from the ABI — positive = added to trove, negative =
       // removed. Rendered with leading minus for withdrawals/repayments.
@@ -145,16 +219,18 @@ export function amountsFor(row: CdpTransactionRow): AmountSlice {
  *  derived as `after - before` so the rendered delta is internally
  *  consistent even if the underlying ABI ever exposed extra redist terms
  *  the indexer didn't fold in. */
-interface TroveSnapshotLeg {
+interface PositionSnapshotLeg {
   before: string;
   after: string;
   delta: string;
 }
 
-export interface TroveSnapshot {
-  debt: TroveSnapshotLeg;
-  coll: TroveSnapshotLeg;
+export interface PositionSnapshot {
+  debt: PositionSnapshotLeg;
+  coll: PositionSnapshotLeg;
 }
+
+export type TroveSnapshot = PositionSnapshot;
 
 /** Returns null when there is no usable snapshot for this row — either
  *  the row is not a trove-op, or the isolated `CDP_TROVE_OP_SNAPSHOTS`
@@ -165,7 +241,7 @@ export interface TroveSnapshot {
 export function troveSnapshotFor(
   row: CdpTransactionRow,
   snapshot: CdpTroveOpSnapshotRow | undefined,
-): TroveSnapshot | null {
+): PositionSnapshot | null {
   if (row.kind !== "troveOp" || snapshot == null) return null;
   if (
     snapshot.debtBefore == null ||
@@ -193,12 +269,49 @@ export function troveSnapshotFor(
   };
 }
 
+export function positionSnapshotFor(
+  row: CdpTransactionRow,
+  snapshot: CdpTroveOpSnapshotRow | undefined,
+): PositionSnapshot | null {
+  if (row.kind === "spOperation") {
+    // Claim-only SP operations are better rendered as claimed gain totals. A
+    // deposit/withdraw, or a zero-principal claim that also realizes passive
+    // balance changes, still needs the before/after LP snapshot; the amount
+    // cell appends claimed gains to that snapshot display.
+    if (isClaimOnlyStabilityPoolOperation(row)) {
+      return null;
+    }
+    const debtBefore = BigInt(row.depositBefore);
+    const debtAfter = BigInt(row.depositAfter);
+    const collBefore = BigInt(row.stashedCollBefore);
+    // Claimed collateral is rendered separately by the amount cell. Add it
+    // back to the snapshot leg so moving stashed collateral to the wallet does
+    // not appear as a red position loss on combined SP operations.
+    const collAfterExcludingClaims =
+      stabilityPoolCollateralAfterExcludingClaims(row);
+    const collAfter = BigInt(collAfterExcludingClaims);
+    return {
+      debt: {
+        before: row.depositBefore,
+        after: row.depositAfter,
+        delta: (debtAfter - debtBefore).toString(),
+      },
+      coll: {
+        before: row.stashedCollBefore,
+        after: collAfterExcludingClaims,
+        delta: (collAfter - collBefore).toString(),
+      },
+    };
+  }
+  return troveSnapshotFor(row, snapshot);
+}
+
 export type MergedTransactions = {
   rows: CdpTransactionRow[];
   capped: boolean;
 };
 
-/** Merge the 4 event arrays into a single timestamp-desc list with an
+/** Merge event arrays into a single timestamp-desc list with an
  *  id-desc tiebreak. `capped` is true when any per-kind array hit
  *  `limit` — surface as a footnote so older entries aren't silently
  *  dropped. `limit` defaults to ENVIO_MAX_ROWS for the per-market table
@@ -207,6 +320,7 @@ export type MergedTransactions = {
 export function mergeTransactionRows(
   data: CdpTransactionsResponse | undefined,
   limit: number = ENVIO_MAX_ROWS,
+  stabilityPoolData?: CdpStabilityPoolEventsResponse | undefined,
 ): MergedTransactions {
   if (!data) return { rows: [], capped: false };
   const liquidations: CdpTransactionRow[] = (data.LiquidationEvent ?? []).map(
@@ -221,10 +335,14 @@ export function mergeTransactionRows(
   const troveOps: CdpTransactionRow[] = (data.TroveOperationEvent ?? []).map(
     (r) => ({ kind: "troveOp", ...r }),
   );
+  const stabilityPoolOps: CdpTransactionRow[] = (
+    stabilityPoolData?.StabilityPoolOperationEvent ?? []
+  ).map((r) => ({ kind: "spOperation", ...r }));
   const rows = [
     ...liquidations,
     ...redemptions,
     ...rebalances,
+    ...stabilityPoolOps,
     ...troveOps,
   ].sort((a, b) => {
     const ts = Number(b.timestamp) - Number(a.timestamp);
@@ -235,6 +353,7 @@ export function mergeTransactionRows(
     liquidations.length >= limit ||
     redemptions.length >= limit ||
     rebalances.length >= limit ||
+    stabilityPoolOps.length >= limit ||
     troveOps.length >= limit;
   return { rows, capped };
 }

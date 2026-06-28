@@ -1354,11 +1354,61 @@ type PendingDepositOperation @index(fields: ["collateralId", "txHash"]) {
   collateralId: String! @index
   txHash: String! @index
   depositor: String! @index
+  operation: Int!
+  depositLossSinceLastOperation: BigInt!
   topUpOrWithdrawal: BigInt!
+  yieldGainSinceLastOperation: BigInt!
   yieldGainClaimed: BigInt!
+  ethGainSinceLastOperation: BigInt!
   ethGainClaimed: BigInt!
   timestamp: BigInt!
   blockNumber: BigInt!
+}
+
+type PendingStabilityPoolConsumption
+  @index(fields: ["collateralId", "txHash"]) {
+  id: ID!
+  chainId: Int!
+  collateralId: String! @index
+  txHash: String! @index
+  pBefore: BigInt!
+  pAfter: BigInt!
+  scaleBefore: BigInt!
+  scaleAfter: BigInt!
+  totalBefore: BigInt!
+  totalAfter: BigInt!
+  stableOut: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+}
+
+type PendingStabilityPoolConsumptionSource
+  @index(fields: ["collateralId", "txHash"]) {
+  id: ID!
+  chainId: Int!
+  collateralId: String! @index
+  txHash: String! @index
+  source: String!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+}
+
+type StabilityPoolLossAccumulator {
+  id: ID!
+  chainId: Int!
+  collateralId: String! @index
+  currentP: BigInt!
+  currentScale: BigInt!
+  totalBoldDeposits: BigInt!
+}
+
+type StabilityPoolLossScale @index(fields: ["collateralId", "scale"]) {
+  id: ID!
+  chainId: Int!
+  collateralId: String! @index
+  scale: BigInt! @index
+  rebalanceLossSum: BigInt!
+  liquidationLossSum: BigInt!
 }
 
 type BorrowerInfo {
@@ -1383,6 +1433,12 @@ type StabilityPoolDepositor
   lastUpdatedAt: BigInt!
   cumulativeDeposited: BigInt!
   cumulativeWithdrawn: BigInt!
+  cumulativeRebalanceUsed: BigInt!
+  cumulativeLiquidationUsed: BigInt!
+  depositSnapshotP: BigInt!
+  depositSnapshotScale: BigInt!
+  rebalanceLossSnapshot: BigInt!
+  liquidationLossSnapshot: BigInt!
 }
 
 type LiquityInstance {
@@ -1585,6 +1641,35 @@ type SpRebalanceEvent @index(fields: ["instanceId", "timestamp"]) {
   instanceId: String! @index
   amountCollIn: BigInt!
   amountStableOut: BigInt!
+  timestamp: BigInt! @index
+  blockNumber: BigInt!
+  txHash: String!
+}
+
+# Durable StabilityPool depositor operation history. Written from the paired
+# `DepositOperation` + `DepositUpdated` events. The raw ABI keeps the legacy
+# `ethGain*` names even though Mento CDP collateral is USDm.
+type StabilityPoolOperationEvent
+  @index(fields: ["instanceId", "timestamp"])
+  @index(fields: ["chainId", "timestamp"])
+  @index(fields: ["chainId", "depositor"]) {
+  id: ID!
+  chainId: Int!
+  instanceId: String! @index
+  depositor: String! @index
+  operation: Int!
+  depositLossSinceLastOperation: BigInt!
+  rebalanceLossSinceLastOperation: BigInt!
+  liquidationLossSinceLastOperation: BigInt!
+  topUpOrWithdrawal: BigInt!
+  yieldGainSinceLastOperation: BigInt!
+  yieldGainClaimed: BigInt!
+  ethGainSinceLastOperation: BigInt!
+  ethGainClaimed: BigInt!
+  depositBefore: BigInt!
+  depositAfter: BigInt!
+  stashedCollBefore: BigInt!
+  stashedCollAfter: BigInt!
   timestamp: BigInt! @index
   blockNumber: BigInt!
   txHash: String!

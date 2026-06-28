@@ -9,6 +9,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  CdpStabilityPoolOperationEventRow,
   CdpTroveOperationEventRow,
   CdpTroveOpSnapshotRow,
 } from "../../../_lib/types";
@@ -25,7 +26,11 @@ vi.mock("@/components/tx-hash-cell", () => ({
   ),
 }));
 
-import { CDP_TRANSACTIONS, CDP_TROVE_OP_SNAPSHOTS } from "@/lib/queries";
+import {
+  CDP_STABILITY_POOL_EVENTS,
+  CDP_TRANSACTIONS,
+  CDP_TROVE_OP_SNAPSHOTS,
+} from "@/lib/queries";
 import { CdpTransactionsTable } from "../cdp-transactions-table";
 
 const USD_WEI = BigInt(10) ** BigInt(18);
@@ -33,6 +38,10 @@ const NOW = 1_767_225_600;
 
 function wei(amount: number): string {
   return (BigInt(amount) * USD_WEI).toString();
+}
+
+function negWei(amount: number): string {
+  return (-BigInt(amount) * USD_WEI).toString();
 }
 
 function troveOp(
@@ -60,6 +69,30 @@ function txData(rows: CdpTroveOperationEventRow[]) {
     RedemptionEvent: [],
     SpRebalanceEvent: [],
     TroveOperationEvent: rows,
+  };
+}
+
+function spOperation(
+  overrides: Partial<CdpStabilityPoolOperationEventRow> = {},
+): CdpStabilityPoolOperationEventRow {
+  return {
+    id: "sp-op-1",
+    depositor: "0xdepositor",
+    operation: 0,
+    depositLossSinceLastOperation: "0",
+    topUpOrWithdrawal: wei(50),
+    yieldGainSinceLastOperation: "0",
+    yieldGainClaimed: "0",
+    ethGainSinceLastOperation: "0",
+    ethGainClaimed: "0",
+    depositBefore: wei(100),
+    depositAfter: wei(150),
+    stashedCollBefore: "0",
+    stashedCollAfter: wei(2),
+    timestamp: String(NOW - 2),
+    blockNumber: "102",
+    txHash: "0xspdeposit",
+    ...overrides,
   };
 }
 
@@ -172,6 +205,70 @@ describe("CdpTransactionsTable", () => {
     );
   });
 
+  it("keeps the empty state behind the SP companion query", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return { data: txData([]), error: null, isLoading: false };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return { data: undefined, error: null, isLoading: true };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: { TroveOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    expect(handle!.container.querySelector('[role="status"]')).not.toBeNull();
+    expect(handle!.container.textContent).not.toContain(
+      "No CDP transactions indexed yet.",
+    );
+  });
+
+  it("shows the SP schema-lag notice when only the companion query fails", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return { data: txData([]), error: null, isLoading: false };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: undefined,
+          error: new Error("schema still syncing"),
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: { TroveOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    expect(handle!.container.textContent).toContain(
+      "No CDP transactions indexed yet.",
+    );
+    expect(handle!.container.textContent).toContain(
+      "Stability pool deposit and withdraw events are temporarily unavailable",
+    );
+    expect(
+      Array.from(handle!.container.querySelectorAll('[role="status"]')).some(
+        (node) =>
+          node.textContent?.includes(
+            "Stability pool deposit and withdraw events are temporarily unavailable",
+          ),
+      ),
+    ).toBe(true);
+  });
+
   it("filters by owner when snapshots are ready and clamps a stale page", () => {
     const rows = Array.from({ length: 21 }, (_, index) =>
       troveOp(`op${index + 1}`, {
@@ -181,6 +278,15 @@ describe("CdpTransactionsTable", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_TRANSACTIONS) {
         return { data: txData(rows), error: null, isLoading: false };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: {
+            StabilityPoolOperationEvent: [],
+          },
+          error: null,
+          isLoading: false,
+        };
       }
       if (query === CDP_TROVE_OP_SNAPSHOTS) {
         return {
@@ -210,7 +316,7 @@ describe("CdpTransactionsTable", () => {
     expect(handle!.container.textContent).not.toContain("page 2 of 1");
 
     const input = handle!.container.querySelector<HTMLInputElement>(
-      'input[aria-label="Filter CDP transactions by trove owner address"]',
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
     );
     act(() => {
       typeInto(input!, "0xowner");
@@ -234,17 +340,191 @@ describe("CdpTransactionsTable", () => {
           isLoading: false,
         };
       }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
       return { data: undefined, error: null, isLoading: false };
     });
     render(handle!);
 
     const input = handle!.container.querySelector<HTMLInputElement>(
-      'input[aria-label="Filter CDP transactions by trove owner address"]',
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
     );
     expect(input?.disabled).toBe(true);
     expect(handle!.container.textContent).toContain(
       "unavailable while indexer syncs",
     );
     expect(bodyText(handle!.container)).toContain("Open Trove");
+  });
+
+  it("filters by SP depositor while trove snapshots are unavailable", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return {
+          data: txData([troveOp("op1")]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: undefined,
+          error: new Error("schema lag"),
+          isLoading: false,
+        };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [spOperation()] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    const input = handle!.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
+    );
+    expect(input?.disabled).toBe(false);
+    act(() => {
+      typeInto(input!, "0xdepositor");
+    });
+
+    expect(bodyText(handle!.container)).toContain("SP Deposit");
+    expect(bodyText(handle!.container)).not.toContain("Open Trove");
+    expect(handle!.container.textContent).toContain(
+      "Showing Stability Pool depositor matches only",
+    );
+    expect(
+      handle!.container.querySelector('[role="status"]')?.textContent,
+    ).toContain("Showing Stability Pool depositor matches only");
+  });
+
+  it("keeps SP depositor matches subject to the type filter", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return {
+          data: txData([]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: undefined,
+          error: new Error("schema lag"),
+          isLoading: false,
+        };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: {
+            StabilityPoolOperationEvent: [
+              spOperation({ id: "sp-deposit", txHash: "0xspdeposit" }),
+              spOperation({
+                id: "sp-withdraw",
+                topUpOrWithdrawal: negWei(20),
+                depositBefore: wei(150),
+                depositAfter: wei(130),
+                txHash: "0xspwithdraw",
+              }),
+            ],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    const input = handle!.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
+    );
+    act(() => {
+      typeInto(input!, "0xdepositor");
+      pill(handle!.container, "SP Withdraw").click();
+    });
+
+    expect(bodyText(handle!.container)).toContain("SP Withdraw");
+    expect(bodyText(handle!.container)).not.toContain("SP Deposit");
+  });
+
+  it("merges stability pool deposit events from the companion query", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return { data: txData([]), error: null, isLoading: false };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [spOperation()] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: { TroveOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    const text = bodyText(handle!.container);
+    expect(text).toContain("SP Deposit");
+    expect(text).toContain("100.00 GBPm");
+    expect(text).toContain("150.00 GBPm");
+    expect(text).toContain("+50.00 GBPm");
+    expect(text).toContain("2.00 USDm");
+  });
+
+  it("renders claimed amounts for claim-only stability pool events", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_TRANSACTIONS) {
+        return { data: txData([]), error: null, isLoading: false };
+      }
+      if (query === CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: {
+            StabilityPoolOperationEvent: [
+              spOperation({
+                topUpOrWithdrawal: "0",
+                yieldGainClaimed: wei(3),
+                ethGainClaimed: wei(1),
+                depositBefore: wei(100),
+                depositAfter: wei(100),
+                stashedCollBefore: wei(2),
+                stashedCollAfter: wei(2),
+              }),
+            ],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: { TroveOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!);
+
+    const text = bodyText(handle!.container);
+    expect(text).toContain("SP Claim");
+    expect(text).toContain("3.00 GBPm");
+    expect(text).toContain("1.00 USDm");
   });
 });

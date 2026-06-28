@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { ErrorBox, Skeleton } from "@/components/feedback";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import {
+  ALL_CDP_STABILITY_POOL_EVENTS,
   ALL_CDP_TRANSACTIONS,
   ALL_CDP_TROVE_OP_SNAPSHOTS,
 } from "@/lib/queries";
@@ -20,19 +21,26 @@ import {
   badgeKindFor,
   indexSnapshotsById,
   mergeTransactionRows,
-  troveSnapshotFor,
+  positionSnapshotFor,
+  type CdpStabilityPoolEventsResponse,
   type CdpTransactionsResponse,
   type CdpTroveOpSnapshotResponse,
 } from "../_lib/transactions";
 import type { CdpTransactionRow, CdpTroveOpSnapshotRow } from "../_lib/types";
 import { CdpTxAmountCell } from "./cdp-tx-amount-cell";
 import {
+  ADDRESS_FILTER_POOL_EVENT_NOTICE,
+  ADDRESS_FILTER_SP_ONLY_NOTICE,
   CdpTxAddressFilter,
   CdpTxMarketFilter,
   CdpTxTypeFilter,
   TX_FILTER_TYPE_ORDER,
   normalizeAddressFilter,
 } from "./cdp-tx-filters";
+import {
+  CdpTransactionsEmptyState,
+  StabilityPoolEventsUnavailableNotice,
+} from "./cdp-transaction-notices";
 
 // 100 across all markets is the user-visible cap. We fetch a larger
 // per-kind cap and merge so the latest 100 across kinds is accurate even
@@ -56,6 +64,10 @@ export function CdpAllTransactionsTable({
     ALL_CDP_TRANSACTIONS,
     { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
   );
+  const stabilityPoolEvents = useGQL<CdpStabilityPoolEventsResponse>(
+    ALL_CDP_STABILITY_POOL_EVENTS,
+    { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
+  );
   // Isolated query for the schema-lag-fragile fields (owner + before/after).
   // Errors and loading states are tracked independently so the table keeps
   // rendering with flat amounts and a disabled address filter when this
@@ -65,14 +77,20 @@ export function CdpAllTransactionsTable({
     { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
   );
   const { rows, capped } = useMemo(
-    () => mergeTransactionRows(data, CDP_OVERVIEW_PER_KIND_FETCH_LIMIT),
-    [data],
+    () =>
+      mergeTransactionRows(
+        data,
+        CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+        stabilityPoolEvents.data,
+      ),
+    [data, stabilityPoolEvents.data],
   );
   const snapshotById = useMemo(
     () => indexSnapshotsById(snapshots.data),
     [snapshots.data],
   );
   const snapshotsReady = snapshots.data != null && snapshots.error == null;
+  const stabilityPoolEventsUnavailable = stabilityPoolEvents.error != null;
 
   const symbolByInstance = useMemo(() => {
     const m = new Map<string, { symbol: string; chainId: number }>();
@@ -91,16 +109,19 @@ export function CdpAllTransactionsTable({
         <ErrorBox
           message={`Failed to load CDP transactions — ${error.message}`}
         />
-      ) : isLoading ? (
+      ) : isLoading || (rows.length === 0 && stabilityPoolEvents.isLoading) ? (
         <Skeleton rows={6} />
       ) : rows.length === 0 ? (
-        <EmptyBox message="No CDP transactions indexed yet." />
+        <CdpTransactionsEmptyState
+          stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+        />
       ) : (
         <OverviewBody
           rows={rows}
           collaterals={collaterals}
           symbolByInstance={symbolByInstance}
           capped={capped}
+          stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
           snapshotById={snapshotById}
           snapshotsReady={snapshotsReady}
         />
@@ -131,20 +152,24 @@ function useOverviewFilters(
     return collaterals.some((c) => c.id === marketFilter) ? marketFilter : null;
   }, [collaterals, marketFilter]);
   const normalizedAddress = normalizeAddressFilter(addressInput);
-  // Address filter is only active when the snapshot query has resolved —
-  // owner data lives there. While the isolated query is loading or has
-  // errored, the input is rendered disabled and the predicate is a no-op
-  // so the table doesn't pretend to match against missing owner data.
-  const addressActive = normalizedAddress.length > 0 && snapshotsReady;
+  const hasStabilityPoolRows = rows.some((row) => row.kind === "spOperation");
+  const addressEnabled = snapshotsReady || hasStabilityPoolRows;
+  const addressActive = normalizedAddress.length > 0 && addressEnabled;
+  const addressFilterNotice =
+    addressActive && snapshotsReady
+      ? ADDRESS_FILTER_POOL_EVENT_NOTICE
+      : addressActive
+        ? ADDRESS_FILTER_SP_ONLY_NOTICE
+        : null;
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (addressActive) {
-        // Owner is only meaningful for trove-op rows; pool-level events
-        // (liquidation / redemption / SP rebalance) get hidden when the
-        // address filter is active so the visible set stays coherent.
-        if (row.kind !== "troveOp") return false;
-        const snap = snapshotById.get(row.id);
-        if (snap == null || snap.owner !== normalizedAddress) return false;
+        const matchesAddress =
+          row.kind === "spOperation"
+            ? row.depositor === normalizedAddress
+            : row.kind === "troveOp" &&
+              snapshotById.get(row.id)?.owner === normalizedAddress;
+        if (!matchesAddress) return false;
       }
       if (typeFilter != null && badgeKindFor(row) !== typeFilter) return false;
       if (
@@ -169,6 +194,8 @@ function useOverviewFilters(
     setMarketFilter,
     addressInput,
     setAddressInput,
+    addressDisabled: !addressEnabled,
+    addressFilterNotice,
     filteredRows,
     filtersActive:
       typeFilter != null || effectiveMarketFilter != null || addressActive,
@@ -188,6 +215,7 @@ function OverviewFilterBar({
   addressInput,
   onAddressInputChange,
   addressDisabled,
+  addressFilterNotice,
 }: {
   collaterals: CollateralSummary[];
   typeFilter: BadgeKind | null;
@@ -197,6 +225,7 @@ function OverviewFilterBar({
   addressInput: string;
   onAddressInputChange: (next: string) => void;
   addressDisabled: boolean;
+  addressFilterNotice: string | null;
 }) {
   return (
     <div className="mb-3 space-y-2">
@@ -218,6 +247,11 @@ function OverviewFilterBar({
           addressDisabled ? "(unavailable while indexer syncs)" : undefined
         }
       />
+      {addressFilterNotice != null && (
+        <p role="status" className="px-1 text-xs text-slate-500">
+          {addressFilterNotice}
+        </p>
+      )}
     </div>
   );
 }
@@ -227,6 +261,7 @@ function OverviewBody({
   collaterals,
   symbolByInstance,
   capped,
+  stabilityPoolEventsUnavailable,
   snapshotById,
   snapshotsReady,
 }: {
@@ -234,6 +269,7 @@ function OverviewBody({
   collaterals: CollateralSummary[];
   symbolByInstance: Map<string, { symbol: string; chainId: number }>;
   capped: boolean;
+  stabilityPoolEventsUnavailable: boolean;
   snapshotById: Map<string, CdpTroveOpSnapshotRow>;
   snapshotsReady: boolean;
 }) {
@@ -244,6 +280,8 @@ function OverviewBody({
     setMarketFilter,
     addressInput,
     setAddressInput,
+    addressDisabled,
+    addressFilterNotice,
     filteredRows,
     filtersActive,
   } = useOverviewFilters(rows, collaterals, snapshotById, snapshotsReady);
@@ -259,7 +297,8 @@ function OverviewBody({
         onMarketFilterChange={setMarketFilter}
         addressInput={addressInput}
         onAddressInputChange={setAddressInput}
-        addressDisabled={!snapshotsReady}
+        addressDisabled={addressDisabled}
+        addressFilterNotice={addressFilterNotice}
       />
       <Table>
         <thead>
@@ -306,11 +345,37 @@ function OverviewBody({
           )}
         </tbody>
       </Table>
-      {visibleRows.length > 0 && (
+      <OverviewFootnotes
+        visibleCount={visibleRows.length}
+        filteredCount={filteredRows.length}
+        filtersActive={filtersActive}
+        capped={capped}
+        stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+      />
+    </>
+  );
+}
+
+function OverviewFootnotes({
+  visibleCount,
+  filteredCount,
+  filtersActive,
+  capped,
+  stabilityPoolEventsUnavailable,
+}: {
+  visibleCount: number;
+  filteredCount: number;
+  filtersActive: boolean;
+  capped: boolean;
+  stabilityPoolEventsUnavailable: boolean;
+}) {
+  return (
+    <>
+      {visibleCount > 0 && (
         <p className="px-1 pt-2 text-xs text-slate-500">
           {filtersActive
-            ? `Showing ${visibleRows.length.toLocaleString()} of ${filteredRows.length.toLocaleString()} matching transactions.`
-            : `Showing the most recent ${visibleRows.length.toLocaleString()} transactions across all CDP markets.`}
+            ? `Showing ${visibleCount.toLocaleString()} of ${filteredCount.toLocaleString()} matching transactions.`
+            : `Showing the most recent ${visibleCount.toLocaleString()} transactions across all CDP markets.`}
         </p>
       )}
       {capped && (
@@ -319,6 +384,9 @@ function OverviewBody({
           {CDP_OVERVIEW_PER_KIND_FETCH_LIMIT.toLocaleString()} entries per event
           type — older history may exist beyond this range.
         </p>
+      )}
+      {stabilityPoolEventsUnavailable && (
+        <StabilityPoolEventsUnavailableNotice />
       )}
     </>
   );
@@ -335,7 +403,7 @@ function OverviewRow({
 }) {
   const kind = badgeKindFor(row);
   const symbol = market?.symbol ?? "—";
-  const resolvedSnapshot = troveSnapshotFor(row, snapshot);
+  const resolvedSnapshot = positionSnapshotFor(row, snapshot);
   return (
     <Row>
       <Td>

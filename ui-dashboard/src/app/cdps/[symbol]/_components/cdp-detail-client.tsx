@@ -10,27 +10,29 @@ import { useGQL } from "@/lib/graphql";
 import {
   CDP_INSTANCE_DAILY_SNAPSHOTS,
   CDP_MARKET_DETAIL,
+  CDP_MARKET_DETAIL_WITH_SP_SOURCE,
   CDP_MARKET_DETAIL_WITH_TROVE_TX,
+  CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE,
   CDP_MARKETS,
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
-import { buildPoolDetailHref } from "@/lib/routing";
-import { formatWei, relativeTime, truncateAddress } from "@/lib/format";
+import { relativeTime } from "@/lib/format";
 import type { Network } from "@/lib/networks";
 import { explorerAddressUrl } from "@/lib/tokens";
 import {
+  CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT,
   CDP_TROVES_DETAIL_LIMIT,
   type CdpCollateral,
   type CdpDepositor,
   type CdpInterestBatch,
   type CdpInstance,
   type CdpInstanceDailySnapshot,
-  type CdpPoolRow,
   type CdpTrove,
   type CdpTroveListRow,
 } from "../../_lib/types";
 import {
   cdpSymbolSlug,
+  formatSignedWei,
   formatTokenAmount,
   redemptionEventSubtitle,
 } from "../../_lib/format";
@@ -53,11 +55,13 @@ type CdpDetailResponse = {
   AllTrove: CdpTrove[];
   InterestBatch: CdpInterestBatch[];
   StabilityPoolDepositor: CdpDepositor[];
-  CdpPool: CdpPoolRow[];
 };
 
 type CdpTroveSchemaFieldsResponse = {
-  __type: {
+  TroveType: {
+    fields: Array<{ name: string }>;
+  } | null;
+  StabilityPoolDepositorType: {
     fields: Array<{ name: string }>;
   } | null;
 };
@@ -65,6 +69,9 @@ type CdpTroveSchemaFieldsResponse = {
 type CdpDailySnapshotsResponse = {
   LiquityInstanceDailySnapshot: CdpInstanceDailySnapshot[];
 };
+
+const compactDepositorCellClassName = "!px-2 whitespace-nowrap";
+const compactDepositorHeaderClassName = "!px-2";
 
 export function CdpDetailClient({ symbol }: { symbol: string }) {
   const { network } = useNetwork();
@@ -87,22 +94,40 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
   );
   const supportsTroveLastUpdatedTxHash = useMemo(
     () =>
-      troveSchema.data?.__type?.fields.some(
+      troveSchema.data?.TroveType?.fields.some(
         (field) => field.name === "lastUpdatedTxHash",
       ) === true,
     [troveSchema.data],
   );
+  const supportsStabilityPoolSourceSplit = useMemo(() => {
+    const fields = troveSchema.data?.StabilityPoolDepositorType?.fields;
+    return (
+      fields?.some((field) => field.name === "cumulativeRebalanceUsed") ===
+        true &&
+      fields.some((field) => field.name === "cumulativeLiquidationUsed") ===
+        true
+    );
+  }, [troveSchema.data]);
   const detailQuery =
     collateral == null
       ? null
       : supportsTroveLastUpdatedTxHash
-        ? CDP_MARKET_DETAIL_WITH_TROVE_TX
-        : CDP_MARKET_DETAIL;
+        ? supportsStabilityPoolSourceSplit
+          ? CDP_MARKET_DETAIL_WITH_TROVE_TX_AND_SP_SOURCE
+          : CDP_MARKET_DETAIL_WITH_TROVE_TX
+        : supportsStabilityPoolSourceSplit
+          ? CDP_MARKET_DETAIL_WITH_SP_SOURCE
+          : CDP_MARKET_DETAIL;
   const rawDetail = useGQL<CdpDetailResponse>(
     detailQuery,
     collateral == null ? undefined : { collateralId: collateral.id },
   );
   const detail = useStableCdpDetail(rawDetail, collateral?.id);
+  const sourceSplitWarning = sourceSplitLoadWarning({
+    supportsStabilityPoolSourceSplit,
+    rawDetail,
+    detail,
+  });
   const snapshots = useGQL<CdpDailySnapshotsResponse>(
     collateral == null ? null : CDP_INSTANCE_DAILY_SNAPSHOTS,
     collateral == null ? undefined : { instanceId: collateral.id },
@@ -120,8 +145,24 @@ export function CdpDetailClient({ symbol }: { symbol: string }) {
       snapshots={snapshots}
       collateral={collateral}
       network={network}
+      sourceSplitWarning={sourceSplitWarning}
     />
   );
+}
+
+function sourceSplitLoadWarning({
+  supportsStabilityPoolSourceSplit,
+  rawDetail,
+  detail,
+}: {
+  supportsStabilityPoolSourceSplit: boolean;
+  rawDetail: ReturnType<typeof useGQL<CdpDetailResponse>>;
+  detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
+}): string | null {
+  if (!supportsStabilityPoolSourceSplit) return null;
+  if (rawDetail.error == null || rawDetail.data != null) return null;
+  if (detail.data == null) return null;
+  return `Rebalance/liquidation split unavailable — ${rawDetail.error.message}`;
 }
 
 function useStableCdpDetail(
@@ -155,12 +196,14 @@ function CdpDetailState({
   snapshots,
   collateral,
   network,
+  sourceSplitWarning,
 }: {
   markets: ReturnType<typeof useGQL<CdpMarketsResponse>>;
   detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
   snapshots: ReturnType<typeof useGQL<CdpDailySnapshotsResponse>>;
   collateral: CdpCollateral | undefined;
   network: Network;
+  sourceSplitWarning: string | null;
 }) {
   if (
     markets.isLoading ||
@@ -192,6 +235,7 @@ function CdpDetailState({
         snapshots,
         collateral,
         network,
+        sourceSplitWarning,
       })}
     />
   );
@@ -202,21 +246,25 @@ function buildContentProps({
   snapshots,
   collateral,
   network,
+  sourceSplitWarning,
 }: {
   detail: ReturnType<typeof useGQL<CdpDetailResponse>>;
   snapshots: ReturnType<typeof useGQL<CdpDailySnapshotsResponse>>;
   collateral: CdpCollateral;
   network: Network;
+  sourceSplitWarning: string | null;
 }) {
   const openTroves = detail.data?.OpenTrove ?? [];
+  const depositors = detail.data?.StabilityPoolDepositor ?? [];
   return {
     collateral,
     instance: detail.data?.LiquityInstance[0],
     openTroves,
     allTroves: detail.data?.AllTrove ?? [],
     interestBatches: detail.data?.InterestBatch ?? [],
-    depositors: detail.data?.StabilityPoolDepositor ?? [],
-    cdpPools: detail.data?.CdpPool ?? [],
+    depositors,
+    depositorsTruncated:
+      depositors.length >= CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT,
     aggregates: aggregateTroves(openTroves, {
       truncated: openTroves.length >= CDP_TROVES_DETAIL_LIMIT,
     }),
@@ -224,6 +272,7 @@ function buildContentProps({
     snapshotsLoading: snapshots.isLoading,
     snapshotsError: snapshots.error != null,
     network,
+    sourceSplitWarning,
   };
 }
 
@@ -234,12 +283,13 @@ function CdpDetailContent({
   allTroves,
   interestBatches,
   depositors,
-  cdpPools,
+  depositorsTruncated,
   aggregates,
   snapshots,
   snapshotsLoading,
   snapshotsError,
   network,
+  sourceSplitWarning,
 }: {
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
@@ -247,12 +297,13 @@ function CdpDetailContent({
   allTroves: CdpTrove[];
   interestBatches: CdpInterestBatch[];
   depositors: CdpDepositor[];
-  cdpPools: CdpPoolRow[];
+  depositorsTruncated: boolean;
   aggregates: ReturnType<typeof aggregateTroves>;
   snapshots: CdpInstanceDailySnapshot[];
   snapshotsLoading: boolean;
   snapshotsError: boolean;
   network: Network;
+  sourceSplitWarning: string | null;
 }) {
   return (
     <div className="space-y-8">
@@ -305,14 +356,13 @@ function CdpDetailContent({
         collateral={collateral}
       />
 
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <DepositorTable
-          depositors={depositors}
-          symbol={collateral.symbol}
-          chainId={collateral.chainId}
-        />
-        <CdpPoolsTable cdpPools={cdpPools} />
-      </section>
+      <DepositorTable
+        depositors={depositors}
+        truncated={depositorsTruncated}
+        symbol={collateral.symbol}
+        chainId={collateral.chainId}
+        sourceSplitWarning={sourceSplitWarning}
+      />
 
       <CdpTransactionsTable
         instanceId={collateral.id}
@@ -407,34 +457,77 @@ function RedemptionsSection({
   );
 }
 
-function CdpPoolsTable({ cdpPools }: { cdpPools: CdpPoolRow[] }) {
+function DepositorTable({
+  depositors,
+  truncated,
+  symbol,
+  chainId,
+  sourceSplitWarning,
+}: {
+  depositors: CdpDepositor[];
+  truncated: boolean;
+  symbol: string;
+  chainId: number;
+  sourceSplitWarning: string | null;
+}) {
+  const hasSourceSplitData = depositors.some(
+    (depositor) =>
+      depositor.cumulativeRebalanceUsed !== undefined &&
+      depositor.cumulativeLiquidationUsed !== undefined,
+  );
+
   return (
     <section>
-      <h2 className="text-lg font-semibold text-white mb-3">CDP Pools</h2>
-      {cdpPools.length === 0 ? (
-        <EmptyBox message="No active FPMM pools linked to this CDP market." />
+      <DepositorTableIntro
+        truncated={truncated}
+        sourceSplitWarning={sourceSplitWarning}
+      />
+      {depositors.length === 0 ? (
+        <EmptyBox message="No stability pool LPs indexed yet." />
       ) : (
         <Table>
-          <thead>
-            <Row>
-              <Th>Pool</Th>
-              <Th align="right">Cooldown</Th>
-              <Th align="right">Updated</Th>
-            </Row>
-          </thead>
+          <DepositorTableHeader hasSourceSplitData={hasSourceSplitData} />
           <tbody>
-            {cdpPools.map((pool) => (
-              <Row key={pool.id}>
-                <Td mono>
-                  <Link
-                    href={buildPoolDetailHref(pool.poolId)}
-                    className="text-indigo-400 hover:text-indigo-300"
-                  >
-                    {truncateAddress(pool.poolId)}
-                  </Link>
+            {depositors.map((depositor) => (
+              <Row key={depositor.id}>
+                <Td className={compactDepositorCellClassName}>
+                  <AddressLink address={depositor.address} chainId={chainId} />
                 </Td>
-                <Td align="right">{pool.rebalanceCooldownSec}s</Td>
-                <Td align="right">{relativeTime(pool.updatedAtTimestamp)}</Td>
+                <Td align="right" className={compactDepositorCellClassName}>
+                  {formatTokenAmount(depositor.lastTouchedDeposit, symbol)}
+                </Td>
+                <Td align="right" className={compactDepositorCellClassName}>
+                  {formatTokenAmount(depositor.cumulativeDeposited, symbol)}
+                </Td>
+                <Td align="right" className={compactDepositorCellClassName}>
+                  {formatTokenAmount(depositor.cumulativeWithdrawn, symbol)}
+                </Td>
+                {hasSourceSplitData && (
+                  <Td align="right" className={compactDepositorCellClassName}>
+                    {depositor.cumulativeRebalanceUsed === undefined
+                      ? "Not indexed"
+                      : formatSignedWei(
+                          depositor.cumulativeRebalanceUsed,
+                          symbol,
+                        )}
+                  </Td>
+                )}
+                {hasSourceSplitData && (
+                  <Td align="right" className={compactDepositorCellClassName}>
+                    {depositor.cumulativeLiquidationUsed === undefined
+                      ? "Not indexed"
+                      : formatSignedWei(
+                          depositor.cumulativeLiquidationUsed,
+                          symbol,
+                        )}
+                  </Td>
+                )}
+                <Td align="right" className={compactDepositorCellClassName}>
+                  {formatTokenAmount(depositor.stashedColl, "USDm")}
+                </Td>
+                <Td align="right" className={compactDepositorCellClassName}>
+                  {relativeTime(depositor.lastUpdatedAt)}
+                </Td>
               </Row>
             ))}
           </tbody>
@@ -444,50 +537,104 @@ function CdpPoolsTable({ cdpPools }: { cdpPools: CdpPoolRow[] }) {
   );
 }
 
-function DepositorTable({
-  depositors,
-  symbol,
-  chainId,
+function DepositorTableHeader({
+  hasSourceSplitData,
 }: {
-  depositors: CdpDepositor[];
-  symbol: string;
-  chainId: number;
+  hasSourceSplitData: boolean;
 }) {
   return (
-    <section>
+    <thead>
+      <Row>
+        <Th className={compactDepositorHeaderClassName}>LP</Th>
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Deposit at Last LP Update"
+        >
+          Current Deposit
+        </Th>
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Gross Deposited"
+        >
+          Deposited (+)
+        </Th>
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Principal Withdrawn"
+        >
+          Withdrawn (-)
+        </Th>
+        {hasSourceSplitData && (
+          <Th
+            align="right"
+            className={compactDepositorHeaderClassName}
+            title="Rebalance Used"
+          >
+            Rebalance (-)
+          </Th>
+        )}
+        {hasSourceSplitData && (
+          <Th
+            align="right"
+            className={compactDepositorHeaderClassName}
+            title="Liquidation Used"
+          >
+            Liquidation (-)
+          </Th>
+        )}
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Unclaimed Collateral at Last LP Update"
+        >
+          Coll. Snapshot
+        </Th>
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Snapshot Updated"
+        >
+          Updated
+        </Th>
+      </Row>
+    </thead>
+  );
+}
+
+function DepositorTableIntro({
+  truncated,
+  sourceSplitWarning,
+}: {
+  truncated: boolean;
+  sourceSplitWarning: string | null;
+}) {
+  return (
+    <>
       <h2 className="text-lg font-semibold text-white mb-3">
-        Last-Touched Depositors
+        Stability Pool LP Snapshots
       </h2>
-      {depositors.length === 0 ? (
-        <EmptyBox message="No stability pool depositors indexed yet." />
-      ) : (
-        <Table>
-          <thead>
-            <Row>
-              <Th>Depositor</Th>
-              <Th align="right">Deposit</Th>
-              <Th align="right">Stashed Coll</Th>
-              <Th align="right">Updated</Th>
-            </Row>
-          </thead>
-          <tbody>
-            {depositors.map((depositor) => (
-              <Row key={depositor.id}>
-                <Td>
-                  <AddressLink address={depositor.address} chainId={chainId} />
-                </Td>
-                <Td align="right">
-                  {formatTokenAmount(depositor.lastTouchedDeposit, symbol)}
-                </Td>
-                <Td align="right">
-                  {formatWei(depositor.stashedColl, 18, 2)} USDm
-                </Td>
-                <Td align="right">{relativeTime(depositor.lastUpdatedAt)}</Td>
-              </Row>
-            ))}
-          </tbody>
-        </Table>
+      <p className="mb-3 text-xs text-slate-500">
+        Rows are last-updated LP snapshots. Current deposit equals gross
+        deposited minus principal withdrawn minus debt-token deposit used by CDP
+        rebalances and Liquity liquidations, net of retained debt-token yield,
+        as of the LP's latest Stability Pool action. Redemptions do not consume
+        Stability Pool deposits.
+      </p>
+      {sourceSplitWarning != null && (
+        <p className="mb-3 text-xs text-amber-400" role="status">
+          {sourceSplitWarning}
+        </p>
       )}
-    </section>
+      {truncated && (
+        <p className="mb-3 text-xs text-amber-400" role="status">
+          Showing the first{" "}
+          {CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT.toLocaleString()} LP
+          snapshots by indexed deposit. More snapshots may exist.
+        </p>
+      )}
+    </>
   );
 }

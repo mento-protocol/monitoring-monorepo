@@ -1,4 +1,7 @@
-import type { StabilityPoolDepositor } from "envio";
+import type {
+  StabilityPoolDepositor,
+  StabilityPoolOperationEvent,
+} from "envio";
 import { indexer } from "../../indexer.js";
 import { asAddress, asBigInt, eventId } from "../../helpers.js";
 import {
@@ -8,6 +11,22 @@ import {
 import { preloadBorrowingRevenueRollover } from "./borrowingRevenue.js";
 import { findLiquityMarketByEventSource, makeCollateralId } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
+import {
+  beginStabilityPoolConsumption,
+  classifyMarkedPendingStabilityPoolConsumption,
+  classifyPendingStabilityPoolConsumption,
+  deriveSourceLossSinceSnapshot,
+  loadLossScalesForDepositor,
+  loadPendingStabilityPoolConsumption,
+  loadStabilityPoolLossAccumulator,
+  loadStabilityPoolLossScale,
+  nextStabilityPoolLossSnapshots,
+  preloadPendingStabilityPoolConsumptionClassification,
+  recordStabilityPoolPUpdate,
+  recordStabilityPoolScaleUpdate,
+  recordStabilityPoolTotalDepositUpdate,
+  type StabilityPoolSourceLoss,
+} from "./stabilityPoolLoss.js";
 import { getOrLoadSystemParams, preloadSystemParams } from "./systemParams.js";
 
 const pendingDepositKey = (
@@ -16,6 +35,152 @@ const pendingDepositKey = (
   collateralId: string,
   depositor: string,
 ): string => `${chainId}-${txHash}-${collateralId}-${asAddress(depositor)}`;
+
+export type StabilityPoolPendingOperation = {
+  operation: number;
+  depositLossSinceLastOperation: bigint;
+  topUpOrWithdrawal: bigint;
+  yieldGainSinceLastOperation: bigint;
+  yieldGainClaimed: bigint;
+  ethGainSinceLastOperation: bigint;
+  ethGainClaimed: bigint;
+};
+
+const EMPTY_PENDING_OPERATION: StabilityPoolPendingOperation = {
+  operation: -1,
+  depositLossSinceLastOperation: 0n,
+  topUpOrWithdrawal: 0n,
+  yieldGainSinceLastOperation: 0n,
+  yieldGainClaimed: 0n,
+  ethGainSinceLastOperation: 0n,
+  ethGainClaimed: 0n,
+};
+
+const unpairedDepositLossSinceSnapshot = (
+  existing: StabilityPoolDepositor | undefined,
+  newDeposit: bigint,
+): bigint =>
+  existing !== undefined && existing.lastTouchedDeposit > newDeposit
+    ? existing.lastTouchedDeposit - newDeposit
+    : 0n;
+
+export function buildStabilityPoolDepositorUpdate({
+  chainId,
+  collateralId,
+  depositor,
+  newDeposit,
+  stashedColl,
+  blockTimestamp,
+  existing,
+  pending,
+  sourceLoss,
+  snapshotP,
+  snapshotScale,
+  rebalanceLossSnapshot,
+  liquidationLossSnapshot,
+}: {
+  chainId: number;
+  collateralId: string;
+  depositor: string;
+  newDeposit: bigint;
+  stashedColl: bigint;
+  blockTimestamp: bigint;
+  existing: StabilityPoolDepositor | undefined;
+  pending: StabilityPoolPendingOperation | undefined;
+  sourceLoss: StabilityPoolSourceLoss;
+  snapshotP: bigint;
+  snapshotScale: bigint;
+  rebalanceLossSnapshot: bigint;
+  liquidationLossSnapshot: bigint;
+}): StabilityPoolDepositor {
+  const op = pending ?? EMPTY_PENDING_OPERATION;
+  return {
+    id: `${collateralId}-${depositor}`,
+    chainId,
+    collateralId,
+    address: depositor,
+    lastTouchedDeposit: newDeposit,
+    stashedColl,
+    yieldGainClaimedCum:
+      (existing?.yieldGainClaimedCum ?? 0n) + op.yieldGainClaimed,
+    ethGainClaimedCum: (existing?.ethGainClaimedCum ?? 0n) + op.ethGainClaimed,
+    firstDepositAt:
+      existing?.firstDepositAt ?? (newDeposit > 0n ? blockTimestamp : 0n),
+    lastUpdatedAt: blockTimestamp,
+    cumulativeDeposited:
+      (existing?.cumulativeDeposited ?? 0n) +
+      (op.topUpOrWithdrawal > 0n ? op.topUpOrWithdrawal : 0n),
+    cumulativeWithdrawn:
+      (existing?.cumulativeWithdrawn ?? 0n) +
+      (op.topUpOrWithdrawal < 0n ? -op.topUpOrWithdrawal : 0n),
+    cumulativeRebalanceUsed:
+      (existing?.cumulativeRebalanceUsed ?? 0n) + sourceLoss.rebalance,
+    cumulativeLiquidationUsed:
+      (existing?.cumulativeLiquidationUsed ?? 0n) + sourceLoss.liquidation,
+    depositSnapshotP: snapshotP,
+    depositSnapshotScale: snapshotScale,
+    rebalanceLossSnapshot,
+    liquidationLossSnapshot,
+  };
+}
+
+export function buildStabilityPoolOperationEvent({
+  id,
+  chainId,
+  instanceId,
+  depositor,
+  newDeposit,
+  stashedColl,
+  existing,
+  pending,
+  sourceLoss,
+  blockNumber,
+  blockTimestamp,
+  txHash,
+}: {
+  id: string;
+  chainId: number;
+  instanceId: string;
+  depositor: string;
+  newDeposit: bigint;
+  stashedColl: bigint;
+  existing: StabilityPoolDepositor | undefined;
+  pending: StabilityPoolPendingOperation | undefined;
+  sourceLoss: StabilityPoolSourceLoss;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  txHash: string;
+}): StabilityPoolOperationEvent | null {
+  if (pending === undefined) return null;
+  const op = pending;
+  const retainedYield = op.yieldGainSinceLastOperation - op.yieldGainClaimed;
+  return {
+    id,
+    chainId,
+    instanceId,
+    depositor,
+    operation: op.operation,
+    depositLossSinceLastOperation: op.depositLossSinceLastOperation,
+    rebalanceLossSinceLastOperation: sourceLoss.rebalance,
+    liquidationLossSinceLastOperation: sourceLoss.liquidation,
+    topUpOrWithdrawal: op.topUpOrWithdrawal,
+    yieldGainSinceLastOperation: op.yieldGainSinceLastOperation,
+    yieldGainClaimed: op.yieldGainClaimed,
+    ethGainSinceLastOperation: op.ethGainSinceLastOperation,
+    ethGainClaimed: op.ethGainClaimed,
+    depositBefore:
+      newDeposit -
+      op.topUpOrWithdrawal -
+      retainedYield +
+      op.depositLossSinceLastOperation,
+    depositAfter: newDeposit,
+    stashedCollBefore: existing?.stashedColl ?? 0n,
+    stashedCollAfter: stashedColl,
+    timestamp: blockTimestamp,
+    blockNumber,
+    txHash,
+  };
+}
 
 indexer.onEvent(
   { contract: "LiquityStabilityPool", event: "DepositOperation" },
@@ -27,6 +192,8 @@ indexer.onEvent(
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
     const depositor = asAddress(event.params._depositor);
+    // Intentionally no isPreload guard: DepositUpdated's preload pass reads
+    // this pending row to declare the correct StabilityPoolDepositor dependency.
     context.PendingDepositOperation.set({
       id: pendingDepositKey(
         event.chainId,
@@ -37,8 +204,13 @@ indexer.onEvent(
       collateralId,
       txHash: event.transaction.hash,
       depositor,
+      operation: Number(event.params._operation),
+      depositLossSinceLastOperation:
+        event.params._depositLossSinceLastOperation,
       topUpOrWithdrawal: event.params._topUpOrWithdrawal,
+      yieldGainSinceLastOperation: event.params._yieldGainSinceLastOperation,
       yieldGainClaimed: event.params._yieldGainClaimed,
+      ethGainSinceLastOperation: event.params._ethGainSinceLastOperation,
       ethGainClaimed: event.params._ethGainClaimed,
       timestamp: asBigInt(event.block.timestamp),
       blockNumber: asBigInt(event.block.number),
@@ -56,8 +228,9 @@ indexer.onEvent(
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
     const depositor = asAddress(event.params._depositor);
-    const id = `${collateralId}-${depositor}`;
+    const depositorId = `${collateralId}-${depositor}`;
     const blockTimestamp = asBigInt(event.block.timestamp);
+    const blockNumber = asBigInt(event.block.number);
     const pendingKey = pendingDepositKey(
       event.chainId,
       event.transaction.hash,
@@ -65,36 +238,182 @@ indexer.onEvent(
       depositor,
     );
     const [existing, pending] = await Promise.all([
-      context.StabilityPoolDepositor.get(id),
+      context.StabilityPoolDepositor.get(depositorId),
       context.PendingDepositOperation.get(pendingKey),
     ]);
-    if (context.isPreload) return;
+    const [lossScales, currentLossScale] = await Promise.all([
+      loadLossScalesForDepositor(context, existing),
+      loadStabilityPoolLossScale(
+        context,
+        event.chainId,
+        collateralId,
+        event.params._snapshotScale,
+      ),
+    ]);
+    if (context.isPreload) {
+      await Promise.all([
+        preloadLiquityMarket(context, market),
+        preloadBorrowingRevenueRollover(context, collateralId, blockTimestamp),
+      ]);
+      return;
+    }
     if (pending !== undefined) {
       context.PendingDepositOperation.deleteUnsafe(pendingKey);
     }
-    const topUp = pending?.topUpOrWithdrawal ?? 0n;
-    const next: StabilityPoolDepositor = {
-      id,
+    const op =
+      pending === undefined
+        ? undefined
+        : ({
+            operation: pending.operation,
+            depositLossSinceLastOperation:
+              pending.depositLossSinceLastOperation,
+            topUpOrWithdrawal: pending.topUpOrWithdrawal,
+            yieldGainSinceLastOperation: pending.yieldGainSinceLastOperation,
+            yieldGainClaimed: pending.yieldGainClaimed,
+            ethGainSinceLastOperation: pending.ethGainSinceLastOperation,
+            ethGainClaimed: pending.ethGainClaimed,
+          } satisfies StabilityPoolPendingOperation);
+    const depositLossSinceSnapshot =
+      op?.depositLossSinceLastOperation ??
+      unpairedDepositLossSinceSnapshot(existing, event.params._newDeposit);
+    const sourceLoss = deriveSourceLossSinceSnapshot({
+      depositor: existing,
+      scales: lossScales,
+      emittedLoss: depositLossSinceSnapshot,
+    });
+    const nextLossSnapshots = nextStabilityPoolLossSnapshots({
+      scale: currentLossScale,
+    });
+    const next = buildStabilityPoolDepositorUpdate({
       chainId: event.chainId,
       collateralId,
-      address: depositor,
-      lastTouchedDeposit: event.params._newDeposit,
+      depositor,
+      newDeposit: event.params._newDeposit,
       stashedColl: event.params._stashedColl,
-      yieldGainClaimedCum:
-        (existing?.yieldGainClaimedCum ?? 0n) +
-        (pending?.yieldGainClaimed ?? 0n),
-      ethGainClaimedCum:
-        (existing?.ethGainClaimedCum ?? 0n) + (pending?.ethGainClaimed ?? 0n),
-      firstDepositAt:
-        existing?.firstDepositAt ??
-        (event.params._newDeposit > 0n ? blockTimestamp : 0n),
-      lastUpdatedAt: blockTimestamp,
-      cumulativeDeposited:
-        (existing?.cumulativeDeposited ?? 0n) + (topUp > 0n ? topUp : 0n),
-      cumulativeWithdrawn:
-        (existing?.cumulativeWithdrawn ?? 0n) + (topUp < 0n ? -topUp : 0n),
-    };
+      blockTimestamp,
+      existing,
+      pending: op,
+      sourceLoss,
+      snapshotP: event.params._snapshotP,
+      snapshotScale: event.params._snapshotScale,
+      ...nextLossSnapshots,
+    });
+    const operationEvent = buildStabilityPoolOperationEvent({
+      id: eventId(event.chainId, event.block.number, event.logIndex),
+      chainId: event.chainId,
+      instanceId: collateralId,
+      depositor,
+      newDeposit: event.params._newDeposit,
+      stashedColl: event.params._stashedColl,
+      existing,
+      pending: op,
+      sourceLoss,
+      blockNumber,
+      blockTimestamp,
+      txHash: event.transaction.hash,
+    });
+    if (operationEvent !== null) {
+      context.StabilityPoolOperationEvent.set(operationEvent);
+      let instance = await getOrCreateLiquityInstance(
+        context,
+        market,
+        blockNumber,
+        blockTimestamp,
+      );
+      instance = await flushLiquitySnapshots(
+        context,
+        instance,
+        blockTimestamp,
+        blockNumber,
+      );
+      context.LiquityInstance.set(
+        touchLiquityInstance(instance, blockNumber, blockTimestamp),
+      );
+    }
     context.StabilityPoolDepositor.set(next);
+  },
+);
+
+indexer.onEvent(
+  { contract: "LiquityStabilityPool", event: "S_Updated" },
+  async ({ event, context }) => {
+    const market = findLiquityMarketByEventSource(
+      event.chainId,
+      event.srcAddress,
+    );
+    if (market === undefined) return;
+    const collateralId = makeCollateralId(market);
+    // Intentionally no isPreload guard: later same-transaction stability pool
+    // events preload this pending row to declare their source-loss dependencies.
+    await beginStabilityPoolConsumption(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
+      blockNumber: asBigInt(event.block.number),
+      blockTimestamp: asBigInt(event.block.timestamp),
+    });
+  },
+);
+
+indexer.onEvent(
+  { contract: "LiquityStabilityPool", event: "ScaleUpdated" },
+  async ({ event, context }) => {
+    const market = findLiquityMarketByEventSource(
+      event.chainId,
+      event.srcAddress,
+    );
+    if (market === undefined) return;
+    const collateralId = makeCollateralId(market);
+    await Promise.all([
+      loadStabilityPoolLossAccumulator(context, event.chainId, collateralId),
+      loadPendingStabilityPoolConsumption(
+        context,
+        event.chainId,
+        event.transaction.hash,
+        collateralId,
+      ),
+    ]);
+    if (context.isPreload) return;
+    await recordStabilityPoolScaleUpdate(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
+      currentScale: event.params._currentScale,
+    });
+  },
+);
+
+indexer.onEvent(
+  { contract: "LiquityStabilityPool", event: "P_Updated" },
+  async ({ event, context }) => {
+    const market = findLiquityMarketByEventSource(
+      event.chainId,
+      event.srcAddress,
+    );
+    if (market === undefined) return;
+    const collateralId = makeCollateralId(market);
+    await Promise.all([
+      loadStabilityPoolLossAccumulator(context, event.chainId, collateralId),
+      preloadPendingStabilityPoolConsumptionClassification(
+        context,
+        event.chainId,
+        event.transaction.hash,
+        collateralId,
+        { requireSource: true },
+      ),
+    ]);
+    if (context.isPreload) return;
+    await recordStabilityPoolPUpdate(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
+      currentP: event.params._P,
+    });
+    await classifyMarkedPendingStabilityPoolConsumption(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
+    });
   },
 );
 
@@ -109,18 +428,40 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    const collateralId = makeCollateralId(market);
+    await Promise.all([
+      loadStabilityPoolLossAccumulator(context, event.chainId, collateralId),
+      preloadPendingStabilityPoolConsumptionClassification(
+        context,
+        event.chainId,
+        event.transaction.hash,
+        collateralId,
+        { requireSource: true },
+      ),
+    ]);
     if (context.isPreload) {
       await Promise.all([
         preloadLiquityMarket(context, market),
         preloadSystemParams(context, market),
         preloadBorrowingRevenueRollover(
           context,
-          makeCollateralId(market),
+          collateralId,
           asBigInt(event.block.timestamp),
         ),
       ]);
       return;
     }
+    await recordStabilityPoolTotalDepositUpdate(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
+      newBalance: event.params._newBalance,
+    });
+    await classifyMarkedPendingStabilityPoolConsumption(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
+    });
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
     let instance = await getOrCreateLiquityInstance(
@@ -168,11 +509,12 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    const collateralId = makeCollateralId(market);
     if (context.isPreload) {
       await preloadLiquityMarket(context, market);
       await preloadBorrowingRevenueRollover(
         context,
-        makeCollateralId(market),
+        collateralId,
         asBigInt(event.block.timestamp),
       );
       return;
@@ -209,13 +551,22 @@ indexer.onEvent(
       event.srcAddress,
     );
     if (market === undefined) return;
+    const collateralId = makeCollateralId(market);
     if (context.isPreload) {
-      await preloadLiquityMarket(context, market);
-      await preloadBorrowingRevenueRollover(
-        context,
-        makeCollateralId(market),
-        asBigInt(event.block.timestamp),
-      );
+      await Promise.all([
+        preloadLiquityMarket(context, market),
+        preloadBorrowingRevenueRollover(
+          context,
+          collateralId,
+          asBigInt(event.block.timestamp),
+        ),
+        preloadPendingStabilityPoolConsumptionClassification(
+          context,
+          event.chainId,
+          event.transaction.hash,
+          collateralId,
+        ),
+      ]);
       return;
     }
     const blockNumber = asBigInt(event.block.number);
@@ -226,6 +577,12 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
     );
+    await classifyPendingStabilityPoolConsumption(context, {
+      chainId: event.chainId,
+      collateralId,
+      txHash: event.transaction.hash,
+      source: "rebalance",
+    });
     context.SpRebalanceEvent.set({
       id: eventId(event.chainId, event.block.number, event.logIndex),
       chainId: event.chainId,
