@@ -70,6 +70,9 @@ type CdpDailySnapshotsResponse = {
   LiquityInstanceDailySnapshot: CdpInstanceDailySnapshot[];
 };
 
+const compactDepositorCellClassName = "!px-2 whitespace-nowrap";
+const compactDepositorHeaderClassName = "!px-2";
+
 export function CdpDetailClient({ symbol }: { symbol: string }) {
   const { network } = useNetwork();
   const symbolSlug = cdpSymbolSlug(symbol);
@@ -483,37 +486,24 @@ function DepositorTable({
         <EmptyBox message="No stability pool LPs indexed yet." />
       ) : (
         <Table>
-          <thead>
-            <Row>
-              <Th>LP</Th>
-              <Th align="right">Current Deposit Snapshot</Th>
-              <Th align="right">Gross Deposited (+)</Th>
-              <Th align="right">Principal Withdrawn (-)</Th>
-              {hasSourceSplitData && <Th align="right">Rebalance Used (-)</Th>}
-              {hasSourceSplitData && (
-                <Th align="right">Liquidation Used (-)</Th>
-              )}
-              <Th align="right">Unclaimed Collateral</Th>
-              <Th align="right">Snapshot Updated</Th>
-            </Row>
-          </thead>
+          <DepositorTableHeader hasSourceSplitData={hasSourceSplitData} />
           <tbody>
             {depositors.map((depositor) => (
               <Row key={depositor.id}>
-                <Td>
+                <Td className={compactDepositorCellClassName}>
                   <AddressLink address={depositor.address} chainId={chainId} />
                 </Td>
-                <Td align="right">
+                <Td align="right" className={compactDepositorCellClassName}>
                   {formatTokenAmount(depositor.lastTouchedDeposit, symbol)}
                 </Td>
-                <Td align="right">
+                <Td align="right" className={compactDepositorCellClassName}>
                   {formatTokenAmount(depositor.cumulativeDeposited, symbol)}
                 </Td>
-                <Td align="right">
+                <Td align="right" className={compactDepositorCellClassName}>
                   {formatTokenAmount(depositor.cumulativeWithdrawn, symbol)}
                 </Td>
                 {hasSourceSplitData && (
-                  <Td align="right">
+                  <Td align="right" className={compactDepositorCellClassName}>
                     {depositor.cumulativeRebalanceUsed === undefined
                       ? "Not indexed"
                       : formatSignedWei(
@@ -523,7 +513,7 @@ function DepositorTable({
                   </Td>
                 )}
                 {hasSourceSplitData && (
-                  <Td align="right">
+                  <Td align="right" className={compactDepositorCellClassName}>
                     {depositor.cumulativeLiquidationUsed === undefined
                       ? "Not indexed"
                       : formatSignedWei(
@@ -532,16 +522,81 @@ function DepositorTable({
                         )}
                   </Td>
                 )}
-                <Td align="right">
+                <Td align="right" className={compactDepositorCellClassName}>
                   {formatTokenAmount(depositor.stashedColl, "USDm")}
                 </Td>
-                <Td align="right">{relativeTime(depositor.lastUpdatedAt)}</Td>
+                <Td align="right" className={compactDepositorCellClassName}>
+                  {relativeTime(depositor.lastUpdatedAt)}
+                </Td>
               </Row>
             ))}
           </tbody>
         </Table>
       )}
     </section>
+  );
+}
+
+function DepositorTableHeader({
+  hasSourceSplitData,
+}: {
+  hasSourceSplitData: boolean;
+}) {
+  return (
+    <thead>
+      <Row>
+        <Th className={compactDepositorHeaderClassName}>LP</Th>
+        <Th align="right" className={compactDepositorHeaderClassName}>
+          Current Deposit
+        </Th>
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Gross Deposited"
+        >
+          Deposited (+)
+        </Th>
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Principal Withdrawn"
+        >
+          Withdrawn (-)
+        </Th>
+        {hasSourceSplitData && (
+          <Th
+            align="right"
+            className={compactDepositorHeaderClassName}
+            title="Rebalance Used"
+          >
+            Rebalance (-)
+          </Th>
+        )}
+        {hasSourceSplitData && (
+          <Th
+            align="right"
+            className={compactDepositorHeaderClassName}
+            title="Liquidation Used"
+          >
+            Liquidation (-)
+          </Th>
+        )}
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Unclaimed Collateral"
+        >
+          Unclaimed Coll.
+        </Th>
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Snapshot Updated"
+        >
+          Updated
+        </Th>
+      </Row>
+    </thead>
   );
 }
 
@@ -558,11 +613,11 @@ function DepositorTableIntro({
         Stability Pool LP Snapshots
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Debt-token flow per row: current deposit snapshot equals gross deposited
-        minus principal withdrawn minus debt-token deposit used by CDP
-        rebalances and Liquity liquidations, net of retained debt-token yield.
-        Redemptions do not consume Stability Pool deposits. Unclaimed collateral
-        is the separate USDm gain currently indexed for the LP.
+        Debt-token flow per row: current deposit equals gross deposited minus
+        principal withdrawn minus debt-token deposit used by CDP rebalances and
+        Liquity liquidations, net of retained debt-token yield. Redemptions do
+        not consume Stability Pool deposits. Unclaimed collateral is the
+        separate USDm gain currently indexed for the LP.
       </p>
       {sourceSplitWarning != null && (
         <p className="mb-3 text-xs text-amber-400" role="status">

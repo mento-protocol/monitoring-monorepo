@@ -465,12 +465,12 @@ describe("CdpDetailClient", () => {
       "Stability Pool LP Snapshots",
     );
     expect(handle!.container.textContent).toContain("0xdepositor");
-    expect(handle!.container.textContent).toContain("Current Deposit Snapshot");
-    expect(handle!.container.textContent).toContain("Unclaimed Collateral");
-    expect(handle!.container.textContent).toContain("Gross Deposited");
-    expect(handle!.container.textContent).toContain("Principal Withdrawn");
-    expect(handle!.container.textContent).toContain("Rebalance Used");
-    expect(handle!.container.textContent).toContain("Liquidation Used");
+    expect(handle!.container.textContent).toContain("Current Deposit");
+    expect(handle!.container.textContent).toContain("Unclaimed Coll.");
+    expect(handle!.container.textContent).toContain("Deposited (+)");
+    expect(handle!.container.textContent).toContain("Withdrawn (-)");
+    expect(handle!.container.textContent).toContain("Rebalance (-)");
+    expect(handle!.container.textContent).toContain("Liquidation (-)");
     expect(handle!.container.textContent).toContain("15.00 GBPm");
     expect(handle!.container.textContent).toContain("5.00 GBPm");
     expect(handle!.container.textContent).toContain("4.00 GBPm");
@@ -682,8 +682,8 @@ describe("CdpDetailClient", () => {
     sourceQueryLoading = false;
     render(handle!);
     expect(handle!.container.textContent).toContain("0xupgradeddepositor");
-    expect(handle!.container.textContent).toContain("Rebalance Used");
-    expect(handle!.container.textContent).toContain("Liquidation Used");
+    expect(handle!.container.textContent).toContain("Rebalance (-)");
+    expect(handle!.container.textContent).toContain("Liquidation (-)");
     expect(handle!.container.textContent).toContain("4.00 GBPm");
     expect(handle!.container.textContent).toContain("1.00 GBPm");
   });

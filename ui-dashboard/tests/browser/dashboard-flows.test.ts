@@ -194,27 +194,23 @@ test.describe("dashboard browser flows", () => {
       page.getByRole("heading", { name: "Stability Pool LP Snapshots" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Gross Deposited (+)" }),
+      page.getByRole("columnheader", { name: "Current Deposit" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Principal Withdrawn (-)" }),
-    ).toBeVisible();
+      page.getByRole("columnheader", { name: "Deposited (+)" }),
+    ).toHaveAttribute("title", "Gross Deposited");
     await expect(
-      page.getByRole("columnheader", {
-        name: "Rebalance Used (-)",
-      }),
-    ).toBeVisible();
+      page.getByRole("columnheader", { name: "Withdrawn (-)" }),
+    ).toHaveAttribute("title", "Principal Withdrawn");
     await expect(
-      page.getByRole("columnheader", {
-        name: "Liquidation Used (-)",
-      }),
-    ).toBeVisible();
+      page.getByRole("columnheader", { name: "Rebalance (-)" }),
+    ).toHaveAttribute("title", "Rebalance Used");
     await expect(
-      page.getByRole("columnheader", { name: "Current Deposit Snapshot" }),
-    ).toBeVisible();
+      page.getByRole("columnheader", { name: "Liquidation (-)" }),
+    ).toHaveAttribute("title", "Liquidation Used");
     await expect(
-      page.getByRole("columnheader", { name: "Unclaimed Collateral" }),
-    ).toBeVisible();
+      page.getByRole("columnheader", { name: "Unclaimed Coll." }),
+    ).toHaveAttribute("title", "Unclaimed Collateral");
     await expect(
       page.getByTitle("0x9999999999999999999999999999999999999999"),
     ).toBeVisible();
