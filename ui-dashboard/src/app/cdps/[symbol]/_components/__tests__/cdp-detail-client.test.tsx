@@ -465,7 +465,7 @@ describe("CdpDetailClient", () => {
       "Stability Pool LP Snapshots",
     );
     expect(handle!.container.textContent).toContain("0xdepositor");
-    expect(handle!.container.textContent).toContain("Deposit Snapshot");
+    expect(handle!.container.textContent).toContain("Current Deposit");
     expect(handle!.container.textContent).toContain("Coll. Snapshot");
     expect(handle!.container.textContent).toContain("Deposited (+)");
     expect(handle!.container.textContent).toContain("Withdrawn (-)");

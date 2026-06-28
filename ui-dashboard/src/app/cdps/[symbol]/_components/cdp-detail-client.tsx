@@ -551,7 +551,7 @@ function DepositorTableHeader({
           className={compactDepositorHeaderClassName}
           title="Deposit at Last LP Update"
         >
-          Deposit Snapshot
+          Current Deposit
         </Th>
         <Th
           align="right"
@@ -617,7 +617,7 @@ function DepositorTableIntro({
         Stability Pool LP Snapshots
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Rows are last-updated LP snapshots. Deposit snapshots equal gross
+        Rows are last-updated LP snapshots. Current deposit equals gross
         deposited minus principal withdrawn minus debt-token deposit used by CDP
         rebalances and Liquity liquidations, net of retained debt-token yield,
         as of the LP's latest Stability Pool action. Redemptions do not consume

@@ -194,7 +194,7 @@ test.describe("dashboard browser flows", () => {
       page.getByRole("heading", { name: "Stability Pool LP Snapshots" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Deposit Snapshot" }),
+      page.getByRole("columnheader", { name: "Current Deposit" }),
     ).toHaveAttribute("title", "Deposit at Last LP Update");
     await expect(
       page.getByRole("columnheader", { name: "Deposited (+)" }),
