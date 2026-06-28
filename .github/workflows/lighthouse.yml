@@ -202,18 +202,52 @@ jobs:
               await new Promise(r => setTimeout(r, pollIntervalMs));
             }
 
-            // Timed out: fail rather than audit a stale branch alias.
-            // A branch alias can still resolve to the previous successful
-            // deployment for that branch, so falling back would silently pass
-            // Lighthouse against stale code and miss the missing current preview.
+            // Timed out — before failing, check whether the latest push actually
+            // changed dashboard-affecting paths. When an earlier commit in the PR
+            // touched the dashboard and a follow-up push doesn't, Vercel's
+            // incremental-skip fires (vercel-ignore-build.sh) and posts no new
+            // preview for the new head SHA. In that case the prior preview already
+            // reflects the current dashboard state, so skipping Lighthouse is
+            // correct and safe. Fail closed if the diff check itself errors out
+            // (assume dashboard changed to avoid silently missing a real preview).
+            // (See issue #991.)
+            core.info(`Timed out after ${maxWaitMs / 1000}s. Checking if the latest push changed dashboard-affecting files…`);
+            let dashboardChangedInLatestPush = true;
+            try {
+              const { data: compare } = await github.rest.repos.compareCommits({
+                owner,
+                repo,
+                base: `${sha}~1`,
+                head: sha,
+              });
+              // Mirror vercel-ignore-build.sh#dashboard_paths exactly.
+              const dashboardPaths = [
+                'ui-dashboard/', 'shared-config/', 'package.json',
+                'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'patches/', '.lighthouserc.cjs',
+              ];
+              const changedFiles = (compare.files || []).map(f => f.filename);
+              dashboardChangedInLatestPush = changedFiles.some(file =>
+                dashboardPaths.some(p =>
+                  file === p || file.startsWith(p.endsWith('/') ? p : p + '/')
+                )
+              );
+              core.info(`Latest push changed ${changedFiles.length} file(s); dashboard-affecting: ${dashboardChangedInLatestPush}`);
+            } catch (e) {
+              core.warning(`Could not compare ${sha}~1..${sha}: ${e.message}. Failing closed.`);
+            }
+            if (!dashboardChangedInLatestPush) {
+              core.info(`Latest push did not change dashboard-affecting paths — Vercel correctly skipped this build. The prior preview still reflects the current dashboard state. Skipping Lighthouse.`);
+              core.setOutput('vercel_skipped', 'true');
+              return;
+            }
             core.setFailed(`Timed out waiting for a successful Vercel preview deployment for SHA ${sha}. Check the Vercel deployment logs.`);
 
       - name: Install dependencies (includes @lhci/cli)
-        if: steps.decide.outputs.run == 'true'
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.vercel_skipped != 'true'
         uses: ./.github/actions/pnpm-install
 
       - name: Install Chromium dependencies
-        if: steps.decide.outputs.run == 'true'
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.vercel_skipped != 'true'
         run: |
           # lhci autorun launches Chromium via puppeteer internally.
           # The required system libraries are not present on the runner by default.
@@ -224,7 +258,7 @@ jobs:
             libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2
 
       - name: Run Lighthouse CI
-        if: steps.decide.outputs.run == 'true'
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.vercel_skipped != 'true'
         env:
           # The bypass secret is passed via lhci's --collect.settings.extraHeaders
           # rather than the URL query string so it does NOT end up in the
@@ -281,7 +315,7 @@ jobs:
         # non-zero. Without it, a hard performance-budget failure (once those
         # graduate from `warn` to `error`) would skip the SSO diagnostic and
         # leave the engineer staring at a generic assertion failure.
-        if: steps.decide.outputs.run == 'true' && always()
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.vercel_skipped != 'true' && always()
         env:
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
         run: node ui-dashboard/scripts/assert-lhci-finalurl.mjs
@@ -304,7 +338,7 @@ jobs:
         # job) can never restore another arch's Chromium — binaries are
         # arch-specific and a cross-arch restore would fail at exec time,
         # not install time.
-        if: steps.decide.outputs.run == 'true' && always()
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.vercel_skipped != 'true' && always()
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cache/ms-playwright
@@ -331,7 +365,7 @@ jobs:
         #
         # On a cache hit (see prior step) this is a fast no-op that just
         # verifies the chromium binary is present.
-        if: steps.decide.outputs.run == 'true' && always()
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.vercel_skipped != 'true' && always()
         working-directory: ui-dashboard
         run: pnpm exec playwright install chromium
 
@@ -353,7 +387,7 @@ jobs:
         # `always()` mirrors the audited-page guard: don't silently skip
         # the INP gate when an earlier step (lhci accessibility, the bypass
         # guard) fails.
-        if: steps.decide.outputs.run == 'true' && always()
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.vercel_skipped != 'true' && always()
         env:
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
@@ -365,7 +399,7 @@ jobs:
           BYPASS_HEADERS_JSON="$BYPASS_HEADERS_JSON" node ui-dashboard/scripts/measure-inp.mjs
 
       - name: Post Lighthouse results as PR comment
-        if: steps.decide.outputs.run == 'true' && always()
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.vercel_skipped != 'true' && always()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |

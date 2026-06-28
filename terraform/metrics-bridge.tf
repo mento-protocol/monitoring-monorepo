@@ -79,11 +79,24 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   }
 
   lifecycle {
-    # Image rollouts are triggered by `gcloud run services update` from the
-    # deploy path (scripts/deploy-bridge.sh and the GitHub workflow), not by
-    # terraform. Ignoring the attribute here means `pnpm infra:apply` won't
-    # revert a freshly-deployed image back to the bootstrap placeholder.
-    ignore_changes = [template[0].containers[0].image]
+    # Image rollouts happen out-of-band via `gcloud run services update`
+    # (scripts/deploy-bridge.sh / the CI workflow), not via terraform.
+    # That command also stamps gcloud bookkeeping fields and a revision suffix
+    # that terraform does not manage, causing perpetual drift on every
+    # `pnpm infra:plan` run. Extend ignore_changes to cover those fields per
+    # the policy in terraform/AGENTS.md: "Keep lifecycle.ignore_changes for
+    # images and Cloud Run API bookkeeping fields when rollouts happen through
+    # deploy scripts or workflows." (See issue #990.)
+    #
+    # NOTE: `template[0].scaling` (min=1 max=1) is intentionally NOT listed —
+    # that block is terraform-managed and must keep tracking real drift.
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].revision,
+      client,
+      client_version,
+      scaling, # service-level scaling block (API default; distinct from template[0].scaling)
+    ]
   }
 }
 
