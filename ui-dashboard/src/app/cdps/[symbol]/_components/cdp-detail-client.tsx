@@ -546,8 +546,12 @@ function DepositorTableHeader({
     <thead>
       <Row>
         <Th className={compactDepositorHeaderClassName}>LP</Th>
-        <Th align="right" className={compactDepositorHeaderClassName}>
-          Current Deposit
+        <Th
+          align="right"
+          className={compactDepositorHeaderClassName}
+          title="Deposit at Last LP Update"
+        >
+          Deposit Snapshot
         </Th>
         <Th
           align="right"
@@ -584,9 +588,9 @@ function DepositorTableHeader({
         <Th
           align="right"
           className={compactDepositorHeaderClassName}
-          title="Unclaimed Collateral"
+          title="Unclaimed Collateral at Last LP Update"
         >
-          Unclaimed Coll.
+          Coll. Snapshot
         </Th>
         <Th
           align="right"
@@ -613,11 +617,11 @@ function DepositorTableIntro({
         Stability Pool LP Snapshots
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        Debt-token flow per row: current deposit equals gross deposited minus
-        principal withdrawn minus debt-token deposit used by CDP rebalances and
-        Liquity liquidations, net of retained debt-token yield. Redemptions do
-        not consume Stability Pool deposits. Unclaimed collateral is the
-        separate USDm gain currently indexed for the LP.
+        Rows are last-updated LP snapshots. Deposit snapshots equal gross
+        deposited minus principal withdrawn minus debt-token deposit used by CDP
+        rebalances and Liquity liquidations, net of retained debt-token yield,
+        as of the LP's latest Stability Pool action. Redemptions do not consume
+        Stability Pool deposits.
       </p>
       {sourceSplitWarning != null && (
         <p className="mb-3 text-xs text-amber-400" role="status">

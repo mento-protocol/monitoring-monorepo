@@ -194,8 +194,8 @@ test.describe("dashboard browser flows", () => {
       page.getByRole("heading", { name: "Stability Pool LP Snapshots" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "Current Deposit" }),
-    ).toBeVisible();
+      page.getByRole("columnheader", { name: "Deposit Snapshot" }),
+    ).toHaveAttribute("title", "Deposit at Last LP Update");
     await expect(
       page.getByRole("columnheader", { name: "Deposited (+)" }),
     ).toHaveAttribute("title", "Gross Deposited");
@@ -209,8 +209,8 @@ test.describe("dashboard browser flows", () => {
       page.getByRole("columnheader", { name: "Liquidation (-)" }),
     ).toHaveAttribute("title", "Liquidation Used");
     await expect(
-      page.getByRole("columnheader", { name: "Unclaimed Coll." }),
-    ).toHaveAttribute("title", "Unclaimed Collateral");
+      page.getByRole("columnheader", { name: "Coll. Snapshot" }),
+    ).toHaveAttribute("title", "Unclaimed Collateral at Last LP Update");
     await expect(
       page.getByTitle("0x9999999999999999999999999999999999999999"),
     ).toBeVisible();

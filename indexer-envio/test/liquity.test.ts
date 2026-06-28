@@ -1014,6 +1014,86 @@ describe("Liquity CDP helpers", () => {
       );
     });
 
+    it("classifies liquidation source after StabilityPool logs before TroveManager logs", async () => {
+      const market = LIQUITY_MARKETS[0]!;
+      const marketCollateralId = makeCollateralId(market);
+      const mockDb = LiquityMockDb.createMockDb();
+      const txHash =
+        "0x4100000000000000000000000000000000000000000000000000000000000000";
+      const mockEventData = (
+        logIndex: number,
+        srcAddress: string,
+        chainId = market.chainId,
+      ) => ({
+        chainId,
+        srcAddress,
+        logIndex,
+        block: { number: 100, timestamp: 200 },
+        transaction: { hash: txHash },
+      });
+      mockDb.entities.StabilityPoolLossAccumulator.set({
+        id: marketCollateralId,
+        chainId: market.chainId,
+        collateralId: marketCollateralId,
+        currentP: 1_000n,
+        currentScale: 0n,
+        totalBoldDeposits: 10_000n,
+      });
+
+      await processMockEvents({
+        mockDb,
+        events: [
+          LiquityStabilityPool.S_Updated.createMockEvent({
+            _S: 0n,
+            mockEventData: mockEventData(1, market.stabilityPool),
+          }),
+          LiquityStabilityPool.ScaleUpdated.createMockEvent({
+            _currentScale: 1n,
+            mockEventData: mockEventData(2, market.stabilityPool),
+          }),
+          LiquityStabilityPool.P_Updated.createMockEvent({
+            _P: 800n * 10n ** 9n,
+            mockEventData: mockEventData(3, market.stabilityPool),
+          }),
+          LiquityStabilityPool.StabilityPoolBoldBalanceUpdated.createMockEvent({
+            _newBalance: 9_000n,
+            mockEventData: mockEventData(4, market.stabilityPool),
+          }),
+          LiquityTroveManager.Liquidation.createMockEvent({
+            _debtOffsetBySP: 1_000n,
+            _debtRedistributed: 0n,
+            _boldGasCompensation: 0n,
+            _collGasCompensation: 0n,
+            _collSentToSP: 0n,
+            _collRedistributed: 0n,
+            _collSurplus: 0n,
+            _L_ETH: 0n,
+            _L_boldDebt: 0n,
+            _price: 1n,
+            mockEventData: mockEventData(5, market.troveManager),
+          }),
+        ],
+      });
+
+      const scale = mockDb.entities.StabilityPoolLossScale.get(
+        `${marketCollateralId}-0`,
+      );
+      assert.equal(scale?.rebalanceLossSum, 0n);
+      assert.equal(scale?.liquidationLossSum, 200n);
+      assert.equal(
+        mockDb.entities.PendingStabilityPoolConsumption.get(
+          `${market.chainId}-${txHash}-${marketCollateralId}`,
+        ),
+        undefined,
+      );
+      assert.equal(
+        mockDb.entities.PendingStabilityPoolConsumptionSource.get(
+          `${market.chainId}-${txHash}-${marketCollateralId}`,
+        ),
+        undefined,
+      );
+    });
+
     it("loads default loss tracker rows and depositor loss scales", async () => {
       const { context } = makeLossContext();
       const accumulator = await loadStabilityPoolLossAccumulator(

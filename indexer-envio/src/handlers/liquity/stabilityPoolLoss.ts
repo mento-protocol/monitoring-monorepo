@@ -356,15 +356,39 @@ export async function classifyMarkedPendingStabilityPoolConsumption(
     collateralId,
   );
   if (source === undefined) return false;
-  const classified = await classifyPendingStabilityPoolConsumption(context, {
+  return classifyKnownPendingStabilityPoolConsumptionSource(context, {
     chainId,
     collateralId,
     txHash,
     source: source.source as StabilityPoolLossSource,
+  });
+}
+
+export async function classifyKnownPendingStabilityPoolConsumptionSource(
+  context: StabilityPoolLossContext,
+  {
+    chainId,
+    collateralId,
+    txHash,
+    source,
+  }: {
+    chainId: number;
+    collateralId: string;
+    txHash: string;
+    source: StabilityPoolLossSource;
+  },
+): Promise<boolean> {
+  const classified = await classifyPendingStabilityPoolConsumption(context, {
+    chainId,
+    collateralId,
+    txHash,
+    source,
     requireLossDelta: true,
   });
   if (classified) {
-    context.PendingStabilityPoolConsumptionSource.deleteUnsafe(source.id);
+    context.PendingStabilityPoolConsumptionSource.deleteUnsafe(
+      consumptionId(chainId, txHash, collateralId),
+    );
   }
   return classified;
 }

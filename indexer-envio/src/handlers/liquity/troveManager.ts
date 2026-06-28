@@ -25,6 +25,7 @@ import { pendingTroveKey } from "./keys.js";
 import { computeTroveIcrBps, negativeToPositive } from "./math.js";
 import { loadLiquityPrice } from "./priceFeed.js";
 import {
+  classifyKnownPendingStabilityPoolConsumptionSource,
   markPendingStabilityPoolConsumptionSource,
   preloadPendingStabilityPoolConsumptionClassification,
 } from "./stabilityPoolLoss.js";
@@ -821,9 +822,8 @@ indexer.onEvent(
     );
     if (market === undefined) return;
     const collateralId = makeCollateralId(market);
-    if (event.params._debtOffsetBySP > 0n) {
-      // Liquidation logs precede the StabilityPool loss-index logs in the same
-      // transaction, so tag the tx here and let the SP handlers classify later.
+    const hasSpOffset = event.params._debtOffsetBySP > 0n;
+    if (hasSpOffset) {
       markPendingStabilityPoolConsumptionSource(context, {
         chainId: event.chainId,
         collateralId,
@@ -852,6 +852,14 @@ indexer.onEvent(
     }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+    if (hasSpOffset) {
+      await classifyKnownPendingStabilityPoolConsumptionSource(context, {
+        chainId: event.chainId,
+        collateralId,
+        txHash: event.transaction.hash,
+        source: "liquidation",
+      });
+    }
     const instance = await getOrCreateLiquityInstance(
       context,
       market,
