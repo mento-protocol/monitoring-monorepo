@@ -1063,6 +1063,10 @@ while IFS= read -r path; do
           add_reserve_yield_codegen_then_restore_mainnet "reserve-yield handler path changed"
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
           ;;
+        indexer-envio/src/rpc/susds.ts|indexer-envio/src/rpc/effects.ts)
+          add_reserve_yield_codegen_then_restore_mainnet "reserve-yield RPC path changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
         indexer-envio/src/handlers/wormhole/*)
           add_bridge_codegen_then_restore_mainnet "bridge handler registration path changed"
           add_indexer_testnet_codegen "indexer handler registration path changed"

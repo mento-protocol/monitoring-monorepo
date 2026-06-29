@@ -27,6 +27,7 @@ export default defineConfig({
         // Reserve-yield has a dedicated chain-1 config and regression command.
         // Keep it out of the default primary-indexer coverage pool until the
         // hosted replay proof closes #1017.
+        "src/handlers/susdsEvents.ts",
         "src/handlers/susds/**/*.ts",
         "src/handlers/steth.ts",
         "src/handlers/steth/**/*.ts",

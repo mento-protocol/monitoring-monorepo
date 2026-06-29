@@ -185,6 +185,8 @@ jobs:
 
             async function changedFilesBetween(base, head) {
               const files = new Set();
+              let compareStatus = "unknown";
+              let behindBy = 0;
               const pages = github.paginate.iterator(
                 github.rest.repos.compareCommitsWithBasehead,
                 {
@@ -196,9 +198,16 @@ jobs:
               );
 
               for await (const response of pages) {
+                compareStatus = response.data.status ?? compareStatus;
+                behindBy = Math.max(behindBy, response.data.behind_by ?? 0);
                 for (const file of response.data.files ?? []) {
                   if (file.filename) files.add(file.filename);
                 }
+              }
+              if (behindBy > 0) {
+                throw new Error(
+                  `compare base is not an ancestor of head (behind_by=${behindBy}, status=${compareStatus})`,
+                );
               }
               if (files.size >= 300) {
                 throw new Error("GitHub compare response may be truncated at 300 files");
