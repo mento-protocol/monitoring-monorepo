@@ -240,6 +240,17 @@ jobs:
               return [...files];
             }
 
+            async function successfulPreviewUrl(deployment) {
+              const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
+                owner,
+                repo,
+                deployment_id: deployment.id,
+                per_page: 5,
+              });
+              const active = statuses.find(s => s.state === "success");
+              return active?.environment_url ?? null;
+            }
+
             async function latestPushTouchedDashboard() {
               const pullRequest = context.payload.pull_request;
               const action = context.payload.action;
@@ -279,6 +290,40 @@ jobs:
               return { touched: files.some(touchesDashboardPath), source: `${parent}...${sha}`, files };
             }
 
+            async function findPriorSuccessfulPreviewForCurrentDashboard() {
+              const pullRequest = context.payload.pull_request;
+              const deploymentArgs = {
+                owner,
+                repo,
+                environment: "Preview",
+                per_page: 30,
+              };
+              if (pullRequest?.head?.ref) {
+                deploymentArgs.ref = pullRequest.head.ref;
+              }
+              const { data: deployments } = await github.rest.repos.listDeployments(deploymentArgs);
+
+              for (const deployment of deployments) {
+                if (!deployment.sha || deployment.sha === sha) continue;
+                const previewUrl = await successfulPreviewUrl(deployment);
+                if (!previewUrl) continue;
+                const files = await changedFilesBetween(deployment.sha, sha);
+                const dashboardFiles = files.filter(touchesDashboardPath);
+                if (dashboardFiles.length === 0) {
+                  return {
+                    sha: deployment.sha,
+                    previewUrl,
+                    source: `${deployment.sha}...${sha}`,
+                  };
+                }
+                core.info(
+                  `Prior preview ${deployment.sha} is stale for current dashboard inputs; ` +
+                    `changed files since that preview: ${dashboardFiles.join(", ")}`,
+                );
+              }
+              return null;
+            }
+
             core.info(`Waiting for Vercel preview deployment for SHA ${sha}...`);
 
             while (Date.now() - start < maxWaitMs) {
@@ -291,16 +336,8 @@ jobs:
               });
 
               for (const deployment of deployments) {
-                const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
-                  owner,
-                  repo,
-                  deployment_id: deployment.id,
-                  per_page: 5,
-                });
-
-                const active = statuses.find(s => s.state === "success");
-                if (active && active.environment_url) {
-                  const previewUrl = active.environment_url;
+                const previewUrl = await successfulPreviewUrl(deployment);
+                if (previewUrl) {
                   core.info(`Found active Vercel preview: ${previewUrl}`);
                   core.setOutput("preview_url", previewUrl);
                   core.setOutput("skip_lighthouse", "false");
@@ -320,17 +357,27 @@ jobs:
             try {
               const latestPush = await latestPushTouchedDashboard();
               if (!latestPush.touched) {
+                const priorPreview = await findPriorSuccessfulPreviewForCurrentDashboard();
+                if (priorPreview === null) {
+                  core.info(
+                    "Latest push did not touch dashboard inputs, but no prior successful " +
+                      "Preview deployment could be proven current for this dashboard bundle.",
+                  );
+                } else {
+                  core.info(
+                    `No dashboard-affecting files changed in ${latestPush.source}; ` +
+                      `prior successful preview ${priorPreview.previewUrl} at ${priorPreview.sha} ` +
+                      `covers ${priorPreview.source}.`,
+                  );
+                  core.setOutput("skip_lighthouse", "true");
+                  return;
+                }
+              } else {
                 core.info(
-                  `No dashboard-affecting files changed in ${latestPush.source}; ` +
-                    "Vercel preview was intentionally skipped for this head SHA.",
+                  `Latest push ${latestPush.source} touched dashboard-affecting files: ` +
+                    latestPush.files.filter(touchesDashboardPath).join(", "),
                 );
-                core.setOutput("skip_lighthouse", "true");
-                return;
               }
-              core.info(
-                `Latest push ${latestPush.source} touched dashboard-affecting files: ` +
-                  latestPush.files.filter(touchesDashboardPath).join(", "),
-              );
             } catch (error) {
               core.warning(
                 `Could not prove the latest push skipped dashboard inputs: ${

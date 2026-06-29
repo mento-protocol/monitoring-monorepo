@@ -468,6 +468,13 @@ jobs:
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.reserve-yield.mainnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
+      - name: Test reserve-yield event indexer
+        # The reserve-yield event suites are intentionally skipped by the
+        # normal test:coverage command because they require the Ethereum-only
+        # config and generated bindings. Run the dedicated wrapper in CI so
+        # EventHandlersReserveYield and the sUSDS/stETH accounting paths stay
+        # covered when the reserve config or handlers change.
+        run: pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
         run: |
