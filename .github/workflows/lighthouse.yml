@@ -183,6 +183,11 @@ jobs:
               return dashboardPaths.some(path => file === path || file.startsWith(`${path}/`));
             }
 
+            function addChangedFilePaths(files, file) {
+              if (file.filename) files.add(file.filename);
+              if (file.previous_filename) files.add(file.previous_filename);
+            }
+
             async function changedFilesBetween(base, head) {
               const files = new Set();
               let compareStatus = "unknown";
@@ -201,7 +206,7 @@ jobs:
                 compareStatus = response.data.status ?? compareStatus;
                 behindBy = Math.max(behindBy, response.data.behind_by ?? 0);
                 for (const file of response.data.files ?? []) {
-                  if (file.filename) files.add(file.filename);
+                  addChangedFilePaths(files, file);
                 }
               }
               if (behindBy > 0) {
@@ -215,12 +220,32 @@ jobs:
               return [...files];
             }
 
+            async function changedFilesForPullRequest(pullNumber) {
+              const files = new Set();
+              const pages = github.paginate.iterator(github.rest.pulls.listFiles, {
+                owner,
+                repo,
+                pull_number: pullNumber,
+                per_page: 100,
+              });
+
+              for await (const response of pages) {
+                for (const file of response.data ?? []) {
+                  addChangedFilePaths(files, file);
+                }
+              }
+              if (files.size >= 3000) {
+                throw new Error("GitHub PR file response may be truncated at 3000 files");
+              }
+              return [...files];
+            }
+
             async function latestPushTouchedDashboard() {
+              const pullRequest = context.payload.pull_request;
               const before = context.payload.before;
               const after = context.payload.after ?? sha;
               // pull_request.synchronize carries the pushed range; opened
-              // events may omit it or use an all-zero before SHA, so those
-              // fall back to the head commit's parent below.
+              // events may omit it or use an all-zero before SHA.
               if (
                 typeof before === "string" &&
                 before.length > 0 &&
@@ -230,6 +255,11 @@ jobs:
               ) {
                 const files = await changedFilesBetween(before, after);
                 return { touched: files.some(touchesDashboardPath), source: `${before}...${after}`, files };
+              }
+
+              if (typeof pullRequest?.number === "number") {
+                const files = await changedFilesForPullRequest(pullRequest.number);
+                return { touched: files.some(touchesDashboardPath), source: `pull_request#${pullRequest.number}`, files };
               }
 
               const { data: commit } = await github.rest.repos.getCommit({

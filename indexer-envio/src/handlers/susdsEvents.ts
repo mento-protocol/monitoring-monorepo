@@ -3,7 +3,7 @@ import { asAddress, eventId } from "../helpers.js";
 import { indexer } from "../indexer.js";
 import {
   readSharePrice,
-  recordSusdsYieldDailySnapshot,
+  recordSusdsYieldEventDailySnapshot,
 } from "./susds/dailySnapshots.js";
 import {
   recordDeposit,
@@ -81,7 +81,7 @@ export function registerSusdsYieldEventHandlers(): void {
         sharePriceUsdWei,
       );
       const totals = await updateSummary(context, meta, sharePriceUsdWei);
-      await recordSusdsYieldDailySnapshot(
+      await recordSusdsYieldEventDailySnapshot(
         context,
         meta,
         sharePriceUsdWei,
@@ -112,7 +112,7 @@ export function registerSusdsYieldEventHandlers(): void {
         sharePriceUsdWei,
       });
       const totals = await updateSummary(context, meta, sharePriceUsdWei);
-      await recordSusdsYieldDailySnapshot(
+      await recordSusdsYieldEventDailySnapshot(
         context,
         meta,
         sharePriceUsdWei,
@@ -146,7 +146,7 @@ export function registerSusdsYieldEventHandlers(): void {
         sharePriceUsdWei,
       );
       const totals = await updateSummary(context, meta, sharePriceUsdWei);
-      await recordSusdsYieldDailySnapshot(
+      await recordSusdsYieldEventDailySnapshot(
         context,
         meta,
         sharePriceUsdWei,

@@ -489,6 +489,38 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(200));
   });
 
+  it("does not emit daily actuals from sparse tracked sUSDS events", async () => {
+    let mockDb = MockDb.createMockDb();
+    const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
+    const day3 = day1 + 2n * 86_400n;
+
+    setSharePrice(100, WAD);
+    mockDb = await deposit(
+      mockDb,
+      100,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(day1 + 3_600n),
+    );
+
+    setSharePrice(300, dollars(130) / 100n);
+    mockDb = await transfer(
+      mockDb,
+      300,
+      1,
+      RESERVE_SAFE,
+      AUSD_OPS_SAFE,
+      dollars(100),
+      Number(day3 + 3_600n),
+    );
+
+    const rows = dailySnapshots(mockDb);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.timestamp, day1);
+    assert.equal(summary(mockDb).totalEarnedYieldUsdWei, dollars(300));
+  });
+
   it("writes sUSDS daily snapshots from a block-number-only heartbeat", async () => {
     let mockDb = MockDb.createMockDb();
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
