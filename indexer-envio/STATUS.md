@@ -4,8 +4,9 @@
 
 Single multichain mainnet indexer (Celo Mainnet `42220` + Monad `143`) on the
 Envio Cloud `mento` project (org `mento-protocol`), Production Medium tier.
-Ethereum reserve-yield entities and handlers are dormant until the hosted-safe
-replay redesign ships.
+Ethereum reserve-yield entities and handlers are isolated in
+`config.reserve-yield.mainnet.yaml`; they are not part of the primary `mento`
+Celo + Monad hosted project.
 
 This file documents only facts that stay true across redeployments. For live
 sync state and the latest deployment currently visible to Envio, run:
@@ -37,6 +38,11 @@ All child entities (`poolId` FKs) follow the same format.
 
 `indexer-envio/config.multichain.mainnet.yaml` — covers both Celo (42220) and Monad (143).
 
+`indexer-envio/config.reserve-yield.mainnet.yaml` — covers Ethereum (1)
+sUSDS/stETH reserve-yield accounting. Host it as a separate Envio project and
+wire the dashboard through `NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL` only after a
+fresh replay catches up.
+
 Git release branch: `envio` — push to this branch to trigger a redeployment.
 
 ## Legacy Projects
@@ -63,5 +69,6 @@ See [`README.md`](./README.md#local-development) for setup instructions.
 ```bash
 pnpm indexer:codegen
 pnpm indexer:dev
+pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test
 # Hasura: http://localhost:8080 (secret: testing)
 ```

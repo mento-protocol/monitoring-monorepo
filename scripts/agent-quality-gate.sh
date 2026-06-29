@@ -656,9 +656,16 @@ add_indexer_bridge_codegen() {
   add_indexer_post_codegen_install
 }
 
+add_indexer_reserve_yield_codegen() {
+  local reason="$1"
+  add_codegen_command "pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:codegen" "$reason"
+  add_indexer_post_codegen_install
+}
+
 add_all_indexer_codegen() {
   local reason="$1"
   add_indexer_bridge_codegen "$reason"
+  add_indexer_reserve_yield_codegen "$reason"
   add_indexer_testnet_codegen "$reason"
   add_indexer_mainnet_codegen "$reason"
 }
@@ -667,6 +674,12 @@ add_bridge_codegen_then_restore_mainnet() {
   local bridge_reason="$1"
   add_indexer_bridge_codegen "$bridge_reason"
   add_indexer_mainnet_codegen "restore full multichain generated package after non-mainnet codegen"
+}
+
+add_reserve_yield_codegen_then_restore_mainnet() {
+  local reserve_reason="$1"
+  add_codegen_command "pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test" "$reserve_reason"
+  add_indexer_post_codegen_install
 }
 
 add_terraform_validate_commands() {
@@ -724,6 +737,8 @@ sort_codegen_commands() {
   # linked generated package; single-config changes still run only that config.
   local known_codegen_commands=(
     "pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
+    "pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:codegen"
+    "pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test"
     "pnpm indexer:testnet:codegen"
     "pnpm indexer:codegen"
   )
@@ -1040,6 +1055,14 @@ while IFS= read -r path; do
           add_bridge_codegen_then_restore_mainnet "bridge handler registration path changed"
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
           ;;
+        indexer-envio/src/EventHandlersReserveYield.ts)
+          add_reserve_yield_codegen_then_restore_mainnet "reserve-yield handler registration path changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+        indexer-envio/src/handlers/susds*.ts|indexer-envio/src/handlers/susds/*|indexer-envio/src/handlers/steth*.ts|indexer-envio/src/handlers/steth/*)
+          add_reserve_yield_codegen_then_restore_mainnet "reserve-yield handler path changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
         indexer-envio/src/handlers/wormhole/*)
           add_bridge_codegen_then_restore_mainnet "bridge handler registration path changed"
           add_indexer_testnet_codegen "indexer handler registration path changed"
@@ -1070,6 +1093,10 @@ while IFS= read -r path; do
           ;;
         indexer-envio/config.multichain.bridge-only.yaml)
           add_bridge_codegen_then_restore_mainnet "bridge-only indexer config changed"
+          add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
+          ;;
+        indexer-envio/config.reserve-yield.mainnet.yaml)
+          add_reserve_yield_codegen_then_restore_mainnet "reserve-yield indexer config changed"
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
           ;;
       esac

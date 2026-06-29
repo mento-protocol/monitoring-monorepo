@@ -14,12 +14,13 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
 # Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
 # Scraped by Grafana Alloy (Aegis repo) → Grafana Cloud alert rules.
 #
-# Image is managed out-of-band: `pnpm bridge:deploy` (or the CI workflow)
-# runs `gcloud run services update metrics-bridge --image=<digest>` after
-# Cloud Build pushes a new revision. Terraform owns the *shape* of the
-# service (probes, env, scaling, memory) and ignores image drift via
-# `lifecycle.ignore_changes` so running `pnpm infra:apply` never reverts
-# the image back to the bootstrap placeholder.
+# Image rollouts are managed out-of-band: `pnpm bridge:deploy` (or the CI
+# workflow) runs `gcloud run services update metrics-bridge --image=<digest>`
+# after Cloud Build pushes a new revision. Terraform owns the service shape
+# (probes, env, template scaling, memory) and ignores image plus Cloud Run
+# deploy/API bookkeeping drift so running `pnpm infra:apply` never reverts a
+# live revision back to the bootstrap placeholder or restarts the alerting
+# pipeline for an unrelated platform change.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
   project             = google_project.monitoring.project_id
@@ -79,11 +80,17 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   }
 
   lifecycle {
-    # Image rollouts are triggered by `gcloud run services update` from the
-    # deploy path (scripts/deploy-bridge.sh and the GitHub workflow), not by
-    # terraform. Ignoring the attribute here means `pnpm infra:apply` won't
-    # revert a freshly-deployed image back to the bootstrap placeholder.
-    ignore_changes = [template[0].containers[0].image]
+    # The deploy path stamps image, revision suffix, client metadata, and
+    # service-level scaling defaults. Keep template[0].scaling and
+    # scaling_mode managed.
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].revision,
+      client,
+      client_version,
+      scaling[0].manual_instance_count,
+      scaling[0].min_instance_count,
+    ]
   }
 }
 

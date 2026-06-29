@@ -13,7 +13,7 @@ import {
   FIRST_TRACKED_STETH_TX,
   STETH_ADDRESS,
   TRACKED_STETH_WALLETS,
-} from "../src/handlers/steth.ts";
+} from "../src/handlers/steth/shared.ts";
 import { ZERO_ADDRESS } from "../src/constants.ts";
 
 type MockDb = MockDbWith<{
@@ -30,6 +30,8 @@ const WAD = 10n ** 18n;
 const RESERVE_SAFE = TRACKED_STETH_WALLETS[0];
 const OPS_SAFE = TRACKED_STETH_WALLETS[1];
 const EXTERNAL = "0x0000000000000000000000000000000000000abc";
+const describeReserveYield =
+  process.env.RESERVE_YIELD_EVENT_TESTS === "1" ? describe : describe.skip;
 
 function steth(value: number): bigint {
   return BigInt(value) * WAD;
@@ -82,10 +84,9 @@ function summary(mockDb: MockDb) {
   return row;
 }
 
-// Deferred with the hosted-safe Ethereum reserve-yield redesign. The default
-// generated test indexer no longer configures chain 1, so Envio correctly
-// rejects chain-1 mock events in this suite.
-describe.skip("stETH reserve-yield ledger", () => {
+// Run through `pnpm indexer:reserve-yield:test`, which codegens the dedicated
+// chain-1 reserve-yield config before executing these event-level tests.
+describeReserveYield("stETH reserve-yield ledger", () => {
   it("records the first tracked stETH mint as FIFO principal", async () => {
     let mockDb = MockDb.createMockDb();
 

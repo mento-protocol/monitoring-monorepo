@@ -3,6 +3,7 @@
   "entry": [
     "src/EventHandlers.ts",
     "src/EventHandlersBridgeOnly.ts",
+    "src/EventHandlersReserveYield.ts",
     "src/indexer.ts",
     "vitest.mutation.config.ts",
     "scripts/*.mjs"

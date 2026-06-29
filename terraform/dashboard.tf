@@ -60,6 +60,15 @@ resource "vercel_project_environment_variable" "hasura_url" {
   target     = ["production", "preview"]
 }
 
+resource "vercel_project_environment_variable" "reserve_yield_hasura_url" {
+  count      = var.reserve_yield_hasura_url == "" ? 0 : 1
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL"
+  value      = var.reserve_yield_hasura_url
+  target     = ["production", "preview"]
+}
+
 resource "vercel_project_environment_variable" "hasura_testnet_url" {
   count      = var.hasura_testnet_url == "" ? 0 : 1
   project_id = vercel_project.dashboard.id

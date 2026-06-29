@@ -10,7 +10,7 @@ last_verified: 2026-05-20
 
 ## What This Is
 
-Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split. Ethereum reserve-yield entities and handlers are present but dormant until the hosted-safe replay redesign ships.
+Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split. Ethereum reserve-yield entities and handlers run through a separate chain-1 config so historical replay cannot block the primary Celo + Monad hosted indexer.
 
 ## Before Opening PRs
 
@@ -24,8 +24,10 @@ This is mandatory for cross-layer/stateful data work. Do not assume the UI/query
 
 - `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad)
 - `config.multichain.testnet.yaml` — Testnet multichain config
-- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, plus dormant sUSDS and stETH yield ledgers)
+- `config.reserve-yield.mainnet.yaml` — Ethereum sUSDS/stETH reserve-yield config; uses the event-only reserve entry point and must be hosted separately from the primary `mento` indexer
+- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, plus sUSDS and stETH yield ledgers used by the reserve-yield config)
 - `src/EventHandlers.ts` — Event processing logic
+- `src/EventHandlersReserveYield.ts` — Reserve-yield handler entry point; registers sparse sUSDS/stETH events and intentionally excludes the historical sUSDS `onBlock` heartbeat
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
 - `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
 - `config/protocolActors.json` — Manual protocol-controlled caller/entry-point overrides for the dashboard volume filter. Dynamic pool liquidity-strategy contracts are classified from `Pool.rebalancerAddress`; add entries here only for protocol actors that are not already discoverable from pool state or normal contract metadata.
@@ -41,6 +43,9 @@ pnpm dev                    # Start indexer in dev mode (Docker: Postgres + Hasu
 pnpm start                  # Start in production mode
 pnpm stop                   # Stop Docker containers
 pnpm test                   # Run tests (vitest)
+pnpm indexer:reserve-yield:codegen  # Generate types from config.reserve-yield.mainnet.yaml
+pnpm indexer:reserve-yield:dev      # Start the local Ethereum reserve-yield indexer
+pnpm indexer:reserve-yield:test     # Codegen reserve config, run sUSDS/stETH tests, restore mainnet codegen
 pnpm check:yaml-addresses   # Verify every address in config*.yaml resolves to a known source
 ```
 
@@ -73,18 +78,20 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_API_TOKEN` — required only for chains that default to HyperRPC (currently only Monad Testnet 10143). Not needed for mainnet if using the full-node defaults. ([create token](https://envio.dev/app/api-tokens))
 - `ENVIO_RPC_URL_42220` — (optional) Celo Mainnet primary RPC override (default: `https://forno.celo.org`)
 - `ENVIO_RPC_URL_143` — (optional) Monad Mainnet primary RPC override (default: `https://rpc2.monad.xyz`)
+- `ENVIO_RPC_URL_1` — (optional) Ethereum Mainnet handler `eth_call` RPC override. Use an archive-capable endpoint before local reserve-yield replays.
 - `ENVIO_RPC_URL_10143` — (optional) Monad Testnet primary RPC override (default: HyperRPC — requires `ENVIO_API_TOKEN`)
 - `ENVIO_RPC_URL_11142220` — (optional) Celo Sepolia handler `eth_call` RPC override (default: `https://forno.celo-sepolia.celo-testnet.org`)
 - `ENVIO_RPC_URL_CELO_SEPOLIA` — (optional) Celo Sepolia event-sync RPC override, read from `config.multichain.testnet.yaml:250` (default: same forno URL). Set this in addition to `ENVIO_RPC_URL_11142220` if you're overriding the full indexer (handler reads + event sync) rather than just contract reads
 - `ENVIO_RPC_FALLBACK_URL_<chainId>` — (optional) explicit per-chain fallback RPC for `readContractWithBlockFallback`. Used for **both** archive-depth and rate-limit failover, so the fallback must cover the full sync window. When unset, falls back to `RPC_CONFIG_BY_CHAIN[<chainId>].default` only if the primary differs from it; otherwise no fallback is used. Empty-string values are treated as unset. **Caveat:** swapping in a shallow-archive secondary as the fallback (e.g. a tokenized QuickNode URL behind `rpc2.monad.xyz`) only works when the deep-archive primary rarely rate-limits at the indexer's load — otherwise rate-limit failover can leak into archive-depth misses during catch-up.
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
 - `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60710000
+- `ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` — (optional) Ethereum reserve-yield start block, defaults to 19111760
 
 Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route all chains to the same endpoint and produce incorrect RPC reads for chain-specific calls.
 
 > **Note:** These RPC URLs are only used for contract reads (`eth_call`). Envio's event syncing uses HyperSync, configured in the YAML files.
 
-Mainnet (Celo + Monad): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`.
+Mainnet (Celo + Monad): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`. Reserve yield (Ethereum): `pnpm indexer:reserve-yield:test` for the event suites, then `pnpm indexer:reserve-yield:dev` for local replay.
 
 ## Local dev gotchas
 

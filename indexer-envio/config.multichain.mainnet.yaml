@@ -217,8 +217,8 @@ contracts:
       - event: Transfer
 
   # Sky sUSDS — reserve-yield handler definition retained for schema/test
-  # compatibility. Production mainnet does not wire an Ethereum chain until the
-  # hosted-safe reserve-yield redesign ships.
+  # compatibility. Production mainnet keeps Ethereum in the separate
+  # config.reserve-yield.mainnet.yaml project.
   - name: Susds
     abi_file_path: abis/Susds.json
     handler: src/EventHandlers.ts
@@ -228,8 +228,8 @@ contracts:
       - event: Withdraw
 
   # Lido stETH — reserve-yield handler definition retained for schema/test
-  # compatibility. Production mainnet does not wire an Ethereum chain until the
-  # hosted-safe reserve-yield redesign ships.
+  # compatibility. Production mainnet keeps Ethereum in the separate
+  # config.reserve-yield.mainnet.yaml project.
   - name: Steth
     abi_file_path: abis/ERC20.json
     handler: src/EventHandlers.ts
