@@ -21,6 +21,9 @@ const transferWhereParams = TRACKED_STETH_WALLETS.flatMap((address) => [
   { from: address },
   { to: address },
 ]);
+const stethRegistrationState = globalThis as typeof globalThis & {
+  __mentoStethYieldEventHandlersRegistered?: boolean;
+};
 
 function eventMeta(event: {
   chainId: number;
@@ -37,24 +40,27 @@ function eventMeta(event: {
   };
 }
 
-indexer.onEvent(
-  {
-    contract: "Steth",
-    event: "Transfer",
-    where: () => ({ params: transferWhereParams }),
-  },
-  async ({ event, context }) => {
-    const from = asAddress(event.params.from);
-    const to = asAddress(event.params.to);
-    if (from === ZERO_ADDRESS && to === ZERO_ADDRESS) return;
-    if (from === to) return;
-    if (!isTrackedWallet(from) && !isTrackedWallet(to)) return;
-    const meta = eventMeta(event);
-    const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
-    if (context.isPreload) return;
-    if (!(await shouldProcess(context, id))) return;
-    if (await recordTransfer(context, meta, from, to, event.params.value)) {
-      await updateSummary(context, meta);
-    }
-  },
-);
+if (!stethRegistrationState.__mentoStethYieldEventHandlersRegistered) {
+  stethRegistrationState.__mentoStethYieldEventHandlersRegistered = true;
+  indexer.onEvent(
+    {
+      contract: "Steth",
+      event: "Transfer",
+      where: () => ({ params: transferWhereParams }),
+    },
+    async ({ event, context }) => {
+      const from = asAddress(event.params.from);
+      const to = asAddress(event.params.to);
+      if (from === ZERO_ADDRESS && to === ZERO_ADDRESS) return;
+      if (from === to) return;
+      if (!isTrackedWallet(from) && !isTrackedWallet(to)) return;
+      const meta = eventMeta(event);
+      const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
+      if (context.isPreload) return;
+      if (!(await shouldProcess(context, id))) return;
+      if (await recordTransfer(context, meta, from, to, event.params.value)) {
+        await updateSummary(context, meta);
+      }
+    },
+  );
+}

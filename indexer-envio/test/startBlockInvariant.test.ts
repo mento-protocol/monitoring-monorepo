@@ -1,7 +1,10 @@
 import { strict as assert } from "assert";
 import {
+  assertReserveYieldStartBlockValid,
   assertStartBlocksValid,
   FPMM_FIRST_DEPLOY_BLOCK,
+  RESERVE_YIELD_FIRST_REQUIRED_EVENT_BLOCK,
+  RESERVE_YIELD_START_BLOCK_ENV_NAME,
   START_BLOCK_ENV_NAME,
 } from "../src/EventHandlers.js";
 
@@ -98,5 +101,39 @@ describe("assertStartBlocksValid", () => {
       // so the loop simply has no entry for them and does nothing.
       assertStartBlocksValid({ 10143: "99999999", 11142220: "99999999" }),
     );
+  });
+
+  it("throws when the reserve-yield start block skips the first tracked movement", () => {
+    const tooHigh = RESERVE_YIELD_FIRST_REQUIRED_EVENT_BLOCK + 1;
+    assert.throws(
+      () => assertReserveYieldStartBlockValid(String(tooHigh), true),
+      (err: unknown) => {
+        assert(err instanceof Error);
+        assert(err.message.includes(RESERVE_YIELD_START_BLOCK_ENV_NAME));
+        assert(err.message.includes(String(tooHigh)));
+        assert(
+          err.message.includes(
+            String(RESERVE_YIELD_FIRST_REQUIRED_EVENT_BLOCK),
+          ),
+        );
+        return true;
+      },
+    );
+  });
+
+  it("warns for a high reserve-yield start block in non-strict mode", () => {
+    const tooHigh = RESERVE_YIELD_FIRST_REQUIRED_EVENT_BLOCK + 1;
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (msg: string) => warnings.push(msg);
+    try {
+      assert.doesNotThrow(() =>
+        assertReserveYieldStartBlockValid(String(tooHigh), false),
+      );
+      assert.equal(warnings.length, 1);
+      assert(warnings[0].includes(RESERVE_YIELD_START_BLOCK_ENV_NAME));
+    } finally {
+      console.warn = origWarn;
+    }
   });
 });

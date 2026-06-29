@@ -169,6 +169,160 @@ jobs:
             const maxWaitMs = 5 * 60 * 1000; // 5 minutes
             const pollIntervalMs = 10 * 1000; // 10 seconds
             const start = Date.now();
+            const dashboardPaths = [
+              "ui-dashboard",
+              "shared-config",
+              "package.json",
+              "pnpm-lock.yaml",
+              "pnpm-workspace.yaml",
+              "patches",
+              ".lighthouserc.cjs",
+            ];
+
+            function touchesDashboardPath(file) {
+              return dashboardPaths.some(path => file === path || file.startsWith(`${path}/`));
+            }
+
+            function addChangedFilePaths(files, file) {
+              if (file.filename) files.add(file.filename);
+              if (file.previous_filename) files.add(file.previous_filename);
+            }
+
+            async function changedFilesBetween(base, head) {
+              const files = new Set();
+              let compareStatus = "unknown";
+              let behindBy = 0;
+              const pages = github.paginate.iterator(
+                github.rest.repos.compareCommitsWithBasehead,
+                {
+                  owner,
+                  repo,
+                  basehead: `${base}...${head}`,
+                  per_page: 100,
+                },
+              );
+
+              for await (const response of pages) {
+                compareStatus = response.data.status ?? compareStatus;
+                behindBy = Math.max(behindBy, response.data.behind_by ?? 0);
+                for (const file of response.data.files ?? []) {
+                  addChangedFilePaths(files, file);
+                }
+              }
+              if (behindBy > 0) {
+                throw new Error(
+                  `compare base is not an ancestor of head (behind_by=${behindBy}, status=${compareStatus})`,
+                );
+              }
+              if (files.size >= 300) {
+                throw new Error("GitHub compare response may be truncated at 300 files");
+              }
+              return [...files];
+            }
+
+            async function changedFilesForPullRequest(pullNumber) {
+              const files = new Set();
+              const pages = github.paginate.iterator(github.rest.pulls.listFiles, {
+                owner,
+                repo,
+                pull_number: pullNumber,
+                per_page: 100,
+              });
+
+              for await (const response of pages) {
+                for (const file of response.data ?? []) {
+                  addChangedFilePaths(files, file);
+                }
+              }
+              if (files.size >= 3000) {
+                throw new Error("GitHub PR file response may be truncated at 3000 files");
+              }
+              return [...files];
+            }
+
+            async function successfulPreviewUrl(deployment) {
+              const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
+                owner,
+                repo,
+                deployment_id: deployment.id,
+                per_page: 5,
+              });
+              const active = statuses.find(s => s.state === "success");
+              return active?.environment_url ?? null;
+            }
+
+            async function latestPushTouchedDashboard() {
+              const pullRequest = context.payload.pull_request;
+              const action = context.payload.action;
+              const before = context.payload.before;
+              const after = context.payload.after ?? sha;
+              // pull_request.synchronize carries the pushed range; opened
+              // events may omit it or use an all-zero before SHA.
+              if (
+                typeof before === "string" &&
+                before.length > 0 &&
+                !/^0+$/.test(before) &&
+                typeof after === "string" &&
+                after.length > 0
+              ) {
+                const files = await changedFilesBetween(before, after);
+                return { touched: files.some(touchesDashboardPath), source: `${before}...${after}`, files };
+              }
+
+              if (
+                (action === "opened" || action === "reopened") &&
+                typeof pullRequest?.number === "number"
+              ) {
+                const files = await changedFilesForPullRequest(pullRequest.number);
+                return { touched: files.some(touchesDashboardPath), source: `pull_request#${pullRequest.number}`, files };
+              }
+
+              const { data: commit } = await github.rest.repos.getCommit({
+                owner,
+                repo,
+                ref: sha,
+              });
+              const parent = commit.parents?.[0]?.sha;
+              if (!parent) {
+                return { touched: true, source: "no-parent-fallback", files: [] };
+              }
+              const files = await changedFilesBetween(parent, sha);
+              return { touched: files.some(touchesDashboardPath), source: `${parent}...${sha}`, files };
+            }
+
+            async function findPriorSuccessfulPreviewForCurrentDashboard() {
+              const pullRequest = context.payload.pull_request;
+              const deploymentArgs = {
+                owner,
+                repo,
+                environment: "Preview",
+                per_page: 30,
+              };
+              if (pullRequest?.head?.ref) {
+                deploymentArgs.ref = pullRequest.head.ref;
+              }
+              const { data: deployments } = await github.rest.repos.listDeployments(deploymentArgs);
+
+              for (const deployment of deployments) {
+                if (!deployment.sha || deployment.sha === sha) continue;
+                const previewUrl = await successfulPreviewUrl(deployment);
+                if (!previewUrl) continue;
+                const files = await changedFilesBetween(deployment.sha, sha);
+                const dashboardFiles = files.filter(touchesDashboardPath);
+                if (dashboardFiles.length === 0) {
+                  return {
+                    sha: deployment.sha,
+                    previewUrl,
+                    source: `${deployment.sha}...${sha}`,
+                  };
+                }
+                core.info(
+                  `Prior preview ${deployment.sha} is stale for current dashboard inputs; ` +
+                    `changed files since that preview: ${dashboardFiles.join(", ")}`,
+                );
+              }
+              return null;
+            }
 
             core.info(`Waiting for Vercel preview deployment for SHA ${sha}...`);
 
@@ -182,18 +336,11 @@ jobs:
               });
 
               for (const deployment of deployments) {
-                const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
-                  owner,
-                  repo,
-                  deployment_id: deployment.id,
-                  per_page: 5,
-                });
-
-                const active = statuses.find(s => s.state === "success");
-                if (active && active.environment_url) {
-                  const previewUrl = active.environment_url;
+                const previewUrl = await successfulPreviewUrl(deployment);
+                if (previewUrl) {
                   core.info(`Found active Vercel preview: ${previewUrl}`);
                   core.setOutput("preview_url", previewUrl);
+                  core.setOutput("skip_lighthouse", "false");
                   return;
                 }
               }
@@ -202,18 +349,55 @@ jobs:
               await new Promise(r => setTimeout(r, pollIntervalMs));
             }
 
-            // Timed out: fail rather than audit a stale branch alias.
+            // Timed out. If the current PR synchronization did not touch any
+            // dashboard-affecting paths, Vercel intentionally skipped posting
+            // a new preview for this head SHA and the previous preview still
+            // reflects the dashboard bundle. Treat that case as a clean skip.
+            // Fail closed when the comparison cannot prove that.
+            try {
+              const latestPush = await latestPushTouchedDashboard();
+              if (!latestPush.touched) {
+                const priorPreview = await findPriorSuccessfulPreviewForCurrentDashboard();
+                if (priorPreview === null) {
+                  core.info(
+                    "Latest push did not touch dashboard inputs, but no prior successful " +
+                      "Preview deployment could be proven current for this dashboard bundle.",
+                  );
+                } else {
+                  core.info(
+                    `No dashboard-affecting files changed in ${latestPush.source}; ` +
+                      `prior successful preview ${priorPreview.previewUrl} at ${priorPreview.sha} ` +
+                      `covers ${priorPreview.source}.`,
+                  );
+                  core.setOutput("skip_lighthouse", "true");
+                  return;
+                }
+              } else {
+                core.info(
+                  `Latest push ${latestPush.source} touched dashboard-affecting files: ` +
+                    latestPush.files.filter(touchesDashboardPath).join(", "),
+                );
+              }
+            } catch (error) {
+              core.warning(
+                `Could not prove the latest push skipped dashboard inputs: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            }
+
+            // Fail rather than audit a stale branch alias.
             // A branch alias can still resolve to the previous successful
             // deployment for that branch, so falling back would silently pass
             // Lighthouse against stale code and miss the missing current preview.
             core.setFailed(`Timed out waiting for a successful Vercel preview deployment for SHA ${sha}. Check the Vercel deployment logs.`);
 
       - name: Install dependencies (includes @lhci/cli)
-        if: steps.decide.outputs.run == 'true'
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true'
         uses: ./.github/actions/pnpm-install
 
       - name: Install Chromium dependencies
-        if: steps.decide.outputs.run == 'true'
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true'
         run: |
           # lhci autorun launches Chromium via puppeteer internally.
           # The required system libraries are not present on the runner by default.
@@ -224,7 +408,7 @@ jobs:
             libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2
 
       - name: Run Lighthouse CI
-        if: steps.decide.outputs.run == 'true'
+        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true'
         env:
           # The bypass secret is passed via lhci's --collect.settings.extraHeaders
           # rather than the URL query string so it does NOT end up in the
@@ -281,7 +465,7 @@ jobs:
         # non-zero. Without it, a hard performance-budget failure (once those
         # graduate from `warn` to `error`) would skip the SSO diagnostic and
         # leave the engineer staring at a generic assertion failure.
-        if: steps.decide.outputs.run == 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         env:
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
         run: node ui-dashboard/scripts/assert-lhci-finalurl.mjs
@@ -304,7 +488,7 @@ jobs:
         # job) can never restore another arch's Chromium — binaries are
         # arch-specific and a cross-arch restore would fail at exec time,
         # not install time.
-        if: steps.decide.outputs.run == 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cache/ms-playwright
@@ -331,7 +515,7 @@ jobs:
         #
         # On a cache hit (see prior step) this is a fast no-op that just
         # verifies the chromium binary is present.
-        if: steps.decide.outputs.run == 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         working-directory: ui-dashboard
         run: pnpm exec playwright install chromium
 
@@ -353,7 +537,7 @@ jobs:
         # `always()` mirrors the audited-page guard: don't silently skip
         # the INP gate when an earlier step (lhci accessibility, the bypass
         # guard) fails.
-        if: steps.decide.outputs.run == 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         env:
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
@@ -365,7 +549,7 @@ jobs:
           BYPASS_HEADERS_JSON="$BYPASS_HEADERS_JSON" node ui-dashboard/scripts/measure-inp.mjs
 
       - name: Post Lighthouse results as PR comment
-        if: steps.decide.outputs.run == 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |

@@ -30,8 +30,11 @@ import "./handlers/virtualPool.js";
 import "./handlers/biPoolManager.js";
 import "./handlers/feeToken.js";
 import "./handlers/stables/transfer.js";
-// Ethereum reserve-yield handlers are intentionally not registered in the
-// production entry point while chain 1 is deferred from the hosted config.
+// Ethereum reserve-yield handlers are event-only. Do not import the historical
+// sUSDS onBlock heartbeat here; sparse event snapshots keep chain 1 safe inside
+// the shared hosted indexer.
+import "./handlers/steth.js";
+import { registerSusdsYieldEventHandlers } from "./handlers/susdsEvents.js";
 import "./handlers/openLiquidityStrategy.js";
 import "./handlers/liquity/collateralRegistry.js";
 import "./handlers/liquity/bootstrapHandler.js";
@@ -47,6 +50,8 @@ import "./handlers/medianDeltaBreaker.js";
 import "./handlers/valueDeltaBreaker.js";
 import "./handlers/wormhole/nttManager.js";
 import "./handlers/wormhole/wormholeTransceiver.js";
+
+registerSusdsYieldEventHandlers();
 
 // ---------------------------------------------------------------------------
 // Re-exports for backwards compatibility with existing tests.
@@ -125,7 +130,10 @@ export { TRADING_LIMITS_INTERNAL_DECIMALS } from "./tradingLimits.js";
 
 // Startup checks (used by startBlockInvariant.test.ts)
 export {
+  assertReserveYieldStartBlockValid,
   assertStartBlocksValid,
   FPMM_FIRST_DEPLOY_BLOCK,
+  RESERVE_YIELD_FIRST_REQUIRED_EVENT_BLOCK,
+  RESERVE_YIELD_START_BLOCK_ENV_NAME,
   START_BLOCK_ENV_NAME,
 } from "./startupChecks.js";

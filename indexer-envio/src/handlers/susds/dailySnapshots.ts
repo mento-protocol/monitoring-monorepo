@@ -24,6 +24,10 @@ type SusdsYieldDeltaBaseline = Pick<
   "totalEarnedYieldUsdWei" | "realizedYieldUsdWei" | "unrealizedYieldUsdWei"
 >;
 
+type SusdsYieldDailySnapshotOptions = {
+  requirePreviousDay?: boolean;
+};
+
 function baselineFromSameDaySnapshot(
   snapshot: SusdsYieldDailySnapshot,
 ): SusdsYieldDeltaBaseline {
@@ -103,29 +107,43 @@ export async function recordSusdsYieldDailySnapshot(
   meta: BlockMeta,
   sharePriceUsdWei: bigint,
   precomputedTotals?: SusdsYieldTotals,
-): Promise<void> {
-  if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return;
+  options: SusdsYieldDailySnapshotOptions = {},
+): Promise<boolean> {
+  if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
 
   const totals =
     precomputedTotals ??
     (await computeYieldTotals(context, meta, sharePriceUsdWei));
   if (totals.currentShares === ZERO && totals.totalEarnedYieldUsdWei === ZERO) {
-    return;
+    return false;
   }
 
   const bucket = dayBucket(meta.blockTimestamp);
   const id = susdsDailySnapshotId(meta.chainId, bucket);
-  const previousSnapshot = await findPreviousDailySnapshot(
-    context,
-    meta.chainId,
-    bucket,
-  );
-  const currentSnapshot =
-    previousSnapshot === undefined
-      ? await context.SusdsYieldDailySnapshot.get(id)
+  const previousDayBucket = bucket - SECONDS_PER_DAY;
+  const launchBucket = dayBucket(V3_REVENUE_LAUNCH_TIMESTAMP);
+  const previousDaySnapshot =
+    previousDayBucket >= launchBucket
+      ? await context.SusdsYieldDailySnapshot.get(
+          susdsDailySnapshotId(meta.chainId, previousDayBucket),
+        )
       : undefined;
+  const latestPriorSnapshot =
+    previousDaySnapshot ??
+    (await findPreviousDailySnapshot(context, meta.chainId, previousDayBucket));
+  const currentSnapshot = await context.SusdsYieldDailySnapshot.get(id);
+
+  if (
+    options.requirePreviousDay === true &&
+    currentSnapshot === undefined &&
+    previousDaySnapshot === undefined &&
+    bucket > launchBucket
+  ) {
+    return false;
+  }
+
   const deltaBaseline =
-    previousSnapshot ??
+    latestPriorSnapshot ??
     (currentSnapshot === undefined
       ? totals
       : baselineFromSameDaySnapshot(currentSnapshot));
@@ -139,6 +157,22 @@ export async function recordSusdsYieldDailySnapshot(
       sampledAtBlock: meta.blockNumber,
       sampledAtTimestamp: meta.blockTimestamp,
     }),
+  );
+  return true;
+}
+
+export async function recordSusdsYieldEventDailySnapshot(
+  context: SusdsContext,
+  meta: BlockMeta,
+  sharePriceUsdWei: bigint,
+  precomputedTotals?: SusdsYieldTotals,
+): Promise<boolean> {
+  return recordSusdsYieldDailySnapshot(
+    context,
+    meta,
+    sharePriceUsdWei,
+    precomputedTotals,
+    { requirePreviousDay: true },
   );
 }
 
@@ -177,8 +211,7 @@ export async function recordSusdsYieldHeartbeatSnapshot(
   if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
 
   const sharePriceUsdWei = await readSharePrice(context, meta);
-  await recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
-  return true;
+  return recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
 }
 
 export async function handleSusdsYieldDailySnapshotHeartbeat({

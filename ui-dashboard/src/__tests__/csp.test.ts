@@ -43,7 +43,8 @@ describe("buildCspWithNonce", () => {
     expect(connectSrc).toContain("wss://ws-us3.pusher.com");
   });
 
-  it("includes the configured testnet Hasura origin in connect-src", async () => {
+  it("includes the configured Hasura origins in connect-src", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     vi.stubEnv(
       "NEXT_PUBLIC_HASURA_URL_TESTNET",
       "https://testnet-hasura.example/v1/graphql",
@@ -61,6 +62,7 @@ describe("buildCspWithNonce", () => {
       .find((d) => d.trim().startsWith("connect-src"));
 
     expect(connectSrc).toBeDefined();
+    expect(connectSrc).toContain("https://hasura.example");
     expect(connectSrc).toContain("https://testnet-hasura.example");
     expect(connectSrc).toContain("https://celo-sepolia-hasura.example");
   });

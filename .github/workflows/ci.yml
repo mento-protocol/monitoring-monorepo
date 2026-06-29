@@ -467,6 +467,12 @@ jobs:
         run: |
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
+      - name: Test reserve-yield event indexer
+        # The reserve-yield event suites are intentionally skipped by the
+        # normal test:coverage command. Run the dedicated wrapper in CI so the
+        # Ethereum sUSDS/stETH accounting paths stay covered after mainnet
+        # codegen.
+        run: pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
         run: |

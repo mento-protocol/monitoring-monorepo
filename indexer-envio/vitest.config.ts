@@ -24,9 +24,10 @@ export default defineConfig({
       exclude: [
         "src/**/*.test.ts",
         "src/**/*.d.ts",
-        // Dormant while Ethereum reserve-yield indexing is deferred from the
-        // production config. #1017 owns re-enabling these modules and tests.
-        "src/handlers/susds.ts",
+        // Reserve-yield has a dedicated chain-1 config and regression command.
+        // Keep it out of the default primary-indexer coverage pool until the
+        // hosted replay proof closes #1017.
+        "src/handlers/susdsEvents.ts",
         "src/handlers/susds/**/*.ts",
         "src/handlers/steth.ts",
         "src/handlers/steth/**/*.ts",

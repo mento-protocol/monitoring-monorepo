@@ -21,6 +21,9 @@ import { env } from "./env.js";
  * First factory deployment blocks:
  *   Celo mainnet (42220):  60668100 — initial batch of 4 FPMM pools
  *   Monad mainnet (143):   60759432 — initial batch of 3 FPMM pools
+ *
+ * First reserve-yield tracked movement:
+ *   Ethereum mainnet (1):  19111760 — tracked stETH movement
  */
 
 export const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
@@ -32,11 +35,45 @@ const FIRST_REQUIRED_EVENT_BLOCK: Record<number, number> = {
   ...FPMM_FIRST_DEPLOY_BLOCK,
 };
 
+export const RESERVE_YIELD_FIRST_REQUIRED_EVENT_BLOCK = 19111760;
+export const RESERVE_YIELD_START_BLOCK_ENV_NAME =
+  "ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD";
+
 /** Maps mainnet chain IDs to their dedicated ENVIO_START_BLOCK_* env var name. */
 export const START_BLOCK_ENV_NAME: Record<number, string> = {
   42220: "ENVIO_START_BLOCK_CELO",
   143: "ENVIO_START_BLOCK_MONAD",
 };
+
+function assertStartBlockNotAfterRequiredEvent({
+  chainId,
+  envVarName,
+  firstRequiredBlock,
+  startBlockOverride,
+  strict,
+}: {
+  chainId: number;
+  envVarName: string;
+  firstRequiredBlock: number;
+  startBlockOverride: string | undefined;
+  strict: boolean | undefined;
+}): void {
+  if (startBlockOverride === undefined || startBlockOverride === "") return;
+  const startBlock = Number(startBlockOverride);
+  if (!Number.isFinite(startBlock)) return;
+  if (startBlock <= firstRequiredBlock) return;
+
+  const msg =
+    `[startupChecks] start block for chain ${chainId} is ${startBlock}, ` +
+    `but the first required indexed event is at block ${firstRequiredBlock}. ` +
+    `Required historical events will be missed. ` +
+    `Lower ${envVarName} to <=${firstRequiredBlock} or remove the override.`;
+  if (strict) {
+    throw new Error(`FATAL: ${msg}`);
+  } else {
+    console.warn(`WARNING: ${msg}`);
+  }
+}
 
 /**
  * Validate that no ENVIO_START_BLOCK_* override is set above the first
@@ -53,24 +90,29 @@ export function assertStartBlocksValid(
     FIRST_REQUIRED_EVENT_BLOCK,
   )) {
     const chainId = Number(chainIdStr);
-    const envVal = envOverrides[chainId];
-    if (envVal === undefined || envVal === "") continue;
-    const startBlock = Number(envVal);
-    if (!Number.isFinite(startBlock)) continue;
-    if (startBlock > firstRequiredBlock) {
-      const envVarName = START_BLOCK_ENV_NAME[chainId];
-      const msg =
-        `[startupChecks] start block for chain ${chainId} is ${startBlock}, ` +
-        `but the first required indexed event is at block ${firstRequiredBlock}. ` +
-        `Required historical events will be missed. ` +
-        `Lower ${envVarName} to ≤${firstRequiredBlock} or remove the override.`;
-      if (strict) {
-        throw new Error(`FATAL: ${msg}`);
-      } else {
-        console.warn(`⚠️  WARNING: ${msg}`);
-      }
-    }
+    const envVarName = START_BLOCK_ENV_NAME[chainId];
+    if (envVarName === undefined) continue;
+    assertStartBlockNotAfterRequiredEvent({
+      chainId,
+      envVarName,
+      firstRequiredBlock,
+      startBlockOverride: envOverrides[chainId],
+      strict,
+    });
   }
+}
+
+export function assertReserveYieldStartBlockValid(
+  startBlockOverride = env.ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD,
+  strict = env.ENVIO_STRICT_START_BLOCK,
+): void {
+  assertStartBlockNotAfterRequiredEvent({
+    chainId: 1,
+    envVarName: RESERVE_YIELD_START_BLOCK_ENV_NAME,
+    firstRequiredBlock: RESERVE_YIELD_FIRST_REQUIRED_EVENT_BLOCK,
+    startBlockOverride,
+    strict,
+  });
 }
 
 /**
@@ -84,4 +126,11 @@ export function runStartupChecks(): void {
     42220: env.ENVIO_START_BLOCK_CELO,
     143: env.ENVIO_START_BLOCK_MONAD,
   });
+  assertReserveYieldStartBlockValid();
+}
+
+export function runReserveYieldStartupChecks(): void {
+  // Skip in test mode — shell env vars must not interfere with test suites.
+  if (env.NODE_ENV === "test") return;
+  assertReserveYieldStartBlockValid();
 }

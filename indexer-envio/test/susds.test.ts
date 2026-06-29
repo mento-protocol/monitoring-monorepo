@@ -10,16 +10,18 @@ import { createMockEventData } from "./helpers/eventFixtures.js";
 import {
   _clearMockSusdsSharePrices,
   _setMockSusdsSharePrice,
-} from "../src/EventHandlers.ts";
+} from "../src/rpc/susds.ts";
 import {
   ETHEREUM_CHAIN_ID,
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
   V3_REVENUE_LAUNCH_TIMESTAMP,
+} from "../src/handlers/susds/shared.ts";
+import {
   handleSusdsYieldDailySnapshotHeartbeat,
-  recordSusdsYieldHeartbeatSnapshot,
   recordSusdsYieldDailySnapshot,
-} from "../src/handlers/susds.ts";
+  recordSusdsYieldHeartbeatSnapshot,
+} from "../src/handlers/susds/dailySnapshots.ts";
 import { ZERO_ADDRESS } from "../src/constants.ts";
 import {
   blockTimestampEffect,
@@ -41,6 +43,8 @@ const WAD = 10n ** 18n;
 const RESERVE_SAFE = TRACKED_SUSDS_WALLETS[0];
 const AUSD_OPS_SAFE = TRACKED_SUSDS_WALLETS[1];
 const EXTERNAL = "0x0000000000000000000000000000000000000abc";
+const describeReserveYield =
+  process.env.RESERVE_YIELD_EVENT_TESTS === "1" ? describe : describe.skip;
 
 function dollars(value: number): bigint {
   return BigInt(value) * WAD;
@@ -198,10 +202,9 @@ function heartbeatContext(
   } as unknown as Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0];
 }
 
-// Deferred with the hosted-safe Ethereum reserve-yield redesign. The default
-// generated test indexer no longer configures chain 1, so Envio correctly
-// rejects chain-1 mock events in this suite.
-describe.skip("sUSDS reserve yield accounting", () => {
+// Run through `pnpm indexer:reserve-yield:test`, which codegens the dedicated
+// chain-1 reserve-yield config before executing these event-level tests.
+describeReserveYield("sUSDS reserve yield accounting", () => {
   afterEach(() => {
     _clearMockSusdsSharePrices();
   });
@@ -342,6 +345,16 @@ describe.skip("sUSDS reserve yield accounting", () => {
       dollars(1000),
       dollars(1000),
       Number(day1 + 3_600n),
+    );
+
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: 101n,
+        blockTimestamp: day1 + 3_600n,
+      },
+      WAD,
     );
 
     let rows = dailySnapshots(mockDb);
@@ -486,6 +499,37 @@ describe.skip("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(200));
   });
 
+  it("does not emit daily actuals from sparse tracked sUSDS events", async () => {
+    let mockDb = MockDb.createMockDb();
+    const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
+    const day3 = day1 + 2n * 86_400n;
+
+    setSharePrice(100, WAD);
+    mockDb = await deposit(
+      mockDb,
+      100,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(day1 + 3_600n),
+    );
+
+    setSharePrice(300, dollars(130) / 100n);
+    mockDb = await transfer(
+      mockDb,
+      300,
+      1,
+      RESERVE_SAFE,
+      AUSD_OPS_SAFE,
+      dollars(100),
+      Number(day3 + 3_600n),
+    );
+
+    const rows = dailySnapshots(mockDb);
+    assert.equal(rows.length, 0);
+    assert.equal(summary(mockDb).totalEarnedYieldUsdWei, dollars(300));
+  });
+
   it("writes sUSDS daily snapshots from a block-number-only heartbeat", async () => {
     let mockDb = MockDb.createMockDb();
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
@@ -499,6 +543,16 @@ describe.skip("sUSDS reserve yield accounting", () => {
       dollars(1000),
       dollars(1000),
       Number(day1 + 3_600n),
+    );
+
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: 101n,
+        blockTimestamp: day1 + 3_600n,
+      },
+      WAD,
     );
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
@@ -559,6 +613,16 @@ describe.skip("sUSDS reserve yield accounting", () => {
       dollars(1000),
       dollars(1000),
       Number(day1 + 3_600n),
+    );
+
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: BigInt(depositBlock + 1),
+        blockTimestamp: day1 + 3_600n,
+      },
+      WAD,
     );
 
     const context = heartbeatContext(

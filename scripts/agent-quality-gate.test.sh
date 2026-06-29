@@ -1290,6 +1290,30 @@ run_gate "indexer-envio/src/helpers.ts"
 assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
 
+run_gate "indexer-envio/src/EventHandlers.ts"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test (reserve-yield handler registration path changed)"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
+
+run_gate "indexer-envio/src/handlers/susdsEvents.ts"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test (reserve-yield handler path changed)"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
+
+run_gate "indexer-envio/src/handlers/steth/shared.ts"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test (reserve-yield handler path changed)"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
+
+run_gate "indexer-envio/src/rpc/susds.ts"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test (reserve-yield RPC path changed)"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
+
+run_gate "indexer-envio/src/rpc/effects.ts"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test (reserve-yield RPC path changed)"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
+
+run_gate "indexer-envio/config.multichain.mainnet.yaml"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test (reserve-yield indexer config changed)"
+assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
+
 run_gate "indexer-envio/src/handlers/stables/classifyKind.ts"
 assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"

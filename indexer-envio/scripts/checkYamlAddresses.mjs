@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * checkYamlAddresses.mjs — drift gate for Envio multichain config YAMLs.
+ * checkYamlAddresses.mjs — drift gate for Envio config YAMLs.
  *
- * Why: Envio's CLI reads `config.multichain.*.yaml` literally — no JSON
+ * Why: Envio's CLI reads `config.*.yaml` literally — no JSON
  * imports at config-load time. So every contract address is duplicated
  * out of `@mento-protocol/contracts`. The package upstream silently
  * republishes addresses (StabilityPool proxy/impl rename in 0.8.1 was one
@@ -199,7 +199,9 @@ function buildKnownByChain() {
 
 function findYamlFiles() {
   return readdirSync(REPO)
-    .filter((f) => /^config(\.multichain\.[a-z0-9-]+)?\.yaml$/.test(f))
+    .filter((f) =>
+      /^config(\.(multichain|reserve-yield)\.[a-z0-9-]+)?\.yaml$/.test(f),
+    )
     .map((f) => join(REPO, f))
     .filter((p) => !lstatSync(p).isSymbolicLink());
 }
@@ -347,7 +349,7 @@ function buildItem(rawValue, chainId, lineOf, node) {
 const byChain = buildKnownByChain();
 const yamls = findYamlFiles();
 if (yamls.length === 0) {
-  console.error("No YAML files matched config(.multichain.*)?.yaml in", REPO);
+  console.error("No YAML files matched config(.<variant>.*)?.yaml in", REPO);
   process.exit(2);
 }
 
