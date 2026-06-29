@@ -32,6 +32,8 @@ const reserveCodegen = run(
 
 let testStatus = reserveCodegen;
 if (reserveCodegen === 0) {
+  // Envio's test harness reads the default config path. This intentionally
+  // follows a config.yaml symlink, then restores the original target content.
   writeFileSync(defaultConfigPath, reserveConfig, "utf8");
   try {
     testStatus = run(

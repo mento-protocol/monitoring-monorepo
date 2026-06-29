@@ -209,6 +209,9 @@ jobs:
             async function latestPushTouchedDashboard() {
               const before = context.payload.before;
               const after = context.payload.after ?? sha;
+              // pull_request.synchronize carries the pushed range; opened
+              // events may omit it or use an all-zero before SHA, so those
+              // fall back to the head commit's parent below.
               if (
                 typeof before === "string" &&
                 before.length > 0 &&

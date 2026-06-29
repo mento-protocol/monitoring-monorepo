@@ -11,9 +11,9 @@
 // Effect registrations used by sUSDS share-price reads.
 import "./rpc/effects.js";
 
+// stETH has no block heartbeat; importing it is event-only.
+import "./handlers/steth.js";
+
 import { registerSusdsYieldEventHandlers } from "./handlers/susdsEvents.js";
 
 registerSusdsYieldEventHandlers();
-
-// stETH has no block heartbeat; importing it is event-only.
-import "./handlers/steth.js";

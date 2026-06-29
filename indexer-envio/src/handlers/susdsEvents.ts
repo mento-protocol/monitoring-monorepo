@@ -22,6 +22,8 @@ const transferWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
   { from: address },
   { to: address },
 ]);
+// Deliver deposits initiated by, or minted to, a tracked wallet. The handler
+// re-filters by owner because owner receives the shares.
 const depositWhereParams = TRACKED_SUSDS_WALLETS.flatMap((address) => [
   { sender: address },
   { owner: address },

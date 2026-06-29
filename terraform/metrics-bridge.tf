@@ -81,8 +81,8 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
 
   lifecycle {
     # The deploy path stamps image, revision suffix, client metadata, and
-    # service-level scaling defaults. Keep template[0].scaling and
-    # scaling_mode managed.
+    # service-level scaling defaults. Per-revision template[0].scaling and
+    # service-level scaling_mode remain managed.
     ignore_changes = [
       template[0].containers[0].image,
       template[0].revision,
