@@ -242,6 +242,7 @@ jobs:
 
             async function latestPushTouchedDashboard() {
               const pullRequest = context.payload.pull_request;
+              const action = context.payload.action;
               const before = context.payload.before;
               const after = context.payload.after ?? sha;
               // pull_request.synchronize carries the pushed range; opened
@@ -257,7 +258,10 @@ jobs:
                 return { touched: files.some(touchesDashboardPath), source: `${before}...${after}`, files };
               }
 
-              if (typeof pullRequest?.number === "number") {
+              if (
+                (action === "opened" || action === "reopened") &&
+                typeof pullRequest?.number === "number"
+              ) {
                 const files = await changedFilesForPullRequest(pullRequest.number);
                 return { touched: files.some(touchesDashboardPath), source: `pull_request#${pullRequest.number}`, files };
               }
