@@ -136,8 +136,8 @@ export async function recordSusdsYieldDailySnapshot(
   if (
     options.requirePreviousDay === true &&
     currentSnapshot === undefined &&
-    latestPriorSnapshot !== undefined &&
-    previousDaySnapshot === undefined
+    previousDaySnapshot === undefined &&
+    bucket > launchBucket
   ) {
     return false;
   }

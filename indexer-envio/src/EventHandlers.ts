@@ -125,7 +125,10 @@ export { TRADING_LIMITS_INTERNAL_DECIMALS } from "./tradingLimits.js";
 
 // Startup checks (used by startBlockInvariant.test.ts)
 export {
+  assertReserveYieldStartBlockValid,
   assertStartBlocksValid,
   FPMM_FIRST_DEPLOY_BLOCK,
+  RESERVE_YIELD_FIRST_REQUIRED_EVENT_BLOCK,
+  RESERVE_YIELD_START_BLOCK_ENV_NAME,
   START_BLOCK_ENV_NAME,
 } from "./startupChecks.js";

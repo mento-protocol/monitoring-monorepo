@@ -8,6 +8,10 @@
 // primary Celo + Monad indexer.
 // ===========================================================================
 
+import { runReserveYieldStartupChecks } from "./startupChecks.js";
+
+runReserveYieldStartupChecks();
+
 // Effect registrations used by sUSDS share-price reads.
 import "./rpc/effects.js";
 

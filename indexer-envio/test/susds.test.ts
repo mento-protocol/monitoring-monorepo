@@ -347,6 +347,16 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
       Number(day1 + 3_600n),
     );
 
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: 101n,
+        blockTimestamp: day1 + 3_600n,
+      },
+      WAD,
+    );
+
     let rows = dailySnapshots(mockDb);
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.timestamp, day1);
@@ -516,8 +526,7 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     );
 
     const rows = dailySnapshots(mockDb);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0]?.timestamp, day1);
+    assert.equal(rows.length, 0);
     assert.equal(summary(mockDb).totalEarnedYieldUsdWei, dollars(300));
   });
 
@@ -534,6 +543,16 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
       dollars(1000),
       dollars(1000),
       Number(day1 + 3_600n),
+    );
+
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: 101n,
+        blockTimestamp: day1 + 3_600n,
+      },
+      WAD,
     );
 
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
@@ -594,6 +613,16 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
       dollars(1000),
       dollars(1000),
       Number(day1 + 3_600n),
+    );
+
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: BigInt(depositBlock + 1),
+        blockTimestamp: day1 + 3_600n,
+      },
+      WAD,
     );
 
     const context = heartbeatContext(
