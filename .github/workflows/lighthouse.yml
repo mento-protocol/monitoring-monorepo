@@ -184,20 +184,26 @@ jobs:
             }
 
             async function changedFilesBetween(base, head) {
-              const files = [];
-              const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
-                owner,
-                repo,
-                basehead: `${base}...${head}`,
-                per_page: 100,
-              });
-              for (const file of comparison.files ?? []) {
-                if (file.filename) files.push(file.filename);
+              const files = new Set();
+              const pages = github.paginate.iterator(
+                github.rest.repos.compareCommitsWithBasehead,
+                {
+                  owner,
+                  repo,
+                  basehead: `${base}...${head}`,
+                  per_page: 100,
+                },
+              );
+
+              for await (const response of pages) {
+                for (const file of response.data.files ?? []) {
+                  if (file.filename) files.add(file.filename);
+                }
               }
-              if (files.length >= 300) {
+              if (files.size >= 300) {
                 throw new Error("GitHub compare response may be truncated at 300 files");
               }
-              return files;
+              return [...files];
             }
 
             async function latestPushTouchedDashboard() {
