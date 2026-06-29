@@ -126,6 +126,7 @@ export function runStartupChecks(): void {
     42220: env.ENVIO_START_BLOCK_CELO,
     143: env.ENVIO_START_BLOCK_MONAD,
   });
+  assertReserveYieldStartBlockValid();
 }
 
 export function runReserveYieldStartupChecks(): void {

@@ -465,7 +465,7 @@ jobs:
         # non-zero. Without it, a hard performance-budget failure (once those
         # graduate from `warn` to `error`) would skip the SSO diagnostic and
         # leave the engineer staring at a generic assertion failure.
-        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         env:
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
         run: node ui-dashboard/scripts/assert-lhci-finalurl.mjs
@@ -488,7 +488,7 @@ jobs:
         # job) can never restore another arch's Chromium — binaries are
         # arch-specific and a cross-arch restore would fail at exec time,
         # not install time.
-        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.cache/ms-playwright
@@ -515,7 +515,7 @@ jobs:
         #
         # On a cache hit (see prior step) this is a fast no-op that just
         # verifies the chromium binary is present.
-        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         working-directory: ui-dashboard
         run: pnpm exec playwright install chromium
 
@@ -537,7 +537,7 @@ jobs:
         # `always()` mirrors the audited-page guard: don't silently skip
         # the INP gate when an earlier step (lhci accessibility, the bypass
         # guard) fails.
-        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         env:
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
@@ -549,7 +549,7 @@ jobs:
           BYPASS_HEADERS_JSON="$BYPASS_HEADERS_JSON" node ui-dashboard/scripts/measure-inp.mjs
 
       - name: Post Lighthouse results as PR comment
-        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && always()
+        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |

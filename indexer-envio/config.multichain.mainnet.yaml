@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: mento-multichain-mainnet
-description: Mento multichain mainnet indexer — Celo (42220) + Monad (143)
+description: Mento multichain mainnet indexer — Ethereum (1) + Celo (42220) + Monad (143)
 
 # Disable v3's `src/handlers/` auto-loading. Each contract below explicitly
 # points at `src/EventHandlers.ts`, which side-effect imports the same
@@ -216,9 +216,9 @@ contracts:
     events:
       - event: Transfer
 
-  # Sky sUSDS — reserve-yield handler definition retained for schema/test
-  # compatibility. Production mainnet keeps Ethereum in the separate
-  # config.reserve-yield.mainnet.yaml project.
+  # Sky sUSDS — reserve-yield event indexing on Ethereum. Only sparse
+  # Deposit/Withdraw/Transfer handlers are registered; the historical onBlock
+  # heartbeat stays out of the shared hosted indexer.
   - name: Susds
     abi_file_path: abis/Susds.json
     handler: src/EventHandlers.ts
@@ -227,9 +227,7 @@ contracts:
       - event: Deposit
       - event: Withdraw
 
-  # Lido stETH — reserve-yield handler definition retained for schema/test
-  # compatibility. Production mainnet keeps Ethereum in the separate
-  # config.reserve-yield.mainnet.yaml project.
+  # Lido stETH — reserve-yield event indexing on Ethereum.
   - name: Steth
     abi_file_path: abis/ERC20.json
     handler: src/EventHandlers.ts
@@ -304,6 +302,23 @@ contracts:
       - event: ReceivedMessage(bytes32 digest, uint16 emitterChainId, bytes32 emitterAddress, uint64 sequence)
 
 chains:
+  # ---------------------------------------------------------------------------
+  # Ethereum Mainnet (chain 1)
+  # ---------------------------------------------------------------------------
+  - id: 1
+    # Earliest known tracked stETH movement: block 19111760,
+    # tx 0x297cbad231aa43b915ade1b699b8b0257babe6fff0b62e564d422daace021731.
+    # Re-run docs/notes/reserve-yield-indexer.md log-derivation commands before
+    # changing tracked reserve wallets or promoting a hosted reindex.
+    start_block: ${ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD:-19111760}
+    contracts:
+      - name: Susds
+        address:
+          - 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD
+      - name: Steth
+        address:
+          - 0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84
+
   # ---------------------------------------------------------------------------
   # Celo Mainnet (chain 42220)
   # ---------------------------------------------------------------------------

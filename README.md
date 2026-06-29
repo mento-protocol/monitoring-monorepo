@@ -30,7 +30,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
                                                         └─────────────┘
 ```
 
-Celo Mainnet (42220) and Monad Mainnet (143) are served from a single Envio project (`mento`) using `config.multichain.mainnet.yaml`. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing is isolated in `config.reserve-yield.mainnet.yaml` so a chain 1 replay cannot block the production Celo + Monad indexer.
+Celo Mainnet (42220), Monad Mainnet (143), and Ethereum reserve-yield events (1) are served from a single Envio project (`mento`) using `config.multichain.mainnet.yaml`. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing is event-only; the historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
 
 **Static production endpoint:** `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`
 
@@ -211,8 +211,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 | Variable                                 | Description                                                                                                |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo and Monad data)                                                |
-| `NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL`   | Optional dedicated reserve-yield Envio GraphQL endpoint; falls back to `NEXT_PUBLIC_HASURA_URL` when unset |
+| `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo, Monad, and Ethereum reserve-yield data)                       |
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`         | Optional Monad Testnet Envio GraphQL endpoint                                                              |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`    | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
 | `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`      | Set to `true` with the per-testnet endpoint URL to show hosted testnet networks                            |

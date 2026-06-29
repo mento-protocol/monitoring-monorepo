@@ -8,49 +8,44 @@ last_verified: 2026-06-29
 
 # Reserve-Yield Indexer Topology
 
-Reserve-yield actuals are isolated from the production Celo + Monad indexer.
-The primary hosted `mento` project continues to use
-`indexer-envio/config.multichain.mainnet.yaml` and must not include Ethereum
-chain 1 contracts.
+Reserve-yield actuals are part of the production `mento` Envio project. The
+primary hosted project uses `indexer-envio/config.multichain.mainnet.yaml` for
+Ethereum reserve-yield events, Celo, and Monad; no separate hosted Envio project
+or dashboard endpoint is required.
 
-The Ethereum reserve-yield config is:
+The reserve-yield test harness is:
 
 ```bash
-pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:codegen
-pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:dev
 pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test
 ```
 
-It uses `indexer-envio/config.reserve-yield.mainnet.yaml` and
-`indexer-envio/src/EventHandlersReserveYield.ts`.
+It codegens `indexer-envio/config.multichain.mainnet.yaml` and runs the
+sUSDS/stETH event suites with reserve-yield event tests enabled.
 
 ## Invariants
 
-- The Celo + Monad production indexer has no Ethereum chain dependency.
-- The reserve-yield entry point registers sparse sUSDS/stETH token events only.
-- The reserve-yield entry point does not register the historical sUSDS
-  `onBlock` heartbeat.
+- Ethereum reserve-yield indexing shares the existing production Envio project
+  and GraphQL endpoint.
+- The primary entry point registers sparse sUSDS/stETH token events only.
+- The primary entry point does not register the historical sUSDS `onBlock`
+  heartbeat.
 - sUSDS event handlers write movement rows, summary rows, and daily snapshots
   only when real `Transfer`, `Deposit`, or `Withdraw` logs for tracked reserve
   wallets are processed.
-- Dashboard reserve-yield readers prefer
-  `NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL`; when unset they fall back to
-  `NEXT_PUBLIC_HASURA_URL` for compatibility with the pre-split deployment.
+- Dashboard reserve-yield readers use `NEXT_PUBLIC_HASURA_URL`.
 
 ## Why This Avoids The Hosted Replay Stall Class
 
 The failed hosted experiments stalled at Envio v3 synthetic `onBlock` batch
-boundaries (`5000`/`15000` synthetic items). The dedicated reserve-yield entry
-point excludes the heartbeat entirely, so the indexer backfills only real
-Ethereum logs for the configured sUSDS/stETH contracts. Any reserve replay
-failure is isolated to the reserve-yield project and cannot block Celo/Monad
-FPMM, CDP, or bridge indexing.
+boundaries (`5000`/`15000` synthetic items). The hosted entry point excludes the
+heartbeat entirely, so the indexer backfills only real Ethereum logs for the
+configured sUSDS/stETH contracts. That keeps the replay work bounded enough to
+share the existing hosted project instead of paying for an additional Envio
+deployment.
 
 ## Degraded Behavior
 
-- If the dedicated reserve endpoint is unset, dashboard reserve-yield history
-  uses the existing production Hasura endpoint.
-- If the endpoint, schema, or summary rows are missing, the revenue page keeps
+- If the shared endpoint, schema, or summary rows are missing, the revenue page keeps
   forecast rows visible and labels earned-yield actuals as pending/unavailable.
 - If daily snapshots exist but stop advancing, the revenue page marks reserve
   history stale after the latest snapshot day and renders later reserve actuals
@@ -58,15 +53,15 @@ FPMM, CDP, or bridge indexing.
 
 ## First-Block Verification
 
-The reserve config currently starts at block `19111760`, the existing checked-in
-first tracked stETH movement:
+The mainnet config currently starts Ethereum reserve-yield at block `19111760`,
+the existing checked-in first tracked stETH movement:
 
 ```text
 0x297cbad231aa43b915ade1b699b8b0257babe6fff0b62e564d422daace021731
 ```
 
-Before promoting a hosted reserve-yield project, re-derive first tracked
-movements from source-of-truth Ethereum logs for every wallet in:
+Before promoting a hosted reindex that includes Ethereum reserve-yield, re-derive
+first tracked movements from source-of-truth Ethereum logs for every wallet in:
 
 - `indexer-envio/src/handlers/susds/shared.ts`
 - `indexer-envio/src/handlers/steth/shared.ts`
@@ -88,7 +83,8 @@ stETH 0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84
 ```
 
 For each tracked wallet, query every indexed wallet position (`from`, `to`,
-`sender`, `owner`, `receiver`) and set the config start block to the minimum
+`sender`, `owner`, `receiver`) and set
+`ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` or the config default to the minimum
 hit across all tracked wallets and contracts.
 
 Example `cast` shape for one wallet/topic pair:
@@ -100,11 +96,11 @@ cast rpc --rpc-url "$ETHEREUM_ARCHIVE_RPC_URL" eth_getLogs \
 
 ## Hosted Promotion Gate
 
-Do not wire `NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL` to production until:
+Do not promote a hosted reindex with Ethereum reserve-yield enabled until:
 
 1. `pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test` passes.
-2. A fresh hosted reserve-yield deployment starts from an unsynced state.
-3. The Ethereum deployment advances beyond the old stall boundaries and catches
+2. A fresh hosted deployment starts from an unsynced state.
+3. The deployment advances beyond the old stall boundaries and catches
    up to head.
 4. The dashboard `/revenue` page shows restored reserve actuals from the
-   dedicated endpoint and continues to label stale/partial data correctly.
+   shared endpoint and continues to label stale/partial data correctly.

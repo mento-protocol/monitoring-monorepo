@@ -75,12 +75,6 @@ variable "hasura_url" {
   default     = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql"
 }
 
-variable "reserve_yield_hasura_url" {
-  description = "Optional GraphQL endpoint for the separate Ethereum reserve-yield Envio indexer. Leave empty until the hosted replay is verified."
-  type        = string
-  default     = ""
-}
-
 variable "hasura_testnet_url" {
   description = "Optional GraphQL endpoint for the Monad Testnet Envio indexer. Leave empty to keep Monad Testnet hidden."
   type        = string

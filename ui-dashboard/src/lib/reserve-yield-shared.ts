@@ -94,13 +94,9 @@ export async function fetchGraphql(
   query: string,
   variables: Record<string, unknown>,
 ): Promise<unknown> {
-  const hasuraUrl =
-    process.env.NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL?.trim() ||
-    process.env.NEXT_PUBLIC_HASURA_URL?.trim();
+  const hasuraUrl = process.env.NEXT_PUBLIC_HASURA_URL?.trim();
   if (!hasuraUrl) {
-    throw new Error(
-      "NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL or NEXT_PUBLIC_HASURA_URL is not configured",
-    );
+    throw new Error("NEXT_PUBLIC_HASURA_URL is not configured");
   }
   const res = await fetchImpl(hasuraUrl, {
     method: "POST",

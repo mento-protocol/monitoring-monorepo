@@ -366,36 +366,6 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdings[0].earnedYieldUsd).toBeCloseTo(300, 6);
   });
 
-  it("queries the dedicated reserve-yield Hasura endpoint when configured", async () => {
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
-    vi.stubEnv(
-      "NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL",
-      "https://reserve-yield.example/v1/graphql",
-    );
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json(RESERVE_WITH_YIELD_COMPONENTS))
-      .mockResolvedValueOnce(
-        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
-      )
-      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
-      .mockResolvedValueOnce(
-        Response.json({
-          data: {
-            SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
-          },
-        }),
-      );
-    const { GET } = await loadRoute();
-
-    const res = await GET();
-
-    expect(res.status).toBe(200);
-    expect(fetchMock.mock.calls[3]?.[0]).toBe(
-      "https://reserve-yield.example/v1/graphql",
-    );
-  });
-
   it("does not refresh sUSDS earned yield from reserve rows outside indexed wallets", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     vi.spyOn(globalThis, "fetch")

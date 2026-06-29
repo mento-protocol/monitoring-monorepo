@@ -7,7 +7,6 @@ import { SUSDS_YIELD_DAILY_SNAPSHOTS } from "@/lib/queries";
 import { REQUEST_TIMEOUT_MS } from "@/lib/fetch-all-networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import { SWR_KEY_RESERVE_YIELD_HISTORY } from "@/lib/swr-keys";
-import { clientEnv } from "@/env";
 import type { SusdsYieldDailySnapshotRow } from "@/lib/canonical-revenue";
 
 export type ReserveYieldHistoryResult = {
@@ -33,13 +32,6 @@ const HISTORY_PAGE_SIZE = 1000;
 const HISTORY_MAX_PAGES = 20;
 
 function reserveYieldHistoryHasuraUrl(): string {
-  const reserveYieldUrl = clientEnv.NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL;
-  if (reserveYieldUrl) {
-    return reserveYieldUrl;
-  }
-
-  // Fallback for deployments before the dedicated reserve-yield indexer is
-  // promoted: production Celo uses the shared multichain Envio endpoint.
   const url = NETWORKS["celo-mainnet"].hasuraUrl;
   if (!url) {
     throw new Error("Hasura URL is not configured for reserve yield history");

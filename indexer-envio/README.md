@@ -51,12 +51,11 @@ This prevents collisions when the same contract address is deployed on multiple 
 
 ## Configuration
 
-| File                                 | Networks                                          |
-| ------------------------------------ | ------------------------------------------------- |
-| `config.multichain.mainnet.yaml`     | Celo Mainnet + Monad Mainnet (default/production) |
-| `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                      |
-| `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness              |
-| `config.reserve-yield.mainnet.yaml`  | Ethereum sUSDS/stETH reserve-yield harness        |
+| File                                 | Networks                                                                   |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| `config.multichain.mainnet.yaml`     | Ethereum reserve-yield + Celo Mainnet + Monad Mainnet (default/production) |
+| `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                                               |
+| `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness                                       |
 
 `config/protocolActors.json` contains manual protocol-controlled caller and
 entry-point overrides for the dashboard volume filter. Pool liquidity-strategy
@@ -93,13 +92,11 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
 ### Available Commands (from repo root)
 
 ```bash
-pnpm indexer:codegen                # Generate types (multichain mainnet — Celo + Monad)
+pnpm indexer:codegen                # Generate types (multichain mainnet — Ethereum reserve-yield + Celo + Monad)
 pnpm indexer:dev                    # Start local multichain mainnet indexer
 pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev            # Start local multichain testnet indexer
-pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:codegen  # Generate types (Ethereum reserve-yield config)
-pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:dev      # Start local Ethereum reserve-yield indexer
-pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test     # Codegen reserve config, run sUSDS/stETH tests, restore mainnet codegen
+pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test     # Codegen mainnet config, run sUSDS/stETH tests, restore mainnet codegen
 pnpm deploy:indexer                 # Push to envio branch → triggers hosted reindex
 pnpm deploy:indexer:status <commit> --watch  # Wait for registration, then watch sync state
 pnpm deploy:indexer:logs <commit> --build    # Show build logs for a deployment

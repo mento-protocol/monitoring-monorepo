@@ -10,7 +10,7 @@ last_verified: 2026-05-20
 
 ## What This Is
 
-Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split. Ethereum reserve-yield entities and handlers run through a separate chain-1 config so historical replay cannot block the primary Celo + Monad hosted indexer.
+Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split. Ethereum reserve-yield entities run in the same hosted project through event-only sUSDS/stETH handlers; the historical sUSDS onBlock heartbeat is intentionally excluded.
 
 ## Before Opening PRs
 
@@ -22,12 +22,10 @@ This is mandatory for cross-layer/stateful data work. Do not assume the UI/query
 
 ## Key Files
 
-- `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad)
+- `config.multichain.mainnet.yaml` — **Default** mainnet config (Ethereum reserve-yield + Celo + Monad)
 - `config.multichain.testnet.yaml` — Testnet multichain config
-- `config.reserve-yield.mainnet.yaml` — Ethereum sUSDS/stETH reserve-yield config; uses the event-only reserve entry point and must be hosted separately from the primary `mento` indexer
-- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, plus sUSDS and stETH yield ledgers used by the reserve-yield config)
-- `src/EventHandlers.ts` — Event processing logic
-- `src/EventHandlersReserveYield.ts` — Reserve-yield handler entry point; registers sparse sUSDS/stETH events and intentionally excludes the historical sUSDS `onBlock` heartbeat
+- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, plus sUSDS and stETH yield ledgers)
+- `src/EventHandlers.ts` — Event processing logic, including event-only sUSDS/stETH reserve-yield handlers
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
 - `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
 - `config/protocolActors.json` — Manual protocol-controlled caller/entry-point overrides for the dashboard volume filter. Dynamic pool liquidity-strategy contracts are classified from `Pool.rebalancerAddress`; add entries here only for protocol actors that are not already discoverable from pool state or normal contract metadata.
@@ -43,9 +41,7 @@ pnpm dev                    # Start indexer in dev mode (Docker: Postgres + Hasu
 pnpm start                  # Start in production mode
 pnpm stop                   # Stop Docker containers
 pnpm test                   # Run tests (vitest)
-pnpm indexer:reserve-yield:codegen  # Generate types from config.reserve-yield.mainnet.yaml
-pnpm indexer:reserve-yield:dev      # Start the local Ethereum reserve-yield indexer
-pnpm indexer:reserve-yield:test     # Codegen reserve config, run sUSDS/stETH tests, restore mainnet codegen
+pnpm indexer:reserve-yield:test     # Codegen mainnet config, run sUSDS/stETH tests, restore mainnet codegen
 pnpm check:yaml-addresses   # Verify every address in config*.yaml resolves to a known source
 ```
 
@@ -91,7 +87,7 @@ Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route
 
 > **Note:** These RPC URLs are only used for contract reads (`eth_call`). Envio's event syncing uses HyperSync, configured in the YAML files.
 
-Mainnet (Celo + Monad): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`. Reserve yield (Ethereum): `pnpm indexer:reserve-yield:test` for the event suites, then `pnpm indexer:reserve-yield:dev` for local replay.
+Mainnet (Ethereum reserve-yield + Celo + Monad): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`. Reserve-yield event suites: `pnpm indexer:reserve-yield:test`.
 
 ## Local dev gotchas
 

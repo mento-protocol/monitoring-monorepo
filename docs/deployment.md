@@ -65,10 +65,9 @@ git push origin main:envio
 4. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
 5. Verify monitoring.mento.org loads data.
 
-Reserve-yield actuals are not deployed through the primary `mento` Envio
-project. Use `indexer-envio/config.reserve-yield.mainnet.yaml` for the separate
-Ethereum sUSDS/stETH project, and only set
-`NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL` after a fresh hosted replay catches up.
+Reserve-yield actuals deploy through the primary `mento` Envio project. The
+Ethereum sUSDS/stETH handlers in `config.multichain.mainnet.yaml` are event-only;
+the historical sUSDS onBlock heartbeat is not part of the hosted path.
 
 To check whether Envio's persistent effect cache is active for a deployment:
 
@@ -169,17 +168,16 @@ manual CLI commands (`gh secret set`, `vercel env add`, `gcloud secrets versions
 add`, etc.). Add or update the owning Terraform resource/integration instead,
 document the source of truth here, and wait for a human-approved plan/apply.
 
-| Variable                               | Source                   | Description                                               |
-| -------------------------------------- | ------------------------ | --------------------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL`               | `terraform.tfvars`       | Prod Envio endpoint (Celo + Monad)                        |
-| `NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL` | `terraform.tfvars`       | Optional dedicated reserve-yield Envio endpoint           |
-| `NEXT_PUBLIC_HASURA_URL_TESTNET`       | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                     |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`  | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                      |
-| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`    | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks |
-| `UPSTASH_REDIS_REST_URL`               | Terraform output         | Address labels Redis — auto-set from DB                   |
-| `UPSTASH_REDIS_REST_TOKEN`             | Terraform output         | Address labels Redis token — auto-set                     |
-| `BLOB_STORE_ID`                        | Vercel store integration | Blob OIDC store id for backup and restore routes          |
-| `BLOB_WEBHOOK_PUBLIC_KEY`              | Vercel store integration | Blob OIDC public key for the connected store              |
+| Variable                              | Source                   | Description                                                 |
+| ------------------------------------- | ------------------------ | ----------------------------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Ethereum reserve-yield + Celo + Monad) |
+| `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                       |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                        |
+| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks   |
+| `UPSTASH_REDIS_REST_URL`              | Terraform output         | Address labels Redis — auto-set from DB                     |
+| `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Address labels Redis token — auto-set                       |
+| `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes            |
+| `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store                |
 
 ### Aggregator Integration Probes
 

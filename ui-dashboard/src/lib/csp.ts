@@ -24,7 +24,6 @@ function configuredHasuraConnectSrc(): string[] {
     new Set(
       [
         clientEnv.NEXT_PUBLIC_HASURA_URL,
-        clientEnv.NEXT_PUBLIC_RESERVE_YIELD_HASURA_URL,
         clientEnv.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA,
         clientEnv.NEXT_PUBLIC_HASURA_URL_TESTNET,
       ].flatMap((url) => (url ? [new URL(url).origin] : [])),

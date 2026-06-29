@@ -38,10 +38,6 @@ upstash_api_key = "..."
 # Override here only if the deployment ID changes.
 # hasura_url = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql"
 
-# Optional separate reserve-yield endpoint. Leave unset until a hosted
-# reserve-yield replay is verified.
-# reserve_yield_hasura_url = "https://indexer.hyperindex.xyz/<reserve-yield-deployment>/v1/graphql"
-
 # Optional hosted testnet Envio endpoints. Each hosted testnet network stays
 # hidden unless its URL is set and show_testnet_networks is true.
 # hasura_testnet_url = "https://indexer.hyperindex.xyz/<testnet-deployment>/v1/graphql"

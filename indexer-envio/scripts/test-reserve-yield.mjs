@@ -4,7 +4,6 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
 const defaultConfigPath = "config.yaml";
-const reserveConfigPath = "config.reserve-yield.mainnet.yaml";
 const mainnetConfigPath = "config.multichain.mainnet.yaml";
 
 function run(command, args, options = {}) {
@@ -17,24 +16,24 @@ function run(command, args, options = {}) {
 }
 
 const defaultConfig = readFileSync(defaultConfigPath, "utf8");
-const reserveConfig = readFileSync(reserveConfigPath, "utf8");
+const mainnetConfig = readFileSync(mainnetConfigPath, "utf8");
 
-const reserveCodegen = run(
+const mainnetCodegen = run(
   "node",
   [
     "./scripts/run-envio-with-env.mjs",
     "codegen",
     "--config",
-    reserveConfigPath,
+    mainnetConfigPath,
   ],
   { env: { ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD: "0" } },
 );
 
-let testStatus = reserveCodegen;
-if (reserveCodegen === 0) {
+let testStatus = mainnetCodegen;
+if (mainnetCodegen === 0) {
   // Envio's test harness reads the default config path. This intentionally
   // follows a config.yaml symlink, then restores the original target content.
-  writeFileSync(defaultConfigPath, reserveConfig, "utf8");
+  writeFileSync(defaultConfigPath, mainnetConfig, "utf8");
   try {
     testStatus = run(
       "pnpm",
@@ -51,11 +50,15 @@ if (reserveCodegen === 0) {
   }
 }
 
-const restoreStatus = run("node", [
-  "./scripts/run-envio-with-env.mjs",
-  "codegen",
-  "--config",
-  mainnetConfigPath,
-]);
+const restoreStatus = run(
+  "node",
+  [
+    "./scripts/run-envio-with-env.mjs",
+    "codegen",
+    "--config",
+    mainnetConfigPath,
+  ],
+  { env: { ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD: "0" } },
+);
 
 process.exit(testStatus || restoreStatus);
