@@ -329,6 +329,27 @@ MSG
   return 1
 }
 
+ensure_autoreview_helper() {
+  local helper="${AUTOREVIEW_HELPER:-$HOME/.agents/skills/autoreview/scripts/autoreview}"
+
+  echo "==> Verifying global autoreview helper"
+  if [[ -x "$helper" ]]; then
+    return 0
+  fi
+
+  cat >&2 <<MSG
+error: the global autoreview skill helper is required for Codex Cloud agent work:
+  ${helper}
+
+Codex Cloud does not inherit a developer's local ~/.agents directory. Install or
+bake the shared autoreview skill into the environment at
+~/.agents/skills/autoreview before running this setup script, or set
+AUTOREVIEW_HELPER to the executable helper path. The repo ship flow depends on
+\`pnpm agent:autoreview\` as a batch-boundary review before opening PRs.
+MSG
+  return 1
+}
+
 echo "==> Marking repository safe for git"
 git config --global --add safe.directory "$REPO_ROOT" || true
 
@@ -353,6 +374,7 @@ pnpm --version
 
 prewarm_trunk
 install_trunk_tools
+ensure_autoreview_helper
 
 echo "==> Installing workspace dependencies"
 CI=true pnpm install --frozen-lockfile
