@@ -209,9 +209,6 @@ Project-wide silences live in `react-doctor.config.json`. Current state:
 ### Historical Cleanup Notes
 
 The dashboard's enforced React Doctor state is **100 / 100 (0 diagnostics)**.
-Historical cleanup notes live in `BACKLOG.md` under "Follow-ups deferred from
-PR #367 (react-doctor diff gate)". Single source of truth — update there, not
-here.
 
 ## Tech Stack
 
