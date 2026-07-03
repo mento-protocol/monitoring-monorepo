@@ -14,6 +14,7 @@ import {
   hasCodexInFlightReaction,
   classifyCodexReviewSignal,
   isCodexReviewRequestBody,
+  parseReadinessOverrideComment,
   summarizeReadyState,
   summarizeTerminalReadyState,
   splitRequiredAndOptionalChecks,
@@ -927,6 +928,152 @@ test("requires chatgpt-codex-connector +1 reaction exactly", () => {
   );
 });
 
+test("parses only human current-head readiness override comments", () => {
+  const active = parseReadinessOverrideComment(
+    {
+      body: "/pr-ready-override gate=codex-description-approval head=abc123 reason=Codex review quota exhausted after clean checks",
+      author_association: "MEMBER",
+      html_url: "https://github.com/example/comment",
+      user: { login: "chapati23", type: "User" },
+      created_at: "2026-05-21T13:24:00Z",
+    },
+    "abc123",
+  );
+
+  assertEqual(active.state, "active");
+  assertEqual(active.gate, "codex-description-approval");
+  assertEqual(active.head, "abc123");
+  assertEqual(active.reason, "Codex review quota exhausted after clean checks");
+
+  const multiline = parseReadinessOverrideComment(
+    {
+      body: "/pr-ready-override gate=codex-description-approval head=abc123 reason=Codex review quota exhausted after clean checks\n\nAdditional maintainer context.",
+      author_association: "MEMBER",
+      user: { login: "chapati23", type: "User" },
+    },
+    "abc123",
+  );
+  assertEqual(multiline.state, "active");
+  assertEqual(
+    multiline.reason,
+    "Codex review quota exhausted after clean checks",
+  );
+
+  const mentionedCommand = parseReadinessOverrideComment(
+    {
+      body: "Please use /pr-ready-override gate=codex-description-approval head=abc123 reason=quoted example",
+      author_association: "MEMBER",
+      user: { login: "chapati23", type: "User" },
+    },
+    "abc123",
+  );
+  assertEqual(mentionedCommand, null);
+
+  const stale = parseReadinessOverrideComment(
+    {
+      body: "/pr-ready-override gate=codex-description-approval head=old123 reason=old head",
+      author_association: "MEMBER",
+      user: { login: "chapati23", type: "User" },
+    },
+    "abc123",
+  );
+  assertEqual(stale.state, "ignored");
+  assertEqual(stale.reasonIgnored, "head_mismatch");
+
+  const unsupportedGate = parseReadinessOverrideComment(
+    {
+      body: "/pr-ready-override gate=some-other-gate head=abc123 reason=workaround",
+      author_association: "MEMBER",
+      user: { login: "chapati23", type: "User" },
+    },
+    "abc123",
+  );
+  assertEqual(unsupportedGate.state, "ignored");
+  assertEqual(unsupportedGate.reasonIgnored, "unsupported_gate");
+
+  const bot = parseReadinessOverrideComment(
+    {
+      body: "/pr-ready-override gate=codex-description-approval head=abc123 reason=nope",
+      author_association: "MEMBER",
+      user: { login: "automation[bot]", type: "Bot" },
+    },
+    "abc123",
+  );
+  assertEqual(bot.state, "ignored");
+  assertEqual(bot.reasonIgnored, "author_not_allowed");
+
+  const missingReason = parseReadinessOverrideComment(
+    {
+      body: "/pr-ready-override gate=codex-description-approval head=abc123",
+      author_association: "MEMBER",
+      user: { login: "chapati23", type: "User" },
+    },
+    "abc123",
+  );
+  assertEqual(missingReason.state, "ignored");
+  assertEqual(missingReason.reasonIgnored, "missing_reason");
+});
+
+test("readiness override clears only the Codex approval gate for the current head", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    issueComments: [
+      {
+        body: "/pr-ready-override gate=codex-description-approval head=abc123 reason=Codex review quota exhausted after clean checks",
+        author_association: "MEMBER",
+        html_url: "https://github.com/example/comment",
+        user: { login: "chapati23", type: "User" },
+        created_at: "2026-05-21T13:24:00Z",
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.codexApprovalReaction, false);
+  assertEqual(summary.gates.codexDescriptionApproval.ready, true);
+  assertEqual(summary.gates.codexDescriptionApproval.state, "overridden");
+  assertEqual(summary.readinessOverrides.length, 1);
+  assertEqual(
+    summary.required.blockers.some(
+      (blocker) => blocker.name === "Codex PR-description approval",
+    ),
+    false,
+  );
+});
+
+test("readiness override does not clear other required blockers", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "test", conclusion: "FAILURE", status: "COMPLETED" },
+      ],
+    },
+    issueComments: [
+      {
+        body: "/pr-ready-override gate=codex-description-approval head=abc123 reason=Codex unavailable",
+        author_association: "MEMBER",
+        user: { login: "chapati23", type: "User" },
+        created_at: "2026-05-21T13:24:00Z",
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, false);
+  assertEqual(summary.gates.codexDescriptionApproval.state, "overridden");
+  assert(
+    summary.required.blockers.some(
+      (blocker) => blocker.kind === "check" && blocker.name === "test",
+    ),
+    "expected failed required check to remain blocking",
+  );
+});
+
 test("classifies Codex review signal as missing, requested, in flight, stale, or approved", () => {
   const headUpdatedAt = Date.parse("2026-05-21T13:22:23Z");
 
@@ -1684,7 +1831,34 @@ test("human output names the readiness verdict and codex reaction gate", () => {
   assert(output.includes("Codex review signal: missing"), output);
 });
 
-test("compact output includes only readiness counters and Codex signal state", () => {
+test("human and compact output report active readiness overrides", () => {
+  const summary = summarizeReadyState({
+    pr: { ...basePr, statusCheckRollup: [] },
+    issueComments: [
+      {
+        body: "/pr-ready-override gate=codex-description-approval head=abc123 reason=Codex quota exhausted",
+        author_association: "MEMBER",
+        html_url: "https://github.com/example/comment",
+        user: { login: "chapati23", type: "User" },
+        created_at: "2026-05-21T13:24:00Z",
+      },
+    ],
+  });
+  const human = formatHuman(summary);
+  const compact = formatCompact(summary);
+
+  assert(human.includes("Readiness overrides active: 1"), human);
+  assert(
+    human.includes(
+      "codex-description-approval by chapati23 for abc123: Codex quota exhausted",
+    ),
+    human,
+  );
+  assert(compact.includes("codex_approval=overridden"), compact);
+  assert(compact.includes("overrides=1"), compact);
+});
+
+test("compact output includes readiness counters and Codex signal state", () => {
   const output = formatCompact(
     summarizeReadyState({
       pr: { ...basePr, statusCheckRollup: [] },
@@ -1697,6 +1871,7 @@ test("compact output includes only readiness counters and Codex signal state", (
   assert(output.includes("required_blockers=1"), output);
   assert(output.includes("codex_approval=missing"), output);
   assert(output.includes("codex_signal=missing"), output);
+  assert(output.includes("overrides=0"), output);
 });
 
 if (failed > 0) {

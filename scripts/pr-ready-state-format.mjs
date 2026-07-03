@@ -55,6 +55,9 @@ export function formatHuman(summary) {
     }`,
   );
   lines.push(`Codex review signal: ${summary.codexReviewSignal}`);
+  lines.push(
+    `Readiness overrides active: ${summary.readinessOverrides?.length ?? 0}`,
+  );
 
   const sections = [
     [
@@ -92,6 +95,14 @@ export function formatHuman(summary) {
         `${item.author ?? "bot"} ${item.url ?? ""} ${formatShortBody(
           item.body,
         )}`.trim(),
+    ],
+    [
+      "Readiness overrides",
+      summary.readinessOverrides ?? [],
+      (item) =>
+        `${item.gate} by ${item.author ?? "unknown"} for ${item.head}: ${
+          item.reason
+        } ${item.url ?? ""}`.trim(),
     ],
   ];
 
@@ -136,5 +147,6 @@ export function formatCompact(summary) {
     `unreplied=${summary.unrepliedRootReviewComments.length}`,
     `codex_approval=${summary.gates.codexDescriptionApproval.state}`,
     `codex_signal=${summary.codexReviewSignal}`,
+    `overrides=${summary.readinessOverrides?.length ?? 0}`,
   ].join(" ");
 }

@@ -85,16 +85,28 @@ the repo's existing gates:
 4. `agent:autoreview` can prepare richer repo-context review bundles:
 
 - Add `pnpm agent:autoreview --prepare-bundle-dir <dir>`.
-- Write changed paths, patch files, copied selected checklists, and the global
+- Write changed paths, patch files, copied selected checklists, and the
   helper's `autoreview-prompt.md` into an out-of-worktree bundle directory.
 - Add `--feedback-pr <number>` to include `pr:feedback-state` JSON for
   feedback-fix batches.
 - Keep normal `pnpm agent:autoreview` behavior unchanged.
 
+5. `pr:ready-state` can report a human break-glass override for externally
+   blocked Codex approval:
+
+- Accept a PR comment command from a human `OWNER`, `MEMBER`, or
+  `COLLABORATOR`:
+  `/pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>`.
+- Apply it only to the Codex PR-description approval gate and only for the exact
+  current head SHA.
+- Report the gate as `overridden` with `readinessOverrides[]` evidence instead
+  of pretending Codex approved.
+- Keep checks, mergeability, requested changes, unresolved threads, and
+  unreplied comments fully blocking.
+
 ## Next PR
 
-Consider a human-only break-glass readiness override that is reported by
-`pr:ready-state`, not silently treated as all-clear.
+- None currently planned.
 
 ## Later PRs
 

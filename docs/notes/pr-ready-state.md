@@ -44,6 +44,20 @@ Required blockers:
   reaction must be created at or after the current-head update lower bound:
   the head commit's GitHub push timestamp when available, otherwise the first
   current-head check/status observation timestamp.
+- A human break-glass override for the Codex PR-description approval gate only,
+  when Codex review is externally blocked after the rest of the required
+  readiness surface is clean. The override must be a PR comment from a GitHub
+  `OWNER`, `MEMBER`, or `COLLABORATOR` human author:
+
+  ```text
+  /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
+  ```
+
+  The override is scoped to the exact current head SHA, so any new push expires
+  it. It is reported as gate state `overridden` with `readinessOverrides[]`
+  evidence; it is not hidden as a normal Codex approval. It never overrides
+  failing or pending required checks, merge conflicts, draft state, requested
+  changes, unresolved review threads, or unreplied review comments.
 
 Optional signals:
 
@@ -187,6 +201,9 @@ Field expectations:
   needs `kind`, `name`, `state`, and `required: false`.
 - `gates`: named repo-policy gates that are not obvious from raw check status.
   Each gate should say whether it is required for readiness.
+- `readinessOverrides[]`: active human break-glass overrides that affected a
+  gate. Each entry includes `gate`, exact `head`, `reason`, `author`, URL, and
+  timestamp. Empty means no override was applied.
 - `pr:feedback-state` adds `findings[]`: normalized review findings from inline
   review threads, root review comments, and actionable top-level bot comments or
   review bodies. Each entry has a stable `fingerprint`, `source`, `sourceId`,
@@ -258,10 +275,10 @@ reached, stop posting duplicate `@codex review` requests and inspect whether
 the limit reply is the current-head Codex result. If it is current-head and
 approval is still missing, treat the Codex PR-description approval as
 externally blocked even if `codexReviewSignal` reports `in_flight`; quota or
-settings must change, or the gate must be intentionally overridden. If the
-limit reply is only historical and the current head is `requested` or
-`in_flight` for another Codex signal, keep watching until Codex approves, posts
-new feedback, or the signal becomes stale.
+settings must change, or the gate must be intentionally overridden with the
+head-scoped comment syntax above. If the limit reply is only historical and the
+current head is `requested` or `in_flight` for another Codex signal, keep
+watching until Codex approves, posts new feedback, or the signal becomes stale.
 
 ## Babysitting Speed Discipline
 
