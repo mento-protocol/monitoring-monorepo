@@ -49,7 +49,7 @@ Celo Mainnet (42220), Monad Mainnet (143), and Ethereum reserve-yield events (1)
 ### Prerequisites
 
 - Node.js 22 LTS
-- [pnpm](https://pnpm.io/) 10.x
+- [pnpm](https://pnpm.io/) 11.x
 - Docker (for local indexer dev — runs Postgres + Hasura)
 
 ### Install
@@ -217,6 +217,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 | Variable                                 | Description                                                                                                |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `ENABLE_EXPERIMENTAL_COREPACK`           | Vercel Corepack opt-in so hosted builds honor the repo `packageManager` pnpm version (Terraform-managed)   |
 | `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo, Monad, and Ethereum reserve-yield data)                       |
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`         | Optional Monad Testnet Envio GraphQL endpoint                                                              |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`    | Optional Celo Sepolia Envio GraphQL endpoint                                                               |

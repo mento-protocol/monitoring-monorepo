@@ -52,6 +52,14 @@ resource "vercel_project" "dashboard" {
 
 # ── Environment Variables ─────────────────────────────────────────────────────
 
+resource "vercel_project_environment_variable" "enable_experimental_corepack" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "ENABLE_EXPERIMENTAL_COREPACK"
+  value      = "1"
+  target     = ["production", "preview"]
+}
+
 resource "vercel_project_environment_variable" "hasura_url" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id

@@ -37,3 +37,8 @@ overrides:
   # in @discordjs/rest's response wrapping — sends deliver but report as failures;
   # see issue #833). If no patched Discord release exists, keep any high-audit
   # exception advisory-, version-, and path-scoped in ../scripts/pnpm-audit-high-gate.mjs.
+
+# pnpm 11 records dependency build-script policy explicitly.
+allowBuilds:
+  esbuild: true
+  protobufjs: false

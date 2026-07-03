@@ -46,6 +46,18 @@ is_disabled() {
   esac
 }
 
+persist_user_path_entry() {
+  local path_entry="$1"
+  local export_line="export PATH=\"${path_entry}:\$PATH\""
+
+  for profile in "$HOME/.bashrc" "$HOME/.profile"; do
+    touch "$profile"
+    if ! grep -Fqx "$export_line" "$profile"; then
+      printf '\n%s\n' "$export_line" >>"$profile"
+    fi
+  done
+}
+
 install_github_cli_from_official_apt_repo() {
   local arch
   arch="$(dpkg --print-architecture)"
@@ -329,6 +341,50 @@ MSG
   return 1
 }
 
+install_foundry() {
+  if is_disabled "${CODEX_CLOUD_INSTALL_FOUNDRY:-true}"; then
+    echo "==> Skipping Foundry install because CODEX_CLOUD_INSTALL_FOUNDRY=${CODEX_CLOUD_INSTALL_FOUNDRY}"
+    return 0
+  fi
+
+  export PATH="${HOME}/.foundry/bin:${PATH}"
+  persist_user_path_entry "$HOME/.foundry/bin"
+  if command -v forge >/dev/null 2>&1; then
+    echo "==> Foundry already available"
+    forge --version
+    return 0
+  fi
+
+  echo "==> Installing Foundry for Aegis forge tests"
+  local foundryup_url="${CODEX_CLOUD_FOUNDRYUP_URL:-https://foundry.paradigm.xyz}"
+  if [[ -n "${CODEX_CLOUD_FOUNDRYUP_SHA256:-}" ]]; then
+    local tmp_dir
+    local installer
+    tmp_dir="$(mktemp -d)"
+    installer="${tmp_dir}/foundryup"
+    curl -fsSL "$foundryup_url" -o "$installer"
+    printf '%s  %s\n' "${CODEX_CLOUD_FOUNDRYUP_SHA256}" "$installer" | sha256sum -c -
+    bash "$installer"
+    rm -rf "$tmp_dir"
+  else
+    # Foundry's public bootstrap script is HTTPS-only by default. Hardened
+    # environments can mirror it and set CODEX_CLOUD_FOUNDRYUP_SHA256 above.
+    curl -fsSL "$foundryup_url" | bash
+  fi
+  if ! command -v foundryup >/dev/null 2>&1; then
+    cat >&2 <<'MSG'
+error: foundryup was not installed on PATH after running the Foundry installer.
+Codex Cloud must allow HTTPS egress to foundry.paradigm.xyz and GitHub release
+hosts, or the base image must preinstall Foundry. Without `forge`, the mapped
+agent quality gate cannot run Aegis Foundry checks.
+MSG
+    return 1
+  fi
+
+  foundryup
+  forge --version
+}
+
 ensure_autoreview_helper() {
   local default_helper="$REPO_ROOT/scripts/agent-autoreview.mjs"
   local helper="${AUTOREVIEW_HELPER:-$default_helper}"
@@ -348,6 +404,29 @@ This repo vendors its default helper at:
 Restore that file before running this setup script, or set AUTOREVIEW_HELPER to
 an executable helper path. The repo ship flow depends on \`pnpm agent:autoreview\`
 as a batch-boundary review before opening PRs.
+MSG
+  return 1
+}
+
+check_osv_api_egress() {
+  if is_disabled "${CODEX_CLOUD_CHECK_OSV_EGRESS:-true}"; then
+    echo "==> Skipping OSV API egress check because CODEX_CLOUD_CHECK_OSV_EGRESS=${CODEX_CLOUD_CHECK_OSV_EGRESS}"
+    return 0
+  fi
+
+  echo "==> Checking OSV API egress"
+  if curl -fsS --max-time 20 \
+    -H "Content-Type: application/json" \
+    -d '{"queries":[{"package":{"ecosystem":"npm","name":"lodash"},"version":"4.17.20"}]}' \
+    https://api.osv.dev/v1/querybatch >/dev/null; then
+    return 0
+  fi
+
+  cat >&2 <<'MSG'
+error: Codex Cloud could not query https://api.osv.dev/v1/querybatch.
+Enable Agent internet access for this environment, allowlist api.osv.dev, and
+allow POST requests. Trunk's osv-scanner linter uses this API during full
+quality-gate scans.
 MSG
   return 1
 }
@@ -377,6 +456,8 @@ pnpm --version
 ensure_autoreview_helper
 prewarm_trunk
 install_trunk_tools
+install_foundry
+check_osv_api_egress
 
 echo "==> Installing workspace dependencies"
 CI=true pnpm install --frozen-lockfile

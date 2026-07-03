@@ -638,7 +638,16 @@ to a reachable mirror of the pinned Linux Trunk tarball and set
 `CODEX_CLOUD_TRUNK_TARBALL_SHA256` so setup verifies the mirrored artifact before
 installing it. Keep `CODEX_CLOUD_TRUNK_INSTALL_TOOLS=true` (the default) for
 normal Cloud runs; set it to `false` only when using a base image with a
-prewarmed Trunk cache.
+prewarmed Trunk cache. Setup also installs Foundry by default
+(`CODEX_CLOUD_INSTALL_FOUNDRY=true`) so Aegis `forge test` checks can run. Set
+`CODEX_CLOUD_FOUNDRYUP_URL` to use a mirrored installer and
+`CODEX_CLOUD_FOUNDRYUP_SHA256` to verify that mirrored installer before
+execution. Setup checks OSV API egress by POSTing to
+`https://api.osv.dev/v1/querybatch` unless `CODEX_CLOUD_CHECK_OSV_EGRESS=false`,
+and verifies the repo-local autoreview helper at
+`scripts/agent-autoreview.mjs` before tool prewarm. Set `AUTOREVIEW_HELPER` only
+for an intentional executable override; setup fails fast when the effective
+helper is missing.
 
 Codex Cloud maintenance runs when Codex resumes a cached container after
 checking out the task branch. It skips apt/tool installation, re-establishes

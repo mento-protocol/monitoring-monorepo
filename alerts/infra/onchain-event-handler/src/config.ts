@@ -30,7 +30,7 @@ const schema: JSONSchemaType<Env> = {
 
 const config = envSchema({
   schema,
-  dotenv: true, // load .env if it is there
+  dotenv: process.env.VITEST ? false : true, // load .env outside hermetic tests
 });
 
 export default config;

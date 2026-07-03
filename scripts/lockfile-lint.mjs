@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Lockfile security validation for pnpm v9 YAML lockfiles.
+ * Lockfile security validation for pnpm v9/v11 YAML lockfiles.
  *
  * lockfile-lint (the npm package) does not support pnpm lockfile v9 format —
  * v9 no longer embeds `resolved:` URLs in pnpm-lock.yaml, so the
@@ -20,7 +20,7 @@
  *      minimum ranges.
  *
  * No external dependencies — parses the lockfile with pure Node.js regex on
- * the known-structured pnpm v9 format.
+ * the known-structured pnpm lockfile format.
  *
  * Run: `pnpm lockfile:lint`
  * CI: .github/workflows/supply-chain.yml
@@ -57,7 +57,8 @@ if (!existsSync(lockfilePath)) {
 
 const lockfileText = readFileSync(lockfilePath, "utf8");
 
-// Confirm lockfile version — only v9 is understood by this script.
+// Confirm lockfile version — only v9 is understood by this script. pnpm 11
+// still writes lockfileVersion 9.x for this workspace.
 const versionMatch = lockfileText.match(
   /^lockfileVersion:\s*['"]?(\S+?)['"]?\s*$/m,
 );
@@ -69,21 +70,48 @@ const lockfileVersion = versionMatch[1];
 if (!lockfileVersion.startsWith("9")) {
   fail(
     `Unexpected lockfile version "${lockfileVersion}" — this script targets pnpm v9.x. ` +
-      "Update the script if you upgraded pnpm.",
+      "Update the script if pnpm's lockfile schema changes.",
   );
   process.exit(1);
 }
 
-// Extract the `packages:` section (between "packages:\n" and "snapshots:\n" or EOF).
-// In pnpm v9 the packages section lists every resolved package with its
-// resolution block (integrity hash + optional engines/peerDependencies).
-const packagesSectionStart = lockfileText.indexOf("\npackages:\n");
-const snapshotsSectionStart = lockfileText.indexOf("\nsnapshots:\n");
+function selectPackageGraphDocument(text) {
+  const documents = text.split(/^---\s*$/m);
+  return (
+    documents.find(
+      (document) =>
+        /^packages:\s*$/m.test(document) && /^snapshots:\s*$/m.test(document),
+    ) ?? text
+  );
+}
+
+function topLevelHeaderIndex(text, header) {
+  const match = new RegExp(`^${header}:\\s*$`, "m").exec(text);
+  return match ? { index: match.index, length: match[0].length } : null;
+}
+
+const packageGraphDocument = selectPackageGraphDocument(lockfileText);
+
+// Extract the `packages:` section (between top-level `packages:` and
+// `snapshots:` or EOF). pnpm 11 may write leading metadata as a separate YAML
+// document; parse the document containing the package graph, not just the first
+// `packages:` string in the file.
+const packagesSectionStart = topLevelHeaderIndex(
+  packageGraphDocument,
+  "packages",
+);
+const snapshotsSectionStart = topLevelHeaderIndex(
+  packageGraphDocument,
+  "snapshots",
+);
 const packagesSection =
-  packagesSectionStart !== -1
-    ? lockfileText.slice(
-        packagesSectionStart + "\npackages:\n".length,
-        snapshotsSectionStart !== -1 ? snapshotsSectionStart : undefined,
+  packagesSectionStart !== null
+    ? packageGraphDocument.slice(
+        packagesSectionStart.index + packagesSectionStart.length,
+        snapshotsSectionStart !== null &&
+          snapshotsSectionStart.index > packagesSectionStart.index
+          ? snapshotsSectionStart.index
+          : undefined,
       )
     : "";
 

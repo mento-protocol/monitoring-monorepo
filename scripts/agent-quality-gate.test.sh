@@ -538,12 +538,22 @@ hook_repo="$(mktemp -d)"
   git add README.md
   git commit -qm "commit from session"
   minimal_bin="$(mktemp -d)"
-  git_bin="$(command -v git)"
-  # Preserve the bundled Git wrapper path; symlinking it breaks its relative native paths.
-  cat > "$minimal_bin/git" <<SH
-#!/usr/bin/env bash
-exec "$git_bin" "\$@"
-SH
+  real_git="$(command -v git)"
+  real_git_quoted="$(printf '%q' "$real_git")"
+  IFS= read -r real_git_first_line < "$real_git" || real_git_first_line=""
+  if [[ "$real_git_first_line" == '#!'* ]]; then
+    # Codex Cloud exposes git as a bash wrapper; preserve that path even when
+    # this test constrains PATH to a tiny fixture directory.
+    cat > "$minimal_bin/git" <<EOF
+#!/bin/bash
+exec /bin/bash $real_git_quoted "\$@"
+EOF
+  else
+    cat > "$minimal_bin/git" <<EOF
+#!/bin/bash
+exec $real_git_quoted "\$@"
+EOF
+  fi
   chmod +x "$minimal_bin/git"
   for tool in awk bash cat dirname pwd tr wc; do
     ln -s "$(command -v "$tool")" "$minimal_bin/$tool"
