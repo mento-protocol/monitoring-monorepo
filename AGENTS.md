@@ -587,7 +587,12 @@ to spawn unavailable nested `codex exec`; explicit `--engine` arguments and
 forked.
 
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
-`~/.claude` directories. Configure the Codex Cloud environment setup script as:
+`~/.claude` directories. The cloud image/environment must therefore install the
+shared global autoreview skill at `~/.agents/skills/autoreview` (or set
+`AUTOREVIEW_HELPER` to its executable helper) before repo setup or maintenance
+runs. Both scripts fail fast when the helper is missing because PR shipping
+requires `pnpm agent:autoreview` as the structured batch-boundary review.
+Configure the Codex Cloud environment setup script as:
 
 ```bash
 ./scripts/codex-cloud-setup.sh
@@ -617,7 +622,8 @@ prewarmed Trunk cache.
 
 Codex Cloud maintenance runs when Codex resumes a cached container after
 checking out the task branch. It skips apt/tool installation, re-establishes
-repo-local git state, refreshes `origin/main`, syncs branch lockfile changes via
+repo-local git state, refreshes `origin/main`, verifies that the global
+autoreview helper is still present, syncs branch lockfile changes via
 `CI=true pnpm install --frozen-lockfile --prefer-offline`, regenerates Envio
 types, and runs `pnpm agent:context-check`.
 
