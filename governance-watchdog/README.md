@@ -164,9 +164,10 @@ This service lives in its own dedicated GCP project (not `mento-alerts` or
    # Slack notification channel ID for error alerts
    # This channel is created via OAuth in GCP Console (not managed by Terraform).
    # Bootstrap or rotate the matching
-   # TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID value in the
-   # production-infra environment / repo settings before the CI apply. Do not
-   # reuse the alerts-owned TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID secret.
+   # TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID repository secret
+   # for plan jobs, and keep the production-infra Environment secret in sync for
+   # gated applies. Do not reuse the alerts-owned
+   # TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID secret.
    # To find the ID:
    #   `gcloud beta monitoring channels list --project=governance-watchdog-b2a6 --format='table(name,displayName,type)'`
    # Or via UI:

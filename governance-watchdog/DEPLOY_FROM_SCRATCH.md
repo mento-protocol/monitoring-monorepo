@@ -187,9 +187,10 @@ run `pnpm run cache:clear` so local scripts pick it up.
      ```
 
      Bootstrap or rotate the matching
-     `TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID` value in the
-     production-infra environment / repo settings before the CI apply. Do not
-     reuse the alerts-owned `TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID` secret.
+     `TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID` repository
+     secret for plan jobs, and keep the production-infra Environment secret in
+     sync for gated applies. Do not reuse the alerts-owned
+     `TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID` secret.
 
    - Run `terraform apply` again to create the error alerting policy
 

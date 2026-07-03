@@ -36,13 +36,15 @@ name: Governance Watchdog Infra
 #     reported actual changes, and only for stack-root changes or explicit
 #     workflow_dispatch, behind the `production-infra` Environment gate.
 #
-# Required repository/environment secrets are this stack's TF_VAR_* values (see
+# Required plan-time repository secrets are this stack's TF_VAR_* values (see
 # the env blocks below): GCP bootstrap (org_id, billing_account), Discord +
 # Telegram notification creds, QuickNode api_key + security_token,
-# x_auth_token, victorops_webhook_url, and the github_token PAT. Operators
-# bootstrap or rotate those values in the production-infra environment / repo
-# settings; `github_actions_secret` resources then self-manage the TF_VAR_*
-# mirror consumed by terraform-drift.yml.
+# x_auth_token, victorops_webhook_url, and the github_token PAT. The plan job
+# does not attach the `production-infra` Environment, so every plan-time value
+# must exist as a repository secret. Keep matching `production-infra`
+# Environment secrets in sync for apply-time values that are intentionally
+# scoped behind that gate; `github_actions_secret` resources then self-manage
+# the TF_VAR_* mirror consumed by terraform-drift.yml.
 #
 # Note: we intentionally do NOT save the plan as a binary artifact for
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
