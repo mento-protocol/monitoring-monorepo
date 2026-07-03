@@ -414,7 +414,7 @@ function extractOverrideValue(body, key) {
 }
 
 function extractOverrideReason(body) {
-  const match = String(body ?? "").match(/(?:^|\s)reason=(.+)$/i);
+  const match = String(body ?? "").match(/(?:^|\s)reason=(.+)$/im);
   return match?.[1]?.trim() ?? "";
 }
 
@@ -734,6 +734,8 @@ export function summarizeReadyState({
     issueComments,
     currentHeadOid,
   );
+  // Keep the gate/head check at the use site so later override types cannot
+  // satisfy this gate merely by appearing in the active override list.
   const codexDescriptionApprovalOverride = activeReadinessOverrides.find(
     (override) =>
       override.gate === CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE &&

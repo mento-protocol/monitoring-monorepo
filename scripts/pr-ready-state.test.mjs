@@ -945,6 +945,20 @@ test("parses only human current-head readiness override comments", () => {
   assertEqual(active.head, "abc123");
   assertEqual(active.reason, "Codex review quota exhausted after clean checks");
 
+  const multiline = parseReadinessOverrideComment(
+    {
+      body: "/pr-ready-override gate=codex-description-approval head=abc123 reason=Codex review quota exhausted after clean checks\n\nAdditional maintainer context.",
+      author_association: "MEMBER",
+      user: { login: "chapati23", type: "User" },
+    },
+    "abc123",
+  );
+  assertEqual(multiline.state, "active");
+  assertEqual(
+    multiline.reason,
+    "Codex review quota exhausted after clean checks",
+  );
+
   const mentionedCommand = parseReadinessOverrideComment(
     {
       body: "Please use /pr-ready-override gate=codex-description-approval head=abc123 reason=quoted example",
@@ -965,6 +979,17 @@ test("parses only human current-head readiness override comments", () => {
   );
   assertEqual(stale.state, "ignored");
   assertEqual(stale.reasonIgnored, "head_mismatch");
+
+  const unsupportedGate = parseReadinessOverrideComment(
+    {
+      body: "/pr-ready-override gate=some-other-gate head=abc123 reason=workaround",
+      author_association: "MEMBER",
+      user: { login: "chapati23", type: "User" },
+    },
+    "abc123",
+  );
+  assertEqual(unsupportedGate.state, "ignored");
+  assertEqual(unsupportedGate.reasonIgnored, "unsupported_gate");
 
   const bot = parseReadinessOverrideComment(
     {
