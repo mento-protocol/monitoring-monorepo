@@ -871,19 +871,29 @@ function reviewDeletedFileReferences(repo, target, findings) {
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean)) {
-    const result = spawnSync(
-      "git",
-      ["grep", "-n", "-F", "--", rel, "HEAD", "--", "."],
-      {
-        cwd: repo,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    const treeRef =
+      target.mode === "branch"
+        ? "HEAD"
+        : target.mode === "commit"
+          ? target.ref
+          : null;
+    const grepArgs = treeRef
+      ? ["grep", "-n", "-F", "--", rel, treeRef, "--", "."]
+      : ["grep", "-n", "-F", "--", rel, "--", "."];
+    const result = spawnSync("git", grepArgs, {
+      cwd: repo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     if (result.status !== 0 || !result.stdout.trim()) continue;
+    const treePrefix = treeRef ? `${treeRef}:` : "";
     const hit = result.stdout
       .split("\n")
-      .map((line) => line.replace(/^HEAD:/, ""))
+      .map((line) =>
+        treePrefix && line.startsWith(treePrefix)
+          ? line.slice(treePrefix.length)
+          : line,
+      )
       .find((line) => !line.startsWith(`${rel}:`));
     if (!hit) continue;
     const fileSeparator = hit.indexOf(":");
@@ -951,15 +961,33 @@ function reviewDocsDrift(repo, paths, findings) {
   }
 }
 
-function reviewDiffCheck(repo, findings) {
-  const result = spawnSync("git", ["diff", "--check"], {
-    cwd: repo,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
+function diffCheckCommands(target) {
+  if (target.mode === "branch") {
+    return [["diff", "--check", `${target.ref}...HEAD`]];
+  }
+  if (target.mode === "commit") {
+    return [["show", "--format=", "--check", target.ref]];
+  }
+  return [
+    ["diff", "--cached", "--check"],
+    ["diff", "--check"],
+  ];
+}
+
+function reviewDiffCheck(repo, target, findings) {
+  const outputs = [];
+  for (const gitArgs of diffCheckCommands(target)) {
+    const result = spawnSync("git", gitArgs, {
+      cwd: repo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
+    if (output) outputs.push(output);
+  }
+  const output = outputs.join("\n");
   if (!output) return;
-  const first = output.split("\n")[0];
+  const first = output.split("\n").find(Boolean) || output;
   const match = first.match(/^(.+):(\d+):\s*(.+)$/);
   addLocalFinding(
     findings,
@@ -982,7 +1010,7 @@ function runLocalReview(
   reviewTerraformDriftWorkflow(repo, paths, findings);
   reviewDeletedFileReferences(repo, target, findings);
   reviewDocsDrift(repo, paths, findings);
-  reviewDiffCheck(repo, findings);
+  reviewDiffCheck(repo, target, findings);
   return {
     findings,
     overall_correctness:
@@ -1032,18 +1060,20 @@ function printReport(report) {
 
 function startParallelTests(command, repo) {
   console.log(`tests: ${command}`);
-  return spawn(command, {
+  const child = spawn(command, {
     cwd: repo,
     shell: true,
     stdio: "inherit",
   });
+  const done = new Promise((resolve) => {
+    child.on("error", () => resolve(1));
+    child.on("close", (code) => resolve(code ?? 1));
+  });
+  return { done };
 }
 
-function finishParallelTests(proc) {
-  if (!proc) return Promise.resolve(0);
-  return new Promise((resolve) => {
-    proc.on("close", (code) => resolve(code ?? 1));
-  });
+function finishParallelTests(testRun) {
+  return testRun?.done ?? Promise.resolve(0);
 }
 
 async function main() {
