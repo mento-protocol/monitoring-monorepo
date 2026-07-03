@@ -14,6 +14,7 @@ stderr="$tmp_dir/stderr"
 cat >"$helper" <<'HELPER'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$AUTOREVIEW_CAPTURE"
+pwd >"$AUTOREVIEW_CAPTURE.cwd"
 bundle_output=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -166,5 +167,13 @@ expect_file_contains "$stdout" "agent:autoreview context bundle: $canonical_bund
 
 run_adapter_expect_failure --prepare-bundle-dir "$repo_root/.autoreview-bundle" --mode branch --base HEAD
 expect_stderr_contains "must be outside the repo worktree"
+
+ln -s "$repo_root" "$tmp_dir/repo-link"
+run_adapter_expect_failure --prepare-bundle-dir "$tmp_dir/repo-link" --mode branch --base HEAD
+expect_stderr_contains "must not be a symlink"
+
+subdir_bundle="$tmp_dir/context-bundle-subdir"
+(cd "$repo_root/scripts" && run_adapter --prepare-bundle-dir "$subdir_bundle" --mode branch --base HEAD --dry-run)
+expect_file_contains "$capture.cwd" "$repo_root"
 
 printf 'agent-autoreview adapter tests passed\n'

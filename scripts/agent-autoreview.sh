@@ -248,6 +248,10 @@ prepare_context_bundle() {
   mkdir -p "$bundle_parent"
   bundle_parent="$(cd "$bundle_parent" && pwd -P)"
   bundle_dir="$bundle_parent/$bundle_name"
+  if [[ -L "$bundle_dir" ]]; then
+    echo "agent:autoreview: --prepare-bundle-dir must not be a symlink" >&2
+    exit 2
+  fi
   case "$bundle_dir/" in
     "$repo_abs"/*)
       echo "agent:autoreview: --prepare-bundle-dir must be outside the repo worktree" >&2
@@ -376,7 +380,7 @@ prepare_context_bundle() {
     fi
   } >"$bundle_dir/README.md"
 
-  "$helper" "${helper_args[@]}" >"$bundle_dir/helper-output.txt"
+  (cd "$repo" && "$helper" "${helper_args[@]}") >"$bundle_dir/helper-output.txt"
   cat "$bundle_dir/helper-output.txt"
   printf 'agent:autoreview context bundle: %s\n' "$bundle_dir"
 }
