@@ -747,7 +747,11 @@ async function fetchRequiredStatusContexts({
   };
 }
 
-export async function fetchReadyState({ prArg, repoArg }) {
+export async function fetchReadyState({
+  prArg,
+  repoArg,
+  includeFeedbackDetails = false,
+}) {
   const prViewArgs = [
     "pr",
     "view",
@@ -859,6 +863,7 @@ export async function fetchReadyState({ prArg, repoArg }) {
     requiredStatusContexts: requiredStatusContexts.contexts,
     requiredStatusContextsError: requiredStatusContexts.error,
     requiredStatusContextsAvailable: requiredStatusContexts.error === null,
+    includeFeedbackDetails,
   });
 }
 

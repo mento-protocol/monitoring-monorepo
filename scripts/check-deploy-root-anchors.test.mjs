@@ -41,12 +41,6 @@ const orderedAnchors = {
     'cd "$REPO_ROOT"',
     'TAG="$(git rev-parse --short HEAD)"',
   ],
-  "scripts/deploy-gov-watchdog.sh": [
-    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
-    'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',
-    'cd "$REPO_ROOT"',
-    "COMMIT_SHA=$(git rev-parse --short HEAD)",
-  ],
 };
 
 const scripts = readdirSync(resolve(ROOT, "scripts"))

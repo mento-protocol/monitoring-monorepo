@@ -395,22 +395,27 @@ Check that:
 - ✅ All links work and point to the correct resources
 - ✅ No errors in the cloud function logs (`pnpm run logs`)
 
-### 7. Deploy to Production
+### 7. Open a PR and Deploy via CI
 
-Once all tests pass, deploy the updated cloud function:
+Once all tests pass, open a PR with the event handler, fixture, tests, and
+QuickNode filter changes. After the PR merges to `main`,
+`.github/workflows/governance-watchdog.yml` re-plans the
+`governance-watchdog/infra` stack and applies through the `production-infra`
+GitHub Environment when the stack root changed. The environment approval is the
+human deploy gate.
+
+For a code-only break-glass update to an already deployed function, use the
+`gcloud` helper:
 
 ```sh
-# Option 1: Deploy via Terraform (recommended)
-pnpm run deploy
-
-# Option 2: Deploy via gcloud CLI (faster, but creates terraform state drift)
 pnpm run deploy:function
 ```
 
 **What happens:**
 
 1. Your TypeScript code is compiled to JavaScript
-2. The cloud function is updated with the new event handler
+2. The cloud function is updated with the new event handler through CI, or
+   through the break-glass gcloud helper when explicitly approved
 3. QuickNode starts sending matching events to your function
 4. Events are validated, deduplicated, and notifications are sent
 
@@ -430,6 +435,7 @@ The complete workflow for adding a new event:
 3. ✅ **Migrate to Terraform** - Delete manual webhook, create Terraform resource
 4. ✅ **Implement TypeScript handler** - Define types, add config, implement message builders
 5. ✅ **Test locally** - Verify event validation and notification formatting
-6. ✅ **Deploy to production** - Update cloud function and monitor for real events
+6. ✅ **Deploy to production** - Merge the PR, let CI apply through the
+   `production-infra` gate, and monitor for real events
 
 This workflow ensures that your event handler is based on real data and thoroughly tested before going live!

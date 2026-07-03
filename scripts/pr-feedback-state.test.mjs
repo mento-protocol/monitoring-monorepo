@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { summarizeFeedbackState } from "./pr-feedback-state-core.mjs";
+import {
+  buildFeedbackFindings,
+  summarizeFeedbackState,
+} from "./pr-feedback-state-core.mjs";
 import {
   parseFeedbackArgs,
   renderFeedbackState,
@@ -138,7 +141,137 @@ test("summarizes only feedback blockers and counts", () => {
     unrepliedRootReviewComments: 1,
     blockingTopLevelBotComments: 0,
     topLevelBotComments: 1,
+    findings: 2,
+    blockingFindings: 2,
   });
+});
+
+test("normalizes feedback surfaces into findings with state flags", () => {
+  const currentHead = "b".repeat(40);
+  const findings = buildFeedbackFindings(
+    {
+      pr: {
+        headRefOid: currentHead,
+        headUpdatedAt: "2026-06-05T16:30:00Z",
+      },
+      reviewThreads: [
+        {
+          id: "thread-1",
+          path: "scripts/example.mjs",
+          line: 12,
+          isResolved: false,
+          isOutdated: true,
+          author: "cursor[bot]",
+          url: "https://github.example/thread-1",
+          body: "[P2] Fix stale thread",
+        },
+        {
+          id: "thread-2",
+          path: "scripts/example.mjs",
+          line: 20,
+          isResolved: true,
+          isOutdated: false,
+          author: "alice",
+          url: "https://github.example/thread-2",
+          body: "Resolved already",
+        },
+      ],
+      rootReviewComments: [
+        {
+          id: 111,
+          path: "scripts/example.mjs",
+          line: 30,
+          replied: false,
+          author: "claude[bot]",
+          url: "https://github.example/comment-111",
+          body: "Please reply to this.",
+        },
+        {
+          id: 112,
+          path: "scripts/example.mjs",
+          line: 31,
+          replied: true,
+          author: "claude[bot]",
+          url: "https://github.example/comment-112",
+          body: "Already handled.",
+        },
+      ],
+      topLevelBotComments: [
+        {
+          id: 456,
+          author: "chatgpt-codex-connector[bot]",
+          updatedAt: "2026-06-05T16:31:00Z",
+          body: "| # | Severity | Issue |\n| 1 | [P1] | Fix one |\n| 2 | [P2] | Fix two |",
+        },
+      ],
+    },
+    [
+      {
+        id: 456,
+        author: "chatgpt-codex-connector[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: "| # | Severity | Issue |\n| 1 | [P1] | Fix one |\n| 2 | [P2] | Fix two |",
+      },
+    ],
+  );
+
+  assertEqual(findings.length, 6);
+  assertDeepEqual(
+    findings.map((finding) => finding.state),
+    [
+      "unresolved-outdated",
+      "resolved",
+      "unreplied",
+      "replied",
+      "blocking-current-head",
+      "blocking-current-head",
+    ],
+  );
+  assertEqual(findings[0].blocking, true);
+  assertEqual(findings[0].currentHead, false);
+  assertEqual(findings[2].replied, false);
+  assertEqual(findings[3].blocking, false);
+  assertEqual(findings[4].blocking, true);
+  assertEqual(findings[5].blocking, true);
+  assertEqual(findings[4].sourceId, "456#1");
+  assertEqual(findings[5].title, "[P2] Fix two");
+});
+
+test("keeps top-level bot finding fingerprints stable across repeated comments", () => {
+  const base = {
+    pr: {
+      headRefOid: "b".repeat(40),
+      headUpdatedAt: "2026-06-05T16:30:00Z",
+    },
+  };
+  const first = buildFeedbackFindings({
+    ...base,
+    topLevelBotComments: [
+      {
+        id: 456,
+        author: "cursor[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: "**High Severity**\nFix the parser branch.",
+      },
+    ],
+  });
+  const repeated = buildFeedbackFindings({
+    ...base,
+    topLevelBotComments: [
+      {
+        id: 789,
+        author: "cursor[bot]",
+        updatedAt: "2026-06-05T16:45:00Z",
+        body: "**High Severity**\nFix the parser branch.",
+      },
+    ],
+  });
+
+  assertEqual(first.length, 1);
+  assertEqual(repeated.length, 1);
+  assertEqual(first[0].fingerprint, repeated[0].fingerprint);
+  assertEqual(first[0].sourceId, "456#1");
+  assertEqual(repeated[0].sourceId, "789#1");
 });
 
 test("includes requested-change review blockers in feedback blockers", () => {

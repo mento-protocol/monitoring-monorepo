@@ -11,13 +11,13 @@ last_verified: 2026-06-10
 `terraform.stacks.json` is the machine-readable registry for Terraform roots.
 Use it instead of inferring ownership from directory names.
 
-| Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                                     | Plan/apply policy                                                                                                                                          |
-| --------------------- | ---------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, CI WIF/IAM                                                                                | Manual plan; human-approved local apply                                                                                                                    |
-| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + the Aegis service-health rule group, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                                 | PR plan; `main` apply through the `production-infra` GitHub Environment                                                                                    |
-| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources                                                                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                                                                    |
-| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                                 | PR plan; `main` apply through the `production-infra` GitHub Environment                                                                                    |
-| `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project (project factory), the watchdog Cloud Function + source archive, Secret Manager secrets, QuickNode webhooks/filters, Cloud Scheduler health check, log-based monitoring/alerts | Manual plan (`pnpm gov-watchdog:tf:plan`); human-approved local apply via `pnpm gov-watchdog:deploy`; daily read-only drift plan via `terraform-drift.yml` |
+| Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                                     | Plan/apply policy                                                                                                   |
+| --------------------- | ---------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, CI WIF/IAM                                                                                | Manual plan; human-approved local apply                                                                             |
+| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + the Aegis service-health rule group, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                                 | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources                                                                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                                 | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project (project factory), the watchdog Cloud Function + source archive, Secret Manager secrets, QuickNode webhooks/filters, Cloud Scheduler health check, log-based monitoring/alerts | PR plan; `main` apply through the `production-infra` GitHub Environment; daily drift plan via `terraform-drift.yml` |
 
 ## Commands
 
@@ -62,14 +62,13 @@ validation inside the required `CI / ci` sentinel. Keep Terraform path routing
 in `terraform.stacks.json` rather than duplicating stack ownership in workflow
 YAML.
 
-`alerts-rules`, `alerts-delivery`, and `aegis` have CI apply behavior on
-`main`, gated by the `production-infra` GitHub Environment. Their plan jobs can run
-for workflow/notifier edits too, but the apply jobs only become eligible when
-the stack root changed or a maintainer used `workflow_dispatch`. The platform
-and `governance-watchdog` stacks remain manual-plan/manual-apply only —
-governance-watchdog lives in its own GCP project and applies stay operator-run
-(`pnpm gov-watchdog:deploy`, which guards against dirty trees). It opts into
-scheduled drift detection, where CI runs a read-only plan under `org-terraform`
+`alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` have CI
+apply behavior on `main`, gated by the `production-infra` GitHub Environment.
+Their plan jobs can run for workflow/notifier edits too, but the apply jobs only
+become eligible when the stack root changed or a maintainer used
+`workflow_dispatch`. The platform stack remains manual-plan/manual-apply only.
+`governance-watchdog` lives in its own GCP project and also opts into scheduled
+drift detection, where CI runs a read-only plan under `org-terraform`
 impersonation without applying changes.
 
 Routine service deploy workflows use the separate `production-services` GitHub
@@ -104,10 +103,10 @@ Repo admins should keep exactly two production GitHub Environments for this
 repo's Actions workflows:
 
 - `production-infra`: used by Terraform apply jobs in `alerts-infra.yml`,
-  `alerts-rules.yml`, and `aegis-terraform.yml`. Copy the required reviewers
-  from the old `production` environment, allow self-review for the required
-  reviewer, disable administrator bypass, and limit deployment branches to
-  protected `main`.
+  `alerts-rules.yml`, `aegis-terraform.yml`, and `governance-watchdog.yml`.
+  Copy the required reviewers from the old `production` environment, allow
+  self-review for the required reviewer, disable administrator bypass, and
+  limit deployment branches to protected `main`.
 - `production-services`: used by routine service deploy jobs such as
   `metrics-bridge.yml` and `aegis-app-engine.yml`. Limit deployment branches to
   protected `main`, but leave required reviewers unset by default so green

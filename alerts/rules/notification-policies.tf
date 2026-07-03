@@ -366,7 +366,7 @@ resource "grafana_notification_policy" "all" {
         group_by        = ["alertname", "chain", "rateFeed"]
         group_wait      = "30s"
         group_interval  = "5m"
-        repeat_interval = "1d"
+        repeat_interval = "24h"
 
         matcher {
           label = "severity"
