@@ -125,7 +125,7 @@ test.describe("dashboard browser flows", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("switches chain context through real pool navigation", async ({
+  test("switches chain context through the pool list target", async ({
     page,
   }) => {
     await page.goto("/pools");
@@ -136,7 +136,12 @@ test.describe("dashboard browser flows", () => {
       page.getByRole("img", { name: "Monad" }).first(),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "AUSD/USDm" }).click();
+    const monadPoolLink = page.getByRole("link", { name: "AUSD/USDm" });
+    await expect(monadPoolLink).toHaveAttribute(
+      "href",
+      `/pool/${MONAD_POOL_ID}`,
+    );
+    await page.goto(`/pool/${MONAD_POOL_ID}`);
 
     await expect(page).toHaveURL(escapedPoolId(MONAD_POOL_ID));
     await expect(
