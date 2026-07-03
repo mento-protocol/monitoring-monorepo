@@ -1,0 +1,491 @@
+#!/usr/bin/env node
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+
+import {
+  analyzeMateriality,
+  parseArgs,
+  renderHuman,
+} from "./review-materiality.mjs";
+
+let passed = 0;
+let failed = 0;
+
+function test(name, fn) {
+  try {
+    fn();
+    process.stdout.write(`ok ${name}\n`);
+    passed += 1;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`not ok ${name}\n  ${message}\n`);
+    failed += 1;
+  }
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function assertEqual(actual, expected) {
+  if (actual !== expected) {
+    throw new Error(
+      `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    );
+  }
+}
+
+function assertIncludes(haystack, needle) {
+  assert(
+    haystack.includes(needle),
+    `expected ${JSON.stringify(haystack)} to include ${JSON.stringify(needle)}`,
+  );
+}
+
+function stats(entries) {
+  return new Map(Object.entries(entries));
+}
+
+function git(cwd, args) {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+  }
+  return result.stdout;
+}
+
+console.log("\nreview-materiality.mjs tests\n");
+
+test("classifies non-canonical plan-only edits as trivial", () => {
+  const report = analyzeMateriality({
+    paths: ["docs/PLAN-ai-review-process.md"],
+    numstat: stats({
+      "docs/PLAN-ai-review-process.md": { additions: 20, deletions: 0 },
+    }),
+  });
+
+  assertEqual(report.tier, "trivial");
+  assertEqual(report.contextUpdateRequired, false);
+  assertEqual(report.contextUpdateMissing, false);
+});
+
+test("classifies root script changes as full and requiring context", () => {
+  const report = analyzeMateriality({
+    paths: ["package.json", "scripts/review-materiality.mjs"],
+    scriptChanges: [
+      {
+        name: "agent:review-materiality",
+        before: null,
+        after: "node scripts/review-materiality.mjs",
+        kind: "added",
+      },
+    ],
+  });
+
+  assertEqual(report.tier, "full");
+  assertEqual(report.contextUpdateRequired, true);
+  assertEqual(report.contextUpdatesPresent, false);
+  assertEqual(report.contextUpdateMissing, true);
+  assertIncludes(
+    report.contextReasons.map((reason) => reason.detail).join("\n"),
+    "agent:review-materiality",
+  );
+});
+
+test("recognizes context updates when canonical docs are present", () => {
+  const report = analyzeMateriality({
+    paths: ["package.json", "scripts/review-materiality.mjs", "AGENTS.md"],
+    scriptChanges: [
+      {
+        name: "agent:review-materiality",
+        before: null,
+        after: "node scripts/review-materiality.mjs",
+        kind: "added",
+      },
+    ],
+  });
+
+  assertEqual(report.contextUpdateRequired, true);
+  assertEqual(report.contextUpdatesPresent, true);
+  assertEqual(report.contextUpdateMissing, false);
+});
+
+test("recognizes scoped Claude context files as canonical context", () => {
+  const report = analyzeMateriality({
+    paths: ["scripts/review-materiality.mjs", "scripts/CLAUDE.md"],
+  });
+
+  assertEqual(report.contextUpdateRequired, true);
+  assertEqual(report.contextUpdatesPresent, true);
+  assertEqual(report.contextUpdateMissing, false);
+});
+
+test("classifies agent hook and permission configs as context", () => {
+  const report = analyzeMateriality({
+    paths: [".codex/hooks.json", ".claude/settings.json"],
+  });
+
+  assertEqual(report.tier, "full");
+  assertEqual(report.contextUpdateRequired, true);
+  assertEqual(report.contextUpdatesPresent, true);
+  assertEqual(report.contextUpdateMissing, false);
+  assertIncludes(
+    report.contextReasons.map((reason) => reason.detail).join("\n"),
+    ".codex/hooks.json changed",
+  );
+});
+
+test("does not require context updates for pure script test edits", () => {
+  const report = analyzeMateriality({
+    paths: ["scripts/review-materiality.test.mjs"],
+  });
+
+  assertEqual(report.tier, "full");
+  assertEqual(report.contextUpdateRequired, false);
+  assertEqual(report.contextUpdateMissing, false);
+});
+
+test("recognizes multi-segment environment example files", () => {
+  const report = analyzeMateriality({
+    paths: ["ui-dashboard/.env.production.local.example"],
+  });
+
+  assertEqual(report.contextUpdateRequired, true);
+  assertEqual(report.contextUpdateMissing, true);
+  assertIncludes(
+    report.contextReasons.map((reason) => reason.detail).join("\n"),
+    "ui-dashboard/.env.production.local.example changed",
+  );
+});
+
+test("classifies pnpmfile changes as package-manager risk", () => {
+  const report = analyzeMateriality({
+    paths: [
+      "pnpmfile.cjs",
+      ".pnpmfile.cjs",
+      "ui-dashboard/.npmrc",
+      "alerts/infra/onchain-event-handler/pnpm-lock.yaml",
+      "alerts/infra/onchain-event-handler/pnpm-workspace.yaml",
+      ".node-version",
+    ],
+  });
+
+  assertEqual(report.tier, "full");
+  assertEqual(report.contextUpdateRequired, true);
+  assertEqual(report.contextUpdateMissing, true);
+  assertIncludes(
+    report.contextReasons.map((reason) => reason.detail).join("\n"),
+    "pnpmfile.cjs changed",
+  );
+  assertIncludes(
+    report.contextReasons.map((reason) => reason.detail).join("\n"),
+    ".pnpmfile.cjs changed",
+  );
+  assertIncludes(
+    report.contextReasons.map((reason) => reason.detail).join("\n"),
+    "ui-dashboard/.npmrc changed",
+  );
+  assertIncludes(
+    report.contextReasons.map((reason) => reason.detail).join("\n"),
+    "alerts/infra/onchain-event-handler/pnpm-lock.yaml changed",
+  );
+  assertIncludes(
+    report.contextReasons.map((reason) => reason.detail).join("\n"),
+    ".node-version changed",
+  );
+});
+
+test("classifies workspace package manifests as package-manager risk", () => {
+  const report = analyzeMateriality({
+    paths: ["ui-dashboard/package.json"],
+  });
+
+  assertEqual(report.tier, "full");
+  assertEqual(report.contextUpdateRequired, true);
+  assertEqual(report.contextUpdateMissing, true);
+  assertIncludes(
+    report.contextReasons.map((reason) => reason.detail).join("\n"),
+    "ui-dashboard/package.json changed",
+  );
+});
+
+test("classifies stateful indexer and dashboard data-flow paths as full", () => {
+  const report = analyzeMateriality({
+    paths: [
+      "indexer-envio/schema.graphql",
+      "indexer-envio/src/EventHandlersBridgeOnly.ts",
+      "ui-dashboard/src/lib/queries/liquity.ts",
+      "ui-dashboard/src/lib/use-table-sort.ts",
+    ],
+  });
+
+  assertEqual(report.tier, "full");
+});
+
+test("classifies Aegis runtime and deploy paths as full", () => {
+  const report = analyzeMateriality({
+    paths: [
+      "aegis/app.yaml",
+      "aegis/config.yaml",
+      "aegis/grafana-agent/config.alloy",
+      "aegis/bin/deploy.ts",
+    ],
+  });
+
+  assertEqual(report.tier, "full");
+});
+
+test("line-count threshold promotes otherwise simple docs to standard", () => {
+  const report = analyzeMateriality({
+    paths: ["docs/notes/example.md"],
+    numstat: stats({
+      "docs/notes/example.md": { additions: 201, deletions: 0 },
+    }),
+  });
+
+  assertEqual(report.tier, "standard");
+});
+
+test("parseArgs supports base/head/json and changed-path file", () => {
+  const parsed = parseArgs([
+    "--base",
+    "origin/main",
+    "--head",
+    "HEAD",
+    "--changed-paths-file",
+    "/tmp/paths.txt",
+    "--json",
+  ]);
+
+  assertEqual(parsed.base, "origin/main");
+  assertEqual(parsed.head, "HEAD");
+  assertEqual(parsed.changedPathsFile, "/tmp/paths.txt");
+  assertEqual(parsed.json, true);
+});
+
+test("renderHuman reports required but present context updates", () => {
+  const rendered = renderHuman(
+    analyzeMateriality({
+      paths: ["package.json", "AGENTS.md"],
+      scriptChanges: [
+        {
+          name: "agent:review-materiality",
+          before: null,
+          after: "node scripts/review-materiality.mjs",
+          kind: "added",
+        },
+      ],
+    }),
+  );
+
+  assertIncludes(rendered, "Review materiality: full");
+  assertIncludes(rendered, "Context update: required and present");
+});
+
+test("CLI reads changed paths from file and emits JSON", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-test-"));
+  const pathsFile = join(dir, "paths.txt");
+  writeFileSync(pathsFile, "docs/PLAN-ai-review-process.md\n", "utf8");
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        new URL("./review-materiality.mjs", import.meta.url).pathname,
+        "--changed-paths-file",
+        pathsFile,
+        "--json",
+      ],
+      { encoding: "utf8" },
+    );
+    assertEqual(result.status, 0);
+    const parsed = JSON.parse(result.stdout);
+    assertEqual(parsed.tier, "trivial");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI accumulates line counts across committed and unstaged changes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-git-test-"));
+  const script = new URL("./review-materiality.mjs", import.meta.url).pathname;
+
+  try {
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test User"]);
+    writeFileSync(join(dir, "example.md"), "one\n", "utf8");
+    git(dir, ["add", "example.md"]);
+    git(dir, ["commit", "-m", "base"]);
+
+    writeFileSync(join(dir, "example.md"), "one\ntwo\n", "utf8");
+    git(dir, ["add", "example.md"]);
+    git(dir, ["commit", "-m", "head"]);
+    // Unstaged: triggers the head === "HEAD" numstat accumulation branch.
+    writeFileSync(join(dir, "example.md"), "one\ntwo\nthree\n", "utf8");
+
+    const result = spawnSync(
+      process.execPath,
+      [script, "--base", "HEAD~1", "--head", "HEAD", "--json"],
+      {
+        cwd: dir,
+        encoding: "utf8",
+      },
+    );
+
+    assertEqual(result.status, 0);
+    const parsed = JSON.parse(result.stdout);
+    assertEqual(parsed.changedFileCount, 1);
+    assertEqual(parsed.lineChanges.additions, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI falls back to two-dot diff when triple-dot has no merge base", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-git-test-"));
+  const script = new URL("./review-materiality.mjs", import.meta.url).pathname;
+
+  try {
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test User"]);
+    writeFileSync(join(dir, "base.md"), "base\n", "utf8");
+    git(dir, ["add", "base.md"]);
+    git(dir, ["commit", "-m", "base"]);
+    const base = git(dir, ["rev-parse", "HEAD"]).trim();
+
+    git(dir, ["checkout", "--orphan", "feature"]);
+    git(dir, ["rm", "-rf", "."]);
+    writeFileSync(join(dir, "feature.md"), "feature\n", "utf8");
+    git(dir, ["add", "feature.md"]);
+    git(dir, ["commit", "-m", "feature"]);
+
+    const result = spawnSync(
+      process.execPath,
+      [script, "--base", base, "--head", "HEAD", "--json"],
+      {
+        cwd: dir,
+        encoding: "utf8",
+      },
+    );
+
+    assertEqual(result.status, 0);
+    const parsed = JSON.parse(result.stdout);
+    assertEqual(parsed.changedFileCount, 2);
+    assertEqual(parsed.lineChanges.additions, 1);
+    assertEqual(parsed.lineChanges.deletions, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI fails when neither triple-dot nor two-dot diff can read the base", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-git-test-"));
+  const script = new URL("./review-materiality.mjs", import.meta.url).pathname;
+
+  try {
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test User"]);
+    writeFileSync(join(dir, "example.md"), "one\n", "utf8");
+    git(dir, ["add", "example.md"]);
+    git(dir, ["commit", "-m", "base"]);
+
+    const result = spawnSync(
+      process.execPath,
+      [script, "--base", "missing/ref", "--head", "HEAD", "--json"],
+      {
+        cwd: dir,
+        encoding: "utf8",
+      },
+    );
+
+    assert(result.status !== 0, "expected missing base ref to fail");
+    assertIncludes(
+      result.stderr,
+      "unable to read git diff for missing/ref..HEAD",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI counts untracked files without trailing newlines", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-git-test-"));
+  const script = new URL("./review-materiality.mjs", import.meta.url).pathname;
+
+  try {
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test User"]);
+    writeFileSync(join(dir, "tracked.md"), "tracked\n", "utf8");
+    git(dir, ["add", "tracked.md"]);
+    git(dir, ["commit", "-m", "base"]);
+    writeFileSync(join(dir, "untracked.md"), "one", "utf8");
+
+    const result = spawnSync(
+      process.execPath,
+      [script, "--base", "HEAD", "--head", "HEAD", "--json"],
+      {
+        cwd: dir,
+        encoding: "utf8",
+      },
+    );
+
+    assertEqual(result.status, 0);
+    const parsed = JSON.parse(result.stdout);
+    assertEqual(parsed.changedFileCount, 1);
+    assertEqual(parsed.lineChanges.additions, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI fails when script comparison cannot read base package.json", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-git-test-"));
+  const script = new URL("./review-materiality.mjs", import.meta.url).pathname;
+  const pathsFile = join(dir, "paths.txt");
+
+  try {
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test User"]);
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ scripts: { test: "true" } }, null, 2),
+      "utf8",
+    );
+    git(dir, ["add", "package.json"]);
+    git(dir, ["commit", "-m", "base"]);
+    writeFileSync(pathsFile, "package.json\n", "utf8");
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        script,
+        "--changed-paths-file",
+        pathsFile,
+        "--base",
+        "missing/ref",
+        "--head",
+        "HEAD",
+        "--json",
+      ],
+      {
+        cwd: dir,
+        encoding: "utf8",
+      },
+    );
+
+    assert(result.status !== 0, "expected missing package.json base to fail");
+    assertIncludes(result.stderr, "unable to read package.json at missing/ref");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+console.log(`\n${passed} passed, ${failed} failed`);
+if (failed > 0) process.exit(1);

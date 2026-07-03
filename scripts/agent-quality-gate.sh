@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -626,6 +626,7 @@ add_root_tooling_package_script_checks() {
   add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "$reason"
   add_command "bash scripts/agent-quality-gate.test.sh" "$reason"
   add_command "node scripts/agent-prewarm.test.mjs" "$reason"
+  add_command "node scripts/review-materiality.test.mjs" "$reason"
   add_command "node scripts/agent-issue-board.test.mjs" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
@@ -1389,6 +1390,9 @@ while IFS= read -r path; do
           ;;
         scripts/agent-prewarm.mjs|scripts/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
+          ;;
+        scripts/review-materiality.mjs|scripts/review-materiality.test.mjs)
+          add_command "pnpm agent:review-materiality:test" "agent review materiality helper changed"
           ;;
         scripts/agent-issue-board.mjs|scripts/agent-issue-board.test.mjs)
           add_command "pnpm issue:board:test" "agent issue board helper changed"

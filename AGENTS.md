@@ -209,7 +209,8 @@ Terraform apply. If any package manifest, `pnpm-lock.yaml`,
 `--allow-package-script-changes`. The narrow exception is a root `package.json`
 edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:quality-gate:test`, `scripts.agent:prewarm`,
-`scripts.agent:prewarm:test`, `scripts.agent:context-check`,
+`scripts.agent:prewarm:test`, `scripts.agent:review-materiality`,
+`scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
 `scripts.agent:autoreview`, `scripts.issue:board`,
 `scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
 `scripts.issue:release`, `scripts.pr:feedback-state`,
@@ -251,6 +252,19 @@ pass `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` to override.
 Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the pinned
 repo helper. For a true Codex semantic pass from inside Codex, use
 `--prepare-only` and the Codex-native flow described by the autoreview helper.
+
+To classify review depth and likely context-update requirements before or after
+the mapped gate, use:
+
+```bash
+pnpm agent:review-materiality
+```
+
+The command reports `trivial`, `standard`, or `full` materiality from changed
+path risk and diff size, plus whether the change likely needs AGENTS, README,
+runbook, checklist, or skill context updates. It is advisory: it helps choose
+review depth, but it does not replace `pnpm agent:quality-gate --run`,
+`pnpm agent:autoreview`, or `pnpm pr:ready-state`.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
 same gate without running deploy, Terraform, mutation, codegen, or install
@@ -358,9 +372,10 @@ run the shared readiness probe:
 pnpm pr:ready-state --pr <number> --json
 ```
 
-For feedback-only sweeps where the agent needs unresolved threads, unreplied
-root review comments, blocking top-level bot feedback, and Codex review gates
-without shelling out to ad hoc `gh api` calls, use:
+For feedback-only sweeps where the agent needs normalized `findings[]`,
+unresolved threads, unreplied root review comments, blocking top-level bot
+feedback, and Codex review gates without shelling out to ad hoc `gh api` calls,
+use:
 
 ```bash
 pnpm --silent pr:feedback-state --pr <number> --json
@@ -399,11 +414,13 @@ For process or policy-router PRs, build a coverage matrix before implementation.
 ## Recurring PR-review patterns
 
 Recurring automated-review hazards are canonicalized in
-`docs/pr-checklists/recurring-review-patterns.md`. Read that checklist when a
-change touches cross-layer state, CI/deploy behavior, code-health rules,
-dashboard interaction flows, security headers, package-manager behavior, or
-other review-prone surfaces. Keep root instructions as routing context; put the
-detailed rules in the checklist.
+`docs/pr-checklists/recurring-review-patterns.md`. Explicit repo-local review
+exclusions live in `docs/pr-checklists/review-prompt-exclusions.md`; reviewers
+should treat that file as the "do not flag" layer before re-raising old or
+speculative findings. Read those checklists when a change touches cross-layer
+state, CI/deploy behavior, code-health rules, dashboard interaction flows,
+security headers, package-manager behavior, or other review-prone surfaces. Keep
+root instructions as routing context; put the detailed rules in the checklists.
 
 ## Quick Commands
 
@@ -435,6 +452,7 @@ pnpm code-health:history           # CodeScene-style git history report → repo
 pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/ (advisory, never blocks)
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
+pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:autoreview              # Structured closeout review; Codex sandbox defaults to --engine local, override with --engine claude/codex
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
@@ -529,7 +547,7 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 
 - Current expected scale is roughly **30–50 total pools**.
 - At this size, client-side aggregation for the 24h volume tiles/table is acceptable with the current polling setup.
-- Do **not** flag the current snapshot-query aggregation path as a scalability issue in PR reviews unless assumptions change materially (e.g. significantly more pools, much higher polling frequency, or observed latency/cost regressions in production).
+- Do **not** flag the current snapshot-query aggregation path as a scalability issue in PR reviews unless assumptions change materially (e.g. significantly more pools, much higher polling frequency, or observed latency/cost regressions in production). The canonical exclusion lives in `docs/pr-checklists/review-prompt-exclusions.md`.
 
 ## Repo conventions
 

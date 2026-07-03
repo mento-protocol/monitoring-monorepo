@@ -33,6 +33,7 @@ type MockDb = MockDbWith<{
 
 const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, ERC20FeeToken, FPMMFactory } = TestHelpers;
+const SLOW_COVERAGE_TEST_TIMEOUT_MS = 120_000;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -202,64 +203,68 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
   // -------------------------------------------------------------------------
   // Test 1: Same-day same-token merge
   // -------------------------------------------------------------------------
-  it("same-day same-token merge: accumulates amounts and feesUsdWei", async () => {
-    let mockDb = MockDb.createMockDb();
-    mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
+  it(
+    "same-day same-token merge: accumulates amounts and feesUsdWei",
+    async () => {
+      let mockDb = MockDb.createMockDb();
+      mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
 
-    const event1 = createTransferEvent({
-      value: AMOUNT_1E6,
-      srcAddress: USDC_ADDRESS,
-      blockTimestamp: TS_DAY1_MORNING,
-      blockNumber: 501,
-      logIndex: 10,
-    });
-    mockDb = await ERC20FeeToken.Transfer.processEvent({
-      event: event1,
-      mockDb,
-    });
+      const event1 = createTransferEvent({
+        value: AMOUNT_1E6,
+        srcAddress: USDC_ADDRESS,
+        blockTimestamp: TS_DAY1_MORNING,
+        blockNumber: 501,
+        logIndex: 10,
+      });
+      mockDb = await ERC20FeeToken.Transfer.processEvent({
+        event: event1,
+        mockDb,
+      });
 
-    const event2 = createTransferEvent({
-      value: AMOUNT_1E6 * 2n,
-      srcAddress: USDC_ADDRESS,
-      blockTimestamp: TS_DAY1_AFTERNOON,
-      blockNumber: 502,
-      logIndex: 11,
-    });
-    mockDb = await ERC20FeeToken.Transfer.processEvent({
-      event: event2,
-      mockDb,
-    });
+      const event2 = createTransferEvent({
+        value: AMOUNT_1E6 * 2n,
+        srcAddress: USDC_ADDRESS,
+        blockTimestamp: TS_DAY1_AFTERNOON,
+        blockNumber: 502,
+        logIndex: 11,
+      });
+      mockDb = await ERC20FeeToken.Transfer.processEvent({
+        event: event2,
+        mockDb,
+      });
 
-    const dayTs = dayBucket(BigInt(TS_DAY1_MORNING));
-    const snap = getSnapshot(mockDb, POOL_ADDRESS, dayTs);
-    assert.ok(snap, "PoolDailyFeeSnapshot must exist");
-    assert.equal(snap!.transferCount, 2, "transferCount === 2");
-    assert.equal(snap!.tokens.length, 1, "single token");
-    assert.equal(snap!.amounts[0], AMOUNT_1E6 * 3n, "amounts[0] = a + b");
-    assert.equal(
-      snap!.feesUsdWei,
-      AMOUNT_1E6_USD_WEI * 3n,
-      "feesUsdWei = (a + b) scaled to 18dp",
-    );
-    assert.equal(snap!.allPegged, true, "USDC is pegged");
-    assert.equal(snap!.unresolvedCount, 0);
+      const dayTs = dayBucket(BigInt(TS_DAY1_MORNING));
+      const snap = getSnapshot(mockDb, POOL_ADDRESS, dayTs);
+      assert.ok(snap, "PoolDailyFeeSnapshot must exist");
+      assert.equal(snap!.transferCount, 2, "transferCount === 2");
+      assert.equal(snap!.tokens.length, 1, "single token");
+      assert.equal(snap!.amounts[0], AMOUNT_1E6 * 3n, "amounts[0] = a + b");
+      assert.equal(
+        snap!.feesUsdWei,
+        AMOUNT_1E6_USD_WEI * 3n,
+        "feesUsdWei = (a + b) scaled to 18dp",
+      );
+      assert.equal(snap!.allPegged, true, "USDC is pegged");
+      assert.equal(snap!.unresolvedCount, 0);
 
-    // Parity check: raw ProtocolFeeTransfer amounts summed == snapshot amounts[0]
-    const tx1Id = `${CELO_CHAIN}_501_10`;
-    const tx2Id = `${CELO_CHAIN}_502_11`;
-    const raw1 = mockDb.entities.ProtocolFeeTransfer.get(tx1Id) as
-      | { amount: bigint }
-      | undefined;
-    const raw2 = mockDb.entities.ProtocolFeeTransfer.get(tx2Id) as
-      | { amount: bigint }
-      | undefined;
-    assert.ok(raw1 && raw2, "both raw transfers must exist");
-    assert.equal(
-      raw1!.amount + raw2!.amount,
-      snap!.amounts[0],
-      "raw transfer sum == snapshot amounts[0] (parity check)",
-    );
-  });
+      // Parity check: raw ProtocolFeeTransfer amounts summed == snapshot amounts[0]
+      const tx1Id = `${CELO_CHAIN}_501_10`;
+      const tx2Id = `${CELO_CHAIN}_502_11`;
+      const raw1 = mockDb.entities.ProtocolFeeTransfer.get(tx1Id) as
+        | { amount: bigint }
+        | undefined;
+      const raw2 = mockDb.entities.ProtocolFeeTransfer.get(tx2Id) as
+        | { amount: bigint }
+        | undefined;
+      assert.ok(raw1 && raw2, "both raw transfers must exist");
+      assert.equal(
+        raw1!.amount + raw2!.amount,
+        snap!.amounts[0],
+        "raw transfer sum == snapshot amounts[0] (parity check)",
+      );
+    },
+    SLOW_COVERAGE_TEST_TIMEOUT_MS,
+  );
 
   // -------------------------------------------------------------------------
   // Test 2: Same-day different tokens

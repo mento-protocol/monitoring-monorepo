@@ -66,8 +66,8 @@ protection.
 `--watch --compact` for low-noise foreground babysitting. `pnpm
 pr:feedback-state` is the feedback-only projection for unresolved threads,
 unreplied root review comments, blocking top-level bot feedback, contextual
-top-level bot comments, and Codex gates; it is intended to replace ad hoc
-read-only `gh api` scraping during review sweeps.
+top-level bot comments, normalized `findings[]`, and Codex gates; it is
+intended to replace ad hoc read-only `gh api` scraping during review sweeps.
 
 Suggested invocation:
 
@@ -187,6 +187,14 @@ Field expectations:
   needs `kind`, `name`, `state`, and `required: false`.
 - `gates`: named repo-policy gates that are not obvious from raw check status.
   Each gate should say whether it is required for readiness.
+- `pr:feedback-state` adds `findings[]`: normalized review findings from inline
+  review threads, root review comments, and actionable top-level bot comments or
+  review bodies. Each entry has a stable `fingerprint`, `source`, `sourceId`,
+  `author`, URL/location fields, a short `title`/`excerpt`, `state`, and
+  booleans for `currentHead`, `outdated`, `replied`, `unresolved`, and
+  `blocking`. Use it as the feedback ledger for batching and deduplicating
+  review follow-ups; do not treat it as a replacement for the final
+  `pr:ready-state` all-clear gate.
 - `codexReviewSignal`: current-head Codex review state. Values are
   `missing`, `requested`, `in_flight`, `stale`, and `approved`. `requested`
   means a current-head `@codex review` request exists but no bot reaction or

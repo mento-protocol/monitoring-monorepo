@@ -792,6 +792,60 @@ test("summarize ready state ignores self-authored roots but not reviewer self-re
   );
 });
 
+test("feedback detail summaries are opt-in for ready-state output", () => {
+  const input = {
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    reviewComments: [
+      {
+        id: 11,
+        body: "root with author reply",
+        path: "b.ts",
+        line: 2,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 12,
+        in_reply_to_id: 11,
+        body: "fixed",
+        user: { login: "chapati23" },
+      },
+    ],
+    reviewThreads: [
+      {
+        id: "thread-1",
+        path: "b.ts",
+        line: 2,
+        isResolved: true,
+        comments: [{ author: { login: "reviewer" }, body: "handled" }],
+      },
+    ],
+  };
+
+  const defaultSummary = summarizeReadyState(input);
+  assertEqual(Object.hasOwn(defaultSummary, "reviewThreads"), false);
+  assertEqual(Object.hasOwn(defaultSummary, "rootReviewComments"), false);
+
+  const detailedSummary = summarizeReadyState({
+    ...input,
+    includeFeedbackDetails: true,
+  });
+  assertEqual(detailedSummary.reviewThreads.length, 1);
+  assertEqual(detailedSummary.rootReviewComments.length, 1);
+  assertEqual(detailedSummary.rootReviewComments[0].replied, true);
+});
+
 test("filters top-level issue comments down to bots", () => {
   const bots = findTopLevelBotComments([
     { id: 1, body: "human", user: { login: "alice", type: "User" } },
