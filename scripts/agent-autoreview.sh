@@ -133,6 +133,31 @@ arg_value() {
   printf '%s\n' "$default_value"
 }
 
+detect_pr_base() {
+  local repo="$1"
+  local base_ref
+
+  if ! command -v gh >/dev/null 2>&1; then
+    return 0
+  fi
+
+  base_ref="$(cd "$repo" && gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || true)"
+  if [[ -n "$base_ref" ]]; then
+    printf 'origin/%s\n' "$base_ref"
+  fi
+}
+
+branch_base_ref() {
+  local repo="$1"
+  shift
+  local base_ref
+  base_ref="$(arg_value --base "" "$@")"
+  if [[ -z "$base_ref" ]]; then
+    base_ref="$(detect_pr_base "$repo")"
+  fi
+  printf '%s\n' "${base_ref:-origin/main}"
+}
+
 git_output() {
   local repo="$1"
   shift
@@ -303,11 +328,11 @@ prepare_context_bundle() {
       ;;
     branch)
       target_mode="branch"
-      target_ref="$(arg_value --base origin/main "$@")"
+      target_ref="$(branch_base_ref "$repo" "$@")"
       ;;
     auto)
       if [[ -n "$branch" && "$branch" != "main" ]]; then
-        target_ref="$(arg_value --base origin/main "$@")"
+        target_ref="$(branch_base_ref "$repo" "$@")"
         if worktree_dirty "$repo"; then
           target_mode="branch-local"
         else

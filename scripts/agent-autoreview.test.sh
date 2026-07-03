@@ -583,6 +583,30 @@ expect_file_contains "$auto_branch_local_bundle/patches/branch.diff" "diff --git
 expect_file_not_contains "$auto_branch_local_bundle/patches/branch.diff" "external diff invoked"
 expect_file_contains "$auto_branch_local_bundle/patches/untracked.diff" "local body"
 
+pr_base_repo="$tmp_dir/pr-base-bundle"
+init_review_repo "$pr_base_repo"
+printf 'base\n' >"$pr_base_repo/README.md"
+commit_review_repo "$pr_base_repo" init
+git -C "$pr_base_repo" update-ref refs/remotes/origin/release HEAD
+git -C "$pr_base_repo" switch -c feature >/dev/null 2>&1
+printf 'feature\n' >"$pr_base_repo/feature.txt"
+commit_review_repo "$pr_base_repo" "add feature file"
+fake_gh_bin="$tmp_dir/fake-gh-bin"
+mkdir "$fake_gh_bin"
+cat >"$fake_gh_bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [[ "$1" == "pr" && "$2" == "view" ]]; then
+  printf 'release\n'
+  exit 0
+fi
+exit 1
+GH
+chmod +x "$fake_gh_bin/gh"
+pr_base_bundle="$tmp_dir/context-bundle-pr-base"
+(cd "$pr_base_repo" && run_adapter "PATH=$fake_gh_bin:$PATH" --prepare-bundle-dir "$pr_base_bundle" --mode branch --dry-run)
+expect_file_contains "$pr_base_bundle/README.md" "- Target: branch origin/release"
+expect_file_contains "$pr_base_bundle/changed-paths.txt" "feature.txt"
+
 run_adapter_expect_failure --prepare-bundle-dir "$repo_root/.autoreview-bundle" --mode branch --base HEAD
 expect_stderr_contains "must be outside the repo worktree"
 
