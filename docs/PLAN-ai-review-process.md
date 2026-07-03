@@ -70,21 +70,25 @@ the repo's existing gates:
 - Include state fields for current-head, outdated, replied, unresolved, and
   blocking status.
 
-## Next PR
-
-Add prompt-exclusion updates to the global `review` skill:
+3. Prompt-exclusion guidance now lives in
+   `docs/pr-checklists/review-prompt-exclusions.md`:
 
 - Translate recurring accepted/rejected review noise into explicit "do not
   flag" guidance.
-- Keep prompt changes outside this repo unless the owning global skill lives in
-  repo-local context.
-- Use `findings[]` from `pr:feedback-state` to identify repeated false-positive
-  patterns before changing prompts.
+- Keep prompt changes repo-local unless the user explicitly asks for an
+  out-of-repo global skill edit.
+- Route review agents from `AGENTS.md` and
+  `docs/pr-checklists/recurring-review-patterns.md` to the exclusion checklist.
+- Use `findings[]` from `pr:feedback-state` as the feedback-state source of
+  truth before reviving older findings.
+
+## Next PR
+
+Teach `agent:autoreview` to prepare a richer review bundle directory with
+changed paths, patch files, selected checklists, and any feedback ledger.
 
 ## Later PRs
 
-- Teach `agent:autoreview` to prepare a richer review bundle directory with
-  changed paths, patch files, selected checklists, and any feedback ledger.
 - Consider a human-only break-glass readiness override that is reported by
   `pr:ready-state`, not silently treated as all-clear.
 

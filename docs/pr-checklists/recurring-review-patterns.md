@@ -3,7 +3,7 @@ title: Recurring PR Review Patterns
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-07-03
 ---
 
 # Recurring PR Review Patterns
@@ -11,6 +11,14 @@ last_verified: 2026-05-20
 Across the last 20 PRs, review findings clustered into the categories below. **Subsections with a linked checklist (`— docs/pr-checklists/X.md`)** treat the checklist as canonical — the inline tldr is a routing hint, not the source of truth. Subsections without a link are inline-canonical (no upstream checklist yet — candidates for future extraction).
 
 ## Patterns
+
+### Prompt exclusions — `docs/pr-checklists/review-prompt-exclusions.md`
+
+tldr: before re-raising a stale or speculative review finding, check the
+repo-local exclusion list. Feedback state, optional bot lag, non-canonical plan
+files, global skill ownership, docs-only browser verification, advisory gates,
+and dashboard scale assumptions all have narrower "do not flag" rules there.
+Full rules in the linked checklist.
 
 ### SWR + Hasura polling — `docs/pr-checklists/swr-polling-hasura.md`
 

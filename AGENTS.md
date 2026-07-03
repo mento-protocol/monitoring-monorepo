@@ -413,11 +413,13 @@ For process or policy-router PRs, build a coverage matrix before implementation.
 ## Recurring PR-review patterns
 
 Recurring automated-review hazards are canonicalized in
-`docs/pr-checklists/recurring-review-patterns.md`. Read that checklist when a
-change touches cross-layer state, CI/deploy behavior, code-health rules,
-dashboard interaction flows, security headers, package-manager behavior, or
-other review-prone surfaces. Keep root instructions as routing context; put the
-detailed rules in the checklist.
+`docs/pr-checklists/recurring-review-patterns.md`. Explicit repo-local review
+exclusions live in `docs/pr-checklists/review-prompt-exclusions.md`; reviewers
+should treat that file as the "do not flag" layer before re-raising old or
+speculative findings. Read those checklists when a change touches cross-layer
+state, CI/deploy behavior, code-health rules, dashboard interaction flows,
+security headers, package-manager behavior, or other review-prone surfaces. Keep
+root instructions as routing context; put the detailed rules in the checklists.
 
 ## Quick Commands
 
@@ -544,7 +546,7 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 
 - Current expected scale is roughly **30–50 total pools**.
 - At this size, client-side aggregation for the 24h volume tiles/table is acceptable with the current polling setup.
-- Do **not** flag the current snapshot-query aggregation path as a scalability issue in PR reviews unless assumptions change materially (e.g. significantly more pools, much higher polling frequency, or observed latency/cost regressions in production).
+- Do **not** flag the current snapshot-query aggregation path as a scalability issue in PR reviews unless assumptions change materially (e.g. significantly more pools, much higher polling frequency, or observed latency/cost regressions in production). The canonical exclusion lives in `docs/pr-checklists/review-prompt-exclusions.md`.
 
 ## Repo conventions
 
