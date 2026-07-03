@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { test } from "node:test";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   _private,
@@ -12,14 +15,18 @@ import {
   withRawDeltas,
 } from "./file-size-watchlist.mjs";
 
-test("scopeForPath excludes generated files, tests, and dashboard types", () => {
+const scriptPath = fileURLToPath(import.meta.url);
+const repoRoot = resolve(dirname(scriptPath), "..");
+
+test("scopeForPath excludes generated files, non-Aegis tests, and dashboard types", () => {
   assert.equal(scopeForPath("indexer-envio/.envio/types.d.ts"), null);
   assert.equal(scopeForPath("ui-dashboard/src/lib/types.ts"), null);
   assert.equal(
     scopeForPath("ui-dashboard/src/lib/__tests__/foo.test.ts"),
     null,
   );
-  assert.equal(scopeForPath("aegis/src/query.service.spec.ts"), null);
+  assert.equal(scopeForPath("indexer-envio/src/foo.spec.ts"), null);
+  assert.equal(scopeForPath("aegis/src/query.service.spec.ts")?.label, "aegis");
 
   assert.equal(
     scopeForPath("ui-dashboard/src/lib/network-fetcher/fetch.ts")?.label,
@@ -43,6 +50,7 @@ test("countLines tracks raw lines and rough non-comment lines", () => {
   ].join("\n");
 
   assert.deepEqual(countLines(source), { raw: 7, rough: 2 });
+  assert.deepEqual(countLines("const a = 1;\n"), { raw: 1, rough: 1 });
 });
 
 test("scanFileList reports package source files at raw or rough threshold", () => {
@@ -105,7 +113,7 @@ test("baseline parsing supports docs notes and old backlog tables", () => {
     "",
     "| Lines | File | Δ since last report |",
     "| ----: | ---- | ------------------: |",
-    "| 978 | `integration-probes/src/adapters.ts` | (new) |",
+    "| 978 | integration-probes/src/adapters.ts | (new) |",
   ].join("\n");
 
   assert.deepEqual(
@@ -116,6 +124,15 @@ test("baseline parsing supports docs notes and old backlog tables", () => {
       ["integration-probes/src/adapters.ts", 978],
     ],
   );
+});
+
+test("json output honors --limit", () => {
+  const output = execFileSync(
+    process.execPath,
+    ["scripts/file-size-watchlist.mjs", "--format", "json", "--limit", "1"],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  assert.equal(JSON.parse(output).rows.length, 1);
 });
 
 test("withRawDeltas marks new and changed files", () => {
