@@ -140,9 +140,11 @@ Do not promote a hosted reindex with Ethereum reserve-yield enabled until:
 2. A fresh hosted deployment starts from an unsynced state.
 3. The deployment advances beyond the old stall boundaries and catches
    up to head.
-4. The dashboard `/revenue` page shows restored reserve actuals from the
+4. `pnpm deploy:indexer:verify <commit>` returns synced chain status plus
+   non-empty `Pool`, sUSDS, and stETH GraphQL probe rows.
+5. The dashboard `/revenue` page shows restored reserve actuals from the
    shared endpoint and continues to label stale/partial data correctly.
 
-This gate was fulfilled for deployment `6bed96e` on 2026-07-03 after adding an
-archive-capable `ENVIO_RPC_URL_1` in Envio Cloud and promoting the caught-up
-deployment to production.
+The manual proof that motivated this gate was completed for deployment
+`6bed96e` on 2026-07-03 after adding an archive-capable `ENVIO_RPC_URL_1` in
+Envio Cloud and promoting the caught-up deployment to production.

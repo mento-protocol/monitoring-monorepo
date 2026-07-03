@@ -1,6 +1,6 @@
 ---
 name: deploy-indexer
-description: Agent-native Envio indexer deploy orchestrator. Pushes the current branch HEAD to the `envio` branch, watches build and sync, optionally promotes to prod, waits for endpoint switchover, and verifies monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
+description: Agent-native Envio indexer deploy orchestrator. Pushes the current branch HEAD to the `envio` branch, watches build and sync, verifies deployment health, optionally promotes to prod, waits for endpoint switchover, and verifies monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
 title: Deploy Indexer Skill
 status: active
 owner: eng
@@ -10,8 +10,9 @@ last_verified: 2026-05-29
 
 # Deploy Indexer (end-to-end)
 
-Push a commit to the `envio` branch, watch the build + re-index, promote to
-prod, wait for the static URL to flip, then verify the dashboard.
+Push a commit to the `envio` branch, watch the build + re-index, verify
+deployment health, promote to prod, wait for the static URL to flip, then
+verify the dashboard.
 
 Target commit: `HEAD` of the current working directory. The user's request may
 contain the boolean flags `--no-promote` and/or `--no-verify` (see below); it does NOT
@@ -36,9 +37,9 @@ not have to track `main`.
 
 When deploying pre-merge, you typically want to NOT promote yet (the PR
 isn't merged; the new schema isn't live in the codebase). Pass `--no-promote`
-to stop after sync; promote separately once the PR merges. For additive
-schema/data changes that the new dashboard will consume, promote as soon as the
-PR lands, ideally before the matching dashboard deployment serves traffic. If
+to stop after sync; verify and promote separately once the PR merges. For
+additive schema/data changes that the new dashboard will consume, promote as
+soon as the PR lands, ideally before the matching dashboard deployment serves traffic. If
 the PR removes or renames GraphQL fields/entities consumed by either the
 currently deployed dashboard or the new dashboard, there is no universally safe
 one-shot timing: require a backward-compatible/two-phase rollout, or an
@@ -69,8 +70,8 @@ If preflight fails, surface the specific cause and stop. Do not push.
 
 The request MAY contain these flags (in any order):
 
-- `--no-promote` — push + sync, but skip Phase 3 (promote) and everything after. Use for pre-merge deploys where the new schema isn't live in the codebase yet. For additive fields/entities, promote separately with `npx envio-cloud deployment promote mento <commit> mento-protocol -y` once the PR merges, ideally before the matching dashboard deployment serves traffic. For removals/renames, do not promote until a compatibility or cutover plan is confirmed.
-- `--no-verify` — skip Phase 5. Use when you want the deploy + DNS wait to complete unattended.
+- `--no-promote` — push + sync, but skip Phase 3 (pre-promote deployment verification), Phase 4 (promote), and everything after. Use for pre-merge deploys where the new schema isn't live in the codebase yet. For additive fields/entities, later run `pnpm deploy:indexer:verify <commit>` and then `pnpm deploy:indexer:promote <commit> -y` once the PR merges, ideally before the matching dashboard deployment serves traffic. For removals/renames, do not promote until a compatibility or cutover plan is confirmed.
+- `--no-verify` — skip Phase 6 browser/UI verification. Use when you want the deploy + DNS wait to complete unattended.
 
 The deployed commit is always the current `HEAD` — there's no SHA argument. To
 deploy a specific older commit, `git checkout <sha>` first, then run the skill.
@@ -184,17 +185,18 @@ removals/renames until a compatibility or cutover plan is confirmed):
 ```text
 Pre-merge deploy complete. Commit <TARGET_COMMIT> is fully synced and ready.
 For additive fields/entities, promote after the PR lands and before the matching dashboard deployment serves traffic:
-  npx envio-cloud deployment promote mento <TARGET_COMMIT> mento-protocol -y
+  pnpm deploy:indexer:verify <TARGET_COMMIT>
+  pnpm deploy:indexer:promote <TARGET_COMMIT> -y
 For removals/renames, do not promote until compatibility or a coordinated cutover/rollback plan is confirmed.
 ```
 
-Do NOT continue to Phase 3 / 4 / 5. The new schema isn't live in the
+Do NOT continue to Phase 3 / 4 / 5 / 6. The new schema isn't live in the
 dashboard codebase yet, so promoting now would point the static URL at a
 schema the deployed UI may not query correctly. For additions this may be
 mostly pointless; for removals/renames it can break production pages until the
 matching dashboard build is live. It also makes the rollback story muddier.
 
-## Phase 3 — Promote
+## Phase 3 — Verify deployment before promotion
 
 Before any promotion path, classify rollout compatibility against the deployed
 dashboard(s), not just the source branch:
@@ -209,6 +211,20 @@ dashboard(s), not just the source branch:
   and ask for the rollout decision before running the promote command.
 - **Pure backfill/no schema contract change:** continue after confirming the
   deployment is caught up; verify the affected dashboard pages after promote.
+
+Run the narrow deployment verifier before promoting:
+
+```bash
+pnpm deploy:indexer:verify <TARGET_COMMIT>
+```
+
+This batches the Envio deployment status, metrics, endpoint resolution, and
+core GraphQL row probe into one pre-promotion gate. Do not promote if this
+command exits non-zero. `--allow-syncing` is for diagnostics only here: it can
+waive an in-progress chain status during investigation, but it does not waive
+empty GraphQL probe tables and is not a promotion approval.
+
+## Phase 4 — Promote
 
 Before promoting, capture the **current** prod commit so the final summary
 can print a paste-ready rollback command:
@@ -261,14 +277,14 @@ npx envio-cloud indexer get mento mento-protocol -o json \
 
 `prod_status=prod` is the success signal.
 
-## Phase 4 — Wait for static URL switchover
+## Phase 5 — Wait for static URL switchover
 
 The static GraphQL endpoint (e.g. `https://indexer.hyperindex.xyz/60ff18c/v1/graphql`)
 takes ~30 s – a few minutes to flip to the newly promoted deployment. During
 that window the dashboard may transiently query the old schema.
 
 Wait **5 minutes wall-clock**, then proceed. Run a one-shot sleep and wait for
-it to finish before continuing to Phase 5:
+it to finish before continuing to Phase 6:
 
 ```bash
 sleep 300 && echo "dns-window-elapsed"
@@ -284,7 +300,7 @@ add new GraphQL fields, not that the routing hasn't flipped. If you have a
 strong signal in this PR's diff (a new entity / field in `schema.graphql`),
 you MAY query for it as a probe; otherwise just wait 5 min and move on.
 
-## Phase 5 — Verify the UI
+## Phase 6 — Verify the UI
 
 If `--no-verify` was passed, stop here and print the final summary.
 
@@ -305,7 +321,8 @@ user to verify manually.
 
 - **Deployed commit:** `<TARGET_COMMIT>`
 - **Build + sync:** time-to-caught-up (mm:ss), per-chain final blocks
-- **Promote:** ✅ / ❌ (and `PREVIOUS_PROD_COMMIT` captured in Phase 3, for rollback reference)
+- **Deployment verify:** `pnpm deploy:indexer:verify <TARGET_COMMIT>` passed before promotion
+- **Promote:** ✅ / ❌ (and `PREVIOUS_PROD_COMMIT` captured in Phase 4, for rollback reference)
 - **DNS wait:** 5 min completed
 - **UI verify:** pages checked + console errors found (✅ if none)
 - **Rollback command (paste-ready):** `pnpm deploy:indexer:promote <PREVIOUS_PROD_COMMIT> -y` — or "(none — first prod deploy)" if `PREVIOUS_PROD_COMMIT` was empty.
@@ -316,6 +333,7 @@ user to verify manually.
 - **Push to envio fails** → stop; never force-push.
 - **Build doesn't register in 30 min** → stop; suggest `pnpm deploy:indexer:logs --build`.
 - **Sync stalls past 90 min** → stop; report last status. Don't promote.
+- **Deployment verification fails** → stop; do not promote until status, metrics, endpoint, and GraphQL row probe pass.
 - **Promote fails** → stop; the previous deployment is still serving. Surface the error.
 - **DNS wait interrupted** (user cancels) → stop; do not skip to verify.
 - **Verify UI finds errors** → surface them with file/line, ask the user whether to roll back. Don't auto-rollback — promote-to-prior is destructive.
@@ -327,6 +345,7 @@ Re-running `/deploy-indexer` for a commit that's already `prod_status=prod`:
 - Preflight will pass.
 - Push is a no-op (envio already at that commit).
 - Babysit returns immediately ("already promoted").
+- Deployment verification still runs against the target deployment.
 - Promote is a no-op (already prod).
 - DNS wait still fires the 5-min sleep.
 - Verify still runs.
@@ -339,7 +358,7 @@ short-circuit; the verification is the value on a re-run.
 1. You're working on a feature branch with additive indexer changes (new schema entity, new event coverage, new field) and dashboard changes that consume them.
 2. Before opening the PR (or while it's in review), run `/deploy-indexer --no-promote` from the feature branch checkout — pushes the branch tip to `envio`, builds, syncs to caught-up. ~30–60 min.
 3. The PR review proceeds normally. The new deployment exists in `envio-cloud` but isn't `prod` yet, so the live dashboard keeps querying the old indexer.
-4. PR merges to `main`. Now run `/deploy-indexer` (without `--no-promote`) from `main` immediately, ideally before the matching production dashboard deployment serves traffic — preflight passes, push is fast (or a no-op if `envio` is already at the commit you're about to push, i.e. SHA-identical to step 2's tip), babysit returns immediately ("already promoted"), promote flips `prod`, DNS waits 5 min, verify passes. The new schema goes live without the usual 30–60 min indexer-lag window.
+4. PR merges to `main`. Now run `/deploy-indexer` (without `--no-promote`) from `main` immediately, ideally before the matching production dashboard deployment serves traffic — preflight passes, push is fast (or a no-op if `envio` is already at the commit you're about to push, i.e. SHA-identical to step 2's tip), babysit returns immediately ("already promoted"), deployment verification passes, promote flips `prod`, DNS waits 5 min, browser verification passes. The new schema goes live without the usual 30–60 min indexer-lag window.
 5. The fast path in step 4 only holds when the commit you push from `main` is byte-identical to what was already on `envio`. Squash-merge produces a new SHA, so the prior `envio` tip becomes irrelevant and you eat a fresh build + sync. To preserve commit identity through merge: use a merge commit or rebase-merge for branches that were pre-deployed, OR pre-deploy from the merge-base just before merging so the eventual `main` tip matches.
 
 ## Rules
@@ -347,6 +366,7 @@ short-circuit; the verification is the value on a re-run.
 - **Never manually force-push** to `main` or any tracked branch. The `pnpm deploy:indexer` script's `--force-with-lease` push to `envio` is the one sanctioned exception (and `envio` is a deploy-trigger ref, not a tracking branch); any other force-push is off-limits.
 - **Never auto-rollback.** Promote-to-prior is the user's call.
 - **Never bypass the babysit phase** — don't promote based on a single status snapshot.
+- **Never bypass the deployment verifier** — run `pnpm deploy:indexer:verify <TARGET_COMMIT>` after sync and before promote.
 - **Always wait the full 5 min** for DNS switchover before verifying — bypassing produces flaky verify results.
 - **Pass the resolved short SHA explicitly** to status and verification steps — don't rely on "latest", since a concurrent deploy by someone else could shift it.
 - **Don't open a PR** to verify the deploy. This skill is a plumbing chain, not a code-review path. The PR (if any) was merged before this skill ran; the deploy is a separate concern.

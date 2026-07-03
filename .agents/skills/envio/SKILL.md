@@ -36,6 +36,7 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 ```bash
 pnpm deploy:indexer [--yes]         # Push HEAD to `envio` → Envio auto-builds
 pnpm deploy:indexer:status [--watch] [--json]
+pnpm deploy:indexer:verify [<commit>] [--prod] [--json]
 pnpm deploy:indexer:promote [<commit>]
 pnpm deploy:indexer:logs [--follow] [--level error] [--build]
 ```
@@ -112,6 +113,10 @@ envio-cloud deployment restart  mento <commit> mento-protocol
 envio-cloud deployment delete   mento <commit> mento-protocol
 ```
 
+`envio-cloud indexer env list` can print raw `ENVIO_*` secret values. Run it
+only when you specifically need to inspect hosted env configuration, and never
+paste or quote its output in chat, PRs, logs, or docs.
+
 For CI, set `ENVIO_GITHUB_TOKEN` to skip interactive login.
 
 ## Local dev (`envio` CLI)
@@ -176,7 +181,8 @@ When asked to "monitor the latest deployment until ready to promote":
 1. `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — required to surface `deployments[]` + `prod_status`. Filter for the newest entry where `prod_status !== "prod"`. (`pnpm deploy:indexer:info <commit>` is the wrapper for inspecting a specific known commit, not for the "find newest pending" step.) If no pending deployment exists, count `deployments[]` first: three live entries means Envio has no room for a new deployment and you must delete, or ask the user to delete, an obsolete non-prod deployment before retrying. If fewer than three deployments exist, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
 2. Poll `deployment status <commit> -o json` every 5–15 min (Envio builds finish fast, syncs take minutes–hours).
 3. Ready-to-promote condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`.
-4. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**
+4. Run `pnpm deploy:indexer:verify <commit>` to batch status, metrics, endpoint resolution, and the GraphQL row probe before promotion.
+5. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**
 
 ## Useful links
 
