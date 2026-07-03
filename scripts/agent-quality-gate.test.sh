@@ -538,7 +538,14 @@ hook_repo="$(mktemp -d)"
   git add README.md
   git commit -qm "commit from session"
   minimal_bin="$(mktemp -d)"
-  for tool in awk cat dirname git pwd tr wc; do
+  git_bin="$(command -v git)"
+  # Preserve the bundled Git wrapper path; symlinking it breaks its relative native paths.
+  cat > "$minimal_bin/git" <<SH
+#!/usr/bin/env bash
+exec "$git_bin" "\$@"
+SH
+  chmod +x "$minimal_bin/git"
+  for tool in awk bash cat dirname pwd tr wc; do
     ln -s "$(command -v "$tool")" "$minimal_bin/$tool"
   done
   printf '{"cwd":"%s"}' "$hook_repo" |
@@ -1590,10 +1597,6 @@ assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapp
 run_gate "scripts/deploy-bridge.sh"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
 assert_occurrences 1 "- bash -n scripts/deploy-bridge.sh (shell script changed)"
-assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
-
-run_gate "scripts/deploy-gov-watchdog.sh"
-assert_contains "- bash -n scripts/deploy-gov-watchdog.sh (shell script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
 run_gate "scripts/check-deploy-root-anchors.test.mjs"

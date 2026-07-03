@@ -186,9 +186,10 @@ run `pnpm run cache:clear` so local scripts pick it up.
      slack_notification_channel_id = "<channel-id>"
      ```
 
-     `pnpm gov-watchdog:deploy` mirrors this value to the stack-specific
-     `TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID` repo secret
-     for scheduled drift. Do not reuse the alerts-owned
+     Bootstrap or rotate the matching
+     `TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID` repository
+     secret for plan jobs, and keep the production-infra Environment secret in
+     sync for gated applies. Do not reuse the alerts-owned
      `TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID` secret.
 
    - Run `terraform apply` again to create the error alerting policy
