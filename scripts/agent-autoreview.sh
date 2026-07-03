@@ -23,7 +23,7 @@ forward_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prepare-bundle-dir|--context-bundle-dir)
+    --prepare-bundle-dir)
       if [[ $# -lt 2 ]]; then
         echo "agent:autoreview: $1 requires a directory argument" >&2
         exit 2
@@ -282,9 +282,6 @@ prepare_context_bundle() {
     auto)
       if worktree_dirty "$repo"; then
         target_mode="local"
-      elif [[ -n "$branch" && "$branch" != "main" && "$branch" != "master" ]]; then
-        target_mode="branch"
-        target_ref="$(arg_value --base origin/main "$@")"
       else
         target_mode="branch"
         target_ref="$(arg_value --base origin/main "$@")"

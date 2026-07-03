@@ -150,6 +150,9 @@ run_adapter CODEX_SANDBOX=seatbelt -- --dry-run
 expect_args $'--engine\nlocal\n--dry-run'
 expect_stderr_contains "detected Codex sandbox"
 
+run_adapter_expect_failure --feedback-pr 1040
+expect_stderr_contains "requires --prepare-bundle-dir"
+
 bundle_dir="$tmp_dir/context-bundle"
 canonical_bundle_dir="$(cd "$(dirname "$bundle_dir")" && pwd -P)/$(basename "$bundle_dir")"
 run_adapter --prepare-bundle-dir "$bundle_dir" --mode branch --base HEAD --dry-run
