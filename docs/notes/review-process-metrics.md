@@ -74,6 +74,9 @@ node scripts/review-process-metrics.mjs \
 
 Use the PR numbers in each generated `cohort.pullRequestNumbers` list to
 sample review threads and classify each candidate finding.
+The collector exits with a clear error if fewer than the requested 10 or 20 PRs
+have merged after the boundary; do not lower the limit just to make a check-in
+run early.
 
 ## Manual Classification
 

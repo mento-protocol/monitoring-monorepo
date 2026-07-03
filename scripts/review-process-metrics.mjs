@@ -6,11 +6,14 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 const DEFAULT_LIMIT = 20;
-const REVIEW_BOT_LOGINS = new Set([
+const CODEX_BOT_LOGINS = new Set([
   "chatgpt-codex-connector",
   "chatgpt-codex-connector[bot]",
-  "claude",
-  "claude[bot]",
+]);
+const CLAUDE_BOT_LOGINS = new Set(["claude", "claude[bot]"]);
+const REVIEW_BOT_LOGINS = new Set([
+  ...CODEX_BOT_LOGINS,
+  ...CLAUDE_BOT_LOGINS,
   "cursor",
   "cursor[bot]",
 ]);
@@ -136,8 +139,20 @@ function authorLogin(value) {
   return String(value?.author?.login ?? value?.user?.login ?? "").toLowerCase();
 }
 
+function isKnownLogin(login, logins) {
+  return logins.has(String(login ?? "").toLowerCase());
+}
+
 export function isReviewBotLogin(login) {
-  return REVIEW_BOT_LOGINS.has(String(login ?? "").toLowerCase());
+  return isKnownLogin(login, REVIEW_BOT_LOGINS);
+}
+
+export function isCodexBotLogin(login) {
+  return isKnownLogin(login, CODEX_BOT_LOGINS);
+}
+
+export function isClaudeBotLogin(login) {
+  return isKnownLogin(login, CLAUDE_BOT_LOGINS);
 }
 
 export function isFindingLikeText(value) {
@@ -248,6 +263,13 @@ export function selectMergedAfter(prs, afterMergedAt, limit = DEFAULT_LIMIT) {
     .slice(0, limit);
 }
 
+export function assertCompleteCohort(cohort, { direction, limit, boundary }) {
+  if (cohort.length >= limit) return cohort;
+  throw new Error(
+    `only found ${cohort.length} merged PR(s) ${direction} PR #${boundary.number}; requested ${limit}`,
+  );
+}
+
 export function summarizePullRequestMetrics({
   pr,
   reviewComments = [],
@@ -281,10 +303,10 @@ export function summarizePullRequestMetrics({
   );
   const claudeTopLevel = issueComments.filter(
     (comment) =>
-      authorLogin(comment) === "claude" && isClaudeSummary(comment.body),
+      isClaudeBotLogin(authorLogin(comment)) && isClaudeSummary(comment.body),
   );
-  const codexTopLevel = issueComments.filter(
-    (comment) => authorLogin(comment) === "chatgpt-codex-connector",
+  const codexTopLevel = issueComments.filter((comment) =>
+    isCodexBotLogin(authorLogin(comment)),
   );
 
   return {
@@ -393,19 +415,27 @@ export function aggregateMetrics(prs) {
   };
 }
 
-function fetchMergedPrList(repo, limit) {
-  return ghJson([
-    "pr",
-    "list",
-    "--repo",
-    repo,
-    "--state",
-    "merged",
-    "--limit",
-    String(limit),
-    "--json",
-    "number,title,createdAt,mergedAt,url",
-  ]);
+function mapPullRequestFromRest(pr) {
+  return {
+    number: pr.number,
+    title: pr.title,
+    createdAt: pr.created_at,
+    mergedAt: pr.merged_at,
+    url: pr.html_url,
+  };
+}
+
+function fetchMergedPrList(repo) {
+  return flattenGhPages(
+    ghJson([
+      "api",
+      `repos/${repo}/pulls?state=closed&sort=created&direction=desc&per_page=100`,
+      "--paginate",
+      "--slurp",
+    ]),
+  )
+    .filter((pr) => pr.merged_at)
+    .map(mapPullRequestFromRest);
 }
 
 function fetchPrView(repo, number) {
@@ -460,11 +490,16 @@ function resolveCohort(args) {
     "--json",
     "number,title,mergedAt,url",
   ]);
-  const list = fetchMergedPrList(args.repo, Math.max(args.limit * 5, 100));
+  const list = fetchMergedPrList(args.repo);
   const cohort =
     args.beforePr !== null
       ? selectMergedBefore(list, boundary.mergedAt, args.limit)
       : selectMergedAfter(list, boundary.mergedAt, args.limit);
+  assertCompleteCohort(cohort, {
+    direction: args.beforePr !== null ? "before" : "after",
+    limit: args.limit,
+    boundary,
+  });
   return {
     mode: args.beforePr !== null ? "before-pr" : "after-pr",
     beforePr: args.beforePr !== null ? boundary : null,

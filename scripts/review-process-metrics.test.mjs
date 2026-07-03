@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   aggregateMetrics,
+  assertCompleteCohort,
   isFindingLikeText,
+  isCodexBotLogin,
+  isClaudeBotLogin,
   isReviewBotLogin,
   selectMergedAfter,
   selectMergedBefore,
@@ -60,9 +63,23 @@ test("selects merged PRs after the boundary by mergedAt ascending", () => {
 test("identifies review bots and finding-like review text", () => {
   assert.equal(isReviewBotLogin("claude[bot]"), true);
   assert.equal(isReviewBotLogin("chatgpt-codex-connector"), true);
+  assert.equal(isClaudeBotLogin("claude[bot]"), true);
+  assert.equal(isCodexBotLogin("chatgpt-codex-connector[bot]"), true);
   assert.equal(isReviewBotLogin("chapati23"), false);
   assert.equal(isFindingLikeText("[P2] Missing branch coverage"), true);
   assert.equal(isFindingLikeText("Codex Review: no major issues"), false);
+});
+
+test("rejects incomplete boundary cohorts instead of reporting partial data", () => {
+  assert.throws(
+    () =>
+      assertCompleteCohort([{ number: 2 }], {
+        direction: "after",
+        limit: 2,
+        boundary: { number: 1 },
+      }),
+    /only found 1 merged PR\(s\) after PR #1; requested 2/,
+  );
 });
 
 test("summarizes PR review metrics from GitHub-shaped fixtures", () => {
@@ -83,12 +100,12 @@ test("summarizes PR review metrics from GitHub-shaped fixtures", () => {
       ],
       comments: [
         {
-          author: { login: "claude" },
+          author: { login: "claude[bot]" },
           body: "**Claude finished**\n\n[P2] Fix parser edge case",
           createdAt: "2026-07-03T10:30:00Z",
         },
         {
-          author: { login: "chatgpt-codex-connector" },
+          author: { login: "chatgpt-codex-connector[bot]" },
           body: "Codex usage limits have been reached for code reviews.",
           createdAt: "2026-07-03T10:35:00Z",
         },
@@ -100,7 +117,7 @@ test("summarizes PR review metrics from GitHub-shaped fixtures", () => {
       ],
       reviews: [
         {
-          author: { login: "claude" },
+          author: { login: "claude[bot]" },
           submittedAt: "2026-07-03T10:45:00Z",
         },
       ],
@@ -138,6 +155,7 @@ test("summarizes PR review metrics from GitHub-shaped fixtures", () => {
   assert.equal(summary.botReviewSignals.findingLikeTopLevel, 1);
   assert.equal(summary.botReviewSignals.findingLikeInline, 1);
   assert.equal(summary.botReviewSignals.candidateFindings, 2);
+  assert.equal(summary.botReviewSignals.codexComments, 1);
   assert.equal(summary.botReviewSignals.codexUsageLimitComments, 1);
   assert.equal(summary.botReviewSignals.claudeSummaryComments, 1);
 });
