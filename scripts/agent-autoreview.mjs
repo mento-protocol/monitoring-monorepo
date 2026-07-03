@@ -98,7 +98,7 @@ Options:
   --parallel-tests <command>         Run a shell test command while review runs
   --timeout-seconds <seconds>        Reviewer process timeout (default: 1800)
   --dry-run                          Print target/engine without invoking a reviewer
-  --no-tools                         Disable Claude tools; Codex requires read-only sandbox
+  --no-tools                         Disable Claude tools and MCP servers; Codex requires read-only sandbox
   --no-web-search                    Disable Claude WebSearch/WebFetch tools
   --stream-engine-output             Show raw engine output before structured parsing
   --help                             Show this help
@@ -581,6 +581,10 @@ async function runClaude(repo, args, prompt) {
     JSON.stringify(REVIEW_SCHEMA),
     "--permission-mode",
     "dontAsk",
+    // Keep locally configured MCP servers out of the review environment.
+    "--mcp-config",
+    JSON.stringify({ mcpServers: {} }),
+    "--strict-mcp-config",
   ];
   if (args.model) claudeArgs.push("--model", args.model);
   if (args.thinking) claudeArgs.push("--effort", args.thinking);

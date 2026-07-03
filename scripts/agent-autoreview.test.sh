@@ -407,6 +407,9 @@ CLAUDE
 
   run_helper_with_path_in_repo "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
   expect_capture_contains_line "--tools"
+  expect_capture_contains_line "--mcp-config"
+  expect_capture_contains_line '{"mcpServers":{}}'
+  expect_capture_contains_line "--strict-mcp-config"
   expect_capture_not_contains_line "--allowedTools"
   expect_capture_not_contains_line "--allowed-tools"
   expect_stdout_contains "autoreview clean"
