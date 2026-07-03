@@ -250,8 +250,21 @@ final PR readiness probe. Inside an active Codex sandbox, the adapter defaults
 to the helper's local deterministic engine because nested `codex exec` is unavailable there;
 pass `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` to override.
 Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the pinned
-repo helper. For a true Codex semantic pass from inside Codex, use
-`--prepare-only` and the Codex-native flow described by the autoreview helper.
+repo helper.
+
+For a true Codex semantic pass from inside Codex, prepare a repo-context bundle
+and pass that bundle to a fresh-context reviewer:
+
+```bash
+pnpm agent:autoreview --prepare-bundle-dir /tmp/autoreview-bundle
+```
+
+Use a directory outside the repo worktree so local-mode bundles do not include
+their own generated files. The bundle contains changed paths, patch files,
+repo-selected checklist/prompt context, and the helper's
+`autoreview-prompt.md`. Add
+`--feedback-pr <number>` to include the current `pr:feedback-state` ledger as a
+review dataset for feedback-fix batches.
 
 To classify review depth and likely context-update requirements before or after
 the mapped gate, use:
@@ -453,7 +466,7 @@ pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:autoreview              # Structured closeout review; Codex sandbox defaults to --engine local, override with --engine claude/codex
+pnpm agent:autoreview              # Structured closeout review; use --prepare-bundle-dir DIR for Codex-native review bundles
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
@@ -602,6 +615,9 @@ uses the helper's local deterministic engine by default so the command does not
 try to spawn unavailable nested `codex exec`; explicit `--engine` arguments and
 `AUTOREVIEW_ENGINE` still take precedence. `AUTOREVIEW_HELPER` is an escape
 hatch for intentional local testing or replacement, not a Cloud prerequisite.
+The adapter also exposes `--prepare-bundle-dir <dir>` to create a repo-context
+review bundle with changed paths, patch files, selected checklists, optional
+`--feedback-pr` feedback state, and the helper's prepared prompt.
 Keep the repo-local helper as the source of truth for this repo's required
 ship gate; update it deliberately when taking upstream improvements from a
 personal/global skill.
