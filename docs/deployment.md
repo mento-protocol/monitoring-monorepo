@@ -157,9 +157,9 @@ pnpm infra:apply   # apply changes
 ```
 
 Protocol Grafana alerts and global Grafana routing use the separate
-`alerts-rules` stack (`pnpm alerts:rules:plan`). Event-driven alert delivery
-uses `alerts-delivery` (`pnpm alerts:infra:plan`). Aegis dashboards and
-service-health alerts use `aegis` (`pnpm aegis:tf:plan`).
+`alerts-rules` stack (`pnpm alerts:rules:plan`), which also owns the Aegis
+service-health alert rules. Event-driven alert delivery uses `alerts-delivery`
+(`pnpm alerts:infra:plan`). Aegis dashboards use `aegis` (`pnpm aegis:tf:plan`).
 
 ### Environment Variables
 

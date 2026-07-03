@@ -84,7 +84,7 @@ Last updated: 2026-05-18
 
 Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state via RPC view calls and exposes Prometheus metrics that Grafana Cloud ingests.
 
-**Live protocol alert rules** (Terraform-managed in `alerts/rules/`; Aegis service-health stays in `aegis/terraform/`):
+**Live protocol alert rules** (Terraform-managed in `alerts/rules/`, including the Aegis service-health group):
 
 | Alert Group      | What it monitors                                                  | Channels                                                                                |
 | ---------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -260,7 +260,7 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 | Deployment guide     | `docs/deployment.md`                                                             |
 | Aegis config         | `aegis/config.yaml`                                                              |
 | Protocol alert rules | `alerts/rules/`                                                                  |
-| Aegis service alert  | `aegis/terraform/aegis-service-alerts.tf`                                        |
+| Aegis service alert  | `alerts/rules/rules-aegis-service.tf`                                            |
 | Aegis dashboards     | `aegis/terraform/grafana-dashboard/`                                             |
 | v3 metrics bridge    | `metrics-bridge/`                                                                |
 | v3 Alloy scrape cfg  | `aegis/grafana-agent/config.alloy`                                               |
