@@ -28,6 +28,13 @@ const PENDING_VALUES = new Set([
   "WAITING",
 ]);
 const SKIPPED_VALUES = new Set(["NEUTRAL", "SKIPPED"]);
+const HUMAN_OVERRIDE_ASSOCIATIONS = new Set([
+  "OWNER",
+  "MEMBER",
+  "COLLABORATOR",
+]);
+const READINESS_OVERRIDE_COMMAND = "/pr-ready-override";
+const CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE = "codex-description-approval";
 
 function normalizeStatusValue(value) {
   return String(value ?? "")
@@ -384,6 +391,93 @@ function parseTimestamp(value) {
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
+function issueCommentAuthorAssociation(comment) {
+  return String(
+    comment.author_association ?? comment.authorAssociation ?? "",
+  ).toUpperCase();
+}
+
+function isHumanOverrideAuthor(comment) {
+  const login = comment.user?.login ?? comment.author?.login ?? "";
+  const type = comment.user?.type ?? comment.author?.type ?? "";
+  return (
+    !String(login).endsWith("[bot]") &&
+    type !== "Bot" &&
+    HUMAN_OVERRIDE_ASSOCIATIONS.has(issueCommentAuthorAssociation(comment))
+  );
+}
+
+function extractOverrideValue(body, key) {
+  const source = String(body ?? "");
+  const pattern = new RegExp(`(?:^|\\s)${key}=([^\\s]+)`, "i");
+  return source.match(pattern)?.[1] ?? null;
+}
+
+function extractOverrideReason(body) {
+  const match = String(body ?? "").match(/(?:^|\s)reason=(.+)$/i);
+  return match?.[1]?.trim() ?? "";
+}
+
+export function parseReadinessOverrideComment(comment, currentHeadOid = null) {
+  const body = String(comment.body ?? "");
+  if (
+    !body
+      .trimStart()
+      .match(new RegExp(`^${READINESS_OVERRIDE_COMMAND}\\b`, "i"))
+  ) {
+    return null;
+  }
+
+  const gate = extractOverrideValue(body, "gate")?.toLowerCase() ?? null;
+  const head = extractOverrideValue(body, "head");
+  const reason = extractOverrideReason(body);
+  const author = comment.user?.login ?? comment.author?.login ?? null;
+  const createdAt = comment.created_at ?? comment.createdAt ?? null;
+  const base = {
+    gate,
+    head,
+    reason,
+    author,
+    authorAssociation:
+      comment.author_association ?? comment.authorAssociation ?? null,
+    url: comment.html_url ?? comment.url ?? null,
+    createdAt,
+    state: "ignored",
+  };
+
+  if (!isHumanOverrideAuthor(comment)) {
+    return { ...base, reasonIgnored: "author_not_allowed" };
+  }
+  if (gate !== CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE) {
+    return { ...base, reasonIgnored: "unsupported_gate" };
+  }
+  if (!head || !currentHeadOid || head !== currentHeadOid) {
+    return { ...base, reasonIgnored: "head_mismatch" };
+  }
+  if (!reason) {
+    return { ...base, reasonIgnored: "missing_reason" };
+  }
+
+  return {
+    ...base,
+    state: "active",
+  };
+}
+
+function findActiveReadinessOverrides(
+  issueComments = [],
+  currentHeadOid = null,
+) {
+  return issueComments
+    .map((comment) => parseReadinessOverrideComment(comment, currentHeadOid))
+    .filter((override) => override?.state === "active")
+    .sort((a, b) => {
+      const aTime = parseTimestamp(a.createdAt) ?? 0;
+      const bTime = parseTimestamp(b.createdAt) ?? 0;
+      return bTime - aTime;
+    });
+}
+
 function currentHeadUpdatedAt(pr) {
   return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt);
 }
@@ -627,14 +721,26 @@ export function summarizeReadyState({
     reactions,
     headUpdatedAt,
   );
+  const currentHeadOid = pr.headRefOid ?? pr.headOid ?? null;
   const codexReviewSignal = classifyCodexReviewSignal({
     issueComments,
     reviews: pr.reviews ?? [],
     headUpdatedAt,
-    currentHeadOid: pr.headRefOid ?? pr.headOid ?? null,
+    currentHeadOid,
     codexApprovalReaction,
     codexInFlightReaction,
   });
+  const activeReadinessOverrides = findActiveReadinessOverrides(
+    issueComments,
+    currentHeadOid,
+  );
+  const codexDescriptionApprovalOverride = activeReadinessOverrides.find(
+    (override) =>
+      override.gate === CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE &&
+      override.head === currentHeadOid,
+  );
+  const codexDescriptionApprovalReady =
+    codexApprovalReaction || Boolean(codexDescriptionApprovalOverride);
 
   const mergeable = normalizeStatusValue(pr.mergeable) === "MERGEABLE";
   const reviewDecision = normalizeStatusValue(pr.reviewDecision);
@@ -720,9 +826,16 @@ export function summarizeReadyState({
 
   const gates = {
     codexDescriptionApproval: {
-      ready: codexApprovalReaction,
+      ready: codexDescriptionApprovalReady,
       required: true,
-      state: codexApprovalReaction ? "present" : "missing",
+      state: codexApprovalReaction
+        ? "present"
+        : codexDescriptionApprovalOverride
+          ? "overridden"
+          : "missing",
+      ...(codexDescriptionApprovalOverride
+        ? { override: codexDescriptionApprovalOverride }
+        : {}),
     },
     codexReviewSignal: {
       ready: ["approved", "in_flight"].includes(codexReviewSignal),
@@ -745,7 +858,7 @@ export function summarizeReadyState({
     },
   };
 
-  if (!codexApprovalReaction) {
+  if (!codexDescriptionApprovalReady) {
     requiredBlockers.push({
       kind: "gate",
       name: "Codex PR-description approval",
@@ -782,6 +895,7 @@ export function summarizeReadyState({
     unresolvedReviewThreads,
     unrepliedRootReviewComments,
     topLevelBotComments,
+    readinessOverrides: activeReadinessOverrides,
     codexApprovalReaction,
     codexReviewSignal,
   };

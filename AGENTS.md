@@ -376,7 +376,12 @@ so a real deferral can't hide behind an empty declaration. Two corollaries:
 
 Before declaring a PR clean, inspect every GitHub feedback surface: top-level PR/issue comments, review submissions and bodies, inline review threads/comments, check-run annotations, and failing check logs. Bot reviews can post actionable multi-finding reports as top-level comments, not only inline comments. A clean or resolved inline-thread list is necessary but not sufficient.
 
-Hard stop: a PR is not all clear until `chatgpt-codex-connector[bot]` has left a 👍 reaction on the PR description for the current head. A Codex review comment on an older commit, elapsed grace time, green checks, or another actor's reaction does not satisfy this gate.
+Hard stop: a PR is not all clear until `chatgpt-codex-connector[bot]` has left
+a 👍 reaction on the PR description for the current head, unless a human
+maintainer has posted the exact head-scoped break-glass override documented in
+`docs/notes/pr-ready-state.md`. A Codex review comment on an older commit,
+elapsed grace time, green checks, or another actor's reaction does not satisfy
+this gate.
 
 Before signaling all-clear, both Claude Code and Codex babysitting flows must
 run the shared readiness probe:
