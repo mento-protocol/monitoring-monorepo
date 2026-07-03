@@ -36,13 +36,13 @@ Celo Mainnet (42220), Monad Mainnet (143), and Ethereum reserve-yield events (1)
 
 ## Networks
 
-| Network       | Chain ID | Status                                                                               |
-| ------------- | -------- | ------------------------------------------------------------------------------------ |
-| Celo Mainnet  | 42220    | Live in the production multichain indexer                                            |
-| Monad Mainnet | 143      | Live in the production multichain indexer                                            |
-| Ethereum      | 1        | Reserve-yield config is isolated; hosted endpoint promotion is gated by replay proof |
-| Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars                              |
-| Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars                              |
+| Network       | Chain ID | Status                                                                |
+| ------------- | -------- | --------------------------------------------------------------------- |
+| Celo Mainnet  | 42220    | Live in the production multichain indexer                             |
+| Monad Mainnet | 143      | Live in the production multichain indexer                             |
+| Ethereum      | 1        | Live in the production multichain indexer — reserve-yield events only |
+| Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars               |
+| Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars               |
 
 ## Getting Started
 
@@ -297,8 +297,9 @@ pnpm aegis:agent:seed-secrets
 pnpm aegis:agent:deploy
 ```
 
-The Aegis dashboard and Aegis service-health alert live in `aegis/terraform`
-and keep the existing GCS backend prefix `aegis`:
+The Aegis dashboard lives in `aegis/terraform` and keeps the existing GCS
+backend prefix `aegis`; the Aegis service-health alert rules moved to
+`alerts/rules/rules-aegis-service.tf` (issue #706):
 
 ```bash
 pnpm aegis:tf:init

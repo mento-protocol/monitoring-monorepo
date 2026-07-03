@@ -373,21 +373,21 @@ here grew past the point where a hand-copied table stays true; the rule files
 themselves are the reference. One file per service domain in
 `alerts/rules/rules-*.tf`:
 
-| File                                   | `service` label   | Covers                                                                                                                                 |
-| -------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `rules-fpmms.tf`                       | `fpmms`           | Oracle liveness/down, deviation breach warning/critical (+anchored fallbacks), rebalancer stale/effectiveness, oracle jump vs swap fee |
-| `rules-fpmms-deviation-transitions.tf` | `fpmms`           | Deviation breach state-transition notifications                                                                                        |
-| `rules-vp-oracles.tf`                  | `fpmms`           | VirtualPool oracle freshness                                                                                                           |
-| `rules-trading-limits.tf`              | `trading-limits`  | L0/L1/LG utilization pressure + tripped                                                                                                |
-| `rules-oracles.tf`                     | `oracles`         | Oracle report outliers                                                                                                                 |
-| `rules-oracle-relayers.tf`             | `oracle-relayers` | Stale price feeds, low relayer native-token balance                                                                                    |
-| `rules-cdps.tf`                        | `cdps`            | Stability-pool headroom/thinning, shutdown, liquidation/redemption, shortfall                                                          |
-| `rules-reserve-balances.tf`            | `reserve`         | Low reserve stable balances (Aegis-sourced `*_balanceOf` gauges)                                                                       |
-| `rules-trading-modes.tf`               | `exchanges`       | Circuit breakers tripped (trading-mode changes)                                                                                        |
-| `rules-indexer.tf`                     | `indexer`         | Envio indexer health                                                                                                                   |
-| `rules-metrics-bridge.tf`              | `metrics-bridge`  | Bridge not-reporting + poll errors                                                                                                     |
-| `rules-aegis-service.tf`               | `aegis`           | Aegis view-call failures + data staleness (page)                                                                                       |
-| `rules-aegis-testnet.tf`               | `aegis-testnet`   | Warning-only testnet variants                                                                                                          |
+| File                                   | `service` label   | Covers                                                                                                                                                                 |
+| -------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rules-fpmms.tf`                       | `fpmms`           | Oracle liveness/down, deviation breach warning/critical (+anchored fallbacks), trading-limit pressure/tripped, rebalancer stale/effectiveness, oracle jump vs swap fee |
+| `rules-fpmms-deviation-transitions.tf` | `fpmms`           | Deviation breach state-transition notifications                                                                                                                        |
+| `rules-vp-oracles.tf`                  | `fpmms`           | VirtualPool oracle freshness                                                                                                                                           |
+| `rules-trading-limits.tf`              | `trading-limits`  | Broker L0/L1/LG trading-limit utilization (Aegis-sourced)                                                                                                              |
+| `rules-oracles.tf`                     | `oracles`         | Oracle report outliers                                                                                                                                                 |
+| `rules-oracle-relayers.tf`             | `oracle-relayers` | Stale price feeds, low relayer native-token balance                                                                                                                    |
+| `rules-cdps.tf`                        | `cdps`            | Stability-pool headroom/thinning, shutdown, liquidation/redemption, shortfall                                                                                          |
+| `rules-reserve-balances.tf`            | `reserve`         | Low reserve stable balances (Aegis-sourced `*_balanceOf` gauges)                                                                                                       |
+| `rules-trading-modes.tf`               | `exchanges`       | Circuit breakers tripped (trading-mode changes)                                                                                                                        |
+| `rules-indexer.tf`                     | `indexer`         | Envio indexer health                                                                                                                                                   |
+| `rules-metrics-bridge.tf`              | `metrics-bridge`  | Bridge not-reporting + poll errors                                                                                                                                     |
+| `rules-aegis-service.tf`               | `aegis`           | Aegis view-call failures + data staleness (page)                                                                                                                       |
+| `rules-aegis-testnet.tf`               | `aegis-testnet`   | Warning-only testnet variants                                                                                                                                          |
 
 **Reading alert vs SLO state — paging gate vs uptime accrual**
 
