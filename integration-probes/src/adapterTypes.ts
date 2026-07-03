@@ -1,9 +1,42 @@
 import type {
+  AggregatorKind,
   ChainProbeConfig,
   FetchLike,
   PairProbeResult,
   QuoteProbeInput,
 } from "./types.js";
+
+export type ChainSupport = "supported" | "unsupported" | "unknown";
+
+export type BeforeQuoteRequest = () => Promise<void>;
+
+export type QuoteBuildContext = {
+  chain: ChainProbeConfig;
+  fetcher: FetchLike;
+};
+
+export type QuoteBuildResult =
+  | QuoteRequest
+  | readonly QuoteRequest[]
+  | Promise<QuoteRequest | readonly QuoteRequest[]>;
+
+export type AggregatorAdapter = {
+  id: string;
+  label: string;
+  kind: AggregatorKind;
+  tier: 1 | 2 | 3;
+  credentialEnv?: readonly string[];
+  researchNote: string;
+  support: Partial<Record<number, ChainSupport>>;
+  quote?: (
+    input: QuoteProbeInput,
+    env: NodeJS.ProcessEnv,
+    context?: QuoteBuildContext,
+  ) => QuoteBuildResult;
+  maxQuoteRequestsPerRun?: number;
+  quoteRequestDelayMs?: number;
+  nextStep?: string;
+};
 
 export type QuoteRequest = {
   url: string;

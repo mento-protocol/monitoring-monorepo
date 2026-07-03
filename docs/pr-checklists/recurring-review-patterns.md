@@ -61,7 +61,7 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 - Hard cap is **1,000 lines**, enforced by `max-lines` in each package's `eslint.config.mjs` (incl. `indexer-envio` since 2026-05-04). CI blocks merges past this. Per-file escape via `// eslint-disable-next-line max-lines` with a comment explaining why the file genuinely needs to stay big.
 - Exemptions (rule disabled): `**/__tests__/**`, `**/*.test.{ts,tsx}`, `**/src/lib/types.ts` (pure type definitions), `indexer-envio/test/Test.ts` (envio-generated harness).
 - **Unused-imports gate**: `eslint-plugin-unused-imports` is wired into every package's config with `unused-imports/no-unused-imports: "error"`. Refactor PRs that move blocks between modules can't leave dead imports behind — `--fix` removes them mechanically.
-- Files near the line budget are tracked in `docs/notes/file-size-watch.md`; refresh the counts before starting a split so growth doesn't slip past unnoticed.
+- Files near the line budget are tracked in `docs/notes/file-size-watch.md`; refresh with `node scripts/file-size-watchlist.mjs` before starting a split so growth doesn't slip past unnoticed. External drift jobs should use `--format issue` for GitHub Issues, not `BACKLOG.md`.
 - Why this exists: PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 lines after a year of unchecked growth. The refactor was a 4-day project; appending one more tab inline was a 30-minute task. Each individual decision was rational; the cumulative drift was not.
 
 ### Security / CSP

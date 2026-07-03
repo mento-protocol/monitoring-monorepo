@@ -290,7 +290,7 @@ These are the rules `cursor[bot]` and Codex have raised repeatedly across PRs #1
 
 ### File-size budget
 
-- Soft cap: 600 lines/file (split in the same PR before crossing). Hard cap: 1,000 lines, enforced by `max-lines` in `eslint.config.mjs`. See `/AGENTS.md` for full rule + rationale.
+- Soft cap: 600 lines/file (split in the same PR before crossing). Hard cap: 1,000 lines, enforced by `max-lines` in `eslint.config.mjs`. Refresh the watchlist with `node scripts/file-size-watchlist.mjs`; see `docs/pr-checklists/recurring-review-patterns.md` for the full rule + rationale.
 - Tab/route pages especially: if a file approaches 600 lines, extract per-tab modules under `_lib/` / `_components/` / `_tabs/` (Next.js App Router excludes underscore-prefixed dirs from routing). Reference: `src/app/pool/[poolId]/` for the pattern from PR #263.
 
 ### Hasura query hygiene
