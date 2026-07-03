@@ -23,17 +23,17 @@ tests. Workflow details live in `docs/notes/agent-issue-workflow.md`.
 
 ## File-size watchlist (auto-generated)
 
-_Last updated: 2026-07-01 by file-size-budget-drift-detector. Counts are **raw physical lines** (`wc -l`). The ESLint `max-lines` hard cap (1,000) uses `skipBlankLines: true, skipComments: true`, so ESLint-counted values are lower — files listed above 1,000 here may still pass the hard cap. Soft cap 600 raw lines. See `/AGENTS.md` §"File-size budget"._
+_Last updated: 2026-07-01 by file-size-budget-drift-detector. Counts are **raw physical lines** (`wc -l`). The ESLint `max-lines` hard cap (1,000) uses `skipBlankLines: true, skipComments: true`, so ESLint-counted values are lower — files listed above 1,000 here may still pass the hard cap. Soft cap 600 raw lines. Δ marked `(new)` = first appearance in this watchlist; 5 rows show deltas sourced from `docs/notes/file-size-watch.md` (baseline 2026-05-25). See `/AGENTS.md` §"File-size budget"._
 
 | Lines | File                                                                        | Δ since last report |
 | ----: | --------------------------------------------------------------------------- | ------------------: |
-|  1312 | ui-dashboard/src/lib/network-fetcher/fetch.ts                               |               (new) |
+|  1312 | ui-dashboard/src/lib/network-fetcher/fetch.ts                               |                +553 |
 |  1052 | ui-dashboard/src/components/oracle-chart.tsx                                |               (new) |
 |  1032 | indexer-envio/src/handlers/liquity/troveManager.ts                          |               (new) |
 |  1027 | indexer-envio/src/breakers.ts                                               |               (new) |
-|   986 | indexer-envio/src/handlers/sortedOracles.ts                                 |               (new) |
+|   986 | indexer-envio/src/handlers/sortedOracles.ts                                 |                +285 |
 |   978 | integration-probes/src/adapters.ts                                          |               (new) |
-|   943 | indexer-envio/src/rpc/effects.ts                                            |               (new) |
+|   943 | indexer-envio/src/rpc/effects.ts                                            |                 +96 |
 |   887 | ui-dashboard/src/app/cdps/[symbol]/\_components/cdp-trove-table.tsx         |               (new) |
 |   857 | ui-dashboard/src/lib/health.ts                                              |               (new) |
 |   818 | ui-dashboard/src/lib/volume.ts                                              |               (new) |
@@ -48,12 +48,12 @@ _Last updated: 2026-07-01 by file-size-budget-drift-detector. Counts are **raw p
 |   686 | ui-dashboard/src/app/pool/[poolId]/\_tabs/oracle-tab.tsx                    |               (new) |
 |   669 | ui-dashboard/src/app/pool/[poolId]/\_components/pool-detail-page-client.tsx |               (new) |
 |   669 | indexer-envio/src/pool/self-heal.ts                                         |               (new) |
-|   667 | ui-dashboard/src/lib/queries/volume.ts                                      |               (new) |
+|   667 | ui-dashboard/src/lib/queries/volume.ts                                      |                 +39 |
 |   660 | ui-dashboard/src/app/volume/\_components/v3-flow-insights.tsx               |               (new) |
 |   654 | indexer-envio/src/handlers/wormhole/nttManager.ts                           |               (new) |
 |   642 | ui-dashboard/src/lib/cdp-borrowing-revenue.ts                               |               (new) |
 |   640 | ui-dashboard/src/app/cdps/[symbol]/\_components/cdp-detail-client.tsx       |               (new) |
-|   632 | ui-dashboard/src/lib/volume-hero.ts                                         |               (new) |
+|   632 | ui-dashboard/src/lib/volume-hero.ts                                         |                  +5 |
 |   626 | indexer-envio/src/pool.ts                                                   |               (new) |
 |   617 | indexer-envio/src/handlers/liquity/stabilityPool.ts                         |               (new) |
 |   617 | indexer-envio/src/handlers/biPoolManager.ts                                 |               (new) |
