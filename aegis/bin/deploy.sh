@@ -24,6 +24,27 @@ cp "$app_root/config.yaml" "$deploy_dir/config.yaml"
 cp -R "$app_root/dist" "$deploy_dir/dist"
 cp "$repo_root/pnpm-workspace.yaml" "$deploy_dir/pnpm-workspace.yaml"
 
+node - "$deploy_dir/pnpm-workspace.yaml" <<'NODE'
+const fs = require('fs');
+
+const workspacePath = process.argv[2];
+const lines = fs.readFileSync(workspacePath, 'utf8').split('\n');
+
+// The App Engine source bundle does not include patches/, and aegis does not
+// depend on any patched package. pnpm 11 reads patchedDependencies from the
+// workspace file, so remove that block from the reduced deploy workspace too.
+const patchedIndex = lines.findIndex((line) => line === 'patchedDependencies:');
+if (patchedIndex !== -1) {
+  let patchedEnd = patchedIndex + 1;
+  while (patchedEnd < lines.length && /^\s/.test(lines[patchedEnd])) {
+    patchedEnd += 1;
+  }
+  lines.splice(patchedIndex, patchedEnd - patchedIndex);
+}
+
+fs.writeFileSync(workspacePath, lines.join('\n'));
+NODE
+
 node - "$repo_root/package.json" "$app_root/package.json" "$deploy_dir/package.json" <<'NODE'
 const fs = require('fs');
 
