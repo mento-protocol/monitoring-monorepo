@@ -161,7 +161,7 @@ These rules come from PRs #184 and #194 — Codex flagged both as P1.
 - Soft cap: 600 lines/file (advisory). Hard cap: 1,000 lines.
 - `pnpm lint` enforces the 1,000-line hard cap for `src/**/*.ts`; tests are exempt. Apply the 600-line soft cap anyway because several files remain close to or slightly above it.
 - Suggested seams when splitting: one helper per RPC/effect family under `src/rpc/`; per-event handlers under `src/handlers/<entity>/` for big handler files.
-- Rationale + monthly drift detector: see `/AGENTS.md` §"File-size budget".
+- Rationale + watchlist refresh command: see `../docs/pr-checklists/recurring-review-patterns.md` and run `node scripts/file-size-watchlist.mjs` from the repo root.
 
 ### Self-heal pipeline coordination
 

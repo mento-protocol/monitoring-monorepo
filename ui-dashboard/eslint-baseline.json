@@ -483,13 +483,6 @@
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
-    "file": "src/lib/network-fetcher/fetch.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 18 allowed.",
-    "line": 216,
-    "linePreview": "*/ | export async function fetchPaginatedRows<TRow, TVars>(args: { | client: GraphQLClient;"
-  },
-  {
     "file": "src/lib/protocol-fee-snapshots.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
