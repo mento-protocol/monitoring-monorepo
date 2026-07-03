@@ -80,7 +80,37 @@ run_default_adapter() {
     --engine local --dry-run >"$stdout" 2>"$stderr"
 }
 
+run_default_adapter_in_clean_main() {
+  local clean_repo="$tmp_dir/clean-main"
+  mkdir "$clean_repo"
+  git -C "$clean_repo" init -b main >/dev/null
+  printf 'clean\n' >"$clean_repo/README.md"
+  git -C "$clean_repo" add README.md
+  git -C "$clean_repo" \
+    -c user.name="Agent Test" \
+    -c user.email="agent-test@example.invalid" \
+    commit -m init >/dev/null
+
+  : >"$stdout"
+  : >"$stderr"
+  (
+    cd "$clean_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "$repo_root/scripts/agent-autoreview.sh" \
+      --engine local --dry-run >"$stdout" 2>"$stderr"
+  )
+}
+
 run_default_adapter
+expect_stdout_contains "engine: local"
+expect_empty_stderr
+
+run_default_adapter_in_clean_main
+expect_stdout_contains "autoreview target: none"
+expect_stdout_contains "branch: main"
 expect_stdout_contains "engine: local"
 expect_empty_stderr
 

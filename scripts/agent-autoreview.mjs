@@ -257,6 +257,10 @@ function isDirty(repo) {
   return runGit(repo, ["status", "--porcelain"]).trim() !== "";
 }
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
 function commandExists(command) {
   const result = spawnSync("sh", ["-c", `command -v ${shellQuote(command)}`], {
     encoding: "utf8",
@@ -558,7 +562,7 @@ async function runClaude(repo, args, prompt) {
       : "Read,Grep,Glob";
     claudeArgs.push("--allowedTools", tools);
   } else {
-    claudeArgs.push("--tools", "");
+    claudeArgs.push("--allowedTools", "");
   }
   const result = await runCommandWithInput("claude", claudeArgs, repo, prompt, {
     stream: args.streamEngineOutput,
@@ -572,6 +576,7 @@ function parseJsonCandidate(text) {
   if (!trimmed) return null;
   try {
     const parsed = JSON.parse(trimmed);
+    // Claude's JSON output mode can wrap the actual review JSON as a string.
     if (typeof parsed === "string") return parseJsonCandidate(parsed) ?? parsed;
     return parsed;
   } catch {
@@ -881,7 +886,15 @@ function reviewDeletedFileReferences(repo, target, findings) {
       .map((line) => line.replace(/^HEAD:/, ""))
       .find((line) => !line.startsWith(`${rel}:`));
     if (!hit) continue;
-    const [filePath, rawLine] = hit.split(":");
+    const fileSeparator = hit.indexOf(":");
+    if (fileSeparator === -1) continue;
+    const filePath = hit.slice(0, fileSeparator);
+    const lineAndContent = hit.slice(fileSeparator + 1);
+    const lineSeparator = lineAndContent.indexOf(":");
+    const rawLine =
+      lineSeparator === -1
+        ? lineAndContent
+        : lineAndContent.slice(0, lineSeparator);
     addLocalFinding(
       findings,
       filePath,
@@ -1017,10 +1030,6 @@ function printReport(report) {
   return `${lines.join("\n")}\n`;
 }
 
-function shellQuote(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
-}
-
 function startParallelTests(command, repo) {
   console.log(`tests: ${command}`);
   return spawn(command, {
@@ -1040,7 +1049,20 @@ function finishParallelTests(proc) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const repo = repoRoot();
-  const target = chooseTarget(repo, args);
+  let target;
+  try {
+    target = chooseTarget(repo, args);
+  } catch (error) {
+    if (
+      args.dryRun &&
+      error.message ===
+        "no review target: clean main checkout and no forced mode"
+    ) {
+      target = { mode: "none", ref: null };
+    } else {
+      throw error;
+    }
+  }
   const branch = currentBranch(repo) || "detached";
 
   console.log(`autoreview target: ${target.mode}`);
