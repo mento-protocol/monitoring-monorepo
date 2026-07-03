@@ -372,9 +372,9 @@ if command -v corepack >/dev/null 2>&1; then
 fi
 pnpm --version
 
+ensure_autoreview_helper
 prewarm_trunk
 install_trunk_tools
-ensure_autoreview_helper
 
 echo "==> Installing workspace dependencies"
 CI=true pnpm install --frozen-lockfile
