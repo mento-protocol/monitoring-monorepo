@@ -27,7 +27,6 @@ _Last updated: 2026-07-01 by file-size-budget-drift-detector. Soft cap 600 lines
 
 | Lines | File                                                                        | Δ since last report |
 | ----: | --------------------------------------------------------------------------- | ------------------: |
-|  4163 | indexer-envio/.envio/types.d.ts                                             |               (new) |
 |  1312 | ui-dashboard/src/lib/network-fetcher/fetch.ts                               |               (new) |
 |  1052 | ui-dashboard/src/components/oracle-chart.tsx                                |               (new) |
 |  1032 | indexer-envio/src/handlers/liquity/troveManager.ts                          |               (new) |
@@ -51,13 +50,11 @@ _Last updated: 2026-07-01 by file-size-budget-drift-detector. Soft cap 600 lines
 |   669 | indexer-envio/src/pool/self-heal.ts                                         |               (new) |
 |   667 | ui-dashboard/src/lib/queries/volume.ts                                      |               (new) |
 |   660 | ui-dashboard/src/app/volume/\_components/v3-flow-insights.tsx               |               (new) |
-|   657 | aegis/src/metric.spec.ts                                                    |               (new) |
 |   654 | indexer-envio/src/handlers/wormhole/nttManager.ts                           |               (new) |
 |   642 | ui-dashboard/src/lib/cdp-borrowing-revenue.ts                               |               (new) |
 |   640 | ui-dashboard/src/app/cdps/[symbol]/\_components/cdp-detail-client.tsx       |               (new) |
 |   632 | ui-dashboard/src/lib/volume-hero.ts                                         |               (new) |
 |   626 | indexer-envio/src/pool.ts                                                   |               (new) |
-|   620 | aegis/src/query.service.spec.ts                                             |               (new) |
 |   617 | indexer-envio/src/handlers/liquity/stabilityPool.ts                         |               (new) |
 |   617 | indexer-envio/src/handlers/biPoolManager.ts                                 |               (new) |
 |   610 | ui-dashboard/src/lib/address-labels/snapshot.ts                             |               (new) |
