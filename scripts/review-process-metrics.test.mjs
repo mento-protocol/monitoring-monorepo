@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import {
   aggregateMetrics,
   assertCompleteCohort,
+  isClaudeSummary,
+  isCodexApprovalComment,
+  isCodexUsageLimit,
   isFindingLikeText,
   isCodexBotLogin,
   isClaudeBotLogin,
@@ -68,6 +71,17 @@ test("identifies review bots and finding-like review text", () => {
   assert.equal(isReviewBotLogin("chapati23"), false);
   assert.equal(isFindingLikeText("[P2] Missing branch coverage"), true);
   assert.equal(isFindingLikeText("Codex Review: no major issues"), false);
+});
+
+test("identifies review-summary detector text", () => {
+  assert.equal(isClaudeSummary("Claude finished @chapati23's task"), true);
+  assert.equal(isClaudeSummary("### PR Review — LGTM"), true);
+  assert.equal(isCodexUsageLimit("Codex usage limits have been reached"), true);
+  assert.equal(
+    isCodexApprovalComment("Codex Review: didn't find any major issues"),
+    true,
+  );
+  assert.equal(isCodexApprovalComment("Codex Review: needs changes"), false);
 });
 
 test("rejects incomplete boundary cohorts instead of reporting partial data", () => {

@@ -171,18 +171,20 @@ function isReviewRequest(value) {
   return /@(codex|claude)\s+review\b/i.test(String(value ?? ""));
 }
 
-function isCodexUsageLimit(value) {
+export function isCodexUsageLimit(value) {
   return /codex usage limits have been reached/i.test(String(value ?? ""));
 }
 
-function isCodexApprovalComment(value) {
+export function isCodexApprovalComment(value) {
   return /codex review:\s+did(?:n['’]?t| not) find any major issues/i.test(
     String(value ?? ""),
   );
 }
 
-function isClaudeSummary(value) {
-  return /claude finished|pr review:/i.test(String(value ?? ""));
+export function isClaudeSummary(value) {
+  return /claude finished|pr review(?:\s*[:\u2014-]|$)/i.test(
+    String(value ?? ""),
+  );
 }
 
 function uniqueRootReviewComments(reviewComments) {

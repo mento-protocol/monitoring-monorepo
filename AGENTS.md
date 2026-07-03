@@ -486,7 +486,8 @@ pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs orig
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:autoreview              # Structured closeout review; use --prepare-bundle-dir DIR for Codex-native review bundles
-node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline/check-in metrics
+node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
+node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
