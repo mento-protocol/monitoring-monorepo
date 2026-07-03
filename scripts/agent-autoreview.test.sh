@@ -156,6 +156,15 @@ expect_file_contains() {
   fi
 }
 
+expect_file_not_contains() {
+  local path="$1"
+  local unexpected="$2"
+  if grep -Fq -- "$unexpected" "$path"; then
+    printf 'expected %s not to contain %s\nactual:\n%s\n' "$path" "$unexpected" "$(cat "$path")" >&2
+    exit 1
+  fi
+}
+
 run_default_adapter() {
   : >"$stdout"
   : >"$stderr"
@@ -557,17 +566,34 @@ git -C "$auto_branch_local_repo" switch -c feature >/dev/null 2>&1
 printf 'branch\n' >"$auto_branch_local_repo/branch.txt"
 commit_review_repo "$auto_branch_local_repo" "add branch file"
 printf 'local body\n' >"$auto_branch_local_repo/local.txt"
+external_diff="$tmp_dir/external-diff"
+cat >"$external_diff" <<'EXTERNAL_DIFF'
+#!/usr/bin/env bash
+printf 'external diff invoked\n'
+EXTERNAL_DIFF
+chmod +x "$external_diff"
 auto_branch_local_bundle="$tmp_dir/context-bundle-auto-branch-local"
-(cd "$auto_branch_local_repo" && run_adapter --prepare-bundle-dir "$auto_branch_local_bundle" --base main --dry-run)
+(cd "$auto_branch_local_repo" && run_adapter "GIT_EXTERNAL_DIFF=$external_diff" --prepare-bundle-dir "$auto_branch_local_bundle" --base main --dry-run)
 expect_file_contains "$auto_branch_local_bundle/README.md" "- Target: branch-local main"
 expect_file_exists "$auto_branch_local_bundle/patches/branch.diff"
 expect_file_exists "$auto_branch_local_bundle/patches/untracked.diff"
 expect_file_contains "$auto_branch_local_bundle/changed-paths.txt" "branch.txt"
 expect_file_contains "$auto_branch_local_bundle/changed-paths.txt" "local.txt"
+expect_file_contains "$auto_branch_local_bundle/patches/branch.diff" "diff --git"
+expect_file_not_contains "$auto_branch_local_bundle/patches/branch.diff" "external diff invoked"
 expect_file_contains "$auto_branch_local_bundle/patches/untracked.diff" "local body"
 
 run_adapter_expect_failure --prepare-bundle-dir "$repo_root/.autoreview-bundle" --mode branch --base HEAD
 expect_stderr_contains "must be outside the repo worktree"
+
+nested_in_repo_parent="$repo_root/.autoreview-test-parent"
+rm -rf "$nested_in_repo_parent"
+run_adapter_expect_failure --prepare-bundle-dir "$nested_in_repo_parent/review" --mode branch --base HEAD
+expect_stderr_contains "must be outside the repo worktree"
+if [[ -e "$nested_in_repo_parent" ]]; then
+  printf 'expected rejected in-repo bundle parent not to be created: %s\n' "$nested_in_repo_parent" >&2
+  exit 1
+fi
 
 nonempty_bundle="$tmp_dir/nonempty-bundle"
 mkdir -p "$nonempty_bundle"

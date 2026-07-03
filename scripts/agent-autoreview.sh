@@ -248,12 +248,27 @@ prepare_context_bundle() {
   local repo_abs
   local bundle_parent
   local bundle_name
+  local bundle_suffix
+  local bundle_ancestor
   repo_abs="$(cd "$repo" && pwd -P)"
+  case "$bundle_dir" in
+    /*) ;;
+    *) bundle_dir="$(pwd -P)/$bundle_dir" ;;
+  esac
   bundle_parent="$(dirname "$bundle_dir")"
   bundle_name="$(basename "$bundle_dir")"
-  mkdir -p "$bundle_parent"
-  bundle_parent="$(cd "$bundle_parent" && pwd -P)"
-  bundle_dir="$bundle_parent/$bundle_name"
+  bundle_suffix="$bundle_name"
+  bundle_ancestor="$bundle_parent"
+  while [[ ! -e "$bundle_ancestor" ]]; do
+    bundle_suffix="$(basename "$bundle_ancestor")/$bundle_suffix"
+    bundle_ancestor="$(dirname "$bundle_ancestor")"
+  done
+  if [[ ! -d "$bundle_ancestor" ]]; then
+    echo "agent:autoreview: --prepare-bundle-dir parent is not a directory" >&2
+    exit 2
+  fi
+  bundle_parent="$(cd "$bundle_ancestor" && pwd -P)"
+  bundle_dir="$bundle_parent/$bundle_suffix"
   if [[ -L "$bundle_dir" ]]; then
     echo "agent:autoreview: --prepare-bundle-dir must not be a symlink" >&2
     exit 2
@@ -268,6 +283,7 @@ prepare_context_bundle() {
     echo "agent:autoreview: --prepare-bundle-dir must be empty or absent" >&2
     exit 2
   fi
+  mkdir -p "$bundle_dir"
   mkdir -p "$bundle_dir/checklists" "$bundle_dir/patches"
 
   local mode
@@ -319,15 +335,15 @@ prepare_context_bundle() {
         git_output "$repo" ls-files --others --exclude-standard
       } | sort -u >"$bundle_dir/changed-paths.txt"
       git_output "$repo" diff --cached --stat >"$bundle_dir/patches/staged.stat"
-      git_output "$repo" diff --cached --patch --find-renames >"$bundle_dir/patches/staged.diff"
+      git_output "$repo" diff --cached --patch --find-renames --no-ext-diff >"$bundle_dir/patches/staged.diff"
       git_output "$repo" diff --stat >"$bundle_dir/patches/unstaged.stat"
-      git_output "$repo" diff --patch --find-renames >"$bundle_dir/patches/unstaged.diff"
+      git_output "$repo" diff --patch --find-renames --no-ext-diff >"$bundle_dir/patches/unstaged.diff"
       git_output "$repo" ls-files --others --exclude-standard >"$bundle_dir/patches/untracked-paths.txt"
       : >"$bundle_dir/patches/untracked.diff"
       while IFS= read -r untracked_path; do
         [[ -z "$untracked_path" ]] && continue
         if [[ -f "$repo/$untracked_path" ]]; then
-          git_output "$repo" diff --no-index -- /dev/null "$untracked_path" >>"$bundle_dir/patches/untracked.diff" || true
+          git_output "$repo" diff --no-index --no-ext-diff -- /dev/null "$untracked_path" >>"$bundle_dir/patches/untracked.diff" || true
         else
           printf 'untracked non-file omitted: %s\n' "$untracked_path" >>"$bundle_dir/patches/untracked.diff"
         fi
@@ -336,7 +352,7 @@ prepare_context_bundle() {
     branch)
       git_output "$repo" diff --name-only "$target_ref...HEAD" | sort -u >"$bundle_dir/changed-paths.txt"
       git_output "$repo" diff --stat "$target_ref...HEAD" >"$bundle_dir/patches/branch.stat"
-      git_output "$repo" diff --patch --find-renames "$target_ref...HEAD" >"$bundle_dir/patches/branch.diff"
+      git_output "$repo" diff --patch --find-renames --no-ext-diff "$target_ref...HEAD" >"$bundle_dir/patches/branch.diff"
       ;;
     branch-local)
       git_output "$repo" status --short >"$bundle_dir/git-status.txt"
@@ -347,17 +363,17 @@ prepare_context_bundle() {
         git_output "$repo" ls-files --others --exclude-standard
       } | sort -u >"$bundle_dir/changed-paths.txt"
       git_output "$repo" diff --stat "$target_ref...HEAD" >"$bundle_dir/patches/branch.stat"
-      git_output "$repo" diff --patch --find-renames "$target_ref...HEAD" >"$bundle_dir/patches/branch.diff"
+      git_output "$repo" diff --patch --find-renames --no-ext-diff "$target_ref...HEAD" >"$bundle_dir/patches/branch.diff"
       git_output "$repo" diff --cached --stat >"$bundle_dir/patches/staged.stat"
-      git_output "$repo" diff --cached --patch --find-renames >"$bundle_dir/patches/staged.diff"
+      git_output "$repo" diff --cached --patch --find-renames --no-ext-diff >"$bundle_dir/patches/staged.diff"
       git_output "$repo" diff --stat >"$bundle_dir/patches/unstaged.stat"
-      git_output "$repo" diff --patch --find-renames >"$bundle_dir/patches/unstaged.diff"
+      git_output "$repo" diff --patch --find-renames --no-ext-diff >"$bundle_dir/patches/unstaged.diff"
       git_output "$repo" ls-files --others --exclude-standard >"$bundle_dir/patches/untracked-paths.txt"
       : >"$bundle_dir/patches/untracked.diff"
       while IFS= read -r untracked_path; do
         [[ -z "$untracked_path" ]] && continue
         if [[ -f "$repo/$untracked_path" ]]; then
-          git_output "$repo" diff --no-index -- /dev/null "$untracked_path" >>"$bundle_dir/patches/untracked.diff" || true
+          git_output "$repo" diff --no-index --no-ext-diff -- /dev/null "$untracked_path" >>"$bundle_dir/patches/untracked.diff" || true
         else
           printf 'untracked non-file omitted: %s\n' "$untracked_path" >>"$bundle_dir/patches/untracked.diff"
         fi
@@ -366,7 +382,7 @@ prepare_context_bundle() {
     commit)
       git_output "$repo" show --name-only --format= "$target_ref" | sed '/^$/d' | sort -u >"$bundle_dir/changed-paths.txt"
       git_output "$repo" show --stat --format=fuller "$target_ref" >"$bundle_dir/patches/commit.stat"
-      git_output "$repo" show --patch --find-renames --format=fuller "$target_ref" >"$bundle_dir/patches/commit.diff"
+      git_output "$repo" show --patch --find-renames --no-ext-diff --format=fuller "$target_ref" >"$bundle_dir/patches/commit.diff"
       ;;
   esac
 
