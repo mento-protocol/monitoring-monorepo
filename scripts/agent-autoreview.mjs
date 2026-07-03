@@ -134,7 +134,13 @@ function parseArgs(argv) {
 
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
+    const equalsIndex =
+      value.startsWith("--") && value !== "--" ? value.indexOf("=") : -1;
+    const option = equalsIndex === -1 ? value : value.slice(0, equalsIndex);
+    const inlineValue =
+      equalsIndex === -1 ? null : value.slice(equalsIndex + 1);
     const next = () => {
+      if (inlineValue !== null) return inlineValue;
       index += 1;
       if (index >= argv.length) {
         throw new Error(`${value} requires an argument`);
@@ -142,7 +148,7 @@ function parseArgs(argv) {
       return argv[index];
     };
 
-    switch (value) {
+    switch (option) {
       case "--":
         break;
       case "--mode":
@@ -582,9 +588,9 @@ async function runClaude(repo, args, prompt) {
     const tools = args.webSearch
       ? "Read,Grep,Glob,WebSearch,WebFetch"
       : "Read,Grep,Glob";
-    claudeArgs.push("--allowedTools", tools);
+    claudeArgs.push("--tools", tools);
   } else {
-    claudeArgs.push("--allowedTools", "");
+    claudeArgs.push("--tools", "");
   }
   const result = await runCommandWithInput("claude", claudeArgs, repo, prompt, {
     stream: args.streamEngineOutput,
@@ -898,7 +904,7 @@ function deletedFileReferenceChecks(repo, target) {
     }
   };
 
-  if (target.mode === "branch" || target.mode === "branch-local") {
+  if (target.mode === "branch") {
     add(
       runGit(repo, [
         "diff",
@@ -907,6 +913,17 @@ function deletedFileReferenceChecks(repo, target) {
         `${target.ref}...HEAD`,
       ]),
       "HEAD",
+    );
+  }
+  if (target.mode === "branch-local") {
+    add(
+      runGit(repo, [
+        "diff",
+        "--name-only",
+        "--diff-filter=D",
+        `${target.ref}...HEAD`,
+      ]),
+      null,
     );
   }
   if (target.mode === "commit") {
@@ -1026,11 +1043,7 @@ function diffCheckCommands(target) {
     return [["show", "--format=", "--check", target.ref]];
   }
   if (target.mode === "branch-local") {
-    return [
-      ["diff", "--check", `${target.ref}...HEAD`],
-      ["diff", "--cached", "--check"],
-      ["diff", "--check"],
-    ];
+    return [["diff", "--check", target.ref]];
   }
   return [
     ["diff", "--cached", "--check"],

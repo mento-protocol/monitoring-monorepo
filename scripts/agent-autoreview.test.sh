@@ -47,6 +47,22 @@ expect_args() {
   fi
 }
 
+expect_capture_contains_line() {
+  local expected="$1"
+  if ! grep -Fxq -- "$expected" "$capture"; then
+    printf 'expected captured args to contain line %s\nargs:\n%s\n' "$expected" "$(cat "$capture")" >&2
+    exit 1
+  fi
+}
+
+expect_capture_not_contains_line() {
+  local unexpected="$1"
+  if grep -Fxq -- "$unexpected" "$capture"; then
+    printf 'expected captured args not to contain line %s\nargs:\n%s\n' "$unexpected" "$(cat "$capture")" >&2
+    exit 1
+  fi
+}
+
 expect_stderr_contains() {
   local expected="$1"
   if ! grep -Fq "$expected" "$stderr"; then
@@ -111,6 +127,17 @@ run_default_adapter_in_clean_main() {
       "$repo_root/scripts/agent-autoreview.sh" \
       --engine local --dry-run >"$stdout" 2>"$stderr"
   )
+}
+
+run_default_adapter_with_inline_engine() {
+  : >"$stdout"
+  : >"$stderr"
+  env -i \
+    "PATH=$PATH" \
+    "HOME=$HOME" \
+    "TMPDIR=${TMPDIR:-/tmp}" \
+    "$repo_root/scripts/agent-autoreview.sh" \
+    --engine=local --dry-run >"$stdout" 2>"$stderr"
 }
 
 init_review_repo() {
@@ -185,6 +212,25 @@ run_node_helper_in_repo_expect_failure() {
     printf 'expected helper to fail\nstdout:\n%s\nstderr:\n%s\n' "$(cat "$stdout")" "$(cat "$stderr")" >&2
     exit 1
   fi
+}
+
+run_helper_with_path_in_repo() {
+  local review_repo="$1"
+  local extra_path="$2"
+  shift 2
+  : >"$capture"
+  : >"$stdout"
+  : >"$stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$extra_path:$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AUTOREVIEW_CAPTURE=$capture" \
+      "$repo_root/scripts/agent-autoreview.sh" \
+      "$@" >"$stdout" 2>"$stderr"
+  )
 }
 
 run_parallel_tests_completion_regression() {
@@ -275,6 +321,23 @@ run_auto_dirty_branch_regression() {
   expect_empty_stderr
 }
 
+run_branch_local_diff_check_fixed_regression() {
+  local review_repo="$tmp_dir/dirty-branch-fixed"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'branch trailing   \n' >>"$review_repo/README.md"
+  commit_review_repo "$review_repo" "add branch whitespace"
+  printf 'base\nbranch trailing\n' >"$review_repo/README.md"
+
+  run_helper_in_repo "$review_repo" --base main --engine local
+  expect_stdout_contains "autoreview target: branch-local"
+  expect_stdout_contains "autoreview clean"
+  expect_stdout_not_contains "Diff contains whitespace"
+  expect_empty_stderr
+}
+
 run_branch_local_deleted_reference_regression() {
   local review_repo="$tmp_dir/branch-local-deleted-reference"
   init_review_repo "$review_repo"
@@ -285,11 +348,30 @@ run_branch_local_deleted_reference_regression() {
   git -C "$review_repo" switch -c feature >/dev/null 2>&1
   rm "$review_repo/docs/old.md"
   commit_review_repo "$review_repo" "delete stale docs without reference fix"
-  printf 'No old docs\n' >"$review_repo/README.md"
+  printf 'local clean\n' >"$review_repo/local.txt"
 
   run_helper_in_repo_expect_failure "$review_repo" --base main --engine local
   expect_stdout_contains "autoreview target: branch-local"
   expect_stdout_contains "Deleted file is still referenced"
+  expect_empty_stderr
+}
+
+run_branch_local_deleted_reference_fixed_regression() {
+  local review_repo="$tmp_dir/branch-local-deleted-reference-fixed"
+  init_review_repo "$review_repo"
+  mkdir "$review_repo/docs"
+  printf 'old docs\n' >"$review_repo/docs/old.md"
+  printf 'See docs/old.md\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  rm "$review_repo/docs/old.md"
+  commit_review_repo "$review_repo" "delete stale docs without reference fix"
+  printf 'No old docs\n' >"$review_repo/README.md"
+
+  run_helper_in_repo "$review_repo" --base main --engine local
+  expect_stdout_contains "autoreview target: branch-local"
+  expect_stdout_contains "autoreview clean"
+  expect_stdout_not_contains "Deleted file is still referenced"
   expect_empty_stderr
 }
 
@@ -306,6 +388,31 @@ run_requested_codex_missing_regression() {
   expect_stdout_not_contains "autoreview clean"
 }
 
+run_claude_no_tools_regression() {
+  local review_repo="$tmp_dir/claude-no-tools"
+  local fake_bin="$tmp_dir/fake-claude-bin"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+  mkdir "$fake_bin"
+  cat >"$fake_bin/claude" <<'CLAUDE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$AUTOREVIEW_CAPTURE"
+cat <<'JSON'
+{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}
+JSON
+CLAUDE
+  chmod +x "$fake_bin/claude"
+
+  run_helper_with_path_in_repo "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
+  expect_capture_contains_line "--tools"
+  expect_capture_not_contains_line "--allowedTools"
+  expect_capture_not_contains_line "--allowed-tools"
+  expect_stdout_contains "autoreview clean"
+  expect_empty_stderr
+}
+
 run_default_adapter
 expect_stdout_contains "engine: local"
 expect_empty_stderr
@@ -316,13 +423,20 @@ expect_stdout_contains "branch: main"
 expect_stdout_contains "engine: local"
 expect_empty_stderr
 
+run_default_adapter_with_inline_engine
+expect_stdout_contains "engine: local"
+expect_empty_stderr
+
 run_parallel_tests_completion_regression
 run_branch_diff_check_regression
 run_local_deleted_reference_regression
 run_commit_target_reads_selected_ref_regression
 run_auto_dirty_branch_regression
+run_branch_local_diff_check_fixed_regression
 run_branch_local_deleted_reference_regression
+run_branch_local_deleted_reference_fixed_regression
 run_requested_codex_missing_regression
+run_claude_no_tools_regression
 
 run_adapter CODEX_SANDBOX=seatbelt --dry-run
 expect_args $'--engine\nlocal\n--dry-run'
