@@ -538,7 +538,22 @@ hook_repo="$(mktemp -d)"
   git add README.md
   git commit -qm "commit from session"
   minimal_bin="$(mktemp -d)"
-  for tool in awk cat dirname git pwd tr wc; do
+  real_git="$(command -v git)"
+  real_git_quoted="$(printf '%q' "$real_git")"
+  IFS= read -r real_git_first_line < "$real_git" || real_git_first_line=""
+  if [[ "$real_git_first_line" == '#!'* ]]; then
+    cat > "$minimal_bin/git" <<EOF
+#!/bin/bash
+exec /bin/bash $real_git_quoted "\$@"
+EOF
+  else
+    cat > "$minimal_bin/git" <<EOF
+#!/bin/bash
+exec $real_git_quoted "\$@"
+EOF
+  fi
+  chmod +x "$minimal_bin/git"
+  for tool in awk cat dirname pwd tr wc; do
     ln -s "$(command -v "$tool")" "$minimal_bin/$tool"
   done
   printf '{"cwd":"%s"}' "$hook_repo" |

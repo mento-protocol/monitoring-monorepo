@@ -65,9 +65,7 @@ overrides:
   yaml@^2.0.0: ^2.8.3
 
 patchedDependencies:
-  '@lhci/utils@0.15.1':
-    hash: d543de2cd2dadadbb6465e9411e7bc12dd6706a75c6d3ef9fe352cf51f90761c
-    path: patches/@lhci__utils@0.15.1.patch
+  '@lhci/utils@0.15.1': d543de2cd2dadadbb6465e9411e7bc12dd6706a75c6d3ef9fe352cf51f90761c
 
 importers:
 

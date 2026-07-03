@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { SessionProvider } from "next-auth/react";
 import { getAuthSession } from "@/auth";
 import { NetworkProvider } from "@/components/network-provider";
@@ -16,10 +16,15 @@ import "./globals.css";
 // This is server-only; local `next start` needs analytics development mode.
 const analyticsMode = serverEnv.VERCEL ? "auto" : "development";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({
+const geistSans = localFont({
+  src: "./fonts/geist-latin.woff2",
+  variable: "--font-geist-sans",
+  display: "swap",
+});
+const geistMono = localFont({
+  src: "./fonts/geist-mono-latin.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 const analyticsEnabled = !clientEnv.NEXT_PUBLIC_BROWSER_TEST_FIXTURES;
 
