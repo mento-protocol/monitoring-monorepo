@@ -5,6 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+node_bin="$(command -v node)"
 
 helper="$tmp_dir/autoreview-helper"
 capture="$tmp_dir/args"
@@ -164,6 +165,28 @@ run_helper_in_repo_expect_failure() {
   fi
 }
 
+run_node_helper_in_repo_expect_failure() {
+  local review_repo="$1"
+  shift
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=/bin:/usr/bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      "$@" >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected helper to fail\nstdout:\n%s\nstderr:\n%s\n' "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+}
+
 run_parallel_tests_completion_regression() {
   local review_repo="$tmp_dir/parallel-tests"
   init_review_repo "$review_repo"
@@ -207,6 +230,64 @@ run_local_deleted_reference_regression() {
   expect_empty_stderr
 }
 
+run_commit_target_reads_selected_ref_regression() {
+  local review_repo="$tmp_dir/commit-target"
+  init_review_repo "$review_repo"
+  mkdir -p "$review_repo/.github/workflows"
+  cat >"$review_repo/.github/workflows/terraform-drift.yml" <<'BAD_WORKFLOW'
+name: drift
+jobs:
+  drift:
+    steps:
+      - run: terraform plan | tee /tmp/tf-plan.txt
+BAD_WORKFLOW
+  commit_review_repo "$review_repo" "add unsafe drift workflow"
+  local unsafe_commit
+  unsafe_commit="$(git -C "$review_repo" rev-parse HEAD)"
+  cat >"$review_repo/.github/workflows/terraform-drift.yml" <<'FIXED_WORKFLOW'
+name: drift
+jobs:
+  drift:
+    steps:
+      - run: terraform plan >/tmp/tf-plan.raw
+FIXED_WORKFLOW
+  commit_review_repo "$review_repo" "fix drift workflow"
+
+  run_helper_in_repo_expect_failure "$review_repo" --mode commit --commit "$unsafe_commit" --engine local
+  expect_stdout_contains "autoreview target: commit"
+  expect_stdout_contains "Drift workflow logs raw Terraform plan output"
+  expect_empty_stderr
+}
+
+run_auto_dirty_branch_regression() {
+  local review_repo="$tmp_dir/dirty-branch"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'branch trailing   \n' >>"$review_repo/README.md"
+  commit_review_repo "$review_repo" "add branch change"
+  printf 'local clean\n' >"$review_repo/local.txt"
+
+  run_helper_in_repo_expect_failure "$review_repo" --base main --engine local
+  expect_stdout_contains "autoreview target: branch-local"
+  expect_stdout_contains "Diff contains whitespace"
+  expect_empty_stderr
+}
+
+run_requested_codex_missing_regression() {
+  local review_repo="$tmp_dir/missing-codex"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  run_node_helper_in_repo_expect_failure "$review_repo" --mode local --engine codex
+  expect_stdout_contains "autoreview target: local"
+  expect_stderr_contains "codex CLI is not available"
+  expect_stdout_not_contains "autoreview clean"
+}
+
 run_default_adapter
 expect_stdout_contains "engine: local"
 expect_empty_stderr
@@ -220,6 +301,9 @@ expect_empty_stderr
 run_parallel_tests_completion_regression
 run_branch_diff_check_regression
 run_local_deleted_reference_regression
+run_commit_target_reads_selected_ref_regression
+run_auto_dirty_branch_regression
+run_requested_codex_missing_regression
 
 run_adapter CODEX_SANDBOX=seatbelt --dry-run
 expect_args $'--engine\nlocal\n--dry-run'

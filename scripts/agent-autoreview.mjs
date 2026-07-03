@@ -286,7 +286,12 @@ function detectPrBase(repo) {
 
 function chooseTarget(repo, args) {
   const branch = currentBranch(repo);
-  if (args.mode === "local" || (args.mode === "auto" && isDirty(repo))) {
+  const dirty = isDirty(repo);
+  const branchTarget = branch && branch !== "main";
+  if (
+    args.mode === "local" ||
+    (args.mode === "auto" && dirty && !branchTarget)
+  ) {
     return { mode: "local", ref: null };
   }
   if (args.mode === "commit") {
@@ -296,9 +301,13 @@ function chooseTarget(repo, args) {
     args.mode === "branch" ||
     (args.mode === "auto" && branch && branch !== "main")
   ) {
+    const ref = args.base || detectPrBase(repo) || "origin/main";
+    if (args.mode === "auto" && dirty) {
+      return { mode: "branch-local", ref };
+    }
     return {
       mode: "branch",
-      ref: args.base || detectPrBase(repo) || "origin/main",
+      ref,
     };
   }
   throw new Error("no review target: clean main checkout and no forced mode");
@@ -353,6 +362,12 @@ function branchBundle(repo, baseRef) {
   ].join("\n\n");
 }
 
+function branchLocalBundle(repo, baseRef) {
+  return [branchBundle(repo, baseRef), "# Local Diff", localBundle(repo)].join(
+    "\n\n",
+  );
+}
+
 function commitBundle(repo, commitRef) {
   return [
     "# Commit Diff",
@@ -380,7 +395,14 @@ function changedPaths(repo, target) {
         ]
       : target.mode === "branch"
         ? [runGit(repo, ["diff", "--name-only", `${target.ref}...HEAD`])]
-        : [runGit(repo, ["show", "--name-only", "--format=", target.ref])];
+        : target.mode === "branch-local"
+          ? [
+              runGit(repo, ["diff", "--name-only", `${target.ref}...HEAD`]),
+              runGit(repo, ["diff", "--name-only", "--cached"]),
+              runGit(repo, ["diff", "--name-only"]),
+              runGit(repo, ["ls-files", "--others", "--exclude-standard"]),
+            ]
+          : [runGit(repo, ["show", "--name-only", "--format=", target.ref])];
 
   return new Set(
     sources
@@ -713,7 +735,27 @@ function lineNumber(text, needle) {
   return text.slice(0, index).split("\n").length;
 }
 
-function readRepoFile(repo, rel) {
+function targetTreeRef(target) {
+  if (!target) return null;
+  if (target.mode === "branch") return "HEAD";
+  if (target.mode === "commit") return target.ref;
+  return null;
+}
+
+function readGitBlob(repo, treeRef, rel, limit = MAX_FILE_CHARS) {
+  const result = spawnSync("git", ["show", `${treeRef}:${rel}`], {
+    cwd: repo,
+    encoding: "buffer",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) return null;
+  if (result.stdout.includes(0)) return "[binary file omitted]";
+  return bounded(result.stdout.toString("utf8"), limit);
+}
+
+function readRepoFile(repo, rel, target = null) {
+  const treeRef = targetTreeRef(target);
+  if (treeRef) return readGitBlob(repo, treeRef, rel, Number.MAX_SAFE_INTEGER);
   const full = path.join(repo, rel);
   if (!existsSync(full)) return null;
   return readText(full, Number.MAX_SAFE_INTEGER);
@@ -745,8 +787,8 @@ function changedSetHas(paths, rel) {
   return paths.has(rel);
 }
 
-function collectWorkflowTfVars(repo, workflowPath) {
-  const text = readRepoFile(repo, workflowPath);
+function collectWorkflowTfVars(repo, workflowPath, target) {
+  const text = readRepoFile(repo, workflowPath, target);
   if (!text) return new Set();
   const vars = new Set();
   for (const line of text.split("\n")) {
@@ -756,10 +798,10 @@ function collectWorkflowTfVars(repo, workflowPath) {
   return vars;
 }
 
-function reviewTerraformDriftWorkflow(repo, paths, findings) {
+function reviewTerraformDriftWorkflow(repo, target, paths, findings) {
   const driftPath = ".github/workflows/terraform-drift.yml";
   if (!changedSetHas(paths, driftPath)) return;
-  const text = readRepoFile(repo, driftPath);
+  const text = readRepoFile(repo, driftPath, target);
   if (!text) return;
 
   if (/terraform plan[^\n]*\|\s*tee\s+\/tmp\/tf-plan\.txt/.test(text)) {
@@ -800,10 +842,10 @@ function reviewTerraformDriftWorkflow(repo, paths, findings) {
   ];
   const required = new Set();
   for (const workflow of sourceWorkflows) {
-    for (const name of collectWorkflowTfVars(repo, workflow))
+    for (const name of collectWorkflowTfVars(repo, workflow, target))
       required.add(name);
   }
-  const present = collectWorkflowTfVars(repo, driftPath);
+  const present = collectWorkflowTfVars(repo, driftPath, target);
   const missing = [...required].filter((name) => !present.has(name)).sort();
   if (missing.length > 0) {
     const anchor = text.includes("Union of every TF_VAR")
@@ -858,15 +900,31 @@ function reviewDeletedFileReferences(repo, target, findings) {
             "--format=",
             target.ref,
           ])
-        : [
-            runGit(repo, [
-              "diff",
-              "--name-only",
-              "--diff-filter=D",
-              "--cached",
-            ]),
-            runGit(repo, ["diff", "--name-only", "--diff-filter=D"]),
-          ].join("\n");
+        : target.mode === "branch-local"
+          ? [
+              runGit(repo, [
+                "diff",
+                "--name-only",
+                "--diff-filter=D",
+                `${target.ref}...HEAD`,
+              ]),
+              runGit(repo, [
+                "diff",
+                "--name-only",
+                "--diff-filter=D",
+                "--cached",
+              ]),
+              runGit(repo, ["diff", "--name-only", "--diff-filter=D"]),
+            ].join("\n")
+          : [
+              runGit(repo, [
+                "diff",
+                "--name-only",
+                "--diff-filter=D",
+                "--cached",
+              ]),
+              runGit(repo, ["diff", "--name-only", "--diff-filter=D"]),
+            ].join("\n");
   for (const rel of deleted
     .split("\n")
     .map((item) => item.trim())
@@ -917,7 +975,7 @@ function reviewDeletedFileReferences(repo, target, findings) {
   }
 }
 
-function reviewDocsDrift(repo, paths, findings) {
+function reviewDocsDrift(repo, target, paths, findings) {
   const docsLike = [
     "BACKLOG.md",
     "README.md",
@@ -944,7 +1002,7 @@ function reviewDocsDrift(repo, paths, findings) {
   for (const rel of docsLike) {
     if (seen.has(rel)) continue;
     seen.add(rel);
-    const text = readRepoFile(repo, rel);
+    const text = readRepoFile(repo, rel, target);
     if (!text) continue;
     for (const stale of stalePatterns) {
       if (!stale.pattern.test(text)) continue;
@@ -967,6 +1025,13 @@ function diffCheckCommands(target) {
   }
   if (target.mode === "commit") {
     return [["show", "--format=", "--check", target.ref]];
+  }
+  if (target.mode === "branch-local") {
+    return [
+      ["diff", "--check", `${target.ref}...HEAD`],
+      ["diff", "--cached", "--check"],
+      ["diff", "--check"],
+    ];
   }
   return [
     ["diff", "--cached", "--check"],
@@ -1007,9 +1072,9 @@ function runLocalReview(
   reason = "deterministic local review",
 ) {
   const findings = [];
-  reviewTerraformDriftWorkflow(repo, paths, findings);
+  reviewTerraformDriftWorkflow(repo, target, paths, findings);
   reviewDeletedFileReferences(repo, target, findings);
-  reviewDocsDrift(repo, paths, findings);
+  reviewDocsDrift(repo, target, paths, findings);
   reviewDiffCheck(repo, target, findings);
   return {
     findings,
@@ -1021,15 +1086,6 @@ function runLocalReview(
         : `Local autoreview found no deterministic findings. ${reason}; this is not a full second-model semantic review.`,
     overall_confidence: findings.length > 0 ? 0.9 : 0.75,
   };
-}
-
-function isCodexEngineUnavailable(error) {
-  const text = String(error?.message || error);
-  return (
-    text.includes("failed to initialize in-process app-server client") ||
-    text.includes("could not update PATH: Operation not permitted") ||
-    text.includes("codex CLI is not available")
-  );
 }
 
 function printReport(report) {
@@ -1114,7 +1170,9 @@ async function main() {
       ? localBundle(repo)
       : target.mode === "branch"
         ? branchBundle(repo, target.ref)
-        : commitBundle(repo, target.ref);
+        : target.mode === "branch-local"
+          ? branchLocalBundle(repo, target.ref)
+          : commitBundle(repo, target.ref);
   const prompt = buildPrompt(repo, target, bundle, loadExtras(repo, args));
   console.log(`bundle: ${prompt.length} chars`);
   if (args.bundleOutput) {
@@ -1149,27 +1207,11 @@ async function main() {
     if (args.engine === "local") {
       report = runLocalReview(repo, target, paths);
     } else {
-      try {
-        const raw =
-          args.engine === "codex"
-            ? await runCodex(repo, args, prompt)
-            : await runClaude(repo, args, prompt);
-        report = validateReport(extractReviewJson(raw), paths);
-      } catch (error) {
-        if (args.engine === "codex" && isCodexEngineUnavailable(error)) {
-          console.error(
-            "autoreview warning: codex review engine is unavailable in this environment; falling back to local deterministic review",
-          );
-          report = runLocalReview(
-            repo,
-            target,
-            paths,
-            "codex review engine was unavailable in this environment",
-          );
-        } else {
-          throw error;
-        }
-      }
+      const raw =
+        args.engine === "codex"
+          ? await runCodex(repo, args, prompt)
+          : await runClaude(repo, args, prompt);
+      report = validateReport(extractReviewJson(raw), paths);
     }
   } finally {
     const testStatus = await finishParallelTests(tests);
