@@ -86,6 +86,14 @@ use the workflow run for the full sanitized plan. The default destination is
 `#ci-failures`; set the repository variable `TERRAFORM_APPLY_SLACK_CHANNEL` to
 route these summaries to another public channel.
 
+If a post-merge Terraform deploy workflow stays `pending` with no jobs, inspect
+that workflow's run queue before waiting on the current run. Older `waiting` or
+`pending` runs in the same deploy concurrency group can block the current merge
+commit. Confirm the older runs are obsolete, cancel them, then watch the current
+run until both plan and apply reach a terminal state. If approval was granted
+before the apply job existed, GitHub can require a fresh `production-infra`
+approval after the plan creates the apply job.
+
 ## GitHub Environment Setup
 
 Pre-merge requirement for the production-environment split in issue #762:
