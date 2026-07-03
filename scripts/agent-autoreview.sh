@@ -258,6 +258,10 @@ prepare_context_bundle() {
       exit 2
       ;;
   esac
+  if [[ -d "$bundle_dir" && -n "$(find "$bundle_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    echo "agent:autoreview: --prepare-bundle-dir must be empty or absent" >&2
+    exit 2
+  fi
   mkdir -p "$bundle_dir/checklists" "$bundle_dir/patches"
 
   local mode
@@ -306,6 +310,15 @@ prepare_context_bundle() {
       git_output "$repo" diff --stat >"$bundle_dir/patches/unstaged.stat"
       git_output "$repo" diff --patch --find-renames >"$bundle_dir/patches/unstaged.diff"
       git_output "$repo" ls-files --others --exclude-standard >"$bundle_dir/patches/untracked-paths.txt"
+      : >"$bundle_dir/patches/untracked.diff"
+      while IFS= read -r untracked_path; do
+        [[ -z "$untracked_path" ]] && continue
+        if [[ -f "$repo/$untracked_path" ]]; then
+          git_output "$repo" diff --no-index -- /dev/null "$untracked_path" >>"$bundle_dir/patches/untracked.diff" || true
+        else
+          printf 'untracked non-file omitted: %s\n' "$untracked_path" >>"$bundle_dir/patches/untracked.diff"
+        fi
+      done < "$bundle_dir/patches/untracked-paths.txt"
       ;;
     branch)
       git_output "$repo" diff --name-only "$target_ref...HEAD" | sort -u >"$bundle_dir/changed-paths.txt"

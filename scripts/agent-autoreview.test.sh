@@ -4,7 +4,8 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
+repo_untracked="$repo_root/.agent-autoreview-test-untracked.txt"
+trap 'rm -rf "$tmp_dir" "$repo_untracked"' EXIT
 
 helper="$tmp_dir/autoreview-helper"
 capture="$tmp_dir/args"
@@ -171,6 +172,12 @@ expect_file_contains "$stdout" "agent:autoreview context bundle: $canonical_bund
 run_adapter_expect_failure --prepare-bundle-dir "$repo_root/.autoreview-bundle" --mode branch --base HEAD
 expect_stderr_contains "must be outside the repo worktree"
 
+nonempty_bundle="$tmp_dir/nonempty-bundle"
+mkdir -p "$nonempty_bundle"
+printf 'stale\n' >"$nonempty_bundle/stale.txt"
+run_adapter_expect_failure --prepare-bundle-dir "$nonempty_bundle" --mode branch --base HEAD
+expect_stderr_contains "must be empty or absent"
+
 ln -s "$repo_root" "$tmp_dir/repo-link"
 run_adapter_expect_failure --prepare-bundle-dir "$tmp_dir/repo-link" --mode branch --base HEAD
 expect_stderr_contains "must not be a symlink"
@@ -178,5 +185,11 @@ expect_stderr_contains "must not be a symlink"
 subdir_bundle="$tmp_dir/context-bundle-subdir"
 (cd "$repo_root/scripts" && run_adapter --prepare-bundle-dir "$subdir_bundle" --mode branch --base HEAD --dry-run)
 expect_file_contains "$capture.cwd" "$repo_root"
+
+printf 'untracked review body\n' >"$repo_untracked"
+untracked_bundle="$tmp_dir/context-bundle-untracked"
+canonical_untracked_bundle="$(cd "$(dirname "$untracked_bundle")" && pwd -P)/$(basename "$untracked_bundle")"
+run_adapter --prepare-bundle-dir "$untracked_bundle" --mode local --dry-run
+expect_file_contains "$canonical_untracked_bundle/patches/untracked.diff" "untracked review body"
 
 printf 'agent-autoreview adapter tests passed\n'
