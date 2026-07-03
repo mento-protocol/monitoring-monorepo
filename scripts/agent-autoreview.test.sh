@@ -275,6 +275,24 @@ run_auto_dirty_branch_regression() {
   expect_empty_stderr
 }
 
+run_branch_local_deleted_reference_regression() {
+  local review_repo="$tmp_dir/branch-local-deleted-reference"
+  init_review_repo "$review_repo"
+  mkdir "$review_repo/docs"
+  printf 'old docs\n' >"$review_repo/docs/old.md"
+  printf 'See docs/old.md\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  rm "$review_repo/docs/old.md"
+  commit_review_repo "$review_repo" "delete stale docs without reference fix"
+  printf 'No old docs\n' >"$review_repo/README.md"
+
+  run_helper_in_repo_expect_failure "$review_repo" --base main --engine local
+  expect_stdout_contains "autoreview target: branch-local"
+  expect_stdout_contains "Deleted file is still referenced"
+  expect_empty_stderr
+}
+
 run_requested_codex_missing_regression() {
   local review_repo="$tmp_dir/missing-codex"
   init_review_repo "$review_repo"
@@ -303,6 +321,7 @@ run_branch_diff_check_regression
 run_local_deleted_reference_regression
 run_commit_target_reads_selected_ref_regression
 run_auto_dirty_branch_regression
+run_branch_local_deleted_reference_regression
 run_requested_codex_missing_regression
 
 run_adapter CODEX_SANDBOX=seatbelt --dry-run

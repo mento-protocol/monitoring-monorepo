@@ -883,58 +883,57 @@ function reviewTerraformDriftWorkflow(repo, target, paths, findings) {
   }
 }
 
+function deletedFileReferenceChecks(repo, target) {
+  const checks = [];
+  const seen = new Set();
+  const add = (deleted, treeRef) => {
+    for (const rel of deleted
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean)) {
+      const key = `${treeRef || "worktree"}\0${rel}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      checks.push({ rel, treeRef });
+    }
+  };
+
+  if (target.mode === "branch" || target.mode === "branch-local") {
+    add(
+      runGit(repo, [
+        "diff",
+        "--name-only",
+        "--diff-filter=D",
+        `${target.ref}...HEAD`,
+      ]),
+      "HEAD",
+    );
+  }
+  if (target.mode === "commit") {
+    add(
+      runGit(repo, [
+        "show",
+        "--name-only",
+        "--diff-filter=D",
+        "--format=",
+        target.ref,
+      ]),
+      target.ref,
+    );
+  }
+  if (target.mode === "local" || target.mode === "branch-local") {
+    add(
+      runGit(repo, ["diff", "--name-only", "--diff-filter=D", "--cached"]),
+      null,
+    );
+    add(runGit(repo, ["diff", "--name-only", "--diff-filter=D"]), null);
+  }
+
+  return checks;
+}
+
 function reviewDeletedFileReferences(repo, target, findings) {
-  const deleted =
-    target.mode === "branch"
-      ? runGit(repo, [
-          "diff",
-          "--name-only",
-          "--diff-filter=D",
-          `${target.ref}...HEAD`,
-        ])
-      : target.mode === "commit"
-        ? runGit(repo, [
-            "show",
-            "--name-only",
-            "--diff-filter=D",
-            "--format=",
-            target.ref,
-          ])
-        : target.mode === "branch-local"
-          ? [
-              runGit(repo, [
-                "diff",
-                "--name-only",
-                "--diff-filter=D",
-                `${target.ref}...HEAD`,
-              ]),
-              runGit(repo, [
-                "diff",
-                "--name-only",
-                "--diff-filter=D",
-                "--cached",
-              ]),
-              runGit(repo, ["diff", "--name-only", "--diff-filter=D"]),
-            ].join("\n")
-          : [
-              runGit(repo, [
-                "diff",
-                "--name-only",
-                "--diff-filter=D",
-                "--cached",
-              ]),
-              runGit(repo, ["diff", "--name-only", "--diff-filter=D"]),
-            ].join("\n");
-  for (const rel of deleted
-    .split("\n")
-    .map((item) => item.trim())
-    .filter(Boolean)) {
-    const treeRef =
-      target.mode === "branch"
-        ? "HEAD"
-        : target.mode === "commit"
-          ? target.ref
-          : null;
+  for (const { rel, treeRef } of deletedFileReferenceChecks(repo, target)) {
     const grepArgs = treeRef
       ? ["grep", "-n", "-F", "--", rel, treeRef, "--", "."]
       : ["grep", "-n", "-F", "--", rel, "--", "."];
