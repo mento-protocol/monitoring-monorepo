@@ -79,11 +79,18 @@ Also configure the optional maintenance script for cached container resumes:
 ```
 
 That path performs the frozen install, Envio codegen, and agent-context check
-inside the cloud container, while relying only on repo-visible files. The
-maintenance path runs after Codex checks out the task branch in a cached
-container; it refreshes `origin/main`, syncs branch lockfile changes with
-`pnpm install --frozen-lockfile --prefer-offline`, reruns Envio codegen, and
-validates the agent context.
+inside the cloud container, while relying only on repo-visible files plus the
+shared global autoreview skill. Codex Cloud does not inherit a developer's local
+`~/.agents` directory, so install or bake `~/.agents/skills/autoreview` into the
+environment before maintenance runs, set `AUTOREVIEW_HELPER` to the executable
+helper path, or let setup provision it from the documented tarball/git source.
+Setup warns by default when the helper is unavailable; set
+`CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER=true` to fail fast instead.
+
+The maintenance path runs after Codex checks out the task branch in a cached
+container; it refreshes `origin/main`, verifies the autoreview helper, syncs
+branch lockfile changes with `pnpm install --frozen-lockfile --prefer-offline`,
+reruns Envio codegen, and validates the agent context.
 
 If you install manually, verify the dashboard can resolve its Sentry package
 after `pnpm install`:
@@ -211,6 +218,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 | Variable                                 | Description                                                                                                |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `ENABLE_EXPERIMENTAL_COREPACK`           | Vercel Corepack opt-in so hosted builds honor the repo `packageManager` pnpm version (Terraform-managed)   |
 | `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo, Monad, and Ethereum reserve-yield data)                       |
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`         | Optional Monad Testnet Envio GraphQL endpoint                                                              |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`    | Optional Celo Sepolia Envio GraphQL endpoint                                                               |

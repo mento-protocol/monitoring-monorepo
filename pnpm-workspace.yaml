@@ -56,6 +56,12 @@ onlyBuiltDependencies:
   - rescript
 
 # Root pnpm settings live here for pnpm 11+.
+packageConfigs:
+  # indexer-envio pins Envio CLI/runtime versions exactly; pnpm 11 ignores
+  # non-auth package .npmrc settings, so keep the policy in the workspace file.
+  "@mento-protocol/indexer-envio":
+    saveExact: true
+
 overrides:
   "envio>react": 19.2.6
   "flatted@<3.4.2": 3.4.2

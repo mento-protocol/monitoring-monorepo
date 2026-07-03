@@ -18,6 +18,7 @@ pnpm monorepo with these workspace packages:
 - `metrics-bridge/` — Hasura → Prometheus gauge exporter for v3 alert rules
 - `integration-probes/` — quote-only aggregator and cross-chain router coverage probes
 - `aegis/` — NestJS App Engine service for v2 alerts plus Grafana Alloy collector, dashboards, and alert-rule Terraform
+- `governance-watchdog/` — Cloud Function that monitors Mento Governance events on-chain and sends notifications to Discord and Telegram
 
 ## Operating Rule (read this before opening PRs)
 
@@ -510,17 +511,18 @@ Never `terraform apply` without explicit user approval — plan first, surface t
 
 Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via symlink). Open the relevant file for package-specific rules, gotchas, and verification.
 
-| Package               | What it does                                                                                                                                                                                                                                                                                                                                                                             | Read                                                           |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `aegis/`              | NestJS App Engine service polling v2 view calls → Prometheus `/metrics`; also owns the Aegis Grafana dashboard and service-health alert (`aegis/terraform/`)                                                                                                                                                                                                                             | [`aegis/AGENTS.md`](aegis/AGENTS.md)                           |
-| `shared-config/`      | `@mento-protocol/monitoring-config`: chain/token metadata, FX calendar, deployment namespaces. Source of truth — never duplicate chain slugs, explorer URLs, or token labels elsewhere (PR #209). Indexer vendors a copy because Envio builds outside the pnpm workspace.                                                                                                                | [`shared-config/AGENTS.md`](shared-config/AGENTS.md)           |
-| `indexer-envio/`      | Envio HyperIndex (envio@3.0.0): Celo + Monad FPMM, v2 Broker, and event-only Ethereum reserve-yield accounting in the primary config. Schema in `schema.graphql`; handler entry point is `src/EventHandlers.ts`.                                                                                                                                                                         | [`indexer-envio/AGENTS.md`](indexer-envio/AGENTS.md)           |
-| `ui-dashboard/`       | Next.js 16 + Plotly.js + SWR + Tailwind 4. Address book + forensic reports stored in Upstash (`labels` + `reports` hashes), backed up daily to Vercel Blob.                                                                                                                                                                                                                              | [`ui-dashboard/AGENTS.md`](ui-dashboard/AGENTS.md)             |
-| `metrics-bridge/`     | Hasura → Prometheus gauge exporter for v3 alert rules; bounded label cardinality required.                                                                                                                                                                                                                                                                                               | [`metrics-bridge/AGENTS.md`](metrics-bridge/AGENTS.md)         |
-| `integration-probes/` | Quote-only Mento v3 route coverage probes for aggregators and cross-chain routers. Publishes `integration-probes:latest` in Upstash for the dashboard `/integrations` page.                                                                                                                                                                                                              | [`integration-probes/AGENTS.md`](integration-probes/AGENTS.md) |
-| `terraform/`          | Vercel project + Upstash Redis + env vars + Cloud Run services + platform-owned repo Actions secrets. `pnpm infra:plan` before any apply; never apply without human approval.                                                                                                                                                                                                            | [`terraform/AGENTS.md`](terraform/AGENTS.md)                   |
-| `alerts/`             | All alert plumbing. `alerts/rules/` = protocol Grafana metric alert rules plus global Grafana routing/contact points/templates; `alerts/infra/` = event-driven delivery (QuickNode→Cloud Fn→Slack + Sentry→Slack bridge + Splunk On-Call rotation announcer + Slack channel lifecycle). `alerts/infra/onchain-event-handler/` and `alerts/infra/oncall-announcer/` are TS pnpm packages. | [`alerts/infra/README.md`](alerts/infra/README.md)             |
-| `scripts/`            | Deploy wrappers, agent quality gate, code-health checks. `set -euo pipefail`; refuse dirty trees before mutating external systems.                                                                                                                                                                                                                                                       | [`scripts/AGENTS.md`](scripts/AGENTS.md)                       |
+| Package                | What it does                                                                                                                                                                                                                                                                                                                                                                             | Read                                                             |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `aegis/`               | NestJS App Engine service polling v2 view calls → Prometheus `/metrics`; also owns the Aegis Grafana dashboard and service-health alert (`aegis/terraform/`)                                                                                                                                                                                                                             | [`aegis/AGENTS.md`](aegis/AGENTS.md)                             |
+| `shared-config/`       | `@mento-protocol/monitoring-config`: chain/token metadata, FX calendar, deployment namespaces. Source of truth — never duplicate chain slugs, explorer URLs, or token labels elsewhere (PR #209). Indexer vendors a copy because Envio builds outside the pnpm workspace.                                                                                                                | [`shared-config/AGENTS.md`](shared-config/AGENTS.md)             |
+| `indexer-envio/`       | Envio HyperIndex (envio@3.0.0): Celo + Monad FPMM, v2 Broker, and event-only Ethereum reserve-yield accounting in the primary config. Schema in `schema.graphql`; handler entry point is `src/EventHandlers.ts`.                                                                                                                                                                         | [`indexer-envio/AGENTS.md`](indexer-envio/AGENTS.md)             |
+| `ui-dashboard/`        | Next.js 16 + Plotly.js + SWR + Tailwind 4. Address book + forensic reports stored in Upstash (`labels` + `reports` hashes), backed up daily to Vercel Blob.                                                                                                                                                                                                                              | [`ui-dashboard/AGENTS.md`](ui-dashboard/AGENTS.md)               |
+| `metrics-bridge/`      | Hasura → Prometheus gauge exporter for v3 alert rules; bounded label cardinality required.                                                                                                                                                                                                                                                                                               | [`metrics-bridge/AGENTS.md`](metrics-bridge/AGENTS.md)           |
+| `integration-probes/`  | Quote-only Mento v3 route coverage probes for aggregators and cross-chain routers. Publishes `integration-probes:latest` in Upstash for the dashboard `/integrations` page.                                                                                                                                                                                                              | [`integration-probes/AGENTS.md`](integration-probes/AGENTS.md)   |
+| `terraform/`           | Vercel project + Upstash Redis + env vars + Cloud Run services + platform-owned repo Actions secrets. `pnpm infra:plan` before any apply; never apply without human approval.                                                                                                                                                                                                            | [`terraform/AGENTS.md`](terraform/AGENTS.md)                     |
+| `alerts/`              | All alert plumbing. `alerts/rules/` = protocol Grafana metric alert rules plus global Grafana routing/contact points/templates; `alerts/infra/` = event-driven delivery (QuickNode→Cloud Fn→Slack + Sentry→Slack bridge + Splunk On-Call rotation announcer + Slack channel lifecycle). `alerts/infra/onchain-event-handler/` and `alerts/infra/oncall-announcer/` are TS pnpm packages. | [`alerts/infra/README.md`](alerts/infra/README.md)               |
+| `governance-watchdog/` | Cloud Function monitoring Mento Governance on-chain events; sends Discord + Telegram notifications. Standalone source root with its own `pnpm-lock.yaml` and Cloud Build deploy path.                                                                                                                                                                                                    | [`governance-watchdog/README.md`](governance-watchdog/README.md) |
+| `scripts/`             | Deploy wrappers, agent quality gate, code-health checks. `set -euo pipefail`; refuse dirty trees before mutating external systems.                                                                                                                                                                                                                                                       | [`scripts/AGENTS.md`](scripts/AGENTS.md)                         |
 
 ### PR Review Guidance (Dashboard Scale)
 
@@ -585,7 +587,15 @@ to spawn unavailable nested `codex exec`; explicit `--engine` arguments and
 forked.
 
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
-`~/.claude` directories. Configure the Codex Cloud environment setup script as:
+`~/.claude` directories. The cloud image/environment must therefore install the
+shared global autoreview skill at `~/.agents/skills/autoreview` (or set
+`AUTOREVIEW_HELPER` to its executable helper) before maintenance runs, or let
+setup provision it from the documented tarball/git source. Setup warns by
+default when the helper is missing; set
+`CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER=true` to make it fail fast because PR
+shipping requires `pnpm agent:autoreview` as the structured batch-boundary
+review.
+Configure the Codex Cloud environment setup script as:
 
 ```bash
 ./scripts/codex-cloud-setup.sh
@@ -612,17 +622,21 @@ to a reachable mirror of the pinned Linux Trunk tarball and set
 installing it. Keep `CODEX_CLOUD_TRUNK_INSTALL_TOOLS=true` (the default) for
 normal Cloud runs; set it to `false` only when using a base image with a
 prewarmed Trunk cache. Setup also installs Foundry by default
-(`CODEX_CLOUD_INSTALL_FOUNDRY=true`) so Aegis `forge test` checks can run, checks
-OSV API egress by POSTing to `https://api.osv.dev/v1/querybatch` unless
-`CODEX_CLOUD_CHECK_OSV_EGRESS=false`, and can provision the global autoreview
-helper from either `CODEX_CLOUD_AUTOREVIEW_TARBALL_URL` plus
+(`CODEX_CLOUD_INSTALL_FOUNDRY=true`) so Aegis `forge test` checks can run. Set
+`CODEX_CLOUD_FOUNDRYUP_URL` to use a mirrored installer and
+`CODEX_CLOUD_FOUNDRYUP_SHA256` to verify that mirrored installer before
+execution. Setup checks OSV API egress by POSTing to
+`https://api.osv.dev/v1/querybatch` unless `CODEX_CLOUD_CHECK_OSV_EGRESS=false`,
+and can provision the global autoreview helper from either
+`CODEX_CLOUD_AUTOREVIEW_TARBALL_URL` plus
 `CODEX_CLOUD_AUTOREVIEW_TARBALL_SHA256` or `CODEX_CLOUD_AUTOREVIEW_GIT_URL`.
 Set `CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER=true` when autoreview should be a
 hard setup prerequisite instead of a warning.
 
 Codex Cloud maintenance runs when Codex resumes a cached container after
 checking out the task branch. It skips apt/tool installation, re-establishes
-repo-local git state, refreshes `origin/main`, syncs branch lockfile changes via
+repo-local git state, refreshes `origin/main`, verifies that the global
+autoreview helper is still present, syncs branch lockfile changes via
 `CI=true pnpm install --frozen-lockfile --prefer-offline`, regenerates Envio
 types, and runs `pnpm agent:context-check`.
 

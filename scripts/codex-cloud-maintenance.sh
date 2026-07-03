@@ -60,6 +60,28 @@ activate_package_manager() {
   pnpm --version
 }
 
+ensure_autoreview_helper() {
+  local helper="${AUTOREVIEW_HELPER:-$HOME/.agents/skills/autoreview/scripts/autoreview}"
+
+  echo "==> Verifying global autoreview helper"
+  if [[ -x "$helper" ]]; then
+    return 0
+  fi
+
+  cat >&2 <<MSG
+error: the global autoreview skill helper is required for cached Codex Cloud
+maintenance:
+  ${helper}
+
+Codex Cloud does not inherit a developer's local ~/.agents directory. Install or
+bake the shared autoreview skill into the environment at
+~/.agents/skills/autoreview before running maintenance, or set AUTOREVIEW_HELPER
+to the executable helper path. Without it, \`pnpm agent:autoreview\` cannot run
+before PR updates.
+MSG
+  return 1
+}
+
 echo "==> Marking repository safe for git"
 git config --global --add safe.directory "$REPO_ROOT" || true
 
@@ -71,6 +93,7 @@ echo "==> Configuring repository git hooks"
 git config core.hooksPath .trunk/hooks
 
 activate_package_manager
+ensure_autoreview_helper
 
 echo "==> Syncing workspace dependencies for the checked-out branch"
 CI=true pnpm install --frozen-lockfile --prefer-offline

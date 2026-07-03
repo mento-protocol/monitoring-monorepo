@@ -145,6 +145,20 @@ test("passes for multiple packages all with valid sha512", () => {
   assert(exitCode === 0, `Expected exit 0, got ${exitCode}`);
 });
 
+test("passes when pnpm 11 writes metadata and package graph as separate YAML documents", () => {
+  const lockfile =
+    `lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n` +
+    `\n---\nimporters:\n\npackages:\n\n` +
+    `  typescript@5.0.0:\n    resolution: {integrity: ${VALID_SHA512}}\n\n` +
+    `snapshots:\n\n  typescript@5.0.0: {}\n`;
+  const { exitCode, stdout, stderr } = run(lockfile);
+  assert(
+    exitCode === 0,
+    `Expected exit 0, got ${exitCode}\n${stdout}\n${stderr}`,
+  );
+  assert(stdout.includes("valid sha512"), `stdout: ${stdout}`);
+});
+
 // 3. Missing integrity — resolution block without integrity key.
 test("fails when a package has no integrity field", () => {
   const lockfile = `lockfileVersion: '9.0'\n\nimporters:\n\npackages:\n\n  typescript@5.0.0:\n    resolution: {}\n\nsnapshots:\n`;

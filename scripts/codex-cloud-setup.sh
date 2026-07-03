@@ -348,6 +348,7 @@ install_foundry() {
   fi
 
   export PATH="${HOME}/.foundry/bin:${PATH}"
+  persist_user_path_entry "$HOME/.foundry/bin"
   if command -v forge >/dev/null 2>&1; then
     echo "==> Foundry already available"
     forge --version
@@ -355,7 +356,21 @@ install_foundry() {
   fi
 
   echo "==> Installing Foundry for Aegis forge tests"
-  curl -fsSL "${CODEX_CLOUD_FOUNDRYUP_URL:-https://foundry.paradigm.xyz}" | bash
+  local foundryup_url="${CODEX_CLOUD_FOUNDRYUP_URL:-https://foundry.paradigm.xyz}"
+  if [[ -n "${CODEX_CLOUD_FOUNDRYUP_SHA256:-}" ]]; then
+    local tmp_dir
+    local installer
+    tmp_dir="$(mktemp -d)"
+    installer="${tmp_dir}/foundryup"
+    curl -fsSL "$foundryup_url" -o "$installer"
+    printf '%s  %s\n' "${CODEX_CLOUD_FOUNDRYUP_SHA256}" "$installer" | sha256sum -c -
+    bash "$installer"
+    rm -rf "$tmp_dir"
+  else
+    # Foundry's public bootstrap script is HTTPS-only by default. Hardened
+    # environments can mirror it and set CODEX_CLOUD_FOUNDRYUP_SHA256 above.
+    curl -fsSL "$foundryup_url" | bash
+  fi
   if ! command -v foundryup >/dev/null 2>&1; then
     cat >&2 <<'MSG'
 error: foundryup was not installed on PATH after running the Foundry installer.
@@ -367,7 +382,6 @@ MSG
   fi
 
   foundryup
-  persist_user_path_entry "$HOME/.foundry/bin"
   forge --version
 }
 
@@ -430,8 +444,13 @@ install_autoreview_helper() {
       echo "==> Autoreview helper installed at ${helper}"
       return 0
     fi
-    echo "error: autoreview helper install completed, but ${helper} is not executable." >&2
-    return 1
+    if is_enabled "${CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER:-false}"; then
+      echo "error: autoreview helper install completed, but ${helper} is not executable." >&2
+      return 1
+    fi
+    echo "warning: autoreview helper install completed, but ${helper} is not executable." >&2
+    echo "warning: continuing because CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER is not true." >&2
+    return 0
   fi
 
   if is_enabled "${CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER:-false}"; then

@@ -542,6 +542,8 @@ hook_repo="$(mktemp -d)"
   real_git_quoted="$(printf '%q' "$real_git")"
   IFS= read -r real_git_first_line < "$real_git" || real_git_first_line=""
   if [[ "$real_git_first_line" == '#!'* ]]; then
+    # Codex Cloud exposes git as a bash wrapper; preserve that path even when
+    # this test constrains PATH to a tiny fixture directory.
     cat > "$minimal_bin/git" <<EOF
 #!/bin/bash
 exec /bin/bash $real_git_quoted "\$@"

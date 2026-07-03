@@ -170,6 +170,7 @@ document the source of truth here, and wait for a human-approved plan/apply.
 
 | Variable                              | Source                   | Description                                                 |
 | ------------------------------------- | ------------------------ | ----------------------------------------------------------- |
+| `ENABLE_EXPERIMENTAL_COREPACK`        | Terraform resource       | Vercel Corepack opt-in so hosted builds honor pnpm 11       |
 | `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Ethereum reserve-yield + Celo + Monad) |
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                       |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                        |
