@@ -472,14 +472,31 @@ export function hasCodexApprovalReaction(reactions = [], headUpdatedAt = null) {
   );
 }
 
+export function hasCodexInFlightReaction(reactions = [], headUpdatedAt = null) {
+  return reactions.some((reaction) => {
+    if (
+      commentReactionContent(reaction) !== "eyes" ||
+      !isBotApproverLogin(reaction.user?.login)
+    ) {
+      return false;
+    }
+    if (headUpdatedAt === null) return true;
+
+    const createdAt = parseTimestamp(reaction.created_at ?? reaction.createdAt);
+    return createdAt !== null && createdAt >= headUpdatedAt;
+  });
+}
+
 export function classifyCodexReviewSignal({
   issueComments = [],
   reviews = [],
   headUpdatedAt = null,
   currentHeadOid = null,
   codexApprovalReaction = false,
+  codexInFlightReaction = false,
 } = {}) {
   if (codexApprovalReaction) return "approved";
+  if (codexInFlightReaction) return "in_flight";
 
   let hasHistoricalSignal = false;
   let hasCurrentRequest = false;
@@ -606,12 +623,17 @@ export function summarizeReadyState({
     reactions,
     headUpdatedAt,
   );
+  const codexInFlightReaction = hasCodexInFlightReaction(
+    reactions,
+    headUpdatedAt,
+  );
   const codexReviewSignal = classifyCodexReviewSignal({
     issueComments,
     reviews: pr.reviews ?? [],
     headUpdatedAt,
     currentHeadOid: pr.headRefOid ?? pr.headOid ?? null,
     codexApprovalReaction,
+    codexInFlightReaction,
   });
 
   const mergeable = normalizeStatusValue(pr.mergeable) === "MERGEABLE";

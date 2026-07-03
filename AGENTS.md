@@ -244,13 +244,14 @@ pnpm agent:autoreview
 
 Use it as a batch-boundary verifier. Verify every accepted finding in the real
 code before editing, rerun focused checks after review-triggered fixes, and
-rerun autoreview once for that fixed batch. This adapter expects the global
-`~/.agents/skills/autoreview` skill and does not replace the final PR readiness
-probe. Inside an active Codex sandbox, the adapter defaults to the helper's
-local deterministic engine because nested `codex exec` is unavailable there;
+rerun autoreview once for that fixed batch. This adapter uses the repo-local
+helper at `scripts/agent-autoreview.mjs` by default and does not replace the
+final PR readiness probe. Inside an active Codex sandbox, the adapter defaults
+to the helper's local deterministic engine because nested `codex exec` is unavailable there;
 pass `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` to override.
-For a true Codex semantic pass from inside Codex, use `--prepare-only` and the
-Codex-native flow described by the global autoreview skill.
+Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the pinned
+repo helper. For a true Codex semantic pass from inside Codex, use
+`--prepare-only` and the Codex-native flow described by the autoreview helper.
 
 To classify review depth and likely context-update requirements before or after
 the mapped gate, use:
@@ -457,6 +458,7 @@ pnpm lockfile:lint                 # Lockfile integrity + registry check (blocki
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 node scripts/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
+node scripts/file-size-watchlist.mjs  # Refresh source file-size watchlist; use --format issue for GitHub Issues, not BACKLOG.md
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
@@ -593,26 +595,23 @@ team-shareable project workflows there instead of relying on local-only
 lives in `.codex/config.toml`; local personal Codex settings still belong in
 `~/.codex/config.toml`.
 
-`autoreview` is a cross-project global skill sourced from
-`~/.agents/skills/autoreview`. This repo exposes it through
-`pnpm agent:autoreview`, and Claude Code also has `/autoreview` as a thin
-command shim. The repo adapter detects active Codex sandbox sessions and uses
-the helper's local deterministic engine by default so the command does not try
-to spawn unavailable nested `codex exec`; explicit `--engine` arguments and
-`AUTOREVIEW_ENGINE` still take precedence. Do not add repo-local
-`.agents/skills/autoreview` or
-`.claude/skills/autoreview` copies unless the global skill is intentionally
-forked.
+`autoreview` is pinned in this repo through `scripts/agent-autoreview.mjs` and
+exposed with `pnpm agent:autoreview`; Claude Code also has `/autoreview` as a
+thin command shim. The repo adapter detects active Codex sandbox sessions and
+uses the helper's local deterministic engine by default so the command does not
+try to spawn unavailable nested `codex exec`; explicit `--engine` arguments and
+`AUTOREVIEW_ENGINE` still take precedence. `AUTOREVIEW_HELPER` is an escape
+hatch for intentional local testing or replacement, not a Cloud prerequisite.
+Keep the repo-local helper as the source of truth for this repo's required
+ship gate; update it deliberately when taking upstream improvements from a
+personal/global skill.
 
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
-`~/.claude` directories. The cloud image/environment must therefore install the
-shared global autoreview skill at `~/.agents/skills/autoreview` (or set
-`AUTOREVIEW_HELPER` to its executable helper) before maintenance runs, or let
-setup provision it from the documented tarball/git source. Setup warns by
-default when the helper is missing; set
-`CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER=true` to make it fail fast because PR
-shipping requires `pnpm agent:autoreview` as the structured batch-boundary
-review.
+`~/.claude` directories. Cloud setup and maintenance therefore rely on the
+repo-local helper at `scripts/agent-autoreview.mjs`; they fail fast only if that
+repo-owned executable is missing or an explicit `AUTOREVIEW_HELPER` override is
+not executable. PR shipping requires `pnpm agent:autoreview` as the structured
+batch-boundary review.
 Configure the Codex Cloud environment setup script as:
 
 ```bash
@@ -645,15 +644,14 @@ prewarmed Trunk cache. Setup also installs Foundry by default
 `CODEX_CLOUD_FOUNDRYUP_SHA256` to verify that mirrored installer before
 execution. Setup checks OSV API egress by POSTing to
 `https://api.osv.dev/v1/querybatch` unless `CODEX_CLOUD_CHECK_OSV_EGRESS=false`,
-and can provision the global autoreview helper from either
-`CODEX_CLOUD_AUTOREVIEW_TARBALL_URL` plus
-`CODEX_CLOUD_AUTOREVIEW_TARBALL_SHA256` or `CODEX_CLOUD_AUTOREVIEW_GIT_URL`.
-Set `CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER=true` when autoreview should be a
-hard setup prerequisite instead of a warning.
+and verifies the repo-local autoreview helper at
+`scripts/agent-autoreview.mjs` before tool prewarm. Set `AUTOREVIEW_HELPER` only
+for an intentional executable override; setup fails fast when the effective
+helper is missing.
 
 Codex Cloud maintenance runs when Codex resumes a cached container after
 checking out the task branch. It skips apt/tool installation, re-establishes
-repo-local git state, refreshes `origin/main`, verifies that the global
+repo-local git state, refreshes `origin/main`, verifies that the repo-local
 autoreview helper is still present, syncs branch lockfile changes via
 `CI=true pnpm install --frozen-lockfile --prefer-offline`, regenerates Envio
 types, and runs `pnpm agent:context-check`.

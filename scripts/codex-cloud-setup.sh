@@ -385,89 +385,27 @@ MSG
   forge --version
 }
 
-install_autoreview_helper_from_tarball() {
-  local helper="$1"
-  local tmp_dir
-  local archive
+ensure_autoreview_helper() {
+  local default_helper="$REPO_ROOT/scripts/agent-autoreview.mjs"
+  local helper="${AUTOREVIEW_HELPER:-$default_helper}"
 
-  if [[ -z "${CODEX_CLOUD_AUTOREVIEW_TARBALL_URL:-}" ]]; then
-    return 1
-  fi
-  if [[ -z "${CODEX_CLOUD_AUTOREVIEW_TARBALL_SHA256:-}" ]]; then
-    echo "error: CODEX_CLOUD_AUTOREVIEW_TARBALL_SHA256 is required when CODEX_CLOUD_AUTOREVIEW_TARBALL_URL is set." >&2
-    return 1
-  fi
-
-  echo "==> Installing autoreview helper from CODEX_CLOUD_AUTOREVIEW_TARBALL_URL"
-  tmp_dir="$(mktemp -d)"
-  archive="${tmp_dir}/autoreview.tar.gz"
-  local install_status=0
-  if curl -fsSL "${CODEX_CLOUD_AUTOREVIEW_TARBALL_URL}" -o "$archive" && \
-    printf '%s  %s\n' "${CODEX_CLOUD_AUTOREVIEW_TARBALL_SHA256}" "$archive" | sha256sum -c - && \
-    mkdir -p "$(dirname "$helper")" && \
-    tar -xzf "$archive" -C "$HOME/.agents/skills"; then
-    install_status=0
-  else
-    install_status=$?
-  fi
-  rm -rf "$tmp_dir"
-  return "$install_status"
-}
-
-install_autoreview_helper_from_git() {
-  local helper="$1"
-
-  if [[ -z "${CODEX_CLOUD_AUTOREVIEW_GIT_URL:-}" ]]; then
-    return 1
-  fi
-
-  echo "==> Installing autoreview helper from CODEX_CLOUD_AUTOREVIEW_GIT_URL"
-  rm -rf "$HOME/.agents/skills/autoreview"
-  git clone --depth 1 "${CODEX_CLOUD_AUTOREVIEW_GIT_URL}" "$HOME/.agents/skills/autoreview"
-  if [[ -n "${CODEX_CLOUD_AUTOREVIEW_GIT_REF:-}" ]]; then
-    git -C "$HOME/.agents/skills/autoreview" fetch --depth 1 origin "${CODEX_CLOUD_AUTOREVIEW_GIT_REF}"
-    git -C "$HOME/.agents/skills/autoreview" checkout --detach FETCH_HEAD
-  fi
-  chmod +x "$helper"
-}
-
-install_autoreview_helper() {
-  local helper="${AUTOREVIEW_HELPER:-$HOME/.agents/skills/autoreview/scripts/autoreview}"
-
+  echo "==> Verifying autoreview helper"
   if [[ -x "$helper" ]]; then
-    echo "==> Autoreview helper already available at ${helper}"
     return 0
   fi
 
-  if install_autoreview_helper_from_tarball "$helper" || install_autoreview_helper_from_git "$helper"; then
-    if [[ -x "$helper" ]]; then
-      echo "==> Autoreview helper installed at ${helper}"
-      return 0
-    fi
-    if is_enabled "${CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER:-false}"; then
-      echo "error: autoreview helper install completed, but ${helper} is not executable." >&2
-      return 1
-    fi
-    echo "warning: autoreview helper install completed, but ${helper} is not executable." >&2
-    echo "warning: continuing because CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER is not true." >&2
-    return 0
-  fi
+  cat >&2 <<MSG
+error: an executable autoreview helper is required for Codex Cloud agent work:
+  ${helper}
 
-  if is_enabled "${CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER:-false}"; then
-    cat >&2 <<'MSG'
-error: autoreview helper is required but was not installed.
-Set CODEX_CLOUD_AUTOREVIEW_TARBALL_URL plus CODEX_CLOUD_AUTOREVIEW_TARBALL_SHA256,
-set CODEX_CLOUD_AUTOREVIEW_GIT_URL, set AUTOREVIEW_HELPER to an executable path,
-or preinstall ~/.agents/skills/autoreview in the Codex Cloud base image.
-MSG
-    return 1
-  fi
+This repo vendors its default helper at:
+  ${default_helper}
 
-  cat >&2 <<'MSG'
-warning: autoreview helper is not installed. `pnpm agent:autoreview` will use
-the repo adapter but still fail until ~/.agents/skills/autoreview is provisioned.
-Set CODEX_CLOUD_REQUIRE_AUTOREVIEW_HELPER=true to make setup fail fast instead.
+Restore that file before running this setup script, or set AUTOREVIEW_HELPER to
+an executable helper path. The repo ship flow depends on \`pnpm agent:autoreview\`
+as a batch-boundary review before opening PRs.
 MSG
+  return 1
 }
 
 check_osv_api_egress() {
@@ -515,10 +453,10 @@ if command -v corepack >/dev/null 2>&1; then
 fi
 pnpm --version
 
+ensure_autoreview_helper
 prewarm_trunk
 install_trunk_tools
 install_foundry
-install_autoreview_helper
 check_osv_api_egress
 
 echo "==> Installing workspace dependencies"
