@@ -23,7 +23,7 @@ tests. Workflow details live in `docs/notes/agent-issue-workflow.md`.
 
 ## File-size watchlist (auto-generated)
 
-_Last updated: 2026-07-01 by file-size-budget-drift-detector. Soft cap 600 lines / hard cap 1,000. See `/AGENTS.md` §"File-size budget"._
+_Last updated: 2026-07-01 by file-size-budget-drift-detector. Counts are **raw physical lines** (`wc -l`). The ESLint `max-lines` hard cap (1,000) uses `skipBlankLines: true, skipComments: true`, so ESLint-counted values are lower — files listed above 1,000 here may still pass the hard cap. Soft cap 600 raw lines. See `/AGENTS.md` §"File-size budget"._
 
 | Lines | File                                                                        | Δ since last report |
 | ----: | --------------------------------------------------------------------------- | ------------------: |
