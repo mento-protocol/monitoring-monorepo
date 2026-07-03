@@ -429,6 +429,19 @@ Treat code review as a batch-boundary verifier, not as the inner edit loop. When
 
 For process or policy-router PRs, build a coverage matrix before implementation. Use `AGENTS.md`, `docs/pr-checklists/*`, CI path filters, package scripts, and existing command docs to map each changed-path class to its required commands, checklist prompts, refusal guards, and regression tests. Run cheap targeted checks while editing; reserve broad local reviews and external bot reviews for completed batches.
 
+## Docs Drift On Workflow Changes
+
+When adding or changing a command, script, env var, deploy step, hook, or
+canonical operator workflow, audit the full live workflow surface before pushing.
+Search `AGENTS.md`, package `AGENTS.md` files, `README.md`, `docs/**`,
+`.agents/skills/**`, `.claude/skills/**`, `.claude/commands/**`, deploy and
+rollback scripts, and babysit commands for the old sequence. Update every
+operator path that could still send an agent or human through stale steps.
+
+Treat deploy, rollback, and babysit flows as one family: if a new promotion gate
+is added to the deploy path, the rollback checklist and monitor/babysit prompt
+usually need the same gate.
+
 ## Recurring PR-review patterns
 
 Recurring automated-review hazards are canonicalized in
