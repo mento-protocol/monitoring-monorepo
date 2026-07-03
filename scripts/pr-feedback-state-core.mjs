@@ -114,6 +114,16 @@ function findingSourceId(id, index = null) {
   return index === null ? sourceId : `${sourceId}#${index + 1}`;
 }
 
+function feedbackCommentKey(comment) {
+  return [
+    comment.id ?? "",
+    comment.url ?? "",
+    comment.commitOid ?? "",
+    comment.author ?? "",
+    normalizeText(comment.body ?? ""),
+  ].join("\0");
+}
+
 function buildFinding({
   source,
   sourceId = null,
@@ -274,10 +284,10 @@ function botCommentSections(comment) {
 }
 
 function botCommentFindings(comments = [], pr, blockingComments = []) {
-  const blockingSet = new Set(blockingComments);
+  const blockingKeys = new Set(blockingComments.map(feedbackCommentKey));
   return comments.filter(isActionableReviewBotComment).flatMap((comment) => {
     const currentHead = isCurrentHeadComment(comment, pr);
-    const blocking = blockingSet.has(comment);
+    const blocking = blockingKeys.has(feedbackCommentKey(comment));
     const source = comment.commitOid
       ? "top-level-bot-review"
       : "top-level-bot-comment";

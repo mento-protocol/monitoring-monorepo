@@ -272,7 +272,7 @@ function reviewCommentSummary(comment, { replied = undefined } = {}) {
   return summary;
 }
 
-export function summarizeRootReviewComments(
+function summarizeRootReviewComments(
   reviewComments = [],
   ignoredAuthors = [],
   allowedReplyAuthors = null,

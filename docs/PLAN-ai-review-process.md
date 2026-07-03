@@ -58,9 +58,7 @@ the repo's existing gates:
 - Route script changes through `pnpm agent:quality-gate`.
 - Document the new command in `AGENTS.md` and keep this plan as the roadmap.
 
-## Next PR
-
-Add a feedback findings ledger to `pr:feedback-state`:
+2. PR #1037 shipped a feedback findings ledger to `pr:feedback-state`:
 
 - Emit `findings[]` entries with stable fingerprints for feedback surfaces.
 - Normalize inline review threads, root review comments, and top-level bot
@@ -72,9 +70,19 @@ Add a feedback findings ledger to `pr:feedback-state`:
 - Include state fields for current-head, outdated, replied, unresolved, and
   blocking status.
 
+## Next PR
+
+Add prompt-exclusion updates to the global `review` skill:
+
+- Translate recurring accepted/rejected review noise into explicit "do not
+  flag" guidance.
+- Keep prompt changes outside this repo unless the owning global skill lives in
+  repo-local context.
+- Use `findings[]` from `pr:feedback-state` to identify repeated false-positive
+  patterns before changing prompts.
+
 ## Later PRs
 
-- Add prompt-exclusion updates to the global `review` skill.
 - Teach `agent:autoreview` to prepare a richer review bundle directory with
   changed paths, patch files, selected checklists, and any feedback ledger.
 - Consider a human-only break-glass readiness override that is reported by

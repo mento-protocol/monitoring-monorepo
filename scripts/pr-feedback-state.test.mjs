@@ -223,14 +223,16 @@ test("normalizes feedback surfaces into findings with state flags", () => {
       "resolved",
       "unreplied",
       "replied",
-      "current-head",
-      "current-head",
+      "blocking-current-head",
+      "blocking-current-head",
     ],
   );
   assertEqual(findings[0].blocking, true);
   assertEqual(findings[0].currentHead, false);
   assertEqual(findings[2].replied, false);
   assertEqual(findings[3].blocking, false);
+  assertEqual(findings[4].blocking, true);
+  assertEqual(findings[5].blocking, true);
   assertEqual(findings[4].sourceId, "456#1");
   assertEqual(findings[5].title, "[P2] Fix two");
 });
