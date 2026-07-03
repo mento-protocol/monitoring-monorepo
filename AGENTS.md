@@ -249,8 +249,19 @@ rerun autoreview once for that fixed batch. This adapter expects the global
 probe. Inside an active Codex sandbox, the adapter defaults to the helper's
 local deterministic engine because nested `codex exec` is unavailable there;
 pass `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` to override.
-For a true Codex semantic pass from inside Codex, use `--prepare-only` and the
-Codex-native flow described by the global autoreview skill.
+For a true Codex semantic pass from inside Codex, prepare a repo-context bundle
+and pass that bundle to a fresh-context reviewer:
+
+```bash
+pnpm agent:autoreview --prepare-bundle-dir /tmp/autoreview-bundle
+```
+
+Use a directory outside the repo worktree so local-mode bundles do not include
+their own generated files. The bundle contains changed paths, patch files,
+repo-selected checklist/prompt context, and the global helper's
+`autoreview-prompt.md`. Add
+`--feedback-pr <number>` to include the current `pr:feedback-state` ledger as a
+review dataset for feedback-fix batches.
 
 To classify review depth and likely context-update requirements before or after
 the mapped gate, use:
@@ -452,7 +463,7 @@ pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:autoreview              # Structured closeout review; Codex sandbox defaults to --engine local, override with --engine claude/codex
+pnpm agent:autoreview              # Structured closeout review; use --prepare-bundle-dir DIR for Codex-native review bundles
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
@@ -599,7 +610,10 @@ lives in `.codex/config.toml`; local personal Codex settings still belong in
 command shim. The repo adapter detects active Codex sandbox sessions and uses
 the helper's local deterministic engine by default so the command does not try
 to spawn unavailable nested `codex exec`; explicit `--engine` arguments and
-`AUTOREVIEW_ENGINE` still take precedence. Do not add repo-local
+`AUTOREVIEW_ENGINE` still take precedence. The adapter also exposes
+`--prepare-bundle-dir <dir>` to create a repo-context review bundle with changed
+paths, patch files, selected checklists, optional `--feedback-pr` feedback
+state, and the global helper's prepared prompt. Do not add repo-local
 `.agents/skills/autoreview` or
 `.claude/skills/autoreview` copies unless the global skill is intentionally
 forked.

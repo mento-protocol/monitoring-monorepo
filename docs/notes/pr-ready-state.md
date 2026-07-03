@@ -223,7 +223,12 @@ Field expectations:
    rerun focused checks and autoreview once for that fixed batch. Inside an
    active Codex sandbox, the adapter defaults to the helper's local
    deterministic engine unless an engine is passed explicitly, because nested
-   `codex exec` is unavailable there.
+   `codex exec` is unavailable there. For a true fresh-context Codex semantic
+   pass, run `pnpm agent:autoreview --prepare-bundle-dir <dir>` and hand the
+   generated bundle to the reviewer; use a directory outside the repo worktree
+   so local-mode bundles do not include themselves. Add
+   `--feedback-pr <number>` when the batch responds to PR feedback so the
+   feedback ledger is included.
 5. Run `pnpm --silent pr:feedback-state --pr <number> --json` for a feedback-only sweep,
    or `pnpm pr:ready-state --pr <number> --json` for the final readiness
    source of truth. For a foreground wait loop, use

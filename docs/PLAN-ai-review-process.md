@@ -82,15 +82,23 @@ the repo's existing gates:
 - Use `findings[]` from `pr:feedback-state` as the feedback-state source of
   truth before reviving older findings.
 
+4. `agent:autoreview` can prepare richer repo-context review bundles:
+
+- Add `pnpm agent:autoreview --prepare-bundle-dir <dir>`.
+- Write changed paths, patch files, copied selected checklists, and the global
+  helper's `autoreview-prompt.md` into an out-of-worktree bundle directory.
+- Add `--feedback-pr <number>` to include `pr:feedback-state` JSON for
+  feedback-fix batches.
+- Keep normal `pnpm agent:autoreview` behavior unchanged.
+
 ## Next PR
 
-Teach `agent:autoreview` to prepare a richer review bundle directory with
-changed paths, patch files, selected checklists, and any feedback ledger.
+Consider a human-only break-glass readiness override that is reported by
+`pr:ready-state`, not silently treated as all-clear.
 
 ## Later PRs
 
-- Consider a human-only break-glass readiness override that is reported by
-  `pr:ready-state`, not silently treated as all-clear.
+- None currently planned.
 
 ## Non-Goals
 

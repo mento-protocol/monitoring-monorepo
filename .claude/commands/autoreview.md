@@ -16,6 +16,10 @@ Arguments: `$ARGUMENTS`
 pnpm agent:autoreview $ARGUMENTS
 ```
 
+For a fresh-context Codex handoff, pass
+`--prepare-bundle-dir /tmp/autoreview-bundle` using a directory outside the repo
+worktree. Add `--feedback-pr <number>` when reviewing a feedback-fix batch.
+
 3. Verify every accepted finding before editing. Do not blindly apply review
    output.
 4. If fixes are made, rerun focused checks and rerun autoreview once for the
