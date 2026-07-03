@@ -43,9 +43,9 @@ the repo's existing gates:
 5. Enrich autoreview bundles with shared context files instead of relying on one
    large prompt.
 
-## First PR
+## Shipped PRs
 
-Ship a repo-native materiality and context-drift slice:
+1. PR #1034 shipped a repo-native materiality and context-drift slice:
 
 - Add `scripts/review-materiality.mjs`.
 - Expose it as `pnpm agent:review-materiality`.
@@ -58,10 +58,22 @@ Ship a repo-native materiality and context-drift slice:
 - Route script changes through `pnpm agent:quality-gate`.
 - Document the new command in `AGENTS.md` and keep this plan as the roadmap.
 
+## Next PR
+
+Add a feedback findings ledger to `pr:feedback-state`:
+
+- Emit `findings[]` entries with stable fingerprints for feedback surfaces.
+- Normalize inline review threads, root review comments, and top-level bot
+  findings into one list.
+- Preserve readiness semantics: `findings[]` explains feedback state but
+  `pr:ready-state` remains the final all-clear gate.
+- Extract separate entries from multi-finding bot review comments when they use
+  table or severity-section formats.
+- Include state fields for current-head, outdated, replied, unresolved, and
+  blocking status.
+
 ## Later PRs
 
-- Add `findings[]` to `pr:feedback-state` with stable fingerprints and section
-  extraction for multi-finding bot comments.
 - Add prompt-exclusion updates to the global `review` skill.
 - Teach `agent:autoreview` to prepare a richer review bundle directory with
   changed paths, patch files, selected checklists, and any feedback ledger.

@@ -59,7 +59,11 @@ async function main() {
 
     for (;;) {
       try {
-        const readyState = await fetchReadyState({ prArg, repoArg });
+        const readyState = await fetchReadyState({
+          prArg,
+          repoArg,
+          includeFeedbackDetails: true,
+        });
         process.stdout.write(
           renderFeedbackState(summarizeFeedbackState(readyState), { watch }),
         );

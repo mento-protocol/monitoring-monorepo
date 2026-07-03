@@ -191,21 +191,25 @@ export function splitRequiredAndOptionalChecks(
 }
 
 export function findUnresolvedReviewThreads(reviewThreads = []) {
-  return reviewThreads
+  return summarizeReviewThreads(reviewThreads)
     .filter((thread) => thread.isResolved === false)
-    .map((thread) => {
-      const firstComment = thread.comments?.nodes?.[0] ?? thread.comments?.[0];
-      return {
-        id: thread.id,
-        path: thread.path ?? null,
-        line: thread.line ?? thread.startLine ?? null,
-        isOutdated: Boolean(thread.isOutdated),
-        author:
-          firstComment?.author?.login ?? firstComment?.user?.login ?? null,
-        url: firstComment?.url ?? null,
-        body: firstComment?.body ?? "",
-      };
-    });
+    .map(({ isResolved: _isResolved, ...thread }) => thread);
+}
+
+export function summarizeReviewThreads(reviewThreads = []) {
+  return reviewThreads.map((thread) => {
+    const firstComment = thread.comments?.nodes?.[0] ?? thread.comments?.[0];
+    return {
+      id: thread.id,
+      path: thread.path ?? null,
+      line: thread.line ?? thread.startLine ?? null,
+      isOutdated: Boolean(thread.isOutdated),
+      isResolved: Boolean(thread.isResolved),
+      author: firstComment?.author?.login ?? firstComment?.user?.login ?? null,
+      url: firstComment?.url ?? null,
+      body: firstComment?.body ?? "",
+    };
+  });
 }
 
 export function findUnrepliedRootReviewComments(
@@ -213,11 +217,35 @@ export function findUnrepliedRootReviewComments(
   ignoredAuthors = [],
   allowedReplyAuthors = null,
 ) {
+  const repliedRootIds = repliedRootReviewCommentIds(
+    reviewComments,
+    allowedReplyAuthors,
+  );
+  const ignoredAuthorSet = new Set(ignoredAuthors.filter(Boolean));
+
+  return reviewComments
+    .filter((comment) => commentIsRootReviewComment(comment))
+    .filter((comment) => !ignoredAuthorSet.has(comment.user?.login))
+    .filter((comment) => !repliedRootIds.has(comment.id))
+    .map(reviewCommentSummary);
+}
+
+function commentIsRootReviewComment(comment) {
+  return (
+    comment.in_reply_to_id === undefined || comment.in_reply_to_id === null
+  );
+}
+
+function repliedRootReviewCommentIds(
+  reviewComments = [],
+  allowedReplyAuthors = null,
+) {
   const allowedReplyAuthorSet =
     allowedReplyAuthors === null
       ? null
       : new Set(allowedReplyAuthors.filter(Boolean));
-  const repliedRootIds = new Set(
+
+  return new Set(
     reviewComments
       .filter((comment) => {
         const rootId = comment.in_reply_to_id;
@@ -229,6 +257,30 @@ export function findUnrepliedRootReviewComments(
       })
       .map((comment) => comment.in_reply_to_id),
   );
+}
+
+function reviewCommentSummary(comment, { replied = undefined } = {}) {
+  const summary = {
+    id: comment.id,
+    path: comment.path ?? null,
+    line: comment.line ?? comment.original_line ?? null,
+    author: comment.user?.login ?? null,
+    url: comment.html_url ?? comment.url ?? null,
+    body: comment.body ?? "",
+  };
+  if (replied !== undefined) summary.replied = replied;
+  return summary;
+}
+
+export function summarizeRootReviewComments(
+  reviewComments = [],
+  ignoredAuthors = [],
+  allowedReplyAuthors = null,
+) {
+  const repliedRootIds = repliedRootReviewCommentIds(
+    reviewComments,
+    allowedReplyAuthors,
+  );
   const ignoredAuthorSet = new Set(ignoredAuthors.filter(Boolean));
 
   return reviewComments
@@ -237,15 +289,11 @@ export function findUnrepliedRootReviewComments(
         comment.in_reply_to_id === undefined || comment.in_reply_to_id === null,
     )
     .filter((comment) => !ignoredAuthorSet.has(comment.user?.login))
-    .filter((comment) => !repliedRootIds.has(comment.id))
-    .map((comment) => ({
-      id: comment.id,
-      path: comment.path ?? null,
-      line: comment.line ?? comment.original_line ?? null,
-      author: comment.user?.login ?? null,
-      url: comment.html_url ?? comment.url ?? null,
-      body: comment.body ?? "",
-    }));
+    .map((comment) =>
+      reviewCommentSummary(comment, {
+        replied: repliedRootIds.has(comment.id),
+      }),
+    );
 }
 
 export function findTopLevelBotComments(issueComments = []) {
@@ -529,6 +577,7 @@ export function summarizeReadyState({
   requiredStatusContexts = [],
   requiredStatusContextsError = null,
   requiredStatusContextsAvailable = requiredStatusContexts.length > 0,
+  includeFeedbackDetails = false,
 }) {
   const statusChecks = groupStatusChecks(pr.statusCheckRollup ?? []);
   const splitChecks = splitRequiredAndOptionalChecks(
@@ -536,11 +585,17 @@ export function summarizeReadyState({
     requiredStatusContexts,
     { requiredStatusContextsAvailable },
   );
-  const unresolvedReviewThreads = findUnresolvedReviewThreads(reviewThreads);
-  const unrepliedRootReviewComments = findUnrepliedRootReviewComments(
+  const reviewThreadSummaries = summarizeReviewThreads(reviewThreads);
+  const unresolvedReviewThreads = reviewThreadSummaries
+    .filter((thread) => thread.isResolved === false)
+    .map(({ isResolved: _isResolved, ...thread }) => thread);
+  const rootReviewComments = summarizeRootReviewComments(
     reviewComments,
     [pr.author?.login],
     [pr.author?.login, BOT_APPROVER],
+  );
+  const unrepliedRootReviewComments = rootReviewComments.filter(
+    (comment) => comment.replied === false,
   );
   const topLevelBotComments = [
     ...findTopLevelBotComments(issueComments),
@@ -687,18 +742,18 @@ export function summarizeReadyState({
     items: optionalItems,
   };
   const ready = required.ready;
-  const summary = ready
+  const summaryText = ready
     ? optional.items.length > 0
       ? `Required gates are clear; ${optional.items.length} optional signal(s) still need attention.`
       : "Required gates are clear."
     : `${required.blockers.length} required blocker(s) remain.`;
 
-  return {
+  const readyStateSummary = {
     ready,
     required,
     optional,
     gates,
-    summary,
+    summary: summaryText,
     pr: summaryPr(pr, headUpdatedAt),
     statusChecks,
     requiredStatusContexts,
@@ -708,4 +763,11 @@ export function summarizeReadyState({
     codexApprovalReaction,
     codexReviewSignal,
   };
+
+  if (includeFeedbackDetails) {
+    readyStateSummary.reviewThreads = reviewThreadSummaries;
+    readyStateSummary.rootReviewComments = rootReviewComments;
+  }
+
+  return readyStateSummary;
 }
