@@ -54,12 +54,35 @@ expect_stderr_contains() {
   fi
 }
 
+expect_stdout_contains() {
+  local expected="$1"
+  if ! grep -Fq "$expected" "$stdout"; then
+    printf 'expected stdout to contain %s\nstdout:\n%s\n' "$expected" "$(cat "$stdout")" >&2
+    exit 1
+  fi
+}
+
 expect_empty_stderr() {
   if [[ -s "$stderr" ]]; then
     printf 'expected empty stderr, got:\n%s\n' "$(cat "$stderr")" >&2
     exit 1
   fi
 }
+
+run_default_adapter() {
+  : >"$stdout"
+  : >"$stderr"
+  env -i \
+    "PATH=$PATH" \
+    "HOME=$HOME" \
+    "TMPDIR=${TMPDIR:-/tmp}" \
+    "$repo_root/scripts/agent-autoreview.sh" \
+    --engine local --dry-run >"$stdout" 2>"$stderr"
+}
+
+run_default_adapter
+expect_stdout_contains "engine: local"
+expect_empty_stderr
 
 run_adapter CODEX_SANDBOX=seatbelt --dry-run
 expect_args $'--engine\nlocal\n--dry-run'
