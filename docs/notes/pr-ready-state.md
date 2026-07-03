@@ -218,10 +218,10 @@ Field expectations:
 3. Run the mapped local gate once for the batch.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
    run `pnpm agent:autoreview` as a structured closeout review. The command is
-   a repo adapter for the global `~/.agents/skills/autoreview` skill. Verify
-   accepted findings before editing; if review-triggered fixes change code,
-   rerun focused checks and autoreview once for that fixed batch. Inside an
-   active Codex sandbox, the adapter defaults to the helper's local
+   a repo adapter for the pinned helper at `scripts/agent-autoreview.mjs`.
+   Verify accepted findings before editing; if review-triggered fixes change
+   code, rerun focused checks and autoreview once for that fixed batch. Inside
+   an active Codex sandbox, the adapter defaults to the helper's local
    deterministic engine unless an engine is passed explicitly, because nested
    `codex exec` is unavailable there. For a true fresh-context Codex semantic
    pass, run `pnpm agent:autoreview --prepare-bundle-dir <dir>` and hand the

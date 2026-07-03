@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-helper="${AUTOREVIEW_HELPER:-$HOME/.agents/skills/autoreview/scripts/autoreview}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/.." && pwd)"
+default_helper="$repo_root/scripts/agent-autoreview.mjs"
+helper="${AUTOREVIEW_HELPER:-$default_helper}"
 
 if [[ ! -x "$helper" ]]; then
   cat >&2 <<EOF
-agent:autoreview requires the global autoreview skill helper:
+agent:autoreview requires an executable autoreview helper:
   $helper
 
-Install or restore ~/.agents/skills/autoreview, then retry.
+This repo vendors its default helper at:
+  $default_helper
+
+Restore that file, or set AUTOREVIEW_HELPER to an executable helper path.
 EOF
   exit 127
 fi
@@ -284,11 +290,18 @@ prepare_context_bundle() {
       target_ref="$(arg_value --base origin/main "$@")"
       ;;
     auto)
-      if worktree_dirty "$repo"; then
+      if [[ -n "$branch" && "$branch" != "main" ]]; then
+        target_ref="$(arg_value --base origin/main "$@")"
+        if worktree_dirty "$repo"; then
+          target_mode="branch-local"
+        else
+          target_mode="branch"
+        fi
+      elif worktree_dirty "$repo"; then
         target_mode="local"
       else
-        target_mode="branch"
-        target_ref="$(arg_value --base origin/main "$@")"
+        echo "agent:autoreview: no review target: clean main checkout and no forced mode" >&2
+        exit 2
       fi
       ;;
     *)
@@ -324,6 +337,31 @@ prepare_context_bundle() {
       git_output "$repo" diff --name-only "$target_ref...HEAD" | sort -u >"$bundle_dir/changed-paths.txt"
       git_output "$repo" diff --stat "$target_ref...HEAD" >"$bundle_dir/patches/branch.stat"
       git_output "$repo" diff --patch --find-renames "$target_ref...HEAD" >"$bundle_dir/patches/branch.diff"
+      ;;
+    branch-local)
+      git_output "$repo" status --short >"$bundle_dir/git-status.txt"
+      {
+        git_output "$repo" diff --name-only "$target_ref...HEAD"
+        git_output "$repo" diff --name-only --cached
+        git_output "$repo" diff --name-only
+        git_output "$repo" ls-files --others --exclude-standard
+      } | sort -u >"$bundle_dir/changed-paths.txt"
+      git_output "$repo" diff --stat "$target_ref...HEAD" >"$bundle_dir/patches/branch.stat"
+      git_output "$repo" diff --patch --find-renames "$target_ref...HEAD" >"$bundle_dir/patches/branch.diff"
+      git_output "$repo" diff --cached --stat >"$bundle_dir/patches/staged.stat"
+      git_output "$repo" diff --cached --patch --find-renames >"$bundle_dir/patches/staged.diff"
+      git_output "$repo" diff --stat >"$bundle_dir/patches/unstaged.stat"
+      git_output "$repo" diff --patch --find-renames >"$bundle_dir/patches/unstaged.diff"
+      git_output "$repo" ls-files --others --exclude-standard >"$bundle_dir/patches/untracked-paths.txt"
+      : >"$bundle_dir/patches/untracked.diff"
+      while IFS= read -r untracked_path; do
+        [[ -z "$untracked_path" ]] && continue
+        if [[ -f "$repo/$untracked_path" ]]; then
+          git_output "$repo" diff --no-index -- /dev/null "$untracked_path" >>"$bundle_dir/patches/untracked.diff" || true
+        else
+          printf 'untracked non-file omitted: %s\n' "$untracked_path" >>"$bundle_dir/patches/untracked.diff"
+        fi
+      done < "$bundle_dir/patches/untracked-paths.txt"
       ;;
     commit)
       git_output "$repo" show --name-only --format= "$target_ref" | sed '/^$/d' | sort -u >"$bundle_dir/changed-paths.txt"
@@ -381,7 +419,7 @@ prepare_context_bundle() {
     printf '%s\n' "- \`checklists/\`: repo-selected prompt/checklist context copied at generation time."
     printf '%s\n' "- \`selected-checklists.txt\`: source paths for the copied checklists."
     if [[ "$default_bundle_output" -eq 1 ]]; then
-      printf '%s\n' "- \`autoreview-prompt.md\`: full prompt emitted by the global autoreview helper."
+      printf '%s\n' "- \`autoreview-prompt.md\`: full prompt emitted by the autoreview helper."
     else
       printf '%s\n' "- The full prompt is written to the caller-provided \`--bundle-output\` path."
     fi
