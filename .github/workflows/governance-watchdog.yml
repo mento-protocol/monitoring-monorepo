@@ -3,9 +3,8 @@ name: Governance Watchdog Infra
 # Terraform plan-on-PR + apply-on-merge for `governance-watchdog/infra/` — the
 # Cloud Function that turns Mento governance on-chain events into Discord +
 # Telegram notifications (plus its QuickNode webhook, Secret Manager secrets,
-# and VictorOps/Slack alerting). This migrates the stack off the manual
-# `pnpm gov-watchdog:deploy` path onto CI apply-on-merge, matching the
-# alerts/infra + aegis stacks. The GCS backend and google provider both
+# and VictorOps/Slack alerting). CI apply-on-merge is the normal deploy path,
+# matching the alerts/infra + aegis stacks. The GCS backend and google provider both
 # impersonate a seed-project SA (see versions.tf). The plan and apply jobs use a
 # read/write split for plan-time blast-radius reduction:
 #   - apply (on merge) authenticates as the write-capable CI deployer SA
@@ -37,12 +36,13 @@ name: Governance Watchdog Infra
 #     reported actual changes, and only for stack-root changes or explicit
 #     workflow_dispatch, behind the `production-infra` Environment gate.
 #
-# Required repository secrets are this stack's TF_VAR_* values (see the env
-# blocks below): GCP bootstrap (org_id, billing_account), Discord + Telegram
-# notification creds, QuickNode api_key + security_token, x_auth_token,
-# victorops_webhook_url, and the github_token PAT. `github_actions_secret`
-# resources in the stack self-manage the TF_VAR_* mirror consumed by
-# terraform-drift.yml.
+# Required repository/environment secrets are this stack's TF_VAR_* values (see
+# the env blocks below): GCP bootstrap (org_id, billing_account), Discord +
+# Telegram notification creds, QuickNode api_key + security_token,
+# x_auth_token, victorops_webhook_url, and the github_token PAT. Operators
+# bootstrap or rotate those values in the production-infra environment / repo
+# settings; `github_actions_secret` resources then self-manage the TF_VAR_*
+# mirror consumed by terraform-drift.yml.
 #
 # Note: we intentionally do NOT save the plan as a binary artifact for
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves

@@ -162,11 +162,11 @@ This service lives in its own dedicated GCP project (not `mento-alerts` or
    victorops_webhook_url   = "<victorops-webhook-url>/<victorops-routing-key>"
 
    # Slack notification channel ID for error alerts
-   # This channel is created via OAuth in GCP Console (not managed by Terraform)
-   # `pnpm gov-watchdog:deploy` mirrors this to the stack-specific
-   # TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID repo secret for
-   # scheduled drift. Do not reuse the alerts-owned
-   # TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID secret.
+   # This channel is created via OAuth in GCP Console (not managed by Terraform).
+   # Bootstrap or rotate the matching
+   # TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID value in the
+   # production-infra environment / repo settings before the CI apply. Do not
+   # reuse the alerts-owned TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID secret.
    # To find the ID:
    #   `gcloud beta monitoring channels list --project=governance-watchdog-b2a6 --format='table(name,displayName,type)'`
    # Or via UI:
@@ -205,32 +205,27 @@ pnpm run test:prod:<EventName> # i.e. pnpm run test:prod:ProposalCreated
 
 ## Updating the Cloud Function
 
-You have two options, using `terraform` or the `gcloud` cli. Both are perfectly fine to use.
+The normal deploy path is a PR against this repo. After merge to `main`,
+`.github/workflows/governance-watchdog.yml` re-plans the
+`governance-watchdog/infra` stack and applies through the `production-infra`
+GitHub Environment when the stack root changed. The environment approval is the
+human gate; do not deploy uncommitted or stale local state with a local
+Terraform apply wrapper.
 
-1. Via `terraform` by running `pnpm run deploy`
-   - How? The pnpm script will:
-     - Refuse dirty working trees and print the target/commit/rollback info (via `scripts/deploy-gov-watchdog.sh` at the monorepo root — `terraform apply` archives your local checkout into the function source, so uncommitted edits must not ship)
-     - Call `terraform apply` which re-deploys the function with the latest code from your local machine (and all other infrastructure that may have changed since the last terraform deploy)
-   - Pros
-     - Keeps the terraform state clean
-     - Same command for all changes, regardless of infra or cloud function code
-   - Cons
-     - Less familiar way of deploying cloud functions (if you're used to `gcloud functions deploy`)
-     - Less log output
-     - Slightly slower because `terraform apply` will always fetch the current state from the cloud storage bucket before deploying
-2. Via `gcloud` by running `pnpm run deploy:function`
-   - How? The pnpm script will:
-     - Look up the service account used by the cloud function
-     - Impersonate our shared Terraform Service Account to avoid individual permission issues
-     - Call `gcloud functions deploy` with the correct parameters
-   - Pros
-     - Familiar way of deploying cloud functions
-     - More log output making deployment failures slightly faster to debug
-     - Slightly faster because we're skipping the terraform state lookup
-   - Cons
-     - Will lead to slightly inconsistent terraform state (because terraform is tracking the function source code and its version)
-     - Different commands to remember when updating infra components vs cloud function source code
-     - Will only work for updating a pre-existing cloud function's code, will fail for a first-time deploy
+For a code-only break-glass update to an already deployed function, use the
+`gcloud` helper by running `pnpm run deploy:function`.
+
+- How? The pnpm script will:
+  - Look up the service account used by the cloud function
+  - Impersonate our shared Terraform Service Account to avoid individual permission issues
+  - Call `gcloud functions deploy` with the correct parameters
+- Pros
+  - Familiar way of deploying cloud functions
+  - More log output making deployment failures slightly faster to debug
+  - Slightly faster because we're skipping the terraform state lookup
+- Cons
+  - Will lead to slightly inconsistent terraform state (because terraform is tracking the function source code and its version)
+  - Will only work for updating a pre-existing cloud function's code, will fail for a first-time deploy
 
 ## Adding New Events
 

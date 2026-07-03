@@ -1579,10 +1579,6 @@ assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy sc
 assert_occurrences 1 "- bash -n scripts/deploy-bridge.sh (shell script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
-run_gate "scripts/deploy-gov-watchdog.sh"
-assert_contains "- bash -n scripts/deploy-gov-watchdog.sh (shell script changed)"
-assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
-
 run_gate "scripts/check-deploy-root-anchors.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy root-anchor test changed)"
