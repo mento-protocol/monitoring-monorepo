@@ -209,7 +209,8 @@ Terraform apply. If any package manifest, `pnpm-lock.yaml`,
 `--allow-package-script-changes`. The narrow exception is a root `package.json`
 edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:quality-gate:test`, `scripts.agent:prewarm`,
-`scripts.agent:prewarm:test`, `scripts.agent:context-check`,
+`scripts.agent:prewarm:test`, `scripts.agent:review-materiality`,
+`scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
 `scripts.agent:autoreview`, `scripts.issue:board`,
 `scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
 `scripts.issue:release`, `scripts.pr:feedback-state`,
@@ -250,6 +251,19 @@ local deterministic engine because nested `codex exec` is unavailable there;
 pass `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` to override.
 For a true Codex semantic pass from inside Codex, use `--prepare-only` and the
 Codex-native flow described by the global autoreview skill.
+
+To classify review depth and likely context-update requirements before or after
+the mapped gate, use:
+
+```bash
+pnpm agent:review-materiality
+```
+
+The command reports `trivial`, `standard`, or `full` materiality from changed
+path risk and diff size, plus whether the change likely needs AGENTS, README,
+runbook, checklist, or skill context updates. It is advisory: it helps choose
+review depth, but it does not replace `pnpm agent:quality-gate --run`,
+`pnpm agent:autoreview`, or `pnpm pr:ready-state`.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
 same gate without running deploy, Terraform, mutation, codegen, or install
@@ -434,6 +448,7 @@ pnpm code-health:history           # CodeScene-style git history report → repo
 pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/ (advisory, never blocks)
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
+pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:autoreview              # Structured closeout review; Codex sandbox defaults to --engine local, override with --engine claude/codex
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)

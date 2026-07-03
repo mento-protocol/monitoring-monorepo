@@ -11,6 +11,8 @@ const expectedScripts = {
   "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
   "agent:prewarm": "node scripts/agent-prewarm.mjs",
   "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+  "agent:review-materiality": "node scripts/review-materiality.mjs",
+  "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
   "agent:context-check": "node scripts/check-agent-context.mjs",
   "agent:autoreview": "./scripts/agent-autoreview.sh",
   "issue:board": "node scripts/agent-issue-board.mjs",
