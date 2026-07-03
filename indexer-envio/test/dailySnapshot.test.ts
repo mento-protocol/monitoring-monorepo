@@ -28,6 +28,7 @@ type MockDb = MockDbWith<{
 const TestHelpers = indexerTestHelpers<MockDb>();
 const { MockDb, FPMMFactory, FPMM, VirtualPoolFactory, VirtualPool } =
   TestHelpers;
+const SLOW_COVERAGE_TEST_TIMEOUT_MS = 120_000;
 
 type SnapshotLike = {
   id: string;
@@ -152,69 +153,77 @@ describe("PoolDailySnapshot rollup", () => {
     _clearMockERC20Decimals();
   });
 
-  it("accumulates two same-day swaps into one PoolDailySnapshot row", async () => {
-    const POOL_ADDR = "0x00000000000000000000000000000000000000f0";
-    // 2025-01-15 08:00:00 UTC and 2025-01-15 14:30:00 UTC — same UTC day.
-    const TS_MORNING = 1_736_928_000;
-    const TS_AFTERNOON = 1_736_951_400;
+  it(
+    "accumulates two same-day swaps into one PoolDailySnapshot row",
+    async () => {
+      const POOL_ADDR = "0x00000000000000000000000000000000000000f0";
+      // 2025-01-15 08:00:00 UTC and 2025-01-15 14:30:00 UTC — same UTC day.
+      const TS_MORNING = 1_736_928_000;
+      const TS_AFTERNOON = 1_736_951_400;
 
-    let mockDb = MockDb.createMockDb();
-    mockDb = await deployPool(mockDb, POOL_ADDR, 100, TS_MORNING - 10);
-    mockDb = await fireSwap(
-      mockDb,
-      POOL_ADDR,
-      101,
-      TS_MORNING,
-      1_000_000_000_000_000_000n,
-      2_000_000_000_000_000_000n,
-    );
-    mockDb = await fireSwap(
-      mockDb,
-      POOL_ADDR,
-      102,
-      TS_AFTERNOON,
-      3_000_000_000_000_000_000n,
-      5_000_000_000_000_000_000n,
-    );
+      let mockDb = MockDb.createMockDb();
+      mockDb = await deployPool(mockDb, POOL_ADDR, 100, TS_MORNING - 10);
+      mockDb = await fireSwap(
+        mockDb,
+        POOL_ADDR,
+        101,
+        TS_MORNING,
+        1_000_000_000_000_000_000n,
+        2_000_000_000_000_000_000n,
+      );
+      mockDb = await fireSwap(
+        mockDb,
+        POOL_ADDR,
+        102,
+        TS_AFTERNOON,
+        3_000_000_000_000_000_000n,
+        5_000_000_000_000_000_000n,
+      );
 
-    const dayTs = dayBucket(BigInt(TS_MORNING));
-    const dailyId = dailySnapshotId(pid(POOL_ADDR), dayTs);
-    const daily = mockDb.entities.PoolDailySnapshot.get(dailyId) as
-      | SnapshotLike
-      | undefined;
-    assert.ok(daily, "PoolDailySnapshot must exist after swaps");
-    assert.equal(daily!.timestamp, dayTs, "timestamp is UTC day bucket");
-    assert.equal(daily!.swapCount, 2, "two swaps accumulated");
-    assert.equal(
-      daily!.swapVolume0,
-      4_000_000_000_000_000_000n,
-      "swapVolume0 = 1e18 + 3e18",
-    );
-    assert.equal(
-      daily!.swapVolume1,
-      7_000_000_000_000_000_000n,
-      "swapVolume1 = 2e18 + 5e18",
-    );
-    assert.equal(daily!.cumulativeSwapCount, 2, "running total after 2 swaps");
-    // The daily snapshot must mirror the Pool's health accumulators
-    // exactly — if the fpmm handlers ever regress to passing the
-    // pre-recordHealthSample pool reference into upsertSnapshot, the
-    // snapshot will lag the Pool by one event and this assertion fails.
-    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
-      | { healthBinarySeconds: bigint; healthTotalSeconds: bigint }
-      | undefined;
-    assert.ok(pool, "Pool must exist after swaps");
-    assert.equal(
-      daily!.cumulativeHealthBinarySeconds,
-      pool!.healthBinarySeconds,
-      "snapshot mirrors Pool.healthBinarySeconds (no lag)",
-    );
-    assert.equal(
-      daily!.cumulativeHealthTotalSeconds,
-      pool!.healthTotalSeconds,
-      "snapshot mirrors Pool.healthTotalSeconds (no lag)",
-    );
-  });
+      const dayTs = dayBucket(BigInt(TS_MORNING));
+      const dailyId = dailySnapshotId(pid(POOL_ADDR), dayTs);
+      const daily = mockDb.entities.PoolDailySnapshot.get(dailyId) as
+        | SnapshotLike
+        | undefined;
+      assert.ok(daily, "PoolDailySnapshot must exist after swaps");
+      assert.equal(daily!.timestamp, dayTs, "timestamp is UTC day bucket");
+      assert.equal(daily!.swapCount, 2, "two swaps accumulated");
+      assert.equal(
+        daily!.swapVolume0,
+        4_000_000_000_000_000_000n,
+        "swapVolume0 = 1e18 + 3e18",
+      );
+      assert.equal(
+        daily!.swapVolume1,
+        7_000_000_000_000_000_000n,
+        "swapVolume1 = 2e18 + 5e18",
+      );
+      assert.equal(
+        daily!.cumulativeSwapCount,
+        2,
+        "running total after 2 swaps",
+      );
+      // The daily snapshot must mirror the Pool's health accumulators
+      // exactly — if the fpmm handlers ever regress to passing the
+      // pre-recordHealthSample pool reference into upsertSnapshot, the
+      // snapshot will lag the Pool by one event and this assertion fails.
+      const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+        | { healthBinarySeconds: bigint; healthTotalSeconds: bigint }
+        | undefined;
+      assert.ok(pool, "Pool must exist after swaps");
+      assert.equal(
+        daily!.cumulativeHealthBinarySeconds,
+        pool!.healthBinarySeconds,
+        "snapshot mirrors Pool.healthBinarySeconds (no lag)",
+      );
+      assert.equal(
+        daily!.cumulativeHealthTotalSeconds,
+        pool!.healthTotalSeconds,
+        "snapshot mirrors Pool.healthTotalSeconds (no lag)",
+      );
+    },
+    SLOW_COVERAGE_TEST_TIMEOUT_MS,
+  );
 
   it("creates separate PoolDailySnapshot rows across a UTC day boundary", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000f1";
