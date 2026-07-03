@@ -1,8 +1,3 @@
-import type {
-  PendingBatchMembershipOperation,
-  LiquityInstance,
-  Trove,
-} from "envio";
 import { indexer } from "../../indexer.js";
 import { asBigInt, eventId } from "../../helpers.js";
 import {
@@ -11,7 +6,6 @@ import {
 } from "./bootstrap.js";
 import {
   preloadBorrowingRevenueRollover,
-  preloadBorrowingUpfrontFeeBucket,
   recordBorrowingFeeAndApplyCum,
 } from "./borrowingRevenue.js";
 import { replayBatchedTroveUpdate } from "./batchReplay.js";
@@ -29,11 +23,12 @@ import {
   markPendingStabilityPoolConsumptionSource,
   preloadPendingStabilityPoolConsumptionClassification,
 } from "./stabilityPoolLoss.js";
-import type {
-  PendingBatchedTroveUpdateRow,
-  TroveManagerPreloadContext,
-  TroveOperationPreloadContext,
-} from "./troveManagerPreloadContext.js";
+import {
+  isPendingBatchRemovalForBatch,
+  isPendingBatchReplayRow,
+  preloadBatchReplay,
+  preloadTroveOperation,
+} from "./troveManagerPreload.js";
 import {
   captureTroveOperationSnapshotState,
   maybeRecordTroveOperation,
@@ -50,6 +45,12 @@ import {
 } from "./pendingOperations.js";
 import { getOrLoadSystemParams, preloadSystemParams } from "./systemParams.js";
 import {
+  isForcedOperation,
+  transitionClosedTrove,
+  transitionLiquidatedTrove,
+  transitionOpenedTrove,
+} from "./troveManagerTransitions.js";
+import {
   TROVE_STATUS,
   applySystemDebtDelta,
   getOrCreateTrove,
@@ -62,283 +63,6 @@ import {
   transitionTroveStatus,
   touchTroveUpdated,
 } from "./troves.js";
-
-const isForcedOperation = (op: number): boolean =>
-  op === OP.REDEEM_COLLATERAL ||
-  op === OP.LIQUIDATE ||
-  op === OP.APPLY_PENDING_DEBT;
-
-function isPendingBatchReplayRow(
-  pending: PendingBatchedTroveUpdateRow,
-  args: {
-    collateralId: string;
-    batchManager: string;
-    eventLogIndex: number;
-  },
-): boolean {
-  return (
-    pending.collateralId === args.collateralId &&
-    pending.batchManager === args.batchManager &&
-    pending.logIndex < args.eventLogIndex
-  );
-}
-
-function isPendingBatchRemovalForBatch(
-  pending: PendingBatchMembershipOperation,
-  args: { collateralId: string; batchId: string },
-): boolean {
-  return (
-    pending.collateralId === args.collateralId &&
-    pending.operation === OP.REMOVE_FROM_BATCH &&
-    pending.interestBatchId === args.batchId
-  );
-}
-
-async function preloadTroveAndMarket(
-  context: TroveManagerPreloadContext,
-  market: Parameters<typeof preloadSystemParams>[1],
-  collateralId: string,
-  troveId: string,
-): Promise<Trove | undefined> {
-  const [, trove] = await Promise.all([
-    preloadLiquityMarket(context, market),
-    context.Trove.get(makeTroveId(collateralId, troveId)),
-  ]);
-  return trove;
-}
-
-async function preloadTroveOperation(
-  context: TroveOperationPreloadContext,
-  args: {
-    market: Parameters<typeof preloadSystemParams>[1];
-    chainId: number;
-    txHash: string;
-    collateralId: string;
-    troveId: string;
-    operation: number;
-    annualInterestRate: bigint;
-    upfrontFee: bigint;
-    blockNumber: bigint;
-    blockTimestamp: bigint;
-  },
-): Promise<void> {
-  const trove = await preloadTroveAndMarket(
-    context,
-    args.market,
-    args.collateralId,
-    args.troveId,
-  );
-  await preloadBorrowingUpfrontFeeBucket(
-    context,
-    args.collateralId,
-    args.upfrontFee,
-    args.blockTimestamp,
-  );
-  if (args.operation === OP.REDEEM_COLLATERAL) {
-    setPendingRedemption(context, {
-      ...args,
-      timestamp: args.blockTimestamp,
-    });
-  } else if (isBatchMembershipOperation(args.operation)) {
-    setPendingBatchMembershipOperation(context, {
-      ...args,
-      operation: args.operation,
-      interestBatchId: trove?.interestBatchId,
-      timestamp: args.blockTimestamp,
-    });
-  }
-}
-
-async function preloadBatchReplay(args: {
-  context: TroveManagerPreloadContext;
-  market: Parameters<typeof preloadSystemParams>[1];
-  chainId: number;
-  txHash: string;
-  collateralId: string;
-  batchManager: string;
-  eventLogIndex: number;
-  blockNumber: bigint;
-  blockTimestamp: bigint;
-  upfrontFee: bigint;
-  prevBatchRate: bigint;
-  nextBatchRate: bigint;
-  prevBatchDebt: bigint;
-  nextBatchDebt: bigint;
-  totalDebtShares: bigint;
-}): Promise<void> {
-  const pendingRows = await args.context.PendingBatchedTroveUpdate.getWhere({
-    txHash: { _eq: args.txHash },
-  });
-  const pendingBatchOps =
-    await args.context.PendingBatchMembershipOperation.getWhere({
-      txHash: { _eq: args.txHash },
-    });
-  const relevantRows = pendingRows.filter((pending) =>
-    isPendingBatchReplayRow(pending, args),
-  );
-  await Promise.all([
-    preloadLiquityMarket(args.context, args.market),
-    preloadSystemParams(args.context, args.market),
-    loadLiquityPrice(args.context, args.market, args.blockNumber),
-    preloadBorrowingRevenueRollover(
-      args.context,
-      args.collateralId,
-      args.blockTimestamp,
-    ),
-    preloadBorrowingUpfrontFeeBucket(
-      args.context,
-      args.collateralId,
-      args.upfrontFee,
-      args.blockTimestamp,
-    ),
-    preloadInterestRateBracketDebt(args.context, {
-      collateralId: args.collateralId,
-      prevRate: args.prevBatchRate,
-      nextRate: args.nextBatchRate,
-      prevDebt: args.prevBatchDebt,
-      nextDebt: args.nextBatchDebt,
-      untilTimestamp: args.blockTimestamp,
-    }),
-    ...relevantRows.map(async (pending) => {
-      const pendingId = pendingTroveKey(
-        args.chainId,
-        args.txHash,
-        args.collateralId,
-        pending.troveId,
-      );
-      const [trove, op] = await Promise.all([
-        args.context.Trove.get(makeTroveId(args.collateralId, pending.troveId)),
-        args.context.PendingBatchMembershipOperation.get(pendingId),
-        args.context.PendingRedemption.get(pendingId),
-      ]);
-      if (trove === undefined) return;
-      const leavesBatch = op?.operation === OP.REMOVE_FROM_BATCH;
-      const entersBatch = trove.interestBatchId === undefined && !leavesBatch;
-      const batchShareDebt =
-        args.totalDebtShares === 0n
-          ? 0n
-          : (args.nextBatchDebt * pending.batchDebtShares) /
-            args.totalDebtShares;
-      const nextDebt = leavesBatch ? trove.debt : batchShareDebt;
-      if (entersBatch) {
-        await preloadInterestRateBracketDebt(args.context, {
-          collateralId: args.collateralId,
-          prevRate: trove.interestRate,
-          nextRate: 0n,
-          prevDebt: trove.debt,
-          nextDebt: 0n,
-          untilTimestamp: args.blockTimestamp,
-        });
-      } else if (leavesBatch && trove.interestBatchId !== undefined) {
-        await preloadInterestRateBracketDebt(args.context, {
-          collateralId: args.collateralId,
-          prevRate: 0n,
-          nextRate: op.annualInterestRate,
-          prevDebt: 0n,
-          nextDebt,
-          untilTimestamp: args.blockTimestamp,
-        });
-      }
-    }),
-    ...pendingBatchOps
-      .filter((pending) =>
-        isPendingBatchRemovalForBatch(pending, {
-          collateralId: args.collateralId,
-          batchId: `${args.collateralId}-${args.batchManager}`,
-        }),
-      )
-      .map((pending) =>
-        args.context.PendingBatchMembershipOperation.get(pending.id),
-      ),
-  ]);
-}
-
-function transitionOpenedTrove(
-  trove: Trove,
-  instance: LiquityInstance,
-  args: { blockTimestamp: bigint; blockNumber: bigint; txHash: string },
-): { trove: Trove; instance: LiquityInstance } {
-  const transitioned = transitionTroveStatus(
-    {
-      ...trove,
-      openedAt: trove.openedAt === 0n ? args.blockTimestamp : trove.openedAt,
-      openedAtBlock:
-        trove.openedAtBlock === 0n ? args.blockNumber : trove.openedAtBlock,
-      openedTxHash: trove.openedTxHash || args.txHash,
-    },
-    TROVE_STATUS.ACTIVE,
-    instance,
-  );
-  return {
-    trove: transitioned.trove,
-    instance: {
-      ...transitioned.instance,
-      troveOpenedCountBucket: transitioned.instance.troveOpenedCountBucket + 1,
-      troveOpenedCountDayBucket:
-        transitioned.instance.troveOpenedCountDayBucket + 1,
-    },
-  };
-}
-
-function transitionClosedTrove(
-  trove: Trove,
-  instance: LiquityInstance,
-  args: { blockTimestamp: bigint; blockNumber: bigint; txHash: string },
-): { trove: Trove; instance: LiquityInstance } {
-  const transitioned = transitionTroveStatus(
-    {
-      ...trove,
-      closedAt: args.blockTimestamp,
-      closedAtBlock: args.blockNumber,
-      closedTxHash: args.txHash,
-    },
-    TROVE_STATUS.CLOSED,
-    instance,
-  );
-  return {
-    trove: transitioned.trove,
-    instance: {
-      ...transitioned.instance,
-      troveClosedCountBucket: transitioned.instance.troveClosedCountBucket + 1,
-      troveClosedCountDayBucket:
-        transitioned.instance.troveClosedCountDayBucket + 1,
-    },
-  };
-}
-
-function transitionLiquidatedTrove(
-  trove: Trove,
-  instance: LiquityInstance,
-  args: {
-    collChange: bigint;
-    debtChange: bigint;
-    blockTimestamp: bigint;
-    blockNumber: bigint;
-    txHash: string;
-  },
-): { trove: Trove; instance: LiquityInstance } {
-  const transitioned = transitionTroveStatus(
-    {
-      ...trove,
-      liquidatedColl: negativeToPositive(args.collChange),
-      liquidatedDebt: negativeToPositive(args.debtChange),
-      closedAt: args.blockTimestamp,
-      closedAtBlock: args.blockNumber,
-      closedTxHash: args.txHash,
-    },
-    TROVE_STATUS.LIQUIDATED,
-    instance,
-  );
-  return {
-    trove: transitioned.trove,
-    instance: {
-      ...transitioned.instance,
-      liqCountCum: transitioned.instance.liqCountCum + 1,
-      liqCountBucket: transitioned.instance.liqCountBucket + 1,
-      liqCountDayBucket: transitioned.instance.liqCountDayBucket + 1,
-    },
-  };
-}
 
 indexer.onEvent(
   { contract: "LiquityTroveManager", event: "TroveOperation" },

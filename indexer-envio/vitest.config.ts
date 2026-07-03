@@ -1,9 +1,18 @@
 import { defineConfig } from "vitest/config";
 
+const DEFAULT_TEST_TIMEOUT_MS = 60_000;
+const COVERAGE_TEST_TIMEOUT_MS = 120_000;
+const isCoverageRun = process.argv.includes("--coverage");
+
 export default defineConfig({
   test: {
     globals: true,
-    testTimeout: 60_000,
+    // V8 coverage instrumentation can push a few generated-handler integration
+    // tests past 60s under the repo quality-gate wrapper. Keep normal tests
+    // strict while giving coverage-only runs enough room to report assertions.
+    testTimeout: isCoverageRun
+      ? COVERAGE_TEST_TIMEOUT_MS
+      : DEFAULT_TEST_TIMEOUT_MS,
     include: ["test/**/*.test.ts"],
     setupFiles: [
       "./vitest.hermetic-setup.ts",
