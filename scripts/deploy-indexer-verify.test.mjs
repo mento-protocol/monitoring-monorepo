@@ -58,6 +58,44 @@ assert.equal(
   "def5678",
 );
 assert.equal(resolveDeployment(indexerJson, "missing"), null);
+assert.throws(
+  () =>
+    resolveDeployment(
+      {
+        data: {
+          deployments: [
+            {
+              commit_hash: "abc1234",
+              created_time: "2026-07-03T11:00:00.000Z",
+            },
+            {
+              commit_hash: "abc5678",
+              created_time: "2026-07-03T10:00:00.000Z",
+            },
+          ],
+        },
+      },
+      "abc",
+    ),
+  /Ambiguous deployment commit abc/,
+);
+assert.equal(
+  resolveDeployment(
+    {
+      data: {
+        deployments: [
+          {
+            commit_hash: null,
+            created_time: "2026-07-03T11:00:00.000Z",
+          },
+        ],
+      },
+    },
+    "1234567890",
+    "1234567890",
+  ),
+  null,
+);
 assert.equal(resolveProdDeployment(indexerJson)?.commit_hash, "abc1234");
 
 assert.deepEqual(

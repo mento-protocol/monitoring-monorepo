@@ -188,6 +188,7 @@ export function resolveDeployment(indexerJson, target, verifiedTarget = "") {
 
   const matches = deployments.filter((deployment) => {
     const commit = String(deployment.commit_hash ?? "");
+    if (!commit) return false;
     return (
       commit.startsWith(target) ||
       (verifiedTarget && verifiedTarget.startsWith(commit))
@@ -409,6 +410,7 @@ endpoint, and a small row probe for core Pool and reserve-yield tables.
 Options:
   --prod           Probe the static production endpoint and require <commit> to be prod.
   --allow-syncing  Do not fail solely because one or more chains are still syncing.
+                   Empty GraphQL probe tables remain a failure.
   --json, -j       Print machine-readable summary JSON.
 `);
 }
