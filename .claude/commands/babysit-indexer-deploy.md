@@ -1,6 +1,6 @@
 # Babysit Indexer Deploy
 
-Monitor an in-flight Envio HyperIndex deployment for `mento-protocol/mento` until every chain is caught up, then prompt the user to promote it. Never auto-promote.
+Monitor an in-flight Envio HyperIndex deployment for `mento-protocol/mento` until every chain is caught up, then prompt the user to verify it before promotion. Never auto-promote.
 
 Target commit: `$1` (default: derive from `git fetch origin envio && git rev-parse --short origin/envio`)
 
@@ -136,7 +136,8 @@ while true; do
       '.data[]? | "  \(.network // .chain_id): caught_up=\(.timestamp_caught_up_to_head_or_endblock)"')
     emit "READY_TO_PROMOTE elapsed=$(elapsed_min)m commit=$TARGET"
     emit "$PER_CHAIN"
-    emit "Run: pnpm deploy:indexer:promote $TARGET -y"
+    emit "Run: pnpm deploy:indexer:verify $TARGET"
+    emit "Then: pnpm deploy:indexer:promote $TARGET -y"
     exit 0
   fi
 
@@ -167,7 +168,7 @@ Each emit is either **terminal** (the script exits after emitting) or **transien
 
 **Terminal emits** — the calling skill treats these as the final result:
 
-- `READY_TO_PROMOTE` / `ALREADY_PROMOTED` → success; proceed to the next phase (typically promote).
+- `READY_TO_PROMOTE` / `ALREADY_PROMOTED` → success; proceed to the next phase (deployment verification, then promote).
 - `BUILD_FAILED` / `SYNC_DEADLINE` → failure; stop without promoting.
 
 **Transient emits** — the script keeps polling after these; the calling skill should NOT stop on them:
@@ -179,7 +180,7 @@ The Monitor process exits cleanly on terminal events — no `TaskStop` needed. C
 
 ## Rules
 
-- **Never auto-promote.** Surfacing `pnpm deploy:indexer:promote <commit>` to the user is the final step — they run it, not you.
+- **Never auto-promote.** Surface `pnpm deploy:indexer:verify <commit>` first, then `pnpm deploy:indexer:promote <commit>` only after verification passes — the user runs promotion, not you.
 - **Prefer the `pnpm deploy:indexer:*` wrappers** over raw `envio-cloud` calls (they handle auth + repo defaults), with two exceptions:
   - `indexer get` — no wrapper exists.
   - `deployment status <commit>` — wrapper auto-resolves _latest_ (we want explicit commit targeting).
@@ -192,7 +193,7 @@ The Monitor process exits cleanly on terminal events — no `TaskStop` needed. C
 
 Callers (notably the `deploy-indexer` skill, Phase 2) invoke this command with a target commit string and treat the Monitor's terminal emit as the result:
 
-- `READY_TO_PROMOTE` / `ALREADY_PROMOTED` → success, continue
+- `READY_TO_PROMOTE` / `ALREADY_PROMOTED` → success, continue to deployment verification before promotion
 - `BUILD_FAILED` / `SYNC_DEADLINE` → failure, stop, do not promote
 - User-cancelled (`TaskStop`) → stop, do not promote
 - `ERROR <kind>` is **non-terminal** — keep waiting; the Monitor will continue polling. A stuck error eventually escalates via the wall-clock deadline checks above.

@@ -10,6 +10,7 @@
 #
 # After pushing, use companion scripts:
 #   pnpm deploy:indexer:status <commit> --watch → watch sync progress
+#   pnpm deploy:indexer:verify <commit>          → verify status, metrics, endpoint, and rows
 #   pnpm deploy:indexer:promote <commit>        → promote deployment to prod
 #   pnpm deploy:indexer:logs         → tail runtime logs
 #
@@ -218,9 +219,12 @@ echo "   1. Watch sync progress:"
 echo "      pnpm deploy:indexer:status $COMMIT_SHA --watch"
 echo "      $SYNC_URL"
 echo ""
-echo "   2. Once synced, promote to prod:"
+echo "   2. Once synced, verify the deployment:"
+echo "      pnpm deploy:indexer:verify $COMMIT_SHA"
+echo ""
+echo "   3. If verification passes, promote to prod:"
 echo "      pnpm deploy:indexer:promote $COMMIT_SHA"
 echo ""
-echo "   3. Verify the dashboard:"
+echo "   4. Verify the dashboard:"
 echo "      https://monitoring.mento.org"
 echo ""
