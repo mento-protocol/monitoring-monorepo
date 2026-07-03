@@ -2359,6 +2359,10 @@ assert_contains "- node scripts/check-pr-description.test.mjs (PR description va
 run_gate "scripts/check-pr-description.test.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
 
+run_gate "scripts/agent-autoreview.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+
 run_gate "scripts/check-deviation-threshold-drift.mjs"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold drift checker changed)"
 assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker changed)"

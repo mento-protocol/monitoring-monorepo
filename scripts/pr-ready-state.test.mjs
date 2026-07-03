@@ -11,6 +11,7 @@ import {
   findUnresolvedReviewThreads,
   groupStatusChecks,
   hasCodexApprovalReaction,
+  hasCodexInFlightReaction,
   classifyCodexReviewSignal,
   isCodexReviewRequestBody,
   summarizeReadyState,
@@ -1042,6 +1043,31 @@ test("uses Codex eyes reaction timestamps to detect current in-flight reviews", 
   );
 });
 
+test("uses PR description Codex eyes reaction as current in-flight signal", () => {
+  const headUpdatedAt = Date.parse("2026-05-21T13:22:23Z");
+
+  assert(
+    hasCodexInFlightReaction(
+      [
+        {
+          content: "eyes",
+          created_at: "2026-05-21T13:23:00Z",
+          user: { login: "chatgpt-codex-connector[bot]" },
+        },
+      ],
+      headUpdatedAt,
+    ),
+    "expected current PR description eyes reaction to count as in-flight",
+  );
+  assertEqual(
+    classifyCodexReviewSignal({
+      headUpdatedAt,
+      codexInFlightReaction: true,
+    }),
+    "in_flight",
+  );
+});
+
 test("uses a shared matcher for Codex review request comments", () => {
   assert(isCodexReviewRequestBody("@codex review"));
   assert(isCodexReviewRequestBody("please @codex review this"));
@@ -1138,6 +1164,35 @@ test("duplicate-review prevention fixture waits on current-head Codex request in
       (blocker) => blocker.name === "Codex PR-description approval",
     ),
     "expected missing final approval gate to keep PR not ready",
+  );
+});
+
+test("duplicate-review prevention fixture waits on PR description eyes reaction", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "eyes",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+  });
+
+  assertEqual(summary.ready, false);
+  assertEqual(summary.codexApprovalReaction, false);
+  assertEqual(summary.codexReviewSignal, "in_flight");
+  assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
+  assert(
+    summary.required.blockers.some(
+      (blocker) => blocker.name === "Codex PR-description approval",
+    ),
+    "expected eyes reaction to wait without satisfying approval",
   );
 });
 

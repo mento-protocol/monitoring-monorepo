@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-helper="${AUTOREVIEW_HELPER:-$HOME/.agents/skills/autoreview/scripts/autoreview}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/.." && pwd)"
+default_helper="$repo_root/scripts/agent-autoreview.mjs"
+helper="${AUTOREVIEW_HELPER:-$default_helper}"
 
 if [[ ! -x "$helper" ]]; then
   cat >&2 <<EOF
-agent:autoreview requires the global autoreview skill helper:
+agent:autoreview requires an executable autoreview helper:
   $helper
 
-Install or restore ~/.agents/skills/autoreview, then retry.
+This repo vendors its default helper at:
+  $default_helper
+
+Restore that file, or set AUTOREVIEW_HELPER to an executable helper path.
 EOF
   exit 127
 fi

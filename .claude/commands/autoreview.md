@@ -1,7 +1,7 @@
 # Auto Review
 
-Run the global structured closeout review helper. Normal shells default to the
-Codex review engine; active Codex sandbox sessions default to the helper's
+Run the repo-local structured closeout review helper. Normal shells default to
+the Codex review engine; active Codex sandbox sessions default to the helper's
 local deterministic engine unless an engine is passed explicitly. Pass
 `--engine claude` when the user explicitly asks for Claude review.
 
@@ -9,16 +9,15 @@ Arguments: `$ARGUMENTS`
 
 ## Steps
 
-1. Read `~/.agents/skills/autoreview/SKILL.md` for the workflow contract.
-2. Run:
+1. Run:
 
 ```bash
 pnpm agent:autoreview $ARGUMENTS
 ```
 
-3. Verify every accepted finding before editing. Do not blindly apply review
+2. Verify every accepted finding before editing. Do not blindly apply review
    output.
-4. If fixes are made, rerun focused checks and rerun autoreview once for the
+3. If fixes are made, rerun focused checks and rerun autoreview once for the
    fixed batch.
-5. For PR work, do not call the PR clean until
+4. For PR work, do not call the PR clean until
    `pnpm pr:ready-state --pr <number> --json` is ready.
