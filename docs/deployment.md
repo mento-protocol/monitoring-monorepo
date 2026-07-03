@@ -44,6 +44,7 @@ Then wait for the deployment to catch up and promote it:
 pnpm deploy:indexer:status "$COMMIT" --watch
 pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
+pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
 ```
 
@@ -61,9 +62,10 @@ git push origin main:envio
 
 1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch` or [envio.dev/app](https://envio.dev/app)).
 2. Inspect build and runtime errors with explicit commit-scoped logs (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h`).
-3. Promote the same caught-up commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.
-4. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
-5. Verify monitoring.mento.org loads data.
+3. Verify sync, metrics, endpoint resolution, and core GraphQL rows (`pnpm deploy:indexer:verify "$COMMIT"`).
+4. Promote the same caught-up commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.
+5. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
+6. Verify monitoring.mento.org loads data.
 
 Reserve-yield actuals deploy through the primary `mento` Envio project. The
 Ethereum sUSDS/stETH handlers in `config.multichain.mainnet.yaml` are event-only;

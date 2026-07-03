@@ -107,6 +107,7 @@ pnpm deploy:indexer:logs <commit> --build    # Show build logs for a deployment
 pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Show runtime issues
 pnpm deploy:indexer:metrics <commit>         # Show per-chain indexing progress
 pnpm deploy:indexer:info <commit>            # Show deployment info/cache state
+pnpm deploy:indexer:verify <commit>          # Batch status, metrics, endpoint, and GraphQL row probe
 pnpm deploy:indexer:promote <commit>         # Promote a synced deployment to prod
 ```
 
@@ -207,6 +208,7 @@ pnpm deploy:indexer
 pnpm deploy:indexer:status "$COMMIT" --watch
 pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
+pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
 ```
 

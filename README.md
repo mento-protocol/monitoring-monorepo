@@ -265,6 +265,7 @@ pnpm deploy:indexer
 pnpm deploy:indexer:status "$COMMIT" --watch
 pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
+pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
 ```
 

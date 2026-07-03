@@ -1428,6 +1428,9 @@ while IFS= read -r path; do
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
           ;;
+        scripts/deploy-indexer-verify.mjs|scripts/deploy-indexer-verify.test.mjs)
+          add_command "node scripts/deploy-indexer-verify.test.mjs" "indexer deploy verifier changed"
+          ;;
         scripts/alert-rules-lint.mjs|scripts/alert-rules-lint.test.mjs)
           add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"
           ;;
