@@ -1,0 +1,783 @@
+{
+  "schemaVersion": 1,
+  "repo": "mento-protocol/monitoring-monorepo",
+  "collectedAt": "2026-07-03T18:05:49.017Z",
+  "cohort": {
+    "mode": "before-pr",
+    "beforePr": {
+      "mergedAt": "2026-07-03T14:59:51Z",
+      "number": 1034,
+      "title": "chore: add review materiality classifier",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1034"
+    },
+    "afterPr": null,
+    "limit": 20,
+    "pullRequestNumbers": [
+      1029, 1031, 1027, 1026, 1028, 1013, 1024, 1022, 1021, 1020, 1019, 1018,
+      1016, 1015, 1014, 1003, 1005, 1007, 1004, 1011
+    ]
+  },
+  "summary": {
+    "pullRequests": 20,
+    "medianDurationHours": 8.89,
+    "medianCommitsAfterFirstReview": 2,
+    "totals": {
+      "comments": 129,
+      "inlineReviewRoots": 96,
+      "inlineReviewReplies": 97,
+      "inlineRootsWithoutReplies": 1,
+      "humanReviewRequests": 35,
+      "candidateFindings": 107,
+      "codexUsageLimitComments": 0,
+      "codexApprovalComments": 12,
+      "claudeSummaryComments": 12
+    }
+  },
+  "pullRequests": [
+    {
+      "number": 1029,
+      "title": "chore: require autoreview helper in Codex Cloud setup/maintenance and document requirement",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1029",
+      "createdAt": "2026-06-30T10:40:59Z",
+      "mergedAt": "2026-07-03T12:49:22Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 74.14,
+      "changedFiles": 4,
+      "additions": 64,
+      "deletions": 7,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 2,
+        "byBots": 1,
+        "byHumans": 1
+      },
+      "comments": {
+        "topLevel": 4,
+        "reviewInlineRoots": 1,
+        "reviewInlineReplies": 1,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 1
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 2,
+        "inlineReviewBotRoots": 1,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 1,
+        "candidateFindings": 2,
+        "codexComments": 1,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 1,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1031,
+      "title": "chore: quarterly CLAUDE.md/AGENTS.md drift audit (2026-07)",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1031",
+      "createdAt": "2026-07-01T08:36:27Z",
+      "mergedAt": "2026-07-03T12:33:19Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 51.95,
+      "changedFiles": 4,
+      "additions": 15,
+      "deletions": 14,
+      "commits": 1,
+      "commitsAfterFirstReview": null,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 0,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1027,
+      "title": "ci(deps): bump anthropics/claude-code-action from 1.0.149 to 1.0.155",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1027",
+      "createdAt": "2026-06-29T04:32:16Z",
+      "mergedAt": "2026-07-03T09:17:24Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 100.75,
+      "changedFiles": 1,
+      "additions": 2,
+      "deletions": 2,
+      "commits": 1,
+      "commitsAfterFirstReview": null,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 1,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 0,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1026,
+      "title": "ci(deps): bump actions/checkout from 6.0.3 to 7.0.0 in the actions-major group",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1026",
+      "createdAt": "2026-06-29T04:31:45Z",
+      "mergedAt": "2026-06-30T09:30:28Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 28.98,
+      "changedFiles": 20,
+      "additions": 44,
+      "deletions": 44,
+      "commits": 1,
+      "commitsAfterFirstReview": null,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 1,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 0,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1028,
+      "title": "Keep reserve-yield on shared indexer and tighten infra flows",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1028",
+      "createdAt": "2026-06-29T09:25:49Z",
+      "mergedAt": "2026-06-29T16:25:48Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 7,
+      "changedFiles": 29,
+      "additions": 978,
+      "deletions": 360,
+      "commits": 9,
+      "commitsAfterFirstReview": 8,
+      "reviews": {
+        "submissions": 34,
+        "byBots": 13,
+        "byHumans": 21
+      },
+      "comments": {
+        "topLevel": 17,
+        "reviewInlineRoots": 21,
+        "reviewInlineReplies": 21,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 3
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 7,
+        "inlineReviewBotRoots": 21,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 21,
+        "candidateFindings": 22,
+        "codexComments": 6,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 2,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1013,
+      "title": "Add Stability Pool LP history to CDPs",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1013",
+      "createdAt": "2026-06-25T13:29:31Z",
+      "mergedAt": "2026-06-28T13:19:54Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 71.84,
+      "changedFiles": 44,
+      "additions": 4349,
+      "deletions": 485,
+      "commits": 71,
+      "commitsAfterFirstReview": 70,
+      "reviews": {
+        "submissions": 81,
+        "byBots": 33,
+        "byHumans": 48
+      },
+      "comments": {
+        "topLevel": 35,
+        "reviewInlineRoots": 47,
+        "reviewInlineReplies": 48,
+        "reviewInlineRootsWithoutReplies": 1,
+        "humanReviewRequests": 15
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 15,
+        "inlineReviewBotRoots": 47,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 47,
+        "candidateFindings": 48,
+        "codexComments": 5,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 4,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1024,
+      "title": "Reduce trading-mode flapping pages",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1024",
+      "createdAt": "2026-06-27T08:52:39Z",
+      "mergedAt": "2026-06-27T20:28:12Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 11.59,
+      "changedFiles": 3,
+      "additions": 26,
+      "deletions": 7,
+      "commits": 3,
+      "commitsAfterFirstReview": 2,
+      "reviews": {
+        "submissions": 2,
+        "byBots": 1,
+        "byHumans": 1
+      },
+      "comments": {
+        "topLevel": 7,
+        "reviewInlineRoots": 1,
+        "reviewInlineReplies": 1,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 2
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 3,
+        "inlineReviewBotRoots": 1,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 1,
+        "candidateFindings": 2,
+        "codexComments": 2,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 2,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1022,
+      "title": "Reduce trading alert Slack duplication",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1022",
+      "createdAt": "2026-06-26T22:24:40Z",
+      "mergedAt": "2026-06-27T08:42:13Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 10.29,
+      "changedFiles": 3,
+      "additions": 109,
+      "deletions": 19,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 4,
+        "byBots": 2,
+        "byHumans": 2
+      },
+      "comments": {
+        "topLevel": 6,
+        "reviewInlineRoots": 2,
+        "reviewInlineReplies": 2,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 2
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 2,
+        "inlineReviewBotRoots": 2,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 2,
+        "candidateFindings": 3,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1021,
+      "title": "Keep VictorOps trading state visible",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1021",
+      "createdAt": "2026-06-26T12:40:18Z",
+      "mergedAt": "2026-06-26T20:09:48Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 7.49,
+      "changedFiles": 2,
+      "additions": 19,
+      "deletions": 17,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 2,
+        "byBots": 1,
+        "byHumans": 1
+      },
+      "comments": {
+        "topLevel": 3,
+        "reviewInlineRoots": 1,
+        "reviewInlineReplies": 1,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 1,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 1,
+        "candidateFindings": 2,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1020,
+      "title": "Slow trading-mode page repeats",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1020",
+      "createdAt": "2026-06-26T12:04:17Z",
+      "mergedAt": "2026-06-26T12:26:06Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 0.36,
+      "changedFiles": 3,
+      "additions": 84,
+      "deletions": 4,
+      "commits": 3,
+      "commitsAfterFirstReview": 2,
+      "reviews": {
+        "submissions": 4,
+        "byBots": 2,
+        "byHumans": 2
+      },
+      "comments": {
+        "topLevel": 5,
+        "reviewInlineRoots": 2,
+        "reviewInlineReplies": 2,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 1
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 2,
+        "inlineReviewBotRoots": 2,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 2,
+        "candidateFindings": 3,
+        "codexComments": 1,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 1,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1019,
+      "title": "Fix duplicate VictorOps trading alert text",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1019",
+      "createdAt": "2026-06-26T11:46:19Z",
+      "mergedAt": "2026-06-26T11:55:43Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 0.16,
+      "changedFiles": 2,
+      "additions": 30,
+      "deletions": 5,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 2,
+        "byBots": 1,
+        "byHumans": 1
+      },
+      "comments": {
+        "topLevel": 3,
+        "reviewInlineRoots": 1,
+        "reviewInlineReplies": 1,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 1,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 1,
+        "candidateFindings": 2,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1018,
+      "title": "Clarify Aegis view-call failure pages",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1018",
+      "createdAt": "2026-06-26T08:20:28Z",
+      "mergedAt": "2026-06-26T08:56:29Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 0.6,
+      "changedFiles": 4,
+      "additions": 84,
+      "deletions": 52,
+      "commits": 3,
+      "commitsAfterFirstReview": 2,
+      "reviews": {
+        "submissions": 8,
+        "byBots": 4,
+        "byHumans": 4
+      },
+      "comments": {
+        "topLevel": 5,
+        "reviewInlineRoots": 4,
+        "reviewInlineReplies": 4,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 1
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 4,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 4,
+        "candidateFindings": 5,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1016,
+      "title": "fix: de-duplicate on-call trading halt alert bodies",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1016",
+      "createdAt": "2026-06-25T15:52:01Z",
+      "mergedAt": "2026-06-25T16:18:31Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 0.44,
+      "changedFiles": 2,
+      "additions": 40,
+      "deletions": 3,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 2,
+        "byBots": 1,
+        "byHumans": 1
+      },
+      "comments": {
+        "topLevel": 3,
+        "reviewInlineRoots": 1,
+        "reviewInlineReplies": 1,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 1,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 1,
+        "candidateFindings": 2,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1015,
+      "title": "Clarify Codex rereview babysit flow",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1015",
+      "createdAt": "2026-06-25T14:57:11Z",
+      "mergedAt": "2026-06-25T15:52:55Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 0.93,
+      "changedFiles": 2,
+      "additions": 16,
+      "deletions": 6,
+      "commits": 1,
+      "commitsAfterFirstReview": 0,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 1,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1014,
+      "title": "Clarify trading halt pager messages",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1014",
+      "createdAt": "2026-06-25T14:03:44Z",
+      "mergedAt": "2026-06-25T14:51:57Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 0.8,
+      "changedFiles": 2,
+      "additions": 43,
+      "deletions": 18,
+      "commits": 7,
+      "commitsAfterFirstReview": 6,
+      "reviews": {
+        "submissions": 13,
+        "byBots": 6,
+        "byHumans": 7
+      },
+      "comments": {
+        "topLevel": 7,
+        "reviewInlineRoots": 7,
+        "reviewInlineReplies": 7,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 3
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 2,
+        "inlineReviewBotRoots": 7,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 7,
+        "candidateFindings": 8,
+        "codexComments": 1,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 1,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1003,
+      "title": "fix(auth): support AUTH_SECRET_PREV for graceful secret rotation",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1003",
+      "createdAt": "2026-06-21T22:27:59Z",
+      "mergedAt": "2026-06-25T10:17:26Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 83.82,
+      "changedFiles": 4,
+      "additions": 104,
+      "deletions": 6,
+      "commits": 12,
+      "commitsAfterFirstReview": 10,
+      "reviews": {
+        "submissions": 6,
+        "byBots": 2,
+        "byHumans": 4
+      },
+      "comments": {
+        "topLevel": 12,
+        "reviewInlineRoots": 3,
+        "reviewInlineReplies": 3,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 1
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 2,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 2,
+        "candidateFindings": 3,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1005,
+      "title": "ci(deps): bump anthropics/claude-code-action from 1.0.141 to 1.0.149",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1005",
+      "createdAt": "2026-06-22T04:34:09Z",
+      "mergedAt": "2026-06-23T17:11:56Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 36.63,
+      "changedFiles": 1,
+      "additions": 2,
+      "deletions": 2,
+      "commits": 2,
+      "commitsAfterFirstReview": null,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 1,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 0,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1007,
+      "title": "fix: label Reserve pools and scope audit exception",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1007",
+      "createdAt": "2026-06-23T14:07:46Z",
+      "mergedAt": "2026-06-23T17:09:50Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 3.03,
+      "changedFiles": 19,
+      "additions": 826,
+      "deletions": 66,
+      "commits": 11,
+      "commitsAfterFirstReview": 10,
+      "reviews": {
+        "submissions": 10,
+        "byBots": 5,
+        "byHumans": 5
+      },
+      "comments": {
+        "topLevel": 12,
+        "reviewInlineRoots": 5,
+        "reviewInlineReplies": 5,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 6
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 2,
+        "inlineReviewBotRoots": 5,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 5,
+        "candidateFindings": 5,
+        "codexComments": 1,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 1,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1004,
+      "title": "ci(deps): bump pnpm/action-setup from 6.0.8 to 6.0.9 in the actions-minor-patch group",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1004",
+      "createdAt": "2026-06-22T04:31:44Z",
+      "mergedAt": "2026-06-23T17:04:06Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 36.54,
+      "changedFiles": 1,
+      "additions": 2,
+      "deletions": 2,
+      "commits": 2,
+      "commitsAfterFirstReview": null,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 1,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 0,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1011,
+      "title": "docs: capture CI verification lessons",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1011",
+      "createdAt": "2026-06-23T16:34:27Z",
+      "mergedAt": "2026-06-23T16:54:28Z",
+      "collectedAt": "2026-07-03T18:05:49.017Z",
+      "durationHours": 0.33,
+      "changedFiles": 2,
+      "additions": 15,
+      "deletions": 0,
+      "commits": 1,
+      "commitsAfterFirstReview": null,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 0,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    }
+  ],
+  "manualClassification": {
+    "required": true,
+    "note": "candidateFindings counts finding-like review comments. Classify each candidate as accepted, valid-wont-fix, duplicate-stale, or noise before comparing review quality.",
+    "categories": ["accepted", "valid-wont-fix", "duplicate-stale", "noise"]
+  }
+}

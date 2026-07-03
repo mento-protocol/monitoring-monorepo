@@ -1403,6 +1403,9 @@ while IFS= read -r path; do
         scripts/pr-ready-state.mjs|scripts/pr-ready-state-core.mjs|scripts/pr-ready-state-format.mjs|scripts/pr-ready-state.test.mjs)
           add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
           ;;
+        scripts/review-process-metrics.mjs|scripts/review-process-metrics.test.mjs)
+          add_command "node scripts/review-process-metrics.test.mjs" "review-process metrics collector changed"
+          ;;
         scripts/tf-stacks.mjs|scripts/tf-stacks.test.mjs)
           add_command "pnpm tf:test" "Terraform stack wrapper changed"
           add_terraform_validate_commands "terraform" "Terraform stack wrapper changed"

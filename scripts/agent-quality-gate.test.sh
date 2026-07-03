@@ -2336,6 +2336,12 @@ assert_contains "- pnpm agent:review-materiality:test (agent review materiality 
 run_gate "scripts/review-materiality.test.mjs"
 assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
 
+run_gate "scripts/review-process-metrics.mjs"
+assert_contains "- node scripts/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
+run_gate "scripts/review-process-metrics.test.mjs"
+assert_contains "- node scripts/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
 run_gate "scripts/agent-issue-board.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 
