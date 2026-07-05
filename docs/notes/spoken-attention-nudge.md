@@ -1,3 +1,11 @@
+---
+title: Spoken Attention Nudge
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-05
+---
+
 # Spoken Attention Nudge
 
 When you need the user's attention and they are not actively responding, send a
