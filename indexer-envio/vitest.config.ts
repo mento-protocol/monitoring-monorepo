@@ -42,7 +42,8 @@ export default defineConfig({
         "src/handlers/steth/**/*.ts",
         "src/rpc/susds.ts",
       ],
-      // Floors = floor(measured) - 2, measured 2026-06-15.
+      // Floors = floor(measured) - 2, measured 2026-07-05, after the
+      // must-cover scenario-test wave (#1052, #1053, #1054) landed on main.
       //
       // The ~12.4k lines under src/handlers/** were previously excluded from
       // coverage entirely — exercised end-to-end by the integration harness
@@ -56,15 +57,15 @@ export default defineConfig({
       // paths, not rare-event branches — the bucket's job is visibility plus a
       // regression ratchet, not a high bar. Raising it is follow-up work.
       thresholds: {
-        statements: 47,
-        branches: 42,
-        functions: 56,
-        lines: 48,
+        statements: 49,
+        branches: 44,
+        functions: 59,
+        lines: 50,
         "src/handlers/**/*.ts": {
-          statements: 22,
-          branches: 14,
-          functions: 29,
-          lines: 22,
+          statements: 24,
+          branches: 18,
+          functions: 32,
+          lines: 24,
         },
         // Re-pins the pre-#925 non-handler floor so a coverage regression in
         // well-tested code (rpc.ts, pool.ts, helpers.ts, src/pool/**, src/rpc/**,
@@ -72,18 +73,18 @@ export default defineConfig({
         // the global pool. Two globs are needed: picomatch's !(handlers) extglob
         // requires a child segment, so "src/!(handlers)/**/*.ts" covers non-handler
         // subdirs but silently misses direct children of src/. "src/*.ts" fills
-        // that gap. Floors = floor(measured) - 2.
+        // that gap. Floors = floor(measured) - 2, measured 2026-07-05.
         "src/*.ts": {
-          statements: 74,
-          branches: 71,
-          functions: 76,
-          lines: 77,
+          statements: 76,
+          branches: 72,
+          functions: 79,
+          lines: 79,
         },
         "src/!(handlers)/**/*.ts": {
-          statements: 65,
-          branches: 52,
+          statements: 67,
+          branches: 54,
           functions: 75,
-          lines: 66,
+          lines: 69,
         },
       },
     },
