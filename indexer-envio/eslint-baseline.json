@@ -35,20 +35,6 @@
     "linePreview": "*/ | export function recordHealthSample( | pool: Pool,"
   },
   {
-    "file": "src/pool.ts",
-    "ruleId": "complexity",
-    "message": "Async arrow function has a complexity of 57. Maximum allowed is 15.",
-    "line": 315,
-    "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
-  },
-  {
-    "file": "src/pool.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 34 to the 18 allowed.",
-    "line": 315,
-    "linePreview": "existing?: { pool: Pool | undefined }; | }): Promise<Pool> => { | const initialBase = existingOverride"
-  },
-  {
     "file": "src/pool/snapshots.ts",
     "ruleId": "complexity",
     "message": "Async arrow function has a complexity of 18. Maximum allowed is 15.",
