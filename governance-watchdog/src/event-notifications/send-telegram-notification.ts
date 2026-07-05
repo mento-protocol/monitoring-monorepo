@@ -1,5 +1,12 @@
 import config from "../config.js";
 import getSecret from "../utils/get-secret.js";
+import { sendWithRetry } from "../utils/send-with-retry.js";
+
+/**
+ * Per-attempt timeout so 3 attempts (1 try + 2 retries) stay well under the
+ * 60s Cloud Function timeout, mirroring the cap on the Discord send.
+ */
+const TELEGRAM_REQUEST_TIMEOUT_MS = 3000;
 
 /**
  * Sends a pre-formatted HTML message to Telegram
@@ -31,16 +38,59 @@ export default async function sendTelegramNotification(
     parse_mode: "HTML",
   };
 
+  await sendWithRetry(() => attemptSendTelegramMessage(botUrl, payload), {
+    isRetryable: isRetryableTelegramError,
+  });
+}
+
+/**
+ * A failed Telegram `sendMessage` call, carrying the HTTP status so the
+ * retry layer can tell a transient failure from a terminal one.
+ */
+class TelegramApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "TelegramApiError";
+  }
+}
+
+async function attemptSendTelegramMessage(
+  botUrl: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
   const response = await fetch(botUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(TELEGRAM_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
     const errorData = await response.text();
-    throw new Error(`Failed to send telegram notification: ${errorData}`);
+    throw new TelegramApiError(
+      `Failed to send telegram notification: ${errorData}`,
+      response.status,
+    );
   }
+}
+
+/**
+ * Classifies a Telegram send failure as retryable (5xx / network) or
+ * terminal (4xx, including 429). Telegram's flood-control 429 response
+ * carries a `parameters.retry_after` that can exceed our whole retry budget
+ * (unlike discord.js, nothing here parses or honors it), so — same as
+ * Discord — 429 is treated as terminal rather than retried blind.
+ */
+function isRetryableTelegramError(error: unknown): boolean {
+  if (error instanceof TelegramApiError) {
+    return error.status >= 500 && error.status <= 599;
+  }
+
+  // Network-level failures (fetch rejecting, including our own timeout) are transient.
+  return true;
 }
