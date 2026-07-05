@@ -1,0 +1,53 @@
+name: Resolve main baseline
+description: >
+  Resolve a package's eslint-baseline.json as committed on origin/main and
+  export it as ESLINT_BASELINE_MAIN for the PR baseline-growth check.
+
+# Composite action used by .github/workflows/ci.yml to DRY the per-package
+# "Resolve main baseline (PR baseline-growth check)" step. Caller is
+# responsible for the `if: github.event_name == 'pull_request'` guard and
+# for `actions/checkout` before invoking this action.
+
+inputs:
+  package-path:
+    description: Package directory the eslint-baseline.json lives in (e.g. shared-config).
+    required: true
+  fetch-main:
+    description: >
+      Fetch origin/main first. Set to 'false' when the caller's checkout
+      already used fetch-depth: 0 (origin/main is already available).
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      if: inputs.fetch-main == 'true'
+      run: |
+        set -euo pipefail
+        # Fail closed if origin/main can't be reached — a silently-empty
+        # main baseline would skip the merge-base growth check and let a
+        # hand-grown HEAD baseline pass. Explicit refspec ensures
+        # refs/remotes/origin/main is updated regardless of the remote's
+        # configured fetch refmap.
+        git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+    - shell: bash
+      run: |
+        set -euo pipefail
+        # Guard the implicit contract: with fetch-main 'false' the caller's
+        # checkout must have made origin/main available (fetch-depth: 0).
+        # Without this guard a misconfigured caller gets a cryptic
+        # "Not a valid object name 'origin/main'" with no hint at the cause.
+        if ! git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
+          echo "::error::refs/remotes/origin/main not found. Either keep fetch-main: 'true' or use fetch-depth: 0 in the caller's checkout." >&2
+          exit 1
+        fi
+        # Only tolerate a genuinely missing baseline file on main (package
+        # didn't exist there yet) — not a missing ref or ls-tree failure.
+        if git ls-tree --name-only origin/main -- "${{ inputs.package-path }}/eslint-baseline.json" | grep -q .; then
+          git show "origin/main:${{ inputs.package-path }}/eslint-baseline.json" > "/tmp/main-baseline-${{ inputs.package-path }}.json"
+        else
+          : > "/tmp/main-baseline-${{ inputs.package-path }}.json"
+        fi
+        echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-${{ inputs.package-path }}.json" >> "$GITHUB_ENV"

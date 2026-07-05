@@ -189,8 +189,10 @@ const coreContextFiles = [
   ...scopedAgentDirs.map((dir) => `${dir}/AGENTS.md`),
   "docs/context-standards.md",
   "docs/pr-checklists/recurring-review-patterns.md",
-  "docs/notes/agent-quality-gate-mechanics.md",
-  "docs/notes/spoken-attention-nudge.md",
+  // docs/notes/* canonical notes (agent-quality-gate-mechanics,
+  // spoken-attention-nudge) are deliberately NOT pinned here: they are
+  // procedural notes managed via frontmatter discovery, and removing their
+  // frontmatter is the legitimate demote-from-canonical operation.
   ...canonicalSkillFiles.filter((file) => file.endsWith("/SKILL.md")),
   ...trackedFiles(".agents/roles", (file) => file.endsWith(".md"), {
     required: true,
