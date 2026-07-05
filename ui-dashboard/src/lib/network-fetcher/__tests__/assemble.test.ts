@@ -212,4 +212,24 @@ describe("assembleNetworkData — pure composition", () => {
     // Unrelated slices are unaffected.
     expect(result.feeSnapshotsError).toBeNull();
   });
+
+  it("mutable-tail error in a fulfilled snapshot result degrades every current window", () => {
+    const tailErr = new Error("tail refresh failed");
+    const result = assembleNetworkData({
+      ...baseArgs,
+      snapshotsAllDailyResult: fulfilled({
+        rows: [],
+        truncated: false,
+        error: null,
+        mutableTailError: tailErr,
+      }),
+      // mutableTailFrom sits just below every window's `to` bound, so all
+      // three windows extend into the mutable range and inherit the error.
+      snapshotTailNowMs: WINDOWS.w24h.to * 1000 - 1,
+    });
+
+    expect(result.snapshotsError).toBe(tailErr);
+    expect(result.snapshots7dError).toBe(tailErr);
+    expect(result.snapshots30dError).toBe(tailErr);
+  });
 });

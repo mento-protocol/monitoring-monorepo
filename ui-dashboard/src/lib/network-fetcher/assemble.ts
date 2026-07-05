@@ -240,6 +240,9 @@ function deriveSnapshotSlice(args: {
   // affect a specific window if we didn't fetch far enough back to cover its
   // `from` bound. Rows come in newest-first, so the last element is the
   // oldest we fetched.
+  // POSITIVE_INFINITY when empty: ensures oldestFetchedTs > windowFrom is
+  // always true, so a pagination issue (error or truncation) degrades every
+  // window — we have no salvaged rows to prove any window is covered.
   const oldestFetchedTs =
     snapshotsAllDaily.length > 0
       ? Number(snapshotsAllDaily[snapshotsAllDaily.length - 1]!.timestamp)
