@@ -2220,6 +2220,13 @@ run_gate "SPEC.md"
 assert_contains "- docs"
 assert_contains "- pnpm agent:context-check (technical specification changed)"
 
+# Any docs markdown may carry canonical: true frontmatter (discovery in
+# check-agent-context.mjs), so a discovered doc path must route through the
+# context check locally, not just in CI.
+run_gate "docs/terraform.md"
+assert_contains "- docs"
+assert_contains "- pnpm agent:context-check (docs markdown may be canonical (frontmatter discovery))"
+
 run_gate ".codex/hooks.json"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"

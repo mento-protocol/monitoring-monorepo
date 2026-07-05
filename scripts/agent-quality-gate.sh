@@ -1342,9 +1342,15 @@ while IFS= read -r path; do
         SPEC.md)
           add_command "pnpm agent:context-check" "technical specification changed"
           ;;
+        docs/*.md)
+          # check-agent-context.mjs discovers canonical files across all of
+          # docs/**/*.md, so any docs markdown change may affect the
+          # frontmatter/staleness policy — route it through the check.
+          add_command "pnpm agent:context-check" "docs markdown may be canonical (frontmatter discovery)"
+          ;;
       esac
       ;;
-    .agents/skills/*|.agents/roles/*|.claude/skills/*|.claude/settings.json|.codex/hooks.json)
+    .agents/*|.claude/skills/*|.claude/settings.json|.codex/hooks.json)
       add_surface "agent-context"
       add_command "pnpm agent:context-check" "agent context files changed"
       ;;
