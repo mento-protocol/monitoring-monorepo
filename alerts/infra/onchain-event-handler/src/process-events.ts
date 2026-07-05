@@ -1,7 +1,9 @@
 import type { EventContext } from "./build-event-context";
 import config from "./config";
+import { writeDeadLetter } from "./dead-letter";
 import { logger } from "./logger";
 import { formatSlackMessage, sendToSlack } from "./slack";
+import type { SlackMessage } from "./slack";
 import type {
   ProcessedEvent,
   QuickNodeDecodedLog,
@@ -17,6 +19,12 @@ import {
 
 const DEFAULT_PROCESSING_BUDGET_MS = 270_000;
 const FALLBACK_HEADROOM_MS = 10_000;
+// Bounds the dead-letter GCS write independently of the overall request
+// budget so a stalled write can't push the response past the Cloud
+// Function's timeout (which would make QuickNode retry the whole batch and
+// duplicate already-delivered alerts). Small and fixed rather than "whatever
+// budget remains" — the write should either complete quickly or fail fast.
+const DEAD_LETTER_WRITE_TIMEOUT_MS = 5_000;
 
 interface ProcessEventsOptions {
   /**
@@ -48,6 +56,25 @@ class ChainDetectionError extends Error {
   ) {
     super(message);
     this.name = "ChainDetectionError";
+  }
+}
+
+/**
+ * Error thrown when sendToSlack exhausts retries (or is aborted) after the
+ * Slack message has already been rendered. Carries the rendered payload so
+ * the per-event catch below can dead-letter it instead of losing the alert.
+ */
+class SlackDeliveryFailedError extends Error {
+  constructor(
+    message: string,
+    public readonly logEntry: QuickNodeDecodedLog,
+    public readonly slackMessage: SlackMessage,
+    public readonly multisigKey: string,
+    public readonly channelId: string,
+    public readonly chain: string,
+  ) {
+    super(message);
+    this.name = "SlackDeliveryFailedError";
   }
 }
 
@@ -155,6 +182,7 @@ export async function processEvents(
               logEntry,
               fallbackAbortController.signal.aborted,
             );
+            await deadLetterIfSlackDeliveryFailed(error);
             skipped += 1;
           } finally {
             clearTimeout(fallbackAbortTimer);
@@ -190,6 +218,7 @@ export async function processEvents(
         }
       } catch (error) {
         logProcessingError(error, logEntry, abortController.signal.aborted);
+        await deadLetterIfSlackDeliveryFailed(error);
         if (abortController.signal.aborted) {
           skipped += 1;
           const nextLog = logsToProcess[index + 1];
@@ -260,8 +289,46 @@ function logProcessingError(
     transactionHash: safe.transactionHash,
     eventName: safe.name,
     chainDetectionFailure: error instanceof ChainDetectionError,
+    slackDeliveryFailure: error instanceof SlackDeliveryFailedError,
     aborted,
   });
+}
+
+/**
+ * Dead-letters the rendered Slack payload whenever `sendToSlack` threw —
+ * including when our own processing-budget abort cut a send short mid-flight,
+ * not just when Slack's own retries were exhausted. The QuickNode nonce is
+ * already reserved by the time this runs (see index.ts), so there is no
+ * "next attempt" from QuickNode to fall back on: skipping the write on the
+ * abort path would silently drop an already-rendered alert with no trace,
+ * which is exactly the failure mode this dead-letter path exists to avoid.
+ * The write below is bounded by its own independent timeout, so it can't be
+ * blocked by whatever caused the outer abort.
+ */
+async function deadLetterIfSlackDeliveryFailed(error: unknown): Promise<void> {
+  if (!(error instanceof SlackDeliveryFailedError)) {
+    return;
+  }
+  const writeAbortController = new AbortController();
+  const writeAbortTimer = setTimeout(
+    () => writeAbortController.abort(),
+    DEAD_LETTER_WRITE_TIMEOUT_MS,
+  );
+  try {
+    await writeDeadLetter(
+      {
+        logEntry: error.logEntry,
+        slackMessage: error.slackMessage,
+        multisigKey: error.multisigKey,
+        channelId: error.channelId,
+        chain: error.chain,
+        failureReason: error.message,
+      },
+      { signal: writeAbortController.signal },
+    );
+  } finally {
+    clearTimeout(writeAbortTimer);
+  }
 }
 
 function isPendingExecutionFallback(
@@ -421,7 +488,18 @@ async function processEvent(
   );
 
   // 7. Send to Slack
-  await sendToSlack(config.SLACK_BOT_TOKEN, channelId, slackMessage, signal);
+  try {
+    await sendToSlack(config.SLACK_BOT_TOKEN, channelId, slackMessage, signal);
+  } catch (error) {
+    throw new SlackDeliveryFailedError(
+      error instanceof Error ? error.message : String(error),
+      logEntry,
+      slackMessage,
+      multisigKey,
+      channelId,
+      chain,
+    );
+  }
 
   logger.info("Event processed successfully", {
     multisigKey,

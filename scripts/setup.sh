@@ -77,7 +77,7 @@ deps_hash="$(
     .npmrc \
     pnpmfile.cjs \
     patches \
-    */package.json \
+    ./*/package.json \
     alerts/infra/*/package.json \
     shared-config/src \
     shared-config/tsconfig.json || true

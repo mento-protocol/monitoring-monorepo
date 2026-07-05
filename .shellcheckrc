@@ -1,0 +1,13 @@
+# Trunk's shellcheck sandbox lints one file at a time (sandbox_type:
+# copy_targets), so sibling scripts sourced via `${SCRIPT_DIR}/...` (resolved
+# from BASH_SOURCE at runtime) never exist alongside the target being
+# checked, producing an unavoidable SC1091 ("not following") false positive.
+# A repo-wide disable here would also hide a genuinely missing sourced file,
+# so SC1091 is instead disabled per-line, immediately above each affected
+# `source` call, with a comment naming the false-positive cause. See:
+# alerts/infra/onchain-event-handler/scripts/{deploy,get-logs,
+# get-project-vars,tail-logs,test-healthcheck,test-local}.sh,
+# alerts/infra/scripts/{check-gcloud-login,common,fix-webhook-state,
+# get-webhook-filter-function,set-up-terraform}.sh,
+# governance-watchdog/bin/{deploy-via-gcloud,get-logs,set-up-terraform,
+# test-deployed-function}.sh.
