@@ -1333,10 +1333,10 @@ while IFS= read -r path; do
       add_surface "ui-dashboard"
       add_checklist "docs/pr-checklists/code-health.md" "Lighthouse CI budget config changed"
       ;;
-    docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md)
+    docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md|SPEC.md)
       add_surface "docs"
       case "$path" in
-        docs/context-standards.md|docs/pr-checklists/recurring-review-patterns.md|AGENTS.md|*/AGENTS.md)
+        docs/context-standards.md|docs/pr-checklists/recurring-review-patterns.md|AGENTS.md|*/AGENTS.md|SPEC.md)
           add_command "pnpm agent:context-check" "agent context standards changed"
           ;;
       esac
@@ -1382,8 +1382,9 @@ while IFS= read -r path; do
         scripts/agent-autoreview.mjs)
           add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview helper changed"
           ;;
-        scripts/check-agent-context.mjs)
+        scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
+          add_command "node scripts/check-agent-context.test.mjs" "agent context checker changed"
           ;;
         scripts/check-deploy-root-anchors.test.mjs)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy root-anchor test changed"

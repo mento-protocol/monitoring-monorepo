@@ -4,6 +4,13 @@ import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  daysSince,
+  FUTURE_SKEW_TOLERANCE_DAYS,
+  parseFrontmatter,
+  STALE_AFTER_DAYS,
+} from "./check-agent-context-helpers.mjs";
+
 const repoRoot = process.cwd();
 const failures = [];
 const requiredMetadataKeys = ["title", "status", "owner", "canonical"];
@@ -99,22 +106,8 @@ function trackedFiles(dir, predicate = () => true, { required = false } = {}) {
   return files;
 }
 
-function parseFrontmatter(filePath) {
-  const content = read(filePath);
-  if (!content.startsWith("---\n")) return null;
-  const end = content.indexOf("\n---\n", 4);
-  if (end === -1) return null;
-  const raw = content.slice(4, end);
-  const data = {};
-  for (const line of raw.split("\n")) {
-    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (match) data[match[1]] = match[2].trim().replace(/^["']|["']$/g, "");
-  }
-  return data;
-}
-
 function requireMetadata(filePath) {
-  const data = parseFrontmatter(filePath);
+  const data = parseFrontmatter(read(filePath));
   if (!data) {
     fail(`${filePath}: missing YAML frontmatter`);
     return;
@@ -130,6 +123,19 @@ function requireMetadata(filePath) {
   }
   if (data.canonical === "true" && !data.last_verified) {
     fail(`${filePath}: canonical files require last_verified`);
+  } else if (data.canonical === "true" && data.last_verified) {
+    const age = daysSince(data.last_verified);
+    if (age === null) {
+      fail(
+        `${filePath}: last_verified '${data.last_verified}' is not a valid YYYY-MM-DD date`,
+      );
+    } else if (age < -FUTURE_SKEW_TOLERANCE_DAYS) {
+      fail(`${filePath}: last_verified ${data.last_verified} is in the future`);
+    } else if (age > STALE_AFTER_DAYS) {
+      fail(
+        `${filePath}: last_verified ${data.last_verified} is ${age} days old, exceeds the ${STALE_AFTER_DAYS}-day policy window`,
+      );
+    }
   }
 }
 
@@ -158,6 +164,7 @@ const claudeSkillFiles = trackedFiles(
 
 const managedContextFiles = [
   "AGENTS.md",
+  "SPEC.md",
   ...scopedAgentDirs.map((dir) => `${dir}/AGENTS.md`),
   "docs/context-standards.md",
   "docs/pr-checklists/recurring-review-patterns.md",

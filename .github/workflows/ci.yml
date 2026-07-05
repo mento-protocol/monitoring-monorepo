@@ -861,6 +861,10 @@ jobs:
         run: node scripts/check-hermetic-vitest-setup.test.mjs
       - name: Deviation threshold drift suite
         run: node scripts/check-deviation-threshold-drift.test.mjs
+      - name: Agent context checker unit tests
+        # Behavioral coverage of scripts/check-agent-context.mjs's pure
+        # helpers: frontmatter parsing and the last_verified staleness window.
+        run: node scripts/check-agent-context.test.mjs
       - name: PR description validator suite
         run: node scripts/check-pr-description.test.mjs
       - name: Deploy root-anchor regression suite
