@@ -50,6 +50,10 @@ function celoEntry() {
   return e!;
 }
 function monadEntry() {
+  // Same proxy address as celoEntry() — intentional: CREATE3 deployment
+  // means the same deterministic address on both chains. The manifest
+  // lookup keys on (chainId, address), so it still returns distinct
+  // per-chain entries.
   const e = findByNttManager(143, "0xa4096343485a44c0f8d05ae6da311c18d63e38bc");
   assert.ok(e, "manifest lookup failed — did generateNttAddresses.mjs run?");
   return e!;

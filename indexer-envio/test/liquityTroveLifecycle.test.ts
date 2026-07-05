@@ -307,6 +307,7 @@ describe("Liquity trove lifecycle — harness-driven multi-entity consistency", 
     });
 
     const troveA = mockDb.entities.Trove.get(troveAEntityId);
+    assert.ok(troveA, "liquidated trove exists");
     instance = mockDb.entities.LiquityInstance.get(collateralId);
     assert.equal(troveA?.status, "liquidated");
     assert.equal(troveA?.liquidatedDebt, 1_500n * 10n ** 18n);

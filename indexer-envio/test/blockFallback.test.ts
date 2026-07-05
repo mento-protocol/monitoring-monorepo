@@ -1165,42 +1165,77 @@ describe("per-chain fallback: archive-depth and rate-limit, isolated across chai
     _testHooks.resetFallbackRuntimeState();
   });
 
-  it("archive-depth failure falls through to the fallback client on both Celo and Monad", async () => {
-    for (const chainId of [CELO, MONAD]) {
-      const primary = mockClient(async () => {
-        throw new Error("querying historical state");
-      });
-      const fallback = mockClient(async () => "archive-ok");
+  // Split per-chain (rather than looping over [CELO, MONAD] in one `it`) so
+  // a failure in one chain's fallback path is attributed unambiguously —
+  // e.g. "Celo archive-depth" vs "Monad archive-depth" — instead of a
+  // generic assertion failure that requires re-running to find which
+  // iteration broke.
+  it("archive-depth failure falls through to the fallback client on Celo", async () => {
+    const primary = mockClient(async () => {
+      throw new Error("querying historical state");
+    });
+    const fallback = mockClient(async () => "archive-ok");
 
-      const res = await readContractWithBlockFallback(
-        chainId,
-        primary,
-        baseArgs,
-        500n,
-        fallback,
-      );
-      assert.equal(res.result, "archive-ok");
-      assert.equal(res.usedFallback, true);
-    }
+    const res = await readContractWithBlockFallback(
+      CELO,
+      primary,
+      baseArgs,
+      500n,
+      fallback,
+    );
+    assert.equal(res.result, "archive-ok");
+    assert.equal(res.usedFallback, true);
   });
 
-  it("rate-limited primary falls through to the fallback client on both Celo and Monad", async () => {
-    for (const chainId of [CELO, MONAD]) {
-      const primary = mockClient(async () => {
-        throw new Error("rate limit");
-      });
-      const fallback = mockClient(async () => "rate-limit-ok");
+  it("archive-depth failure falls through to the fallback client on Monad", async () => {
+    const primary = mockClient(async () => {
+      throw new Error("querying historical state");
+    });
+    const fallback = mockClient(async () => "archive-ok");
 
-      const res = await readContractWithBlockFallback(
-        chainId,
-        primary,
-        baseArgs,
-        500n,
-        fallback,
-      );
-      assert.equal(res.result, "rate-limit-ok");
-      assert.equal(res.usedFallback, true);
-    }
+    const res = await readContractWithBlockFallback(
+      MONAD,
+      primary,
+      baseArgs,
+      500n,
+      fallback,
+    );
+    assert.equal(res.result, "archive-ok");
+    assert.equal(res.usedFallback, true);
+  });
+
+  it("rate-limited primary falls through to the fallback client on Celo", async () => {
+    const primary = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    const fallback = mockClient(async () => "rate-limit-ok");
+
+    const res = await readContractWithBlockFallback(
+      CELO,
+      primary,
+      baseArgs,
+      500n,
+      fallback,
+    );
+    assert.equal(res.result, "rate-limit-ok");
+    assert.equal(res.usedFallback, true);
+  });
+
+  it("rate-limited primary falls through to the fallback client on Monad", async () => {
+    const primary = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    const fallback = mockClient(async () => "rate-limit-ok");
+
+    const res = await readContractWithBlockFallback(
+      MONAD,
+      primary,
+      baseArgs,
+      500n,
+      fallback,
+    );
+    assert.equal(res.result, "rate-limit-ok");
+    assert.equal(res.usedFallback, true);
   });
 
   it("an archive-depth horizon recorded for one chain does not gate the fallback for another chain", async () => {

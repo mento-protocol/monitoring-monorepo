@@ -19,19 +19,27 @@
  * desired behavior.
  */
 import { strict as assert } from "assert";
-import type { LiquityCollateral, LiquityInstance, Trove } from "envio";
+import type {
+  LiquityBorrowingRevenueDailySnapshot,
+  LiquityCollateral,
+  LiquityInstance,
+  Trove,
+} from "envio";
 import { bootstrapCollaterals } from "../src/handlers/liquity/bootstrap";
 import { makeLiquityCollateral } from "../src/handlers/liquity/bootstrap";
+import { borrowingRevenueDailySnapshotId } from "../src/handlers/liquity/borrowingRevenue";
 import {
   LIQUITY_MARKETS,
   makeCollateralId,
 } from "../src/handlers/liquity/config";
 import { OP } from "../src/handlers/liquity/operations";
 import { pendingTroveKey } from "../src/handlers/liquity/keys";
+import { makeTroveId } from "../src/handlers/liquity/troves";
 import {
   indexerTestHelpers,
   processMockEvents,
   type EntityCollection,
+  type EntityReader,
   type MockDbWith,
   type WritableEntity,
 } from "./helpers/indexerTestHarness.js";
@@ -46,6 +54,7 @@ type ReplayMockDb = MockDbWith<{
   LiquityInstance: WritableEntity<LiquityInstance>;
   Trove: WritableEntity<Trove>;
   PendingBatchedTroveUpdate: EntityCollection<PendingBatchedTroveUpdate>;
+  LiquityBorrowingRevenueDailySnapshot: EntityReader<LiquityBorrowingRevenueDailySnapshot>;
 }>;
 
 const TestHelpers = indexerTestHelpers<ReplayMockDb>();
@@ -120,7 +129,7 @@ describe("Liquity batchReplay idempotency", () => {
       events: [batchedTroveUpdatedEvent(1), batchUpdatedEvent({ logIndex: 2 })],
     });
 
-    const troveEntityId = `${collateralId}-0x1`;
+    const troveEntityId = makeTroveId(collateralId, "0x1");
     const pendingId = pendingTroveKey(
       market.chainId,
       TX_HASH,
@@ -181,13 +190,23 @@ describe("Liquity batchReplay idempotency", () => {
     );
     const firstPassInstance = mockDb.entities.LiquityInstance.get(collateralId);
     assert.ok(firstPassInstance, "instance bootstrapped on first call");
+    const firstPassCollateral =
+      mockDb.entities.LiquityCollateral.get(collateralId);
+    assert.ok(firstPassCollateral, "collateral bootstrapped on first call");
 
-    // Mutate the instance the way a later handler would, then call
-    // bootstrapCollaterals again (simulating the onBlock heartbeat firing a
-    // second time, e.g. a re-sync from an earlier checkpoint).
+    // Mutate the instance and collateral the way a later handler would, then
+    // call bootstrapCollaterals again (simulating the onBlock heartbeat
+    // firing a second time, e.g. a re-sync from an earlier checkpoint).
+    // `bootstrapCollaterals` guards both rows with the same `existing ??`
+    // pattern, so both must survive the second call untouched.
     mockDb.entities.LiquityInstance.set({
       ...firstPassInstance!,
       systemDebt: 42n,
+    });
+    mockDb.entities.LiquityCollateral.set({
+      ...firstPassCollateral!,
+      systemParamsLoaded: true,
+      minDebt: MIN_DEBT,
     });
     await bootstrapCollaterals(
       {
@@ -205,12 +224,21 @@ describe("Liquity batchReplay idempotency", () => {
       42n,
       "existing instance is preserved verbatim — bootstrap never overwrites live state",
     );
+    const secondPassCollateral =
+      mockDb.entities.LiquityCollateral.get(collateralId);
+    assert.equal(
+      secondPassCollateral?.systemParamsLoaded,
+      true,
+      "existing collateral is preserved verbatim — bootstrap never overwrites live state",
+    );
+    assert.equal(secondPassCollateral?.minDebt, MIN_DEBT);
   });
 
-  it("KNOWN GAP (#1083): replaying a BatchUpdated event with a nonzero upfront fee double-counts LiquityInstance.borrowingFeeCum (pins current behavior)", async () => {
+  it("KNOWN GAP (#1083): replaying a BatchUpdated event with a nonzero upfront fee double-counts LiquityInstance.borrowingFeeCum AND LiquityBorrowingRevenueDailySnapshot.upfrontFee (pins current behavior)", async () => {
     let mockDb = MockDb.createMockDb();
     seedLoadedCollateral(mockDb);
     const fee = 10n * 10n ** 18n;
+    const snapshotId = borrowingRevenueDailySnapshotId(collateralId, 0n);
 
     mockDb = await processMockEvents({
       mockDb,
@@ -225,6 +253,13 @@ describe("Liquity batchReplay idempotency", () => {
       fee,
       "fee recorded once on first delivery",
     );
+    let snapshot =
+      mockDb.entities.LiquityBorrowingRevenueDailySnapshot.get(snapshotId);
+    assert.equal(
+      snapshot?.upfrontFee,
+      fee,
+      "daily snapshot upfrontFee recorded once on first delivery",
+    );
 
     // Replay the identical event a second time.
     mockDb = await processMockEvents({
@@ -234,17 +269,27 @@ describe("Liquity batchReplay idempotency", () => {
       ],
     });
     instance = mockDb.entities.LiquityInstance.get(collateralId);
+    snapshot =
+      mockDb.entities.LiquityBorrowingRevenueDailySnapshot.get(snapshotId);
     // NOTE for whoever fixes #1083: once recordBorrowingFeeAndApplyCum is
-    // made replay-safe, this expectation must flip to `fee` (not `fee * 2n`).
-    // Leaving this assertion on the buggy value is intentional — it pins
-    // CURRENT behavior per issue #1054's workflow contract, not the desired
-    // behavior; it is deliberately not skipped so it forces an explicit
-    // update the moment #1083 lands.
+    // made replay-safe, BOTH expectations below must flip to `fee` (not
+    // `fee * 2n`) — recordBorrowingUpfrontFee (which writes the daily
+    // snapshot) and the borrowingFeeCum increment share the same missing
+    // replay guard. Leaving these assertions on the buggy value is
+    // intentional — it pins CURRENT behavior per issue #1054's workflow
+    // contract, not the desired behavior; it is deliberately not skipped so
+    // it forces an explicit update the moment #1083 lands.
     assert.equal(
       instance?.borrowingFeeCum,
       fee * 2n,
       "KNOWN GAP: recordBorrowingFeeAndApplyCum has no replay guard, so the " +
         "fee is double-counted on redelivery — pinned here, not the desired behavior",
+    );
+    assert.equal(
+      snapshot?.upfrontFee,
+      fee * 2n,
+      "KNOWN GAP: the daily snapshot's upfrontFee bucket is double-counted " +
+        "in lockstep with borrowingFeeCum — pinned here, not the desired behavior",
     );
   });
 });
