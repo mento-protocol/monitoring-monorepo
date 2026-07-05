@@ -1649,7 +1649,18 @@ run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
 assert_contains "- node scripts/check-github-action-pins.mjs (Trunk workflow/action setup changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate trunk hook changed)"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck"
+
+# .shellcheckrc disables/options apply repo-wide, so a targeted single-file
+# Trunk check on it alone is a no-op; the gate must additionally route to a
+# full ShellCheck-only scan (see trunk_requires_shellcheck_full_scan) or a
+# future disable/option change here could pass local checks without
+# re-validating the scripts it governs.
+run_gate ".shellcheckrc"
+assert_contains "- tooling"
+assert_contains "- ./tools/trunk check --all --filter=shellcheck (ShellCheck config changed; re-validate every script it governs)"
+assert_not_contains "- ./tools/trunk check --all ("
 
 run_gate "turbo.json"
 assert_contains "- tooling"

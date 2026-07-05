@@ -690,7 +690,28 @@ trunk_requires_full_scan() {
   while IFS= read -r path; do
     [[ -e "$path" ]] || return 0
     case "$path" in
+      # .trunk/trunk.yaml (enabled linters, ignores) already lands here via
+      # .trunk/*, so it gets the unfiltered full scan below; no separate
+      # .shellcheckrc-style case is needed for it.
       .trunk/*|tools/trunk|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|patches/*|.npmrc|*/.npmrc|pnpmfile.cjs|.pnpmfile.cjs|.node-version|*/package.json)
+        return 0
+        ;;
+    esac
+  done < "$changed_paths_file"
+
+  return 1
+}
+
+trunk_requires_shellcheck_full_scan() {
+  local path
+  while IFS= read -r path; do
+    case "$path" in
+      # .shellcheckrc disables/options apply repo-wide, but a targeted Trunk
+      # check only lints the config file itself (a no-op) rather than the
+      # *.sh targets it governs. Force a repo-wide, ShellCheck-only scan so
+      # an edit here (e.g. loosening a disable) is validated against every
+      # script instead of passing trivially.
+      .shellcheckrc)
         return 0
         ;;
     esac
@@ -718,6 +739,10 @@ add_trunk_check_command() {
     prepend_command "$trunk_command" "changed existing paths should pass targeted Trunk checks"
   else
     prepend_command "./tools/trunk check --all" "changed paths could not be mapped to targeted Trunk checks"
+  fi
+
+  if trunk_requires_shellcheck_full_scan; then
+    prepend_command "./tools/trunk check --all --filter=shellcheck" "ShellCheck config changed; re-validate every script it governs"
   fi
 }
 
@@ -1332,6 +1357,13 @@ while IFS= read -r path; do
     .lighthouserc.cjs)
       add_surface "ui-dashboard"
       add_checklist "docs/pr-checklists/code-health.md" "Lighthouse CI budget config changed"
+      ;;
+    .shellcheckrc)
+      # The repo-wide `./tools/trunk check --all --filter=shellcheck` command
+      # itself is added by add_trunk_check_command (see
+      # trunk_requires_shellcheck_full_scan) since it depends on the full
+      # changed-paths set, not just this one path.
+      add_surface "tooling"
       ;;
     docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md)
       add_surface "docs"

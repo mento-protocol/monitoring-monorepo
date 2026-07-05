@@ -26,6 +26,7 @@ ROOT_DIR="$(cd "${MODULE_DIR}/.." && pwd)"
 
 # Source common utilities
 # shellcheck source=../../scripts/common.sh
+# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 source "${ROOT_DIR}/scripts/common.sh"
 
 # Check for required tools

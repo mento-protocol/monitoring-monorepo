@@ -45,6 +45,7 @@ if [[ ! -f "${ROOT_DIR}/scripts/common.sh" ]]; then
 fi
 
 # shellcheck source=../../scripts/common.sh
+# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 source "${ROOT_DIR}/scripts/common.sh"
 
 # Check requirements
