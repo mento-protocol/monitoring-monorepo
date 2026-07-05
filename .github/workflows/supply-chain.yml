@@ -28,6 +28,12 @@ name: Supply Chain
 #    updates a labeled GitHub issue for sub-high advisories, so stale
 #    resolution-time override floors stay visible without blocking merges.
 #
+# The weekly report job doubles as the repo's scheduled-report slot: it also
+# runs `pnpm agent:context-check` so the canonical-context last_verified
+# staleness policy — which expires with time, not with a diff — is evaluated
+# on a calendar cadence instead of only when a PR happens to touch context
+# files.
+#
 # What this does NOT cover: sigstore attestations / SLSA provenance. pnpm 10
 # has no `audit signatures` equivalent, and `npm audit signatures` requires a
 # package-lock.json (we use pnpm-lock.yaml). If we ever want that layer,
@@ -186,6 +192,15 @@ jobs:
           node-version-file: .node-version
           # No pnpm install — same as the blocking audit job. Audit queries the
           # hosted advisory DB directly from the committed lockfile.
+      - name: Agent context staleness check
+        # last_verified expires with time, not with a diff: a canonical doc
+        # can pass its 90-day window without any PR touching context files,
+        # so the path-filtered ci.yml scripts job alone can never catch
+        # calendar expiry. This weekly run is the time-based backstop.
+        # Zero-dependency Node script (no pnpm install needed); a failure
+        # fails the job and surfaces via notify-slack-on-main-failure.yml
+        # like the other scheduled supply-chain gates.
+        run: pnpm agent:context-check
       - name: pnpm audit (moderate+, report only)
         # Exit 1 means advisories found, which is the expected report case.
         # The script step below fails if pnpm returns a registry error payload.
