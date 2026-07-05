@@ -118,13 +118,36 @@ async function postToSlack({ slackToken, channel, message, fetchImpl }) {
   }
 }
 
+function doneObjectName(objectName) {
+  return `${DEAD_LETTER_DONE_PREFIX}${objectName.slice(DEAD_LETTER_PREFIX.length)}`;
+}
+
+/**
+ * Cheap existence check (metadata GET, no "alt=media" body fetch) for a
+ * "dead-letter/done/<name>" object. Used to make redrive idempotent across a
+ * partial archive failure from a prior run: if the done copy already
+ * exists, the source event was already reposted to Slack, so a rerun must
+ * not post it again.
+ */
+async function doneObjectExists({ bucket, doneName, accessToken, fetchImpl }) {
+  const url = new URL(
+    `${STORAGE_API_BASE}/${encodeURIComponent(bucket)}/o/${encodeURIComponent(doneName)}`,
+  );
+  const response = await fetchImpl(url, { headers: authHeaders(accessToken) });
+  if (response.status === 404) {
+    return false;
+  }
+  await parseJsonResponse(response, url);
+  return true;
+}
+
 async function archiveDeadLetterObject({
   bucket,
   objectName,
   accessToken,
   fetchImpl,
 }) {
-  const doneName = `${DEAD_LETTER_DONE_PREFIX}${objectName.slice(DEAD_LETTER_PREFIX.length)}`;
+  const doneName = doneObjectName(objectName);
   const copyUrl = new URL(
     `${STORAGE_API_BASE}/${encodeURIComponent(bucket)}/o/${encodeURIComponent(
       objectName,
@@ -154,6 +177,12 @@ async function archiveDeadLetterObject({
  * Reposts one dead-lettered event to Slack, then archives it. Archiving only
  * happens after a successful repost — a Slack failure here must leave the
  * object in place so the next redrive attempt can retry it.
+ *
+ * Idempotent against a partial archive from a prior run (copy to
+ * "dead-letter/done/" succeeded but the delete of the original failed): if
+ * the done copy already exists, the repost is skipped and only the archive
+ * steps (copy + delete) are retried, so a rerun after that kind of partial
+ * failure can't post the same alert to Slack a second time.
  */
 async function redriveDeadLetterObject({
   bucket,
@@ -162,18 +191,28 @@ async function redriveDeadLetterObject({
   accessToken,
   fetchImpl,
 }) {
-  const payload = await getObjectJson({
+  const alreadyPosted = await doneObjectExists({
     bucket,
-    objectName,
+    doneName: doneObjectName(objectName),
     accessToken,
     fetchImpl,
   });
-  await postToSlack({
-    slackToken,
-    channel: payload.channelId,
-    message: payload.slackMessage,
-    fetchImpl,
-  });
+
+  if (!alreadyPosted) {
+    const payload = await getObjectJson({
+      bucket,
+      objectName,
+      accessToken,
+      fetchImpl,
+    });
+    await postToSlack({
+      slackToken,
+      channel: payload.channelId,
+      message: payload.slackMessage,
+      fetchImpl,
+    });
+  }
+
   await archiveDeadLetterObject({ bucket, objectName, accessToken, fetchImpl });
 }
 

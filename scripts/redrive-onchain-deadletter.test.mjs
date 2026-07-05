@@ -67,6 +67,12 @@ function createFakeTransport(objects) {
       if (!objects.has(name)) return new Response("not found", { status: 404 });
       return jsonResponse(objects.get(name));
     }
+    if (objectMatch && method === "GET") {
+      // Metadata-only GET (the "done/" marker existence check).
+      const name = decodeURIComponent(objectMatch[1]);
+      if (!objects.has(name)) return new Response("not found", { status: 404 });
+      return jsonResponse({ name });
+    }
     if (objectMatch && method === "DELETE") {
       const name = decodeURIComponent(objectMatch[1]);
       objects.delete(name);
@@ -164,6 +170,92 @@ function createFakeTransport(objects) {
 
   assert.equal(objects.has("dead-letter/0xtx2-0-456.json"), true);
   assert.equal(objects.has("dead-letter/done/0xtx2-0-456.json"), false);
+}
+
+// redriveDeadLetterObject: a done marker already present (copy succeeded,
+// delete failed on a prior run) must skip the repost and only retry the
+// archive steps.
+{
+  const objects = new Map([
+    [
+      "dead-letter/0xtx5-0-1.json",
+      { channelId: "Calerts", slackMessage: { text: "hi", blocks: [] } },
+    ],
+    [
+      "dead-letter/done/0xtx5-0-1.json",
+      { channelId: "Calerts", slackMessage: { text: "hi", blocks: [] } },
+    ],
+  ]);
+  const { fetchImpl, slackCalls } = createFakeTransport(objects);
+
+  await redriveDeadLetterObject({
+    bucket: BUCKET,
+    objectName: "dead-letter/0xtx5-0-1.json",
+    slackToken: "xoxb-test",
+    accessToken: "token",
+    fetchImpl,
+  });
+
+  assert.deepEqual(slackCalls, []);
+  assert.equal(objects.has("dead-letter/0xtx5-0-1.json"), false);
+  assert.equal(objects.has("dead-letter/done/0xtx5-0-1.json"), true);
+}
+
+// redriveDeadLetterObject: reruns after a delete failure never repost to
+// Slack a second time — the done marker from the first attempt's successful
+// copy short-circuits every retry until the delete finally succeeds.
+{
+  const objects = new Map([
+    [
+      "dead-letter/0xtx6-0-1.json",
+      { channelId: "Calerts", slackMessage: { text: "hi", blocks: [] } },
+    ],
+  ]);
+  const { fetchImpl: baseFetch, slackCalls } = createFakeTransport(objects);
+  let deleteAttempts = 0;
+  const flakyDeleteFetch = async (url, init = {}) => {
+    const parsed = new URL(url);
+    if (
+      parsed.hostname !== "slack.com" &&
+      (init.method ?? "GET") === "DELETE"
+    ) {
+      deleteAttempts += 1;
+      return new Response("boom", { status: 500 });
+    }
+    return baseFetch(url, init);
+  };
+  const redrive = () =>
+    redriveDeadLetterObject({
+      bucket: BUCKET,
+      objectName: "dead-letter/0xtx6-0-1.json",
+      slackToken: "xoxb-test",
+      accessToken: "token",
+      fetchImpl: flakyDeleteFetch,
+    });
+
+  // First run: copy succeeds, delete fails -> archive rejects, but Slack was
+  // reposted once.
+  await assert.rejects(redrive(), /HTTP 500/);
+  assert.equal(slackCalls.length, 1);
+  assert.equal(objects.has("dead-letter/0xtx6-0-1.json"), true);
+  assert.equal(objects.has("dead-letter/done/0xtx6-0-1.json"), true);
+
+  // Second run: done marker exists -> repost is skipped; delete still fails.
+  await assert.rejects(redrive(), /HTTP 500/);
+  assert.equal(slackCalls.length, 1);
+  assert.equal(deleteAttempts, 2);
+
+  // Third run: delete finally succeeds -> archive completes, still no
+  // duplicate repost.
+  await redriveDeadLetterObject({
+    bucket: BUCKET,
+    objectName: "dead-letter/0xtx6-0-1.json",
+    slackToken: "xoxb-test",
+    accessToken: "token",
+    fetchImpl: baseFetch,
+  });
+  assert.equal(slackCalls.length, 1);
+  assert.equal(objects.has("dead-letter/0xtx6-0-1.json"), false);
 }
 
 // main(): end-to-end sweep across a mix of a redrivable and a failing object,

@@ -660,7 +660,12 @@ describe("processEvents - ChainDetectionError handling", () => {
     );
   });
 
-  it("does not dead-letter when the failure is our own budget abort, not a Slack failure", async () => {
+  it("dead-letters the rendered Slack payload even when the failure is our own budget abort", async () => {
+    // The QuickNode nonce is already reserved by the time processEvents runs
+    // (see index.ts), so there is no redelivery to fall back on if a Slack
+    // send that was cut short by our own processing-budget abort is dropped
+    // instead of dead-lettered — see the invariant note on
+    // deadLetterIfSlackDeliveryFailed.
     vi.useFakeTimers();
     try {
       const { processEvents } = await import("./process-events");
@@ -700,7 +705,20 @@ describe("processEvents - ChainDetectionError handling", () => {
         processedEvents: [],
         skipped: 1,
       });
-      expect(writeDeadLetterMock).not.toHaveBeenCalled();
+      expect(writeDeadLetterMock).toHaveBeenCalledTimes(1);
+      expect(writeDeadLetterMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          multisigKey: "SOLO_CELO",
+          channelId: "Calerts",
+          chain: "celo",
+          failureReason: "aborted",
+          logEntry: expect.objectContaining({
+            transactionHash: "0xtx-aborted",
+            name: "AddedOwner",
+          }),
+        }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     } finally {
       vi.useRealTimers();
     }

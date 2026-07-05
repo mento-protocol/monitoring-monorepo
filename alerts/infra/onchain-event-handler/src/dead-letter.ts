@@ -10,12 +10,12 @@
  */
 
 import { logger } from "./logger";
-import { getMetadataAccessToken } from "./quicknode-replay-protection";
+import {
+  getMetadataAccessToken,
+  STORAGE_UPLOAD_BASE_URL,
+} from "./quicknode-replay-protection";
 import type { SlackMessage } from "./slack";
 import type { QuickNodeDecodedLog } from "./types";
-
-const STORAGE_UPLOAD_BASE_URL =
-  "https://storage.googleapis.com/upload/storage/v1/b";
 
 const DEAD_LETTER_PREFIX = "dead-letter/";
 

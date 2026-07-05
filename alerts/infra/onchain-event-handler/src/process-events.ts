@@ -182,10 +182,7 @@ export async function processEvents(
               logEntry,
               fallbackAbortController.signal.aborted,
             );
-            await deadLetterIfSlackDeliveryFailed(
-              error,
-              fallbackAbortController.signal.aborted,
-            );
+            await deadLetterIfSlackDeliveryFailed(error);
             skipped += 1;
           } finally {
             clearTimeout(fallbackAbortTimer);
@@ -221,10 +218,7 @@ export async function processEvents(
         }
       } catch (error) {
         logProcessingError(error, logEntry, abortController.signal.aborted);
-        await deadLetterIfSlackDeliveryFailed(
-          error,
-          abortController.signal.aborted,
-        );
+        await deadLetterIfSlackDeliveryFailed(error);
         if (abortController.signal.aborted) {
           skipped += 1;
           const nextLog = logsToProcess[index + 1];
@@ -301,16 +295,18 @@ function logProcessingError(
 }
 
 /**
- * Dead-letters the rendered Slack payload when the per-event failure is a
- * genuine Slack delivery failure (retries exhausted) — never for our own
- * budget-driven aborts, since those don't reach exhaustion and there is
- * nothing "final" about them.
+ * Dead-letters the rendered Slack payload whenever `sendToSlack` threw —
+ * including when our own processing-budget abort cut a send short mid-flight,
+ * not just when Slack's own retries were exhausted. The QuickNode nonce is
+ * already reserved by the time this runs (see index.ts), so there is no
+ * "next attempt" from QuickNode to fall back on: skipping the write on the
+ * abort path would silently drop an already-rendered alert with no trace,
+ * which is exactly the failure mode this dead-letter path exists to avoid.
+ * The write below is bounded by its own independent timeout, so it can't be
+ * blocked by whatever caused the outer abort.
  */
-async function deadLetterIfSlackDeliveryFailed(
-  error: unknown,
-  aborted: boolean,
-): Promise<void> {
-  if (!(error instanceof SlackDeliveryFailedError) || aborted) {
+async function deadLetterIfSlackDeliveryFailed(error: unknown): Promise<void> {
+  if (!(error instanceof SlackDeliveryFailedError)) {
     return;
   }
   const writeAbortController = new AbortController();

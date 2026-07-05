@@ -3,7 +3,9 @@ import { logger } from "./logger";
 
 const METADATA_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
-const STORAGE_UPLOAD_BASE_URL =
+// Exported so dead-letter.ts can reuse it instead of duplicating the string —
+// both modules upload to the same GCS bucket via this endpoint.
+export const STORAGE_UPLOAD_BASE_URL =
   "https://storage.googleapis.com/upload/storage/v1/b";
 const METADATA_TOKEN_REFRESH_SKEW_MS = 60_000;
 
