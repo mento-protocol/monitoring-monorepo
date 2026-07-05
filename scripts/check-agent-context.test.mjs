@@ -12,6 +12,7 @@
  */
 
 import {
+  assessStaleness,
   daysSince,
   FUTURE_SKEW_TOLERANCE_DAYS,
   parseFrontmatter,
@@ -169,6 +170,45 @@ test("a last_verified past the window is flagged stale", () => {
   assert(
     age > STALE_AFTER_DAYS,
     `expected last_verified ${isoDate} to exceed the ${STALE_AFTER_DAYS}-day window, got age ${age}`,
+  );
+});
+
+// ── assessStaleness (requireMetadata's enforcement branch) ────────────────────
+//
+// check-agent-context.mjs's requireMetadata calls assessStaleness(age) with
+// no options, so it always enforces the real STALE_AFTER_DAYS /
+// FUTURE_SKEW_TOLERANCE_DAYS window. These tests exercise assessStaleness at
+// exactly the same boundaries requireMetadata does, so a `<` → `<=` flip (or
+// a dropped negation) on either comparison fails a test here.
+
+console.log("\nassessStaleness");
+
+test("a last_verified within the stale window passes (age === STALE_AFTER_DAYS)", () => {
+  const status = assessStaleness(STALE_AFTER_DAYS);
+  assert(status === "ok", `expected 'ok' at the boundary, got ${status}`);
+});
+
+test("a last_verified beyond the stale window fails (age === STALE_AFTER_DAYS + 1)", () => {
+  const status = assessStaleness(STALE_AFTER_DAYS + 1);
+  assert(
+    status === "stale",
+    `expected 'stale' one day past the window, got ${status}`,
+  );
+});
+
+test("a last_verified within the future-skew tolerance passes (age === -FUTURE_SKEW_TOLERANCE_DAYS)", () => {
+  const status = assessStaleness(-FUTURE_SKEW_TOLERANCE_DAYS);
+  assert(
+    status === "ok",
+    `expected 'ok' at the future-tolerance boundary, got ${status}`,
+  );
+});
+
+test("a last_verified beyond the future-skew tolerance fails (age === -FUTURE_SKEW_TOLERANCE_DAYS - 1)", () => {
+  const status = assessStaleness(-FUTURE_SKEW_TOLERANCE_DAYS - 1);
+  assert(
+    status === "future",
+    `expected 'future' beyond the tolerance, got ${status}`,
   );
 });
 

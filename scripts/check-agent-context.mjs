@@ -5,8 +5,8 @@ import path from "node:path";
 import process from "node:process";
 
 import {
+  assessStaleness,
   daysSince,
-  FUTURE_SKEW_TOLERANCE_DAYS,
   parseFrontmatter,
   STALE_AFTER_DAYS,
 } from "./check-agent-context-helpers.mjs";
@@ -129,12 +129,17 @@ function requireMetadata(filePath) {
       fail(
         `${filePath}: last_verified '${data.last_verified}' is not a valid YYYY-MM-DD date`,
       );
-    } else if (age < -FUTURE_SKEW_TOLERANCE_DAYS) {
-      fail(`${filePath}: last_verified ${data.last_verified} is in the future`);
-    } else if (age > STALE_AFTER_DAYS) {
-      fail(
-        `${filePath}: last_verified ${data.last_verified} is ${age} days old, exceeds the ${STALE_AFTER_DAYS}-day policy window`,
-      );
+    } else {
+      const staleness = assessStaleness(age);
+      if (staleness === "future") {
+        fail(
+          `${filePath}: last_verified ${data.last_verified} is in the future`,
+        );
+      } else if (staleness === "stale") {
+        fail(
+          `${filePath}: last_verified ${data.last_verified} is ${age} days old, exceeds the ${STALE_AFTER_DAYS}-day policy window`,
+        );
+      }
     }
   }
 }

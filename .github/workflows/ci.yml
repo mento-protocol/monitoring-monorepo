@@ -234,6 +234,18 @@ jobs:
               # if only the new workflow file is touched (no script change).
               - .github/workflows/**
               - .github/actions/pnpm-install/**
+              # Managed context files that scripts/check-agent-context.mjs
+              # enforces (frontmatter + last_verified staleness policy). A
+              # PR that only touches one of these otherwise has no CI job
+              # that runs the checker, so a stale/missing last_verified could
+              # merge silently. Mirrors managedContextFiles in that script.
+              - SPEC.md
+              - AGENTS.md
+              - "*/AGENTS.md"
+              - docs/context-standards.md
+              - docs/pr-checklists/recurring-review-patterns.md
+              - .agents/skills/*/SKILL.md
+              - .agents/roles/*.md
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
@@ -865,6 +877,11 @@ jobs:
         # Behavioral coverage of scripts/check-agent-context.mjs's pure
         # helpers: frontmatter parsing and the last_verified staleness window.
         run: node scripts/check-agent-context.test.mjs
+      - name: Agent context checker
+        # Runs the actual check-agent-context.mjs enforcement pass (managed
+        # frontmatter + last_verified staleness policy) — the unit tests
+        # above only cover the pure helpers in isolation.
+        run: pnpm agent:context-check
       - name: PR description validator suite
         run: node scripts/check-pr-description.test.mjs
       - name: Deploy root-anchor regression suite

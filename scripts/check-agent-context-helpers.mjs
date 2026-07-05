@@ -24,6 +24,27 @@ export const STALE_AFTER_DAYS = 90;
 export const FUTURE_SKEW_TOLERANCE_DAYS = 1;
 
 /**
+ * Classify a `last_verified` age (in days, as returned by `daysSince`)
+ * against the staleness policy window. This is the pure decision logic
+ * behind check-agent-context.mjs's `requireMetadata` future/stale checks,
+ * extracted so the comparisons themselves get direct regression coverage.
+ * @param {number} age
+ * @param {{staleAfterDays?: number, toleranceDays?: number}} [options]
+ * @returns {"ok" | "stale" | "future"}
+ */
+export function assessStaleness(
+  age,
+  {
+    staleAfterDays = STALE_AFTER_DAYS,
+    toleranceDays = FUTURE_SKEW_TOLERANCE_DAYS,
+  } = {},
+) {
+  if (age < -toleranceDays) return "future";
+  if (age > staleAfterDays) return "stale";
+  return "ok";
+}
+
+/**
  * Parse the YAML-ish frontmatter block (`---\nkey: value\n---`) from a
  * file's content. Returns null when the content has no frontmatter block.
  * @param {string} content

@@ -2218,7 +2218,7 @@ assert_contains "- pnpm agent:context-check (agent context standards changed)"
 
 run_gate "SPEC.md"
 assert_contains "- docs"
-assert_contains "- pnpm agent:context-check (agent context standards changed)"
+assert_contains "- pnpm agent:context-check (technical specification changed)"
 
 run_gate ".codex/hooks.json"
 assert_contains "- agent-context"
