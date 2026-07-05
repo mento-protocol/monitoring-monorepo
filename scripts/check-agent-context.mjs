@@ -4,6 +4,15 @@ import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  assessStaleness,
+  daysSince,
+  discoverCanonicalFiles,
+  missingCoreContextFiles,
+  parseFrontmatter,
+  STALE_AFTER_DAYS,
+} from "./check-agent-context-helpers.mjs";
+
 const repoRoot = process.cwd();
 const failures = [];
 const requiredMetadataKeys = ["title", "status", "owner", "canonical"];
@@ -99,22 +108,8 @@ function trackedFiles(dir, predicate = () => true, { required = false } = {}) {
   return files;
 }
 
-function parseFrontmatter(filePath) {
-  const content = read(filePath);
-  if (!content.startsWith("---\n")) return null;
-  const end = content.indexOf("\n---\n", 4);
-  if (end === -1) return null;
-  const raw = content.slice(4, end);
-  const data = {};
-  for (const line of raw.split("\n")) {
-    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (match) data[match[1]] = match[2].trim().replace(/^["']|["']$/g, "");
-  }
-  return data;
-}
-
 function requireMetadata(filePath) {
-  const data = parseFrontmatter(filePath);
+  const data = parseFrontmatter(read(filePath));
   if (!data) {
     fail(`${filePath}: missing YAML frontmatter`);
     return;
@@ -130,12 +125,32 @@ function requireMetadata(filePath) {
   }
   if (data.canonical === "true" && !data.last_verified) {
     fail(`${filePath}: canonical files require last_verified`);
+  } else if (data.canonical === "true" && data.last_verified) {
+    const age = daysSince(data.last_verified);
+    if (age === null) {
+      fail(
+        `${filePath}: last_verified '${data.last_verified}' is not a valid YYYY-MM-DD date`,
+      );
+    } else {
+      const staleness = assessStaleness(age);
+      if (staleness === "future") {
+        fail(
+          `${filePath}: last_verified ${data.last_verified} is in the future`,
+        );
+      } else if (staleness === "stale") {
+        fail(
+          `${filePath}: last_verified ${data.last_verified} is ${age} days old, exceeds the ${STALE_AFTER_DAYS}-day policy window`,
+        );
+      }
+    }
   }
 }
 
 const scopedAgentDirs = [
   "aegis",
+  "alerts",
   "indexer-envio",
+  "integration-probes",
   "metrics-bridge",
   "shared-config",
   "terraform",
@@ -156,27 +171,51 @@ const claudeSkillFiles = trackedFiles(
   },
 );
 
-const managedContextFiles = [
+// The enforced set is discovered, not hardcoded: every tracked markdown file
+// in the discovery roots (see isCanonicalDiscoveryPath) whose frontmatter
+// declares `canonical: true` gets full metadata + staleness enforcement, so
+// new canonical files are picked up automatically.
+const managedContextFiles = discoverCanonicalFiles(trackedFiles("."), (file) =>
+  exists(file) ? read(file) : "",
+);
+
+// Minimum-presence assertion: these core files must always be discovered.
+// Without this, stripping a core file's frontmatter (or its `canonical:
+// true` flag) would silently drop it out of the discovered set instead of
+// failing the check.
+const coreContextFiles = [
   "AGENTS.md",
+  "SPEC.md",
   ...scopedAgentDirs.map((dir) => `${dir}/AGENTS.md`),
   "docs/context-standards.md",
   "docs/pr-checklists/recurring-review-patterns.md",
-  "docs/notes/agent-quality-gate-mechanics.md",
-  "docs/notes/spoken-attention-nudge.md",
+  // docs/notes/* canonical notes (agent-quality-gate-mechanics,
+  // spoken-attention-nudge) are deliberately NOT pinned here: they are
+  // procedural notes managed via frontmatter discovery, and removing their
+  // frontmatter is the legitimate demote-from-canonical operation.
   ...canonicalSkillFiles.filter((file) => file.endsWith("/SKILL.md")),
   ...trackedFiles(".agents/roles", (file) => file.endsWith(".md"), {
     required: true,
   }),
 ];
 
-for (const file of managedContextFiles) {
+for (const file of missingCoreContextFiles(
+  coreContextFiles,
+  managedContextFiles,
+)) {
   if (!exists(file)) {
     fail(`${file}: required managed context file is missing`);
   } else {
-    requireMetadata(file);
-    if (read(file).includes("/Users/")) {
-      fail(`${file}: managed context must not include /Users paths`);
-    }
+    fail(
+      `${file}: core context file must keep canonical: true frontmatter (discovery no longer finds it)`,
+    );
+  }
+}
+
+for (const file of managedContextFiles) {
+  requireMetadata(file);
+  if (read(file).includes("/Users/")) {
+    fail(`${file}: managed context must not include /Users paths`);
   }
 }
 

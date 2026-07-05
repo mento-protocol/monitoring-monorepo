@@ -1,3 +1,11 @@
+---
+title: Mento v3 Monitoring Technical Specification
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-03
+---
+
 # Mento v3 Monitoring — Technical Specification
 
 Last updated: 2026-07-03
