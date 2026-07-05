@@ -1,3 +1,11 @@
+---
+title: Agent Quality Gate — Mechanics
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-05
+---
+
 # Agent Quality Gate — Mechanics
 
 The invocation contract (which commands to run, in what order, before opening
