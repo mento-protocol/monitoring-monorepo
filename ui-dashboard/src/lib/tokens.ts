@@ -355,7 +355,7 @@ function poolTvlViaOracleRates(
  *     }
  *
  * Caller pattern for sorts (untrusted to bottom of descending order):
- *     pools.toSorted((a, b) =>
+ *     sortedCopy(pools, (a, b) =>
  *       (poolTvlUSD(b) ?? Number.NEGATIVE_INFINITY) -
  *       (poolTvlUSD(a) ?? Number.NEGATIVE_INFINITY))
  */

@@ -1,4 +1,5 @@
 import type { AddressEntryRecord } from "@/lib/address-labels";
+import { sortedCopy } from "@/lib/immutable-sort";
 
 export const SUGGESTED_TAGS = [
   // Behavioral
@@ -39,8 +40,5 @@ export function getUsedTags(entries: AddressEntryRecord[]): string[] {
       set.add(tag);
     }
   }
-  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-  return [...Array.from(set)].sort((a, b) => a.localeCompare(b));
+  return sortedCopy(Array.from(set), (a, b) => a.localeCompare(b));
 }
