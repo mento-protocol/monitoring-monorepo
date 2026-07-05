@@ -4,8 +4,9 @@
  *
  * The script itself scans live repo state (git ls-files, real settings/hook
  * files) and exits the process on failure, so it isn't a good target for a
- * synthetic-fixture end-to-end harness. Instead this tests the pure parsing
- * and staleness helpers from check-agent-context-helpers.mjs directly.
+ * synthetic-fixture end-to-end harness. Instead this tests the pure parsing,
+ * staleness, and canonical-discovery helpers from
+ * check-agent-context-helpers.mjs directly.
  *
  * Run: node scripts/check-agent-context.test.mjs
  * CI:  .github/workflows/ci.yml  (scripts job)
@@ -14,7 +15,9 @@
 import {
   assessStaleness,
   daysSince,
+  discoverCanonicalFiles,
   FUTURE_SKEW_TOLERANCE_DAYS,
+  missingCoreContextFiles,
   parseFrontmatter,
   STALE_AFTER_DAYS,
 } from "./check-agent-context-helpers.mjs";
@@ -209,6 +212,90 @@ test("a last_verified beyond the future-skew tolerance fails (age === -FUTURE_SK
   assert(
     status === "future",
     `expected 'future' beyond the tolerance, got ${status}`,
+  );
+});
+
+// ── canonical-context discovery ───────────────────────────────────────────────
+//
+// check-agent-context.mjs derives the enforced set by discovery: tracked
+// markdown in the discovery roots with `canonical: true` frontmatter. These
+// tests drive discoverCanonicalFiles with a synthetic file map (same reader
+// contract the script uses), so a new canonical file can't escape the policy
+// and a stripped-frontmatter core file can't silently drop out.
+
+console.log("\ncanonical-context discovery");
+
+const canonicalContent =
+  "---\ntitle: T\nstatus: active\nowner: eng\ncanonical: true\nlast_verified: 2026-07-03\n---\n\n# T\n";
+
+function discoverIn(files) {
+  return discoverCanonicalFiles(Object.keys(files), (file) => files[file]);
+}
+
+test("discovers a canonical file in a nested docs path", () => {
+  const discovered = discoverIn({
+    "docs/notes/deep/topology.md": canonicalContent,
+  });
+  assert(
+    discovered.includes("docs/notes/deep/topology.md"),
+    `expected nested docs file to be discovered, got ${JSON.stringify(discovered)}`,
+  );
+});
+
+test("discovers AGENTS.md in any package directory", () => {
+  const discovered = discoverIn({
+    "alerts/AGENTS.md": canonicalContent,
+    "integration-probes/AGENTS.md": canonicalContent,
+  });
+  assert(
+    discovered.length === 2,
+    `expected both package AGENTS.md files, got ${JSON.stringify(discovered)}`,
+  );
+});
+
+test("does not enforce non-canonical files", () => {
+  const discovered = discoverIn({
+    "docs/guide.md":
+      "---\ntitle: G\nstatus: active\nowner: eng\ncanonical: false\n---\n",
+    "docs/plain.md": "# no frontmatter\n",
+  });
+  assert(
+    discovered.length === 0,
+    `expected non-canonical files to be skipped, got ${JSON.stringify(discovered)}`,
+  );
+});
+
+test("ignores canonical frontmatter outside the discovery roots", () => {
+  const discovered = discoverIn({
+    "ui-dashboard/README.md": canonicalContent,
+  });
+  assert(
+    discovered.length === 0,
+    `expected files outside the discovery roots to be skipped, got ${JSON.stringify(discovered)}`,
+  );
+});
+
+test("minimum-presence fires when a core file loses its frontmatter", () => {
+  const discovered = discoverIn({
+    "AGENTS.md": "# frontmatter stripped\n",
+    "SPEC.md": canonicalContent,
+  });
+  const missing = missingCoreContextFiles(["AGENTS.md", "SPEC.md"], discovered);
+  assert(
+    missing.length === 1 && missing[0] === "AGENTS.md",
+    `expected AGENTS.md to be reported missing, got ${JSON.stringify(missing)}`,
+  );
+});
+
+test("minimum-presence passes when every core file is discovered", () => {
+  const discovered = discoverIn({
+    "AGENTS.md": canonicalContent,
+    "SPEC.md": canonicalContent,
+  });
+  const missing = missingCoreContextFiles(["AGENTS.md", "SPEC.md"], discovered);
+  assert(
+    missing.length === 0,
+    `expected no missing core files, got ${JSON.stringify(missing)}`,
   );
 });
 

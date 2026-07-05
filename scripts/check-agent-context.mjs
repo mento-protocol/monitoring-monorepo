@@ -7,6 +7,8 @@ import process from "node:process";
 import {
   assessStaleness,
   daysSince,
+  discoverCanonicalFiles,
+  missingCoreContextFiles,
   parseFrontmatter,
   STALE_AFTER_DAYS,
 } from "./check-agent-context-helpers.mjs";
@@ -146,7 +148,9 @@ function requireMetadata(filePath) {
 
 const scopedAgentDirs = [
   "aegis",
+  "alerts",
   "indexer-envio",
+  "integration-probes",
   "metrics-bridge",
   "shared-config",
   "terraform",
@@ -167,7 +171,19 @@ const claudeSkillFiles = trackedFiles(
   },
 );
 
-const managedContextFiles = [
+// The enforced set is discovered, not hardcoded: every tracked markdown file
+// in the discovery roots (see isCanonicalDiscoveryPath) whose frontmatter
+// declares `canonical: true` gets full metadata + staleness enforcement, so
+// new canonical files are picked up automatically.
+const managedContextFiles = discoverCanonicalFiles(trackedFiles("."), (file) =>
+  exists(file) ? read(file) : "",
+);
+
+// Minimum-presence assertion: these core files must always be discovered.
+// Without this, stripping a core file's frontmatter (or its `canonical:
+// true` flag) would silently drop it out of the discovered set instead of
+// failing the check.
+const coreContextFiles = [
   "AGENTS.md",
   "SPEC.md",
   ...scopedAgentDirs.map((dir) => `${dir}/AGENTS.md`),
@@ -179,14 +195,23 @@ const managedContextFiles = [
   }),
 ];
 
-for (const file of managedContextFiles) {
+for (const file of missingCoreContextFiles(
+  coreContextFiles,
+  managedContextFiles,
+)) {
   if (!exists(file)) {
     fail(`${file}: required managed context file is missing`);
   } else {
-    requireMetadata(file);
-    if (read(file).includes("/Users/")) {
-      fail(`${file}: managed context must not include /Users paths`);
-    }
+    fail(
+      `${file}: core context file must keep canonical: true frontmatter (discovery no longer finds it)`,
+    );
+  }
+}
+
+for (const file of managedContextFiles) {
+  requireMetadata(file);
+  if (read(file).includes("/Users/")) {
+    fail(`${file}: managed context must not include /Users paths`);
   }
 }
 

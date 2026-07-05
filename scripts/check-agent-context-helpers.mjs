@@ -64,6 +64,57 @@ export function parseFrontmatter(content) {
 }
 
 /**
+ * Whether a tracked file path is eligible for canonical-context discovery.
+ * Discovery roots: AGENTS.md and SPEC.md at the repo root, AGENTS.md in any
+ * directory, docs markdown at any depth, and .agents markdown (skills,
+ * roles). Mirrors under .claude/skills are excluded on purpose: the checker
+ * enforces byte-parity between each mirror and its canonical .agents source,
+ * so their metadata is already enforced transitively.
+ * @param {string} filePath
+ * @returns {boolean}
+ */
+export function isCanonicalDiscoveryPath(filePath) {
+  return (
+    filePath === "AGENTS.md" ||
+    filePath === "SPEC.md" ||
+    filePath.endsWith("/AGENTS.md") ||
+    (filePath.startsWith("docs/") && filePath.endsWith(".md")) ||
+    (filePath.startsWith(".agents/") && filePath.endsWith(".md"))
+  );
+}
+
+/**
+ * Discover the canonical (frontmatter-managed) context files: every path in
+ * `filePaths` that sits in a discovery root and whose frontmatter declares
+ * `canonical: true`. This derives the enforced set from the repo itself so
+ * new canonical files can't silently escape the staleness policy.
+ * @param {string[]} filePaths
+ * @param {(filePath: string) => string} readFile
+ * @returns {string[]}
+ */
+export function discoverCanonicalFiles(filePaths, readFile) {
+  return filePaths.filter((filePath) => {
+    if (!isCanonicalDiscoveryPath(filePath)) return false;
+    const data = parseFrontmatter(readFile(filePath));
+    return data?.canonical === "true";
+  });
+}
+
+/**
+ * Core context files that discovery failed to find. Discovery derives the
+ * enforced set from `canonical: true` frontmatter, so stripping a file's
+ * frontmatter would otherwise silently unmanage it — the caller fails the
+ * check for every file returned here.
+ * @param {string[]} coreFiles
+ * @param {string[]} discoveredFiles
+ * @returns {string[]}
+ */
+export function missingCoreContextFiles(coreFiles, discoveredFiles) {
+  const discovered = new Set(discoveredFiles);
+  return coreFiles.filter((file) => !discovered.has(file));
+}
+
+/**
  * Days elapsed between a `YYYY-MM-DD` date string and `now`. Returns null
  * when `dateString` isn't a strict `YYYY-MM-DD` date — including calendar
  * dates that don't exist (e.g. `2026-02-31`), which `Date.UTC` would

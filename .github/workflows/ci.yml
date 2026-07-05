@@ -234,18 +234,25 @@ jobs:
               # if only the new workflow file is touched (no script change).
               - .github/workflows/**
               - .github/actions/pnpm-install/**
-              # Managed context files that scripts/check-agent-context.mjs
-              # enforces (frontmatter + last_verified staleness policy). A
-              # PR that only touches one of these otherwise has no CI job
-              # that runs the checker, so a stale/missing last_verified could
-              # merge silently. Mirrors managedContextFiles in that script.
+              # check-agent-context inputs. The checker discovers canonical
+              # (frontmatter-managed) markdown across these roots — SPEC.md,
+              # AGENTS.md at any depth, docs/**, .agents/** — and separately
+              # validates SessionEnd hooks (.codex/hooks.json,
+              # .claude/settings.json) and .claude/skills mirror parity. A PR
+              # touching only one of these files must still run the checker
+              # in CI. docs/**/*.md is deliberately broad: discovery means
+              # any docs markdown can opt into canonical enforcement, and
+              # the scripts job is cheap. The checker's remaining inputs
+              # (scripts/*.sh guards, workflow revision-suffix guard) are
+              # already covered by the script/workflow globs above.
               - SPEC.md
               - AGENTS.md
-              - "*/AGENTS.md"
-              - docs/context-standards.md
-              - docs/pr-checklists/recurring-review-patterns.md
-              - .agents/skills/*/SKILL.md
-              - .agents/roles/*.md
+              - "**/AGENTS.md"
+              - "docs/**/*.md"
+              - ".agents/**"
+              - ".claude/skills/**"
+              - .claude/settings.json
+              - .codex/hooks.json
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
