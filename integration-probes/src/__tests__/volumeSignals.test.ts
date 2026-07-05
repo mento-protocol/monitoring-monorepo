@@ -9,7 +9,6 @@ describe("volumeSignalsForAdapters", () => {
       adapters: [
         adapter("openocean"),
         adapter("kyberswap"),
-        adapter("okx"),
         adapter("lifi"),
         adapter("socket"),
         adapter("rubic"),
@@ -34,7 +33,6 @@ describe("volumeSignalsForAdapters", () => {
             protocols: [
               { name: "OpenOcean", total30d: 327_881_227 },
               { name: "KyberSwap", total30d: 6_970_000_000 },
-              { name: "OKX DEX", total30d: 5_275_000_000 },
             ],
           }),
         );
@@ -52,10 +50,6 @@ describe("volumeSignalsForAdapters", () => {
     expect(signals.get("kyberswap")).toMatchObject({
       valueUsd: 6_970_000_000,
       sourceProtocol: "KyberSwap",
-    });
-    expect(signals.get("okx")).toMatchObject({
-      valueUsd: 5_275_000_000,
-      sourceProtocol: "OKX DEX",
     });
     expect(signals.get("lifi")).toMatchObject({
       window: "30d",

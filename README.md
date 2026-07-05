@@ -247,10 +247,6 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `SQUID_INTEGRATOR_ID`           | Squid integrator id; probes return `needs_key` without it                                   |
 | `SQUID_CELO_RPC_URL`            | Optional Celo RPC override for Squid Uniswap-liquidity discovery sizing (defaults to Forno) |
 | `SOCKET_API_KEY`                | Optional Socket quote API key                                                               |
-| `RANGO_API_KEY`                 | Optional Rango quote API key                                                                |
-| `OKX_DEX_API_KEY`               | Optional OKX DEX API key                                                                    |
-| `OKX_DEX_SECRET`                | Optional OKX DEX signing secret                                                             |
-| `OKX_DEX_PASSPHRASE`            | Optional OKX DEX passphrase                                                                 |
 
 Production env vars are managed by Terraform except the Blob OIDC variables, which are managed by the Vercel store integration. See [`terraform/`](./terraform/).
 
