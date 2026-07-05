@@ -36,6 +36,11 @@ on:
     # is nothing for Lighthouse to measure anyway. The in-job filter/decide
     # steps are kept (they also skip forks + dependabot). Keep this list in
     # sync with the in-job `filters:` block and vercel-ignore-build.sh.
+    # NOTE: the ignore script also diffs incrementally against the branch's
+    # previous deployment, so Vercel can skip a SHA even when these globs
+    # match (e.g. a change under ui-dashboard/scripts/ that is not a build
+    # input). The wait step honors Vercel's per-SHA "Canceled by Ignored
+    # Build Step" status and skips instead of timing out in that case.
     paths:
       - ui-dashboard/**
       - shared-config/**
@@ -86,6 +91,11 @@ jobs:
       # `deployments: read` lets the job query the GitHub Deployments API to
       # find the Vercel preview URL without needing a Vercel API token.
       deployments: read
+      # `statuses: read` lets the wait step read the combined commit status to
+      # detect Vercel's "Canceled by Ignored Build Step" verdict. Without it
+      # the lookup 403s and (by design) degrades to the timeout path, so the
+      # ignored-build skip would silently never engage.
+      statuses: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -251,6 +261,32 @@ jobs:
               return active?.environment_url ?? null;
             }
 
+            // Vercel's ignoreCommand (ui-dashboard/scripts/vercel-ignore-build.sh)
+            // diffs incrementally against the branch's previous deployment, so it
+            // can legitimately skip a SHA even when the branch as a whole touches
+            // a path in `dashboardPaths` (e.g. an operator script under
+            // ui-dashboard/scripts/ that is not a build input). When it skips, no
+            // GitHub Deployment is ever created for the SHA — only a commit
+            // status: context "Vercel", state "success", description
+            // "Canceled by Ignored Build Step". Without honoring that verdict,
+            // this wait step polls for a preview that will never exist and fails
+            // by timeout. Treat the status as authoritative: no new preview means
+            // no new dashboard bundle to audit, so the (advisory) check skips.
+            async function vercelIgnoredBuild() {
+              const { data } = await github.rest.repos.getCombinedStatusForRef({
+                owner,
+                repo,
+                ref: sha,
+                per_page: 100,
+              });
+              return (data.statuses ?? []).some(
+                s =>
+                  s.context === "Vercel" &&
+                  s.state === "success" &&
+                  /ignored build step/i.test(s.description ?? ""),
+              );
+            }
+
             async function latestPushTouchedDashboard() {
               const pullRequest = context.payload.pull_request;
               const action = context.payload.action;
@@ -343,6 +379,87 @@ jobs:
                   core.setOutput("skip_lighthouse", "false");
                   return;
                 }
+              }
+
+              // No preview yet — check whether Vercel has already ruled this
+              // SHA out via its Ignored Build Step before polling again. A
+              // pending/absent Vercel status means a build may still be
+              // starting, so keep polling in that case. A status-API error is
+              // treated the same as "no verdict yet" so it cannot bypass the
+              // 5-minute timeout backstop below.
+              let ignoredBuild = false;
+              try {
+                ignoredBuild = await vercelIgnoredBuild();
+              } catch (error) {
+                core.info(
+                  `Vercel status lookup failed (will keep polling): ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+              if (ignoredBuild) {
+                // Do NOT trust the verdict when the PR touches the ignore
+                // machinery itself: a buggy (or malicious) edit to the skip
+                // logic could make Vercel report "ignored" for a SHA that
+                // really changes the dashboard, and silently skipping would
+                // suppress the audit exactly when it matters. Deliberately
+                // FULL-PR-scoped (not latest-push-scoped): once any commit in
+                // the PR modifies the machinery, that modified script is what
+                // Vercel runs for every subsequent head, so no head in the PR
+                // may vouch for its own skip — even a later push that only
+                // touches unrelated files. Falls through to the polling/
+                // timeout path, which fails loudly and forces the change to
+                // prove itself.
+                const ignoreMachineryPaths = [
+                  "ui-dashboard/scripts/vercel-ignore-build.sh",
+                  "ui-dashboard/vercel.json",
+                ];
+                try {
+                  const pullNumber = context.payload.pull_request?.number;
+                  const pullRequestFiles =
+                    typeof pullNumber === "number"
+                      ? await changedFilesForPullRequest(pullNumber)
+                      : (await latestPushTouchedDashboard()).files ?? [];
+                  const touchedMachinery = pullRequestFiles.filter(f =>
+                    ignoreMachineryPaths.includes(f),
+                  );
+                  if (touchedMachinery.length > 0) {
+                    core.warning(
+                      `Vercel reported "Canceled by Ignored Build Step" for ${sha}, but this ` +
+                        `push touches the ignore machinery (${touchedMachinery.join(", ")}) — ` +
+                        "not trusting the verdict; continuing to poll (will fail loudly on timeout).",
+                    );
+                    core.info(`No active preview yet — retrying in ${pollIntervalMs / 1000}s...`);
+                    await new Promise(r => setTimeout(r, pollIntervalMs));
+                    continue;
+                  }
+                } catch (error) {
+                  core.warning(
+                    `Could not verify the pushed file list before honoring Vercel's ignored-build ` +
+                      `verdict (${error instanceof Error ? error.message : String(error)}) — ` +
+                      "not trusting the verdict; continuing to poll.",
+                  );
+                  core.info(`No active preview yet — retrying in ${pollIntervalMs / 1000}s...`);
+                  await new Promise(r => setTimeout(r, pollIntervalMs));
+                  continue;
+                }
+                core.notice(
+                  `Vercel canceled the build for ${sha} via its Ignored Build Step — ` +
+                    "no preview will be posted for this SHA, so there is no new " +
+                    "dashboard bundle to audit. Skipping Lighthouse.",
+                );
+                try {
+                  const priorPreview = await findPriorSuccessfulPreviewForCurrentDashboard();
+                  core.info(
+                    priorPreview
+                      ? `Prior successful preview ${priorPreview.previewUrl} at ${priorPreview.sha} still covers the current dashboard bundle.`
+                      : "No prior branch preview exists; the branch has never produced a dashboard-affecting change per Vercel.",
+                  );
+                } catch (error) {
+                  core.info(
+                    `Prior-preview lookup skipped: ${error instanceof Error ? error.message : String(error)}`,
+                  );
+                }
+                core.setOutput("skip_lighthouse", "true");
+                return;
               }
 
               core.info(`No active preview yet — retrying in ${pollIntervalMs / 1000}s...`);
