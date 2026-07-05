@@ -18,9 +18,11 @@ resource "google_cloudfunctions2_function" "watchdog_notifications" {
   }
 
   service_config {
-    available_memory      = "512M"
+    available_memory      = "${var.memory_mb}M"
     service_account_email = module.governance_watchdog.service_account_email
-    timeout_seconds       = 60
+    timeout_seconds       = var.timeout_seconds
+    max_instance_count    = var.max_instances
+    min_instance_count    = var.min_instances
 
     # 🔒 Security Note: Checkov recommends to only allow this function to be called from a cloud load balancer.
     # We're making a conscious security tradeoff here for lower complexity and faster delivery. It seems unlikely
