@@ -1,5 +1,14 @@
 import crypto from "crypto";
 
+// SIBLING FILE — kept in behavioral parity with (not byte-identical to):
+//   alerts/infra/onchain-event-handler/src/quicknode-replay-protection.ts
+// Both must fail closed (5xx, no event processing) when the replay bucket is
+// unconfigured; see the "missing-bucket parity" test in
+// src/utils/__tests__/vendored-source-drift.test.ts. This copy cannot be
+// byte-identical to the sibling: that package logs via a GCP structured
+// logger (an extra dependency this package doesn't carry), while this one
+// logs via plain console.* and relies on the caller (index.ts) to emit the
+// paging-severity log.
 const METADATA_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
 const STORAGE_UPLOAD_BASE_URL =
@@ -9,7 +18,7 @@ const METADATA_TOKEN_REFRESH_SKEW_MS = 60_000;
 type Fetch = typeof fetch;
 
 type ReplayProtectionResult =
-  | { valid: true; skipped?: string }
+  | { valid: true }
   | { valid: false; status: number; message: string; replayed?: boolean };
 
 interface ReplayProtectionOptions {
@@ -29,10 +38,8 @@ export async function reserveQuickNodeNonce(
   const bucketName =
     options.bucketName ?? process.env.QUICKNODE_REPLAY_BUCKET ?? "";
   if (!bucketName) {
-    // Degrade open: without a configured bucket we cannot dedupe, but failing
-    // every signed webhook (500) would drop governance alerts. Process the
-    // webhook and surface the misconfiguration so the call site can page.
-    return { valid: true, skipped: "QUICKNODE_REPLAY_BUCKET not configured" };
+    console.error("QUICKNODE_REPLAY_BUCKET is not configured");
+    return serverConfigurationError();
   }
 
   const {
