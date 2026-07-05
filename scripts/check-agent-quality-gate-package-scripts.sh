@@ -32,6 +32,8 @@ const expectedScripts = {
   "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
   "skew:check": "node scripts/version-skew-check.mjs",
   "skew:check:test": "node scripts/version-skew-check.test.mjs",
+  "override:prune-report": "node scripts/override-prune-report.mjs",
+  "override:prune-report:test": "node scripts/override-prune-report.test.mjs",
   "sanitize:test": "node scripts/sanitize-terraform-output.test.mjs",
 };
 

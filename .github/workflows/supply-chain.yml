@@ -1,6 +1,6 @@
 name: Supply Chain
 
-# Four gates that protect the dependency supply chain:
+# Five gates that protect the dependency supply chain:
 #
 # 1. npm advisory audit — blocks merges when a high/critical advisory exists
 #    against any package in the root or standalone deploy lockfiles, except
@@ -34,6 +34,13 @@ name: Supply Chain
 # a diff — is evaluated on a calendar cadence instead of only when a PR
 # happens to touch context files. It is a separate job from the advisory
 # report so a stale doc can never abort supply-chain tracking.
+#
+# 5. override prune report — a weekly non-blocking report (scripts/
+#    override-prune-report.mjs) that flags `pnpm.overrides` entries whose
+#    floor may already be satisfied by natural resolution, and
+#    `minimumReleaseAgeExclude` entries older than a configurable age.
+#    Report-only: it never edits config; pruning an entry is always a
+#    follow-up, human-reviewed PR.
 #
 # What this does NOT cover: sigstore attestations / SLSA provenance. pnpm 10
 # has no `audit signatures` equivalent, and `npm audit signatures` requires a
@@ -372,5 +379,91 @@ jobs:
                 title: "Supply chain: moderate npm advisories",
                 body,
                 labels,
+              });
+            }
+
+  override-prune-report:
+    name: override prune report (non-blocking)
+    # Weekly cron + default-branch manual dispatch only — never on pull_request,
+    # so this job can never block a merge. The manual branch guard matters
+    # because this job mutates the canonical override-prune-report issue.
+    if: >-
+      github.event.schedule == '17 7 * * 1' ||
+      (github.event_name == 'workflow_dispatch' &&
+        github.ref_name == github.event.repository.default_branch)
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Full history required: the minimumReleaseAgeExclude age check
+          # runs `git blame` on pnpm-workspace.yaml. A default depth-1
+          # shallow clone attributes every line to the boundary (HEAD)
+          # commit, so every entry would read as "just changed" and the
+          # `stale` verdict could never fire.
+          fetch-depth: 0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          # No pnpm install — scripts/override-prune-report.mjs is pure
+          # Node.js (zero deps) and reads only the committed lockfiles.
+      - name: override-prune-report self-tests
+        run: node scripts/override-prune-report.test.mjs
+      - name: Generate override prune report
+        run: node scripts/override-prune-report.mjs > /tmp/override-prune-report.md
+      - name: Ensure label exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create "dependencies" --color "0366d6" --description "Dependency updates and supply-chain advisory tracking" --force
+      - name: Open or update the override prune report issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- supply-chain-override-prune-report -->";
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+            const checkedAt = new Date().toISOString();
+            const report = fs.readFileSync("/tmp/override-prune-report.md", "utf8");
+
+            const body =
+              `**Last checked:** ${checkedAt}\n` +
+              `[Workflow run](${runUrl})\n\n` +
+              `${report}\n` +
+              marker;
+
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: "open",
+                labels: "dependencies",
+                per_page: 100,
+              },
+            );
+            const existing = issues.find(
+              (issue) => issue.body && issue.body.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: "Supply chain: override prune report",
+                body,
+                labels: ["dependencies"],
               });
             }

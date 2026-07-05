@@ -312,6 +312,7 @@ node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect r
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
+pnpm override:prune-report          # pnpm.overrides + minimumReleaseAgeExclude pruning report (advisory; no install needed)
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 node scripts/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
 node scripts/file-size-watchlist.mjs  # Refresh source file-size watchlist; use --format issue for GitHub Issues, not BACKLOG.md

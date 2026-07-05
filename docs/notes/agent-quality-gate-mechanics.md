@@ -40,7 +40,8 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.tf`, `scripts.tf:test`, `scripts.alerts:rules:lint`,
 `scripts.alerts:rules:lint:test`, `scripts.lockfile:lint`,
 `scripts.lockfile:lint:test`, `scripts.skew:check`,
-`scripts.skew:check:test`, or `scripts.sanitize:test`; the gate treats that
+`scripts.skew:check:test`, `scripts.sanitize:test`,
+`scripts.override:prune-report`, or `scripts.override:prune-report:test`; the gate treats that
 as tooling-only and runs an
 entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
 regression tests instead of the package-script refusal path. Existing changed paths run
