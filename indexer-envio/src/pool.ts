@@ -339,6 +339,31 @@ async function healPoolFees(
   return healedFees;
 }
 
+/** Resolve the pool's final `referenceRateFeedID` for this event (caller
+ * param > self-heal > existing persisted value) and, when a pool's rate feed
+ * is assigned for the first time (the ""→set transition), recompute
+ * `breakerTripped` from the feed's current breaker configs — otherwise a
+ * pool that first appears while the feed is already halted would read
+ * `false` until the next BreakerBox transition. The steady-state gate (only
+ * fires on that one transition) lives inside `breakerTrippedOnFeedAssign`. */
+async function resolveFeedIdAndBreakerHalt(
+  context: PoolContext,
+  chainId: number,
+  existing: Pool,
+  referenceRateFeedID: string | undefined,
+  healedFeedId: string | undefined,
+): Promise<{ finalReferenceRateFeedID: string; breakerTripped: boolean }> {
+  const finalReferenceRateFeedID =
+    referenceRateFeedID ?? healedFeedId ?? existing.referenceRateFeedID;
+  const breakerTripped = await breakerTrippedOnFeedAssign(
+    context,
+    chainId,
+    existing,
+    finalReferenceRateFeedID,
+  );
+  return { finalReferenceRateFeedID, breakerTripped };
+}
+
 // eslint-disable-next-line max-lines-per-function -- Existing pool upsert pipeline remains intentionally centralized for atomic state updates.
 export const upsertPool = async ({
   context,
@@ -463,20 +488,14 @@ export const upsertPool = async ({
   );
   const healedFees = await healPoolFees(context, existing, chainId, poolAddr);
 
-  // When a pool's rate feed is assigned for the first time (factory param or
-  // self-heal), recompute `breakerTripped` from the feed's current breaker
-  // configs — otherwise a pool that first appears while the feed is already
-  // halted would read `false` until the next BreakerBox transition. The gate
-  // (only the "" -> set transition) lives in the helper to keep upsertPool's
-  // cognitive complexity flat.
-  const finalReferenceRateFeedID =
-    referenceRateFeedID ?? healedFeedId ?? existing.referenceRateFeedID;
-  const breakerTripped = await breakerTrippedOnFeedAssign(
-    context,
-    chainId,
-    existing,
-    finalReferenceRateFeedID,
-  );
+  const { finalReferenceRateFeedID, breakerTripped } =
+    await resolveFeedIdAndBreakerHalt(
+      context,
+      chainId,
+      existing,
+      referenceRateFeedID,
+      healedFeedId,
+    );
 
   const next: Pool = {
     ...existing,
