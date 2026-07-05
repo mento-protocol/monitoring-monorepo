@@ -396,20 +396,29 @@ jobs:
                 );
               }
               if (ignoredBuild) {
-                // Do NOT trust the verdict when this push touches the ignore
+                // Do NOT trust the verdict when the PR touches the ignore
                 // machinery itself: a buggy (or malicious) edit to the skip
                 // logic could make Vercel report "ignored" for a SHA that
                 // really changes the dashboard, and silently skipping would
-                // suppress the audit exactly when it matters. Fall through to
-                // the polling/timeout path instead, which fails loudly and
-                // forces the change to prove itself.
+                // suppress the audit exactly when it matters. Deliberately
+                // FULL-PR-scoped (not latest-push-scoped): once any commit in
+                // the PR modifies the machinery, that modified script is what
+                // Vercel runs for every subsequent head, so no head in the PR
+                // may vouch for its own skip — even a later push that only
+                // touches unrelated files. Falls through to the polling/
+                // timeout path, which fails loudly and forces the change to
+                // prove itself.
                 const ignoreMachineryPaths = [
                   "ui-dashboard/scripts/vercel-ignore-build.sh",
                   "ui-dashboard/vercel.json",
                 ];
                 try {
-                  const latestPush = await latestPushTouchedDashboard();
-                  const touchedMachinery = (latestPush.files ?? []).filter(f =>
+                  const pullNumber = context.payload.pull_request?.number;
+                  const pullRequestFiles =
+                    typeof pullNumber === "number"
+                      ? await changedFilesForPullRequest(pullNumber)
+                      : (await latestPushTouchedDashboard()).files ?? [];
+                  const touchedMachinery = pullRequestFiles.filter(f =>
                     ignoreMachineryPaths.includes(f),
                   );
                   if (touchedMachinery.length > 0) {
