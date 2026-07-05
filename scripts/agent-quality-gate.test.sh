@@ -2330,6 +2330,12 @@ assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 run_gate "scripts/lockfile-lint.test.mjs"
 assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 
+run_gate "scripts/sanitize-terraform-output.sh"
+assert_contains "- pnpm sanitize:test (Terraform output sanitizer changed)"
+
+run_gate "scripts/sanitize-terraform-output.test.mjs"
+assert_contains "- pnpm sanitize:test (Terraform output sanitizer test changed)"
+
 run_gate "scripts/review-materiality.mjs"
 assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
 

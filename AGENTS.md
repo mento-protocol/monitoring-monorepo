@@ -218,10 +218,11 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.pr:ready-state:test`,
 `scripts.tf`, `scripts.tf:test`, `scripts.alerts:rules:lint`,
 `scripts.alerts:rules:lint:test`, `scripts.lockfile:lint`,
-`scripts.lockfile:lint:test`, `scripts.skew:check`, or
-`scripts.skew:check:test`; the gate treats that as tooling-only and runs an
-entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
-regression tests instead of the package-script refusal path. Existing changed paths run
+`scripts.lockfile:lint:test`, `scripts.skew:check`,
+`scripts.skew:check:test`, or `scripts.sanitize:test`; the gate treats that
+as tooling-only and runs an entrypoint validator plus the
+gate/prewarm/PR-feedback/PR-ready/Terraform-stack regression tests instead of
+the package-script refusal path. Existing changed paths run
 targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, package-manager changes, pnpm patches, and
 package-manifest changes still run full-repo Trunk locally. CI also runs a
@@ -490,6 +491,7 @@ node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect r
 node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
+pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 node scripts/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
 node scripts/file-size-watchlist.mjs  # Refresh source file-size watchlist; use --format issue for GitHub Issues, not BACKLOG.md

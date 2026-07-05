@@ -881,6 +881,11 @@ jobs:
         run: pnpm alerts:rules:lint
       - name: Alert-rules lint self-test
         run: pnpm alerts:rules:lint:test
+      - name: Terraform output sanitizer fixture suite
+        # Fixture coverage for scripts/sanitize-terraform-output.sh, the sole
+        # redaction layer before terraform plan/apply output reaches public
+        # GitHub issue bodies and PR sticky comments.
+        run: pnpm sanitize:test
       - name: Notifier coverage unit tests
         # Behavioral coverage of scripts/check-notifier-coverage.mjs:
         # parse helpers (hasPushMain inline + block-sequence, hasSchedule,
