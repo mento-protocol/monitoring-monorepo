@@ -215,6 +215,23 @@ For local development, you'll need to set up environment variables. The function
 - **Routing**: Routes security events to alerts channels, operational events to events channels
 - **Error Handling**: Continues processing other events if one fails
 
+### Dead-lettering & redrive
+
+If Slack delivery for an event exhausts its retries, the rendered payload is
+persisted to the same GCS bucket used for QuickNode nonce replay protection,
+under a `dead-letter/` prefix (see `src/dead-letter.ts`), instead of being
+lost. The write logs `"Dead-lettered Safe alert after Slack delivery
+failure"` at ERROR — this is covered by the existing
+`onchain_handler_errors_policy` Cloud Monitoring alert (see
+`alerts/infra/monitoring.tf`), since it fires alongside the same event's
+`"Error processing log"` entry.
+
+To re-deliver dead-lettered alerts, run `pnpm deadletter:redrive` (requires
+`QUICKNODE_REPLAY_BUCKET` and `SLACK_BOT_TOKEN` in the environment, plus an
+authenticated `gcloud` CLI session for GCS access). It reposts each
+dead-lettered payload to its original Slack channel, then archives it to
+`dead-letter/done/` so re-runs don't repost it.
+
 ## Troubleshooting
 
 ### Build Issues

@@ -20,7 +20,8 @@ interface SlackBlock {
   }>;
 }
 
-interface SlackMessage {
+// Exported so dead-letter.ts can type the rendered payload it persists.
+export interface SlackMessage {
   text: string;
   blocks: SlackBlock[];
 }

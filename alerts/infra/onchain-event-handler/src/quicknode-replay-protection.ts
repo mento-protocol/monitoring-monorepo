@@ -131,7 +131,15 @@ async function replayProtectionSetup(
   };
 }
 
-async function getMetadataAccessToken(fetchImpl: Fetch): Promise<string> {
+// Exported so dead-letter.ts (dead-lettering after Slack delivery failure)
+// can reuse the same metadata-server auth + token cache instead of its own
+// copy — both write into the same GCS bucket, just under different prefixes.
+// `signal` is optional and unused by this module's own call site below; it
+// exists so dead-letter.ts can bound the token fetch under its own timeout.
+export async function getMetadataAccessToken(
+  fetchImpl: Fetch,
+  signal?: AbortSignal,
+): Promise<string> {
   if (
     cachedMetadataToken &&
     cachedMetadataToken.expiresAtMs - METADATA_TOKEN_REFRESH_SKEW_MS >
@@ -144,6 +152,7 @@ async function getMetadataAccessToken(fetchImpl: Fetch): Promise<string> {
     headers: {
       "metadata-flavor": "Google",
     },
+    signal,
   });
 
   if (!response.ok) {
