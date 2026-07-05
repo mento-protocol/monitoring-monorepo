@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -690,7 +690,28 @@ trunk_requires_full_scan() {
   while IFS= read -r path; do
     [[ -e "$path" ]] || return 0
     case "$path" in
+      # .trunk/trunk.yaml (enabled linters, ignores) already lands here via
+      # .trunk/*, so it gets the unfiltered full scan below; no separate
+      # .shellcheckrc-style case is needed for it.
       .trunk/*|tools/trunk|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|patches/*|.npmrc|*/.npmrc|pnpmfile.cjs|.pnpmfile.cjs|.node-version|*/package.json)
+        return 0
+        ;;
+    esac
+  done < "$changed_paths_file"
+
+  return 1
+}
+
+trunk_requires_shellcheck_full_scan() {
+  local path
+  while IFS= read -r path; do
+    case "$path" in
+      # .shellcheckrc disables/options apply repo-wide, but a targeted Trunk
+      # check only lints the config file itself (a no-op) rather than the
+      # *.sh targets it governs. Force a repo-wide, ShellCheck-only scan so
+      # an edit here (e.g. loosening a disable) is validated against every
+      # script instead of passing trivially.
+      .shellcheckrc)
         return 0
         ;;
     esac
@@ -718,6 +739,10 @@ add_trunk_check_command() {
     prepend_command "$trunk_command" "changed existing paths should pass targeted Trunk checks"
   else
     prepend_command "./tools/trunk check --all" "changed paths could not be mapped to targeted Trunk checks"
+  fi
+
+  if trunk_requires_shellcheck_full_scan; then
+    prepend_command "./tools/trunk check --all --filter=shellcheck" "ShellCheck config changed; re-validate every script it governs"
   fi
 }
 
@@ -824,12 +849,12 @@ compact_turbo_quality_commands() {
         existing_packages="${turbo_group_packages[$group_index]}"
         read -r -a existing_package_array <<< "$existing_packages"
         if ! list_contains_word "$package_name" "${existing_package_array[@]}"; then
-          turbo_group_packages[$group_index]="${existing_packages} ${package_name}"
+          turbo_group_packages[group_index]="${existing_packages} ${package_name}"
         fi
 
         existing_reasons="${turbo_group_reasons[$group_index]}"
         if ! reason_list_contains "$existing_reasons" "$reason"; then
-          turbo_group_reasons[$group_index]="${existing_reasons}; ${reason}"
+          turbo_group_reasons[group_index]="${existing_reasons}; ${reason}"
         fi
       else
         turbo_group_tasks+=("$task")
@@ -1333,6 +1358,13 @@ while IFS= read -r path; do
       add_surface "ui-dashboard"
       add_checklist "docs/pr-checklists/code-health.md" "Lighthouse CI budget config changed"
       ;;
+    .shellcheckrc)
+      # The repo-wide `./tools/trunk check --all --filter=shellcheck` command
+      # itself is added by add_trunk_check_command (see
+      # trunk_requires_shellcheck_full_scan) since it depends on the full
+      # changed-paths set, not just this one path.
+      add_surface "tooling"
+      ;;
     docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md)
       add_surface "docs"
       case "$path" in
@@ -1350,6 +1382,9 @@ while IFS= read -r path; do
       case "$path" in
         scripts/deploy-*.sh)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
+          ;;
+        scripts/sanitize-terraform-output.sh)
+          add_command "pnpm sanitize:test" "Terraform output sanitizer changed"
           ;;
       esac
       case "$path" in
@@ -1419,6 +1454,9 @@ while IFS= read -r path; do
           ;;
         scripts/pnpm-audit-high-gate.mjs|scripts/pnpm-audit-high-gate.test.mjs)
           add_command "node scripts/pnpm-audit-high-gate.test.mjs" "pnpm audit high gate changed"
+          ;;
+        scripts/sanitize-terraform-output.test.mjs)
+          add_command "pnpm sanitize:test" "Terraform output sanitizer test changed"
           ;;
         scripts/version-skew-check.mjs|scripts/version-skew-check.test.mjs)
           add_command "pnpm skew:check:test" "version skew checker changed"

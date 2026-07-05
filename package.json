@@ -98,7 +98,8 @@
     "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
     "skew:check": "node scripts/version-skew-check.mjs",
     "skew:check:test": "node scripts/version-skew-check.test.mjs",
-    "code-health:schema-diff": "git show origin/main:indexer-envio/schema.graphql > /tmp/schema-base-local.graphql && node scripts/schema-diff.mjs /tmp/schema-base-local.graphql indexer-envio/schema.graphql"
+    "code-health:schema-diff": "git show origin/main:indexer-envio/schema.graphql > /tmp/schema-base-local.graphql && node scripts/schema-diff.mjs /tmp/schema-base-local.graphql indexer-envio/schema.graphql",
+    "sanitize:test": "node scripts/sanitize-terraform-output.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

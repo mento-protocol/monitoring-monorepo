@@ -1320,7 +1320,6 @@ describe("aggregator quote builders", () => {
       "squid",
       "openocean",
       "kyberswap",
-      "okx",
       "1inch",
       "0x",
       "cow-swap",
@@ -1328,7 +1327,6 @@ describe("aggregator quote builders", () => {
       "relay",
       "odos",
       "socket",
-      "rango",
       "rubic",
       "debridge",
     ]);

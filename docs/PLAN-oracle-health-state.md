@@ -1,3 +1,14 @@
+---
+title: "Plan: Oracle & Health State in the Indexer + Dashboard"
+status: archived
+owner: eng
+canonical: false
+archived: 2026-07-05
+archived_reason: "Oracle health state shipped in full — healthStatus/oracleOk/oraclePrice/priceDifference/rebalanceThreshold on Pool, HealthBadge/HealthPanel in the dashboard. See docs/ROADMAP.md → Indexer/Dashboard → 'Oracle health state'."
+---
+
+> **ARCHIVED** — This planning document is superseded by shipped work. See [`docs/ROADMAP.md`](./ROADMAP.md) for current state.
+
 # Plan: Oracle & Health State in the Indexer + Dashboard
 
 ## Goal

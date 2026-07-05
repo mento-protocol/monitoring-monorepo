@@ -7,10 +7,17 @@ set -u          # Treat unset variables as an error when substituting
 # Usage: tail-logs.sh [filter]
 # Example: tail-logs.sh "severity>=ERROR"
 # Example: tail-logs.sh "jsonPayload.multisigKey=mento"
+# function_name and project_id (referenced throughout below) are defined by
+# get-project-vars.sh, sourced inside this function; `set -u` catches them
+# at runtime if that ever changes. Disable scoped to this function (not
+# file-wide) so an unrelated undefined-variable typo elsewhere still flags.
+# shellcheck disable=SC2154 # covers: function_name, project_id
 tail_function_logs() {
 	# Load common utilities and project variables
 	script_dir=$(dirname "$0")
+	# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 	source "${script_dir}/../../scripts/common.sh"
+	# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 	source "${script_dir}/get-project-vars.sh"
 
 	# Optional filter (first argument)

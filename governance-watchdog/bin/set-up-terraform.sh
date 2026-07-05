@@ -56,6 +56,7 @@ check_gcloud_iam_permissions() {
 
 set_up_terraform() {
 	script_dir=$(dirname "$0")
+	# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 	source "${script_dir}/check-gcloud-login.sh"
 
 	if ! command -v terraform &>/dev/null; then

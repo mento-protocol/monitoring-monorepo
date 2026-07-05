@@ -267,6 +267,7 @@ validate_non_negative_int() {
 _common_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${_common_script_dir}/spinner.sh" ]]; then
 	# shellcheck source=scripts/spinner.sh
+	# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 	source "${_common_script_dir}/spinner.sh"
 fi
 unset _common_script_dir
