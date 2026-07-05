@@ -3,6 +3,8 @@
 # scripts/agent-quality-gate.sh's source text (e.g. turbo's `$TURBO_ROOT$`
 # token, `"$(...)"` snippets); expanding them would break the assertions
 # they're meant to check for.
+# Trade-off (accepted): this disables SC2016 file-wide, so a future
+# genuinely-unexpanded `$var` typo in this file won't be flagged.
 # shellcheck disable=SC2016
 set -euo pipefail
 

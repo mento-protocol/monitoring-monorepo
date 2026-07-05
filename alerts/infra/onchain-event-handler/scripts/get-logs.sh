@@ -1,12 +1,12 @@
 #!/bin/bash
-# function_name, region, project_id are defined by get-project-vars.sh,
-# sourced below; `set -u` catches them at runtime if that ever changes.
-# shellcheck disable=SC2154
 set -e          # Fail on any error
 set -o pipefail # Ensure piped commands propagate exit codes properly
 set -u          # Treat unset variables as an error when substituting
 
 # Fetches the latest logs for the Cloud Function and displays them in the terminal.
+# function_name, region, project_id are defined by get-project-vars.sh,
+# sourced below; `set -u` catches them at runtime if that ever changes.
+# shellcheck disable=SC2154
 get_function_logs() {
 	# Load common utilities and project variables
 	script_dir=$(dirname "$0")
