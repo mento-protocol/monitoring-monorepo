@@ -1128,3 +1128,191 @@ describe("rate-limit fallback skips secondary below known archive horizon", () =
     assert.equal(fallbackLikelyHasBlock(HORIZON_CHAIN, 900n), true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-chain fallback: both failure modes on real chain ids, state isolated
+// ---------------------------------------------------------------------------
+//
+// `getFallbackRpcClient(chainId)` resolves `ENVIO_RPC_FALLBACK_URL_<chainId>`
+// per real chain id (covered in rpcClient.test.ts); this block covers the
+// consuming mechanism — `readContractWithBlockFallback` — for the two
+// documented failure modes (archive-depth and rate-limit) using real mainnet
+// chain ids instead of a synthetic one, and asserts the per-chain archive
+// horizon / cooldown state (keyed by chainId) never leaks across chains.
+describe("per-chain fallback: archive-depth and rate-limit, isolated across chains", () => {
+  const baseArgs = {
+    address: "0xtest",
+    abi: [],
+    functionName: "foo",
+  };
+  const CELO = 42220;
+  const MONAD = 143;
+
+  let originalDelayFn: typeof _testHooks.delayFn;
+  let originalNowFn: typeof _testHooks.nowFn;
+  beforeAll(() => {
+    originalDelayFn = _testHooks.delayFn;
+    originalNowFn = _testHooks.nowFn;
+    _testHooks.delayFn = async () => {};
+    _testHooks.nowFn = () => 0;
+  });
+  afterAll(() => {
+    _testHooks.delayFn = originalDelayFn;
+    _testHooks.nowFn = originalNowFn;
+  });
+  beforeEach(() => {
+    _resetFallbackArchiveDepth();
+    _testHooks.resetFallbackRuntimeState();
+  });
+
+  it("archive-depth failure falls through to the fallback client on both Celo and Monad", async () => {
+    for (const chainId of [CELO, MONAD]) {
+      const primary = mockClient(async () => {
+        throw new Error("querying historical state");
+      });
+      const fallback = mockClient(async () => "archive-ok");
+
+      const res = await readContractWithBlockFallback(
+        chainId,
+        primary,
+        baseArgs,
+        500n,
+        fallback,
+      );
+      assert.equal(res.result, "archive-ok");
+      assert.equal(res.usedFallback, true);
+    }
+  });
+
+  it("rate-limited primary falls through to the fallback client on both Celo and Monad", async () => {
+    for (const chainId of [CELO, MONAD]) {
+      const primary = mockClient(async () => {
+        throw new Error("rate limit");
+      });
+      const fallback = mockClient(async () => "rate-limit-ok");
+
+      const res = await readContractWithBlockFallback(
+        chainId,
+        primary,
+        baseArgs,
+        500n,
+        fallback,
+      );
+      assert.equal(res.result, "rate-limit-ok");
+      assert.equal(res.usedFallback, true);
+    }
+  });
+
+  it("an archive-depth horizon recorded for one chain does not gate the fallback for another chain", async () => {
+    // Celo's fallback proves it lacks archive depth below block 500.
+    const celoPrimary = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    const celoFallback = mockClient(async () => {
+      throw new Error(
+        "Invalid parameters were provided to the RPC method. Double check you have provided the correct parameters.",
+      );
+    });
+    await assert.rejects(() =>
+      readContractWithBlockFallback(
+        CELO,
+        celoPrimary,
+        baseArgs,
+        500n,
+        celoFallback,
+      ),
+    );
+    assert.equal(
+      fallbackLikelyHasBlock(CELO, 200n),
+      false,
+      "Celo's fallback is now known to lack archive depth below 500",
+    );
+
+    // Monad — a chain that has recorded NO archive miss — must still be
+    // allowed to use its fallback at the same (or an even lower) block.
+    // A shared/global horizon map would incorrectly gate this call too.
+    assert.equal(
+      fallbackLikelyHasBlock(MONAD, 200n),
+      true,
+      "Monad's archive horizon must be tracked independently of Celo's",
+    );
+    let monadFallbackCalls = 0;
+    const monadPrimary = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    const monadFallback = mockClient(async () => {
+      monadFallbackCalls++;
+      return "monad-served";
+    });
+    const res = await readContractWithBlockFallback(
+      MONAD,
+      monadPrimary,
+      baseArgs,
+      200n,
+      monadFallback,
+    );
+    assert.equal(res.result, "monad-served");
+    assert.equal(monadFallbackCalls, 1);
+  });
+
+  it("a rate-limit cooldown started for one chain does not skip the fallback for another chain", async () => {
+    // Trip Celo's fallback into cooldown via a rate-limited secondary.
+    const celoPrimary = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    const celoFallback = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    await assert.rejects(() =>
+      readContractWithBlockFallback(
+        CELO,
+        celoPrimary,
+        baseArgs,
+        900n,
+        celoFallback,
+      ),
+    );
+
+    // A subsequent Celo call within the cooldown window must skip the
+    // fallback and surface the primary's rate-limit error directly.
+    let celoFallbackCallsDuringCooldown = 0;
+    const celoPrimaryAgain = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    const celoFallbackAgain = mockClient(async () => {
+      celoFallbackCallsDuringCooldown++;
+      return "should-not-be-called";
+    });
+    await assert.rejects(() =>
+      readContractWithBlockFallback(
+        CELO,
+        celoPrimaryAgain,
+        baseArgs,
+        900n,
+        celoFallbackAgain,
+      ),
+    );
+    assert.equal(celoFallbackCallsDuringCooldown, 0);
+
+    // Monad's fallback must be unaffected by Celo's cooldown — the cooldown
+    // key is `${chainId}:${fn}`, so a shared/global cooldown would wrongly
+    // skip this call too.
+    const monadPrimary = mockClient(async () => {
+      throw new Error("rate limit");
+    });
+    let monadFallbackCalls = 0;
+    const monadFallback = mockClient(async () => {
+      monadFallbackCalls++;
+      return "monad-served";
+    });
+    const res = await readContractWithBlockFallback(
+      MONAD,
+      monadPrimary,
+      baseArgs,
+      900n,
+      monadFallback,
+    );
+    assert.equal(res.result, "monad-served");
+    assert.equal(monadFallbackCalls, 1);
+  });
+});
