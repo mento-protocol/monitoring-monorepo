@@ -228,12 +228,12 @@ console.log("\ncanonical-context discovery");
 const canonicalContent =
   "---\ntitle: T\nstatus: active\nowner: eng\ncanonical: true\nlast_verified: 2026-07-03\n---\n\n# T\n";
 
-function discoverIn(files) {
+function discoverFrom(files) {
   return discoverCanonicalFiles(Object.keys(files), (file) => files[file]);
 }
 
 test("discovers a canonical file in a nested docs path", () => {
-  const discovered = discoverIn({
+  const discovered = discoverFrom({
     "docs/notes/deep/topology.md": canonicalContent,
   });
   assert(
@@ -243,7 +243,7 @@ test("discovers a canonical file in a nested docs path", () => {
 });
 
 test("discovers AGENTS.md in any package directory", () => {
-  const discovered = discoverIn({
+  const discovered = discoverFrom({
     "alerts/AGENTS.md": canonicalContent,
     "integration-probes/AGENTS.md": canonicalContent,
   });
@@ -254,7 +254,7 @@ test("discovers AGENTS.md in any package directory", () => {
 });
 
 test("does not enforce non-canonical files", () => {
-  const discovered = discoverIn({
+  const discovered = discoverFrom({
     "docs/guide.md":
       "---\ntitle: G\nstatus: active\nowner: eng\ncanonical: false\n---\n",
     "docs/plain.md": "# no frontmatter\n",
@@ -266,7 +266,7 @@ test("does not enforce non-canonical files", () => {
 });
 
 test("ignores canonical frontmatter outside the discovery roots", () => {
-  const discovered = discoverIn({
+  const discovered = discoverFrom({
     "ui-dashboard/README.md": canonicalContent,
   });
   assert(
@@ -276,7 +276,7 @@ test("ignores canonical frontmatter outside the discovery roots", () => {
 });
 
 test("minimum-presence fires when a core file loses its frontmatter", () => {
-  const discovered = discoverIn({
+  const discovered = discoverFrom({
     "AGENTS.md": "# frontmatter stripped\n",
     "SPEC.md": canonicalContent,
   });
@@ -288,7 +288,7 @@ test("minimum-presence fires when a core file loses its frontmatter", () => {
 });
 
 test("minimum-presence passes when every core file is discovered", () => {
-  const discovered = discoverIn({
+  const discovered = discoverFrom({
     "AGENTS.md": canonicalContent,
     "SPEC.md": canonicalContent,
   });
