@@ -23,4 +23,6 @@ sed -E \
 	-e 's#("token"[[:space:]]*:[[:space:]]*")[^"]+#\1[REDACTED]#g' \
 	-e 's#(token[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
 	-e 's#(Authorization[[:space:]]*=[[:space:]]*"?Bot )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+	-e 's#(\[REDACTED\]\\?" -> \\?")[^"\\]+#\1[REDACTED]#g' \
+	-e 's#(\[REDACTED\][[:space:]]*->[[:space:]]*)[^"[:space:]\\]+#\1[REDACTED]#g' \
 	"$input_file" > "$output_file"

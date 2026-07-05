@@ -108,11 +108,28 @@ const FIXTURE_LINES = [
   // Authorization = "Bot ..." / Authorization = Bot ... (quote optional).
   'Authorization = "Bot SECRETBOTTOKENQUOTED1234567890"',
   "Authorization = Bot SECRETBOTTOKENBARE1234567890",
+  // ── terraform arrow-form updates: `attr = "OLD" -> "NEW"` ──
+  // Terraform's plan renderer shows in-place value updates in this old-to-new
+  // form. The value-matching patterns above only consume through the first
+  // closing quote, so without a follow-up pass the NEW value on the right of
+  // `->` survives redaction. One fixture per affected class, covering both
+  // HCL and JSON-ish (plain + backslash-escaped-quote) variants.
+  'security_token = "OLDARROWSECBAREHCL1234567890" -> "NEWARROWSECBAREHCL1234567890"',
+  '"security_token": "OLDARROWSECJSONCOL1234567890" -> "NEWARROWSECJSONCOL1234567890"',
+  '"security_token" = "OLDARROWSECJSONEQ1234567890" -> "NEWARROWSECJSONEQ1234567890"',
+  '\\"security_token\\" = \\"OLDARROWSECESCEQ1234567890\\" -> \\"NEWARROWSECESCEQ1234567890\\"',
+  'token = "OLDARROWTOKHCL1234567890" -> "NEWARROWTOKHCL1234567890"',
+  '"token": "OLDARROWTOKJSONCOL1234567890" -> "NEWARROWTOKJSONCOL1234567890"',
+  '\\"token\\": \\"OLDARROWTOKESCCOL1234567890\\" -> \\"NEWARROWTOKESCCOL1234567890\\"',
+  "api_key = OLDARROWAPIKEYBARE1234567890 -> NEWARROWAPIKEYBARE1234567890",
+  '"webhook_api_key": "OLDARROWAPIKEYJSONCOL1234567890" -> "NEWARROWAPIKEYJSONCOL1234567890"',
+  '"webhook_api_key" = "OLDARROWAPIKEYJSONEQ1234567890" -> "NEWARROWAPIKEYJSONEQ1234567890"',
   // ── near-misses: must survive byte-identical ──
   "token_count = 5",
   'docs_url = "https://example.com/readme"',
   'api_keyspace = "innocuous-value-1234567890"',
   'discord_docs = "https://discord.com/developers/docs/intro"',
+  'instance_type = "t2.micro" -> "t2.large"',
 ];
 
 const tempDir = mkdtempSync(path.join(tmpdir(), "sanitize-tf-output-test-"));
@@ -439,7 +456,156 @@ test("redacts Authorization = Bot ... (unquoted)", () => {
   );
 });
 
+// ── terraform arrow-form updates: `attr = "OLD" -> "NEW"` ───────────────────
+// P1 finding: a rotated secret rendered by terraform's in-place update diff
+// (`attr = "OLD" -> "NEW"`) leaked the NEW value because the value-matching
+// patterns above stop at the first closing quote. These assert BOTH sides
+// are redacted for every affected class.
+
+test("redacts both sides of a bare-HCL security_token arrow update", () => {
+  assertIncludes(
+    output,
+    'security_token = "[REDACTED]" -> "[REDACTED]"',
+    "security_token arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "OLDARROWSECBAREHCL1234567890",
+    "security_token arrow update leaked OLD value",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWSECBAREHCL1234567890",
+    "security_token arrow update leaked NEW value",
+  );
+});
+
+test("redacts both sides of a JSON-colon security_token arrow update", () => {
+  assertIncludes(
+    output,
+    '"security_token": "[REDACTED]" -> "[REDACTED]"',
+    "JSON-colon security_token arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWSECJSONCOL1234567890",
+    "JSON-colon security_token arrow update leaked NEW value",
+  );
+});
+
+test("redacts both sides of a JSON-equals security_token arrow update", () => {
+  assertIncludes(
+    output,
+    '"security_token" = "[REDACTED]" -> "[REDACTED]"',
+    "JSON-equals security_token arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWSECJSONEQ1234567890",
+    "JSON-equals security_token arrow update leaked NEW value",
+  );
+});
+
+test("redacts both sides of an escaped-quote JSON-equals security_token arrow update", () => {
+  assertIncludes(
+    output,
+    '\\"security_token\\" = \\"[REDACTED]\\" -> \\"[REDACTED]\\"',
+    "escaped-quote security_token arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWSECESCEQ1234567890",
+    "escaped-quote security_token arrow update leaked NEW value",
+  );
+});
+
+test("redacts both sides of an HCL token arrow update", () => {
+  assertIncludes(
+    output,
+    'token = "[REDACTED]" -> "[REDACTED]"',
+    "HCL token arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWTOKHCL1234567890",
+    "HCL token arrow update leaked NEW value",
+  );
+});
+
+test("redacts both sides of a JSON-colon token arrow update", () => {
+  assertIncludes(
+    output,
+    '"token": "[REDACTED]" -> "[REDACTED]"',
+    "JSON-colon token arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWTOKJSONCOL1234567890",
+    "JSON-colon token arrow update leaked NEW value",
+  );
+});
+
+test("redacts both sides of an escaped-quote JSON-colon token arrow update", () => {
+  assertIncludes(
+    output,
+    '\\"token\\": \\"[REDACTED]\\" -> \\"[REDACTED]\\"',
+    "escaped-quote token arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWTOKESCCOL1234567890",
+    "escaped-quote token arrow update leaked NEW value",
+  );
+});
+
+test("redacts both sides of a bare api_key arrow update", () => {
+  assertIncludes(
+    output,
+    "api_key = [REDACTED] -> [REDACTED]",
+    "bare api_key arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWAPIKEYBARE1234567890",
+    "bare api_key arrow update leaked NEW value",
+  );
+});
+
+test("redacts both sides of a JSON-colon *api_key arrow update", () => {
+  assertIncludes(
+    output,
+    '"webhook_api_key": "[REDACTED]" -> "[REDACTED]"',
+    "JSON-colon api_key arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWAPIKEYJSONCOL1234567890",
+    "JSON-colon api_key arrow update leaked NEW value",
+  );
+});
+
+test("redacts both sides of a JSON-equals *api_key arrow update", () => {
+  assertIncludes(
+    output,
+    '"webhook_api_key" = "[REDACTED]" -> "[REDACTED]"',
+    "JSON-equals api_key arrow update not fully redacted",
+  );
+  assertNotIncludes(
+    output,
+    "NEWARROWAPIKEYJSONEQ1234567890",
+    "JSON-equals api_key arrow update leaked NEW value",
+  );
+});
+
 // ── near-misses: must survive byte-identical ────────────────────────────────
+
+test("leaves a non-secret attribute arrow update untouched", () => {
+  assertIncludes(
+    output,
+    'instance_type = "t2.micro" -> "t2.large"',
+    "near-miss instance_type arrow update was altered",
+  );
+});
 
 test("leaves token_count = 5 untouched", () => {
   assertIncludes(
