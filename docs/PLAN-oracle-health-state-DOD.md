@@ -1,3 +1,14 @@
+---
+title: "Oracle & Health State — Definition of Done"
+status: archived
+owner: eng
+canonical: false
+archived: 2026-07-05
+archived_reason: "Definition-of-done checklist for docs/PLAN-oracle-health-state.md; every item shipped even though the checkboxes below were never ticked. See docs/ROADMAP.md → 'Oracle health state'."
+---
+
+> **ARCHIVED** — Companion checklist to [`docs/PLAN-oracle-health-state.md`](./PLAN-oracle-health-state.md). The feature shipped; the unchecked boxes below are stale, not outstanding work. See [`docs/ROADMAP.md`](./ROADMAP.md) for current state.
+
 # Oracle & Health State — Definition of Done
 
 ## Checklist

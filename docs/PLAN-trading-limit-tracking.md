@@ -1,3 +1,14 @@
+---
+title: "Plan: Trading Limit Tracking"
+status: archived
+owner: eng
+canonical: false
+archived: 2026-07-05
+archived_reason: "Trading limit tracking shipped (TradingLimit entity, limitStatus/limitPressure, LimitBadge/LimitPanel). See docs/ROADMAP.md → Indexer/Dashboard → 'TradingLimit entity' and 'LimitBadge + LimitPanel'."
+---
+
+> **ARCHIVED** — This planning document is superseded by shipped work. See [`docs/ROADMAP.md`](./ROADMAP.md) for current state.
+
 # Plan: Trading Limit Tracking
 
 **Feature:** Index trading limit state, compute `limitPressure`, display warn/crit badges per Roman's spec
