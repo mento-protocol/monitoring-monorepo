@@ -3,6 +3,7 @@
 import { useMemo, type ReactNode } from "react";
 import Link from "next/link";
 import { formatUSD, truncateAddress } from "@/lib/format";
+import { sortedCopy } from "@/lib/immutable-sort";
 import { poolName } from "@/lib/tokens";
 import { Table, Row } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
@@ -168,10 +169,7 @@ function sortRows(
   sortKey: SortKey,
   sortDir: SortDir,
 ): PoolFeeRow[] {
-  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-  return [...rows].sort((a, b) => {
+  return sortedCopy(rows, (a, b) => {
     const aV = rowSortValue(a, sortKey);
     const bV = rowSortValue(b, sortKey);
     if (aV == null && bV == null) return 0;

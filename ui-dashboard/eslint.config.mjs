@@ -190,6 +190,46 @@ export default tseslint.config(
       "sonarjs/no-collapsible-if": "off",
     },
   },
+  // Backstop for AGENTS.md "Browser target — ES2017, no polyfill": these
+  // ES2023 Array methods compile fine (the TS `lib` includes `esnext`) but
+  // throw at runtime on Safari <=15 / Chrome <=109. `toSorted` use `sortedCopy`
+  // from `@/lib/immutable-sort` instead; `toReversed`/`toSpliced` use
+  // `[...arr].reverse()` / manual copy. Excludes the paths AGENTS.md's
+  // "Browser target" section names as ES2023+-safe (Node >=20, never bundled
+  // to the browser) and tests. Deliberately narrower than the broader
+  // server-only surface in "Server vs client module boundaries" (e.g.
+  // `bridge-flows-og.ts`, `opengraph-image.tsx`) — widen the ignore list if a
+  // future PR needs ES2023+ there instead of hand-rolling the ES2017 form.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      "src/app/api/**/route.ts",
+      "src/lib/homepage-og.ts",
+      "src/lib/pool-og.ts",
+      "**/__tests__/**",
+      "**/*.test.{ts,tsx}",
+    ],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        {
+          property: "toSorted",
+          message:
+            "requires Safari 16+/Chrome 110+; use sortedCopy() from '@/lib/immutable-sort' instead.",
+        },
+        {
+          property: "toReversed",
+          message:
+            "requires Safari 16+/Chrome 110+; use `[...arr].reverse()` instead.",
+        },
+        {
+          property: "toSpliced",
+          message:
+            "requires Safari 16+/Chrome 110+; use a manual copy instead.",
+        },
+      ],
+    },
+  },
   {
     ignores: [
       "**/node_modules/**",

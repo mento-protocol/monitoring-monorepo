@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { parseWei } from "@/lib/format";
+import { sortedCopy } from "@/lib/immutable-sort";
 import { escapePlotText } from "@/lib/plot";
 import {
   filterSeriesByRange,
@@ -32,8 +33,8 @@ export function buildStabilityPoolTvlSeries(
 ): TimeSeriesPoint[] {
   // Query returns desc (newest-first) to preserve recent rows when the
   // 1000-row cap kicks in. Reverse here so Plotly receives chronological.
-  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-  const sorted = [...snapshots].sort(
+  const sorted = sortedCopy(
+    snapshots,
     (a, b) => Number(a.timestamp) - Number(b.timestamp),
   );
   const series = sorted.map((snap) => ({

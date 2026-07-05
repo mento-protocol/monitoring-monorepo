@@ -10,6 +10,7 @@ import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
 import { formatTimestamp, parseWei, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
+import { sortedCopy } from "@/lib/immutable-sort";
 import { POOL_LP_POSITIONS } from "@/lib/queries";
 import { normalizeSearch } from "@/lib/table-search";
 import { isFpmm, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
@@ -87,10 +88,7 @@ export function LpsTab({
         },
       ];
     });
-    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-    return [...filtered].sort((a, b) =>
+    return sortedCopy(filtered, (a, b) =>
       a.netLiquidity === b.netLiquidity
         ? 0
         : a.netLiquidity > b.netLiquidity
