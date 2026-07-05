@@ -122,6 +122,8 @@ describe("Issue #1052 scenario gap-closing", () => {
       referenceValue: null,
     });
 
+    // No Pool entities — EMA is stored on BreakerConfig, not Pool, so the
+    // handler's config-update loop still runs when getPoolsByFeed returns [].
     let mockDb = MockDb.createMockDb();
     mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
       event: BreakerBox.BreakerStatusUpdated.createMockEvent({
@@ -139,10 +141,16 @@ describe("Issue #1052 scenario gap-closing", () => {
     });
 
     const cfgId = makeBreakerConfigId(CHAIN_ID, MD_BREAKER, FEED);
-    const seeded = mockDb.entities.BreakerConfig.get(cfgId) as {
-      medianRatesEMA: bigint;
-    };
-    assert.equal(seeded.medianRatesEMA, 0n, "precondition: EMA unseeded");
+    const seeded = mockDb.entities.BreakerConfig.get(cfgId);
+    assert.ok(
+      seeded,
+      "BreakerConfig must exist after BreakerStatusUpdated bootstrap",
+    );
+    assert.equal(
+      (seeded as { medianRatesEMA: bigint }).medianRatesEMA,
+      0n,
+      "precondition: EMA unseeded",
+    );
 
     // First median: previousEMA === 0n, so the handler must SEED (contract
     // line 182-186 semantics) — EMA becomes the raw median, not a blend.
@@ -160,7 +168,12 @@ describe("Issue #1052 scenario gap-closing", () => {
       }),
       mockDb,
     });
-    const afterFirst = mockDb.entities.BreakerConfig.get(cfgId) as {
+    const afterFirstRaw = mockDb.entities.BreakerConfig.get(cfgId);
+    assert.ok(
+      afterFirstRaw,
+      "BreakerConfig must exist after the first MedianUpdated",
+    );
+    const afterFirst = afterFirstRaw as {
       medianRatesEMA: bigint;
       lastMedianRate: bigint;
       lastUpdatedAt: bigint;
@@ -189,13 +202,19 @@ describe("Issue #1052 scenario gap-closing", () => {
       }),
       mockDb,
     });
-    const afterSecond = mockDb.entities.BreakerConfig.get(cfgId) as {
+    const afterSecondRaw = mockDb.entities.BreakerConfig.get(cfgId);
+    assert.ok(
+      afterSecondRaw,
+      "BreakerConfig must exist after the second MedianUpdated",
+    );
+    const afterSecond = afterSecondRaw as {
       medianRatesEMA: bigint;
       lastMedianRate: bigint;
       lastUpdatedAt: bigint;
     };
     const expectedBlend =
-      (M2 * SMOOTHING + M1 * (FIXED_1 - SMOOTHING)) / FIXED_1;
+      (M2 * SMOOTHING + afterFirst.medianRatesEMA * (FIXED_1 - SMOOTHING)) /
+      FIXED_1;
     assert.equal(
       afterSecond.medianRatesEMA,
       expectedBlend,
@@ -261,11 +280,10 @@ describe("Issue #1052 scenario gap-closing", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(poolId) as
-      | { breakerTripped: boolean }
-      | undefined;
+    const pool = mockDb.entities.Pool.get(poolId);
+    assert.ok(pool, "Pool must exist for poolId");
     assert.equal(
-      pool?.breakerTripped,
+      (pool as { breakerTripped: boolean }).breakerTripped,
       true,
       "the feed's own already-tripped breaker must be reconciled onto the pool in the same event that bootstraps it",
     );
@@ -457,9 +475,18 @@ describe("Issue #1052 scenario gap-closing", () => {
       mockDb,
     });
 
-    const registeredAfter = mockDb.entities.BreakerConfig.get(
+    const registeredAfterRaw = mockDb.entities.BreakerConfig.get(
       registeredCfg.id,
-    ) as { tradingMode: number; status: string; cooldownEndsAt: bigint };
+    );
+    assert.ok(
+      registeredAfterRaw,
+      "BreakerConfig must exist for the registered breaker after TradingModeUpdated",
+    );
+    const registeredAfter = registeredAfterRaw as {
+      tradingMode: number;
+      status: string;
+      cooldownEndsAt: bigint;
+    };
     assert.equal(registeredAfter.tradingMode, 3);
     assert.equal(registeredAfter.status, "TRIPPED");
     assert.equal(
@@ -468,7 +495,12 @@ describe("Issue #1052 scenario gap-closing", () => {
       "registered breaker's config uses the breaker's inherited (900s) cooldown",
     );
 
-    const ghostAfter = mockDb.entities.BreakerConfig.get(ghostCfg.id) as {
+    const ghostAfterRaw = mockDb.entities.BreakerConfig.get(ghostCfg.id);
+    assert.ok(
+      ghostAfterRaw,
+      "BreakerConfig must exist for the ghost breaker after TradingModeUpdated",
+    );
+    const ghostAfter = ghostAfterRaw as {
       tradingMode: number;
       status: string;
       cooldownEndsAt: bigint;
@@ -481,9 +513,12 @@ describe("Issue #1052 scenario gap-closing", () => {
       "unresolved-breaker config falls back to its OWN cooldownTime, not the sibling's default",
     );
 
-    const pool = mockDb.entities.Pool.get(poolId) as {
-      breakerTripped: boolean;
-    };
+    const poolRaw = mockDb.entities.Pool.get(poolId);
+    assert.ok(
+      poolRaw,
+      "Pool must exist for poolId after TradingModeUpdated fan-out",
+    );
+    const pool = poolRaw as { breakerTripped: boolean };
     assert.equal(
       pool.breakerTripped,
       true,
