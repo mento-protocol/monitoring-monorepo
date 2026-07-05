@@ -379,8 +379,18 @@ jobs:
               // No preview yet — check whether Vercel has already ruled this
               // SHA out via its Ignored Build Step before polling again. A
               // pending/absent Vercel status means a build may still be
-              // starting, so keep polling in that case.
-              if (await vercelIgnoredBuild()) {
+              // starting, so keep polling in that case. A status-API error is
+              // treated the same as "no verdict yet" so it cannot bypass the
+              // 5-minute timeout backstop below.
+              let ignoredBuild = false;
+              try {
+                ignoredBuild = await vercelIgnoredBuild();
+              } catch (error) {
+                core.info(
+                  `Vercel status lookup failed (will keep polling): ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+              if (ignoredBuild) {
                 core.notice(
                   `Vercel canceled the build for ${sha} via its Ignored Build Step — ` +
                     "no preview will be posted for this SHA, so there is no new " +
@@ -390,7 +400,7 @@ jobs:
                   const priorPreview = await findPriorSuccessfulPreviewForCurrentDashboard();
                   core.info(
                     priorPreview
-                      ? `Prior preview ${priorPreview.previewUrl} (${priorPreview.sha}) still covers the current dashboard bundle.`
+                      ? `Prior successful preview ${priorPreview.previewUrl} at ${priorPreview.sha} still covers the current dashboard bundle.`
                       : "No prior branch preview exists; the branch has never produced a dashboard-affecting change per Vercel.",
                   );
                 } catch (error) {
