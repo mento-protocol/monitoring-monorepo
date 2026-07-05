@@ -6,14 +6,14 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 
 ## Packages
 
-| Package                                         | Description                                                                          |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad multichain                                   |
-| [`ui-dashboard`](./ui-dashboard/)               | Next.js 16 + Plotly.js dashboard with multi-chain network switching                  |
-| [`metrics-bridge`](./metrics-bridge/)           | Hasura → Prometheus exporter for v3 alert rules                                      |
-| [`shared-config`](./shared-config/)             | Shared deployment config (chain ID → treb namespace mappings)                        |
-| [`aegis`](./aegis/)                             | App Engine v2 alerting service + Aegis Grafana dashboards                            |
-| [`governance-watchdog`](./governance-watchdog/) | Cloud Function watching Mento Governance events → Discord/Telegram (own GCP project) |
+| Package                                         | Description                                                                                                 |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad multichain                                                          |
+| [`ui-dashboard`](./ui-dashboard/)               | Next.js 16 + Plotly.js multi-chain dashboard — all chains shown together, network derived from the pool URL |
+| [`metrics-bridge`](./metrics-bridge/)           | Hasura → Prometheus exporter for v3 alert rules                                                             |
+| [`shared-config`](./shared-config/)             | Shared deployment config (chain ID → treb namespace mappings)                                               |
+| [`aegis`](./aegis/)                             | App Engine v2 alerting service + Aegis Grafana dashboards                                                   |
+| [`governance-watchdog`](./governance-watchdog/) | Cloud Function watching Mento Governance events → Discord/Telegram (own GCP project)                        |
 
 ## Architecture
 
@@ -247,10 +247,6 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `SQUID_INTEGRATOR_ID`           | Squid integrator id; probes return `needs_key` without it                                   |
 | `SQUID_CELO_RPC_URL`            | Optional Celo RPC override for Squid Uniswap-liquidity discovery sizing (defaults to Forno) |
 | `SOCKET_API_KEY`                | Optional Socket quote API key                                                               |
-| `RANGO_API_KEY`                 | Optional Rango quote API key                                                                |
-| `OKX_DEX_API_KEY`               | Optional OKX DEX API key                                                                    |
-| `OKX_DEX_SECRET`                | Optional OKX DEX signing secret                                                             |
-| `OKX_DEX_PASSPHRASE`            | Optional OKX DEX passphrase                                                                 |
 
 Production env vars are managed by Terraform except the Blob OIDC variables, which are managed by the Vercel store integration. See [`terraform/`](./terraform/).
 

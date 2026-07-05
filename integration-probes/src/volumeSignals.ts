@@ -55,7 +55,6 @@ const VOLUME_SOURCES: Record<string, VolumeSource> = {
   ),
   openocean: defillama("dex-aggregators", "OpenOcean"),
   kyberswap: defillama("dex-aggregators", "KyberSwap"),
-  okx: defillama("dex-aggregators", "OKX DEX"),
   "1inch": defillama("dex-aggregators", "1inch"),
   "0x": defillama("dex-aggregators", "0x Aggregator"),
   "cow-swap": defillama("dex-aggregators", "CoWSwap"),
@@ -68,7 +67,6 @@ const VOLUME_SOURCES: Record<string, VolumeSource> = {
   ),
   odos: defillama("dex-aggregators", "ODOS"),
   socket: defillama("bridge-aggregators", "Bungee", "bridge-aggregator"),
-  rango: defillama("bridge-aggregators", "Rango", "bridge-aggregator"),
   rubic: defillama("bridge-aggregators", "Rubic", "bridge-aggregator"),
   debridge: unavailable(
     "direct-bridge",

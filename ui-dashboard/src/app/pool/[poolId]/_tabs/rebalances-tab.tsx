@@ -23,6 +23,7 @@ import {
   formatUSD,
   relativeTime,
 } from "@/lib/format";
+import { sortedCopy } from "@/lib/immutable-sort";
 import { useGQL } from "@/lib/graphql";
 import {
   POOL_REBALANCE_REWARDS,
@@ -117,14 +118,11 @@ export function computeRewardThresholds(
     const v = r ? Number(r) : Number.NaN;
     return Number.isFinite(v) && v > 0 ? [v] : [];
   });
-  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-  const values = [...finite].sort((a, b) => a - b);
+  const values = sortedCopy(finite, (a, b) => a - b);
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
   const med = median(values);
-  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-  const deviations = [...values.map((v) => Math.abs(v - med))].sort(
+  const deviations = sortedCopy(
+    values.map((v) => Math.abs(v - med)),
     (a, b) => a - b,
   );
   const mad = median(deviations);
@@ -285,10 +283,8 @@ export function RebalancesTab({
     const raw = (chartData?.RebalanceEvent ?? []).filter(
       (r) => r.effectivenessRatio != null && r.effectivenessRatio !== "",
     );
-    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-    return [...raw].sort(
+    return sortedCopy(
+      raw,
       (a, b) => Number(a.blockTimestamp) - Number(b.blockTimestamp),
     );
   }, [chartData]);

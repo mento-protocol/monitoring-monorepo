@@ -57,66 +57,11 @@ using a CLI workaround.
 
 ## Spoken Attention Nudge
 
-When you need the user's attention and they are not actively responding, send a
-brief spoken nudge with `sag` in addition to the normal chat message. Default to
-doing this when blocked on a user decision, waiting on approval for a production
-mutation, a long task has finished and needs user follow-up, or plan feedback is
-required before meaningful progress can continue.
-
-Use Charlie's voice with `sag` when it is installed and configured. Keep the
-spoken message short and specific. Both Codex and Claude should prefer the
-repo-standard key file path so behavior does not depend on shell startup files
-or stripped environment variables:
-
-```bash
-sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "hey, i need your approval to deploy the Alloy collector"
-```
-
-`sag` needs network access to ElevenLabs, a readable ElevenLabs API key, and the
-local audio device. Store the key for agent nudges in
-`$HOME/.config/sag/elevenlabs-api-key` with mode `0600`, then invoke `sag` with
-`--api-key-file`. This is required for Codex because it does not reliably
-inherit shell startup files, and its environment policy strips secret-like
-variables such as `ELEVENLABS_API_KEY`, even when they exist in `.zshrc`. Claude
-may inherit `.zshrc` in local shells, but should still use the same key-file
-command so the two agents behave consistently.
-
-Because `sag` is a third-party Homebrew package, it may not exist on every
-developer machine. Use this fallback order:
-
-```bash
-msg="hey, i need your feedback on the deploy"
-sent=0
-if command -v sag >/dev/null 2>&1 && [ -r "$HOME/.config/sag/elevenlabs-api-key" ]; then
-  sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "$msg" && sent=1
-fi
-if [ "$sent" -eq 0 ] && command -v say >/dev/null 2>&1; then
-  say "$msg" && sent=1
-fi
-if [ "$sent" -eq 0 ] && command -v spd-say >/dev/null 2>&1; then
-  spd-say "$msg" && sent=1
-fi
-if [ "$sent" -eq 0 ]; then
-  printf 'spoken nudge unavailable; falling back to chat only: %s\n' "$msg" >&2
-fi
-```
-
-On macOS, `say` is the expected built-in fallback. Linux has no universal
-built-in TTS command; `spd-say` is best-effort only when installed. In Codex,
-request escalated execution for the nudge instead of trying to run it inside the
-workspace sandbox. If every spoken path fails, report the failure in chat and
-continue with the visible written request; do not silently assume the user heard
-the nudge. Claude command pre-approvals should stay limited to literal,
-low-information nudge messages. Do not pre-approve arbitrary `say`, `spd-say`,
-or `sag` message arguments, because shell substitutions in those arguments could
-disclose local file contents through speech or the ElevenLabs request.
-
-Do not wire this into the existing SessionEnd hook. The current shared hook
-events do not know whether the agent is genuinely waiting on the user versus
-waiting on CI, bot review, deploy sync, or another external process, so a hook
-would either miss the important decision point or create noisy false alarms.
-Use the manual `sag` call at the moment the agent identifies a real user-input
-blocker.
+When you need the user's attention and they are not actively responding (blocked
+on a decision, waiting on approval for a production mutation, a long task just
+finished, or plan feedback is required), send a brief spoken nudge with `sag` in
+addition to the normal chat message. See `docs/notes/spoken-attention-nudge.md`
+for the fallback ladder, key-file setup, and pre-approval constraints.
 
 > **Any PR that adds or changes stateful data flow across layers must ship with explicit invariants, degraded-mode behavior, and interaction tests before opening.**
 
@@ -190,145 +135,20 @@ carry routing/risk labels such as `source:backlog`, `pkg:*`, `kind:*`, and
 Before opening or updating an agent-authored PR, run:
 
 ```bash
-pnpm agent:quality-gate
+pnpm agent:quality-gate          # dry-run: maps changed paths to package checks + PR checklists
+pnpm agent:quality-gate --run    # executes the mapped local-only commands (lint, typecheck, tests, codegen, Trunk, formatting)
+pnpm agent:autoreview            # structured closeout review; batch-boundary verifier for non-trivial batches
+pnpm agent:review-materiality    # classify review depth (trivial/standard/full) + likely context-update needs
+pnpm agent:prewarm --base origin/main  # warm Turbo's local cache for the same mapped package tasks
 ```
 
-The gate defaults to dry-run mode and maps changed paths to the package checks
-and PR checklists that apply. Review the checklist output, then run the mapped
-safe local commands with:
-
-```bash
-pnpm agent:quality-gate --run
-```
-
-The execution mode is intentionally local-only: lint, typecheck, tests, codegen,
-Trunk, and formatting/validation commands. It never runs deploy commands or
-Terraform apply. If any package manifest, `pnpm-lock.yaml`,
-`pnpm-workspace.yaml`, `.npmrc`, pnpmfile, or `patches/**` file changed,
-`--run` refuses to execute until you review package scripts/lifecycle hooks and pass
-`--allow-package-script-changes`. The narrow exception is a root `package.json`
-edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
-`scripts.agent:quality-gate:test`, `scripts.agent:prewarm`,
-`scripts.agent:prewarm:test`, `scripts.agent:review-materiality`,
-`scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
-`scripts.agent:autoreview`, `scripts.issue:board`,
-`scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
-`scripts.issue:release`, `scripts.pr:feedback-state`,
-`scripts.pr:feedback-state:test`, `scripts.pr:ready-state`,
-`scripts.pr:ready-state:test`,
-`scripts.tf`, `scripts.tf:test`, `scripts.alerts:rules:lint`,
-`scripts.alerts:rules:lint:test`, `scripts.lockfile:lint`,
-`scripts.lockfile:lint:test`, `scripts.skew:check`,
-`scripts.skew:check:test`, or `scripts.sanitize:test`; the gate treats that
-as tooling-only and runs an entrypoint validator plus the
-gate/prewarm/PR-feedback/PR-ready/Terraform-stack regression tests instead of
-the package-script refusal path. Existing changed paths run
-targeted Trunk checks for faster local iteration. Deleted paths,
-Trunk/tooling changes, package-manager changes, pnpm patches, and
-package-manifest changes still run full-repo Trunk locally. CI also runs a
-required full-repo Trunk check on every
-PR. Normal `--run` mode executes independent quality-phase commands with
-bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
-`AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
-Terraform init/validate chains, Playwright browser install, and shared-config
-build setup remain ordered. Dashboard `test:browser` and build-backed
-`size-limit` also stay serialized because both touch `ui-dashboard/.next`.
-`--fail-fast` stays sequential so it still stops before starting the next mapped
-command.
-
-For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
-the structured closeout review after the mapped gate and before pushing:
-
-```bash
-pnpm agent:autoreview
-```
-
-Use it as a batch-boundary verifier. Verify every accepted finding in the real
-code before editing, rerun focused checks after review-triggered fixes, and
-rerun autoreview once for that fixed batch. This adapter uses the repo-local
-helper at `scripts/agent-autoreview.mjs` by default and does not replace the
-final PR readiness probe. Inside an active Codex sandbox, the adapter defaults
-to the helper's local deterministic engine because nested `codex exec` is unavailable there;
-pass `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` to override.
-Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the pinned
-repo helper.
-
-For a true Codex semantic pass from inside Codex, prepare a repo-context bundle
-and pass that bundle to a fresh-context reviewer:
-
-```bash
-pnpm agent:autoreview --prepare-bundle-dir /tmp/autoreview-bundle
-```
-
-Use a directory outside the repo worktree so local-mode bundles do not include
-their own generated files. The bundle contains changed paths, patch files,
-repo-selected checklist/prompt context, and the helper's
-`autoreview-prompt.md`. Add
-`--feedback-pr <number>` to include the current `pr:feedback-state` ledger as a
-review dataset for feedback-fix batches.
-
-To classify review depth and likely context-update requirements before or after
-the mapped gate, use:
-
-```bash
-pnpm agent:review-materiality
-```
-
-The command reports `trivial`, `standard`, or `full` materiality from changed
-path risk and diff size, plus whether the change likely needs AGENTS, README,
-runbook, checklist, or skill context updates. It is advisory: it helps choose
-review depth, but it does not replace `pnpm agent:quality-gate --run`,
-`pnpm agent:autoreview`, or `pnpm pr:ready-state`.
-
-To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
-same gate without running deploy, Terraform, mutation, codegen, or install
-commands, use:
-
-```bash
-pnpm agent:prewarm --base origin/main
-```
-
-It is a no-op when the gate maps no relevant Turbo commands. Like the run mode
-gate, prewarm refuses to execute Turbo-backed package scripts when package
-manifests, lockfiles, `.npmrc`, pnpmfile, or `patches/**` changed unless you
-first review the script/lifecycle diff and pass `--allow-package-script-changes`. Prewarm runs
-Turbo commands with bounded parallelism too (`--parallel <n>`, default `2`, or
-`AGENT_PREWARM_PARALLELISM`) and captures each command's output separately so
-concurrent logs do not interleave. The same dashboard `.next` serialization rule
-applies to prewarm.
-
-The Trunk pre-push hook delegates to this same path-aware gate with
-`--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped
-command instead of burning through the rest of the suite, and it reuses a
-recent successful manual gate run when the fetched base commit, mapped command
-plan, gate implementation, changed paths, validated file content, package-risk
-state, and package-script acknowledgement are unchanged. For a push that
-intentionally changes package scripts or package-manager config, review the
-script/lifecycle diff first, then temporarily set
-`agent.qualityGate.allowPackageScriptChanges=true` in local git config for that
-push; a just-passed acknowledged manual gate can then satisfy the pre-push
-`--skip-if-fresh` check.
-
-Package-local gate tasks for `lint`, `typecheck`, `knip`, dashboard size-limit,
-local dashboard browser tests, and dashboard React Doctor checks run through
-Turbo's local filesystem cache (`pnpm exec turbo run ... --cache=local:rw`).
-The gate coalesces same-task Turbo checks into one invocation with multiple
-explicit `--filter` arguments when several packages map the same task. Remote
-caching is disabled in `turbo.json`. The Turbo config is only for the gate's
-explicit package-filtered invocations; do not use it as a general workspace
-task orchestrator.
-Per-package coverage floors run as direct package commands such as
-`pnpm --filter <pkg> test:coverage` (or Aegis `test:cov`) so they always
-exercise the current local coverage threshold rather than a stale cached test
-result.
-Dashboard build/browser/React Doctor cache keys explicitly include
-`shared-config`, package-manager, workflow, wrapper-script, and relevant env
-inputs; CI still runs browser tests normally and remains the Linux snapshot
-authority. The only task dependency is `size-limit -> build`, because
-size-limit reads `.next/` output; the local gate relies on that dependency
-instead of mapping a separate dashboard build command for size-limit checks.
-High-risk or cross-layer commands stay outside Turbo, including codegen,
-install, dep-cruiser, coverage floors, mutation baselines, and Terraform.
+The gate is local-only (never deploy or Terraform apply) and refuses `--run`
+when package manifests, the lockfile, `.npmrc`, pnpmfile, or `patches/**`
+changed until you review the script/lifecycle diff and pass
+`--allow-package-script-changes`. The Trunk pre-push hook delegates to this
+same gate with `--fail-fast --skip-if-fresh`. For parallelism knobs, Turbo
+caching rules, the package-script refusal exceptions, and Codex-native review
+bundle prep, see `docs/notes/agent-quality-gate-mechanics.md`.
 
 ## PR description standard
 
@@ -576,7 +396,7 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 | `metrics-bridge/`      | Hasura → Prometheus gauge exporter for v3 alert rules; bounded label cardinality required.                                                                                                                                                                                                                                                                                               | [`metrics-bridge/AGENTS.md`](metrics-bridge/AGENTS.md)           |
 | `integration-probes/`  | Quote-only Mento v3 route coverage probes for aggregators and cross-chain routers. Publishes `integration-probes:latest` in Upstash for the dashboard `/integrations` page.                                                                                                                                                                                                              | [`integration-probes/AGENTS.md`](integration-probes/AGENTS.md)   |
 | `terraform/`           | Vercel project + Upstash Redis + env vars + Cloud Run services + platform-owned repo Actions secrets. `pnpm infra:plan` before any apply; never apply without human approval.                                                                                                                                                                                                            | [`terraform/AGENTS.md`](terraform/AGENTS.md)                     |
-| `alerts/`              | All alert plumbing. `alerts/rules/` = protocol Grafana metric alert rules plus global Grafana routing/contact points/templates; `alerts/infra/` = event-driven delivery (QuickNode→Cloud Fn→Slack + Sentry→Slack bridge + Splunk On-Call rotation announcer + Slack channel lifecycle). `alerts/infra/onchain-event-handler/` and `alerts/infra/oncall-announcer/` are TS pnpm packages. | [`alerts/infra/README.md`](alerts/infra/README.md)               |
+| `alerts/`              | All alert plumbing. `alerts/rules/` = protocol Grafana metric alert rules plus global Grafana routing/contact points/templates; `alerts/infra/` = event-driven delivery (QuickNode→Cloud Fn→Slack + Sentry→Slack bridge + Splunk On-Call rotation announcer + Slack channel lifecycle). `alerts/infra/onchain-event-handler/` and `alerts/infra/oncall-announcer/` are TS pnpm packages. | [`alerts/AGENTS.md`](alerts/AGENTS.md)                           |
 | `governance-watchdog/` | Cloud Function monitoring Mento Governance on-chain events; sends Discord + Telegram notifications. Standalone source root with its own `pnpm-lock.yaml` and Cloud Build deploy path.                                                                                                                                                                                                    | [`governance-watchdog/README.md`](governance-watchdog/README.md) |
 | `scripts/`             | Deploy wrappers, agent quality gate, code-health checks. `set -euo pipefail`; refuse dirty trees before mutating external systems.                                                                                                                                                                                                                                                       | [`scripts/AGENTS.md`](scripts/AGENTS.md)                         |
 
@@ -646,54 +466,14 @@ ship gate; update it deliberately when taking upstream improvements from a
 personal/global skill.
 
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
-`~/.claude` directories. Cloud setup and maintenance therefore rely on the
-repo-local helper at `scripts/agent-autoreview.mjs`; they fail fast only if that
-repo-owned executable is missing or an explicit `AUTOREVIEW_HELPER` override is
-not executable. PR shipping requires `pnpm agent:autoreview` as the structured
-batch-boundary review.
-Configure the Codex Cloud environment setup script as:
-
-```bash
-./scripts/codex-cloud-setup.sh
-```
-
-Configure the optional Codex Cloud environment maintenance script as:
-
-```bash
-./scripts/codex-cloud-maintenance.sh
-```
-
-Codex Cloud setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for GitHub
-CLI-backed PR workflows, installs GitHub CLI from the official apt repository if
-the base image lacks it, configures git to use `gh` credentials for fetch/push,
-and refreshes `origin/main` before agent work starts. It also
-prewarms the pinned Trunk CLI and runs `./tools/trunk install` so
-Trunk-managed linters/runtimes are available before a task starts. If the cloud
-proxy blocks Trunk, allowlist
-`https://trunk.io/releases/`; if direct egress is available but the proxy is the
-blocker, set `CODEX_CLOUD_TRUNK_BYPASS_PROXY=1` to add `trunk.io` to `NO_PROXY`
-during setup. If neither route is available, set `CODEX_CLOUD_TRUNK_TARBALL_URL`
-to a reachable mirror of the pinned Linux Trunk tarball and set
-`CODEX_CLOUD_TRUNK_TARBALL_SHA256` so setup verifies the mirrored artifact before
-installing it. Keep `CODEX_CLOUD_TRUNK_INSTALL_TOOLS=true` (the default) for
-normal Cloud runs; set it to `false` only when using a base image with a
-prewarmed Trunk cache. Setup also installs Foundry by default
-(`CODEX_CLOUD_INSTALL_FOUNDRY=true`) so Aegis `forge test` checks can run. Set
-`CODEX_CLOUD_FOUNDRYUP_URL` to use a mirrored installer and
-`CODEX_CLOUD_FOUNDRYUP_SHA256` to verify that mirrored installer before
-execution. Setup checks OSV API egress by POSTing to
-`https://api.osv.dev/v1/querybatch` unless `CODEX_CLOUD_CHECK_OSV_EGRESS=false`,
-and verifies the repo-local autoreview helper at
-`scripts/agent-autoreview.mjs` before tool prewarm. Set `AUTOREVIEW_HELPER` only
-for an intentional executable override; setup fails fast when the effective
-helper is missing.
-
-Codex Cloud maintenance runs when Codex resumes a cached container after
-checking out the task branch. It skips apt/tool installation, re-establishes
-repo-local git state, refreshes `origin/main`, verifies that the repo-local
-autoreview helper is still present, syncs branch lockfile changes via
-`CI=true pnpm install --frozen-lockfile --prefer-offline`, regenerates Envio
-types, and runs `pnpm agent:context-check`.
+`~/.claude` directories; setup and maintenance rely on the repo-local helper at
+`scripts/agent-autoreview.mjs`, which fails fast if missing. PR shipping
+requires `pnpm agent:autoreview` as the structured batch-boundary review.
+Configure the environment setup script as `./scripts/codex-cloud-setup.sh` and
+the optional maintenance script as `./scripts/codex-cloud-maintenance.sh`. Full
+mechanics (GitHub CLI bootstrap, Trunk/Foundry install and mirror knobs, OSV
+egress check, maintenance fast-path) live in
+`docs/notes/codex-cloud-setup.md`.
 
 For workflow continuity, this repo includes thin repo-local `ship` and
 `babysit-pr` skill adapters under `.agents/skills/` with matching

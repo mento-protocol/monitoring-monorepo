@@ -189,6 +189,8 @@ const coreContextFiles = [
   ...scopedAgentDirs.map((dir) => `${dir}/AGENTS.md`),
   "docs/context-standards.md",
   "docs/pr-checklists/recurring-review-patterns.md",
+  "docs/notes/agent-quality-gate-mechanics.md",
+  "docs/notes/spoken-attention-nudge.md",
   ...canonicalSkillFiles.filter((file) => file.endsWith("/SKILL.md")),
   ...trackedFiles(".agents/roles", (file) => file.endsWith(".md"), {
     required: true,

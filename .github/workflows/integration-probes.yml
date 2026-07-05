@@ -29,10 +29,6 @@ jobs:
       ONEINCH_API_KEY: ${{ secrets.ONEINCH_API_KEY }}
       SQUID_INTEGRATOR_ID: ${{ secrets.SQUID_INTEGRATOR_ID }}
       SOCKET_API_KEY: ${{ secrets.SOCKET_API_KEY }}
-      RANGO_API_KEY: ${{ secrets.RANGO_API_KEY }}
-      OKX_DEX_API_KEY: ${{ secrets.OKX_DEX_API_KEY }}
-      OKX_DEX_SECRET: ${{ secrets.OKX_DEX_SECRET }}
-      OKX_DEX_PASSPHRASE: ${{ secrets.OKX_DEX_PASSPHRASE }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/pnpm-install
