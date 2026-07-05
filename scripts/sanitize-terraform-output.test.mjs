@@ -94,6 +94,12 @@ const FIXTURE_LINES = [
   'splunk_key = "SECRETHCLUNDERSCOREKEYVALUE1234567890"',
   // security_token: bare colon form, and JSON-quoted (plain + escaped) form.
   "security_token: SECRETSECURITYTOKENVALUE1234567890",
+  // Bare equals (unquoted) form — regression guard against the "[:=]" branch
+  // silently narrowing to "[:]" and dropping this form's redaction.
+  "security_token = SECRETSECURITYTOKENBAREEQUALS1234567890",
+  // Bare colon form with a base64-ish value (/, +, = characters), matching
+  // the shape of a real AWS STS temporary security_token.
+  "security_token: FwoGZXIvYXdzEMb//////////wEaoA==",
   'security_token = "SECRETSECURITYTOKENHCLQUOTED1234567890"',
   '"security_token": "SECRETJSONSECURITYTOKEN1234567890"',
   '\\"security_token\\": \\"SECRETJSONSECURITYTOKENESCAPED1234567890\\"',
@@ -316,6 +322,32 @@ test("redacts bare security_token in ':' form", () => {
     output,
     "SECRETSECURITYTOKENVALUE1234567890",
     "security_token leaked",
+  );
+});
+
+test("redacts bare security_token in '=' form (unquoted)", () => {
+  assertIncludes(
+    output,
+    "security_token = [REDACTED]",
+    "bare equals-form security_token not redacted",
+  );
+  assertNotIncludes(
+    output,
+    "SECRETSECURITYTOKENBAREEQUALS1234567890",
+    "bare equals-form security_token leaked",
+  );
+});
+
+test("redacts bare security_token with base64-ish characters (/, +, =)", () => {
+  assertIncludes(
+    output,
+    "security_token: [REDACTED]\n",
+    "base64-ish security_token value not fully redacted (character class too narrow)",
+  );
+  assertNotIncludes(
+    output,
+    "wEaoA==",
+    "base64-ish security_token value partially leaked (character class too narrow)",
   );
 });
 
