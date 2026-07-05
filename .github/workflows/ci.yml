@@ -240,6 +240,11 @@ jobs:
               # if only the new workflow file is touched (no script change).
               - .github/workflows/**
               - .github/actions/pnpm-install/**
+              # The baseline-resolve composite exports ESLINT_BASELINE_MAIN,
+              # consumed by scripts/eslint-baseline-diff.mjs — the scripts
+              # job's baseline-diff semantic suite must re-run when the
+              # producing action changes.
+              - .github/actions/resolve-eslint-baseline/**
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the

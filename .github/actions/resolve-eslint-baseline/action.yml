@@ -35,6 +35,14 @@ runs:
     - shell: bash
       run: |
         set -euo pipefail
+        # Guard the implicit contract: with fetch-main 'false' the caller's
+        # checkout must have made origin/main available (fetch-depth: 0).
+        # Without this guard a misconfigured caller gets a cryptic
+        # "Not a valid object name 'origin/main'" with no hint at the cause.
+        if ! git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
+          echo "::error::refs/remotes/origin/main not found. Either keep fetch-main: 'true' or use fetch-depth: 0 in the caller's checkout." >&2
+          exit 1
+        fi
         # Only tolerate a genuinely missing baseline file on main (package
         # didn't exist there yet) — not a missing ref or ls-tree failure.
         if git ls-tree --name-only origin/main -- "${{ inputs.package-path }}/eslint-baseline.json" | grep -q .; then
