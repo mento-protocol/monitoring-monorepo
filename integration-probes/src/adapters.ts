@@ -62,7 +62,6 @@ export const AGGREGATOR_ADAPTERS: AggregatorAdapter[] = [
   squidAdapter(),
   openOceanAdapter(),
   kyberAdapter(),
-  okxAdapter(),
   oneInchAdapter(),
   zeroXAdapter(),
   excludedAdapter(
@@ -82,7 +81,6 @@ export const AGGREGATOR_ADAPTERS: AggregatorAdapter[] = [
     "Public chain metadata currently lists neither Celo nor Monad.",
   ),
   socketAdapter(),
-  rangoAdapter(),
   rubicAdapter(),
   excludedAdapter(
     "debridge",
@@ -241,36 +239,6 @@ function kyberAdapter(): AggregatorAdapter {
       getRequest(kyberUrl(input), {
         "x-client-id": "mento-integration-probes",
       }),
-  };
-}
-
-function okxAdapter(): AggregatorAdapter {
-  return {
-    id: "okx",
-    label: "OKX DEX API",
-    kind: "dex",
-    tier: 2,
-    credentialEnv: ["OKX_DEX_API_KEY", "OKX_DEX_SECRET", "OKX_DEX_PASSPHRASE"],
-    support: { 42220: "unsupported", 143: "supported" },
-    researchNote:
-      "OKX docs list Monad but not Celo; signed API probing is required.",
-    nextStep:
-      "Implement OKX request signing before enabling live quote probes.",
-  };
-}
-
-function rangoAdapter(): AggregatorAdapter {
-  return {
-    id: "rango",
-    label: "Rango",
-    kind: "cross_chain",
-    tier: 2,
-    credentialEnv: ["RANGO_API_KEY"],
-    support: { 42220: "unknown", 143: "unknown" },
-    researchNote:
-      "Rango metadata requires an API key; chain support is probed when configured.",
-    nextStep:
-      "Add Rango quote endpoint mapping once API credentials are available.",
   };
 }
 

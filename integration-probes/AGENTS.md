@@ -84,9 +84,8 @@ pnpm --filter @mento-protocol/integration-probes knip
   when writing snapshots.
 - Adapter credentials are optional at the infrastructure layer and should
   surface as `needs_key` when missing: `LIFI_API_KEY`, `OPENOCEAN_API_KEY`,
-  `ZEROX_API_KEY`, `ONEINCH_API_KEY`, `SQUID_INTEGRATOR_ID`,
-  `SOCKET_API_KEY`, `RANGO_API_KEY`, `OKX_DEX_API_KEY`, `OKX_DEX_SECRET`, and
-  `OKX_DEX_PASSPHRASE`.
+  `ZEROX_API_KEY`, `ONEINCH_API_KEY`, `SQUID_INTEGRATOR_ID`, and
+  `SOCKET_API_KEY`.
 - `LIFI_API_KEY` authenticates LI.FI/Jumper quote probes with
   `x-lifi-api-key`; keep it server-side and Terraform-managed.
 - `FLYTRADE_API_KEY` authenticates the Fly.trade follow-up requests behind
