@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -633,6 +633,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
   add_command "node scripts/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/version-skew-check.test.mjs" "$reason"
+  add_command "node scripts/override-prune-report.test.mjs" "$reason"
 }
 
 add_indexer_post_codegen_install() {
@@ -1422,6 +1423,9 @@ while IFS= read -r path; do
           ;;
         scripts/version-skew-check.mjs|scripts/version-skew-check.test.mjs)
           add_command "pnpm skew:check:test" "version skew checker changed"
+          ;;
+        scripts/override-prune-report.mjs|scripts/override-prune-report.test.mjs)
+          add_command "pnpm override:prune-report:test" "override prune report helper changed"
           ;;
         scripts/check-hermetic-vitest-setup.mjs|scripts/check-hermetic-vitest-setup.test.mjs)
           add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup checker changed"
