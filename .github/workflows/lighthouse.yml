@@ -91,6 +91,11 @@ jobs:
       # `deployments: read` lets the job query the GitHub Deployments API to
       # find the Vercel preview URL without needing a Vercel API token.
       deployments: read
+      # `statuses: read` lets the wait step read the combined commit status to
+      # detect Vercel's "Canceled by Ignored Build Step" verdict. Without it
+      # the lookup 403s and (by design) degrades to the timeout path, so the
+      # ignored-build skip would silently never engage.
+      statuses: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -391,6 +396,42 @@ jobs:
                 );
               }
               if (ignoredBuild) {
+                // Do NOT trust the verdict when this push touches the ignore
+                // machinery itself: a buggy (or malicious) edit to the skip
+                // logic could make Vercel report "ignored" for a SHA that
+                // really changes the dashboard, and silently skipping would
+                // suppress the audit exactly when it matters. Fall through to
+                // the polling/timeout path instead, which fails loudly and
+                // forces the change to prove itself.
+                const ignoreMachineryPaths = [
+                  "ui-dashboard/scripts/vercel-ignore-build.sh",
+                  "ui-dashboard/vercel.json",
+                ];
+                try {
+                  const latestPush = await latestPushTouchedDashboard();
+                  const touchedMachinery = (latestPush.files ?? []).filter(f =>
+                    ignoreMachineryPaths.includes(f),
+                  );
+                  if (touchedMachinery.length > 0) {
+                    core.warning(
+                      `Vercel reported "Canceled by Ignored Build Step" for ${sha}, but this ` +
+                        `push touches the ignore machinery (${touchedMachinery.join(", ")}) — ` +
+                        "not trusting the verdict; continuing to poll (will fail loudly on timeout).",
+                    );
+                    core.info(`No active preview yet — retrying in ${pollIntervalMs / 1000}s...`);
+                    await new Promise(r => setTimeout(r, pollIntervalMs));
+                    continue;
+                  }
+                } catch (error) {
+                  core.warning(
+                    `Could not verify the pushed file list before honoring Vercel's ignored-build ` +
+                      `verdict (${error instanceof Error ? error.message : String(error)}) — ` +
+                      "not trusting the verdict; continuing to poll.",
+                  );
+                  core.info(`No active preview yet — retrying in ${pollIntervalMs / 1000}s...`);
+                  await new Promise(r => setTimeout(r, pollIntervalMs));
+                  continue;
+                }
                 core.notice(
                   `Vercel canceled the build for ${sha} via its Ignored Build Step — ` +
                     "no preview will be posted for this SHA, so there is no new " +
