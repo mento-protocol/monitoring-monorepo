@@ -32,6 +32,7 @@ const expectedScripts = {
   "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
   "skew:check": "node scripts/version-skew-check.mjs",
   "skew:check:test": "node scripts/version-skew-check.test.mjs",
+  "sanitize:test": "node scripts/sanitize-terraform-output.test.mjs",
 };
 
 for (const [name, expected] of Object.entries(expectedScripts)) {

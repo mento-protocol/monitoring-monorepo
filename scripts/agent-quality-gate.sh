@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -1351,6 +1351,9 @@ while IFS= read -r path; do
         scripts/deploy-*.sh)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
           ;;
+        scripts/sanitize-terraform-output.sh)
+          add_command "pnpm sanitize:test" "Terraform output sanitizer changed"
+          ;;
       esac
       case "$path" in
         scripts/check-agent-quality-gate-package-scripts.sh)
@@ -1419,6 +1422,9 @@ while IFS= read -r path; do
           ;;
         scripts/pnpm-audit-high-gate.mjs|scripts/pnpm-audit-high-gate.test.mjs)
           add_command "node scripts/pnpm-audit-high-gate.test.mjs" "pnpm audit high gate changed"
+          ;;
+        scripts/sanitize-terraform-output.test.mjs)
+          add_command "pnpm sanitize:test" "Terraform output sanitizer test changed"
           ;;
         scripts/version-skew-check.mjs|scripts/version-skew-check.test.mjs)
           add_command "pnpm skew:check:test" "version skew checker changed"

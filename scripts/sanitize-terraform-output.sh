@@ -18,6 +18,8 @@ sed -E \
 	-e 's#(\\?"[A-Za-z0-9_-]*api[-_]key\\?"[[:space:]]*=[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
 	-e 's#(_key[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
 	-e 's#(security_token[[:space:]]*[:=][[:space:]]*)[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+	-e 's#(\\?"security_token\\?"[[:space:]]*:[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
+	-e 's#(\\?"security_token\\?"[[:space:]]*=[[:space:]]*\\?")[^"\\]+#\1[REDACTED]#g' \
 	-e 's#("token"[[:space:]]*:[[:space:]]*")[^"]+#\1[REDACTED]#g' \
 	-e 's#(token[[:space:]]*=[[:space:]]*")[^"]+#\1[REDACTED]#g' \
 	-e 's#(Authorization[[:space:]]*=[[:space:]]*"?Bot )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
