@@ -32,7 +32,8 @@ describe("vendored shared-source files stay byte-identical", () => {
 // via a GCP structured logger it depends on) — see the header comment on
 // both files. This test instead pins the one contract that must stay in
 // parity: neither function may process a webhook when the replay bucket is
-// unconfigured. Keep this literal identical to the assertion in
+// unconfigured. Keep the resolves.toEqual and fetchMock.not.toHaveBeenCalled
+// assertions below literal-identical to the missing-bucket case in
 // alerts/infra/onchain-event-handler/src/quicknode-replay-protection.test.ts.
 describe("quicknode-replay-protection.ts missing-bucket parity", () => {
   const originalReplayBucket = process.env.QUICKNODE_REPLAY_BUCKET;
@@ -51,17 +52,20 @@ describe("quicknode-replay-protection.ts missing-bucket parity", () => {
   });
 
   it("fails closed like the onchain-event-handler copy when the bucket is unset", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
     const { reserveQuickNodeNonce } =
       await import("../quicknode-replay-protection.js");
 
     await expect(
       reserveQuickNodeNonce("nonce-1", "1700000000", {
-        fetchImpl: vi.fn<typeof fetch>(),
+        fetchImpl: fetchMock,
       }),
     ).resolves.toEqual({
       valid: false,
       status: 500,
       message: "Server configuration error",
     });
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
