@@ -1,3 +1,14 @@
+---
+title: "Plan: Celo Mainnet Envio Indexer"
+status: archived
+owner: eng
+canonical: false
+archived: 2026-07-05
+archived_reason: "Celo Mainnet FPMM/VirtualPool indexing shipped and is live (mento-v3-celo-mainnet, 100% synced). See docs/ROADMAP.md → Indexer → 'Envio indexer: Celo Mainnet config' and 'Envio hosted deployment: mento-v3-celo-mainnet live, 100% synced'."
+---
+
+> **ARCHIVED** — This document is a planning artifact from before Celo Mainnet indexing shipped. The "Current state" section below (Mento v3 contracts NOT yet on Celo Mainnet) is historical and no longer true — v3 FPMM/VirtualPool contracts are live on Celo Mainnet today. See [`docs/ROADMAP.md`](./ROADMAP.md) for current state.
+
 # Plan: Celo Mainnet Envio Indexer
 
 ## Context

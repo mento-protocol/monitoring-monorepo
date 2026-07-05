@@ -34,6 +34,7 @@ set -euo pipefail
 # Source common utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
+# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 source "${SCRIPT_DIR}/common.sh"
 
 echo -e "${YELLOW}QuickNode Webhook State Repair Tool${NC}"

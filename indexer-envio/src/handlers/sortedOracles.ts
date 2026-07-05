@@ -537,21 +537,41 @@ indexer.onEvent(
     await Promise.all(
       // eslint-disable-next-line max-lines-per-function -- Existing per-pool fan-out preserves oracle, breach, health, and snapshot updates together.
       poolIds.map(async (poolId) => {
-        const initial = await context.Pool.get(poolId);
-        if (!initial) return;
-        const existing = await selfHealTokenDecimals(
-          context,
-          await selfHealInvertRateFeed(context, initial),
-        );
+        let existing: Pool;
+        let oracleExpiry: bigint;
+        try {
+          const initial = await context.Pool.get(poolId);
+          if (!initial) return;
+          existing = await selfHealTokenDecimals(
+            context,
+            await selfHealInvertRateFeed(context, initial),
+          );
 
-        const oracleExpiry =
-          existing.oracleExpiry > 0n
-            ? existing.oracleExpiry
-            : ((await context.effect(reportExpiryEffect, {
-                chainId: event.chainId,
-                rateFeedID,
-                blockNumber,
-              })) ?? existing.oracleExpiry);
+          oracleExpiry =
+            existing.oracleExpiry > 0n
+              ? existing.oracleExpiry
+              : ((await context.effect(reportExpiryEffect, {
+                  chainId: event.chainId,
+                  rateFeedID,
+                  blockNumber,
+                })) ?? existing.oracleExpiry);
+        } catch (error) {
+          // Mirrors the OracleReported isolation fix (#871, see
+          // processOracleReportedPool above): these reads/self-heals happen
+          // before this pool queues any writes, so one pool's malformed id or
+          // transient RPC self-heal failure can be skipped without
+          // committing partial state for that pool or rejecting the whole
+          // Promise.all — sibling pools on the same feed must still update.
+          // Any failure once writes may already be queued still propagates
+          // (uncaught below) and fails the event, same as before this fix.
+          // Same log level as the OracleReported isolation path (`.warn`)
+          // so the two mirrored failure classes triage consistently.
+          context.log.warn(
+            `sortedOracles.medianUpdatedPoolFailed pool=${poolId} feed=${rateFeedID} chain=${event.chainId}: ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+          return;
+        }
 
         const lineage = computeMedianLineageNext(
           existing,

@@ -70,6 +70,7 @@ jobs:
               - .node-version
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
+              - .github/actions/resolve-eslint-baseline/**
             ui:
               - ui-dashboard/**
               - shared-config/**
@@ -86,6 +87,7 @@ jobs:
               - .node-version
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
+              - .github/actions/resolve-eslint-baseline/**
             # shared-config/** is included in the indexer filter because
             # indexer-envio/test/fx-calendar.test.ts and
             # indexer-envio/test/deployment-namespaces.test.ts deep-equal
@@ -104,6 +106,7 @@ jobs:
               - .node-version
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
+              - .github/actions/resolve-eslint-baseline/**
             bridge:
               - metrics-bridge/**
               - shared-config/**
@@ -122,6 +125,7 @@ jobs:
               - patches/**
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
+              - .github/actions/resolve-eslint-baseline/**
             integrationProbes:
               - integration-probes/**
               - shared-config/**
@@ -134,6 +138,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/workflows/integration-probes.yml
               - .github/actions/pnpm-install/**
+              - .github/actions/resolve-eslint-baseline/**
             aegis:
               - aegis/**
               - scripts/eslint-baseline-diff.mjs
@@ -146,6 +151,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/workflows/aegis-app-engine.yml
               - .github/actions/pnpm-install/**
+              - .github/actions/resolve-eslint-baseline/**
             terraform:
               - terraform/**
               - alerts/rules/**
@@ -234,6 +240,11 @@ jobs:
               # if only the new workflow file is touched (no script change).
               - .github/workflows/**
               - .github/actions/pnpm-install/**
+              # The baseline-resolve composite exports ESLINT_BASELINE_MAIN,
+              # consumed by scripts/eslint-baseline-diff.mjs — the scripts
+              # job's baseline-diff semantic suite must re-run when the
+              # producing action changes.
+              - .github/actions/resolve-eslint-baseline/**
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
@@ -266,23 +277,9 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          # Fail closed if origin/main can't be reached — a silently-empty
-          # main baseline would skip the merge-base growth check and let a
-          # hand-grown HEAD baseline pass. Explicit refspec ensures
-          # refs/remotes/origin/main is updated regardless of the remote's
-          # configured fetch refmap.
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
-          # Only tolerate a genuinely missing baseline file on main
-          # (package didn't exist there yet) — not a missing ref or
-          # ls-tree failure.
-          if git ls-tree --name-only origin/main -- shared-config/eslint-baseline.json | grep -q .; then
-            git show origin/main:shared-config/eslint-baseline.json > /tmp/main-baseline-shared-config.json
-          else
-            : > /tmp/main-baseline-shared-config.json
-          fi
-          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-shared-config.json" >> "$GITHUB_ENV"
+        uses: ./.github/actions/resolve-eslint-baseline
+        with:
+          package-path: shared-config
       - name: Typecheck
         run: pnpm --filter @mento-protocol/monitoring-config typecheck
       - name: Lint
@@ -321,17 +318,12 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          # ui-dashboard uses checkout fetch-depth=0, so origin/main is
-          # already available without an extra fetch. Still guard against
-          # the missing-file case.
-          if git ls-tree --name-only origin/main -- ui-dashboard/eslint-baseline.json | grep -q .; then
-            git show origin/main:ui-dashboard/eslint-baseline.json > /tmp/main-baseline-ui-dashboard.json
-          else
-            : > /tmp/main-baseline-ui-dashboard.json
-          fi
-          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-ui-dashboard.json" >> "$GITHUB_ENV"
+        # ui-dashboard uses checkout fetch-depth=0, so origin/main is
+        # already available without an extra fetch.
+        uses: ./.github/actions/resolve-eslint-baseline
+        with:
+          package-path: ui-dashboard
+          fetch-main: "false"
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
       - name: Lint
@@ -475,15 +467,9 @@ jobs:
         run: pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
-          if git ls-tree --name-only origin/main -- indexer-envio/eslint-baseline.json | grep -q .; then
-            git show origin/main:indexer-envio/eslint-baseline.json > /tmp/main-baseline-indexer-envio.json
-          else
-            : > /tmp/main-baseline-indexer-envio.json
-          fi
-          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-indexer-envio.json" >> "$GITHUB_ENV"
+        uses: ./.github/actions/resolve-eslint-baseline
+        with:
+          package-path: indexer-envio
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
       - name: Lint
@@ -517,15 +503,9 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
-          if git ls-tree --name-only origin/main -- metrics-bridge/eslint-baseline.json | grep -q .; then
-            git show origin/main:metrics-bridge/eslint-baseline.json > /tmp/main-baseline-metrics-bridge.json
-          else
-            : > /tmp/main-baseline-metrics-bridge.json
-          fi
-          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-metrics-bridge.json" >> "$GITHUB_ENV"
+        uses: ./.github/actions/resolve-eslint-baseline
+        with:
+          package-path: metrics-bridge
       - name: Typecheck
         run: pnpm --filter @mento-protocol/metrics-bridge typecheck
       - name: Lint
@@ -559,15 +539,9 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
-          if git ls-tree --name-only origin/main -- integration-probes/eslint-baseline.json | grep -q .; then
-            git show origin/main:integration-probes/eslint-baseline.json > /tmp/main-baseline-integration-probes.json
-          else
-            : > /tmp/main-baseline-integration-probes.json
-          fi
-          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-integration-probes.json" >> "$GITHUB_ENV"
+        uses: ./.github/actions/resolve-eslint-baseline
+        with:
+          package-path: integration-probes
       - name: Typecheck
         run: pnpm --filter @mento-protocol/integration-probes typecheck
       - name: Lint
@@ -800,15 +774,9 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
-          if git ls-tree --name-only origin/main -- aegis/eslint-baseline.json | grep -q .; then
-            git show origin/main:aegis/eslint-baseline.json > /tmp/main-baseline-aegis.json
-          else
-            : > /tmp/main-baseline-aegis.json
-          fi
-          echo "ESLINT_BASELINE_MAIN=/tmp/main-baseline-aegis.json" >> "$GITHUB_ENV"
+        uses: ./.github/actions/resolve-eslint-baseline
+        with:
+          package-path: aegis
       - name: Typecheck
         run: pnpm --filter @mento-protocol/aegis typecheck
       - name: Build
@@ -881,6 +849,11 @@ jobs:
         run: pnpm alerts:rules:lint
       - name: Alert-rules lint self-test
         run: pnpm alerts:rules:lint:test
+      - name: Terraform output sanitizer fixture suite
+        # Fixture coverage for scripts/sanitize-terraform-output.sh, the sole
+        # redaction layer before terraform plan/apply output reaches public
+        # GitHub issue bodies and PR sticky comments.
+        run: pnpm sanitize:test
       - name: Notifier coverage unit tests
         # Behavioral coverage of scripts/check-notifier-coverage.mjs:
         # parse helpers (hasPushMain inline + block-sequence, hasSchedule,

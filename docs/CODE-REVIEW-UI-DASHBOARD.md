@@ -1,3 +1,14 @@
+---
+title: "Code Review — ui-dashboard"
+status: archived
+owner: eng
+canonical: false
+archived: 2026-07-05
+archived_reason: "One-off review snapshot of ui-dashboard from 2026-03-05; applied refactors already landed and the codebase has moved on since. Not a standing checklist."
+---
+
+> **ARCHIVED** — Point-in-time review artifact, not a standing checklist. Applied refactors already landed; the codebase has moved on since 2026-03-05.
+
 # Code Review — `ui-dashboard`
 
 > Reviewed by Giskard · 2026-03-05  

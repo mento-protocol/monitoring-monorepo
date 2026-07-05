@@ -44,6 +44,8 @@ start_spinner() {
 	local message="${1:-Loading...}"
 	local delay=0.1
 
+	# Literal spinner glyphs (pipe/slash/dash/backslash), not an escape attempt.
+	# shellcheck disable=SC1003
 	local spin_string='|/-\'
 
 	# Hide cursor

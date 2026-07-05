@@ -1,3 +1,14 @@
+---
+title: "Stream C: Dashboard Components for Trading Limits & Rebalancer Liveness"
+status: archived
+owner: eng
+canonical: false
+archived: 2026-07-05
+archived_reason: "Trading-limit and rebalancer-liveness dashboard components shipped (LimitBadge/LimitPanel, RebalancerBadge/RebalancerPanel). The 'Status: Planned' line below is stale. See docs/ROADMAP.md → Dashboard."
+---
+
+> **ARCHIVED** — This planning document is superseded by shipped work; the "Status: Planned" line below is historical. See [`docs/ROADMAP.md`](./ROADMAP.md) for current state.
+
 # Stream C: Dashboard Components for Trading Limits & Rebalancer Liveness
 
 **Date:** 2026-03-05  

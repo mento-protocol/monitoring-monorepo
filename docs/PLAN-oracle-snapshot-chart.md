@@ -1,3 +1,14 @@
+---
+title: "Plan: OracleSnapshot Chart — Oracle Price History Timeline"
+status: archived
+owner: eng
+canonical: false
+archived: 2026-07-05
+archived_reason: "OracleSnapshot chart shipped on the pool detail Analytics tab. See docs/ROADMAP.md → Dashboard → 'Oracle chart on analytics tab'."
+---
+
+> **ARCHIVED** — This planning document is superseded by shipped work. See [`docs/ROADMAP.md`](./ROADMAP.md) for current state.
+
 # Plan: OracleSnapshot Chart — Oracle Price History Timeline
 
 **Feature:** Oracle price history chart on pool detail page (Analytics tab, FPMM pools only)

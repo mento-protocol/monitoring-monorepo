@@ -6,6 +6,7 @@ import type { AddressEntry } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
 import { SUGGESTED_TAGS, getUsedTags } from "@/lib/tag-suggestions";
 import { isValidAddress } from "@/lib/format";
+import { sortedCopy } from "@/lib/immutable-sort";
 
 // Pure helpers (exported for testing and re-exported via address-label-editor
 // for back-compat with existing test imports).
@@ -226,10 +227,7 @@ export function AddressLabelForm(props: Props) {
   const tagSuggestions = useMemo(() => {
     const used = getUsedTags(customEntries);
     const all = new Set([...SUGGESTED_TAGS, ...used]);
-    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-    return [...Array.from(all)].sort((a, b) => a.localeCompare(b));
+    return sortedCopy(Array.from(all), (a, b) => a.localeCompare(b));
   }, [customEntries]);
 
   // When editing an existing contract row (not a new address, no custom label yet),

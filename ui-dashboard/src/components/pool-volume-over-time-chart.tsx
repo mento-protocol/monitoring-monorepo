@@ -7,6 +7,7 @@ import {
   snapshotWindow7d,
   snapshotWindow30d,
 } from "@/lib/volume";
+import { sortedCopy } from "@/lib/immutable-sort";
 import type { Network } from "@/lib/networks";
 import { canPricePool, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshot } from "@/lib/types";
@@ -53,10 +54,8 @@ export function PoolVolumeOverTimeChart({
   // which the headline would then render as a real-looking "$0.00".
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
     if (!priceable || snapshots.length === 0) return [];
-    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-    const sorted = [...snapshots].sort(
+    const sorted = sortedCopy(
+      snapshots,
       (a, b) => Number(a.timestamp) - Number(b.timestamp),
     );
     const points: TimeSeriesPoint[] = [];

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { sortedCopy } from "@/lib/immutable-sort";
 import { escapePlotText } from "@/lib/plot";
 import type {
   BreakdownSeries,
@@ -245,12 +246,7 @@ export function useSortedHover(params: {
           },
         ];
       });
-      // ES2023 `Array.prototype.toSorted` would be cleaner but requires
-      // Safari 16+ / Chrome 110+; the dashboard's compile target is
-      // ES2017 with no polyfill, so keep the cloned `sort()` form to
-      // stay compatible with older browsers (codex P2, PR #371).
-      // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-      const sorted = [...points].sort((a, b) => b.value - a.value);
+      const sorted = sortedCopy(points, (a, b) => b.value - a.value);
       const xRaw = rawPoints[0]?.x;
       const dayLabel =
         typeof xRaw === "string" || typeof xRaw === "number"

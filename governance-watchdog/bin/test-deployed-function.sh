@@ -14,6 +14,7 @@ echo "🔍 Validating Google Cloud project configuration..."
 
 # Source the project variables to get the correct project information
 # This script will ensure we're in the right project and cache the values
+# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 source "$(dirname "$0")/get-project-vars.sh"
 
 # Validate that we have a project_id from the sourced script
@@ -21,6 +22,7 @@ if [[ -z ${project_id-} ]]; then
 	echo "⚠️  No project ID found. Clearing cache and re-initializing project configuration..."
 	"$(dirname "$0")/get-project-vars.sh" --invalidate-cache
 	# Re-source to get the updated project_id
+	# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 	source "$(dirname "$0")/get-project-vars.sh"
 
 	# Check again after cache invalidation
@@ -38,6 +40,7 @@ if [[ ${current_gcloud_project} != "${project_id}" ]]; then
 	"$(dirname "$0")/get-project-vars.sh" --invalidate-cache
 
 	# Re-source to get the updated configuration
+	# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 	source "$(dirname "$0")/get-project-vars.sh"
 
 	# Verify the fix worked

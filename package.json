@@ -100,7 +100,8 @@
     "skew:check:test": "node scripts/version-skew-check.test.mjs",
     "override:prune-report": "node scripts/override-prune-report.mjs",
     "override:prune-report:test": "node scripts/override-prune-report.test.mjs",
-    "code-health:schema-diff": "git show origin/main:indexer-envio/schema.graphql > /tmp/schema-base-local.graphql && node scripts/schema-diff.mjs /tmp/schema-base-local.graphql indexer-envio/schema.graphql"
+    "code-health:schema-diff": "git show origin/main:indexer-envio/schema.graphql > /tmp/schema-base-local.graphql && node scripts/schema-diff.mjs /tmp/schema-base-local.graphql indexer-envio/schema.graphql",
+    "sanitize:test": "node scripts/sanitize-terraform-output.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

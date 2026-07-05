@@ -1053,4 +1053,68 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
       "failing pool must not be updated via holdCursor - pre-write failure path must be taken",
     );
   });
+
+  it("SortedOracles.MedianUpdated isolates one pool's failure from sibling updates", async () => {
+    let mockDb = MockDb.createMockDb();
+    const goodPoolId = makePoolId(
+      CHAIN_ID,
+      "0x00000000000000000000000000000000000000d4",
+    );
+    // Malformed id forces the per-pool decimals self-heal to throw when it
+    // tries to extract the raw pool address. The sibling pool on the same
+    // feed must still receive the median update.
+    const failingPoolId = `${CHAIN_ID}-bad-median-pool-id`;
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: goodPoolId,
+        referenceRateFeedID: FEED,
+        invertRateFeedKnown: true,
+        tokenDecimalsKnown: true,
+        oracleExpiry: 1_700_010_000n,
+      }),
+    );
+    mockDb = mockDb.entities.Pool.set(
+      makePool({
+        id: failingPoolId,
+        referenceRateFeedID: FEED,
+        invertRateFeedKnown: true,
+        tokenDecimalsKnown: false,
+        oracleExpiry: 1_700_010_000n,
+      }),
+    );
+
+    const newMedian = 1_190_000_000_000_000_000_000_000n;
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: SortedOracles.MedianUpdated.createMockEvent({
+        token: FEED,
+        value: newMedian,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 9,
+          srcAddress: "0xefb84935239dacdecf7c5ba76d8de40b077b7b33",
+          block: { number: 303, timestamp: 1_700_002_100 },
+        },
+      }),
+      mockDb,
+    });
+
+    const goodPool = mockDb.entities.Pool.get(goodPoolId) as
+      | { oraclePrice: bigint; oracleTimestamp: bigint }
+      | undefined;
+    assert.equal(
+      goodPool?.oraclePrice,
+      newMedian,
+      "healthy sibling pool still receives the median update",
+    );
+    assert.equal(goodPool?.oracleTimestamp, 1_700_002_100n);
+
+    const failingPool = mockDb.entities.Pool.get(failingPoolId) as
+      | { oraclePrice: bigint }
+      | undefined;
+    assert.notEqual(
+      failingPool?.oraclePrice,
+      newMedian,
+      "failing pool's decimals self-heal throw must not update oraclePrice or reject the batch",
+    );
+  });
 });

@@ -1,3 +1,14 @@
+---
+title: "Plan: Rebalancer Liveness & Effectiveness"
+status: archived
+owner: eng
+canonical: false
+archived: 2026-07-05
+archived_reason: "Rebalancer liveness + effectiveness shipped (RebalanceEvent fields, RebalancerBadge/RebalancerPanel). See docs/ROADMAP.md → Indexer/Dashboard → 'Rebalancer liveness' and 'RebalancerBadge + RebalancerPanel'."
+---
+
+> **ARCHIVED** — This planning document is superseded by shipped work. See [`docs/ROADMAP.md`](./ROADMAP.md) for current state.
+
 # Plan: Rebalancer Liveness & Effectiveness
 
 **Feature:** Track whether rebalancers are active and whether rebalances are actually improving oracle health

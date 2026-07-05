@@ -34,6 +34,7 @@ const expectedScripts = {
   "skew:check:test": "node scripts/version-skew-check.test.mjs",
   "override:prune-report": "node scripts/override-prune-report.mjs",
   "override:prune-report:test": "node scripts/override-prune-report.test.mjs",
+  "sanitize:test": "node scripts/sanitize-terraform-output.test.mjs",
 };
 
 for (const [name, expected] of Object.entries(expectedScripts)) {

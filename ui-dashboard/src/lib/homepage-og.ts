@@ -1,4 +1,5 @@
 import { unstable_cache } from "next/cache";
+import { sortedCopy } from "@/lib/immutable-sort";
 import { NETWORKS, NETWORK_IDS, type Network } from "@/lib/networks";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import {
@@ -677,13 +678,14 @@ function priceTvlAtBucket(
 function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
   const histories: TvlHistory[] = [];
   for (const { pool, slice } of entries) {
-    const points = slice.daily
-      .flatMap((d) =>
+    const points = sortedCopy(
+      slice.daily.flatMap((d) =>
         d.poolId === pool.id
           ? [{ ts: Number(d.timestamp), r0: d.reserves0, r1: d.reserves1 }]
           : [],
-      )
-      .toSorted((a, b) => a.ts - b.ts);
+      ),
+      (a, b) => a.ts - b.ts,
+    );
     // Pool has no snapshots in the 35d window. Since PoolDailySnapshot is
     // written on swap activity, zero snapshots means the pool has been
     // dormant — reserves in `pool.reserves0/1` haven't changed since the

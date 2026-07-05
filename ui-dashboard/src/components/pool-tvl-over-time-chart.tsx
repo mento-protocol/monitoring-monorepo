@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
+import { sortedCopy } from "@/lib/immutable-sort";
 import { canValueTvl, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshot } from "@/lib/types";
@@ -49,10 +50,8 @@ export function PoolTvlOverTimeChart({
 
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
     if (snapshots.length === 0) return [];
-    // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-    // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-    // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-    const sorted = [...snapshots].sort(
+    const sorted = sortedCopy(
+      snapshots,
       (a, b) => Number(a.timestamp) - Number(b.timestamp),
     );
     // Skip points where TVL is unknowable (untrusted decimals → null) so the

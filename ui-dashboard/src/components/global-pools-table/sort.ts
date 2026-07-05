@@ -1,4 +1,5 @@
 import { computeEffectiveStatus, computePoolUptimePct } from "@/lib/health";
+import { sortedCopy } from "@/lib/immutable-sort";
 import type { Network } from "@/lib/networks";
 import type { SortDir } from "@/lib/table-sort";
 import { poolName, type OracleRateMap } from "@/lib/tokens";
@@ -78,10 +79,7 @@ export function sortGlobalPools(
     tvlChangeWoWByKey,
   }: GlobalSortContext,
 ): GlobalPoolEntry[] {
-  // ES2023 `toSorted` requires Safari 16+/Chrome 110+; TS target is
-  // ES2017 with no polyfill — keep the spread+sort form (codex P2).
-  // react-doctor-disable-next-line react-doctor/js-tosorted-immutable
-  return [...entries].sort((a, b) => {
+  return sortedCopy(entries, (a, b) => {
     const aKey = globalPoolKey(a);
     const bKey = globalPoolKey(b);
     let cmp = 0;

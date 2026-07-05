@@ -48,7 +48,7 @@ upload_one() {
   local fname
   fname=$(basename "$draft_path")
   local addr="${fname%%-*}"  # 0x… prefix before first dash
-  local slug="${fname#${addr}-}"
+  local slug="${fname#"${addr}"-}"
   slug="${slug%.md}"
 
   # Mirror the API route's validation — this writer bypasses the route, so

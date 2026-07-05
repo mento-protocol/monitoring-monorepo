@@ -35,6 +35,37 @@ variable "function_entry_point" {
   default = "governanceWatchdog"
 }
 
+# Mirrors the sibling alerts/infra/onchain-event-handler and oncall-announcer
+# modules' variable names for consistency. Defaults match current behavior so
+# the only plan diff from parametrizing is the new instance bounds below.
+variable "memory_mb" {
+  description = "Memory allocation for the function in MB"
+  type        = number
+  default     = 512
+}
+
+variable "timeout_seconds" {
+  description = "Cloud Function timeout in seconds"
+  type        = number
+  default     = 60
+}
+
+variable "min_instances" {
+  description = "Minimum number of Cloud Function instances"
+  type        = number
+  default     = 0
+}
+
+# Single QuickNode webhook stream (governance events only, low volume) with no
+# fan-out to other consumers. Capped low so a webhook flood or misconfigured
+# retry storm can't scale cost unbounded, mirroring the "keep this low" intent
+# on the sibling functions' max_instances default.
+variable "max_instances" {
+  description = "Maximum number of Cloud Function instances. Keep this low; a single QuickNode webhook stream should never need to burst wide, and an unbounded cap would let a webhook flood or retry storm scale cost without limit."
+  type        = number
+  default     = 3
+}
+
 # You can look this up via:
 #  `gcloud secrets list`
 variable "discord_webhook_url_secret_id" {
