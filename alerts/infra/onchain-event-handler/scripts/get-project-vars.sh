@@ -80,6 +80,9 @@ set_project_id() {
 	# insensitive on some surfaces).
 	if [[ $(echo "${project_id}" | wc -l) -gt 1 ]]; then
 		error "Multiple GCP projects matched name '${project_name}':"
+		# Prefixing every line of a multi-line value; bash parameter expansion
+		# doesn't do per-line substitution.
+		# shellcheck disable=SC2001
 		echo "${project_id}" | sed 's/^/  - /' >&2
 		error "Refusing to proceed — narrow the project_name in variables.tf or set a specific project ID manually."
 		exit 1

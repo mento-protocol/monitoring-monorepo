@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Single-quoted strings below are literal substrings asserted against
+# scripts/agent-quality-gate.sh's source text (e.g. turbo's `$TURBO_ROOT$`
+# token, `"$(...)"` snippets); expanding them would break the assertions
+# they're meant to check for.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -235,7 +240,7 @@ normalize_expected_command() {
     *"pnpm --filter @mento-protocol/"*" lint"*|*"pnpm --filter @mento-protocol/"*" typecheck"*|*"pnpm --filter @mento-protocol/"*" test"*|*"pnpm --filter @mento-protocol/"*" knip"*)
       package_name="${expected#*pnpm --filter }"
       package_name="${package_name%% *}"
-      task_name="${expected#*pnpm --filter ${package_name} }"
+      task_name="${expected#*pnpm --filter "${package_name}" }"
       task_name="${task_name%% *}"
       case "$task_name" in
         lint|typecheck|test|test:browser|knip)

@@ -1,4 +1,9 @@
 #!/bin/bash
+# function_name, function_entry_point, terraform_service_account,
+# project_id, region, project_service_account are defined by
+# get-project-vars.sh, sourced below; `set -u` catches them at runtime if
+# that ever changes.
+# shellcheck disable=SC2154
 set -e          # Fail on any error
 set -o pipefail # Ensure piped commands propagate exit codes properly
 set -u          # Treat unset variables as an error when substituting

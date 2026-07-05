@@ -824,12 +824,12 @@ compact_turbo_quality_commands() {
         existing_packages="${turbo_group_packages[$group_index]}"
         read -r -a existing_package_array <<< "$existing_packages"
         if ! list_contains_word "$package_name" "${existing_package_array[@]}"; then
-          turbo_group_packages[$group_index]="${existing_packages} ${package_name}"
+          turbo_group_packages[group_index]="${existing_packages} ${package_name}"
         fi
 
         existing_reasons="${turbo_group_reasons[$group_index]}"
         if ! reason_list_contains "$existing_reasons" "$reason"; then
-          turbo_group_reasons[$group_index]="${existing_reasons}; ${reason}"
+          turbo_group_reasons[group_index]="${existing_reasons}; ${reason}"
         fi
       else
         turbo_group_tasks+=("$task")
