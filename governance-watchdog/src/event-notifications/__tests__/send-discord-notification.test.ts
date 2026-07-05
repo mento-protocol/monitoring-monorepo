@@ -34,10 +34,10 @@ vi.mock("../../utils/get-secret.js", () => ({ default: mockGetSecret }));
 
 vi.mock("../../config.js", () => ({ default: mockConfig }));
 
-function make5xxError(status = 503): HTTPError {
+function makeHTTPError(status = 503): HTTPError {
   return new HTTPError(
     status,
-    "Service Unavailable",
+    "HTTP Error",
     "POST",
     "https://discord.com/api/webhooks/1/token",
     {},
@@ -62,7 +62,7 @@ describe("sendDiscordNotification", () => {
 
   it("delivers exactly once when a 5xx failure is followed by success", async () => {
     mockSend
-      .mockRejectedValueOnce(make5xxError(503))
+      .mockRejectedValueOnce(makeHTTPError(503))
       .mockResolvedValueOnce(undefined);
     const { default: sendDiscordNotification } =
       await import("../send-discord-notification.js");
@@ -73,7 +73,7 @@ describe("sendDiscordNotification", () => {
   });
 
   it("does not retry a terminal 4xx failure", async () => {
-    const terminal = make5xxError(400);
+    const terminal = makeHTTPError(400);
     mockSend.mockRejectedValue(terminal);
     const { default: sendDiscordNotification } =
       await import("../send-discord-notification.js");
@@ -137,9 +137,10 @@ describe("sendDiscordNotification", () => {
     await sendDiscordNotification("content", embed);
 
     const options = mockWebhookClientCtor.mock.calls[0]?.[1] as
-      | { rest?: { retries?: number } }
+      | { rest?: { retries?: number; timeout?: number } }
       | undefined;
     expect(options?.rest?.retries).toBe(0);
+    expect(options?.rest?.timeout).toBe(3000);
   });
 
   it("throws without sending when the dev test webhook secret id is missing", async () => {

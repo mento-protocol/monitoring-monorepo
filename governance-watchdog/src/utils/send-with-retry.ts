@@ -30,6 +30,10 @@ interface SendWithRetryOptions {
 
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_BASE_DELAY_MS = 250;
+// With current callers (maxRetries: 2) this never binds — sleeps top out at
+// 500ms. It's a ceiling for future callers that raise maxRetries, so backoff
+// can't grow unbounded and blow the Cloud Function timeout.
+const MAX_DELAY_MS = 5000;
 
 export async function sendWithRetry<T>(
   attempt: () => Promise<T>,
@@ -50,7 +54,7 @@ export async function sendWithRetry<T>(
         throw error;
       }
 
-      await sleep(baseDelayMs * 2 ** attemptNumber);
+      await sleep(Math.min(baseDelayMs * 2 ** attemptNumber, MAX_DELAY_MS));
     }
   }
 
