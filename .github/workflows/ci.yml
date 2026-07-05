@@ -245,6 +245,25 @@ jobs:
               # job's baseline-diff semantic suite must re-run when the
               # producing action changes.
               - .github/actions/resolve-eslint-baseline/**
+              # check-agent-context inputs. The checker discovers canonical
+              # (frontmatter-managed) markdown across these roots — SPEC.md,
+              # AGENTS.md at any depth, docs/**, .agents/** — and separately
+              # validates SessionEnd hooks (.codex/hooks.json,
+              # .claude/settings.json) and .claude/skills mirror parity. A PR
+              # touching only one of these files must still run the checker
+              # in CI. docs/**/*.md is deliberately broad: discovery means
+              # any docs markdown can opt into canonical enforcement, and
+              # the scripts job is cheap. The checker's remaining inputs
+              # (scripts/*.sh guards, workflow revision-suffix guard) are
+              # already covered by the script/workflow globs above.
+              - SPEC.md
+              - AGENTS.md
+              - "**/AGENTS.md"
+              - "docs/**/*.md"
+              - ".agents/**"
+              - ".claude/skills/**"
+              - .claude/settings.json
+              - .codex/hooks.json
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
@@ -829,6 +848,15 @@ jobs:
         run: node scripts/check-hermetic-vitest-setup.test.mjs
       - name: Deviation threshold drift suite
         run: node scripts/check-deviation-threshold-drift.test.mjs
+      - name: Agent context checker unit tests
+        # Behavioral coverage of scripts/check-agent-context.mjs's pure
+        # helpers: frontmatter parsing and the last_verified staleness window.
+        run: node scripts/check-agent-context.test.mjs
+      - name: Agent context checker
+        # Runs the actual check-agent-context.mjs enforcement pass (managed
+        # frontmatter + last_verified staleness policy) — the unit tests
+        # above only cover the pure helpers in isolation.
+        run: pnpm agent:context-check
       - name: PR description validator suite
         run: node scripts/check-pr-description.test.mjs
       - name: Deploy root-anchor regression suite

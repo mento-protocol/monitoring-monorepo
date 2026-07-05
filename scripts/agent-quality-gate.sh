@@ -1366,15 +1366,24 @@ while IFS= read -r path; do
       # changed-paths set, not just this one path.
       add_surface "tooling"
       ;;
-    docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md)
+    docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md|SPEC.md)
       add_surface "docs"
       case "$path" in
         docs/context-standards.md|docs/pr-checklists/recurring-review-patterns.md|AGENTS.md|*/AGENTS.md)
           add_command "pnpm agent:context-check" "agent context standards changed"
           ;;
+        SPEC.md)
+          add_command "pnpm agent:context-check" "technical specification changed"
+          ;;
+        docs/*.md)
+          # check-agent-context.mjs discovers canonical files across all of
+          # docs/**/*.md, so any docs markdown change may affect the
+          # frontmatter/staleness policy — route it through the check.
+          add_command "pnpm agent:context-check" "docs markdown may be canonical (frontmatter discovery)"
+          ;;
       esac
       ;;
-    .agents/skills/*|.agents/roles/*|.claude/skills/*|.claude/settings.json|.codex/hooks.json)
+    .agents/*|.claude/skills/*|.claude/settings.json|.codex/hooks.json)
       add_surface "agent-context"
       add_command "pnpm agent:context-check" "agent context files changed"
       ;;
@@ -1418,8 +1427,9 @@ while IFS= read -r path; do
         scripts/agent-autoreview.mjs)
           add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview helper changed"
           ;;
-        scripts/check-agent-context.mjs)
+        scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
+          add_command "node scripts/check-agent-context.test.mjs" "agent context checker changed"
           ;;
         scripts/check-deploy-root-anchors.test.mjs)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy root-anchor test changed"
