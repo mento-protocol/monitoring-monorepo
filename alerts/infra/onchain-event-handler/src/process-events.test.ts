@@ -81,6 +81,12 @@ vi.mock("./slack", async () => {
   };
 });
 
+// Mock dead-letter writes so failure tests don't try to hit GCS.
+const writeDeadLetterMock = vi.fn(async () => undefined);
+vi.mock("./dead-letter", () => ({
+  writeDeadLetter: writeDeadLetterMock,
+}));
+
 const SOLO_CELO_ADDR = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const AMBIGUOUS_ADDR = "0xcccccccccccccccccccccccccccccccccccccccc";
 
@@ -90,6 +96,7 @@ describe("processEvents - ChainDetectionError handling", () => {
     loggerErrorMock.mockClear();
     loggerInfoMock.mockClear();
     loggerWarnMock.mockClear();
+    writeDeadLetterMock.mockClear();
   });
 
   it("logs ChainDetectionError but does NOT throw; returns successful events only", async () => {
@@ -605,6 +612,113 @@ describe("processEvents - ChainDetectionError handling", () => {
         skipped: 2,
       });
       expect(sendMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dead-letters the rendered Slack payload when retries are exhausted", async () => {
+    const { processEvents } = await import("./process-events");
+    const { buildEventContext } = await import("./build-event-context");
+    const { sendToSlack } = await import("./slack");
+    const sendMock = vi.mocked(sendToSlack);
+    sendMock.mockClear();
+    sendMock.mockRejectedValueOnce(
+      new Error("Slack postMessage failed after all retries"),
+    );
+
+    const logs = [
+      {
+        address: SOLO_CELO_ADDR,
+        name: "AddedOwner",
+        transactionHash: "0xtx-deadletter",
+        blockHash: "0xblockGood",
+        blockNumber: "101",
+        logIndex: "1",
+        owner: "0xowner1",
+      },
+    ];
+
+    const context = buildEventContext(logs);
+    const result = await processEvents(logs, context);
+
+    expect(result).toEqual({ processedEvents: [], skipped: 0 });
+    expect(writeDeadLetterMock).toHaveBeenCalledTimes(1);
+    expect(writeDeadLetterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        multisigKey: "SOLO_CELO",
+        channelId: "Calerts",
+        chain: "celo",
+        failureReason: "Slack postMessage failed after all retries",
+        logEntry: expect.objectContaining({
+          transactionHash: "0xtx-deadletter",
+          name: "AddedOwner",
+        }),
+        slackMessage: { text: "test", blocks: [] },
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("dead-letters the rendered Slack payload even when the failure is our own budget abort", async () => {
+    // The QuickNode nonce is already reserved by the time processEvents runs
+    // (see index.ts), so there is no redelivery to fall back on if a Slack
+    // send that was cut short by our own processing-budget abort is dropped
+    // instead of dead-lettered — see the invariant note on
+    // deadLetterIfSlackDeliveryFailed.
+    vi.useFakeTimers();
+    try {
+      const { processEvents } = await import("./process-events");
+      const { buildEventContext } = await import("./build-event-context");
+      const { sendToSlack } = await import("./slack");
+      const sendMock = vi.mocked(sendToSlack);
+      sendMock.mockClear();
+      sendMock.mockImplementation(
+        async (_botToken, _channelId, _message, signal?: AbortSignal) =>
+          new Promise((_, reject) => {
+            signal?.addEventListener("abort", () => {
+              reject(new Error("aborted"));
+            });
+          }),
+      );
+
+      const logs = [
+        {
+          address: SOLO_CELO_ADDR,
+          name: "AddedOwner",
+          transactionHash: "0xtx-aborted",
+          blockHash: "0xblockGood",
+          blockNumber: "101",
+          logIndex: "1",
+          owner: "0xowner1",
+        },
+      ];
+
+      const context = buildEventContext(logs);
+      const resultPromise = processEvents(logs, context, {
+        budgetMs: 10,
+        now: () => 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(resultPromise).resolves.toEqual({
+        processedEvents: [],
+        skipped: 1,
+      });
+      expect(writeDeadLetterMock).toHaveBeenCalledTimes(1);
+      expect(writeDeadLetterMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          multisigKey: "SOLO_CELO",
+          channelId: "Calerts",
+          chain: "celo",
+          failureReason: "aborted",
+          logEntry: expect.objectContaining({
+            transactionHash: "0xtx-aborted",
+            name: "AddedOwner",
+          }),
+        }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     } finally {
       vi.useRealTimers();
     }
