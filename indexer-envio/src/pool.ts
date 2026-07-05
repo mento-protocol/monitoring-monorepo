@@ -2,7 +2,7 @@
 // Pool upsert logic and public pool-module re-exports
 // ---------------------------------------------------------------------------
 
-import type { Pool } from "envio";
+import type { EffectCaller, Pool } from "envio";
 import { UNKNOWN_ORACLE_REPORTERS } from "./constants.js";
 import { extractAddressFromPoolId, isVirtualPool } from "./helpers.js";
 import {
@@ -255,6 +255,90 @@ const defaultPool = (
   updatedAtTimestamp: 0n,
 });
 
+/** Self-heal `referenceRateFeedID` when it was missed at pool creation
+ * (transient RPC failure). Retries via `referenceRateFeedIDEffect`; when a
+ * feed resolves, also fetches its current `oracleExpiry` via
+ * `reportExpiryEffect`. No-op (both fields `undefined`) for VirtualPools,
+ * pools no event has touched yet (`source === ""`), or pools that already
+ * carry a feed. `healedFeedId` is returned separately from
+ * `healedOracleDelta` because `referenceRateFeedID` is no longer part of
+ * `DEFAULT_ORACLE_FIELDS` (extracted to avoid the spread-clobber bug — see
+ * the `DEFAULT_ORACLE_FIELDS` doc above); the caller applies it directly in
+ * the field-merge stage. */
+async function healReferenceRateFeed(
+  context: { effect: EffectCaller },
+  existing: Pool,
+  chainId: number,
+  poolAddr: string,
+  blockNumber: bigint,
+): Promise<{
+  healedFeedId: string | undefined;
+  healedOracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> | undefined;
+}> {
+  let healedFeedId: string | undefined;
+  let healedOracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> | undefined;
+  if (
+    existing.referenceRateFeedID === "" &&
+    existing.source !== "" &&
+    !isVirtualPool(existing)
+  ) {
+    const rateFeedID = await context.effect(referenceRateFeedIDEffect, {
+      chainId,
+      poolAddress: poolAddr,
+    });
+    if (rateFeedID) {
+      healedFeedId = rateFeedID;
+      const expiry = await context.effect(reportExpiryEffect, {
+        chainId,
+        rateFeedID,
+        blockNumber,
+      });
+      if (expiry !== null) {
+        healedOracleDelta = { oracleExpiry: expiry };
+      }
+    }
+  }
+  return { healedFeedId, healedOracleDelta };
+}
+
+/** Self-heal `lpFee` / `protocolFee` / `rebalanceReward` when any of them are
+ * still at the -1 "not yet attempted" sentinel. Retries now; once a
+ * successful read lands — even if the real fee is 0 — the caller persists it
+ * and stops retrying. `fetchFees` (behind `feesEffect`) also stamps -2 on any
+ * getter that rejects with "returned no data" (contract doesn't implement
+ * it), and -2 is excluded from the retry gate so older FPMM deployments
+ * missing `rebalanceIncentive()` don't thrash forever. No-op for
+ * VirtualPools or pools no event has touched yet. */
+async function healPoolFees(
+  context: { effect: EffectCaller },
+  existing: Pool,
+  chainId: number,
+  poolAddr: string,
+): Promise<
+  | Partial<{ lpFee: number; protocolFee: number; rebalanceReward: number }>
+  | undefined
+> {
+  let healedFees:
+    | Partial<{ lpFee: number; protocolFee: number; rebalanceReward: number }>
+    | undefined;
+  if (
+    (existing.lpFee === -1 ||
+      existing.protocolFee === -1 ||
+      existing.rebalanceReward === -1) &&
+    existing.source !== "" &&
+    !isVirtualPool(existing)
+  ) {
+    const fees = await context.effect(feesEffect, {
+      chainId,
+      poolAddress: poolAddr,
+    });
+    if (fees) {
+      healedFees = compactFees(fees);
+    }
+  }
+  return healedFees;
+}
+
 // eslint-disable-next-line max-lines-per-function -- Existing pool upsert pipeline remains intentionally centralized for atomic state updates.
 export const upsertPool = async ({
   context,
@@ -365,66 +449,19 @@ export const upsertPool = async ({
   // `isVirtualPool`) so FPMM-only paths pay the cost.
   const existing = await selfHealTokenDecimals(context, wrappedHealed);
 
-  // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
-  // pool creation), retry now so oracle events can start flowing.
   // Use the raw address (not the namespaced poolId) for RPC calls.
   const poolAddr = extractAddressFromPoolId(poolId);
-  // `healedFeedId` is split from `healedOracleDelta` because
-  // `referenceRateFeedID` is no longer part of `DEFAULT_ORACLE_FIELDS`
-  // (extracted to avoid the spread-clobber bug — see DEFAULT_ORACLE_FIELDS
-  // doc above). Applied directly in the `next` builder below.
-  let healedFeedId: string | undefined;
-  let healedOracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> | undefined;
-  if (
-    existing.referenceRateFeedID === "" &&
-    existing.source !== "" &&
-    !isVirtualPool(existing)
-  ) {
-    const rateFeedID = await context.effect(referenceRateFeedIDEffect, {
-      chainId,
-      poolAddress: poolAddr,
-    });
-    if (rateFeedID) {
-      healedFeedId = rateFeedID;
-      const expiry = await context.effect(reportExpiryEffect, {
-        chainId,
-        rateFeedID,
-        blockNumber,
-      });
-      if (expiry !== null) {
-        healedOracleDelta = { oracleExpiry: expiry };
-      }
-    }
-  }
-
   // (invertRateFeed self-heal already happened above via
   // `selfHealInvertRateFeed(context, existingInitial)` — its result is in
   // `existing` and flows through the `...existing` spread into `next`.)
-
-  // Self-heal: if fees are still at the -1 "not yet attempted" sentinel,
-  // retry now. Once we get a successful read — even if the real fees are
-  // 0 — we persist the result and stop retrying. fetchFees also stamps
-  // -2 on any getter that rejects with "returned no data" (contract
-  // doesn't implement it), and -2 is excluded here so we don't thrash
-  // forever on older FPMM deployments missing rebalanceIncentive().
-  let healedFees:
-    | Partial<{ lpFee: number; protocolFee: number; rebalanceReward: number }>
-    | undefined;
-  if (
-    (existing.lpFee === -1 ||
-      existing.protocolFee === -1 ||
-      existing.rebalanceReward === -1) &&
-    existing.source !== "" &&
-    !isVirtualPool(existing)
-  ) {
-    const fees = await context.effect(feesEffect, {
-      chainId,
-      poolAddress: poolAddr,
-    });
-    if (fees) {
-      healedFees = compactFees(fees);
-    }
-  }
+  const { healedFeedId, healedOracleDelta } = await healReferenceRateFeed(
+    context,
+    existing,
+    chainId,
+    poolAddr,
+    blockNumber,
+  );
+  const healedFees = await healPoolFees(context, existing, chainId, poolAddr);
 
   // When a pool's rate feed is assigned for the first time (factory param or
   // self-heal), recompute `breakerTripped` from the feed's current breaker
