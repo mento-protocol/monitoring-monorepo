@@ -16,6 +16,7 @@ import {
 } from "../src/EventHandlers.ts";
 import { makeBreakerConfigId, makeBreakerId } from "../src/breakers.ts";
 import { makePoolId } from "../src/helpers.ts";
+import { registerMockRateFeedDependenciesHttp } from "../src/rpc/http-test-mock-bridge.js";
 import { makePool } from "./helpers/makePool.js";
 
 // Issue #1052 gap-closing suite. See breakerHandlers.test.ts for the shared
@@ -244,6 +245,12 @@ describe("Issue #1052 scenario gap-closing", () => {
       medianRatesEMA: 1_000_000n,
       referenceValue: null,
     });
+    // MedianUpdated with pools also cold-starts the feed's DEPENDENCY edges
+    // (`syncDependencyHaltOnColdStart`, hasPools: true). Mock an empty set so
+    // that path takes its clean "no dependencies" branch instead of the
+    // unmocked-RPC transient-outage fallback — this scenario's subject is the
+    // feed's OWN breaker only.
+    registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, []);
 
     let mockDb = MockDb.createMockDb();
     const poolId = makePoolId(
@@ -255,6 +262,13 @@ describe("Issue #1052 scenario gap-closing", () => {
         id: poolId,
         referenceRateFeedID: FEED,
         breakerTripped: false,
+        // Short-circuit the per-pool RPC-backed paths this scenario doesn't
+        // exercise: `known` flags skip the invert/decimals self-heals, and a
+        // non-zero oracleExpiry skips the reportExpiryEffect read. Mirrors
+        // the dependency cold-start fixtures in breakerHandlers.test.ts.
+        invertRateFeedKnown: true,
+        tokenDecimalsKnown: true,
+        oracleExpiry: 1_700_010_000n,
       }),
     );
 
