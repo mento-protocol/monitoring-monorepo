@@ -50,6 +50,16 @@ export function makePool(overrides: Partial<Pool> = {}): Pool {
     // shared fixture must carry it too. Override to true for halt tests.
     breakerTripped: false,
     wrappedExchangeId: "",
+    // Also excluded from DEFAULT_ORACLE_FIELDS (spread-clobber guard — see
+    // pool.ts). Without an explicit default here the field is `undefined`
+    // at runtime despite the `Pool` type marking it required: TS can't
+    // catch the gap because the trailing `...overrides` spread makes the
+    // object literal's required-field check permissive. `undefined` is
+    // silently fine for tests that call self-heal helpers directly, but a
+    // Pool row seeded straight into the real Envio harness (`mockDb.entities
+    // .Pool.set(...)`) fails entity-schema validation on write, surfacing as
+    // an opaque worker crash rather than a normal assertion failure.
+    referenceRateFeedID: "",
     createdAtBlock: 0n,
     createdAtTimestamp: 0n,
     updatedAtBlock: 0n,
