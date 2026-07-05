@@ -32,4 +32,18 @@ describe("sortedCopy", () => {
       { key: "b", order: 0 },
     ]);
   });
+
+  it("handles an empty array", () => {
+    const input: number[] = [];
+    const result = sortedCopy(input, (a, b) => a - b);
+
+    expect(result).toEqual([]);
+  });
+
+  it("handles a single-element array", () => {
+    const input = [42];
+    const result = sortedCopy(input, (a, b) => a - b);
+
+    expect(result).toEqual([42]);
+  });
 });
