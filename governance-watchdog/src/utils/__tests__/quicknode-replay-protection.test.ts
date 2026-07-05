@@ -65,7 +65,7 @@ describe("reserveQuickNodeNonce", () => {
     vi.resetModules();
   });
 
-  it("degrades open without calling metadata when the replay bucket is missing", async () => {
+  it("fails closed without calling metadata when the replay bucket is missing", async () => {
     delete process.env.QUICKNODE_REPLAY_BUCKET;
     const fetchMock = vi.fn<typeof fetch>();
     const reserveQuickNodeNonce = await loadReserveQuickNodeNonce();
@@ -75,11 +75,15 @@ describe("reserveQuickNodeNonce", () => {
         fetchImpl: fetchMock,
       }),
     ).resolves.toEqual({
-      valid: true,
-      skipped: "QUICKNODE_REPLAY_BUCKET not configured",
+      valid: false,
+      status: 500,
+      message: "Server configuration error",
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "QUICKNODE_REPLAY_BUCKET is not configured",
+    );
   });
 
   it("reserves a nonce by writing a conditional object to the replay bucket", async () => {

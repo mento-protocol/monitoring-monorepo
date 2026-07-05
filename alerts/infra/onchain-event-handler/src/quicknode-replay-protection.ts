@@ -1,6 +1,14 @@
 import crypto from "crypto";
 import { logger } from "./logger";
 
+// SIBLING FILE — kept in behavioral parity with (not byte-identical to):
+//   governance-watchdog/src/utils/quicknode-replay-protection.ts
+// Both must fail closed (5xx, no event processing) when the replay bucket is
+// unconfigured; see the "missing-bucket parity" test in
+// vendored-source-drift.test.ts (both packages). This copy cannot be
+// byte-identical to the sibling: it logs via the GCP structured logger above,
+// while the governance-watchdog copy logs via plain console.* and relies on
+// its caller (index.ts) to emit the paging-severity log.
 const METADATA_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
 const STORAGE_UPLOAD_BASE_URL =

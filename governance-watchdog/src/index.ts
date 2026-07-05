@@ -163,14 +163,6 @@ const handleQuicknodeWebhook = async (
       res.status(replay.status).send(replay.message);
       return;
     }
-    if (replay.skipped) {
-      // Bucket misconfigured (e.g. a gcloud-only deploy without the Terraform
-      // env var): the webhook was processed WITHOUT replay protection. Page so
-      // the gap gets fixed, but never drop the alert.
-      logError("QuickNode replay protection disabled:", {
-        reason: replay.skipped,
-      });
-    }
   }
 
   let eventsProcessed = 0;
