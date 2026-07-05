@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# Single-quoted strings below are literal substrings asserted against
+# scripts/agent-quality-gate.sh's source text (e.g. turbo's `$TURBO_ROOT$`
+# token, `"$(...)"` snippets); expanding them would break the assertions
+# they're meant to check for.
+# Trade-off (accepted): this disables SC2016 file-wide, so a future
+# genuinely-unexpanded `$var` typo in this file won't be flagged.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -235,7 +242,7 @@ normalize_expected_command() {
     *"pnpm --filter @mento-protocol/"*" lint"*|*"pnpm --filter @mento-protocol/"*" typecheck"*|*"pnpm --filter @mento-protocol/"*" test"*|*"pnpm --filter @mento-protocol/"*" knip"*)
       package_name="${expected#*pnpm --filter }"
       package_name="${package_name%% *}"
-      task_name="${expected#*pnpm --filter ${package_name} }"
+      task_name="${expected#*pnpm --filter "${package_name}" }"
       task_name="${task_name%% *}"
       case "$task_name" in
         lint|typecheck|test|test:browser|knip)
@@ -1642,7 +1649,18 @@ run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
 assert_contains "- node scripts/check-github-action-pins.mjs (Trunk workflow/action setup changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate trunk hook changed)"
+assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck"
+
+# .shellcheckrc disables/options apply repo-wide, so a targeted single-file
+# Trunk check on it alone is a no-op; the gate must additionally route to a
+# full ShellCheck-only scan (see trunk_requires_shellcheck_full_scan) or a
+# future disable/option change here could pass local checks without
+# re-validating the scripts it governs.
+run_gate ".shellcheckrc"
+assert_contains "- tooling"
+assert_contains "- ./tools/trunk check --all --filter=shellcheck (ShellCheck config changed; re-validate every script it governs)"
+assert_not_contains "- ./tools/trunk check --all ("
 
 run_gate "turbo.json"
 assert_contains "- tooling"

@@ -27,6 +27,7 @@ set -euo pipefail
 # Source common utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
+# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 source "${SCRIPT_DIR}/common.sh"
 
 # Checks if the user has the "Service Account Token Creator" role in the Terraform Seed Project
@@ -130,6 +131,7 @@ ${sa_result}"
 set_up_terraform() {
 	script_dir=$(dirname "$0")
 	# shellcheck source=check-gcloud-login.sh
+	# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 	source "${script_dir}/check-gcloud-login.sh"
 
 	check_tools "terraform" "jq" "gcloud"

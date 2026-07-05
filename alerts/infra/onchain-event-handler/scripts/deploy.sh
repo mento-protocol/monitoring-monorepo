@@ -46,6 +46,7 @@ ROOT_DIR="$(cd "${MODULE_DIR}/.." && pwd)"
 # Source common utilities
 if [[ -f "${ROOT_DIR}/scripts/common.sh" ]]; then
 	# shellcheck source=../../scripts/common.sh
+	# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 	source "${ROOT_DIR}/scripts/common.sh"
 else
 	# Can't use error() function here since we haven't sourced common.sh yet
@@ -220,8 +221,10 @@ main() {
 	if [[ -f "${SCRIPT_DIR}/get-project-vars.sh" ]]; then
 		# Source the script to get variables (suppress output unless verbose)
 		if [[ ${VERBOSE:-0} -eq 1 ]]; then
+			# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 			source "${SCRIPT_DIR}/get-project-vars.sh" --verbose
 		else
+			# shellcheck disable=SC1091 # runtime-resolved path; absent from Trunk's single-file sandbox copy
 			source "${SCRIPT_DIR}/get-project-vars.sh" >/dev/null 2>&1
 		fi
 	else
