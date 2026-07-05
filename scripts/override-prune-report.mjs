@@ -209,7 +209,17 @@ function splitPackageKey(rawKey) {
   const searchFrom = key.startsWith("@") ? 1 : 0;
   const at = key.indexOf("@", searchFrom);
   if (at === -1) return null;
-  return { name: key.slice(0, at), version: key.slice(at + 1) };
+  // pnpm package keys can carry a parenthesized peer-dependency suffix
+  // (e.g. `foo@1.0.0(peer@2.0.0)`). The version is everything before the
+  // first `(` — keeping the suffix would break the exact-floor comparison
+  // ("1.0.0(peer@2.0.0)" !== "1.0.0") and misreport an active override as
+  // possible-prune.
+  const rawVersion = key.slice(at + 1);
+  const parenIndex = rawVersion.indexOf("(");
+  return {
+    name: key.slice(0, at),
+    version: parenIndex === -1 ? rawVersion : rawVersion.slice(0, parenIndex),
+  };
 }
 
 /**

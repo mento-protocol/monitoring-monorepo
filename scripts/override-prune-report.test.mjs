@@ -162,6 +162,27 @@ test("extractPackageInstances groups scoped and unscoped package versions", () =
   );
 });
 
+test("extractPackageInstances strips parenthesized peer-dependency suffixes from versions", () => {
+  // pnpm package keys can carry peer suffixes (`foo@1.0.0(peer@2.0.0)`);
+  // the stored version must be the bare semver, or floor comparisons break.
+  const text = makeLockfile({
+    packages: [
+      "vite@8.0.16(@types/node@24.10.1)(yaml@2.9.0)",
+      "'@angular-devkit/core@19.2.17(chokidar@4.0.3)'",
+    ],
+  });
+  const instances = extractPackageInstances(text);
+  assert(
+    JSON.stringify(instances.get("vite")) === JSON.stringify(["8.0.16"]),
+    `expected bare vite version, got ${JSON.stringify(instances.get("vite"))}`,
+  );
+  assert(
+    JSON.stringify(instances.get("@angular-devkit/core")) ===
+      JSON.stringify(["19.2.17"]),
+    `expected bare scoped version, got ${JSON.stringify(instances.get("@angular-devkit/core"))}`,
+  );
+});
+
 test("extractPackageInstances skips file:/link: local sources", () => {
   const text =
     "lockfileVersion: '9.0'\n\npackages:\n" +
@@ -222,6 +243,24 @@ test("evaluateOverride: keep when a same-major instance sits exactly at the floo
   assert(
     row.verdict === "keep",
     `expected keep, got ${row.verdict}: ${row.evidence}`,
+  );
+});
+
+test("evaluateOverride: keep when the floor instance appears only via a peer-suffixed key", () => {
+  // Regression: with the peer suffix left on the parsed version, the
+  // exact-floor comparison ("8.0.16(@types/node@24.10.1)" !== "8.0.16")
+  // misreported this active override as possible-prune.
+  const text = makeLockfile({
+    packages: ["vite@8.0.16(@types/node@24.10.1)(yaml@2.9.0)"],
+  });
+  const row = evaluateOverride(
+    "vite@>=8.0.0 <8.0.16",
+    "8.0.16",
+    extractPackageInstances(text),
+  );
+  assert(
+    row.verdict === "keep",
+    `expected keep for a peer-suffixed floor instance, got ${row.verdict}: ${row.evidence}`,
   );
 });
 
