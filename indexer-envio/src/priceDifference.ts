@@ -67,6 +67,26 @@ export function parseDecimalsPair(
   };
 }
 
+type MedianFreshnessInputs = {
+  lastMedianPrice: bigint;
+  lastOracleReportAt: bigint;
+  medianLive: boolean;
+  oracleExpiry: bigint;
+  oracleOk: boolean;
+};
+
+export function hasFreshLiveMedian(
+  pool: MedianFreshnessInputs,
+  eventTimestamp: bigint,
+): boolean {
+  if (pool.lastMedianPrice <= 0n) return false;
+  if (!pool.medianLive) return false;
+  if (!pool.oracleOk) return false;
+  if (pool.oracleExpiry <= 0n) return false;
+  if (pool.lastOracleReportAt <= 0n) return false;
+  return pool.lastOracleReportAt + pool.oracleExpiry > eventTimestamp;
+}
+
 /** Shared inputs for `reservePriceVsOracleRef`, `computePriceDifference`,
  * and `pickActiveThreshold`. Identical fields to the FPMM `getRebalancingState`
  * contract reads but kept structural (no `Pool` type dependency) so callers
@@ -291,32 +311,7 @@ export function tryDeriveRebalanceState(
   // priceDifference off by `10^(18 - real_dec)`. RPC fallback is the safe
   // path — the contract carries the real value at this block.
   if (!pool.tokenDecimalsKnown) return null;
-  if (pool.lastMedianPrice <= 0n) return null;
-  // Zero-median outage gate: only `medianLive` is reliable here.
-  // `oraclePrice > 0n` would also pass after a non-median `OracleReported`
-  // following a zero `MedianUpdated`, because the reporter quote gets
-  // written into `oraclePrice`. `medianLive` is set only by
-  // `MedianUpdated` (true on non-zero, false on zero) so it's the
-  // median-only signal we need for parity with the contract's outage
-  // behaviour.
-  if (!pool.medianLive) return null;
-  if (!pool.oracleOk) return null;
-  // Stale-oracle revert mirror: require a known expiry window (zero =
-  // pre-seed; fall through to RPC) AND `lastOracleReportAt` to be
-  // within that window. `lastOracleReportAt` is advanced only inside
-  // `MedianUpdated` using `blockTimestamp` (and frozen on zero-median
-  // outages). NOT `oracleTimestamp` (bumped by `OracleReported` and
-  // state-sync writes — tracks last entity touch) and NOT
-  // `lastMedianAt` (jump-detection lineage field that doesn't freeze
-  // on outages). This is an under-bound on the contract's actual
-  // expiry (which uses the median reporter's own `report.timestamp`),
-  // safe by construction: when reporters refresh but the median hasn't
-  // moved recently, derive falls through to RPC instead of letting
-  // potentially-stale data through.
-  if (pool.oracleExpiry <= 0n) return null;
-  if (pool.lastOracleReportAt <= 0n) return null;
-  const expiresAt = pool.lastOracleReportAt + pool.oracleExpiry;
-  if (expiresAt <= ctx.eventTimestamp) return null;
+  if (!hasFreshLiveMedian(pool, ctx.eventTimestamp)) return null;
   const reserves = ctx.reservesOverride
     ? {
         reserves0: ctx.reservesOverride.reserve0,

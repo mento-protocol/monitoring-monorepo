@@ -352,6 +352,25 @@ export const POOL_DAILY_SNAPSHOTS_CHART = `
   }
 `;
 
+// Hourly PoolSnapshot rows for short hero-chart windows. The timestamp filter
+// keeps 7d/30d responses under hosted Hasura's 1000-row cap.
+export const POOL_HOURLY_SNAPSHOTS_CHART = `
+  query PoolHourlySnapshotsChart($poolId: String!, $from: numeric!) {
+    PoolSnapshot(
+      where: { poolId: { _eq: $poolId }, timestamp: { _gte: $from } }
+      order_by: [{ timestamp: asc }, { id: asc }]
+      limit: 1000
+    ) {
+      id poolId timestamp
+      reserves0 reserves1
+      swapCount swapVolume0 swapVolume1
+      rebalanceCount cumulativeSwapCount
+      cumulativeVolume0 cumulativeVolume1
+      blockNumber
+    }
+  }
+`;
+
 // VirtualPool deploy/deprecate timeline. The DEPLOYED row exists for every
 // pool (factory always emits it); DEPRECATED is appended when governance
 // removes the underlying v2 exchange. Sorted asc so the UI can show

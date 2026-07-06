@@ -7,6 +7,7 @@ import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, isVirtualPool } from "../helpers.js";
 import {
   computePriceDifference,
+  hasFreshLiveMedian,
   hasDegenerateReserves,
   pickActiveThreshold,
 } from "../priceDifference.js";
@@ -30,6 +31,7 @@ import { upsertOraclePriceDaily } from "../pool/oracle-rollup.js";
 import { recordBreachTransition } from "../deviationBreach.js";
 import { recordHealthSample } from "../healthScore.js";
 import { computeMedianLineageNext } from "../oracleJump.js";
+import { shouldPersistRawOracleSnapshot } from "../oracleSnapshotRetention.js";
 import {
   getPoolsByFeed,
   updatePoolsOracleExpiry,
@@ -229,10 +231,17 @@ async function processOracleReportedPool(
   // read the row's priceDifference directly (BreachEvent, oracle tab
   // detail) would see a fake non-zero value. Preserve existing instead.
   const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
+  // OracleReported carries a reporter quote, not a fresh median anchor. If the
+  // last MedianUpdated anchor has expired, the contract-side freshness gate
+  // would reject median-derived health/deviation math, so hold the cursor.
+  if (!hasFreshLiveMedian(updatedPool, c.blockTimestamp)) {
+    holdOracleReportedCursor(context, updatedPool, existing);
+    return;
+  }
   const priceDifference = priceDifferenceForOracleSample(
-    updatedPool,
+    { ...updatedPool, oraclePrice: updatedPool.lastMedianPrice },
     decimalsTrustworthy,
-    oraclePrice,
+    updatedPool.lastMedianPrice,
   );
   const degenerateReserves = degenerateReservesForOracleSample(
     updatedPool,
@@ -321,7 +330,9 @@ async function processOracleReportedPool(
       c.breakerSnapshotFields?.breakerThresholdAtSnapshot,
     ...snapshotFields,
   };
-  context.OracleSnapshot.set(snapshot);
+  if (shouldPersistRawOracleSnapshot(c.blockTimestamp)) {
+    context.OracleSnapshot.set(snapshot);
+  }
 
   // Refresh the daily snapshot's frozen health counters even though no
   // pool-side activity (swap/rebalance/mint/burn/UR) fired. Without
@@ -800,7 +811,9 @@ indexer.onEvent(
             breakerSnapshotFields?.breakerThresholdAtSnapshot,
           ...snapshotFields,
         };
-        context.OracleSnapshot.set(snapshot);
+        if (shouldPersistRawOracleSnapshot(blockTimestamp)) {
+          context.OracleSnapshot.set(snapshot);
+        }
 
         // Refresh the daily snapshot's frozen health counters even when no
         // pool-side activity fires — see the OracleReported handler for why.

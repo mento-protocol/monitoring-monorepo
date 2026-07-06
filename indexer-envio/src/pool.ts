@@ -7,6 +7,7 @@ import { extractAddressFromPoolId, isVirtualPool } from "./helpers.js";
 import {
   classifyExactZeroReserves,
   computePriceDifference,
+  hasFreshLiveMedian,
   hasDegenerateReserves,
 } from "./priceDifference.js";
 import { recordBreachTransition } from "./deviationBreach.js";
@@ -137,6 +138,44 @@ function nextDegenerateReserveState(
 
 function canClassifyDegenerateReserveState(pool: Pool): boolean {
   return !isVirtualPool(pool) && pool.tokenDecimalsKnown;
+}
+
+function hasContractPriceDifference(
+  oracleDelta: OracleDelta | undefined,
+): oracleDelta is OracleDelta & { priceDifference: bigint } {
+  return oracleDelta?.priceDifference !== undefined;
+}
+
+function canRecomputeMedianPriceDifference(
+  pool: Pool,
+  eventTimestamp: bigint,
+): boolean {
+  return (
+    !isVirtualPool(pool) &&
+    pool.tokenDecimalsKnown &&
+    hasFreshLiveMedian(pool, eventTimestamp)
+  );
+}
+
+function resolvePriceDifference({
+  pool,
+  oracleDelta,
+  canRecompute,
+}: {
+  pool: Pool;
+  oracleDelta: OracleDelta | undefined;
+  canRecompute: boolean;
+}): bigint {
+  if (hasContractPriceDifference(oracleDelta)) {
+    return oracleDelta.priceDifference;
+  }
+  if (canRecompute) {
+    return computePriceDifference({
+      ...pool,
+      oraclePrice: pool.lastMedianPrice,
+    });
+  }
+  return pool.priceDifference;
 }
 
 const getOrCreatePool = async (
@@ -344,18 +383,14 @@ export const upsertPool = async ({
   // off by 10^(18 - real_dec) for non-18-decimal pools whose factory +
   // self-heal both blipped. Preserve `existing.priceDifference` until
   // self-heal lands real decimals.
-  const hasContractPriceDiff =
-    oracleDelta != null &&
-    "priceDifference" in oracleDelta &&
-    oracleDelta.priceDifference !== undefined;
-  const canRecompute =
-    !isVirtualPool(next) && next.oraclePrice > 0n && next.tokenDecimalsKnown;
+  const hasContractPriceDiff = hasContractPriceDifference(oracleDelta);
+  const canRecompute = canRecomputeMedianPriceDifference(next, blockTimestamp);
   const canClassifyDegenerateReserves = canClassifyDegenerateReserveState(next);
-  const priceDifference = hasContractPriceDiff
-    ? oracleDelta.priceDifference!
-    : canRecompute
-      ? computePriceDifference(next)
-      : next.priceDifference;
+  const priceDifference = resolvePriceDifference({
+    pool: next,
+    oracleDelta,
+    canRecompute,
+  });
   const degenerateReserves = nextDegenerateReserveState(
     next,
     oracleDelta,

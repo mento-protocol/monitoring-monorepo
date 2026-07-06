@@ -80,18 +80,34 @@ function currentDayBucket(): number {
   return dailyBucket(Math.floor(Date.now() / 1000));
 }
 
-export function dailySnapshotRange(
+function currentBucket(bucketSeconds: number): number {
+  return bucketTimestamp(Math.floor(Date.now() / 1000), bucketSeconds);
+}
+
+export function snapshotRange(
   snapshots: readonly Timestamped[],
+  bucketSeconds: number,
 ): TimeSeriesRange {
   const first = snapshots[0]!;
   const last = snapshots[snapshots.length - 1]!;
-  const from = dailyBucket(Number(first.timestamp));
-  const lastSnapshotEnd = dailyBucket(Number(last.timestamp)) + SECONDS_PER_DAY;
-  const todayEnd = currentDayBucket() + SECONDS_PER_DAY;
+  const from = bucketTimestamp(Number(first.timestamp), bucketSeconds);
+  const lastSnapshotEnd =
+    bucketTimestamp(Number(last.timestamp), bucketSeconds) + bucketSeconds;
+  const currentEnd = currentBucket(bucketSeconds) + bucketSeconds;
   return {
     from,
-    to: Math.max(lastSnapshotEnd, todayEnd),
-    bucketSeconds: SECONDS_PER_DAY,
+    to: Math.max(lastSnapshotEnd, currentEnd),
+    bucketSeconds,
+  };
+}
+
+export function dailySnapshotRange(
+  snapshots: readonly Timestamped[],
+): TimeSeriesRange {
+  const range = snapshotRange(snapshots, SECONDS_PER_DAY);
+  return {
+    ...range,
+    to: Math.max(range.to, currentDayBucket() + SECONDS_PER_DAY),
   };
 }
 

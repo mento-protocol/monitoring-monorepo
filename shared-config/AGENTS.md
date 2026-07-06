@@ -8,6 +8,8 @@ last_verified: 2026-05-20
 
 # AGENTS.md — Shared Config
 
+> **Architecture decisions** for this package live in [`docs/adr/`](../docs/adr/README.md) (scope: `shared-config`) — read the relevant ADR before changing how something here is built; it records the _why_ the code can't.
+
 ## Scope
 
 `shared-config/` is the source of truth for chain metadata, deployment namespaces, token/pool label derivation, FX calendar data, and shared ABIs.

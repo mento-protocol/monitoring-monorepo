@@ -135,6 +135,7 @@ const rebalanceBlockedLabels = [
 ] as const;
 export type PollErrorKind =
   | "hasura_query"
+  | "hasura_rate_limit"
   | "update_metrics"
   | "mark_healthy"
   | "rebalance_probe"

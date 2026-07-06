@@ -15,16 +15,20 @@ import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { zeroFillSeries } from "@/lib/chart-gap-fill";
 import {
   SECONDS_PER_DAY,
+  SECONDS_PER_HOUR,
+  VOLUME_CHART_RANGES,
   dailyBucket,
+  rangeKeyToDays,
   type RangeKey,
   type TimeSeriesPoint,
 } from "@/lib/time-series";
+import { usePoolSnapshots } from "@/lib/use-pool-snapshots";
 import { fxPoolWeekendBandsForSeries } from "@/lib/weekend";
 
 interface PoolVolumeOverTimeChartProps {
+  poolId: string;
   pool: Pool;
   network: Network;
-  snapshots: PoolSnapshot[];
   isLoading: boolean;
   hasError: boolean;
   rates?: OracleRateMap;
@@ -36,16 +40,109 @@ interface PoolVolumeOverTimeChartProps {
   historySupported?: boolean;
 }
 
-export function PoolVolumeOverTimeChart({
+function buildVolumeSeries({
+  snapshots,
   pool,
   network,
-  snapshots,
+  rates,
+}: {
+  snapshots: PoolSnapshot[];
+  pool: Pool;
+  network: Network;
+  rates: OracleRateMap | undefined;
+}): TimeSeriesPoint[] {
+  const sorted = sortedCopy(
+    snapshots,
+    (a, b) => Number(a.timestamp) - Number(b.timestamp),
+  );
+  const points: TimeSeriesPoint[] = [];
+  for (const snap of sorted) {
+    const value = getSnapshotVolumeInUsd(
+      snap,
+      pool,
+      network,
+      rates ?? new Map(),
+    );
+    if (value === null) continue;
+    points.push({ timestamp: Number(snap.timestamp), value });
+  }
+  return points;
+}
+
+function volumeWindow({
+  series,
+  range,
+  bucketSeconds,
+}: {
+  series: TimeSeriesPoint[];
+  range: RangeKey;
+  bucketSeconds: number;
+}): { from: number; to: number } {
+  const nowMs = Date.now();
+  if (bucketSeconds === SECONDS_PER_HOUR) {
+    return range === "7d" ? snapshotWindow7d(nowMs) : snapshotWindow30d(nowMs);
+  }
+
+  const todayStart = dailyBucket(Math.floor(nowMs / 1000));
+  const days = rangeKeyToDays(range);
+  if (days !== null) {
+    return {
+      from: todayStart - (days - 1) * SECONDS_PER_DAY,
+      to: todayStart + SECONDS_PER_DAY,
+    };
+  }
+  return {
+    from: Math.min(
+      todayStart,
+      ...series.map((pt) => dailyBucket(pt.timestamp)),
+    ),
+    to: todayStart + SECONDS_PER_DAY,
+  };
+}
+
+function volumeHeadline({
+  loading,
+  priceable,
+  visibleSeries,
+  rangeTotal,
+}: {
+  loading: boolean;
+  priceable: boolean;
+  visibleSeries: TimeSeriesPoint[];
+  rangeTotal: number;
+}): string {
+  if (loading) return "…";
+  if (!priceable || visibleSeries.length === 0) return "—";
+  return formatUSD(rangeTotal);
+}
+
+function volumeEmptyMessage(
+  error: boolean,
+  historySupported: boolean,
+  priceable: boolean,
+): string {
+  if (error) return "Unable to load volume history";
+  if (!historySupported) return "History unavailable for this pool type";
+  if (!priceable) return "Volume unavailable for this pair";
+  return "Not enough history yet";
+}
+
+export function PoolVolumeOverTimeChart({
+  poolId,
+  pool,
+  network,
   isLoading,
   hasError,
   rates,
   historySupported = true,
 }: PoolVolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("all");
+  const {
+    snapshots,
+    bucketSeconds,
+    isLoading: snapshotsLoading,
+    hasError: snapshotsError,
+  } = usePoolSnapshots(poolId, range, historySupported);
 
   const priceable = canPricePool(pool, network, rates ?? new Map());
 
@@ -54,72 +151,50 @@ export function PoolVolumeOverTimeChart({
   // which the headline would then render as a real-looking "$0.00".
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
     if (!priceable || snapshots.length === 0) return [];
-    const sorted = sortedCopy(
-      snapshots,
-      (a, b) => Number(a.timestamp) - Number(b.timestamp),
-    );
-    const points: TimeSeriesPoint[] = [];
-    for (const snap of sorted) {
-      const value = getSnapshotVolumeInUsd(
-        snap,
-        pool,
-        network,
-        rates ?? new Map(),
-      );
-      if (value === null) continue;
-      points.push({ timestamp: Number(snap.timestamp), value });
-    }
-    return points;
+    return buildVolumeSeries({ snapshots, pool, network, rates });
   }, [priceable, pool, network, snapshots, rates]);
 
-  // Day-aligned gap-fill. 1W/1M use the same rolling-hour snapshot windows as
-  // homepage volume, while "All" spans every day from the pool's first snapshot
-  // to today. Missing daily snapshots — real in this repo for sparse pools —
-  // surface as explicit $0 bars rather than dropped points, so Plotly doesn't
-  // bridge a line across inactive days and the headline total is the honest sum
-  // over the window.
+  // Bucket-aligned gap-fill. 1M uses hourly PoolSnapshot rows; 3M/All use the
+  // daily rollup so the query remains under hosted Hasura's 1000-row cap.
   const visibleSeries = useMemo(() => {
     if (fullSeries.length === 0) return fullSeries;
-    const nowMs = Date.now();
-    const todayStart = dailyBucket(Math.floor(nowMs / 1000));
-    let earliest = todayStart;
-    for (const pt of fullSeries) {
-      const bucket = dailyBucket(pt.timestamp);
-      if (bucket < earliest) earliest = bucket;
-    }
-    const window =
-      range === "7d"
-        ? snapshotWindow7d(nowMs)
-        : range === "30d"
-          ? snapshotWindow30d(nowMs)
-          : { from: earliest, to: todayStart + SECONDS_PER_DAY };
+    const window = volumeWindow({
+      series: fullSeries,
+      range,
+      bucketSeconds,
+    });
     return zeroFillSeries(fullSeries, {
       from: window.from,
       to: window.to,
-      bucketSeconds: SECONDS_PER_DAY,
+      bucketSeconds,
     });
-  }, [fullSeries, range]);
+  }, [fullSeries, range, bucketSeconds]);
   const shapes = useMemo(
     () =>
       fxPoolWeekendBandsForSeries({
         pool,
         network,
         series: visibleSeries,
-        endPaddingSeconds: SECONDS_PER_DAY,
+        endPaddingSeconds: bucketSeconds,
       }),
-    [pool, network, visibleSeries],
+    [pool, network, visibleSeries, bucketSeconds],
   );
 
   const rangeTotal = useMemo(
     () => visibleSeries.reduce((sum, pt) => sum + pt.value, 0),
     [visibleSeries],
   );
+  const loading = isLoading || snapshotsLoading;
+  const error = hasError || snapshotsError;
+  const hoverDateFormat =
+    bucketSeconds === SECONDS_PER_HOUR ? "%b %d, %H:00 UTC" : "%b %d, %Y";
 
-  const headline = isLoading
-    ? "…"
-    : !priceable || visibleSeries.length === 0
-      ? "—"
-      : formatUSD(rangeTotal);
+  const headline = volumeHeadline({
+    loading,
+    priceable,
+    visibleSeries,
+    rangeTotal,
+  });
 
   return (
     <TimeSeriesChartCard
@@ -130,19 +205,13 @@ export function PoolVolumeOverTimeChart({
       onRangeChange={setRange}
       headline={headline}
       change={null}
-      isLoading={isLoading}
-      hasError={hasError}
+      hoverDateFormat={hoverDateFormat}
+      isLoading={loading}
+      hasError={error}
       hasSnapshotError={false}
+      ranges={VOLUME_CHART_RANGES}
       shapes={shapes}
-      emptyMessage={
-        hasError
-          ? "Unable to load volume history"
-          : !historySupported
-            ? "History unavailable for this pool type"
-            : !priceable
-              ? "Volume unavailable for this pair"
-              : "Not enough history yet"
-      }
+      emptyMessage={volumeEmptyMessage(error, historySupported, priceable)}
     />
   );
 }

@@ -41,6 +41,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_DEVIATION_BREACHES_COUNT",
   "POOL_DEVIATION_BREACHES_ALL",
   "POOL_DAILY_SNAPSHOTS_CHART",
+  "POOL_HOURLY_SNAPSHOTS_CHART",
   "POOL_DAILY_SNAPSHOTS_ALL",
   "BROKER_DAILY_SNAPSHOTS_ALL",
   "BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H",
@@ -479,6 +480,17 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
   it("POOL_DAILY_SNAPSHOTS_CHART sorts [timestamp desc, id desc]", () => {
     expect(normalize(queries.POOL_DAILY_SNAPSHOTS_CHART)).toContain(
       "order_by: [{ timestamp: desc }, { id: desc }]",
+    );
+  });
+
+  it("POOL_HOURLY_SNAPSHOTS_CHART filters by timestamp and caps at one Hasura page", () => {
+    expect(queries.POOL_HOURLY_SNAPSHOTS_CHART).toContain("$from: numeric!");
+    expect(normalize(queries.POOL_HOURLY_SNAPSHOTS_CHART)).toContain(
+      "timestamp: { _gte: $from }",
+    );
+    expect(queries.POOL_HOURLY_SNAPSHOTS_CHART).toMatch(/limit:\s*1000\b/);
+    expect(normalize(queries.POOL_HOURLY_SNAPSHOTS_CHART)).toContain(
+      "order_by: [{ timestamp: asc }, { id: asc }]",
     );
   });
 

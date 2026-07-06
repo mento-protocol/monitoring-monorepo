@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-06-10
+last_verified: 2026-07-06
 ---
 
 # Terraform Stacks
@@ -83,8 +83,12 @@ The summary links back to the merged PR when GitHub can associate the main
 commit with a PR, and lists Terraform resource actions by resource type plus
 exact resource address. Attribute values are intentionally omitted from Slack;
 use the workflow run for the full sanitized plan. The default destination is
-`#ci-failures`; set the repository variable `TERRAFORM_APPLY_SLACK_CHANNEL` to
-route these summaries to another public channel.
+`#ci-operations`; the platform stack manages the repository variable
+`TERRAFORM_APPLY_SLACK_CHANNEL` (`terraform_apply_slack_channel` tfvar,
+`terraform/github-variables.tf`) — set the tfvar and apply to route these
+summaries to another channel. See `docs/notes/slack-github-subscriptions.md`
+for the separate GitHub Slack App subscription and the two systems'
+relationship.
 
 If a post-merge Terraform deploy workflow stays `pending` with no jobs, inspect
 that workflow's run queue before waiting on the current run. Older `waiting` or

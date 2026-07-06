@@ -151,3 +151,9 @@ size-limit reads `.next/` output; the local gate relies on that dependency
 instead of mapping a separate dashboard build command for size-limit checks.
 High-risk or cross-layer commands stay outside Turbo, including codegen,
 install, dep-cruiser, coverage floors, mutation baselines, and Terraform.
+
+## Common local-gate traps
+
+- `codespell` flags short variable names that match common abbreviations (e.g. a two-letter loop var that looks like a misspelling). Use descriptive names like `netData` to avoid this.
+- `trunk check <file>` only checks the specified files. That is fine for the path-aware local agent gate, but use `--all` when you need to manually reproduce CI's full-repo Trunk job.
+- If `indexer-envio typecheck` fails with "Cannot find module 'generated'", run `./scripts/setup.sh` first

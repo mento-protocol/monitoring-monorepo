@@ -34,6 +34,7 @@ import {
 import { recordHealthSample } from "../../healthScore.js";
 import { bootstrapAndResolveBreakerSnapshotFields } from "../../breakers.js";
 import { getBreakerConfigsByFeed } from "../../rpc.js";
+import { shouldPersistRawOracleSnapshot } from "../../oracleSnapshotRetention.js";
 
 function degenerateReservesForThresholdUpdate(pool: Pool): boolean {
   const exactZeroDegenerateState = classifyExactZeroReserves(pool);
@@ -492,17 +493,18 @@ indexer.onEvent(
           blockNumber,
           blockTimestamp,
         );
-        context.OracleSnapshot.set(
-          buildThresholdUpdatedSnapshot({
-            event,
-            blockNumber,
-            blockTimestamp,
-            poolId,
-            pool,
-            snapshotFields,
-            breakerSnapshotFields,
-          }),
-        );
+        const snapshot = buildThresholdUpdatedSnapshot({
+          event,
+          blockNumber,
+          blockTimestamp,
+          poolId,
+          pool,
+          snapshotFields,
+          breakerSnapshotFields,
+        });
+        if (shouldPersistRawOracleSnapshot(blockTimestamp)) {
+          context.OracleSnapshot.set(snapshot);
+        }
       }
     }
     await upsertSnapshot({

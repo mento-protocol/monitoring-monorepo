@@ -3,7 +3,7 @@ title: Agent Context Standards
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-05
+last_verified: 2026-07-06
 ---
 
 # Agent Context Standards
@@ -18,6 +18,7 @@ Canonical context describes the system and operating rules as they are today. Ag
 
 - `AGENTS.md` and nested `*/AGENTS.md` files: operational instructions scoped to the repo or a directory.
 - `SPEC.md`: the technical specification of the monitoring system's architecture, data flow, and endpoints.
+- `docs/adr/*.md`: architecture decision records — the _why_ behind the system's shape. Each in-force ADR is current operating truth; superseded ones carry `status: archived`. The index is `docs/adr/README.md`.
 - `docs/pr-checklists/*.md`: mandatory review checklists for known hazard classes.
 - `docs/deployment.md`: current deployment workflow.
 - `.agents/skills/**/SKILL.md`: reusable agent procedures.

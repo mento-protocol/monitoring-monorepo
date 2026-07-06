@@ -3,10 +3,12 @@ title: Envio Indexer Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-07-06
 ---
 
 # AGENTS.md — Envio Indexer
+
+> **Architecture decisions** for this package live in [`docs/adr/`](../docs/adr/README.md) (scope: `indexer-envio`) — read the relevant ADR before changing how something here is built; it records the _why_ the code can't.
 
 ## What This Is
 
@@ -82,6 +84,7 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
 - `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60710000
 - `ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` — (optional) Ethereum reserve-yield start block, defaults to 19111760
+- `ENVIO_ORACLE_SNAPSHOT_RETENTION_DAYS` — (optional) raw `OracleSnapshot` retention window in days; unset keeps all rows. The value takes effect on the next full resync. Hosted deployments pass it via `.env.cloud` (`envio-cloud indexer add -e .env.cloud ...`); setting it is an ops step, not part of ordinary CI.
 
 Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route all chains to the same endpoint and produce incorrect RPC reads for chain-specific calls.
 
@@ -155,6 +158,12 @@ These rules come from PRs #184 and #194 — Codex flagged both as P1.
 
 - Block-keyed RPC caches (oracle reads, etc.) MUST be size-bounded. PR #184 fixed an OOM where the indexer cached one entry per block forever
 - Use an LRU or evict on block height advance; never an unbounded `Map`
+
+### Median-derived deviation freshness
+
+- Any local recomputation from `lastMedianPrice` must use the full fresh-live-median gate, not just `medianLive` or non-zero `lastMedianPrice`.
+- Use `hasFreshLiveMedian(pool, eventTimestamp)` for sibling paths that derive price difference, breach, health, or snapshot state from the indexed median. That predicate requires a non-zero median, `medianLive`, `oracleOk`, known `oracleExpiry`, known `lastOracleReportAt`, and `lastOracleReportAt + oracleExpiry > eventTimestamp`.
+- Add stale-anchor regression coverage for every sibling path that can recompute median-derived deviation without a contract-provided `priceDifference` (for example `OracleReported` fan-out and `upsertPool` calls from swap/mint/burn/update-reserves/fee-only events). A fresh non-median reporter must not extend a stale median anchor.
 
 ### File-size budget
 

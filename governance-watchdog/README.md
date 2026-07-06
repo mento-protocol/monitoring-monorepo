@@ -1,5 +1,7 @@
 # 🐕 Governance Watchdog
 
+> **Architecture decisions** for this service live in [`docs/adr/`](../docs/adr/README.md) (scope: `governance-watchdog`) — read the relevant ADR before changing how it deploys or is structured; it records the _why_ the code can't.
+
 <!-- markdown-link-check-disable -->
 
 A system that monitors Mento Governance events on-chain and sends notifications about them to Discord and Telegram. Mento Devs can view the [full project spec in our Notion.](https://www.notion.so/mentolabs/Governance-Watchdog-d168a8110a53430a90e2f5ab65f103f5?pvs=4)

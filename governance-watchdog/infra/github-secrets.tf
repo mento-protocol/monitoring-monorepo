@@ -11,12 +11,13 @@
 # TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID are deliberately NOT mirrored here:
 # alerts-delivery / alerts/infra already own those repo secrets, and a second
 # stack managing the same secret name would fight it on every apply. The
-# governance-watchdog Slack channel is project-specific, so it is mirrored under
-# TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID and exported as
-# TF_VAR_slack_notification_channel_id only in the governance-watchdog drift leg.
+# governance-watchdog QuickNode API key and Slack channel are project-specific,
+# so they are mirrored under TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY and
+# TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID, then exported under
+# the Terraform variable names only in the governance-watchdog workflow legs.
 # The drift workflow keeps the pre-existing workflow-level Slack value as a
 # transition fallback only until this stack-specific secret has been mirrored.
-# This stack's tfvars must hold the same shared Billing/QuickNode/GitHub values.
+# This stack's tfvars must hold the same shared Billing/GitHub values.
 
 locals {
   # Non-sensitive name set for for_each; sensitive values flow only through
@@ -29,6 +30,7 @@ locals {
     "TF_VAR_TELEGRAM_TEST_CHAT_ID",
     "TF_VAR_TELEGRAM_BOT_TOKEN",
     "TF_VAR_X_AUTH_TOKEN",
+    "TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY",
     "TF_VAR_QUICKNODE_SECURITY_TOKEN",
     "TF_VAR_VICTOROPS_WEBHOOK_URL",
   ])
@@ -48,6 +50,7 @@ locals {
     TF_VAR_TELEGRAM_TEST_CHAT_ID                             = var.telegram_test_chat_id
     TF_VAR_TELEGRAM_BOT_TOKEN                                = var.telegram_bot_token
     TF_VAR_X_AUTH_TOKEN                                      = var.x_auth_token
+    TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY             = var.quicknode_api_key
     TF_VAR_QUICKNODE_SECURITY_TOKEN                          = var.quicknode_security_token
     TF_VAR_VICTOROPS_WEBHOOK_URL                             = var.victorops_webhook_url
     TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID = var.slack_notification_channel_id

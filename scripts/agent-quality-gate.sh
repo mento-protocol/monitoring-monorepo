@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -634,6 +634,18 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/version-skew-check.test.mjs" "$reason"
   add_command "node scripts/override-prune-report.test.mjs" "$reason"
+  add_command "node scripts/check-adr-reminder.test.mjs" "$reason"
+}
+
+# Advisory ADR reminder, fed the gate's own base/head + changed-path set so the
+# checker evaluates exactly what the gate routed (including a precomputed
+# --changed-paths-file set). Self-suppressing, so safe to route broadly.
+add_adr_reminder() {
+  local reason="$1"
+  local cmd="node scripts/check-adr-reminder.mjs"
+  cmd="$cmd --base $(quote_path "$base_ref") --head $(quote_path "$head_ref")"
+  cmd="$cmd --include-untracked --changed-paths-file $(quote_path "$changed_paths_file")"
+  add_command "$cmd" "$reason"
 }
 
 add_indexer_post_codegen_install() {
@@ -1206,6 +1218,7 @@ while IFS= read -r path; do
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
       add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions workflow/action changed"
+      add_adr_reminder "workflow/action changed — ADR reminder (a new workflow likely needs an ADR)"
       case "$path" in
         .github/workflows/ci.yml)
           add_surface "workspace"
@@ -1369,7 +1382,15 @@ while IFS= read -r path; do
     docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md|SPEC.md)
       add_surface "docs"
       case "$path" in
-        docs/context-standards.md|docs/pr-checklists/recurring-review-patterns.md|AGENTS.md|*/AGENTS.md)
+        AGENTS.md|*/AGENTS.md)
+          add_command "pnpm agent:context-check" "agent context standards changed"
+          # A scoped AGENTS.md reaching this route (not an earlier package route)
+          # is a brand-new standalone service (governance-watchdog-style) added
+          # without a pnpm-workspace.yaml change. The reminder self-suppresses on
+          # an edit to an existing AGENTS.md, so this only nags on a new one.
+          add_adr_reminder "scoped AGENTS.md changed — ADR reminder (a new package/service likely needs an ADR)"
+          ;;
+        docs/context-standards.md|docs/pr-checklists/recurring-review-patterns.md)
           add_command "pnpm agent:context-check" "agent context standards changed"
           ;;
         SPEC.md)
@@ -1433,6 +1454,9 @@ while IFS= read -r path; do
           ;;
         scripts/check-deploy-root-anchors.test.mjs)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy root-anchor test changed"
+          ;;
+        scripts/check-adr-reminder.mjs|scripts/check-adr-reminder.test.mjs)
+          add_command "pnpm adr:check:test" "ADR reminder helper changed"
           ;;
         scripts/agent-prewarm.mjs|scripts/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
@@ -1552,6 +1576,8 @@ while IFS= read -r path; do
       add_terraform_validate_commands "aegis/terraform" "Terraform stack registry changed"
       add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack registry changed"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Terraform stack registry changed"
+      add_checklist "docs/pr-checklists/architecture-decisions.md" "Terraform stack registry changed — a new stack likely needs an ADR"
+      add_adr_reminder "Terraform stack registry changed — ADR reminder"
       ;;
     package.json)
       root_package_json_class="$(get_root_package_json_class)"
@@ -1572,6 +1598,7 @@ while IFS= read -r path; do
       add_surface "workspace"
       add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
       add_workspace_quality_commands "workspace dependency/config changed"
+      add_adr_reminder "workspace membership/policy changed — ADR reminder (a new package likely needs an ADR)"
       ;;
     patches/*)
       add_surface "workspace"
@@ -1582,6 +1609,20 @@ while IFS= read -r path; do
       add_surface "workspace"
       add_preflight_command "pnpm install --frozen-lockfile" "Node version changed"
       add_workspace_quality_commands "Node version changed"
+      ;;
+    */package.json)
+      # A TOP-LEVEL package.json not handled by an earlier package route is a
+      # new standalone service root (governance-watchdog-style: package.json but
+      # possibly no AGENTS.md). Restrict to a single path segment — a nested
+      # `pkg/sub/package.json` is a workspace member covered by the
+      # pnpm-workspace.yaml route, not a new top-level service. The reminder
+      # self-suppresses on an edit to an existing package.json anyway.
+      case "$path" in
+        */*/*) ;;
+        *)
+          add_adr_reminder "top-level package.json changed — ADR reminder (a new package/service likely needs an ADR)"
+          ;;
+      esac
       ;;
   esac
 done < "$changed_paths_file"

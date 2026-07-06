@@ -14,6 +14,8 @@ const expectedScripts = {
   "agent:review-materiality": "node scripts/review-materiality.mjs",
   "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
   "agent:context-check": "node scripts/check-agent-context.mjs",
+  "adr:check": "node scripts/check-adr-reminder.mjs",
+  "adr:check:test": "node scripts/check-adr-reminder.test.mjs",
   "agent:autoreview": "./scripts/agent-autoreview.sh",
   "issue:board": "node scripts/agent-issue-board.mjs",
   "issue:board:test": "node scripts/agent-issue-board.test.mjs",
