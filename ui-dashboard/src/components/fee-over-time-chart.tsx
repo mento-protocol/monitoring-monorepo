@@ -351,7 +351,9 @@ export function TotalRevenueChart({
   const chartSummary = isLoading
     ? "Total revenue chart is loading."
     : !hasAnyRevenue
-      ? `Total revenue chart: no revenue in the ${activeRangeLabel} range.`
+      ? partialReasons.length > 0
+        ? `Total revenue chart: revenue data is partially unavailable for the ${activeRangeLabel} range.`
+        : `Total revenue chart: no revenue in the ${activeRangeLabel} range.`
       : `Total revenue over the ${activeRangeLabel} range: ${headline}${
           change === null
             ? ""
