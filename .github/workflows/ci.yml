@@ -394,7 +394,7 @@ jobs:
         # binaries are arch-specific, and `playwright install` validates
         # version, not architecture, so a cross-arch restore would pass
         # validation and then die with an exec-format error.
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
@@ -457,7 +457,7 @@ jobs:
       # the cache.
       - name: Cache Envio .envio/
         id: cache-generated
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: indexer-envio/.envio
           key: envio-generated-v3-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**', 'indexer-envio/scripts/**') }}
