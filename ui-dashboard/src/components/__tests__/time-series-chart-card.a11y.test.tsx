@@ -53,11 +53,15 @@ describe("TimeSeriesChartCard accessibility (WCAG 1.1.1)", () => {
     expect(html).toContain('aria-label="Total Value Locked chart, All range"');
   });
 
-  it("carries a visually-hidden text alternative summarizing latest value + trend", () => {
+  it("carries a visually-hidden text alternative summarizing range + trend", () => {
     const html = render();
     expect(html).toContain("sr-only");
+    // The summary describes range + trend direction, deliberately without a
+    // specific value: consumers denominate their headline differently (dollar
+    // totals, per-day latest, token amounts), so a single formatter here would
+    // mislabel some of them.
     expect(html).toContain(
-      "Total Value Locked: latest value $2.69M over the 1W range, up 3.10% week-over-week.",
+      "Total Value Locked chart over the 1W range, up 3.10% week-over-week.",
     );
   });
 

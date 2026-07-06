@@ -59,6 +59,14 @@ const fmtUsd = (v: number) =>
       ? `$${(v / 1_000).toFixed(1)}K`
       : `$${v.toFixed(2)}`;
 
+function lpChartName(sym0?: string, sym1?: string): string {
+  return `LP concentration pie chart${sym0 && sym1 ? ` for ${sym0} and ${sym1}` : ""}`;
+}
+
+function lpPairLabel(sym0?: string, sym1?: string): string {
+  return `${sym0 ?? "Token 0"}/${sym1 ?? "Token 1"}`;
+}
+
 export function LpConcentrationChart({
   positions,
   totalLiquidity,
@@ -185,7 +193,7 @@ export function LpConcentrationChart({
         ? `${(v / 1_000).toFixed(1)}K ${sym}`
         : `${v.toFixed(2)} ${sym}`;
 
-  const concentrationSummary = `LP concentration for ${sym0 ?? "Token 0"}/${sym1 ?? "Token 1"}: ${totalPositions} liquidity providers. Top holder ${topShare}% of the pool, top 3 hold ${top3Share}%. Herfindahl-Hirschman Index ${hhi.toFixed(0)}.`;
+  const concentrationSummary = `LP concentration for ${lpPairLabel(sym0, sym1)}: ${totalPositions} liquidity providers. Top holder ${topShare}% of the pool, top 3 hold ${top3Share}%. Herfindahl-Hirschman Index ${hhi.toFixed(0)}.`;
 
   return (
     <div className="mb-4 overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4">
@@ -198,7 +206,7 @@ export function LpConcentrationChart({
           <div className="flex flex-col items-start gap-4 xl:flex-row xl:items-start">
             <div
               role="img"
-              aria-label={`LP concentration pie chart${sym0 && sym1 ? ` for ${sym0} and ${sym1}` : ""}`}
+              aria-label={lpChartName(sym0, sym1)}
               className="w-full max-w-[360px] shrink-0"
             >
               <Plot
