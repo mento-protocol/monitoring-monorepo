@@ -8,6 +8,8 @@ last_verified: 2026-05-20
 
 # AGENTS.md — Aegis
 
+> **Architecture decisions** for this package live in [`docs/adr/`](../docs/adr/README.md) (scope: `aegis`) — read the relevant ADR before changing how something here is built; it records the _why_ the code can't.
+
 ## Scope
 
 `aegis/` polls configured on-chain view calls and exposes Prometheus metrics for Grafana dashboards and alerts.

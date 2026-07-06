@@ -1,0 +1,48 @@
+---
+title: Vendor ABIs from the contracts package and gate config addresses on a drift check
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-06
+scope: indexer-envio
+date: 2026-05
+---
+
+# ADR 0015 — Vendor ABIs from the contracts package; gate every config address on a drift check
+
+**Status:** Accepted (May 2026), in force.
+**Scope:** indexer-envio
+
+## Context
+
+Envio config YAML hard-codes contract addresses and the handlers need ABIs. If a
+config address silently stops matching `@mento-protocol/contracts` (a rename, a
+redeploy, a typo), the indexer indexes the wrong thing and the failure is invisible
+until data looks wrong downstream.
+
+## Decision
+
+**Vendor ABIs** from `@mento-protocol/contracts` via `pnpm generate:abis` (with a
+few hand-vendored minimal subsets, e.g. ERC20 and Wormhole NTT), and **gate every
+hex address** in `config*.yaml` with `scripts/checkYamlAddresses.mjs`: each must
+resolve to `@mento-protocol/contracts`, `config/nttAddresses.json`, or an explicit
+inline allowlist. The check runs in CI before codegen.
+
+## Alternatives considered
+
+- **Hand-maintain ABIs and addresses** — rejected: drifts from the published
+  contracts package; the bug is silent.
+- **Trust the contracts package at runtime only** — rejected: a drift check that
+  runs in <1s at build time catches renames before they ship.
+
+## Consequences
+
+- Bumping `@mento-protocol/contracts` starts with running the address drift check —
+  a renamed entry surfaces immediately.
+- ERC20/NTT subsets are intentionally excluded from the generator (hand-vendored);
+  that exception is documented in the generator header.
+
+## Evidence
+
+- YAML address drift check PR #486 (2026-05-20); `scripts/generateAbis.mjs`, `scripts/checkYamlAddresses.mjs`.
+- [`indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md) §Key Files.

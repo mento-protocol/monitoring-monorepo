@@ -12,6 +12,15 @@ Across the last 20 PRs, review findings clustered into the categories below. **S
 
 ## Patterns
 
+### Architecture decisions — `docs/pr-checklists/architecture-decisions.md`
+
+tldr: if a PR makes an architectural decision (constrains future work · had a
+real alternative · the why isn't obvious from the code), it records an ADR under
+`docs/adr/` in the same PR. High-signal triggers — a new package/service, a new
+Terraform stack, a new CI/deploy workflow — are flagged by `pnpm adr:check` and
+the agent quality gate. A won't-record needs a one-line reason on the PR's
+"Architecture decision?" line. Full rules in the linked checklist.
+
 ### Prompt exclusions — `docs/pr-checklists/review-prompt-exclusions.md`
 
 tldr: before re-raising a stale or speculative review finding, check the

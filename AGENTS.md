@@ -27,6 +27,15 @@ Context authority, placement, and metadata rules live in
 and non-canonical notes/plans as historical input that must be verified before
 use.
 
+Architecture decisions and the rationale behind the system's shape are recorded
+in [`docs/adr/`](docs/adr/README.md) — read the ADR that governs a subsystem
+before changing how it is built. When your change **makes** an architectural
+decision (it constrains future work, had a real alternative, and the why is not
+obvious from the code), record a new ADR in the same PR. `pnpm adr:check` and the
+agent quality gate remind you on architectural surfaces (new package, Terraform
+stack, or workflow); the when/how procedure is
+[`docs/pr-checklists/architecture-decisions.md`](docs/pr-checklists/architecture-decisions.md).
+
 ## Cross-Protocol Context
 
 For any protocol-level question that crosses beyond this monitoring repo, first
@@ -288,6 +297,8 @@ pnpm lockfile:lint                 # Lockfile integrity + registry check (blocki
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
 pnpm override:prune-report          # pnpm.overrides + minimumReleaseAgeExclude pruning report (advisory; no install needed)
+pnpm adr:check                      # Advisory ADR reminder for architectural changes (new package/stack/workflow); --strict to hard-gate
+pnpm adr:check:test                 # Offline tests for the ADR reminder trigger logic
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 node scripts/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
 node scripts/file-size-watchlist.mjs  # Refresh source file-size watchlist; use --format issue for GitHub Issues, not BACKLOG.md
