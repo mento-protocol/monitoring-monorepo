@@ -1,5 +1,6 @@
 import type {
   BorrowerInfo,
+  BorrowingFeeAppliedEvent,
   InterestRateBracket,
   LiquityBorrowingRevenueDailySnapshot,
   PendingBatchMembershipOperation,
@@ -52,6 +53,9 @@ export type TroveManagerPreloadContext = Parameters<
     BorrowerInfo: {
       get: (id: string) => Promise<BorrowerInfo | undefined>;
       set: (entity: BorrowerInfo) => void;
+    };
+    BorrowingFeeAppliedEvent: {
+      get: (id: string) => Promise<BorrowingFeeAppliedEvent | undefined>;
     };
   };
 

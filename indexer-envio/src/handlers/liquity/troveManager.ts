@@ -1,5 +1,5 @@
 import { indexer } from "../../indexer.js";
-import { asBigInt, eventId } from "../../helpers.js";
+import { asBigInt, eventId, eventIdFromEvent } from "../../helpers.js";
 import {
   getOrCreateLiquityInstance,
   preloadLiquityMarket,
@@ -85,6 +85,7 @@ indexer.onEvent(
           operation: Number(event.params._operation),
           annualInterestRate: event.params._annualInterestRate,
           upfrontFee: event.params._debtIncreaseFromUpfrontFee,
+          appliedFeeEventId: eventIdFromEvent(event),
           blockNumber: asBigInt(event.block.number),
           blockTimestamp: asBigInt(event.block.timestamp),
         }),
@@ -191,6 +192,7 @@ indexer.onEvent(
       event.params._debtIncreaseFromUpfrontFee,
       blockTimestamp,
       blockNumber,
+      eventIdFromEvent(event),
     );
     // TroveOperation only flips status — debt arrives in TroveUpdated.
     instance = applySystemDebtDelta(instance, prevTroveState, {
@@ -423,6 +425,7 @@ indexer.onEvent(
         blockNumber,
         blockTimestamp,
         upfrontFee: event.params._debtIncreaseFromUpfrontFee,
+        appliedFeeEventId: eventIdFromEvent(event),
         prevBatchRate: existing?.annualInterestRate ?? 0n,
         nextBatchRate: event.params._annualInterestRate,
         prevBatchDebt: existing?.debt ?? 0n,
@@ -530,6 +533,7 @@ indexer.onEvent(
       event.params._debtIncreaseFromUpfrontFee,
       blockTimestamp,
       blockNumber,
+      eventIdFromEvent(event),
     );
     context.LiquityInstance.set(
       touchLiquityInstance(instance, blockNumber, blockTimestamp),

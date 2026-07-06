@@ -9,14 +9,15 @@
  * `bootstrapCollaterals` (bootstrapHandler.ts's onBlock target) is a plain
  * get-or-create and is idempotent by construction.
  *
- * The last test in this file pins a REAL gap found while writing this
- * coverage: `recordBorrowingFeeAndApplyCum` (borrowingRevenue.ts), called
- * unconditionally from both the `TroveOperation` and `BatchUpdated` handlers,
- * has no replay guard — a redelivered event with a nonzero
- * `_debtIncreaseFromUpfrontFee` double-counts `LiquityInstance.borrowingFeeCum`
- * and the `LiquityBorrowingRevenueDailySnapshot.upfrontFee` bucket. Filed as
- * follow-up issue #1083; this test pins CURRENT behavior, it does not assert
- * desired behavior.
+ * The last test in this file pins the fix for issue #1083:
+ * `recordBorrowingFeeAndApplyCum` (borrowingRevenue.ts), called from both the
+ * `TroveOperation` and `BatchUpdated` handlers, now gates its write on a
+ * `BorrowingFeeAppliedEvent` replay-guard row keyed by
+ * `eventId(chainId, blockNumber, logIndex)` — a redelivered event with a
+ * nonzero `_debtIncreaseFromUpfrontFee` finds its guard row already present
+ * and skips re-applying the fee, so `LiquityInstance.borrowingFeeCum` and the
+ * `LiquityBorrowingRevenueDailySnapshot.upfrontFee` bucket are unaffected by
+ * the replay.
  */
 import { strict as assert } from "assert";
 import type {
@@ -234,7 +235,7 @@ describe("Liquity batchReplay idempotency", () => {
     assert.equal(secondPassCollateral?.minDebt, MIN_DEBT);
   });
 
-  it("KNOWN GAP (#1083): replaying a BatchUpdated event with a nonzero upfront fee double-counts LiquityInstance.borrowingFeeCum AND LiquityBorrowingRevenueDailySnapshot.upfrontFee (pins current behavior)", async () => {
+  it("replaying a BatchUpdated event with a nonzero upfront fee does not double-count LiquityInstance.borrowingFeeCum or LiquityBorrowingRevenueDailySnapshot.upfrontFee (#1083)", async () => {
     let mockDb = MockDb.createMockDb();
     seedLoadedCollateral(mockDb);
     const fee = 10n * 10n ** 18n;
@@ -271,25 +272,18 @@ describe("Liquity batchReplay idempotency", () => {
     instance = mockDb.entities.LiquityInstance.get(collateralId);
     snapshot =
       mockDb.entities.LiquityBorrowingRevenueDailySnapshot.get(snapshotId);
-    // NOTE for whoever fixes #1083: once recordBorrowingFeeAndApplyCum is
-    // made replay-safe, BOTH expectations below must flip to `fee` (not
-    // `fee * 2n`) — recordBorrowingUpfrontFee (which writes the daily
-    // snapshot) and the borrowingFeeCum increment share the same missing
-    // replay guard. Leaving these assertions on the buggy value is
-    // intentional — it pins CURRENT behavior per issue #1054's workflow
-    // contract, not the desired behavior; it is deliberately not skipped so
-    // it forces an explicit update the moment #1083 lands.
+    // recordBorrowingFeeAndApplyCum's BorrowingFeeAppliedEvent replay guard
+    // (keyed on this event's eventId) is already set from the first
+    // delivery, so the redelivered event must not re-apply the fee.
     assert.equal(
       instance?.borrowingFeeCum,
-      fee * 2n,
-      "KNOWN GAP: recordBorrowingFeeAndApplyCum has no replay guard, so the " +
-        "fee is double-counted on redelivery — pinned here, not the desired behavior",
+      fee,
+      "borrowingFeeCum is unchanged by the replayed event — not doubled",
     );
     assert.equal(
       snapshot?.upfrontFee,
-      fee * 2n,
-      "KNOWN GAP: the daily snapshot's upfrontFee bucket is double-counted " +
-        "in lockstep with borrowingFeeCum — pinned here, not the desired behavior",
+      fee,
+      "daily snapshot upfrontFee is unchanged by the replayed event — not doubled",
     );
   });
 });

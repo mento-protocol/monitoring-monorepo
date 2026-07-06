@@ -2,6 +2,7 @@ import type { PendingBatchMembershipOperation, Trove } from "envio";
 import { pendingTroveKey } from "./keys.js";
 import { preloadLiquityMarket } from "./bootstrap.js";
 import {
+  preloadBorrowingFeeAppliedEvent,
   preloadBorrowingRevenueRollover,
   preloadBorrowingUpfrontFeeBucket,
 } from "./borrowingRevenue.js";
@@ -70,6 +71,7 @@ export async function preloadTroveOperation(
     operation: number;
     annualInterestRate: bigint;
     upfrontFee: bigint;
+    appliedFeeEventId: string;
     blockNumber: bigint;
     blockTimestamp: bigint;
   },
@@ -85,6 +87,11 @@ export async function preloadTroveOperation(
     args.collateralId,
     args.upfrontFee,
     args.blockTimestamp,
+  );
+  await preloadBorrowingFeeAppliedEvent(
+    context,
+    args.appliedFeeEventId,
+    args.upfrontFee,
   );
   if (args.operation === OP.REDEEM_COLLATERAL) {
     setPendingRedemption(context, {
@@ -112,6 +119,7 @@ export async function preloadBatchReplay(args: {
   blockNumber: bigint;
   blockTimestamp: bigint;
   upfrontFee: bigint;
+  appliedFeeEventId: string;
   prevBatchRate: bigint;
   nextBatchRate: bigint;
   prevBatchDebt: bigint;
@@ -142,6 +150,11 @@ export async function preloadBatchReplay(args: {
       args.collateralId,
       args.upfrontFee,
       args.blockTimestamp,
+    ),
+    preloadBorrowingFeeAppliedEvent(
+      args.context,
+      args.appliedFeeEventId,
+      args.upfrontFee,
     ),
     preloadInterestRateBracketDebt(args.context, {
       collateralId: args.collateralId,
