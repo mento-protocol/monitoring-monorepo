@@ -131,7 +131,7 @@ export function PoolTvlOverTimeChart({
     bucketSeconds,
     isLoading: snapshotsLoading,
     hasError: snapshotsError,
-  } = usePoolSnapshots(poolId, range, historySupported);
+  } = usePoolSnapshots(poolId, range, historySupported, "stock");
 
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
     // Skip points where TVL is unknowable (untrusted decimals → null) so the

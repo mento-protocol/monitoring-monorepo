@@ -18,8 +18,11 @@ import {
   type RangeKey,
 } from "@/lib/time-series";
 import type { PoolSnapshot } from "@/lib/types";
-import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
-import { usePoolSnapshots } from "../use-pool-snapshots";
+import { SNAPSHOT_REFRESH_MS, snapshotWindow30d } from "@/lib/volume";
+import {
+  usePoolSnapshots,
+  type PoolSnapshotsMode,
+} from "../use-pool-snapshots";
 
 const { useGQLMock } = vi.hoisted(() => ({
   useGQLMock: vi.fn(),
@@ -89,11 +92,13 @@ function installResponses({
 function Probe({
   resultRef,
   range,
+  mode,
 }: {
   resultRef: { current: HookResult | null };
   range: RangeKey;
+  mode: PoolSnapshotsMode;
 }) {
-  resultRef.current = usePoolSnapshots("pool-1", range, true);
+  resultRef.current = usePoolSnapshots("pool-1", range, true, mode);
   return null;
 }
 
@@ -117,14 +122,17 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function render(range: RangeKey): {
+function render(
+  range: RangeKey,
+  mode: PoolSnapshotsMode = "flow",
+): {
   ref: { current: HookResult | null };
   rerender: (nextRange?: RangeKey) => void;
 } {
   const ref: { current: HookResult | null } = { current: null };
   const rerender = (nextRange = range) =>
     act(() => {
-      root.render(<Probe resultRef={ref} range={nextRange} />);
+      root.render(<Probe resultRef={ref} range={nextRange} mode={mode} />);
     });
   rerender();
   return { ref, rerender };
@@ -158,6 +166,50 @@ describe("usePoolSnapshots", () => {
       { poolId: "pool-1" },
       SNAPSHOT_REFRESH_MS,
     );
+  });
+
+  it("prepends the latest pre-window daily baseline for stock short-range rows", () => {
+    const hourlyFrom = snapshotWindow30d(Date.now()).from;
+    const hourlyRows = [
+      snapshot("hourly-1", String(hourlyFrom + SECONDS_PER_HOUR)),
+    ];
+    const olderBaseline = snapshot(
+      "daily-older",
+      String(hourlyFrom - 2 * SECONDS_PER_DAY),
+    );
+    const latestBaseline = snapshot(
+      "daily-latest-baseline",
+      String(hourlyFrom - SECONDS_PER_DAY),
+    );
+    const afterWindowStart = snapshot(
+      "daily-after-window-start",
+      String(hourlyFrom + SECONDS_PER_DAY),
+    );
+    installResponses({
+      hourlyRows,
+      dailyRows: [afterWindowStart, olderBaseline, latestBaseline],
+    });
+
+    const { ref } = render("30d", "stock");
+
+    expect(ref.current?.snapshots).toEqual([latestBaseline, ...hourlyRows]);
+    expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_HOUR);
+  });
+
+  it("does not merge a pre-window daily baseline for flow short-range rows", () => {
+    const hourlyFrom = snapshotWindow30d(Date.now()).from;
+    const hourlyRows = [
+      snapshot("hourly-1", String(hourlyFrom + SECONDS_PER_HOUR)),
+    ];
+    const dailyRows = [
+      snapshot("daily-baseline", String(hourlyFrom - SECONDS_PER_DAY)),
+    ];
+    installResponses({ hourlyRows, dailyRows });
+
+    const { ref } = render("30d");
+
+    expect(ref.current?.snapshots).toBe(hourlyRows);
+    expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_HOUR);
   });
 
   it("falls back to daily rows and daily bucketing when short-range hourly rows are empty", () => {

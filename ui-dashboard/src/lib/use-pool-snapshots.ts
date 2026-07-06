@@ -18,6 +18,8 @@ import {
   snapshotWindow30d,
 } from "@/lib/volume";
 
+export type PoolSnapshotsMode = "flow" | "stock";
+
 function currentHourBucketMs(): number {
   const hourMs = SECONDS_PER_HOUR * 1000;
   return Math.floor(Date.now() / hourMs) * hourMs;
@@ -58,10 +60,47 @@ function snapshotsHaveError({
   return dailyError;
 }
 
+function latestSnapshotBefore(
+  snapshots: readonly PoolSnapshot[],
+  timestamp: number,
+): PoolSnapshot | null {
+  let latest: PoolSnapshot | null = null;
+  let latestTimestamp = -Infinity;
+  for (const snapshot of snapshots) {
+    const snapshotTimestamp = Number(snapshot.timestamp);
+    if (!Number.isFinite(snapshotTimestamp) || snapshotTimestamp >= timestamp) {
+      continue;
+    }
+    if (snapshotTimestamp > latestTimestamp) {
+      latest = snapshot;
+      latestTimestamp = snapshotTimestamp;
+    }
+  }
+  return latest;
+}
+
+function stockSnapshotsWithDailyBaseline({
+  hourlySnapshots,
+  dailySnapshots,
+  hourlyFrom,
+}: {
+  hourlySnapshots: PoolSnapshot[];
+  dailySnapshots: readonly PoolSnapshot[];
+  hourlyFrom: number | null;
+}): PoolSnapshot[] {
+  if (hourlySnapshots.length === 0 || hourlyFrom === null) {
+    return hourlySnapshots;
+  }
+  const baseline = latestSnapshotBefore(dailySnapshots, hourlyFrom);
+  if (baseline === null) return hourlySnapshots;
+  return [baseline, ...hourlySnapshots];
+}
+
 export function usePoolSnapshots(
   poolId: string,
   range: RangeKey,
   historySupported: boolean,
+  mode: PoolSnapshotsMode = "flow",
 ) {
   const hourlyAnchorMs = currentHourBucketMs();
   const hourlyFrom = useMemo(
@@ -89,7 +128,20 @@ export function usePoolSnapshots(
   const hourlySnapshots = hourlyResult.data?.PoolSnapshot ?? [];
   const dailySnapshots = dailyResult.data?.PoolDailySnapshot ?? [];
   const useHourlySnapshots = hourly && hourlySnapshots.length > 0;
-  const snapshots = useHourlySnapshots ? hourlySnapshots : dailySnapshots;
+  const hourlySnapshotsForMode = useMemo(
+    () =>
+      mode === "stock"
+        ? stockSnapshotsWithDailyBaseline({
+            hourlySnapshots,
+            dailySnapshots,
+            hourlyFrom,
+          })
+        : hourlySnapshots,
+    [dailySnapshots, hourlyFrom, hourlySnapshots, mode],
+  );
+  const snapshots = useHourlySnapshots
+    ? hourlySnapshotsForMode
+    : dailySnapshots;
 
   return {
     snapshots,
