@@ -91,6 +91,21 @@ variable "slack_bot_token" {
 }
 
 #####################
+# Deploy Notification Channel Membership
+#####################
+
+variable "deploy_notification_channel_id" {
+  description = "Slack channel ID the Terraform-apply-pending bot (scripts/notify-terraform-apply.mjs, via SLACK_BOT_TOKEN) should join — e.g. when the platform stack's terraform_apply_slack_channel/TERRAFORM_APPLY_SLACK_CHANNEL is rerouted to a private channel, or a public channel the bot has not otherwise joined. Empty = no-op (no join). See docs/notes/slack-github-subscriptions.md."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.deploy_notification_channel_id == "" || can(regex("^[CG][A-Z0-9]{8,}$", var.deploy_notification_channel_id))
+    error_message = "deploy_notification_channel_id must be empty or a Slack channel ID such as C0123ABC456."
+  }
+}
+
+#####################
 # On-call Announcer
 #####################
 
