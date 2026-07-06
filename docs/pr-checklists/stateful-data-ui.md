@@ -6,6 +6,8 @@ Use this checklist for any PR that changes stateful data flow across layers.
 
 > **Any PR that adds or changes stateful data flow across layers must ship with explicit invariants, degraded-mode behavior, and interaction tests before opening.**
 
+This repo has already paid the tax for learning this the hard way.
+
 If the change touches any combination of:
 
 - Envio schema/entities
@@ -15,6 +17,8 @@ If the change touches any combination of:
 - partial failure behavior (count query failure, stale RPC, missing metadata, old rows after schema rollout)
 
 then this checklist is mandatory.
+
+Do not rely on PR review to finish the design. Reviews should catch misses, not define the invariants for the first time.
 
 ---
 
