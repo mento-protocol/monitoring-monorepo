@@ -6,11 +6,18 @@
  * files) and exits the process on failure, so it isn't a good target for a
  * synthetic-fixture end-to-end harness. Instead this tests the pure parsing,
  * staleness, and canonical-discovery helpers from
- * check-agent-context-helpers.mjs directly.
+ * check-agent-context-helpers.mjs directly, plus a small fixture harness for
+ * README-specific metadata discovery that lives in the main script.
  *
  * Run: node scripts/check-agent-context.test.mjs
  * CI:  .github/workflows/ci.yml  (scripts job)
  */
+
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   assessStaleness,
@@ -42,6 +49,155 @@ function test(name, fn) {
 
 function assert(condition, msg) {
   if (!condition) throw new Error(msg);
+}
+
+const checkerScriptPath = fileURLToPath(
+  new URL("./check-agent-context.mjs", import.meta.url),
+);
+
+function isoDateWithOffset(offsetDays) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
+}
+
+function canonicalContextFile(title, lastVerified = isoDateWithOffset(0)) {
+  return `---\ntitle: ${title}\nstatus: active\nowner: eng\ncanonical: true\nlast_verified: ${lastVerified}\n---\n\n# ${title}\n`;
+}
+
+function writeFixtureFile(root, filePath, content) {
+  const absolutePath = path.join(root, filePath);
+  mkdirSync(path.dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, content);
+}
+
+function writeFixtureJson(root, filePath, value) {
+  writeFixtureFile(root, filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function createContextCheckFixture(readmeContent) {
+  const root = mkdtempSync(path.join(tmpdir(), "check-agent-context-"));
+
+  writeFixtureFile(root, "AGENTS.md", canonicalContextFile("Agents"));
+  writeFixtureFile(root, "SPEC.md", canonicalContextFile("Spec"));
+  writeFixtureFile(root, "README.md", readmeContent);
+  writeFixtureFile(
+    root,
+    "docs/context-standards.md",
+    canonicalContextFile("Context Standards"),
+  );
+  writeFixtureFile(
+    root,
+    "docs/pr-checklists/recurring-review-patterns.md",
+    canonicalContextFile("Recurring Review Patterns"),
+  );
+  for (const note of [
+    "agent-issue-workflow",
+    "agent-quality-gate-mechanics",
+    "codex-agent-skills",
+    "codex-cloud-setup",
+    "cross-protocol-context",
+    "pr-ready-state",
+    "spoken-attention-nudge",
+    "worktree-and-web-setup",
+  ]) {
+    writeFixtureFile(
+      root,
+      `docs/notes/${note}.md`,
+      canonicalContextFile(`${note} Note`),
+    );
+  }
+
+  for (const dir of [
+    "aegis",
+    "alerts",
+    "indexer-envio",
+    "integration-probes",
+    "metrics-bridge",
+    "shared-config",
+    "terraform",
+    "scripts",
+    "ui-dashboard",
+  ]) {
+    writeFixtureFile(
+      root,
+      `${dir}/AGENTS.md`,
+      canonicalContextFile(`${dir} Agents`),
+    );
+  }
+
+  const skill = canonicalContextFile("Demo Skill");
+  writeFixtureFile(root, ".agents/skills/demo/SKILL.md", skill);
+  writeFixtureFile(root, ".claude/skills/demo/SKILL.md", skill);
+  writeFixtureFile(
+    root,
+    ".agents/roles/reviewer.md",
+    canonicalContextFile("Reviewer Role"),
+  );
+
+  writeFixtureFile(
+    root,
+    ".github/workflows/metrics-bridge.yml",
+    'jobs:\n  deploy:\n    steps:\n      - run: |\n          --revision-suffix="r-${GITHUB_SHA::7}-${GITHUB_RUN_ID}"\n',
+  );
+  writeFixtureFile(
+    root,
+    "scripts/deploy-bridge.sh",
+    'REVISION_SUFFIX="r-${TAG}-$(date +%s)"\n',
+  );
+  writeFixtureFile(
+    root,
+    "scripts/agent-session-end-hook.sh",
+    "#!/usr/bin/env bash\n",
+  );
+  writeFixtureJson(root, ".codex/hooks.json", {
+    hooks: {
+      SessionEnd: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command:
+                "bash -lc 'repo=$(git rev-parse --show-toplevel) && exec bash \"$repo/scripts/agent-session-end-hook.sh\"'",
+            },
+          ],
+        },
+      ],
+    },
+  });
+  writeFixtureJson(root, ".claude/settings.json", {
+    permissions: { allow: [] },
+    hooks: {
+      SessionEnd: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command:
+                'bash "${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh"',
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["add", "."], { cwd: root, stdio: "ignore" });
+  return root;
+}
+
+function runContextCheckFixture(readmeContent) {
+  const root = createContextCheckFixture(readmeContent);
+  try {
+    return execFileSync(process.execPath, [checkerScriptPath], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 // ── parseFrontmatter tests ────────────────────────────────────────────────────
@@ -297,6 +453,76 @@ test("minimum-presence passes when every core file is discovered", () => {
     missing.length === 0,
     `expected no missing core files, got ${JSON.stringify(missing)}`,
   );
+});
+
+// ── README metadata discovery in the live checker ─────────────────────────────
+//
+// Root README.md is intentionally outside the generic frontmatter discovery
+// roots because visible YAML frontmatter renders poorly on the GitHub repo
+// homepage. The live checker has a README-only hidden marker path, so these
+// tests run the actual script in a minimal tracked repo fixture.
+
+console.log("\nREADME metadata discovery");
+
+test("fails when root README has neither frontmatter nor marker", () => {
+  try {
+    runContextCheckFixture("# Root README\n\nNo metadata here.\n");
+    throw new Error("expected context check to fail without README metadata");
+  } catch (/** @type {unknown} */ err) {
+    const maybeError =
+      err && typeof err === "object"
+        ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
+            err
+          )
+        : {};
+    const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
+    assert(
+      output.includes(
+        "README.md: core context file must keep canonical: true metadata",
+      ),
+      `expected missing README metadata failure, got ${JSON.stringify(output || maybeError.message)}`,
+    );
+  }
+});
+
+test("continues to support root README YAML frontmatter", () => {
+  const output = runContextCheckFixture(canonicalContextFile("Root README"));
+  assert(
+    output.includes("Agent context check passed"),
+    `expected README frontmatter to pass, got ${JSON.stringify(output)}`,
+  );
+});
+
+test("supports a hidden root README agent-context marker", () => {
+  const output = runContextCheckFixture(
+    `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${isoDateWithOffset(0)} -->\n`,
+  );
+  assert(
+    output.includes("Agent context check passed"),
+    `expected README marker to pass, got ${JSON.stringify(output)}`,
+  );
+});
+
+test("applies staleness checks to a hidden root README marker", () => {
+  const staleDate = isoDateWithOffset(-(STALE_AFTER_DAYS + 1));
+  try {
+    runContextCheckFixture(
+      `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${staleDate} -->\n`,
+    );
+    throw new Error("expected context check to fail for stale README metadata");
+  } catch (/** @type {unknown} */ err) {
+    const maybeError =
+      err && typeof err === "object"
+        ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
+            err
+          )
+        : {};
+    const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
+    assert(
+      output.includes(`README.md: last_verified ${staleDate} is`),
+      `expected stale README marker failure, got ${JSON.stringify(output || maybeError.message)}`,
+    );
+  }
 });
 
 // ── summary ───────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 title: Cross-Protocol Context
 status: active
 owner: eng
+canonical: true
 last_verified: 2026-07-06
 ---
 
