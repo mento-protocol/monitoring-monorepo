@@ -8,6 +8,13 @@ export const eventId = (
   logIndex: number,
 ): string => `${chainId}_${blockNumber}_${logIndex}`;
 
+/** eventId derived directly from an event's identity fields. */
+export const eventIdFromEvent = (event: {
+  chainId: number;
+  block: { number: number };
+  logIndex: number;
+}): string => eventId(event.chainId, event.block.number, event.logIndex);
+
 export const asAddress = (value: string): string => value.toLowerCase();
 
 /**

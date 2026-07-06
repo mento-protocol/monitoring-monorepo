@@ -1,4 +1,5 @@
 import type {
+  BorrowingFeeAppliedEvent,
   InterestRateBracket,
   LiquityBorrowingRevenueDailySnapshot,
   LiquityInstance,
@@ -27,6 +28,20 @@ type BorrowingRevenueBracketContext = BorrowingRevenueSnapshotContext & {
 };
 
 export type BorrowingRevenueContext = BorrowingRevenueBracketContext;
+
+// Read-only view of the replay guard, used by the preload warmer below.
+type BorrowingFeeAppliedEventReadContext = {
+  BorrowingFeeAppliedEvent: {
+    get: (id: string) => Promise<BorrowingFeeAppliedEvent | undefined>;
+  };
+};
+
+// Read/write view used by recordBorrowingFeeAndApplyCum to gate the write.
+type BorrowingFeeAppliedEventContext = BorrowingFeeAppliedEventReadContext & {
+  BorrowingFeeAppliedEvent: {
+    set: (entity: BorrowingFeeAppliedEvent) => void;
+  };
+};
 
 export const borrowingRevenueDailySnapshotId = (
   instanceId: string,
@@ -89,12 +104,23 @@ export async function recordBorrowingUpfrontFee(
 }
 
 export async function recordBorrowingFeeAndApplyCum(
-  context: BorrowingRevenueSnapshotContext,
+  context: BorrowingRevenueSnapshotContext & BorrowingFeeAppliedEventContext,
   instance: LiquityInstance,
   fee: bigint,
   timestamp: bigint,
   blockNumber: bigint,
+  // Replay guard key: eventId(chainId, blockNumber, logIndex) of the
+  // TroveOperation/BatchUpdated event carrying this fee. A redelivered event
+  // (reorg replay, backfill re-run) must not re-apply its fee — see
+  // BorrowingFeeAppliedEvent in schema.graphql.
+  appliedFeeEventId: string,
 ): Promise<LiquityInstance> {
+  if (fee <= ZERO) return instance;
+  const alreadyApplied =
+    await context.BorrowingFeeAppliedEvent.get(appliedFeeEventId);
+  if (alreadyApplied !== undefined) return instance;
+  context.BorrowingFeeAppliedEvent.set({ id: appliedFeeEventId });
+
   await recordBorrowingUpfrontFee(
     context,
     instance,
@@ -309,3 +335,14 @@ export const preloadBorrowingUpfrontFeeBucket =
 // Warm the daily-snapshot row recordBorrowingCollected reads (the event-day
 // bucket).
 export const preloadBorrowingCollectedBucket = preloadBorrowingRevenueDayBucket;
+
+// Warm the BorrowingFeeAppliedEvent row recordBorrowingFeeAndApplyCum's
+// replay guard reads, when a positive upfront fee is present.
+export async function preloadBorrowingFeeAppliedEvent(
+  context: BorrowingFeeAppliedEventReadContext,
+  appliedFeeEventId: string,
+  amount: bigint,
+): Promise<void> {
+  if (amount <= ZERO) return;
+  await context.BorrowingFeeAppliedEvent.get(appliedFeeEventId);
+}

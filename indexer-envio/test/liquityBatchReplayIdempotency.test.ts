@@ -9,14 +9,18 @@
  * `bootstrapCollaterals` (bootstrapHandler.ts's onBlock target) is a plain
  * get-or-create and is idempotent by construction.
  *
- * The last test in this file pins a REAL gap found while writing this
- * coverage: `recordBorrowingFeeAndApplyCum` (borrowingRevenue.ts), called
- * unconditionally from both the `TroveOperation` and `BatchUpdated` handlers,
- * has no replay guard — a redelivered event with a nonzero
- * `_debtIncreaseFromUpfrontFee` double-counts `LiquityInstance.borrowingFeeCum`
- * and the `LiquityBorrowingRevenueDailySnapshot.upfrontFee` bucket. Filed as
- * follow-up issue #1083; this test pins CURRENT behavior, it does not assert
- * desired behavior.
+ * The last two tests in this file pin the fix for issue #1083:
+ * `recordBorrowingFeeAndApplyCum` (borrowingRevenue.ts), called from both the
+ * `TroveOperation` and `BatchUpdated` handlers, now gates its write on a
+ * `BorrowingFeeAppliedEvent` replay-guard row keyed by
+ * `eventId(chainId, blockNumber, logIndex)` — a redelivered event with a
+ * nonzero `_debtIncreaseFromUpfrontFee` finds its guard row already present
+ * and skips re-applying the fee, so `LiquityInstance.borrowingFeeCum` and the
+ * `LiquityBorrowingRevenueDailySnapshot.upfrontFee` bucket are unaffected by
+ * the replay. One test drives the `BatchUpdated` call site, the other drives
+ * `TroveOperation` — both route through the same shared function and
+ * `eventIdFromEvent` computation, but a wiring bug at either call site would
+ * only be caught by testing that site directly.
  */
 import { strict as assert } from "assert";
 import type {
@@ -28,6 +32,7 @@ import type {
 import { bootstrapCollaterals } from "../src/handlers/liquity/bootstrap";
 import { makeLiquityCollateral } from "../src/handlers/liquity/bootstrap";
 import { borrowingRevenueDailySnapshotId } from "../src/handlers/liquity/borrowingRevenue";
+import { dayBucket } from "../src/helpers";
 import {
   LIQUITY_MARKETS,
   makeCollateralId,
@@ -66,6 +71,7 @@ const MIN_DEBT = 100n * 10n ** 18n;
 const BATCH_MANAGER = "0x000000000000000000000000000000000000b0b0";
 const TROVE_ID = 1n;
 const TX_HASH = "0xbatchreplay";
+const TROVE_OP_TX_HASH = "0xtroveopreplay";
 
 function seedLoadedCollateral(mockDb: ReplayMockDb): void {
   mockDb.entities.LiquityCollateral.set({
@@ -90,6 +96,29 @@ function batchedTroveUpdatedEvent(logIndex: number) {
       logIndex,
       block: { number: 500, timestamp: 5_000 },
       transaction: { hash: TX_HASH },
+    },
+  });
+}
+
+function troveOperationEvent(args: {
+  logIndex: number;
+  debtIncreaseFromUpfrontFee?: bigint;
+}) {
+  return LiquityTroveManager.TroveOperation.createMockEvent({
+    _troveId: TROVE_ID,
+    _operation: OP.ADJUST_TROVE,
+    _annualInterestRate: 5n * 10n ** 16n,
+    _debtIncreaseFromRedist: 0n,
+    _debtIncreaseFromUpfrontFee: args.debtIncreaseFromUpfrontFee ?? 0n,
+    _debtChangeFromOperation: 0n,
+    _collIncreaseFromRedist: 0n,
+    _collChangeFromOperation: 0n,
+    mockEventData: {
+      chainId: market.chainId,
+      srcAddress: market.troveManager,
+      logIndex: args.logIndex,
+      block: { number: 600, timestamp: 6_000 },
+      transaction: { hash: TROVE_OP_TX_HASH },
     },
   });
 }
@@ -234,7 +263,7 @@ describe("Liquity batchReplay idempotency", () => {
     assert.equal(secondPassCollateral?.minDebt, MIN_DEBT);
   });
 
-  it("KNOWN GAP (#1083): replaying a BatchUpdated event with a nonzero upfront fee double-counts LiquityInstance.borrowingFeeCum AND LiquityBorrowingRevenueDailySnapshot.upfrontFee (pins current behavior)", async () => {
+  it("replaying a BatchUpdated event with a nonzero upfront fee does not double-count LiquityInstance.borrowingFeeCum or LiquityBorrowingRevenueDailySnapshot.upfrontFee (#1083)", async () => {
     let mockDb = MockDb.createMockDb();
     seedLoadedCollateral(mockDb);
     const fee = 10n * 10n ** 18n;
@@ -271,25 +300,74 @@ describe("Liquity batchReplay idempotency", () => {
     instance = mockDb.entities.LiquityInstance.get(collateralId);
     snapshot =
       mockDb.entities.LiquityBorrowingRevenueDailySnapshot.get(snapshotId);
-    // NOTE for whoever fixes #1083: once recordBorrowingFeeAndApplyCum is
-    // made replay-safe, BOTH expectations below must flip to `fee` (not
-    // `fee * 2n`) — recordBorrowingUpfrontFee (which writes the daily
-    // snapshot) and the borrowingFeeCum increment share the same missing
-    // replay guard. Leaving these assertions on the buggy value is
-    // intentional — it pins CURRENT behavior per issue #1054's workflow
-    // contract, not the desired behavior; it is deliberately not skipped so
-    // it forces an explicit update the moment #1083 lands.
+    // recordBorrowingFeeAndApplyCum's BorrowingFeeAppliedEvent replay guard
+    // (keyed on this event's eventId) is already set from the first
+    // delivery, so the redelivered event must not re-apply the fee.
     assert.equal(
       instance?.borrowingFeeCum,
-      fee * 2n,
-      "KNOWN GAP: recordBorrowingFeeAndApplyCum has no replay guard, so the " +
-        "fee is double-counted on redelivery — pinned here, not the desired behavior",
+      fee,
+      "borrowingFeeCum is unchanged by the replayed event — not doubled",
     );
     assert.equal(
       snapshot?.upfrontFee,
-      fee * 2n,
-      "KNOWN GAP: the daily snapshot's upfrontFee bucket is double-counted " +
-        "in lockstep with borrowingFeeCum — pinned here, not the desired behavior",
+      fee,
+      "daily snapshot upfrontFee is unchanged by the replayed event — not doubled",
+    );
+  });
+
+  it("replaying a TroveOperation event with a nonzero upfront fee does not double-count LiquityInstance.borrowingFeeCum or LiquityBorrowingRevenueDailySnapshot.upfrontFee (#1083)", async () => {
+    // Same invariant as the BatchUpdated test above, but for the
+    // TroveOperation call site: both handlers route through the shared
+    // recordBorrowingFeeAndApplyCum via the same eventIdFromEvent(event)
+    // computation, so this guards the TroveOperation wiring specifically.
+    let mockDb = MockDb.createMockDb();
+    seedLoadedCollateral(mockDb);
+    const fee = 10n * 10n ** 18n;
+    const snapshotId = borrowingRevenueDailySnapshotId(
+      collateralId,
+      dayBucket(6_000n),
+    );
+
+    mockDb = await processMockEvents({
+      mockDb,
+      events: [
+        troveOperationEvent({ logIndex: 1, debtIncreaseFromUpfrontFee: fee }),
+      ],
+    });
+    let instance = mockDb.entities.LiquityInstance.get(collateralId);
+    assert.equal(
+      instance?.borrowingFeeCum,
+      fee,
+      "fee recorded once on first delivery",
+    );
+    let snapshot =
+      mockDb.entities.LiquityBorrowingRevenueDailySnapshot.get(snapshotId);
+    assert.equal(
+      snapshot?.upfrontFee,
+      fee,
+      "daily snapshot upfrontFee recorded once on first delivery",
+    );
+
+    // Replay the identical TroveOperation event a second time (same tx hash,
+    // same logIndex, same block).
+    mockDb = await processMockEvents({
+      mockDb,
+      events: [
+        troveOperationEvent({ logIndex: 1, debtIncreaseFromUpfrontFee: fee }),
+      ],
+    });
+    instance = mockDb.entities.LiquityInstance.get(collateralId);
+    snapshot =
+      mockDb.entities.LiquityBorrowingRevenueDailySnapshot.get(snapshotId);
+    assert.equal(
+      instance?.borrowingFeeCum,
+      fee,
+      "borrowingFeeCum is unchanged by the replayed event — not doubled",
+    );
+    assert.equal(
+      snapshot?.upfrontFee,
+      fee,
+      "daily snapshot upfrontFee is unchanged by the replayed event — not doubled",
     );
   });
 });

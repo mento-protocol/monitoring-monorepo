@@ -1299,6 +1299,17 @@ type LiquityBorrowingRevenueDailySnapshot
   updatedAtTimestamp: BigInt!
 }
 
+# Replay guard for recordBorrowingFeeAndApplyCum (issue #1083): ensures a
+# given (chainId, blockNumber, logIndex) TroveOperation/BatchUpdated event
+# contributes its upfront fee to LiquityInstance.borrowingFeeCum and
+# LiquityBorrowingRevenueDailySnapshot.upfrontFee at most once. id is the
+# event's `eventId(chainId, blockNumber, logIndex)`. The row is written once
+# and never updated or deleted — a redelivered event finds it already
+# present and skips the fee application.
+type BorrowingFeeAppliedEvent {
+  id: ID!
+}
+
 type InterestBatch {
   id: ID!
   collateralId: String! @index

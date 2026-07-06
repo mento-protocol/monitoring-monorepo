@@ -2,6 +2,7 @@ import type { PendingBatchMembershipOperation, Trove } from "envio";
 import { pendingTroveKey } from "./keys.js";
 import { preloadLiquityMarket } from "./bootstrap.js";
 import {
+  preloadBorrowingFeeAppliedEvent,
   preloadBorrowingRevenueRollover,
   preloadBorrowingUpfrontFeeBucket,
 } from "./borrowingRevenue.js";
@@ -70,22 +71,30 @@ export async function preloadTroveOperation(
     operation: number;
     annualInterestRate: bigint;
     upfrontFee: bigint;
+    appliedFeeEventId: string;
     blockNumber: bigint;
     blockTimestamp: bigint;
   },
 ): Promise<void> {
-  const trove = await preloadTroveAndMarket(
-    context,
-    args.market,
-    args.collateralId,
-    args.troveId,
-  );
-  await preloadBorrowingUpfrontFeeBucket(
-    context,
-    args.collateralId,
-    args.upfrontFee,
-    args.blockTimestamp,
-  );
+  const [trove] = await Promise.all([
+    preloadTroveAndMarket(
+      context,
+      args.market,
+      args.collateralId,
+      args.troveId,
+    ),
+    preloadBorrowingUpfrontFeeBucket(
+      context,
+      args.collateralId,
+      args.upfrontFee,
+      args.blockTimestamp,
+    ),
+    preloadBorrowingFeeAppliedEvent(
+      context,
+      args.appliedFeeEventId,
+      args.upfrontFee,
+    ),
+  ]);
   if (args.operation === OP.REDEEM_COLLATERAL) {
     setPendingRedemption(context, {
       ...args,
@@ -112,6 +121,7 @@ export async function preloadBatchReplay(args: {
   blockNumber: bigint;
   blockTimestamp: bigint;
   upfrontFee: bigint;
+  appliedFeeEventId: string;
   prevBatchRate: bigint;
   nextBatchRate: bigint;
   prevBatchDebt: bigint;
@@ -142,6 +152,11 @@ export async function preloadBatchReplay(args: {
       args.collateralId,
       args.upfrontFee,
       args.blockTimestamp,
+    ),
+    preloadBorrowingFeeAppliedEvent(
+      args.context,
+      args.appliedFeeEventId,
+      args.upfrontFee,
     ),
     preloadInterestRateBracketDebt(args.context, {
       collateralId: args.collateralId,

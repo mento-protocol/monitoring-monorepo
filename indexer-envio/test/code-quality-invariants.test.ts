@@ -8,6 +8,7 @@ import {
   dayBucket,
   asBigInt,
   eventId,
+  eventIdFromEvent,
   extractAddressFromPoolId,
   hourBucket,
   makePoolId,
@@ -91,6 +92,15 @@ describe("indexer code quality invariants", () => {
     assert.notEqual(eventId(42220, 123, 4), eventId(42220, 124, 4));
     assert.notEqual(eventId(42220, 123, 4), eventId(42220, 123, 5));
     assert.equal(asBigInt(123), 123n);
+  });
+
+  it("derives the same collision-resistant ID from an event's identity fields", () => {
+    const event = { chainId: 42220, block: { number: 123 }, logIndex: 4 };
+    assert.equal(eventIdFromEvent(event), eventId(42220, 123, 4));
+    assert.notEqual(
+      eventIdFromEvent(event),
+      eventIdFromEvent({ ...event, logIndex: 5 }),
+    );
   });
 
   it("keeps pool IDs chain-namespaced and lowercased", () => {
