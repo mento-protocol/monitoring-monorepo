@@ -538,6 +538,17 @@ describe("GlobalPoolsTable — Uptime cell a11y (#1116 / #1117)", () => {
     expect(html).not.toContain('title="95.000% uptime');
   });
 
+  it("routes the health diagnostic through an accessible tooltip, not a native title", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry(UPTIME_POOL)]} />,
+    );
+    // Both the Health badge and the Uptime cell moved their diagnostics off the
+    // native `title` into the accessible Tooltip (role="tooltip" +
+    // aria-describedby), so at least two tooltips render in the row.
+    const tooltipCount = (html.match(/role="tooltip"/g) || []).length;
+    expect(tooltipCount).toBeGreaterThanOrEqual(2);
+  });
+
   it("exposes a non-color severity signal (shape glyph + sr-only tier label)", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry(UPTIME_POOL)]} />,
@@ -546,8 +557,10 @@ describe("GlobalPoolsTable — Uptime cell a11y (#1116 / #1117)", () => {
     expect(html).toContain("good uptime");
     // The tier glyph is rendered but hidden from the a11y tree.
     expect(html).toContain("◆");
-    // The uptime number itself stays on a neutral, non-alarm color.
-    expect(html).toContain("text-slate-200");
+    // The uptime number itself stays on a neutral, non-alarm color. Assert the
+    // class is on the uptime value specifically (text-slate-200 also appears on
+    // other cells), so this can't pass on an unrelated column.
+    expect(html).toContain('text-slate-200">95.00%');
   });
 });
 
