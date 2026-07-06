@@ -66,13 +66,17 @@ describe("SortedOracles.OracleReported median parity", () => {
 
   async function processReport({
     lastMedianPrice,
+    lastOracleReportAt = 1_700_000_000n,
     medianLive = true,
+    oracleExpiry = 1_700_010_000n,
     existingPriceDifference = 0n,
     value,
     blockTimestamp = 1_700_002_000,
   }: {
     lastMedianPrice: bigint;
+    lastOracleReportAt?: bigint;
     medianLive?: boolean;
+    oracleExpiry?: bigint;
     existingPriceDifference?: bigint;
     value: bigint;
     blockTimestamp?: number;
@@ -92,7 +96,8 @@ describe("SortedOracles.OracleReported median parity", () => {
         reserves1: 10n ** 21n,
         invertRateFeedKnown: true,
         tokenDecimalsKnown: true,
-        oracleExpiry: 1_700_010_000n,
+        oracleExpiry,
+        lastOracleReportAt,
         lastMedianPrice,
         medianLive,
         priceDifference: existingPriceDifference,
@@ -166,5 +171,23 @@ describe("SortedOracles.OracleReported median parity", () => {
 
     assert.equal(pool.priceDifference, 123n);
     assert.equal(pool.deviationBreachStartedAt, 0n);
+  });
+
+  it("freezes when a non-median report arrives after the median anchor expired", async () => {
+    const { mockDb, poolId, snapshotId } = await processReport({
+      lastMedianPrice: 3n * ONE,
+      lastOracleReportAt: 1_700_000_000n,
+      oracleExpiry: 100n,
+      existingPriceDifference: 123n,
+      value: ONE,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId)!;
+
+    assert.equal(pool.priceDifference, 123n);
+    assert.equal(pool.deviationBreachStartedAt, 0n);
+    assert.equal(pool.oracleTimestamp, 1_700_000_000n);
+    assert.equal(pool.lastFreshReporterAt, 1_700_001_900n);
+    assert.equal(mockDb.entities.OracleSnapshot.get(snapshotId), undefined);
   });
 });

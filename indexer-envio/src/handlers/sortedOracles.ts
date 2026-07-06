@@ -7,6 +7,7 @@ import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, isVirtualPool } from "../helpers.js";
 import {
   computePriceDifference,
+  hasFreshLiveMedian,
   hasDegenerateReserves,
   pickActiveThreshold,
 } from "../priceDifference.js";
@@ -230,12 +231,17 @@ async function processOracleReportedPool(
   // read the row's priceDifference directly (BreachEvent, oracle tab
   // detail) would see a fake non-zero value. Preserve existing instead.
   const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
-  const medianUsable =
-    updatedPool.lastMedianPrice > 0n && updatedPool.medianLive;
+  // OracleReported carries a reporter quote, not a fresh median anchor. If the
+  // last MedianUpdated anchor has expired, the contract-side freshness gate
+  // would reject median-derived health/deviation math, so hold the cursor.
+  if (!hasFreshLiveMedian(updatedPool, c.blockTimestamp)) {
+    holdOracleReportedCursor(context, updatedPool, existing);
+    return;
+  }
   const priceDifference = priceDifferenceForOracleSample(
     { ...updatedPool, oraclePrice: updatedPool.lastMedianPrice },
     decimalsTrustworthy,
-    medianUsable ? updatedPool.lastMedianPrice : 0n,
+    updatedPool.lastMedianPrice,
   );
   const degenerateReserves = degenerateReservesForOracleSample(
     updatedPool,

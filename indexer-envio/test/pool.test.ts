@@ -503,7 +503,9 @@ describe("upsertPool degenerate reserves", () => {
       id: "42220-0x0000000000000000000000000000000000008561",
       oraclePrice: 3n * 10n ** 24n,
       lastMedianPrice: 10n ** 24n,
+      lastOracleReportAt: 1_700_000_000n,
       medianLive: true,
+      oracleExpiry: 300n,
       invertRateFeedKnown: true,
       tokenDecimalsKnown: true,
       reserves0: 1_000n * oneUnit,
@@ -525,6 +527,38 @@ describe("upsertPool degenerate reserves", () => {
 
     assert.equal(result.priceDifference, 0n);
     assert.equal(result.oraclePrice, 3n * 10n ** 24n);
+  });
+
+  it("does not recompute fallback deviation from an expired median anchor", async () => {
+    const oneUnit = 10n ** 18n;
+    const existing = makePool({
+      id: "42220-0x0000000000000000000000000000000000008562",
+      oraclePrice: 3n * 10n ** 24n,
+      lastMedianPrice: 10n ** 24n,
+      lastOracleReportAt: 1_700_000_000n,
+      medianLive: true,
+      oracleExpiry: 100n,
+      invertRateFeedKnown: true,
+      tokenDecimalsKnown: true,
+      reserves0: 1_000n * oneUnit,
+      reserves1: 1_000n * oneUnit,
+      priceDifference: 999n,
+    });
+    const { context } = makeUpsertCtx();
+
+    const result = await upsertPool({
+      context,
+      chainId: existing.chainId,
+      poolId: existing.id,
+      source: "fpmm_update_reserves",
+      blockNumber: 2n,
+      blockTimestamp: 1_700_000_200n,
+      txHash: "0xexpired-median",
+      existing: { pool: existing },
+    });
+
+    assert.equal(result.priceDifference, 999n);
+    assert.equal(result.deviationBreachStartedAt, 0n);
   });
 
   it("classifies degenerate reserves even when oracle price is zero", async () => {

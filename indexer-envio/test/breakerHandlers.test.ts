@@ -1005,6 +1005,8 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
         referenceRateFeedID: FEED,
         invertRateFeedKnown: true,
         tokenDecimalsKnown: true,
+        lastMedianPrice: 1_180_000_000_000_000_000_000_000n,
+        lastOracleReportAt: 1_700_001_900n,
         oracleExpiry: 1_700_010_000n,
       }),
     );

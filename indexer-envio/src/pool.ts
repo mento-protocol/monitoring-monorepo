@@ -7,6 +7,7 @@ import { extractAddressFromPoolId, isVirtualPool } from "./helpers.js";
 import {
   classifyExactZeroReserves,
   computePriceDifference,
+  hasFreshLiveMedian,
   hasDegenerateReserves,
 } from "./priceDifference.js";
 import { recordBreachTransition } from "./deviationBreach.js";
@@ -145,12 +146,14 @@ function hasContractPriceDifference(
   return oracleDelta?.priceDifference !== undefined;
 }
 
-function canRecomputeMedianPriceDifference(pool: Pool): boolean {
+function canRecomputeMedianPriceDifference(
+  pool: Pool,
+  eventTimestamp: bigint,
+): boolean {
   return (
     !isVirtualPool(pool) &&
-    pool.lastMedianPrice > 0n &&
-    pool.medianLive &&
-    pool.tokenDecimalsKnown
+    pool.tokenDecimalsKnown &&
+    hasFreshLiveMedian(pool, eventTimestamp)
   );
 }
 
@@ -381,7 +384,7 @@ export const upsertPool = async ({
   // self-heal both blipped. Preserve `existing.priceDifference` until
   // self-heal lands real decimals.
   const hasContractPriceDiff = hasContractPriceDifference(oracleDelta);
-  const canRecompute = canRecomputeMedianPriceDifference(next);
+  const canRecompute = canRecomputeMedianPriceDifference(next, blockTimestamp);
   const canClassifyDegenerateReserves = canClassifyDegenerateReserveState(next);
   const priceDifference = resolvePriceDifference({
     pool: next,
