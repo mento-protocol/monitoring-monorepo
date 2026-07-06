@@ -63,6 +63,6 @@ export function useSsrSafeRelative(ts: string | null | undefined): string {
 
 /** SSR-safe absolute timestamp for title/tooltip attributes: a deterministic UTC
  *  value on the server + hydration render, the local timestamp after mount. */
-export function useSsrSafeTimestamp(ts: string): string {
-  return timestampOrUtc(ts, useNowSeconds());
+export function useSsrSafeTimestamp(ts: string | null | undefined): string {
+  return timestampOrUtc(ts ?? "", useNowSeconds());
 }

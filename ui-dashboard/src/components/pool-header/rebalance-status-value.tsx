@@ -36,6 +36,7 @@ function LastRebalanceSubtitle({
   const hasLastRebalance =
     pool.lastRebalancedAt != null && pool.lastRebalancedAt !== "0";
   const lastRel = useSsrSafeRelative(pool.lastRebalancedAt);
+  const title = useSsrSafeTimestamp(pool.lastRebalancedAt);
 
   // Fetch the most recent rebalance tx for THIS strategy so the "last Ns ago"
   // link attributes to the same strategy the cell names. `refreshInterval: 0`
@@ -58,7 +59,6 @@ function LastRebalanceSubtitle({
   const txHash = lastRebalanceData?.RebalanceEvent?.[0]?.txHash ?? null;
 
   if (!hasLastRebalance) return null;
-  const title = useSsrSafeTimestamp(pool.lastRebalancedAt!);
   return txHash ? (
     <a
       href={explorerTxUrl(network, txHash)}
