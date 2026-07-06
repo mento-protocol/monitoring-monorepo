@@ -1998,10 +1998,10 @@ rm -rf "$package_risk_fresh_stamp_repo"
 assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 # A failed ORDERED prerequisite phase (here the preflight `pnpm install`) must
-# stop the run via abort_if_failed before the parallel quality pool executes.
-# This is the behavioral contract that replaced --fail-fast for the pre-push
-# hook: prerequisites still abort before their dependents, only the independent
-# quality pool keeps going.
+# stop the run before the parallel quality pool executes. Prerequisite phases
+# (preflight / codegen / quality-setup) run fail-fast even though the pre-push
+# hook drops global --fail-fast, so a failed install stops before its
+# dependents; only the independent quality pool keeps going.
 abort_prereq_repo="$(mktemp -d)"
 (
   cd "$abort_prereq_repo"
@@ -2042,7 +2042,7 @@ STUB
     fail "quality pool ran despite a failed prerequisite phase"
 )
 rm -rf "$abort_prereq_repo"
-assert_contains "Stopping: a prerequisite phase failed before dependent checks ran."
+assert_contains "Stopping after first failed mapped command (--fail-fast)."
 
 stale_stamp_repo="$(mktemp -d)"
 (

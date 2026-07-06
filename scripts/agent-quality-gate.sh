@@ -1813,10 +1813,6 @@ fi
 
 failures=0
 command_summaries=()
-supports_wait_n=false
-if help wait 2>/dev/null | grep -q -- "-n"; then
-  supports_wait_n=true
-fi
 
 format_duration() {
   local seconds="$1"
@@ -2035,7 +2031,7 @@ run_mapped_entries_parallel() {
   local i
   local status
   local elapsed
-  local phase_start_ts last_heartbeat_ts now_ts hb_cmd heartbeat_timer_pid
+  local phase_start_ts last_heartbeat_ts now_ts hb_cmd
   local heartbeat_interval=20
 
   if [[ "$total" -eq 0 ]]; then
@@ -2140,40 +2136,32 @@ run_mapped_entries_parallel() {
       fi
     fi
 
-    if [[ ${#active_pids[@]} -gt 0 && "$supports_wait_n" == true ]]; then
-      # Cap the block at the heartbeat interval so a single long-running tail
-      # command still produces periodic liveness output: a throwaway timer job
-      # makes `wait -n` return at least every heartbeat_interval even when no
-      # real command completes. A genuine completion still returns immediately;
-      # the timer is then killed and reaped.
-      sleep "$heartbeat_interval" &
-      heartbeat_timer_pid=$!
-      wait -n 2>/dev/null || true
-      kill "$heartbeat_timer_pid" 2>/dev/null || true
-      wait "$heartbeat_timer_pid" 2>/dev/null || true
-    elif [[ ${#active_pids[@]} -gt 0 ]]; then
-      # Polling cadence for shells without `wait -n` (e.g. macOS bash 3.x), NOT
-      # the heartbeat period — that is tracked separately by wall clock via
-      # heartbeat_interval, so a slower poll here does not change how often the
-      # liveness line prints.
+    # Poll on a short cadence instead of blocking on `wait -n`. A bare `wait -n`
+    # only wakes on completions, so a set of concurrently-slow commands would
+    # suppress the wall-clock heartbeat above; and capping `wait -n` with a timer
+    # job races with fast commands that finish mid-cycle (the timer becomes the
+    # next completion and delays recording them by a full interval). A 1s poll
+    # detects completions within ~1s — negligible for a gate whose parallel
+    # members run for seconds to minutes — and lets the heartbeat fire on time.
+    if [[ ${#active_pids[@]} -gt 0 ]]; then
       sleep 1
     fi
   done
 }
 
-abort_if_failed() {
-  # A failed ORDERED prerequisite (install / codegen / quality-setup /
-  # quality-serialized) must stop the run before its dependents execute, even
-  # when not --fail-fast. The independent parallel quality pool intentionally
-  # keeps going for speed, but ordered phases do not — otherwise a dependent
-  # (a typecheck needing a built dist, a browser test needing Chromium) fails
-  # for a derived reason and buries the real error.
-  if [[ "$failures" -gt 0 ]]; then
-    echo
-    echo "Stopping: a prerequisite phase failed before dependent checks ran." >&2
-    print_command_summary
-    exit 1
-  fi
+run_prerequisite_phase() {
+  # Ordered prerequisite phases (install / codegen / quality-setup) fail-fast
+  # WITHIN themselves: a failed step must stop before its dependents — and
+  # before later steps in the SAME phase (e.g. `terraform validate` after a
+  # failed `terraform init`) — run. This preserves the old --fail-fast
+  # prerequisite behavior even though the hook now drops global --fail-fast so
+  # the independent quality pool keeps going. Serialized dashboard checks and
+  # the parallel pool are NOT prerequisites (serialized only for the .next
+  # mutex), so they are run keep-going and still collect their own feedback.
+  local previous_fail_fast="$fail_fast"
+  fail_fast=true
+  run_mapped_entries_sequential "$@"
+  fail_fast="$previous_fail_fast"
 }
 
 run_quality_phase() {
@@ -2199,19 +2187,14 @@ run_quality_phase() {
     fi
   done
 
-  run_mapped_entries_sequential "quality setup" "${setup_entries[@]+"${setup_entries[@]}"}"
-  abort_if_failed
+  run_prerequisite_phase "quality setup" "${setup_entries[@]+"${setup_entries[@]}"}"
   run_mapped_entries_sequential "quality serialized" "${serial_entries[@]+"${serial_entries[@]}"}"
-  abort_if_failed
   run_mapped_entries_parallel "quality" "$quality_parallelism" "${parallel_entries[@]+"${parallel_entries[@]}"}"
 }
 
-run_mapped_entries_sequential "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
-abort_if_failed
-run_mapped_entries_sequential "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"
-abort_if_failed
-run_mapped_entries_sequential "post-codegen" "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"
-abort_if_failed
+run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
+run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"
+run_prerequisite_phase "post-codegen" "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"
 run_quality_phase
 
 print_command_summary
