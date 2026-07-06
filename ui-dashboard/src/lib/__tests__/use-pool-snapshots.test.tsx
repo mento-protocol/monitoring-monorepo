@@ -92,6 +92,8 @@ let container: HTMLElement;
 let root: Root;
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-06T12:34:00Z"));
   useGQLMock.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -103,14 +105,28 @@ afterEach(() => {
     root.unmount();
   });
   container.remove();
+  vi.useRealTimers();
 });
 
-function render(range: RangeKey): { current: HookResult | null } {
+function render(range: RangeKey): {
+  ref: { current: HookResult | null };
+  rerender: (nextRange?: RangeKey) => void;
+} {
   const ref: { current: HookResult | null } = { current: null };
-  act(() => {
-    root.render(<Probe resultRef={ref} range={range} />);
-  });
-  return ref;
+  const rerender = (nextRange = range) =>
+    act(() => {
+      root.render(<Probe resultRef={ref} range={nextRange} />);
+    });
+  rerender();
+  return { ref, rerender };
+}
+
+function latestHourlyFrom(): number {
+  const hourlyCall = useGQLMock.mock.calls.findLast(
+    (call) => call[0] === POOL_HOURLY_SNAPSHOTS_CHART,
+  );
+  expect(hourlyCall).toBeDefined();
+  return (hourlyCall![1] as { from: number }).from;
 }
 
 describe("usePoolSnapshots", () => {
@@ -119,7 +135,7 @@ describe("usePoolSnapshots", () => {
     const dailyRows = [snapshot("daily-1", "1700000000")];
     installResponses({ hourlyRows, dailyRows });
 
-    const ref = render("30d");
+    const { ref } = render("30d");
 
     expect(ref.current?.snapshots).toBe(hourlyRows);
     expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_HOUR);
@@ -139,7 +155,7 @@ describe("usePoolSnapshots", () => {
     const dailyRows = [snapshot("daily-1", "1700000000")];
     installResponses({ hourlyRows: [], dailyRows });
 
-    const ref = render("30d");
+    const { ref } = render("30d");
 
     expect(ref.current?.snapshots).toBe(dailyRows);
     expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_DAY);
@@ -150,7 +166,7 @@ describe("usePoolSnapshots", () => {
     const dailyRows = [snapshot("daily-1", "1700000000")];
     installResponses({ hourlyRows: [], dailyRows });
 
-    const ref = render("all");
+    const { ref } = render("all");
 
     expect(ref.current?.snapshots).toBe(dailyRows);
     expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_DAY);
@@ -159,5 +175,33 @@ describe("usePoolSnapshots", () => {
       expect.anything(),
       SNAPSHOT_REFRESH_MS,
     );
+  });
+
+  it("keeps the hourly from filter stable within the current hour", () => {
+    installResponses({
+      hourlyRows: [snapshot("hourly-1", "1700003600")],
+      dailyRows: [snapshot("daily-1", "1700000000")],
+    });
+
+    const { rerender } = render("30d");
+    const initialFrom = latestHourlyFrom();
+    vi.setSystemTime(new Date("2026-07-06T12:59:59Z"));
+    rerender();
+
+    expect(latestHourlyFrom()).toBe(initialFrom);
+  });
+
+  it("refreshes the hourly from filter when the current hour changes", () => {
+    installResponses({
+      hourlyRows: [snapshot("hourly-1", "1700003600")],
+      dailyRows: [snapshot("daily-1", "1700000000")],
+    });
+
+    const { rerender } = render("30d");
+    const initialFrom = latestHourlyFrom();
+    vi.setSystemTime(new Date("2026-07-06T13:00:00Z"));
+    rerender();
+
+    expect(latestHourlyFrom()).toBeGreaterThan(initialFrom);
   });
 });

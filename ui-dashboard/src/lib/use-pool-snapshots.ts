@@ -18,9 +18,14 @@ import {
   snapshotWindow30d,
 } from "@/lib/volume";
 
-function hourlyWindowFrom(range: RangeKey): number | null {
-  if (range === "7d") return snapshotWindow7d(Date.now()).from;
-  if (range === "30d") return snapshotWindow30d(Date.now()).from;
+function currentHourBucketMs(): number {
+  const hourMs = SECONDS_PER_HOUR * 1000;
+  return Math.floor(Date.now() / hourMs) * hourMs;
+}
+
+function hourlyWindowFrom(range: RangeKey, nowMs: number): number | null {
+  if (range === "7d") return snapshotWindow7d(nowMs).from;
+  if (range === "30d") return snapshotWindow30d(nowMs).from;
   return null;
 }
 
@@ -62,7 +67,11 @@ export function usePoolSnapshots(
   range: RangeKey,
   historySupported: boolean,
 ) {
-  const hourlyFrom = useMemo(() => hourlyWindowFrom(range), [range]);
+  const hourlyAnchorMs = currentHourBucketMs();
+  const hourlyFrom = useMemo(
+    () => hourlyWindowFrom(range, hourlyAnchorMs),
+    [range, hourlyAnchorMs],
+  );
   const hourly = hourlyFrom !== null;
   const hourlyVars = useMemo(
     () => ({ poolId, from: hourlyFrom ?? 0 }),
