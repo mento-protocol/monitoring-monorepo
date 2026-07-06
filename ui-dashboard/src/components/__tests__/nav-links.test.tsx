@@ -30,6 +30,8 @@ describe("NavLinks", () => {
     expect(html).toContain("/integrations");
     expect(html).toContain("Revenue");
     expect(html).toContain("/revenue");
+    expect(html).toContain("Entities");
+    expect(html).toContain("/entities");
   });
 
   it("hides protected links when user is not authenticated", () => {
@@ -41,6 +43,8 @@ describe("NavLinks", () => {
     expect(html).not.toContain("/integrations");
     expect(html).not.toContain("Revenue");
     expect(html).not.toContain("/revenue");
+    expect(html).not.toContain("Entities");
+    expect(html).not.toContain("/entities");
   });
 
   it("always shows Pools and home links regardless of auth", () => {
