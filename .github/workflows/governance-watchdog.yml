@@ -67,7 +67,13 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - governance-watchdog/**
+      - governance-watchdog/infra/**
+      - governance-watchdog/src/**
+      - governance-watchdog/package.json
+      - governance-watchdog/pnpm-lock.yaml
+      - governance-watchdog/pnpm-workspace.yaml
+      - governance-watchdog/tsconfig.json
+      - governance-watchdog/tsconfig.build.json
       - scripts/sanitize-terraform-output.sh
       - scripts/notify-terraform-apply.mjs
       - scripts/verify-github-environment-protection.mjs
@@ -76,7 +82,13 @@ on:
   push:
     branches: [main]
     paths:
-      - governance-watchdog/**
+      - governance-watchdog/infra/**
+      - governance-watchdog/src/**
+      - governance-watchdog/package.json
+      - governance-watchdog/pnpm-lock.yaml
+      - governance-watchdog/pnpm-workspace.yaml
+      - governance-watchdog/tsconfig.json
+      - governance-watchdog/tsconfig.build.json
       - scripts/sanitize-terraform-output.sh
       - scripts/notify-terraform-apply.mjs
       - scripts/verify-github-environment-protection.mjs
@@ -180,8 +192,17 @@ jobs:
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.sha }}
-          STACK_PATH: governance-watchdog
         run: |
+          stack_paths=(
+            "governance-watchdog/infra"
+            "governance-watchdog/src"
+            "governance-watchdog/package.json"
+            "governance-watchdog/pnpm-lock.yaml"
+            "governance-watchdog/pnpm-workspace.yaml"
+            "governance-watchdog/tsconfig.json"
+            "governance-watchdog/tsconfig.build.json"
+          )
+
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             echo "stack-changed=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -192,7 +213,7 @@ jobs:
             exit 0
           fi
 
-          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$STACK_PATH"; then
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "${stack_paths[@]}"; then
             echo "stack-changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "stack-changed=true" >> "$GITHUB_OUTPUT"

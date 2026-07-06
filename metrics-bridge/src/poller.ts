@@ -1,3 +1,4 @@
+import { ClientError } from "graphql-request";
 import { fetchPools } from "./graphql.js";
 import { fetchCdps } from "./cdp-graphql.js";
 import { updateCdpMetrics } from "./cdp-metrics.js";
@@ -41,6 +42,15 @@ function recordPollError(
   console.error(message, error);
 }
 
+function hasuraQueryErrorKind(
+  error: unknown,
+  fallbackKind: PollErrorKind,
+): PollErrorKind {
+  return error instanceof ClientError && error.response.status === 429
+    ? "hasura_rate_limit"
+    : fallbackKind;
+}
+
 // CDP (service=cdps) gauges share this poll loop so bridge liveness +
 // poll-error infrastructure cover them too. Failures here must NOT derail the
 // FPMM metrics or flip the bridge unhealthy — a CDP schema/Hasura hiccup
@@ -52,7 +62,7 @@ async function refreshCdpMetrics(): Promise<void> {
     cdps = await fetchCdps();
   } catch (error) {
     recordPollError(
-      "cdp_query",
+      hasuraQueryErrorKind(error, "cdp_query"),
       "CDP poll failed while querying Hasura:",
       error,
     );
@@ -97,7 +107,7 @@ async function pollPools(): Promise<void> {
     pools = data.Pool;
   } catch (error) {
     recordPollError(
-      "hasura_query",
+      hasuraQueryErrorKind(error, "hasura_query"),
       "Poll failed while querying Hasura:",
       error,
     );

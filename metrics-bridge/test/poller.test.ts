@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ClientError } from "graphql-request";
 import { register } from "../src/metrics.js";
 import * as metricsModule from "../src/metrics.js";
 import {
@@ -88,6 +89,24 @@ describe("poll", () => {
     expect(await pollErrorValue("hasura_query")).toBe(1);
   });
 
+  it("increments pollErrors with hasura_rate_limit kind on Hasura 429", async () => {
+    mockFetchPools.mockRejectedValueOnce(
+      new ClientError(
+        {
+          data: undefined,
+          errors: undefined,
+          status: 429,
+          headers: new Headers(),
+        },
+        { query: "..." },
+      ),
+    );
+    await poll();
+
+    expect(await pollErrorValue("hasura_rate_limit")).toBe(1);
+    expect(await pollErrorValue("hasura_query")).toBe(0);
+  });
+
   it("increments pollErrors with update_metrics kind on metric update failure", async () => {
     mockFetchPools.mockResolvedValueOnce(makePoolResponse());
     const updateSpy = vi
@@ -152,6 +171,29 @@ describe("poll", () => {
     expect(
       await getGaugeValue(register, "mento_pool_bridge_last_poll"),
     ).toBeGreaterThan(0);
+  });
+
+  it("classifies CDP Hasura 429s as shared rate limits", async () => {
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    mockFetchCdps.mockRejectedValueOnce(
+      new ClientError(
+        {
+          data: undefined,
+          errors: undefined,
+          status: 429,
+          headers: new Headers(),
+        },
+        { query: "..." },
+      ),
+    );
+
+    await poll();
+
+    expect(await pollErrorValue("hasura_rate_limit")).toBe(1);
+    expect(await pollErrorValue("cdp_query")).toBe(0);
+    // A CDP query failure must not flip the FPMM bridge unhealthy.
+    expect(mockUpdateCdpMetrics).not.toHaveBeenCalled();
+    expect(mockMarkHealthy).toHaveBeenCalledOnce();
   });
 
   it("increments pollErrors with cdp_update kind when the CDP metric update throws", async () => {

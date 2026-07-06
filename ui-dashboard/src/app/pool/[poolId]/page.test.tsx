@@ -22,6 +22,7 @@ import {
   POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
+  POOL_HOURLY_SNAPSHOTS_CHART,
   POOL_LIQUIDITY,
   POOL_LIQUIDITY_COUNT,
   POOL_LIQUIDITY_PAGE,
@@ -456,6 +457,8 @@ beforeEach(() => {
         return makeGqlResult({ SwapEvent: swaps.map((s) => ({ id: s.id })) });
       if (query === POOL_DAILY_SNAPSHOTS_CHART)
         return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
+      if (query === POOL_HOURLY_SNAPSHOTS_CHART)
+        return makeGqlResult({ PoolSnapshot: poolSnapshots });
       if (query === POOL_RESERVES)
         return makeGqlResult({ ReserveUpdate: reserves });
       if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
@@ -514,6 +517,22 @@ function renderInteractive(params: Record<string, string> = {}) {
     interactiveRoot?.render(<PoolDetailPage />);
   });
   return interactiveContainer;
+}
+
+function rangeButton(
+  container: HTMLElement,
+  groupLabel: string,
+  buttonLabel: string,
+): HTMLButtonElement {
+  const group = Array.from(container.querySelectorAll('[role="group"]')).find(
+    (el) => el.getAttribute("aria-label") === groupLabel,
+  );
+  expect(group).toBeDefined();
+  const button = Array.from(group!.querySelectorAll("button")).find(
+    (el) => el.textContent === buttonLabel,
+  );
+  expect(button).toBeDefined();
+  return button as HTMLButtonElement;
 }
 
 describe("pool detail helpers", () => {
@@ -844,6 +863,89 @@ describe("Pool detail tab search", () => {
     );
   });
 
+  it("uses hourly snapshots plus daily fallback for TVL short ranges and daily snapshots for all-time", () => {
+    const container = renderInteractive();
+
+    useGQLMock.mockClear();
+    act(() => {
+      rangeButton(container, "Pool TVL chart time range", "1W").click();
+    });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_HOURLY_SNAPSHOTS_CHART,
+      { poolId: "pool-1", from: expect.any(Number) },
+      SNAPSHOT_REFRESH_MS,
+    );
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_DAILY_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
+
+    useGQLMock.mockClear();
+    act(() => {
+      rangeButton(container, "Pool TVL chart time range", "1M").click();
+    });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_HOURLY_SNAPSHOTS_CHART,
+      { poolId: "pool-1", from: expect.any(Number) },
+      SNAPSHOT_REFRESH_MS,
+    );
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_DAILY_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
+
+    useGQLMock.mockClear();
+    act(() => {
+      rangeButton(container, "Pool TVL chart time range", "All").click();
+    });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_DAILY_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
+  });
+
+  it("uses hourly snapshots plus daily fallback for volume 1M and daily snapshots for 3M/all", () => {
+    const container = renderInteractive();
+
+    useGQLMock.mockClear();
+    act(() => {
+      rangeButton(container, "Pool volume chart time range", "1M").click();
+    });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_HOURLY_SNAPSHOTS_CHART,
+      { poolId: "pool-1", from: expect.any(Number) },
+      SNAPSHOT_REFRESH_MS,
+    );
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_DAILY_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
+
+    useGQLMock.mockClear();
+    act(() => {
+      rangeButton(container, "Pool volume chart time range", "3M").click();
+    });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_DAILY_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
+
+    useGQLMock.mockClear();
+    act(() => {
+      rangeButton(container, "Pool volume chart time range", "All").click();
+    });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_DAILY_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
+  });
+
   it("does not block non-VirtualPool amount tabs on VP companion query loading", () => {
     const defaultGql = useGQLMock.getMockImplementation();
     useGQLMock.mockImplementation((query: unknown, ...args: unknown[]) => {
@@ -1076,6 +1178,8 @@ describe("Pool detail tab search", () => {
           return makeGqlResult({ SwapEvent: swaps.map((s) => ({ id: s.id })) });
         if (query === POOL_DAILY_SNAPSHOTS_CHART)
           return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
+        if (query === POOL_HOURLY_SNAPSHOTS_CHART)
+          return makeGqlResult({ PoolSnapshot: poolSnapshots });
         if (query === POOL_RESERVES)
           return makeGqlResult({ ReserveUpdate: reserves });
         if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)

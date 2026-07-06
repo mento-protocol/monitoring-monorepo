@@ -63,6 +63,7 @@ import {
   upsertSnapshot,
 } from "../../pool.js";
 import { recordHealthSample } from "../../healthScore.js";
+import { shouldPersistRawOracleSnapshot } from "../../oracleSnapshotRetention.js";
 
 type DegenerateReservePool = Pick<
   Pool,
@@ -292,7 +293,9 @@ indexer.onEvent(
           breakerThresholdAtSnapshot: undefined,
           ...snapshotFields,
         };
-        context.OracleSnapshot.set(snapshot);
+        if (shouldPersistRawOracleSnapshot(blockTimestamp)) {
+          context.OracleSnapshot.set(snapshot);
+        }
       }
     }
 
@@ -547,7 +550,9 @@ indexer.onEvent(
           breakerThresholdAtSnapshot: undefined,
           ...snapshotFields,
         };
-        context.OracleSnapshot.set(snapshot);
+        if (shouldPersistRawOracleSnapshot(blockTimestamp)) {
+          context.OracleSnapshot.set(snapshot);
+        }
       }
     }
 

@@ -23,6 +23,11 @@ variable "org_id" {
 # You can find the billing account via `gcloud billing accounts list` (pick the GmbH account)
 variable "billing_account" {
   type = string
+
+  validation {
+    condition     = length(trimspace(var.billing_account)) > 0
+    error_message = "Billing account must not be empty."
+  }
 }
 
 variable "function_name" {
@@ -83,6 +88,11 @@ variable "discord_test_webhook_url_secret_id" {
 variable "discord_webhook_url" {
   type      = string
   sensitive = true
+
+  validation {
+    condition     = length(trimspace(var.discord_webhook_url)) > 0
+    error_message = "Discord webhook URL must not be empty."
+  }
 }
 
 # You can look this up either on the Discord Channel settings, or fetch it from Secret Manager via:
@@ -90,16 +100,31 @@ variable "discord_webhook_url" {
 variable "discord_test_webhook_url" {
   type      = string
   sensitive = true
+
+  validation {
+    condition     = length(trimspace(var.discord_test_webhook_url)) > 0
+    error_message = "Discord test webhook URL must not be empty."
+  }
 }
 
 # You can look this up by inviting @MissRose_bot to the telegram group and then calling the `/id` command (please remove the bot after you're done)
 variable "telegram_chat_id" {
   type = string
+
+  validation {
+    condition     = length(trimspace(var.telegram_chat_id)) > 0
+    error_message = "Telegram chat ID must not be empty."
+  }
 }
 
 # You can look this up by inviting @MissRose_bot to the telegram group and then calling the `/id` command (please remove the bot after you're done)
 variable "telegram_test_chat_id" {
   type = string
+
+  validation {
+    condition     = length(trimspace(var.telegram_test_chat_id)) > 0
+    error_message = "Telegram test chat ID must not be empty."
+  }
 }
 
 # You can look this up via:
@@ -114,12 +139,22 @@ variable "telegram_bot_token_secret_id" {
 variable "telegram_bot_token" {
   type      = string
   sensitive = true
+
+  validation {
+    condition     = length(trimspace(var.telegram_bot_token)) > 0
+    error_message = "Telegram bot token must not be empty."
+  }
 }
 
 # You can create an API key via the QuickNode dashboard at https://dashboard.quicknode.com/api-keys
 variable "quicknode_api_key" {
   type      = string
   sensitive = true
+
+  validation {
+    condition     = length(trimspace(var.quicknode_api_key)) > 0
+    error_message = "QuickNode API key must not be empty."
+  }
 }
 
 # You can look this up via:
@@ -146,12 +181,22 @@ variable "x_auth_token_secret_id" {
 variable "x_auth_token" {
   type      = string
   sensitive = true
+
+  validation {
+    condition     = length(trimspace(var.x_auth_token)) > 0
+    error_message = "x-auth-token must not be empty."
+  }
 }
 
 variable "quicknode_security_token" {
   type        = string
   sensitive   = true
   description = "Security token for QuickNode webhook authentication"
+
+  validation {
+    condition     = length(trimspace(var.quicknode_security_token)) > 0
+    error_message = "QuickNode security token must not be empty."
+  }
 }
 
 # Webhook URL to send monitoring alerts from within GCP Monitoring
@@ -160,6 +205,11 @@ variable "quicknode_security_token" {
 variable "victorops_webhook_url" {
   type      = string
   sensitive = true
+
+  validation {
+    condition     = length(trimspace(var.victorops_webhook_url)) > 0
+    error_message = "VictorOps webhook URL must not be empty."
+  }
 }
 
 # Slack notification channel ID for error alerts.

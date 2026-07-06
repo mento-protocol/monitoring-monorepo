@@ -68,6 +68,10 @@ const responses = new Map([
     [{ filename: "ui-dashboard/src/app/page.tsx" }],
   ],
   [
+    "/repos/mento-protocol/monitoring-monorepo/pulls/987/files",
+    [{ filename: "pnpm-lock.yaml" }],
+  ],
+  [
     "/repos/mento-protocol/monitoring-monorepo/compare/main...sha-docs",
     {
       ahead_by: 1,
@@ -77,6 +81,10 @@ const responses = new Map([
   [
     "/repos/mento-protocol/monitoring-monorepo/compare/main...sha-dashboard",
     { ahead_by: 1, files: [{ filename: "ui-dashboard/src/app/page.tsx" }] },
+  ],
+  [
+    "/repos/mento-protocol/monitoring-monorepo/compare/main...sha-lockfile",
+    { ahead_by: 1, files: [{ filename: "pnpm-lock.yaml" }] },
   ],
   [
     "/repos/mento-protocol/monitoring-monorepo/compare/main...sha-multi-docs",
@@ -101,6 +109,15 @@ const responses = new Map([
       ahead_by: 1,
       behind_by: 0,
       files: [{ filename: "ui-dashboard/src/app/page.tsx" }],
+    },
+  ],
+  [
+    "/repos/mento-protocol/monitoring-monorepo/compare/previous-sha...sha-lockfile",
+    {
+      status: "ahead",
+      ahead_by: 1,
+      behind_by: 0,
+      files: [{ filename: "pnpm-lock.yaml" }],
     },
   ],
   // Diverged history (e.g. after a PR branch rebase/force-push): the previous
@@ -161,7 +178,7 @@ NODE
   mock_api_base="http://127.0.0.1:$(cat "$port_file")"
 }
 
-mkdir -p "$fixture_repo/ui-dashboard/scripts" "$fixture_repo/shared-config"
+mkdir -p "$fixture_repo/ui-dashboard/scripts" "$fixture_repo/shared-config" "$fixture_repo/patches"
 cp "$repo_root/ui-dashboard/scripts/vercel-ignore-build.sh" "$fixture_repo/ui-dashboard/scripts/vercel-ignore-build.sh"
 
 cd "$fixture_repo"
@@ -173,6 +190,10 @@ printf 'dashboard v1\n' > ui-dashboard/app.txt
 printf 'shared v1\n' > shared-config/config.txt
 printf 'docs v1\n' > AGENTS.md
 printf '{ "name": "root", "scripts": { "a": "echo a" } }\n' > package.json
+printf 'lockfile v1\n' > pnpm-lock.yaml
+printf 'workspace v1\n' > pnpm-workspace.yaml
+printf 'patch v1\n' > patches/fix.patch
+printf 'lighthouse v1\n' > .lighthouserc.cjs
 git add .
 git commit -qm "initial dashboard"
 previous_sha="$(git rev-parse --verify HEAD)"
@@ -215,6 +236,54 @@ git commit -am "chore: add a root script" -q
 expect_build "PR root package.json-only change builds" \
   VERCEL_GIT_PULL_REQUEST_ID=413
 assert_output_contains "Dashboard-affecting changes detected in PR #413"
+
+git switch -c shared-config-only "$main_sha" >/dev/null 2>&1
+printf 'shared v2\n' > shared-config/config.txt
+git commit -am "chore: update shared config" -q
+
+expect_build "PR shared-config-only change builds" \
+  VERCEL_GIT_PULL_REQUEST_ID=414
+assert_output_contains "Dashboard-affecting changes detected in PR #414"
+
+git switch -c lockfile-only "$main_sha" >/dev/null 2>&1
+printf 'lockfile v2\n' > pnpm-lock.yaml
+git commit -am "chore: update lockfile" -q
+
+expect_build "PR pnpm-lock-only change builds" \
+  VERCEL_GIT_PULL_REQUEST_ID=415
+assert_output_contains "Dashboard-affecting changes detected in PR #415"
+
+git switch -c workspace-only "$main_sha" >/dev/null 2>&1
+printf 'workspace v2\n' > pnpm-workspace.yaml
+git commit -am "chore: update workspace config" -q
+
+expect_build "PR pnpm-workspace-only change builds" \
+  VERCEL_GIT_PULL_REQUEST_ID=416
+assert_output_contains "Dashboard-affecting changes detected in PR #416"
+
+git switch -c patch-only "$main_sha" >/dev/null 2>&1
+printf 'patch v2\n' > patches/fix.patch
+git commit -am "chore: update patch" -q
+
+expect_build "PR patches-only change builds" \
+  VERCEL_GIT_PULL_REQUEST_ID=417
+assert_output_contains "Dashboard-affecting changes detected in PR #417"
+
+git switch -c lighthouse-only "$main_sha" >/dev/null 2>&1
+printf 'lighthouse v2\n' > .lighthouserc.cjs
+git commit -am "chore: update lighthouse config" -q
+
+expect_build "PR lighthouse-config-only change builds" \
+  VERCEL_GIT_PULL_REQUEST_ID=418
+assert_output_contains "Dashboard-affecting changes detected in PR #418"
+
+git switch -c package-manager-only "$main_sha" >/dev/null 2>&1
+printf '{ "name": "root", "packageManager": "pnpm@99.0.0", "scripts": { "a": "echo a" } }\n' > package.json
+git commit -am "chore: update package manager" -q
+
+expect_build "PR packageManager-only change builds" \
+  VERCEL_GIT_PULL_REQUEST_ID=419
+assert_output_contains "Dashboard-affecting changes detected in PR #419"
 
 # Restore HEAD for the branch-fallback tests below, which assume the dashboard
 # branch is checked out.
@@ -261,6 +330,18 @@ expect_build "PR dashboard follow-up builds against previous branch deployment" 
   VERCEL_GIT_PREVIOUS_SHA="$pr_prev_sha"
 assert_output_contains "Dashboard-affecting changes detected since previous deployment for PR #410"
 
+git switch -c pr-incremental-lockfile "$main_sha" >/dev/null 2>&1
+printf 'docs v4\n' > AGENTS.md
+git commit -am "docs change in PR" -q
+pr_lock_prev_sha="$(git rev-parse --verify HEAD)"
+printf 'lockfile v3\n' > pnpm-lock.yaml
+git commit -am "lockfile follow-up in PR" -q
+
+expect_build "PR lockfile follow-up builds against previous branch deployment" \
+  VERCEL_GIT_PULL_REQUEST_ID=411 \
+  VERCEL_GIT_PREVIOUS_SHA="$pr_lock_prev_sha"
+assert_output_contains "Dashboard-affecting changes detected since previous deployment for PR #411"
+
 start_mock_github_api
 nogit_repo="$fixture_repo/no-git"
 mkdir -p "$nogit_repo/ui-dashboard/scripts"
@@ -282,6 +363,13 @@ expect_build "PR dashboard changes build without local git via GitHub API" \
   VERCEL_GIT_PULL_REQUEST_ID=983
 assert_output_contains "Dashboard-affecting changes detected in PR #983"
 
+expect_build "PR lockfile changes build without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PULL_REQUEST_ID=987
+assert_output_contains "Dashboard-affecting changes detected in PR #987"
+
 expect_skip "branch first push docs-only change skips without local git via GitHub API" \
   GITHUB_API_BASE_URL="$mock_api_base" \
   GIT_CEILING_DIRECTORIES="$nogit_repo" \
@@ -297,6 +385,14 @@ expect_build "branch first push dashboard change builds without local git via Gi
   VERCEL_GIT_COMMIT_REF=dashboard-pr \
   VERCEL_GIT_COMMIT_SHA=sha-dashboard
 assert_output_contains "Dashboard-affecting changes detected on branch dashboard-pr vs main"
+
+expect_build "branch first push lockfile change builds without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_COMMIT_REF=lockfile-only \
+  VERCEL_GIT_COMMIT_SHA=sha-lockfile
+assert_output_contains "Dashboard-affecting changes detected on branch lockfile-only vs main"
 
 expect_build "branch first push multi-commit fallback builds without local git" \
   GITHUB_API_BASE_URL="$mock_api_base" \
@@ -322,6 +418,14 @@ expect_build "previous SHA dashboard change builds without local git via GitHub 
   VERCEL_GIT_COMMIT_SHA=sha-dashboard
 assert_output_contains "Dashboard-affecting changes detected since previous successful Vercel deployment"
 
+expect_build "previous SHA lockfile change builds without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PREVIOUS_SHA=previous-sha \
+  VERCEL_GIT_COMMIT_SHA=sha-lockfile
+assert_output_contains "Dashboard-affecting changes detected since previous successful Vercel deployment"
+
 expect_skip "PR incremental docs-only change skips without local git via GitHub API" \
   GITHUB_API_BASE_URL="$mock_api_base" \
   GIT_CEILING_DIRECTORIES="$nogit_repo" \
@@ -339,6 +443,15 @@ expect_build "PR incremental dashboard change builds without local git via GitHu
   VERCEL_GIT_PREVIOUS_SHA=previous-sha \
   VERCEL_GIT_COMMIT_SHA=sha-dashboard
 assert_output_contains "Dashboard-affecting changes detected since previous deployment for PR #985"
+
+expect_build "PR incremental lockfile change builds without local git via GitHub API" \
+  GITHUB_API_BASE_URL="$mock_api_base" \
+  GIT_CEILING_DIRECTORIES="$nogit_repo" \
+  GIT_DIR="$nogit_repo/.git-missing" \
+  VERCEL_GIT_PULL_REQUEST_ID=987 \
+  VERCEL_GIT_PREVIOUS_SHA=previous-sha \
+  VERCEL_GIT_COMMIT_SHA=sha-lockfile
+assert_output_contains "Dashboard-affecting changes detected since previous deployment for PR #987"
 
 # Diverged history after a rebase/force-push: the previous deployment SHA is not
 # an ancestor of head, so the THREE-DOT gitless compare returns only the

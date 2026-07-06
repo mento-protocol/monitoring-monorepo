@@ -9,10 +9,18 @@ on:
       - alerts/rules/**
       - alerts/infra/**
       - aegis/terraform/**
+      - governance-watchdog/infra/**
+      - governance-watchdog/src/**
+      - governance-watchdog/package.json
+      - governance-watchdog/pnpm-lock.yaml
+      - governance-watchdog/pnpm-workspace.yaml
+      - governance-watchdog/tsconfig.json
+      - governance-watchdog/tsconfig.build.json
       - terraform.stacks.json
       - scripts/tf-stacks.mjs
       - .github/workflows/alerts-infra.yml
       - .github/workflows/infra.yml
+      - .github/workflows/governance-watchdog.yml
   pull_request:
     branches: [main]
     paths:
@@ -20,10 +28,18 @@ on:
       - alerts/rules/**
       - alerts/infra/**
       - aegis/terraform/**
+      - governance-watchdog/infra/**
+      - governance-watchdog/src/**
+      - governance-watchdog/package.json
+      - governance-watchdog/pnpm-lock.yaml
+      - governance-watchdog/pnpm-workspace.yaml
+      - governance-watchdog/tsconfig.json
+      - governance-watchdog/tsconfig.build.json
       - terraform.stacks.json
       - scripts/tf-stacks.mjs
       - .github/workflows/alerts-infra.yml
       - .github/workflows/infra.yml
+      - .github/workflows/governance-watchdog.yml
 
 # See ci.yml for the concurrency rationale: PR runs cancel on new pushes
 # to the same PR ref; push/dispatch events use a SHA-unique group so they

@@ -15,7 +15,6 @@ import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import {
   OLS_POOL,
   ORACLE_RATES,
-  POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   TRADING_LIMITS,
@@ -28,7 +27,7 @@ import {
   poolName,
   type OracleRateMap,
 } from "@/lib/tokens";
-import type { OlsPool, Pool, PoolSnapshot, TradingLimit } from "@/lib/types";
+import type { OlsPool, Pool, TradingLimit } from "@/lib/types";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -168,7 +167,6 @@ function usePoolDetailData(normalizedPoolId: string, network: PoolNetwork) {
     olsData,
     olsLoading,
     fpmmPool,
-    ...useDailySnapshots(normalizedPoolId, fpmmPool),
     ...usePoolRates(pool, network),
   };
 }
@@ -267,9 +265,6 @@ function PoolDetail({ initialSearch }: { initialSearch: string }) {
         tradingLimitsError={detail.tradingLimitsError}
         fpmmPool={detail.fpmmPool}
         network={network}
-        dailySnapshots={detail.dailySnapshots}
-        dailySnapshotLoading={detail.dailySnapshotLoading}
-        dailySnapshotError={detail.dailySnapshotError}
         poolNeedsRates={detail.poolNeedsRates}
         ratesLoading={detail.ratesLoading}
         ratesError={detail.ratesError}
@@ -344,9 +339,6 @@ function PoolOverview({
   tradingLimitsError,
   fpmmPool,
   network,
-  dailySnapshots,
-  dailySnapshotLoading,
-  dailySnapshotError,
   poolNeedsRates,
   ratesLoading,
   ratesError,
@@ -363,9 +355,6 @@ function PoolOverview({
   tradingLimitsError: boolean;
   fpmmPool: boolean;
   network: ReturnType<typeof useNetwork>["network"];
-  dailySnapshots: PoolSnapshot[];
-  dailySnapshotLoading: boolean;
-  dailySnapshotError: Error | undefined;
   poolNeedsRates: boolean;
   ratesLoading: boolean;
   ratesError: boolean;
@@ -392,9 +381,6 @@ function PoolOverview({
         <PoolChartsRow
           pool={pool}
           network={network}
-          dailySnapshots={dailySnapshots}
-          dailySnapshotLoading={dailySnapshotLoading}
-          dailySnapshotError={dailySnapshotError}
           poolNeedsRates={poolNeedsRates}
           ratesLoading={ratesLoading}
           ratesError={ratesError}
@@ -410,9 +396,6 @@ function PoolOverview({
 function PoolChartsRow({
   pool,
   network,
-  dailySnapshots,
-  dailySnapshotLoading,
-  dailySnapshotError,
   poolNeedsRates,
   ratesLoading,
   ratesError,
@@ -422,9 +405,6 @@ function PoolChartsRow({
 }: {
   pool: Pool;
   network: ReturnType<typeof useNetwork>["network"];
-  dailySnapshots: PoolSnapshot[];
-  dailySnapshotLoading: boolean;
-  dailySnapshotError: Error | undefined;
   poolNeedsRates: boolean;
   ratesLoading: boolean;
   ratesError: boolean;
@@ -432,30 +412,25 @@ function PoolChartsRow({
   thresholdsError: Error | undefined;
   rates: OracleRateMap;
 }) {
-  const isLoading =
-    dailySnapshotLoading ||
-    (poolNeedsRates && ratesLoading) ||
-    thresholdsLoading;
+  const isLoading = (poolNeedsRates && ratesLoading) || thresholdsLoading;
   const hasError =
-    dailySnapshotError !== undefined ||
-    (poolNeedsRates && ratesError) ||
-    thresholdsError !== undefined;
+    (poolNeedsRates && ratesError) || thresholdsError !== undefined;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <PoolTvlOverTimeChart
+        poolId={pool.id}
         pool={pool}
         network={network}
-        snapshots={dailySnapshots}
         isLoading={isLoading}
         hasError={hasError}
         rates={rates}
         historySupported
       />
       <PoolVolumeOverTimeChart
+        poolId={pool.id}
         pool={pool}
         network={network}
-        snapshots={dailySnapshots}
         isLoading={isLoading}
         hasError={hasError}
         rates={rates}
@@ -594,24 +569,6 @@ function PoolTabPanel({
       </TokenAmountTrustGate>
     </div>
   );
-}
-
-function useDailySnapshots(normalizedPoolId: string, fpmmPool: boolean) {
-  // Hoisted out of `_tabs/swaps-tab.tsx` so sub-hero charts render
-  // independently of which tab is active. useGQL dedupes identical tab-local
-  // queries by key + vars.
-  const { data, error, isLoading } = useGQL<{
-    PoolDailySnapshot: PoolSnapshot[];
-  }>(
-    fpmmPool ? POOL_DAILY_SNAPSHOTS_CHART : null,
-    { poolId: normalizedPoolId },
-    SNAPSHOT_REFRESH_MS,
-  );
-  return {
-    dailySnapshots: data?.PoolDailySnapshot ?? [],
-    dailySnapshotError: error,
-    dailySnapshotLoading: isLoading,
-  };
 }
 
 function usePoolRates(pool: Pool | null, network: PoolNetwork) {
