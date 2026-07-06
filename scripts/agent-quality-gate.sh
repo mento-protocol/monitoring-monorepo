@@ -634,6 +634,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/version-skew-check.test.mjs" "$reason"
   add_command "node scripts/override-prune-report.test.mjs" "$reason"
+  add_command "node scripts/check-adr-reminder.test.mjs" "$reason"
 }
 
 add_indexer_post_codegen_install() {
@@ -1434,6 +1435,9 @@ while IFS= read -r path; do
           ;;
         scripts/check-deploy-root-anchors.test.mjs)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy root-anchor test changed"
+          ;;
+        scripts/check-adr-reminder.mjs|scripts/check-adr-reminder.test.mjs)
+          add_command "pnpm adr:check:test" "ADR reminder helper changed"
           ;;
         scripts/agent-prewarm.mjs|scripts/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
