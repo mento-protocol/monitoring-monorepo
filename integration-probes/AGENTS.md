@@ -8,6 +8,8 @@ last_verified: 2026-06-01
 
 # integration-probes
 
+> **Architecture decisions** for this package live in [`docs/adr/`](../docs/adr/README.md) (scope: `integration-probes`) — read the relevant ADR before changing how something here is built; it records the _why_ the code can't.
+
 `@mento-protocol/integration-probes` runs quote-only checks against DEX
 aggregators and cross-chain routers. It publishes the latest snapshot to
 Upstash Redis for the dashboard `/integrations` page.

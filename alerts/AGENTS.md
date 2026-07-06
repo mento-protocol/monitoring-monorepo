@@ -8,6 +8,8 @@ last_verified: 2026-05-21
 
 # AGENTS.md — Alerts
 
+> **Architecture decisions** for this package live in [`docs/adr/`](../docs/adr/README.md) (scope: `alerts`) — read the relevant ADR before changing how something here is built; it records the _why_ the code can't.
+
 ## Scope
 
 `alerts/` is the domain folder for all alert plumbing. Two independent Terraform stacks live here:

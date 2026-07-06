@@ -8,6 +8,8 @@ last_verified: 2026-05-20
 
 # AGENTS.md — Envio Indexer
 
+> **Architecture decisions** for this package live in [`docs/adr/`](../docs/adr/README.md) (scope: `indexer-envio`) — read the relevant ADR before changing how something here is built; it records the _why_ the code can't.
+
 ## What This Is
 
 Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split. Ethereum reserve-yield entities run in the same hosted project through event-only sUSDS/stETH handlers; the historical sUSDS onBlock heartbeat is intentionally excluded.

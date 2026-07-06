@@ -8,6 +8,8 @@ last_verified: 2026-05-20
 
 # AGENTS.md — Scripts
 
+> **Architecture decisions** behind these scripts live in [`docs/adr/`](../docs/adr/README.md) (scopes: `ci/process`, `terraform/infra`) — read the relevant ADR before changing how something here works; it records the _why_ the code can't.
+
 ## Scope
 
 `scripts/` contains deploy wrappers, agent quality gates, code-health checks, and repo maintenance utilities.

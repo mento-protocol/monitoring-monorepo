@@ -1,0 +1,49 @@
+---
+title: Supply-chain hardening — release-age gate, lockfile-lint, SHA-pinned Actions
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-06
+scope: ci/process
+date: 2026-05
+---
+
+# ADR 0009 — Supply-chain hardening: release-age gate, lockfile-lint, SHA-pinned Actions
+
+**Status:** Accepted (Apr–Jun 2026), in force.
+**Scope:** ci/process
+
+## Context
+
+A monitoring system that watches money is a supply-chain target. Two attack
+vectors matter most here: a freshly published malicious package version pulled in
+by a range, and a mutated GitHub Action tag executing arbitrary code in CI.
+
+## Decision
+
+Adopt a defense-in-depth posture:
+
+- **`minimumReleaseAge`** in `pnpm-workspace.yaml` refuses registry versions
+  younger than 3 days (`@mento-protocol/*` exempted; frozen-lockfile installs
+  unaffected).
+- **`pnpm lockfile:lint`** validates lockfile integrity + registry provenance,
+  with no install needed, as a blocking gate.
+- **SHA-pin every GitHub Action** `uses:` ref, enforced by
+  `scripts/check-github-action-pins.mjs`.
+
+## Alternatives considered
+
+- **Trust the registry and tags** — rejected: tag mutation and same-day malicious
+  releases are real, cheap attacks against exactly this kind of repo.
+- **Manual vigilance** — rejected: unenforced posture rots; each control is a gate.
+
+## Consequences
+
+- Override ranges re-resolve on fresh lockfiles, so migrations pin exact versions
+  (a range once silently bumped undici and broke Discord delivery).
+- An advisory pruning report keeps `pnpm.overrides` + release-age exclusions honest.
+
+## Evidence
+
+- `minimumReleaseAge` PR #418; lockfile-lint PR #447; enforce-pinned-actions PR #922; early action pins PR #177.
+- Guards in `pnpm-workspace.yaml`, `scripts/check-github-action-pins.mjs`, [`docs/pr-checklists/recurring-review-patterns.md`](../pr-checklists/recurring-review-patterns.md).

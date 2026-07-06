@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -1206,6 +1206,7 @@ while IFS= read -r path; do
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
       add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions workflow/action changed"
+      add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref")" "workflow/action changed — ADR reminder (a new workflow likely needs an ADR)"
       case "$path" in
         .github/workflows/ci.yml)
           add_surface "workspace"
@@ -1552,6 +1553,8 @@ while IFS= read -r path; do
       add_terraform_validate_commands "aegis/terraform" "Terraform stack registry changed"
       add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack registry changed"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Terraform stack registry changed"
+      add_checklist "docs/pr-checklists/architecture-decisions.md" "Terraform stack registry changed — a new stack likely needs an ADR"
+      add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref")" "Terraform stack registry changed — ADR reminder"
       ;;
     package.json)
       root_package_json_class="$(get_root_package_json_class)"
@@ -1572,6 +1575,7 @@ while IFS= read -r path; do
       add_surface "workspace"
       add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
       add_workspace_quality_commands "workspace dependency/config changed"
+      add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref")" "workspace membership/policy changed — ADR reminder (a new package likely needs an ADR)"
       ;;
     patches/*)
       add_surface "workspace"
