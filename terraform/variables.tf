@@ -49,13 +49,18 @@ variable "terraform_apply_slack_channel" {
     (alerts-rules, alerts-delivery, aegis, governance-watchdog). Mirrored
     to the GitHub Actions repository variable `TERRAFORM_APPLY_SLACK_CHANNEL`
     (see `github-variables.tf`), which those workflows read with a fallback
-    to this same default. Changing this only reroutes the message; if the
-    new channel is private or the bot isn't already a member, also set
-    `deploy_notification_channel_id` in the `alerts-delivery` stack. See
-    `docs/notes/slack-github-subscriptions.md`.
+    to this same default. Changing this reroutes the message; the notify bot
+    posts to any public channel via its `chat:write.public` scope without
+    being a member, so a private target channel needs a one-time manual
+    `/invite`. See `docs/notes/slack-github-subscriptions.md`.
   EOT
   type        = string
   default     = "#ci-operations"
+
+  validation {
+    condition     = can(regex("^#", var.terraform_apply_slack_channel))
+    error_message = "terraform_apply_slack_channel must start with '#' (e.g. '#ci-operations')."
+  }
 }
 
 # ── Upstash ───────────────────────────────────────────────────────────────────

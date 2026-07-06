@@ -40,12 +40,6 @@ sentry_slack_workspace_name = "Mento Labs"
 #   - users:read.email        resolve the current Splunk On-Call user's Slack account by email
 slack_bot_token = "xoxb-..."
 
-# Slack channel ID the deploy-notification bot should join — set this when
-# the platform stack's terraform_apply_slack_channel is rerouted to a
-# private channel, or a public channel the bot isn't already a member of.
-# Empty = no-op (no join). See docs/notes/slack-github-subscriptions.md.
-# deploy_notification_channel_id = "C0123ABC456"
-
 # Splunk On-Call API credentials for the support-engineer rotation announcer.
 # A read-only key is sufficient: the function calls /oncall/current and /user,
 # then posts to Slack and updates @support-engineer with the Slack bot token.

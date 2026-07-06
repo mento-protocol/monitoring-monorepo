@@ -87,8 +87,8 @@ use the workflow run for the full sanitized plan. The default destination is
 `TERRAFORM_APPLY_SLACK_CHANNEL` (`terraform_apply_slack_channel` tfvar,
 `terraform/github-variables.tf`) — set the tfvar and apply to route these
 summaries to another channel. See `docs/notes/slack-github-subscriptions.md`
-for the accompanying bot-membership step, the separate GitHub Slack App
-subscription, and the two systems' relationship.
+for the separate GitHub Slack App subscription and the two systems'
+relationship.
 
 If a post-merge Terraform deploy workflow stays `pending` with no jobs, inspect
 that workflow's run queue before waiting on the current run. Older `waiting` or

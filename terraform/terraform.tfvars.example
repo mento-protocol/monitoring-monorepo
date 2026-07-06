@@ -18,7 +18,9 @@ vercel_token = "vcp_..."
 # Create at: https://github.com/settings/personal-access-tokens/new
 #   Resource owner: mento-protocol
 #   Repository access: mento-protocol/monitoring-monorepo
-#   Permissions: Repository → Secrets: Read/write
+#   Permissions: Repository → Secrets: Read/write, Variables: Read/write
+#     (Variables is required for terraform_apply_slack_channel below;
+#      GitHub scopes repo Secrets and repo Variables independently.)
 github_token = "ghp_..."
 
 # Owner default is already set in variables.tf; override only if managing a
