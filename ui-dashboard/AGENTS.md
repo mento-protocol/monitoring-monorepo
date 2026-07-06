@@ -46,6 +46,7 @@ If we ever raise the TS target to ES2022+ or install a global polyfill (`core-js
 
 ```bash
 pnpm dev     # Start dev server
+pnpm codegen # Generate GraphQL operation types from ../indexer-envio/schema.graphql
 pnpm build   # Production build
 pnpm start   # Start production server
 pnpm lint    # Run ESLint
@@ -57,6 +58,12 @@ pnpm react-doctor:score  # Full react-doctor score gate; must end at 100
 REACT_DOCTOR_BASE_REF=origin/main pnpm react-doctor:diff  # Diff gate used by the local agent quality gate
 pnpm dashboard:react-doctor:diff  # CI-equivalent diff scan from repo root
 ```
+
+Generated GraphQL operation types live in
+`src/lib/__generated__/graphql.ts`. Regenerate them with `pnpm codegen` after
+changing dashboard query strings, `../indexer-envio/schema.graphql`, or
+`../scripts/envio-schema-stubs.graphql`; keep runtime Zod guards in place for
+hosted Hasura response drift.
 
 ## Local Dev Server And Auth States
 

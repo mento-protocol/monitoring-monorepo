@@ -124,6 +124,7 @@ pnpm indexer:testnet:codegen && pnpm indexer:testnet:dev
 ### Run the Dashboard
 
 ```bash
+pnpm dashboard:codegen
 pnpm dashboard:dev
 ```
 
@@ -355,6 +356,7 @@ Sourced from the published [`@mento-protocol/contracts`](https://www.npmjs.com/p
 | Dashboard app                | `ui-dashboard/src/app/`                                                          |
 | Network defs                 | `ui-dashboard/src/lib/networks.ts`                                               |
 | GraphQL queries              | `ui-dashboard/src/lib/queries.ts` (barrel) + `ui-dashboard/src/lib/queries/*.ts` |
+| Dashboard GraphQL types      | `ui-dashboard/src/lib/__generated__/graphql.ts`                                  |
 | Terraform infrastructure     | `terraform/`                                                                     |
 
 ## Documentation

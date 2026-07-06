@@ -514,6 +514,8 @@ add_package_quality_commands() {
     # a preflight; add_codegen_command dedups so concurrent triggers are
     # cheap.
     add_indexer_mainnet_codegen "$reason (codegen needed before indexer typecheck/lint)"
+  elif [[ "$package_name" == "@mento-protocol/ui-dashboard" ]]; then
+    add_dashboard_codegen "$reason (codegen needed before dashboard typecheck/lint)"
   fi
   add_turbo_package_task "$package_name" "lint" "$reason"
   add_turbo_package_task "$package_name" "typecheck" "$reason"
@@ -652,6 +654,11 @@ add_indexer_post_codegen_install() {
   add_post_codegen_command "pnpm install --frozen-lockfile" "link generated package after indexer codegen"
 }
 
+add_dashboard_codegen() {
+  local reason="$1"
+  add_codegen_command "pnpm dashboard:codegen" "$reason"
+}
+
 add_indexer_mainnet_codegen() {
   local reason="$1"
   add_codegen_command "pnpm indexer:codegen" "$reason"
@@ -768,6 +775,7 @@ sort_codegen_commands() {
   # variants are needed, keep mainnet last so package checks validate the normal
   # linked generated package; single-config changes still run only that config.
   local known_codegen_commands=(
+    "pnpm dashboard:codegen"
     "pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
     "pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test"
     "pnpm indexer:testnet:codegen"
@@ -1080,6 +1088,7 @@ while IFS= read -r path; do
       case "$path" in
         indexer-envio/schema.graphql|indexer-envio/abis/*|indexer-envio/scripts/run-envio-with-env.mjs|indexer-envio/package.json)
           add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
+          add_dashboard_codegen "indexer schema/source path changed (dashboard GraphQL types read schema.graphql)"
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
           ;;
         indexer-envio/src/EventHandlersBridgeOnly.ts)
@@ -1561,6 +1570,7 @@ while IFS= read -r path; do
       # paths-filters. add_package_quality_commands omits test:browser, so this
       # stays light.
       add_surface "scripts"
+      add_dashboard_codegen "shared Envio schema stub changed (dashboard GraphQL types read it)"
       add_package_quality_commands "@mento-protocol/ui-dashboard" "shared Envio schema stub changed (dashboard GraphQL contract test reads it)"
       add_package_quality_commands "@mento-protocol/metrics-bridge" "shared Envio schema stub changed (bridge GraphQL contract test reads it)"
       ;;
