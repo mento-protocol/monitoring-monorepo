@@ -25,6 +25,12 @@ export function Table({
     <div
       className={[
         "overflow-x-auto rounded-lg border border-slate-800",
+        // Persistently-visible thin horizontal scrollbar so the scroll
+        // affordance is signalled at rest — mobile Safari/Chrome hide the
+        // native scrollbar until touched, which makes an off-screen column
+        // (e.g. a wide swap amount) read as a silent clip rather than
+        // scrollable content.
+        "[&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-600 [scrollbar-width:thin] [scrollbar-color:rgb(71_85_105)_rgb(15_23_42)]",
         scrollClassName,
       ]
         .filter(Boolean)
@@ -90,7 +96,10 @@ export function Td({
 }) {
   const cls = [
     "px-2 sm:px-4 py-1.5 sm:py-2",
-    mono && "font-mono",
+    // Numeric cells never wrap — an amount+symbol pair stays one intact
+    // unit (a squeezed column scrolls the whole table rather than breaking
+    // "22,900 cUSD" mid-value). tabular-nums keeps digit columns aligned.
+    mono && "font-mono whitespace-nowrap tabular-nums",
     small ? "text-[10px] sm:text-xs" : "text-xs sm:text-sm",
     muted ? "text-slate-400" : "text-slate-300",
     align === "right" && "text-right",

@@ -75,11 +75,11 @@ export function BreakdownTile({
           </p>
         )}
         {subItems && (
-          <div className="mt-1.5 flex gap-3 text-sm font-mono">
+          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-sm font-mono">
             {subItems.map((s) => (
               <span key={s.label}>
                 <span className="text-slate-500">{s.label}</span>{" "}
-                <span className="text-slate-400">
+                <span className="text-slate-400 tabular-nums">
                   {s.value === null ? "N/A" : formatSub(s.value)}
                 </span>
               </span>
