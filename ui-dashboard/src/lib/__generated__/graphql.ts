@@ -308,7 +308,6 @@ export type BreakerBoolExp = {
 };
 
 export type BreakerConfigSelectColumn =
-  | "breaker"
   | "breakerAddress"
   | "chainId"
   | "cooldownEndsAt"
@@ -331,7 +330,6 @@ export type BreakerConfigSelectColumn =
   | "tripCountLifetime";
 
 export type BreakerConfigOrderBy = {
-  readonly breaker?: OrderBy;
   readonly breakerAddress?: OrderBy;
   readonly chainId?: OrderBy;
   readonly cooldownEndsAt?: OrderBy;
@@ -358,7 +356,6 @@ export type BreakerConfigBoolExp = {
   readonly _and?: BreakerConfigBoolExp | ReadonlyArray<BreakerConfigBoolExp>;
   readonly _or?: BreakerConfigBoolExp | ReadonlyArray<BreakerConfigBoolExp>;
   readonly _not?: BreakerConfigBoolExp;
-  readonly breaker?: ComparisonExp<unknown>;
   readonly breakerAddress?: ComparisonExp<string>;
   readonly chainId?: ComparisonExp<number>;
   readonly cooldownEndsAt?: ComparisonExp<string>;
@@ -384,7 +381,6 @@ export type BreakerConfigBoolExp = {
 export type BreakerTripEventSelectColumn =
   | "blockNumber"
   | "blockTimestamp"
-  | "breaker"
   | "breakerAddress"
   | "chainId"
   | "id"
@@ -398,7 +394,6 @@ export type BreakerTripEventSelectColumn =
 export type BreakerTripEventOrderBy = {
   readonly blockNumber?: OrderBy;
   readonly blockTimestamp?: OrderBy;
-  readonly breaker?: OrderBy;
   readonly breakerAddress?: OrderBy;
   readonly chainId?: OrderBy;
   readonly id?: OrderBy;
@@ -420,7 +415,6 @@ export type BreakerTripEventBoolExp = {
   readonly _not?: BreakerTripEventBoolExp;
   readonly blockNumber?: ComparisonExp<string>;
   readonly blockTimestamp?: ComparisonExp<string>;
-  readonly breaker?: ComparisonExp<unknown>;
   readonly breakerAddress?: ComparisonExp<string>;
   readonly chainId?: ComparisonExp<number>;
   readonly id?: ComparisonExp<string>;

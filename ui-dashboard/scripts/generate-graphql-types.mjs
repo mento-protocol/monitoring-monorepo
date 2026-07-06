@@ -283,6 +283,12 @@ function evalCallExpression(expr, mod, env) {
         return evalExpression(callback.node.body, callback.mod, nextEnv);
       });
     }
+    throw new Error(
+      `Unsupported method ".${method}" in ${path.relative(
+        REPO_ROOT,
+        mod.filePath,
+      )}: only .join() and .map() are supported`,
+    );
   }
 
   const callee = evalExpression(expr.expression, mod, env);
@@ -536,7 +542,7 @@ function comparisonTypeFor(type) {
   const named = getNamedType(type);
   if (isEnumType(named)) return named.name;
   if (isScalarType(named)) return inputScalarType(named.name);
-  return "unknown";
+  return null;
 }
 
 function entityInputTypes(schema, entityNames) {
@@ -578,15 +584,18 @@ function entityInputTypes(schema, entityNames) {
     const fields = Object.values(type.getFields()).sort((a, b) =>
       a.name.localeCompare(b.name),
     );
+    const columnFields = fields.filter(
+      (field) => comparisonTypeFor(field.type) != null,
+    );
     chunks.push(
       "",
       typeAlias(
         `${entityName}SelectColumn`,
-        unionType(fields.map((field) => quoted(field.name))),
+        unionType(columnFields.map((field) => quoted(field.name))),
       ),
       "",
       `export type ${entityName}OrderBy = {`,
-      ...fields.map(
+      ...columnFields.map(
         (field) => `  readonly ${propertyName(field.name)}?: OrderBy;`,
       ),
       "};",
@@ -595,7 +604,7 @@ function entityInputTypes(schema, entityNames) {
       ...recursiveBoolExpProperty(entityName, "_and"),
       ...recursiveBoolExpProperty(entityName, "_or"),
       `  readonly _not?: ${entityName}BoolExp;`,
-      ...fields.map(
+      ...columnFields.map(
         (field) =>
           `  readonly ${propertyName(field.name)}?: ComparisonExp<${comparisonTypeFor(
             field.type,
@@ -695,6 +704,12 @@ function selectionSetToTs(schema, parentType, selectionSet, indent) {
             .filter((line) => line.trim().length > 0),
         );
       }
+    } else if (selection.kind === Kind.FRAGMENT_SPREAD) {
+      throw new Error(
+        `Named fragment spreads (...${selection.name.value}) are not supported by the dashboard codegen. Inline the fragment fields instead.`,
+      );
+    } else {
+      throw new Error(`Unsupported GraphQL selection kind: ${selection.kind}`);
     }
   }
   lines.push(`${pad}}`);
