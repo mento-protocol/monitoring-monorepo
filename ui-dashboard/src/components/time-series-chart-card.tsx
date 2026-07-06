@@ -47,7 +47,7 @@ function PlotSkeleton({
 // our custom `{ heightPx }`, so the chunk-loading flash falls back to
 // the default 200px height. That's a 1-frame visual nit before
 // hydration; not worth threading the height through.
-const Plot = dynamic(() => import("react-plotly.js"), {
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), {
   ssr: false,
   loading: () => <PlotSkeleton />,
 });

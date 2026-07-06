@@ -18,7 +18,7 @@ import {
 import { tradingSecondsInRange } from "@/lib/weekend";
 import { formatDurationShort } from "@/lib/bridge-status";
 
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
 
 interface Props {
   breaches: DeviationThresholdBreach[];

@@ -17,7 +17,7 @@ const PlotSkeleton = () => (
   <div className="h-[220px] animate-pulse rounded bg-slate-800/30" />
 );
 
-const Plot = dynamic(() => import("react-plotly.js"), {
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), {
   ssr: false,
   loading: PlotSkeleton,
 });

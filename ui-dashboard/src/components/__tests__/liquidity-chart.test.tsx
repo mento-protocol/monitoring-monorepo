@@ -13,7 +13,7 @@ const plotlyMock = vi.hoisted(() => {
   return { capturedPlotProps, MockPlot };
 });
 
-vi.mock("react-plotly.js", () => ({
+vi.mock("@/lib/react-plotly-basic", () => ({
   default: plotlyMock.MockPlot,
 }));
 

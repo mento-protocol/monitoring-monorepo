@@ -15,9 +15,9 @@
 // 3. Set budget to current_bytes × 1.10 (10% headroom).
 // 4. Update the comments below with the new baseline + date.
 //
-// BASELINE (measured 2026-05-18 with Next.js 16.2.6 + Turbopack):
-//   All client JS chunks (brotli): 1,702,785 bytes (1.62 MB)
-//   All CSS (brotli):              10,283 bytes (10.0 KB)
+// BASELINE (measured 2026-07-06 with Next.js 16.2.6 + Turbopack):
+//   All client JS chunks (brotli): 1,085,606 bytes (1.03 MB)
+//   All CSS (brotli):              10,987 bytes (10.7 KB)
 
 const fs = process.getBuiltinModule("node:fs");
 const path = process.getBuiltinModule("node:path");
@@ -138,20 +138,24 @@ const config = [
   {
     // All client-side JavaScript emitted by Turbopack under .next/static/chunks/.
     // This is what the browser downloads (brotli-compressed in prod via CDN).
-    // Dominant contributor is plotly.js-basic-dist-min (~1.3 MB brotli).
+    // Dominant contributor is Plotly, loaded lazily via @/lib/react-plotly-basic.
     //
-    // Baseline: 1,702,785 bytes  Budget: ×1.10 = 1,873,064 bytes → 1830 KB
-    // PR #624 (oracle chart breaker-band rewrite, 2026-05-27): the chart's
-    // wheel handler, breaker-config plumbing, and new hover formatter add
-    // ~3 KB brotli. Bumped to 1850 KB (~1.4% headroom over current) so the
-    // feature ships without bumping the absolute budget unreasonably.
+    // The chart layer was accidentally shipping the FULL plotly.js build
+    // (mapbox-gl + WebGL) because react-plotly.js defaults to it even though the
+    // app declares plotly.js-basic-dist-min. Building the shared Plot via
+    // react-plotly.js/factory + plotly.js-basic-dist-min (only scatter/bar/pie
+    // traces are used) cut the client JS from 1,702,785 → 1,085,606 bytes brotli
+    // (−36%). See docs/notes/ui-dashboard-performance-plan.md (P1).
+    //
+    // Baseline: 1,085,606 bytes  Budget: ×1.10 = 1,194,167 bytes → 1190 KB.
+    // Keep this tight so a regression back to the full plotly.js build fails CI.
     name: "All client JS chunks",
     path: manifestPathsOrFallback(
       ".js",
       ["static/chunks/"],
       ".next/static/chunks/**/*.js",
     ),
-    limit: "1850 kB",
+    limit: "1190 kB",
   },
   {
     // Manifest-referenced CSS emitted under .next/static/ (single Tailwind v4 bundle).

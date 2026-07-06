@@ -6,7 +6,7 @@ import { escapePlotText, PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
 import { USDM_SYMBOLS } from "@/lib/tokens";
 import type { Pool } from "@/lib/types";
 
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
 
 interface LpPosition {
   address: string;

@@ -11,7 +11,7 @@ import {
   makeDateXAxis,
 } from "@/lib/plot";
 
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
 
 interface EffectivenessChartProps {
   events: RebalanceEvent[];

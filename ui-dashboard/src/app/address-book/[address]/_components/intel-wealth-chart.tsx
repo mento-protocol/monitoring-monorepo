@@ -8,7 +8,7 @@ import { relativeTimeFromIso } from "@/lib/format";
 import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
 import type { IntelWealthRecord } from "@/lib/intel-wealth";
 
-const Plot = dynamic(() => import("react-plotly.js"), {
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), {
   ssr: false,
   loading: () => <div className="h-40 animate-pulse rounded bg-slate-800/30" />,
 });

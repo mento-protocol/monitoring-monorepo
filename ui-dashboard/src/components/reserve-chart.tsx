@@ -15,7 +15,7 @@ import {
 } from "@/lib/plot";
 
 // Plotly must be loaded client-side only (no SSR)
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
 
 interface ReserveChartProps {
   rows: ReserveUpdate[];
