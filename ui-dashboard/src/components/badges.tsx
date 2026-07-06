@@ -70,15 +70,17 @@ export function SourceBadge({
   // pure-presentation component).
   const isVirtual = source.includes("virtual") || Boolean(wrappedExchangeId);
   const label = isVirtual ? "Virtual" : "FPMM";
-  // Color follows the same predicate as the label so non-virtual non-fpmm
-  // sources (e.g. `oracle_reported` on a synthetic test fixture) get a
-  // consistent FPMM/indigo treatment instead of FPMM-label-with-Virtual-
-  // color (round 7 cursor finding).
+  // Pool TYPE, not health STATE — so both variants stay off the emerald/amber/
+  // red alarm palette reserved for HealthBadge/LimitBadge. Virtual = neutral
+  // slate, FPMM = indigo; the color follows the same predicate as the label so
+  // non-virtual non-fpmm sources (e.g. `oracle_reported` on a synthetic test
+  // fixture) get a consistent FPMM/indigo treatment instead of an
+  // FPMM-label-with-Virtual-color mismatch (round 7 cursor finding).
   return (
     <span
       className={`rounded px-2 py-0.5 text-xs font-medium ${
         isVirtual
-          ? "bg-emerald-500/20 text-emerald-300"
+          ? "bg-slate-500/20 text-slate-300"
           : "bg-indigo-500/20 text-indigo-300"
       }`}
     >
@@ -132,12 +134,13 @@ export function LimitBadge({ status }: { status: string }) {
 
 export function KindBadge({ kind }: { kind: string }) {
   const isMint = kind === "MINT";
+  // MINT / BURN are routine liquidity ops, not alarm states — keep them off the
+  // emerald/amber/red palette (which would read as OK/WARN severity). The kind
+  // text carries the meaning; sky vs slate just distinguishes the two.
   return (
     <span
       className={`rounded px-2 py-0.5 text-xs font-medium ${
-        isMint
-          ? "bg-emerald-500/20 text-emerald-300"
-          : "bg-amber-500/20 text-amber-300"
+        isMint ? "bg-sky-500/20 text-sky-300" : "bg-slate-500/20 text-slate-300"
       }`}
     >
       {kind}
