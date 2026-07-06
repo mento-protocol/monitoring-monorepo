@@ -196,6 +196,23 @@ describe("usePoolSnapshots", () => {
     expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_HOUR);
   });
 
+  it("keeps stock short-range rows loading until the daily baseline query settles", () => {
+    const hourlyFrom = snapshotWindow30d(Date.now()).from;
+    const hourlyRows = [
+      snapshot("hourly-1", String(hourlyFrom + SECONDS_PER_HOUR)),
+    ];
+    installResults({
+      hourlyResult: result({ PoolSnapshot: hourlyRows }),
+      dailyResult: { isLoading: true },
+    });
+
+    const { ref } = render("30d", "stock");
+
+    expect(ref.current?.snapshots).toBe(hourlyRows);
+    expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_HOUR);
+    expect(ref.current?.isLoading).toBe(true);
+  });
+
   it("does not merge a pre-window daily baseline for flow short-range rows", () => {
     const hourlyFrom = snapshotWindow30d(Date.now()).from;
     const hourlyRows = [
@@ -210,6 +227,23 @@ describe("usePoolSnapshots", () => {
 
     expect(ref.current?.snapshots).toBe(hourlyRows);
     expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_HOUR);
+  });
+
+  it("does not keep flow short-range rows loading while the daily fallback is pending", () => {
+    const hourlyFrom = snapshotWindow30d(Date.now()).from;
+    const hourlyRows = [
+      snapshot("hourly-1", String(hourlyFrom + SECONDS_PER_HOUR)),
+    ];
+    installResults({
+      hourlyResult: result({ PoolSnapshot: hourlyRows }),
+      dailyResult: { isLoading: true },
+    });
+
+    const { ref } = render("30d");
+
+    expect(ref.current?.snapshots).toBe(hourlyRows);
+    expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_HOUR);
+    expect(ref.current?.isLoading).toBe(false);
   });
 
   it("falls back to daily rows and daily bucketing when short-range hourly rows are empty", () => {

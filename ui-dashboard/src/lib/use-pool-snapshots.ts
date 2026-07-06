@@ -37,13 +37,16 @@ function snapshotsAreLoading({
   useHourlySnapshots,
   hourlyLoading,
   dailyLoading,
+  awaitDailyBaseline,
 }: {
   snapshots: PoolSnapshot[];
   hourly: boolean;
   useHourlySnapshots: boolean;
   hourlyLoading: boolean;
   dailyLoading: boolean;
+  awaitDailyBaseline: boolean;
 }) {
+  if (awaitDailyBaseline && dailyLoading) return true;
   if (snapshots.length > 0) return false;
   if (hourly && !useHourlySnapshots) return hourlyLoading || dailyLoading;
   return dailyLoading;
@@ -142,6 +145,7 @@ export function usePoolSnapshots(
   const snapshots = useHourlySnapshots
     ? hourlySnapshotsForMode
     : dailySnapshots;
+  const awaitDailyBaseline = mode === "stock" && useHourlySnapshots;
 
   return {
     snapshots,
@@ -152,6 +156,7 @@ export function usePoolSnapshots(
       useHourlySnapshots,
       hourlyLoading: hourlyResult.isLoading,
       dailyLoading: dailyResult.isLoading,
+      awaitDailyBaseline,
     }),
     hasError: snapshotsHaveError({
       snapshots,
