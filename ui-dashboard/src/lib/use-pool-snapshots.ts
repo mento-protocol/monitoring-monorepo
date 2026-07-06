@@ -29,7 +29,7 @@ export function usePoolSnapshots(
   range: RangeKey,
   historySupported: boolean,
 ) {
-  const hourlyFrom = hourlyWindowFrom(range);
+  const hourlyFrom = useMemo(() => hourlyWindowFrom(range), [range]);
   const hourly = hourlyFrom !== null;
   const hourlyVars = useMemo(
     () => ({ poolId, from: hourlyFrom ?? 0 }),
