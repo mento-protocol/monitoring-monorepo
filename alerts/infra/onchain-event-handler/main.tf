@@ -180,9 +180,14 @@ resource "google_storage_bucket" "webhook_replay_nonces" {
   # scripts/redrive-onchain-deadletter.mjs) must outlive the 24h nonce TTL
   # above so there's a real window to redrive them. 30 days is well beyond
   # any plausible redrive delay while still bounding storage growth.
+  # with_state = "ANY" (not the LIVE/ARCHIVED split used above) so the
+  # bucket's versioning doesn't turn this into an archive-then-delete detour:
+  # without it, deleting a LIVE object at 30 days would just archive it,
+  # leaving a noncurrent copy until a separate rule cleans it up.
   lifecycle_rule {
     condition {
       age            = 30
+      with_state     = "ANY"
       matches_prefix = ["dead-letter/"]
     }
     action {
