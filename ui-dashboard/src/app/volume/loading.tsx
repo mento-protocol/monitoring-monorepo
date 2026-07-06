@@ -28,13 +28,35 @@ export default function VolumeLoading() {
           <div className="h-9 w-28 animate-pulse rounded-md bg-slate-800/50" />
         </div>
       </div>
-      {/* Chart card: matches TimeSeriesChartCard's 200px plot area
-          (ROW_CHART_HEIGHT_PX) plus title chrome — NOT a 16:9 block, which is
-          hundreds of px taller at desktop widths. */}
-      <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
-        <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
-        <div className="mt-3 h-[200px] animate-pulse rounded bg-slate-800/30" />
-      </div>
+      {/* Chart card: mirrors TimeSeriesChartCard's loading state — the p-5/sm:p-6
+          section, the title + 3xl/4xl headline + h-5 change row + range buttons,
+          then the mt-4 200px plot (ROW_CHART_HEIGHT_PX). Reserving the full card
+          header (not just the plot) keeps the KPI tiles from being pushed down. */}
+      <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-sm">
+              <span className="inline-block h-[1em] w-32 animate-pulse rounded bg-slate-800/50 align-middle" />
+            </p>
+            <p className="mt-1 text-3xl font-semibold sm:text-4xl">
+              <span className="inline-block h-[1em] w-36 animate-pulse rounded bg-slate-800/60 align-middle" />
+            </p>
+            <div className="mt-1 flex h-5 items-center">
+              <span className="h-3 w-24 animate-pulse rounded bg-slate-800/40" />
+            </div>
+          </div>
+          <div className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5">
+            {Array.from({ length: 4 }, (_, i) => (
+              // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+              <span
+                key={`vol-range-${i}`}
+                className="h-6 w-9 animate-pulse rounded bg-slate-800/40"
+              />
+            ))}
+          </div>
+        </div>
+        <div className="mt-4 h-[200px] animate-pulse rounded bg-slate-800/30" />
+      </section>
       {/* KPI tiles: mirrors VolumeKpiTiles (grid-cols-1 sm:grid-cols-3, 3 tiles). */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {Array.from({ length: 3 }, (_, i) => (
