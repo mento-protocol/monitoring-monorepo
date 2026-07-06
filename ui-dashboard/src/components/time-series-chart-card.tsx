@@ -102,7 +102,9 @@ interface TimeSeriesChartCardProps {
    * Two effects:
    * - **Non-stacked / single-trace** charts: drives the explicit
    *   `yaxis.range` upper bound (`ymax + span * yAxisTopPadding`). The
-   *   bottom is pinned to 0 when a breakdown is present.
+   *   bottom is a tight, non-zero floor (`Math.max(0, ymin - span * 0.1)`)
+   *   whether or not a breakdown is present, so low-variance series stay
+   *   visible instead of flattening against a zero baseline.
    * - **Stacked** charts (breakdownMode === "stacked"): the y-axis
    *   uses Plotly autorange so trace toggling can re-fit, so this
    *   value is *not* read by the y-axis math. It still controls the
@@ -283,8 +285,9 @@ export function TimeSeriesChartCard({
             }),
       };
     });
-    // Pull y-min toward 0 when a breakdown is present so smaller chains
-    // don't get clipped off the bottom edge by the total-tight range.
+    // Fold every breakdown series into the y-range inputs (`allYs` below)
+    // so `ymin` is data-driven and covers all chains — the tight, non-zero
+    // floor then can't clip a small chain off the bottom edge.
     const breakdownYs = (breakdown ?? []).flatMap((b) =>
       b.series.map((p) => p.value),
     );
@@ -298,7 +301,12 @@ export function TimeSeriesChartCard({
       allYs.length > 0 ? allYs.reduce((a, b) => Math.max(a, b), -Infinity) : 1;
     const span = Math.max(ymax - ymin, ymax * 0.02, 1);
     const yRange: [number, number] = [
-      hasBreakdown ? 0 : Math.max(0, ymin - span * 0.1),
+      // Same tight, non-zero floor whether or not a breakdown is present.
+      // Pinning the breakdown baseline to 0 made a low-variance TVL
+      // envelope (~2% of a large total) move only 1-2px; the reduce-based
+      // `ymin` already folds in every breakdown point via `allYs`, so no
+      // small per-chain series is clipped off the bottom.
+      Math.max(0, ymin - span * 0.1),
       ymax + span * yAxisTopPadding,
     ];
 

@@ -13,8 +13,9 @@ variable "vercel_team_id" {
 }
 
 # ── GitHub ────────────────────────────────────────────────────────────────────
-# Used to manage repo-level GitHub Actions secrets that belong to the platform
-# stack, including the Vercel bypass mirror and integration-probe credentials.
+# Used to manage repo-level GitHub Actions secrets and variables that belong
+# to the platform stack, including the Vercel bypass mirror, integration-probe
+# credentials, and the Terraform-apply Slack channel routing variable.
 # `alerts/infra/` uses a separate token of the same shape for its own `TF_VAR_*`
 # repo-secret mirrors.
 
@@ -32,9 +33,43 @@ variable "github_token" {
     stack's use case (org-admin scope is NOT needed because the secrets
     managed here are repo-level, not org-level). Used only by
     `github_actions_secret` resources in this stack.
+
+    Managing `terraform_apply_slack_channel` below also requires the
+    separate "Variables: Read and write" repository permission on this
+    same PAT — GitHub scopes repo Secrets and repo Variables independently.
   EOT
   type        = string
   sensitive   = true
+}
+
+variable "terraform_apply_slack_channel" {
+  description = <<-EOT
+    Slack channel that receives the Terraform apply-pending prompt posted
+    by `scripts/notify-terraform-apply.mjs` for the CI-applied stacks
+    (alerts-rules, alerts-delivery, aegis, governance-watchdog). Mirrored
+    to the GitHub Actions repository variable `TERRAFORM_APPLY_SLACK_CHANNEL`
+    (see `github-variables.tf`), which those workflows read with a fallback
+    to this same default. Changing this reroutes the message; the notify bot
+    posts to any public channel via its `chat:write.public` scope without
+    being a member, so a private target channel needs a one-time manual
+    `/invite` and is set by its Slack channel ID (chat.postMessage needs the
+    ID for private channels). See `docs/notes/slack-github-subscriptions.md`.
+  EOT
+  type        = string
+  default     = "#ci-operations"
+
+  validation {
+    # Accept a `#`-prefixed channel name or a Slack channel ID (C…/G…). A
+    # private reroute target must be set by ID — chat.postMessage needs the
+    # ID for a private channel even after the bot is invited — so a `^#`-only
+    # rule would reject the one value that actually works. Still rejects a
+    # bare name like `ci-operations` (the typo footgun).
+    condition = (
+      can(regex("^#", var.terraform_apply_slack_channel)) ||
+      can(regex("^[CG][A-Z0-9]{8,}$", var.terraform_apply_slack_channel))
+    )
+    error_message = "terraform_apply_slack_channel must be a '#'-prefixed channel name (e.g. '#ci-operations') or a Slack channel ID (e.g. C0123ABC456)."
+  }
 }
 
 # ── Upstash ───────────────────────────────────────────────────────────────────

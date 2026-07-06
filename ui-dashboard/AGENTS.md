@@ -8,6 +8,8 @@ last_verified: 2026-05-20
 
 # AGENTS.md — Monitoring Dashboard
 
+> **Architecture decisions** for this package live in [`docs/adr/`](../docs/adr/README.md) (scope: `ui-dashboard`) — read the relevant ADR before changing how something here is built; it records the _why_ the code can't.
+
 ## What This Is
 
 Next.js 16 monitoring dashboard for Mento v3 pools. Displays real-time pool data (reserves, swaps, mints, burns) using Plotly.js charts, sourced from Hasura GraphQL.

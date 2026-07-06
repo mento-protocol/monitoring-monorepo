@@ -34,3 +34,4 @@ When you keep it, CI requires each item to be "None" or link a GitHub issue.
 - [ ] The Solution is plain English and understandable before reading the diff.
 - [ ] Deeper implementation details come after the opening two sections.
 - [ ] Every knowing deferral is listed under Deferrals with a GitHub issue link.
+- [ ] Architecture decision? If this makes one, an ADR is added under `docs/adr/` (see `docs/pr-checklists/architecture-decisions.md`); otherwise not applicable.

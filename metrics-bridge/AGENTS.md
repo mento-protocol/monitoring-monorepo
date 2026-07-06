@@ -8,6 +8,8 @@ last_verified: 2026-05-20
 
 # AGENTS.md — Metrics Bridge
 
+> **Architecture decisions** for this package live in [`docs/adr/`](../docs/adr/README.md) (scope: `metrics-bridge`) — read the relevant ADR before changing how something here is built; it records the _why_ the code can't.
+
 ## Scope
 
 `metrics-bridge/` exports Hasura/Envio data and rebalance probes as Prometheus gauges for Grafana alerting.

@@ -68,6 +68,14 @@ export function NavLinks() {
           Addresses
         </Link>
       )}
+      {session && (
+        <Link
+          href="/entities"
+          className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+        >
+          Entities
+        </Link>
+      )}
     </>
   );
 }

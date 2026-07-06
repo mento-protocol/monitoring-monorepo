@@ -79,8 +79,9 @@ export function OraclePriceValue({
   );
 
   // On the server + hydration render (liveNowSeconds === null) evaluate freshness
-  // against the oracle's own timestamp so it deterministically reads "fresh"
-  // (no red flash / hydration mismatch); the live check runs after mount.
+  // against the oracle's own timestamp: for a non-zero timestamp the zero diff
+  // reads "fresh", avoiding a red flash / hydration mismatch, and the live check
+  // runs after mount. (A no-oracle pool has no freshness label to mismatch.)
   const liveNowSeconds = useNowSeconds();
   const nowSeconds = liveNowSeconds ?? oracleFreshnessTimestamp(pool);
   const fresh = isOracleFresh(pool, nowSeconds, network.chainId);

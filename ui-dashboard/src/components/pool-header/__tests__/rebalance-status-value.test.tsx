@@ -4,14 +4,21 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 
-// The component reads the SSR-safe clock via useNowSeconds (null on the server /
-// hydration render, live after mount). These tests exercise the live client
-// render, so return the current time — matching the pre-SSR-safe
-// relativeTime(Date.now()) behavior. SSR-safety itself is covered by the browser
-// hydration suite.
-vi.mock("@/hooks/use-now-seconds", () => ({
-  useNowSeconds: () => Math.floor(Date.now() / 1000),
-}));
+// The subtitle reads the SSR-safe clock via useSsrSafeRelative (a deterministic
+// UTC date on the server/hydration render, the live "N ago" label after mount).
+// These tests exercise the live client render, so drive the hook off the current
+// time — matching the pre-SSR-safe relativeTime(Date.now()) behavior. SSR-safety
+// itself is covered by the browser hydration suite. Provide BOTH exports: vi.mock
+// replaces the whole module, so a missing useSsrSafeRelative would be undefined.
+vi.mock("@/hooks/use-now-seconds", async () => {
+  const { relativeTimeOrTimestamp } =
+    await vi.importActual<typeof import("@/lib/format")>("@/lib/format");
+  return {
+    useNowSeconds: () => Math.floor(Date.now() / 1000),
+    useSsrSafeRelative: (ts: string | null | undefined) =>
+      relativeTimeOrTimestamp(ts ?? "", Math.floor(Date.now() / 1000)),
+  };
+});
 
 // Pin `isWeekend` to false so `computeHealthStatus` doesn't rewrite the
 // "Oracle stale" path to "Markets closed" when this test file happens to

@@ -1,0 +1,47 @@
+---
+title: shared-config is the single source of truth for chain and token metadata
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-06
+scope: shared-config
+date: 2026-03
+---
+
+# ADR 0011 — `shared-config` is the single source of truth for chain/token metadata
+
+**Status:** Accepted (Mar 2026), in force.
+**Scope:** shared-config
+
+## Context
+
+Chain slugs, explorer URLs, treb deployment namespaces, and token-symbol
+derivation are needed by the dashboard, indexer, and metrics-bridge alike. When
+each package carried its own copy, they drifted — a renamed token or a new chain
+had to be fixed in several places, and some were missed.
+
+## Decision
+
+`@mento-protocol/monitoring-config` (`shared-config/`) is the **single source of
+truth** for chain metadata, deployment namespaces, token/pool label derivation,
+the FX calendar, and shared ABIs. Consumers import from it; no package duplicates
+chain slugs, explorer URLs, or token labels.
+
+## Alternatives considered
+
+- **Per-package copies** — rejected: guaranteed drift; the bug that motivated this.
+- **A remote config service** — rejected: this is static build-time metadata; a
+  workspace package is simpler and versioned with the code.
+
+## Consequences
+
+- Exported shapes are a change surface: dashboard, indexer, and bridge typechecks
+  are part of any `shared-config` change, and config edits need a cross-reference test.
+- `shared-config` stays low-dependency because it is imported into client bundles.
+- The indexer is the **one** sanctioned exception: it vendors a mirror because Envio
+  builds it outside the pnpm workspace (ADR 0013).
+
+## Evidence
+
+- Namespace extraction `204dd1ab` and contracts-package adoption `a77979d0` (2026-03); no-duplication rule PR #209.
+- [`shared-config/AGENTS.md`](../../shared-config/AGENTS.md).

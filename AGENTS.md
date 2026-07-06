@@ -27,23 +27,21 @@ Context authority, placement, and metadata rules live in
 and non-canonical notes/plans as historical input that must be verified before
 use.
 
+Architecture decisions and the rationale behind the system's shape are recorded
+in [`docs/adr/`](docs/adr/README.md) — read the ADR that governs a subsystem
+before changing how it is built. When your change **makes** an architectural
+decision (it constrains future work, had a real alternative, and the why is not
+obvious from the code), record a new ADR in the same PR. `pnpm adr:check` and the
+agent quality gate remind you on architectural surfaces (new package, Terraform
+stack, or workflow); the when/how procedure is
+[`docs/pr-checklists/architecture-decisions.md`](docs/pr-checklists/architecture-decisions.md).
+
 ## Cross-Protocol Context
 
 For any protocol-level question that crosses beyond this monitoring repo, first
-read the private `mento-master-context` router when the checkout is available:
-
-```text
-../mento-master-context/.agents/mento-context/README.md
-```
-
-This applies before broad repo searches for questions about contracts,
-deployments, addresses, ABIs, live on-chain state, stable supply, reserve data,
-monitoring data semantics, Aegis/Grafana metrics, docs, the whitepaper, business
-model, or legal/risk framing. Load only the relevant master-context card(s), then
-return to this repo for implementation details. It is a router, not live truth;
-verify current values through the source-specific repo, API, RPC, or dashboard
-path it points to. When answering, mention which master-context card you used or
-state that the checkout was unavailable.
+read the private `mento-master-context` router when the checkout is available.
+See `docs/notes/cross-protocol-context.md` for the router path, what it covers,
+and the verify-before-use rule.
 
 ## Secrets Rule (IaC Before CLI)
 
@@ -63,23 +61,10 @@ finished, or plan feedback is required), send a brief spoken nudge with `sag` in
 addition to the normal chat message. See `docs/notes/spoken-attention-nudge.md`
 for the fallback ladder, key-file setup, and pre-approval constraints.
 
-> **Any PR that adds or changes stateful data flow across layers must ship with explicit invariants, degraded-mode behavior, and interaction tests before opening.**
-
-This repo has already paid the tax for learning this the hard way.
-
-If your change touches any combination of:
-
-- Envio schema/entities
-- event handlers / entity writers
-- generated types / GraphQL queries / dashboard types
-- paginated or sortable UI state
-- partial failure behavior (missing counts, stale RPC, missing txHash, etc.)
-
-then you are expected to run the dedicated PR checklist before opening or updating the PR:
+Any PR that adds or changes stateful data flow across layers must run the
+dedicated PR checklist before opening or updating the PR:
 
 - **Checklist:** `docs/pr-checklists/stateful-data-ui.md`
-
-Do not rely on PR review to finish the design. Reviews should catch misses, not define the invariants for the first time.
 
 ## Issue-Driven Backlog
 
@@ -145,10 +130,9 @@ pnpm agent:prewarm --base origin/main  # warm Turbo's local cache for the same m
 The gate is local-only (never deploy or Terraform apply) and refuses `--run`
 when package manifests, the lockfile, `.npmrc`, pnpmfile, or `patches/**`
 changed until you review the script/lifecycle diff and pass
-`--allow-package-script-changes`. The Trunk pre-push hook delegates to this
-same gate with `--fail-fast --skip-if-fresh`. For parallelism knobs, Turbo
-caching rules, the package-script refusal exceptions, and Codex-native review
-bundle prep, see `docs/notes/agent-quality-gate-mechanics.md`.
+`--allow-package-script-changes`. For parallelism knobs, Turbo caching rules,
+the pre-push hook delegation, the package-script refusal exceptions, and
+Codex-native review bundle prep, see `docs/notes/agent-quality-gate-mechanics.md`.
 
 ## PR description standard
 
@@ -313,6 +297,8 @@ pnpm lockfile:lint                 # Lockfile integrity + registry check (blocki
 pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
 pnpm override:prune-report          # pnpm.overrides + minimumReleaseAgeExclude pruning report (advisory; no install needed)
+pnpm adr:check                      # Advisory ADR reminder for architectural changes (new package/stack/workflow); --strict to hard-gate
+pnpm adr:check:test                 # Offline tests for the ADR reminder trigger logic
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 node scripts/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
 node scripts/file-size-watchlist.mjs  # Refresh source file-size watchlist; use --format issue for GitHub Issues, not BACKLOG.md
@@ -416,17 +402,9 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 
 - Indexer needs Docker for local dev (Postgres + Hasura containers)
 - Dashboard localhost UI review defaults to the live production Envio endpoint
-  when `NEXT_PUBLIC_HASURA_URL` is unset, so fresh worktrees should verify
-  against real pool/CDP data by default. Set `NEXT_PUBLIC_HASURA_URL` only when
-  a task explicitly needs a non-prod or fixture endpoint. Hosted testnet
-  networks require `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true` plus the
-  per-network endpoint env (`NEXT_PUBLIC_HASURA_URL_TESTNET` for Monad Testnet
-  or `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` for Celo Sepolia); leave them unset
-  unless the task explicitly needs testnet UI coverage. Real
-  address-label/authenticated surfaces also need `UPSTASH_REDIS_REST_URL`,
-  `UPSTASH_REDIS_REST_TOKEN`, and local Auth.js placeholders (`AUTH_SECRET`,
-  `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`). See `ui-dashboard/AGENTS.md` for the
-  logged-in/logged-out verification workflow and local session-cookie recipe.
+  when `NEXT_PUBLIC_HASURA_URL` is unset. See `ui-dashboard/AGENTS.md` for
+  testnet env vars, Upstash/Auth.js local setup, and the logged-in/logged-out
+  verification workflow.
 - Production env vars are managed by Terraform except Vercel Blob OIDC variables, which are managed by the Vercel store integration — see `terraform/terraform.tfvars.example`
 - See root README.md for full env var documentation
 
@@ -454,86 +432,26 @@ lives in `.codex/config.toml`; local personal Codex settings still belong in
 
 `autoreview` is pinned in this repo through `scripts/agent-autoreview.mjs` and
 exposed with `pnpm agent:autoreview`; Claude Code also has `/autoreview` as a
-thin command shim. The repo adapter detects active Codex sandbox sessions and
-uses the helper's local deterministic engine by default so the command does not
-try to spawn unavailable nested `codex exec`; explicit `--engine` arguments and
-`AUTOREVIEW_ENGINE` still take precedence. `AUTOREVIEW_HELPER` is an escape
-hatch for intentional local testing or replacement, not a Cloud prerequisite.
-The adapter also exposes `--prepare-bundle-dir <dir>` to create a repo-context
-review bundle with changed paths, patch files, selected checklists, optional
-`--feedback-pr` feedback state, and the helper's prepared prompt.
-Keep the repo-local helper as the source of truth for this repo's required
-ship gate; update it deliberately when taking upstream improvements from a
-personal/global skill.
-
-Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
-`~/.claude` directories; setup and maintenance rely on the repo-local helper at
-`scripts/agent-autoreview.mjs`, which fails fast if missing. PR shipping
-requires `pnpm agent:autoreview` as the structured batch-boundary review.
-Configure the environment setup script as `./scripts/codex-cloud-setup.sh` and
-the optional maintenance script as `./scripts/codex-cloud-maintenance.sh`. Full
-mechanics (GitHub CLI bootstrap, Trunk/Foundry install and mirror knobs, OSV
-egress check, maintenance fast-path) live in
-`docs/notes/codex-cloud-setup.md`.
-
-For workflow continuity, this repo includes thin repo-local `ship` and
-`babysit-pr` skill adapters under `.agents/skills/` with matching
-`.claude/skills/` mirrors. They preserve the familiar command names while
-backing the behavior with repo-visible commands: `pnpm agent:quality-gate`,
-`pnpm agent:autoreview` when available, and `pnpm pr:ready-state`.
-
-### SessionEnd hook (reflect nudge)
-
-`scripts/agent-session-end-hook.sh` runs on SessionEnd for both Claude Code and Codex. When the session left commits or unstaged changes in the tree, it prints a one-line nudge to run `/reflect` so any new learnings get captured in memory / `AGENTS.md` / `CLAUDE.md` before context is lost. Silent on no-op sessions.
-
-- Claude wiring: `.claude/settings.json` → `hooks.SessionEnd`.
-- Codex wiring: `.codex/hooks.json`. Codex auto-disables new hooks until trusted; on first encounter, codex either prompts to trust or you mirror the entry into `~/.codex/hooks.json` and toggle `enabled = true` (set the hash) in `[hooks.state]` of `~/.codex/config.toml`. Or pass `--dangerously-bypass-hook-trust` for automation.
-
-### Status-polling commands use `Monitor`, not `/loop`
-
-For commands that watch a long-running external process (Envio sync, PR CI, deploy progress, etc.), prefer the `Monitor` tool over `/loop` + cron. Monitor runs a single shell script that polls internally at 30–60s and only emits stdout lines (== notifications) on state changes worth surfacing. Cron / `/loop` fires a full Stop turn per interval, which triggers a macOS notification regardless of whether anything changed — a 60-min sync produces ~12 idle notifications, vs 2–3 with Monitor. `babysit-indexer-deploy` and `babysit-pr` are the canonical examples; if you find yourself writing a new "watch X every Y minutes" command, model it on those.
+thin command shim. Codex Cloud setup/maintenance use
+`./scripts/codex-cloud-setup.sh` / `./scripts/codex-cloud-maintenance.sh`. See
+`docs/notes/codex-agent-skills.md` for the autoreview engine-detection and
+bundle-prep mechanics, Codex Cloud setup detail, the `ship`/`babysit-pr` skill
+adapters, the SessionEnd reflect-nudge hook, and why status-polling commands
+use `Monitor` instead of `/loop`.
 
 ## New Worktree / Clone Setup
 
-After creating a new worktree manually or cloning the repo, run:
-
-```bash
-./scripts/setup.sh
-```
-
-This ensures deps are installed, Playwright Chromium is available for dashboard
-browser tests, and Envio codegen has produced the generated type facade
-required for `indexer-envio` TypeScript to compile.
-Worktrunk-created worktrees (`wt switch --create` / `wt switch -c`) run the
-same setup script automatically through `.config/wt.toml` as a blocking
-`pre-start` hook before any `--execute` command starts.
+After creating a new worktree manually or cloning the repo, run
+`./scripts/setup.sh`. See `docs/notes/worktree-and-web-setup.md` for what it
+installs/verifies and the Worktrunk `pre-start` hook wiring.
 
 ## Claude Code on the web setup
 
-Claude Code on the web sessions run in a hosted container that does not inherit
-the user's local `~/.claude` skills or shell environment. The repo bootstraps
-itself through a SessionStart hook (`.claude/settings.json` →
-`.claude/hooks/session-start.sh`) that delegates to:
-
-```bash
-./scripts/claude-code-web-setup.sh
-```
-
-The script is gated on `$CLAUDE_CODE_REMOTE` so it is a no-op for local Claude
-Code sessions. It performs the same install + codegen contract as
-`./scripts/setup.sh` plus a Playwright Chromium install for the dashboard
-browser fixture suite. The Playwright step is non-fatal: hosted environments
-that restrict outbound access to `cdn.playwright.dev` will skip the download
-and warn instead of failing the bootstrap.
-
-Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
-(mirrored under `.agents/skills/` for Codex), so the familiar `/ship` and
-`/babysit-pr` workflows resolve to repo-visible commands (`pnpm
-agent:quality-gate`, `pnpm agent:autoreview`, `pnpm pr:ready-state`) without
-needing a developer's personal skills present. When the Claude `Monitor` tool
-is unavailable in the hosted session, the `babysit-pr` skill falls back to
-`pnpm pr:ready-state --pr <number> --watch --compact` as the foreground watch
-loop.
+Claude Code on the web sessions run in a hosted container that bootstraps
+itself through a SessionStart hook delegating to
+`./scripts/claude-code-web-setup.sh`. See `docs/notes/worktree-and-web-setup.md`
+for the hosted-container bootstrap contract, the Playwright fallback behavior,
+and the `babysit-pr` `Monitor` fallback.
 
 ## Pre-Push Checklist (MANDATORY for server-side work)
 
@@ -559,10 +477,7 @@ Before pushing any cross-layer or stateful UI change, also read and apply:
 
 - **`docs/pr-checklists/stateful-data-ui.md`**
 
-**Common traps:**
-
-- `codespell` flags short variable names that match common abbreviations (e.g. a two-letter loop var that looks like a misspelling). Use descriptive names like `netData` to avoid this.
-- `trunk check <file>` only checks the specified files. That is fine for the path-aware local agent gate, but use `--all` when you need to manually reproduce CI's full-repo Trunk job.
-- If `indexer-envio typecheck` fails with "Cannot find module 'generated'", run `./scripts/setup.sh` first
+See `docs/notes/agent-quality-gate-mechanics.md` for common local-gate traps
+(codespell false positives, `trunk check` scoping, missing `generated` module).
 
 For package-specific workflows (promoting a deployment, adding a contract to the indexer, dashboard chart wiring, infrastructure changes), see the relevant package's `AGENTS.md` — they own the procedural detail.
