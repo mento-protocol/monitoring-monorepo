@@ -239,18 +239,8 @@ export function TimeSeriesChartCard({
           type: "scatter" as const,
           mode: "lines" as const,
           line: { color: "#6366f1", width: 2 },
-          // Area fill only for single-trace charts. With a breakdown the
-          // total is the top-of-envelope sum and the y-axis is truncated
-          // to a non-zero baseline to reveal a low-variance TVL band, so a
-          // fill draped from the total down to that baseline would flood
-          // the plot behind the per-chain lines and exaggerate the level.
-          // Keep the total a plain line there.
-          ...(hasBreakdown
-            ? {}
-            : {
-                fill: "tozeroy" as const,
-                fillcolor: "rgba(99,102,241,0.08)",
-              }),
+          fill: "tozeroy" as const,
+          fillcolor: "rgba(99,102,241,0.08)",
           hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
         };
     const breakdownTraces = (breakdown ?? []).map((b) => {
