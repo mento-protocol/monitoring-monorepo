@@ -465,6 +465,136 @@ test("groups status check rollup into stable pass/fail/pending/skipped buckets",
   );
 });
 
+test("hides cancelled check runs superseded by a newer passing run", () => {
+  const checks = [
+    {
+      name: "PR description format",
+      workflowName: "PR Description",
+      status: "COMPLETED",
+      conclusion: "CANCELLED",
+      startedAt: "2026-07-06T15:32:37Z",
+      completedAt: "2026-07-06T15:32:43Z",
+    },
+    {
+      name: "PR description format",
+      workflowName: "PR Description",
+      status: "COMPLETED",
+      conclusion: "CANCELLED",
+      startedAt: "2026-07-06T15:32:52Z",
+      completedAt: "2026-07-06T15:33:10Z",
+    },
+    {
+      name: "PR description format",
+      workflowName: "PR Description",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-07-06T15:32:57Z",
+      completedAt: "2026-07-06T15:33:09Z",
+    },
+  ];
+
+  const grouped = groupStatusChecks(checks);
+  const split = splitRequiredAndOptionalChecks(checks, [], {
+    requiredStatusContextsAvailable: true,
+  });
+
+  assertDeepEqual(
+    {
+      pass: grouped.pass.map((check) => check.name),
+      fail: grouped.fail.map((check) => check.name),
+      optional: split.optional.map((check) => `${check.name}:${check.state}`),
+    },
+    {
+      pass: ["PR description format"],
+      fail: [],
+      optional: ["PR description format:pass"],
+    },
+  );
+});
+
+test("keeps cancelled check runs without a newer passing replacement", () => {
+  const checks = [
+    {
+      name: "PR description format",
+      workflowName: "PR Description",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-07-06T15:32:37Z",
+      completedAt: "2026-07-06T15:32:43Z",
+    },
+    {
+      name: "PR description format",
+      workflowName: "PR Description",
+      status: "COMPLETED",
+      conclusion: "CANCELLED",
+      startedAt: "2026-07-06T15:32:52Z",
+      completedAt: "2026-07-06T15:32:55Z",
+    },
+  ];
+
+  const grouped = groupStatusChecks(checks);
+  const split = splitRequiredAndOptionalChecks(checks, [], {
+    requiredStatusContextsAvailable: true,
+  });
+
+  assertDeepEqual(
+    {
+      pass: grouped.pass.map((check) => check.name),
+      fail: grouped.fail.map((check) => check.name),
+      optional: split.optional.map((check) => `${check.name}:${check.state}`),
+    },
+    {
+      pass: ["PR description format"],
+      fail: ["PR description format"],
+      optional: ["PR description format:pass", "PR description format:fail"],
+    },
+  );
+});
+
+test("keeps cancelled check runs when run timestamps are unavailable", () => {
+  const checks = [
+    {
+      name: "cancel-without-time",
+      workflowName: "PR Description",
+      status: "COMPLETED",
+      conclusion: "CANCELLED",
+    },
+    {
+      name: "cancel-without-time",
+      workflowName: "PR Description",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-07-06T15:33:09Z",
+    },
+    {
+      name: "pass-without-time",
+      workflowName: "PR Description",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+    },
+    {
+      name: "pass-without-time",
+      workflowName: "PR Description",
+      status: "COMPLETED",
+      conclusion: "CANCELLED",
+      startedAt: "2026-07-06T15:32:52Z",
+    },
+  ];
+
+  const grouped = groupStatusChecks(checks);
+
+  assertDeepEqual(
+    {
+      pass: grouped.pass.map((check) => check.name),
+      fail: grouped.fail.map((check) => check.name),
+    },
+    {
+      pass: ["cancel-without-time", "pass-without-time"],
+      fail: ["cancel-without-time", "pass-without-time"],
+    },
+  );
+});
+
 test("splits known advisory checks into optional lag when branch protection data is unavailable", () => {
   const split = splitRequiredAndOptionalChecks([
     { name: "Code Quality", status: "COMPLETED", conclusion: "SUCCESS" },
