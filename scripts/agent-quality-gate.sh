@@ -1207,7 +1207,7 @@ while IFS= read -r path; do
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
       add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions workflow/action changed"
-      add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref")" "workflow/action changed — ADR reminder (a new workflow likely needs an ADR)"
+      add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref") --head $(quote_path "$head_ref") --include-untracked" "workflow/action changed — ADR reminder (a new workflow likely needs an ADR)"
       case "$path" in
         .github/workflows/ci.yml)
           add_surface "workspace"
@@ -1371,7 +1371,15 @@ while IFS= read -r path; do
     docs/*|README.md|AGENTS.md|*/AGENTS.md|BACKLOG.md|SPEC.md)
       add_surface "docs"
       case "$path" in
-        docs/context-standards.md|docs/pr-checklists/recurring-review-patterns.md|AGENTS.md|*/AGENTS.md)
+        AGENTS.md|*/AGENTS.md)
+          add_command "pnpm agent:context-check" "agent context standards changed"
+          # A scoped AGENTS.md reaching this route (not an earlier package route)
+          # is a brand-new standalone service (governance-watchdog-style) added
+          # without a pnpm-workspace.yaml change. The reminder self-suppresses on
+          # an edit to an existing AGENTS.md, so this only nags on a new one.
+          add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref") --head $(quote_path "$head_ref") --include-untracked" "scoped AGENTS.md changed — ADR reminder (a new package/service likely needs an ADR)"
+          ;;
+        docs/context-standards.md|docs/pr-checklists/recurring-review-patterns.md)
           add_command "pnpm agent:context-check" "agent context standards changed"
           ;;
         SPEC.md)
@@ -1558,7 +1566,7 @@ while IFS= read -r path; do
       add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack registry changed"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Terraform stack registry changed"
       add_checklist "docs/pr-checklists/architecture-decisions.md" "Terraform stack registry changed — a new stack likely needs an ADR"
-      add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref")" "Terraform stack registry changed — ADR reminder"
+      add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref") --head $(quote_path "$head_ref") --include-untracked" "Terraform stack registry changed — ADR reminder"
       ;;
     package.json)
       root_package_json_class="$(get_root_package_json_class)"
@@ -1579,7 +1587,7 @@ while IFS= read -r path; do
       add_surface "workspace"
       add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
       add_workspace_quality_commands "workspace dependency/config changed"
-      add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref")" "workspace membership/policy changed — ADR reminder (a new package likely needs an ADR)"
+      add_command "node scripts/check-adr-reminder.mjs --base $(quote_path "$base_ref") --head $(quote_path "$head_ref") --include-untracked" "workspace membership/policy changed — ADR reminder (a new package likely needs an ADR)"
       ;;
     patches/*)
       add_surface "workspace"

@@ -19,7 +19,13 @@
  * Advisory by default (exit 0). Pass `--strict` to exit non-zero on a trigger
  * that has no accompanying ADR so a CI job can hard-gate if a team wants that.
  *
- * Usage: node scripts/check-adr-reminder.mjs [--base <ref>] [--strict]
+ * Usage: node scripts/check-adr-reminder.mjs [--base <ref>] [--head <ref>]
+ *          [--strict] [--include-untracked]
+ *
+ * The agent quality gate passes its own `--head` and `--include-untracked` so
+ * the reminder sees exactly what the gate sees (committed + staged + untracked
+ * high-signal files). Standalone runs default to committed/staged only, so an
+ * unrelated untracked scratch file never nags.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -164,26 +170,47 @@ function baseExists(base) {
   }
 }
 
+function headContent(head, path) {
+  return head ? git(["show", `${head}:${path}`]) : readHead(path);
+}
+
 /**
- * Collect the diff facts the pure detector needs. Added files come from the
- * base diff only (committed + staged additions) — untracked working-tree files
- * are deliberately excluded so local scratch files never trigger a reminder.
+ * Collect the diff facts the pure detector needs.
+ *
+ * Added files come from the base→head diff (committed + staged additions). When
+ * `includeUntracked` is set — which the quality gate passes so this checker sees
+ * exactly the gate's changed-path set — untracked new files are added too, so a
+ * not-yet-committed new package/workflow is not invisible during a local gate
+ * run. Standalone runs leave it off, so an unrelated untracked scratch file
+ * never nags.
  */
-export function collectGitState(base) {
-  const addedFiles = lines(
-    git(["diff", "--diff-filter=A", "--name-only", base, "--"]),
-  );
+export function collectGitState(
+  base,
+  { head = "", includeUntracked = false } = {},
+) {
+  const diffArgs = head
+    ? ["diff", "--diff-filter=A", "--name-only", base, head, "--"]
+    : ["diff", "--diff-filter=A", "--name-only", base, "--"];
+  const added = new Set(lines(git(diffArgs)));
+  if (includeUntracked) {
+    for (const file of lines(
+      git(["ls-files", "--others", "--exclude-standard"]),
+    )) {
+      added.add(file);
+    }
+  }
+  const addedFiles = [...added];
 
   // Compare declared stacks/packages between base and head so only a genuinely
   // new registration triggers — not a path edit, a reformat, or an unrelated
   // list section that happens to share YAML `- item` syntax.
   const stacksAddsNewStack = hasNewEntry(
     extractStackIds(git(["show", `${base}:terraform.stacks.json`])),
-    extractStackIds(readHead("terraform.stacks.json")),
+    extractStackIds(headContent(head, "terraform.stacks.json")),
   );
   const workspaceAddsPackage = hasNewEntry(
     extractPackagesList(git(["show", `${base}:pnpm-workspace.yaml`])),
-    extractPackagesList(readHead("pnpm-workspace.yaml")),
+    extractPackagesList(headContent(head, "pnpm-workspace.yaml")),
   );
 
   return { addedFiles, stacksAddsNewStack, workspaceAddsPackage };
@@ -195,11 +222,18 @@ function printSurfaces(triggers) {
 
 function main(argv) {
   let base = process.env.AGENT_QUALITY_BASE || "origin/main";
+  let head = "";
   let strict = false;
+  let includeUntracked = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--base") base = argv[++i];
+    else if (argv[i] === "--head") head = argv[++i] ?? "";
     else if (argv[i] === "--strict") strict = true;
+    else if (argv[i] === "--include-untracked") includeUntracked = true;
   }
+  // A gate that defaults --head to the working tree passes "" or "HEAD"; treat
+  // "HEAD" as "diff against the commit" and anything falsy as the working tree.
+  if (head === "HEAD" && !baseExists("HEAD")) head = "";
 
   if (!baseExists(base)) {
     // Nothing to diff against (e.g. base not fetched) — do not block, do not nag.
@@ -209,7 +243,7 @@ function main(argv) {
     return 0;
   }
 
-  const state = collectGitState(base);
+  const state = collectGitState(base, { head, includeUntracked });
   const triggers = detectAdrTriggers(state);
   if (triggers.length === 0) {
     return 0; // No architectural trigger — quiet.
