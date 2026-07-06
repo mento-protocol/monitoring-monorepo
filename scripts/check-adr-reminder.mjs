@@ -231,9 +231,11 @@ function main(argv) {
     else if (argv[i] === "--strict") strict = true;
     else if (argv[i] === "--include-untracked") includeUntracked = true;
   }
-  // A gate that defaults --head to the working tree passes "" or "HEAD"; treat
-  // "HEAD" as "diff against the commit" and anything falsy as the working tree.
-  if (head === "HEAD" && !baseExists("HEAD")) head = "";
+  // The gate's --head defaults to "HEAD", meaning "the current checkout". Treat
+  // that (and empty) as the WORKING TREE so staged/uncommitted edits to
+  // pnpm-workspace.yaml / terraform.stacks.json and not-yet-committed new files
+  // are seen. Only an explicit non-HEAD ref reads that ref's committed content.
+  if (head === "HEAD") head = "";
 
   if (!baseExists(base)) {
     // Nothing to diff against (e.g. base not fetched) — do not block, do not nag.
