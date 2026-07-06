@@ -2152,6 +2152,10 @@ run_mapped_entries_parallel() {
       kill "$heartbeat_timer_pid" 2>/dev/null || true
       wait "$heartbeat_timer_pid" 2>/dev/null || true
     elif [[ ${#active_pids[@]} -gt 0 ]]; then
+      # Polling cadence for shells without `wait -n` (e.g. macOS bash 3.x), NOT
+      # the heartbeat period — that is tracked separately by wall clock via
+      # heartbeat_interval, so a slower poll here does not change how often the
+      # liveness line prints.
       sleep 1
     fi
   done

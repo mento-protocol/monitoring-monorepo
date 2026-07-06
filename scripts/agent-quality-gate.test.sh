@@ -1997,6 +1997,53 @@ STUB
 rm -rf "$package_risk_fresh_stamp_repo"
 assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
+# A failed ORDERED prerequisite phase (here the preflight `pnpm install`) must
+# stop the run via abort_if_failed before the parallel quality pool executes.
+# This is the behavioral contract that replaced --fail-fast for the pre-push
+# hook: prerequisites still abort before their dependents, only the independent
+# quality pool keeps going.
+abort_prereq_repo="$(mktemp -d)"
+(
+  cd "$abort_prereq_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin tools
+  printf 'fixture\n' > README.md
+  # Marks that the quality pool ran; it must NOT run if a prerequisite failed.
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+printf 'ran\n' > "${QUALITY_MARKER:?}"
+STUB
+  # Fail the preflight install; succeed for every other pnpm invocation.
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *install*) exit 1 ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'packages/fixture/package.json\n' > changed-paths.txt
+  if QUALITY_MARKER="$abort_prereq_repo/.tmp/quality-ran" \
+    PATH="$abort_prereq_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 3 \
+      --allow-package-script-changes \
+      > "$output_file" 2>&1; then
+    fail "gate did not fail when the preflight prerequisite failed"
+  fi
+  [[ ! -f "$abort_prereq_repo/.tmp/quality-ran" ]] ||
+    fail "quality pool ran despite a failed prerequisite phase"
+)
+rm -rf "$abort_prereq_repo"
+assert_contains "Stopping: a prerequisite phase failed before dependent checks ran."
+
 stale_stamp_repo="$(mktemp -d)"
 (
   cd "$stale_stamp_repo"
