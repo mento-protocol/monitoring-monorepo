@@ -16,8 +16,10 @@
 // 4. Update the comments below with the new baseline + date.
 //
 // BASELINE (measured 2026-07-06 with Next.js 16.2.6 + Turbopack):
-//   All client JS chunks (brotli): 1,085,606 bytes (1.03 MB)
-//   All CSS (brotli):              10,987 bytes (10.7 KB)
+//   All client JS chunks (brotli):     1,094,742 bytes (1.04 MB)
+//   Plotly chunk (brotli):               291,466 bytes
+//   Markdown editor chunk (brotli):       44,130 bytes
+//   All CSS (brotli):                     10,987 bytes (10.7 KB)
 
 const fs = process.getBuiltinModule("node:fs");
 const path = process.getBuiltinModule("node:path");
@@ -133,6 +135,36 @@ function manifestPathsOrFallback(extension, prefixes, fallbackGlob) {
   return [fallbackGlob];
 }
 
+// Pin a single logical chunk by a stable content marker instead of a filename.
+// Turbopack content-hashes filenames every build (see header), so a named budget
+// can't key on the filename; we read each manifest-referenced JS asset and select
+// the one whose source contains `marker`. This lets us guard individual chunks —
+// the Plotly bundle and the lazy markdown-editor bundle — so a regression trips a
+// tight per-chunk budget rather than hiding inside the aggregate. If a marker ever
+// stops matching (renamed/removed), we return a non-existent sentinel path so
+// size-limit reports 0 bytes and passes, leaving the aggregate budget as backstop
+// rather than crashing the whole run on an empty path list.
+function chunkContaining(marker, label) {
+  const assets = collectManifestReferencedStaticAssets({
+    extension: ".js",
+    prefixes: ["static/chunks/"],
+  });
+  const cwd = process.cwd();
+  const matches = assets.filter((asset) => {
+    try {
+      return fs.readFileSync(path.resolve(cwd, asset), "utf8").includes(marker);
+    } catch {
+      return false;
+    }
+  });
+
+  if (matches.length === 0) {
+    return [`${DIST_DIR}/static/chunks/__no_${label}_chunk_matched__.js`];
+  }
+
+  return matches;
+}
+
 /** @type {import('size-limit').SizeLimitConfig} */
 const config = [
   {
@@ -147,7 +179,10 @@ const config = [
     // traces are used) cut the client JS from 1,702,785 → 1,085,606 bytes brotli
     // (−36%). See docs/notes/ui-dashboard-performance-plan.md (P1).
     //
-    // Baseline: 1,085,606 bytes  Budget: ×1.10 = 1,194,167 bytes → 1190 KB.
+    // Baseline: 1,094,742 bytes  Budget: 1190 KB. (Was 1,085,606 after the P1
+    // plotly swap; lazy-splitting the markdown editor in P4 moved ~44 KB brotli off
+    // the data-page critical path but added ~9 KB of async chunk-boundary overhead
+    // to this all-chunks total — the per-chunk budgets below track the real wins.)
     // Keep this tight so a regression back to the full plotly.js build fails CI.
     name: "All client JS chunks",
     path: manifestPathsOrFallback(
@@ -156,6 +191,31 @@ const config = [
       ".next/static/chunks/**/*.js",
     ),
     limit: "1190 kB",
+  },
+  {
+    // Plotly chunk, pinned by content (the "js-plotly-plot" DOM class the bundle
+    // emits) so it survives Turbopack's per-build content hashing. Guards P1: the
+    // lean plotly.js-basic-dist-min build is ~291 KB brotli; reintroducing the full
+    // plotly.js (mapbox-gl + WebGL) balloons this chunk past the budget and fails CI
+    // here, before it hides inside the 1190 KB aggregate.
+    //
+    // Baseline: 291,466 bytes  Budget: ×1.10 = 320,613 bytes → 320 KB
+    name: "Plotly chunk (js-plotly-plot)",
+    path: chunkContaining("js-plotly-plot", "plotly"),
+    limit: "320 kB",
+  },
+  {
+    // Markdown-editor chunk, pinned by the "react-markdown" marker. Guards P4: the
+    // react-markdown + remark-gfm + rehype-sanitize pipeline is lazy-loaded via
+    // next/dynamic from address-link.tsx, so it lives in its own ~44 KB brotli async
+    // chunk instead of shipping on every page that renders an AddressLink. If a
+    // static import re-merges it into a shared chunk, the matched chunk's size jumps
+    // well past this budget and fails CI.
+    //
+    // Baseline: 44,130 bytes  Budget: ×1.10 = 48,543 bytes → 49 KB
+    name: "Markdown editor chunk (react-markdown)",
+    path: chunkContaining("react-markdown", "markdown"),
+    limit: "49 kB",
   },
   {
     // Manifest-referenced CSS emitted under .next/static/ (single Tailwind v4 bundle).
@@ -168,7 +228,11 @@ const config = [
 ];
 
 Object.defineProperty(config, "_private", {
-  value: { collectManifestReferencedStaticAssets, manifestPathsOrFallback },
+  value: {
+    collectManifestReferencedStaticAssets,
+    manifestPathsOrFallback,
+    chunkContaining,
+  },
 });
 
 module.exports = config;
