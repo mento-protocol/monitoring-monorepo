@@ -3,6 +3,7 @@ import { describe, it } from "vitest";
 import {
   computeRawSnapshotCutoff,
   shouldPersistRawOracleSnapshot,
+  shouldPersistRawOracleSnapshotAt,
 } from "../src/oracleSnapshotRetention.js";
 
 describe("OracleSnapshot raw retention", () => {
@@ -19,7 +20,28 @@ describe("OracleSnapshot raw retention", () => {
     const cutoff = computeRawSnapshotCutoff(1_700_000_000, 90);
     assert.ok(cutoff !== null);
 
-    assert.equal(cutoff >= cutoff, true);
-    assert.equal(cutoff - 1n >= cutoff, false);
+    assert.equal(
+      shouldPersistRawOracleSnapshotAt(cutoff, 1_700_000_000, 90),
+      true,
+    );
+    assert.equal(
+      shouldPersistRawOracleSnapshotAt(cutoff - 1n, 1_700_000_000, 90),
+      false,
+    );
+  });
+
+  it("evaluates the cutoff from the current call time", () => {
+    const firstCutoff = computeRawSnapshotCutoff(1_700_000_000, 90);
+    assert.ok(firstCutoff !== null);
+    const blockTimestamp = firstCutoff + 10n;
+
+    assert.equal(
+      shouldPersistRawOracleSnapshotAt(blockTimestamp, 1_700_000_000, 90),
+      true,
+    );
+    assert.equal(
+      shouldPersistRawOracleSnapshotAt(blockTimestamp, 1_700_000_020, 90),
+      false,
+    );
   });
 });

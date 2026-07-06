@@ -10,11 +10,20 @@ export const computeRawSnapshotCutoff = (
     ? null
     : BigInt(nowSeconds) - BigInt(retentionDays) * DAY_SECONDS;
 
-const cutoff = computeRawSnapshotCutoff(
-  Math.floor(Date.now() / 1000),
-  env.ENVIO_ORACLE_SNAPSHOT_RETENTION_DAYS,
-);
+export const shouldPersistRawOracleSnapshotAt = (
+  blockTimestamp: bigint,
+  nowSeconds: number,
+  retentionDays: number | undefined,
+): boolean => {
+  const cutoff = computeRawSnapshotCutoff(nowSeconds, retentionDays);
+  return cutoff === null || blockTimestamp >= cutoff;
+};
 
 export const shouldPersistRawOracleSnapshot = (
   blockTimestamp: bigint,
-): boolean => cutoff === null || blockTimestamp >= cutoff;
+): boolean =>
+  shouldPersistRawOracleSnapshotAt(
+    blockTimestamp,
+    Math.floor(Date.now() / 1000),
+    env.ENVIO_ORACLE_SNAPSHOT_RETENTION_DAYS,
+  );
