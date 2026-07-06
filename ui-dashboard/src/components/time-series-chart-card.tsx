@@ -454,12 +454,14 @@ export function TimeSeriesChartCard({
       : `, ${change >= 0 ? "up" : "down"} ${Math.abs(change).toFixed(
           2,
         )}% ${changeLabel}`;
+  const partialSummary =
+    hasError || hasSnapshotError ? "; some data failed to load" : "";
   const chartAriaLabel = `${title} chart, ${activeRangeLabel} range`;
   const chartSummary = isLoading
     ? `${title} chart is loading.`
     : series.length === 0
       ? `${title} chart: ${emptyMessage}`
-      : `${title} chart over the ${activeRangeLabel} range${changeSummary}.`;
+      : `${title} chart over the ${activeRangeLabel} range${changeSummary}${partialSummary}.`;
 
   return (
     <section

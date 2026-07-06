@@ -548,14 +548,19 @@ function oracleAltText(
   sym0: string,
   sym1: string,
   sampleCount: number,
-  bandsAvailable: boolean,
+  breakerReady: boolean,
+  hasPersistedBands: boolean,
 ): string {
   const samples = `${sampleCount} price sample${sampleCount === 1 ? "" : "s"}`;
-  return `Oracle price versus breaker band for ${sym0}/${sym1}: ${samples} plotted${
-    bandsAvailable
-      ? ", colored by whether each sample sat inside its breaker band"
-      : "; breaker band data is currently unavailable"
-  }.`;
+  // Coverage tiers: with a live breaker config every sample is colored; with
+  // only persisted at-the-time bands, coverage is partial (samples predating a
+  // stored band aren't colored); with neither there is no band context at all.
+  const bandClause = breakerReady
+    ? ", each colored by whether it sat inside its breaker band"
+    : hasPersistedBands
+      ? ", with samples colored by breaker-band membership only where a persisted band exists"
+      : "; breaker band data is currently unavailable";
+  return `Oracle price versus breaker band for ${sym0}/${sym1}: ${samples} plotted${bandClause}.`;
 }
 
 export function OracleChart({
@@ -637,7 +642,8 @@ export function OracleChart({
     token0Symbol,
     token1Symbol,
     snapshots.length,
-    hasPersistedBands || breakerConfigStatus === "ready",
+    breakerConfigStatus === "ready",
+    hasPersistedBands,
   );
 
   return (
