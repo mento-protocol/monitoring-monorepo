@@ -30,7 +30,7 @@ export function Table({
         // native scrollbar until touched, which makes an off-screen column
         // (e.g. a wide swap amount) read as a silent clip rather than
         // scrollable content.
-        "[&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-600 [scrollbar-width:thin]",
+        "[&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-600 [scrollbar-width:thin] [scrollbar-color:rgb(71_85_105)_rgb(15_23_42)]",
         scrollClassName,
       ]
         .filter(Boolean)
