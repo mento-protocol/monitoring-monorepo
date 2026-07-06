@@ -51,6 +51,16 @@ export function relativeTimeOrTimestamp(
   return new Date(Number(ts) * 1000).toISOString().slice(0, 10);
 }
 
+/** SSR-safe absolute timestamp for title/tooltip text on server-rendered
+ *  components: a deterministic UTC value when `nowSeconds` is null (the server +
+ *  hydration render — `formatTimestamp`'s `toLocaleString` is tz/locale-dependent
+ *  and would mismatch), the local `formatTimestamp` after mount. */
+export function timestampOrUtc(ts: string, nowSeconds: number | null): string {
+  if (!ts || ts === "0") return "—";
+  if (nowSeconds !== null) return formatTimestamp(ts);
+  return `${new Date(Number(ts) * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
 // `nowMs` is injectable so SSR-rendered callers can pass a hydration-stable clock
 // (see useNowSeconds); it defaults to the live `Date.now()` for the common
 // client-only callers.

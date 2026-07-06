@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { relativeTimeOrTimestamp } from "@/lib/format";
+import { relativeTimeOrTimestamp, timestampOrUtc } from "@/lib/format";
 
 // A shared, SSR-safe wall-clock in whole seconds for relative-time labels
 // ("N ago") and freshness math in components that now render on the server (the
@@ -59,4 +59,10 @@ export function useNowSeconds(): number | null {
  *  change. */
 export function useSsrSafeRelative(ts: string | null | undefined): string {
   return relativeTimeOrTimestamp(ts ?? "", useNowSeconds());
+}
+
+/** SSR-safe absolute timestamp for title/tooltip attributes: a deterministic UTC
+ *  value on the server + hydration render, the local timestamp after mount. */
+export function useSsrSafeTimestamp(ts: string): string {
+  return timestampOrUtc(ts, useNowSeconds());
 }

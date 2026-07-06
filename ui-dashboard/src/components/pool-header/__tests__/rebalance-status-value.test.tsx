@@ -11,12 +11,14 @@ import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 // itself is covered by the browser hydration suite. Provide BOTH exports: vi.mock
 // replaces the whole module, so a missing useSsrSafeRelative would be undefined.
 vi.mock("@/hooks/use-now-seconds", async () => {
-  const { relativeTimeOrTimestamp } =
+  const { relativeTimeOrTimestamp, timestampOrUtc } =
     await vi.importActual<typeof import("@/lib/format")>("@/lib/format");
+  const now = () => Math.floor(Date.now() / 1000);
   return {
-    useNowSeconds: () => Math.floor(Date.now() / 1000),
+    useNowSeconds: now,
     useSsrSafeRelative: (ts: string | null | undefined) =>
-      relativeTimeOrTimestamp(ts ?? "", Math.floor(Date.now() / 1000)),
+      relativeTimeOrTimestamp(ts ?? "", now()),
+    useSsrSafeTimestamp: (ts: string) => timestampOrUtc(ts, now()),
   };
 });
 

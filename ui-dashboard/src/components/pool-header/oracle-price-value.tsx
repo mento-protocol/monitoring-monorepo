@@ -5,9 +5,9 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import {
   formatOraclePrice,
-  formatTimestamp,
   relativeTime,
   relativeTimeOrTimestamp,
+  timestampOrUtc,
 } from "@/lib/format";
 import {
   getOracleStalenessThreshold,
@@ -32,7 +32,7 @@ function oracleFreshnessDisplay(
 
   const freshnessTsString = String(freshnessTs);
   return {
-    updatedTitle: formatTimestamp(freshnessTsString),
+    updatedTitle: timestampOrUtc(freshnessTsString, nowSeconds),
     updatedHref:
       pool.oracleTxHash && pool.oracleTimestamp === freshnessTsString
         ? explorerTxUrl(network, pool.oracleTxHash)

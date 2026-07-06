@@ -5,14 +5,16 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { Tooltip } from "@/components/tooltip";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
-import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
+import {
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { computeHealthStatus } from "@/lib/health";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 import {
   isHealthyNoOp,
   strategyRebalanceWriteUrl,
 } from "@/lib/rebalance-check";
-import { formatTimestamp } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { LATEST_POOL_REBALANCE_FOR_STRATEGY } from "@/lib/queries";
 import { explorerTxUrl } from "@/lib/tokens";
@@ -56,7 +58,7 @@ function LastRebalanceSubtitle({
   const txHash = lastRebalanceData?.RebalanceEvent?.[0]?.txHash ?? null;
 
   if (!hasLastRebalance) return null;
-  const title = formatTimestamp(pool.lastRebalancedAt!);
+  const title = useSsrSafeTimestamp(pool.lastRebalancedAt!);
   return txHash ? (
     <a
       href={explorerTxUrl(network, txHash)}
