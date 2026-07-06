@@ -150,10 +150,15 @@ resource "google_storage_bucket" "webhook_replay_nonces" {
     enabled = true
   }
 
+  # Nonce replay markers (quicknode-replay-protection.ts) only need to
+  # survive long enough to catch a replayed webhook, so expire them after a
+  # day. Scoped to their own prefix so this does NOT catch dead-letter/
+  # objects (dead-letter.ts) — see the dead-letter retention rule below.
   lifecycle_rule {
     condition {
-      age        = 1
-      with_state = "LIVE"
+      age            = 1
+      with_state     = "LIVE"
+      matches_prefix = ["quicknode-replay-nonces/"]
     }
     action {
       type = "Delete"
@@ -162,8 +167,23 @@ resource "google_storage_bucket" "webhook_replay_nonces" {
 
   lifecycle_rule {
     condition {
-      age        = 1
-      with_state = "ARCHIVED"
+      age            = 1
+      with_state     = "ARCHIVED"
+      matches_prefix = ["quicknode-replay-nonces/"]
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  # Dead-lettered Safe alerts (dead-letter.ts, redriven by
+  # scripts/redrive-onchain-deadletter.mjs) must outlive the 24h nonce TTL
+  # above so there's a real window to redrive them. 30 days is well beyond
+  # any plausible redrive delay while still bounding storage growth.
+  lifecycle_rule {
+    condition {
+      age            = 30
+      matches_prefix = ["dead-letter/"]
     }
     action {
       type = "Delete"
