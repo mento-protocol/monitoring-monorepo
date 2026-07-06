@@ -13,6 +13,7 @@ import {
   POOL_HOURLY_SNAPSHOTS_CHART,
 } from "@/lib/queries";
 import {
+  dailyBucket,
   SECONDS_PER_DAY,
   SECONDS_PER_HOUR,
   type RangeKey,
@@ -181,13 +182,22 @@ describe("usePoolSnapshots", () => {
       "daily-latest-baseline",
       String(hourlyFrom - SECONDS_PER_DAY),
     );
+    const sameDayRollup = snapshot(
+      "daily-same-day-rollup",
+      String(dailyBucket(hourlyFrom)),
+    );
     const afterWindowStart = snapshot(
       "daily-after-window-start",
       String(hourlyFrom + SECONDS_PER_DAY),
     );
     installResponses({
       hourlyRows,
-      dailyRows: [afterWindowStart, olderBaseline, latestBaseline],
+      dailyRows: [
+        afterWindowStart,
+        olderBaseline,
+        latestBaseline,
+        sameDayRollup,
+      ],
     });
 
     const { ref } = render("30d", "stock");

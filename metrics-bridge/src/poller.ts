@@ -42,10 +42,13 @@ function recordPollError(
   console.error(message, error);
 }
 
-function hasuraPollErrorKind(error: unknown): PollErrorKind {
+function hasuraQueryErrorKind(
+  error: unknown,
+  fallbackKind: PollErrorKind,
+): PollErrorKind {
   return error instanceof ClientError && error.response.status === 429
     ? "hasura_rate_limit"
-    : "hasura_query";
+    : fallbackKind;
 }
 
 // CDP (service=cdps) gauges share this poll loop so bridge liveness +
@@ -59,7 +62,7 @@ async function refreshCdpMetrics(): Promise<void> {
     cdps = await fetchCdps();
   } catch (error) {
     recordPollError(
-      "cdp_query",
+      hasuraQueryErrorKind(error, "cdp_query"),
       "CDP poll failed while querying Hasura:",
       error,
     );
@@ -104,7 +107,7 @@ async function pollPools(): Promise<void> {
     pools = data.Pool;
   } catch (error) {
     recordPollError(
-      hasuraPollErrorKind(error),
+      hasuraQueryErrorKind(error, "hasura_query"),
       "Poll failed while querying Hasura:",
       error,
     );

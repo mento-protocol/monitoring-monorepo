@@ -7,6 +7,7 @@ import {
   POOL_HOURLY_SNAPSHOTS_CHART,
 } from "@/lib/queries";
 import {
+  dailyBucket,
   SECONDS_PER_DAY,
   SECONDS_PER_HOUR,
   type RangeKey,
@@ -94,7 +95,12 @@ function stockSnapshotsWithDailyBaseline({
   if (hourlySnapshots.length === 0 || hourlyFrom === null) {
     return hourlySnapshots;
   }
-  const baseline = latestSnapshotBefore(dailySnapshots, hourlyFrom);
+  // Daily snapshots are end-of-day rollups keyed by midnight; the same-day row
+  // may include reserves observed after the hourly window starts.
+  const baseline = latestSnapshotBefore(
+    dailySnapshots,
+    dailyBucket(hourlyFrom),
+  );
   if (baseline === null) return hourlySnapshots;
   return [baseline, ...hourlySnapshots];
 }

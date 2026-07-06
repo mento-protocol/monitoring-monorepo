@@ -173,6 +173,29 @@ describe("poll", () => {
     ).toBeGreaterThan(0);
   });
 
+  it("classifies CDP Hasura 429s as shared rate limits", async () => {
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    mockFetchCdps.mockRejectedValueOnce(
+      new ClientError(
+        {
+          data: undefined,
+          errors: undefined,
+          status: 429,
+          headers: new Headers(),
+        },
+        { query: "..." },
+      ),
+    );
+
+    await poll();
+
+    expect(await pollErrorValue("hasura_rate_limit")).toBe(1);
+    expect(await pollErrorValue("cdp_query")).toBe(0);
+    // A CDP query failure must not flip the FPMM bridge unhealthy.
+    expect(mockUpdateCdpMetrics).not.toHaveBeenCalled();
+    expect(mockMarkHealthy).toHaveBeenCalledOnce();
+  });
+
   it("increments pollErrors with cdp_update kind when the CDP metric update throws", async () => {
     mockFetchPools.mockResolvedValueOnce(makePoolResponse());
     mockFetchCdps.mockResolvedValueOnce([]);
