@@ -102,7 +102,9 @@ interface TimeSeriesChartCardProps {
    * Two effects:
    * - **Non-stacked / single-trace** charts: drives the explicit
    *   `yaxis.range` upper bound (`ymax + span * yAxisTopPadding`). The
-   *   bottom is pinned to 0 when a breakdown is present.
+   *   bottom is a tight, non-zero floor (`Math.max(0, ymin - span * 0.1)`)
+   *   whether or not a breakdown is present, so low-variance series stay
+   *   visible instead of flattening against a zero baseline.
    * - **Stacked** charts (breakdownMode === "stacked"): the y-axis
    *   uses Plotly autorange so trace toggling can re-fit, so this
    *   value is *not* read by the y-axis math. It still controls the
@@ -237,8 +239,18 @@ export function TimeSeriesChartCard({
           type: "scatter" as const,
           mode: "lines" as const,
           line: { color: "#6366f1", width: 2 },
-          fill: "tozeroy" as const,
-          fillcolor: "rgba(99,102,241,0.08)",
+          // Area fill only for single-trace charts. With a breakdown the
+          // total is the top-of-envelope sum and the y-axis is truncated
+          // to a non-zero baseline to reveal a low-variance TVL band, so a
+          // fill draped from the total down to that baseline would flood
+          // the plot behind the per-chain lines and exaggerate the level.
+          // Keep the total a plain line there.
+          ...(hasBreakdown
+            ? {}
+            : {
+                fill: "tozeroy" as const,
+                fillcolor: "rgba(99,102,241,0.08)",
+              }),
           hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
         };
     const breakdownTraces = (breakdown ?? []).map((b) => {
@@ -298,7 +310,12 @@ export function TimeSeriesChartCard({
       allYs.length > 0 ? allYs.reduce((a, b) => Math.max(a, b), -Infinity) : 1;
     const span = Math.max(ymax - ymin, ymax * 0.02, 1);
     const yRange: [number, number] = [
-      hasBreakdown ? 0 : Math.max(0, ymin - span * 0.1),
+      // Same tight, non-zero floor whether or not a breakdown is present.
+      // Pinning the breakdown baseline to 0 made a low-variance TVL
+      // envelope (~2% of a large total) move only 1-2px; the reduce-based
+      // `ymin` already folds in every breakdown point via `allYs`, so no
+      // small per-chain series is clipped off the bottom.
+      Math.max(0, ymin - span * 0.1),
       ymax + span * yAxisTopPadding,
     ];
 
