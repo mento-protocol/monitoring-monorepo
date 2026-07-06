@@ -16,7 +16,7 @@ import {
 import { dailySnapshotRange, type TimeSeriesRange } from "@/lib/time-series";
 import { fxPoolWeekendBands } from "@/lib/weekend";
 
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
 
 interface SnapshotChartProps {
   snapshots: PoolSnapshot[];

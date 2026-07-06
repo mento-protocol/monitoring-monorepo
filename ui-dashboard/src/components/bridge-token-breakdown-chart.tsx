@@ -28,7 +28,7 @@ const PIE_COLORS = [
   "#f472b6",
 ];
 
-const Plot = dynamic(() => import("react-plotly.js"), {
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), {
   ssr: false,
   loading: () => (
     <div

@@ -27,7 +27,7 @@ import {
 
 export { formatOracleChartHoverText };
 
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
 
 // Per-chart Plotly config — we wire a custom wheel handler below so we can
 // suppress Y-axis changes on plot-area scrolls (Plotly's built-in scrollZoom
