@@ -4,6 +4,15 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 
+// The component reads the SSR-safe clock via useNowSeconds (null on the server /
+// hydration render, live after mount). These tests exercise the live client
+// render, so return the current time — matching the pre-SSR-safe
+// relativeTime(Date.now()) behavior. SSR-safety itself is covered by the browser
+// hydration suite.
+vi.mock("@/hooks/use-now-seconds", () => ({
+  useNowSeconds: () => Math.floor(Date.now() / 1000),
+}));
+
 // Pin `isWeekend` to false so `computeHealthStatus` doesn't rewrite the
 // "Oracle stale" path to "Markets closed" when this test file happens to
 // run on a Saturday or Sunday. Faking system time doesn't work cleanly

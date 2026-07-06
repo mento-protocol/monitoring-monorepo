@@ -2,6 +2,14 @@
 // queries. Re-exported from `../queries.ts` so existing
 // `from "@/lib/queries"` imports stay stable.
 
+import type { Pool } from "@/lib/types";
+
+/** Response shape of `POOL_DETAIL_WITH_HEALTH`. Shared by the client `useGQL`
+ *  read and the server SSR-prefetch fallback so their types can't drift.
+ *  Lives here (not in the `server-only` SSR module) so client code can import
+ *  it without pulling `server-only` into the browser bundle. */
+export type PoolDetailResponse = { Pool: Pool[] };
+
 export const POOL_DETAIL_WITH_HEALTH = `
   query PoolDetailWithHealth($id: String!, $chainId: Int!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {

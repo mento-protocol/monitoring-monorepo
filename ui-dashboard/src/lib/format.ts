@@ -36,9 +36,27 @@ export function formatTimestamp(ts: string): string {
   return new Date(Number(ts) * 1000).toLocaleString();
 }
 
-export function relativeTime(ts: string): string {
+/** SSR-safe relative time for components that render on the server. When
+ *  `nowSeconds` is null (the server + hydration render, see useNowSeconds) it
+ *  returns a timezone/locale-INDEPENDENT UTC date (`YYYY-MM-DD`), NOT
+ *  `formatTimestamp` — which uses `toLocaleString` and would render differently
+ *  on a UTC server vs a local-timezone browser, causing a hydration mismatch.
+ *  The live "N ago" label replaces this after mount. */
+export function relativeTimeOrTimestamp(
+  ts: string,
+  nowSeconds: number | null,
+): string {
+  if (nowSeconds !== null) return relativeTime(ts, nowSeconds * 1000);
+  if (!ts || ts === "0") return "—";
+  return new Date(Number(ts) * 1000).toISOString().slice(0, 10);
+}
+
+// `nowMs` is injectable so SSR-rendered callers can pass a hydration-stable clock
+// (see useNowSeconds); it defaults to the live `Date.now()` for the common
+// client-only callers.
+export function relativeTime(ts: string, nowMs: number = Date.now()): string {
   if (!ts || ts === "0") return "\u2014";
-  const diff = Date.now() - Number(ts) * 1000;
+  const diff = nowMs - Number(ts) * 1000;
   if (diff < 0) return formatTimestamp(ts);
   const s = Math.floor(diff / 1000);
   if (s < 60) return `${s}s ago`;

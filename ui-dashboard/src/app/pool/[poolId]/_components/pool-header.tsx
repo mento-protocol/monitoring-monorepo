@@ -19,13 +19,9 @@ import {
 import { SourceBadge } from "@/components/badges";
 import { Stat } from "@/components/stat";
 import { useGQL } from "@/lib/graphql";
+import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
-import {
-  formatTimestamp,
-  formatUSD,
-  relativeTime,
-  weiToUsd,
-} from "@/lib/format";
+import { formatTimestamp, formatUSD, weiToUsd } from "@/lib/format";
 import type { Network } from "@/lib/networks";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import {
@@ -132,8 +128,8 @@ export function PoolHeader({
       sym
     );
 
-  const createdRelative = relativeTime(pool.createdAtTimestamp);
   const createdTitle = formatTimestamp(pool.createdAtTimestamp);
+  const createdRelative = useSsrSafeRelative(pool.createdAtTimestamp);
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">

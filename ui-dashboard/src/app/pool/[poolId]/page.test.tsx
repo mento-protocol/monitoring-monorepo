@@ -130,6 +130,14 @@ vi.mock("@/lib/graphql", () => ({
   useGQL: (...args: unknown[]) => useGQLMock(...args),
 }));
 
+// The server component SSR-prefetches the pool overview via unstable_cache, which
+// throws "incrementalCache missing" outside a Next request context. These route
+// tests exercise redirect/canonicalization, not the prefetch, so stub it to no
+// fallback (the client hook path is what the render assertions cover).
+vi.mock("@/lib/pool-detail-ssr", () => ({
+  fetchPoolDetailForSSR: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/components/address-link", () => ({
   AddressLink: ({ address }: { address: string | null }) => (
     <span>{address}</span>
