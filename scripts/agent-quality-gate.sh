@@ -654,9 +654,19 @@ add_indexer_post_codegen_install() {
   add_post_codegen_command "pnpm install --frozen-lockfile" "link generated package after indexer codegen"
 }
 
+add_dashboard_codegen_commit_check() {
+  local command
+  command="if [[ -n \"\$(git status --porcelain -- ui-dashboard/src/lib/__generated__/graphql.ts)\" ]]; then"
+  command+=" git status --short -- ui-dashboard/src/lib/__generated__/graphql.ts;"
+  command+=" echo \"Generated dashboard GraphQL types are not committed. Run pnpm dashboard:codegen and commit the result.\" >&2;"
+  command+=" exit 1; fi"
+  add_post_codegen_command "$command" "verify dashboard GraphQL generated output is committed"
+}
+
 add_dashboard_codegen() {
   local reason="$1"
   add_codegen_command "pnpm dashboard:codegen" "$reason"
+  add_dashboard_codegen_commit_check
 }
 
 add_indexer_mainnet_codegen() {
