@@ -485,6 +485,55 @@ test("fails when root README has neither frontmatter nor marker", () => {
   }
 });
 
+test("fails when root README marker demotes canonical metadata", () => {
+  try {
+    runContextCheckFixture(
+      `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=false last_verified=${isoDateWithOffset(0)} -->\n`,
+    );
+    throw new Error(
+      "expected context check to fail for demoted README metadata",
+    );
+  } catch (/** @type {unknown} */ err) {
+    const maybeError =
+      err && typeof err === "object"
+        ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
+            err
+          )
+        : {};
+    const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
+    assert(
+      output.includes(
+        "README.md: core context file must keep canonical: true metadata",
+      ),
+      `expected demoted README metadata failure, got ${JSON.stringify(output || maybeError.message)}`,
+    );
+  }
+});
+
+test("fails when root README marker is missing required metadata keys", () => {
+  try {
+    runContextCheckFixture(
+      `# Root README\n\n<!-- agent-context: title="Root README" canonical=true last_verified=${isoDateWithOffset(0)} -->\n`,
+    );
+    throw new Error(
+      "expected context check to fail for incomplete README metadata",
+    );
+  } catch (/** @type {unknown} */ err) {
+    const maybeError =
+      err && typeof err === "object"
+        ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
+            err
+          )
+        : {};
+    const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
+    assert(
+      output.includes("README.md: missing metadata key 'status'") &&
+        output.includes("README.md: missing metadata key 'owner'"),
+      `expected missing key failures, got ${JSON.stringify(output || maybeError.message)}`,
+    );
+  }
+});
+
 test("continues to support root README YAML frontmatter", () => {
   const output = runContextCheckFixture(canonicalContextFile("Root README"));
   assert(
