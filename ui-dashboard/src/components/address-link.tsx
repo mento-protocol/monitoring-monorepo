@@ -2,12 +2,24 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
 import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
-import { AddressLabelEditor } from "@/components/address-label-editor";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
+
+// Lazy-load the label/report editor, which pulls in the react-markdown +
+// remark-gfm + rehype-sanitize pipeline. That heavy chunk should only ship when a
+// signed-in user actually opens the editor — it stays off every page that merely
+// renders an AddressLink (pools, volume, cdps, stables, bridge-flows).
+const AddressLabelEditor = dynamic(
+  () =>
+    import("@/components/address-label-editor").then(
+      (m) => m.AddressLabelEditor,
+    ),
+  { ssr: false },
+);
 
 type Props = {
   address: string;
