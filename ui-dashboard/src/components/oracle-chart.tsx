@@ -656,7 +656,7 @@ export function OracleChart({
         }
       />
       <div
-        role="img"
+        role="figure"
         aria-label={`Oracle price versus breaker band chart for ${token0Symbol}/${token1Symbol}`}
       >
         <Plot

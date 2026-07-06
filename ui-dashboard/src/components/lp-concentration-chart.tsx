@@ -205,7 +205,7 @@ export function LpConcentrationChart({
         <div className="min-w-0 flex-1 lg:max-w-3xl">
           <div className="flex flex-col items-start gap-4 xl:flex-row xl:items-start">
             <div
-              role="img"
+              role="figure"
               aria-label={lpChartName(sym0, sym1)}
               className="w-full max-w-[360px] shrink-0"
             >

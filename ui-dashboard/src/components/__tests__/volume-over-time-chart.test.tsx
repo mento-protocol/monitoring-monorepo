@@ -494,9 +494,9 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).not.toContain("Volume (24h)");
   });
 
-  it("exposes the chart as role=img with a non-empty accessible name (WCAG 1.1.1)", () => {
+  it("exposes the chart as role=figure with a non-empty accessible name (WCAG 1.1.1)", () => {
     const html = renderChart();
-    expect(html).toContain('role="img"');
+    expect(html).toContain('role="figure"');
     expect(html).toMatch(/aria-label="Volume chart, [^"]+ range"/);
   });
 

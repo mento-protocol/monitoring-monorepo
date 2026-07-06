@@ -116,7 +116,7 @@ describe("LiquidityChart", () => {
     expect(usdmQuotePlot?.data?.[1]?.y).toEqual([200]);
   });
 
-  it("wraps the plot in role=img with a token-aware accessible name and sr-only summary (WCAG 1.1.1)", () => {
+  it("wraps the plot in role=figure with a token-aware accessible name and sr-only summary (WCAG 1.1.1)", () => {
     const html = renderToStaticMarkup(
       <LiquidityChart
         snapshots={[
@@ -134,7 +134,7 @@ describe("LiquidityChart", () => {
       />,
     );
 
-    expect(html).toContain('role="img"');
+    expect(html).toContain('role="figure"');
     expect(html).toContain(
       'aria-label="Pool reserves over time chart for USDm and TESTm"',
     );

@@ -40,11 +40,12 @@ function render(
 }
 
 describe("TimeSeriesChartCard accessibility (WCAG 1.1.1)", () => {
-  it("exposes the plot as role=img with a dynamic, non-empty accessible name", () => {
+  it("exposes the plot as role=figure with a dynamic, non-empty accessible name", () => {
     const html = render();
-    // role="img" turns the SVG internals presentational; the aria-label is the
-    // chart's accessible name and reflects the live range so it can't go stale.
-    expect(html).toContain('role="img"');
+    // role="figure" gives the chart the aria-label as its accessible name
+    // (which reflects the live range so it can't go stale) while keeping the
+    // interactive Plotly controls and axis/legend text in the a11y tree.
+    expect(html).toContain('role="figure"');
     expect(html).toContain('aria-label="Total Value Locked chart, 1W range"');
   });
 

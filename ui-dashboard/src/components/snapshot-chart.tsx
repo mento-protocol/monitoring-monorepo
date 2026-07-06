@@ -196,7 +196,7 @@ export function SnapshotChart({
         Daily Swap Volume
       </h3>
       <div
-        role="img"
+        role="figure"
         aria-label={`Daily swap volume chart for ${token0Symbol} and ${token1Symbol}`}
       >
         <Plot

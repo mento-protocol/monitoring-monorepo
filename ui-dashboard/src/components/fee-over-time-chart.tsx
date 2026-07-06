@@ -291,7 +291,7 @@ function RevenueChartBody({
 }) {
   return (
     <div className="mt-4 -mx-2 sm:-mx-3">
-      <div role="img" aria-label={ariaLabel}>
+      <div role="figure" aria-label={ariaLabel}>
         {isLoading ? (
           <PlotSkeleton />
         ) : showEmptyState ? (

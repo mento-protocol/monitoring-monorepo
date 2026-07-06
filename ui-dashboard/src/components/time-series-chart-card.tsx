@@ -442,9 +442,10 @@ export function TimeSeriesChartCard({
   // does NOT restate a specific value: consumers denominate their headline
   // differently (dollar range-totals, per-day latest, token amounts), so a
   // single formatter here would mislabel some of them — the trend direction +
-  // range is the always-accurate signal. `role="img"` on the plot container
-  // turns the SVG internals presentational; the concise `aria-label` names the
-  // chart and the sr-only sibling below carries the summary.
+  // range is the always-accurate signal. `role="figure"` on the plot container
+  // gives it the concise `aria-label` as its accessible name and the sr-only
+  // sibling below carries the summary, while leaving the interactive Plotly
+  // controls (range selector/slider, legend) and axis text in the a11y tree.
   const activeRangeLabel =
     ranges.find((item) => item.key === range)?.label ?? String(range);
   const changeSummary =
@@ -543,7 +544,7 @@ export function TimeSeriesChartCard({
 
       <div
         ref={containerRef}
-        role="img"
+        role="figure"
         aria-label={chartAriaLabel}
         className="relative mt-4 -mx-2 sm:-mx-3"
       >
@@ -622,8 +623,9 @@ export function TimeSeriesChartCard({
         {customSortedHover && hover && <CustomSortedTooltip hover={hover} />}
       </div>
       {/* Non-visual text alternative for the chart. Sits outside the
-          role="img" container (whose descendants are presentational to AT) so
-          screen readers announce the data summary as regular page content. */}
+          role="figure" container so screen readers announce the data summary
+          as regular page content, alongside the figure's own accessible
+          controls and axis/legend text. */}
       <p className="sr-only">{chartSummary}</p>
       {useCustomLegend && (
         <CustomLegend

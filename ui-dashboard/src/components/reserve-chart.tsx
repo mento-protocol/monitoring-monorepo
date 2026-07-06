@@ -140,7 +140,7 @@ export function ReserveChart({
         {subtitle && <span className="text-xs text-slate-600">{subtitle}</span>}
       </div>
       <div
-        role="img"
+        role="figure"
         aria-label={`Reserve history chart for ${sym0} and ${sym1}`}
       >
         <Plot

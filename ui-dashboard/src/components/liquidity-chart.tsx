@@ -160,7 +160,7 @@ export function LiquidityChart({
         {subtitle && <span className="text-xs text-slate-600">{subtitle}</span>}
       </div>
       <div
-        role="img"
+        role="figure"
         aria-label={`Pool reserves over time chart for ${token0Symbol} and ${token1Symbol}`}
       >
         <Plot

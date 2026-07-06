@@ -115,7 +115,7 @@ export function EffectivenessChart({ events }: EffectivenessChartProps) {
         oracle). Below 100% = control loop under-correcting. Negative =
         rebalance made deviation worse.
       </p>
-      <div role="img" aria-label="Rebalance effectiveness trend chart">
+      <div role="figure" aria-label="Rebalance effectiveness trend chart">
         <Plot
           data={[trace]}
           layout={STATIC_LAYOUT}
