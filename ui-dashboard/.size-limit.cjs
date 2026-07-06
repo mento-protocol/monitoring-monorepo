@@ -162,6 +162,19 @@ function chunkContaining(marker, label) {
     return [`${DIST_DIR}/static/chunks/__no_${label}_chunk_matched__.js`];
   }
 
+  if (matches.length > 1) {
+    // Exactly one chunk is expected. A silent multi-match would make the budget
+    // measure the SUM of several chunks — which could hide a regression if a
+    // re-split scattered the code into individually-small chunks. Surface it so
+    // the "one logical chunk" assumption can't break unnoticed.
+    process.stderr.write(
+      `[size-limit] warning: marker "${marker}" matched ${matches.length} chunks ` +
+        `(${matches.map((asset) => path.basename(asset)).join(", ")}); the "${label}" ` +
+        `budget now measures their combined size. Investigate a bundling/dedup change ` +
+        `before trusting this budget.\n`,
+    );
+  }
+
   return matches;
 }
 
