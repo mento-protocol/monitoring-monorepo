@@ -455,7 +455,7 @@ export function TimeSeriesChartCard({
           2,
         )}% ${changeLabel}`;
   const partialSummary =
-    hasError || hasSnapshotError ? "; some data failed to load" : "";
+    hasError || hasSnapshotError ? "; showing partial data" : "";
   const chartAriaLabel = `${title} chart, ${activeRangeLabel} range`;
   const chartSummary = isLoading
     ? `${title} chart is loading.`
