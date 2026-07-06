@@ -192,7 +192,11 @@ export function collectGitState(
     ? ["diff", "--diff-filter=A", "--name-only", base, head, "--"]
     : ["diff", "--diff-filter=A", "--name-only", base, "--"];
   const added = new Set(lines(git(diffArgs)));
-  if (includeUntracked) {
+  // Untracked files belong to the WORKING TREE, so only fold them in for a
+  // working-tree run (no explicit head). Mixing the current checkout's untracked
+  // files into an explicit `--head <ref>` diff would let an unrelated local ADR
+  // draft suppress the reminder for the selected ref.
+  if (includeUntracked && !head) {
     for (const file of lines(
       git(["ls-files", "--others", "--exclude-standard"]),
     )) {
