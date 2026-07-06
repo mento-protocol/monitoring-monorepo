@@ -1932,14 +1932,18 @@ STUB
   git commit -qm init
   base_ref="$(git rev-parse --verify HEAD)"
   printf 'changed\n' >> README.md
+  # Warm WITH --allow-package-script-changes; the skip run below passes NO such
+  # flag (like the pre-push hook). With no package-script risk they must still
+  # share a freshness stamp, so the flag-less run skips (allowPackageScripts is
+  # folded out of the stamp when packageRisk is false).
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run > "$output_file" 2>&1
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --allow-package-script-changes > "$output_file" 2>&1
   git add README.md
   git commit -qm "commit validated content"
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
   [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
-    fail "fresh gate stamp did not skip duplicate run"
+    fail "fresh gate stamp did not skip flag-less run after allow-flag warm"
 )
 rm -rf "$fresh_stamp_repo"
 assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."

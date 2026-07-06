@@ -1713,6 +1713,19 @@ command_plan_hash="$(hash_file "$command_plan_file")"
 implementation_hash="$(implementation_signature)"
 validated_content_hash="$(validation_content_signature)"
 
+# `allow_package_script_changes` only gates the pre-run package-script refusal,
+# which is a no-op unless `package_script_risk_changed`. Fold it out of the
+# freshness stamp in the common no-risk case so a warm manual run (which may pass
+# --allow-package-script-changes defensively) produces the SAME stamp as the
+# flag-less pre-push hook — otherwise warm-then-push never skips. When package
+# risk IS present, keep the real value so an unacknowledged hook run cannot reuse
+# an acknowledged manual run.
+if [[ "$package_script_risk_changed" == "true" ]]; then
+  stamp_allow_package_scripts="${allow_package_script_changes:-false}"
+else
+  stamp_allow_package_scripts="n/a"
+fi
+
 stamp_line() {
   printf 'v2\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\n' \
     "$base_oid" \
@@ -1721,7 +1734,7 @@ stamp_line() {
     "$implementation_hash" \
     "$validated_content_hash" \
     "$package_script_risk_changed" \
-    "${allow_package_script_changes:-false}"
+    "$stamp_allow_package_scripts"
 }
 
 current_stamp="$(stamp_line)"
@@ -2022,6 +2035,8 @@ run_mapped_entries_parallel() {
   local i
   local status
   local elapsed
+  local phase_start_ts last_heartbeat_ts now_ts hb_cmd heartbeat_timer_pid
+  local heartbeat_interval=20
 
   if [[ "$total" -eq 0 ]]; then
     return
@@ -2034,6 +2049,8 @@ run_mapped_entries_parallel() {
 
   echo
   echo "Running ${phase} commands with parallelism ${max_parallel}."
+  phase_start_ts="$(date +%s)"
+  last_heartbeat_ts="$phase_start_ts"
 
   while [[ "$completed" -lt "$total" ]]; do
     while [[ "$next_index" -lt "$total" && "${#active_pids[@]}" -lt "$max_parallel" ]]; do
@@ -2109,12 +2126,50 @@ run_mapped_entries_parallel() {
     active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
     active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
 
+    # Heartbeat: while commands are still in flight, emit a periodic liveness
+    # line naming what is running so a slow member is visibly working, not hung.
+    if [[ ${#active_pids[@]} -gt 0 ]]; then
+      now_ts="$(date +%s)"
+      if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
+        printf '⏳ still running after %s (%d/%d done):\n' \
+          "$(format_duration $((now_ts - phase_start_ts)))" "$completed" "$total"
+        for hb_cmd in "${active_commands[@]}"; do
+          printf '    · %s\n' "$hb_cmd"
+        done
+        last_heartbeat_ts="$now_ts"
+      fi
+    fi
+
     if [[ ${#active_pids[@]} -gt 0 && "$supports_wait_n" == true ]]; then
+      # Cap the block at the heartbeat interval so a single long-running tail
+      # command still produces periodic liveness output: a throwaway timer job
+      # makes `wait -n` return at least every heartbeat_interval even when no
+      # real command completes. A genuine completion still returns immediately;
+      # the timer is then killed and reaped.
+      sleep "$heartbeat_interval" &
+      heartbeat_timer_pid=$!
       wait -n 2>/dev/null || true
+      kill "$heartbeat_timer_pid" 2>/dev/null || true
+      wait "$heartbeat_timer_pid" 2>/dev/null || true
     elif [[ ${#active_pids[@]} -gt 0 ]]; then
-      sleep 0.1
+      sleep 1
     fi
   done
+}
+
+abort_if_failed() {
+  # A failed ORDERED prerequisite (install / codegen / quality-setup /
+  # quality-serialized) must stop the run before its dependents execute, even
+  # when not --fail-fast. The independent parallel quality pool intentionally
+  # keeps going for speed, but ordered phases do not — otherwise a dependent
+  # (a typecheck needing a built dist, a browser test needing Chromium) fails
+  # for a derived reason and buries the real error.
+  if [[ "$failures" -gt 0 ]]; then
+    echo
+    echo "Stopping: a prerequisite phase failed before dependent checks ran." >&2
+    print_command_summary
+    exit 1
+  fi
 }
 
 run_quality_phase() {
@@ -2141,13 +2196,18 @@ run_quality_phase() {
   done
 
   run_mapped_entries_sequential "quality setup" "${setup_entries[@]+"${setup_entries[@]}"}"
+  abort_if_failed
   run_mapped_entries_sequential "quality serialized" "${serial_entries[@]+"${serial_entries[@]}"}"
+  abort_if_failed
   run_mapped_entries_parallel "quality" "$quality_parallelism" "${parallel_entries[@]+"${parallel_entries[@]}"}"
 }
 
 run_mapped_entries_sequential "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
+abort_if_failed
 run_mapped_entries_sequential "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"
+abort_if_failed
 run_mapped_entries_sequential "post-codegen" "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"
+abort_if_failed
 run_quality_phase
 
 print_command_summary
