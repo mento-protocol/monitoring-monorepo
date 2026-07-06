@@ -20,6 +20,57 @@ import { formatDurationShort } from "@/lib/bridge-status";
 
 const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
 
+function makeBreachHistoryLayout(grace: number) {
+  return {
+    ...PLOTLY_BASE_LAYOUT,
+    autosize: true,
+    height: 260,
+    margin: { l: 56, r: 16, t: 8, b: 40 },
+    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
+    yaxis: {
+      ...PLOTLY_AXIS_DEFAULTS,
+      type: "log" as const,
+      title: { text: "Breach duration", standoff: 8 },
+      // Nice log ticks: 1s, 10s, 1min, 10min, 1h, 6h, 1d.
+      tickvals: [1, 10, 60, 600, 3600, 21600, 86400],
+      ticktext: ["1s", "10s", "1m", "10m", "1h", "6h", "1d"],
+    },
+    legend: { ...PLOTLY_LEGEND, orientation: "h" as const, y: -0.25 },
+    hovermode: "closest" as const,
+    // Draw a thin amber reference line at the 1h grace boundary so
+    // the split between amber and red markers is visually obvious.
+    shapes: [
+      {
+        type: "line" as const,
+        xref: "paper" as const,
+        x0: 0,
+        x1: 1,
+        yref: "y" as const,
+        y0: grace,
+        y1: grace,
+        line: { color: "#f59e0b", width: 1, dash: "dot" as const },
+      },
+    ],
+    annotations: [
+      {
+        xref: "paper" as const,
+        yref: "y" as const,
+        x: 1,
+        // Plotly quirk: shapes auto-transform `y` to log coordinates
+        // when the axis is type: "log", but annotations don't —
+        // pass log10(value) explicitly, otherwise the label renders
+        // at 10^3600 (way off-chart).
+        y: Math.log10(grace),
+        xanchor: "right" as const,
+        yanchor: "bottom" as const,
+        text: "1h grace",
+        showarrow: false,
+        font: { size: 10, color: "#f59e0b" },
+      },
+    ],
+  };
+}
+
 interface Props {
   breaches: DeviationThresholdBreach[];
 }
@@ -134,62 +185,24 @@ export function BreachHistoryChart({ breaches }: Props) {
     trace(ongoing, "Ongoing", "#8b5cf6"),
   ].filter((t) => t.x.length > 0);
 
+  const breachSummary = `Deviation breach history: ${breaches.length} breaches plotted — ${closedCritical.length} past the 1-hour grace (critical), ${closedInGrace.length} within grace, ${ongoing.length} ongoing. Marker height is the breach duration on a log scale.`;
+
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 sm:p-5">
-      <Plot
-        data={data}
-        layout={{
-          ...PLOTLY_BASE_LAYOUT,
-          autosize: true,
-          height: 260,
-          margin: { l: 56, r: 16, t: 8, b: 40 },
-          xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
-          yaxis: {
-            ...PLOTLY_AXIS_DEFAULTS,
-            type: "log",
-            title: { text: "Breach duration", standoff: 8 },
-            // Nice log ticks: 1s, 10s, 1min, 10min, 1h, 6h, 1d.
-            tickvals: [1, 10, 60, 600, 3600, 21600, 86400],
-            ticktext: ["1s", "10s", "1m", "10m", "1h", "6h", "1d"],
-          },
-          legend: { ...PLOTLY_LEGEND, orientation: "h", y: -0.25 },
-          hovermode: "closest",
-          // Draw a thin amber reference line at the 1h grace boundary so
-          // the split between amber and red markers is visually obvious.
-          shapes: [
-            {
-              type: "line",
-              xref: "paper",
-              x0: 0,
-              x1: 1,
-              yref: "y",
-              y0: grace,
-              y1: grace,
-              line: { color: "#f59e0b", width: 1, dash: "dot" },
-            },
-          ],
-          annotations: [
-            {
-              xref: "paper",
-              yref: "y",
-              x: 1,
-              // Plotly quirk: shapes auto-transform `y` to log coordinates
-              // when the axis is type: "log", but annotations don't —
-              // pass log10(value) explicitly, otherwise the label renders
-              // at 10^3600 (way off-chart).
-              y: Math.log10(grace),
-              xanchor: "right",
-              yanchor: "bottom",
-              text: "1h grace",
-              showarrow: false,
-              font: { size: 10, color: "#f59e0b" },
-            },
-          ],
-        }}
-        config={PLOTLY_CONFIG}
-        style={{ width: "100%" }}
-      />
-    </div>
+    <>
+      <div
+        role="img"
+        aria-label="Deviation breach history chart"
+        className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 sm:p-5"
+      >
+        <Plot
+          data={data}
+          layout={makeBreachHistoryLayout(grace)}
+          config={PLOTLY_CONFIG}
+          style={{ width: "100%" }}
+        />
+      </div>
+      <p className="sr-only">{breachSummary}</p>
+    </>
   );
 }
 

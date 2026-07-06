@@ -129,7 +129,7 @@
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'PoolTabPanel' has too many lines (122). Maximum allowed is 100.",
-    "line": 476,
+    "line": 451,
     "linePreview": " | function PoolTabPanel({ | tab,"
   },
   {
@@ -150,14 +150,14 @@
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
-    "line": 202,
+    "line": 200,
     "linePreview": "<tbody> | {pagedPositions.map((position) => { | const fmtTok = ("
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
     "message": "Function 'LpsTab' has a complexity of 32. Maximum allowed is 15.",
-    "line": 41,
+    "line": 42,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing tab keeps LP pagination, totals, and degraded-count copy in one route-owned surface. | export function LpsTab({ | poolId,"
   },
   {
@@ -213,14 +213,14 @@
     "file": "src/components/address-label-form.tsx",
     "ruleId": "complexity",
     "message": "Function 'AddressLabelForm' has a complexity of 32. Maximum allowed is 15.",
-    "line": 160,
+    "line": 161,
     "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressLabelForm(props: Props) { | const {"
   },
   {
     "file": "src/components/address-label-form.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'AddressLabelForm' has too many lines (275). Maximum allowed is 100.",
-    "line": 160,
+    "line": 161,
     "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressLabelForm(props: Props) { | const {"
   },
   {
@@ -257,13 +257,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 33 to the 18 allowed.",
     "line": 75,
     "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressReportEditor(props: Props) { | const { address, onSavingChange, onDeletingCha"
-  },
-  {
-    "file": "src/components/breach-history-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'BreachHistoryChart' has too many lines (116). Maximum allowed is 100.",
-    "line": 43,
-    "linePreview": "*/ | export function BreachHistoryChart({ breaches }: Props) { | if (breaches.length === 0) return null;"
   },
   {
     "file": "src/components/breach-history-panel.tsx",
@@ -304,28 +297,28 @@
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 58. Maximum allowed is 15.",
-    "line": 84,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/js-tosorted-immutable | return [...entries].sort((a, b) => { | const aKey = globalPoolKey(a);"
+    "line": 82,
+    "linePreview": "): GlobalPoolEntry[] { | return sortedCopy(entries, (a, b) => { | const aKey = globalPoolKey(a);"
   },
   {
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 65 to the 18 allowed.",
-    "line": 84,
-    "linePreview": "// react-doctor-disable-next-line react-doctor/js-tosorted-immutable | return [...entries].sort((a, b) => { | const aKey = globalPoolKey(a);"
+    "line": 82,
+    "linePreview": "): GlobalPoolEntry[] { | return sortedCopy(entries, (a, b) => { | const aKey = globalPoolKey(a);"
   },
   {
     "file": "src/components/lp-concentration-chart.tsx",
     "ruleId": "complexity",
     "message": "Function 'LpConcentrationChart' has a complexity of 25. Maximum allowed is 15.",
-    "line": 55,
+    "line": 62,
     "linePreview": " | export function LpConcentrationChart({ | positions,"
   },
   {
     "file": "src/components/lp-concentration-chart.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'LpConcentrationChart' has too many lines (201). Maximum allowed is 100.",
-    "line": 55,
+    "line": 62,
     "linePreview": " | export function LpConcentrationChart({ | positions,"
   },
   {
@@ -360,14 +353,7 @@
     "file": "src/components/reserve-chart.tsx",
     "ruleId": "complexity",
     "message": "Function 'ReserveChart' has a complexity of 17. Maximum allowed is 15.",
-    "line": 27,
-    "linePreview": " | export function ReserveChart({ | rows,"
-  },
-  {
-    "file": "src/components/reserve-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'ReserveChart' has too many lines (103). Maximum allowed is 100.",
-    "line": 27,
+    "line": 47,
     "linePreview": " | export function ReserveChart({ | rows,"
   },
   {
@@ -381,7 +367,7 @@
     "file": "src/components/time-series-chart-card-hooks.ts",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
-    "line": 199,
+    "line": 200,
     "linePreview": "event?: { clientX?: number; clientY?: number }; | }) => { | if (!enabled) return;"
   },
   {
@@ -465,21 +451,21 @@
     "file": "src/lib/homepage-og.ts",
     "ruleId": "complexity",
     "message": "Async function 'fetchHomepageOgDataUncached' has a complexity of 35. Maximum allowed is 15.",
-    "line": 281,
+    "line": 282,
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "max-lines-per-function",
     "message": "Async function 'fetchHomepageOgDataUncached' has too many lines (141). Maximum allowed is 100.",
-    "line": 281,
+    "line": 282,
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/homepage-og.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
-    "line": 281,
+    "line": 282,
     "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {

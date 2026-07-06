@@ -619,6 +619,10 @@ export function OracleChart({
     (s) => s.breakerBaselineAtSnapshot != null,
   );
 
+  const oracleSummary = `Oracle price versus breaker band for ${token0Symbol}/${token1Symbol}: ${snapshots.length} price sample${
+    snapshots.length === 1 ? "" : "s"
+  } plotted, colored by whether each sample sat inside its breaker band.`;
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <h3 className="text-sm font-medium text-slate-400 mb-3">
@@ -634,24 +638,30 @@ export function OracleChart({
           breakerConfig?.breakerKind === "MEDIAN_DELTA" ? "median EMA" : "peg"
         }
       />
-      <Plot
-        data={traceData}
-        layout={layout}
-        config={ORACLE_CHART_CONFIG}
-        style={PLOT_STYLE}
-        useResizeHandler
-        onRelayout={handleRelayout}
-        onInitialized={(_figure, graphDiv) => {
-          cleanupWheelRef.current?.();
-          cleanupWheelRef.current = attachOracleWheelHandler(
-            graphDiv as unknown as HTMLElement,
-          );
-        }}
-        onPurge={() => {
-          cleanupWheelRef.current?.();
-          cleanupWheelRef.current = null;
-        }}
-      />
+      <div
+        role="img"
+        aria-label={`Oracle price versus breaker band chart for ${token0Symbol}/${token1Symbol}`}
+      >
+        <Plot
+          data={traceData}
+          layout={layout}
+          config={ORACLE_CHART_CONFIG}
+          style={PLOT_STYLE}
+          useResizeHandler
+          onRelayout={handleRelayout}
+          onInitialized={(_figure, graphDiv) => {
+            cleanupWheelRef.current?.();
+            cleanupWheelRef.current = attachOracleWheelHandler(
+              graphDiv as unknown as HTMLElement,
+            );
+          }}
+          onPurge={() => {
+            cleanupWheelRef.current?.();
+            cleanupWheelRef.current = null;
+          }}
+        />
+      </div>
+      <p className="sr-only">{oracleSummary}</p>
     </div>
   );
 }

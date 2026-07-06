@@ -1,0 +1,79 @@
+import React from "react";
+import { describe, it, expect, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+
+// Render the Plot as an inert marker — the accessible name / text alternative
+// live on the container the card controls, not inside Plotly's SVG.
+vi.mock("next/dynamic", () => ({
+  default: () =>
+    function MockPlot() {
+      return React.createElement("div", { "data-testid": "plot" });
+    },
+}));
+
+import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
+import type { TimeSeriesPoint } from "@/lib/time-series";
+
+const SERIES: TimeSeriesPoint[] = [
+  { timestamp: 1_000, value: 1_000_000 },
+  { timestamp: 2_000, value: 2_690_000 },
+];
+
+function render(
+  overrides: Partial<React.ComponentProps<typeof TimeSeriesChartCard>> = {},
+): string {
+  const props: React.ComponentProps<typeof TimeSeriesChartCard> = {
+    title: "Total Value Locked",
+    rangeAriaLabel: "TVL chart time range",
+    series: SERIES,
+    range: "7d",
+    onRangeChange: () => {},
+    headline: "$2.69M",
+    change: 3.1,
+    isLoading: false,
+    hasError: false,
+    hasSnapshotError: false,
+    emptyMessage: "Not enough history yet",
+    ...overrides,
+  };
+  return renderToStaticMarkup(React.createElement(TimeSeriesChartCard, props));
+}
+
+describe("TimeSeriesChartCard accessibility (WCAG 1.1.1)", () => {
+  it("exposes the plot as role=img with a dynamic, non-empty accessible name", () => {
+    const html = render();
+    // role="img" turns the SVG internals presentational; the aria-label is the
+    // chart's accessible name and reflects the live range so it can't go stale.
+    expect(html).toContain('role="img"');
+    expect(html).toContain('aria-label="Total Value Locked chart, 1W range"');
+  });
+
+  it("re-labels when the active range changes so the name tracks the series", () => {
+    const html = render({ range: "all" });
+    expect(html).toContain('aria-label="Total Value Locked chart, All range"');
+  });
+
+  it("carries a visually-hidden text alternative summarizing latest value + trend", () => {
+    const html = render();
+    expect(html).toContain("sr-only");
+    expect(html).toContain(
+      "Total Value Locked: latest value $2.69M over the 1W range, up 3.10% week-over-week.",
+    );
+  });
+
+  it("describes a negative change as a downward trend", () => {
+    const html = render({ change: -4.2 });
+    expect(html).toContain("down 4.20% week-over-week");
+  });
+
+  it("summarizes the loading state instead of a stale value", () => {
+    const html = render({ isLoading: true });
+    expect(html).toContain('aria-label="Total Value Locked chart, 1W range"');
+    expect(html).toContain("Total Value Locked chart is loading.");
+  });
+
+  it("summarizes the empty state with the empty message", () => {
+    const html = render({ series: [], change: null });
+    expect(html).toContain("Total Value Locked chart: Not enough history yet");
+  });
+});

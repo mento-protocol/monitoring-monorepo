@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { formatUSD } from "@/lib/format";
 import {
   escapePlotText,
   PLOTLY_BASE_LAYOUT,
@@ -436,6 +437,32 @@ export function TimeSeriesChartCard({
 
   const showEmptyState = !isLoading && series.length === 0;
 
+  // Accessible name + non-visual summary for the chart (WCAG 1.1.1). Both are
+  // derived from live props (title + active range + latest plotted value +
+  // week-over-week change) so they can never drift from the rendered series.
+  // `formatUSD` matches the dollar-denominated headline every consumer of this
+  // card uses (TVL / volume / bridged volume). `role="img"` on the plot
+  // container turns the SVG internals presentational; the concise `aria-label`
+  // names the chart and the sr-only sibling below carries the data summary.
+  const activeRangeLabel =
+    ranges.find((item) => item.key === range)?.label ?? String(range);
+  const latestValue =
+    series.length > 0 ? series[series.length - 1]!.value : null;
+  const changeSummary =
+    change === null || isLoading || hasError
+      ? ""
+      : `, ${change >= 0 ? "up" : "down"} ${Math.abs(change).toFixed(
+          2,
+        )}% ${changeLabel}`;
+  const chartAriaLabel = `${title} chart, ${activeRangeLabel} range`;
+  const chartSummary = isLoading
+    ? `${title} chart is loading.`
+    : latestValue === null
+      ? `${title} chart: ${emptyMessage}`
+      : `${title}: latest value ${formatUSD(
+          latestValue,
+        )} over the ${activeRangeLabel} range${changeSummary}.`;
+
   return (
     <section
       className={
@@ -517,7 +544,12 @@ export function TimeSeriesChartCard({
         </div>
       </div>
 
-      <div ref={containerRef} className="relative mt-4 -mx-2 sm:-mx-3">
+      <div
+        ref={containerRef}
+        role="img"
+        aria-label={chartAriaLabel}
+        className="relative mt-4 -mx-2 sm:-mx-3"
+      >
         {isLoading ? (
           <PlotSkeleton heightPx={chartHeightPx} />
         ) : showEmptyState ? (
@@ -592,6 +624,10 @@ export function TimeSeriesChartCard({
         )}
         {customSortedHover && hover && <CustomSortedTooltip hover={hover} />}
       </div>
+      {/* Non-visual text alternative for the chart. Sits outside the
+          role="img" container (whose descendants are presentational to AT) so
+          screen readers announce the data summary as regular page content. */}
+      <p className="sr-only">{chartSummary}</p>
       {useCustomLegend && (
         <CustomLegend
           breakdown={breakdown ?? []}

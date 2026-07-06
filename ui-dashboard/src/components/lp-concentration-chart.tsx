@@ -52,6 +52,13 @@ export function resolvePieLabel(
   return resolved === truncated ? truncated : resolved;
 }
 
+const fmtUsd = (v: number) =>
+  v >= 1_000_000
+    ? `$${(v / 1_000_000).toFixed(2)}M`
+    : v >= 1_000
+      ? `$${(v / 1_000).toFixed(1)}K`
+      : `$${v.toFixed(2)}`;
+
 export function LpConcentrationChart({
   positions,
   totalLiquidity,
@@ -171,19 +178,14 @@ export function LpConcentrationChart({
         : reserves0Raw * feedVal + reserves1Raw
       : null;
 
-  const fmtUsd = (v: number) =>
-    v >= 1_000_000
-      ? `$${(v / 1_000_000).toFixed(2)}M`
-      : v >= 1_000
-        ? `$${(v / 1_000).toFixed(1)}K`
-        : `$${v.toFixed(2)}`;
-
   const fmtReserve = (v: number, sym: string) =>
     v >= 1_000_000
       ? `${(v / 1_000_000).toFixed(2)}M ${sym}`
       : v >= 1_000
         ? `${(v / 1_000).toFixed(1)}K ${sym}`
         : `${v.toFixed(2)} ${sym}`;
+
+  const concentrationSummary = `LP concentration: ${totalPositions} liquidity providers. Top holder ${topShare}% of the pool, top 3 hold ${top3Share}%. Herfindahl-Hirschman Index ${hhi.toFixed(0)}.`;
 
   return (
     <div className="mb-4 overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4">
@@ -194,7 +196,11 @@ export function LpConcentrationChart({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1 lg:max-w-3xl">
           <div className="flex flex-col items-start gap-4 xl:flex-row xl:items-start">
-            <div className="w-full max-w-[360px] shrink-0">
+            <div
+              role="img"
+              aria-label="LP concentration pie chart"
+              className="w-full max-w-[360px] shrink-0"
+            >
               <Plot
                 data={[trace]}
                 layout={layout}
@@ -203,6 +209,7 @@ export function LpConcentrationChart({
                 useResizeHandler
               />
             </div>
+            <p className="sr-only">{concentrationSummary}</p>
 
             <div className="min-w-0 flex-1 xl:pt-2">
               <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">
