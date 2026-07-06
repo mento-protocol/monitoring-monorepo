@@ -56,9 +56,13 @@ all four gated workflows plus the two status-only deploy workflows:
 /github subscribe mento-protocol/monitoring-monorepo workflows:{name:"Governance Watchdog Infra","Alerts Infra","Alerts Rules","Aegis Terraform","Aegis App Engine","Metrics Bridge" event:"push","workflow_dispatch" branch:"main"}
 ```
 
-`/github subscribe list` (run in the channel) prints the live subscription,
-including this filter string — treat it as the audit command and reconcile
-this document against it whenever they disagree.
+To audit the live filter, run `/github subscribe list features` in the
+channel — that is the variant GitHub documents for showing a channel's active
+subscription filters; plain `/github subscribe list` only names the
+repositories the channel follows and will **not** print the `workflows:{…}`
+string you need to reconcile. Its output detail has been inconsistent in
+practice, so treat **this document** as the source of truth and reconcile the
+live filter against it — not the other way around.
 
 | Channel          | Subscription                     | Why                                                                                                                                                                    |
 | ---------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
