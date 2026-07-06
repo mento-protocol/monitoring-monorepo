@@ -69,6 +69,33 @@ check("multiple triggers accumulate", () => {
   assert.equal(t.length, 4);
 });
 
+check("a package.json-only service root triggers (no AGENTS.md)", () => {
+  // governance-watchdog-style: package.json but no AGENTS.md.
+  const t = detectAdrTriggers({ addedFiles: ["newsvc/package.json"] });
+  assert.equal(t.length, 1);
+  assert.match(t[0].why, /new package\/service "newsvc\/"/);
+});
+
+check(
+  "AGENTS.md + package.json for the same dir is one trigger (deduped)",
+  () => {
+    const t = detectAdrTriggers({
+      addedFiles: ["newsvc/AGENTS.md", "newsvc/package.json"],
+    });
+    assert.equal(t.length, 1);
+    assert.equal(t[0].surface, "newsvc/");
+  },
+);
+
+check("a nested package.json is not a top-level service root", () => {
+  // A new workspace member under an existing package registers via
+  // pnpm-workspace.yaml (workspaceAddsPackage), not this top-level detection.
+  const t = detectAdrTriggers({
+    addedFiles: ["alerts/infra/newthing/package.json"],
+  });
+  assert.equal(t.length, 0);
+});
+
 check("adrBeingWritten true when a numbered ADR is added", () => {
   assert.equal(adrBeingWritten(["docs/adr/0034-new-thing.md"]), true);
 });

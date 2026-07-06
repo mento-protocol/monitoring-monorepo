@@ -20,12 +20,15 @@
  * that has no accompanying ADR so a CI job can hard-gate if a team wants that.
  *
  * Usage: node scripts/check-adr-reminder.mjs [--base <ref>] [--head <ref>]
- *          [--strict] [--include-untracked]
+ *          [--strict] [--include-untracked] [--changed-paths-file <file>]
  *
- * The agent quality gate passes its own `--head` and `--include-untracked` so
- * the reminder sees exactly what the gate sees (committed + staged + untracked
- * high-signal files). Standalone runs default to committed/staged only, so an
- * unrelated untracked scratch file never nags.
+ * The agent quality gate passes its own `--head`, `--include-untracked`, and
+ * `--changed-paths-file` so the reminder evaluates exactly the gate's
+ * changed-path set — including a precomputed set routed via
+ * `agent-quality-gate --changed-paths-file`. A path from that set counts as a
+ * new file when it does not exist at base. Standalone runs (no file) fall back
+ * to `git diff` and default to committed/staged only, so an unrelated untracked
+ * scratch file never nags.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -42,20 +45,26 @@ export function detectAdrTriggers({
   workspaceAddsPackage = false,
 }) {
   const triggers = [];
+  // A new top-level service root announces itself with a new AGENTS.md and/or a
+  // new package.json (a standalone service like governance-watchdog has a
+  // package.json but no AGENTS.md). Collect by dir so one new service is one
+  // trigger regardless of which marker files it added.
+  const serviceDirs = new Set();
   for (const file of addedFiles) {
-    const scoped = /^([^/]+)\/AGENTS\.md$/.exec(file);
-    if (scoped) {
-      triggers.push({
-        surface: file,
-        why: `new package/service "${scoped[1]}/" (new scoped AGENTS.md)`,
-      });
-    }
+    const svc = /^([^/]+)\/(?:AGENTS\.md|package\.json)$/.exec(file);
+    if (svc) serviceDirs.add(svc[1]);
     if (/^\.github\/workflows\/.+\.ya?ml$/.test(file)) {
       triggers.push({
         surface: file,
         why: "new GitHub Actions workflow (new CI/deploy path or required check)",
       });
     }
+  }
+  for (const dir of serviceDirs) {
+    triggers.push({
+      surface: `${dir}/`,
+      why: `new package/service "${dir}/" (new AGENTS.md/package.json)`,
+    });
   }
   if (stacksAddsNewStack) {
     triggers.push({
@@ -174,6 +183,17 @@ function headContent(head, path) {
   return head ? git(["show", `${head}:${path}`]) : readHead(path);
 }
 
+function existsAtBase(base, path) {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${base}:${path}`], {
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Collect the diff facts the pure detector needs.
  *
@@ -186,12 +206,21 @@ function headContent(head, path) {
  */
 export function collectGitState(
   base,
-  { head = "", includeUntracked = false } = {},
+  { head = "", includeUntracked = false, changedPathsFile = "" } = {},
 ) {
-  const diffArgs = head
-    ? ["diff", "--diff-filter=A", "--name-only", base, head, "--"]
-    : ["diff", "--diff-filter=A", "--name-only", base, "--"];
-  const added = new Set(lines(git(diffArgs)));
+  let added;
+  if (changedPathsFile) {
+    // Consume the gate's authoritative changed-path set instead of recomputing.
+    // A path is "added" when it does not exist at base, so a modified
+    // AGENTS.md/package.json (this very PR) is correctly not a new service.
+    const candidates = lines(readHead(changedPathsFile));
+    added = new Set(candidates.filter((path) => !existsAtBase(base, path)));
+  } else {
+    const diffArgs = head
+      ? ["diff", "--diff-filter=A", "--name-only", base, head, "--"]
+      : ["diff", "--diff-filter=A", "--name-only", base, "--"];
+    added = new Set(lines(git(diffArgs)));
+  }
   // Untracked files belong to the WORKING TREE, so only fold them in for a
   // working-tree run (no explicit head). Mixing the current checkout's untracked
   // files into an explicit `--head <ref>` diff would let an unrelated local ADR
@@ -229,11 +258,14 @@ function main(argv) {
   let head = "";
   let strict = false;
   let includeUntracked = false;
+  let changedPathsFile = "";
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--base") base = argv[++i];
     else if (argv[i] === "--head") head = argv[++i] ?? "";
     else if (argv[i] === "--strict") strict = true;
     else if (argv[i] === "--include-untracked") includeUntracked = true;
+    else if (argv[i] === "--changed-paths-file")
+      changedPathsFile = argv[++i] ?? "";
   }
   // The gate's --head defaults to "HEAD", meaning "the current checkout". Treat
   // that (and empty) as the WORKING TREE so staged/uncommitted edits to
@@ -249,7 +281,11 @@ function main(argv) {
     return 0;
   }
 
-  const state = collectGitState(base, { head, includeUntracked });
+  const state = collectGitState(base, {
+    head,
+    includeUntracked,
+    changedPathsFile,
+  });
   const triggers = detectAdrTriggers(state);
   if (triggers.length === 0) {
     return 0; // No architectural trigger — quiet.
