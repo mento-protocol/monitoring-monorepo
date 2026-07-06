@@ -76,23 +76,25 @@ export async function preloadTroveOperation(
     blockTimestamp: bigint;
   },
 ): Promise<void> {
-  const trove = await preloadTroveAndMarket(
-    context,
-    args.market,
-    args.collateralId,
-    args.troveId,
-  );
-  await preloadBorrowingUpfrontFeeBucket(
-    context,
-    args.collateralId,
-    args.upfrontFee,
-    args.blockTimestamp,
-  );
-  await preloadBorrowingFeeAppliedEvent(
-    context,
-    args.appliedFeeEventId,
-    args.upfrontFee,
-  );
+  const [trove] = await Promise.all([
+    preloadTroveAndMarket(
+      context,
+      args.market,
+      args.collateralId,
+      args.troveId,
+    ),
+    preloadBorrowingUpfrontFeeBucket(
+      context,
+      args.collateralId,
+      args.upfrontFee,
+      args.blockTimestamp,
+    ),
+    preloadBorrowingFeeAppliedEvent(
+      context,
+      args.appliedFeeEventId,
+      args.upfrontFee,
+    ),
+  ]);
   if (args.operation === OP.REDEEM_COLLATERAL) {
     setPendingRedemption(context, {
       ...args,
