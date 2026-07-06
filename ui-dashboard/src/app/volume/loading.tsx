@@ -1,11 +1,13 @@
-import { ChartSkeleton, TableSkeleton } from "@/components/skeletons";
+import { TableSkeleton } from "@/components/skeletons";
 
-// Route-level fallback for /volume. The page is an async Server Component that
-// `await`s the auth session before its Suspense boundary, so without this the
-// whole segment blocks on the session read and paints nothing on client nav.
-// The order and grid MIRROR VolumePageView (header → chart → 3 KPI tiles →
-// venue table) so the skeleton→content swap reserves matching space and doesn't
-// shift layout. A single live region wraps the presentational child skeletons.
+// Route-level fallback for /volume, rendered during the server session-await —
+// BEFORE the client reads URL-state (venue/range) or the auth session. It
+// therefore can't conditionally match (the chart is absent for range=24h; the
+// venue insight/aggregator sections are venue-specific). It reserves the
+// always-present, fixed-size blocks of VolumePageView for the common (7d, v3)
+// case so the skeleton→content swap doesn't shift: header (title + toggle
+// controls) → 200px chart card → 3 KPI tiles → venue table. A single live region
+// wraps the presentational child skeletons.
 export default function VolumeLoading() {
   return (
     <div
@@ -14,12 +16,26 @@ export default function VolumeLoading() {
       aria-live="polite"
       aria-label="Loading volume"
     >
-      <div className="space-y-2">
-        <div className="h-8 w-56 animate-pulse rounded bg-slate-800/50" />
-        <div className="h-4 w-96 max-w-full animate-pulse rounded bg-slate-800/50" />
+      {/* Header: title/subtitle + the venue/range toggle groups, matching
+          VolumePageHeader's flex-wrap justify-between control row. */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-2">
+          <div className="h-8 w-56 animate-pulse rounded bg-slate-800/50" />
+          <div className="h-4 w-96 max-w-full animate-pulse rounded bg-slate-800/50" />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="h-9 w-44 animate-pulse rounded-md bg-slate-800/50" />
+          <div className="h-9 w-28 animate-pulse rounded-md bg-slate-800/50" />
+        </div>
       </div>
-      <ChartSkeleton presentational />
-      {/* Mirrors VolumeKpiTiles: grid-cols-1 sm:grid-cols-3, three tiles. */}
+      {/* Chart card: matches TimeSeriesChartCard's 200px plot area
+          (ROW_CHART_HEIGHT_PX) plus title chrome — NOT a 16:9 block, which is
+          hundreds of px taller at desktop widths. */}
+      <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
+        <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
+        <div className="mt-3 h-[200px] animate-pulse rounded bg-slate-800/30" />
+      </div>
+      {/* KPI tiles: mirrors VolumeKpiTiles (grid-cols-1 sm:grid-cols-3, 3 tiles). */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {Array.from({ length: 3 }, (_, i) => (
           // react-doctor-disable-next-line react-doctor/no-array-index-as-key
