@@ -73,6 +73,49 @@ export function classifyCheck(check) {
   return "pending";
 }
 
+function checkRunOrderTimestampMs(check) {
+  // Use startedAt so delayed cancellation completion does not make a stale
+  // run appear newer than the passing run that superseded it.
+  const timestamp = check.startedAt ?? check.completedAt ?? null;
+  const parsed = Date.parse(timestamp ?? "");
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function checkIdentity(check) {
+  const appId =
+    check.appId ?? check.app_id ?? check.app?.id ?? check.app?.databaseId ?? "";
+  return [
+    checkDisplayName(check),
+    check.workflowName ?? check.workflow_name ?? "",
+    appId,
+  ].join("\0");
+}
+
+function suppressSupersededCancelledChecks(statusCheckRollup = []) {
+  const latestPassingTimeByIdentity = new Map();
+
+  for (const check of statusCheckRollup) {
+    if (classifyCheck(check) !== "pass") continue;
+    const timestampMs = checkRunOrderTimestampMs(check);
+    if (timestampMs === null) continue;
+    const identity = checkIdentity(check);
+    const previous = latestPassingTimeByIdentity.get(identity) ?? -Infinity;
+    if (timestampMs > previous) {
+      latestPassingTimeByIdentity.set(identity, timestampMs);
+    }
+  }
+
+  return statusCheckRollup.filter((check) => {
+    if (normalizeStatusValue(check.conclusion) !== "CANCELLED") return true;
+    const timestampMs = checkRunOrderTimestampMs(check);
+    if (timestampMs === null) return true;
+    const newerPassingTime = latestPassingTimeByIdentity.get(
+      checkIdentity(check),
+    );
+    return newerPassingTime === undefined || newerPassingTime <= timestampMs;
+  });
+}
+
 export function groupStatusChecks(statusCheckRollup = []) {
   const grouped = {
     pass: [],
@@ -81,7 +124,7 @@ export function groupStatusChecks(statusCheckRollup = []) {
     skipped: [],
   };
 
-  for (const check of statusCheckRollup) {
+  for (const check of suppressSupersededCancelledChecks(statusCheckRollup)) {
     const group = classifyCheck(check);
     grouped[group].push({
       name: checkDisplayName(check),
@@ -154,7 +197,7 @@ export function splitRequiredAndOptionalChecks(
   const optional = [];
   const seenRequiredContexts = new Set();
 
-  for (const check of statusCheckRollup) {
+  for (const check of suppressSupersededCancelledChecks(statusCheckRollup)) {
     const name = checkDisplayName(check);
     const matchedRequiredContext = requiredStatusContexts.find((context) =>
       checkMatchesRequiredContext(check, context),
