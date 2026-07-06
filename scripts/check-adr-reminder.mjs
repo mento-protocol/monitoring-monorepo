@@ -209,11 +209,14 @@ export function collectGitState(
   { head = "", includeUntracked = false, changedPathsFile = "" } = {},
 ) {
   let added;
+  // When a path set is supplied it is the AUTHORITATIVE scope; `candidates`
+  // stays null otherwise so standalone runs keep their git-diff behavior.
+  let candidates = null;
   if (changedPathsFile) {
     // Consume the gate's authoritative changed-path set instead of recomputing.
     // A path is "added" when it does not exist at base, so a modified
     // AGENTS.md/package.json (this very PR) is correctly not a new service.
-    const candidates = lines(readHead(changedPathsFile));
+    candidates = lines(readHead(changedPathsFile));
     added = new Set(candidates.filter((path) => !existsAtBase(base, path)));
   } else {
     const diffArgs = head
@@ -221,30 +224,47 @@ export function collectGitState(
       : ["diff", "--diff-filter=A", "--name-only", base, "--"];
     added = new Set(lines(git(diffArgs)));
   }
-  // Untracked files belong to the WORKING TREE, so only fold them in for a
-  // working-tree run (no explicit head). Mixing the current checkout's untracked
-  // files into an explicit `--head <ref>` diff would let an unrelated local ADR
-  // draft suppress the reminder for the selected ref.
-  if (includeUntracked && !head) {
+  // Untracked files belong to the WORKING TREE. Fold them in only for a
+  // working-tree run WITHOUT an authoritative scope: an explicit `--head` or a
+  // `--changed-paths-file` defines what to evaluate, and mixing in the current
+  // checkout's untracked files (e.g. a local ADR draft) would wrongly
+  // suppress/trigger the reminder for that scope.
+  if (includeUntracked && !head && !changedPathsFile) {
     for (const file of lines(
       git(["ls-files", "--others", "--exclude-standard"]),
     )) {
       added.add(file);
     }
   }
-  const addedFiles = [...added];
+  // A service marker (`<dir>/AGENTS.md` or `<dir>/package.json`) only signals a
+  // NEW package/service when its top-level directory did not already exist at
+  // base — adding docs/AGENTS.md to the existing docs/ tree is documentation,
+  // not a new service (the checklist defines the trigger as a *new* top-level
+  // directory). A pure rename of a top-level dir/workflow (delete+add in the
+  // gate's --no-renames set) still reads as a new surface here; that is an
+  // accepted advisory-only limitation, since a rename is itself structural.
+  const addedFiles = [...added].filter((file) => {
+    const svc = /^([^/]+)\/(?:AGENTS\.md|package\.json)$/.exec(file);
+    return !(svc && existsAtBase(base, svc[1]));
+  });
 
-  // Compare declared stacks/packages between base and head so only a genuinely
-  // new registration triggers — not a path edit, a reformat, or an unrelated
-  // list section that happens to share YAML `- item` syntax.
-  const stacksAddsNewStack = hasNewEntry(
-    extractStackIds(git(["show", `${base}:terraform.stacks.json`])),
-    extractStackIds(headContent(head, "terraform.stacks.json")),
-  );
-  const workspaceAddsPackage = hasNewEntry(
-    extractPackagesList(git(["show", `${base}:pnpm-workspace.yaml`])),
-    extractPackagesList(headContent(head, "pnpm-workspace.yaml")),
-  );
+  // Registry/workspace content checks compare declared stacks/packages between
+  // base and head so only a genuinely new registration triggers. When a path
+  // set was supplied, only run a check when its file is in that set — a run
+  // scoped to other paths must not flag a stack/package change outside it.
+  const inScope = (file) => !candidates || candidates.includes(file);
+  const stacksAddsNewStack =
+    inScope("terraform.stacks.json") &&
+    hasNewEntry(
+      extractStackIds(git(["show", `${base}:terraform.stacks.json`])),
+      extractStackIds(headContent(head, "terraform.stacks.json")),
+    );
+  const workspaceAddsPackage =
+    inScope("pnpm-workspace.yaml") &&
+    hasNewEntry(
+      extractPackagesList(git(["show", `${base}:pnpm-workspace.yaml`])),
+      extractPackagesList(headContent(head, "pnpm-workspace.yaml")),
+    );
 
   return { addedFiles, stacksAddsNewStack, workspaceAddsPackage };
 }
