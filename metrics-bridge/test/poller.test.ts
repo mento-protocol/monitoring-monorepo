@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ClientError } from "graphql-request";
 import { register } from "../src/metrics.js";
 import * as metricsModule from "../src/metrics.js";
 import {
@@ -86,6 +87,24 @@ describe("poll", () => {
     await poll();
 
     expect(await pollErrorValue("hasura_query")).toBe(1);
+  });
+
+  it("increments pollErrors with hasura_rate_limit kind on Hasura 429", async () => {
+    mockFetchPools.mockRejectedValueOnce(
+      new ClientError(
+        {
+          data: undefined,
+          errors: undefined,
+          status: 429,
+          headers: new Headers(),
+        },
+        { query: "..." },
+      ),
+    );
+    await poll();
+
+    expect(await pollErrorValue("hasura_rate_limit")).toBe(1);
+    expect(await pollErrorValue("hasura_query")).toBe(0);
   });
 
   it("increments pollErrors with update_metrics kind on metric update failure", async () => {

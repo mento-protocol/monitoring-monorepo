@@ -30,6 +30,7 @@ import { upsertOraclePriceDaily } from "../pool/oracle-rollup.js";
 import { recordBreachTransition } from "../deviationBreach.js";
 import { recordHealthSample } from "../healthScore.js";
 import { computeMedianLineageNext } from "../oracleJump.js";
+import { shouldPersistRawOracleSnapshot } from "../oracleSnapshotRetention.js";
 import {
   getPoolsByFeed,
   updatePoolsOracleExpiry,
@@ -229,10 +230,12 @@ async function processOracleReportedPool(
   // read the row's priceDifference directly (BreachEvent, oracle tab
   // detail) would see a fake non-zero value. Preserve existing instead.
   const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
+  const medianUsable =
+    updatedPool.lastMedianPrice > 0n && updatedPool.medianLive;
   const priceDifference = priceDifferenceForOracleSample(
-    updatedPool,
+    { ...updatedPool, oraclePrice: updatedPool.lastMedianPrice },
     decimalsTrustworthy,
-    oraclePrice,
+    medianUsable ? updatedPool.lastMedianPrice : 0n,
   );
   const degenerateReserves = degenerateReservesForOracleSample(
     updatedPool,
@@ -321,7 +324,9 @@ async function processOracleReportedPool(
       c.breakerSnapshotFields?.breakerThresholdAtSnapshot,
     ...snapshotFields,
   };
-  context.OracleSnapshot.set(snapshot);
+  if (shouldPersistRawOracleSnapshot(c.blockTimestamp)) {
+    context.OracleSnapshot.set(snapshot);
+  }
 
   // Refresh the daily snapshot's frozen health counters even though no
   // pool-side activity (swap/rebalance/mint/burn/UR) fired. Without
@@ -800,7 +805,9 @@ indexer.onEvent(
             breakerSnapshotFields?.breakerThresholdAtSnapshot,
           ...snapshotFields,
         };
-        context.OracleSnapshot.set(snapshot);
+        if (shouldPersistRawOracleSnapshot(blockTimestamp)) {
+          context.OracleSnapshot.set(snapshot);
+        }
 
         // Refresh the daily snapshot's frozen health counters even when no
         // pool-side activity fires — see the OracleReported handler for why.

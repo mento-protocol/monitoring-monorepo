@@ -139,6 +139,42 @@ function canClassifyDegenerateReserveState(pool: Pool): boolean {
   return !isVirtualPool(pool) && pool.tokenDecimalsKnown;
 }
 
+function hasContractPriceDifference(
+  oracleDelta: OracleDelta | undefined,
+): oracleDelta is OracleDelta & { priceDifference: bigint } {
+  return oracleDelta?.priceDifference !== undefined;
+}
+
+function canRecomputeMedianPriceDifference(pool: Pool): boolean {
+  return (
+    !isVirtualPool(pool) &&
+    pool.lastMedianPrice > 0n &&
+    pool.medianLive &&
+    pool.tokenDecimalsKnown
+  );
+}
+
+function resolvePriceDifference({
+  pool,
+  oracleDelta,
+  canRecompute,
+}: {
+  pool: Pool;
+  oracleDelta: OracleDelta | undefined;
+  canRecompute: boolean;
+}): bigint {
+  if (hasContractPriceDifference(oracleDelta)) {
+    return oracleDelta.priceDifference;
+  }
+  if (canRecompute) {
+    return computePriceDifference({
+      ...pool,
+      oraclePrice: pool.lastMedianPrice,
+    });
+  }
+  return pool.priceDifference;
+}
+
 const getOrCreatePool = async (
   context: PoolContext,
   chainId: number,
@@ -344,18 +380,14 @@ export const upsertPool = async ({
   // off by 10^(18 - real_dec) for non-18-decimal pools whose factory +
   // self-heal both blipped. Preserve `existing.priceDifference` until
   // self-heal lands real decimals.
-  const hasContractPriceDiff =
-    oracleDelta != null &&
-    "priceDifference" in oracleDelta &&
-    oracleDelta.priceDifference !== undefined;
-  const canRecompute =
-    !isVirtualPool(next) && next.oraclePrice > 0n && next.tokenDecimalsKnown;
+  const hasContractPriceDiff = hasContractPriceDifference(oracleDelta);
+  const canRecompute = canRecomputeMedianPriceDifference(next);
   const canClassifyDegenerateReserves = canClassifyDegenerateReserveState(next);
-  const priceDifference = hasContractPriceDiff
-    ? oracleDelta.priceDifference!
-    : canRecompute
-      ? computePriceDifference(next)
-      : next.priceDifference;
+  const priceDifference = resolvePriceDifference({
+    pool: next,
+    oracleDelta,
+    canRecompute,
+  });
   const degenerateReserves = nextDegenerateReserveState(
     next,
     oracleDelta,

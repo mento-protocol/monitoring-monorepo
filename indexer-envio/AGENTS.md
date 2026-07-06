@@ -82,6 +82,7 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
 - `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60710000
 - `ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` — (optional) Ethereum reserve-yield start block, defaults to 19111760
+- `ENVIO_ORACLE_SNAPSHOT_RETENTION_DAYS` — (optional) raw `OracleSnapshot` retention window in days; unset keeps all rows. The value takes effect on the next full resync. Hosted deployments pass it via `.env.cloud` (`envio-cloud indexer add -e .env.cloud ...`); setting it is an ops step, not part of ordinary CI.
 
 Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route all chains to the same endpoint and produce incorrect RPC reads for chain-specific calls.
 

@@ -497,6 +497,36 @@ describe("upsertPool breaker halt (cold-start)", () => {
 });
 
 describe("upsertPool degenerate reserves", () => {
+  it("recomputes fallback deviation from the median, not a reporter-tainted oraclePrice", async () => {
+    const oneUnit = 10n ** 18n;
+    const existing = makePool({
+      id: "42220-0x0000000000000000000000000000000000008561",
+      oraclePrice: 3n * 10n ** 24n,
+      lastMedianPrice: 10n ** 24n,
+      medianLive: true,
+      invertRateFeedKnown: true,
+      tokenDecimalsKnown: true,
+      reserves0: 1_000n * oneUnit,
+      reserves1: 1_000n * oneUnit,
+      priceDifference: 999n,
+    });
+    const { context } = makeUpsertCtx();
+
+    const result = await upsertPool({
+      context,
+      chainId: existing.chainId,
+      poolId: existing.id,
+      source: "fpmm_update_reserves",
+      blockNumber: 2n,
+      blockTimestamp: 1_700_000_001n,
+      txHash: "0xmedian-fallback",
+      existing: { pool: existing },
+    });
+
+    assert.equal(result.priceDifference, 0n);
+    assert.equal(result.oraclePrice, 3n * 10n ** 24n);
+  });
+
   it("classifies degenerate reserves even when oracle price is zero", async () => {
     const oneUnit = 10n ** 18n;
     const existing = makePool({

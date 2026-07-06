@@ -29,6 +29,12 @@ const schema = z.object({
     .positive()
     .optional()
     .catch(undefined),
+  ENVIO_ORACLE_SNAPSHOT_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .catch(undefined),
 });
 
 // `rpc/client.ts` reads `ENVIO_API_TOKEN` / `ENVIO_RPC_URL` /
@@ -45,4 +51,6 @@ export const env = schema.parse({
     process.env.ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD,
   NODE_ENV: process.env.NODE_ENV,
   ENVIO_TEST_RPC_PORT: process.env.ENVIO_TEST_RPC_PORT,
+  ENVIO_ORACLE_SNAPSHOT_RETENTION_DAYS:
+    process.env.ENVIO_ORACLE_SNAPSHOT_RETENTION_DAYS,
 });

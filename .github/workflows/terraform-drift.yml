@@ -242,21 +242,24 @@ jobs:
             elif [ -n "${TF_VAR_slack_notification_channel_id:-}" ]; then
               echo "::notice::governance-watchdog drift leg using legacy TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID fallback until the stack-specific Slack secret is mirrored"
             fi
+            # Do not inherit alerts/infra's shared-name QuickNode key into the
+            # governance-watchdog plan. If the stack-specific mirror is absent,
+            # the bootstrap guard below must skip instead of planning with the
+            # wrong provider account.
+            unset TF_VAR_quicknode_api_key
             if [ -n "${GOV_WATCHDOG_TF_VAR_QUICKNODE_API_KEY:-}" ]; then
               export TF_VAR_quicknode_api_key="${GOV_WATCHDOG_TF_VAR_QUICKNODE_API_KEY}"
-            elif [ -n "${TF_VAR_quicknode_api_key:-}" ]; then
-              echo "::notice::governance-watchdog drift leg using legacy shared TF_VAR_QUICKNODE_API_KEY fallback until the stack-specific QuickNode secret is mirrored"
             fi
           fi
 
           # Bootstrap guard: TF_VAR_telegram_bot_token is a sensitive,
           # governance-watchdog-EXCLUSIVE secret (no sibling stack declares it),
-          # so an empty value reliably signals "this stack's TF_VAR_* secrets
-          # aren't bootstrapped yet". Until the operator bootstraps them, skip
+          # and TF_VAR_quicknode_api_key must come from the stack-specific
+          # mirror above. Until the operator bootstraps those repo secrets, skip
           # with a warning instead of failing every scheduled run. (org_id is no
           # longer the signal — it now carries a shared default.)
-          if [ "$STACK_ID" = "governance-watchdog" ] && [ -z "${TF_VAR_telegram_bot_token:-}" ]; then
-            echo "::warning::governance-watchdog drift leg skipped — TF_VAR_* repo secrets not bootstrapped yet (add them to the repo's production-infra environment + Actions secrets)"
+          if [ "$STACK_ID" = "governance-watchdog" ] && { [ -z "${TF_VAR_telegram_bot_token:-}" ] || [ -z "${TF_VAR_quicknode_api_key:-}" ]; }; then
+            echo "::warning::governance-watchdog drift leg skipped — stack-specific TF_VAR_* repo secrets not bootstrapped yet (add them to the repo's production-infra environment + Actions secrets)"
             echo "exitcode=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi

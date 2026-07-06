@@ -1,3 +1,4 @@
+import { ClientError } from "graphql-request";
 import { fetchPools } from "./graphql.js";
 import { fetchCdps } from "./cdp-graphql.js";
 import { updateCdpMetrics } from "./cdp-metrics.js";
@@ -39,6 +40,12 @@ function recordPollError(
 ): void {
   counters.pollErrors.inc({ kind });
   console.error(message, error);
+}
+
+function hasuraPollErrorKind(error: unknown): PollErrorKind {
+  return error instanceof ClientError && error.response.status === 429
+    ? "hasura_rate_limit"
+    : "hasura_query";
 }
 
 // CDP (service=cdps) gauges share this poll loop so bridge liveness +
@@ -97,7 +104,7 @@ async function pollPools(): Promise<void> {
     pools = data.Pool;
   } catch (error) {
     recordPollError(
-      "hasura_query",
+      hasuraPollErrorKind(error),
       "Poll failed while querying Hasura:",
       error,
     );

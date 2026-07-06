@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { dateTickFormatForSeries, rangeKeyToDays } from "../time-series";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import {
+  SECONDS_PER_DAY,
+  SECONDS_PER_HOUR,
+  dateTickFormatForSeries,
+  rangeKeyToDays,
+  snapshotRange,
+} from "../time-series";
 
 describe("rangeKeyToDays", () => {
   it("returns 7 for the 7d key", () => {
@@ -12,6 +18,41 @@ describe("rangeKeyToDays", () => {
 
   it("returns null for the 'all' key (no cutoff)", () => {
     expect(rangeKeyToDays("all")).toBeNull();
+  });
+});
+
+describe("snapshotRange", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("uses hourly buckets when requested", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T12:34:00Z"));
+
+    expect(
+      snapshotRange(
+        [{ timestamp: 1_783_340_401 }, { timestamp: 1_783_344_001 }],
+        SECONDS_PER_HOUR,
+      ),
+    ).toEqual({
+      from: 1_783_339_200,
+      to: 1_783_346_400,
+      bucketSeconds: SECONDS_PER_HOUR,
+    });
+  });
+
+  it("uses daily buckets when requested", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T12:34:00Z"));
+
+    expect(
+      snapshotRange([{ timestamp: 1_783_340_401 }], SECONDS_PER_DAY),
+    ).toEqual({
+      from: 1_783_296_000,
+      to: 1_783_382_400,
+      bucketSeconds: SECONDS_PER_DAY,
+    });
   });
 });
 
