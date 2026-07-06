@@ -58,6 +58,21 @@ function result(data: GqlResult["data"]): GqlResult {
   return { data, isLoading: false };
 }
 
+function installResults({
+  hourlyResult,
+  dailyResult,
+}: {
+  hourlyResult: GqlResult;
+  dailyResult: GqlResult;
+}) {
+  useGQLMock.mockImplementation((query: unknown) => {
+    if (query === null) return { isLoading: false };
+    if (query === POOL_HOURLY_SNAPSHOTS_CHART) return hourlyResult;
+    if (query === POOL_DAILY_SNAPSHOTS_CHART) return dailyResult;
+    throw new Error(`Unexpected query: ${String(query)}`);
+  });
+}
+
 function installResponses({
   hourlyRows,
   dailyRows,
@@ -65,15 +80,9 @@ function installResponses({
   hourlyRows: PoolSnapshot[];
   dailyRows: PoolSnapshot[];
 }) {
-  useGQLMock.mockImplementation((query: unknown) => {
-    if (query === null) return { isLoading: false };
-    if (query === POOL_HOURLY_SNAPSHOTS_CHART) {
-      return result({ PoolSnapshot: hourlyRows });
-    }
-    if (query === POOL_DAILY_SNAPSHOTS_CHART) {
-      return result({ PoolDailySnapshot: dailyRows });
-    }
-    throw new Error(`Unexpected query: ${String(query)}`);
+  installResults({
+    hourlyResult: result({ PoolSnapshot: hourlyRows }),
+    dailyResult: result({ PoolDailySnapshot: dailyRows }),
   });
 }
 
@@ -159,6 +168,34 @@ describe("usePoolSnapshots", () => {
 
     expect(ref.current?.snapshots).toBe(dailyRows);
     expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_DAY);
+    expect(ref.current?.hasError).toBe(false);
+  });
+
+  it("falls back to daily rows without error when the hourly query fails", () => {
+    const dailyRows = [snapshot("daily-1", "1700000000")];
+    installResults({
+      hourlyResult: { error: new Error("hourly down"), isLoading: false },
+      dailyResult: result({ PoolDailySnapshot: dailyRows }),
+    });
+
+    const { ref } = render("30d");
+
+    expect(ref.current?.snapshots).toBe(dailyRows);
+    expect(ref.current?.bucketSeconds).toBe(SECONDS_PER_DAY);
+    expect(ref.current?.isLoading).toBe(false);
+    expect(ref.current?.hasError).toBe(false);
+  });
+
+  it("keeps loading while the daily fallback is still loading after an hourly error", () => {
+    installResults({
+      hourlyResult: { error: new Error("hourly down"), isLoading: false },
+      dailyResult: { isLoading: true },
+    });
+
+    const { ref } = render("30d");
+
+    expect(ref.current?.snapshots).toEqual([]);
+    expect(ref.current?.isLoading).toBe(true);
     expect(ref.current?.hasError).toBe(false);
   });
 

@@ -49,17 +49,13 @@ function snapshotsAreLoading({
 
 function snapshotsHaveError({
   snapshots,
-  hourly,
-  hourlyError,
   dailyError,
 }: {
   snapshots: PoolSnapshot[];
-  hourly: boolean;
-  hourlyError: boolean;
   dailyError: boolean;
 }) {
   if (snapshots.length > 0) return false;
-  return dailyError || (hourly && hourlyError);
+  return dailyError;
 }
 
 export function usePoolSnapshots(
@@ -107,8 +103,6 @@ export function usePoolSnapshots(
     }),
     hasError: snapshotsHaveError({
       snapshots,
-      hourly,
-      hourlyError: hourlyResult.error !== undefined,
       dailyError: dailyResult.error !== undefined,
     }),
   };
