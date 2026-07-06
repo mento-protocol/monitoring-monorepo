@@ -5,7 +5,13 @@
  */
 import assert from "node:assert/strict";
 
-import { adrBeingWritten, detectAdrTriggers } from "./check-adr-reminder.mjs";
+import {
+  adrBeingWritten,
+  detectAdrTriggers,
+  extractPackagesList,
+  extractStackIds,
+  hasNewEntry,
+} from "./check-adr-reminder.mjs";
 
 let passed = 0;
 function check(name, fn) {
@@ -74,5 +80,89 @@ check("adrBeingWritten ignores the ADR index README", () => {
 check("adrBeingWritten false when no ADR added", () => {
   assert.equal(adrBeingWritten(["ui-dashboard/src/app/page.tsx"]), false);
 });
+
+check("extractStackIds reads stacks[].id", () => {
+  const json = JSON.stringify({
+    stacks: [{ id: "platform" }, { id: "aegis" }],
+  });
+  assert.deepEqual(extractStackIds(json), ["platform", "aegis"]);
+});
+
+check("extractStackIds tolerates empty/garbage input", () => {
+  assert.deepEqual(extractStackIds(""), []);
+  assert.deepEqual(extractStackIds("not json"), []);
+  assert.deepEqual(extractStackIds("{}"), []);
+});
+
+check("extractPackagesList reads only the packages: block", () => {
+  const yaml = [
+    "packages:",
+    "  - shared-config",
+    "  - ui-dashboard",
+    "",
+    "minimumReleaseAgeExclude:",
+    '  - "@mento-protocol/*"',
+    "ignoredBuiltDependencies:",
+    "  - sharp",
+  ].join("\n");
+  // The `- @mento-protocol/*` and `- sharp` items must NOT leak in.
+  assert.deepEqual(extractPackagesList(yaml), [
+    "shared-config",
+    "ui-dashboard",
+  ]);
+});
+
+check("extractPackagesList strips quotes", () => {
+  const yaml = [
+    "packages:",
+    "  - 'alerts/infra/oncall-announcer'",
+    "catalog:",
+  ].join("\n");
+  assert.deepEqual(extractPackagesList(yaml), [
+    "alerts/infra/oncall-announcer",
+  ]);
+});
+
+check("hasNewEntry true only when head has an unseen entry", () => {
+  assert.equal(hasNewEntry(["a", "b"], ["a", "b"]), false);
+  assert.equal(hasNewEntry(["a", "b"], ["a", "b", "c"]), true);
+  assert.equal(hasNewEntry(["a", "b"], ["a"]), false); // removal is not an add
+});
+
+check("editing an existing stack path does not read as a new stack", () => {
+  const base = JSON.stringify({
+    stacks: [{ id: "platform", path: "terraform" }],
+  });
+  const head = JSON.stringify({
+    stacks: [{ id: "platform", path: "infra/tf" }],
+  });
+  assert.equal(
+    hasNewEntry(extractStackIds(base), extractStackIds(head)),
+    false,
+  );
+});
+
+check(
+  "adding a minimumReleaseAgeExclude entry is not a workspace package add",
+  () => {
+    const base = [
+      "packages:",
+      "  - shared-config",
+      "minimumReleaseAgeExclude:",
+      "  - tar",
+    ].join("\n");
+    const head = [
+      "packages:",
+      "  - shared-config",
+      "minimumReleaseAgeExclude:",
+      "  - tar",
+      "  - undici",
+    ].join("\n");
+    assert.equal(
+      hasNewEntry(extractPackagesList(base), extractPackagesList(head)),
+      false,
+    );
+  },
+);
 
 console.log(`\n${passed} checks passed`);

@@ -9,17 +9,20 @@
  * CI/deploy workflow — and forgets to record why.
  *
  * It detects a small set of HIGH-SIGNAL architectural triggers in the diff vs a
- * base ref and, when none of them are accompanied by a new ADR, prints a
- * reminder. It is deliberately self-suppressing: it stays silent when there is
- * no trigger, or when the same diff already adds an ADR — so it is safe to run
- * on every push without becoming noise the reader learns to ignore.
+ * base ref. Detection is intentionally precise (a real new package / stack, not
+ * a reformat or an unrelated list edit) because the tool's only value is
+ * credibility: a nag that cries wolf gets ignored. It stays silent when there
+ * is no trigger; when a trigger is present it prints — either a full reminder
+ * (no ADR in the change) or a lighter "confirm each surface is covered" note
+ * (an ADR is present, so the author is clearly ADR-aware).
  *
- * Advisory by default (exit 0). Pass `--strict` to exit non-zero on an
- * un-accompanied trigger so a CI job can hard-gate if a team wants that.
+ * Advisory by default (exit 0). Pass `--strict` to exit non-zero on a trigger
+ * that has no accompanying ADR so a CI job can hard-gate if a team wants that.
  *
  * Usage: node scripts/check-adr-reminder.mjs [--base <ref>] [--strict]
  */
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /**
@@ -64,13 +67,68 @@ export function detectAdrTriggers({
 }
 
 /**
- * True when the same diff already adds a numbered ADR (README changes do not
- * count) — the decision is being recorded, so stay quiet.
+ * True when the change adds a numbered ADR (README changes do not count).
  * @param {string[]} addedFiles
  * @returns {boolean}
  */
 export function adrBeingWritten(addedFiles = []) {
-  return addedFiles.some((file) => /^docs\/adr\/\d{4}-.+\.md$/.test(file));
+  return addedFiles.some((file) => /^docs\/adr\/\d{4}-[^/]+\.md$/.test(file));
+}
+
+/**
+ * Stack identifiers (`stacks[].id`) declared in a terraform.stacks.json blob.
+ * Returns [] for empty/unparsable input so a missing base file degrades to
+ * "everything in head is new" without throwing.
+ * @param {string} jsonText
+ * @returns {string[]}
+ */
+export function extractStackIds(jsonText) {
+  if (!jsonText.trim()) return [];
+  try {
+    const parsed = JSON.parse(jsonText);
+    if (!Array.isArray(parsed?.stacks)) return [];
+    return parsed.stacks
+      .map((stack) => stack?.id)
+      .filter((id) => typeof id === "string");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Package globs under the top-level `packages:` key of a pnpm-workspace.yaml
+ * blob. Only the `packages:` list — NOT `minimumReleaseAgeExclude`,
+ * `ignoredBuiltDependencies`, or the other `- item` sections that share YAML
+ * list syntax.
+ * @param {string} yamlText
+ * @returns {string[]}
+ */
+export function extractPackagesList(yamlText) {
+  const out = [];
+  let inPackages = false;
+  for (const raw of yamlText.split("\n")) {
+    if (/^packages:\s*$/.test(raw)) {
+      inPackages = true;
+      continue;
+    }
+    if (!inPackages) continue;
+    if (raw.trim() === "") continue; // blank line stays inside the block
+    if (/^\S/.test(raw)) break; // next top-level key ends the block
+    const item = /^\s+-\s+(.+?)\s*$/.exec(raw);
+    if (item) out.push(item[1].replace(/^["']|["']$/g, ""));
+  }
+  return out;
+}
+
+/**
+ * Whether `headList` contains an entry absent from `baseList`.
+ * @param {string[]} baseList
+ * @param {string[]} headList
+ * @returns {boolean}
+ */
+export function hasNewEntry(baseList, headList) {
+  const base = new Set(baseList);
+  return headList.some((entry) => !base.has(entry));
 }
 
 function git(args) {
@@ -85,14 +143,20 @@ function lines(text) {
   return text.split("\n").filter(Boolean);
 }
 
+function readHead(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 function baseExists(base) {
   try {
     execFileSync(
       "git",
       ["rev-parse", "--verify", "--quiet", `${base}^{commit}`],
-      {
-        stdio: "ignore",
-      },
+      { stdio: "ignore" },
     );
     return true;
   } catch {
@@ -100,28 +164,33 @@ function baseExists(base) {
   }
 }
 
-/** Collect the diff facts the pure detector needs. */
+/**
+ * Collect the diff facts the pure detector needs. Added files come from the
+ * base diff only (committed + staged additions) — untracked working-tree files
+ * are deliberately excluded so local scratch files never trigger a reminder.
+ */
 export function collectGitState(base) {
-  const added = new Set([
-    ...lines(git(["diff", "--diff-filter=A", "--name-only", base, "--"])),
-    ...lines(git(["ls-files", "--others", "--exclude-standard"])),
-  ]);
-  const addedFiles = [...added];
+  const addedFiles = lines(
+    git(["diff", "--diff-filter=A", "--name-only", base, "--"]),
+  );
 
-  // A new stack entry shows up as an added object with a "path" key.
-  const stacksDiff = git(["diff", base, "--", "terraform.stacks.json"]);
-  const stacksIsNew = addedFiles.includes("terraform.stacks.json");
-  const stacksAddsNewStack =
-    stacksIsNew ||
-    lines(stacksDiff).some((line) => /^\+.*"path"\s*:/.test(line));
-
-  // A new workspace package shows up as an added `- <glob>` list item.
-  const workspaceDiff = git(["diff", base, "--", "pnpm-workspace.yaml"]);
-  const workspaceAddsPackage = lines(workspaceDiff).some((line) =>
-    /^\+\s*-\s+\S/.test(line),
+  // Compare declared stacks/packages between base and head so only a genuinely
+  // new registration triggers — not a path edit, a reformat, or an unrelated
+  // list section that happens to share YAML `- item` syntax.
+  const stacksAddsNewStack = hasNewEntry(
+    extractStackIds(git(["show", `${base}:terraform.stacks.json`])),
+    extractStackIds(readHead("terraform.stacks.json")),
+  );
+  const workspaceAddsPackage = hasNewEntry(
+    extractPackagesList(git(["show", `${base}:pnpm-workspace.yaml`])),
+    extractPackagesList(readHead("pnpm-workspace.yaml")),
   );
 
   return { addedFiles, stacksAddsNewStack, workspaceAddsPackage };
+}
+
+function printSurfaces(triggers) {
+  for (const t of triggers) console.log(`  • ${t.surface} — ${t.why}`);
 }
 
 function main(argv) {
@@ -141,25 +210,33 @@ function main(argv) {
   }
 
   const state = collectGitState(base);
-  if (adrBeingWritten(state.addedFiles)) {
-    return 0; // A decision is being recorded — quiet.
-  }
-
   const triggers = detectAdrTriggers(state);
   if (triggers.length === 0) {
     return 0; // No architectural trigger — quiet.
   }
 
+  if (adrBeingWritten(state.addedFiles)) {
+    // An ADR is present, so the author is ADR-aware. Still list the surfaces —
+    // a second, uncovered decision must not be silently skipped — but never fail.
+    console.log(
+      "\n[adr-reminder] Architectural surface(s) changed and an ADR is present in this change — confirm each is covered by an ADR:",
+    );
+    printSurfaces(triggers);
+    console.log(
+      "If a surface above is a separate new decision without its own ADR, add one.\n" +
+        "Procedure: docs/pr-checklists/architecture-decisions.md\n",
+    );
+    return 0;
+  }
+
   console.log(
     "\n[adr-reminder] This change touches an architecturally significant surface but adds no ADR:",
   );
-  for (const t of triggers) {
-    console.log(`  • ${t.surface} — ${t.why}`);
-  }
+  printSurfaces(triggers);
   console.log(
     "Does it encode an architectural decision (constrains future work · had a real\n" +
       "alternative · the why is not obvious from the code)? If yes, record it under\n" +
-      'docs/adr/ in this PR. If not, note why on the PR\'s "Architecture decision?" line.\n' +
+      'docs/adr/ in this change. If not, note why on the PR\'s "Architecture decision?" line.\n' +
       "Procedure: docs/pr-checklists/architecture-decisions.md\n",
   );
 
