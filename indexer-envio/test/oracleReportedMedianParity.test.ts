@@ -99,7 +99,7 @@ describe("SortedOracles.OracleReported median parity", () => {
       }),
     );
 
-    const blockNumber = 301;
+    const blockNumber = 60_664_500;
     const logIndex = 6;
     mockDb = await SortedOracles.OracleReported.processEvent({
       event: SortedOracles.OracleReported.createMockEvent({

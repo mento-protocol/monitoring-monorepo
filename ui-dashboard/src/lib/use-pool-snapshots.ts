@@ -24,6 +24,39 @@ function hourlyWindowFrom(range: RangeKey): number | null {
   return null;
 }
 
+function snapshotsAreLoading({
+  snapshots,
+  hourly,
+  useHourlySnapshots,
+  hourlyLoading,
+  dailyLoading,
+}: {
+  snapshots: PoolSnapshot[];
+  hourly: boolean;
+  useHourlySnapshots: boolean;
+  hourlyLoading: boolean;
+  dailyLoading: boolean;
+}) {
+  if (snapshots.length > 0) return false;
+  if (hourly && !useHourlySnapshots) return hourlyLoading || dailyLoading;
+  return dailyLoading;
+}
+
+function snapshotsHaveError({
+  snapshots,
+  hourly,
+  hourlyError,
+  dailyError,
+}: {
+  snapshots: PoolSnapshot[];
+  hourly: boolean;
+  hourlyError: boolean;
+  dailyError: boolean;
+}) {
+  if (snapshots.length > 0) return false;
+  return dailyError || (hourly && hourlyError);
+}
+
 export function usePoolSnapshots(
   poolId: string,
   range: RangeKey,
@@ -37,25 +70,37 @@ export function usePoolSnapshots(
   );
   const dailyVars = useMemo(() => ({ poolId }), [poolId]);
 
-  const { data, error, isLoading } = useGQL<{
-    PoolSnapshot?: PoolSnapshot[];
-    PoolDailySnapshot?: PoolSnapshot[];
-  }>(
-    historySupported
-      ? hourly
-        ? POOL_HOURLY_SNAPSHOTS_CHART
-        : POOL_DAILY_SNAPSHOTS_CHART
-      : null,
-    hourly ? hourlyVars : dailyVars,
+  const hourlyResult = useGQL<{ PoolSnapshot?: PoolSnapshot[] }>(
+    historySupported && hourly ? POOL_HOURLY_SNAPSHOTS_CHART : null,
+    hourlyVars,
+    SNAPSHOT_REFRESH_MS,
+  );
+  const dailyResult = useGQL<{ PoolDailySnapshot?: PoolSnapshot[] }>(
+    historySupported ? POOL_DAILY_SNAPSHOTS_CHART : null,
+    dailyVars,
     SNAPSHOT_REFRESH_MS,
   );
 
+  const hourlySnapshots = hourlyResult.data?.PoolSnapshot ?? [];
+  const dailySnapshots = dailyResult.data?.PoolDailySnapshot ?? [];
+  const useHourlySnapshots = hourly && hourlySnapshots.length > 0;
+  const snapshots = useHourlySnapshots ? hourlySnapshots : dailySnapshots;
+
   return {
-    snapshots:
-      (hourly ? data?.PoolSnapshot : data?.PoolDailySnapshot) ??
-      ([] as PoolSnapshot[]),
-    bucketSeconds: hourly ? SECONDS_PER_HOUR : SECONDS_PER_DAY,
-    isLoading,
-    hasError: error !== undefined,
+    snapshots,
+    bucketSeconds: useHourlySnapshots ? SECONDS_PER_HOUR : SECONDS_PER_DAY,
+    isLoading: snapshotsAreLoading({
+      snapshots,
+      hourly,
+      useHourlySnapshots,
+      hourlyLoading: hourlyResult.isLoading,
+      dailyLoading: dailyResult.isLoading,
+    }),
+    hasError: snapshotsHaveError({
+      snapshots,
+      hourly,
+      hourlyError: hourlyResult.error !== undefined,
+      dailyError: dailyResult.error !== undefined,
+    }),
   };
 }

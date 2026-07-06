@@ -863,7 +863,7 @@ describe("Pool detail tab search", () => {
     );
   });
 
-  it("uses hourly snapshots for TVL short ranges and daily snapshots for all-time", () => {
+  it("uses hourly snapshots plus daily fallback for TVL short ranges and daily snapshots for all-time", () => {
     const container = renderInteractive();
 
     useGQLMock.mockClear();
@@ -875,6 +875,11 @@ describe("Pool detail tab search", () => {
       { poolId: "pool-1", from: expect.any(Number) },
       SNAPSHOT_REFRESH_MS,
     );
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_DAILY_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
 
     useGQLMock.mockClear();
     act(() => {
@@ -883,6 +888,11 @@ describe("Pool detail tab search", () => {
     expect(useGQLMock).toHaveBeenCalledWith(
       POOL_HOURLY_SNAPSHOTS_CHART,
       { poolId: "pool-1", from: expect.any(Number) },
+      SNAPSHOT_REFRESH_MS,
+    );
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_DAILY_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
       SNAPSHOT_REFRESH_MS,
     );
 
@@ -897,7 +907,7 @@ describe("Pool detail tab search", () => {
     );
   });
 
-  it("uses hourly snapshots for volume 1M and daily snapshots for 3M/all", () => {
+  it("uses hourly snapshots plus daily fallback for volume 1M and daily snapshots for 3M/all", () => {
     const container = renderInteractive();
 
     useGQLMock.mockClear();
@@ -907,6 +917,11 @@ describe("Pool detail tab search", () => {
     expect(useGQLMock).toHaveBeenCalledWith(
       POOL_HOURLY_SNAPSHOTS_CHART,
       { poolId: "pool-1", from: expect.any(Number) },
+      SNAPSHOT_REFRESH_MS,
+    );
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_DAILY_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
       SNAPSHOT_REFRESH_MS,
     );
 
