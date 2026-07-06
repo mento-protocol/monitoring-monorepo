@@ -189,6 +189,10 @@ export function BreachHistoryChart({ breaches }: Props) {
 
   return (
     <>
+      {/* role="img" sits on the card here (not a bare plot wrapper) because this
+          chart has no visible <h3> and no interactive controls — the whole card
+          is the image. Charts that have an <h3> scope role="img" to the plot so
+          the heading stays in the a11y tree. */}
       <div
         role="img"
         aria-label="Deviation breach history chart"

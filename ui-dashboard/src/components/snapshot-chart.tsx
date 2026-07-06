@@ -184,7 +184,8 @@ export function SnapshotChart({
     yaxis: "y2" as const,
   };
 
-  const lastCumSwaps = cumSwaps.length > 0 ? cumSwaps[cumSwaps.length - 1]! : 0;
+  const lastCumSwaps =
+    cumSwaps.length > 0 ? (cumSwaps[cumSwaps.length - 1] ?? 0) : 0;
   const swapVolumeSummary = `Daily swap volume for ${token0Symbol} and ${token1Symbol}: ${
     days.length
   } days plotted, ${lastCumSwaps.toLocaleString()} cumulative swaps.`;

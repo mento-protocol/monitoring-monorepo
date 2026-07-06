@@ -544,6 +544,20 @@ function useOracleChartModel({
   return { traceData, layout };
 }
 
+function oracleAltText(
+  sym0: string,
+  sym1: string,
+  sampleCount: number,
+  bandsAvailable: boolean,
+): string {
+  const samples = `${sampleCount} price sample${sampleCount === 1 ? "" : "s"}`;
+  return `Oracle price versus breaker band for ${sym0}/${sym1}: ${samples} plotted${
+    bandsAvailable
+      ? ", colored by whether each sample sat inside its breaker band"
+      : "; breaker band data is currently unavailable"
+  }.`;
+}
+
 export function OracleChart({
   snapshots,
   token0Symbol = "Token 0",
@@ -619,9 +633,12 @@ export function OracleChart({
     (s) => s.breakerBaselineAtSnapshot != null,
   );
 
-  const oracleSummary = `Oracle price versus breaker band for ${token0Symbol}/${token1Symbol}: ${snapshots.length} price sample${
-    snapshots.length === 1 ? "" : "s"
-  } plotted, colored by whether each sample sat inside its breaker band.`;
+  const oracleSummary = oracleAltText(
+    token0Symbol,
+    token1Symbol,
+    snapshots.length,
+    hasPersistedBands || breakerConfigStatus === "ready",
+  );
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">

@@ -2,7 +2,6 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { formatUSD } from "@/lib/format";
 import {
   escapePlotText,
   PLOTLY_BASE_LAYOUT,
@@ -438,16 +437,16 @@ export function TimeSeriesChartCard({
   const showEmptyState = !isLoading && series.length === 0;
 
   // Accessible name + non-visual summary for the chart (WCAG 1.1.1). Both are
-  // derived from live props (title + active range + latest plotted value +
-  // week-over-week change) so they can never drift from the rendered series.
-  // `formatUSD` matches the dollar-denominated headline every consumer of this
-  // card uses (TVL / volume / bridged volume). `role="img"` on the plot
-  // container turns the SVG internals presentational; the concise `aria-label`
-  // names the chart and the sr-only sibling below carries the data summary.
+  // derived from live props (title + active range + week-over-week change) so
+  // they can never drift from the rendered series. The summary deliberately
+  // does NOT restate a specific value: consumers denominate their headline
+  // differently (dollar range-totals, per-day latest, token amounts), so a
+  // single formatter here would mislabel some of them — the trend direction +
+  // range is the always-accurate signal. `role="img"` on the plot container
+  // turns the SVG internals presentational; the concise `aria-label` names the
+  // chart and the sr-only sibling below carries the summary.
   const activeRangeLabel =
     ranges.find((item) => item.key === range)?.label ?? String(range);
-  const latestValue =
-    series.length > 0 ? series[series.length - 1]!.value : null;
   const changeSummary =
     change === null || isLoading || hasError
       ? ""
@@ -457,11 +456,9 @@ export function TimeSeriesChartCard({
   const chartAriaLabel = `${title} chart, ${activeRangeLabel} range`;
   const chartSummary = isLoading
     ? `${title} chart is loading.`
-    : latestValue === null
+    : series.length === 0
       ? `${title} chart: ${emptyMessage}`
-      : `${title}: latest value ${formatUSD(
-          latestValue,
-        )} over the ${activeRangeLabel} range${changeSummary}.`;
+      : `${title} chart over the ${activeRangeLabel} range${changeSummary}.`;
 
   return (
     <section
