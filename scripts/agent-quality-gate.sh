@@ -1611,11 +1611,18 @@ while IFS= read -r path; do
       add_workspace_quality_commands "Node version changed"
       ;;
     */package.json)
-      # A top-level package.json not handled by an earlier package route is a
+      # A TOP-LEVEL package.json not handled by an earlier package route is a
       # new standalone service root (governance-watchdog-style: package.json but
-      # possibly no AGENTS.md). The reminder self-suppresses on an edit to an
-      # existing package.json, so this only nags on a genuinely new service.
-      add_adr_reminder "top-level package.json changed — ADR reminder (a new package/service likely needs an ADR)"
+      # possibly no AGENTS.md). Restrict to a single path segment — a nested
+      # `pkg/sub/package.json` is a workspace member covered by the
+      # pnpm-workspace.yaml route, not a new top-level service. The reminder
+      # self-suppresses on an edit to an existing package.json anyway.
+      case "$path" in
+        */*/*) ;;
+        *)
+          add_adr_reminder "top-level package.json changed — ADR reminder (a new package/service likely needs an ADR)"
+          ;;
+      esac
       ;;
   esac
 done < "$changed_paths_file"
