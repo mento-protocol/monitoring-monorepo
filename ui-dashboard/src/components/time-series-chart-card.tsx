@@ -295,8 +295,9 @@ export function TimeSeriesChartCard({
             }),
       };
     });
-    // Pull y-min toward 0 when a breakdown is present so smaller chains
-    // don't get clipped off the bottom edge by the total-tight range.
+    // Fold every breakdown series into the y-range inputs (`allYs` below)
+    // so `ymin` is data-driven and covers all chains — the tight, non-zero
+    // floor then can't clip a small chain off the bottom edge.
     const breakdownYs = (breakdown ?? []).flatMap((b) =>
       b.series.map((p) => p.value),
     );
