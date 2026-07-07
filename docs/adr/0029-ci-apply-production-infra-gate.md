@@ -29,8 +29,11 @@ branch restricted to protected `main`). PR runs do **read-only plans** under a
 read-only plan service account. Secret-bearing PR plan workflows also export
 validation-safe placeholder `TF_VAR_*` values instead of production secrets; the
 push/dispatch plan and environment-gated apply paths keep real secrets and
-re-plan before any production mutation. The `platform` stack stays
-manual-plan/manual-apply.
+re-plan before any production mutation. The `alerts-delivery` PR plan is
+targeted to `terraform_data.pr_plan_secretless_guard` because its
+Sentry/Slack/QuickNode/GitHub provider graph performs authenticated plan-time
+checks that cannot run with dummy credentials; push/dispatch and apply paths run
+the full graph. The `platform` stack stays manual-plan/manual-apply.
 Routine service deploys use a separate `production-services` environment that records
 history but doesn't require manual approval.
 

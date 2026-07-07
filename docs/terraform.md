@@ -75,13 +75,15 @@ For secret-bearing plan workflows (`alerts-infra.yml`, `aegis-terraform.yml`,
 and `governance-watchdog.yml`), same-repo PR plans intentionally receive
 validation-safe placeholder `TF_VAR_*` values instead of production secrets.
 push/workflow_dispatch plans and environment-gated apply jobs keep the real
-secrets and are the authoritative plan before production mutation. This means
-PR plans verify Terraform shape and config diffs without exposing the GitHub
-Secrets PAT, Grafana token, notification webhooks, or vendor API keys to a PR
-that can edit the workflow or Terraform code. Some secret-backed resources may
-show placeholder drift in PR comments; reviewers should treat the main-branch
-re-plan behind `production-infra` as the source of truth for secret value
-changes.
+secrets and are the authoritative plan before production mutation. The Aegis
+and governance-watchdog PR plans verify Terraform shape and config diffs with
+placeholders. The alerts-delivery PR plan is narrower by design: it runs
+init/validate plus a targeted plan for
+`terraform_data.pr_plan_secretless_guard`, because the stack's Sentry, Slack,
+QuickNode, and GitHub resources perform authenticated plan-time checks that
+cannot run with dummy credentials. Reviewers should treat the main-branch
+re-plan behind `production-infra` as the source of truth for alerts-delivery
+full-stack diffs and all secret value changes.
 
 Routine service deploy workflows use the separate `production-services` GitHub
 Environment. That environment records deploy history and scopes production
