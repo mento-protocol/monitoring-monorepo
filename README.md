@@ -50,7 +50,7 @@ Celo Mainnet (42220), Monad Mainnet (143), and Ethereum reserve-yield events (1)
 
 ### Prerequisites
 
-- Node.js 22 LTS
+- Node.js 24 LTS
 - [pnpm](https://pnpm.io/) 11.x
 - Docker (for local indexer dev — runs Postgres + Hasura)
 

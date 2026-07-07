@@ -28,7 +28,7 @@
     "@eslint/js": "^10.0.1",
     "@stryker-mutator/core": "9.6.1",
     "@stryker-mutator/vitest-runner": "9.6.1",
-    "@types/node": "^22.19.13",
+    "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^10.0.2",
     "eslint-plugin-sonarjs": "4.0.3",
@@ -42,6 +42,6 @@
     "vitest": "^4.1.0"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   }
 }
