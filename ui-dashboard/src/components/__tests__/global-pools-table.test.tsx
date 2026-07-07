@@ -263,6 +263,75 @@ describe("GlobalPoolsTable — column structure", () => {
   });
 });
 
+describe("GlobalPoolsTable — inactive Virtual pools", () => {
+  const VIRTUAL_NETWORK: Network = {
+    ...CELO_NETWORK,
+    hasVirtualPools: true,
+  };
+
+  function inactiveVirtualEntry(id: string): GlobalPoolEntry {
+    return makeEntry(
+      {
+        id,
+        source: "virtual_pool_factory",
+        wrappedExchangeId: `exchange-${id}`,
+        swapCount: 0,
+        rebalanceCount: 0,
+        reserves0: "0",
+        reserves1: "0",
+        notionalVolume0: "0",
+        notionalVolume1: "0",
+        lpFee: undefined,
+        protocolFee: undefined,
+        healthTotalSeconds: undefined,
+        healthBinarySeconds: undefined,
+      },
+      VIRTUAL_NETWORK,
+    );
+  }
+
+  it("collapses empty Virtual rows into a single expandable row by default", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          inactiveVirtualEntry("inactive-1"),
+          inactiveVirtualEntry("inactive-2"),
+        ]}
+      />,
+    );
+
+    expect(html).toContain("2 inactive Virtual pools");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("/pool/inactive-1");
+    expect(html).not.toContain("/pool/inactive-2");
+  });
+
+  it("keeps Virtual rows visible when they have activity signal", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          inactiveVirtualEntry("inactive-1"),
+          makeEntry(
+            {
+              id: "active-virtual",
+              source: "virtual_pool_factory",
+              wrappedExchangeId: "exchange-active",
+              swapCount: 1,
+              notionalVolume0: "100",
+              notionalVolume1: "100",
+            },
+            VIRTUAL_NETWORK,
+          ),
+        ]}
+      />,
+    );
+
+    expect(html).toContain("1 inactive Virtual pool");
+    expect(html).toContain("/pool/active-virtual");
+    expect(html).not.toContain("/pool/inactive-1");
+  });
+});
+
 describe("GlobalPoolsTable — Reserves column", () => {
   it("renders compact reserve percentages when reserves can be valued", () => {
     const html = renderToStaticMarkup(

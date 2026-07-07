@@ -143,6 +143,56 @@ describe("GlobalPage — all networks succeed", () => {
     expect(html).not.toContain("partial data");
   });
 
+  it("renders protocol health above the trend charts", () => {
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [
+          makeTvlPool({
+            id: "critical-pool",
+            oracleTimestamp: "4102444800",
+            oracleExpiry: "3600",
+            oracleOk: true,
+            priceDifference: "300",
+            rebalanceThreshold: 100,
+            rebalanceThresholdAbove: 100,
+            rebalanceThresholdBelow: 100,
+            rebalanceThresholdsKnown: true,
+            deviationBreachStartedAt: "1",
+            hasHealthData: true,
+            limitStatus: "OK",
+          }),
+          makeTvlPool({
+            id: "warn-pool",
+            oracleTimestamp: "4102444800",
+            oracleExpiry: "3600",
+            oracleOk: true,
+            priceDifference: "120",
+            rebalanceThreshold: 100,
+            rebalanceThresholdAbove: 100,
+            rebalanceThresholdBelow: 100,
+            rebalanceThresholdsKnown: true,
+            deviationBreachStartedAt: "4102444700",
+            hasHealthData: true,
+            limitStatus: "OK",
+          }),
+        ],
+      }),
+    ]);
+
+    expect(html.indexOf("Protocol status")).toBeLessThan(
+      html.indexOf("Total Value Locked"),
+    );
+    expect(html).toContain("1 pool needs immediate attention");
+    expect(html).toContain("Critical pools");
+    expect(html).toContain("Warn pools");
+    expect(html).toContain("Worst deviation");
+    expect(html).toContain("Rebalance watch");
+    expect(html).toContain("3.00%");
+    expect(html).toContain("300% of threshold");
+    expect(html).toContain("Pools above tolerance before escalation");
+  });
+
   it("shows fees when fees succeed on all networks", () => {
     const html = render([
       makeNetworkData({
@@ -559,7 +609,7 @@ describe("GlobalPage — TVL delta sub-KPIs", () => {
     ]);
     // Should not show any percentage, but should show TVL value
     expect(html).toContain("Total Value Locked");
-    expect(html).not.toContain("%");
+    expect(html).not.toContain("week-over-week");
   });
 
   it("shows negative percentage for TVL decrease", () => {

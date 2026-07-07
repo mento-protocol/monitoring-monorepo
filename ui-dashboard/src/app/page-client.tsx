@@ -20,6 +20,8 @@ import {
   buildDailyVolumeSeries,
 } from "@/components/volume-over-time-chart";
 import { BreakdownTile } from "@/components/breakdown-tile";
+import { ProtocolStatusBand } from "./_components/protocol-status-band";
+import { summarizeProtocolStatus } from "./_lib/protocol-status";
 import { useGQL } from "@/lib/graphql";
 import {
   VOLUME_TODAY_TRADERS,
@@ -309,6 +311,14 @@ function GlobalContent({
   const failedNetworks = networkData.filter((net) => net.error !== null);
   const hasGlobalPools = globalEntries.length > 0;
   const shouldShowEmptyPools = failedNetworks.length === 0 && !hasGlobalPools;
+  const protocolStatus = useMemo(
+    () =>
+      summarizeProtocolStatus({
+        entries: globalEntries,
+        failedNetworkCount: failedNetworks.length,
+      }),
+    [globalEntries, failedNetworks.length],
+  );
 
   const feesApprox =
     aggregated.unpricedSymbols.length > 0 ||
@@ -323,6 +333,8 @@ function GlobalContent({
           Protocol-wide statistics across all chains
         </p>
       </div>
+
+      <ProtocolStatusBand summary={protocolStatus} isLoading={isLoading} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <TvlOverTimeChart

@@ -2,6 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 
 const CELO_POOL_ID = "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
 const MONAD_POOL_ID = "143-0xb0a0264ce6847f101b76ba36a4a3083ba489f501";
+const INACTIVE_VIRTUAL_POOL_IDS = [
+  "42220-0x0000000000000000000000000000000000000101",
+  "42220-0x0000000000000000000000000000000000000102",
+];
 
 function escapedPoolId(poolId: string): RegExp {
   return new RegExp(`/pool/${poolId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
@@ -184,6 +188,43 @@ test.describe("dashboard browser flows", () => {
         }
       }
     }
+  });
+
+  test("keeps homepage health status above the fold and collapses inactive Virtual pools", async ({
+    page,
+  }) => {
+    for (const width of [1440, 375]) {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- viewport-dependent browser acceptance checks must run sequentially against the same page.
+      await page.setViewportSize({ width, height: 900 });
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- see sequential viewport note above.
+      await page.goto("/");
+
+      const statusBand = page.locator('[aria-label="Protocol status"]');
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- assertions target the current viewport iteration.
+      await expect(statusBand).toBeInViewport();
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- assertions target the current viewport iteration.
+      await expect(statusBand.getByText("Critical pools")).toBeVisible();
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- assertions target the current viewport iteration.
+      await expect(statusBand.getByText("Worst deviation")).toBeVisible();
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- assertions target the current viewport iteration.
+      await expect(statusBand.getByText("Rebalance watch")).toBeVisible();
+    }
+
+    const inactiveRow = page.getByRole("row", {
+      name: /2 inactive Virtual pools/,
+    });
+    await expect(inactiveRow).toBeVisible();
+    await expect(
+      page.locator(`a[href="/pool/${INACTIVE_VIRTUAL_POOL_IDS[0]}"]`),
+    ).toHaveCount(0);
+
+    await inactiveRow
+      .getByRole("button", { name: "Show 2 inactive Virtual pools" })
+      .click();
+
+    await expect(
+      page.locator(`a[href="/pool/${INACTIVE_VIRTUAL_POOL_IDS[0]}"]`),
+    ).toBeVisible();
   });
 
   test("renders CDP detail trove ranking with indexed ICR and interest", async ({

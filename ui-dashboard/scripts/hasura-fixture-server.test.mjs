@@ -4,10 +4,15 @@ import { handleGraphQL } from "../tests/browser/fixtures/hasura-fixture-server.m
 const DAY_SECONDS = 86_400;
 const QUERY =
   "query HomepageOgDailySnapshots { PoolDailySnapshot { timestamp } }";
+const POOLS_QUERY = "query PoolsForVolume { Pool { id } }";
 const FIXED_NOW_MS = Date.UTC(2026, 5, 16, 12, 0, 0);
 
 function dailyRows(variables) {
   return handleGraphQL({ query: QUERY, variables }).PoolDailySnapshot;
+}
+
+function fixturePoolCount() {
+  return handleGraphQL({ query: POOLS_QUERY }).Pool.length;
 }
 
 describe("hasura fixture daily snapshot filters", () => {
@@ -29,7 +34,7 @@ describe("hasura fixture daily snapshot filters", () => {
       since: todayStart - 1,
     });
 
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(fixturePoolCount());
     expect(rows.every((row) => Number(row.timestamp) === todayStart)).toBe(
       true,
     );
@@ -45,6 +50,6 @@ describe("hasura fixture daily snapshot filters", () => {
       since: todayStart - 1,
     });
 
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(fixturePoolCount() * 3);
   });
 });

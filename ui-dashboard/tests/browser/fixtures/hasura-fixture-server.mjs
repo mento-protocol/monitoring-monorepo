@@ -21,6 +21,8 @@ const ADDRESSES = {
   celoBrlm: "0x0000000000000000000000000000000000000b71",
   celoTroveManagerGbpm: "0xb38aef2bf4e34b997330d626ebcd7629de3885c9",
   celoStabilityPoolGbpm: "0x2d5d7e2767c5493610cae84e0ab7f9d2cce8c1a5",
+  celoInactiveVirtualPoolA: "42220-0x0000000000000000000000000000000000000101",
+  celoInactiveVirtualPoolB: "42220-0x0000000000000000000000000000000000000102",
   monadAusd: "0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
   monadUsdm: "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
   lp: "0x1111111111111111111111111111111111111111",
@@ -99,6 +101,64 @@ function poolFixture({
   };
 }
 
+function inactiveVirtualPoolFixture(id, index) {
+  const now = nowSeconds();
+  return {
+    id,
+    chainId: 42220,
+    token0: ADDRESSES.celoUsdm,
+    token1: ADDRESSES.celoUsdc,
+    token0Decimals: 18,
+    token1Decimals: 6,
+    tokenDecimalsKnown: true,
+    source: "virtual_pool_factory",
+    wrappedExchangeId: `fixture-vp-${index}`,
+    wrappedExchangeDeprecated: false,
+    wrappedExchangeMinimumReports: "1",
+    createdAtBlock: "1000",
+    createdAtTimestamp: String(now - 90 * DAY_SECONDS),
+    updatedAtBlock: "1500",
+    updatedAtTimestamp: String(now - 60),
+    healthStatus: "N/A",
+    oracleOk: true,
+    oraclePrice: FIXED_1,
+    oracleTimestamp: String(now - 60),
+    lastOracleReportAt: String(now - 60),
+    medianLive: true,
+    oracleTxHash:
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    oracleExpiry: "3600",
+    oracleFreshnessWindow: "3600",
+    oracleNumReporters: 1,
+    referenceRateFeedID: "",
+    priceDifference: "0",
+    degenerateReserves: false,
+    rebalanceThreshold: 100,
+    rebalanceThresholdAbove: 100,
+    rebalanceThresholdBelow: 100,
+    rebalanceThresholdsKnown: true,
+    lastRebalancedAt: "0",
+    deviationBreachStartedAt: null,
+    lpFee: undefined,
+    protocolFee: undefined,
+    rebalanceReward: 0,
+    limitStatus: "N/A",
+    limitPressure0: "0",
+    limitPressure1: "0",
+    rebalancerAddress: "",
+    reserves0: "0",
+    reserves1: "0",
+    swapCount: 0,
+    rebalanceCount: 0,
+    notionalVolume0: "0",
+    notionalVolume1: "0",
+    healthTotalSeconds: undefined,
+    healthBinarySeconds: undefined,
+    hasHealthData: true,
+    breachCount: 0,
+  };
+}
+
 const pools = [
   poolFixture({
     id: ADDRESSES.celoPool,
@@ -124,6 +184,8 @@ const pools = [
     notionalVolume0: "750000000000000000000",
     notionalVolume1: "750000000000000000000",
   }),
+  inactiveVirtualPoolFixture(ADDRESSES.celoInactiveVirtualPoolA, 0),
+  inactiveVirtualPoolFixture(ADDRESSES.celoInactiveVirtualPoolB, 1),
 ];
 
 const poolsById = new Map(pools.map((pool) => [pool.id, pool]));
@@ -325,28 +387,36 @@ function dailySnapshotsFor(poolId) {
   const pool = poolsById.get(poolId);
   if (!pool) return [];
   const todayStart = Math.floor(nowSeconds() / DAY_SECONDS) * DAY_SECONDS;
+  const hasActivity = (pool.swapCount ?? 0) > 0;
   return [0, 1, 2].map((daysAgo) => ({
     id: `${poolId}-${todayStart - daysAgo * DAY_SECONDS}`,
     poolId,
     timestamp: String(todayStart - daysAgo * DAY_SECONDS),
     reserves0: pool.reserves0,
     reserves1: pool.reserves1,
-    swapCount: daysAgo === 0 ? 1 : 2,
-    swapVolume0:
-      daysAgo === 0 ? "25000000000000000000" : "50000000000000000000",
-    swapVolume1:
-      pool.token1Decimals === 6
+    swapCount: hasActivity ? (daysAgo === 0 ? 1 : 2) : 0,
+    swapVolume0: hasActivity
+      ? daysAgo === 0
+        ? "25000000000000000000"
+        : "50000000000000000000"
+      : "0",
+    swapVolume1: hasActivity
+      ? pool.token1Decimals === 6
         ? daysAgo === 0
           ? "25000000"
           : "50000000"
         : daysAgo === 0
           ? "25000000000000000000"
-          : "50000000000000000000",
+          : "50000000000000000000"
+      : "0",
     rebalanceCount: 0,
-    cumulativeSwapCount: 3 - daysAgo,
-    cumulativeVolume0: "125000000000000000000",
-    cumulativeVolume1:
-      pool.token1Decimals === 6 ? "125000000" : "125000000000000000000",
+    cumulativeSwapCount: hasActivity ? 3 - daysAgo : 0,
+    cumulativeVolume0: hasActivity ? "125000000000000000000" : "0",
+    cumulativeVolume1: hasActivity
+      ? pool.token1Decimals === 6
+        ? "125000000"
+        : "125000000000000000000"
+      : "0",
     blockNumber: String(2000 - daysAgo),
   }));
 }
