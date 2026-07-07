@@ -16,6 +16,7 @@ import {
   uptimeTierGlyph,
 } from "@/lib/health";
 import { combinedTooltip } from "@/lib/pool-table-utils";
+import { Tooltip } from "@/components/tooltip";
 import { buildPoolDetailHref } from "@/lib/routing";
 import {
   formatFee,
