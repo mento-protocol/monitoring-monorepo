@@ -32,6 +32,7 @@ import {
   ORACLE_SNAPSHOTS_COUNT_PAGE,
   POOL_BREAKER_CONFIG,
 } from "@/lib/queries";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
 import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
@@ -342,8 +343,9 @@ export function OracleTab(props: OracleTabProps) {
     return <EmptyBox message="VirtualPool — no oracle data available." />;
   }
 
-  if (error) return <ErrorBox message={error.message} />;
-  if (isLoading) return <Skeleton rows={5} />;
+  if (hasErrorWithoutData(error, data))
+    return <ErrorBox message={error.message} />;
+  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={5} />;
   if (rows.length === 0)
     return (
       <EmptyBox message="No oracle snapshots yet. Oracle data is captured on pool activity (swaps, rebalances)." />

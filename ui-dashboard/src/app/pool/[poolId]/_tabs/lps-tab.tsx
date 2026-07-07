@@ -12,6 +12,7 @@ import { formatTimestamp, parseWei, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { sortedCopy } from "@/lib/immutable-sort";
 import { POOL_LP_POSITIONS } from "@/lib/queries";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import { normalizeSearch } from "@/lib/table-search";
 import { isFpmm, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import type { LiquidityPosition, Pool } from "@/lib/types";
@@ -111,7 +112,7 @@ export function LpsTab({
       <EmptyBox message="LP provider data is only available for FPMM pools." />
     );
   }
-  if (indexedError) {
+  if (hasErrorWithoutData(indexedError, indexedData)) {
     if (isLiquidityPositionSchemaError(indexedError)) {
       return (
         <EmptyBox message="LP provider data is unavailable until this environment is reindexed with the LiquidityPosition schema." />
@@ -119,7 +120,8 @@ export function LpsTab({
     }
     return <ErrorBox message={indexedError.message} />;
   }
-  if (indexedLoading) return <Skeleton rows={5} />;
+  if (isLoadingWithoutData(indexedLoading, indexedData))
+    return <Skeleton rows={5} />;
   if (positions.length === 0)
     return <EmptyBox message="No active LP positions for this pool." />;
 

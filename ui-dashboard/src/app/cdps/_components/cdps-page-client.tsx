@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useGQL } from "@/lib/graphql";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
   ALL_CDP_STABILITY_POOL_EVENTS,
   ALL_CDP_TRANSACTIONS,
@@ -161,8 +162,8 @@ export function CdpsPageClient() {
     );
   }
 
-  if (isLoading) return <Skeleton rows={6} />;
-  if (error) {
+  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={6} />;
+  if (hasErrorWithoutData(error, data)) {
     return (
       <ErrorBox message={`Failed to load CDP markets — ${error.message}`} />
     );

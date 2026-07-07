@@ -3,6 +3,7 @@
 import { Stat } from "@/components/stat";
 import { useNetwork } from "@/components/network-provider";
 import { useGQL } from "@/lib/graphql";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import { formatTimestamp, relativeTime, truncateAddress } from "@/lib/format";
 import { VIRTUAL_POOL_LIFECYCLE } from "@/lib/queries";
 import type { Pool, VirtualPoolLifecycle } from "@/lib/types";
@@ -18,21 +19,22 @@ export function PoolLifecyclePanel({ pool }: { pool: Pool }) {
     VirtualPoolLifecycle: VirtualPoolLifecycle[];
   }>(VIRTUAL_POOL_LIFECYCLE, { poolId: pool.id });
 
-  if (isLoading) {
+  const rows = data?.VirtualPoolLifecycle ?? [];
+
+  if (isLoadingWithoutData(isLoading, data)) {
     return <div className="h-12 animate-pulse rounded-md bg-slate-800/40" />;
   }
   // Surface fetch failure explicitly. Without this, a Hasura schema lag /
   // transient outage collapses to `rows = []` and the whole lifecycle
   // section disappears as if the pool had no records — operators can't
   // tell "no data yet" from "fetch failed."
-  if (error) {
+  if (hasErrorWithoutData(error, data)) {
     return (
       <p className="text-sm text-slate-500">
         Lifecycle unavailable: {error.message}
       </p>
     );
   }
-  const rows = data?.VirtualPoolLifecycle ?? [];
   const deployed = rows.find((r) => r.action === "DEPLOYED");
   const deprecated = rows.find((r) => r.action === "DEPRECATED");
 
