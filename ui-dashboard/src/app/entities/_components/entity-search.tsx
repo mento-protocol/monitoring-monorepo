@@ -164,7 +164,7 @@ function EntityPager({
 }) {
   if (totalPages <= 1) return null;
   const btn =
-    "rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-muted hover:border-indigo-500 hover:text-indigo-400";
+    "rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-400 hover:border-indigo-500 hover:text-indigo-400";
   return (
     <div className="mt-4 flex items-center justify-between">
       <span className="text-xs text-muted">
