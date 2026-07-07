@@ -5,6 +5,7 @@ import { poolName } from "@/lib/tokens";
 import { type Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { Row } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { SourceBadge, HealthBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
 import {
@@ -167,10 +168,9 @@ function SourceCell({ pool }: { pool: Pool }) {
 function HealthCell({ status, details }: { status: string; details: string }) {
   return (
     <Cell className="">
-      <span title={details} className="inline-flex cursor-help">
+      <Tooltip content={details} label={`Pool health diagnostics: ${details}`}>
         <HealthBadge status={status} />
-        <span className="sr-only">{details}</span>
-      </span>
+      </Tooltip>
     </Cell>
   );
 }

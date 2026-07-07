@@ -182,13 +182,17 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).not.toContain(">Chain</button>");
   });
 
-  it("does not make health badges dead tab stops", () => {
+  it("renders health diagnostics through the accessible tooltip trigger", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).not.toMatch(/<button[^>]*title="[^"]*Oracle/);
-    expect(html).toContain("sr-only");
+    expect(html).toMatch(
+      /<button[^>]*aria-label="Pool health diagnostics: Oracle stale/,
+    );
+    expect(html).toMatch(/<button[^>]*aria-describedby="[^"]+"/);
+    expect(html).toContain('role="tooltip"');
     expect(html).toContain("Oracle stale — last update expired");
+    expect(html).not.toMatch(/title="[^"]*Oracle stale/);
   });
 
   it("uses VP median/quorum tooltip copy for critical VirtualPool incidents", () => {
