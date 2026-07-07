@@ -27,9 +27,9 @@ Treat context as part of the product with a two-tier **authority model**:
 **canonical** context (AGENTS.md files, SPEC.md, PR checklists, deployment docs,
 skills/roles) is current operating truth; **non-canonical** context (PLANs, notes,
 archived docs, backlog) is history that must be re-verified before acting. Managed
-files carry YAML frontmatter (`title`, `status`, `owner`, `canonical`,
-`last_verified`), and `pnpm agent:context-check` enforces the contract, including a
-90-day staleness window on canonical files.
+files carry metadata (`title`, `status`, `owner`, `canonical`, `last_verified`),
+and `pnpm agent:context-check` enforces the contract, including a 90-day
+staleness window on canonical files.
 
 ## Alternatives considered
 
@@ -44,6 +44,8 @@ files carry YAML frontmatter (`title`, `status`, `owner`, `canonical`,
   enrollment is the "is this still true?" enforcement.
 - New canonical files are auto-discovered by `canonical: true` frontmatter in the
   discovery roots (root/nested `AGENTS.md`, `SPEC.md`, `docs/**`, `.agents/**`).
+  Root `README.md` uses the same metadata keys in a hidden `agent-context`
+  comment so the GitHub landing page does not render YAML frontmatter.
 - Root `AGENTS.md` is kept lean; detail lives in the most specific owning file.
 
 ## Evidence

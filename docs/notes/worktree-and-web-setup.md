@@ -2,6 +2,7 @@
 title: New Worktree / Clone Setup and Claude Code on the Web Setup
 status: active
 owner: eng
+canonical: true
 last_verified: 2026-07-06
 ---
 

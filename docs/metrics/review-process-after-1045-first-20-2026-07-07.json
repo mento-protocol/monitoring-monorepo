@@ -1,0 +1,953 @@
+{
+  "schemaVersion": 1,
+  "repo": "mento-protocol/monitoring-monorepo",
+  "collectedAt": "2026-07-07T04:52:11.107Z",
+  "cohort": {
+    "mode": "after-pr",
+    "beforePr": null,
+    "afterPr": {
+      "mergedAt": "2026-07-03T17:40:00Z",
+      "number": 1045,
+      "title": "Harden Claude workflow trigger scope",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1045"
+    },
+    "limit": 20,
+    "pullRequestNumbers": [
+      1065, 1069, 1068, 1082, 1072, 1075, 1077, 1078, 1086, 1074, 1080, 1085,
+      1076, 1087, 1088, 1091, 1084, 1092, 1090, 1093
+    ]
+  },
+  "summary": {
+    "pullRequests": 20,
+    "medianDurationHours": 1.27,
+    "medianCommitsAfterFirstReview": 1,
+    "totals": {
+      "comments": 60,
+      "inlineReviewRoots": 51,
+      "inlineReviewReplies": 51,
+      "inlineRootsWithoutReplies": 0,
+      "humanReviewRequests": 1,
+      "candidateFindings": 67,
+      "codexUsageLimitComments": 3,
+      "codexApprovalComments": 1,
+      "claudeSummaryComments": 16
+    }
+  },
+  "pullRequests": [
+    {
+      "number": 1065,
+      "title": "docs: document workflow docs drift checks",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1065",
+      "createdAt": "2026-07-03T17:45:09Z",
+      "mergedAt": "2026-07-03T17:47:44Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 0.04,
+      "changedFiles": 1,
+      "additions": 13,
+      "deletions": 0,
+      "commits": 1,
+      "commitsAfterFirstReview": 0,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 1,
+        "codexUsageLimitComments": 1,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1069,
+      "title": "docs: re-verify SPEC.md against current reality",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1069",
+      "createdAt": "2026-07-03T18:08:23Z",
+      "mergedAt": "2026-07-03T18:10:59Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 0.04,
+      "changedFiles": 5,
+      "additions": 199,
+      "deletions": 176,
+      "commits": 3,
+      "commitsAfterFirstReview": 0,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 1,
+        "codexUsageLimitComments": 1,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1068,
+      "title": "Add review process metrics baseline",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1068",
+      "createdAt": "2026-07-03T17:56:59Z",
+      "mergedAt": "2026-07-03T18:12:10Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 0.25,
+      "changedFiles": 7,
+      "additions": 1693,
+      "deletions": 0,
+      "commits": 3,
+      "commitsAfterFirstReview": 2,
+      "reviews": {
+        "submissions": 9,
+        "byBots": 4,
+        "byHumans": 5
+      },
+      "comments": {
+        "topLevel": 4,
+        "reviewInlineRoots": 5,
+        "reviewInlineReplies": 5,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 2,
+        "inlineReviewBotRoots": 5,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 5,
+        "candidateFindings": 6,
+        "codexComments": 1,
+        "codexUsageLimitComments": 1,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1082,
+      "title": "fix(ci): skip Lighthouse when Vercel cancels the build via its Ignored Build Step",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1082",
+      "createdAt": "2026-07-05T14:35:25Z",
+      "mergedAt": "2026-07-05T14:53:44Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 0.31,
+      "changedFiles": 1,
+      "additions": 117,
+      "deletions": 0,
+      "commits": 4,
+      "commitsAfterFirstReview": 3,
+      "reviews": {
+        "submissions": 9,
+        "byBots": 4,
+        "byHumans": 5
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 5,
+        "reviewInlineReplies": 5,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 5,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 5,
+        "candidateFindings": 6,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1072,
+      "title": "fix: governance-watchdog fails closed on missing replay bucket",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1072",
+      "createdAt": "2026-07-05T13:01:09Z",
+      "mergedAt": "2026-07-05T14:54:22Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 1.89,
+      "changedFiles": 6,
+      "additions": 119,
+      "deletions": 18,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 8,
+        "byBots": 4,
+        "byHumans": 4
+      },
+      "comments": {
+        "topLevel": 4,
+        "reviewInlineRoots": 4,
+        "reviewInlineReplies": 4,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 4,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 4,
+        "candidateFindings": 5,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1075,
+      "title": "fix(governance-watchdog): retry transient Discord/Telegram delivery failures",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1075",
+      "createdAt": "2026-07-05T13:18:57Z",
+      "mergedAt": "2026-07-05T14:54:43Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 1.6,
+      "changedFiles": 7,
+      "additions": 703,
+      "deletions": 8,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 6,
+        "byBots": 3,
+        "byHumans": 3
+      },
+      "comments": {
+        "topLevel": 3,
+        "reviewInlineRoots": 3,
+        "reviewInlineReplies": 3,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 3,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 3,
+        "candidateFindings": 4,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1077,
+      "title": "dashboard: decompose fetchNetworkData behind characterization tests",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1077",
+      "createdAt": "2026-07-05T13:40:14Z",
+      "mergedAt": "2026-07-05T14:54:46Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 1.24,
+      "changedFiles": 10,
+      "additions": 1889,
+      "deletions": 542,
+      "commits": 4,
+      "commitsAfterFirstReview": 2,
+      "reviews": {
+        "submissions": 6,
+        "byBots": 3,
+        "byHumans": 3
+      },
+      "comments": {
+        "topLevel": 3,
+        "reviewInlineRoots": 3,
+        "reviewInlineReplies": 3,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 3,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 3,
+        "candidateFindings": 4,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1078,
+      "title": "alerts: dead-letter Safe alerts on Slack retry exhaustion + redrive tool",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1078",
+      "createdAt": "2026-07-05T13:42:10Z",
+      "mergedAt": "2026-07-05T15:25:49Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 1.73,
+      "changedFiles": 11,
+      "additions": 1204,
+      "deletions": 4,
+      "commits": 3,
+      "commitsAfterFirstReview": 2,
+      "reviews": {
+        "submissions": 12,
+        "byBots": 5,
+        "byHumans": 7
+      },
+      "comments": {
+        "topLevel": 5,
+        "reviewInlineRoots": 7,
+        "reviewInlineReplies": 7,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 7,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 7,
+        "candidateFindings": 8,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1086,
+      "title": "test(indexer): cover self-heal + FPMM lifecycle must-cover scenarios",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1086",
+      "createdAt": "2026-07-05T15:30:19Z",
+      "mergedAt": "2026-07-05T15:38:23Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 0.13,
+      "changedFiles": 7,
+      "additions": 1444,
+      "deletions": 0,
+      "commits": 1,
+      "commitsAfterFirstReview": 0,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 0,
+        "candidateFindings": 1,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1074,
+      "title": "fix: isolate one pool's failure from MedianUpdated fan-out",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1074",
+      "createdAt": "2026-07-05T13:14:48Z",
+      "mergedAt": "2026-07-05T16:19:38Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 3.08,
+      "changedFiles": 2,
+      "additions": 98,
+      "deletions": 14,
+      "commits": 1,
+      "commitsAfterFirstReview": 0,
+      "reviews": {
+        "submissions": 2,
+        "byBots": 1,
+        "byHumans": 1
+      },
+      "comments": {
+        "topLevel": 4,
+        "reviewInlineRoots": 1,
+        "reviewInlineReplies": 1,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 1
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 2,
+        "inlineReviewBotRoots": 1,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 1,
+        "candidateFindings": 2,
+        "codexComments": 1,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 1,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1080,
+      "title": "test: fixture coverage for sanitize-terraform-output.sh",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1080",
+      "createdAt": "2026-07-05T14:04:45Z",
+      "mergedAt": "2026-07-05T16:40:16Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 2.59,
+      "changedFiles": 8,
+      "additions": 682,
+      "deletions": 7,
+      "commits": 4,
+      "commitsAfterFirstReview": 3,
+      "reviews": {
+        "submissions": 6,
+        "byBots": 3,
+        "byHumans": 3
+      },
+      "comments": {
+        "topLevel": 8,
+        "reviewInlineRoots": 3,
+        "reviewInlineReplies": 3,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 3,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 3,
+        "candidateFindings": 4,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1085,
+      "title": "test(indexer): Liquity lifecycle, batch-replay idempotency, per-chain fallback, namespacing, Wormhole drain scenarios",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1085",
+      "createdAt": "2026-07-05T15:09:38Z",
+      "mergedAt": "2026-07-05T16:48:28Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 1.65,
+      "changedFiles": 5,
+      "additions": 1532,
+      "deletions": 0,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 12,
+        "byBots": 6,
+        "byHumans": 6
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 6,
+        "reviewInlineReplies": 6,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 6,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 6,
+        "candidateFindings": 7,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1076,
+      "title": "ci: gate scripts/*.sh with shellcheck via trunk",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1076",
+      "createdAt": "2026-07-05T13:21:13Z",
+      "mergedAt": "2026-07-05T16:55:34Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 3.57,
+      "changedFiles": 22,
+      "additions": 120,
+      "deletions": 5,
+      "commits": 4,
+      "commitsAfterFirstReview": 3,
+      "reviews": {
+        "submissions": 8,
+        "byBots": 3,
+        "byHumans": 5
+      },
+      "comments": {
+        "topLevel": 5,
+        "reviewInlineRoots": 5,
+        "reviewInlineReplies": 5,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 5,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 5,
+        "candidateFindings": 6,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1087,
+      "title": "fix(governance-watchdog): parametrize function memory/timeout, add instance bounds",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1087",
+      "createdAt": "2026-07-05T15:42:41Z",
+      "mergedAt": "2026-07-05T17:00:01Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 1.29,
+      "changedFiles": 2,
+      "additions": 35,
+      "deletions": 2,
+      "commits": 1,
+      "commitsAfterFirstReview": 0,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 3,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 0,
+        "candidateFindings": 1,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1088,
+      "title": "docs: archive completed PLAN files; fix stale README copy",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1088",
+      "createdAt": "2026-07-05T15:46:57Z",
+      "mergedAt": "2026-07-05T17:00:32Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 1.23,
+      "changedFiles": 9,
+      "additions": 96,
+      "deletions": 8,
+      "commits": 1,
+      "commitsAfterFirstReview": null,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 1,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 0,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 0,
+        "candidateFindings": 0,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1091,
+      "title": "integration-probes: remove inert OKX/Rango adapters",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1091",
+      "createdAt": "2026-07-05T15:56:51Z",
+      "mergedAt": "2026-07-05T17:00:36Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 1.06,
+      "changedFiles": 7,
+      "additions": 2,
+      "deletions": 53,
+      "commits": 1,
+      "commitsAfterFirstReview": 0,
+      "reviews": {
+        "submissions": 0,
+        "byBots": 0,
+        "byHumans": 0
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 0,
+        "reviewInlineReplies": 0,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 0,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 0,
+        "candidateFindings": 1,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1084,
+      "title": "test(indexer): close oracle fan-out + breaker-graph scenario gaps (#1052)",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1084",
+      "createdAt": "2026-07-05T14:39:38Z",
+      "mergedAt": "2026-07-05T17:09:42Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 2.5,
+      "changedFiles": 1,
+      "additions": 542,
+      "deletions": 0,
+      "commits": 3,
+      "commitsAfterFirstReview": 2,
+      "reviews": {
+        "submissions": 8,
+        "byBots": 4,
+        "byHumans": 4
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 4,
+        "reviewInlineReplies": 4,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 4,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 4,
+        "candidateFindings": 5,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1092,
+      "title": "dashboard: single immutable-sort helper; remove homepage-og.ts toSorted()",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1092",
+      "createdAt": "2026-07-05T16:51:13Z",
+      "mergedAt": "2026-07-05T17:19:58Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 0.48,
+      "changedFiles": 17,
+      "additions": 141,
+      "deletions": 57,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 2,
+        "byBots": 1,
+        "byHumans": 1
+      },
+      "comments": {
+        "topLevel": 3,
+        "reviewInlineRoots": 1,
+        "reviewInlineReplies": 1,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 1,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 1,
+        "candidateFindings": 2,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    },
+    {
+      "number": 1090,
+      "title": "docs: root AGENTS.md token diet, CLAUDE.md symlink, alerts routing fix",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1090",
+      "createdAt": "2026-07-05T15:55:29Z",
+      "mergedAt": "2026-07-05T17:21:08Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 1.43,
+      "changedFiles": 6,
+      "additions": 302,
+      "deletions": 246,
+      "commits": 4,
+      "commitsAfterFirstReview": 3,
+      "reviews": {
+        "submissions": 4,
+        "byBots": 2,
+        "byHumans": 2
+      },
+      "comments": {
+        "topLevel": 1,
+        "reviewInlineRoots": 2,
+        "reviewInlineReplies": 2,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 0,
+        "inlineReviewBotRoots": 2,
+        "findingLikeTopLevel": 0,
+        "findingLikeInline": 2,
+        "candidateFindings": 2,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 0
+      }
+    },
+    {
+      "number": 1093,
+      "title": "ci: extract the baseline-resolve block into a composite action",
+      "url": "https://github.com/mento-protocol/monitoring-monorepo/pull/1093",
+      "createdAt": "2026-07-05T17:10:53Z",
+      "mergedAt": "2026-07-05T17:37:43Z",
+      "collectedAt": "2026-07-07T04:52:11.107Z",
+      "durationHours": 0.45,
+      "changedFiles": 2,
+      "additions": 85,
+      "deletions": 64,
+      "commits": 2,
+      "commitsAfterFirstReview": 1,
+      "reviews": {
+        "submissions": 4,
+        "byBots": 2,
+        "byHumans": 2
+      },
+      "comments": {
+        "topLevel": 2,
+        "reviewInlineRoots": 2,
+        "reviewInlineReplies": 2,
+        "reviewInlineRootsWithoutReplies": 0,
+        "humanReviewRequests": 0
+      },
+      "botReviewSignals": {
+        "topLevelReviewBotComments": 1,
+        "inlineReviewBotRoots": 2,
+        "findingLikeTopLevel": 1,
+        "findingLikeInline": 2,
+        "candidateFindings": 3,
+        "codexComments": 0,
+        "codexUsageLimitComments": 0,
+        "codexApprovalComments": 0,
+        "claudeSummaryComments": 1
+      }
+    }
+  ],
+  "manualClassification": {
+    "required": true,
+    "status": "classified",
+    "classifiedAt": "2026-07-07",
+    "method": "Reviewed the underlying GitHub finding-like top-level and inline review comments plus their agent replies. Top-level bot review summaries that contained words like findings/review but no discrete finding were classified as noise.",
+    "categories": ["accepted", "valid-wont-fix", "duplicate-stale", "noise"],
+    "counts": {
+      "accepted": 45,
+      "valid-wont-fix": 3,
+      "duplicate-stale": 3,
+      "noise": 16
+    },
+    "byPullRequest": [
+      {
+        "number": 1065,
+        "accepted": 0,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 0,
+        "note": "No finding-like candidates."
+      },
+      {
+        "number": 1069,
+        "accepted": 0,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 0,
+        "note": "No finding-like candidates."
+      },
+      {
+        "number": 1068,
+        "accepted": 4,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 1,
+        "noise": 1,
+        "note": "Four fixed findings; one duplicate cohort-completeness report; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1082,
+        "accepted": 5,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Five fixed workflow findings; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1072,
+        "accepted": 4,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Four fixed vendored-source parity findings; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1075,
+        "accepted": 3,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Three fixed retry/test clarity findings; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1077,
+        "accepted": 3,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Three fixed dashboard fetcher/test findings; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1078,
+        "accepted": 3,
+        "valid-wont-fix": 2,
+        "duplicate-stale": 2,
+        "noise": 1,
+        "note": "Three fixed findings; two valid evidence-backed wont-fix replies; two duplicate archive-idempotency reports; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1086,
+        "accepted": 0,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Top-level Claude review summary only; no inline finding."
+      },
+      {
+        "number": 1074,
+        "accepted": 0,
+        "valid-wont-fix": 1,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "One evidence-backed wont-fix reply; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1080,
+        "accepted": 3,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Three fixed sanitize-output findings; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1085,
+        "accepted": 6,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Six fixed indexer scenario-test findings; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1076,
+        "accepted": 5,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Five fixed ShellCheck/gate findings; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1087,
+        "accepted": 0,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Top-level Claude review summary only; no inline finding."
+      },
+      {
+        "number": 1088,
+        "accepted": 0,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 0,
+        "note": "No finding-like candidates."
+      },
+      {
+        "number": 1091,
+        "accepted": 0,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Top-level Claude review summary only; no inline finding."
+      },
+      {
+        "number": 1084,
+        "accepted": 4,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Four fixed indexer scenario-test findings; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1092,
+        "accepted": 1,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "One fixed immutable-sort test finding; top-level Claude review summary counted as noise."
+      },
+      {
+        "number": 1090,
+        "accepted": 2,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 0,
+        "note": "Two fixed context-canonicalization findings."
+      },
+      {
+        "number": 1093,
+        "accepted": 2,
+        "valid-wont-fix": 0,
+        "duplicate-stale": 0,
+        "noise": 1,
+        "note": "Two fixed CI composite-action findings; top-level Claude review summary counted as noise."
+      }
+    ]
+  }
+}

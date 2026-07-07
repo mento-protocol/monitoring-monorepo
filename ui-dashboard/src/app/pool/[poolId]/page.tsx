@@ -10,6 +10,8 @@ import {
   parseRouteChainId,
   routeCanonicalPoolId,
 } from "./_lib/route-canonicalization";
+import { extractChainIdFromPoolId } from "@/lib/pool-id";
+import { fetchPoolDetailForSSR } from "@/lib/pool-detail-ssr";
 
 // 60s — incident-time state flips should propagate in minutes, not hours.
 export const revalidate = 60;
@@ -144,7 +146,22 @@ async function CanonicalPoolDetailPage({
     redirect(POOL_NOT_FOUND_DEST);
   }
 
-  return <PoolDetailPageClient initialSearch={clientParams.toString()} />;
+  // SSR-prefetch the pool-overview query so the client paints header + health
+  // immediately instead of swapping a short skeleton for a tall block (the
+  // measured CLS 0.25). Degrades to undefined on any miss; the client hook then
+  // loads normally via its own reserved-height skeleton.
+  const chainId = extractChainIdFromPoolId(canonicalPoolId);
+  const initialPool =
+    chainId === null
+      ? undefined
+      : await fetchPoolDetailForSSR(chainId, canonicalPoolId);
+
+  return (
+    <PoolDetailPageClient
+      initialSearch={clientParams.toString()}
+      initialPool={initialPool}
+    />
+  );
 }
 
 export default function PoolDetailPage({

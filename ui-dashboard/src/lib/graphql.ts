@@ -51,6 +51,11 @@ export type UseGQLOptions<T> = {
   /** Optional Zod schema to validate the response. When provided,
    *  a parse failure throws `GraphQLSchemaError` via SWR's error path. */
   schema?: ZodType<T> | undefined;
+  /** Server-prefetched initial data for SSR-prefetch pages. Forwarded to SWR's
+   *  `fallbackData` at this hook's computed key, so the first client render paints
+   *  real content instead of a skeleton (kills the layout shift) while the normal
+   *  poll revalidates in the background. */
+  fallbackData?: T | undefined;
 };
 
 /**
@@ -102,6 +107,7 @@ export function useGQL<T>(
     schema,
     revalidateOnFocus = false,
     revalidateOnReconnect = false,
+    fallbackData,
   } = opts;
 
   async function fetcher(): Promise<T> {
@@ -137,6 +143,7 @@ export function useGQL<T>(
     revalidateOnReconnect,
     refreshWhenHidden: false,
     onErrorRetry: rateLimitAwareRetry,
+    ...(fallbackData !== undefined && { fallbackData }),
   });
 
   if (!network.hasuraUrl) {

@@ -1,8 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
+
+// The component reads the SSR-safe clock via useNowSeconds (null on the server /
+// hydration render, live after mount). These tests exercise the live client
+// render, so return the current time — matching the pre-SSR-safe
+// relativeTime(Date.now()) / freshness behavior. SSR-safety itself is covered by
+// the browser hydration suite.
+vi.mock("@/hooks/use-now-seconds", () => ({
+  useNowSeconds: () => Math.floor(Date.now() / 1000),
+}));
 
 const CELO_CHAIN_ID = 42220;
 const USDM_ADDR = "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b";

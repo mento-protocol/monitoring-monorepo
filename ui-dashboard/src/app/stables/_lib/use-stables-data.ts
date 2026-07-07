@@ -1,6 +1,15 @@
 "use client";
 
 import { useMemo } from "react";
+import type {
+  StablesChangesQuery,
+  StablesCurrentCustodyPerTokenQuery,
+  StablesCurrentSupplyPerTokenQuery,
+  StablesCustodyDailySnapshotsQuery,
+  StablesDailySnapshotsQuery,
+  StablesLatestCustodyPerTokenQuery,
+  StablesLatestPerTokenQuery,
+} from "@/lib/__generated__/graphql";
 import { useGQL } from "@/lib/graphql";
 import type { OracleRateMap } from "@/lib/tokens";
 import {
@@ -36,23 +45,13 @@ const EMPTY_ORACLE_RATES: OracleRateMap = new Map();
 // the first page from the top of the desc-ordered snapshot table.
 const TS_CURSOR_INITIAL = "9999999999";
 
-type DailySnapshotsResult = {
-  StableSupplyDailySnapshot: ReadonlyArray<StableSupplyDailySnapshot>;
-};
-type CurrentSupplyResult = {
-  StableTokenSupply: ReadonlyArray<StableSupplyDailySnapshot>;
-};
-type LatestPerTokenResult = DailySnapshotsResult;
-type CustodyDailySnapshotsResult = {
-  StableTokenCustodyDailySnapshot: ReadonlyArray<StableTokenCustodyDailySnapshot>;
-};
-type CurrentCustodyResult = {
-  StableTokenCustodyState: ReadonlyArray<StableTokenCustodyDailySnapshot>;
-};
-type LatestCustodyPerTokenResult = CustodyDailySnapshotsResult;
-type ChangesResult = {
-  StableSupplyChangeEvent: ReadonlyArray<StableSupplyChangeEvent>;
-};
+type DailySnapshotsResult = StablesDailySnapshotsQuery;
+type CurrentSupplyResult = StablesCurrentSupplyPerTokenQuery;
+type LatestPerTokenResult = StablesLatestPerTokenQuery;
+type CustodyDailySnapshotsResult = StablesCustodyDailySnapshotsQuery;
+type CurrentCustodyResult = StablesCurrentCustodyPerTokenQuery;
+type LatestCustodyPerTokenResult = StablesLatestCustodyPerTokenQuery;
+type ChangesResult = StablesChangesQuery;
 type ChangePageState = {
   enabled: boolean;
   rawEvents: ReadonlyArray<StableSupplyChangeEvent>;
