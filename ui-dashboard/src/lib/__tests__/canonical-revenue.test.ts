@@ -414,6 +414,43 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
+  it("marks reserve history stale when any active reserve source is stale", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({
+            identifier: wallet,
+            principalUsd: 2_000,
+            balance: 1,
+          }),
+        ],
+      }),
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-10"), 5),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.availableTotalUsd).toBe(5);
+    expect(
+      result.dailySeries.find((point) => point.timestamp === ts("2026-06-10"))
+        ?.reserveYieldUsd,
+    ).toBe(5);
+    expect(
+      result.dailySeries.find((point) => point.timestamp === ts("2026-06-12"))
+        ?.reserveYieldUsd,
+    ).toBeNull();
+    expect(result.partialReasons).toContain(
+      "Reserve earned-yield history is stale; latest snapshot is Jun 10, 2026.",
+    );
+  });
+
   it("builds reserve, swap, and CDP forecasts from their separate assumptions", () => {
     const completedDays = Array.from(
       { length: 30 },

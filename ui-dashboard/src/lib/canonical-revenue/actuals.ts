@@ -22,29 +22,46 @@ function hasReserveYieldSignal(
   );
 }
 
-function latestReserveSnapshotBucket(
+function reserveSnapshotSourceKey(row: ReserveYieldDailySnapshotRow): string {
+  const tokenKey = `${row.chainId}:${row.token.toLowerCase()}`;
+  return "wallet" in row ? `${tokenKey}:${row.wallet.toLowerCase()}` : tokenKey;
+}
+
+function latestReserveSnapshotBucketsBySource(
   reserveDailySnapshots: ReadonlyArray<ReserveYieldDailySnapshotRow>,
-): number | null {
-  let latest: number | null = null;
+): Map<string, number> {
+  const latestBySource = new Map<string, number>();
   for (const row of reserveDailySnapshots) {
     const timestamp = Number(row.timestamp);
     if (!Number.isFinite(timestamp)) continue;
     const bucket = dayBucket(timestamp);
-    if (latest === null || bucket > latest) latest = bucket;
+    const sourceKey = reserveSnapshotSourceKey(row);
+    const latest = latestBySource.get(sourceKey);
+    if (latest === undefined || bucket > latest) {
+      latestBySource.set(sourceKey, bucket);
+    }
   }
-  return latest;
+  return latestBySource;
 }
 
 function reserveStaleAfterBucket(
   args: BuildCanonicalRevenueArgs,
 ): number | null {
   if (args.reserveHistoryFailed || args.reserveHistoryUnavailable) return null;
-  const latestBucket = latestReserveSnapshotBucket(args.reserveDailySnapshots);
-  if (latestBucket === null) return null;
-  return latestBucket <
-    currentDayBucket(args.nowSeconds ?? Math.floor(Date.now() / 1000))
-    ? latestBucket
-    : null;
+  const latestBySource = latestReserveSnapshotBucketsBySource(
+    args.reserveDailySnapshots,
+  );
+  if (latestBySource.size === 0) return null;
+  const today = currentDayBucket(
+    args.nowSeconds ?? Math.floor(Date.now() / 1000),
+  );
+  let staleAfter: number | null = null;
+  for (const latestBucket of latestBySource.values()) {
+    if (latestBucket >= today) continue;
+    staleAfter =
+      staleAfter === null ? latestBucket : Math.min(staleAfter, latestBucket);
+  }
+  return staleAfter;
 }
 
 export function buildActualAvailability(

@@ -12,6 +12,7 @@ import {
   FIRST_TRACKED_STETH_BLOCK,
   FIRST_TRACKED_STETH_TX,
   STETH_ADDRESS,
+  STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL,
   TRACKED_STETH_WALLETS,
   V3_REVENUE_LAUNCH_BLOCK,
   V3_REVENUE_LAUNCH_TIMESTAMP,
@@ -20,12 +21,14 @@ import {
   recordStethWalletLaunchBaselines,
   recordStethYieldDailySnapshots,
   recordStethYieldEventDailySnapshots,
+  recordStethYieldHeartbeatSnapshots,
 } from "../src/handlers/steth/dailySnapshots.ts";
 import {
   _clearMockStethBalanceOf,
   _setMockStethBalanceOf,
 } from "../src/rpc/steth.ts";
 import { stethBalanceOfEffect } from "../src/rpc/effects.ts";
+import { blockTimestampEffect } from "../src/rpc/effects.ts";
 import { ZERO_ADDRESS } from "../src/constants.ts";
 
 type MockDb = MockDbWith<{
@@ -105,6 +108,7 @@ function summary(mockDb: MockDb) {
 function stethSnapshotContext(
   mockDb: MockDb,
   balances: Record<string, bigint | null>,
+  blockTimestamp: bigint | null = null,
 ): Parameters<typeof recordStethYieldDailySnapshots>[0] {
   return {
     StethPosition: {
@@ -137,6 +141,7 @@ function stethSnapshotContext(
         const account = input.account.toLowerCase();
         return balances[account] ?? null;
       }
+      if (effect === blockTimestampEffect) return blockTimestamp;
       throw new Error("unexpected effect");
     },
     isPreload: false,
@@ -184,6 +189,10 @@ function setStethBalance(
 describeReserveYield("stETH reserve-yield ledger", () => {
   afterEach(() => {
     _clearMockStethBalanceOf();
+  });
+
+  it("samples stETH sub-daily so missed slots cannot skip UTC buckets", () => {
+    assert.equal(STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL, 600);
   });
 
   it("records the first tracked stETH mint as FIFO principal", async () => {
@@ -389,6 +398,49 @@ describeReserveYield("stETH reserve-yield ledger", () => {
     assert.equal(snapshot.principalAmount, steth(110));
     assert.equal(snapshot.totalEarnedYieldAmount, steth(2));
     assert.equal(snapshot.dailyEarnedYieldAmount, steth(2));
+  });
+
+  it("retries missing stETH launch baselines from a later heartbeat", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await transfer(mockDb, 100, 1, EXTERNAL, RESERVE_SAFE, steth(100));
+
+    assert.equal(
+      await recordStethWalletLaunchBaselines(
+        stethSnapshotContext(mockDb, {
+          [RESERVE_SAFE]: null,
+          [OPS_SAFE]: 0n,
+        }),
+        V3_REVENUE_LAUNCH_TIMESTAMP,
+      ),
+      false,
+    );
+    assert.equal(mockDb.entities.StethWalletLaunchBaseline.getAll().length, 0);
+
+    const day1 = dayAfterLaunch(1);
+    assert.equal(
+      await recordStethYieldHeartbeatSnapshots(
+        stethSnapshotContext(
+          mockDb,
+          {
+            [RESERVE_SAFE]: steth(101),
+            [OPS_SAFE]: 0n,
+          },
+          day1,
+        ),
+        BigInt(V3_REVENUE_LAUNCH_BLOCK + STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL),
+      ),
+      true,
+    );
+    assert.equal(mockDb.entities.StethWalletLaunchBaseline.getAll().length, 2);
+    assert.equal(
+      walletSnapshot(mockDb, RESERVE_SAFE, V3_REVENUE_LAUNCH_TIMESTAMP)
+        .totalEarnedYieldAmount,
+      0n,
+    );
+    assert.equal(
+      walletSnapshot(mockDb, RESERVE_SAFE, day1).totalEarnedYieldAmount,
+      0n,
+    );
   });
 
   it("keeps post-launch stETH yield with the source wallet after an internal transfer", async () => {

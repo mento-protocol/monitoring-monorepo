@@ -20,7 +20,10 @@ export const V3_REVENUE_LAUNCH_TIMESTAMP = 1_772_496_000n; // 2026-03-03T00:00:0
 // ethereum.publicnode.com RPC on 2026-07-07:
 // block 24573203 timestamp 1772495999; block 24573204 timestamp 1772496011.
 export const V3_REVENUE_LAUNCH_BLOCK = 24_573_203;
-export const STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL = 7_200;
+// Roughly every two Ethereum hours. This keeps the UTC daily sampler from
+// drifting across buckets when missed slots make produced blocks slower than
+// wall-clock time.
+export const STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL = 600;
 
 const TRACKED_WALLET_SET = new Set<string>(TRACKED_STETH_WALLETS);
 

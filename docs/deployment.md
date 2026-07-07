@@ -69,7 +69,7 @@ git push origin main:envio
 
 Reserve-yield actuals deploy through the primary `mento` Envio project. The
 Ethereum sUSDS handlers in `config.multichain.mainnet.yaml` are event-only, and
-stETH adds a launch-aligned daily wallet balance sampler. The historical sUSDS
+stETH adds a launch-aligned sub-daily wallet balance sampler. The historical sUSDS
 onBlock heartbeat is not part of the hosted path.
 
 To check whether Envio's persistent effect cache is active for a deployment:

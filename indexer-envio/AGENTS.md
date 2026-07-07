@@ -12,7 +12,7 @@ last_verified: 2026-07-06
 
 ## What This Is
 
-Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split. Ethereum reserve-yield entities run in the same hosted project: sUSDS remains event-only, and stETH adds a launch-aligned daily wallet balance sampler. The historical sUSDS onBlock heartbeat is intentionally excluded.
+Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split. Ethereum reserve-yield entities run in the same hosted project: sUSDS remains event-only, and stETH adds a launch-aligned sub-daily wallet balance sampler that writes daily rows. The historical sUSDS onBlock heartbeat is intentionally excluded.
 
 ## Before Opening PRs
 
@@ -27,7 +27,7 @@ This is mandatory for cross-layer/stateful data work. Do not assume the UI/query
 - `config.multichain.mainnet.yaml` — **Default** mainnet config (Ethereum reserve-yield + Celo + Monad)
 - `config.multichain.testnet.yaml` — Testnet multichain config
 - `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, plus sUSDS and stETH yield ledgers)
-- `src/EventHandlers.ts` — Event processing logic, including sUSDS event-only reserve-yield handlers and the stETH daily wallet sampler
+- `src/EventHandlers.ts` — Event processing logic, including sUSDS event-only reserve-yield handlers and the stETH sub-daily wallet sampler
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
 - `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
 - `config/protocolActors.json` — Manual protocol-controlled caller/entry-point overrides for the dashboard volume filter. Dynamic pool liquidity-strategy contracts are classified from `Pool.rebalancerAddress`; add entries here only for protocol actors that are not already discoverable from pool state or normal contract metadata.

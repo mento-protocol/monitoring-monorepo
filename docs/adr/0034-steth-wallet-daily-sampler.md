@@ -1,5 +1,5 @@
 ---
-title: stETH actuals use a launch-aligned daily wallet balance sampler
+title: stETH actuals use a launch-aligned sub-daily wallet balance sampler
 status: active
 owner: eng
 canonical: true
@@ -8,7 +8,7 @@ scope: indexer-envio
 date: 2026-07
 ---
 
-# ADR 0034 — stETH actuals use a launch-aligned daily wallet balance sampler
+# ADR 0034 — stETH actuals use a launch-aligned sub-daily wallet balance sampler
 
 **Status:** Accepted (Jul 2026), in force.
 **Scope:** indexer-envio (constrains ui-dashboard reserve-yield reads)
@@ -27,8 +27,9 @@ a bounded stETH sampler:
 
 - Create one launch baseline per tracked wallet at Ethereum block `24573203`,
   the final block before `2026-03-03T00:00:00Z`.
-- Poll tracked stETH wallet balances at a low daily cadence and persist
-  wallet-level `StethYieldDailySnapshot` rows.
+- Poll tracked stETH wallet balances every 600 produced Ethereum blocks
+  (roughly two hours) and persist wallet-level daily
+  `StethYieldDailySnapshot` rows.
 - Allocate future stETH earned yield to the wallet where it accrued, even when
   principal later moves between tracked reserve wallets.
 - Leave sUSDS event-only and do not reintroduce the historical sUSDS heartbeat.
@@ -51,7 +52,9 @@ a bounded stETH sampler:
 - The dashboard reads stETH daily rows by `chainId:token:wallet` so it does not
   merge earnings from different reserve wallets into one token-level stream.
 - If any required historical stETH balance read is unavailable, the sampler skips
-  the affected snapshot batch instead of writing partial wallet actuals.
+  the affected snapshot batch instead of writing partial wallet actuals. Later
+  heartbeats retry missing launch baselines from the launch block before writing
+  daily rows.
 - Hosted deploy verification for reserve-yield changes should check both
   `SusdsYieldDailySnapshot` and `StethYieldDailySnapshot` rows.
 

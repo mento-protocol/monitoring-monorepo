@@ -86,7 +86,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0016](0016-effect-rpc-split-and-heal-stages.md)     | Split effects/RPC from handlers; decompose `upsertPool` into pure heal-stages       |
 | [0017](0017-broker-denormalization-volume-dedup.md)  | Denormalize the v2 Broker swap path to de-duplicate router-routed volume            |
 | [0018](0018-indexer-observability-loki.md)           | Indexer observability is structured logs → Loki → Grafana, not Sentry               |
-| [0034](0034-steth-wallet-daily-sampler.md)           | stETH actuals use a launch-aligned daily wallet balance sampler                     |
+| [0034](0034-steth-wallet-daily-sampler.md)           | stETH actuals use a launch-aligned sub-daily wallet balance sampler                 |
 
 ### ui-dashboard
 

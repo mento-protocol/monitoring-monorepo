@@ -25,7 +25,7 @@ yield accounting, not full pool indexing.
 Run **one Envio project** that indexes Celo + Monad FPMM/oracle/broker/bridge
 events and Ethereum reserve-yield in the same hosted deployment
 (`config.multichain.mainnet.yaml`). sUSDS remains event-only, stETH uses the
-launch-aligned daily wallet sampler recorded in [ADR 0034](0034-steth-wallet-daily-sampler.md),
+launch-aligned sub-daily wallet sampler recorded in [ADR 0034](0034-steth-wallet-daily-sampler.md),
 and the historical sUSDS `onBlock` heartbeat is intentionally excluded from the
 hosted path. IDs are chain-namespaced so entities don't collide.
 
@@ -34,7 +34,7 @@ hosted path. IDs are chain-namespaced so entities don't collide.
 - **One indexer per chain** — rejected: triples deploy/ops surface and forces the
   dashboard to fan out queries across endpoints for a unified view.
 - **Full Ethereum indexing** — rejected: only yield accounting is needed there;
-  sparse event handlers plus the bounded stETH daily sampler keep sync cheap
+  sparse event handlers plus the bounded stETH sub-daily sampler keep sync cheap
   and avoid the historical sUSDS archival-block heartbeat.
 
 ## Consequences

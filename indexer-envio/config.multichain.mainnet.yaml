@@ -227,8 +227,8 @@ contracts:
       - event: Deposit
       - event: Withdraw
 
-  # Lido stETH — reserve-yield event indexing plus a low-cadence wallet-level
-  # daily balance sampler on Ethereum. The sampler is registered in
+  # Lido stETH — reserve-yield event indexing plus a sub-daily wallet-level
+  # balance sampler that writes daily rows on Ethereum. The sampler is registered in
   # src/handlers/steth.ts and uses archive `balanceOf` reads to capture rebases.
   - name: Steth
     abi_file_path: abis/ERC20.json

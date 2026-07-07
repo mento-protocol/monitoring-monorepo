@@ -27,7 +27,7 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 - Ethereum reserve-yield indexing shares the existing production Envio project
   and GraphQL endpoint.
 - The primary entry point registers sparse sUSDS/stETH token events plus the
-  launch-aligned stETH daily wallet balance sampler from
+  launch-aligned stETH sub-daily wallet balance sampler from
   [`ADR 0034`](../adr/0034-steth-wallet-daily-sampler.md).
 - The primary entry point does not register the historical sUSDS `onBlock`
   heartbeat.
@@ -44,7 +44,7 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 The failed hosted experiments stalled at Envio v3 synthetic `onBlock` batch
 boundaries (`5000`/`15000` synthetic items). The hosted entry point excludes the
 historical sUSDS heartbeat entirely, so the indexer backfills real Ethereum logs
-for the configured sUSDS/stETH contracts plus one low-cadence stETH wallet
+for the configured sUSDS/stETH contracts plus one sub-daily stETH wallet
 balance sampler. That keeps the replay work bounded enough to share the existing
 hosted project instead of paying for an additional Envio deployment.
 

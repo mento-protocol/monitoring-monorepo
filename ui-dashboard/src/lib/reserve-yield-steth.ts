@@ -85,6 +85,16 @@ function isIndexedStethHolding(holding: ReserveYieldHolding): boolean {
   );
 }
 
+function unindexedStethHoldingWarning(
+  holding: ReserveYieldHolding,
+): string | null {
+  if (!isStethHolding(holding) || holding.principalUsd <= 0) return null;
+  const identifier = holding.identifier?.toLowerCase() ?? null;
+  return identifier === null
+    ? "stETH earned-yield actuals missing wallet identifier for a current stETH holding."
+    : `stETH earned-yield actuals missing indexed wallet configuration for ${identifier}.`;
+}
+
 function currentStethPrincipalUsd(holdings: ReserveYieldHolding[]): number {
   return holdings
     .filter(isStethHolding)
@@ -206,7 +216,11 @@ function applyStethYieldLedger(
   const warnings: string[] = [];
 
   const nextHoldings = holdings.map((holding) => {
-    if (!isIndexedStethHolding(holding)) return holding;
+    if (!isIndexedStethHolding(holding)) {
+      const warning = unindexedStethHoldingWarning(holding);
+      if (warning !== null) warnings.push(warning);
+      return holding;
+    }
     const wallet = holding.identifier!.toLowerCase();
     const entry = byWallet.get(wallet);
     if (!entry) {

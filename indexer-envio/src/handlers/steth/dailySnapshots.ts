@@ -340,6 +340,29 @@ function buildLaunchBaseline({
   };
 }
 
+async function hasAllStethWalletLaunchBaselines(
+  context: StethContext,
+): Promise<boolean> {
+  for (const wallet of TRACKED_STETH_WALLETS) {
+    const baseline = await context.StethWalletLaunchBaseline.get(
+      stethWalletLaunchBaselineId(ETHEREUM_CHAIN_ID, wallet),
+    );
+    if (baseline === undefined) return false;
+  }
+  return true;
+}
+
+async function ensureStethWalletLaunchBaselines(
+  context: StethContext,
+): Promise<boolean> {
+  if (await hasAllStethWalletLaunchBaselines(context)) return true;
+  await recordStethWalletLaunchBaselines(
+    context,
+    V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+  );
+  return hasAllStethWalletLaunchBaselines(context);
+}
+
 export async function recordStethWalletLaunchBaselines(
   context: StethContext,
   sampledAtTimestamp: bigint,
@@ -422,6 +445,7 @@ export async function recordStethYieldHeartbeatSnapshots(
     blockTimestamp,
   };
   if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
+  if (!(await ensureStethWalletLaunchBaselines(context))) return false;
 
   return recordStethYieldDailySnapshots(context, meta);
 }

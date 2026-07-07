@@ -317,6 +317,84 @@ describe("GET /api/reserve-yield", () => {
     expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
   });
 
+  it("warns when stETH actuals cover only the indexed wallet subset", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              {
+                symbol: "stETH",
+                chain: "ethereum",
+                balance: "300",
+                usd_value: 600_000,
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Reserve Safe",
+                    identifier: "0xd0697f70E79476195B742d5aFAb14BE50f98CC1E",
+                    balance: "200",
+                    usd_value: 400_000,
+                    custodian_type: "cold",
+                  },
+                  {
+                    type: "wallet",
+                    label: "New Reserve Safe",
+                    identifier: "0x1111111111111111111111111111111111111111",
+                    balance: "100",
+                    usd_value: 200_000,
+                    custodian_type: "cold",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldDailySnapshot: [
+              {
+                id: "1-steth-0xd0697f70e79476195b742d5afab14be50f98cc1e-1780444800",
+                chainId: 1,
+                token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+                wallet: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                timestamp: "1780444800",
+                realizedYieldAmount: "0",
+                unrealizedYieldAmount: "1000000000000000000",
+                totalEarnedYieldAmount: "1000000000000000000",
+                sampledAtTimestamp: "1780483271",
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldUsd).toBeCloseTo(2_000, 6);
+    expect(body.earnedYieldError).toContain(
+      "stETH earned-yield actuals missing indexed wallet configuration for 0x1111111111111111111111111111111111111111.",
+    );
+  });
+
   it("keeps stETH balances visible when Lido APR is unavailable", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
