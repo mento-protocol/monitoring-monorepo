@@ -279,29 +279,36 @@ function RevenueChartBody({
   showEmptyState,
   emptyMessage,
   figure,
+  ariaLabel,
+  summary,
 }: {
   isLoading: boolean;
   showEmptyState: boolean;
   emptyMessage: ReactNode;
   figure: RevenueChartFigure;
+  ariaLabel: string;
+  summary: string;
 }) {
   return (
     <div className="mt-4 -mx-2 sm:-mx-3">
-      {isLoading ? (
-        <PlotSkeleton />
-      ) : showEmptyState ? (
-        <div className="flex h-[220px] items-center justify-center text-sm text-slate-500">
-          {emptyMessage}
-        </div>
-      ) : (
-        <Plot
-          data={figure.traces}
-          layout={figure.layout}
-          config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
-          style={{ width: "100%", height: 220 }}
-          useResizeHandler
-        />
-      )}
+      <div role="figure" aria-label={ariaLabel}>
+        {isLoading ? (
+          <PlotSkeleton />
+        ) : showEmptyState ? (
+          <div className="flex h-[220px] items-center justify-center text-sm text-slate-500">
+            {emptyMessage}
+          </div>
+        ) : (
+          <Plot
+            data={figure.traces}
+            layout={figure.layout}
+            config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
+            style={{ width: "100%", height: 220 }}
+            useResizeHandler
+          />
+        )}
+      </div>
+      <p className="sr-only">{summary}</p>
     </div>
   );
 }
@@ -338,6 +345,23 @@ export function TotalRevenueChart({
   const hasAnyRevenue = series.some((point) => point.availableRevenueUsd !== 0);
   const showEmptyState = !isLoading && !hasAnyRevenue;
 
+  const activeRangeLabel =
+    RANGES.find((item) => item.key === range)?.label ?? String(range);
+  const chartAriaLabel = `Total revenue chart, ${activeRangeLabel} range`;
+  const chartSummary = isLoading
+    ? "Total revenue chart is loading."
+    : !hasAnyRevenue
+      ? partialReasons.length > 0
+        ? `Total revenue chart: revenue data is partially unavailable for the ${activeRangeLabel} range.`
+        : `Total revenue chart: no revenue in the ${activeRangeLabel} range.`
+      : `Total revenue over the ${activeRangeLabel} range: ${headline}${
+          change === null
+            ? ""
+            : `, ${change >= 0 ? "up" : "down"} ${Math.abs(change).toFixed(
+                2,
+              )}% week-over-week`
+        }.`;
+
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -359,6 +383,8 @@ export function TotalRevenueChart({
         showEmptyState={showEmptyState}
         emptyMessage={revenueChartEmptyMessage(partialReasons)}
         figure={figure}
+        ariaLabel={chartAriaLabel}
+        summary={chartSummary}
       />
     </section>
   );
