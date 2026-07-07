@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
 import { useOracleRates } from "@/hooks/use-oracle-rates";
 import type { OracleRateMap } from "@/lib/tokens";
-import type { RangeKey } from "../_lib/types";
+import { useStablesRangeUrlState } from "../_lib/use-stables-range-url-state";
 import {
   useStablesCustodyDailySnapshots,
   useStablesDailySnapshots,
@@ -26,7 +26,7 @@ export function StablesPageClient(): React.JSX.Element {
 }
 
 function StablesContent(): React.JSX.Element {
-  const [range, setRange] = useState<RangeKey>("30d");
+  const { range, updateRange } = useStablesRangeUrlState();
 
   const { merged: rates, isLoading: ratesLoading } = useOracleRates();
   const {
@@ -92,7 +92,7 @@ function StablesContent(): React.JSX.Element {
         latestCustodyPerToken={effectiveLatestCustodyPerToken}
         rates={rates}
         range={range}
-        onRangeChange={setRange}
+        onRangeChange={updateRange}
         isLoading={isLoading}
         hasError={hasError}
       />

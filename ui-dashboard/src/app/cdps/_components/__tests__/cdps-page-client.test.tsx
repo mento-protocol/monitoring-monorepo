@@ -33,6 +33,9 @@ const networkState = vi.hoisted(() => ({
     hasVirtualPools: true,
   },
 }));
+const mockSearchParams = vi.hoisted(() => ({
+  current: new URLSearchParams(),
+}));
 
 vi.mock("@/components/network-provider", () => ({
   useNetwork: () => ({
@@ -43,6 +46,10 @@ vi.mock("@/components/network-provider", () => ({
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
+}));
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => mockSearchParams.current,
 }));
 
 vi.mock("next/link", () => ({
@@ -275,6 +282,11 @@ function typeInto(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function setUrl(url: string) {
+  window.history.replaceState(window.history.state, "", url);
+  mockSearchParams.current = new URLSearchParams(window.location.search);
+}
+
 describe("CdpsPageClient", () => {
   let handle: Handle | null = null;
 
@@ -282,6 +294,7 @@ describe("CdpsPageClient", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW * 1000));
     vi.clearAllMocks();
+    setUrl("/cdps");
     networkState.network = { ...networkState.network, chainId: 42220 };
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
@@ -449,6 +462,7 @@ describe("CdpAllTransactionsTable", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW * 1000));
     vi.clearAllMocks();
+    setUrl("/cdps");
     networkState.network = { ...networkState.network, chainId: 42220 };
     handle = setup();
   });
@@ -513,6 +527,165 @@ describe("CdpAllTransactionsTable", () => {
     expect(bodyText(handle!.container)).toContain(
       "No transactions match the active filters.",
     );
+  });
+
+  it("initializes overview filters from a copied URL", () => {
+    setUrl("/cdps?type=troveOpen&market=gbpm&address=0xOWNER");
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return { data: transactionData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: snapshotData([
+            {
+              id: "op1",
+              owner: "0xowner",
+              debtBefore: wei(5),
+              debtAfter: wei(10),
+              collBefore: wei(1),
+              collAfter: wei(11),
+            },
+          ]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[
+          { id: "gbpm", chainId: 42220, symbol: "GBPm" },
+          { id: "chfm", chainId: 42220, symbol: "CHFm" },
+        ]}
+      />,
+    );
+
+    const input = handle!.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
+    );
+    expect(input?.value).toBe("0xowner");
+    expect(pill(handle!.container, "Open Trove").ariaChecked).toBe("true");
+    expect(pill(handle!.container, "GBPm").ariaChecked).toBe("true");
+    expect(bodyText(handle!.container)).toContain("Open Trove");
+    expect(bodyText(handle!.container)).not.toContain("Liquidation");
+    expect(window.location.search).toBe(
+      "?type=troveOpen&market=gbpm&address=0xowner",
+    );
+  });
+
+  it("writes overview filters to the URL while preserving unrelated params", () => {
+    setUrl("/cdps?foo=1#firehose");
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return { data: transactionData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return {
+          data: snapshotData([
+            {
+              id: "op1",
+              owner: "0xowner",
+              debtBefore: wei(5),
+              debtAfter: wei(10),
+              collBefore: wei(1),
+              collAfter: wei(11),
+            },
+          ]),
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[
+          { id: "gbpm", chainId: 42220, symbol: "GBPm" },
+          { id: "chfm", chainId: 42220, symbol: "CHFm" },
+        ]}
+      />,
+    );
+
+    const input = handle!.container.querySelector<HTMLInputElement>(
+      'input[aria-label="Filter CDP transactions by owner or depositor address"]',
+    );
+    act(() => {
+      pill(handle!.container, "Open Trove").click();
+    });
+    act(() => {
+      pill(handle!.container, "GBPm").click();
+    });
+    act(() => {
+      typeInto(input!, " 0xOWNER ");
+    });
+
+    expect(window.location.search).toBe(
+      "?foo=1&type=troveOpen&market=gbpm&address=0xowner",
+    );
+    expect(window.location.hash).toBe("#firehose");
+  });
+
+  it("canonicalizes malformed overview filter params", () => {
+    setUrl("/cdps?type=bogus&market=stale&address=%20%20&foo=1");
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[{ id: "gbpm", chainId: 42220, symbol: "GBPm" }]}
+      />,
+    );
+
+    expect(pill(handle!.container, "All").ariaChecked).toBe("true");
+    expect(window.location.search).toBe("?foo=1");
+  });
+
+  it("syncs overview filters from browser back-forward popstate", () => {
+    setUrl("/cdps?type=troveOpen&market=gbpm");
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return { data: transactionData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[
+          { id: "gbpm", chainId: 42220, symbol: "GBPm" },
+          { id: "chfm", chainId: 42220, symbol: "CHFm" },
+        ]}
+      />,
+    );
+    expect(bodyText(handle!.container)).toContain("Open Trove");
+    expect(bodyText(handle!.container)).not.toContain("Liquidation");
+
+    window.history.replaceState(
+      window.history.state,
+      "",
+      "/cdps?type=liquidation&market=chfm",
+    );
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    expect(pill(handle!.container, "Liquidation").ariaChecked).toBe("true");
+    expect(pill(handle!.container, "CHFm").ariaChecked).toBe("true");
+    expect(bodyText(handle!.container)).toContain("Liquidation");
+    expect(bodyText(handle!.container)).not.toContain("Open Trove");
   });
 
   it("keeps overview SP depositor matches subject to type and market filters", () => {

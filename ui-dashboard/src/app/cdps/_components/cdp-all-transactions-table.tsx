@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { ErrorBox, Skeleton } from "@/components/feedback";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
@@ -14,6 +14,7 @@ import {
 } from "@/lib/queries";
 import Link from "next/link";
 import { cdpSymbolSlug } from "../_lib/format";
+import { useCdpOverviewUrlFilters } from "../_lib/use-cdp-overview-url-filters";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
@@ -136,27 +137,21 @@ export function CdpAllTransactionsTable({
   );
 }
 
-/** Filter state for the overview transactions table. Combines:
- *  - validated `marketFilter` (falls back to null if the indexer drops or
- *    renames a market between revalidations, so a stale id can't silently
- *    zero out the result set without a visibly selected pill)
- *  - free-text `addressInput` (normalized to lowercase + trimmed at the
- *    comparison site so the input renders the raw typed value)
- *  No useEffect — the derived `effectiveMarketFilter` / `addressActive`
- *  values absorb stale inputs. */
-function useOverviewFilters(
-  rows: CdpTransactionRow[],
-  collaterals: CollateralSummary[],
-  snapshotById: Map<string, CdpTroveOpSnapshotRow>,
-  snapshotsReady: boolean,
-) {
-  const [typeFilter, setTypeFilter] = useState<BadgeKind | null>(null);
-  const [marketFilter, setMarketFilter] = useState<string | null>(null);
-  const [addressInput, setAddressInput] = useState("");
-  const effectiveMarketFilter = useMemo(() => {
-    if (marketFilter == null) return null;
-    return collaterals.some((c) => c.id === marketFilter) ? marketFilter : null;
-  }, [collaterals, marketFilter]);
+function useFilteredOverviewRows({
+  rows,
+  typeFilter,
+  effectiveMarketFilter,
+  addressInput,
+  snapshotById,
+  snapshotsReady,
+}: {
+  rows: CdpTransactionRow[];
+  typeFilter: BadgeKind | null;
+  effectiveMarketFilter: string | null;
+  addressInput: string;
+  snapshotById: Map<string, CdpTroveOpSnapshotRow>;
+  snapshotsReady: boolean;
+}) {
   const normalizedAddress = normalizeAddressFilter(addressInput);
   const hasStabilityPoolRows = rows.some((row) => row.kind === "spOperation");
   const addressEnabled = snapshotsReady || hasStabilityPoolRows;
@@ -194,13 +189,46 @@ function useOverviewFilters(
     snapshotById,
   ]);
   return {
+    addressDisabled: !addressEnabled,
+    addressFilterNotice,
+    addressActive,
+    filteredRows,
+  };
+}
+
+function useOverviewFilters(
+  rows: CdpTransactionRow[],
+  collaterals: CollateralSummary[],
+  snapshotById: Map<string, CdpTroveOpSnapshotRow>,
+  snapshotsReady: boolean,
+) {
+  const {
     typeFilter,
     setTypeFilter,
-    marketFilter: effectiveMarketFilter,
+    marketFilter,
+    setMarketFilter,
+    effectiveMarketFilter,
+    addressInput,
+    setAddressInput,
+  } = useCdpOverviewUrlFilters(collaterals);
+  const { addressDisabled, addressFilterNotice, addressActive, filteredRows } =
+    useFilteredOverviewRows({
+      rows,
+      typeFilter,
+      effectiveMarketFilter,
+      addressInput,
+      snapshotById,
+      snapshotsReady,
+    });
+
+  return {
+    typeFilter,
+    setTypeFilter,
+    marketFilter,
     setMarketFilter,
     addressInput,
     setAddressInput,
-    addressDisabled: !addressEnabled,
+    addressDisabled,
     addressFilterNotice,
     filteredRows,
     filtersActive:

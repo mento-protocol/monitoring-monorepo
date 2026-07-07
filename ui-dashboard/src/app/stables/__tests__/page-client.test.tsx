@@ -15,6 +15,10 @@ import type {
   StableSupplyChangeEvent,
 } from "../_lib/types";
 
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 const mockRates = vi.hoisted(() => ({
   merged: new Map<string, number>([["EURm", 1.1]]),
   isLoading: false,
@@ -183,6 +187,11 @@ describe("StablesPageClient — smoke", () => {
     // KPI strip headline tiles show "—" when no data is present.
     // Sparkline grid shows the empty-state message.
     expect(html).toContain("No per-token data yet");
+  });
+
+  it("surfaces the 3M range control for 90d stablecoin supply URLs", () => {
+    const html = renderToStaticMarkup(<StablesPageClient />);
+    expect(html).toContain(">3M</button>");
   });
 
   it("renders cards with USDm data when snapshots are present", () => {
