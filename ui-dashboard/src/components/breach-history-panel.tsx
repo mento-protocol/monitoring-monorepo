@@ -8,6 +8,7 @@ import {
 } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { useGQL } from "@/lib/graphql";
+import { hasErrorWithoutData } from "@/lib/swr-state";
 import {
   POOL_DEVIATION_BREACHES_ALL,
   POOL_DEVIATION_BREACHES_COUNT,
@@ -317,7 +318,7 @@ function BreachHistoryPanelInner({
   // count request shouldn't blank rows we already have. countError
   // degrades to a small banner below the table (pagination metadata
   // unavailable) instead of hiding the incident list.
-  if (error) {
+  if (hasErrorWithoutData(error, data)) {
     const message = error instanceof Error ? error.message : String(error);
     const isSchemaLag =
       message.includes("not found in type") ||

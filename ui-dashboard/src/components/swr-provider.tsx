@@ -1,8 +1,14 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { SWRConfig, type SWRConfiguration } from "swr";
+import { useEffect, type ReactNode } from "react";
+import { SWRConfig, type Middleware, type SWRConfiguration } from "swr";
 import * as Sentry from "@sentry/nextjs";
+import {
+  normalizeSWRFreshnessKey,
+  registerSWRFreshnessKey,
+  recordSWRFreshnessError,
+  recordSWRFreshnessSuccess,
+} from "@/lib/swr-freshness";
 
 // Global SWR onError handler: funnel every fetch failure to Sentry with the
 // SWR cache key attached as extra data. Without this, caught errors surface
@@ -15,10 +21,6 @@ import * as Sentry from "@sentry/nextjs";
 const THROTTLE_MS = 60_000;
 const lastCapturedAt = new Map<string, number>();
 
-function normalizeKey(key: unknown): string {
-  return typeof key === "string" ? key : JSON.stringify(key);
-}
-
 function shouldCapture(normalized: string): boolean {
   const now = Date.now();
   const last = lastCapturedAt.get(normalized) ?? 0;
@@ -26,6 +28,30 @@ function shouldCapture(normalized: string): boolean {
   lastCapturedAt.set(normalized, now);
   return true;
 }
+
+function readRefreshIntervalMs(config: SWRConfiguration | undefined) {
+  const refreshInterval = config?.refreshInterval;
+  return typeof refreshInterval === "number" && refreshInterval > 0
+    ? refreshInterval
+    : null;
+}
+
+const freshnessMiddleware: Middleware = (useSWRNext) => {
+  return (key, fetcher, config) => {
+    const refreshIntervalMs = readRefreshIntervalMs(config);
+    const freshnessKey =
+      key == null || typeof key === "function" || refreshIntervalMs === null
+        ? null
+        : normalizeSWRFreshnessKey(key);
+
+    useEffect(() => {
+      if (freshnessKey === null || refreshIntervalMs === null) return;
+      return registerSWRFreshnessKey(freshnessKey, refreshIntervalMs);
+    }, [freshnessKey, refreshIntervalMs]);
+
+    return useSWRNext(key, fetcher, config);
+  };
+};
 
 // Hoisted to module scope so the config object identity is stable across
 // renders — an inline object literal would bust context consumers every
@@ -37,13 +63,18 @@ function shouldCapture(normalized: string): boolean {
 // one-shot SWR reads still refresh when the user returns to a tab or the
 // network recovers.
 const swrConfig: SWRConfiguration = {
-  onError(err, key) {
-    const normalized = normalizeKey(key);
+  use: [freshnessMiddleware],
+  onError(err, key, config) {
+    recordSWRFreshnessError(err, key, config);
+    const normalized = normalizeSWRFreshnessKey(key);
     if (!shouldCapture(normalized)) return;
     Sentry.captureException(err, {
       tags: { source: "swr" },
       extra: { swrKey: normalized },
     });
+  },
+  onSuccess(_data, key, config) {
+    recordSWRFreshnessSuccess(key, config);
   },
 };
 

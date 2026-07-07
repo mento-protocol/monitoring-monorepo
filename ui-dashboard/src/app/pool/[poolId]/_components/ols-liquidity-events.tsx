@@ -16,6 +16,7 @@ import {
   OLS_LIQUIDITY_EVENTS_COUNT,
   OLS_LIQUIDITY_EVENTS_PAGE,
 } from "@/lib/queries";
+import { hasErrorWithoutData } from "@/lib/swr-state";
 import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
@@ -48,7 +49,6 @@ export function OlsLiquidityEvents({
   const { getName, getTags } = useAddressLabels();
   const searchQuery = normalizeSearch(search);
   const [rawPage, setRawPage] = React.useState(1);
-
   const handleSearchChange = React.useCallback(
     (value: string) => {
       onSearchChange(value);
@@ -56,12 +56,10 @@ export function OlsLiquidityEvents({
     },
     [onSearchChange],
   );
-
-  const countQuery = olsAddress ? OLS_LIQUIDITY_EVENTS_COUNT : null;
   const { data: countData, error: countError } = useGQL<{
     OlsLiquidityEvent: { id: string }[];
   }>(
-    countQuery,
+    olsAddress ? OLS_LIQUIDITY_EVENTS_COUNT : null,
     olsAddress ? { poolId, olsAddress, limit: ENVIO_MAX_ROWS, offset: 0 } : {},
   );
   const lastKnownTotalRef = React.useRef(0);
@@ -115,7 +113,7 @@ export function OlsLiquidityEvents({
       ]);
     });
   }, [events, searchQuery, pool, network, getName, getTags]);
-
+  const showMetadata = !hasErrorWithoutData(error, data);
   return (
     <>
       {events.length > 0 && (
@@ -126,7 +124,7 @@ export function OlsLiquidityEvents({
           ariaLabel="Search OLS events"
         />
       )}
-      {error ? (
+      {!showMetadata ? (
         <OlsLiquidityTable
           events={[]}
           pool={pool}
@@ -145,7 +143,7 @@ export function OlsLiquidityEvents({
           error={null}
         />
       )}
-      {!error && !isSearching && (
+      {showMetadata && !isSearching && (
         <Pagination
           page={page}
           pageSize={limit}
@@ -153,19 +151,19 @@ export function OlsLiquidityEvents({
           onPageChange={setRawPage}
         />
       )}
-      {!error && countCapped && !isSearching && (
+      {showMetadata && countCapped && !isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing first {ENVIO_MAX_ROWS.toLocaleString()} OLS events — older
           entries may exist beyond this page range.
         </p>
       )}
-      {!error && countCapped && isSearching && (
+      {showMetadata && countCapped && isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()} OLS
           events only.
         </p>
       )}
-      {!error && countError && !isSearching && (
+      {showMetadata && countError && !isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Could not load total count — pagination may be incomplete.
         </p>

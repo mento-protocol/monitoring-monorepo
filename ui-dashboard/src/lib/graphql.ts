@@ -1,4 +1,5 @@
 import { GraphQLClient } from "graphql-request";
+import { useMemo } from "react";
 import useSWR, { type SWRResponse } from "swr";
 import type { ZodType } from "zod";
 import { useNetwork } from "@/components/network-provider";
@@ -126,17 +127,17 @@ export function useGQL<T>(
     return raw;
   }
 
-  const result = useSWR<T>(
-    query && network.hasuraUrl ? [network.id, query, variables] : null,
-    fetcher,
-    {
-      refreshInterval,
-      revalidateOnFocus,
-      revalidateOnReconnect,
-      refreshWhenHidden: false,
-      onErrorRetry: rateLimitAwareRetry,
-    },
+  const swrKey = useMemo(
+    () => (query && network.hasuraUrl ? [network.id, query, variables] : null),
+    [network.id, network.hasuraUrl, query, variables],
   );
+  const result = useSWR<T>(swrKey, fetcher, {
+    refreshInterval,
+    revalidateOnFocus,
+    revalidateOnReconnect,
+    refreshWhenHidden: false,
+    onErrorRetry: rateLimitAwareRetry,
+  });
 
   if (!network.hasuraUrl) {
     return {

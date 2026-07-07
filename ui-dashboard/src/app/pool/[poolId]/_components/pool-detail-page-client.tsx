@@ -12,6 +12,7 @@ import { ReservesPanel } from "@/components/reserves-panel";
 import { normalizePoolIdForChain } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
   OLS_POOL,
   ORACLE_RATES,
@@ -203,6 +204,20 @@ function usePoolTabState({
   return { visibleTabs, tab, activeSearch };
 }
 
+function isPoolUnavailable({
+  poolLoading,
+  poolErr,
+  pool,
+}: {
+  poolLoading: boolean;
+  poolErr: Error | undefined;
+  pool: Pool | null;
+}): boolean {
+  return (
+    (!poolLoading && !poolErr && !pool) || hasErrorWithoutData(poolErr, pool)
+  );
+}
+
 function PoolDetail({ initialSearch }: { initialSearch: string }) {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
@@ -226,7 +241,7 @@ function PoolDetail({ initialSearch }: { initialSearch: string }) {
     requestedTab,
     urlParams,
   });
-  const poolMissing = !detail.poolLoading && !detail.poolErr && !detail.pool;
+  const poolUnavailable = isPoolUnavailable(detail);
 
   useEffect(() => {
     if (
@@ -273,7 +288,7 @@ function PoolDetail({ initialSearch }: { initialSearch: string }) {
         rates={detail.rates}
       />
 
-      {!poolMissing && (
+      {!poolUnavailable && (
         <>
           <PoolTablist
             visibleTabs={visibleTabs}
@@ -362,9 +377,9 @@ function PoolOverview({
   thresholdsError: Error | undefined;
   rates: OracleRateMap;
 }) {
-  if (poolErr)
+  if (hasErrorWithoutData(poolErr, pool))
     return <ErrorBox message={`Failed to load pool: ${poolErr.message}`} />;
-  if (poolLoading) return <Skeleton rows={2} />;
+  if (isLoadingWithoutData(poolLoading, pool)) return <Skeleton rows={2} />;
   if (!pool)
     return <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />;
 
