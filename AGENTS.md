@@ -463,7 +463,7 @@ and the `babysit-pr` `Monitor` fallback.
 > more expensive than local checks. Always run these manually before pushing:
 
 ```bash
-git fetch origin main
+git fetch origin main:refs/remotes/origin/main
 ./tools/trunk fmt --all
 ./tools/trunk check --all
 pnpm dashboard:react-doctor:diff
