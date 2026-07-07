@@ -434,16 +434,16 @@ test.describe("dashboard browser flows", () => {
     const input = page.getByLabel("Minimum USD-equivalent supply change");
     const rows = page.locator("tbody tr");
 
-    await expect(input).toHaveValue("0.01");
+    await expect(input).toHaveValue("1000");
     await expect(
-      page.getByText("Hiding changes below $0.01 equivalent."),
+      page.getByText("Hiding changes below $1,000.00 equivalent."),
     ).toBeVisible();
     await expect(
       page.getByText("Keeping 1 unpriced event visible."),
     ).toBeVisible();
-    await expect(rows).toHaveCount(4);
-    await expect(rows.filter({ hasText: "USDm" })).toHaveCount(1);
-    await expect(rows.filter({ hasText: "GBPm" })).toHaveCount(2);
+    await expect(rows).toHaveCount(1);
+    await expect(rows.filter({ hasText: "USDm" })).toHaveCount(0);
+    await expect(rows.filter({ hasText: "GBPm" })).toHaveCount(0);
     await expect(rows.filter({ hasText: "BRLm" })).toHaveCount(1);
 
     await input.fill("1.");
@@ -451,9 +451,9 @@ test.describe("dashboard browser flows", () => {
     await expect(input).toHaveValue("1.");
     expect(page.url()).not.toContain("minSupplyChangeUsd");
     await expect(
-      page.getByText("Hiding changes below $0.01 equivalent."),
+      page.getByText("Hiding changes below $1,000.00 equivalent."),
     ).toBeVisible();
-    await expect(rows).toHaveCount(4);
+    await expect(rows).toHaveCount(1);
 
     await input.fill("1");
     await input.press("Enter");
@@ -471,8 +471,8 @@ test.describe("dashboard browser flows", () => {
     await page.getByRole("button", { name: "Reset" }).click();
 
     await expect(page).not.toHaveURL(/minSupplyChangeUsd=/);
-    await expect(input).toHaveValue("0.01");
-    await expect(rows).toHaveCount(4);
+    await expect(input).toHaveValue("1000");
+    await expect(rows).toHaveCount(1);
   });
 
   test("shows the FX weekend banner after mount without a hydration mismatch", async ({

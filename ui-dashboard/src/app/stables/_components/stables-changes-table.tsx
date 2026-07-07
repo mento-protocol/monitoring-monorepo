@@ -17,6 +17,8 @@ import {
 } from "../_lib/aggregate";
 import type { StableSupplyChangeEvent } from "../_lib/types";
 
+const SUPPLY_CHANGES_PAGE_SIZE = 50;
+
 type Props = {
   events: ReadonlyArray<StableSupplyChangeEvent>;
   minimumUsdValue: number;
@@ -48,71 +50,90 @@ export function StablesChangesTable({
   unpricedEventsCount,
 }: Props): React.JSX.Element {
   const thresholdLabel = formatSupplyChangeUsdThreshold(minimumUsdValue);
-  if (isLoading) {
-    return (
-      <Card>
-        <ChangesHeader
-          minimumUsdValue={minimumUsdValue}
-          thresholdLabel={thresholdLabel}
-          capped={false}
-          eventCount={0}
-          unpricedEventsCount={0}
-          onMinimumUsdValueChange={onMinimumUsdValueChange}
-          onMinimumUsdValueReset={onMinimumUsdValueReset}
-        />
-        <p className="text-sm text-slate-500">Loading supply changes…</p>
-      </Card>
-    );
-  }
-  if (hasError) {
-    return (
-      <Card>
-        <ChangesHeader
-          minimumUsdValue={minimumUsdValue}
-          thresholdLabel={thresholdLabel}
-          capped={false}
-          eventCount={0}
-          unpricedEventsCount={0}
-          onMinimumUsdValueChange={onMinimumUsdValueChange}
-          onMinimumUsdValueReset={onMinimumUsdValueReset}
-        />
-        <p className="text-sm text-rose-400" role="alert">
-          Failed to load supply changes.
-        </p>
-      </Card>
-    );
-  }
-  if (events.length === 0) {
-    return (
-      <Card>
-        <ChangesHeader
-          minimumUsdValue={minimumUsdValue}
-          thresholdLabel={thresholdLabel}
-          capped={capped}
-          eventCount={0}
-          unpricedEventsCount={0}
-          onMinimumUsdValueChange={onMinimumUsdValueChange}
-          onMinimumUsdValueReset={onMinimumUsdValueReset}
-        />
-        <p className="text-sm text-slate-500">
-          No supply changes at or above {thresholdLabel} equivalent in{" "}
-          {capped ? "the most recent fetched rows" : "the selected window"}.
-        </p>
-      </Card>
-    );
-  }
+  const hasRows = !isLoading && !hasError && events.length > 0;
+  const showEmptyState = !isLoading && !hasError && events.length === 0;
 
   return (
     <Card>
       <ChangesHeader
         minimumUsdValue={minimumUsdValue}
         thresholdLabel={thresholdLabel}
-        capped={capped}
-        eventCount={events.length}
-        unpricedEventsCount={unpricedEventsCount}
+        capped={hasRows || showEmptyState ? capped : false}
+        eventCount={hasRows ? events.length : 0}
+        unpricedEventsCount={hasRows ? unpricedEventsCount : 0}
         onMinimumUsdValueChange={onMinimumUsdValueChange}
         onMinimumUsdValueReset={onMinimumUsdValueReset}
       />
+      <SupplyChangesContent
+        events={events}
+        minimumUsdValue={minimumUsdValue}
+        thresholdLabel={thresholdLabel}
+        isLoading={isLoading}
+        hasError={hasError}
+        capped={capped}
+      />
+    </Card>
+  );
+}
+
+function SupplyChangesContent({
+  events,
+  minimumUsdValue,
+  thresholdLabel,
+  isLoading,
+  hasError,
+  capped,
+}: {
+  events: ReadonlyArray<StableSupplyChangeEvent>;
+  minimumUsdValue: number;
+  thresholdLabel: string;
+  isLoading: boolean;
+  hasError: boolean;
+  capped: boolean;
+}): React.JSX.Element {
+  if (isLoading) {
+    return <p className="text-sm text-slate-500">Loading supply changes…</p>;
+  }
+
+  if (hasError) {
+    return (
+      <p className="text-sm text-rose-400" role="alert">
+        Failed to load supply changes.
+      </p>
+    );
+  }
+
+  if (events.length === 0) {
+    return (
+      <p className="text-sm text-slate-500">
+        No supply changes at or above {thresholdLabel} equivalent in{" "}
+        {capped ? "the most recent fetched rows" : "the selected window"}.
+      </p>
+    );
+  }
+
+  return <PaginatedSupplyChangesTable key={minimumUsdValue} events={events} />;
+}
+
+function PaginatedSupplyChangesTable({
+  events,
+}: {
+  events: ReadonlyArray<StableSupplyChangeEvent>;
+}): React.JSX.Element {
+  const [pageIndex, setPageIndex] = useState(0);
+  const pageCount = Math.max(
+    1,
+    Math.ceil(events.length / SUPPLY_CHANGES_PAGE_SIZE),
+  );
+  const currentPageIndex = Math.min(pageIndex, pageCount - 1);
+  const pageStart = currentPageIndex * SUPPLY_CHANGES_PAGE_SIZE;
+  const pageEvents = events.slice(
+    pageStart,
+    pageStart + SUPPLY_CHANGES_PAGE_SIZE,
+  );
+
+  return (
+    <>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -126,13 +147,24 @@ export function StablesChangesTable({
             </tr>
           </thead>
           <tbody>
-            {events.map((e) => (
+            {pageEvents.map((e) => (
               <SupplyChangeRow key={e.id} event={e} />
             ))}
           </tbody>
         </table>
       </div>
-    </Card>
+      <SupplyChangesPagination
+        totalCount={events.length}
+        pageStart={pageStart}
+        visibleCount={pageEvents.length}
+        currentPageIndex={currentPageIndex}
+        pageCount={pageCount}
+        onPrevious={() => setPageIndex((current) => Math.max(0, current - 1))}
+        onNext={() =>
+          setPageIndex((current) => Math.min(pageCount - 1, current + 1))
+        }
+      />
+    </>
   );
 }
 
@@ -174,12 +206,63 @@ function ChangesHeader({
           ) : null}
           {capped ? (
             <p className="text-xs text-amber-400" role="status">
-              Showing the most recent {eventCount} events; older entries may be
-              truncated.
+              Showing {eventCount} matching events from the most recent fetched
+              rows; older matches may be truncated.
             </p>
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function SupplyChangesPagination({
+  totalCount,
+  pageStart,
+  visibleCount,
+  currentPageIndex,
+  pageCount,
+  onPrevious,
+  onNext,
+}: {
+  totalCount: number;
+  pageStart: number;
+  visibleCount: number;
+  currentPageIndex: number;
+  pageCount: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}): React.JSX.Element {
+  const firstVisible = pageStart + 1;
+  const lastVisible = pageStart + visibleCount;
+  return (
+    <div className="mt-4 flex flex-col gap-3 border-t border-slate-800 pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs text-slate-500" role="status">
+        Showing {firstVisible}-{lastVisible} of {totalCount} matching events.
+      </p>
+      {pageCount > 1 ? (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onPrevious}
+            disabled={currentPageIndex === 0}
+            className="h-8 rounded-md border border-slate-700 px-3 text-xs text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <span className="text-xs text-slate-500">
+            Page {currentPageIndex + 1} of {pageCount}
+          </span>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={currentPageIndex >= pageCount - 1}
+            className="h-8 rounded-md border border-slate-700 px-3 text-xs text-slate-300 transition-colors hover:border-slate-600 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
