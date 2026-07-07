@@ -199,6 +199,7 @@ type BreachHistoryPanelInnerProps = {
   orderBy: ReturnType<typeof buildOrderBy>;
 };
 
+// eslint-disable-next-line max-lines-per-function -- Existing oversized panel is outside this contrast-token sweep.
 function BreachHistoryPanelInner({
   pool,
   network,

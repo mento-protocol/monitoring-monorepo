@@ -53,6 +53,7 @@ interface BridgeTokenBreakdownChartProps {
   defaultRange?: RangeKey;
 }
 
+// eslint-disable-next-line max-lines-per-function -- Existing oversized chart is outside this contrast-token sweep.
 export function BridgeTokenBreakdownChart({
   snapshots,
   rates,
