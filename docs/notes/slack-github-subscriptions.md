@@ -2,15 +2,15 @@
 title: GitHub-to-Slack notifications for Terraform-applying workflows
 status: active
 owner: eng
-last_verified: 2026-07-06
+last_verified: 2026-07-07
 ---
 
 # GitHub-to-Slack notifications for Terraform-applying workflows
 
-Two independent systems post GitHub Actions activity into Slack for the
+Terraform deploy activity reaches Slack through three independent paths for the
 CI-applied Terraform stacks (`alerts-rules`, `alerts-delivery`, `aegis`,
-`governance-watchdog` — see `docs/terraform.md`). They are unrelated,
-configured in different places, and neither can see the other.
+`governance-watchdog` — see `docs/terraform.md`). They are configured in
+different places, and none should be treated as a substitute for the others.
 
 ## 1. GitHub Slack App subscription (Slack-side, NOT Terraform-managed)
 
@@ -110,17 +110,27 @@ the bot as above. The platform PAT needs **both** `Secrets: Read/write` and
 `Variables: Read/write` — GitHub scopes repo Secrets and repo Variables
 independently, so a Secrets-only PAT gets a silent 403 on the first apply.
 
-## Known hazard: stalled deploy runs
+## 3. `Terraform Deploy Queue Watch`
 
-Neither notification system fires while a deploy workflow run is stuck
-`queued`/`pending` with zero started jobs — the plan job that posts both
-notifications never runs. See issue #1136 for the concurrency-pileup hazard
-and proposed stuck-run visibility fixes; this is tracked separately and not
-addressed by this document.
+`.github/workflows/terraform-deploy-queue-watch.yml` is the pre-plan guard for a
+different failure mode: a post-merge Terraform deploy workflow can sit
+`queued`/`pending` behind an older run before any job starts. In that state the
+GitHub Slack App approval card and `scripts/notify-terraform-apply.mjs` summary
+cannot fire because the deploy workflow has not reached its `plan` job.
+
+The watcher runs every 15 minutes, reads recent runs for the four
+`production-infra` deploy workflows, and posts to the same
+`TERRAFORM_APPLY_SLACK_CHANNEL` destination when a `push`/`workflow_dispatch`
+run is older than 60 minutes and still has zero started jobs. It fails its own
+workflow run after posting so the generic `#ci-failures` listener also has a
+machine-visible failure signal. It is observer-only: it does not join the
+deploy workflows' `*-deploy` concurrency groups, cancel runs, approve
+environments, or apply Terraform.
 
 ## Out of scope
 
-`.github/workflows/notify-slack-on-main-failure.yml` is a third, separate
-Slack integration (main-branch workflow _failures_ only, posted to
-`#ci-failures` via the same bot token) — it is not one of the two systems
-described above and is not covered by this document.
+`.github/workflows/notify-slack-on-main-failure.yml` is a separate Slack
+integration for main-branch workflow _failures_ only, posted to `#ci-failures`
+via the same bot token. It is only relevant here because the queue watcher is a
+scheduled workflow and therefore must be listed in that listener's explicit
+`workflow_run.workflows` allowlist.

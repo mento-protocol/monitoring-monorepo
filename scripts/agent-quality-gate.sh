@@ -1548,6 +1548,9 @@ while IFS= read -r path; do
         scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
           add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
           ;;
+        scripts/check-terraform-deploy-queue.mjs|scripts/check-terraform-deploy-queue.test.mjs)
+          add_command "node scripts/check-terraform-deploy-queue.test.mjs" "Terraform deploy queue watcher changed"
+          ;;
         scripts/redrive-onchain-deadletter.mjs|scripts/redrive-onchain-deadletter.test.mjs)
           add_command "node scripts/redrive-onchain-deadletter.test.mjs" "onchain dead-letter redrive tool changed"
           ;;
