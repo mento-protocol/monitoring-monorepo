@@ -52,11 +52,12 @@ required full-repo Trunk check on every
 PR. Normal `--run` mode executes independent quality-phase commands with
 bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
 `AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
-Terraform init/validate chains, Playwright browser install, and shared-config
-build setup remain ordered. Dashboard `test:browser` and build-backed
-`size-limit` also stay serialized because both touch `ui-dashboard/.next`.
-`--fail-fast` stays sequential so it still stops before starting the next mapped
-command.
+Terraform init/validate chains, and shared-config build setup remain ordered
+prerequisites. Playwright browser install, dashboard `test:browser`, and
+build-backed `size-limit` stay serialized with each other, but are not global
+quality prerequisites: a browser setup failure still lets independent
+lint/typecheck/unit/knip feedback run. `--fail-fast` stays sequential so it
+still stops before starting the next mapped command.
 
 For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
 the structured closeout review after the mapped gate and before pushing:

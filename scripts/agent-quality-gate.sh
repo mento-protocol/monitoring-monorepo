@@ -1951,9 +1951,6 @@ is_quality_setup_command() {
   # they must finish before the independent quality pool starts. Keep this list
   # in sync with new setup-style commands added by the path mapper above.
   case "$command" in
-    "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium")
-      return 0
-      ;;
     "pnpm --filter @mento-protocol/monitoring-config build")
       return 0
       ;;
@@ -1967,10 +1964,15 @@ is_quality_setup_command() {
 
 is_quality_serial_command() {
   local command="$1"
-  # Dashboard browser tests start a Next dev server while size-limit runs a
-  # build-backed Turbo task. Both touch ui-dashboard/.next, so keep them
-  # mutually exclusive instead of letting the parallel pool overlap them.
+  # Dashboard browser setup/tests and size-limit must stay ordered relative to
+  # each other, but they are not prerequisites for lint/typecheck/unit/knip.
+  # Browser tests need Chromium installed first; browser tests start a Next dev
+  # server while size-limit runs a build-backed Turbo task, and both touch
+  # ui-dashboard/.next, so keep those two mutually exclusive.
   case "$command" in
+    "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium")
+      return 0
+      ;;
     "pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw")
       return 0
       ;;

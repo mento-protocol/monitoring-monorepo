@@ -1909,6 +1909,52 @@ assert_contains "+ pnpm exec turbo run size-limit --filter=@mento-protocol/ui-da
 assert_contains "All mapped commands passed."
 assert_not_contains "dashboard .next command overlapped"
 
+dashboard_setup_failure_repo="$(mktemp -d)"
+(
+  cd "$dashboard_setup_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin tools ui-dashboard
+  printf 'fixture\n' > ui-dashboard/README.md
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  --filter\ @mento-protocol/ui-dashboard\ exec\ playwright\ install\ chromium)
+    echo "chromium install unavailable"
+    exit 1
+    ;;
+  exec\ turbo\ run\ lint*|exec\ turbo\ run\ typecheck*|exec\ turbo\ run\ knip*|--filter\ @mento-protocol/ui-dashboard\ test:coverage|code-health:deps)
+    printf 'ran\n' >> "${QUALITY_MARKER:?}"
+    ;;
+esac
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'ui-dashboard/README.md\n' > changed-paths.txt
+  if QUALITY_MARKER="$dashboard_setup_failure_repo/.tmp/quality-ran" \
+    PATH="$dashboard_setup_failure_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 8 \
+      > "$output_file" 2>&1; then
+    fail "gate did not fail when dashboard Chromium install failed"
+  fi
+  [[ -f "$dashboard_setup_failure_repo/.tmp/quality-ran" ]] ||
+    fail "independent quality pool did not run after dashboard Chromium install failed"
+)
+rm -rf "$dashboard_setup_failure_repo"
+assert_contains "chromium install unavailable"
+assert_contains "Running quality commands with parallelism 8."
+
 fresh_stamp_repo="$(mktemp -d)"
 (
   cd "$fresh_stamp_repo"
