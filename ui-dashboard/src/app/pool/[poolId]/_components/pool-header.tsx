@@ -118,6 +118,10 @@ export function PoolHeader({
     exchangeVolumeData,
     exchangeVolumeLoading,
   );
+  const exchangeVolumeHasError = hasErrorWithoutData(
+    exchangeVolumeError,
+    exchangeVolumeData,
+  );
   // The Hasura "field not found" error during the indexer deploy+resync
   // window collapses to `v2Error`; surface as a degraded panel rather
   // than silently rendering nothing.
@@ -199,7 +203,7 @@ export function PoolHeader({
             hasError={v2HasError}
             exchangeVolumeRows={exchangeVolumeRows}
             exchangeVolumeLoading={exchangeVolumeLoadingWithoutData}
-            exchangeVolumeError={exchangeVolumeError !== undefined}
+            exchangeVolumeError={exchangeVolumeHasError}
             hasExchangeId={Boolean(
               exchangeIdForVolume && exchangeProviderForVolume,
             )}

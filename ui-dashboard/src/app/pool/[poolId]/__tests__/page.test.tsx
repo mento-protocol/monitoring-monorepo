@@ -533,7 +533,10 @@ describe("Pool detail LPs tab", () => {
         );
       }
       if (query.includes("BrokerExchangeDailySnapshots24h")) {
-        return revalidatingGqlResult(initialData.brokerExchange24h);
+        return revalidatingGqlResult(
+          initialData.brokerExchange24h,
+          new Error("transient exchange volume query failure"),
+        );
       }
       if (query.includes("TradingLimits"))
         return gqlResult({ TradingLimit: [] });
