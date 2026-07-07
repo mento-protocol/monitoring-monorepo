@@ -58,7 +58,7 @@ variable "region" {
 variable "runtime" {
   description = "Cloud Function runtime"
   type        = string
-  default     = "nodejs22"
+  default     = "nodejs24"
 }
 
 variable "schedule" {

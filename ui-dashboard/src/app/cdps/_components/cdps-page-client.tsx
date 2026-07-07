@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Suspense, useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { useGQL } from "@/lib/graphql";
@@ -226,10 +226,35 @@ export function CdpsPageClient() {
         activityLoading={txLoading}
         activityHasError={txHasError}
       />
-      <CdpAllTransactionsTable
+      <CdpTransactionsSection
         collaterals={collaterals}
         chainId={network.chainId}
       />
     </div>
+  );
+}
+
+function CdpTransactionsSection({
+  collaterals,
+  chainId,
+}: {
+  collaterals: CdpCollateral[];
+  chainId: number;
+}) {
+  return (
+    <Suspense fallback={<CdpTransactionsTableFallback />}>
+      <CdpAllTransactionsTable collaterals={collaterals} chainId={chainId} />
+    </Suspense>
+  );
+}
+
+function CdpTransactionsTableFallback() {
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-white mb-3">
+        Recent CDP Transactions
+      </h2>
+      <Skeleton rows={6} />
+    </section>
   );
 }

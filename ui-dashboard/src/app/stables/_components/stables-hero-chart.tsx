@@ -39,8 +39,14 @@ type Props = {
   onRangeChange: (range: RangeKey) => void;
   isLoading: boolean;
   hasError: boolean;
-  capped: boolean;
 };
+
+const STABLES_CHART_RANGES: ReadonlyArray<{ key: RangeKey; label: string }> = [
+  { key: "7d", label: "1W" },
+  { key: "30d", label: "1M" },
+  { key: "90d", label: "3M" },
+  { key: "all", label: "All" },
+];
 
 /**
  * Total Mento stablecoin supply over time, USD-normalized, stacked by token.
@@ -59,7 +65,6 @@ export function StablesHeroChart({
   onRangeChange,
   isLoading,
   hasError,
-  capped,
 }: Props): React.JSX.Element {
   // Group snapshots by `{chainId}|{tokenAddress}|{source}` so Celo and Monad
   // supplies stay distinct before the stacked total sums them.
@@ -137,31 +142,24 @@ export function StablesHeroChart({
   const change = stockWoWChangePct(totalSeries);
 
   return (
-    <div className="space-y-2">
-      <TimeSeriesChartCard
-        title="Mento stablecoin supply"
-        rangeAriaLabel="Mento stablecoin supply range"
-        series={totalSeries}
-        breakdown={breakdown}
-        breakdownMode="stacked"
-        range={range}
-        onRangeChange={onRangeChange}
-        headline={headline}
-        change={change}
-        changeLabel="vs. 7d ago"
-        isLoading={isLoading}
-        hasError={hasError}
-        hasSnapshotError={false}
-        emptyMessage="No stablecoin supply data yet."
-        plotlyDeferMode="visible"
-      />
-      {capped ? (
-        <p className="text-xs text-amber-400" role="status">
-          Showing the most recent 1,000 snapshot rows — older history may be
-          truncated. Use the 1W or 1M range for a complete view.
-        </p>
-      ) : null}
-    </div>
+    <TimeSeriesChartCard
+      title="Mento stablecoin supply"
+      rangeAriaLabel="Mento stablecoin supply range"
+      series={totalSeries}
+      breakdown={breakdown}
+      breakdownMode="stacked"
+      range={range}
+      onRangeChange={onRangeChange}
+      ranges={STABLES_CHART_RANGES}
+      headline={headline}
+      change={change}
+      changeLabel="vs. 7d ago"
+      isLoading={isLoading}
+      hasError={hasError}
+      hasSnapshotError={false}
+      emptyMessage="No stablecoin supply data yet."
+      plotlyDeferMode="visible"
+    />
   );
 }
 

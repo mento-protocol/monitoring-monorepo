@@ -225,7 +225,7 @@ read_tfvar_default_number() {
 
 # Read a value from main.tf using an awk pattern
 # Usage: read_tf_main_value "main_tf_path" "awk_pattern" "fallback"
-# Example: runtime=$(read_tf_main_value "${main_tf}" '/build_config/{f=1} f==1&&/runtime.*=/{gsub(/[^"]*"|".*/, ""); print; exit}' "nodejs22")
+# Example: runtime=$(read_tf_main_value "${main_tf}" '/build_config/{f=1} f==1&&/runtime.*=/{gsub(/[^"]*"|".*/, ""); print; exit}' "nodejs24")
 read_tf_main_value() {
 	local main_tf="$1"
 	local pattern="$2"
