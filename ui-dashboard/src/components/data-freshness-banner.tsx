@@ -32,16 +32,14 @@ export function DataFreshnessBanner() {
   }, []);
 
   const currentNow = Math.max(now, Date.now());
-  const status = getSWRFreshnessStatus(currentNow);
+  const status = getSWRFreshnessStatus();
   if (status === null) return null;
 
   const age = formatAge(currentNow - status.lastUpdatedAt);
   const sourceCount =
-    status.staleCount === 1
+    status.failedCount === 1
       ? "1 data source"
-      : `${status.staleCount} data sources`;
-  const prefix =
-    status.failedCount > 0 ? "Latest refresh failed" : "Data may be stale";
+      : `${status.failedCount} data sources`;
 
   return (
     <div
@@ -50,8 +48,8 @@ export function DataFreshnessBanner() {
       className="border-b border-amber-400/20 bg-amber-950/30 px-3 py-2 text-xs text-amber-100 sm:px-6"
     >
       <div className="mx-auto max-w-7xl">
-        {prefix}. Showing last-good data from {age} ago across {sourceCount}.
-        Retrying automatically.
+        Latest refresh failed. Showing last-good data from {age} ago across{" "}
+        {sourceCount}. Retrying automatically.
         {status.lastErrorMessage ? (
           <span className="sr-only">
             {" "}

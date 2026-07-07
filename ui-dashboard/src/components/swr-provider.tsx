@@ -68,7 +68,7 @@ const freshnessMiddleware: Middleware = (useSWRNext) => {
 
     useEffect(() => {
       if (freshnessKey === null || refreshIntervalMs === null) return;
-      return registerSWRFreshnessKey(freshnessKey, refreshIntervalMs);
+      return registerSWRFreshnessKey(freshnessKey);
     }, [freshnessKey, refreshIntervalMs]);
 
     useEffect(() => {
