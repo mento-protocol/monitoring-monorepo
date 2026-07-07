@@ -42,6 +42,13 @@ type Props = {
   capped: boolean;
 };
 
+const STABLES_CHART_RANGES: ReadonlyArray<{ key: RangeKey; label: string }> = [
+  { key: "7d", label: "1W" },
+  { key: "30d", label: "1M" },
+  { key: "90d", label: "3M" },
+  { key: "all", label: "All" },
+];
+
 /**
  * Total Mento stablecoin supply over time, USD-normalized, stacked by token.
  * Cross-currency supplies only stack meaningfully in a common unit — tokens
@@ -146,6 +153,7 @@ export function StablesHeroChart({
         breakdownMode="stacked"
         range={range}
         onRangeChange={onRangeChange}
+        ranges={STABLES_CHART_RANGES}
         headline={headline}
         change={change}
         changeLabel="vs. 7d ago"
