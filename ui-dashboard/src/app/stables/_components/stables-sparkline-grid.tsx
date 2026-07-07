@@ -23,8 +23,8 @@ import type {
 } from "../_lib/types";
 
 /**
- * Per-token sparkline grid — overview-card layer between the KPI strip
- * and the hero chart. One card per `(tokenAddress, source)` row from
+ * Per-token sparkline grid — overview-card layer below the aggregate
+ * supply chart. One card per `(tokenAddress, source)` row from
  * `rollupByToken`, showing current USD supply, 7d change, and a small
  * inline SVG sparkline of the last 30 days normalized to USD.
  *

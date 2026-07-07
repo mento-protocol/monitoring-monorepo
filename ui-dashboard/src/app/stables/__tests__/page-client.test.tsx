@@ -1,6 +1,6 @@
 /**
  * StablesPageClient smoke test — renders with all hooks mocked to verify
- * the page wires KPI strip → sparkline grid → hero chart → changes table
+ * the page wires KPI strip → hero chart → sparkline grid → changes table
  * without throwing. Covers three states: loading, empty, and data-present.
  *
  * Doesn't assert pixel-perfect output (that's the job of browser verify);
@@ -200,6 +200,12 @@ describe("StablesPageClient — smoke", () => {
     const html = renderToStaticMarkup(<StablesPageClient />);
     // USDm label appears in both the KPI strip + sparkline grid + chart legend.
     expect(html).toContain("USDm");
+    expect(html.indexOf("Mento stablecoin supply")).toBeLessThan(
+      html.indexOf("Per-token supply detail"),
+    );
+    expect(html.indexOf("Per-token supply detail")).toBeLessThan(
+      html.indexOf("Supply changes"),
+    );
     // Sparkline grid empty-state message should be absent now.
     expect(html).not.toContain("No per-token data yet");
   });

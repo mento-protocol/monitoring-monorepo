@@ -85,16 +85,6 @@ function StablesContent(): React.JSX.Element {
         hasError={hasError}
       />
 
-      <StablesSparklineGrid
-        snapshots={snapshots}
-        latestPerToken={latestPerToken}
-        custodySnapshots={effectiveCustodySnapshots}
-        latestCustodyPerToken={effectiveLatestCustodyPerToken}
-        rates={rates}
-        isLoading={isLoading}
-        hasError={hasError}
-      />
-
       <StablesHeroChart
         snapshots={snapshots}
         latestPerToken={latestPerToken}
@@ -106,6 +96,16 @@ function StablesContent(): React.JSX.Element {
         isLoading={isLoading}
         hasError={hasError}
         capped={chartCapped}
+      />
+
+      <StablesSparklineGrid
+        snapshots={snapshots}
+        latestPerToken={latestPerToken}
+        custodySnapshots={effectiveCustodySnapshots}
+        latestCustodyPerToken={effectiveLatestCustodyPerToken}
+        rates={rates}
+        isLoading={isLoading}
+        hasError={hasError}
       />
 
       <StablesChangesSection rates={rates} />
