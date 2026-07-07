@@ -27,9 +27,12 @@ import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { formatUSD, weiToUsd } from "@/lib/format";
 import type { Network } from "@/lib/networks";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import { hasErrorWithoutData } from "@/lib/swr-state";
 import {
   BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
   POOL_V2_EXCHANGE,
+  type BrokerExchangeDailySnapshots24hResponse,
+  type PoolV2ExchangeResponse,
 } from "@/lib/queries";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
@@ -44,16 +47,25 @@ import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import { PoolLifecyclePanel } from "./pool-lifecycle-panel";
 import { V2ExchangePanel } from "./v2-exchange-panel";
 
+function isLoadingWithoutData(data: unknown, isLoading: boolean): boolean {
+  return data === undefined && isLoading;
+}
+
+// eslint-disable-next-line max-lines-per-function -- Existing composed header surface; this PR only threads SSR fallback props into its current queries.
 export function PoolHeader({
   pool,
   deployTxHash,
   tradingLimits,
   tradingLimitsError = false,
+  initialV2Exchange,
+  initialExchangeVolume,
 }: {
   pool: Pool;
   deployTxHash?: string | undefined;
   tradingLimits: TradingLimit[];
   tradingLimitsError?: boolean | undefined;
+  initialV2Exchange?: PoolV2ExchangeResponse | undefined;
+  initialExchangeVolume?: BrokerExchangeDailySnapshots24hResponse | undefined;
 }) {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
@@ -64,11 +76,14 @@ export function PoolHeader({
     data: v2Data,
     isLoading: v2Loading,
     error: v2Error,
-  } = useGQL<{ BiPoolExchange: BiPoolExchangeRow[] }>(
+  } = useGQL<PoolV2ExchangeResponse>(
     isVirtual ? POOL_V2_EXCHANGE : null,
     { poolId: pool.id, chainId: pool.chainId },
+    undefined,
+    { fallbackData: initialV2Exchange },
   );
   const v2Config = v2Data?.BiPoolExchange?.[0] ?? null;
+  const v2LoadingWithoutData = isLoadingWithoutData(v2Data, v2Loading);
   const exchangeIdForVolume = (
     pool.wrappedExchangeId ??
     v2Config?.exchangeId ??
@@ -95,14 +110,22 @@ export function PoolHeader({
       since: volumeSince,
     },
     SNAPSHOT_REFRESH_MS,
-    { timeoutMs: HASURA_TIMEOUT_MS },
+    { timeoutMs: HASURA_TIMEOUT_MS, fallbackData: initialExchangeVolume },
   );
   const exchangeVolumeRows =
     exchangeVolumeData?.BrokerExchangeDailySnapshot ?? [];
+  const exchangeVolumeLoadingWithoutData = isLoadingWithoutData(
+    exchangeVolumeData,
+    exchangeVolumeLoading,
+  );
+  const exchangeVolumeHasError = hasErrorWithoutData(
+    exchangeVolumeError,
+    exchangeVolumeData,
+  );
   // The Hasura "field not found" error during the indexer deploy+resync
   // window collapses to `v2Error`; surface as a degraded panel rather
   // than silently rendering nothing.
-  const v2HasError = v2Error !== undefined;
+  const v2HasError = hasErrorWithoutData(v2Error, v2Data);
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
@@ -179,8 +202,8 @@ export function PoolHeader({
             v2Config={v2Config}
             hasError={v2HasError}
             exchangeVolumeRows={exchangeVolumeRows}
-            exchangeVolumeLoading={exchangeVolumeLoading}
-            exchangeVolumeError={exchangeVolumeError !== undefined}
+            exchangeVolumeLoading={exchangeVolumeLoadingWithoutData}
+            exchangeVolumeError={exchangeVolumeHasError}
             hasExchangeId={Boolean(
               exchangeIdForVolume && exchangeProviderForVolume,
             )}
@@ -235,7 +258,7 @@ export function PoolHeader({
             pool={pool}
             network={network}
             v2Config={v2Config}
-            isLoading={v2Loading}
+            isLoading={v2LoadingWithoutData}
             hasError={v2HasError}
           />
           <div className="my-5 h-px bg-slate-800" />

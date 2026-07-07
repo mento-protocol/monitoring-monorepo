@@ -11,6 +11,7 @@ import { PoolVolumeOverTimeChart } from "@/components/pool-volume-over-time-char
 import { ReservesPanel } from "@/components/reserves-panel";
 import { normalizePoolIdForChain } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
+import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
@@ -64,16 +65,17 @@ import { SwapsTab } from "../_tabs/swaps-tab";
 
 export function PoolDetailPageClient({
   initialSearch = windowLocationSearch(),
-  initialPool,
+  initialData,
 }: {
   initialSearch?: string;
-  /** Server-prefetched pool-overview response, forwarded to the overview
-   *  `useGQL` as `fallbackData` so the header/health paint on first render. */
-  initialPool?: PoolDetailResponse | undefined;
+  /** Server-prefetched pool-detail responses, forwarded to matching `useGQL`
+   *  calls as `fallbackData` so the overview and extension fields paint
+   *  populated. */
+  initialData?: PoolDetailInitialData | undefined;
 } = {}) {
   return (
     <Suspense>
-      <PoolDetail initialSearch={initialSearch} initialPool={initialPool} />
+      <PoolDetail initialSearch={initialSearch} initialData={initialData} />
     </Suspense>
   );
 }
@@ -82,6 +84,10 @@ type SearchParamsReader = Pick<URLSearchParams, "get" | "toString">;
 type PoolNetwork = ReturnType<typeof useNetwork>["network"];
 type ReplacePoolURL = (tab: Tab, limit: number) => void;
 type SetTabSearch = (tab: Tab, value: string) => void;
+type PoolDetailProps = {
+  initialSearch: string;
+  initialData?: PoolDetailInitialData | undefined;
+};
 
 function readSearchParam(params: SearchParamsReader, key: string) {
   return params.get(key);
@@ -139,7 +145,7 @@ function usePoolUrlState(initialSearch: string, normalizedPoolId: string) {
 function usePoolDetailData(
   normalizedPoolId: string,
   network: PoolNetwork,
-  initialPool?: PoolDetailResponse,
+  initialData?: PoolDetailInitialData,
 ) {
   const {
     data: poolData,
@@ -151,12 +157,13 @@ function usePoolDetailData(
     // refreshInterval stays default (30s); options go in the 4th arg per the
     // documented shape (see use-gql-shape.test.ts).
     undefined,
-    { fallbackData: initialPool },
+    { fallbackData: initialData?.pool },
   );
   const { pool, thresholdsLoading, thresholdsError } = usePoolWithThresholds(
     poolData?.Pool?.[0] ?? null,
     normalizedPoolId,
     network.chainId,
+    initialData,
   );
   const { data: limitsData, error: limitsError } = useGQL<{
     TradingLimit: TradingLimit[];
@@ -231,13 +238,7 @@ function isPoolUnavailable({
   );
 }
 
-function PoolDetail({
-  initialSearch,
-  initialPool,
-}: {
-  initialSearch: string;
-  initialPool?: PoolDetailResponse | undefined;
-}) {
+function PoolDetail({ initialSearch, initialData }: PoolDetailProps) {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
   const decodedId = decodePoolId(poolId);
@@ -252,7 +253,7 @@ function PoolDetail({
     ? (rawTab as Tab)
     : "providers";
   const limit = parseTabLimit(readSearchParam(urlParams, "limit"));
-  const detail = usePoolDetailData(normalizedPoolId, network, initialPool);
+  const detail = usePoolDetailData(normalizedPoolId, network, initialData);
   const { visibleTabs, tab, activeSearch } = usePoolTabState({
     fpmmPool: detail.fpmmPool,
     olsData: detail.olsData,
@@ -305,6 +306,7 @@ function PoolDetail({
         thresholdsLoading={detail.thresholdsLoading}
         thresholdsError={detail.thresholdsError}
         rates={detail.rates}
+        initialData={initialData}
       />
 
       {!poolUnavailable && (
@@ -379,6 +381,7 @@ function PoolOverview({
   thresholdsLoading,
   thresholdsError,
   rates,
+  initialData,
 }: {
   poolErr: Error | undefined;
   poolLoading: boolean;
@@ -395,6 +398,7 @@ function PoolOverview({
   thresholdsLoading: boolean;
   thresholdsError: Error | undefined;
   rates: OracleRateMap;
+  initialData?: PoolDetailInitialData | undefined;
 }) {
   if (hasErrorWithoutData(poolErr, pool))
     return <ErrorBox message={`Failed to load pool: ${poolErr.message}`} />;
@@ -419,6 +423,8 @@ function PoolOverview({
         deployTxHash={deployTxHash}
         tradingLimits={tradingLimits}
         tradingLimitsError={tradingLimitsError}
+        initialV2Exchange={initialData?.v2Exchange}
+        initialExchangeVolume={initialData?.brokerExchange24h}
       />
       <HealthPanel pool={pool} />
       {fpmmPool && (

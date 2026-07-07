@@ -6,24 +6,101 @@
 import { unstable_cache } from "next/cache";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
+import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
+import {
+  BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
+  type BrokerExchangeDailySnapshots24hResponse,
+} from "@/lib/queries/broker";
 import {
   POOL_DETAIL_WITH_HEALTH,
+  POOL_THRESHOLDS_KNOWN_EXT,
+  POOL_V2_EXCHANGE,
+  POOL_VP_DEPRECATION_EXT,
+  POOL_VP_LIFECYCLE_DEPRECATION_EXT,
+  POOL_VP_ORACLE_FRESHNESS_EXT,
   type PoolDetailResponse,
+  type PoolThresholdsKnownExtResponse,
+  type PoolV2ExchangeResponse,
+  type PoolVpDeprecationExtResponse,
+  type PoolVpLifecycleDeprecationExtResponse,
+  type PoolVpOracleFreshnessExtResponse,
 } from "@/lib/queries/pool-detail";
 import { NETWORKS, configuredNetworkIdForChainId } from "@/lib/networks";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
+import { isVirtualPool, type Pool } from "@/lib/types";
 
-// SSR-prefetch of the pool-overview query. `/pool/[poolId]` is otherwise a pure
-// client waterfall: PoolOverview swaps a short skeleton for a tall header + health
-// block once the client fetch resolves, which is the measured CLS 0.25. Fetching
-// the same query + variables server-side and handing the result to the client as
-// fallbackData lets the overview paint immediately, eliminating that shift.
+// SSR-prefetch of the pool-detail base row plus split extension queries.
+// `/pool/[poolId]` is otherwise a pure client waterfall: PoolOverview swaps a
+// short skeleton for a tall header + health block once the client fetch resolves,
+// which is the measured CLS 0.25. Fetching the same query variables server-side
+// and handing the responses to the client as fallbackData lets the overview and
+// extension-backed tiles paint immediately, eliminating that shift.
 //
 // Distinct from lib/pool-og.ts: that fetch merges extensions and returns a
-// transformed PoolOgData shape for OG images; this returns the raw response.
+// transformed PoolOgData shape for OG images; this returns the raw responses.
+function currentUtcDayStartSeconds(nowMs = Date.now()): number {
+  return Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+}
+
+type PoolDetailClient = ReturnType<typeof makeOgGraphQLClient>;
+
+async function requestOptional<T>(
+  client: PoolDetailClient,
+  document: string,
+  variables: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<T | undefined> {
+  try {
+    return await client.request<T>({
+      document,
+      variables,
+      signal,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+async function fetchVirtualPoolHeaderInitialData(
+  client: PoolDetailClient,
+  chainId: number,
+  pool: Pool,
+  signal: AbortSignal,
+): Promise<Pick<PoolDetailInitialData, "v2Exchange" | "brokerExchange24h">> {
+  if (!isVirtualPool(pool)) return {};
+  const v2Exchange = await requestOptional<PoolV2ExchangeResponse>(
+    client,
+    POOL_V2_EXCHANGE,
+    { poolId: pool.id, chainId },
+    signal,
+  );
+  const v2Config = v2Exchange?.BiPoolExchange?.[0];
+  const exchangeId = (pool.wrappedExchangeId ?? v2Config?.exchangeId ?? "")
+    .toLowerCase()
+    .trim();
+  const exchangeProvider = (v2Config?.exchangeProvider ?? "")
+    .toLowerCase()
+    .trim();
+  if (!exchangeId || !exchangeProvider) return { v2Exchange };
+  const brokerExchange24h =
+    await requestOptional<BrokerExchangeDailySnapshots24hResponse>(
+      client,
+      BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
+      {
+        chainId,
+        exchangeProvider,
+        exchangeId,
+        since: currentUtcDayStartSeconds(),
+      },
+      signal,
+    );
+  return { v2Exchange, brokerExchange24h };
+}
+
 async function fetchPoolDetailUncached(
   chainId: number,
   id: string,
-): Promise<PoolDetailResponse | undefined> {
+): Promise<PoolDetailInitialData | undefined> {
   // Resolve the network the same way NetworkProvider does on the client
   // (configured-only), so we hit the same endpoint the client will key against.
   const networkId = configuredNetworkIdForChainId(chainId);
@@ -31,19 +108,65 @@ async function fetchPoolDetailUncached(
   const network = NETWORKS[networkId];
   if (!network.hasuraUrl) return undefined;
 
-  try {
-    // Bound the request: this await runs during the server render, so a slow or
-    // hung Hasura would otherwise stall the whole pool page's HTML response.
-    return await makeOgGraphQLClient(network).request<PoolDetailResponse>({
-      document: POOL_DETAIL_WITH_HEALTH,
-      variables: { id, chainId },
-      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
-    });
-  } catch {
-    // Degrade to no fallback: the client hook fetches normally and its own
-    // reserved-height loading path takes over. Never block the render on this.
+  const client = makeOgGraphQLClient(network);
+  const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
+  const pool = await requestOptional<PoolDetailResponse>(
+    client,
+    POOL_DETAIL_WITH_HEALTH,
+    { id, chainId },
+    signal,
+  );
+  const poolRow = pool?.Pool?.[0];
+  if (!poolRow) {
+    // Degrade to no fallback: the client hooks fetch normally and their own
+    // reserved-height loading paths take over. Never block the render on this.
     return undefined;
   }
+
+  const [
+    thresholds,
+    vpOracleFreshness,
+    vpDeprecation,
+    vpLifecycleDeprecation,
+    headerInitialData,
+  ] = await Promise.all([
+    requestOptional<PoolThresholdsKnownExtResponse>(
+      client,
+      POOL_THRESHOLDS_KNOWN_EXT,
+      { id, chainId },
+      signal,
+    ),
+    requestOptional<PoolVpOracleFreshnessExtResponse>(
+      client,
+      POOL_VP_ORACLE_FRESHNESS_EXT,
+      { id, chainId },
+      signal,
+    ),
+    requestOptional<PoolVpDeprecationExtResponse>(
+      client,
+      POOL_VP_DEPRECATION_EXT,
+      { id, chainId },
+      signal,
+    ),
+    requestOptional<PoolVpLifecycleDeprecationExtResponse>(
+      client,
+      POOL_VP_LIFECYCLE_DEPRECATION_EXT,
+      { id, chainId },
+      signal,
+    ),
+    fetchVirtualPoolHeaderInitialData(client, chainId, poolRow, signal),
+  ]);
+  const { v2Exchange, brokerExchange24h } = headerInitialData;
+
+  return {
+    pool,
+    thresholds,
+    vpOracleFreshness,
+    vpDeprecation,
+    vpLifecycleDeprecation,
+    v2Exchange,
+    brokerExchange24h,
+  };
 }
 
 // 60s revalidate matches the OG cache and the client polling cadence: the fallback

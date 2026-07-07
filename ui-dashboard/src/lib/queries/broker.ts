@@ -1,6 +1,12 @@
 // Broker rollup queries. Re-exported from `../queries.ts` so existing
 // `from "@/lib/queries"` imports stay stable.
 
+import type { BrokerExchangeDailySnapshotRow } from "@/lib/types";
+
+export type BrokerExchangeDailySnapshots24hResponse = {
+  BrokerExchangeDailySnapshot: BrokerExchangeDailySnapshotRow[];
+};
+
 // Daily rollup of legacy v2 (Broker -> BiPoolManager) volume on a chain.
 // Filters out router-driven Broker.Swap events (the sibling-of-VirtualPool
 // case where the v3 Router transitively invokes the Broker — counted as v3
