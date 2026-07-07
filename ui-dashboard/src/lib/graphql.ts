@@ -82,11 +82,11 @@ export function preloadGQL<T>(
   const [serializedKey] = serialize(key);
   if (!serializedKey) return;
 
-  clearGQLPreloadTimer(serializedKey);
   const req = preload(key, () => requestGQL<T>(network, query, variables));
   if (req === undefined) return;
 
   const ttlMs = options.ttlMs ?? SPECULATIVE_PRELOAD_TTL_MS;
+  clearGQLPreloadTimer(serializedKey);
   gqlPreloadTimers.set(
     serializedKey,
     globalThis.setTimeout(() => clearGQLPreload(serializedKey), ttlMs),

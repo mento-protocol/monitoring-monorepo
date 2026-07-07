@@ -80,6 +80,24 @@ describe("preloadGQL", () => {
     expect(swrPreloads()[key]).toBeUndefined();
   });
 
+  it("refreshes expiry when duplicate speculative preloads reuse the same request", async () => {
+    requestMock.mockResolvedValue({ pool_by_pk: { id: VARIABLES.id } });
+
+    preloadGQL(NETWORK, QUERY, VARIABLES, { ttlMs: 1_000 });
+    await vi.advanceTimersByTimeAsync(900);
+    preloadGQL(NETWORK, QUERY, VARIABLES, { ttlMs: 1_000 });
+
+    const key = serializedPreloadKey();
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(swrPreloads()[key]).toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(swrPreloads()[key]).toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(swrPreloads()[key]).toBeUndefined();
+  });
+
   it("clears rejected speculative preloads without an unhandled rejection", async () => {
     requestMock.mockRejectedValue(new Error("Tier quota"));
 
