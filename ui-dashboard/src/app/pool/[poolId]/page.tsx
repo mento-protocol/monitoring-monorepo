@@ -146,10 +146,11 @@ async function CanonicalPoolDetailPage({
     redirect(POOL_NOT_FOUND_DEST);
   }
 
-  // SSR-prefetch the pool-overview query so the client paints header + health
-  // immediately instead of swapping a short skeleton for a tall block (the
-  // measured CLS 0.25). Degrades to undefined on any miss; the client hook then
-  // loads normally via its own reserved-height skeleton.
+  // SSR-prefetch the pool-detail base row plus isolated extension queries so the
+  // client paints header, health, and extension-backed tiles immediately instead
+  // of swapping a short skeleton for a tall block (the measured CLS 0.25).
+  // Degrades to undefined on a base-row miss; the client hooks then load
+  // normally via their own reserved-height skeletons.
   const chainId = extractChainIdFromPoolId(canonicalPoolId);
   const initialData =
     chainId === null

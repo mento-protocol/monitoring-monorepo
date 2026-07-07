@@ -24,17 +24,21 @@ Canonical context describes the system and operating rules as they are today. Ag
 - `.agents/skills/**/SKILL.md`: reusable agent procedures.
 - `.agents/roles/*.md`: opt-in role definitions for verification and standards review.
 - Package READMEs when they describe current commands or runtime behavior.
+- Root `README.md`: the repo landing page and current setup/operator overview.
+  It uses an invisible `agent-context` HTML comment for metadata so GitHub does
+  not render a raw YAML frontmatter block on the repo homepage.
+- `docs/notes/*.md` files that canonical files explicitly delegate current
+  operating rules to. These notes must carry `canonical: true` frontmatter and
+  are enforced like other canonical docs.
 
 Canonical context must stay internally consistent. If two canonical files conflict, fix the conflict before relying on either one.
-
-Root `README.md` is deliberately excluded from the metadata contract for now: it's a GitHub-rendered landing page, and a raw `---\nkey: value\n---` frontmatter block would render as literal text at the top of the repo homepage. Bringing it into `scripts/check-agent-context.mjs` would need a comment-based marker the check can parse instead — tracked in #1071 rather than built speculatively here.
 
 ### Non-Canonical Context
 
 Non-canonical context is useful history, intent, notes, or hypotheses. Agents may read it for rationale, but must verify current behavior in code, config, deployment state, or canonical docs before acting.
 
 - `docs/PLAN-*.md`
-- `docs/notes/*.md`
+- `docs/notes/*.md` files without `canonical: true` frontmatter
 - archived docs
 - roadmap/backlog entries
 - historical PR review notes
@@ -43,7 +47,11 @@ Non-canonical context is allowed to be stale or contradictory. It should not be 
 
 ## Metadata Contract
 
-Managed context files use YAML frontmatter with `title`, `status`, `owner`, `canonical`, and `last_verified` for canonical files.
+Managed context files use YAML frontmatter with `title`, `status`, `owner`, `canonical`, and `last_verified` for canonical files. Root `README.md` uses the same keys in an invisible HTML comment instead:
+
+```html
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=YYYY-MM-DD -->
+```
 
 Rules:
 

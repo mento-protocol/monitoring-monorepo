@@ -29,14 +29,15 @@ import { NETWORKS, configuredNetworkIdForChainId } from "@/lib/networks";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { isVirtualPool, type Pool } from "@/lib/types";
 
-// SSR-prefetch of the pool-overview query. `/pool/[poolId]` is otherwise a pure
-// client waterfall: PoolOverview swaps a short skeleton for a tall header + health
-// block once the client fetch resolves, which is the measured CLS 0.25. Fetching
-// the same query + variables server-side and handing the result to the client as
-// fallbackData lets the overview paint immediately, eliminating that shift.
+// SSR-prefetch of the pool-detail base row plus split extension queries.
+// `/pool/[poolId]` is otherwise a pure client waterfall: PoolOverview swaps a
+// short skeleton for a tall header + health block once the client fetch resolves,
+// which is the measured CLS 0.25. Fetching the same query variables server-side
+// and handing the responses to the client as fallbackData lets the overview and
+// extension-backed tiles paint immediately, eliminating that shift.
 //
 // Distinct from lib/pool-og.ts: that fetch merges extensions and returns a
-// transformed PoolOgData shape for OG images; this returns the raw response.
+// transformed PoolOgData shape for OG images; this returns the raw responses.
 function currentUtcDayStartSeconds(nowMs = Date.now()): number {
   return Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 }

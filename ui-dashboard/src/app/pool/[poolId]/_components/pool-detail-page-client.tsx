@@ -67,8 +67,9 @@ export function PoolDetailPageClient({
   initialData,
 }: {
   initialSearch?: string;
-  /** Server-prefetched pool-detail responses, forwarded to the matching
-   *  `useGQL` calls as `fallbackData` so the overview paints populated. */
+  /** Server-prefetched pool-detail responses, forwarded to matching `useGQL`
+   *  calls as `fallbackData` so the overview and extension fields paint
+   *  populated. */
   initialData?: PoolDetailInitialData | undefined;
 } = {}) {
   return (

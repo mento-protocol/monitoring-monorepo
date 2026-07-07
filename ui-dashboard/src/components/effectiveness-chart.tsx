@@ -97,6 +97,13 @@ export function EffectivenessChart({ events }: EffectivenessChartProps) {
 
   if (events.length < 2) return null;
 
+  const latestPct = Number(events[events.length - 1]!.effectivenessRatio) * 100;
+  const effectivenessSummary = `Rebalance effectiveness trend: ${
+    events.length
+  } rebalances plotted. Latest effectiveness ${latestPct.toFixed(
+    1,
+  )}% (100% = landed exactly on the rebalance boundary).`;
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <h3 className="text-sm font-medium text-slate-400 mb-1">
@@ -108,13 +115,16 @@ export function EffectivenessChart({ events }: EffectivenessChartProps) {
         oracle). Below 100% = control loop under-correcting. Negative =
         rebalance made deviation worse.
       </p>
-      <Plot
-        data={[trace]}
-        layout={STATIC_LAYOUT}
-        config={PLOTLY_CONFIG}
-        style={{ width: "100%", height: 300 }}
-        useResizeHandler
-      />
+      <div role="figure" aria-label="Rebalance effectiveness trend chart">
+        <Plot
+          data={[trace]}
+          layout={STATIC_LAYOUT}
+          config={PLOTLY_CONFIG}
+          style={{ width: "100%", height: 300 }}
+          useResizeHandler
+        />
+      </div>
+      <p className="sr-only">{effectivenessSummary}</p>
     </div>
   );
 }

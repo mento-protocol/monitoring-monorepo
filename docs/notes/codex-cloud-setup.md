@@ -1,3 +1,11 @@
+---
+title: Codex Cloud Setup and Maintenance
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-06
+---
+
 # Codex Cloud Setup and Maintenance
 
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or

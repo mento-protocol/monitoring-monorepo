@@ -2,6 +2,7 @@
 title: PR Ready State
 status: active
 owner: eng
+canonical: true
 last_verified: 2026-06-05
 ---
 

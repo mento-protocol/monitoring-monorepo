@@ -129,14 +129,14 @@
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'PoolTabPanel' has too many lines (122). Maximum allowed is 100.",
-    "line": 485,
+    "line": 486,
     "linePreview": " | function PoolTabPanel({ | tab,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-header.tsx",
     "ruleId": "complexity",
     "message": "Function 'PoolHeader' has a complexity of 28. Maximum allowed is 15.",
-    "line": 50,
+    "line": 54,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing composed header surface; this PR only threads SSR fallback props into its current queries. | export function PoolHeader({ | pool,"
   },
   {
@@ -252,13 +252,6 @@
     "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressReportEditor(props: Props) { | const { address, onSavingChange, onDeletingCha"
   },
   {
-    "file": "src/components/breach-history-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'BreachHistoryChart' has too many lines (116). Maximum allowed is 100.",
-    "line": 43,
-    "linePreview": "*/ | export function BreachHistoryChart({ breaches }: Props) { | if (breaches.length === 0) return null;"
-  },
-  {
     "file": "src/components/breach-history-panel.tsx",
     "ruleId": "complexity",
     "message": "Function 'BreachHistoryPanelInner' has a complexity of 30. Maximum allowed is 15.",
@@ -311,14 +304,14 @@
     "file": "src/components/lp-concentration-chart.tsx",
     "ruleId": "complexity",
     "message": "Function 'LpConcentrationChart' has a complexity of 25. Maximum allowed is 15.",
-    "line": 55,
+    "line": 62,
     "linePreview": " | export function LpConcentrationChart({ | positions,"
   },
   {
     "file": "src/components/lp-concentration-chart.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'LpConcentrationChart' has too many lines (201). Maximum allowed is 100.",
-    "line": 55,
+    "line": 62,
     "linePreview": " | export function LpConcentrationChart({ | positions,"
   },
   {
@@ -339,14 +332,7 @@
     "file": "src/components/reserve-chart.tsx",
     "ruleId": "complexity",
     "message": "Function 'ReserveChart' has a complexity of 17. Maximum allowed is 15.",
-    "line": 27,
-    "linePreview": " | export function ReserveChart({ | rows,"
-  },
-  {
-    "file": "src/components/reserve-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'ReserveChart' has too many lines (103). Maximum allowed is 100.",
-    "line": 27,
+    "line": 47,
     "linePreview": " | export function ReserveChart({ | rows,"
   },
   {
