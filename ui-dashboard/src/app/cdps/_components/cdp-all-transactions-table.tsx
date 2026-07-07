@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
-import { useSearchParams } from "next/navigation";
+import { useMemo } from "react";
 import { ErrorBox, Skeleton } from "@/components/feedback";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
@@ -22,6 +14,7 @@ import {
 } from "@/lib/queries";
 import Link from "next/link";
 import { cdpSymbolSlug } from "../_lib/format";
+import { useCdpOverviewUrlFilters } from "../_lib/use-cdp-overview-url-filters";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
@@ -55,21 +48,11 @@ import {
 // per-kind cap and merge so the latest 100 across kinds is accurate even
 // when one kind dominates (e.g. trove ops far outnumber liquidations).
 const MAX_ROWS = 100;
-const CDP_TYPE_QUERY_PARAM = "type";
-const CDP_MARKET_QUERY_PARAM = "market";
-const CDP_ADDRESS_QUERY_PARAM = "address";
-const TX_FILTER_TYPE_SET = new Set<BadgeKind>(TX_FILTER_TYPE_ORDER);
 
 interface CollateralSummary {
   id: string;
   symbol: string;
   chainId: number;
-}
-
-interface OverviewFilterSnapshot {
-  typeFilter: BadgeKind | null;
-  marketFilter: string | null;
-  addressInput: string;
 }
 
 export function CdpAllTransactionsTable({
@@ -154,281 +137,6 @@ export function CdpAllTransactionsTable({
   );
 }
 
-/** Filter state for the overview transactions table. Combines:
- *  - validated `marketFilter` (falls back to null if the indexer drops or
- *    renames a market between revalidations, so a stale id can't silently
- *    zero out the result set without a visibly selected pill)
- *  - free-text `addressInput` (normalized to lowercase + trimmed at the
- *    comparison site so the input renders the raw typed value)
- *  URL canonicalization clears malformed type/market/address params once the
- *  collateral list is available, while derived `addressActive` still absorbs
- *  degraded owner-data availability. */
-function readOverviewFiltersFromParams(
-  params: URLSearchParams,
-  collaterals: CollateralSummary[],
-): OverviewFilterSnapshot {
-  return {
-    typeFilter: parseTypeFilter(params),
-    marketFilter: normalizeMarketFilter(parseMarketFilter(params), collaterals),
-    addressInput: parseAddressInput(params),
-  };
-}
-
-function parseTypeFilter(params: URLSearchParams): BadgeKind | null {
-  const raw = params.get(CDP_TYPE_QUERY_PARAM);
-  return raw && TX_FILTER_TYPE_SET.has(raw as BadgeKind)
-    ? (raw as BadgeKind)
-    : null;
-}
-
-function parseMarketFilter(params: URLSearchParams): string | null {
-  const raw = params.get(CDP_MARKET_QUERY_PARAM)?.trim();
-  return raw ? raw : null;
-}
-
-function parseAddressInput(params: URLSearchParams): string {
-  return normalizeAddressFilter(params.get(CDP_ADDRESS_QUERY_PARAM) ?? "");
-}
-
-function normalizeMarketFilter(
-  marketFilter: string | null,
-  collaterals: CollateralSummary[],
-): string | null {
-  if (marketFilter == null) return null;
-  return collaterals.some((c) => c.id === marketFilter) ? marketFilter : null;
-}
-
-function buildOverviewFiltersSearch(
-  currentSearch: string,
-  { typeFilter, marketFilter, addressInput }: OverviewFilterSnapshot,
-): string {
-  const params = new URLSearchParams(currentSearch);
-  if (typeFilter == null) {
-    params.delete(CDP_TYPE_QUERY_PARAM);
-  } else {
-    params.set(CDP_TYPE_QUERY_PARAM, typeFilter);
-  }
-  if (marketFilter == null) {
-    params.delete(CDP_MARKET_QUERY_PARAM);
-  } else {
-    params.set(CDP_MARKET_QUERY_PARAM, marketFilter);
-  }
-  const normalizedAddress = normalizeAddressFilter(addressInput);
-  if (normalizedAddress === "") {
-    params.delete(CDP_ADDRESS_QUERY_PARAM);
-  } else {
-    params.set(CDP_ADDRESS_QUERY_PARAM, normalizedAddress);
-  }
-  return params.toString();
-}
-
-function replaceOverviewFiltersUrl(nextSearch: string) {
-  if (typeof window === "undefined") return;
-  const nextUrl =
-    window.location.pathname +
-    (nextSearch ? `?${nextSearch}` : "") +
-    window.location.hash;
-  window.history.replaceState(window.history.state, "", nextUrl);
-}
-
-function writeOverviewFiltersUrl(next: OverviewFilterSnapshot) {
-  if (typeof window === "undefined") return;
-  replaceOverviewFiltersUrl(
-    buildOverviewFiltersSearch(window.location.search, next),
-  );
-}
-
-function syncOverviewFilterState({
-  next,
-  setTypeFilterState,
-  setMarketFilterState,
-  setAddressInputState,
-}: {
-  next: OverviewFilterSnapshot;
-  setTypeFilterState: Dispatch<SetStateAction<BadgeKind | null>>;
-  setMarketFilterState: Dispatch<SetStateAction<string | null>>;
-  setAddressInputState: Dispatch<SetStateAction<string>>;
-}) {
-  setTypeFilterState((prev) =>
-    prev === next.typeFilter ? prev : next.typeFilter,
-  );
-  setMarketFilterState((prev) =>
-    prev === next.marketFilter ? prev : next.marketFilter,
-  );
-  setAddressInputState((prev) =>
-    prev === next.addressInput ? prev : next.addressInput,
-  );
-}
-
-interface OverviewUrlFilterState {
-  typeFilter: BadgeKind | null;
-  setTypeFilter: (next: BadgeKind | null) => void;
-  marketFilter: string | null;
-  setMarketFilter: (next: string | null) => void;
-  effectiveMarketFilter: string | null;
-  addressInput: string;
-  setAddressInput: (next: string) => void;
-}
-
-function useOverviewUrlFilterState(
-  collaterals: CollateralSummary[],
-): OverviewUrlFilterState {
-  // `useSearchParams()` is the SSR-pass source for direct `/cdps?...` loads.
-  // Runtime writes/readbacks use `window.location.search` so our own
-  // `replaceState` writes compose with sibling URL-state writers.
-  // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
-  const searchParams = useSearchParams();
-  const initialReadParams =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search)
-      : searchParams;
-  const initialFilters = readOverviewFiltersFromParams(
-    initialReadParams,
-    collaterals,
-  );
-
-  const [typeFilter, setTypeFilterState] = useState<BadgeKind | null>(
-    initialFilters.typeFilter,
-  );
-  const [marketFilter, setMarketFilterState] = useState<string | null>(
-    initialFilters.marketFilter,
-  );
-  const [addressInput, setAddressInputState] = useState(
-    initialFilters.addressInput,
-  );
-  const effectiveMarketFilter = useMemo(() => {
-    if (marketFilter == null) return null;
-    return collaterals.some((c) => c.id === marketFilter) ? marketFilter : null;
-  }, [collaterals, marketFilter]);
-
-  const writeFiltersUrl = useCallback(
-    (next: OverviewFilterSnapshot) => {
-      writeOverviewFiltersUrl({
-        ...next,
-        marketFilter: normalizeMarketFilter(next.marketFilter, collaterals),
-      });
-    },
-    [collaterals],
-  );
-
-  const setTypeFilter = useCallback(
-    (next: BadgeKind | null) => {
-      setTypeFilterState(next);
-      writeFiltersUrl({
-        typeFilter: next,
-        marketFilter: effectiveMarketFilter,
-        addressInput,
-      });
-    },
-    [addressInput, effectiveMarketFilter, writeFiltersUrl],
-  );
-  const setMarketFilter = useCallback(
-    (next: string | null) => {
-      setMarketFilterState(next);
-      writeFiltersUrl({
-        typeFilter,
-        marketFilter: next,
-        addressInput,
-      });
-    },
-    [addressInput, typeFilter, writeFiltersUrl],
-  );
-  const setAddressInput = useCallback(
-    (next: string) => {
-      setAddressInputState(next);
-      writeFiltersUrl({
-        typeFilter,
-        marketFilter: effectiveMarketFilter,
-        addressInput: next,
-      });
-    },
-    [effectiveMarketFilter, typeFilter, writeFiltersUrl],
-  );
-  useCanonicalOverviewFilterUrl(
-    collaterals,
-    setTypeFilterState,
-    setMarketFilterState,
-    setAddressInputState,
-  );
-  useOverviewFilterPopState(
-    collaterals,
-    setTypeFilterState,
-    setMarketFilterState,
-    setAddressInputState,
-  );
-
-  return {
-    typeFilter,
-    setTypeFilter,
-    marketFilter: effectiveMarketFilter,
-    setMarketFilter,
-    effectiveMarketFilter,
-    addressInput,
-    setAddressInput,
-  };
-}
-
-function useCanonicalOverviewFilterUrl(
-  collaterals: CollateralSummary[],
-  setTypeFilterState: Dispatch<SetStateAction<BadgeKind | null>>,
-  setMarketFilterState: Dispatch<SetStateAction<string | null>>,
-  setAddressInputState: Dispatch<SetStateAction<string>>,
-) {
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const current = new URLSearchParams(window.location.search);
-    const next = readOverviewFiltersFromParams(current, collaterals);
-    syncOverviewFilterState({
-      next,
-      setTypeFilterState,
-      setMarketFilterState,
-      setAddressInputState,
-    });
-    const canonicalSearch = buildOverviewFiltersSearch(
-      window.location.search,
-      next,
-    );
-    if (canonicalSearch !== current.toString()) {
-      replaceOverviewFiltersUrl(canonicalSearch);
-    }
-  }, [
-    collaterals,
-    setAddressInputState,
-    setMarketFilterState,
-    setTypeFilterState,
-  ]);
-}
-
-function useOverviewFilterPopState(
-  collaterals: CollateralSummary[],
-  setTypeFilterState: Dispatch<SetStateAction<BadgeKind | null>>,
-  setMarketFilterState: Dispatch<SetStateAction<string | null>>,
-  setAddressInputState: Dispatch<SetStateAction<string>>,
-) {
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const onPopState = () => {
-      const next = readOverviewFiltersFromParams(
-        new URLSearchParams(window.location.search),
-        collaterals,
-      );
-      syncOverviewFilterState({
-        next,
-        setTypeFilterState,
-        setMarketFilterState,
-        setAddressInputState,
-      });
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [
-    collaterals,
-    setAddressInputState,
-    setMarketFilterState,
-    setTypeFilterState,
-  ]);
-}
-
 function useFilteredOverviewRows({
   rows,
   typeFilter,
@@ -502,7 +210,7 @@ function useOverviewFilters(
     effectiveMarketFilter,
     addressInput,
     setAddressInput,
-  } = useOverviewUrlFilterState(collaterals);
+  } = useCdpOverviewUrlFilters(collaterals);
   const { addressDisabled, addressFilterNotice, addressActive, filteredRows } =
     useFilteredOverviewRows({
       rows,
