@@ -374,9 +374,7 @@ export function TotalRevenueChart({
         <RangeSelector range={range} onRangeChange={setRange} />
       </div>
       {partialReasons.length > 0 ? (
-        <p className="mt-3 text-xs text-muted">
-          {partialReasons.join(" ")}
-        </p>
+        <p className="mt-3 text-xs text-muted">{partialReasons.join(" ")}</p>
       ) : null}
       <RevenueChartBody
         isLoading={isLoading}
