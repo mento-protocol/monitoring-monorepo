@@ -15,16 +15,12 @@ import {
   oracleRateKey,
   type OracleRateMap,
 } from "./tokens";
+import type {
+  StableSupplyChangeKind,
+  StableSupplySource,
+} from "@/lib/__generated__/graphql";
 
-export type StableSupplySource = "RESERVE" | "V3_HUB_COLLATERAL" | "V3_LIQUITY";
-
-export type StableSupplyChangeKind =
-  | "RESERVE_MINT"
-  | "RESERVE_BURN"
-  | "BRIDGE_MINT"
-  | "BRIDGE_BURN"
-  | "OTHER_MINT"
-  | "OTHER_BURN";
+export type { StableSupplyChangeKind, StableSupplySource };
 
 // Internal helper — applies the brand legacy alias table. Today the only
 // mapping is cEUR → EURm (Celo cUSD is already brand-named "USDm" in the

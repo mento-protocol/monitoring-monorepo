@@ -454,7 +454,7 @@ function selectOraclePlotData({
 
 /**
  * Memoized plot model: decimate → build trace data + layout, all referentially
- * stable. react-plotly.js 2.6 ref-compares `data`/`layout`/`config` in
+ * stable. react-plotly.js 3.0 ref-compares `data`/`layout`/`config` in
  * `componentDidUpdate` and skips `Plotly.react` when all three are unchanged,
  * so a 30s SWR repoll or a coalesced relayout whose decimated output is
  * identical no longer rebuilds + redraws the SVG (the dominant per-tick cost).
@@ -544,6 +544,25 @@ function useOracleChartModel({
   return { traceData, layout };
 }
 
+function oracleAltText(
+  sym0: string,
+  sym1: string,
+  sampleCount: number,
+  breakerReady: boolean,
+  hasPersistedBands: boolean,
+): string {
+  const samples = `${sampleCount} price sample${sampleCount === 1 ? "" : "s"}`;
+  // Coverage tiers: with a live breaker config every sample is colored; with
+  // only persisted at-the-time bands, coverage is partial (samples predating a
+  // stored band aren't colored); with neither there is no band context at all.
+  const bandClause = breakerReady
+    ? ", each colored by whether it sat inside its breaker band"
+    : hasPersistedBands
+      ? ", with samples colored by breaker-band membership only where a persisted band exists"
+      : "; breaker band data is currently unavailable";
+  return `Oracle price versus breaker band for ${sym0}/${sym1}: ${samples} plotted${bandClause}.`;
+}
+
 export function OracleChart({
   snapshots,
   token0Symbol = "Token 0",
@@ -618,8 +637,14 @@ export function OracleChart({
   const hasPersistedBands = snapshots.some(
     (s) => s.breakerBaselineAtSnapshot != null,
   );
-  const chartLabel = `Oracle price versus breaker band chart for ${token0Symbol}/${token1Symbol}`;
-  const chartSummary = `Oracle price versus breaker band chart with ${snapshots.length} raw snapshots${dailyCandles?.length ? ` and ${dailyCandles.length} daily candles` : ""}. It plots the pool oracle price against the configured breaker band; breaker config status is ${breakerConfigStatus}.`;
+
+  const oracleSummary = oracleAltText(
+    token0Symbol,
+    token1Symbol,
+    snapshots.length,
+    breakerConfigStatus === "ready",
+    hasPersistedBands,
+  );
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
@@ -636,26 +661,32 @@ export function OracleChart({
           breakerConfig?.breakerKind === "MEDIAN_DELTA" ? "median EMA" : "peg"
         }
       />
-      <Plot
-        ariaLabel={chartLabel}
-        textAlternative={chartSummary}
-        data={traceData}
-        layout={layout}
-        config={ORACLE_CHART_CONFIG}
-        style={PLOT_STYLE}
-        useResizeHandler
-        onRelayout={handleRelayout}
-        onInitialized={(_figure, graphDiv) => {
-          cleanupWheelRef.current?.();
-          cleanupWheelRef.current = attachOracleWheelHandler(
-            graphDiv as unknown as HTMLElement,
-          );
-        }}
-        onPurge={() => {
-          cleanupWheelRef.current?.();
-          cleanupWheelRef.current = null;
-        }}
-      />
+      <div
+        role="figure"
+        aria-label={`Oracle price versus breaker band chart for ${token0Symbol}/${token1Symbol}`}
+      >
+        <Plot
+          ariaLabel={`Oracle price versus breaker band chart for ${token0Symbol}/${token1Symbol}`}
+          textAlternative={oracleSummary}
+          data={traceData}
+          layout={layout}
+          config={ORACLE_CHART_CONFIG}
+          style={PLOT_STYLE}
+          useResizeHandler
+          onRelayout={handleRelayout}
+          onInitialized={(_figure, graphDiv) => {
+            cleanupWheelRef.current?.();
+            cleanupWheelRef.current = attachOracleWheelHandler(
+              graphDiv as unknown as HTMLElement,
+            );
+          }}
+          onPurge={() => {
+            cleanupWheelRef.current?.();
+            cleanupWheelRef.current = null;
+          }}
+        />
+      </div>
+      <p className="sr-only">{oracleSummary}</p>
     </div>
   );
 }

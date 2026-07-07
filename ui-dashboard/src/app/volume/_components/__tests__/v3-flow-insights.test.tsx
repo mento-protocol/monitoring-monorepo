@@ -130,6 +130,14 @@ describe("V3FlowInsights", () => {
     );
     expect(text).not.toContain("No directional corridors in this window.");
     expect(text).not.toContain("No outlier swaps in this window.");
+
+    const statuses = Array.from(
+      handle.container.querySelectorAll('[role="status"]'),
+    ).map((element) => element.textContent);
+    expect(statuses).toEqual([
+      "Corridor data may be incomplete; top-query cap reached.",
+      "Outlier data may be incomplete; top-query cap reached.",
+    ]);
   });
 
   it("links outlier volume values to txs without a separate tx column", () => {
