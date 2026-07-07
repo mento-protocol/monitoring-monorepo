@@ -1,9 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { formatUSD } from "@/lib/format";
 import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
+import { useDeferredMount } from "@/components/use-deferred-mount";
 import {
   RANGES,
   SECONDS_PER_DAY,
@@ -289,15 +290,24 @@ function RevenueChartBody({
   ariaLabel: string;
   summary: string;
 }) {
+  const plotRef = useRef<HTMLDivElement>(null);
+  const shouldMountPlot = useDeferredMount(
+    "visible",
+    plotRef,
+    !isLoading && !showEmptyState,
+  );
+
   return (
     <div className="mt-4 -mx-2 sm:-mx-3">
-      <div role="figure" aria-label={ariaLabel}>
+      <div ref={plotRef} role="figure" aria-label={ariaLabel}>
         {isLoading ? (
           <PlotSkeleton />
         ) : showEmptyState ? (
           <div className="flex h-[220px] items-center justify-center text-sm text-slate-500">
             {emptyMessage}
           </div>
+        ) : !shouldMountPlot ? (
+          <PlotSkeleton />
         ) : (
           <Plot
             ariaLabel={ariaLabel}

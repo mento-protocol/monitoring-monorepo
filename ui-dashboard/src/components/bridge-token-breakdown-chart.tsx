@@ -1,13 +1,21 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
+import {
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { formatUSD } from "@/lib/format";
 import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_CONFIG,
   ROW_CHART_HEIGHT_PX,
 } from "@/lib/plot";
+import { useDeferredMount } from "@/components/use-deferred-mount";
 import { buildTokenBreakdown } from "@/lib/bridge-flows/snapshots";
 import { RANGES, rangeKeyToDays, type RangeKey } from "@/lib/time-series";
 import type { OracleRateMap } from "@/lib/tokens";
@@ -30,12 +38,7 @@ const PIE_COLORS = [
 
 const Plot = dynamic(() => import("@/lib/react-plotly-basic"), {
   ssr: false,
-  loading: () => (
-    <div
-      className="animate-pulse rounded bg-slate-800/30"
-      style={{ height: ROW_CHART_HEIGHT_PX }}
-    />
-  ),
+  loading: () => <TokenBreakdownPlaceholder />,
 });
 
 interface BridgeTokenBreakdownChartProps {
@@ -53,9 +56,24 @@ interface BridgeTokenBreakdownChartProps {
   defaultRange?: RangeKey;
 }
 
-type BridgeTokenSlice = ReturnType<typeof buildTokenBreakdown>[number];
+type TokenBreakdownSlice = ReturnType<typeof buildTokenBreakdown>[number];
+type TokenBreakdownTrace = ReturnType<typeof buildTokenTrace>;
+type TokenBreakdownLayout = ReturnType<typeof buildTokenLayout>;
+type TokenBreakdownBodyState =
+  | { kind: "error" }
+  | { kind: "loading" }
+  | { kind: "empty" }
+  | {
+      kind: "ready";
+      ariaLabel: string;
+      shouldMountPlot: boolean;
+      textAlternative: string;
+      trace: TokenBreakdownTrace;
+      layout: TokenBreakdownLayout;
+      slices: TokenBreakdownSlice[];
+    };
 
-function buildBridgeTokenTrace(slices: BridgeTokenSlice[]) {
+function buildTokenTrace(slices: TokenBreakdownSlice[]) {
   return {
     type: "pie" as const,
     hole: 0.5,
@@ -74,7 +92,7 @@ function buildBridgeTokenTrace(slices: BridgeTokenSlice[]) {
   };
 }
 
-function buildBridgeTokenLayout() {
+function buildTokenLayout() {
   return {
     ...PLOTLY_BASE_LAYOUT,
     margin: { t: 8, r: 8, b: 8, l: 8 },
@@ -90,7 +108,7 @@ function rangeLabel(range: RangeKey) {
 
 function bridgeTokenTextAlternative(
   activeRangeLabel: string,
-  slices: BridgeTokenSlice[],
+  slices: TokenBreakdownSlice[],
   total: number,
 ) {
   const topSlice = slices[0];
@@ -126,16 +144,40 @@ export function BridgeTokenBreakdownChart({
 
   const total = slices.reduce((sum, s) => sum + s.usd, 0);
   const hasData = total > 0;
+  const plotRef = useRef<HTMLDivElement>(null);
+  const shouldMountPlot = useDeferredMount(
+    "visible",
+    plotRef,
+    !isLoading && !hasError && hasData,
+  );
 
-  const trace = useMemo(() => buildBridgeTokenTrace(slices), [slices]);
-
-  const layout = useMemo(buildBridgeTokenLayout, []);
+  const trace = useMemo(() => buildTokenTrace(slices), [slices]);
+  const layout = useMemo(() => buildTokenLayout(), []);
 
   // Match the "partial data" copy used on BridgeVolumeChart (via
   // TimeSeriesChartCard's `hasSnapshotError` branch). Only surface when the
   // "all" window is active — the bounded ranges don't touch the cap.
   const showCapNote = isCapped && range === "all";
   const activeRangeLabel = rangeLabel(range);
+  const bodyState: TokenBreakdownBodyState = hasError
+    ? { kind: "error" }
+    : isLoading
+      ? { kind: "loading" }
+      : !hasData
+        ? { kind: "empty" }
+        : {
+            kind: "ready",
+            ariaLabel: `Volume by token chart for ${activeRangeLabel}`,
+            shouldMountPlot,
+            textAlternative: bridgeTokenTextAlternative(
+              activeRangeLabel,
+              slices,
+              total,
+            ),
+            trace,
+            layout,
+            slices,
+          };
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
@@ -150,57 +192,7 @@ export function BridgeTokenBreakdownChart({
         </div>
         <BridgeRangePicker range={range} setRange={setRange} />
       </div>
-      {hasError ? (
-        <p className="text-sm text-slate-500">
-          Unable to load token breakdown.
-        </p>
-      ) : isLoading ? (
-        <div
-          className="animate-pulse rounded bg-slate-800/30"
-          style={{ height: ROW_CHART_HEIGHT_PX }}
-        />
-      ) : !hasData ? (
-        <div
-          className="flex items-center justify-center text-sm text-slate-500"
-          style={{ height: ROW_CHART_HEIGHT_PX }}
-        >
-          No priced volume in the selected window.
-        </div>
-      ) : (
-        <>
-          <Plot
-            ariaLabel={`Volume by token chart for ${activeRangeLabel}`}
-            textAlternative={bridgeTokenTextAlternative(
-              activeRangeLabel,
-              slices,
-              total,
-            )}
-            data={[trace]}
-            layout={layout}
-            config={PLOTLY_CONFIG}
-            style={{ width: "100%", height: ROW_CHART_HEIGHT_PX }}
-            useResizeHandler
-          />
-          <ul className="mt-3 grid gap-1.5 text-xs">
-            {slices.map((s, i) => (
-              <li
-                key={s.symbol}
-                className="flex items-center gap-2 text-slate-300"
-              >
-                <span
-                  aria-hidden="true"
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
-                />
-                <span className="font-mono">{s.symbol}</span>
-                <span className="ml-auto font-mono text-slate-500">
-                  {formatUSD(s.usd)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      <TokenBreakdownBody plotRef={plotRef} state={bodyState} />
     </section>
   );
 }
@@ -238,5 +230,77 @@ function BridgeRangePicker({
         );
       })}
     </div>
+  );
+}
+
+function TokenBreakdownBody({
+  plotRef,
+  state,
+}: {
+  plotRef: RefObject<HTMLDivElement | null>;
+  state: TokenBreakdownBodyState;
+}) {
+  if (state.kind === "error") {
+    return (
+      <p className="text-sm text-slate-500">Unable to load token breakdown.</p>
+    );
+  }
+  if (state.kind === "loading") return <TokenBreakdownPlaceholder />;
+  if (state.kind === "empty") {
+    return (
+      <div
+        className="flex items-center justify-center text-sm text-slate-500"
+        style={{ height: ROW_CHART_HEIGHT_PX }}
+      >
+        No priced volume in the selected window.
+      </div>
+    );
+  }
+  return (
+    <div ref={plotRef}>
+      {state.shouldMountPlot ? (
+        <Plot
+          ariaLabel={state.ariaLabel}
+          textAlternative={state.textAlternative}
+          data={[state.trace]}
+          layout={state.layout}
+          config={PLOTLY_CONFIG}
+          style={{ width: "100%", height: ROW_CHART_HEIGHT_PX }}
+          useResizeHandler
+        />
+      ) : (
+        <TokenBreakdownPlaceholder />
+      )}
+      <TokenBreakdownLegend slices={state.slices} />
+    </div>
+  );
+}
+
+function TokenBreakdownPlaceholder() {
+  return (
+    <div
+      className="animate-pulse rounded bg-slate-800/30"
+      style={{ height: ROW_CHART_HEIGHT_PX }}
+    />
+  );
+}
+
+function TokenBreakdownLegend({ slices }: { slices: TokenBreakdownSlice[] }) {
+  return (
+    <ul className="mt-3 grid gap-1.5 text-xs">
+      {slices.map((s, i) => (
+        <li key={s.symbol} className="flex items-center gap-2 text-slate-300">
+          <span
+            aria-hidden="true"
+            className="h-2.5 w-2.5 shrink-0 rounded-full"
+            style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+          />
+          <span className="font-mono">{s.symbol}</span>
+          <span className="ml-auto font-mono text-slate-500">
+            {formatUSD(s.usd)}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -1,6 +1,7 @@
 import { GraphQLClient } from "graphql-request";
 import { useMemo } from "react";
-import useSWR, { type SWRResponse } from "swr";
+import useSWR, { preload, type SWRResponse } from "swr";
+import { cache, serialize, SWRGlobalState } from "swr/_internal";
 import type { ZodType } from "zod";
 import { useNetwork } from "@/components/network-provider";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
@@ -24,6 +25,89 @@ function getClient(network: Network): GraphQLClient {
   const client = new GraphQLClient(endpoint);
   clientCache.set(endpoint, client);
   return client;
+}
+
+type GqlVariables = Record<string, unknown> | undefined;
+type GqlKey = readonly [string, string, GqlVariables];
+type PreloadTimer = ReturnType<typeof globalThis.setTimeout>;
+
+const SPECULATIVE_PRELOAD_TTL_MS = 5_000;
+const gqlPreloadTimers = new Map<string, PreloadTimer>();
+
+function gqlKey(
+  network: Network,
+  query: string | null,
+  variables: GqlVariables,
+): GqlKey | null {
+  return query && network.hasuraUrl ? [network.id, query, variables] : null;
+}
+
+async function requestGQL<T>(
+  network: Network,
+  query: string,
+  variables: GqlVariables,
+  opts: Pick<UseGQLOptions<T>, "schema" | "timeoutMs"> = {},
+): Promise<T> {
+  const client = getClient(network);
+  const raw = await (opts.timeoutMs == null
+    ? variables !== undefined
+      ? client.request<T>(query, variables)
+      : client.request<T>(query)
+    : client.request<T>({
+        document: query,
+        ...(variables !== undefined ? { variables } : {}),
+        signal: AbortSignal.timeout(opts.timeoutMs),
+      }));
+  if (opts.schema != null) {
+    const result = opts.schema.safeParse(raw);
+    if (!result.success) {
+      // Pass the operation name (not the full GQL document) as the hint
+      // so Sentry titles stay readable.
+      const hint = query.match(/\b(?:query|mutation)\s+(\w+)/)?.[1];
+      throw new GraphQLSchemaError(result.error.issues, hint);
+    }
+    return result.data;
+  }
+  return raw;
+}
+
+export function preloadGQL<T>(
+  network: Network,
+  query: string,
+  variables?: Record<string, unknown>,
+  options: { ttlMs?: number } = {},
+): void {
+  const key = gqlKey(network, query, variables);
+  if (!key) return;
+  const [serializedKey] = serialize(key);
+  if (!serializedKey) return;
+
+  const req = preload(key, () => requestGQL<T>(network, query, variables));
+  if (req === undefined) return;
+
+  const ttlMs = options.ttlMs ?? SPECULATIVE_PRELOAD_TTL_MS;
+  clearGQLPreloadTimer(serializedKey);
+  gqlPreloadTimers.set(
+    serializedKey,
+    globalThis.setTimeout(() => clearGQLPreload(serializedKey), ttlMs),
+  );
+  void Promise.resolve(req).catch(() => clearGQLPreload(serializedKey));
+}
+
+function clearGQLPreload(serializedKey: string): void {
+  clearGQLPreloadTimer(serializedKey);
+  const state = SWRGlobalState.get(cache);
+  const preloads = state?.[3];
+  if (preloads) {
+    delete preloads[serializedKey];
+  }
+}
+
+function clearGQLPreloadTimer(serializedKey: string): void {
+  const timer = gqlPreloadTimers.get(serializedKey);
+  if (timer == null) return;
+  globalThis.clearTimeout(timer);
+  gqlPreloadTimers.delete(serializedKey);
 }
 
 // Pool-level data (oracle, reserves, health) doesn't move fast enough to
@@ -83,7 +167,6 @@ export function useGQL<T>(
   legacyOptions?: Omit<UseGQLOptions<T>, "refreshInterval">,
 ): SWRResponse<T> {
   const { network } = useNetwork();
-  const client = getClient(network);
 
   // Normalise the two calling conventions:
   //   (q, v, number, opts?)  — legacy positional refreshInterval
@@ -111,30 +194,11 @@ export function useGQL<T>(
   } = opts;
 
   async function fetcher(): Promise<T> {
-    const raw = await (timeoutMs == null
-      ? variables !== undefined
-        ? client.request<T>(query!, variables)
-        : client.request<T>(query!)
-      : client.request<T>({
-          document: query!,
-          ...(variables !== undefined ? { variables } : {}),
-          signal: AbortSignal.timeout(timeoutMs),
-        }));
-    if (schema != null) {
-      const result = schema.safeParse(raw);
-      if (!result.success) {
-        // Pass the operation name (not the full GQL document) as the hint
-        // so Sentry titles stay readable.
-        const hint = query?.match(/\b(?:query|mutation)\s+(\w+)/)?.[1];
-        throw new GraphQLSchemaError(result.error.issues, hint);
-      }
-      return result.data;
-    }
-    return raw;
+    return requestGQL<T>(network, query!, variables, { schema, timeoutMs });
   }
 
   const swrKey = useMemo(
-    () => (query && network.hasuraUrl ? [network.id, query, variables] : null),
+    () => gqlKey(network, query, variables),
     [network.id, network.hasuraUrl, query, variables],
   );
   const result = useSWR<T>(swrKey, fetcher, {

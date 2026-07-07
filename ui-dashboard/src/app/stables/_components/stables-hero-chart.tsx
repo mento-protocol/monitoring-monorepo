@@ -153,6 +153,7 @@ export function StablesHeroChart({
         hasError={hasError}
         hasSnapshotError={false}
         emptyMessage="No stablecoin supply data yet."
+        plotlyDeferMode="visible"
       />
       {capped ? (
         <p className="text-xs text-amber-400" role="status">
