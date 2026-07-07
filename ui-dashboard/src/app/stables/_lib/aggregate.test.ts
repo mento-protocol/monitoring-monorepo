@@ -76,7 +76,7 @@ describe("supply-change display threshold", () => {
     expect(
       isVisibleSupplyChangeEvent(
         {
-          amount: "9999999999999999",
+          amount: "999999999999999999999",
           chainId: 42220,
           tokenDecimals: 18,
           tokenSymbol: "USDm",
@@ -87,7 +87,7 @@ describe("supply-change display threshold", () => {
     expect(
       isVisibleSupplyChangeEvent(
         {
-          amount: "10000000000000000",
+          amount: "1000000000000000000000",
           chainId: 42220,
           tokenDecimals: 18,
           tokenSymbol: "USDm",
@@ -103,7 +103,7 @@ describe("supply-change display threshold", () => {
     expect(
       isVisibleSupplyChangeEvent(
         {
-          amount: "-10000000000000000",
+          amount: "-1000000000000000000000",
           chainId: 42220,
           tokenDecimals: 18,
           tokenSymbol: "USDm",
@@ -114,7 +114,7 @@ describe("supply-change display threshold", () => {
     expect(
       isVisibleSupplyChangeEvent(
         {
-          amount: "-9999999999999999",
+          amount: "-999999999999999999999",
           chainId: 42220,
           tokenDecimals: 18,
           tokenSymbol: "USDm",
@@ -152,7 +152,7 @@ describe("supply-change display threshold", () => {
     expect(
       isVisibleSupplyChangeEvent(
         {
-          amount: "2",
+          amount: "149254",
           chainId: 42220,
           tokenDecimals: 0,
           tokenSymbol: "JPYm",
@@ -178,7 +178,7 @@ describe("supply-change display threshold", () => {
 
   it("formats the default threshold for table copy", () => {
     expect(formatSupplyChangeUsdThreshold(DEFAULT_SUPPLY_CHANGE_MIN_USD)).toBe(
-      "$0.01",
+      "$1,000.00",
     );
     expect(formatSupplyChangeUsdThreshold(1000)).toBe("$1,000.00");
   });
