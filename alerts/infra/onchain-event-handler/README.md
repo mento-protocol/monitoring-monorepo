@@ -125,7 +125,7 @@ terraform apply
 
 1. Archives function source (`dist/` folder)
 2. Creates Cloud Storage bucket and uploads archive
-3. Deploys Cloud Function (2nd gen, Node.js 22)
+3. Deploys Cloud Function (2nd gen, Node.js 24)
 4. Configures environment variables
 5. Sets up public IAM permissions for QuickNode webhook access
 
@@ -151,8 +151,8 @@ Terraform detects `dist/` changes and creates a new archive, triggering a functi
 
 ### Development Prerequisites
 
-- Node.js 22
-- pnpm 10
+- Node.js 24
+- pnpm 11
 
 ### Setup
 
@@ -206,7 +206,7 @@ For local development, you'll need to set up environment variables. The function
 
 ## Architecture
 
-- **Runtime**: Node.js 22
+- **Runtime**: Node.js 24
 - **Language**: TypeScript (compiled to JavaScript)
 - **Trigger**: HTTP/HTTPS
 - **Generation**: 2nd gen Cloud Functions
@@ -238,7 +238,7 @@ dead-lettered payload to its original Slack channel, then archives it to
 
 #### Error: `pnpm: command not found`
 
-- Install Node.js 22: `brew install node@22` (macOS) or use [nvm](https://github.com/nvm-sh/nvm)
+- Install Node.js 24: `brew install node@24` (macOS) or use [nvm](https://github.com/nvm-sh/nvm)
 - Enable pnpm via corepack (ships with Node.js 16+): `corepack enable pnpm`
 
 #### Error: TypeScript compilation fails

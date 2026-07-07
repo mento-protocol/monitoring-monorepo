@@ -96,7 +96,7 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 | GraphQL API             | Hasura (auto-managed)  | Envio hosted                     | —                                                                      |
 | Dashboard               | Next.js 16 + Plotly    | Vercel                           | `ui-dashboard/`                                                        |
 | Shared config           | TypeScript             | —                                | `shared-config/`                                                       |
-| Metrics bridge (v3)     | Node 22 + prom-client  | Cloud Run (mento-monitoring)     | `metrics-bridge/`                                                      |
+| Metrics bridge (v3)     | Node 24 + prom-client  | Cloud Run (mento-monitoring)     | `metrics-bridge/`                                                      |
 | Aegis (v2)              | NestJS                 | App Engine (mento-monitoring)    | `aegis/`                                                               |
 | Grafana Alloy collector | Docker (grafana/alloy) | App Engine (mento-monitoring)    | `aegis/grafana-agent/`                                                 |
 | Aegis dashboards/folder | Terraform (HCL)        | Grafana Cloud                    | `aegis/terraform/`                                                     |
