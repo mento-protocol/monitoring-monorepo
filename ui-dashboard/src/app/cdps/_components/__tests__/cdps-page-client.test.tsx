@@ -470,6 +470,47 @@ describe("CdpsPageClient", () => {
     ]);
   });
 
+  it("keeps cached activity visible during background activity errors", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return {
+          data: transactionData(),
+          error: new Error("background poll failed"),
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!, <CdpsPageClient />);
+
+    expect(handle!.container.textContent).not.toContain(
+      "Last 24h: activity unavailable",
+    );
+    expect(handle!.container.textContent).toContain(
+      "Last 24h: 2 operations · 1 liquidation · 0 redemptions",
+    );
+    expect(digestRowCells(handle!.container).slice(2, 6)).toEqual([
+      "0",
+      "0",
+      "0",
+      "1",
+    ]);
+  });
+
   it("does not count rebalance redemptions in the Redemptions digest column", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {

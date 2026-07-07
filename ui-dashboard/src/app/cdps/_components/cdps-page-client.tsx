@@ -84,9 +84,14 @@ function useActivity24hByInstance(chainId: number): {
   );
   const txData = transactions.data;
   const spData = stabilityPoolEvents.data;
-  const isLoading = transactions.isLoading || stabilityPoolEvents.isLoading;
-  const hasError = transactions.error != null;
-  const spEventsUnavailable = stabilityPoolEvents.error != null;
+  const isLoading =
+    isLoadingWithoutData(transactions.isLoading, txData) ||
+    isLoadingWithoutData(stabilityPoolEvents.isLoading, spData);
+  const hasError = hasErrorWithoutData(transactions.error, txData);
+  const spEventsUnavailable = hasErrorWithoutData(
+    stabilityPoolEvents.error,
+    spData,
+  );
   return useMemo(() => {
     const merged = mergeTransactionRows(
       txData,

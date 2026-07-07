@@ -290,14 +290,10 @@ function OverviewBody({
     filteredRows,
     filtersActive,
   } = useOverviewFilters(rows, collaterals, snapshotById, snapshotsReady);
-  const pageCountKey = Math.ceil(
-    filteredRows.length / CDP_OVERVIEW_TABLE_PAGE_SIZE,
-  );
   const tableKey = [
     typeFilter ?? "all-types",
     marketFilter ?? "all-markets",
     normalizeAddressFilter(addressInput),
-    pageCountKey,
   ].join(":");
 
   return (
