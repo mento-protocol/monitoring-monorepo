@@ -13,49 +13,30 @@
 
 import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
+import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
 import {
   POOL_THRESHOLDS_KNOWN_EXT,
   POOL_VP_DEPRECATION_EXT,
   POOL_VP_LIFECYCLE_DEPRECATION_EXT,
   POOL_VP_ORACLE_FRESHNESS_EXT,
+  type PoolThresholdsKnownExtResponse,
+  type PoolThresholdsKnownExtRow,
+  type PoolVpDeprecationExtResponse,
+  type PoolVpDeprecationExtRow,
+  type PoolVpLifecycleDeprecationExtResponse,
+  type PoolVpLifecycleDeprecationExtRow,
+  type PoolVpOracleFreshnessExtResponse,
+  type PoolVpOracleFreshnessExtRow,
 } from "@/lib/queries";
 import { isVirtualPool, type Pool } from "@/lib/types";
-
-type ThresholdsExtRow = {
-  id: string;
-  rebalanceThresholdAbove?: number;
-  rebalanceThresholdBelow?: number;
-  rebalanceThresholdsKnown?: boolean;
-  tokenDecimalsKnown?: boolean;
-  degenerateReserves?: boolean;
-  breakerTripped?: boolean;
-};
-
-type VpOracleFreshnessExtRow = {
-  id: string;
-  lastOracleReportAt?: string;
-  medianLive?: boolean;
-  oracleFreshnessWindow?: string;
-};
-
-type VpDeprecationExtRow = {
-  id: string;
-  isDeprecated?: boolean;
-  minimumReports?: string;
-};
-
-type VpLifecycleDeprecationExtRow = {
-  id: string;
-  poolId?: string;
-};
 
 function mergePoolExtensions(
   rawPool: Pool | null,
   args: {
-    thresholdsExt: ThresholdsExtRow | null;
-    vpFreshnessExt: VpOracleFreshnessExtRow | null;
-    vpDeprecationExt: VpDeprecationExtRow | null;
-    vpLifecycleDeprecationExt: VpLifecycleDeprecationExtRow | null;
+    thresholdsExt: PoolThresholdsKnownExtRow | null;
+    vpFreshnessExt: PoolVpOracleFreshnessExtRow | null;
+    vpDeprecationExt: PoolVpDeprecationExtRow | null;
+    vpLifecycleDeprecationExt: PoolVpLifecycleDeprecationExtRow | null;
   },
 ): Pool | null {
   if (!rawPool) return null;
@@ -98,6 +79,61 @@ function anyLoading(...states: boolean[]): boolean {
   return states.some(Boolean);
 }
 
+function queryStillLoadingWithoutData(
+  data: unknown,
+  isLoading: boolean,
+): boolean {
+  return data === undefined && isLoading;
+}
+
+function firstPoolRow<T>(
+  data: { Pool?: T[] | undefined } | undefined,
+): T | null {
+  return data?.Pool?.[0] ?? null;
+}
+
+function firstBiPoolExchangeRow(
+  data: PoolVpDeprecationExtResponse | undefined,
+): PoolVpDeprecationExtRow | null {
+  return data?.BiPoolExchange?.[0] ?? null;
+}
+
+function firstVirtualPoolLifecycleRow(
+  data: PoolVpLifecycleDeprecationExtResponse | undefined,
+): PoolVpLifecycleDeprecationExtRow | null {
+  return data?.VirtualPoolLifecycle?.[0] ?? null;
+}
+
+function virtualPoolExtensionsLoading(
+  rawPool: Pool | null,
+  states: {
+    vpFreshnessData: PoolVpOracleFreshnessExtResponse | undefined;
+    vpFreshnessQueryLoading: boolean;
+    vpDeprecationData: PoolVpDeprecationExtResponse | undefined;
+    vpDeprecationQueryLoading: boolean;
+    vpLifecycleDeprecationData:
+      | PoolVpLifecycleDeprecationExtResponse
+      | undefined;
+    vpLifecycleDeprecationQueryLoading: boolean;
+  },
+): boolean {
+  if (!rawPool || !isVirtualPool(rawPool)) return false;
+  return anyLoading(
+    queryStillLoadingWithoutData(
+      states.vpFreshnessData,
+      states.vpFreshnessQueryLoading,
+    ),
+    queryStillLoadingWithoutData(
+      states.vpDeprecationData,
+      states.vpDeprecationQueryLoading,
+    ),
+    queryStillLoadingWithoutData(
+      states.vpLifecycleDeprecationData,
+      states.vpLifecycleDeprecationQueryLoading,
+    ),
+  );
+}
+
 export type PoolWithThresholdsResult = {
   pool: Pool | null;
   /** True until SWR has either resolved data or returned an error for the
@@ -114,6 +150,7 @@ export function usePoolWithThresholds(
   rawPool: Pool | null,
   poolId: string,
   chainId: number,
+  initialData?: PoolDetailInitialData,
 ): PoolWithThresholdsResult {
   // Without this, a wedged Hasura connection on the trust-flag fetch
   // sticks the SWR poll until the underlying socket times out (minutes),
@@ -121,8 +158,8 @@ export function usePoolWithThresholds(
   const {
     data: thresholdsData,
     error: thresholdsError,
-    isLoading: thresholdsLoading,
-  } = useGQL<{ Pool: ThresholdsExtRow[] }>(
+    isLoading: thresholdsQueryLoading,
+  } = useGQL<PoolThresholdsKnownExtResponse>(
     POOL_THRESHOLDS_KNOWN_EXT,
     { id: poolId, chainId },
     undefined,
@@ -130,31 +167,37 @@ export function usePoolWithThresholds(
     // literal here so this file's `vi.mock("@/lib/graphql", ...)`
     // boundary in the page test doesn't have to enumerate every named
     // export).
-    { timeoutMs: 5000 },
+    { timeoutMs: 5000, fallbackData: initialData?.thresholds },
   );
-  const thresholdsExt = thresholdsData?.Pool?.[0] ?? null;
-  const { data: vpFreshnessData, isLoading: vpFreshnessLoading } = useGQL<{
-    Pool: VpOracleFreshnessExtRow[];
-  }>(POOL_VP_ORACLE_FRESHNESS_EXT, { id: poolId, chainId }, undefined, {
-    timeoutMs: 5000,
-  });
-  const vpFreshnessExt = vpFreshnessData?.Pool?.[0] ?? null;
-  const { data: vpDeprecationData, isLoading: vpDeprecationLoading } = useGQL<{
-    BiPoolExchange: VpDeprecationExtRow[];
-  }>(POOL_VP_DEPRECATION_EXT, { id: poolId, chainId }, undefined, {
-    timeoutMs: 5000,
-  });
-  const vpDeprecationExt = vpDeprecationData?.BiPoolExchange?.[0] ?? null;
+  const thresholdsExt = firstPoolRow(thresholdsData);
+  const { data: vpFreshnessData, isLoading: vpFreshnessQueryLoading } =
+    useGQL<PoolVpOracleFreshnessExtResponse>(
+      POOL_VP_ORACLE_FRESHNESS_EXT,
+      { id: poolId, chainId },
+      undefined,
+      { timeoutMs: 5000, fallbackData: initialData?.vpOracleFreshness },
+    );
+  const vpFreshnessExt = firstPoolRow(vpFreshnessData);
+  const { data: vpDeprecationData, isLoading: vpDeprecationQueryLoading } =
+    useGQL<PoolVpDeprecationExtResponse>(
+      POOL_VP_DEPRECATION_EXT,
+      { id: poolId, chainId },
+      undefined,
+      { timeoutMs: 5000, fallbackData: initialData?.vpDeprecation },
+    );
+  const vpDeprecationExt = firstBiPoolExchangeRow(vpDeprecationData);
   const {
     data: vpLifecycleDeprecationData,
-    isLoading: vpLifecycleDeprecationLoading,
-  } = useGQL<{
-    VirtualPoolLifecycle: VpLifecycleDeprecationExtRow[];
-  }>(POOL_VP_LIFECYCLE_DEPRECATION_EXT, { id: poolId, chainId }, undefined, {
-    timeoutMs: 5000,
-  });
-  const vpLifecycleDeprecationExt =
-    vpLifecycleDeprecationData?.VirtualPoolLifecycle?.[0] ?? null;
+    isLoading: vpLifecycleDeprecationQueryLoading,
+  } = useGQL<PoolVpLifecycleDeprecationExtResponse>(
+    POOL_VP_LIFECYCLE_DEPRECATION_EXT,
+    { id: poolId, chainId },
+    undefined,
+    { timeoutMs: 5000, fallbackData: initialData?.vpLifecycleDeprecation },
+  );
+  const vpLifecycleDeprecationExt = firstVirtualPoolLifecycleRow(
+    vpLifecycleDeprecationData,
+  );
   const pool = useMemo<Pool | null>(() => {
     return mergePoolExtensions(rawPool, {
       thresholdsExt,
@@ -169,17 +212,20 @@ export function usePoolWithThresholds(
     vpDeprecationExt,
     vpLifecycleDeprecationExt,
   ]);
-  const vpLoading =
-    rawPool && isVirtualPool(rawPool)
-      ? anyLoading(
-          vpFreshnessLoading,
-          vpDeprecationLoading,
-          vpLifecycleDeprecationLoading,
-        )
-      : false;
+  const vpLoading = virtualPoolExtensionsLoading(rawPool, {
+    vpFreshnessData,
+    vpFreshnessQueryLoading,
+    vpDeprecationData,
+    vpDeprecationQueryLoading,
+    vpLifecycleDeprecationData,
+    vpLifecycleDeprecationQueryLoading,
+  });
   return {
     pool,
-    thresholdsLoading: anyLoading(thresholdsLoading, vpLoading),
+    thresholdsLoading: anyLoading(
+      queryStillLoadingWithoutData(thresholdsData, thresholdsQueryLoading),
+      vpLoading,
+    ),
     thresholdsError,
   };
 }

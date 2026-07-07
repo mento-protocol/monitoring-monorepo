@@ -151,7 +151,7 @@ async function CanonicalPoolDetailPage({
   // measured CLS 0.25). Degrades to undefined on any miss; the client hook then
   // loads normally via its own reserved-height skeleton.
   const chainId = extractChainIdFromPoolId(canonicalPoolId);
-  const initialPool =
+  const initialData =
     chainId === null
       ? undefined
       : await fetchPoolDetailForSSR(chainId, canonicalPoolId);
@@ -159,7 +159,7 @@ async function CanonicalPoolDetailPage({
   return (
     <PoolDetailPageClient
       initialSearch={clientParams.toString()}
-      initialPool={initialPool}
+      initialData={initialData}
     />
   );
 }

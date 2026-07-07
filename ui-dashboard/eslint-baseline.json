@@ -129,22 +129,15 @@
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'PoolTabPanel' has too many lines (122). Maximum allowed is 100.",
-    "line": 480,
+    "line": 485,
     "linePreview": " | function PoolTabPanel({ | tab,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/pool-header.tsx",
     "ruleId": "complexity",
     "message": "Function 'PoolHeader' has a complexity of 28. Maximum allowed is 15.",
-    "line": 44,
-    "linePreview": " | export function PoolHeader({ | pool,"
-  },
-  {
-    "file": "src/app/pool/[poolId]/_components/pool-header.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'PoolHeader' has too many lines (193). Maximum allowed is 100.",
-    "line": 44,
-    "linePreview": " | export function PoolHeader({ | pool,"
+    "line": 50,
+    "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing composed header surface; this PR only threads SSR fallback props into its current queries. | export function PoolHeader({ | pool,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",

@@ -2,13 +2,57 @@
 // queries. Re-exported from `../queries.ts` so existing
 // `from "@/lib/queries"` imports stay stable.
 
-import type { Pool } from "@/lib/types";
+import type { BiPoolExchangeRow, Pool } from "@/lib/types";
 
 /** Response shape of `POOL_DETAIL_WITH_HEALTH`. Shared by the client `useGQL`
  *  read and the server SSR-prefetch fallback so their types can't drift.
  *  Lives here (not in the `server-only` SSR module) so client code can import
  *  it without pulling `server-only` into the browser bundle. */
 export type PoolDetailResponse = { Pool: Pool[] };
+
+export type PoolThresholdsKnownExtRow = {
+  id: string;
+  rebalanceThresholdAbove?: number | undefined;
+  rebalanceThresholdBelow?: number | undefined;
+  rebalanceThresholdsKnown?: boolean | undefined;
+  tokenDecimalsKnown?: boolean | undefined;
+  degenerateReserves?: boolean | undefined;
+  breakerTripped?: boolean | undefined;
+};
+export type PoolThresholdsKnownExtResponse = {
+  Pool: PoolThresholdsKnownExtRow[];
+};
+
+export type PoolVpOracleFreshnessExtRow = {
+  id: string;
+  lastOracleReportAt?: string | undefined;
+  medianLive?: boolean | undefined;
+  oracleFreshnessWindow?: string | undefined;
+};
+export type PoolVpOracleFreshnessExtResponse = {
+  Pool: PoolVpOracleFreshnessExtRow[];
+};
+
+export type PoolVpDeprecationExtRow = {
+  id: string;
+  isDeprecated?: boolean | undefined;
+  minimumReports?: string | undefined;
+};
+export type PoolVpDeprecationExtResponse = {
+  BiPoolExchange: PoolVpDeprecationExtRow[];
+};
+
+export type PoolVpLifecycleDeprecationExtRow = {
+  id: string;
+  poolId?: string | undefined;
+};
+export type PoolVpLifecycleDeprecationExtResponse = {
+  VirtualPoolLifecycle: PoolVpLifecycleDeprecationExtRow[];
+};
+
+export type PoolV2ExchangeResponse = {
+  BiPoolExchange: BiPoolExchangeRow[];
+};
 
 export const POOL_DETAIL_WITH_HEALTH = `
   query PoolDetailWithHealth($id: String!, $chainId: Int!) {

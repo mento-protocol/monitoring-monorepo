@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
+import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
 import type { Pool } from "@/lib/types";
 
 const mockUseGQL = vi.fn();
@@ -118,9 +119,12 @@ vi.mock("@/components/table", () => ({
 
 import { PoolDetailPageClient as PoolDetailPage } from "../_components/pool-detail-page-client";
 
-function renderPoolDetailPage() {
+function renderPoolDetailPage(initialData?: PoolDetailInitialData) {
   return renderToStaticMarkup(
-    <PoolDetailPage initialSearch={mockSearchParams.toString()} />,
+    <PoolDetailPage
+      initialSearch={mockSearchParams.toString()}
+      initialData={initialData}
+    />,
   );
 }
 
@@ -142,6 +146,43 @@ const BASE_POOL: Pool = {
   tokenDecimalsKnown: true,
 };
 
+const V2_EXCHANGE_ID =
+  "0x1111111111111111111111111111111111111111111111111111111111111111";
+const V2_EXCHANGE_RESPONSE = {
+  BiPoolExchange: [
+    {
+      id: `42220-${V2_EXCHANGE_ID}`,
+      chainId: 42220,
+      exchangeId: V2_EXCHANGE_ID,
+      exchangeProvider: "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901",
+      asset0: "0xt0",
+      asset1: "0xt1",
+      pricingModule: "0xpricingmodule",
+      pricingModuleName: "ConstantSum",
+      spread: "5000000000000000000000",
+      referenceRateFeedID: "0xfeed000000000000000000000000000000000000",
+      referenceRateResetFrequency: "300",
+      minimumReports: "1",
+      stablePoolResetSize: "1000000000000000000000",
+      bucket0: "1000000000000000000000",
+      bucket1: "2000000000000000000000",
+      lastBucketUpdate: "1700000000",
+      isDeprecated: false,
+      wrappedByPoolId: BASE_POOL.id,
+    },
+  ],
+};
+const BROKER_EXCHANGE_24H_RESPONSE = {
+  BrokerExchangeDailySnapshot: [
+    {
+      id: "42220-v2-volume-1778457600",
+      timestamp: "1778457600",
+      volumeUsdWei: "42000000000000000000",
+      swapCount: 3,
+    },
+  ],
+};
+
 function gqlResult(data: unknown, error?: Error) {
   return {
     data,
@@ -160,6 +201,24 @@ function loadingGqlResult() {
     mutate: vi.fn(),
     isValidating: false,
   };
+}
+
+function revalidatingGqlResult(data: unknown) {
+  return {
+    data,
+    error: undefined,
+    isLoading: true,
+    mutate: vi.fn(),
+    isValidating: true,
+  };
+}
+
+function findUseGqlCall(operationName: string) {
+  return mockUseGQL.mock.calls.find(([query]) => {
+    return (
+      typeof query === "string" && query.includes(`query ${operationName}`)
+    );
+  });
 }
 
 describe("Pool detail LPs tab", () => {
@@ -367,6 +426,131 @@ describe("Pool detail LPs tab", () => {
     expect(html).toContain("loading");
     expect(html).not.toContain("0xreserve");
     expect(firedOperationNames()).not.toContain("PoolReserves");
+  });
+
+  it("treats SSR threshold fallback data as loaded during mount revalidation", () => {
+    mockSearchParams.set("tab", "reserves");
+    const initialData: PoolDetailInitialData = {
+      pool: { Pool: [BASE_POOL] },
+      thresholds: {
+        Pool: [
+          {
+            id: BASE_POOL.id,
+            rebalanceThresholdsKnown: true,
+            tokenDecimalsKnown: true,
+          },
+        ],
+      },
+    };
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return revalidatingGqlResult(initialData.pool);
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return revalidatingGqlResult(initialData.thresholds);
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolReserves")) {
+        return gqlResult({
+          ReserveUpdate: [
+            {
+              id: "reserve-1",
+              chainId: 42220,
+              poolId: BASE_POOL.id,
+              reserve0: "1000000",
+              reserve1: "2000000",
+              blockTimestampInPool: "1700000000",
+              txHash: "0xreserve",
+              blockNumber: "123",
+              blockTimestamp: "1700000000",
+            },
+          ],
+        });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderPoolDetailPage(initialData);
+
+    expect(html).not.toContain(
+      "Checking token decimal metadata before rendering token amount tab data.",
+    );
+    expect(html).not.toContain(
+      "Token amount tab data is hidden until token decimal metadata can be verified.",
+    );
+    expect(firedOperationNames()).toContain("PoolReserves");
+    expect(findUseGqlCall("PoolDetailWithHealth")?.[3]).toMatchObject({
+      fallbackData: initialData.pool,
+    });
+    expect(findUseGqlCall("PoolThresholdsKnownExt")?.[3]).toMatchObject({
+      timeoutMs: 5000,
+      fallbackData: initialData.thresholds,
+    });
+  });
+
+  it("threads SSR fallbacks into VirtualPool header extension queries", () => {
+    const virtualPool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool",
+      wrappedExchangeId: V2_EXCHANGE_ID,
+    };
+    const initialData: PoolDetailInitialData = {
+      pool: { Pool: [virtualPool] },
+      thresholds: {
+        Pool: [
+          {
+            id: virtualPool.id,
+            rebalanceThresholdsKnown: true,
+            tokenDecimalsKnown: true,
+          },
+        ],
+      },
+      v2Exchange: V2_EXCHANGE_RESPONSE,
+      brokerExchange24h: BROKER_EXCHANGE_24H_RESPONSE,
+    };
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return revalidatingGqlResult(initialData.pool);
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return revalidatingGqlResult(initialData.thresholds);
+      }
+      if (query.includes("PoolV2Exchange")) {
+        return revalidatingGqlResult(initialData.v2Exchange);
+      }
+      if (query.includes("BrokerExchangeDailySnapshots24h")) {
+        return revalidatingGqlResult(initialData.brokerExchange24h);
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderPoolDetailPage(initialData);
+
+    expect(findUseGqlCall("PoolV2Exchange")?.[3]).toMatchObject({
+      fallbackData: initialData.v2Exchange,
+    });
+    expect(
+      findUseGqlCall("BrokerExchangeDailySnapshots24h")?.[3],
+    ).toMatchObject({
+      timeoutMs: 5000,
+      fallbackData: initialData.brokerExchange24h,
+    });
+    expect(html).toContain("ConstantSum");
+    expect(html).toContain("$42.00");
+    expect(html).toContain("3 swaps since UTC midnight");
   });
 
   it("gates token amount tab content when the trust query fails", () => {
