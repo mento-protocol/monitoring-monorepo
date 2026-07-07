@@ -41,14 +41,17 @@ name: Alerts Infra
 # Required repository secrets mirror the `alerts_infra_ci_secret_names` local in
 # alerts/infra/main.tf, including Splunk On-Call credentials for the on-call
 # announcer: TF_VAR_SPLUNK_ON_CALL_API_ID and TF_VAR_SPLUNK_ON_CALL_API_KEY.
+# PR plans intentionally receive validation-safe placeholders for these
+# sensitive TF_VAR values; push/dispatch plans and the apply job keep the real
+# secrets so the gated apply-time re-plan is authoritative.
 #
 # Note: we intentionally do NOT save the plan as a binary artifact for
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
 # sensitive data in cleartext in the plan file"
 # (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
 # TF_VAR_* env block here carries production Sentry/QuickNode/Slack/GitHub
-# credentials. Uploading the binary plan as a workflow artifact would expose
-# those secrets to anyone with `actions:read`.
+# credentials on push/dispatch and apply runs. Uploading the binary plan as a
+# workflow artifact would expose those secrets to anyone with `actions:read`.
 # Instead the apply job re-plans at gate-approval time — the trade-off
 # is the brief "between approval and apply" drift window, which the
 # reviewer can detect by checking the apply-job's plan output before
@@ -109,7 +112,7 @@ jobs:
   plan:
     name: Terraform Plan (alerts/infra)
     # Fork PRs and Dependabot PRs don't get repository secrets, so the
-    # GCP auth + TF_VAR_* steps would resolve empty and fail every time.
+    # GCP auth step would resolve empty and fail every time.
     # Skip the job in those contexts — the plan is only meaningful when
     # secrets are available. Internal PRs + main pushes run.
     if: >-
@@ -135,10 +138,6 @@ jobs:
       has-changes: ${{ steps.detect.outputs.has-changes }}
       stack-changed: ${{ steps.stack_changes.outputs.stack-changed }}
     env:
-      # Sentry
-      TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      # GCP
-      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       # On PRs, point the google provider at the read-only seed SA so provider
       # init impersonates an identity the plan-readonly CI SA can mint a token
       # for; with `-refresh=false` (see Plan step) the provider makes no GCP API
@@ -146,19 +145,6 @@ jobs:
       # workflow_dispatch this resolves to the write-capable `org-terraform@…seed`
       # (= the variable default) — those runs full-refresh to gate apply.
       TF_VAR_terraform_service_account: ${{ github.event_name == 'pull_request' && 'org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com' || 'org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com' }}
-      # QuickNode
-      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
-      TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
-      # Splunk On-Call / VictorOps API (read-only key is sufficient)
-      TF_VAR_splunk_on_call_api_id: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_ID }}
-      TF_VAR_splunk_on_call_api_key: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_KEY }}
-      TF_VAR_oncall_slack_channel_id: ${{ secrets.TF_VAR_ONCALL_SLACK_CHANNEL_ID }}
-      TF_VAR_oncall_support_usergroup_id: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
-      TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID }}
-      # Slack (for restapi.slack provider — creates/archives Sentry alert channels)
-      TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
-      # GitHub (for github_actions_secret resources that self-manage these secrets)
-      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -206,6 +192,52 @@ jobs:
         with:
           terraform_version: 1.14.6
           terraform_wrapper: false
+
+      - name: Export PR-safe Terraform inputs
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            printf '%s\n' 'TF_VAR_sentry_auth_token=pr-plan-dummy-sentry-token-0000'
+            printf '%s\n' 'TF_VAR_billing_account=000000-000000-000000'
+            printf '%s\n' 'TF_VAR_quicknode_api_key=pr-plan-dummy-quicknode-api-key'
+            printf '%s\n' 'TF_VAR_quicknode_signing_secret=00000000000000000000000000000000'
+            printf '%s\n' 'TF_VAR_splunk_on_call_api_id=pr-plan-dummy-splunk-id'
+            printf '%s\n' 'TF_VAR_splunk_on_call_api_key=pr-plan-dummy-splunk-key'
+            printf '%s\n' 'TF_VAR_oncall_slack_channel_id=C012345678'
+            printf '%s\n' 'TF_VAR_oncall_support_usergroup_id=S012345678'
+            printf '%s\n' 'TF_VAR_slack_notification_channel_id=123456789'
+            printf '%s\n' 'TF_VAR_slack_bot_token=xoxb-pr-plan-dummy-token'
+            printf '%s\n' 'TF_VAR_github_token=pr-plan-dummy-github-token'
+          } >> "$GITHUB_ENV"
+
+      - name: Export production Terraform inputs
+        if: github.event_name != 'pull_request'
+        env:
+          INPUT_SENTRY_AUTH_TOKEN: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
+          INPUT_BILLING_ACCOUNT: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
+          INPUT_QUICKNODE_API_KEY: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
+          INPUT_QUICKNODE_SIGNING_SECRET: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
+          INPUT_SPLUNK_ON_CALL_API_ID: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_ID }}
+          INPUT_SPLUNK_ON_CALL_API_KEY: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_KEY }}
+          INPUT_ONCALL_SLACK_CHANNEL_ID: ${{ secrets.TF_VAR_ONCALL_SLACK_CHANNEL_ID }}
+          INPUT_ONCALL_SUPPORT_USERGROUP_ID: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
+          INPUT_SLACK_NOTIFICATION_CHANNEL_ID: ${{ secrets.TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID }}
+          INPUT_SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+          INPUT_GITHUB_TOKEN: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+        run: |
+          {
+            printf '%s\n' "TF_VAR_sentry_auth_token=${INPUT_SENTRY_AUTH_TOKEN}"
+            printf '%s\n' "TF_VAR_billing_account=${INPUT_BILLING_ACCOUNT}"
+            printf '%s\n' "TF_VAR_quicknode_api_key=${INPUT_QUICKNODE_API_KEY}"
+            printf '%s\n' "TF_VAR_quicknode_signing_secret=${INPUT_QUICKNODE_SIGNING_SECRET}"
+            printf '%s\n' "TF_VAR_splunk_on_call_api_id=${INPUT_SPLUNK_ON_CALL_API_ID}"
+            printf '%s\n' "TF_VAR_splunk_on_call_api_key=${INPUT_SPLUNK_ON_CALL_API_KEY}"
+            printf '%s\n' "TF_VAR_oncall_slack_channel_id=${INPUT_ONCALL_SLACK_CHANNEL_ID}"
+            printf '%s\n' "TF_VAR_oncall_support_usergroup_id=${INPUT_ONCALL_SUPPORT_USERGROUP_ID}"
+            printf '%s\n' "TF_VAR_slack_notification_channel_id=${INPUT_SLACK_NOTIFICATION_CHANNEL_ID}"
+            printf '%s\n' "TF_VAR_slack_bot_token=${INPUT_SLACK_BOT_TOKEN}"
+            printf '%s\n' "TF_VAR_github_token=${INPUT_GITHUB_TOKEN}"
+          } >> "$GITHUB_ENV"
 
       - name: Format check
         run: terraform fmt -check -recursive
