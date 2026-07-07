@@ -228,4 +228,51 @@ describe("StablesChangesTable", () => {
     );
     expect(container.textContent).toContain("Page 2 of 2");
   });
+
+  it("resets to the first page when the matching page count changes", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    const renderEvents = (eventCount: number) => {
+      root?.render(
+        <StablesChangesTable
+          events={Array.from({ length: eventCount }, (_, index) =>
+            changeEvent(index),
+          )}
+          minimumUsdValue={DEFAULT_SUPPLY_CHANGE_MIN_USD}
+          onMinimumUsdValueChange={() => undefined}
+          onMinimumUsdValueReset={() => undefined}
+          isLoading={false}
+          hasError={false}
+          capped={false}
+          unpricedEventsCount={0}
+        />,
+      );
+    };
+
+    act(() => renderEvents(55));
+
+    const nextButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Next",
+    );
+    act(() => {
+      nextButton?.click();
+    });
+
+    expect(container.textContent).toContain(
+      "Showing 51-55 of 55 matching events.",
+    );
+
+    act(() => renderEvents(1));
+    expect(container.textContent).toContain(
+      "Showing 1-1 of 1 matching events.",
+    );
+
+    act(() => renderEvents(55));
+    expect(container.textContent).toContain(
+      "Showing 1-50 of 55 matching events.",
+    );
+    expect(container.textContent).toContain("Page 1 of 2");
+  });
 });

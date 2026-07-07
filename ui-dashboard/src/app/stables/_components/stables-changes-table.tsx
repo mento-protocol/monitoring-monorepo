@@ -112,7 +112,13 @@ function SupplyChangesContent({
     );
   }
 
-  return <PaginatedSupplyChangesTable key={minimumUsdValue} events={events} />;
+  const pageCountKey = Math.ceil(events.length / SUPPLY_CHANGES_PAGE_SIZE);
+  return (
+    <PaginatedSupplyChangesTable
+      key={`${minimumUsdValue}:${pageCountKey}`}
+      events={events}
+    />
+  );
 }
 
 function PaginatedSupplyChangesTable({
