@@ -400,21 +400,41 @@ describeReserveYield("stETH reserve-yield ledger", () => {
     assert.equal(snapshot.dailyEarnedYieldAmount, steth(2));
   });
 
-  it("retries missing stETH launch baselines from a later heartbeat", async () => {
+  it("fails the launch baseline block when a launch balance read is unavailable", async () => {
     let mockDb = MockDb.createMockDb();
     mockDb = await transfer(mockDb, 100, 1, EXTERNAL, RESERVE_SAFE, steth(100));
 
-    assert.equal(
-      await recordStethWalletLaunchBaselines(
+    await assert.rejects(
+      recordStethWalletLaunchBaselines(
         stethSnapshotContext(mockDb, {
           [RESERVE_SAFE]: null,
           [OPS_SAFE]: 0n,
         }),
         V3_REVENUE_LAUNCH_TIMESTAMP,
       ),
-      false,
+      /launch baseline balanceOf unavailable/,
     );
     assert.equal(mockDb.entities.StethWalletLaunchBaseline.getAll().length, 0);
+    assert.equal(dailySnapshots(mockDb).length, 0);
+  });
+
+  it("does not backfill missing launch baselines from post-launch positions", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await transfer(mockDb, 100, 1, EXTERNAL, RESERVE_SAFE, steth(100));
+
+    const transferBlock =
+      V3_REVENUE_LAUNCH_BLOCK + STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL;
+    setStethBalance(transferBlock, RESERVE_SAFE, steth(60));
+    setStethBalance(transferBlock, OPS_SAFE, steth(40));
+    mockDb = await transfer(
+      mockDb,
+      transferBlock,
+      2,
+      RESERVE_SAFE,
+      OPS_SAFE,
+      steth(40),
+      Number(V3_REVENUE_LAUNCH_TIMESTAMP + 3_600n),
+    );
 
     const day1 = dayAfterLaunch(1);
     assert.equal(
@@ -429,18 +449,22 @@ describeReserveYield("stETH reserve-yield ledger", () => {
         ),
         BigInt(V3_REVENUE_LAUNCH_BLOCK + STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL),
       ),
-      true,
+      false,
     );
-    assert.equal(mockDb.entities.StethWalletLaunchBaseline.getAll().length, 2);
-    assert.equal(
-      walletSnapshot(mockDb, RESERVE_SAFE, V3_REVENUE_LAUNCH_TIMESTAMP)
-        .totalEarnedYieldAmount,
-      0n,
-    );
-    assert.equal(
-      walletSnapshot(mockDb, RESERVE_SAFE, day1).totalEarnedYieldAmount,
-      0n,
-    );
+    assert.equal(mockDb.entities.StethWalletLaunchBaseline.getAll().length, 0);
+    assert.equal(dailySnapshots(mockDb).length, 0);
+
+    const reservePosition = mockDb.entities.StethPosition.get(
+      `1-${RESERVE_SAFE}`,
+    ) as { balance: bigint; principalAmount: bigint };
+    const opsPosition = mockDb.entities.StethPosition.get(`1-${OPS_SAFE}`) as {
+      balance: bigint;
+      principalAmount: bigint;
+    };
+    assert.equal(reservePosition.balance, steth(60));
+    assert.equal(reservePosition.principalAmount, steth(60));
+    assert.equal(opsPosition.balance, steth(40));
+    assert.equal(opsPosition.principalAmount, steth(40));
   });
 
   it("keeps post-launch stETH yield with the source wallet after an internal transfer", async () => {

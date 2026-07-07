@@ -355,11 +355,6 @@ async function hasAllStethWalletLaunchBaselines(
 async function ensureStethWalletLaunchBaselines(
   context: StethContext,
 ): Promise<boolean> {
-  if (await hasAllStethWalletLaunchBaselines(context)) return true;
-  await recordStethWalletLaunchBaselines(
-    context,
-    V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
-  );
   return hasAllStethWalletLaunchBaselines(context);
 }
 
@@ -369,7 +364,11 @@ export async function recordStethWalletLaunchBaselines(
 ): Promise<boolean> {
   const meta = launchBaselineMeta(sampledAtTimestamp);
   const balances = await readAllTrackedBalances(context, meta);
-  if (balances === null) return false;
+  if (balances === null) {
+    throw new Error(
+      "[stETH] launch baseline balanceOf unavailable; failing launch block so Envio retries before post-launch movements.",
+    );
+  }
 
   let didWrite = false;
   for (const wallet of TRACKED_STETH_WALLETS) {

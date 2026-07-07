@@ -51,10 +51,12 @@ a bounded stETH sampler:
 - stETH has launch-aligned actual snapshots, while sUSDS remains event-only.
 - The dashboard reads stETH daily rows by `chainId:token:wallet` so it does not
   merge earnings from different reserve wallets into one token-level stream.
-- If any required historical stETH balance read is unavailable, the sampler skips
-  the affected snapshot batch instead of writing partial wallet actuals. Later
-  heartbeats retry missing launch baselines from the launch block before writing
-  daily rows.
+- If the launch-block stETH balance read is unavailable, the launch baseline
+  handler fails so Envio retries the launch block before post-launch movements
+  can mutate wallet positions. Later heartbeat samples require those baselines
+  to already exist.
+- If any later historical stETH balance read is unavailable, the sampler skips
+  the affected snapshot batch instead of writing partial wallet actuals.
 - Hosted deploy verification for reserve-yield changes should check both
   `SusdsYieldDailySnapshot` and `StethYieldDailySnapshot` rows.
 
