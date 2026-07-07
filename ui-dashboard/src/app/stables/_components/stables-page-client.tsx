@@ -85,16 +85,6 @@ function StablesContent(): React.JSX.Element {
         hasError={hasError}
       />
 
-      <StablesSparklineGrid
-        snapshots={snapshots}
-        latestPerToken={latestPerToken}
-        custodySnapshots={effectiveCustodySnapshots}
-        latestCustodyPerToken={effectiveLatestCustodyPerToken}
-        rates={rates}
-        isLoading={isLoading}
-        hasError={hasError}
-      />
-
       <StablesHeroChart
         snapshots={snapshots}
         latestPerToken={latestPerToken}
@@ -105,11 +95,36 @@ function StablesContent(): React.JSX.Element {
         onRangeChange={updateRange}
         isLoading={isLoading}
         hasError={hasError}
-        capped={chartCapped}
       />
+
+      <StablesSparklineGrid
+        snapshots={snapshots}
+        latestPerToken={latestPerToken}
+        custodySnapshots={effectiveCustodySnapshots}
+        latestCustodyPerToken={effectiveLatestCustodyPerToken}
+        rates={rates}
+        isLoading={isLoading}
+        hasError={hasError}
+      />
+
+      <StablesSnapshotLimitNotice visible={chartCapped} />
 
       <StablesChangesSection rates={rates} />
     </div>
+  );
+}
+
+function StablesSnapshotLimitNotice({
+  visible,
+}: {
+  visible: boolean;
+}): React.JSX.Element | null {
+  if (!visible) return null;
+  return (
+    <p className="text-xs text-amber-400" role="status">
+      Showing the most recent 1,000 snapshot rows — older history may be
+      truncated. Use the 1W or 1M range for a complete view.
+    </p>
   );
 }
 
