@@ -32,6 +32,7 @@ import {
   POOL_REBALANCES_PAGE,
   POOL_REBALANCES_USD_EXT,
 } from "@/lib/queries";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import type { Pool, RebalanceEvent } from "@/lib/types";
@@ -306,8 +307,9 @@ export function RebalancesTab({
     });
   }, [rows, query, getName, getTags]);
 
-  if (error) return <ErrorBox message={error.message} />;
-  if (isLoading) return <Skeleton rows={5} />;
+  if (hasErrorWithoutData(error, data))
+    return <ErrorBox message={error.message} />;
+  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={5} />;
   if (rows.length === 0)
     return <EmptyBox message="No rebalance events for this pool." />;
 

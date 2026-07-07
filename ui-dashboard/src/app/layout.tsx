@@ -7,6 +7,7 @@ import { NetworkProvider } from "@/components/network-provider";
 import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NavLinks } from "@/components/nav-links";
 import { AuthStatus } from "@/components/auth-status";
+import { DataFreshnessBanner } from "@/components/data-freshness-banner";
 import { SessionErrorGuard } from "@/components/session-error-guard";
 import { SwrProvider } from "@/components/swr-provider";
 import { Analytics } from "@vercel/analytics/next";
@@ -70,6 +71,7 @@ export default async function RootLayout({
                     <NavLinks />
                     <AuthStatus />
                   </nav>
+                  <DataFreshnessBanner />
                   <div className="mx-auto max-w-7xl px-3 sm:px-6 py-4 sm:py-6">
                     {children}
                   </div>

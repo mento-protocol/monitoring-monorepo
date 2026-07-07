@@ -27,6 +27,7 @@ import { Pagination } from "@/components/pagination";
 import { useOracleRates } from "@/hooks/use-oracle-rates";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { windowTotals } from "@/lib/bridge-flows/snapshots";
+import { hasErrorWithoutData } from "@/lib/swr-state";
 import { TransfersTable } from "./transfers-table";
 import { BridgeOverviewSection } from "./bridge-overview-section";
 import type {
@@ -176,7 +177,7 @@ function RecentTransfersSection({
           onChange={handleStatusChange}
         />
       </div>
-      {transfersResult.error ? (
+      {hasErrorWithoutData(transfersResult.error, transfersResult.data) ? (
         <EmptyBox message="Unable to load transfers — see error above." />
       ) : transfersResult.isLoading && transfers.length === 0 ? (
         <Skeleton rows={5} />
@@ -307,28 +308,45 @@ function useBridgeOverviewData() {
   );
   const pendingRows = pendingResult.data?.BridgeTransfer?.length ?? null;
   const pending = summarizeCappedCount(pendingRows);
+  const snapshotsHasHardError = hasErrorWithoutData(
+    snapshotsResult.error,
+    snapshotsResult.data,
+  );
+  const pendingHasHardError = hasErrorWithoutData(
+    pendingResult.error,
+    pendingRows,
+  );
 
   return {
-    deliveredHasError: !!deliveredRecentResult.error,
+    deliveredHasError: hasErrorWithoutData(
+      deliveredRecentResult.error,
+      deliveredRecentResult.data,
+    ),
     deliveredIsLoading: isLoadingEmpty(
       deliveredRecentResult.isLoading,
       deliveredTransfers.length,
     ),
     deliveredTransfers,
-    error: firstErrorMessage(snapshotsResult.error, pendingResult.error),
+    error: firstErrorMessage(
+      snapshotsHasHardError ? snapshotsResult.error : undefined,
+      pendingHasHardError ? pendingResult.error : undefined,
+    ),
     pendingCapped: pending.capped,
     pendingCount: pending.count,
-    pendingHasError: !!pendingResult.error,
+    pendingHasError: pendingHasHardError,
     rates,
     snapshots,
     snapshotsCapped: snapshots.length >= 1000,
-    snapshotsHasError: !!snapshotsResult.error,
+    snapshotsHasError: snapshotsHasHardError,
     snapshotsIsLoading: isLoadingEmpty(
       snapshotsResult.isLoading,
       snapshots.length,
     ),
     topBridgers,
-    topBridgersHasError: !!topBridgersResult.error,
+    topBridgersHasError: hasErrorWithoutData(
+      topBridgersResult.error,
+      topBridgersResult.data,
+    ),
     topBridgersIsLoading: isLoadingEmpty(
       topBridgersResult.isLoading,
       topBridgers.length,
@@ -356,8 +374,12 @@ function BridgeFlowsContent() {
   const pagination = useBridgePaginationData(rawPage, selectedStatus, statusIn);
   const overview = useBridgeOverviewData();
   const [toasts, addToast, dismissToast] = useBridgeToasts();
-  const error =
-    pagination.transfersResult.error?.message ?? overview.error ?? null;
+  const error = hasErrorWithoutData(
+    pagination.transfersResult.error,
+    pagination.transfersResult.data,
+  )
+    ? pagination.transfersResult.error.message
+    : (overview.error ?? null);
 
   return (
     <div className="space-y-8">

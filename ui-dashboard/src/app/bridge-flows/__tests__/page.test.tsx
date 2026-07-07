@@ -216,6 +216,9 @@ function ok<T>(data: T): GQLResult<T> {
 function failed<T>(message: string): GQLResult<T> {
   return { data: undefined, error: new Error(message), isLoading: false };
 }
+function stale<T>(data: T, message: string): GQLResult<T> {
+  return { data, error: new Error(message), isLoading: false };
+}
 /** First-fetch-in-flight: SWR shape with no data yet, no error, isLoading=true. */
 function loading<T>(): GQLResult<T> {
   return { data: undefined, error: undefined, isLoading: true };
@@ -458,6 +461,39 @@ describe("BridgeFlowsPage — initial render", () => {
     expect(container.querySelector("table")).toBeTruthy();
     // 3 data rows in tbody.
     expect(container.querySelectorAll("tbody tr")).toHaveLength(3);
+  });
+
+  it("keeps last-good transfers mounted during a background poll error", () => {
+    mockUseBridgeGQL.mockImplementation(
+      bridgeImpl({
+        transfers: stale({ BridgeTransfer: ALL_THREE_TRANSFERS }, "Tier quota"),
+        count: ok({
+          BridgeTransfer: ALL_THREE_TRANSFERS.map((t) => ({ id: t.id })),
+        }),
+      }),
+    );
+
+    renderJsdom();
+
+    expect(container.querySelector("table")).toBeTruthy();
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(3);
+    expect(container.textContent).not.toContain("Unable to load transfers");
+    expect(container.textContent).not.toContain("Tier quota");
+  });
+
+  it("keeps a last-good empty transfer set as an empty state during a background poll error", () => {
+    mockUseBridgeGQL.mockImplementation(
+      bridgeImpl({
+        transfers: stale({ BridgeTransfer: [] }, "Tier quota"),
+        count: ok({ BridgeTransfer: [] }),
+      }),
+    );
+
+    renderJsdom();
+
+    expect(container.textContent).toContain("No bridge transfers yet.");
+    expect(container.textContent).not.toContain("Unable to load transfers");
+    expect(container.textContent).not.toContain("Tier quota");
   });
 });
 
