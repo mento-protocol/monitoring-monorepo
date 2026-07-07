@@ -17,25 +17,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-
-const HIGH_SEVERITIES = new Set(["high", "critical"]);
-const DISCORD_UNDICI_ADVISORY_IDS = new Set([
-  "GHSA-vxpw-j846-p89q",
-  "CVE-2026-12151",
-]);
-const ROOT_DISCORD_UNDICI_PATHS = new Set([
-  "governance-watchdog>discord.js>undici",
-  "governance-watchdog>discord.js>@discordjs/rest>undici",
-  "governance-watchdog>discord.js>@discordjs/ws>@discordjs/rest>undici",
-]);
-const GOVERNANCE_STANDALONE_DISCORD_UNDICI_PATHS = new Set([
-  ".>discord.js>undici",
-  ".>discord.js>@discordjs/rest>undici",
-  ".>discord.js>@discordjs/ws>@discordjs/rest>undici",
-  "discord.js>undici",
-  "discord.js>@discordjs/rest>undici",
-  "discord.js>@discordjs/ws>@discordjs/rest>undici",
-]);
+import {
+  evaluateAuditReport,
+  isBlockingSeverity,
+} from "./pnpm-audit-classifier.mjs";
 
 /**
  * @param {string} message
@@ -137,136 +122,17 @@ function loadAuditReport({ dir, auditJsonPath }) {
   return report;
 }
 
-/**
- * @param {Record<string, any>} advisory
- * @returns {string[]}
- */
-function advisoryIds(advisory) {
-  return [
-    advisory.github_advisory_id,
-    ...(Array.isArray(advisory.cves) ? advisory.cves : []),
-    advisory.url,
-    advisory.id !== undefined ? String(advisory.id) : undefined,
-  ].filter((id) => typeof id === "string" && id.length > 0);
-}
-
-/**
- * @param {Record<string, any>} advisory
- * @returns {boolean}
- */
-function isBlockingSeverity(advisory) {
-  const severity = String(advisory.severity ?? "").toLowerCase();
-  return severity === "" || HIGH_SEVERITIES.has(severity);
-}
-
-/**
- * @param {{dir: string; label: string}} options
- * @returns {boolean}
- */
-function isGovernanceWatchdogAudit(options) {
-  const normalizedDir = options.dir.replaceAll("\\", "/").replace(/\/+$/, "");
-  return (
-    normalizedDir === "governance-watchdog" ||
-    normalizedDir.endsWith("/governance-watchdog") ||
-    options.label === "governance-watchdog"
-  );
-}
-
-/**
- * @param {{dir: string; label: string}} options
- * @returns {boolean}
- */
-function isRootAudit(options) {
-  const normalizedDir = options.dir.replaceAll("\\", "/").replace(/\/+$/, "");
-  return (
-    normalizedDir === "." || normalizedDir === "" || options.label === "root"
-  );
-}
-
-/**
- * @param {Record<string, any>} advisory
- * @param {Record<string, any>} finding
- * @param {string} path
- * @param {{dir: string; label: string}} options
- * @returns {boolean}
- */
-function isAllowedDiscordUndiciFinding(advisory, finding, path, options) {
-  if (advisory.module_name !== "undici") return false;
-  if (finding.version !== "6.24.1") return false;
-  if (
-    !(isRootAudit(options) && ROOT_DISCORD_UNDICI_PATHS.has(path)) &&
-    !(
-      isGovernanceWatchdogAudit(options) &&
-      GOVERNANCE_STANDALONE_DISCORD_UNDICI_PATHS.has(path)
-    )
-  ) {
-    return false;
-  }
-
-  return advisoryIds(advisory).some((id) =>
-    DISCORD_UNDICI_ADVISORY_IDS.has(id),
-  );
-}
-
-/**
- * @param {Record<string, any>} advisory
- * @returns {Array<{finding: Record<string, any>; path: string}>}
- */
-function findingPaths(advisory) {
-  const findings = Array.isArray(advisory.findings) ? advisory.findings : [];
-  if (findings.length === 0) {
-    return [{ finding: {}, path: "<missing finding path>" }];
-  }
-
-  return findings.flatMap((finding) => {
-    const paths = Array.isArray(finding.paths) ? finding.paths : [];
-    if (paths.length === 0) {
-      return [{ finding, path: "<missing finding path>" }];
-    }
-    return paths.map((path) => ({ finding, path: String(path) }));
-  });
-}
-
-/**
- * @param {Record<string, any>} report
- * @param {{dir: string; label: string}} options
- * @returns {{allowed: string[]; disallowed: string[]}}
- */
-function evaluateReport(report, options) {
-  if (report.error) {
-    const message = report.error.message ?? JSON.stringify(report.error);
-    die(`pnpm audit failed: ${message}`);
-  }
-
-  const allowed = [];
-  const disallowed = [];
-  const advisories = Object.values(report.advisories ?? {});
-
-  for (const advisory of advisories) {
-    if (!isBlockingSeverity(advisory)) continue;
-
-    const ids = advisoryIds(advisory);
-    const id = ids[0] ?? "unknown-advisory";
-    const moduleName = advisory.module_name ?? "unknown-module";
-    const severity = advisory.severity ?? "unknown-severity";
-
-    for (const { finding, path } of findingPaths(advisory)) {
-      const version = finding.version ?? "unknown-version";
-      const summary = `${id} ${severity} ${moduleName}@${version} via ${path}`;
-      if (isAllowedDiscordUndiciFinding(advisory, finding, path, options)) {
-        allowed.push(summary);
-      } else {
-        disallowed.push(summary);
-      }
-    }
-  }
-
-  return { allowed, disallowed };
-}
-
 const options = parseArgs(process.argv.slice(2));
 const report = loadAuditReport(options);
-const { allowed, disallowed } = evaluateReport(report, options);
+let evaluated;
+try {
+  evaluated = evaluateAuditReport(report, options, {
+    includeAdvisory: isBlockingSeverity,
+  });
+} catch (error) {
+  die(error instanceof Error ? error.message : String(error));
+}
+const { allowed, disallowed } = evaluated;
 
 if (disallowed.length > 0) {
   console.error(`${options.label}: disallowed high/critical pnpm advisories:`);
