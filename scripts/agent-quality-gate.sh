@@ -514,6 +514,8 @@ add_package_quality_commands() {
     # a preflight; add_codegen_command dedups so concurrent triggers are
     # cheap.
     add_indexer_mainnet_codegen "$reason (codegen needed before indexer typecheck/lint)"
+  elif [[ "$package_name" == "@mento-protocol/ui-dashboard" ]]; then
+    add_dashboard_codegen "$reason (codegen needed before dashboard typecheck/lint)"
   fi
   add_turbo_package_task "$package_name" "lint" "$reason"
   add_turbo_package_task "$package_name" "typecheck" "$reason"
@@ -652,6 +654,21 @@ add_indexer_post_codegen_install() {
   add_post_codegen_command "pnpm install --frozen-lockfile" "link generated package after indexer codegen"
 }
 
+add_dashboard_codegen_commit_check() {
+  local command
+  command="if [[ -n \"\$(git status --porcelain -- ui-dashboard/src/lib/__generated__/graphql.ts)\" ]]; then"
+  command+=" git status --short -- ui-dashboard/src/lib/__generated__/graphql.ts;"
+  command+=" echo \"Generated dashboard GraphQL types are not committed. Run pnpm dashboard:codegen and commit the result.\" >&2;"
+  command+=" exit 1; fi"
+  add_post_codegen_command "$command" "verify dashboard GraphQL generated output is committed"
+}
+
+add_dashboard_codegen() {
+  local reason="$1"
+  add_codegen_command "pnpm dashboard:codegen" "$reason"
+  add_dashboard_codegen_commit_check
+}
+
 add_indexer_mainnet_codegen() {
   local reason="$1"
   add_codegen_command "pnpm indexer:codegen" "$reason"
@@ -768,6 +785,7 @@ sort_codegen_commands() {
   # variants are needed, keep mainnet last so package checks validate the normal
   # linked generated package; single-config changes still run only that config.
   local known_codegen_commands=(
+    "pnpm dashboard:codegen"
     "pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
     "pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test"
     "pnpm indexer:testnet:codegen"
@@ -1080,6 +1098,7 @@ while IFS= read -r path; do
       case "$path" in
         indexer-envio/schema.graphql|indexer-envio/abis/*|indexer-envio/scripts/run-envio-with-env.mjs|indexer-envio/package.json)
           add_all_indexer_codegen "indexer schema/source/ABI/package path changed"
+          add_dashboard_codegen "indexer schema/source path changed (dashboard GraphQL types read schema.graphql)"
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "indexer data flow changed"
           ;;
         indexer-envio/src/EventHandlersBridgeOnly.ts)
@@ -1561,6 +1580,7 @@ while IFS= read -r path; do
       # paths-filters. add_package_quality_commands omits test:browser, so this
       # stays light.
       add_surface "scripts"
+      add_dashboard_codegen "shared Envio schema stub changed (dashboard GraphQL types read it)"
       add_package_quality_commands "@mento-protocol/ui-dashboard" "shared Envio schema stub changed (dashboard GraphQL contract test reads it)"
       add_package_quality_commands "@mento-protocol/metrics-bridge" "shared Envio schema stub changed (bridge GraphQL contract test reads it)"
       ;;
@@ -1713,6 +1733,19 @@ command_plan_hash="$(hash_file "$command_plan_file")"
 implementation_hash="$(implementation_signature)"
 validated_content_hash="$(validation_content_signature)"
 
+# `allow_package_script_changes` only gates the pre-run package-script refusal,
+# which is a no-op unless `package_script_risk_changed`. Fold it out of the
+# freshness stamp in the common no-risk case so a warm manual run (which may pass
+# --allow-package-script-changes defensively) produces the SAME stamp as the
+# flag-less pre-push hook — otherwise warm-then-push never skips. When package
+# risk IS present, keep the real value so an unacknowledged hook run cannot reuse
+# an acknowledged manual run.
+if [[ "$package_script_risk_changed" == "true" ]]; then
+  stamp_allow_package_scripts="${allow_package_script_changes:-false}"
+else
+  stamp_allow_package_scripts="n/a"
+fi
+
 stamp_line() {
   printf 'v2\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\n' \
     "$base_oid" \
@@ -1721,7 +1754,7 @@ stamp_line() {
     "$implementation_hash" \
     "$validated_content_hash" \
     "$package_script_risk_changed" \
-    "${allow_package_script_changes:-false}"
+    "$stamp_allow_package_scripts"
 }
 
 current_stamp="$(stamp_line)"
@@ -1800,10 +1833,6 @@ fi
 
 failures=0
 command_summaries=()
-supports_wait_n=false
-if help wait 2>/dev/null | grep -q -- "-n"; then
-  supports_wait_n=true
-fi
 
 format_duration() {
   local seconds="$1"
@@ -1942,9 +1971,6 @@ is_quality_setup_command() {
   # they must finish before the independent quality pool starts. Keep this list
   # in sync with new setup-style commands added by the path mapper above.
   case "$command" in
-    "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium")
-      return 0
-      ;;
     "pnpm --filter @mento-protocol/monitoring-config build")
       return 0
       ;;
@@ -1958,10 +1984,15 @@ is_quality_setup_command() {
 
 is_quality_serial_command() {
   local command="$1"
-  # Dashboard browser tests start a Next dev server while size-limit runs a
-  # build-backed Turbo task. Both touch ui-dashboard/.next, so keep them
-  # mutually exclusive instead of letting the parallel pool overlap them.
+  # Dashboard browser setup/tests and size-limit must stay ordered relative to
+  # each other, but they are not prerequisites for lint/typecheck/unit/knip.
+  # Browser tests need Chromium installed first; browser tests start a Next dev
+  # server while size-limit runs a build-backed Turbo task, and both touch
+  # ui-dashboard/.next, so keep those two mutually exclusive.
   case "$command" in
+    "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium")
+      return 0
+      ;;
     "pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw")
       return 0
       ;;
@@ -2022,6 +2053,8 @@ run_mapped_entries_parallel() {
   local i
   local status
   local elapsed
+  local phase_start_ts last_heartbeat_ts now_ts hb_cmd
+  local heartbeat_interval=20
 
   if [[ "$total" -eq 0 ]]; then
     return
@@ -2034,6 +2067,8 @@ run_mapped_entries_parallel() {
 
   echo
   echo "Running ${phase} commands with parallelism ${max_parallel}."
+  phase_start_ts="$(date +%s)"
+  last_heartbeat_ts="$phase_start_ts"
 
   while [[ "$completed" -lt "$total" ]]; do
     while [[ "$next_index" -lt "$total" && "${#active_pids[@]}" -lt "$max_parallel" ]]; do
@@ -2109,12 +2144,46 @@ run_mapped_entries_parallel() {
     active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
     active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
 
-    if [[ ${#active_pids[@]} -gt 0 && "$supports_wait_n" == true ]]; then
-      wait -n 2>/dev/null || true
-    elif [[ ${#active_pids[@]} -gt 0 ]]; then
-      sleep 0.1
+    # Heartbeat: while commands are still in flight, emit a periodic liveness
+    # line naming what is running so a slow member is visibly working, not hung.
+    if [[ ${#active_pids[@]} -gt 0 ]]; then
+      now_ts="$(date +%s)"
+      if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
+        printf '⏳ still running after %s (%d/%d done):\n' \
+          "$(format_duration $((now_ts - phase_start_ts)))" "$completed" "$total"
+        for hb_cmd in "${active_commands[@]}"; do
+          printf '    · %s\n' "$hb_cmd"
+        done
+        last_heartbeat_ts="$now_ts"
+      fi
+    fi
+
+    # Poll on a short cadence instead of blocking on `wait -n`. A bare `wait -n`
+    # only wakes on completions, so a set of concurrently-slow commands would
+    # suppress the wall-clock heartbeat above; and capping `wait -n` with a timer
+    # job races with fast commands that finish mid-cycle (the timer becomes the
+    # next completion and delays recording them by a full interval). A 1s poll
+    # detects completions within ~1s — negligible for a gate whose parallel
+    # members run for seconds to minutes — and lets the heartbeat fire on time.
+    if [[ ${#active_pids[@]} -gt 0 ]]; then
+      sleep 1
     fi
   done
+}
+
+run_prerequisite_phase() {
+  # Ordered prerequisite phases (install / codegen / quality-setup) fail-fast
+  # WITHIN themselves: a failed step must stop before its dependents — and
+  # before later steps in the SAME phase (e.g. `terraform validate` after a
+  # failed `terraform init`) — run. This preserves the old --fail-fast
+  # prerequisite behavior even though the hook now drops global --fail-fast so
+  # the independent quality pool keeps going. Serialized dashboard checks and
+  # the parallel pool are NOT prerequisites (serialized only for the .next
+  # mutex), so they are run keep-going and still collect their own feedback.
+  local previous_fail_fast="$fail_fast"
+  fail_fast=true
+  run_mapped_entries_sequential "$@"
+  fail_fast="$previous_fail_fast"
 }
 
 run_quality_phase() {
@@ -2140,14 +2209,14 @@ run_quality_phase() {
     fi
   done
 
-  run_mapped_entries_sequential "quality setup" "${setup_entries[@]+"${setup_entries[@]}"}"
+  run_prerequisite_phase "quality setup" "${setup_entries[@]+"${setup_entries[@]}"}"
   run_mapped_entries_sequential "quality serialized" "${serial_entries[@]+"${serial_entries[@]}"}"
   run_mapped_entries_parallel "quality" "$quality_parallelism" "${parallel_entries[@]+"${parallel_entries[@]}"}"
 }
 
-run_mapped_entries_sequential "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
-run_mapped_entries_sequential "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"
-run_mapped_entries_sequential "post-codegen" "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"
+run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
+run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"
+run_prerequisite_phase "post-codegen" "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"
 run_quality_phase
 
 print_command_summary

@@ -343,6 +343,15 @@ jobs:
         with:
           package-path: ui-dashboard
           fetch-main: "false"
+      - name: GraphQL codegen
+        run: pnpm --filter @mento-protocol/ui-dashboard codegen
+      - name: Verify generated GraphQL types are committed
+        run: |
+          if [[ -n "$(git status --porcelain -- ui-dashboard/src/lib/__generated__/graphql.ts)" ]]; then
+            git status --short -- ui-dashboard/src/lib/__generated__/graphql.ts
+            echo "::error::Generated GraphQL types are not committed. Run pnpm dashboard:codegen and commit the result."
+            exit 1
+          fi
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
       - name: Lint

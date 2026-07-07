@@ -436,6 +436,33 @@ export function TimeSeriesChartCard({
 
   const showEmptyState = !isLoading && series.length === 0;
 
+  // Accessible name + non-visual summary for the chart (WCAG 1.1.1). Both are
+  // derived from live props (title + active range + week-over-week change) so
+  // they can never drift from the rendered series. The summary deliberately
+  // does NOT restate a specific value: consumers denominate their headline
+  // differently (dollar range-totals, per-day latest, token amounts), so a
+  // single formatter here would mislabel some of them — the trend direction +
+  // range is the always-accurate signal. `role="figure"` on the plot container
+  // gives it the concise `aria-label` as its accessible name and the sr-only
+  // sibling below carries the summary, while leaving the interactive Plotly
+  // controls (range selector/slider, legend) and axis text in the a11y tree.
+  const activeRangeLabel =
+    ranges.find((item) => item.key === range)?.label ?? String(range);
+  const changeSummary =
+    change === null || isLoading || hasError
+      ? ""
+      : `, ${change >= 0 ? "up" : "down"} ${Math.abs(change).toFixed(
+          2,
+        )}% ${changeLabel}`;
+  const partialSummary =
+    hasError || hasSnapshotError ? "; showing partial data" : "";
+  const chartAriaLabel = `${title} chart, ${activeRangeLabel} range`;
+  const chartSummary = isLoading
+    ? `${title} chart is loading.`
+    : series.length === 0
+      ? `${title} chart: ${emptyMessage}`
+      : `${title} chart over the ${activeRangeLabel} range${changeSummary}${partialSummary}.`;
+
   return (
     <section
       className={
@@ -515,7 +542,12 @@ export function TimeSeriesChartCard({
         </div>
       </div>
 
-      <div ref={containerRef} className="relative mt-4 -mx-2 sm:-mx-3">
+      <div
+        ref={containerRef}
+        role="figure"
+        aria-label={chartAriaLabel}
+        className="relative mt-4 -mx-2 sm:-mx-3"
+      >
         {isLoading ? (
           <PlotSkeleton heightPx={chartHeightPx} />
         ) : showEmptyState ? (
@@ -590,6 +622,11 @@ export function TimeSeriesChartCard({
         )}
         {customSortedHover && hover && <CustomSortedTooltip hover={hover} />}
       </div>
+      {/* Non-visual text alternative for the chart. Sits outside the
+          role="figure" container so screen readers announce the data summary
+          as regular page content, alongside the figure's own accessible
+          controls and axis/legend text. */}
+      <p className="sr-only">{chartSummary}</p>
       {useCustomLegend && (
         <CustomLegend
           breakdown={breakdown ?? []}

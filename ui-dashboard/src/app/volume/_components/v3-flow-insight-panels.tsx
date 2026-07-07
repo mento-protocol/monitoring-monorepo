@@ -245,7 +245,13 @@ function PanelMessage({
   return (
     <p
       className={"py-8 text-center text-sm " + tone}
-      role={variant === "error" ? "alert" : undefined}
+      role={
+        variant === "error"
+          ? "alert"
+          : variant === "warn"
+            ? "status"
+            : undefined
+      }
     >
       {message}
     </p>

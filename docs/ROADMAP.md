@@ -245,23 +245,24 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
 ## Key Files
 
-| What                 | Where                                                                            |
-| -------------------- | -------------------------------------------------------------------------------- |
-| Indexer schema       | `indexer-envio/schema.graphql`                                                   |
-| Event handlers       | `indexer-envio/src/EventHandlers.ts`                                             |
-| Multichain config    | `indexer-envio/config.multichain.mainnet.yaml`                                   |
-| Mainnet config       | `indexer-envio/config.multichain.mainnet.yaml`                                   |
-| Dashboard app        | `ui-dashboard/src/app/`                                                          |
-| Network defs         | `ui-dashboard/src/lib/networks.ts`                                               |
-| GraphQL queries      | `ui-dashboard/src/lib/queries.ts` (barrel) + `ui-dashboard/src/lib/queries/*.ts` |
-| Pool type helper     | `ui-dashboard/src/lib/tokens.ts`                                                 |
-| FX calendar          | `shared-config/fx-calendar.json`                                                 |
-| Technical spec       | `SPEC.md`                                                                        |
-| Deployment guide     | `docs/deployment.md`                                                             |
-| Aegis config         | `aegis/config.yaml`                                                              |
-| Protocol alert rules | `alerts/rules/`                                                                  |
-| Aegis service alert  | `alerts/rules/rules-aegis-service.tf`                                            |
-| Aegis dashboards     | `aegis/terraform/grafana-dashboard/`                                             |
-| v3 metrics bridge    | `metrics-bridge/`                                                                |
-| v3 Alloy scrape cfg  | `aegis/grafana-agent/config.alloy`                                               |
-| v3 alert rules       | `alerts/rules/`                                                                  |
+| What                    | Where                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------- |
+| Indexer schema          | `indexer-envio/schema.graphql`                                                   |
+| Event handlers          | `indexer-envio/src/EventHandlers.ts`                                             |
+| Multichain config       | `indexer-envio/config.multichain.mainnet.yaml`                                   |
+| Mainnet config          | `indexer-envio/config.multichain.mainnet.yaml`                                   |
+| Dashboard app           | `ui-dashboard/src/app/`                                                          |
+| Network defs            | `ui-dashboard/src/lib/networks.ts`                                               |
+| GraphQL queries         | `ui-dashboard/src/lib/queries.ts` (barrel) + `ui-dashboard/src/lib/queries/*.ts` |
+| Dashboard GraphQL types | `ui-dashboard/src/lib/__generated__/graphql.ts`                                  |
+| Pool type helper        | `ui-dashboard/src/lib/tokens.ts`                                                 |
+| FX calendar             | `shared-config/fx-calendar.json`                                                 |
+| Technical spec          | `SPEC.md`                                                                        |
+| Deployment guide        | `docs/deployment.md`                                                             |
+| Aegis config            | `aegis/config.yaml`                                                              |
+| Protocol alert rules    | `alerts/rules/`                                                                  |
+| Aegis service alert     | `alerts/rules/rules-aegis-service.tf`                                            |
+| Aegis dashboards        | `aegis/terraform/grafana-dashboard/`                                             |
+| v3 metrics bridge       | `metrics-bridge/`                                                                |
+| v3 Alloy scrape cfg     | `aegis/grafana-agent/config.alloy`                                               |
+| v3 alert rules          | `alerts/rules/`                                                                  |

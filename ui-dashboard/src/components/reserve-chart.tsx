@@ -17,6 +17,26 @@ import {
 // Plotly must be loaded client-side only (no SSR)
 const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
 
+function makeReserveChartLayout(yAxisTitle: string) {
+  return {
+    ...PLOTLY_BASE_LAYOUT,
+    font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
+    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_HOURLY),
+    yaxis: { title: { text: yAxisTitle }, ...PLOTLY_AXIS_DEFAULTS },
+    legend: {
+      ...PLOTLY_LEGEND,
+      orientation: "h" as const,
+      x: 0.5,
+      y: -0.25,
+      xanchor: "center" as const,
+      yanchor: "top" as const,
+    },
+    margin: { t: 8, r: 16, b: 8, l: 48 },
+    autosize: true,
+    dragmode: "pan" as const,
+  };
+}
+
 interface ReserveChartProps {
   rows: ReserveUpdate[];
   token0: string | null;
@@ -105,27 +125,13 @@ export function ReserveChart({
     yaxis: "y" as const,
   };
 
-  const layout = {
-    ...PLOTLY_BASE_LAYOUT,
-    font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
-    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_HOURLY),
-    yaxis: { title: { text: yAxisTitle }, ...PLOTLY_AXIS_DEFAULTS },
-    legend: {
-      ...PLOTLY_LEGEND,
-      orientation: "h" as const,
-      x: 0.5,
-      y: -0.25,
-      xanchor: "center" as const,
-      yanchor: "top" as const,
-    },
-    margin: { t: 8, r: 16, b: 8, l: 48 },
-    autosize: true,
-    dragmode: "pan" as const,
-  };
+  const layout = makeReserveChartLayout(yAxisTitle);
 
   const subtitle = useUsd
     ? "Estimated using current oracle price — balanced pool = lines overlap"
     : null;
+
+  const reserveSummary = `Reserve history for ${sym0} and ${sym1}: ${rows.length} snapshots plotted.`;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
@@ -133,13 +139,19 @@ export function ReserveChart({
         <h3 className="text-sm font-medium text-slate-400">Reserve History</h3>
         {subtitle && <span className="text-xs text-muted">{subtitle}</span>}
       </div>
-      <Plot
-        data={[trace0, trace1]}
-        layout={layout}
-        config={PLOTLY_CONFIG}
-        style={{ width: "100%", height: 320 }}
-        useResizeHandler
-      />
+      <div
+        role="figure"
+        aria-label={`Reserve history chart for ${sym0} and ${sym1}`}
+      >
+        <Plot
+          data={[trace0, trace1]}
+          layout={layout}
+          config={PLOTLY_CONFIG}
+          style={{ width: "100%", height: 320 }}
+          useResizeHandler
+        />
+      </div>
+      <p className="sr-only">{reserveSummary}</p>
     </div>
   );
 }

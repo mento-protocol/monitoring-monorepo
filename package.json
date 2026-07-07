@@ -6,6 +6,7 @@
   "scripts": {
     "postinstall": "pnpm --filter @mento-protocol/monitoring-config build",
     "dashboard:build": "pnpm --filter @mento-protocol/ui-dashboard build",
+    "dashboard:codegen": "pnpm --filter @mento-protocol/ui-dashboard codegen",
     "dashboard:size-limit": "pnpm --filter @mento-protocol/ui-dashboard size-limit",
     "dashboard:dev": "pnpm --filter @mento-protocol/ui-dashboard dev",
     "dashboard:mutation": "pnpm --filter @mento-protocol/ui-dashboard test:mutation",

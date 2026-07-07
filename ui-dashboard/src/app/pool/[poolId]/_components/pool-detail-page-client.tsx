@@ -17,6 +17,7 @@ import {
   ORACLE_RATES,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
+  type PoolDetailResponse,
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { buildPoolDetailUrl } from "@/lib/routing";
@@ -62,12 +63,16 @@ import { SwapsTab } from "../_tabs/swaps-tab";
 
 export function PoolDetailPageClient({
   initialSearch = windowLocationSearch(),
+  initialPool,
 }: {
   initialSearch?: string;
+  /** Server-prefetched pool-overview response, forwarded to the overview
+   *  `useGQL` as `fallbackData` so the header/health paint on first render. */
+  initialPool?: PoolDetailResponse | undefined;
 } = {}) {
   return (
     <Suspense>
-      <PoolDetail initialSearch={initialSearch} />
+      <PoolDetail initialSearch={initialSearch} initialPool={initialPool} />
     </Suspense>
   );
 }
@@ -130,15 +135,23 @@ function usePoolUrlState(initialSearch: string, normalizedPoolId: string) {
   return { urlParams, replacePoolURL, setTabSearch };
 }
 
-function usePoolDetailData(normalizedPoolId: string, network: PoolNetwork) {
+function usePoolDetailData(
+  normalizedPoolId: string,
+  network: PoolNetwork,
+  initialPool?: PoolDetailResponse,
+) {
   const {
     data: poolData,
     error: poolErr,
     isLoading: poolLoading,
-  } = useGQL<{ Pool: Pool[] }>(POOL_DETAIL_WITH_HEALTH, {
-    id: normalizedPoolId,
-    chainId: network.chainId,
-  });
+  } = useGQL<PoolDetailResponse>(
+    POOL_DETAIL_WITH_HEALTH,
+    { id: normalizedPoolId, chainId: network.chainId },
+    // refreshInterval stays default (30s); options go in the 4th arg per the
+    // documented shape (see use-gql-shape.test.ts).
+    undefined,
+    { fallbackData: initialPool },
+  );
   const { pool, thresholdsLoading, thresholdsError } = usePoolWithThresholds(
     poolData?.Pool?.[0] ?? null,
     normalizedPoolId,
@@ -203,7 +216,13 @@ function usePoolTabState({
   return { visibleTabs, tab, activeSearch };
 }
 
-function PoolDetail({ initialSearch }: { initialSearch: string }) {
+function PoolDetail({
+  initialSearch,
+  initialPool,
+}: {
+  initialSearch: string;
+  initialPool?: PoolDetailResponse | undefined;
+}) {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
   const decodedId = decodePoolId(poolId);
@@ -218,7 +237,7 @@ function PoolDetail({ initialSearch }: { initialSearch: string }) {
     ? (rawTab as Tab)
     : "providers";
   const limit = parseTabLimit(readSearchParam(urlParams, "limit"));
-  const detail = usePoolDetailData(normalizedPoolId, network);
+  const detail = usePoolDetailData(normalizedPoolId, network, initialPool);
   const { visibleTabs, tab, activeSearch } = usePoolTabState({
     fpmmPool: detail.fpmmPool,
     olsData: detail.olsData,
@@ -364,9 +383,19 @@ function PoolOverview({
 }) {
   if (poolErr)
     return <ErrorBox message={`Failed to load pool: ${poolErr.message}`} />;
-  if (poolLoading) return <Skeleton rows={2} />;
+  // Gate on data presence, not `isLoading`. SWR keeps `isLoading` true while it
+  // revalidates and does NOT count `fallbackData` as "loaded data", so with the
+  // SSR-prefetched fallback `poolLoading` stays true even though `pool` is already
+  // present. Rendering on `pool` lets the header paint on the first (server)
+  // render, eliminating the skeleton→header swap that is the measured CLS. The
+  // reserved-height skeleton only shows when there is genuinely no pool yet
+  // (the degraded path where the SSR prefetch missed).
   if (!pool)
-    return <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />;
+    return poolLoading ? (
+      <Skeleton rows={4} />
+    ) : (
+      <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />
+    );
 
   return (
     <>

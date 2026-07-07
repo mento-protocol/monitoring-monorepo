@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-05
+last_verified: 2026-07-06
 ---
 
 # Agent Quality Gate — Mechanics
@@ -52,11 +52,12 @@ required full-repo Trunk check on every
 PR. Normal `--run` mode executes independent quality-phase commands with
 bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
 `AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
-Terraform init/validate chains, Playwright browser install, and shared-config
-build setup remain ordered. Dashboard `test:browser` and build-backed
-`size-limit` also stay serialized because both touch `ui-dashboard/.next`.
-`--fail-fast` stays sequential so it still stops before starting the next mapped
-command.
+Terraform init/validate chains, and shared-config build setup remain ordered
+prerequisites. Playwright browser install, dashboard `test:browser`, and
+build-backed `size-limit` stay serialized with each other, but are not global
+quality prerequisites: a browser setup failure still lets independent
+lint/typecheck/unit/knip feedback run. `--fail-fast` stays sequential so it
+still stops before starting the next mapped command.
 
 For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
 the structured closeout review after the mapped gate and before pushing:
@@ -120,16 +121,23 @@ concurrent logs do not interleave. The same dashboard `.next` serialization rule
 applies to prewarm.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
-`--fail-fast --skip-if-fresh`, so the hook stops on the first failed mapped
-command instead of burning through the rest of the suite, and it reuses a
-recent successful manual gate run when the fetched base commit, mapped command
-plan, gate implementation, changed paths, validated file content, package-risk
-state, and package-script acknowledgement are unchanged. For a push that
-intentionally changes package scripts or package-manager config, review the
-script/lifecycle diff first, then temporarily set
-`agent.qualityGate.allowPackageScriptChanges=true` in local git config for that
-push; a just-passed acknowledged manual gate can then satisfy the pre-push
-`--skip-if-fresh` check.
+`--parallel 3 --skip-if-fresh`, so the independent quality-phase members run
+concurrently (the heavy `test:coverage` suites and the gate self-test overlap
+instead of summing to the serial total), and it reuses a recent successful
+manual gate run when the fetched base commit, mapped command plan, gate
+implementation, changed paths, validated file content, and package-risk state
+are unchanged. Because it runs in parallel rather than `--fail-fast`, a red
+push runs the remaining in-flight members before failing (green pushes, the
+common case, get the full speedup). Package-script acknowledgement is folded out
+of the reuse key when there is no package-script risk, so a warm
+`pnpm agent:quality-gate --run` — even one passed `--allow-package-script-changes`
+defensively — satisfies the flag-less hook's `--skip-if-fresh` check, and
+warm-then-push then skips the mapped commands. When a push DOES change package
+scripts or package-manager config, the acknowledgement is part of the reuse key:
+review the script/lifecycle diff first, then set
+`agent.qualityGate.allowPackageScriptChanges=true` in local git config (seen by
+both the manual warm run and the hook) so a just-passed acknowledged manual gate
+can satisfy the `--skip-if-fresh` check.
 
 Package-local gate tasks for `lint`, `typecheck`, `knip`, dashboard size-limit,
 local dashboard browser tests, and dashboard React Doctor checks run through

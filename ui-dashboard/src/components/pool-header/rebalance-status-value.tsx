@@ -5,16 +5,76 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { Tooltip } from "@/components/tooltip";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
+import {
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { computeHealthStatus } from "@/lib/health";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 import {
   isHealthyNoOp,
   strategyRebalanceWriteUrl,
 } from "@/lib/rebalance-check";
-import { formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { LATEST_POOL_REBALANCE_FOR_STRATEGY } from "@/lib/queries";
 import { explorerTxUrl } from "@/lib/tokens";
+
+// The "last N ago / via <strategy>" subtitle. Extracted from RebalanceStatusValue
+// so the SSR-safe relative-time hook (useSsrSafeRelative) lives in a focused
+// component. Renders null when the pool has never rebalanced.
+function LastRebalanceSubtitle({
+  pool,
+  network,
+  strategyAddress,
+}: {
+  pool: Pool;
+  network: Network;
+  strategyAddress: string;
+}) {
+  // `!= null` catches both undefined AND null — the Pool type says
+  // `string | undefined` but Hasura returns null for absent nullable fields.
+  const hasLastRebalance =
+    pool.lastRebalancedAt != null && pool.lastRebalancedAt !== "0";
+  const lastRel = useSsrSafeRelative(pool.lastRebalancedAt);
+  const title = useSsrSafeTimestamp(pool.lastRebalancedAt);
+
+  // Fetch the most recent rebalance tx for THIS strategy so the "last Ns ago"
+  // link attributes to the same strategy the cell names. `refreshInterval: 0`
+  // disables polling: the txHash rarely changes within a session, and a
+  // stale-but-valid explorer link is an acceptable tradeoff.
+  const lastRebalanceVars = useMemo(
+    () =>
+      hasLastRebalance
+        ? { poolId: pool.id, strategy: strategyAddress.toLowerCase() }
+        : undefined,
+    [hasLastRebalance, pool.id, strategyAddress],
+  );
+  const { data: lastRebalanceData } = useGQL<{
+    RebalanceEvent: { txHash: string }[];
+  }>(
+    hasLastRebalance ? LATEST_POOL_REBALANCE_FOR_STRATEGY : null,
+    lastRebalanceVars,
+    0,
+  );
+  const txHash = lastRebalanceData?.RebalanceEvent?.[0]?.txHash ?? null;
+
+  if (!hasLastRebalance) return null;
+  return txHash ? (
+    <a
+      href={explorerTxUrl(network, txHash)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-xs text-muted hover:text-indigo-400 transition-colors"
+      title={title}
+    >
+      last {lastRel}
+    </a>
+  ) : (
+    <span className="text-xs text-muted" title={title}>
+      last {lastRel}
+    </span>
+  );
+}
 
 export function RebalanceStatusValue({
   pool,
@@ -82,64 +142,6 @@ export function RebalanceStatusValue({
     statusTitle = buildBlockedTitle(rebalanceCheck);
   }
 
-  // `!= null` catches both undefined AND null — the Pool type says
-  // `string | undefined` but Hasura returns null for absent nullable
-  // fields, and `null !== undefined` would otherwise slip past the gate,
-  // rendering "last —" and firing an unnecessary lookup.
-  const hasLastRebalance =
-    pool.lastRebalancedAt != null && pool.lastRebalancedAt !== "0";
-  const lastRebalanceLabel = hasLastRebalance
-    ? `last ${relativeTime(pool.lastRebalancedAt!)}`
-    : "never rebalanced";
-
-  // Fetch the most recent rebalance tx for THIS strategy so the subtitle's
-  // "last Ns ago" link attributes to the same strategy the cell names. An
-  // unscoped lookup would wire the link to a tx emitted by a previously-
-  // rotated strategy while the label still says "via <current strategy>".
-  //
-  // Lowercased address — Envio stores addresses lowercase. `refreshInterval:
-  // 0` disables polling: the txHash rarely changes within a session, and
-  // when it does, a stale-but-valid explorer link is an acceptable tradeoff
-  // for not issuing a background GQL read every 10s per open pool page.
-  // Memoize the variables object so its identity is stable across renders.
-  const lastRebalanceVars = useMemo(
-    () =>
-      hasLastRebalance
-        ? { poolId: pool.id, strategy: strategyAddress.toLowerCase() }
-        : undefined,
-    [hasLastRebalance, pool.id, strategyAddress],
-  );
-  const { data: lastRebalanceData } = useGQL<{
-    RebalanceEvent: { txHash: string }[];
-  }>(
-    hasLastRebalance ? LATEST_POOL_REBALANCE_FOR_STRATEGY : null,
-    lastRebalanceVars,
-    0,
-  );
-  const lastRebalanceTxHash =
-    lastRebalanceData?.RebalanceEvent?.[0]?.txHash ?? null;
-
-  const lastRebalanceNode =
-    hasLastRebalance &&
-    (lastRebalanceTxHash ? (
-      <a
-        href={explorerTxUrl(network, lastRebalanceTxHash)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs text-muted hover:text-indigo-400 transition-colors"
-        title={formatTimestamp(pool.lastRebalancedAt!)}
-      >
-        {lastRebalanceLabel}
-      </a>
-    ) : (
-      <span
-        className="text-xs text-muted"
-        title={formatTimestamp(pool.lastRebalancedAt!)}
-      >
-        {lastRebalanceLabel}
-      </span>
-    ));
-
   return (
     <span className="flex flex-col gap-0.5">
       <span className={`flex items-center gap-1 font-medium ${statusColor}`}>
@@ -160,7 +162,11 @@ export function RebalanceStatusValue({
           <RebalanceDiagnosticsInfoIcon title={statusTitle} />
         )}
       </span>
-      {lastRebalanceNode}
+      <LastRebalanceSubtitle
+        pool={pool}
+        network={network}
+        strategyAddress={strategyAddress}
+      />
     </span>
   );
 }

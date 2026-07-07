@@ -3,15 +3,28 @@
 import React from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import { formatOraclePrice, formatTimestamp, relativeTime } from "@/lib/format";
+import {
+  formatOraclePrice,
+  relativeTime,
+  relativeTimeOrTimestamp,
+  timestampOrUtc,
+} from "@/lib/format";
 import {
   getOracleStalenessThreshold,
   isOracleFresh,
   oracleFreshnessTimestamp,
 } from "@/lib/health";
 import { explorerTxUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 
-function oracleFreshnessDisplay(pool: Pool, network: Network) {
+// `nowSeconds === null` (server + hydration render) falls back to the absolute
+// timestamp so the SSR-prefetched header can't mismatch on the second-granularity
+// "N ago" label; the live label appears after mount.
+function oracleFreshnessDisplay(
+  pool: Pool,
+  network: Network,
+  nowSeconds: number | null,
+) {
   const freshnessTs = oracleFreshnessTimestamp(pool);
   if (freshnessTs === 0) {
     return { updatedTitle: undefined, updatedHref: null, lastLabel: null };
@@ -19,12 +32,15 @@ function oracleFreshnessDisplay(pool: Pool, network: Network) {
 
   const freshnessTsString = String(freshnessTs);
   return {
-    updatedTitle: formatTimestamp(freshnessTsString),
+    updatedTitle: timestampOrUtc(freshnessTsString, nowSeconds),
     updatedHref:
       pool.oracleTxHash && pool.oracleTimestamp === freshnessTsString
         ? explorerTxUrl(network, pool.oracleTxHash)
         : null,
-    lastLabel: `last ${relativeTime(freshnessTsString)}`,
+    lastLabel:
+      nowSeconds === null
+        ? relativeTimeOrTimestamp(freshnessTsString, null)
+        : `last ${relativeTime(freshnessTsString, nowSeconds * 1000)}`,
   };
 }
 
@@ -62,7 +78,12 @@ export function OraclePriceValue({
     inverted,
   );
 
-  const nowSeconds = Math.floor(Date.now() / 1000);
+  // On the server + hydration render (liveNowSeconds === null) evaluate freshness
+  // against the oracle's own timestamp: for a non-zero timestamp the zero diff
+  // reads "fresh", avoiding a red flash / hydration mismatch, and the live check
+  // runs after mount. (A no-oracle pool has no freshness label to mismatch.)
+  const liveNowSeconds = useNowSeconds();
+  const nowSeconds = liveNowSeconds ?? oracleFreshnessTimestamp(pool);
   const fresh = isOracleFresh(pool, nowSeconds, network.chainId);
   const priceColor = fresh ? "text-white" : "text-red-400";
   const subColor = fresh ? "text-muted" : "text-red-400";
@@ -73,6 +94,7 @@ export function OraclePriceValue({
   const { updatedTitle, updatedHref, lastLabel } = oracleFreshnessDisplay(
     pool,
     network,
+    liveNowSeconds,
   );
 
   return (
