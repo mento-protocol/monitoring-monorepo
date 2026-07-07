@@ -28,6 +28,8 @@ type FallbackPayload = {
   ready: boolean;
 };
 
+const stableSuccessPayload: FallbackPayload = { ready: true };
+
 function FallbackDataProbe({ triggerRef }: { triggerRef: TriggerRef }) {
   const { data, mutate } = useSWR<FallbackPayload>(
     "fallback-freshness-key",
@@ -47,6 +49,33 @@ function FallbackDataProbe({ triggerRef }: { triggerRef: TriggerRef }) {
     <>
       <DataFreshnessBanner />
       <div>{data?.ready ? "fallback ready" : "missing"}</div>
+    </>
+  );
+}
+
+function CustomSuccessProbe({
+  onSuccess,
+  triggerRef,
+}: {
+  onSuccess: () => void;
+  triggerRef: TriggerRef;
+}) {
+  const { data, mutate } = useSWR<FallbackPayload>(
+    "custom-success-freshness-key",
+    async () => stableSuccessPayload,
+    {
+      fallbackData: stableSuccessPayload,
+      onSuccess,
+      refreshInterval: 30_000,
+      revalidateOnMount: false,
+    },
+  );
+  triggerRef.current = () => mutate();
+
+  return (
+    <>
+      <DataFreshnessBanner />
+      <div>{data?.ready ? "custom ready" : "missing"}</div>
     </>
   );
 }
@@ -106,5 +135,33 @@ describe("SwrProvider freshness tracking", () => {
     expect(container.textContent).toContain("fallback ready");
     expect(container.textContent).toContain("Latest refresh failed");
     expect(container.textContent).toContain("last-good data from 1s ago");
+  });
+
+  it("records per-hook onSuccess refreshes when SWR data is unchanged", async () => {
+    const onSuccess = vi.fn();
+    const triggerRef: TriggerRef = { current: null };
+
+    act(() => {
+      root.render(
+        <SwrProvider>
+          <CustomSuccessProbe onSuccess={onSuccess} triggerRef={triggerRef} />
+        </SwrProvider>,
+      );
+    });
+
+    act(() => {
+      vi.setSystemTime(NOW + 31_000);
+      vi.advanceTimersByTime(31_000);
+    });
+
+    expect(container.textContent).toContain("Data may be stale");
+
+    await act(async () => {
+      await triggerRef.current?.();
+    });
+
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("custom ready");
+    expect(container.textContent).not.toContain("Data may be stale");
   });
 });

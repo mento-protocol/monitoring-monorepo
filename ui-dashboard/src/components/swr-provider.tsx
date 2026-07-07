@@ -30,6 +30,15 @@ function shouldCapture(normalized: string): boolean {
   return true;
 }
 
+function captureSWRError(err: unknown, key: unknown) {
+  const normalized = normalizeSWRFreshnessKey(key);
+  if (!shouldCapture(normalized)) return;
+  Sentry.captureException(err, {
+    tags: { source: "swr" },
+    extra: { swrKey: normalized },
+  });
+}
+
 function readRefreshIntervalMs(config: SWRConfiguration | undefined) {
   const refreshInterval = config?.refreshInterval;
   return typeof refreshInterval === "number" && refreshInterval > 0
@@ -44,7 +53,18 @@ const freshnessMiddleware: Middleware = (useSWRNext) => {
       key == null || typeof key === "function" || refreshIntervalMs === null
         ? null
         : normalizeSWRFreshnessKey(key);
-    const response = useSWRNext(key, fetcher, config);
+    const trackedConfig: SWRConfiguration = {
+      ...config,
+      onError(err, callbackKey, callbackConfig) {
+        recordSWRFreshnessError(err, callbackKey, callbackConfig);
+        config?.onError?.(err, callbackKey, callbackConfig);
+      },
+      onSuccess(data, callbackKey, callbackConfig) {
+        recordSWRFreshnessSuccess(callbackKey, callbackConfig);
+        config?.onSuccess?.(data, callbackKey, callbackConfig);
+      },
+    };
+    const response = useSWRNext(key, fetcher, trackedConfig);
 
     useEffect(() => {
       if (freshnessKey === null || refreshIntervalMs === null) return;
@@ -79,17 +99,8 @@ const freshnessMiddleware: Middleware = (useSWRNext) => {
 // network recovers.
 const swrConfig: SWRConfiguration = {
   use: [freshnessMiddleware],
-  onError(err, key, config) {
-    recordSWRFreshnessError(err, key, config);
-    const normalized = normalizeSWRFreshnessKey(key);
-    if (!shouldCapture(normalized)) return;
-    Sentry.captureException(err, {
-      tags: { source: "swr" },
-      extra: { swrKey: normalized },
-    });
-  },
-  onSuccess(_data, key, config) {
-    recordSWRFreshnessSuccess(key, config);
+  onError(err, key) {
+    captureSWRError(err, key);
   },
 };
 
