@@ -24,15 +24,7 @@ let snapshotVersion = 0;
 
 export function normalizeSWRFreshnessKey(key: unknown): string {
   if (typeof key === "string") return key;
-  try {
-    return unstable_serialize(key as Key) || String(key);
-  } catch {
-    try {
-      return JSON.stringify(key) ?? String(key);
-    } catch {
-      return String(key);
-    }
-  }
+  return unstable_serialize(key as Key) || String(key);
 }
 
 function readRefreshIntervalMs(config: SWRConfiguration | undefined) {
