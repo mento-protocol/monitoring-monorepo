@@ -168,7 +168,7 @@ function SourceCell({ pool }: { pool: Pool }) {
 function HealthCell({ status, details }: { status: string; details: string }) {
   return (
     <Cell className="">
-      <Tooltip content={details} label={`Pool health diagnostics: ${details}`}>
+      <Tooltip content={details} label={`Pool health ${status}: ${details}`}>
         <HealthBadge status={status} />
       </Tooltip>
     </Cell>

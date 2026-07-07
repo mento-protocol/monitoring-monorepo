@@ -187,7 +187,7 @@ describe("GlobalPoolsTable — column structure", () => {
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
     expect(html).toMatch(
-      /<button[^>]*aria-label="Pool health diagnostics: Oracle stale/,
+      /<button[^>]*aria-label="Pool health CRITICAL: Oracle stale/,
     );
     expect(html).toMatch(/<button[^>]*aria-describedby="[^"]+"/);
     expect(html).toContain('role="tooltip"');
