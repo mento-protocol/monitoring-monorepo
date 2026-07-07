@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   CdpCollateral,
   CdpInstance,
+  CdpRedemptionEventRow,
   CdpStabilityPoolOperationEventRow,
   CdpTroveListRow,
   CdpTroveOperationEventRow,
@@ -202,6 +203,26 @@ function transactionData() {
   };
 }
 
+function redemptionEvent(
+  overrides: Partial<CdpRedemptionEventRow> = {},
+): CdpRedemptionEventRow {
+  return {
+    id: "redemption-1",
+    instanceId: "gbpm",
+    attemptedBoldAmount: wei(20),
+    actualBoldAmount: wei(10),
+    ETHSent: wei(10),
+    ETHFee: "0",
+    price: wei(1),
+    redemptionPrice: wei(1),
+    isRebalance: false,
+    timestamp: String(NOW - 15),
+    blockNumber: "102",
+    txHash: "0xredemption",
+    ...overrides,
+  };
+}
+
 function troveOperation(
   overrides: Partial<CdpTroveOperationEventRow> = {},
 ): CdpTroveOperationEventRow {
@@ -287,6 +308,16 @@ function bodyText(container: HTMLElement): string {
   return Array.from(container.querySelectorAll("tbody > tr"))
     .map((row) => row.textContent ?? "")
     .join("\n");
+}
+
+function digestRowCells(container: HTMLElement): string[] {
+  const row = container.querySelector(
+    '[aria-labelledby="cdp-activity-digest-heading"] tbody tr',
+  );
+  if (!row) throw new Error("Missing CDP activity digest row");
+  return Array.from(row.querySelectorAll("td")).map(
+    (cell) => cell.textContent?.trim() ?? "",
+  );
 }
 
 function pill(container: HTMLElement, label: string): HTMLButtonElement {
@@ -403,6 +434,89 @@ describe("CdpsPageClient", () => {
     );
     expect(handle!.container.textContent).toContain("Recent CDP Transactions");
     expect(bodyText(handle!.container)).toContain("Open Trove");
+  });
+
+  it("keeps unavailable activity out of per-market digest cells", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return { data: undefined, error: null, isLoading: true };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!, <CdpsPageClient />);
+
+    expect(handle!.container.textContent).toContain(
+      "Last 24h: activity unavailable",
+    );
+    expect(digestRowCells(handle!.container).slice(2, 6)).toEqual([
+      "—",
+      "—",
+      "—",
+      "—",
+    ]);
+  });
+
+  it("does not count rebalance redemptions in the Redemptions digest column", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return {
+          data: {
+            LiquidationEvent: [],
+            RedemptionEvent: [
+              redemptionEvent({ id: "user-redemption" }),
+              redemptionEvent({
+                id: "rebalance-redemption",
+                isRebalance: true,
+              }),
+            ],
+            SpRebalanceEvent: [],
+            TroveOperationEvent: [],
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!, <CdpsPageClient />);
+
+    expect(handle!.container.textContent).toContain(
+      "Last 24h: 2 operations · 0 liquidations · 1 redemption",
+    );
+    expect(digestRowCells(handle!.container).slice(2, 6)).toEqual([
+      "0",
+      "1",
+      "1",
+      "0",
+    ]);
   });
 
   it("keeps last-good CDP market data mounted during a background poll error", () => {

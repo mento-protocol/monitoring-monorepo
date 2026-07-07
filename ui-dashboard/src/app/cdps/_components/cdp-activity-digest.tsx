@@ -28,10 +28,10 @@ export function CdpActivityDigest({
   activityLoading: boolean;
   activityHasError: boolean;
 }) {
-  const summaryText =
-    activityLoading || activityHasError
-      ? "Last 24h: activity unavailable"
-      : `Last 24h: ${countLabel(totalActivity.total24h, "operation", activityCapped)} · ${countLabel(totalActivity.liquidations24h, "liquidation")} · ${countLabel(totalActivity.redemptions24h, "redemption")}`;
+  const activityUnavailable = activityLoading || activityHasError;
+  const summaryText = activityUnavailable
+    ? "Last 24h: activity unavailable"
+    : `Last 24h: ${countLabel(totalActivity.total24h, "operation", activityCapped)} · ${countLabel(totalActivity.liquidations24h, "liquidation")} · ${countLabel(totalActivity.userRedemptions24h, "redemption")}`;
 
   return (
     <section
@@ -73,9 +73,10 @@ export function CdpActivityDigest({
                 openTroveCount: 0,
                 truncated: queryTruncated,
               };
-              const activity =
-                activityByInstance.get(collateral.id) ??
-                EMPTY_CDP_MARKET_ACTIVITY;
+              const activity = activityUnavailable
+                ? null
+                : (activityByInstance.get(collateral.id) ??
+                  EMPTY_CDP_MARKET_ACTIVITY);
               return (
                 <tr
                   key={collateral.id}
@@ -94,8 +95,8 @@ export function CdpActivityDigest({
                       </span>
                     ) : null}
                   </td>
-                  <DigestNumber value={activity.liquidations24h} />
-                  <DigestNumber value={activity.redemptions24h} />
+                  <DigestNumber value={activity?.liquidations24h} />
+                  <DigestNumber value={activity?.userRedemptions24h} />
                   <DigestNumber value={rebalanceCount(activity)} />
                   <DigestNumber value={otherOpsCount(activity)} isLast />
                 </tr>
@@ -108,27 +109,38 @@ export function CdpActivityDigest({
   );
 }
 
-function DigestNumber({ value, isLast }: { value: number; isLast?: boolean }) {
+function DigestNumber({
+  value,
+  isLast,
+}: {
+  value: number | undefined;
+  isLast?: boolean;
+}) {
+  const isUnavailable = value === undefined;
   return (
     <td
       className={[
         "py-2 text-right tabular-nums",
         isLast ? "" : "pr-4",
-        value > 0 ? "text-slate-100" : "text-slate-500",
+        !isUnavailable && value > 0 ? "text-slate-100" : "text-slate-500",
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      {value.toLocaleString()}
+      {isUnavailable ? "—" : value.toLocaleString()}
     </td>
   );
 }
 
-function rebalanceCount(activity: CdpMarketActivity): number {
+function rebalanceCount(
+  activity: CdpMarketActivity | null,
+): number | undefined {
+  if (activity === null) return undefined;
   return activity.rebalanceRedemptions24h + activity.spRebalances24h;
 }
 
-function otherOpsCount(activity: CdpMarketActivity): number {
+function otherOpsCount(activity: CdpMarketActivity | null): number | undefined {
+  if (activity === null) return undefined;
   return activity.stabilityPoolOps24h + activity.troveOps24h;
 }
 
