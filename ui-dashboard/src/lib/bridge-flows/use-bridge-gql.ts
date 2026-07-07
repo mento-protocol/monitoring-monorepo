@@ -1,6 +1,7 @@
 "use client";
 
 import { GraphQLClient, type Variables } from "graphql-request";
+import { useMemo } from "react";
 import useSWR, { type SWRResponse } from "swr";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
 import { clientEnv } from "@/env";
@@ -31,9 +32,12 @@ export function useBridgeGQL<T>(
   refreshInterval = 30_000,
 ): SWRResponse<T> {
   const client = getClient();
-
+  const swrKey = useMemo(
+    () => (query && client ? ["bridge", query, variables] : null),
+    [client, query, variables],
+  );
   const result = useSWR<T>(
-    query && client ? ["bridge", query, variables] : null,
+    swrKey,
     () =>
       client!.request<T>({
         document: query!,

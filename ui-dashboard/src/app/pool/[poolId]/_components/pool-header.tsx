@@ -27,6 +27,7 @@ import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { formatUSD, weiToUsd } from "@/lib/format";
 import type { Network } from "@/lib/networks";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import { hasErrorWithoutData } from "@/lib/swr-state";
 import {
   BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
   POOL_V2_EXCHANGE,
@@ -120,7 +121,7 @@ export function PoolHeader({
   // The Hasura "field not found" error during the indexer deploy+resync
   // window collapses to `v2Error`; surface as a degraded panel rather
   // than silently rendering nothing.
-  const v2HasError = v2Error !== undefined;
+  const v2HasError = hasErrorWithoutData(v2Error, v2Data);
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);

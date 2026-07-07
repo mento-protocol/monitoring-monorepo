@@ -8,6 +8,7 @@ import { TxHashCell } from "@/components/tx-hash-cell";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
   CDP_STABILITY_POOL_EVENTS,
   CDP_TRANSACTIONS,
@@ -86,11 +87,16 @@ export function CdpTransactionsTable({
       <h2 className="text-lg font-semibold text-white mb-3">
         CDP Transactions
       </h2>
-      {error ? (
+      {hasErrorWithoutData(error, data) ? (
         <ErrorBox
           message={`Failed to load CDP transactions — ${error.message}`}
         />
-      ) : isLoading || (rows.length === 0 && stabilityPoolEvents.isLoading) ? (
+      ) : isLoadingWithoutData(isLoading, data) ||
+        (rows.length === 0 &&
+          isLoadingWithoutData(
+            stabilityPoolEvents.isLoading,
+            stabilityPoolEvents.data,
+          )) ? (
         <Skeleton rows={6} />
       ) : rows.length === 0 ? (
         <CdpTransactionsEmptyState

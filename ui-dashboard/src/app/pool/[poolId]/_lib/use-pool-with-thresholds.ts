@@ -226,6 +226,7 @@ export function usePoolWithThresholds(
       queryStillLoadingWithoutData(thresholdsData, thresholdsQueryLoading),
       vpLoading,
     ),
-    thresholdsError,
+    thresholdsError:
+      thresholdsData === undefined ? thresholdsError : undefined,
   };
 }

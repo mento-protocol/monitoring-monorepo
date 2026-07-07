@@ -1909,6 +1909,52 @@ assert_contains "+ pnpm exec turbo run size-limit --filter=@mento-protocol/ui-da
 assert_contains "All mapped commands passed."
 assert_not_contains "dashboard .next command overlapped"
 
+dashboard_setup_failure_repo="$(mktemp -d)"
+(
+  cd "$dashboard_setup_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin tools ui-dashboard
+  printf 'fixture\n' > ui-dashboard/README.md
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  --filter\ @mento-protocol/ui-dashboard\ exec\ playwright\ install\ chromium)
+    echo "chromium install unavailable"
+    exit 1
+    ;;
+  exec\ turbo\ run\ lint*|exec\ turbo\ run\ typecheck*|exec\ turbo\ run\ knip*|--filter\ @mento-protocol/ui-dashboard\ test:coverage|code-health:deps)
+    printf 'ran\n' >> "${QUALITY_MARKER:?}"
+    ;;
+esac
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'ui-dashboard/README.md\n' > changed-paths.txt
+  if QUALITY_MARKER="$dashboard_setup_failure_repo/.tmp/quality-ran" \
+    PATH="$dashboard_setup_failure_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 8 \
+      > "$output_file" 2>&1; then
+    fail "gate did not fail when dashboard Chromium install failed"
+  fi
+  [[ -f "$dashboard_setup_failure_repo/.tmp/quality-ran" ]] ||
+    fail "independent quality pool did not run after dashboard Chromium install failed"
+)
+rm -rf "$dashboard_setup_failure_repo"
+assert_contains "chromium install unavailable"
+assert_contains "Running quality commands with parallelism 8."
+
 fresh_stamp_repo="$(mktemp -d)"
 (
   cd "$fresh_stamp_repo"
@@ -1932,14 +1978,18 @@ STUB
   git commit -qm init
   base_ref="$(git rev-parse --verify HEAD)"
   printf 'changed\n' >> README.md
+  # Warm WITH --allow-package-script-changes; the skip run below passes NO such
+  # flag (like the pre-push hook). With no package-script risk they must still
+  # share a freshness stamp, so the flag-less run skips (allowPackageScripts is
+  # folded out of the stamp when packageRisk is false).
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run > "$output_file" 2>&1
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --allow-package-script-changes > "$output_file" 2>&1
   git add README.md
   git commit -qm "commit validated content"
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
   [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
-    fail "fresh gate stamp did not skip duplicate run"
+    fail "fresh gate stamp did not skip flag-less run after allow-flag warm"
 )
 rm -rf "$fresh_stamp_repo"
 assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
@@ -1992,6 +2042,53 @@ STUB
 )
 rm -rf "$package_risk_fresh_stamp_repo"
 assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
+# A failed ORDERED prerequisite phase (here the preflight `pnpm install`) must
+# stop the run before the parallel quality pool executes. Prerequisite phases
+# (preflight / codegen / quality-setup) run fail-fast even though the pre-push
+# hook drops global --fail-fast, so a failed install stops before its
+# dependents; only the independent quality pool keeps going.
+abort_prereq_repo="$(mktemp -d)"
+(
+  cd "$abort_prereq_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin tools
+  printf 'fixture\n' > README.md
+  # Marks that the quality pool ran; it must NOT run if a prerequisite failed.
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+printf 'ran\n' > "${QUALITY_MARKER:?}"
+STUB
+  # Fail the preflight install; succeed for every other pnpm invocation.
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *install*) exit 1 ;;
+  *) exit 0 ;;
+esac
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'packages/fixture/package.json\n' > changed-paths.txt
+  if QUALITY_MARKER="$abort_prereq_repo/.tmp/quality-ran" \
+    PATH="$abort_prereq_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 3 \
+      --allow-package-script-changes \
+      > "$output_file" 2>&1; then
+    fail "gate did not fail when the preflight prerequisite failed"
+  fi
+  [[ ! -f "$abort_prereq_repo/.tmp/quality-ran" ]] ||
+    fail "quality pool ran despite a failed prerequisite phase"
+)
+rm -rf "$abort_prereq_repo"
+assert_contains "Stopping after first failed mapped command (--fail-fast)."
 
 stale_stamp_repo="$(mktemp -d)"
 (
