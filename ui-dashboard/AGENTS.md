@@ -162,6 +162,10 @@ built app (`next build` plus `next start`) instead of dev mode. It allocates the
 same fixture ports up front, starts the Hasura fixture before `next build`,
 bakes the live fixture GraphQL URL into the production build, and then runs the
 same Playwright suite against `next start` while reusing that fixture server.
+When a browser test asserts that an interaction did not refetch the current
+route payload, filter `?_rsc=` requests to the route under test. Production
+`next/link` may prefetch unrelated navigation targets after page load; those
+background RSC requests should not fail current-route no-refetch assertions.
 Use `PLAYWRIGHT_NEXT_START_TIMEOUT_MS` to tune the production `next start`
 timeout; `PLAYWRIGHT_NEXT_TIMEOUT_MS` remains the dev-server timeout knob.
 For local macOS agent runs that can bind localhost outside the sandbox but hit
