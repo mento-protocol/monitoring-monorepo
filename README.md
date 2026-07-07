@@ -2,6 +2,8 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-06 -->
+
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
 ## Packages

@@ -17,6 +17,7 @@ const repoRoot = process.cwd();
 const failures = [];
 const requiredMetadataKeys = ["title", "status", "owner", "canonical"];
 const validStatuses = new Set(["active", "archived", "draft"]);
+const readmeContextMarkerPattern = /<!--\s*agent-context:\s*([\s\S]*?)-->/i;
 
 function fail(message) {
   failures.push(message);
@@ -82,6 +83,28 @@ function hasExecutableLine(content, pattern) {
     );
 }
 
+function parseFieldList(raw) {
+  const data = {};
+  const fieldPattern = /([A-Za-z0-9_-]+)=("([^"]*)"|'([^']*)'|[^\s]+)/g;
+  for (const match of raw.matchAll(fieldPattern)) {
+    data[match[1]] = (match[3] ?? match[4] ?? match[2]).trim();
+  }
+  return data;
+}
+
+function parseReadmeContextMarker(content) {
+  const match = readmeContextMarkerPattern.exec(content);
+  if (!match) return null;
+  return parseFieldList(match[1]);
+}
+
+function parseContextMetadata(filePath, content) {
+  const frontmatter = parseFrontmatter(content);
+  if (frontmatter) return frontmatter;
+  if (filePath === "README.md") return parseReadmeContextMarker(content);
+  return null;
+}
+
 function trackedFiles(dir, predicate = () => true, { required = false } = {}) {
   if (required && !exists(dir)) {
     fail(`${dir}: expected directory is missing or unreadable (ENOENT)`);
@@ -109,13 +132,15 @@ function trackedFiles(dir, predicate = () => true, { required = false } = {}) {
 }
 
 function requireMetadata(filePath) {
-  const data = parseFrontmatter(read(filePath));
+  const data = parseContextMetadata(filePath, read(filePath));
   if (!data) {
-    fail(`${filePath}: missing YAML frontmatter`);
+    fail(
+      `${filePath}: missing context metadata${filePath === "README.md" ? " (YAML frontmatter or hidden agent-context marker)" : ""}`,
+    );
     return;
   }
   for (const key of requiredMetadataKeys) {
-    if (!data[key]) fail(`${filePath}: missing frontmatter key '${key}'`);
+    if (!data[key]) fail(`${filePath}: missing metadata key '${key}'`);
   }
   if (data.status && !validStatuses.has(data.status)) {
     fail(`${filePath}: invalid status '${data.status}'`);
@@ -158,6 +183,17 @@ const scopedAgentDirs = [
   "ui-dashboard",
 ];
 
+const delegatedOperatingRuleNotes = [
+  "docs/notes/agent-issue-workflow.md",
+  "docs/notes/agent-quality-gate-mechanics.md",
+  "docs/notes/codex-agent-skills.md",
+  "docs/notes/codex-cloud-setup.md",
+  "docs/notes/cross-protocol-context.md",
+  "docs/notes/pr-ready-state.md",
+  "docs/notes/spoken-attention-nudge.md",
+  "docs/notes/worktree-and-web-setup.md",
+];
+
 const canonicalSkillFiles = trackedFiles(
   ".agents/skills",
   (file) => !file.endsWith("/"),
@@ -174,10 +210,22 @@ const claudeSkillFiles = trackedFiles(
 // The enforced set is discovered, not hardcoded: every tracked markdown file
 // in the discovery roots (see isCanonicalDiscoveryPath) whose frontmatter
 // declares `canonical: true` gets full metadata + staleness enforcement, so
-// new canonical files are picked up automatically.
-const managedContextFiles = discoverCanonicalFiles(trackedFiles("."), (file) =>
+// new canonical files are picked up automatically. Root README.md uses a
+// hidden metadata marker instead of visible frontmatter, so it is enrolled
+// with the same metadata parser used by requireMetadata.
+const trackedRepoFiles = trackedFiles(".");
+const managedContextFiles = discoverCanonicalFiles(trackedRepoFiles, (file) =>
   exists(file) ? read(file) : "",
 );
+if (trackedRepoFiles.includes("README.md")) {
+  const readmeMetadata = parseContextMetadata("README.md", read("README.md"));
+  if (
+    readmeMetadata?.canonical === "true" &&
+    !managedContextFiles.includes("README.md")
+  ) {
+    managedContextFiles.push("README.md");
+  }
+}
 
 // Minimum-presence assertion: these core files must always be discovered.
 // Without this, stripping a core file's frontmatter (or its `canonical:
@@ -185,14 +233,16 @@ const managedContextFiles = discoverCanonicalFiles(trackedFiles("."), (file) =>
 // failing the check.
 const coreContextFiles = [
   "AGENTS.md",
+  "README.md",
   "SPEC.md",
   ...scopedAgentDirs.map((dir) => `${dir}/AGENTS.md`),
   "docs/context-standards.md",
   "docs/pr-checklists/recurring-review-patterns.md",
-  // docs/notes/* canonical notes (agent-quality-gate-mechanics,
-  // spoken-attention-nudge) are deliberately NOT pinned here: they are
-  // procedural notes managed via frontmatter discovery, and removing their
-  // frontmatter is the legitimate demote-from-canonical operation.
+  // Root-delegated operating-rule notes are pinned because root AGENTS.md or
+  // another canonical entry point sends agents there for current behavior.
+  // Other docs/notes/* canonical notes remain discovery-managed; removing
+  // their frontmatter is the legitimate demote-from-canonical operation.
+  ...delegatedOperatingRuleNotes,
   ...canonicalSkillFiles.filter((file) => file.endsWith("/SKILL.md")),
   ...trackedFiles(".agents/roles", (file) => file.endsWith(".md"), {
     required: true,
@@ -207,7 +257,7 @@ for (const file of missingCoreContextFiles(
     fail(`${file}: required managed context file is missing`);
   } else {
     fail(
-      `${file}: core context file must keep canonical: true frontmatter (discovery no longer finds it)`,
+      `${file}: core context file must keep canonical: true metadata (discovery no longer finds it)`,
     );
   }
 }
