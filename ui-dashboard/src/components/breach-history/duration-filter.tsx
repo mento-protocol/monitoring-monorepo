@@ -139,7 +139,7 @@ function DurationField({
         }
       }}
       className={
-        "w-20 rounded-lg border bg-slate-800 px-2 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 " +
+        "w-20 rounded-lg border bg-slate-800 px-2 py-1 text-xs text-white placeholder:text-muted focus:outline-none focus:ring-1 " +
         (invalid
           ? "border-red-500/70 focus:border-red-400 focus:ring-red-400"
           : "border-slate-700 focus:border-indigo-500 focus:ring-indigo-500")

@@ -63,7 +63,7 @@ describe("muted text contrast", () => {
 
   it("does not reintroduce the failing slate secondary text utilities", () => {
     const failingUtilityPattern = new RegExp(
-      `\\btext-slate-(${[500, 600].join("|")})\\b`,
+      `\\b(?:text|placeholder)-slate-(${[500, 600].join("|")})\\b`,
     );
     const offenders = listSourceFiles(SRC_ROOT).flatMap((file) => {
       const source = readFileSync(file, "utf8");

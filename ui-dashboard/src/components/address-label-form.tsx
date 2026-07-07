@@ -343,7 +343,7 @@ export function AddressLabelForm(props: Props) {
                   onAddressChange?.(e.target.value);
                 }}
                 placeholder="0x…"
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 font-mono text-sm text-white placeholder:text-muted focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             ) : (
               <p className="font-mono text-xs text-slate-300 break-all select-all">
@@ -378,7 +378,7 @@ export function AddressLabelForm(props: Props) {
                   ? "Leave blank to keep contract name"
                   : "e.g. Binance Hot Wallet"
               }
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
 
@@ -412,7 +412,7 @@ export function AddressLabelForm(props: Props) {
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               placeholder="Any context about this address…"
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
             />
           </div>
 

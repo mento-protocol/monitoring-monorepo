@@ -394,7 +394,7 @@ export function AddressReportEditor(props: Props) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Multi-DEX arb bot (idontloseiwin.eth)"
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-muted focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
         )}
@@ -433,7 +433,7 @@ export function AddressReportEditor(props: Props) {
               onChange={(e) => setBody(e.target.value)}
               rows={18}
               placeholder="# TL;DR&#10;&#10;Multi-DEX arb bot operated by …&#10;&#10;## Cast of characters&#10;…"
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 placeholder-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 placeholder:text-muted focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
             />
           </div>
         )}

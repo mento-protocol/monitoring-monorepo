@@ -139,7 +139,7 @@ export function TagInput({
           aria-labelledby={ariaLabelledBy}
           aria-activedescendant={activeOptionId}
           aria-autocomplete="list"
-          className="flex-1 min-w-[80px] bg-transparent text-sm text-white placeholder-slate-500 outline-none py-0.5"
+          className="flex-1 min-w-[80px] bg-transparent text-sm text-white placeholder:text-muted outline-none py-0.5"
         />
       </div>
 

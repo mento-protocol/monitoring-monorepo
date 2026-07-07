@@ -114,7 +114,7 @@ export function AddressLink({
               custom ? `Edit label for ${address}` : `Add label for ${address}`
             }
             title={custom ? "Edit label" : "Add label"}
-            className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 text-muted hover:text-slate-300 transition-all"
+            className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 text-muted hover:text-white transition-all"
           >
             <PencilIcon />
           </button>

@@ -135,7 +135,7 @@ function OwnerTroveCell({
         rel="noopener noreferrer"
         title={trove.troveId}
         aria-label={`Manage trove ${trove.troveId} in the Mento app`}
-        className="font-mono text-[10px] text-muted hover:text-slate-300 hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="font-mono text-[10px] text-muted hover:text-white hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500"
       >
         {shortenHex(trove.troveId)}
       </a>

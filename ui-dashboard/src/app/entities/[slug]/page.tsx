@@ -27,10 +27,7 @@ function EntityHeader({
 }) {
   return (
     <div>
-      <Link
-        href="/entities"
-        className="text-xs text-muted hover:text-slate-300"
-      >
+      <Link href="/entities" className="text-xs text-muted hover:text-white">
         &larr; All entities
       </Link>
       <h1 className="mt-2 text-2xl font-semibold text-white">
