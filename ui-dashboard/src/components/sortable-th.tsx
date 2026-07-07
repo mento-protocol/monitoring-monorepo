@@ -42,7 +42,7 @@ export function SortableTh<K extends string>({
         <span className="text-indigo-400">{sortDir === "asc" ? "↑" : "↓"}</span>
       ) : (
         <span
-          className="text-slate-600 text-[1.1em] leading-none"
+          className="text-muted text-[1.1em] leading-none"
           style={{ fontVariantEmoji: "text" }}
         >
           ↕

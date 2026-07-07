@@ -37,7 +37,7 @@ export function DurationRangeInputs({
         committedSeconds={minSeconds}
         onCommit={onMinCommit}
       />
-      <span className="text-xs text-slate-600">–</span>
+      <span className="text-xs text-muted">–</span>
       <DurationField
         id="breach-duration-max"
         ariaLabel="Maximum breach duration"
@@ -155,7 +155,7 @@ function DurationField({
  */
 export function DurationFormatHint() {
   return (
-    <p id={DURATION_FORMAT_HINT_ID} className="text-[10px] text-slate-500">
+    <p id={DURATION_FORMAT_HINT_ID} className="text-[10px] text-muted">
       {DURATION_FORMAT_HINT}
     </p>
   );

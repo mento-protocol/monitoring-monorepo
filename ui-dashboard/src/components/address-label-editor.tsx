@@ -203,7 +203,7 @@ export function AddressLabelEditor({
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="text-slate-500 hover:text-slate-300 transition-colors text-lg leading-none"
+          className="text-muted hover:text-slate-300 transition-colors text-lg leading-none"
         >
           ×
         </button>

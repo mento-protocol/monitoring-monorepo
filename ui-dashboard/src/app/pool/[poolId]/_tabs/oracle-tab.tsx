@@ -439,7 +439,7 @@ function OracleChartScrollbackStatus({
   }
   if (isFetchingOlder) {
     return (
-      <p className="px-1 -mt-3 mb-4 text-xs text-slate-500" role="status">
+      <p className="px-1 -mt-3 mb-4 text-xs text-muted" role="status">
         Loading older history…
       </p>
     );
@@ -466,7 +466,7 @@ function OracleChartScrollbackStatus({
   }
   if (reachedStart) {
     return (
-      <p className="px-1 -mt-3 mb-4 text-xs text-slate-600" role="status">
+      <p className="px-1 -mt-3 mb-4 text-xs text-muted" role="status">
         Beginning of recorded oracle history.
       </p>
     );

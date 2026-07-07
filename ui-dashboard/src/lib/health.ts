@@ -451,7 +451,7 @@ export function pressureColorClass(pressure: number): string {
  *   <70%   → red
  */
 export function uptimeColorClass(pct: number): string {
-  if (!Number.isFinite(pct)) return "text-slate-500";
+  if (!Number.isFinite(pct)) return "text-muted";
   if (pct > 99) return "text-emerald-400";
   if (pct >= 90) return "text-yellow-400";
   if (pct >= 70) return "text-amber-400";

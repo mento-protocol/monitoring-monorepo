@@ -146,7 +146,7 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
         <span className="text-slate-300 font-medium">Market Closed</span>
         {calendarClosed && (
           <>
-            <span className="text-slate-500">·</span>
+            <span className="text-muted">·</span>
             <span className="font-mono text-slate-300">
               {formatHoursMinutes(secondsUntilTransition)} until open
             </span>
@@ -165,7 +165,7 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
         title={tooltip}
       >
         <span className="text-amber-300 font-medium">Market Open</span>
-        <span className="text-slate-500">·</span>
+        <span className="text-muted">·</span>
         <span className="font-mono text-amber-200">
           {formatHoursMinutes(secondsUntilTransition)} until close
         </span>
@@ -181,7 +181,7 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
       title={tooltip}
     >
       <span className="text-emerald-300 font-medium">Market Open</span>
-      <span className="text-slate-500">·</span>
+      <span className="text-muted">·</span>
       <span className="font-mono text-slate-300">{scheduleString()}</span>
       <span className="sr-only"> — {tooltip}</span>
     </span>

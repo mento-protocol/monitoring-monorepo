@@ -275,7 +275,7 @@
   {
     "file": "src/components/breach-history-panel.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BreachHistoryPanelInner' has too many lines (195). Maximum allowed is 100.",
+    "message": "Function 'BreachHistoryPanelInner' has too many lines (193). Maximum allowed is 100.",
     "line": 202,
     "linePreview": " | function BreachHistoryPanelInner({ | pool,"
   },
@@ -296,7 +296,7 @@
   {
     "file": "src/components/bridge-token-breakdown-chart.tsx",
     "ruleId": "max-lines-per-function",
-    "message": "Function 'BridgeTokenBreakdownChart' has too many lines (131). Maximum allowed is 100.",
+    "message": "Function 'BridgeTokenBreakdownChart' has too many lines (129). Maximum allowed is 100.",
     "line": 56,
     "linePreview": " | export function BridgeTokenBreakdownChart({ | snapshots,"
   },

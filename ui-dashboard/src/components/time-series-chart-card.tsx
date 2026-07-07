@@ -477,12 +477,10 @@ export function TimeSeriesChartCard({
                 <>
                   {deltaPill}
                   {deltaPill && (
-                    <span className="text-slate-500">{changeLabel}</span>
+                    <span className="text-muted">{changeLabel}</span>
                   )}
                   {(hasError || hasSnapshotError) && (
-                    <span className="text-xs text-slate-500">
-                      · partial data
-                    </span>
+                    <span className="text-xs text-muted">· partial data</span>
                   )}
                 </>
               )}
@@ -522,7 +520,7 @@ export function TimeSeriesChartCard({
           <PlotSkeleton heightPx={chartHeightPx} />
         ) : showEmptyState ? (
           <div
-            className="flex items-center justify-center text-sm text-slate-500"
+            className="flex items-center justify-center text-sm text-muted"
             style={{ height: chartHeightPx }}
           >
             {emptyMessage}

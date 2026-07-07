@@ -103,7 +103,7 @@ export function StablesSparklineGrid({
   if (isLoading) {
     return (
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
-        <p className="text-sm text-slate-500" role="status">
+        <p className="text-sm text-muted" role="status">
           Loading per-token detail…
         </p>
       </section>
@@ -122,7 +122,7 @@ export function StablesSparklineGrid({
   if (cards.length === 0) {
     return (
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
-        <p className="text-sm text-slate-500">No per-token data yet.</p>
+        <p className="text-sm text-muted">No per-token data yet.</p>
       </section>
     );
   }
@@ -159,7 +159,7 @@ function SparklineCard({
       : `${change7d >= 0 ? "+" : ""}${change7d.toFixed(2)}%`;
   const changeColor =
     change7d == null
-      ? "text-slate-500"
+      ? "text-muted"
       : change7d >= 0
         ? "text-emerald-400"
         : "text-rose-400";
@@ -224,7 +224,7 @@ function MiniSparkline({
       missingReason === "no-rate" ? "No USD rate" : "Building history…";
     return (
       <div className="h-[40px] w-full rounded bg-slate-800/40 flex items-center justify-center">
-        <span className="text-[10px] text-slate-500">{message}</span>
+        <span className="text-[10px] text-muted">{message}</span>
       </div>
     );
   }

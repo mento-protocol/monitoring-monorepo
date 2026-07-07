@@ -23,7 +23,7 @@ const UPTIME_EXPLAINER =
   "% of time the oracle was fresh AND the pool's price stayed within the 1.01× tolerance of the rebalance threshold.\nStale oracle (no report past expiry) and price-deviation breaches both count as unhealthy.\n\n7d shows the same metric over the last 7 days, with a trend arrow vs all-time.";
 const UPTIME_FX_SUFFIX = "\nWeekends don't count into FX pool uptime.";
 
-const NA = <span className="text-slate-500">N/A</span>;
+const NA = <span className="text-muted">N/A</span>;
 
 const ARROW = {
   up: {
@@ -130,9 +130,9 @@ export function UptimeValue({ pool }: { pool: Pool }) {
     <span className="flex flex-col gap-0.5">
       <span className="font-medium">
         <span className={uptimeColorClass(pct)}>{pct.toFixed(2)}%</span>
-        <span className="ml-1 text-xs text-slate-500">all-time</span>
+        <span className="ml-1 text-xs text-muted">all-time</span>
       </span>
-      <span className="text-xs text-slate-500">
+      <span className="text-xs text-muted">
         {pct7d != null ? (
           <>
             {arrow && (

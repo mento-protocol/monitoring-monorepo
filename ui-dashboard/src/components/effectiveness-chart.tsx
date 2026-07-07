@@ -102,7 +102,7 @@ export function EffectivenessChart({ events }: EffectivenessChartProps) {
       <h3 className="text-sm font-medium text-slate-400 mb-1">
         Rebalance Effectiveness Trend
       </h3>
-      <p className="text-xs text-slate-500 mb-3">
+      <p className="text-xs text-muted mb-3">
         100% = rebalance landed exactly on the rebalance boundary (ideal). Above
         100% = over-correction past the boundary (e.g. all the way to the
         oracle). Below 100% = control loop under-correcting. Negative =

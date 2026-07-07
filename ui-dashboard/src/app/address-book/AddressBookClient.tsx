@@ -33,7 +33,7 @@ function LabelLoadStatus({
   error: Error | undefined;
 }) {
   if (!hasLoaded && !error) {
-    return <p className="text-sm text-slate-500">Loading labels…</p>;
+    return <p className="text-sm text-muted">Loading labels…</p>;
   }
   if (!hasLoaded && error) {
     return (
@@ -66,7 +66,7 @@ function EmptyRowsState({
 }) {
   if (!hasLoaded || isLoading || rowCount > 0) return null;
   return (
-    <p className="text-sm text-slate-500">
+    <p className="text-sm text-muted">
       {search ? "No labels match your search." : "No labels yet. Add one!"}
     </p>
   );
@@ -347,34 +347,34 @@ export default function AddressBookPage(props: AddressBookPageProps) {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-800 bg-slate-900/50">
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                   Chain
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                   Address
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                   Name
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                   Tags
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                   Notes
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                   Source
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                   Visibility
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                   Created at
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                   Updated at
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 w-20">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted w-20">
                   Actions
                 </th>
               </tr>

@@ -326,9 +326,7 @@ function BreachHistoryPanelInner({
     return (
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
         <h2 className="mb-4 text-sm text-slate-400">Breach History</h2>
-        <p
-          className={`text-sm ${isSchemaLag ? "text-slate-500" : "text-red-400"}`}
-        >
+        <p className={`text-sm ${isSchemaLag ? "text-muted" : "text-red-400"}`}>
           {isSchemaLag
             ? "Breach history not available yet — indexer rollout in progress."
             : "Couldn't load breach history — try again later."}
@@ -344,7 +342,7 @@ function BreachHistoryPanelInner({
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm text-slate-400">Breach History</h2>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-muted">
             {countError
               ? `${rows.length.toLocaleString()}+ on this page`
               : countCapped
@@ -377,7 +375,7 @@ function BreachHistoryPanelInner({
         </div>
 
         {isLoading && rows.length === 0 ? (
-          <p className="py-6 text-center text-sm text-slate-500">Loading…</p>
+          <p className="py-6 text-center text-sm text-muted">Loading…</p>
         ) : rows.length === 0 && countConfirmed && rawTotal === 0 ? (
           <EmptyBox
             message={

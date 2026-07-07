@@ -62,7 +62,7 @@ function AggregatorRows({
           <div className="min-w-[9rem]">
             <div className="font-medium text-white">{aggregator.label}</div>
             {aggregator.credentialEnv.length > 0 && (
-              <div className="mt-1 text-[10px] text-slate-500">
+              <div className="mt-1 text-[10px] text-muted">
                 {aggregator.credentialEnv.join(", ")}
               </div>
             )}
@@ -107,13 +107,13 @@ function VolumeSignalCell({
 }: {
   signal: IntegrationProbeAggregator["volumeSignal"];
 }) {
-  if (!signal) return <span className="text-slate-500">-</span>;
+  if (!signal) return <span className="text-muted">-</span>;
   const category = volumeCategoryLabel(signal.category);
   if (signal.valueUsd === null) {
     return (
       <div className="max-w-[11rem]" title={signal.note ?? undefined}>
-        <div className="font-mono text-xs text-slate-500">-</div>
-        <div className="mt-1 text-[10px] text-slate-500">
+        <div className="font-mono text-xs text-muted">-</div>
+        <div className="mt-1 text-[10px] text-muted">
           {category} · unavailable
         </div>
       </div>
@@ -124,7 +124,7 @@ function VolumeSignalCell({
       <div className="font-mono text-xs text-slate-200">
         {formatUsdCompact(signal.valueUsd)} {signal.window}
       </div>
-      <div className="mt-1 text-[10px] text-slate-500">
+      <div className="mt-1 text-[10px] text-muted">
         {category} · {volumeSourceLabel(signal)}
       </div>
     </div>
@@ -132,11 +132,11 @@ function VolumeSignalCell({
 }
 
 function ChainCell({ chain }: { chain?: IntegrationProbeChain | undefined }) {
-  if (!chain) return <span className="text-slate-500">-</span>;
+  if (!chain) return <span className="text-muted">-</span>;
   return (
     <div className="space-y-1">
       <IntegrationStatusBadge status={chain.status} />
-      <div className="text-[10px] text-slate-500">
+      <div className="text-[10px] text-muted">
         {chain.pairCoverage.passed}/{chain.pairCoverage.total} routes
       </div>
     </div>
@@ -164,14 +164,14 @@ function ChainEvidence({ chain }: { chain: IntegrationProbeChain }) {
               </span>
               <IntegrationStatusBadge status={pair.status} />
             </div>
-            <p className="mt-1 break-all font-mono text-[10px] text-slate-500">
+            <p className="mt-1 break-all font-mono text-[10px] text-muted">
               {evidenceText(pair)}
             </p>
-            <p className="mt-1 text-[10px] text-slate-500">{metaText(pair)}</p>
+            <p className="mt-1 text-[10px] text-muted">{metaText(pair)}</p>
           </div>
         ))}
         {hiddenCount > 0 && (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted">
             {hiddenCount} more route checks in the snapshot.
           </p>
         )}

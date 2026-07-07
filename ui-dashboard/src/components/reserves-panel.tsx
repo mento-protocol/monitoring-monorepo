@@ -81,10 +81,7 @@ export function ReservesPanel({
               className="w-5 border-t-2 border-dashed border-amber-400/60 flex-shrink-0"
               aria-hidden="true"
             />
-            <span
-              id="reserves-threshold-legend"
-              className="text-xs text-slate-500"
-            >
+            <span id="reserves-threshold-legend" className="text-xs text-muted">
               Rebalance threshold
             </span>
             <Tooltip
@@ -291,7 +288,7 @@ function Tank({
         <div className="text-xs font-mono text-slate-400 mt-0.5">
           {amount}
           {usd !== null && (
-            <span className="text-slate-500"> ≈ {formatUSD(usd)}</span>
+            <span className="text-muted"> ≈ {formatUSD(usd)}</span>
           )}
         </div>
       </div>

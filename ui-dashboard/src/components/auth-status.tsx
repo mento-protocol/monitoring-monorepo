@@ -78,7 +78,7 @@ export function AuthStatus() {
       <button
         type="button"
         onClick={handleSignOut}
-        className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+        className="text-xs text-muted hover:text-slate-300 transition-colors"
       >
         Sign out
       </button>

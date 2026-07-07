@@ -170,7 +170,7 @@ function DepositorTableIntro({
       <h2 className="text-lg font-semibold text-white mb-3">
         Stability Pool LP Snapshots
       </h2>
-      <p className="mb-3 text-xs text-slate-500">
+      <p className="mb-3 text-xs text-muted">
         Rows are last-updated LP snapshots. Current deposit equals gross
         deposited minus principal withdrawn minus debt-token deposit used by CDP
         rebalances and Liquity liquidations, net of retained debt-token yield,

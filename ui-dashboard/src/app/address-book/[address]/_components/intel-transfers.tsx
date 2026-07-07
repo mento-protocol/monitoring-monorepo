@@ -247,7 +247,7 @@ function TransfersPanel({
       <div className="border-b border-slate-800 px-5 py-3 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-white">Recent transfers</h2>
         {fetchedAt && (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-muted">
             Fetched {relativeTimeFromIso(fetchedAt)}
           </span>
         )}

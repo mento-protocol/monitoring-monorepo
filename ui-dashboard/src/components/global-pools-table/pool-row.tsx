@@ -150,7 +150,7 @@ function SourceCell({ pool }: { pool: Pool }) {
   if (!pool.source) {
     return (
       <Cell className="">
-        <span className="text-slate-600 text-xs">—</span>
+        <span className="text-muted text-xs">—</span>
       </Cell>
     );
   }
@@ -181,7 +181,7 @@ function UptimeCell({ pool }: { pool: Pool }) {
   if (pct == null) {
     return (
       <Cell className={className}>
-        <span className="text-slate-600">—</span>
+        <span className="text-muted">—</span>
       </Cell>
     );
   }
@@ -210,7 +210,7 @@ function TvlCell({
     wow === null
       ? "text-slate-400"
       : wow === undefined
-        ? "text-slate-600"
+        ? "text-muted"
         : wow > 0
           ? "text-emerald-400"
           : wow < 0
@@ -281,7 +281,7 @@ function StrategyCell({ strategies }: { strategies: PoolStrategyLabel[] }) {
           ))}
         </div>
       ) : (
-        <span className="text-slate-600 text-xs">—</span>
+        <span className="text-muted text-xs">—</span>
       )}
     </Cell>
   );

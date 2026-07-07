@@ -202,13 +202,13 @@ function RecentTransfersSection({
             onPageChange={setPage}
           />
           {totalCapped && (
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-muted">
               Showing first {ENVIO_MAX_ROWS.toLocaleString()} transfers — older
               entries may exist beyond this page range.
             </p>
           )}
           {countHasError && (
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-muted">
               Total count degraded — showing last known denominator.
             </p>
           )}

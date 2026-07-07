@@ -27,7 +27,7 @@ export function PoolLifecyclePanel({ pool }: { pool: Pool }) {
   // tell "no data yet" from "fetch failed."
   if (error) {
     return (
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-muted">
         Lifecycle unavailable: {error.message}
       </p>
     );

@@ -42,7 +42,7 @@ export function AddressDetailHeader({
 
   return (
     <header className="space-y-3">
-      <nav aria-label="Breadcrumb" className="text-xs text-slate-500">
+      <nav aria-label="Breadcrumb" className="text-xs text-muted">
         <Link
           href="/address-book"
           className="hover:text-slate-300 transition-colors"
@@ -118,7 +118,7 @@ export function AddressDetailHeader({
       )}
 
       {!hasLabel && !hasReport && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted">
           No label or report yet — fill in the form to save, or paste a markdown
           investigation into the report panel on the right.
         </p>

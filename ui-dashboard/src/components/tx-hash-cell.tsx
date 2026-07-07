@@ -38,7 +38,7 @@ export function TxHashCell({
         className="font-mono text-slate-300 hover:text-indigo-300 transition-colors"
       >
         {short}
-        <span className="ml-1 text-slate-600" aria-hidden="true">
+        <span className="ml-1 text-muted" aria-hidden="true">
           {"\u2197"}
         </span>
       </a>

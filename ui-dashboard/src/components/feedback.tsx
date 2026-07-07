@@ -14,7 +14,7 @@ export function Skeleton({ rows }: { rows: number }) {
 
 export function EmptyBox({ message }: { message: string }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/30 py-12 text-center text-sm text-slate-500">
+    <div className="rounded-lg border border-slate-800 bg-slate-900/30 py-12 text-center text-sm text-muted">
       {message}
     </div>
   );
@@ -61,7 +61,7 @@ export function Tile({
           {value}
         </p>
       )}
-      {subtitle && <p className="mt-1.5 text-xs text-slate-500">{subtitle}</p>}
+      {subtitle && <p className="mt-1.5 text-xs text-muted">{subtitle}</p>}
     </div>
   );
 }

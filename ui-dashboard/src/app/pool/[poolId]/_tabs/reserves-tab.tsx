@@ -139,7 +139,7 @@ export function ReservesTab({
                       {sym0}
                     </div>
                     {showUsd && (
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-muted">
                         ≈ $
                         {usd0.toLocaleString(undefined, {
                           minimumFractionDigits: 2,
@@ -154,7 +154,7 @@ export function ReservesTab({
                       {sym1}
                     </div>
                     {showUsd && (
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-muted">
                         ≈ $
                         {usd1.toLocaleString(undefined, {
                           minimumFractionDigits: 2,

@@ -76,7 +76,7 @@ export function BridgeStatusFilter({
       onKeyDown={handleKeyDown}
       tabIndex={-1}
     >
-      <span className="text-xs text-slate-500 mr-1">Status:</span>
+      <span className="text-xs text-muted mr-1">Status:</span>
       <button
         type="button"
         role="radio"

@@ -129,7 +129,7 @@ function RadioPillGroup<TOption, TValue extends string>({
       onKeyDown={handleKeyDown}
       tabIndex={-1}
     >
-      <span className="text-xs text-slate-500 mr-1">{labelText}</span>
+      <span className="text-xs text-muted mr-1">{labelText}</span>
       <button
         type="button"
         role="radio"
@@ -205,7 +205,7 @@ export function CdpTxAddressFilter({
 }) {
   return (
     <label className="flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-slate-500">Address:</span>
+      <span className="text-xs text-muted">Address:</span>
       <input
         type="text"
         value={value}
@@ -215,10 +215,10 @@ export function CdpTxAddressFilter({
         autoComplete="off"
         aria-label="Filter CDP transactions by owner or depositor address"
         disabled={disabled}
-        className="w-72 max-w-full rounded border border-slate-700/60 bg-slate-900/40 px-2 py-1 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+        className="w-72 max-w-full rounded border border-slate-700/60 bg-slate-900/40 px-2 py-1 font-mono text-xs text-slate-200 placeholder:text-muted focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
       />
       {disabled && disabledHint != null && (
-        <span className="text-[10px] text-slate-500">{disabledHint}</span>
+        <span className="text-[10px] text-muted">{disabledHint}</span>
       )}
     </label>
   );

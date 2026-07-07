@@ -91,7 +91,7 @@ export function LimitStatusValue({
   hasError?: boolean;
 }) {
   const isVirtual = pool.source?.includes("virtual");
-  if (isVirtual) return <span className="text-slate-500">—</span>;
+  if (isVirtual) return <span className="text-muted">—</span>;
 
   // An actual fetch failure leaves `tradingLimits` as `[]`, which would
   // otherwise render the same neutral em-dash as virtual pools and as
@@ -105,7 +105,7 @@ export function LimitStatusValue({
   const l1 = summarizeWindow(tradingLimits, "1");
 
   if (!l0 && !l1) {
-    return <span className="text-slate-500">—</span>;
+    return <span className="text-muted">—</span>;
   }
 
   const formatPair = (s: WindowSummary | null) =>
@@ -117,13 +117,13 @@ export function LimitStatusValue({
         <MiniBar summary={l0} title="5-minute limit (L0)" />
         <MiniBar summary={l1} title="Daily limit (L1)" />
       </span>
-      <span className="grid grid-cols-2 gap-2 text-xs text-slate-500 font-mono">
+      <span className="grid grid-cols-2 gap-2 text-xs text-muted font-mono">
         <span title="5-minute netflow / limit">
-          <span className="text-slate-600">5m </span>
+          <span className="text-muted">5m </span>
           {formatPair(l0)}
         </span>
         <span title="Daily netflow / limit">
-          <span className="text-slate-600">1d </span>
+          <span className="text-muted">1d </span>
           {formatPair(l1)}
         </span>
       </span>

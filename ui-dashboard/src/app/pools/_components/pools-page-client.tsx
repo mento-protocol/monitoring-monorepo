@@ -245,7 +245,7 @@ function PoolsContent({
             aria-label="Filter swaps by pool ID or pool address"
             aria-describedby={filterError ? "filter-error" : undefined}
             aria-invalid={filterError ? true : undefined}
-            className="w-96 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm font-mono text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="w-96 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm font-mono text-slate-200 placeholder:text-muted focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
           <button
             onClick={applyFilter}

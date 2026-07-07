@@ -362,9 +362,9 @@ export function AddressLabelForm(props: Props) {
               {requireExplicitName ? (
                 <span className="text-indigo-400">*</span>
               ) : isContractRow ? (
-                <span className="text-slate-500">(optional)</span>
+                <span className="text-muted">(optional)</span>
               ) : (
-                <span className="text-slate-500">(optional if tags added)</span>
+                <span className="text-muted">(optional if tags added)</span>
               )}
             </label>
             <input
@@ -388,7 +388,7 @@ export function AddressLabelForm(props: Props) {
               id="al-tags-label"
               className="block text-xs font-medium text-slate-400 mb-1"
             >
-              Tags <span className="text-slate-500">(optional)</span>
+              Tags <span className="text-muted">(optional)</span>
             </span>
             <TagInput
               tags={tags}
@@ -404,7 +404,7 @@ export function AddressLabelForm(props: Props) {
               htmlFor="al-notes"
               className="block text-xs font-medium text-slate-400 mb-1"
             >
-              Notes <span className="text-slate-500">(optional)</span>
+              Notes <span className="text-muted">(optional)</span>
             </label>
             <textarea
               id="al-notes"
@@ -440,7 +440,7 @@ export function AddressLabelForm(props: Props) {
                 }`}
               />
             </button>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-muted">
               {isPublic
                 ? "Anyone can see this label"
                 : "Only team members can see this label"}

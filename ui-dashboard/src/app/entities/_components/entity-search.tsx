@@ -126,9 +126,9 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
         placeholder="Search entities…"
         value={query}
         onChange={(e) => updateQuery(e.target.value)}
-        className="mb-4 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+        className="mb-4 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-white placeholder:text-muted focus:border-indigo-500 focus:outline-none"
       />
-      <p className="mb-2 text-xs text-slate-500">
+      <p className="mb-2 text-xs text-muted">
         {filtered.length.toLocaleString()} entities
         {query ? ` matching "${query}"` : ""}
       </p>
@@ -164,10 +164,10 @@ function EntityPager({
 }) {
   if (totalPages <= 1) return null;
   const btn =
-    "rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600 hover:border-indigo-500 hover:text-indigo-400";
+    "rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-muted hover:border-indigo-500 hover:text-indigo-400";
   return (
     <div className="mt-4 flex items-center justify-between">
-      <span className="text-xs text-slate-500">
+      <span className="text-xs text-muted">
         Page {page} of {totalPages}
       </span>
       <div className="flex gap-1.5">

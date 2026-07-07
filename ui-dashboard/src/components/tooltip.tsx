@@ -84,7 +84,7 @@ function defaultTooltipTrigger(
       className="inline-flex cursor-help rounded border-0 bg-transparent p-0 text-inherit focus:outline-none focus:ring-1 focus:ring-indigo-500"
     >
       {children ?? (
-        <span className="text-xs text-slate-500" aria-hidden="true">
+        <span className="text-xs text-muted" aria-hidden="true">
           ⓘ
         </span>
       )}

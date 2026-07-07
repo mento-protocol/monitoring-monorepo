@@ -301,7 +301,7 @@ function ViaCell({
   }
   if (unavailableReason) {
     return (
-      <span className="text-slate-500" title={unavailableReason}>
+      <span className="text-muted" title={unavailableReason}>
         -
       </span>
     );
@@ -309,7 +309,7 @@ function ViaCell({
   if (hasError) {
     return (
       <span
-        className="text-slate-500"
+        className="text-muted"
         title={errorReason ?? "Couldn't load v2 route attribution."}
       >
         -
@@ -319,7 +319,7 @@ function ViaCell({
   if (!routes || routes.length === 0) {
     return (
       <span
-        className="text-slate-500"
+        className="text-muted"
         title="No route marker found for this trader in the selected window."
       >
         -

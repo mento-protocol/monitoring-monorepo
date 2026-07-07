@@ -58,7 +58,7 @@ function MetricPill({
 }) {
   return (
     <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950/40 px-2 py-1.5">
-      <p className="truncate text-[10px] uppercase tracking-wide text-slate-500">
+      <p className="truncate text-[10px] uppercase tracking-wide text-muted">
         {label}
       </p>
       <p className="mt-0.5 truncate font-mono text-slate-200">
@@ -89,7 +89,7 @@ function PeriodCard({
       <div className="flex items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-medium text-slate-300">{period.title}</h2>
-          <p className="mt-0.5 text-xs text-slate-500">{period.subtitle}</p>
+          <p className="mt-0.5 text-xs text-muted">{period.subtitle}</p>
         </div>
         {isPartial ? (
           <Tooltip
@@ -175,7 +175,7 @@ function ForecastCard({
           <h2 className="text-sm font-medium text-slate-300">
             {forecast.title}
           </h2>
-          <p className="mt-0.5 text-xs text-slate-500">{forecast.subtitle}</p>
+          <p className="mt-0.5 text-xs text-muted">{forecast.subtitle}</p>
         </div>
         <Tooltip
           label={`About ${forecast.title}`}
@@ -204,7 +204,7 @@ function ForecastCard({
         />
       </div>
       {isPartial ? (
-        <p className="mt-2 text-xs text-slate-500">Partial forecast inputs</p>
+        <p className="mt-2 text-xs text-muted">Partial forecast inputs</p>
       ) : null}
     </article>
   );
@@ -307,7 +307,7 @@ function StreamCard({
       <div className="flex items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-medium text-slate-300">{stream.title}</h2>
-          <p className="mt-0.5 text-xs text-slate-500">{stream.subtitle}</p>
+          <p className="mt-0.5 text-xs text-muted">{stream.subtitle}</p>
         </div>
         {isPartial ? (
           <Tooltip
@@ -324,7 +324,7 @@ function StreamCard({
           formatActualValue(stream.actualUsd, actualIsPartial)
         )}
       </p>
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
         <span>30d {mutedUnavailable(stream.forecast30dUsd)}</span>
         <span>1y {mutedUnavailable(stream.forecast365dUsd)}</span>
       </div>

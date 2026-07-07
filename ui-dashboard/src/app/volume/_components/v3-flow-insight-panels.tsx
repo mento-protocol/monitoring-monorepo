@@ -58,7 +58,7 @@ export function CohortPanel({
             />
             <CohortLeader label="Top dormant" row={summary.topDormantTrader} />
           </div>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-muted">
             {summary.currentCount.toLocaleString()} active now vs{" "}
             {summary.previousCount.toLocaleString()} in the previous window
             {isPartial ? " (approx.)" : ""}.
@@ -99,7 +99,7 @@ export function CorridorPanel({
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-slate-800 text-slate-500">
+              <tr className="border-b border-slate-800 text-muted">
                 <th scope="col" className="py-2 pr-3 text-left font-medium">
                   Pool
                 </th>
@@ -161,7 +161,7 @@ export function OutlierPanel({
         <div>
           <table className="w-full table-fixed text-xs">
             <thead>
-              <tr className="border-b border-slate-800 text-slate-500">
+              <tr className="border-b border-slate-800 text-muted">
                 <th
                   scope="col"
                   className="w-[42%] py-2 pr-3 text-left font-medium whitespace-nowrap"
@@ -209,7 +209,7 @@ function InsightPanel({
 }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
-      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
+      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted">
         {title}
       </h3>
       {children}
@@ -220,7 +220,7 @@ function InsightPanel({
 function MiniStat({ label, value }: { label: string; value: number }) {
   return (
     <div className="min-w-0">
-      <p className="text-[11px] text-slate-500">{label}</p>
+      <p className="text-[11px] text-muted">{label}</p>
       <p className="mt-1 font-mono text-lg font-semibold text-white">
         {value.toLocaleString()}
       </p>
@@ -240,7 +240,7 @@ function PanelMessage({
       ? "text-red-400"
       : variant === "warn"
         ? "text-amber-300"
-        : "text-slate-500";
+        : "text-muted";
 
   return (
     <p
@@ -261,7 +261,7 @@ function CohortLeader({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-slate-500">{label}</span>
+      <span className="text-muted">{label}</span>
       {row ? (
         <span className="inline-flex items-center gap-1.5">
           {networkForChainId(row.chainId) && (
@@ -273,7 +273,7 @@ function CohortLeader({
           </span>
         </span>
       ) : (
-        <span className="text-slate-500">—</span>
+        <span className="text-muted">—</span>
       )}
     </div>
   );
@@ -382,7 +382,7 @@ function OutlierVolumeLink({
   blockTimestamp: string;
 }) {
   const label = outlierVolumeLabel(value);
-  if (!label) return <span className="text-slate-500">—</span>;
+  if (!label) return <span className="text-muted">—</span>;
   if (!txUrl) {
     return <span className="inline-block max-w-full truncate">{label}</span>;
   }

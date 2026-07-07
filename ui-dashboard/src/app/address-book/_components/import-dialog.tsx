@@ -27,7 +27,7 @@ export function ImportDialog({
         <summary
           aria-label="Supported import formats"
           title="Supported import formats"
-          className="cursor-pointer list-none rounded-full p-1 text-slate-500 hover:text-slate-300 transition-colors"
+          className="cursor-pointer list-none rounded-full p-1 text-muted hover:text-slate-300 transition-colors"
         >
           <span aria-hidden="true">&#9432;</span>
         </summary>

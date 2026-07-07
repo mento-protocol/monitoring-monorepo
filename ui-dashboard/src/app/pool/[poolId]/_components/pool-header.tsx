@@ -162,12 +162,12 @@ export function PoolHeader({
             target="_blank"
             rel="noopener noreferrer"
             title={createdTitle}
-            className="ml-auto text-xs text-slate-500 hover:text-indigo-400 transition-colors"
+            className="ml-auto text-xs text-muted hover:text-indigo-400 transition-colors"
           >
             Created {createdRelative}
           </a>
         ) : (
-          <span className="ml-auto text-xs text-slate-500" title={createdTitle}>
+          <span className="ml-auto text-xs text-muted" title={createdTitle}>
             Created {createdRelative}
           </span>
         )}
@@ -221,7 +221,7 @@ export function PoolHeader({
                     strategyAddress={pool.rebalancerAddress}
                   />
                 ) : (
-                  <span className="text-slate-500">—</span>
+                  <span className="text-muted">—</span>
                 )
               }
             />
@@ -261,7 +261,7 @@ export function PoolHeader({
 // route — operators see a distinct "—" + tooltip rather than a perpetual
 // loading state.
 const STATUS_TILE = {
-  loading: { label: "—", color: "text-slate-500" },
+  loading: { label: "—", color: "text-muted" },
   active: { label: "Active", color: "text-emerald-300" },
   deprecated: { label: "Deprecated", color: "text-amber-300" },
   error: { label: "—", color: "text-rose-400" },
@@ -436,7 +436,7 @@ function VirtualPoolVolumeValue({
     );
   }
   if (!hasExchangeId || isLoading) {
-    return <span className="text-slate-500">—</span>;
+    return <span className="text-muted">—</span>;
   }
 
   const volumeUsdWei = rows.reduce(

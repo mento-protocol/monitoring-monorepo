@@ -177,7 +177,7 @@ export function IntelWealthChart({ address }: { address: string }) {
           Wealth trajectory (USD, all chains)
         </h2>
         {data.fetchedAt && (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-muted">
             Fetched {relativeTimeFromIso(data.fetchedAt)}
           </span>
         )}

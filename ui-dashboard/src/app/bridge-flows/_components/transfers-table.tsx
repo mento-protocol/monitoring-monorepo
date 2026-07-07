@@ -203,7 +203,7 @@ export function TransfersTable({
                       : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
                   </div>
                   {t.amount && (
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-muted">
                       {formatWei(t.amount, t.tokenDecimals ?? 18, 2)}
                     </div>
                   )}

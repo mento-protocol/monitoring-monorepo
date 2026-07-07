@@ -45,7 +45,7 @@ export function IntelCounterparties({ address }: { address: string }) {
           Counterparties (30d)
         </h2>
         {data.fetchedAt && (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-muted">
             Fetched {relativeTimeFromIso(data.fetchedAt)}
           </span>
         )}

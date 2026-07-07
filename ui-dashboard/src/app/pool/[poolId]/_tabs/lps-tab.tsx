@@ -215,7 +215,7 @@ export function LpsTab({
                       {formatted} {sym}
                     </span>
                     {showSubUsd && (
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-muted">
                         ≈ $
                         {vUsd!.toLocaleString(undefined, {
                           minimumFractionDigits: 2,
@@ -316,7 +316,7 @@ export function LpsTab({
 function LpPositionsCapNotice({ rowCount }: { rowCount: number }) {
   if (rowCount < POOL_LP_POSITIONS_CAP) return null;
   return (
-    <p className="text-xs text-slate-500">
+    <p className="text-xs text-muted">
       Showing first {POOL_LP_POSITIONS_CAP.toLocaleString()} LP positions by net
       liquidity. Search and totals are limited to this loaded set.
     </p>

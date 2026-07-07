@@ -80,7 +80,7 @@ const STATUS_CLASSES: Record<BridgeStatusOverlay, string> = {
   ATTESTED: "bg-indigo-900/40 text-indigo-300",
   QUEUED_INBOUND: "bg-indigo-900/40 text-indigo-300",
   DELIVERED: "bg-emerald-900/40 text-emerald-300",
-  CANCELLED: "bg-slate-800 text-slate-500",
+  CANCELLED: "bg-slate-800 text-muted",
   FAILED: "bg-red-900/60 text-red-200",
   STUCK: "bg-red-900/40 text-red-300",
 };

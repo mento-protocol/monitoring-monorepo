@@ -65,7 +65,7 @@ export function OraclePriceValue({
   const nowSeconds = Math.floor(Date.now() / 1000);
   const fresh = isOracleFresh(pool, nowSeconds, network.chainId);
   const priceColor = fresh ? "text-white" : "text-red-400";
-  const subColor = fresh ? "text-slate-500" : "text-red-400";
+  const subColor = fresh ? "text-muted" : "text-red-400";
 
   const expirySeconds = getOracleStalenessThreshold(pool, network.chainId);
   const expiryMinutes =
@@ -86,11 +86,10 @@ export function OraclePriceValue({
           title={`1 ${base} = ${fullPrice} ${quote} · click to invert`}
           className={`font-mono ${priceColor} hover:text-indigo-300 transition-colors text-left cursor-pointer`}
         >
-          1 {base} <span className="text-slate-500">⇄</span> {displayPrice}{" "}
-          {quote}
+          1 {base} <span className="text-muted">⇄</span> {displayPrice} {quote}
         </button>
       ) : (
-        <span className="text-slate-500">—</span>
+        <span className="text-muted">—</span>
       )}
       {lastLabel && (
         <span className={`text-xs ${subColor}`}>

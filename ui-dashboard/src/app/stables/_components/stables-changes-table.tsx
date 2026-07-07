@@ -60,7 +60,7 @@ export function StablesChangesTable({
           onMinimumUsdValueChange={onMinimumUsdValueChange}
           onMinimumUsdValueReset={onMinimumUsdValueReset}
         />
-        <p className="text-sm text-slate-500">Loading supply changes…</p>
+        <p className="text-sm text-muted">Loading supply changes…</p>
       </Card>
     );
   }
@@ -94,7 +94,7 @@ export function StablesChangesTable({
           onMinimumUsdValueChange={onMinimumUsdValueChange}
           onMinimumUsdValueReset={onMinimumUsdValueReset}
         />
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-muted">
           No supply changes at or above {thresholdLabel} equivalent in{" "}
           {capped ? "the most recent fetched rows" : "the selected window"}.
         </p>
@@ -116,7 +116,7 @@ export function StablesChangesTable({
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs uppercase text-slate-500">
+            <tr className="text-left text-xs uppercase text-muted">
               <th className="py-2 pr-4">Time</th>
               <th className="py-2 pr-4">Token</th>
               <th className="py-2 pr-4">Source</th>
@@ -163,7 +163,7 @@ function ChangesHeader({
           onReset={onMinimumUsdValueReset}
         />
         <div className="text-left sm:text-right">
-          <p className="text-xs text-slate-500" role="status">
+          <p className="text-xs text-muted" role="status">
             Hiding changes below {thresholdLabel} equivalent.
           </p>
           {unpricedEventsCount > 0 ? (
@@ -238,13 +238,13 @@ function SupplyChangeThresholdInput({
     <div className="min-w-[11rem]">
       <label
         htmlFor="supply-change-min-usd"
-        className="mb-1 block text-xs text-slate-500"
+        className="mb-1 block text-xs text-muted"
       >
         Min value
       </label>
       <div className="flex items-center gap-1.5">
         <div className="flex h-8 items-center rounded-md border border-slate-700 bg-slate-950/60 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500">
-          <span className="pl-2 text-sm text-slate-500">$</span>
+          <span className="pl-2 text-sm text-muted">$</span>
           <input
             id="supply-change-min-usd"
             type="text"
@@ -312,7 +312,7 @@ function SupplyChangeRow({
       </td>
       <td className="py-3 pr-4 text-slate-300">
         {event.isProtocolOwnedCaller ? (
-          <span className="text-slate-500" title="Protocol-owned address">
+          <span className="text-muted" title="Protocol-owned address">
             {truncateAddress(event.caller)}
           </span>
         ) : (

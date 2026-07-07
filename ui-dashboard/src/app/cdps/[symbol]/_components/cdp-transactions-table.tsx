@@ -187,7 +187,7 @@ function PerMarketFilterBar({
         }
       />
       {addressFilterNotice != null && (
-        <p role="status" className="px-1 text-xs text-slate-500">
+        <p role="status" className="px-1 text-xs text-muted">
           {addressFilterNotice}
         </p>
       )}
@@ -262,7 +262,7 @@ function TransactionsBody({
             <Row>
               <td
                 colSpan={6}
-                className="px-2 sm:px-4 py-3 text-center text-xs text-slate-500"
+                className="px-2 sm:px-4 py-3 text-center text-xs text-muted"
               >
                 No transactions match the active filter.
               </td>

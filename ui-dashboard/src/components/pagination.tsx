@@ -24,11 +24,11 @@ export function Pagination({
     "px-2.5 py-1 text-xs font-medium rounded border transition-colors";
   const btnActive =
     "border-slate-600 text-slate-300 hover:border-indigo-500 hover:text-indigo-400";
-  const btnDisabled = "border-slate-800 text-slate-600 cursor-not-allowed";
+  const btnDisabled = "border-slate-800 text-muted cursor-not-allowed";
 
   return (
     <div className="flex items-center justify-between px-1 pt-2 pb-1">
-      <span className="text-xs text-slate-500">
+      <span className="text-xs text-muted">
         {total.toLocaleString()} total
         {showControls && (
           <>

@@ -131,7 +131,7 @@ export function ReserveChart({
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <div className="flex items-baseline gap-2 mb-3">
         <h3 className="text-sm font-medium text-slate-400">Reserve History</h3>
-        {subtitle && <span className="text-xs text-slate-600">{subtitle}</span>}
+        {subtitle && <span className="text-xs text-muted">{subtitle}</span>}
       </div>
       <Plot
         data={[trace0, trace1]}

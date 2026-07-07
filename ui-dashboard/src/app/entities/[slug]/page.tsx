@@ -29,7 +29,7 @@ function EntityHeader({
     <div>
       <Link
         href="/entities"
-        className="text-xs text-slate-500 hover:text-slate-300"
+        className="text-xs text-muted hover:text-slate-300"
       >
         &larr; All entities
       </Link>

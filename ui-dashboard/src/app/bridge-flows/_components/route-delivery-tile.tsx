@@ -52,7 +52,7 @@ export function RouteDeliveryTile({
           ))}
         </div>
       ) : routes.length === 0 ? (
-        <p className="text-sm text-slate-500">No delivered transfers yet</p>
+        <p className="text-sm text-muted">No delivered transfers yet</p>
       ) : (
         <>
           <div className="space-y-2">
@@ -68,11 +68,11 @@ export function RouteDeliveryTile({
                 <span className="font-mono text-sm font-semibold text-white">
                   {formatDurationShort(r.avgSec)}
                 </span>
-                <span className="text-xs text-slate-500">n={r.count}</span>
+                <span className="text-xs text-muted">n={r.count}</span>
               </div>
             ))}
           </div>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-muted">
             last {ROUTE_STATS_LIMIT} delivered
           </p>
         </>

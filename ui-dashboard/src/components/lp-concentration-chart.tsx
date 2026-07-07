@@ -205,7 +205,7 @@ export function LpConcentrationChart({
             </div>
 
             <div className="min-w-0 flex-1 xl:pt-2">
-              <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+              <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted">
                 Legend
               </div>
               <ul className="grid gap-2 sm:grid-cols-2">
@@ -223,7 +223,7 @@ export function LpConcentrationChart({
                         }}
                       />
                       <span className="truncate">{label}</span>
-                      <span className="ml-auto shrink-0 font-mono tabular-nums text-slate-500">
+                      <span className="ml-auto shrink-0 font-mono tabular-nums text-muted">
                         {(values[i]! * 100).toFixed(1)}%
                       </span>
                     </li>
@@ -236,7 +236,7 @@ export function LpConcentrationChart({
 
         <div className="w-full shrink-0 lg:w-64">
           <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3">
-            <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted">
               Pool at a glance
             </div>
 

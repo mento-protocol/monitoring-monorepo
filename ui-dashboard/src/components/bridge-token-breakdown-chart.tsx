@@ -122,7 +122,7 @@ export function BridgeTokenBreakdownChart({
         <div>
           <h3 className="text-sm text-slate-400">Volume by token</h3>
           {showCapNote && (
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-xs text-muted">
               Partial — snapshot cap hit
             </p>
           )}
@@ -154,9 +154,7 @@ export function BridgeTokenBreakdownChart({
         </div>
       </div>
       {hasError ? (
-        <p className="text-sm text-slate-500">
-          Unable to load token breakdown.
-        </p>
+        <p className="text-sm text-muted">Unable to load token breakdown.</p>
       ) : isLoading ? (
         <div
           className="animate-pulse rounded bg-slate-800/30"
@@ -164,7 +162,7 @@ export function BridgeTokenBreakdownChart({
         />
       ) : !hasData ? (
         <div
-          className="flex items-center justify-center text-sm text-slate-500"
+          className="flex items-center justify-center text-sm text-muted"
           style={{ height: ROW_CHART_HEIGHT_PX }}
         >
           No priced volume in the selected window.
@@ -190,7 +188,7 @@ export function BridgeTokenBreakdownChart({
                   style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
                 />
                 <span className="font-mono">{s.symbol}</span>
-                <span className="ml-auto font-mono text-slate-500">
+                <span className="ml-auto font-mono text-muted">
                   {formatUSD(s.usd)}
                 </span>
               </li>

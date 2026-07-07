@@ -53,7 +53,7 @@ export function CounterpartyChainTables({ byChain }: Props) {
         const extra = all.length - visible.length;
         return (
           <div key={chain}>
-            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">
               {chain}
             </p>
             <Table aria-label={`Counterparties on ${chain}`}>
@@ -77,7 +77,7 @@ export function CounterpartyChainTables({ byChain }: Props) {
                         >
                           {cpName(cp)}
                         </Link>
-                        <span className="font-mono text-[10px] text-slate-500">
+                        <span className="font-mono text-[10px] text-muted">
                           {cp.address.address.slice(0, 6)}&hellip;
                           {cp.address.address.slice(-4)}
                         </span>
@@ -110,7 +110,7 @@ export function CounterpartyChainTables({ byChain }: Props) {
               </tbody>
             </Table>
             {extra > 0 && (
-              <p className="mt-1 text-xs text-slate-500">+{extra} more</p>
+              <p className="mt-1 text-xs text-muted">+{extra} more</p>
             )}
           </div>
         );

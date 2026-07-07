@@ -102,7 +102,7 @@ function CardActivitySubtitle({
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-xs text-muted">{label}</p>
       <p className="mt-1 text-sm font-semibold text-white">{value}</p>
     </div>
   );

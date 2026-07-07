@@ -99,7 +99,7 @@ export function usePoolChartViewModel(args: {
         color: b.color,
         series: b.series,
         legendIcon: network ? (
-          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted">
             {network.label}
           </span>
         ) : null,
@@ -131,7 +131,7 @@ export function usePoolChartViewModel(args: {
         poolId: p.poolId,
         name: poolDisplayName(p.poolId, poolMeta),
         chainBadge: network ? (
-          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted">
             {network.label}
           </span>
         ) : null,

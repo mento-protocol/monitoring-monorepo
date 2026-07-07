@@ -135,7 +135,7 @@ function OwnerTroveCell({
         rel="noopener noreferrer"
         title={trove.troveId}
         aria-label={`Manage trove ${trove.troveId} in the Mento app`}
-        className="font-mono text-[10px] text-slate-500 hover:text-slate-300 hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="font-mono text-[10px] text-muted hover:text-slate-300 hover:underline focus:outline-none focus:ring-1 focus:ring-indigo-500"
       >
         {shortenHex(trove.troveId)}
       </a>
@@ -154,11 +154,11 @@ function shortenHex(value: string): string {
 }
 
 function RankValue({ row }: { row: TroveDisplayRow }) {
-  if (row.rank == null) return <span className="text-slate-500">—</span>;
+  if (row.rank == null) return <span className="text-muted">—</span>;
   return (
     <span className="inline-flex flex-col items-end leading-tight">
       <span>#{row.rank.toLocaleString()}</span>
-      {row.tied && <span className="text-[10px] text-slate-500">tie</span>}
+      {row.tied && <span className="text-[10px] text-muted">tie</span>}
     </span>
   );
 }
@@ -168,7 +168,7 @@ function InterestValue({ row }: { row: TroveDisplayRow }) {
     <span className="inline-flex flex-col items-end leading-tight">
       <span>{formatInterestRate(row.effectiveRate)}</span>
       {row.rateSource === "batch" && (
-        <span className="text-[10px] text-slate-500">Batch</span>
+        <span className="text-[10px] text-muted">Batch</span>
       )}
       {row.rateSource == null && row.trove.interestBatchId != null && (
         <span className="text-[10px] text-amber-400">Batch missing</span>
@@ -189,7 +189,7 @@ function EventTimeValue({
   prefix: string;
 }) {
   if (!timestamp || timestamp === "0") {
-    return <span className="text-slate-500">—</span>;
+    return <span className="text-muted">—</span>;
   }
 
   const label = relativeTime(timestamp);
@@ -239,12 +239,12 @@ function RedeemedValue({ trove, symbol }: { trove: CdpTrove; symbol: string }) {
     !isPositiveWei(trove.redeemedColl) &&
     trove.redemptionCount === 0
   ) {
-    return <span className="text-slate-500">—</span>;
+    return <span className="text-muted">—</span>;
   }
   return (
     <span className="inline-flex flex-col items-end leading-tight">
       <span>{formatTokenAmount(trove.redeemedDebt, symbol)}</span>
-      <span className="text-[10px] text-slate-500">
+      <span className="text-[10px] text-muted">
         {trove.redemptionCount.toLocaleString()}{" "}
         {trove.redemptionCount === 1 ? "event" : "events"}
       </span>
@@ -259,7 +259,7 @@ function OutcomeAmount({
   value: string | null | undefined;
   symbol: string;
 }) {
-  if (!isPositiveWei(value)) return <span className="text-slate-500">—</span>;
+  if (!isPositiveWei(value)) return <span className="text-muted">—</span>;
   return <span>{formatTokenAmount(value, symbol)}</span>;
 }
 
@@ -274,13 +274,13 @@ function LiquidatedValue({
     !isPositiveWei(trove.liquidatedDebt) &&
     !isPositiveWei(trove.liquidatedColl)
   ) {
-    return <span className="text-slate-500">—</span>;
+    return <span className="text-muted">—</span>;
   }
   return (
     <span className="inline-flex flex-col items-end leading-tight">
       <span>{formatTokenAmount(trove.liquidatedDebt, symbol)}</span>
       {isPositiveWei(trove.liquidatedColl) && (
-        <span className="text-[10px] text-slate-500">
+        <span className="text-[10px] text-muted">
           {formatTokenAmount(trove.liquidatedColl, "USDm")}
         </span>
       )}
@@ -381,7 +381,7 @@ function formatBpsPercent(bps: number): string {
 }
 
 function icrTextClass(icrBps: number, mcrBps: number): string {
-  if (icrBps < 0 || mcrBps <= 0) return "text-slate-500";
+  if (icrBps < 0 || mcrBps <= 0) return "text-muted";
   if (icrBps < mcrBps) return "text-rose-300";
   if (icrBps < Math.ceil(mcrBps * 1.2)) return "text-amber-300";
   return "text-emerald-300";

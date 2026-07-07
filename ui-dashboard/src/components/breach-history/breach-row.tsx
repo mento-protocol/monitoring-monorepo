@@ -92,10 +92,10 @@ export function BreachRow({
         className={`py-2 pr-4 whitespace-nowrap ${isOpen ? "text-amber-400" : ""}`}
       >
         {formatDurationShort(duration)}
-        {isOpen && <span className="ml-1 text-xs text-slate-500">ongoing</span>}
+        {isOpen && <span className="ml-1 text-xs text-muted">ongoing</span>}
       </td>
       <td
-        className={`py-2 pr-4 whitespace-nowrap ${critDuration > 0 ? "text-red-400" : "text-slate-500"}`}
+        className={`py-2 pr-4 whitespace-nowrap ${critDuration > 0 ? "text-red-400" : "text-muted"}`}
       >
         {critDuration > 0 ? formatDurationShort(critDuration) : "—"}
       </td>
@@ -110,7 +110,7 @@ export function BreachRow({
       </td>
       <td className="py-2 pr-4 whitespace-nowrap">
         {isOpen ? (
-          <span className="text-slate-500">—</span>
+          <span className="text-muted">—</span>
         ) : breach.endedByTxHash ? (
           <a
             href={explorerTxUrl(network, breach.endedByTxHash)}

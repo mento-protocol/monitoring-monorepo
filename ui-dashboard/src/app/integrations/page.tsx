@@ -111,7 +111,7 @@ function IntegrationsContent({
               {snapshot.pairSource.note}
             </p>
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted">
             Taker {shortAddress(snapshot.takerAddress)}
           </p>
         </div>

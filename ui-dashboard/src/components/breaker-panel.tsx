@@ -249,9 +249,7 @@ function BreakerIdentityMetric({
         <span className={tripped ? "text-red-400" : "text-emerald-400"}>
           {kind === "MEDIAN_DELTA" ? "MedianDelta" : "ValueDelta"}
         </span>
-        <span
-          className={`text-xs ${tripped ? "text-red-300" : "text-slate-500"}`}
-        >
+        <span className={`text-xs ${tripped ? "text-red-300" : "text-muted"}`}>
           trading mode {cfg.tradingMode}
           {tripped && " · halted"}
         </span>
@@ -276,12 +274,12 @@ function ReferenceMetric({
       <dt className="text-slate-400">{presentation.referenceLabel}</dt>
       <dd className="flex flex-col gap-0.5">
         <span className={`font-mono ${presentation.breachedValueClass}`}>
-          <span className="text-slate-500">ref </span>
+          <span className="text-muted">ref </span>
           {presentation.formattedReference ?? "—"}
-          <span className="text-slate-500"> / actual </span>
+          <span className="text-muted"> / actual </span>
           {presentation.formattedActual ?? "—"}
         </span>
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-muted">
           {presentation.referenceCaption}
         </span>
       </dd>
@@ -307,7 +305,7 @@ function ThresholdMetric({
           {presentation.formattedThreshold} / {presentation.formattedCooldown}
         </span>
         <span
-          className={`text-xs ${cooldownActive ? "text-amber-300" : "text-slate-500"}`}
+          className={`text-xs ${cooldownActive ? "text-amber-300" : "text-muted"}`}
         >
           {cooldownActive
             ? `${formatDurationShort(cooldownRemainingSec)} left`
@@ -346,9 +344,7 @@ function LiveDeltaMetric({
             />
           </div>
         </div>
-        <span
-          className={`text-xs ${tripped ? "text-red-300" : "text-slate-500"}`}
-        >
+        <span className={`text-xs ${tripped ? "text-red-300" : "text-muted"}`}>
           {liveDelta != null
             ? `${presentation.formattedLiveDelta} of ${presentation.formattedThreshold}`
             : "—"}
@@ -395,10 +391,10 @@ function LastTripMetric({
             {relativeTime(lastTripTs)}
           </a>
         ) : (
-          <span className="text-slate-500">never</span>
+          <span className="text-muted">never</span>
         )}
         <span
-          className={`text-xs ${tripsToday > 0 ? "text-amber-300" : "text-slate-500"}`}
+          className={`text-xs ${tripsToday > 0 ? "text-amber-300" : "text-muted"}`}
         >
           {cfg.tripCountLifetime} lifetime
           {tripsToday > 0 && ` · ${tripsToday} today`}
@@ -455,10 +451,10 @@ function ResetPathBanner({
         </span>
       </span>
       <span className="inline-flex items-center gap-1">
-        <span className="text-slate-500">·</span>
+        <span className="text-muted">·</span>
         <span className="text-slate-300">Next oracle report</span>
       </span>
-      <span className="text-slate-500 ml-auto">
+      <span className="text-muted ml-auto">
         Reset is automatic on next report once both are ✓
       </span>
     </div>

@@ -53,7 +53,7 @@ const CDP_AVERAGE_APR_INFO = (
       smaller troves.
     </span>
     <span className="block rounded border border-slate-700/70 bg-slate-950/70 px-2 py-1">
-      <span className="font-sans text-slate-500">Formula: </span>
+      <span className="font-sans text-muted">Formula: </span>
       <span className="font-mono text-slate-100">Σ(debt × APR) / Σ(debt)</span>
     </span>
   </span>

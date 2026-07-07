@@ -22,7 +22,7 @@ export default function AddressDetailError({
         }
       />
       {error.digest && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted">
           Error ID: <code className="font-mono">{error.digest}</code>
         </p>
       )}

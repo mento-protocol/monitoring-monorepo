@@ -39,7 +39,7 @@ export function BridgeTopBridgersChart({
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
       <div className="mb-4 flex items-baseline justify-between">
         <h3 className="text-sm text-slate-400">Top bridgers</h3>
-        <span className="text-[10px] uppercase tracking-wider text-slate-500">
+        <span className="text-[10px] uppercase tracking-wider text-muted">
           all-time by transfer count
         </span>
       </div>
@@ -68,7 +68,7 @@ export function BridgeTopBridgersChart({
                   />
                   <div className="relative flex items-center justify-between gap-3 px-3 py-2 text-sm">
                     <span className="flex min-w-0 items-center gap-3">
-                      <span className="w-5 text-right font-mono text-xs text-slate-500">
+                      <span className="w-5 text-right font-mono text-xs text-muted">
                         {i + 1}
                       </span>
                       {chainId ? (
@@ -81,7 +81,7 @@ export function BridgeTopBridgersChart({
                     </span>
                     <span className="shrink-0 font-mono text-xs text-slate-300">
                       {b.totalSentCount.toLocaleString()}{" "}
-                      <span className="text-slate-500">transfers</span>
+                      <span className="text-muted">transfers</span>
                     </span>
                   </div>
                 </li>

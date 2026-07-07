@@ -173,7 +173,7 @@ function DeviationBar({
           />
         </div>
       </div>
-      <span className="text-xs text-slate-500">
+      <span className="text-xs text-muted">
         {diffPct}% of {thresholdPct}% threshold
       </span>
     </div>

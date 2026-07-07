@@ -18,7 +18,7 @@ export function ReservesCell({
   if (composition.kind !== "available") {
     return (
       <span
-        className={`text-xs ${composition.kind === "empty" ? "text-slate-500" : "text-slate-600"}`}
+        className={`text-xs ${composition.kind === "empty" ? "text-muted" : "text-muted"}`}
         title={unavailableMessage(composition.kind)}
       >
         {composition.kind === "empty" ? "Empty" : "—"}

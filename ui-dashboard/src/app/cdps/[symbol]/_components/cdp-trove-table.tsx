@@ -270,7 +270,7 @@ function TroveTableHeader({
           value={search}
           onChange={(event) => onSearch(event.target.value)}
           placeholder="Search owner or trove ID"
-          className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none sm:w-64"
+          className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 placeholder:text-muted focus:border-indigo-500 focus:outline-none sm:w-64"
         />
       </div>
     </div>
@@ -331,7 +331,7 @@ function TroveTableResults({
             <Row>
               <td
                 colSpan={8}
-                className="px-2 py-3 text-center text-xs text-slate-500 sm:px-4"
+                className="px-2 py-3 text-center text-xs text-muted sm:px-4"
               >
                 {emptyMessage}
               </td>

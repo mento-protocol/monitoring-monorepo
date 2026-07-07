@@ -33,7 +33,7 @@ import type { BridgeProvider, BridgeTransfer } from "@/lib/types";
 // ---------------------------------------------------------------------------
 
 function Dash() {
-  return <span className="text-slate-600">{"—"}</span>;
+  return <span className="text-muted">{"—"}</span>;
 }
 
 /** Wraps children in a Wormholescan tx anchor when href is set. Keeps the
@@ -75,7 +75,7 @@ export function RouteCell({
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-slate-300">
       {src ? <ChainIcon network={src} size={14} /> : <Dash />}
-      <span className="text-slate-500">{"→"}</span>
+      <span className="text-muted">{"→"}</span>
       {dst ? <ChainIcon network={dst} size={14} /> : <Dash />}
     </span>
   );
@@ -130,7 +130,7 @@ export function DurationCell({ transfer }: { transfer: BridgeTransfer }) {
       derived !== "FAILED";
     return (
       <td
-        className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs text-slate-500 font-mono text-right whitespace-nowrap"
+        className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs text-muted font-mono text-right whitespace-nowrap"
         title={
           pending
             ? "Not yet delivered"
@@ -183,7 +183,7 @@ export function TokenCell({
       className="font-mono text-slate-200 hover:text-indigo-300 transition-colors"
     >
       {symbol}
-      <span className="ml-1 text-slate-600" aria-hidden="true">
+      <span className="ml-1 text-muted" aria-hidden="true">
         {"↗"}
       </span>
     </a>
@@ -237,7 +237,7 @@ function TxPill({
       className="inline-flex items-center gap-0.5 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors"
     >
       {label}
-      <span aria-hidden="true" className="text-slate-600">
+      <span aria-hidden="true" className="text-muted">
         {"↗"}
       </span>
     </a>

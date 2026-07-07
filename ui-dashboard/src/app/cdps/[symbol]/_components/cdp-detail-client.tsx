@@ -391,7 +391,7 @@ function DetailHeader({
       </div>
       <div className="flex flex-col items-end gap-1">
         <CdpHealthBadge health={health} />
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-muted">
           Last event {relativeTime(instance?.lastEventTimestamp ?? "0")}
         </span>
       </div>

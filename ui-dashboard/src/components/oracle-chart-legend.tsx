@@ -39,7 +39,7 @@ export function OracleChartLegend({
         ? "Loading current breaker config…"
         : "No active breaker for this rate feed — band check unavailable";
     return (
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-muted">
         {hasPersistedBands && (
           <>
             <span className="flex items-center gap-1">
@@ -60,7 +60,7 @@ export function OracleChartLegend({
     );
   }
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
+    <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-muted">
       <span className="flex items-center gap-1">
         <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
         {/* Marker verdicts use each snapshot's at-the-time band when

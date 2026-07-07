@@ -262,10 +262,10 @@ function RevenueChartHeader({
               </span>
             ) : null}
             {change !== null ? (
-              <span className="text-slate-500">week-over-week</span>
+              <span className="text-muted">week-over-week</span>
             ) : null}
             {isPartial ? (
-              <span className="text-xs text-slate-500">partial data</span>
+              <span className="text-xs text-muted">partial data</span>
             ) : null}
           </>
         )}
@@ -290,7 +290,7 @@ function RevenueChartBody({
       {isLoading ? (
         <PlotSkeleton />
       ) : showEmptyState ? (
-        <div className="flex h-[220px] items-center justify-center text-sm text-slate-500">
+        <div className="flex h-[220px] items-center justify-center text-sm text-muted">
           {emptyMessage}
         </div>
       ) : (
@@ -350,9 +350,7 @@ export function TotalRevenueChart({
         <RangeSelector range={range} onRangeChange={setRange} />
       </div>
       {partialReasons.length > 0 ? (
-        <p className="mt-3 text-xs text-slate-500">
-          {partialReasons.join(" ")}
-        </p>
+        <p className="mt-3 text-xs text-muted">{partialReasons.join(" ")}</p>
       ) : null}
       <RevenueChartBody
         isLoading={isLoading}

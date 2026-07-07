@@ -67,7 +67,7 @@ export function AggregatorBreakdownSection({
         >
           {venueLabel} volume by aggregator / entry-point ({rangeLabel})
         </TableSectionTitle>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-muted">
           Canonical name from <code>aggregators.json</code>. Large{" "}
           <span className="rounded bg-amber-900/40 px-1 py-px text-amber-200">
             unknown

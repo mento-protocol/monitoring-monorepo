@@ -35,7 +35,7 @@ export function BreachTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-xs text-slate-500">
+          <tr className="text-left text-xs text-muted">
             <SortableTh
               sortKey="startedAt"
               activeSortKey={sortKey}

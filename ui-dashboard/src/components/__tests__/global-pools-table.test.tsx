@@ -463,7 +463,7 @@ describe("GlobalPoolsTable — TVL cell", () => {
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
     expect(html).toContain("Week-over-week TVL change: </span>—");
-    expect(html).toContain("text-slate-600");
+    expect(html).toContain("text-muted");
   });
 
   it("renders em-dash when the pool has no WoW entry (no comparable snapshot)", () => {
@@ -474,7 +474,7 @@ describe("GlobalPoolsTable — TVL cell", () => {
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
     expect(html).toContain("Week-over-week TVL change: </span>—");
-    expect(html).toContain("text-slate-600");
+    expect(html).toContain("text-muted");
   });
 
   it("renders N/A when the WoW value is explicitly null (snapshot query failed)", () => {

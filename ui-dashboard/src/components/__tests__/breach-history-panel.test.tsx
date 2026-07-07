@@ -1176,7 +1176,7 @@ describe("BreachRow critical-ratio scoring", () => {
     // Past-grace cell shows em-dash
     expect(html).toContain("—");
     // Grey class for non-critical
-    expect(html).toContain("text-slate-500");
+    expect(html).toContain("text-muted");
   });
 });
 

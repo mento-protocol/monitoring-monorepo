@@ -74,7 +74,7 @@ export function TopPoolsList({
               key={`${e.color ?? "none"}-${e.name}-${e.poolId}`}
               className="flex items-center gap-2 text-[13px] text-slate-200"
             >
-              <span className="w-5 flex-shrink-0 text-right font-mono text-[11px] tabular-nums text-slate-500">
+              <span className="w-5 flex-shrink-0 text-right font-mono text-[11px] tabular-nums text-muted">
                 {i + 1}
               </span>
               <span
@@ -91,7 +91,7 @@ export function TopPoolsList({
               <span className="ml-auto font-mono tabular-nums">
                 {formatUSD(e.totalUsd)}
               </span>
-              <span className="w-10 flex-shrink-0 text-right font-mono text-[11px] tabular-nums text-slate-500">
+              <span className="w-10 flex-shrink-0 text-right font-mono text-[11px] tabular-nums text-muted">
                 {(e.share * 100).toFixed(1)}%
               </span>
             </li>

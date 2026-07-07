@@ -323,7 +323,7 @@ export function AddressReportEditor(props: Props) {
         >
           Retry
         </button>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted">
           The Forensic Report tab is disabled while the read fails — close and
           reopen the modal once the issue is resolved.
         </p>
@@ -385,7 +385,7 @@ export function AddressReportEditor(props: Props) {
               htmlFor="ar-title"
               className="block text-xs font-medium text-slate-400 mb-1"
             >
-              Title <span className="text-slate-500">(optional)</span>
+              Title <span className="text-muted">(optional)</span>
             </label>
             <input
               id="ar-title"
@@ -405,12 +405,12 @@ export function AddressReportEditor(props: Props) {
             {body.trim() ? (
               <MarkdownRenderer>{body}</MarkdownRenderer>
             ) : (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-muted">
                 Empty — switch to Edit to write the report.
               </p>
             )}
             {title.trim() && (
-              <p className="mt-3 border-t border-slate-800 pt-2 text-xs text-slate-500">
+              <p className="mt-3 border-t border-slate-800 pt-2 text-xs text-muted">
                 Title: <span className="text-slate-400">{title}</span>
               </p>
             )}
@@ -422,7 +422,7 @@ export function AddressReportEditor(props: Props) {
               className="block text-xs font-medium text-slate-400 mb-1"
             >
               Markdown body{" "}
-              <span className={overLimit ? "text-red-400" : "text-slate-500"}>
+              <span className={overLimit ? "text-red-400" : "text-muted"}>
                 ({bodyLen.toLocaleString()} / {MAX_BODY_LENGTH.toLocaleString()}
                 )
               </span>

@@ -126,14 +126,14 @@ export function RebalanceStatusValue({
         href={explorerTxUrl(network, lastRebalanceTxHash)}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-xs text-slate-500 hover:text-indigo-400 transition-colors"
+        className="text-xs text-muted hover:text-indigo-400 transition-colors"
         title={formatTimestamp(pool.lastRebalancedAt!)}
       >
         {lastRebalanceLabel}
       </a>
     ) : (
       <span
-        className="text-xs text-slate-500"
+        className="text-xs text-muted"
         title={formatTimestamp(pool.lastRebalancedAt!)}
       >
         {lastRebalanceLabel}
@@ -231,7 +231,7 @@ function getPassiveStatus(
     return { text: "Trading halted", color: "text-orange-400" };
   }
   if (health === "N/A") {
-    return { text: "N/A", color: "text-slate-500" };
+    return { text: "N/A", color: "text-muted" };
   }
 
   const diff = Number(pool.priceDifference ?? "0");

@@ -65,7 +65,7 @@ export function CdpTxAmountCell({
           <span className="text-slate-400">
             {formatTokenAmount(slice.before, symbol)}
           </span>
-          <span className="mx-1 text-slate-500">→</span>
+          <span className="mx-1 text-muted">→</span>
           <span>{formatTokenAmount(slice.after, symbol)}</span>
         </span>
         {deltaBig !== ZERO && (

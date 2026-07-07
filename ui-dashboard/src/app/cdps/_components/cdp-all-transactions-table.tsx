@@ -248,7 +248,7 @@ function OverviewFilterBar({
         }
       />
       {addressFilterNotice != null && (
-        <p role="status" className="px-1 text-xs text-slate-500">
+        <p role="status" className="px-1 text-xs text-muted">
           {addressFilterNotice}
         </p>
       )}
@@ -322,7 +322,7 @@ function OverviewBody({
             <Row>
               <td
                 colSpan={7}
-                className="px-2 sm:px-4 py-3 text-center text-xs text-slate-500"
+                className="px-2 sm:px-4 py-3 text-center text-xs text-muted"
               >
                 No transactions match the active filters.
               </td>
@@ -372,7 +372,7 @@ function OverviewFootnotes({
   return (
     <>
       {visibleCount > 0 && (
-        <p className="px-1 pt-2 text-xs text-slate-500">
+        <p className="px-1 pt-2 text-xs text-muted">
           {filtersActive
             ? `Showing ${visibleCount.toLocaleString()} of ${filteredCount.toLocaleString()} matching transactions.`
             : `Showing the most recent ${visibleCount.toLocaleString()} transactions across all CDP markets.`}
@@ -422,7 +422,7 @@ function OverviewRow({
             {market.symbol}
           </Link>
         ) : (
-          <span className="text-slate-500">{symbol}</span>
+          <span className="text-muted">{symbol}</span>
         )}
       </Td>
       <CdpTxAmountCell

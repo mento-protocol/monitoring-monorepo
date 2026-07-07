@@ -117,12 +117,12 @@ export function AddressTableRow({
               className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors pointer-events-auto"
             >
               {truncateAddress(address)}
-              <span className="ml-1 text-slate-600" aria-hidden="true">
+              <span className="ml-1 text-muted" aria-hidden="true">
                 ↗
               </span>
             </a>
           ) : (
-            <span title={address} className="font-mono text-xs text-slate-500">
+            <span title={address} className="font-mono text-xs text-muted">
               {truncateAddress(address)}
             </span>
           )}
@@ -143,18 +143,18 @@ export function AddressTableRow({
           title={name}
           className={`block truncate text-sm ${isCustom ? "font-medium text-indigo-400" : "text-slate-300"}`}
         >
-          {name || <span className="text-slate-600">—</span>}
+          {name || <span className="text-muted">—</span>}
         </span>
       </td>
       <td className="relative z-10 px-4 py-3 pointer-events-none">
         {displayTags.length > 0 ? (
           <TagPills tags={displayTags} />
         ) : (
-          <span className="text-xs text-slate-600">—</span>
+          <span className="text-xs text-muted">—</span>
         )}
       </td>
       <td className="relative z-10 px-4 py-3 text-xs text-slate-400 max-w-[180px] truncate pointer-events-none">
-        {notes ?? <span className="text-slate-600">—</span>}
+        {notes ?? <span className="text-muted">—</span>}
       </td>
       <td className="relative z-10 px-4 py-3 pointer-events-none">
         {isReportOnly ? (
@@ -197,7 +197,7 @@ export function AddressTableRow({
             {formatCreatedAt(createdAt)}
           </time>
         ) : (
-          <span className="text-slate-600">—</span>
+          <span className="text-muted">—</span>
         )}
       </td>
       <td className="relative z-10 px-4 py-3 text-xs whitespace-nowrap pointer-events-none">
@@ -217,7 +217,7 @@ export function AddressTableRow({
               {formatCreatedAt(updatedAt)}
             </time>
           ) : createdAt && updatedAt === createdAt ? (
-            <span className="text-slate-600">—</span>
+            <span className="text-muted">—</span>
           ) : (
             <time
               dateTime={updatedAt}
@@ -228,7 +228,7 @@ export function AddressTableRow({
             </time>
           )
         ) : (
-          <span className="text-slate-600">—</span>
+          <span className="text-muted">—</span>
         )}
       </td>
       <td className="relative z-10 px-4 py-3">
@@ -245,7 +245,7 @@ export function AddressTableRow({
             type="button"
             onClick={onEdit}
             title="Add a label to this report-only address"
-            className="text-xs text-slate-600 hover:text-indigo-300 transition-colors"
+            className="text-xs text-muted hover:text-indigo-300 transition-colors"
           >
             + Label
           </button>
@@ -254,7 +254,7 @@ export function AddressTableRow({
             type="button"
             onClick={onEdit}
             title="Add tags or notes to this contract"
-            className="text-xs text-slate-600 hover:text-indigo-300 transition-colors"
+            className="text-xs text-muted hover:text-indigo-300 transition-colors"
           >
             + Tag
           </button>

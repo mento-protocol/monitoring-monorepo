@@ -153,7 +153,7 @@ export function LiquidityChart({
         <h3 className="text-sm font-medium text-slate-400">
           Pool Reserves Over Time
         </h3>
-        {subtitle && <span className="text-xs text-slate-600">{subtitle}</span>}
+        {subtitle && <span className="text-xs text-muted">{subtitle}</span>}
       </div>
       <Plot
         data={[trace0, trace1]}

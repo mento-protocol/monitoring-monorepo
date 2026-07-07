@@ -342,7 +342,7 @@ function DeprecatedExchangeNote({
         The VirtualPool wrapper remains deployed but routes no traffic. Trading
         data shown below is historical only.
       </p>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-muted">
         Exchange id:{" "}
         <span className="font-mono" title={config.exchangeId}>
           {truncateAddress(config.exchangeId)}

@@ -270,19 +270,19 @@ function TraderRow({
             primaryPoolLabel ? (
               <span className="text-slate-300">{primaryPoolLabel}</span>
             ) : breakdown.isLoading ? (
-              <span className="text-slate-500">…</span>
+              <span className="text-muted">…</span>
             ) : (
-              <span className="text-slate-500">—</span>
+              <span className="text-muted">—</span>
             )
           ) : (
-            <span className="text-slate-500">—</span>
+            <span className="text-muted">—</span>
           )}
         </Td>
         <Td>
           {flow ? (
             <FlowBadge flow={flow} />
           ) : (
-            <span className="text-slate-500">—</span>
+            <span className="text-muted">—</span>
           )}
         </Td>
         <Td align="right" mono>
@@ -301,7 +301,7 @@ function TraderRow({
                 : `Expand pool breakdown for ${trader.trader}`
             }
             onClick={() => setExpanded((v) => !v)}
-            className="rounded p-1 text-slate-500 hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
+            className="rounded p-1 text-muted hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
           >
             <svg
               width="14"
@@ -363,7 +363,7 @@ function ExpandedBreakdown({
   if (isLoading) return <Skeleton rows={2} />;
   if (rows.length === 0) {
     return (
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted">
         No per-pool detail available for this window.
       </p>
     );
@@ -373,7 +373,7 @@ function ExpandedBreakdown({
     <div className="rounded-md border border-slate-800/70 bg-slate-950/40">
       <table className="w-full text-xs">
         <thead>
-          <tr className="border-b border-slate-800/60 text-slate-500">
+          <tr className="border-b border-slate-800/60 text-muted">
             <th scope="col" className="px-3 py-2 text-left font-medium">
               Pool
             </th>
@@ -420,7 +420,7 @@ function ExpandedBreakdown({
               >
                 <td className="px-3 py-1.5 text-slate-300">
                   {label ?? (
-                    <span className="font-mono text-slate-500">{p.poolId}</span>
+                    <span className="font-mono text-muted">{p.poolId}</span>
                   )}
                 </td>
                 <td className="px-3 py-1.5 text-right font-mono text-slate-300">
@@ -448,7 +448,7 @@ function ExpandedBreakdown({
         </tbody>
       </table>
       {rows.length > 10 && (
-        <p className="px-3 py-2 text-[11px] text-slate-500">
+        <p className="px-3 py-2 text-[11px] text-muted">
           Showing top 10 of {rows.length} pools by volume.
         </p>
       )}

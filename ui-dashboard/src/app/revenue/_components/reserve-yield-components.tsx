@@ -100,7 +100,7 @@ function ReserveYieldHoldingRow({ holding }: { holding: ReserveYieldHolding }) {
       </Td>
       <Td className="min-w-48 sm:!px-2" title={holding.yieldModel}>
         <span className="block text-slate-200">{holding.sourceLabel}</span>
-        <span className="block text-[10px] uppercase tracking-wide text-slate-500">
+        <span className="block text-[10px] uppercase tracking-wide text-muted">
           {sourceTypeLabel(holding)}
         </span>
       </Td>

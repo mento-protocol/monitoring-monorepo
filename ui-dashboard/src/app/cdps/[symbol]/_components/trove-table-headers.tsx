@@ -39,7 +39,7 @@ export function OpenTroveHeader({
             content={RANK_EXPLAINER}
             align="left"
           >
-            <span className="text-slate-500" aria-hidden="true">
+            <span className="text-muted" aria-hidden="true">
               ⓘ
             </span>
           </Tooltip>
@@ -79,7 +79,7 @@ export function OpenTroveHeader({
             content={ICR_INDEXED_EXPLAINER}
             align="right"
           >
-            <span className="text-slate-500" aria-hidden="true">
+            <span className="text-muted" aria-hidden="true">
               ⓘ
             </span>
           </Tooltip>

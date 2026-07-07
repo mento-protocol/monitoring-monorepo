@@ -68,7 +68,7 @@ export function OlsStatusPanel({
 
       <dl className="text-sm space-y-4">
         <div>
-          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+          <h4 className="text-xs font-medium text-muted uppercase tracking-wider mb-2">
             Configuration
           </h4>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -96,7 +96,7 @@ export function OlsStatusPanel({
         </div>
 
         <div className="border-t border-slate-800 pt-4">
-          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+          <h4 className="text-xs font-medium text-muted uppercase tracking-wider mb-2">
             Activity
           </h4>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -131,7 +131,7 @@ export function OlsStatusPanel({
               <dt className="text-slate-400 mb-1">Cooldown Status</dt>
               <dd className="text-white">
                 {lastRebalance === 0 ? (
-                  <span className="text-slate-500">Never rebalanced</span>
+                  <span className="text-muted">Never rebalanced</span>
                 ) : cooldownReady ? (
                   <span className="text-emerald-400">Ready to rebalance</span>
                 ) : (
@@ -153,7 +153,7 @@ export function OlsStatusPanel({
         </div>
 
         <div className="border-t border-slate-800 pt-4">
-          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+          <h4 className="text-xs font-medium text-muted uppercase tracking-wider mb-2">
             Incentive Structure
           </h4>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

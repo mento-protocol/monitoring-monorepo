@@ -140,7 +140,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
           strategyAddress ? (
             <AddressLink address={strategyAddress} readOnly />
           ) : (
-            <span className="text-slate-500">—</span>
+            <span className="text-muted">—</span>
           )
         }
       />
