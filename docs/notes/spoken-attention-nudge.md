@@ -20,12 +20,12 @@ repo-standard key file path so behavior does not depend on shell startup files
 or stripped environment variables:
 
 ```bash
-sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "hey, i need your approval to deploy the Alloy collector"
+sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval to deploy the Alloy collector"
 ```
 
 `sag` needs network access to ElevenLabs, a readable ElevenLabs API key, and the
 local audio device. Store the key for agent nudges in
-`$HOME/.config/sag/elevenlabs-api-key` with mode `0600`, then invoke `sag` with
+`$HOME/.config/elevenlabs_api_key` with mode `0600`, then invoke `sag` with
 `--api-key-file`. This is required for Codex because it does not reliably
 inherit shell startup files, and its environment policy strips secret-like
 variables such as `ELEVENLABS_API_KEY`, even when they exist in `.zshrc`. Claude
@@ -38,8 +38,8 @@ developer machine. Use this fallback order:
 ```bash
 msg="hey, i need your feedback on the deploy"
 sent=0
-if command -v sag >/dev/null 2>&1 && [ -r "$HOME/.config/sag/elevenlabs-api-key" ]; then
-  sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "$msg" && sent=1
+if command -v sag >/dev/null 2>&1 && [ -r "$HOME/.config/elevenlabs_api_key" ]; then
+  sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "$msg" && sent=1
 fi
 if [ "$sent" -eq 0 ] && command -v say >/dev/null 2>&1; then
   say "$msg" && sent=1
