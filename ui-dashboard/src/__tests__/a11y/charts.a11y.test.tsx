@@ -49,7 +49,7 @@ function render(element: ReactElement) {
 }
 
 describe("Plotly chart accessibility wrapper", () => {
-  it("exposes a named image role with a referenced text alternative", async () => {
+  it("exposes a named group with a referenced text alternative", async () => {
     render(
       <AccessiblePlot
         ariaLabel="Daily volume chart for USDm"
@@ -60,7 +60,7 @@ describe("Plotly chart accessibility wrapper", () => {
       />,
     );
 
-    const chart = container.querySelector('[role="img"]');
+    const chart = container.querySelector('[role="group"]');
     expect(chart?.getAttribute("aria-label")).toBe(
       "Daily volume chart for USDm",
     );
@@ -72,6 +72,7 @@ describe("Plotly chart accessibility wrapper", () => {
     expect(
       container.querySelector('[data-testid="plotly-graph"]'),
     ).not.toBeNull();
+    expect(container.querySelector('[role="img"]')).toBeNull();
 
     const results = await axe(container);
     expect(results.violations).toEqual([]);
@@ -89,7 +90,7 @@ describe("Plotly chart accessibility wrapper", () => {
     );
 
     expect(
-      container.querySelector('[role="img"]')?.getAttribute("aria-hidden"),
+      container.querySelector('[role="group"]')?.getAttribute("aria-hidden"),
     ).toBe("true");
   });
 });

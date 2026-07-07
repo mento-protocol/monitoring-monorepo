@@ -33,7 +33,7 @@ export default function AccessiblePlot({
 
   return (
     <div
-      role="img"
+      role="group"
       aria-label={ariaLabel}
       aria-describedby={summaryId}
       aria-hidden={ariaHidden || undefined}
