@@ -351,6 +351,7 @@ jobs:
         # so a failed plan still surfaces the error inline.
         if: always()
         env:
+          EVENT_NAME: ${{ github.event_name }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
           STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
@@ -359,7 +360,19 @@ jobs:
             echo '## Terraform Plan — `alerts/infra/`'
             echo
             if [ "$PLAN_OUTCOME" = "success" ]; then
-              if [ "$HAS_CHANGES" = "true" ]; then
+              if [ "$EVENT_NAME" = "pull_request" ]; then
+                if [ "$STACK_CHANGED" = "true" ]; then
+                  if [ "$HAS_CHANGES" = "true" ]; then
+                    echo '**Status:** 📝 PR target plan changed — trusted main plan will decide apply'
+                  else
+                    echo '**Status:** ✅ PR target plan clean — trusted main plan will decide apply'
+                  fi
+                elif [ "$HAS_CHANGES" = "true" ]; then
+                  echo '**Status:** ⚠️ PR target drift detected — stack path unchanged, apply will skip'
+                else
+                  echo '**Status:** ✅ PR target plan clean — stack path unchanged, apply will skip'
+                fi
+              elif [ "$HAS_CHANGES" = "true" ]; then
                 if [ "$STACK_CHANGED" = "true" ]; then
                   echo '**Status:** 📝 changes detected — stack change is eligible for apply'
                 else
@@ -410,6 +423,7 @@ jobs:
           # template injection points (defensive — `steps.*.outcome` is an
           # enum controlled by Actions, but env-based passing is the standard
           # hardening pattern).
+          EVENT_NAME: ${{ github.event_name }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
           STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
@@ -433,14 +447,29 @@ jobs:
             const planOutcome = process.env.PLAN_OUTCOME || "unknown";
             const hasChanges = process.env.HAS_CHANGES === "true";
             const stackChanged = process.env.STACK_CHANGED === "true";
-            const statusIcon = planOutcome === "success"
-              ? (hasChanges ? (stackChanged ? "📝" : "⚠️") : "✅")
-              : "❌";
-            const statusText = planOutcome === "success"
-              ? (hasChanges
+            const eventName = process.env.EVENT_NAME || "unknown";
+            let statusIcon = "❌";
+            let statusText = "plan failed";
+            if (planOutcome === "success") {
+              if (eventName === "pull_request") {
+                if (stackChanged) {
+                  statusIcon = hasChanges ? "📝" : "✅";
+                  statusText = hasChanges
+                    ? "PR target plan changed — trusted main plan will decide apply"
+                    : "PR target plan clean — trusted main plan will decide apply";
+                } else {
+                  statusIcon = hasChanges ? "⚠️" : "✅";
+                  statusText = hasChanges
+                    ? "PR target drift detected — stack path unchanged, apply will skip"
+                    : "PR target plan clean — stack path unchanged, apply will skip";
+                }
+              } else {
+                statusIcon = hasChanges ? (stackChanged ? "📝" : "⚠️") : "✅";
+                statusText = hasChanges
                   ? (stackChanged ? "changes detected — stack change is eligible for apply" : "drift detected — stack path unchanged, apply will skip")
-                  : "no changes — merge will skip apply")
-              : "plan failed";
+                  : "no changes — merge will skip apply";
+              }
+            }
 
             const runUrl =
               `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
