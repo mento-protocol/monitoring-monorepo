@@ -168,7 +168,7 @@ export function OlsLiquidityEvents({
           Could not load total count — pagination may be incomplete.
         </p>
       )}
-      {!error && countError && isSearching && (
+      {showMetadata && countError && isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Could not load total count — search covers the most recent{" "}
           {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
