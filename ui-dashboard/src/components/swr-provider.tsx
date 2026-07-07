@@ -43,13 +43,27 @@ const freshnessMiddleware: Middleware = (useSWRNext) => {
       key == null || typeof key === "function" || refreshIntervalMs === null
         ? null
         : normalizeSWRFreshnessKey(key);
+    const response = useSWRNext(key, fetcher, config);
 
     useEffect(() => {
       if (freshnessKey === null || refreshIntervalMs === null) return;
       return registerSWRFreshnessKey(freshnessKey, refreshIntervalMs);
     }, [freshnessKey, refreshIntervalMs]);
 
-    return useSWRNext(key, fetcher, config);
+    useEffect(() => {
+      if (
+        freshnessKey === null ||
+        refreshIntervalMs === null ||
+        response.data === undefined
+      ) {
+        return;
+      }
+      recordSWRFreshnessSuccess(freshnessKey, {
+        refreshInterval: refreshIntervalMs,
+      });
+    }, [freshnessKey, refreshIntervalMs, response.data]);
+
+    return response;
   };
 };
 
