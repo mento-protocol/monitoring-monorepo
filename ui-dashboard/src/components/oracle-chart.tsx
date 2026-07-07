@@ -454,10 +454,10 @@ function selectOraclePlotData({
 
 /**
  * Memoized plot model: decimate → build trace data + layout, all referentially
- * stable. react-plotly.js 3.0 ref-compares `data`/`layout`/`config` in
- * `componentDidUpdate` and skips `Plotly.react` when all three are unchanged,
- * so a 30s SWR repoll or a coalesced relayout whose decimated output is
- * identical no longer rebuilds + redraws the SVG (the dominant per-tick cost).
+ * stable. react-plotly.js 4.0 ref-compares `data`/`layout`/`config` in its
+ * update effect and skips `Plotly.react` when the figure is unchanged, so a 30s
+ * SWR repoll or a coalesced relayout whose decimated output is identical no
+ * longer rebuilds + redraws the SVG (the dominant per-tick cost).
  * Extracted to keep `OracleChart` under the max-lines-per-function budget.
  */
 function useOracleChartModel({

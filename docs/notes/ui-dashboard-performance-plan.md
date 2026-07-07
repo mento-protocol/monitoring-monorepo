@@ -16,10 +16,11 @@ page paints, and that JS is dominated by one chart library.
 
 **Three levers move ~90% of the user-visible win:**
 
-1. **Ship the lean Plotly build.** We already depend on `plotly.js-basic-dist-min`
-   but never import it — `react-plotly.js` is pulling the **full** `plotly.js`
-   (mapbox-gl + WebGL included) while we only ever draw scatter/bar/pie. One factory
-   swap ≈ **−0.45 MB brotli (~25% of the JS budget)** off the critical-path chunk.
+1. **Ship the lean Plotly build.** The original baseline depended on
+   `plotly.js-basic-dist-min` but never imported it — `react-plotly.js` pulled the
+   **full** `plotly.js` (mapbox-gl + WebGL included) while we only ever draw
+   scatter/bar/pie. The shipped factory + peer-alias swap keeps the chart chunk on
+   the lean bundle and avoids the unused full Plotly dependency tree.
 2. **Fix pool-detail CLS 0.25** (currently "poor") with skeleton height reservation +
    SSR-prefetch of the pool overview — the same pattern that already gives `/` and
    `/pools` a perfect CLS 0.00.
@@ -110,14 +111,17 @@ out explicitly.
 - **P1 · Swap full `plotly.js` → `plotly.js-basic-dist-min`.** ⭐ _Anchor win._
   Confidence **high**, effort **M**, impact **high** (~**−0.45 MB brotli**, directly on
   the LCP-window chunk).
-  - Current: every chart uses `dynamic(() => import("react-plotly.js"))`, whose default
-    entry imports the full `plotly.js` (pulls `mapbox-gl@1.13.3` + WebGL). Trace audit:
+  - Original baseline: every chart used `dynamic(() => import("react-plotly.js"))`,
+    whose default entry imported the full `plotly.js` (pulls `mapbox-gl@1.13.3` +
+    WebGL). Trace audit:
     only `scatter`/`bar`/`pie` are used anywhere — no gl/3d/mapbox/heatmap traces —
     so basic-dist-min covers **100%** of usage. The declared dep is imported nowhere
     (`package.json:36`; only referenced in a `globals.css` comment).
   - Change: build one shared `Plot` via `react-plotly.js/factory` +
-    `plotly.js-basic-dist-min` (one-line `declare module` shim; `@types/react-plotly.js`
-    already installed). Route all 11 chart sites through it.
+    `plotly.js-basic-dist-min`; keep the `plotly.js` peer aliased to
+    `plotly.js-basic-dist-min` so pnpm does not install the unused full package.
+    `react-plotly.js` v4 ships the factory types; only the basic dist needs a
+    local `declare module` shim. Route all chart sites through the shared wrapper.
   - Verify: `pnpm dashboard:build && pnpm dashboard:size-limit`; confirm the drop and
     re-baseline the budget. Browser-verify every chart type still renders.
 

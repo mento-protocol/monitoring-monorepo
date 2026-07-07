@@ -3,7 +3,7 @@ title: Plotly.js basic-dist plus enforced bundle-size budgets
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-07
 scope: ui-dashboard
 date: 2026-03
 ---
@@ -25,6 +25,12 @@ Use Plotly's **`basic-dist`** build (no `scattergl`/WebGL traces) and enforce
 **bundle-size budgets** via `pnpm dashboard:size-limit` after build. Charts render
 through `react-plotly`, and observed chart lag is treated as JS/main-thread work,
 not GPU paint.
+
+The dashboard intentionally satisfies `react-plotly.js`'s `plotly.js` peer with
+the package alias `plotly.js@npm:plotly.js-basic-dist-min`. Do not replace that
+alias with the full `plotly.js` package unless this ADR is revisited: pnpm would
+otherwise install the unused full Plotly dependency tree even though chart code
+imports the lean bundle through `react-plotly.js/factory`.
 
 ## Alternatives considered
 

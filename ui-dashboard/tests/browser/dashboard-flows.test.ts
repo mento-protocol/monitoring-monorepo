@@ -303,10 +303,16 @@ test.describe("dashboard browser flows", () => {
       "true",
     );
 
+    const poolRoutePattern = escapedPoolId(CELO_POOL_ID);
     const rscRequests: string[] = [];
     page.on("request", (request) => {
       const url = request.url();
-      if (url.includes("_rsc=")) rscRequests.push(url);
+      // In production, next/link may prefetch unrelated nav destinations after
+      // the page is visible. This assertion is specifically about tab state not
+      // refetching the current pool route payload.
+      if (url.includes("_rsc=") && poolRoutePattern.test(url)) {
+        rscRequests.push(url);
+      }
     });
 
     await page.getByRole("tab", { name: "swaps" }).click();
