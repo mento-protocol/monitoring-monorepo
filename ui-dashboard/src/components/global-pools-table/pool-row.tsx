@@ -5,6 +5,7 @@ import { poolName } from "@/lib/tokens";
 import { type Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { Row } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { SourceBadge, HealthBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
 import {
@@ -169,10 +170,7 @@ function SourceCell({ pool }: { pool: Pool }) {
 function HealthCell({ status, details }: { status: string; details: string }) {
   return (
     <Cell className="">
-      {/* Diagnostic lives in the accessible Tooltip (role="tooltip" +
-          aria-describedby on a focusable trigger) instead of a native `title`,
-          so it is reachable by keyboard Tab and by tap on touch devices. */}
-      <Tooltip content={details}>
+      <Tooltip content={details} label={`Pool health ${status}: ${details}`}>
         <HealthBadge status={status} />
       </Tooltip>
     </Cell>
