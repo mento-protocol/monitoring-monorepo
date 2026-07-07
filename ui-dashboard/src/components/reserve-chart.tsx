@@ -24,6 +24,19 @@ interface ReserveChartProps {
   pool?: Pool | null;
 }
 
+function reserveChartTextAlternative(
+  rowCount: number,
+  timestamps: string[],
+  sym0: string,
+  sym1: string,
+  useUsd: boolean,
+) {
+  const firstTimestamp = timestamps[0] ?? "unknown start";
+  const lastTimestamp = timestamps[timestamps.length - 1] ?? firstTimestamp;
+  const valuation = useUsd ? " converted to estimated USD value" : "";
+  return `Reserve history chart with ${rowCount} updates from ${firstTimestamp} to ${lastTimestamp}. It compares ${sym0} and ${sym1} reserves${valuation}.`;
+}
+
 export function ReserveChart({
   rows,
   token0,
@@ -105,7 +118,39 @@ export function ReserveChart({
     yaxis: "y" as const,
   };
 
-  const layout = {
+  const layout = reserveChartLayout(yAxisTitle);
+
+  const subtitle = useUsd
+    ? "Estimated using current oracle price — balanced pool = lines overlap"
+    : null;
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
+      <div className="flex items-baseline gap-2 mb-3">
+        <h3 className="text-sm font-medium text-slate-400">Reserve History</h3>
+        {subtitle && <span className="text-xs text-slate-600">{subtitle}</span>}
+      </div>
+      <Plot
+        ariaLabel={`Reserve history chart for ${sym0} and ${sym1}`}
+        textAlternative={reserveChartTextAlternative(
+          rows.length,
+          timestamps,
+          sym0,
+          sym1,
+          useUsd,
+        )}
+        data={[trace0, trace1]}
+        layout={layout}
+        config={PLOTLY_CONFIG}
+        style={{ width: "100%", height: 320 }}
+        useResizeHandler
+      />
+    </div>
+  );
+}
+
+function reserveChartLayout(yAxisTitle: string) {
+  return {
     ...PLOTLY_BASE_LAYOUT,
     font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
     xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_HOURLY),
@@ -122,24 +167,4 @@ export function ReserveChart({
     autosize: true,
     dragmode: "pan" as const,
   };
-
-  const subtitle = useUsd
-    ? "Estimated using current oracle price — balanced pool = lines overlap"
-    : null;
-
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
-      <div className="flex items-baseline gap-2 mb-3">
-        <h3 className="text-sm font-medium text-slate-400">Reserve History</h3>
-        {subtitle && <span className="text-xs text-slate-600">{subtitle}</span>}
-      </div>
-      <Plot
-        data={[trace0, trace1]}
-        layout={layout}
-        config={PLOTLY_CONFIG}
-        style={{ width: "100%", height: 320 }}
-        useResizeHandler
-      />
-    </div>
-  );
 }

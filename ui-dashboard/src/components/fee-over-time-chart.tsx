@@ -279,11 +279,15 @@ function RevenueChartBody({
   showEmptyState,
   emptyMessage,
   figure,
+  range,
+  headline,
 }: {
   isLoading: boolean;
   showEmptyState: boolean;
   emptyMessage: ReactNode;
   figure: RevenueChartFigure;
+  range: RangeKey;
+  headline: string;
 }) {
   return (
     <div className="mt-4 -mx-2 sm:-mx-3">
@@ -295,6 +299,8 @@ function RevenueChartBody({
         </div>
       ) : (
         <Plot
+          ariaLabel={`Total revenue chart for ${range}`}
+          textAlternative={`Total revenue chart for ${range} with ${figure.traces[0]?.x.length ?? 0} daily buckets. Current headline is ${headline}. Series include swap fees, CDP borrowing, and reserve yield revenue.`}
           data={figure.traces}
           layout={figure.layout}
           config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
@@ -359,6 +365,8 @@ export function TotalRevenueChart({
         showEmptyState={showEmptyState}
         emptyMessage={revenueChartEmptyMessage(partialReasons)}
         figure={figure}
+        range={range}
+        headline={headline}
       />
     </section>
   );

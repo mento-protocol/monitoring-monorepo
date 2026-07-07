@@ -435,6 +435,12 @@ export function TimeSeriesChartCard({
     );
 
   const showEmptyState = !isLoading && series.length === 0;
+  const activeRangeLabel =
+    ranges.find((item) => item.key === range)?.label ?? range;
+  const headlineText =
+    typeof headline === "string" ? headline : "the current value shown above";
+  const chartAriaLabel = `${title} chart for ${activeRangeLabel}`;
+  const chartTextAlternative = `${title} chart for ${activeRangeLabel} with ${series.length} plotted points and ${hasBreakdown ? `${breakdownCount} breakdown series` : "one total series"}. Current headline is ${headlineText}.`;
 
   return (
     <section
@@ -560,6 +566,9 @@ export function TimeSeriesChartCard({
                   }}
                 >
                   <Plot
+                    ariaLabel={chartAriaLabel}
+                    textAlternative={chartTextAlternative}
+                    ariaHidden={!active}
                     data={traces}
                     layout={layout}
                     config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
@@ -581,6 +590,8 @@ export function TimeSeriesChartCard({
           </div>
         ) : (
           <Plot
+            ariaLabel={chartAriaLabel}
+            textAlternative={chartTextAlternative}
             data={traces}
             layout={layout}
             config={{ ...PLOTLY_CONFIG, scrollZoom: false }}

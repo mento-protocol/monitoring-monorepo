@@ -109,6 +109,8 @@ export function EffectivenessChart({ events }: EffectivenessChartProps) {
         rebalance made deviation worse.
       </p>
       <Plot
+        ariaLabel="Rebalance effectiveness trend chart"
+        textAlternative={`Rebalance effectiveness trend chart with ${events.length} rebalances. Values show correction effectiveness against the rebalance boundary, where 100% means the rebalance landed on the boundary.`}
         data={[trace]}
         layout={STATIC_LAYOUT}
         config={PLOTLY_CONFIG}

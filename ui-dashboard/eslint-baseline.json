@@ -259,13 +259,6 @@
     "linePreview": "// react-doctor-disable-next-line react-doctor/prefer-useReducer, react-doctor/no-giant-component | export function AddressReportEditor(props: Props) { | const { address, onSavingChange, onDeletingCha"
   },
   {
-    "file": "src/components/breach-history-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'BreachHistoryChart' has too many lines (116). Maximum allowed is 100.",
-    "line": 43,
-    "linePreview": "*/ | export function BreachHistoryChart({ breaches }: Props) { | if (breaches.length === 0) return null;"
-  },
-  {
     "file": "src/components/breach-history-panel.tsx",
     "ruleId": "complexity",
     "message": "Function 'BreachHistoryPanelInner' has a complexity of 30. Maximum allowed is 15.",
@@ -294,13 +287,6 @@
     "linePreview": " | export function BreachRow({ | breach,"
   },
   {
-    "file": "src/components/bridge-token-breakdown-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'BridgeTokenBreakdownChart' has too many lines (131). Maximum allowed is 100.",
-    "line": 56,
-    "linePreview": " | export function BridgeTokenBreakdownChart({ | snapshots,"
-  },
-  {
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 58. Maximum allowed is 15.",
@@ -313,20 +299,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 65 to the 18 allowed.",
     "line": 84,
     "linePreview": "// react-doctor-disable-next-line react-doctor/js-tosorted-immutable | return [...entries].sort((a, b) => { | const aKey = globalPoolKey(a);"
-  },
-  {
-    "file": "src/components/lp-concentration-chart.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'LpConcentrationChart' has a complexity of 25. Maximum allowed is 15.",
-    "line": 55,
-    "linePreview": " | export function LpConcentrationChart({ | positions,"
-  },
-  {
-    "file": "src/components/lp-concentration-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'LpConcentrationChart' has too many lines (201). Maximum allowed is 100.",
-    "line": 55,
-    "linePreview": " | export function LpConcentrationChart({ | positions,"
   },
   {
     "file": "src/components/pool-header/deviation-cell.tsx",
@@ -360,13 +332,6 @@
     "file": "src/components/reserve-chart.tsx",
     "ruleId": "complexity",
     "message": "Function 'ReserveChart' has a complexity of 17. Maximum allowed is 15.",
-    "line": 27,
-    "linePreview": " | export function ReserveChart({ | rows,"
-  },
-  {
-    "file": "src/components/reserve-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'ReserveChart' has too many lines (103). Maximum allowed is 100.",
     "line": 27,
     "linePreview": " | export function ReserveChart({ | rows,"
   },

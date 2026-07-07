@@ -102,41 +102,22 @@ export function BreachHistoryChart({ breaches }: Props) {
     else closedInGrace.push(marker);
   }
 
-  const trace = (markers: Marker[], name: string, color: string) => ({
-    type: "scatter" as const,
-    mode: "markers" as const,
-    name,
-    x: markers.map((m) => m.x),
-    y: markers.map((m) => m.y),
-    customdata: markers.map((m) => [
-      formatDurationShort(m.duration),
-      formatDurationShort(m.critical),
-      m.peakPct.toFixed(1),
-    ]),
-    hovertemplate:
-      "<b>%{x}</b><br>" +
-      "Duration: %{customdata[0]}<br>" +
-      "Past grace: %{customdata[1]}<br>" +
-      "Peak: %{customdata[2]}% of threshold<extra>" +
-      escapePlotText(name) +
-      "</extra>",
-    marker: {
-      color,
-      size: 8,
-      opacity: 0.85,
-      line: { color: "rgba(255,255,255,0.15)", width: 1 },
-    },
-  });
-
   const data = [
-    trace(closedCritical, "Past grace (CRITICAL)", "#ef4444"),
-    trace(closedInGrace, "Within grace", "#f59e0b"),
-    trace(ongoing, "Ongoing", "#8b5cf6"),
+    breachTrace(closedCritical, "Past grace (CRITICAL)", "#ef4444"),
+    breachTrace(closedInGrace, "Within grace", "#f59e0b"),
+    breachTrace(ongoing, "Ongoing", "#8b5cf6"),
   ].filter((t) => t.x.length > 0);
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 sm:p-5">
       <Plot
+        ariaLabel="Deviation breach history chart"
+        textAlternative={breachHistoryTextAlternative(
+          breaches.length,
+          closedCritical.length,
+          closedInGrace.length,
+          ongoing.length,
+        )}
         data={data}
         layout={{
           ...PLOTLY_BASE_LAYOUT,
@@ -191,6 +172,43 @@ export function BreachHistoryChart({ breaches }: Props) {
       />
     </div>
   );
+}
+
+function breachTrace(markers: Marker[], name: string, color: string) {
+  return {
+    type: "scatter" as const,
+    mode: "markers" as const,
+    name,
+    x: markers.map((m) => m.x),
+    y: markers.map((m) => m.y),
+    customdata: markers.map((m) => [
+      formatDurationShort(m.duration),
+      formatDurationShort(m.critical),
+      m.peakPct.toFixed(1),
+    ]),
+    hovertemplate:
+      "<b>%{x}</b><br>" +
+      "Duration: %{customdata[0]}<br>" +
+      "Past grace: %{customdata[1]}<br>" +
+      "Peak: %{customdata[2]}% of threshold<extra>" +
+      escapePlotText(name) +
+      "</extra>",
+    marker: {
+      color,
+      size: 8,
+      opacity: 0.85,
+      line: { color: "rgba(255,255,255,0.15)", width: 1 },
+    },
+  };
+}
+
+function breachHistoryTextAlternative(
+  breachCount: number,
+  criticalCount: number,
+  inGraceCount: number,
+  ongoingCount: number,
+) {
+  return `Deviation breach history chart with ${breachCount} total breaches: ${criticalCount} past grace, ${inGraceCount} within grace, and ${ongoingCount} ongoing. The y-axis uses a log scale for breach duration.`;
 }
 
 function tradingSecondsPastGrace(

@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
 import {
   PLOTLY_BASE_LAYOUT,
@@ -53,6 +53,53 @@ interface BridgeTokenBreakdownChartProps {
   defaultRange?: RangeKey;
 }
 
+type BridgeTokenSlice = ReturnType<typeof buildTokenBreakdown>[number];
+
+function buildBridgeTokenTrace(slices: BridgeTokenSlice[]) {
+  return {
+    type: "pie" as const,
+    hole: 0.5,
+    labels: slices.map((s) => s.symbol),
+    values: slices.map((s) => s.usd),
+    customdata: slices.map((s) => formatUSD(s.usd)),
+    hovertemplate:
+      "<b>%{label}</b><br>%{customdata}<br>%{percent}<extra></extra>",
+    textinfo: "percent" as const,
+    sort: false,
+    direction: "clockwise" as const,
+    marker: {
+      colors: PIE_COLORS.slice(0, slices.length),
+      line: { color: "#0f172a", width: 2 },
+    },
+  };
+}
+
+function buildBridgeTokenLayout() {
+  return {
+    ...PLOTLY_BASE_LAYOUT,
+    margin: { t: 8, r: 8, b: 8, l: 8 },
+    showlegend: false,
+    height: ROW_CHART_HEIGHT_PX,
+    autosize: true,
+  };
+}
+
+function rangeLabel(range: RangeKey) {
+  return RANGES.find((item) => item.key === range)?.label ?? range;
+}
+
+function bridgeTokenTextAlternative(
+  activeRangeLabel: string,
+  slices: BridgeTokenSlice[],
+  total: number,
+) {
+  const topSlice = slices[0];
+  const largest = topSlice
+    ? ` Largest token slice is ${topSlice.symbol} at ${formatUSD(topSlice.usd)}.`
+    : "";
+  return `Volume by token chart for ${activeRangeLabel} with ${slices.length} priced token slices and ${formatUSD(total)} total volume.${largest}`;
+}
+
 export function BridgeTokenBreakdownChart({
   snapshots,
   rates,
@@ -80,41 +127,15 @@ export function BridgeTokenBreakdownChart({
   const total = slices.reduce((sum, s) => sum + s.usd, 0);
   const hasData = total > 0;
 
-  const trace = useMemo(
-    () => ({
-      type: "pie" as const,
-      hole: 0.5,
-      labels: slices.map((s) => s.symbol),
-      values: slices.map((s) => s.usd),
-      customdata: slices.map((s) => formatUSD(s.usd)),
-      hovertemplate:
-        "<b>%{label}</b><br>%{customdata}<br>%{percent}<extra></extra>",
-      textinfo: "percent" as const,
-      sort: false,
-      direction: "clockwise" as const,
-      marker: {
-        colors: PIE_COLORS.slice(0, slices.length),
-        line: { color: "#0f172a", width: 2 },
-      },
-    }),
-    [slices],
-  );
+  const trace = useMemo(() => buildBridgeTokenTrace(slices), [slices]);
 
-  const layout = useMemo(
-    () => ({
-      ...PLOTLY_BASE_LAYOUT,
-      margin: { t: 8, r: 8, b: 8, l: 8 },
-      showlegend: false,
-      height: ROW_CHART_HEIGHT_PX,
-      autosize: true,
-    }),
-    [],
-  );
+  const layout = useMemo(buildBridgeTokenLayout, []);
 
   // Match the "partial data" copy used on BridgeVolumeChart (via
   // TimeSeriesChartCard's `hasSnapshotError` branch). Only surface when the
   // "all" window is active — the bounded ranges don't touch the cap.
   const showCapNote = isCapped && range === "all";
+  const activeRangeLabel = rangeLabel(range);
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
@@ -127,31 +148,7 @@ export function BridgeTokenBreakdownChart({
             </p>
           )}
         </div>
-        <div
-          role="group"
-          aria-label="Volume by token time range"
-          className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5"
-        >
-          {RANGES.map((item) => {
-            const active = range === item.key;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setRange(item.key)}
-                className={
-                  "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
-                  (active
-                    ? "bg-slate-700 text-white shadow-sm"
-                    : "text-slate-400 hover:text-slate-200")
-                }
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
+        <BridgeRangePicker range={range} setRange={setRange} />
       </div>
       {hasError ? (
         <p className="text-sm text-slate-500">
@@ -172,6 +169,12 @@ export function BridgeTokenBreakdownChart({
       ) : (
         <>
           <Plot
+            ariaLabel={`Volume by token chart for ${activeRangeLabel}`}
+            textAlternative={bridgeTokenTextAlternative(
+              activeRangeLabel,
+              slices,
+              total,
+            )}
             data={[trace]}
             layout={layout}
             config={PLOTLY_CONFIG}
@@ -199,5 +202,41 @@ export function BridgeTokenBreakdownChart({
         </>
       )}
     </section>
+  );
+}
+
+function BridgeRangePicker({
+  range,
+  setRange,
+}: {
+  range: RangeKey;
+  setRange: Dispatch<SetStateAction<RangeKey>>;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Volume by token time range"
+      className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5"
+    >
+      {RANGES.map((item) => {
+        const active = range === item.key;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            aria-pressed={active}
+            onClick={() => setRange(item.key)}
+            className={
+              "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+              (active
+                ? "bg-slate-700 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200")
+            }
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }

@@ -618,6 +618,8 @@ export function OracleChart({
   const hasPersistedBands = snapshots.some(
     (s) => s.breakerBaselineAtSnapshot != null,
   );
+  const chartLabel = `Oracle price versus breaker band chart for ${token0Symbol}/${token1Symbol}`;
+  const chartSummary = `Oracle price versus breaker band chart with ${snapshots.length} raw snapshots${dailyCandles?.length ? ` and ${dailyCandles.length} daily candles` : ""}. It plots the pool oracle price against the configured breaker band; breaker config status is ${breakerConfigStatus}.`;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
@@ -635,6 +637,8 @@ export function OracleChart({
         }
       />
       <Plot
+        ariaLabel={chartLabel}
+        textAlternative={chartSummary}
         data={traceData}
         layout={layout}
         config={ORACLE_CHART_CONFIG}

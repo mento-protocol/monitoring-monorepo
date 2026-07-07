@@ -169,6 +169,8 @@ export function IntelWealthChart({ address }: { address: string }) {
   );
   if (points.length === 0) return null;
   const summaryText = buildSummaryText(data);
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
 
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900">
@@ -184,6 +186,8 @@ export function IntelWealthChart({ address }: { address: string }) {
       </div>
       <div className="p-5">
         <Plot
+          ariaLabel="Wealth trajectory chart"
+          textAlternative={`Wealth trajectory chart with ${points.length} portfolio snapshots.${firstPoint && lastPoint ? ` It starts at ${firstPoint.label} ${formatUSD(firstPoint.usd)} and ends at ${lastPoint.label} ${formatUSD(lastPoint.usd)}.` : ""}`}
           data={[sparkTrace(points)]}
           layout={SPARK_LAYOUT}
           config={{ ...PLOTLY_CONFIG, scrollZoom: false }}

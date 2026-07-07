@@ -183,6 +183,8 @@ export function SnapshotChart({
     marker: { size: 4 },
     yaxis: "y2" as const,
   };
+  const firstDay = days[0] ?? "unknown start";
+  const lastDay = days[days.length - 1] ?? firstDay;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
@@ -190,6 +192,8 @@ export function SnapshotChart({
         Daily Swap Volume
       </h3>
       <Plot
+        ariaLabel={`Daily swap volume chart for ${token0Symbol} and ${token1Symbol}`}
+        textAlternative={`Daily swap volume chart with ${days.length} daily buckets from ${firstDay} to ${lastDay}. It compares ${token0Symbol} sold, ${token1Symbol} sold, and cumulative swaps.`}
         data={[volumeTrace0, volumeTrace1, cumSwapTrace]}
         layout={makeSnapshotLayout(shapes)}
         config={PLOTLY_CONFIG}

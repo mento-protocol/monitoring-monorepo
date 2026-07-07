@@ -146,6 +146,8 @@ export function LiquidityChart({
   const subtitle = useUsd
     ? "Estimated using current oracle price — balanced pool = lines overlap"
     : null;
+  const firstTimestamp = timestamps[0] ?? "unknown start";
+  const lastTimestamp = timestamps[timestamps.length - 1] ?? firstTimestamp;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
@@ -156,6 +158,8 @@ export function LiquidityChart({
         {subtitle && <span className="text-xs text-slate-600">{subtitle}</span>}
       </div>
       <Plot
+        ariaLabel={`Pool reserves chart for ${token0Symbol} and ${token1Symbol}`}
+        textAlternative={`Pool reserves over time with ${timestamps.length} daily buckets from ${firstTimestamp} to ${lastTimestamp}. It compares ${token0Symbol} and ${token1Symbol} reserves${useUsd ? " as estimated USD value" : ""}.`}
         data={[trace0, trace1]}
         layout={{
           ...makeLayout(useUsd),
