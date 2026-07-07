@@ -187,6 +187,7 @@ export function PoolTvlOverTimeChart({
       hasError={error}
       hasSnapshotError={false}
       shapes={shapes}
+      plotlyDeferMode="visible"
       emptyMessage={tvlEmptyMessage(error, historySupported, priceable)}
     />
   );

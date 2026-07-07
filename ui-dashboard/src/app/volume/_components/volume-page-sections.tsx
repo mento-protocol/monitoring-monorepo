@@ -282,6 +282,7 @@ function PoolChartArea({
           chartHeightPx={250}
           yAxisTopPadding={0}
           customSortedHover
+          plotlyDeferMode="visible"
         />
       </div>
       <div className="h-full lg:col-span-1">
@@ -325,6 +326,7 @@ function DailyVolumeChart({
           ? "No trader volume in this window."
           : "No legacy-v2 volume in this window."
       }
+      plotlyDeferMode="visible"
     />
   );
 }

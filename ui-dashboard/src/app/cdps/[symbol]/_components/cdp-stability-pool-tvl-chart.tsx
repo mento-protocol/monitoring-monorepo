@@ -159,6 +159,7 @@ export function CdpStabilityPoolTvlChart({
           ? "Unable to load stability pool history"
           : "Not enough stability pool history yet"
       }
+      plotlyDeferMode="visible"
     />
   );
 }

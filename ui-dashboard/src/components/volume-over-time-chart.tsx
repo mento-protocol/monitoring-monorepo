@@ -13,6 +13,7 @@ import type { Network } from "@/lib/networks";
 import {
   TimeSeriesChartCard,
   type BreakdownSeries,
+  type PlotlyDeferMode,
 } from "@/components/time-series-chart-card";
 import {
   SECONDS_PER_DAY,
@@ -566,6 +567,7 @@ interface VolumeOverTimeChartProps {
    */
   hasBrokerSnapshotError: boolean;
   fullVolumeSeries: DailyVolumeSeriesResult;
+  plotlyDeferMode?: PlotlyDeferMode;
 }
 
 // The four loading/error flags are independent: volume can load while
@@ -578,6 +580,7 @@ export function VolumeOverTimeChart({
   hasSnapshotError,
   hasBrokerSnapshotError,
   fullVolumeSeries,
+  plotlyDeferMode = "none",
 }: VolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
@@ -682,6 +685,7 @@ export function VolumeOverTimeChart({
       hasError={hasError}
       hasSnapshotError={hasSnapshotError || visibleVolumePartial === true}
       emptyMessage={emptyMessage}
+      plotlyDeferMode={plotlyDeferMode}
     />
   );
 }
