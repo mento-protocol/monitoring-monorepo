@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 describe("GlobalPoolsTable pool-detail prefetch", () => {
-  it("preloads the pool detail query on row hover", () => {
+  it("preloads the pool detail query only on pool link hover", () => {
     act(() => {
       root.render(
         <GlobalPoolsTable
@@ -119,9 +119,22 @@ describe("GlobalPoolsTable pool-detail prefetch", () => {
     });
 
     const row = container.querySelector("tbody tr");
+    const link = container.querySelector("tbody a");
     expect(row).not.toBeNull();
+    expect(link).not.toBeNull();
+
     act(() => {
       row?.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+    });
+    expect(mockPreloadGQL).not.toHaveBeenCalled();
+
+    act(() => {
+      link?.dispatchEvent(
         new MouseEvent("mouseover", {
           bubbles: true,
           relatedTarget: document.body,

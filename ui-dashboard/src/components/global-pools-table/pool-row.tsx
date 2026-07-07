@@ -89,11 +89,14 @@ export function PoolRow({
     cdpPoolKeys?.has(key) ?? false,
     reservePoolKeys?.has(key) ?? false,
   );
-  const prefetchDetail = () => prefetchPoolDetail(entry);
 
   return (
-    <Row onFocus={prefetchDetail} onMouseEnter={prefetchDetail}>
-      <NameCell pool={pool} network={network} />
+    <Row>
+      <NameCell
+        pool={pool}
+        network={network}
+        onPrefetch={() => prefetchPoolDetail(entry)}
+      />
       {showVirtualPoolSource && <SourceCell pool={pool} />}
       <HealthCell status={effectiveStatus} details={healthDetails} />
       <UptimeCell pool={pool} />
@@ -152,7 +155,15 @@ function Cell({
   );
 }
 
-function NameCell({ pool, network }: { pool: Pool; network: Network }) {
+function NameCell({
+  pool,
+  network,
+  onPrefetch,
+}: {
+  pool: Pool;
+  network: Network;
+  onPrefetch: () => void;
+}) {
   return (
     <Cell className="">
       <div className="flex items-center gap-2">
@@ -160,6 +171,8 @@ function NameCell({ pool, network }: { pool: Pool; network: Network }) {
         <Link
           href={buildPoolDetailHref(pool.id)}
           className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
+          onFocus={onPrefetch}
+          onMouseEnter={onPrefetch}
         >
           {poolName(network, pool.token0, pool.token1)}
         </Link>

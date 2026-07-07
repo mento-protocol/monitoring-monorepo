@@ -1,6 +1,7 @@
 import { GraphQLClient } from "graphql-request";
 import { useMemo } from "react";
 import useSWR, { preload, type SWRResponse } from "swr";
+import { cache, serialize, SWRGlobalState } from "swr/_internal";
 import type { ZodType } from "zod";
 import { useNetwork } from "@/components/network-provider";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
@@ -28,6 +29,10 @@ function getClient(network: Network): GraphQLClient {
 
 type GqlVariables = Record<string, unknown> | undefined;
 type GqlKey = readonly [string, string, GqlVariables];
+type PreloadTimer = ReturnType<typeof globalThis.setTimeout>;
+
+const SPECULATIVE_PRELOAD_TTL_MS = 5_000;
+const gqlPreloadTimers = new Map<string, PreloadTimer>();
 
 function gqlKey(
   network: Network,
@@ -70,10 +75,39 @@ export function preloadGQL<T>(
   network: Network,
   query: string,
   variables?: Record<string, unknown>,
+  options: { ttlMs?: number } = {},
 ): void {
   const key = gqlKey(network, query, variables);
   if (!key) return;
-  void preload(key, () => requestGQL<T>(network, query, variables));
+  const [serializedKey] = serialize(key);
+  if (!serializedKey) return;
+
+  clearGQLPreloadTimer(serializedKey);
+  const req = preload(key, () => requestGQL<T>(network, query, variables));
+  if (req === undefined) return;
+
+  const ttlMs = options.ttlMs ?? SPECULATIVE_PRELOAD_TTL_MS;
+  gqlPreloadTimers.set(
+    serializedKey,
+    globalThis.setTimeout(() => clearGQLPreload(serializedKey), ttlMs),
+  );
+  void Promise.resolve(req).catch(() => clearGQLPreload(serializedKey));
+}
+
+function clearGQLPreload(serializedKey: string): void {
+  clearGQLPreloadTimer(serializedKey);
+  const state = SWRGlobalState.get(cache);
+  const preloads = state?.[3];
+  if (preloads) {
+    delete preloads[serializedKey];
+  }
+}
+
+function clearGQLPreloadTimer(serializedKey: string): void {
+  const timer = gqlPreloadTimers.get(serializedKey);
+  if (timer == null) return;
+  globalThis.clearTimeout(timer);
+  gqlPreloadTimers.delete(serializedKey);
 }
 
 // Pool-level data (oracle, reserves, health) doesn't move fast enough to
