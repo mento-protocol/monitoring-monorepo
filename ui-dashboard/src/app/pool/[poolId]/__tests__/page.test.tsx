@@ -744,6 +744,75 @@ describe("Pool detail LPs tab", () => {
     },
   );
 
+  it("keeps the OLS search count warning visible during stale event revalidation", () => {
+    mockSearchParams.set("tab", "ols");
+    mockSearchParams.set("olsQ", "expand");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth"))
+        return gqlResult({ Pool: [BASE_POOL] });
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment"))
+        return gqlResult({ FactoryDeployment: [] });
+      if (query.includes("OlsPool")) {
+        return gqlResult({
+          OlsPool: [
+            {
+              id: "ols-1",
+              poolId: "42220-0xpool",
+              olsAddress: "0xols",
+              debtToken: "0xt0",
+              isActive: true,
+              lastRebalance: "0",
+              rebalanceCooldown: "0",
+              olsRebalanceCount: "0",
+              liquiditySourceIncentiveExpansion: "0",
+              liquiditySourceIncentiveContraction: "0",
+              protocolIncentiveExpansion: "0",
+              protocolIncentiveContraction: "0",
+              protocolFeeRecipient: null,
+              updatedAtTimestamp: "1",
+            },
+          ],
+        });
+      }
+      if (query.includes("OlsLiquidityEventsCount")) {
+        return gqlResult(undefined, new Error("count failed"));
+      }
+      if (query.includes("OlsLiquidityEventsPage")) {
+        return gqlResult(
+          {
+            OlsLiquidityEvent: [
+              {
+                id: "event-1",
+                chainId: 42220,
+                poolId: "42220-0xpool",
+                olsAddress: "0xols",
+                direction: 0,
+                caller: "0x0000000000000000000000000000000000000001",
+                tokenGivenToPool: "0xt0",
+                amountGivenToPool: "1000000000000000000",
+                tokenTakenFromPool: "0xt1",
+                amountTakenFromPool: "2000000000000000000",
+                txHash: "0xexpand",
+                blockNumber: "123",
+                blockTimestamp: "1700000000",
+              },
+            ],
+          },
+          new Error("event poll failed"),
+        );
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderPoolDetailPage();
+    expect(html).toContain("Could not load total count");
+    expect(html).toContain("search covers the most recent");
+  });
+
   it("queries pool detail with both the namespaced id and active chainId", () => {
     // expect.assertions ensures the expects inside mockImplementation actually
     // run — without this the test would pass vacuously if the mock were never

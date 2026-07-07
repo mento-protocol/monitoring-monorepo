@@ -25,7 +25,7 @@ browser tests, and Envio codegen has produced the generated type facade
 required for `indexer-envio` TypeScript to compile.
 Worktrunk-created worktrees (`wt switch --create` / `wt switch -c`) run the
 same setup script automatically through `.config/wt.toml` as a blocking
-`pre-start` hook before any `--execute` command starts.
+`pre-start` hook before any launch command configured with `-x` starts.
 
 ## Claude Code on the web setup
 

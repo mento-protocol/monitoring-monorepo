@@ -12,6 +12,7 @@ import { ReservesPanel } from "@/components/reserves-panel";
 import { normalizePoolIdForChain } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
   OLS_POOL,
   ORACLE_RATES,
@@ -216,6 +217,20 @@ function usePoolTabState({
   return { visibleTabs, tab, activeSearch };
 }
 
+function isPoolUnavailable({
+  poolLoading,
+  poolErr,
+  pool,
+}: {
+  poolLoading: boolean;
+  poolErr: Error | undefined;
+  pool: Pool | null;
+}): boolean {
+  return (
+    (!poolLoading && !poolErr && !pool) || hasErrorWithoutData(poolErr, pool)
+  );
+}
+
 function PoolDetail({
   initialSearch,
   initialPool,
@@ -245,7 +260,7 @@ function PoolDetail({
     requestedTab,
     urlParams,
   });
-  const poolMissing = !detail.poolLoading && !detail.poolErr && !detail.pool;
+  const poolUnavailable = isPoolUnavailable(detail);
 
   useEffect(() => {
     if (
@@ -292,7 +307,7 @@ function PoolDetail({
         rates={detail.rates}
       />
 
-      {!poolMissing && (
+      {!poolUnavailable && (
         <>
           <PoolTablist
             visibleTabs={visibleTabs}
@@ -381,7 +396,7 @@ function PoolOverview({
   thresholdsError: Error | undefined;
   rates: OracleRateMap;
 }) {
-  if (poolErr)
+  if (hasErrorWithoutData(poolErr, pool))
     return <ErrorBox message={`Failed to load pool: ${poolErr.message}`} />;
   // Gate on data presence, not `isLoading`. SWR keeps `isLoading` true while it
   // revalidates and does NOT count `fallbackData` as "loaded data", so with the
@@ -391,7 +406,7 @@ function PoolOverview({
   // reserved-height skeleton only shows when there is genuinely no pool yet
   // (the degraded path where the SSR prefetch missed).
   if (!pool)
-    return poolLoading ? (
+    return isLoadingWithoutData(poolLoading, pool) ? (
       <Skeleton rows={4} />
     ) : (
       <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />

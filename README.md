@@ -66,7 +66,8 @@ handled in one place:
 
 When creating worktrees through Worktrunk (`wt switch --create` / `wt switch
 -c`), the committed `.config/wt.toml` runs this setup script automatically as a
-blocking `pre-start` hook before any `--execute` command starts.
+blocking `pre-start` hook before any launch command configured with `-x`
+starts.
 
 For a Codex Cloud environment, configure the environment setup script to run:
 
