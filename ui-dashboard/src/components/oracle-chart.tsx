@@ -666,6 +666,8 @@ export function OracleChart({
         aria-label={`Oracle price versus breaker band chart for ${token0Symbol}/${token1Symbol}`}
       >
         <Plot
+          ariaLabel={`Oracle price versus breaker band chart for ${token0Symbol}/${token1Symbol}`}
+          textAlternative={oracleSummary}
           data={traceData}
           layout={layout}
           config={ORACLE_CHART_CONFIG}

@@ -200,6 +200,8 @@ export function BreachHistoryChart({ breaches }: Props) {
         className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 sm:p-5"
       >
         <Plot
+          ariaLabel="Deviation breach history chart"
+          textAlternative={breachSummary}
           data={data}
           layout={makeBreachHistoryLayout(grace)}
           config={PLOTLY_CONFIG}

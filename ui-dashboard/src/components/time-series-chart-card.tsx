@@ -435,7 +435,6 @@ export function TimeSeriesChartCard({
     );
 
   const showEmptyState = !isLoading && series.length === 0;
-
   // Accessible name + non-visual summary for the chart (WCAG 1.1.1). Both are
   // derived from live props (title + active range + week-over-week change) so
   // they can never drift from the rendered series. The summary deliberately
@@ -592,6 +591,9 @@ export function TimeSeriesChartCard({
                   }}
                 >
                   <Plot
+                    ariaLabel={chartAriaLabel}
+                    textAlternative={chartSummary}
+                    ariaHidden={!active}
                     data={traces}
                     layout={layout}
                     config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
@@ -613,6 +615,8 @@ export function TimeSeriesChartCard({
           </div>
         ) : (
           <Plot
+            ariaLabel={chartAriaLabel}
+            textAlternative={chartSummary}
             data={traces}
             layout={layout}
             config={{ ...PLOTLY_CONFIG, scrollZoom: false }}

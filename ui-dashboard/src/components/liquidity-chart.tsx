@@ -164,6 +164,8 @@ export function LiquidityChart({
         aria-label={`Pool reserves over time chart for ${token0Symbol} and ${token1Symbol}`}
       >
         <Plot
+          ariaLabel={`Pool reserves over time chart for ${token0Symbol} and ${token1Symbol}`}
+          textAlternative={reservesSummary}
           data={[trace0, trace1]}
           layout={{
             ...makeLayout(useUsd),

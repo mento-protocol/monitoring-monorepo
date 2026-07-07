@@ -300,6 +300,8 @@ function RevenueChartBody({
           </div>
         ) : (
           <Plot
+            ariaLabel={ariaLabel}
+            textAlternative={summary}
             data={figure.traces}
             layout={figure.layout}
             config={{ ...PLOTLY_CONFIG, scrollZoom: false }}

@@ -287,13 +287,6 @@
     "linePreview": " | export function BreachRow({ | breach,"
   },
   {
-    "file": "src/components/bridge-token-breakdown-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'BridgeTokenBreakdownChart' has too many lines (131). Maximum allowed is 100.",
-    "line": 56,
-    "linePreview": " | export function BridgeTokenBreakdownChart({ | snapshots,"
-  },
-  {
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 58. Maximum allowed is 15.",
@@ -306,20 +299,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 65 to the 18 allowed.",
     "line": 82,
     "linePreview": "): GlobalPoolEntry[] { | return sortedCopy(entries, (a, b) => { | const aKey = globalPoolKey(a);"
-  },
-  {
-    "file": "src/components/lp-concentration-chart.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'LpConcentrationChart' has a complexity of 25. Maximum allowed is 15.",
-    "line": 62,
-    "linePreview": " | export function LpConcentrationChart({ | positions,"
-  },
-  {
-    "file": "src/components/lp-concentration-chart.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'LpConcentrationChart' has too many lines (201). Maximum allowed is 100.",
-    "line": 62,
-    "linePreview": " | export function LpConcentrationChart({ | positions,"
   },
   {
     "file": "src/components/pool-header/deviation-cell.tsx",

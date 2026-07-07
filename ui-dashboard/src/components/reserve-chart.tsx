@@ -144,6 +144,8 @@ export function ReserveChart({
         aria-label={`Reserve history chart for ${sym0} and ${sym1}`}
       >
         <Plot
+          ariaLabel={`Reserve history chart for ${sym0} and ${sym1}`}
+          textAlternative={reserveSummary}
           data={[trace0, trace1]}
           layout={layout}
           config={PLOTLY_CONFIG}

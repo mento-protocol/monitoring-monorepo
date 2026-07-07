@@ -52,96 +52,10 @@ export function resolvePieLabel(
   return resolved === truncated ? truncated : resolved;
 }
 
-const fmtUsd = (v: number) =>
-  v >= 1_000_000
-    ? `$${(v / 1_000_000).toFixed(2)}M`
-    : v >= 1_000
-      ? `$${(v / 1_000).toFixed(1)}K`
-      : `$${v.toFixed(2)}`;
-
-function lpChartName(sym0?: string, sym1?: string): string {
-  return `LP concentration pie chart${sym0 && sym1 ? ` for ${sym0} and ${sym1}` : ""}`;
-}
-
-function lpPairLabel(sym0?: string, sym1?: string): string {
-  return `${sym0 ?? "Token 0"}/${sym1 ?? "Token 1"}`;
-}
-
-export function LpConcentrationChart({
-  positions,
-  totalLiquidity,
-  getLabel,
-  pool,
-  sym0,
-  sym1,
-  reserves0Raw = 0,
-  reserves1Raw = 0,
-  feedVal = null,
-  usdmIsToken0 = false,
-}: LpConcentrationChartProps) {
-  if (positions.length === 0 || totalLiquidity === BigInt(0)) return null;
-
-  const TOP_N = 10;
-  const top = positions.slice(0, TOP_N);
-  const rest = positions.slice(TOP_N);
-  const otherTotal = rest.reduce((acc, p) => acc + p.netLiquidity, BigInt(0));
-
-  const resolveLabel = (addr: string) => resolvePieLabel(addr, getLabel);
-
-  // Keep raw addresses as the slice key so Plotly never merges distinct LPs
-  // that happen to share the same human-readable label.
-  const labels = [
-    ...top.map((p) => p.address),
-    ...(otherTotal > BigInt(0) ? ["other"] : []),
-  ];
-  const displayLabels = [
-    ...top.map((p) => resolveLabel(p.address)),
-    ...(otherTotal > BigInt(0) ? ["Other"] : []),
-  ];
-
-  const toRelative = (v: bigint) =>
-    Number((v * BigInt(10_000)) / totalLiquidity) / 10000;
-  const values = [
-    ...top.map((p) => toRelative(p.netLiquidity)),
-    ...(otherTotal > BigInt(0) ? [toRelative(otherTotal)] : []),
-  ];
-
-  // Plotly renders HTML in customdata when interpolated via %{customdata}
-  // in hovertemplate. Labels come from user-controlled address-book entries,
-  // so escape here to prevent stored XSS. The legend (React JSX below)
-  // receives raw text, which React auto-escapes.
-  const customdata = [
-    ...top.map((p) => escapePlotText(resolveLabel(p.address))),
-    ...(otherTotal > BigInt(0) ? ["(multiple)"] : []),
-  ];
-
-  const hovertemplate =
-    "<b>%{customdata}</b><br>%{percent} of pool<br><extra></extra>";
-
-  const trace = {
-    type: "pie" as const,
-    hole: 0.4,
-    labels,
-    values,
-    customdata,
-    hovertemplate,
-    textinfo: "percent" as const,
-    sort: false,
-    direction: "clockwise" as const,
-    marker: {
-      colors: PIE_COLORS,
-      line: { color: "#1e293b", width: 2 },
-    },
-  };
-
-  const layout = {
-    ...PLOTLY_BASE_LAYOUT,
-    margin: { t: 8, r: 8, b: 8, l: 8 },
-    showlegend: false,
-    height: 280,
-    autosize: true,
-  };
-
+function getLpConcentrationStats(
+  positions: LpPosition[],
+  totalLiquidity: bigint,
+) {
   const totalPositions = positions.length;
   const topShare =
     positions.length > 0
@@ -163,9 +77,6 @@ export function LpConcentrationChart({
           ) / 100
         ).toFixed(1)
       : "0";
-
-  // Herfindahl-Hirschman Index: sum of squared market shares (0-10000 scale).
-  // HHI < 1500 = competitive, 1500-2500 = moderate, > 2500 = concentrated.
   const hhi =
     totalLiquidity > BigInt(0)
       ? positions.reduce((acc, p) => {
@@ -176,6 +87,104 @@ export function LpConcentrationChart({
         }, 0) / 10_000
       : 0;
 
+  return { totalPositions, topShare, top3Share, hhi };
+}
+
+function lpConcentrationTextAlternative(
+  totalPositions: number,
+  topShare: string,
+  top3Share: string,
+  hhi: number,
+) {
+  return `LP concentration pie chart for ${totalPositions} LPs. The top holder owns ${topShare}% of liquidity, the top 3 own ${top3Share}%, and the HHI concentration score is ${hhi.toFixed(0)}.`;
+}
+
+function buildLpConcentrationModel(
+  positions: LpPosition[],
+  totalLiquidity: bigint,
+  getLabel: LpConcentrationChartProps["getLabel"],
+) {
+  const TOP_N = 10;
+  const top = positions.slice(0, TOP_N);
+  const rest = positions.slice(TOP_N);
+  const otherTotal = rest.reduce((acc, p) => acc + p.netLiquidity, BigInt(0));
+  const resolveLabel = (addr: string) => resolvePieLabel(addr, getLabel);
+  const labels = [
+    ...top.map((p) => p.address),
+    ...(otherTotal > BigInt(0) ? ["other"] : []),
+  ];
+  const displayLabels = [
+    ...top.map((p) => resolveLabel(p.address)),
+    ...(otherTotal > BigInt(0) ? ["Other"] : []),
+  ];
+  const toRelative = (v: bigint) =>
+    Number((v * BigInt(10_000)) / totalLiquidity) / 10000;
+  const values = [
+    ...top.map((p) => toRelative(p.netLiquidity)),
+    ...(otherTotal > BigInt(0) ? [toRelative(otherTotal)] : []),
+  ];
+  const customdata = [
+    ...top.map((p) => escapePlotText(resolveLabel(p.address))),
+    ...(otherTotal > BigInt(0) ? ["(multiple)"] : []),
+  ];
+
+  return {
+    labels,
+    displayLabels,
+    values,
+    trace: buildLpTrace(labels, values, customdata),
+    layout: lpConcentrationLayout(),
+    ...getLpConcentrationStats(positions, totalLiquidity),
+  };
+}
+
+function buildLpTrace(
+  labels: string[],
+  values: number[],
+  customdata: string[],
+) {
+  return {
+    type: "pie" as const,
+    hole: 0.4,
+    labels,
+    values,
+    customdata,
+    hovertemplate:
+      "<b>%{customdata}</b><br>%{percent} of pool<br><extra></extra>",
+    textinfo: "percent" as const,
+    sort: false,
+    direction: "clockwise" as const,
+    marker: {
+      colors: PIE_COLORS,
+      line: { color: "#1e293b", width: 2 },
+    },
+  };
+}
+
+function lpConcentrationLayout() {
+  return {
+    ...PLOTLY_BASE_LAYOUT,
+    margin: { t: 8, r: 8, b: 8, l: 8 },
+    showlegend: false,
+    height: 280,
+    autosize: true,
+  };
+}
+
+function getLpPoolData({
+  pool,
+  reserves0Raw,
+  reserves1Raw,
+  feedVal,
+  usdmIsToken0,
+  sym1,
+}: Pick<
+  Required<LpConcentrationChartProps>,
+  "reserves0Raw" | "reserves1Raw" | "feedVal" | "usdmIsToken0"
+> & {
+  pool: Pool | null | undefined;
+  sym1: string | undefined;
+}) {
   const hasPoolData = Boolean(pool) && (reserves0Raw > 0 || reserves1Raw > 0);
   const usdmIsToken1 = USDM_SYMBOLS.has(sym1 ?? "");
   const hasUsdmSide = usdmIsToken0 !== usdmIsToken1;
@@ -186,14 +195,46 @@ export function LpConcentrationChart({
         : reserves0Raw * feedVal + reserves1Raw
       : null;
 
-  const fmtReserve = (v: number, sym: string) =>
-    v >= 1_000_000
-      ? `${(v / 1_000_000).toFixed(2)}M ${sym}`
-      : v >= 1_000
-        ? `${(v / 1_000).toFixed(1)}K ${sym}`
-        : `${v.toFixed(2)} ${sym}`;
+  return { hasPoolData, totalTvl };
+}
 
-  const concentrationSummary = `LP concentration for ${lpPairLabel(sym0, sym1)}: ${totalPositions} liquidity providers. Top holder ${topShare}% of the pool, top 3 hold ${top3Share}%. Herfindahl-Hirschman Index ${hhi.toFixed(0)}.`;
+const fmtUsd = (v: number) =>
+  v >= 1_000_000
+    ? `$${(v / 1_000_000).toFixed(2)}M`
+    : v >= 1_000
+      ? `$${(v / 1_000).toFixed(1)}K`
+      : `$${v.toFixed(2)}`;
+
+const fmtReserve = (v: number, sym: string) =>
+  v >= 1_000_000
+    ? `${(v / 1_000_000).toFixed(2)}M ${sym}`
+    : v >= 1_000
+      ? `${(v / 1_000).toFixed(1)}K ${sym}`
+      : `${v.toFixed(2)} ${sym}`;
+
+export function LpConcentrationChart({
+  positions,
+  totalLiquidity,
+  getLabel,
+  pool,
+  sym0,
+  sym1,
+  reserves0Raw = 0,
+  reserves1Raw = 0,
+  feedVal = null,
+  usdmIsToken0 = false,
+}: LpConcentrationChartProps) {
+  if (positions.length === 0 || totalLiquidity === BigInt(0)) return null;
+
+  const model = buildLpConcentrationModel(positions, totalLiquidity, getLabel);
+  const poolData = getLpPoolData({
+    pool,
+    reserves0Raw,
+    reserves1Raw,
+    feedVal,
+    usdmIsToken0,
+    sym1,
+  });
 
   return (
     <div className="mb-4 overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4">
@@ -204,94 +245,130 @@ export function LpConcentrationChart({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1 lg:max-w-3xl">
           <div className="flex flex-col items-start gap-4 xl:flex-row xl:items-start">
-            <div
-              role="figure"
-              aria-label={lpChartName(sym0, sym1)}
-              className="w-full max-w-[360px] shrink-0"
-            >
+            <div className="w-full max-w-[360px] shrink-0">
               <Plot
-                data={[trace]}
-                layout={layout}
+                ariaLabel="LP concentration pie chart"
+                textAlternative={lpConcentrationTextAlternative(
+                  model.totalPositions,
+                  model.topShare,
+                  model.top3Share,
+                  model.hhi,
+                )}
+                data={[model.trace]}
+                layout={model.layout}
                 config={PLOTLY_CONFIG}
                 style={{ width: "100%", height: 280 }}
                 useResizeHandler
               />
             </div>
-            <p className="sr-only">{concentrationSummary}</p>
 
-            <div className="min-w-0 flex-1 xl:pt-2">
-              <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                Legend
-              </div>
-              <ul className="grid gap-2 sm:grid-cols-2">
-                {displayLabels.map((label, i) => {
-                  const sliceKey = labels[i] ?? `slice-${label}`;
-                  return (
-                    <li
-                      key={sliceKey}
-                      className="flex items-center gap-2 text-xs text-slate-300"
-                    >
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{
-                          backgroundColor: PIE_COLORS[i % PIE_COLORS.length],
-                        }}
-                      />
-                      <span className="truncate">{label}</span>
-                      <span className="ml-auto shrink-0 font-mono tabular-nums text-slate-500">
-                        {(values[i]! * 100).toFixed(1)}%
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+            <LpConcentrationLegend
+              labels={model.labels}
+              displayLabels={model.displayLabels}
+              values={model.values}
+            />
           </div>
         </div>
 
         <div className="w-full shrink-0 lg:w-64">
-          <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3">
-            <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-slate-500">
-              Pool at a glance
-            </div>
-
-            <div className="space-y-2 border-b border-slate-700/70 pb-3">
-              <StatRow label="Total LPs" value={String(totalPositions)} />
-              <StatRow label="Top holder" value={`${topShare}%`} />
-              <StatRow label="Top 3 share" value={`${top3Share}%`} />
-              <StatRow
-                label="HHI"
-                value={hhi.toFixed(0)}
-                highlight={hhi > 2500}
-              />
-            </div>
-
-            {hasPoolData && (
-              <div className="mt-3 space-y-2">
-                {sym0 && (
-                  <StatRow
-                    label={sym0}
-                    value={fmtReserve(reserves0Raw, sym0)}
-                  />
-                )}
-                {sym1 && (
-                  <StatRow
-                    label={sym1}
-                    value={fmtReserve(reserves1Raw, sym1)}
-                  />
-                )}
-                {totalTvl !== null && (
-                  <StatRow
-                    label="Estimated TVL"
-                    value={fmtUsd(totalTvl)}
-                    highlight
-                  />
-                )}
-              </div>
-            )}
-          </div>
+          <PoolAtAGlance
+            model={model}
+            poolData={poolData}
+            sym0={sym0}
+            sym1={sym1}
+            reserves0Raw={reserves0Raw}
+            reserves1Raw={reserves1Raw}
+          />
         </div>
       </div>
+    </div>
+  );
+}
+
+function LpConcentrationLegend({
+  labels,
+  displayLabels,
+  values,
+}: {
+  labels: string[];
+  displayLabels: string[];
+  values: number[];
+}) {
+  return (
+    <div className="min-w-0 flex-1 xl:pt-2">
+      <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+        Legend
+      </div>
+      <ul className="grid gap-2 sm:grid-cols-2">
+        {displayLabels.map((label, i) => (
+          <li
+            key={labels[i] ?? `slice-${label}`}
+            className="flex items-center gap-2 text-xs text-slate-300"
+          >
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+            />
+            <span className="truncate">{label}</span>
+            <span className="ml-auto shrink-0 font-mono tabular-nums text-slate-500">
+              {(values[i]! * 100).toFixed(1)}%
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PoolAtAGlance({
+  model,
+  poolData,
+  sym0,
+  sym1,
+  reserves0Raw,
+  reserves1Raw,
+}: {
+  model: ReturnType<typeof buildLpConcentrationModel>;
+  poolData: ReturnType<typeof getLpPoolData>;
+  sym0: string | undefined;
+  sym1: string | undefined;
+  reserves0Raw: number;
+  reserves1Raw: number;
+}) {
+  return (
+    <div className="rounded-md border border-slate-700 bg-slate-800/60 p-3">
+      <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+        Pool at a glance
+      </div>
+
+      <div className="space-y-2 border-b border-slate-700/70 pb-3">
+        <StatRow label="Total LPs" value={String(model.totalPositions)} />
+        <StatRow label="Top holder" value={`${model.topShare}%`} />
+        <StatRow label="Top 3 share" value={`${model.top3Share}%`} />
+        <StatRow
+          label="HHI"
+          value={model.hhi.toFixed(0)}
+          highlight={model.hhi > 2500}
+        />
+      </div>
+
+      {poolData.hasPoolData && (
+        <div className="mt-3 space-y-2">
+          {sym0 && (
+            <StatRow label={sym0} value={fmtReserve(reserves0Raw, sym0)} />
+          )}
+          {sym1 && (
+            <StatRow label={sym1} value={fmtReserve(reserves1Raw, sym1)} />
+          )}
+          {poolData.totalTvl !== null && (
+            <StatRow
+              label="Estimated TVL"
+              value={fmtUsd(poolData.totalTvl)}
+              highlight
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

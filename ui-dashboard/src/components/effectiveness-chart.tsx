@@ -117,6 +117,8 @@ export function EffectivenessChart({ events }: EffectivenessChartProps) {
       </p>
       <div role="figure" aria-label="Rebalance effectiveness trend chart">
         <Plot
+          ariaLabel="Rebalance effectiveness trend chart"
+          textAlternative={effectivenessSummary}
           data={[trace]}
           layout={STATIC_LAYOUT}
           config={PLOTLY_CONFIG}

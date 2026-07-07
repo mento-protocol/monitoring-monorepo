@@ -200,6 +200,8 @@ export function SnapshotChart({
         aria-label={`Daily swap volume chart for ${token0Symbol} and ${token1Symbol}`}
       >
         <Plot
+          ariaLabel={`Daily swap volume chart for ${token0Symbol} and ${token1Symbol}`}
+          textAlternative={swapVolumeSummary}
           data={[volumeTrace0, volumeTrace1, cumSwapTrace]}
           layout={makeSnapshotLayout(shapes)}
           config={PLOTLY_CONFIG}
