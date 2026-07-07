@@ -55,6 +55,7 @@ import {
   formatFee,
   hasFeeData,
 } from "@/components/global-pools-table/formatting";
+import { uptimeColorClass, uptimeTierGlyph } from "@/lib/health";
 
 const CELO_NETWORK: Network = {
   id: "celo-mainnet",
@@ -511,6 +512,80 @@ describe("GlobalPoolsTable — TVL cell", () => {
     );
     expect(html).toContain("Week-over-week TVL change: </span>-1.10%");
     expect(html).toContain("text-red-400");
+  });
+});
+
+describe("GlobalPoolsTable — Uptime cell a11y (#1116 / #1117)", () => {
+  // 95% → "good" tier (90-99 band). No lastOracleSnapshotTimestamp, so the
+  // live open-interval carry is skipped and pct reads the stored counters
+  // directly (9500 / 10000).
+  const UPTIME_POOL = {
+    id: "uptime-pool",
+    healthBinarySeconds: "9500",
+    healthTotalSeconds: "10000",
+    breachCount: 0,
+  };
+
+  it("routes the uptime diagnostic through an accessible tooltip, not a native title", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry(UPTIME_POOL)]} />,
+    );
+    // Diagnostic is exposed via role="tooltip" + aria-describedby (keyboard /
+    // tap reachable), never a native `title` tooltip.
+    expect(html).toContain('role="tooltip"');
+    expect(html).toContain("95.000% uptime (oracle freshness");
+    expect(html).toContain("aria-describedby");
+    expect(html).not.toContain('title="95.000% uptime');
+  });
+
+  it("routes the health diagnostic through an accessible tooltip, not a native title", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry(UPTIME_POOL)]} />,
+    );
+    // Both the Health badge and the Uptime cell moved their diagnostics off the
+    // native `title` into the accessible Tooltip (role="tooltip" +
+    // aria-describedby), so at least two tooltips render in the row.
+    const tooltipCount = (html.match(/role="tooltip"/g) || []).length;
+    expect(tooltipCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("exposes a non-color severity signal (shape glyph + sr-only tier label)", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry(UPTIME_POOL)]} />,
+    );
+    // sr-only tier name so the severity is announced without relying on color.
+    expect(html).toContain("good uptime");
+    // The tier glyph is rendered but hidden from the a11y tree.
+    expect(html).toContain("◆");
+    // The uptime number itself stays on a neutral, non-alarm color. Assert the
+    // class is on the uptime value specifically (text-slate-200 also appears on
+    // other cells), so this can't pass on an unrelated column.
+    expect(html).toContain('text-slate-200">95.00%');
+  });
+});
+
+describe("uptime severity encoding (#1117)", () => {
+  it("keeps the uptime number off the emerald/amber/red alarm palette", () => {
+    for (const pct of [99.9, 95, 80, 50]) {
+      const cls = uptimeColorClass(pct);
+      expect(cls).not.toMatch(/emerald|amber|red|yellow/);
+    }
+    // Non-finite guard still resolves to a neutral muted class.
+    expect(uptimeColorClass(Number.NaN)).not.toMatch(
+      /emerald|amber|red|yellow/,
+    );
+  });
+
+  it("maps each tier to a visually distinct, colorblind-safe glyph", () => {
+    const glyphs = [99.5, 95, 80, 50].map((p) => uptimeTierGlyph(p)?.glyph);
+    expect(glyphs).toEqual(["●", "◆", "▲", "■"]);
+    // Four distinct silhouettes.
+    expect(new Set(glyphs).size).toBe(4);
+    // Every tier carries an accessible label for its aria-hidden glyph.
+    for (const pct of [99.5, 95, 80, 50]) {
+      expect(uptimeTierGlyph(pct)?.label).toMatch(/uptime$/);
+    }
+    expect(uptimeTierGlyph(Number.NaN)).toBeNull();
   });
 });
 
