@@ -15,6 +15,12 @@ export const SUMMARY_ID = `${ETHEREUM_CHAIN_ID}-steth`;
 export const FIRST_TRACKED_STETH_BLOCK = 19_111_760;
 export const FIRST_TRACKED_STETH_TX =
   "0x297cbad231aa43b915ade1b699b8b0257babe6fff0b62e564d422daace021731";
+export const V3_REVENUE_LAUNCH_TIMESTAMP = 1_772_496_000n; // 2026-03-03T00:00:00Z
+// Last Ethereum block before the v3 revenue launch timestamp. Derived via
+// ethereum.publicnode.com RPC on 2026-07-07:
+// block 24573203 timestamp 1772495999; block 24573204 timestamp 1772496011.
+export const V3_REVENUE_LAUNCH_BLOCK = 24_573_203;
+export const STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL = 7_200;
 
 const TRACKED_WALLET_SET = new Set<string>(TRACKED_STETH_WALLETS);
 
@@ -22,15 +28,21 @@ export type StethContext = Pick<
   EvmOnEventContext,
   | "StethCostBasisLot"
   | "StethPosition"
+  | "StethWalletLaunchBaseline"
+  | "StethYieldDailySnapshot"
   | "StethYieldMovement"
   | "StethYieldSummary"
+  | "effect"
   | "isPreload"
 >;
 
-export type EventMeta = {
+export type BlockMeta = {
   chainId: number;
   blockNumber: bigint;
   blockTimestamp: bigint;
+};
+
+export type EventMeta = BlockMeta & {
   logIndex: number;
   txHash: string;
 };

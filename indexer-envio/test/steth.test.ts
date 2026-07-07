@@ -13,12 +13,25 @@ import {
   FIRST_TRACKED_STETH_TX,
   STETH_ADDRESS,
   TRACKED_STETH_WALLETS,
+  V3_REVENUE_LAUNCH_BLOCK,
+  V3_REVENUE_LAUNCH_TIMESTAMP,
 } from "../src/handlers/steth/shared.ts";
+import {
+  recordStethWalletLaunchBaselines,
+  recordStethYieldDailySnapshots,
+} from "../src/handlers/steth/dailySnapshots.ts";
+import {
+  _clearMockStethBalanceOf,
+  _setMockStethBalanceOf,
+} from "../src/rpc/steth.ts";
+import { stethBalanceOfEffect } from "../src/rpc/effects.ts";
 import { ZERO_ADDRESS } from "../src/constants.ts";
 
 type MockDb = MockDbWith<{
   StethCostBasisLot: EntityCollection;
+  StethWalletLaunchBaseline: WritableEntity & EntityCollection;
   StethPosition: WritableEntity & EntityReader;
+  StethYieldDailySnapshot: WritableEntity & EntityCollection;
   StethYieldMovement: EntityCollection;
   StethYieldSummary: WritableEntity & EntityReader;
 }>;
@@ -35,6 +48,10 @@ const describeReserveYield =
 
 function steth(value: number): bigint {
   return BigInt(value) * WAD;
+}
+
+function dayAfterLaunch(day: number): bigint {
+  return V3_REVENUE_LAUNCH_TIMESTAMP + BigInt(day) * 86_400n;
 }
 
 function txHash(index: number): string {
@@ -84,9 +101,90 @@ function summary(mockDb: MockDb) {
   return row;
 }
 
+function stethSnapshotContext(
+  mockDb: MockDb,
+  balances: Record<string, bigint | null>,
+): Parameters<typeof recordStethYieldDailySnapshots>[0] {
+  return {
+    StethPosition: {
+      get: async (id: string) => mockDb.entities.StethPosition.get(id),
+      set: (entity: { id: string }) => {
+        mockDb.entities.StethPosition.set(entity);
+      },
+    },
+    StethCostBasisLot: {
+      set: (entity: { id: string }) => {
+        mockDb.entities.StethCostBasisLot.set(entity);
+      },
+    },
+    StethWalletLaunchBaseline: {
+      get: async (id: string) =>
+        mockDb.entities.StethWalletLaunchBaseline.get(id),
+      set: (entity: { id: string }) => {
+        mockDb.entities.StethWalletLaunchBaseline.set(entity);
+      },
+    },
+    StethYieldDailySnapshot: {
+      get: async (id: string) =>
+        mockDb.entities.StethYieldDailySnapshot.get(id),
+      set: (entity: { id: string }) => {
+        mockDb.entities.StethYieldDailySnapshot.set(entity);
+      },
+    },
+    effect: async (effect, input) => {
+      if (effect === stethBalanceOfEffect) {
+        const account = input.account.toLowerCase();
+        return balances[account] ?? null;
+      }
+      throw new Error("unexpected effect");
+    },
+    isPreload: false,
+  } as unknown as Parameters<typeof recordStethYieldDailySnapshots>[0];
+}
+
+function dailySnapshots(mockDb: MockDb) {
+  return mockDb.entities.StethYieldDailySnapshot.getAll() as Array<{
+    wallet: string;
+    timestamp: bigint;
+    balanceAmount: bigint;
+    principalAmount: bigint;
+    realizedYieldAmount: bigint;
+    unrealizedYieldAmount: bigint;
+    totalEarnedYieldAmount: bigint;
+    dailyEarnedYieldAmount: bigint;
+  }>;
+}
+
+function walletSnapshot(mockDb: MockDb, wallet: string, timestamp: bigint) {
+  const row = dailySnapshots(mockDb).find(
+    (snapshot) =>
+      snapshot.wallet === wallet && snapshot.timestamp === timestamp,
+  );
+  assert.ok(row, `expected stETH snapshot for ${wallet} at ${timestamp}`);
+  return row;
+}
+
+function setStethBalance(
+  blockNumber: number | bigint,
+  account: string,
+  value: bigint | null,
+): void {
+  _setMockStethBalanceOf({
+    chainId: ETHEREUM_CHAIN_ID,
+    tokenAddress: STETH_ADDRESS,
+    account,
+    blockNumber: BigInt(blockNumber),
+    value,
+  });
+}
+
 // Run through `pnpm indexer:reserve-yield:test`, which codegens the dedicated
 // chain-1 reserve-yield config before executing these event-level tests.
 describeReserveYield("stETH reserve-yield ledger", () => {
+  afterEach(() => {
+    _clearMockStethBalanceOf();
+  });
+
   it("records the first tracked stETH mint as FIFO principal", async () => {
     let mockDb = MockDb.createMockDb();
 
@@ -231,5 +329,191 @@ describeReserveYield("stETH reserve-yield ledger", () => {
 
     assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 0);
     assert.equal(mockDb.entities.StethYieldSummary.get("1-steth"), undefined);
+  });
+
+  it("baselines pre-launch rebases as principal before daily actuals accrue", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await transfer(mockDb, 100, 1, EXTERNAL, RESERVE_SAFE, steth(100));
+
+    const context = stethSnapshotContext(mockDb, {
+      [RESERVE_SAFE]: steth(110),
+      [OPS_SAFE]: 0n,
+    });
+    assert.equal(
+      await recordStethWalletLaunchBaselines(
+        context,
+        V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+      ),
+      true,
+    );
+
+    const baseline = mockDb.entities.StethWalletLaunchBaseline.get(
+      `1-steth-${RESERVE_SAFE}-launch`,
+    ) as {
+      balanceAmount: bigint;
+      principalTopUpAmount: bigint;
+      realizedYieldAmountAtLaunch: bigint;
+    };
+    assert.equal(baseline.balanceAmount, steth(110));
+    assert.equal(baseline.principalTopUpAmount, steth(10));
+    assert.equal(baseline.realizedYieldAmountAtLaunch, 0n);
+
+    const reservePosition = mockDb.entities.StethPosition.get(
+      `1-${RESERVE_SAFE}`,
+    ) as { balance: bigint; principalAmount: bigint };
+    assert.equal(reservePosition.balance, steth(110));
+    assert.equal(reservePosition.principalAmount, steth(110));
+    assert.equal(
+      walletSnapshot(mockDb, RESERVE_SAFE, V3_REVENUE_LAUNCH_TIMESTAMP)
+        .totalEarnedYieldAmount,
+      0n,
+    );
+
+    const day1 = dayAfterLaunch(1);
+    assert.equal(
+      await recordStethYieldDailySnapshots(
+        stethSnapshotContext(mockDb, {
+          [RESERVE_SAFE]: steth(112),
+          [OPS_SAFE]: 0n,
+        }),
+        {
+          chainId: ETHEREUM_CHAIN_ID,
+          blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK + 7_200),
+          blockTimestamp: day1,
+        },
+      ),
+      true,
+    );
+    const snapshot = walletSnapshot(mockDb, RESERVE_SAFE, day1);
+    assert.equal(snapshot.principalAmount, steth(110));
+    assert.equal(snapshot.totalEarnedYieldAmount, steth(2));
+    assert.equal(snapshot.dailyEarnedYieldAmount, steth(2));
+  });
+
+  it("keeps post-launch stETH yield with the source wallet after an internal transfer", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await transfer(mockDb, 100, 1, EXTERNAL, RESERVE_SAFE, steth(100));
+
+    await recordStethWalletLaunchBaselines(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: steth(100),
+        [OPS_SAFE]: 0n,
+      }),
+      V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+    );
+
+    const day1 = dayAfterLaunch(1);
+    await recordStethYieldDailySnapshots(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: steth(110),
+        [OPS_SAFE]: 0n,
+      }),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK + 7_200),
+        blockTimestamp: day1,
+      },
+    );
+
+    const transferBlock = V3_REVENUE_LAUNCH_BLOCK + 14_400;
+    setStethBalance(transferBlock, RESERVE_SAFE, steth(60));
+    setStethBalance(transferBlock, OPS_SAFE, steth(50));
+    mockDb = await transfer(
+      mockDb,
+      transferBlock,
+      2,
+      RESERVE_SAFE,
+      OPS_SAFE,
+      steth(50),
+      Number(dayAfterLaunch(2)),
+    );
+
+    const day2 = dayAfterLaunch(2);
+    await recordStethYieldDailySnapshots(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: steth(60),
+        [OPS_SAFE]: steth(50),
+      }),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: BigInt(transferBlock),
+        blockTimestamp: day2,
+      },
+    );
+    const reserveSnapshot = walletSnapshot(mockDb, RESERVE_SAFE, day2);
+    const opsSnapshot = walletSnapshot(mockDb, OPS_SAFE, day2);
+
+    assert.equal(reserveSnapshot.balanceAmount, steth(60));
+    assert.equal(reserveSnapshot.principalAmount, steth(50));
+    assert.equal(reserveSnapshot.totalEarnedYieldAmount, steth(10));
+    assert.equal(reserveSnapshot.dailyEarnedYieldAmount, 0n);
+    assert.equal(opsSnapshot.balanceAmount, steth(50));
+    assert.equal(opsSnapshot.principalAmount, steth(50));
+    assert.equal(opsSnapshot.totalEarnedYieldAmount, 0n);
+  });
+
+  it("skips stETH daily snapshots when a historical balance read is unavailable", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await transfer(mockDb, 100, 1, EXTERNAL, RESERVE_SAFE, steth(100));
+
+    await recordStethWalletLaunchBaselines(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: steth(100),
+        [OPS_SAFE]: 0n,
+      }),
+      V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+    );
+    const before = dailySnapshots(mockDb).length;
+
+    assert.equal(
+      await recordStethYieldDailySnapshots(
+        stethSnapshotContext(mockDb, {
+          [RESERVE_SAFE]: steth(101),
+          [OPS_SAFE]: null,
+        }),
+        {
+          chainId: ETHEREUM_CHAIN_ID,
+          blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK + 7_200),
+          blockTimestamp: dayAfterLaunch(1),
+        },
+      ),
+      false,
+    );
+    assert.equal(dailySnapshots(mockDb).length, before);
+  });
+
+  it("skips the stETH snapshot batch when a tracked wallet baseline is missing", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await transfer(mockDb, 100, 1, EXTERNAL, RESERVE_SAFE, steth(100));
+    mockDb.entities.StethWalletLaunchBaseline.set({
+      id: `1-steth-${RESERVE_SAFE}-launch`,
+      chainId: ETHEREUM_CHAIN_ID,
+      token: STETH_ADDRESS,
+      wallet: RESERVE_SAFE,
+      launchBlock: BigInt(V3_REVENUE_LAUNCH_BLOCK),
+      launchTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
+      balanceAmount: steth(100),
+      principalTopUpAmount: 0n,
+      realizedYieldAmountAtLaunch: 0n,
+      transferredOutYieldAmountAtLaunch: 0n,
+      sampledAtBlock: BigInt(V3_REVENUE_LAUNCH_BLOCK),
+      sampledAtTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+    });
+
+    assert.equal(
+      await recordStethYieldDailySnapshots(
+        stethSnapshotContext(mockDb, {
+          [RESERVE_SAFE]: steth(101),
+          [OPS_SAFE]: 0n,
+        }),
+        {
+          chainId: ETHEREUM_CHAIN_ID,
+          blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK + 7_200),
+          blockTimestamp: dayAfterLaunch(1),
+        },
+      ),
+      false,
+    );
+    assert.equal(dailySnapshots(mockDb).length, 0);
   });
 });

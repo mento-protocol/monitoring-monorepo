@@ -2,10 +2,10 @@ import { currentDayBucket, dayBucket, isoDate } from "./utils";
 import type {
   ActualRevenueAvailability,
   BuildCanonicalRevenueArgs,
-  SusdsYieldDailySnapshotRow,
+  ReserveYieldDailySnapshotRow,
 } from "./types";
 
-function hasSusdsReserveYieldSignal(
+function hasReserveYieldSignal(
   reserveYield: BuildCanonicalRevenueArgs["reserveYield"],
 ): boolean {
   if (reserveYield === null) return false;
@@ -17,12 +17,13 @@ function hasSusdsReserveYieldSignal(
   if (earnedYieldUsd !== null && earnedYieldUsd > 0) return true;
   return reserveYield.holdings.some(
     (holding) =>
-      holding.assetSymbol.toUpperCase() === "SUSDS" && holding.principalUsd > 0,
+      ["SUSDS", "STETH"].includes(holding.assetSymbol.toUpperCase()) &&
+      holding.principalUsd > 0,
   );
 }
 
 function latestReserveSnapshotBucket(
-  reserveDailySnapshots: ReadonlyArray<SusdsYieldDailySnapshotRow>,
+  reserveDailySnapshots: ReadonlyArray<ReserveYieldDailySnapshotRow>,
 ): number | null {
   let latest: number | null = null;
   for (const row of reserveDailySnapshots) {
@@ -52,15 +53,43 @@ export function buildActualAvailability(
   const reserveHistoryUnavailable =
     args.reserveHistoryFailed === true ||
     args.reserveHistoryUnavailable === true ||
+    args.reserveHistoryUnpriced === true ||
     (args.reserveDailySnapshots.length === 0 &&
       (args.reserveYieldFailed === true ||
-        hasSusdsReserveYieldSignal(args.reserveYield)));
+        hasReserveYieldSignal(args.reserveYield)));
   return {
     reserve: !reserveHistoryUnavailable,
     reserveStaleAfter: reserveStaleAfterBucket(args),
     swap: args.swapFeesFailed !== true,
     cdp: args.cdpDailySeriesFailed !== true,
   };
+}
+
+function reservePartialReason(args: BuildCanonicalRevenueArgs): string | null {
+  if (args.reserveHistoryFailed) {
+    return "Reserve earned-yield history failed to load.";
+  }
+  if (args.reserveYield?.earnedYieldError) {
+    return `Reserve earned-yield actuals partial: ${args.reserveYield.earnedYieldError}`;
+  }
+  if (args.reserveHistoryUnavailable) {
+    return "Reserve earned-yield history is not indexed yet.";
+  }
+  if (args.reserveHistoryUnpriced) {
+    return "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.";
+  }
+  if (args.reserveDailySnapshots.length > 0) {
+    const staleAfter = reserveStaleAfterBucket(args);
+    return staleAfter === null
+      ? null
+      : `Reserve earned-yield history is stale; latest snapshot is ${isoDate(staleAfter)}.`;
+  }
+  if (args.reserveYieldFailed) {
+    return "Reserve earned-yield actuals unavailable: current reserve yield failed to load before any snapshots were indexed.";
+  }
+  return hasReserveYieldSignal(args.reserveYield)
+    ? "Reserve earned-yield history has no snapshots yet."
+    : null;
 }
 
 export function buildPartialReasons(args: BuildCanonicalRevenueArgs): string[] {
@@ -75,30 +104,8 @@ export function buildPartialReasons(args: BuildCanonicalRevenueArgs): string[] {
   if (!args.cdpDailySeriesFailed && args.cdpInputsApproximate) {
     reasons.push("CDP borrowing history is approximate.");
   }
-  if (args.reserveHistoryFailed) {
-    reasons.push("Reserve earned-yield history failed to load.");
-  } else if (args.reserveHistoryUnavailable) {
-    reasons.push("Reserve earned-yield history is not indexed yet.");
-  } else if (
-    args.reserveYieldFailed &&
-    args.reserveDailySnapshots.length === 0
-  ) {
-    reasons.push(
-      "Reserve earned-yield actuals unavailable: current reserve yield failed to load before any snapshots were indexed.",
-    );
-  } else if (
-    args.reserveDailySnapshots.length === 0 &&
-    hasSusdsReserveYieldSignal(args.reserveYield)
-  ) {
-    reasons.push("Reserve earned-yield history has no sUSDS snapshots yet.");
-  } else {
-    const staleAfter = reserveStaleAfterBucket(args);
-    if (staleAfter !== null) {
-      reasons.push(
-        `Reserve earned-yield history is stale; latest snapshot is ${isoDate(staleAfter)}.`,
-      );
-    }
-  }
+  const reserveReason = reservePartialReason(args);
+  if (reserveReason !== null) reasons.push(reserveReason);
   if (args.reserveHistoryTruncated) {
     reasons.push("Reserve earned-yield history exceeded the pagination cap.");
   }

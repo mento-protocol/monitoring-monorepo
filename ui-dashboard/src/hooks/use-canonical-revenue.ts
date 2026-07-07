@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import {
   buildCanonicalRevenue,
   type CanonicalRevenueResult,
-  type SusdsYieldDailySnapshotRow,
+  type ReserveYieldDailySnapshotRow,
 } from "@/lib/canonical-revenue";
 import type { NetworkData } from "@/lib/fetch-all-networks";
 import type {
@@ -18,7 +18,7 @@ export type UseCanonicalRevenueArgs = {
   cdpDailySeries: ReadonlyArray<CdpBorrowingFeeSeriesPoint>;
   cdpMarkets: ReadonlyArray<CdpBorrowingRevenueMarket>;
   reserveYield: ReserveYieldResponse | null;
-  reserveDailySnapshots: ReadonlyArray<SusdsYieldDailySnapshotRow>;
+  reserveDailySnapshots: ReadonlyArray<ReserveYieldDailySnapshotRow>;
   reserveHistoryUnavailable: boolean;
   reserveHistoryFailed: boolean;
   reserveHistoryTruncated: boolean;

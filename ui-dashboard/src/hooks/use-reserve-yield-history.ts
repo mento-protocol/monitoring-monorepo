@@ -3,14 +3,21 @@
 import useSWR from "swr";
 import { GraphQLClient } from "graphql-request";
 import { NETWORKS } from "@/lib/networks";
-import { SUSDS_YIELD_DAILY_SNAPSHOTS } from "@/lib/queries";
+import {
+  STETH_YIELD_DAILY_SNAPSHOTS,
+  SUSDS_YIELD_DAILY_SNAPSHOTS,
+} from "@/lib/queries";
 import { REQUEST_TIMEOUT_MS } from "@/lib/fetch-all-networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import { SWR_KEY_RESERVE_YIELD_HISTORY } from "@/lib/swr-keys";
-import type { SusdsYieldDailySnapshotRow } from "@/lib/canonical-revenue";
+import type {
+  ReserveYieldDailySnapshotRow,
+  StethYieldDailySnapshotRow,
+  SusdsYieldDailySnapshotRow,
+} from "@/lib/canonical-revenue";
 
 export type ReserveYieldHistoryResult = {
-  rows: SusdsYieldDailySnapshotRow[];
+  rows: ReserveYieldDailySnapshotRow[];
   isLoading: boolean;
   hasError: boolean;
   unavailable: boolean;
@@ -21,8 +28,12 @@ type SusdsYieldDailySnapshotsResponse = {
   SusdsYieldDailySnapshot: SusdsYieldDailySnapshotRow[];
 };
 
+type StethYieldDailySnapshotsResponse = {
+  StethYieldDailySnapshot: StethYieldDailySnapshotRow[];
+};
+
 type SnapshotPageResult = {
-  rows: SusdsYieldDailySnapshotRow[];
+  rows: ReserveYieldDailySnapshotRow[];
   unavailable: boolean;
   truncated: boolean;
 };
@@ -41,20 +52,21 @@ function reserveYieldHistoryHasuraUrl(): string {
 
 async function requestWithTimeout<T>(
   client: GraphQLClient,
+  document: string,
   variables: Record<string, unknown>,
   signal: AbortSignal,
 ): Promise<T> {
   return client.request<T>({
-    document: SUSDS_YIELD_DAILY_SNAPSHOTS,
+    document,
     variables,
     signal,
   });
 }
 
-function isMissingSusdsYieldDailySnapshotEntity(err: unknown): boolean {
+function isMissingEntity(err: unknown, entity: string): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return (
-    message.includes("SusdsYieldDailySnapshot") &&
+    message.includes(entity) &&
     (message.includes("not found in type") ||
       message.includes("Cannot query field"))
   );
@@ -62,33 +74,106 @@ function isMissingSusdsYieldDailySnapshotEntity(err: unknown): boolean {
 
 async function fetchReserveYieldHistory(): Promise<SnapshotPageResult> {
   const client = new GraphQLClient(reserveYieldHistoryHasuraUrl());
-  const rows: SusdsYieldDailySnapshotRow[] = [];
-  const seen = new Set<string>();
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 
   try {
-    return await fetchReserveYieldHistoryPage(client, signal, rows, seen, 0);
+    const susds = await fetchSusdsHistory(client, signal);
+    const steth = await fetchStethHistory(client, signal);
+    return {
+      rows: [...susds.rows, ...steth.rows],
+      unavailable: false,
+      truncated: susds.truncated || steth.truncated,
+    };
   } catch (err) {
-    if (isMissingSusdsYieldDailySnapshotEntity(err)) {
+    if (isMissingEntity(err, "SusdsYieldDailySnapshot")) {
       return { rows: [], unavailable: true, truncated: false };
     }
     throw err;
   }
 }
 
-async function fetchReserveYieldHistoryPage(
+async function fetchSusdsHistory(
   client: GraphQLClient,
   signal: AbortSignal,
-  rows: SusdsYieldDailySnapshotRow[],
-  seen: Set<string>,
-  page: number,
 ): Promise<SnapshotPageResult> {
+  return fetchReserveYieldHistoryPage({
+    client,
+    signal,
+    document: SUSDS_YIELD_DAILY_SNAPSHOTS,
+    responseKey: "SusdsYieldDailySnapshot",
+  });
+}
+
+async function fetchStethHistory(
+  client: GraphQLClient,
+  signal: AbortSignal,
+): Promise<SnapshotPageResult> {
+  try {
+    return await fetchReserveYieldHistoryPage({
+      client,
+      signal,
+      document: STETH_YIELD_DAILY_SNAPSHOTS,
+      responseKey: "StethYieldDailySnapshot",
+    });
+  } catch (err) {
+    if (isMissingEntity(err, "StethYieldDailySnapshot")) {
+      return { rows: [], unavailable: false, truncated: false };
+    }
+    throw err;
+  }
+}
+
+type ReserveYieldHistoryResponse =
+  | SusdsYieldDailySnapshotsResponse
+  | StethYieldDailySnapshotsResponse;
+
+type ReserveYieldHistoryResponseKey =
+  | "SusdsYieldDailySnapshot"
+  | "StethYieldDailySnapshot";
+
+function pageRowsForResponse(
+  response: ReserveYieldHistoryResponse,
+  responseKey: ReserveYieldHistoryResponseKey,
+): ReserveYieldDailySnapshotRow[] {
+  if (
+    responseKey === "SusdsYieldDailySnapshot" &&
+    "SusdsYieldDailySnapshot" in response
+  ) {
+    return response.SusdsYieldDailySnapshot;
+  }
+  if (
+    responseKey === "StethYieldDailySnapshot" &&
+    "StethYieldDailySnapshot" in response
+  ) {
+    return response.StethYieldDailySnapshot;
+  }
+  return [];
+}
+
+async function fetchReserveYieldHistoryPage({
+  client,
+  signal,
+  document,
+  responseKey,
+  rows = [],
+  seen = new Set<string>(),
+  page = 0,
+}: {
+  client: GraphQLClient;
+  signal: AbortSignal;
+  document: string;
+  responseKey: ReserveYieldHistoryResponseKey;
+  rows?: ReserveYieldDailySnapshotRow[];
+  seen?: Set<string>;
+  page?: number;
+}): Promise<SnapshotPageResult> {
   if (page >= HISTORY_MAX_PAGES) {
     return { rows, unavailable: false, truncated: true };
   }
 
-  const response = await requestWithTimeout<SusdsYieldDailySnapshotsResponse>(
+  const response = await requestWithTimeout<ReserveYieldHistoryResponse>(
     client,
+    document,
     {
       chainId: ETHEREUM_CHAIN_ID,
       limit: HISTORY_PAGE_SIZE,
@@ -96,7 +181,7 @@ async function fetchReserveYieldHistoryPage(
     },
     signal,
   );
-  const pageRows = response.SusdsYieldDailySnapshot ?? [];
+  const pageRows = pageRowsForResponse(response, responseKey) ?? [];
   for (const row of pageRows) {
     if (seen.has(row.id)) continue;
     seen.add(row.id);
@@ -105,7 +190,15 @@ async function fetchReserveYieldHistoryPage(
   if (pageRows.length < HISTORY_PAGE_SIZE) {
     return { rows, unavailable: false, truncated: false };
   }
-  return fetchReserveYieldHistoryPage(client, signal, rows, seen, page + 1);
+  return fetchReserveYieldHistoryPage({
+    client,
+    signal,
+    document,
+    responseKey,
+    rows,
+    seen,
+    page: page + 1,
+  });
 }
 
 export function useReserveYieldHistory(): ReserveYieldHistoryResult {

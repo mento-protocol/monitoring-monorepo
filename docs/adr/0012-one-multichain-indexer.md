@@ -1,5 +1,5 @@
 ---
-title: One multichain indexer project; Ethereum reserve-yield is event-only
+title: One multichain indexer project; Ethereum reserve-yield shares the hosted deployment
 status: active
 owner: eng
 canonical: true
@@ -8,9 +8,9 @@ scope: indexer-envio
 date: 2026-03
 ---
 
-# ADR 0012 — One multichain indexer project; Ethereum reserve-yield is event-only
+# ADR 0012 — One multichain indexer project; Ethereum reserve-yield shares the hosted deployment
 
-**Status:** Accepted (Mar 2026; reserve-yield added Jun 2026), in force.
+**Status:** Accepted (Mar 2026; reserve-yield added Jun 2026; stETH sampler refined by ADR 0034), in force.
 **Scope:** indexer-envio
 
 ## Context
@@ -24,16 +24,18 @@ yield accounting, not full pool indexing.
 
 Run **one Envio project** that indexes Celo + Monad FPMM/oracle/broker/bridge
 events and Ethereum reserve-yield in the same hosted deployment
-(`config.multichain.mainnet.yaml`). Ethereum is **event-only** (sUSDS/stETH
-handlers); the historical sUSDS `onBlock` heartbeat is intentionally excluded from
-the hosted path. IDs are chain-namespaced so entities don't collide.
+(`config.multichain.mainnet.yaml`). sUSDS remains event-only, stETH uses the
+launch-aligned daily wallet sampler recorded in [ADR 0034](0034-steth-wallet-daily-sampler.md),
+and the historical sUSDS `onBlock` heartbeat is intentionally excluded from the
+hosted path. IDs are chain-namespaced so entities don't collide.
 
 ## Alternatives considered
 
 - **One indexer per chain** — rejected: triples deploy/ops surface and forces the
   dashboard to fan out queries across endpoints for a unified view.
 - **Full Ethereum indexing** — rejected: only yield accounting is needed there;
-  event-only keeps sync cheap and avoids an archival-block heartbeat.
+  sparse event handlers plus the bounded stETH daily sampler keep sync cheap
+  and avoid the historical sUSDS archival-block heartbeat.
 
 ## Consequences
 

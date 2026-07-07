@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   V3_REVENUE_LAUNCH_TIMESTAMP,
   buildCanonicalRevenue,
+  type StethYieldDailySnapshotRow,
   type SusdsYieldDailySnapshotRow,
 } from "@/lib/canonical-revenue";
 import type {
@@ -75,6 +76,58 @@ function reserveSnapshot(
     sharePriceUsdWei: "1000000000000000000",
     sampledAtBlock: "1",
     sampledAtTimestamp: String(timestamp),
+  };
+}
+
+function stethReserveSnapshot(
+  timestamp: number,
+  wallet: string,
+  dailyEarnedYieldAmount: number,
+  totalEarnedYieldAmount = dailyEarnedYieldAmount,
+): StethYieldDailySnapshotRow {
+  return {
+    id: `1-steth-${wallet}-${timestamp}`,
+    chainId: 1,
+    token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+    wallet,
+    timestamp: String(timestamp),
+    balanceAmount: "0",
+    principalAmount: "0",
+    realizedYieldAmount: "0",
+    transferredOutYieldAmount: "0",
+    unrealizedYieldAmount: "0",
+    totalEarnedYieldAmount: usdWei(totalEarnedYieldAmount),
+    dailyEarnedYieldAmount: usdWei(dailyEarnedYieldAmount),
+    dailyRealizedYieldAmount: "0",
+    dailyUnrealizedYieldAmount: usdWei(dailyEarnedYieldAmount),
+    sampledAtBlock: "1",
+    sampledAtTimestamp: String(timestamp),
+  };
+}
+
+function stethHolding(
+  overrides: Partial<ReserveYieldResponse["holdings"][number]> = {},
+): ReserveYieldResponse["holdings"][number] {
+  return {
+    id: "ethereum-steth-reserve-safe",
+    chain: "ethereum",
+    assetSymbol: "stETH",
+    sourceType: "safe",
+    sourceLabel: "Reserve Safe",
+    identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+    custodianType: "self-custody",
+    principalUsd: 419_495.97,
+    balance: 251.59825779325257,
+    hasTokenBalance: true,
+    earnedYieldUsd: null,
+    apyPercent: 2.95,
+    dailyRunRateUsd: 33.91,
+    next30dUsd: 1_017.31,
+    next365dUsd: 12_375.13,
+    annualRunRateUsd: 12_375.13,
+    yieldModel:
+      "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
+    ...overrides,
   };
 }
 
@@ -192,7 +245,7 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("flags empty reserve snapshots as partial when the current sUSDS ledger has yield", () => {
+  it("flags empty reserve snapshots as partial when the current reserve ledger has yield", () => {
     const result = buildCanonicalRevenue({
       networkData: [],
       cdpDailySeries: [],
@@ -205,7 +258,90 @@ describe("buildCanonicalRevenue", () => {
     expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
     expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
     expect(result.periods.allTimeSinceV3.partialReasons).toContain(
-      "Reserve earned-yield history has no sUSDS snapshots yet.",
+      "Reserve earned-yield history has no snapshots yet.",
+    );
+  });
+
+  it("flags empty reserve snapshots as partial when current stETH actuals are pending", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        earnedYieldError:
+          "stETH earned-yield actuals pending: no indexed wallet snapshot rows yet.",
+        holdings: [stethHolding()],
+      }),
+      reserveDailySnapshots: [],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.partialReasons).toContain(
+      "Reserve earned-yield actuals partial: stETH earned-yield actuals pending: no indexed wallet snapshot rows yet.",
+    );
+  });
+
+  it("prices stETH reserve history with the current wallet USD/token rate", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({
+            identifier: wallet,
+            principalUsd: 4_000,
+            balance: 2,
+          }),
+        ],
+      }),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(ts("2026-06-11"), wallet, 1, 1),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1, 2),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(4_000);
+    expect(result.partialReasons).not.toContain(
+      "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
+    );
+  });
+
+  it("marks stETH reserve history partial when current wallet pricing is missing", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [
+        makeNetworkData({
+          feeSnapshots: [feeSnapshot(ts("2026-06-12"), 12)],
+        }),
+      ],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({
+            identifier: wallet,
+            hasTokenBalance: false,
+            balance: 0,
+          }),
+        ],
+      }),
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-12"), 5),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.availableTotalUsd).toBe(12);
+    expect(result.partialReasons).toContain(
+      "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
     );
   });
 

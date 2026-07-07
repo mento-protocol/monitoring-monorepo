@@ -119,10 +119,33 @@ export type SusdsYieldState = {
   earnedYieldError: string | null;
 };
 
+export type StethYieldLedgerEntry = {
+  wallet: string;
+  earnedYieldAmount: bigint;
+  realizedYieldAmount: bigint;
+  unrealizedYieldAmount: bigint;
+  asOf: string | null;
+};
+
+export type StethYieldLedgerResult = {
+  entries: StethYieldLedgerEntry[];
+  error: string | null;
+};
+
+export type StethYieldState = {
+  holdings: ReserveYieldHolding[];
+  earnedYieldUsd: number | null;
+  realizedYieldUsd: number | null;
+  unrealizedYieldUsd: number | null;
+  earnedYieldAsOf: string | null;
+  earnedYieldError: string | null;
+};
+
 export type ReserveHoldingsState = {
   holdings: ReserveYieldHolding[];
   principalUsd: number | null;
   holdingsAsOf: string | null;
   holdingsError: string | null;
   hasCurrentSusdsAsset: boolean;
+  hasCurrentStethAsset: boolean;
 };

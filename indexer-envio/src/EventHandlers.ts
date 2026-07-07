@@ -30,9 +30,8 @@ import "./handlers/virtualPool.js";
 import "./handlers/biPoolManager.js";
 import "./handlers/feeToken.js";
 import "./handlers/stables/transfer.js";
-// Ethereum reserve-yield handlers are event-only. Do not import the historical
-// sUSDS onBlock heartbeat here; sparse event snapshots keep chain 1 safe inside
-// the shared hosted indexer.
+// Ethereum reserve-yield keeps sUSDS event-only; stETH adds a low-cadence
+// wallet-level daily sampler so rebasing balances can be launch-aligned.
 import "./handlers/steth.js";
 import { registerSusdsYieldEventHandlers } from "./handlers/susdsEvents.js";
 import "./handlers/openLiquidityStrategy.js";
@@ -103,6 +102,11 @@ export {
   _setMockSusdsSharePrice,
   _clearMockSusdsSharePrices,
 } from "./rpc/susds.js";
+
+export {
+  _setMockStethBalanceOf,
+  _clearMockStethBalanceOf,
+} from "./rpc/steth.js";
 
 // Fee token test mocks and helpers
 export {

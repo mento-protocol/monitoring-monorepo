@@ -1011,6 +1011,40 @@ type StethYieldSummary {
   lastUpdatedTimestamp: BigInt!
 }
 
+type StethWalletLaunchBaseline {
+  id: ID! # "{chainId}-steth-{wallet}-launch"
+  chainId: Int! @index
+  token: String!
+  wallet: String! @index
+  launchBlock: BigInt!
+  launchTimestamp: BigInt!
+  balanceAmount: BigInt! @config(precision: 78)
+  principalTopUpAmount: BigInt! @config(precision: 78)
+  realizedYieldAmountAtLaunch: BigInt! @config(precision: 78)
+  transferredOutYieldAmountAtLaunch: BigInt! @config(precision: 78)
+  sampledAtBlock: BigInt!
+  sampledAtTimestamp: BigInt!
+}
+
+type StethYieldDailySnapshot {
+  id: ID! # "{chainId}-steth-{wallet}-{dayTimestamp}"
+  chainId: Int! @index
+  token: String!
+  wallet: String! @index
+  timestamp: BigInt! @index # UTC day bucket start
+  balanceAmount: BigInt! @config(precision: 78)
+  principalAmount: BigInt! @config(precision: 78)
+  realizedYieldAmount: BigInt! @config(precision: 78)
+  transferredOutYieldAmount: BigInt! @config(precision: 78)
+  unrealizedYieldAmount: BigInt! @config(precision: 78)
+  totalEarnedYieldAmount: BigInt! @config(precision: 78)
+  dailyEarnedYieldAmount: BigInt! @config(precision: 78)
+  dailyRealizedYieldAmount: BigInt! @config(precision: 78)
+  dailyUnrealizedYieldAmount: BigInt! @config(precision: 78)
+  sampledAtBlock: BigInt!
+  sampledAtTimestamp: BigInt!
+}
+
 # Pre-rolled hero metrics for /volume. Bypasses Hasura's 1000-row
 # cap on TraderDailySnapshot for any window-level aggregation.
 # One row per (chainId, windowKey, snapshotDay). The dashboard reads the

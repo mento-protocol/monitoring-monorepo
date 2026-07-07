@@ -411,10 +411,12 @@ describe("RevenuePageClient canonical revenue layout", () => {
     expect(html.indexOf("Monthly Forecast")).toBeLessThan(
       html.indexOf("7d Forecast"),
     );
-    expect(html).toContain("AUSD and stETH are forecast-only");
+    expect(html).toContain("AUSD is forecast-only");
     expect(html).toContain("balance x annual rate");
     expect(html).toContain("Revenue streams");
-    expect(html).toContain("sUSDS actual yield; AUSD and stETH forecast-only");
+    expect(html).toContain(
+      "sUSDS and stETH actual yield when indexed; AUSD forecast-only",
+    );
     expect(html).toContain("Reserve Yield Components");
     expect(html).toContain("Borrowing Fees by CDP");
     expect(html).toContain(

@@ -77,15 +77,16 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### indexer-envio
 
-| ADR                                                  | Decision                                                                           |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| [0012](0012-one-multichain-indexer.md)               | One multichain indexer project; Ethereum reserve-yield is event-only               |
-| [0013](0013-vendored-shared-config-mirror.md)        | The indexer vendors a mirror of `shared-config` (it builds outside the workspace)  |
-| [0014](0014-snapshot-entities-no-aggregate.md)       | Precompute snapshot/rollup entities; never rely on Hasura `_aggregate`             |
-| [0015](0015-abi-vendoring-and-address-drift-gate.md) | Vendor ABIs from the contracts package; gate every config address on a drift check |
-| [0016](0016-effect-rpc-split-and-heal-stages.md)     | Split effects/RPC from handlers; decompose `upsertPool` into pure heal-stages      |
-| [0017](0017-broker-denormalization-volume-dedup.md)  | Denormalize the v2 Broker swap path to de-duplicate router-routed volume           |
-| [0018](0018-indexer-observability-loki.md)           | Indexer observability is structured logs → Loki → Grafana, not Sentry              |
+| ADR                                                  | Decision                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [0012](0012-one-multichain-indexer.md)               | One multichain indexer project; Ethereum reserve-yield shares the hosted deployment |
+| [0013](0013-vendored-shared-config-mirror.md)        | The indexer vendors a mirror of `shared-config` (it builds outside the workspace)   |
+| [0014](0014-snapshot-entities-no-aggregate.md)       | Precompute snapshot/rollup entities; never rely on Hasura `_aggregate`              |
+| [0015](0015-abi-vendoring-and-address-drift-gate.md) | Vendor ABIs from the contracts package; gate every config address on a drift check  |
+| [0016](0016-effect-rpc-split-and-heal-stages.md)     | Split effects/RPC from handlers; decompose `upsertPool` into pure heal-stages       |
+| [0017](0017-broker-denormalization-volume-dedup.md)  | Denormalize the v2 Broker swap path to de-duplicate router-routed volume            |
+| [0018](0018-indexer-observability-loki.md)           | Indexer observability is structured logs → Loki → Grafana, not Sentry               |
+| [0034](0034-steth-wallet-daily-sampler.md)           | stETH actuals use a launch-aligned daily wallet balance sampler                     |
 
 ### ui-dashboard
 
