@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { ErrorBox, Skeleton } from "@/components/feedback";
+import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
@@ -18,11 +19,14 @@ import {
   BADGE_LABELS,
   BADGE_STYLES,
   CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+  CDP_OVERVIEW_TABLE_PAGE_SIZE,
   type BadgeKind,
   badgeKindFor,
+  groupTransactionsByUtcDay,
   indexSnapshotsById,
   mergeTransactionRows,
   positionSnapshotFor,
+  transactionAttentionRank,
   type CdpStabilityPoolEventsResponse,
   type CdpTransactionsResponse,
   type CdpTroveOpSnapshotResponse,
@@ -42,11 +46,6 @@ import {
   CdpTransactionsEmptyState,
   StabilityPoolEventsUnavailableNotice,
 } from "./cdp-transaction-notices";
-
-// 100 across all markets is the user-visible cap. We fetch a larger
-// per-kind cap and merge so the latest 100 across kinds is accurate even
-// when one kind dominates (e.g. trove ops far outnumber liquidations).
-const MAX_ROWS = 100;
 
 interface CollateralSummary {
   id: string;
@@ -291,7 +290,15 @@ function OverviewBody({
     filteredRows,
     filtersActive,
   } = useOverviewFilters(rows, collaterals, snapshotById, snapshotsReady);
-  const visibleRows = filteredRows.slice(0, MAX_ROWS);
+  const pageCountKey = Math.ceil(
+    filteredRows.length / CDP_OVERVIEW_TABLE_PAGE_SIZE,
+  );
+  const tableKey = [
+    typeFilter ?? "all-types",
+    marketFilter ?? "all-markets",
+    normalizeAddressFilter(addressInput),
+    pageCountKey,
+  ].join(":");
 
   return (
     <>
@@ -306,6 +313,52 @@ function OverviewBody({
         addressDisabled={addressDisabled}
         addressFilterNotice={addressFilterNotice}
       />
+      <PaginatedOverviewTable
+        key={tableKey}
+        rows={filteredRows}
+        symbolByInstance={symbolByInstance}
+        snapshotById={snapshotById}
+        filtersActive={filtersActive}
+        capped={capped}
+        stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+      />
+    </>
+  );
+}
+
+function PaginatedOverviewTable({
+  rows,
+  symbolByInstance,
+  snapshotById,
+  filtersActive,
+  capped,
+  stabilityPoolEventsUnavailable,
+}: {
+  rows: CdpTransactionRow[];
+  symbolByInstance: Map<string, { symbol: string; chainId: number }>;
+  snapshotById: Map<string, CdpTroveOpSnapshotRow>;
+  filtersActive: boolean;
+  capped: boolean;
+  stabilityPoolEventsUnavailable: boolean;
+}) {
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(
+    1,
+    Math.ceil(rows.length / CDP_OVERVIEW_TABLE_PAGE_SIZE),
+  );
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * CDP_OVERVIEW_TABLE_PAGE_SIZE;
+  const pageRows = rows.slice(
+    pageStart,
+    pageStart + CDP_OVERVIEW_TABLE_PAGE_SIZE,
+  );
+  const dayGroups = useMemo(
+    () => groupTransactionsByUtcDay(pageRows),
+    [pageRows],
+  );
+
+  return (
+    <>
       <Table>
         <thead>
           <Row>
@@ -324,51 +377,91 @@ function OverviewBody({
           </Row>
         </thead>
         <tbody>
-          {visibleRows.length === 0 ? (
-            <Row>
-              <td
-                colSpan={7}
-                className="px-2 sm:px-4 py-3 text-center text-xs text-slate-500"
-              >
-                No transactions match the active filters.
-              </td>
-            </Row>
-          ) : (
-            visibleRows.map((row) => (
-              <OverviewRow
-                key={`${row.kind}-${row.id}`}
-                row={row}
-                market={
-                  row.instanceId
-                    ? symbolByInstance.get(row.instanceId)
-                    : undefined
-                }
-                snapshot={
-                  row.kind === "troveOp" ? snapshotById.get(row.id) : undefined
-                }
-              />
-            ))
-          )}
+          <OverviewTableRows
+            pageRows={pageRows}
+            dayGroups={dayGroups}
+            symbolByInstance={symbolByInstance}
+            snapshotById={snapshotById}
+          />
         </tbody>
       </Table>
       <OverviewFootnotes
-        visibleCount={visibleRows.length}
-        filteredCount={filteredRows.length}
+        pageStart={pageStart}
+        visibleCount={pageRows.length}
+        filteredCount={rows.length}
         filtersActive={filtersActive}
         capped={capped}
         stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
+      />
+      <Pagination
+        page={currentPage}
+        pageSize={CDP_OVERVIEW_TABLE_PAGE_SIZE}
+        total={rows.length}
+        onPageChange={setPage}
       />
     </>
   );
 }
 
+function OverviewTableRows({
+  pageRows,
+  dayGroups,
+  symbolByInstance,
+  snapshotById,
+}: {
+  pageRows: CdpTransactionRow[];
+  dayGroups: ReturnType<typeof groupTransactionsByUtcDay>;
+  symbolByInstance: Map<string, { symbol: string; chainId: number }>;
+  snapshotById: Map<string, CdpTroveOpSnapshotRow>;
+}) {
+  if (pageRows.length === 0) {
+    return (
+      <Row>
+        <td
+          colSpan={7}
+          className="px-2 sm:px-4 py-3 text-center text-xs text-slate-500"
+        >
+          No transactions match the active filters.
+        </td>
+      </Row>
+    );
+  }
+
+  return dayGroups.map((group) => (
+    <Fragment key={group.key}>
+      <tr className="border-y border-slate-800 bg-slate-900/50">
+        <td
+          colSpan={7}
+          className="px-2 py-2 text-xs font-medium uppercase tracking-wide text-slate-400 sm:px-4"
+        >
+          {group.label}
+        </td>
+      </tr>
+      {group.rows.map((row) => (
+        <OverviewRow
+          key={`${row.kind}-${row.id}`}
+          row={row}
+          market={
+            row.instanceId ? symbolByInstance.get(row.instanceId) : undefined
+          }
+          snapshot={
+            row.kind === "troveOp" ? snapshotById.get(row.id) : undefined
+          }
+        />
+      ))}
+    </Fragment>
+  ));
+}
+
 function OverviewFootnotes({
+  pageStart,
   visibleCount,
   filteredCount,
   filtersActive,
   capped,
   stabilityPoolEventsUnavailable,
 }: {
+  pageStart: number;
   visibleCount: number;
   filteredCount: number;
   filtersActive: boolean;
@@ -380,8 +473,8 @@ function OverviewFootnotes({
       {visibleCount > 0 && (
         <p className="px-1 pt-2 text-xs text-slate-500">
           {filtersActive
-            ? `Showing ${visibleCount.toLocaleString()} of ${filteredCount.toLocaleString()} matching transactions.`
-            : `Showing the most recent ${visibleCount.toLocaleString()} transactions across all CDP markets.`}
+            ? `Showing ${(pageStart + 1).toLocaleString()}-${(pageStart + visibleCount).toLocaleString()} of ${filteredCount.toLocaleString()} matching transactions.`
+            : `Showing ${(pageStart + 1).toLocaleString()}-${(pageStart + visibleCount).toLocaleString()} of ${filteredCount.toLocaleString()} fetched transactions across all CDP markets.`}
         </p>
       )}
       {capped && (
@@ -411,7 +504,7 @@ function OverviewRow({
   const symbol = market?.symbol ?? "—";
   const resolvedSnapshot = positionSnapshotFor(row, snapshot);
   return (
-    <Row>
+    <Row className={overviewRowClass(row)}>
       <Td>
         <span
           className={`inline-block rounded border px-2 py-0.5 text-xs ${BADGE_STYLES[kind]}`}
@@ -452,4 +545,18 @@ function OverviewRow({
       </Td>
     </Row>
   );
+}
+
+function overviewRowClass(row: CdpTransactionRow): string {
+  const rank = transactionAttentionRank(row);
+  if (rank >= 3) {
+    return "border-l-2 border-l-amber-500/60 bg-amber-950/10 hover:bg-amber-950/20";
+  }
+  if (rank === 2) {
+    return "border-l-2 border-l-cyan-500/50 bg-cyan-950/10 hover:bg-cyan-950/20";
+  }
+  if (rank === 1) {
+    return "border-l-2 border-l-indigo-500/40";
+  }
+  return "";
 }

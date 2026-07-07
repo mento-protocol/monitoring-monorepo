@@ -13,6 +13,7 @@ import type {
   CdpInstance,
   CdpStabilityPoolOperationEventRow,
   CdpTroveListRow,
+  CdpTroveOperationEventRow,
   CdpTroveOpSnapshotRow,
 } from "../../_lib/types";
 
@@ -201,6 +202,36 @@ function transactionData() {
   };
 }
 
+function troveOperation(
+  overrides: Partial<CdpTroveOperationEventRow> = {},
+): CdpTroveOperationEventRow {
+  return {
+    id: "op1",
+    instanceId: "gbpm",
+    troveId: "trove-1",
+    operation: 0,
+    collChange: wei(10),
+    debtChange: wei(5),
+    annualInterestRate: "0",
+    debtIncreaseFromUpfrontFee: "0",
+    timestamp: String(NOW - 10),
+    blockNumber: "101",
+    txHash: "0xtroveop",
+    ...overrides,
+  };
+}
+
+function manyTroveOperations(count: number): CdpTroveOperationEventRow[] {
+  return Array.from({ length: count }, (_, index) =>
+    troveOperation({
+      id: `op-${index}`,
+      timestamp: String(NOW - index),
+      blockNumber: String(1_000 + index),
+      txHash: `0x${(index + 1).toString(16).padStart(64, "0")}`,
+    }),
+  );
+}
+
 function stabilityPoolOperation(
   overrides: Partial<CdpStabilityPoolOperationEventRow> = {},
 ): CdpStabilityPoolOperationEventRow {
@@ -366,6 +397,10 @@ describe("CdpsPageClient", () => {
     expect(handle!.container.textContent).toContain("Critical");
     expect(handle!.container.textContent).toContain("Open Troves");
     expect(handle!.container.textContent).toContain("2");
+    expect(handle!.container.textContent).toContain("24h CDP activity");
+    expect(handle!.container.textContent).toContain(
+      "Last 24h: 2 operations · 1 liquidation · 0 redemptions",
+    );
     expect(handle!.container.textContent).toContain("Recent CDP Transactions");
     expect(bodyText(handle!.container)).toContain("Open Trove");
   });
@@ -427,7 +462,7 @@ describe("CdpsPageClient", () => {
 
     render(handle!, <CdpsPageClient />);
 
-    expect(handle!.container.textContent).toContain("≥1 ops in 24h");
+    expect(handle!.container.textContent).toContain("24h: ≥1 ops");
     expect(handle!.container.textContent).toContain(
       "Stability pool deposit and withdraw events are temporarily unavailable",
     );
@@ -808,5 +843,83 @@ describe("CdpAllTransactionsTable", () => {
     expect(
       handle!.container.querySelector('[role="status"]')?.textContent,
     ).toContain("Showing Stability Pool depositor matches only");
+  });
+
+  it("paginates overview rows in 25-row pages and resets after filter changes", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return {
+          data: {
+            LiquidationEvent: [],
+            RedemptionEvent: [],
+            SpRebalanceEvent: [],
+            TroveOperationEvent: manyTroveOperations(55),
+          },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[
+          { id: "gbpm", chainId: 42220, symbol: "GBPm" },
+          { id: "chfm", chainId: 42220, symbol: "CHFm" },
+        ]}
+      />,
+    );
+
+    const txCells = () =>
+      handle!.container.querySelectorAll('[data-testid="tx-hash"]');
+    expect(txCells()).toHaveLength(25);
+    expect(handle!.container.textContent).toContain(
+      "Showing 1-25 of 55 fetched transactions across all CDP markets.",
+    );
+    expect(handle!.container.textContent).toContain("UTC");
+
+    act(() => {
+      handle!.container
+        .querySelector<HTMLButtonElement>('button[aria-label="Next page"]')
+        ?.click();
+    });
+
+    expect(txCells()).toHaveLength(25);
+    expect(handle!.container.textContent).toContain(
+      "Showing 26-50 of 55 fetched transactions across all CDP markets.",
+    );
+
+    act(() => {
+      handle!.container
+        .querySelector<HTMLButtonElement>('button[aria-label="Next page"]')
+        ?.click();
+    });
+
+    expect(txCells()).toHaveLength(5);
+    expect(handle!.container.textContent).toContain(
+      "Showing 51-55 of 55 fetched transactions across all CDP markets.",
+    );
+
+    act(() => {
+      pill(handle!.container, "GBPm").click();
+    });
+
+    expect(txCells()).toHaveLength(25);
+    expect(handle!.container.textContent).toContain(
+      "Showing 1-25 of 55 matching transactions.",
+    );
   });
 });

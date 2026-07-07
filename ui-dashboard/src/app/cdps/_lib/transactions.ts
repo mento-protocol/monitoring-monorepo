@@ -32,6 +32,8 @@ export function indexSnapshotsById(
  *  the overview table and the page-level fetch that derives per-market
  *  24h activity counts for the market cards. */
 export const CDP_OVERVIEW_PER_KIND_FETCH_LIMIT = 250;
+export const CDP_OVERVIEW_TABLE_PAGE_SIZE = 25;
+const ONE_DAY_SECONDS = 86_400;
 
 export type CdpTransactionsResponse = {
   LiquidationEvent: CdpLiquidationEventRow[];
@@ -42,6 +44,48 @@ export type CdpTransactionsResponse = {
 
 export type CdpStabilityPoolEventsResponse = {
   StabilityPoolOperationEvent: CdpStabilityPoolOperationEventRow[];
+};
+
+export type CdpMarketActivity = {
+  total24h: number;
+  liquidations24h: number;
+  redemptions24h: number;
+  userRedemptions24h: number;
+  rebalanceRedemptions24h: number;
+  spRebalances24h: number;
+  stabilityPoolOps24h: number;
+  troveOps24h: number;
+  lastTimestamp: number | null;
+};
+
+export type CdpActivitySummary = {
+  total24h: number;
+  liquidations24h: number;
+  redemptions24h: number;
+  userRedemptions24h: number;
+  rebalanceRedemptions24h: number;
+  spRebalances24h: number;
+  stabilityPoolOps24h: number;
+  troveOps24h: number;
+  byInstance: Map<string, CdpMarketActivity>;
+};
+
+export type CdpTransactionDayGroup = {
+  key: string;
+  label: string;
+  rows: CdpTransactionRow[];
+};
+
+export const EMPTY_CDP_MARKET_ACTIVITY: CdpMarketActivity = {
+  total24h: 0,
+  liquidations24h: 0,
+  redemptions24h: 0,
+  userRedemptions24h: 0,
+  rebalanceRedemptions24h: 0,
+  spRebalances24h: 0,
+  stabilityPoolOps24h: 0,
+  troveOps24h: 0,
+  lastTimestamp: null,
 };
 
 export type BadgeKind =
@@ -129,6 +173,146 @@ export function badgeKindFor(row: CdpTransactionRow): BadgeKind {
     case "troveOp":
       return TROVE_OP_BADGE[row.operation] ?? "troveAdjust";
   }
+}
+
+export function transactionAttentionRank(row: CdpTransactionRow): number {
+  const kind = badgeKindFor(row);
+  switch (kind) {
+    case "liquidation":
+      return 3;
+    case "rebalanceRedemption":
+    case "spRebalance":
+      return 2;
+    case "userRedemption":
+    case "troveClose":
+      return 1;
+    case "spDeposit":
+    case "spWithdraw":
+    case "spClaim":
+    case "troveOpen":
+    case "troveAdjust":
+    case "troveInterestRateChange":
+    case "troveBatch":
+      return 0;
+  }
+}
+
+export function summarizeCdpActivity(
+  rows: ReadonlyArray<CdpTransactionRow>,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): CdpActivitySummary {
+  const cutoff = nowSeconds - ONE_DAY_SECONDS;
+  const summary: CdpActivitySummary = {
+    total24h: 0,
+    liquidations24h: 0,
+    redemptions24h: 0,
+    userRedemptions24h: 0,
+    rebalanceRedemptions24h: 0,
+    spRebalances24h: 0,
+    stabilityPoolOps24h: 0,
+    troveOps24h: 0,
+    byInstance: new Map<string, CdpMarketActivity>(),
+  };
+
+  for (const row of rows) {
+    if (row.instanceId) {
+      const market = ensureMarketActivity(summary.byInstance, row.instanceId);
+      const timestamp = Number(row.timestamp);
+      if (
+        Number.isFinite(timestamp) &&
+        (market.lastTimestamp == null || timestamp > market.lastTimestamp)
+      ) {
+        market.lastTimestamp = timestamp;
+      }
+    }
+
+    if (Number(row.timestamp) < cutoff) continue;
+    incrementActivity(summary, row);
+    if (row.instanceId) {
+      incrementActivity(
+        ensureMarketActivity(summary.byInstance, row.instanceId),
+        row,
+      );
+    }
+  }
+
+  return summary;
+}
+
+export function groupTransactionsByUtcDay(
+  rows: ReadonlyArray<CdpTransactionRow>,
+): CdpTransactionDayGroup[] {
+  const groups: CdpTransactionDayGroup[] = [];
+  const indexByKey = new Map<string, CdpTransactionDayGroup>();
+  for (const row of rows) {
+    const key = utcDayKey(row.timestamp);
+    let group = indexByKey.get(key);
+    if (!group) {
+      group = { key, label: formatUtcDayLabel(key), rows: [] };
+      indexByKey.set(key, group);
+      groups.push(group);
+    }
+    group.rows.push(row);
+  }
+  return groups;
+}
+
+function ensureMarketActivity(
+  byInstance: Map<string, CdpMarketActivity>,
+  instanceId: string,
+): CdpMarketActivity {
+  let activity = byInstance.get(instanceId);
+  if (!activity) {
+    activity = { ...EMPTY_CDP_MARKET_ACTIVITY };
+    byInstance.set(instanceId, activity);
+  }
+  return activity;
+}
+
+function incrementActivity(
+  activity: Omit<CdpActivitySummary, "byInstance"> | CdpMarketActivity,
+  row: CdpTransactionRow,
+) {
+  activity.total24h += 1;
+  switch (row.kind) {
+    case "liquidation":
+      activity.liquidations24h += 1;
+      break;
+    case "redemption":
+      activity.redemptions24h += 1;
+      if (row.isRebalance) {
+        activity.rebalanceRedemptions24h += 1;
+      } else {
+        activity.userRedemptions24h += 1;
+      }
+      break;
+    case "spRebalance":
+      activity.spRebalances24h += 1;
+      break;
+    case "spOperation":
+      activity.stabilityPoolOps24h += 1;
+      break;
+    case "troveOp":
+      activity.troveOps24h += 1;
+      break;
+  }
+}
+
+function utcDayKey(timestamp: string): string {
+  const value = Number(timestamp);
+  if (!Number.isFinite(value)) return "unknown";
+  return new Date(value * 1000).toISOString().slice(0, 10);
+}
+
+function formatUtcDayLabel(key: string): string {
+  if (key === "unknown") return "Unknown day";
+  const date = new Date(`${key}T00:00:00Z`);
+  return `${date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })} UTC`;
 }
 
 function sumWei(...parts: string[]): string {

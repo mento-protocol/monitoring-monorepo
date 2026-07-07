@@ -262,6 +262,24 @@ test.describe("dashboard browser flows", () => {
     await expect(table).toContainText("redeemed");
   });
 
+  test("renders CDP overview activity digest and grouped transactions", async ({
+    page,
+  }) => {
+    await page.goto("/cdps");
+
+    await expect(page.getByRole("heading", { name: "CDPs" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "24h CDP activity" }),
+    ).toBeVisible();
+    await expect(page.getByText(/Last 24h: .*redemption/)).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Recent CDP Transactions" }),
+    ).toBeVisible();
+    await expect(page.getByText(/UTC/).first()).toBeVisible();
+    await expect(page.getByText("Rebalance Redemption").first()).toBeVisible();
+    await expect(page.getByText("SP Deposit").first()).toBeVisible();
+  });
+
   test("keeps pool tabs manually activated with keyboard focus and URL state", async ({
     page,
   }) => {

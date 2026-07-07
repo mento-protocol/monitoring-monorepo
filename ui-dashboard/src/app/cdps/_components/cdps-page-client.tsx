@@ -23,10 +23,15 @@ import {
 } from "../_lib/health";
 import {
   CDP_OVERVIEW_PER_KIND_FETCH_LIMIT,
+  type CdpActivitySummary,
+  type CdpMarketActivity,
+  EMPTY_CDP_MARKET_ACTIVITY,
   type CdpStabilityPoolEventsResponse,
   type CdpTransactionsResponse,
   mergeTransactionRows,
+  summarizeCdpActivity,
 } from "../_lib/transactions";
+import { CdpActivityDigest } from "./cdp-activity-digest";
 import { CdpAllTransactionsTable } from "./cdp-all-transactions-table";
 import { CdpMarketCard } from "./cdp-market-card";
 
@@ -62,7 +67,13 @@ function isKindAtCapInWindow(
 /** Per-market 24h ops count + cap flag, derived from the chain-scoped
  *  overview transactions fetch. Shares the SWR cache with the table
  *  mounted below so we don't double-fetch. */
-function useOps24hByInstance(chainId: number) {
+function useActivity24hByInstance(chainId: number): {
+  activityByInstance: Map<string, CdpMarketActivity>;
+  totalActivity: CdpActivitySummary;
+  txCapped: boolean;
+  isLoading: boolean;
+  hasError: boolean;
+} {
   const transactions = useGQL<CdpTransactionsResponse>(
     chainId === 42220 ? ALL_CDP_TRANSACTIONS : null,
     { chainId, limit: CDP_OVERVIEW_PER_KIND_FETCH_LIMIT },
@@ -83,12 +94,7 @@ function useOps24hByInstance(chainId: number) {
       spData,
     );
     const cutoff = Math.floor(Date.now() / 1000) - ONE_DAY_SECONDS;
-    const counts = new Map<string, number>();
-    for (const row of merged.rows) {
-      if (!row.instanceId) continue;
-      if (Number(row.timestamp) < cutoff) continue;
-      counts.set(row.instanceId, (counts.get(row.instanceId) ?? 0) + 1);
-    }
+    const totalActivity = summarizeCdpActivity(merged.rows);
     const undercountPossible =
       spEventsUnavailable ||
       [
@@ -99,7 +105,8 @@ function useOps24hByInstance(chainId: number) {
         txData?.TroveOperationEvent,
       ].some((rows) => isKindAtCapInWindow(rows, cutoff));
     return {
-      ops24hByInstance: counts,
+      activityByInstance: totalActivity.byInstance,
+      totalActivity,
       txCapped: undercountPossible,
       isLoading,
       hasError,
@@ -114,11 +121,12 @@ export function CdpsPageClient() {
     { chainId: network.chainId },
   );
   const {
-    ops24hByInstance,
+    activityByInstance,
+    totalActivity,
     txCapped,
     isLoading: txLoading,
     hasError: txHasError,
-  } = useOps24hByInstance(network.chainId);
+  } = useActivity24hByInstance(network.chainId);
 
   const liquityInstances = data?.LiquityInstance;
   const troves = data?.Trove;
@@ -193,13 +201,26 @@ export function CdpsPageClient() {
               aggregatesByCollateral,
               queryTruncated,
             )}
-            ops24h={ops24hByInstance.get(collateral.id) ?? 0}
+            activity24h={
+              activityByInstance.get(collateral.id) ?? EMPTY_CDP_MARKET_ACTIVITY
+            }
             ops24hCapped={txCapped}
             ops24hLoading={txLoading}
             ops24hHasError={txHasError}
           />
         ))}
       </div>
+      <CdpActivityDigest
+        collaterals={collaterals}
+        instances={instances}
+        aggregatesByCollateral={aggregatesByCollateral}
+        queryTruncated={queryTruncated}
+        activityByInstance={activityByInstance}
+        totalActivity={totalActivity}
+        activityCapped={txCapped}
+        activityLoading={txLoading}
+        activityHasError={txHasError}
+      />
       <CdpAllTransactionsTable
         collaterals={collaterals}
         chainId={network.chainId}
