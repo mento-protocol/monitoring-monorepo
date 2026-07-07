@@ -9,6 +9,10 @@ import {
   dedupeAdvisories,
   reportableAdvisories,
 } from "./pnpm-audit-moderate-report.mjs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 let passed = 0;
 let failed = 0;
@@ -154,6 +158,46 @@ test("deduplicates advisories across lockfiles", () => {
     records[0]?.lockfiles.join(",") === "governance-watchdog,root",
     `unexpected lockfiles ${records[0]?.lockfiles.join(",")}`,
   );
+});
+
+test("runs CLI when invoked with a relative script path", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pnpm-audit-report-"));
+  try {
+    const reportPath = join(dir, "audit.json");
+    writeFileSync(
+      reportPath,
+      JSON.stringify({
+        advisories: {
+          example: {
+            module_name: "example",
+            severity: "moderate",
+            github_advisory_id: "GHSA-xxxx-yyyy-zzzz",
+            title: "example issue",
+            vulnerable_versions: "<1.2.3",
+            patched_versions: ">=1.2.3",
+            findings: [{ version: "1.0.0", paths: [".>example"] }],
+          },
+        },
+      }),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "scripts/pnpm-audit-moderate-report.mjs",
+        "--report",
+        `root=${reportPath}`,
+      ],
+      { encoding: "utf8" },
+    );
+
+    assert(result.status === 0, result.stderr || "CLI exited non-zero");
+    const records = JSON.parse(result.stdout);
+    assert(records.length === 1, `expected one record, got ${records.length}`);
+    assert(records[0]?.module_name === "example", "expected example record");
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

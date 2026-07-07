@@ -14,6 +14,8 @@
  */
 
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   advisoryRecord,
   evaluateAuditReport,
@@ -150,7 +152,9 @@ export function dedupeAdvisories(records) {
   });
 }
 
-const isCli = process.argv[1] === new URL(import.meta.url).pathname;
+const isCli =
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) {
   const { reports } = parseArgs(process.argv.slice(2));
   const records = reports.flatMap(({ label, path }) => {
