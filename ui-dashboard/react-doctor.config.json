@@ -28,6 +28,10 @@
         "rules": ["knip/files"]
       },
       {
+        "files": ["src/lib/__generated__/**"],
+        "rules": ["knip/files", "knip/exports", "knip/types"]
+      },
+      {
         "files": ["src/lib/graphql.ts"],
         "rules": ["knip/exports"]
       }

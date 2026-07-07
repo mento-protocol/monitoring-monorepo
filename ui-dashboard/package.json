@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev-with-live-hasura.mjs",
+    "codegen": "node scripts/generate-graphql-types.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "node ../scripts/eslint-baseline-diff.mjs check",
