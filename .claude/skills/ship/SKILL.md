@@ -22,6 +22,10 @@ commands and GitHub tooling.
 
 ```bash
 git fetch origin main:refs/remotes/origin/main
+if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+  git fetch --unshallow origin
+  git fetch origin main:refs/remotes/origin/main
+fi
 ```
 
 3. Inspect branch, dirty state, commits, and PR state:
@@ -34,11 +38,13 @@ git merge-base --is-ancestor origin/main HEAD
 gh pr view --json number,url,state,isDraft,baseRefName 2>/dev/null
 ```
 
-Hard stop on `main` or `master`. If `git merge-base --is-ancestor origin/main
-HEAD` fails, the branch is missing commits from current `origin/main`; merge or
-rebase before pushing unless you intentionally created a fresh branch from that
-same fetched base. If unrelated dirty changes are mixed with the intended scope,
-stop and ask before staging anything.
+Hard stop on `main` or `master`. The shallow-repository guard prevents hosted
+depth-1 checkouts from producing a false ancestry failure. If
+`git merge-base --is-ancestor origin/main HEAD` still fails, the branch is
+missing commits from current `origin/main`; merge or rebase before pushing
+unless you intentionally created a fresh branch from that same fetched base. If
+unrelated dirty changes are mixed with the intended scope, stop and ask before
+staging anything.
 
 ## Review And Validation
 
