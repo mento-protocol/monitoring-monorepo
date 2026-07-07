@@ -197,13 +197,13 @@ async function walletTotals(
   };
 }
 
-async function recordWalletSnapshot(
+async function buildWalletSnapshot(
   context: StethContext,
   meta: BlockMeta,
   wallet: string,
   totals: StethWalletYieldTotals,
   options: StethDailySnapshotOptions,
-): Promise<boolean> {
+): Promise<StethYieldDailySnapshot | null> {
   const bucket = dayBucket(meta.blockTimestamp);
   const id = stethDailySnapshotId(meta.chainId, wallet, bucket);
   const previousDayBucket = bucket - SECONDS_PER_DAY;
@@ -230,7 +230,7 @@ async function recordWalletSnapshot(
     previousDaySnapshot === undefined &&
     bucket > launchBucket
   ) {
-    return false;
+    return null;
   }
 
   const deltaBaseline =
@@ -239,18 +239,15 @@ async function recordWalletSnapshot(
       ? zeroDeltaBaseline()
       : baselineFromSameDaySnapshot(currentSnapshot));
 
-  context.StethYieldDailySnapshot.set(
-    buildStethYieldDailySnapshot({
-      chainId: meta.chainId,
-      wallet,
-      bucket,
-      totals,
-      deltaBaseline,
-      sampledAtBlock: meta.blockNumber,
-      sampledAtTimestamp: meta.blockTimestamp,
-    }),
-  );
-  return true;
+  return buildStethYieldDailySnapshot({
+    chainId: meta.chainId,
+    wallet,
+    bucket,
+    totals,
+    deltaBaseline,
+    sampledAtBlock: meta.blockNumber,
+    sampledAtTimestamp: meta.blockTimestamp,
+  });
 }
 
 export async function recordStethYieldDailySnapshots(
@@ -263,7 +260,6 @@ export async function recordStethYieldDailySnapshots(
   const balances = await readAllTrackedBalances(context, meta);
   if (balances === null) return false;
 
-  let didWrite = false;
   const totalsByWallet = new Map<string, StethWalletYieldTotals>();
   for (const wallet of TRACKED_STETH_WALLETS) {
     const balance = balances.get(wallet);
@@ -273,14 +269,24 @@ export async function recordStethYieldDailySnapshots(
     totalsByWallet.set(wallet, totals);
   }
 
+  const snapshots: StethYieldDailySnapshot[] = [];
   for (const wallet of TRACKED_STETH_WALLETS) {
     const totals = totalsByWallet.get(wallet);
     if (totals === undefined) return false;
-    didWrite =
-      (await recordWalletSnapshot(context, meta, wallet, totals, options)) ||
-      didWrite;
+    const snapshot = await buildWalletSnapshot(
+      context,
+      meta,
+      wallet,
+      totals,
+      options,
+    );
+    if (snapshot === null) return false;
+    snapshots.push(snapshot);
   }
-  return didWrite;
+  for (const snapshot of snapshots) {
+    context.StethYieldDailySnapshot.set(snapshot);
+  }
+  return snapshots.length > 0;
 }
 
 export async function recordStethYieldEventDailySnapshots(

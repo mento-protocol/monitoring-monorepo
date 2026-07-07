@@ -78,7 +78,7 @@ async function fetchReserveYieldHistory(): Promise<SnapshotPageResult> {
 
   try {
     const susds = await fetchSusdsHistory(client, signal);
-    const steth = await fetchStethHistory(client, signal);
+    const steth = await fetchOptionalStethHistory(client, signal);
     return {
       rows: [...susds.rows, ...steth.rows],
       unavailable: false,
@@ -102,6 +102,18 @@ async function fetchSusdsHistory(
     document: SUSDS_YIELD_DAILY_SNAPSHOTS,
     responseKey: "SusdsYieldDailySnapshot",
   });
+}
+
+async function fetchOptionalStethHistory(
+  client: GraphQLClient,
+  signal: AbortSignal,
+): Promise<SnapshotPageResult> {
+  try {
+    return await fetchStethHistory(client, signal);
+  } catch {
+    // stETH history is optional during rollout; keep already-fetched sUSDS rows.
+    return { rows: [], unavailable: false, truncated: false };
+  }
 }
 
 async function fetchStethHistory(

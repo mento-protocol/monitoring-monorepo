@@ -4,7 +4,10 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
-import type { SusdsYieldDailySnapshotRow } from "@/lib/canonical-revenue";
+import type {
+  ReserveYieldDailySnapshotRow,
+  SusdsYieldDailySnapshotRow,
+} from "@/lib/canonical-revenue";
 
 type ReserveYieldHistorySWRConfig = {
   refreshInterval: number;
@@ -14,10 +17,33 @@ type ReserveYieldHistorySWRConfig = {
   onErrorRetry: unknown;
 };
 
+type ReserveYieldHistoryFetcher = () => Promise<{
+  rows: ReserveYieldDailySnapshotRow[];
+  unavailable: boolean;
+  truncated: boolean;
+}>;
+
 const swrMock = vi.hoisted(() => vi.fn());
+const graphQlRequestMock = vi.hoisted(() => vi.fn());
 
 vi.mock("swr", () => ({
   default: swrMock,
+}));
+
+vi.mock("graphql-request", () => ({
+  GraphQLClient: vi.fn().mockImplementation(function GraphQLClient() {
+    return {
+      request: graphQlRequestMock,
+    };
+  }),
+}));
+
+vi.mock("@/lib/networks", () => ({
+  NETWORKS: {
+    "celo-mainnet": {
+      hasuraUrl: "https://hasura.test/v1/graphql",
+    },
+  },
 }));
 
 import { useReserveYieldHistory } from "../use-reserve-yield-history";
@@ -54,6 +80,7 @@ function ReserveYieldHistoryProbe() {
 
 function renderReserveYieldHistoryProbe(): {
   config: ReserveYieldHistorySWRConfig;
+  fetcher: ReserveYieldHistoryFetcher;
   result: ReturnType<typeof useReserveYieldHistory>;
 } {
   capturedResult = null;
@@ -66,16 +93,21 @@ function renderReserveYieldHistoryProbe(): {
   const config = swrMock.mock.calls[0]?.[2] as
     | ReserveYieldHistorySWRConfig
     | undefined;
+  const fetcher = swrMock.mock.calls[0]?.[1] as
+    | ReserveYieldHistoryFetcher
+    | undefined;
   if (config === undefined) throw new Error("SWR config was not captured");
+  if (fetcher === undefined) throw new Error("SWR fetcher was not captured");
   if (capturedResult === null) {
     throw new Error("Reserve yield history hook result was not captured");
   }
-  return { config, result: capturedResult };
+  return { config, fetcher, result: capturedResult };
 }
 
 describe("useReserveYieldHistory", () => {
   beforeEach(() => {
     swrMock.mockReset();
+    graphQlRequestMock.mockReset();
     swrMock.mockReturnValue({
       data: undefined,
       error: undefined,
@@ -111,5 +143,21 @@ describe("useReserveYieldHistory", () => {
       unavailable: false,
       truncated: false,
     });
+  });
+
+  it("keeps sUSDS rows when the optional stETH history request fails", async () => {
+    const snapshot = reserveSnapshot();
+    graphQlRequestMock
+      .mockResolvedValueOnce({ SusdsYieldDailySnapshot: [snapshot] })
+      .mockRejectedValueOnce(new Error("temporary stETH failure"));
+
+    const { fetcher } = renderReserveYieldHistoryProbe();
+
+    await expect(fetcher()).resolves.toEqual({
+      rows: [snapshot],
+      unavailable: false,
+      truncated: false,
+    });
+    expect(graphQlRequestMock).toHaveBeenCalledTimes(2);
   });
 });

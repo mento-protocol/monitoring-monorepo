@@ -19,6 +19,7 @@ import {
 import {
   recordStethWalletLaunchBaselines,
   recordStethYieldDailySnapshots,
+  recordStethYieldEventDailySnapshots,
 } from "../src/handlers/steth/dailySnapshots.ts";
 import {
   _clearMockStethBalanceOf,
@@ -450,6 +451,61 @@ describeReserveYield("stETH reserve-yield ledger", () => {
     assert.equal(opsSnapshot.balanceAmount, steth(50));
     assert.equal(opsSnapshot.principalAmount, steth(50));
     assert.equal(opsSnapshot.totalEarnedYieldAmount, 0n);
+  });
+
+  it("skips the event stETH snapshot batch when any tracked wallet lacks prior-day history", async () => {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await transfer(mockDb, 100, 1, EXTERNAL, RESERVE_SAFE, steth(100));
+
+    await recordStethWalletLaunchBaselines(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: steth(100),
+        [OPS_SAFE]: 0n,
+      }),
+      V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+    );
+
+    const day1 = dayAfterLaunch(1);
+    await recordStethYieldDailySnapshots(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: steth(101),
+        [OPS_SAFE]: 0n,
+      }),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK + 7_200),
+        blockTimestamp: day1,
+      },
+    );
+    mockDb._stores
+      .get("StethYieldDailySnapshot")
+      ?.delete(`1-steth-${OPS_SAFE}-${day1}`);
+    const before = dailySnapshots(mockDb).length;
+
+    const day2 = dayAfterLaunch(2);
+    assert.equal(
+      await recordStethYieldEventDailySnapshots(
+        stethSnapshotContext(mockDb, {
+          [RESERVE_SAFE]: steth(102),
+          [OPS_SAFE]: 0n,
+        }),
+        {
+          chainId: ETHEREUM_CHAIN_ID,
+          blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK + 14_400),
+          blockTimestamp: day2,
+          logIndex: 2,
+          txHash: txHash(2),
+        },
+      ),
+      false,
+    );
+    assert.equal(dailySnapshots(mockDb).length, before);
+    assert.equal(
+      mockDb.entities.StethYieldDailySnapshot.get(
+        `1-steth-${RESERVE_SAFE}-${day2}`,
+      ),
+      undefined,
+    );
   });
 
   it("skips stETH daily snapshots when a historical balance read is unavailable", async () => {
