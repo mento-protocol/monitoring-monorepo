@@ -7,6 +7,7 @@ import {
   recordSWRFreshnessSuccess,
   registerSWRFreshnessKey,
   resetSWRFreshnessForTests,
+  seedSWRFreshnessData,
 } from "@/lib/swr-freshness";
 
 const NOW = 1_767_225_600_000;
@@ -137,6 +138,24 @@ describe("SWR freshness status", () => {
     expect(getSWRFreshnessStatus(NOW + 1_000)).toMatchObject({
       failedCount: 1,
       lastErrorMessage: "Unknown refresh error",
+      lastUpdatedAt: NOW,
+      staleCount: 1,
+    });
+  });
+
+  it("seeds fallback data without clearing later refresh failures", () => {
+    registerSWRFreshnessKey("seeded-key", REFRESH_MS);
+    seedSWRFreshnessData("seeded-key", { refreshInterval: REFRESH_MS });
+
+    vi.setSystemTime(NOW + 1_000);
+    recordSWRFreshnessError(new Error("refresh failed"), "seeded-key", {
+      refreshInterval: REFRESH_MS,
+    });
+    seedSWRFreshnessData("seeded-key", { refreshInterval: REFRESH_MS });
+
+    expect(getSWRFreshnessStatus(NOW + 1_000)).toMatchObject({
+      failedCount: 1,
+      lastErrorMessage: "refresh failed",
       lastUpdatedAt: NOW,
       staleCount: 1,
     });

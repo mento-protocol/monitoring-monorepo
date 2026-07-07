@@ -103,6 +103,24 @@ export function recordSWRFreshnessSuccess(
   emit();
 }
 
+export function seedSWRFreshnessData(
+  key: unknown,
+  config?: SWRConfiguration,
+): void {
+  const normalizedKey = normalizeSWRFreshnessKey(key);
+  const refreshIntervalMs = readRefreshIntervalMs(config);
+  const entry =
+    entries.get(normalizedKey) ??
+    (refreshIntervalMs !== null
+      ? upsertEntry(normalizedKey, refreshIntervalMs)
+      : null);
+  if (!entry) return;
+  if (entry.lastSuccessAt !== null || entry.lastErrorAt !== null) return;
+  if (refreshIntervalMs !== null) entry.refreshIntervalMs = refreshIntervalMs;
+  entry.lastSuccessAt = Date.now();
+  emit();
+}
+
 export function recordSWRFreshnessError(
   error: unknown,
   key: unknown,

@@ -8,6 +8,7 @@ import {
   registerSWRFreshnessKey,
   recordSWRFreshnessError,
   recordSWRFreshnessSuccess,
+  seedSWRFreshnessData,
 } from "@/lib/swr-freshness";
 
 // Global SWR onError handler: funnel every fetch failure to Sentry with the
@@ -58,7 +59,7 @@ const freshnessMiddleware: Middleware = (useSWRNext) => {
       ) {
         return;
       }
-      recordSWRFreshnessSuccess(freshnessKey, {
+      seedSWRFreshnessData(freshnessKey, {
         refreshInterval: refreshIntervalMs,
       });
     }, [freshnessKey, refreshIntervalMs, response.data]);

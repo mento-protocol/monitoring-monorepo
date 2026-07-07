@@ -90,5 +90,21 @@ describe("SwrProvider freshness tracking", () => {
 
     expect(container.textContent).toContain("Latest refresh failed");
     expect(container.textContent).toContain("last-good data from 1s ago");
+
+    act(() => root.unmount());
+    root = createRoot(container);
+
+    const remountTriggerRef: TriggerRef = { current: null };
+    act(() => {
+      root.render(
+        <SwrProvider>
+          <FallbackDataProbe triggerRef={remountTriggerRef} />
+        </SwrProvider>,
+      );
+    });
+
+    expect(container.textContent).toContain("fallback ready");
+    expect(container.textContent).toContain("Latest refresh failed");
+    expect(container.textContent).toContain("last-good data from 1s ago");
   });
 });
