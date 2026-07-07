@@ -50,6 +50,7 @@ Hasura silently caps every query at **1000 rows** (Envio hosted Hasura config). 
 - [ ] Test the error state (mock SWR with `error: new Error(...)`)
 - [ ] Test the populated state with both empty array and >0 entries
 - [ ] If the hook sets `revalidateOnFocus: false`, write a regression test that asserts the option is set — otherwise it gets removed in a future refactor
+- [ ] If the hook feeds a global freshness/degraded-data banner, test that the banner is driven by an observed fetch error after last-good data — not just elapsed data age or refresh-interval drift
 
 ## 6. Per-consumer error-channel isolation
 
