@@ -307,6 +307,7 @@ pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
 # Dashboard
 pnpm dashboard:dev            # Dev server; see ui-dashboard/AGENTS.md for logged-in/out localhost verification
+pnpm dashboard:codegen        # Generate dashboard GraphQL operation types from indexer-envio/schema.graphql
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)
 pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture-driven browser interaction + visual snapshot tests
@@ -466,6 +467,7 @@ git fetch origin main
 ./tools/trunk fmt --all
 ./tools/trunk check --all
 pnpm dashboard:react-doctor:diff
+pnpm dashboard:codegen # Regenerates dashboard GraphQL operation types from indexer-envio/schema.graphql
 pnpm --filter @mento-protocol/ui-dashboard typecheck
 pnpm --filter @mento-protocol/indexer-envio typecheck
 pnpm --filter @mento-protocol/indexer-envio test:coverage

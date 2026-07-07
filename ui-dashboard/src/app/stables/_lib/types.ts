@@ -1,55 +1,34 @@
-import type { StableSupplySource, StableSupplyChangeKind } from "@/lib/stables";
+import type {
+  StablesChangesQuery,
+  StablesCurrentCustodyPerTokenQuery,
+  StablesCurrentSupplyPerTokenQuery,
+  StablesCustodyDailySnapshotsQuery,
+  StablesDailySnapshotsQuery,
+  StablesLatestCustodyPerTokenQuery,
+  StablesLatestPerTokenQuery,
+} from "@/lib/__generated__/graphql";
+import type { StableSupplySource } from "@/lib/stables";
 
-// Raw row shape returned by STABLES_DAILY_SNAPSHOTS and the normalized
-// current-state supply feed.
+// Row shapes are generated from the stables GraphQL operations. The optional
+// current-state discriminator is added after fetch normalization.
 // `totalSupply` / `dailyMintAmount` / `dailyBurnAmount` are token-native wei
 // serialized as strings by Hasura (numeric → string in JSON to preserve
 // 256-bit precision); parse to bigint via `BigInt(...)` at consumption.
-export type StableSupplyDailySnapshot = {
-  id: string;
-  chainId: number;
-  tokenAddress: string;
-  tokenSymbol: string;
-  source: StableSupplySource;
-  tokenDecimals: number;
-  timestamp: string;
-  totalSupply: string;
-  dailyMintAmount: string;
-  dailyBurnAmount: string;
+export type StableSupplyDailySnapshot = (
+  | StablesDailySnapshotsQuery["StableSupplyDailySnapshot"][number]
+  | StablesLatestPerTokenQuery["StableSupplyDailySnapshot"][number]
+  | StablesCurrentSupplyPerTokenQuery["StableTokenSupply"][number]
+) & {
   isCurrentState?: boolean;
 };
 
-export type StableTokenCustodyDailySnapshot = {
-  id: string;
-  chainId: number;
-  tokenAddress: string;
-  tokenSymbol: string;
-  source: StableSupplySource;
-  tokenDecimals: number;
-  managerAddress: string;
-  timestamp: string;
-  lockedSupply: string;
-  dailyLockedAmount: string;
-  dailyUnlockedAmount: string;
-};
+export type StableTokenCustodyDailySnapshot =
+  | StablesCustodyDailySnapshotsQuery["StableTokenCustodyDailySnapshot"][number]
+  | StablesLatestCustodyPerTokenQuery["StableTokenCustodyDailySnapshot"][number]
+  | StablesCurrentCustodyPerTokenQuery["StableTokenCustodyState"][number];
 
-export type StableSupplyChangeEvent = {
-  id: string;
-  chainId: number;
-  tokenAddress: string;
-  tokenSymbol: string;
-  tokenDecimals: number;
-  source: StableSupplySource;
-  kind: StableSupplyChangeKind;
-  counterparty: string;
-  caller: string;
-  txTo: string;
-  isProtocolOwnedCaller: boolean;
-  amount: string;
-  txHash: string;
-  blockNumber: string;
-  blockTimestamp: string;
-};
+export type StableSupplyChangeEvent =
+  StablesChangesQuery["StableSupplyChangeEvent"][number];
 
 // Per-token aggregate computed by `rollupByToken` — feeds the sparkline grid,
 // KPI tiles, and hero chart.

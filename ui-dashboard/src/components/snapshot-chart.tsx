@@ -184,18 +184,30 @@ export function SnapshotChart({
     yaxis: "y2" as const,
   };
 
+  const lastCumSwaps =
+    cumSwaps.length > 0 ? (cumSwaps[cumSwaps.length - 1] ?? 0) : 0;
+  const swapVolumeSummary = `Daily swap volume for ${token0Symbol} and ${token1Symbol}: ${
+    days.length
+  } days plotted, ${lastCumSwaps.toLocaleString()} cumulative swaps.`;
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <h3 className="text-sm font-medium text-slate-400 mb-3">
         Daily Swap Volume
       </h3>
-      <Plot
-        data={[volumeTrace0, volumeTrace1, cumSwapTrace]}
-        layout={makeSnapshotLayout(shapes)}
-        config={PLOTLY_CONFIG}
-        style={{ width: "100%", height: 380 }}
-        useResizeHandler
-      />
+      <div
+        role="figure"
+        aria-label={`Daily swap volume chart for ${token0Symbol} and ${token1Symbol}`}
+      >
+        <Plot
+          data={[volumeTrace0, volumeTrace1, cumSwapTrace]}
+          layout={makeSnapshotLayout(shapes)}
+          config={PLOTLY_CONFIG}
+          style={{ width: "100%", height: 380 }}
+          useResizeHandler
+        />
+      </div>
+      <p className="sr-only">{swapVolumeSummary}</p>
     </div>
   );
 }

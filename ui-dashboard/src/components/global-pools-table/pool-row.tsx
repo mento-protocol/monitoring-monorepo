@@ -14,8 +14,10 @@ import {
   computePoolUptimePct,
   resolveLimitStatus,
   uptimeColorClass,
+  uptimeTierGlyph,
 } from "@/lib/health";
 import { combinedTooltip } from "@/lib/pool-table-utils";
+import { Tooltip } from "@/components/tooltip";
 import { buildPoolDetailHref } from "@/lib/routing";
 import {
   formatFee,
@@ -187,14 +189,26 @@ function UptimeCell({ pool }: { pool: Pool }) {
   }
   const breachCount = pool.breachCount ?? 0;
   const breachLabel = breachCount === 1 ? "breach" : "breaches";
+  const tier = uptimeTierGlyph(pct);
+  const diagnostic = `${pct.toFixed(3)}% uptime (oracle freshness + price within tolerance) · ${breachCount} lifetime price-deviation ${breachLabel}`;
   return (
     <Cell className={className}>
-      <span
-        className={uptimeColorClass(pct)}
-        title={`${pct.toFixed(3)}% uptime (oracle freshness + price within tolerance) · ${breachCount} lifetime price-deviation ${breachLabel}`}
-      >
-        {pct.toFixed(2)}%
-      </span>
+      {/* Diagnostic moved off the native `title` into the accessible Tooltip
+          (keyboard- + tap-reachable). Severity is encoded by a shape-distinct
+          glyph (grayscale/deuteranopia safe) with an sr-only tier label; the
+          number stays a neutral non-alarm color so it can't contradict the
+          row's Health badge. */}
+      <Tooltip content={diagnostic} align="right">
+        <span className="inline-flex items-center gap-1">
+          {tier && (
+            <span aria-hidden="true" className="text-[10px] text-slate-400">
+              {tier.glyph}
+            </span>
+          )}
+          <span className={uptimeColorClass(pct)}>{pct.toFixed(2)}%</span>
+          {tier && <span className="sr-only">{tier.label}</span>}
+        </span>
+      </Tooltip>
     </Cell>
   );
 }

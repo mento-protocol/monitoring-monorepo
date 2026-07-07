@@ -147,6 +147,10 @@ export function LiquidityChart({
     ? "Estimated using current oracle price — balanced pool = lines overlap"
     : null;
 
+  const reservesSummary = `Pool reserves over time for ${token0Symbol} and ${token1Symbol}: ${
+    timestamps.length
+  } snapshots plotted${useUsd ? ", USD-normalized" : ""}.`;
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <div className="flex items-baseline gap-2 mb-3">
@@ -155,21 +159,27 @@ export function LiquidityChart({
         </h3>
         {subtitle && <span className="text-xs text-slate-600">{subtitle}</span>}
       </div>
-      <Plot
-        data={[trace0, trace1]}
-        layout={{
-          ...makeLayout(useUsd),
-          shapes: fxPoolWeekendBands({
-            pool,
-            network,
-            from: range.from,
-            to: range.to,
-          }),
-        }}
-        config={PLOTLY_CONFIG}
-        style={{ width: "100%", height: 320 }}
-        useResizeHandler
-      />
+      <div
+        role="figure"
+        aria-label={`Pool reserves over time chart for ${token0Symbol} and ${token1Symbol}`}
+      >
+        <Plot
+          data={[trace0, trace1]}
+          layout={{
+            ...makeLayout(useUsd),
+            shapes: fxPoolWeekendBands({
+              pool,
+              network,
+              from: range.from,
+              to: range.to,
+            }),
+          }}
+          config={PLOTLY_CONFIG}
+          style={{ width: "100%", height: 320 }}
+          useResizeHandler
+        />
+      </div>
+      <p className="sr-only">{reservesSummary}</p>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
   computeWindowUptimePct,
   liveHealthCounters,
   uptimeColorClass,
+  uptimeTierGlyph,
 } from "@/lib/health";
 import { isFxPool } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
@@ -56,6 +57,24 @@ type DailyAnchorRow = {
   cumulativeHealthBinarySeconds?: string | undefined;
   cumulativeHealthTotalSeconds?: string | undefined;
 };
+
+/**
+ * Shape-distinct, color-independent uptime tier signal (see `uptimeTierGlyph`):
+ * the number itself is a neutral non-alarm color, so severity is carried by the
+ * glyph + sr-only label to stay legible in grayscale / for deuteranopia.
+ */
+function UptimeTierMarker({ pct }: { pct: number }) {
+  const tier = uptimeTierGlyph(pct);
+  if (!tier) return null;
+  return (
+    <>
+      <span aria-hidden="true" className="mr-1 text-[10px] text-slate-400">
+        {tier.glyph}
+      </span>
+      <span className="sr-only">{tier.label} </span>
+    </>
+  );
+}
 
 export function UptimeValue({ pool }: { pool: Pool }) {
   const isVirtual = isVirtualPool(pool);
@@ -129,6 +148,7 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   return (
     <span className="flex flex-col gap-0.5">
       <span className="font-medium">
+        <UptimeTierMarker pct={pct} />
         <span className={uptimeColorClass(pct)}>{pct.toFixed(2)}%</span>
         <span className="ml-1 text-xs text-slate-500">all-time</span>
       </span>

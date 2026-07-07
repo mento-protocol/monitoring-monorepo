@@ -440,22 +440,41 @@ export function pressureColorClass(pressure: number): string {
 }
 
 /**
- * Tailwind text-color class for an uptime percentage (0–100). Tier
- * thresholds are intentionally coarse — we want "red = page someone"
- * not "red = SLO budget touched". Adjust upward once breach attribution
- * is solid and we have a real three-nines target.
- *
- *   >99%   → emerald
- *   90-99% → yellow
- *   70-90% → amber
- *   <70%   → red
+ * Non-alarm text color for an uptime percentage. Uptime is a rolling
+ * reliability metric, NOT a live health STATE, so it deliberately does NOT
+ * spend the emerald/amber/red alarm palette that HealthBadge / LimitBadge
+ * reserve for actual state. Painting a low-uptime-but-currently-OK pool's
+ * number red would contradict its green Health badge on the same row; keeping
+ * the number neutral makes that contradiction impossible. Severity is instead
+ * carried by a shape-distinct, color-independent glyph (`uptimeTierGlyph`) so
+ * it stays legible in grayscale / for deuteranopia.
  */
 export function uptimeColorClass(pct: number): string {
-  if (!Number.isFinite(pct)) return "text-slate-500";
-  if (pct > 99) return "text-emerald-400";
-  if (pct >= 90) return "text-yellow-400";
-  if (pct >= 70) return "text-amber-400";
-  return "text-red-400";
+  return Number.isFinite(pct) ? "text-slate-200" : "text-slate-500";
+}
+
+export interface UptimeTierGlyph {
+  /** Shape-distinct, colorblind-safe glyph for the uptime tier. */
+  glyph: string;
+  /** Accessible tier name (sr-only / tooltip) — the glyph is aria-hidden. */
+  label: string;
+}
+
+/**
+ * Shape-only severity signal for pool uptime, mirroring the coarse tier
+ * boundaries the old color scale used (>99 / 90-99 / 70-90 / <70). Four
+ * maximally-distinct silhouettes — circle, diamond, triangle, square (the
+ * classic matplotlib-marker set) — so the tier is distinguishable WITHOUT
+ * color (grayscale + deuteranopia safe). Color is intentionally absent here
+ * and in `uptimeColorClass`, which also guarantees the uptime cell can never
+ * contradict the row's Health badge hue.
+ */
+export function uptimeTierGlyph(pct: number): UptimeTierGlyph | null {
+  if (!Number.isFinite(pct)) return null;
+  if (pct > 99) return { glyph: "●", label: "excellent uptime" };
+  if (pct >= 90) return { glyph: "◆", label: "good uptime" };
+  if (pct >= 70) return { glyph: "▲", label: "degraded uptime" };
+  return { glyph: "■", label: "poor uptime" };
 }
 
 /** Clamp `binary / total` to a percentage, returning `null` when the

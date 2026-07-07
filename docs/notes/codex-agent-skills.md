@@ -2,6 +2,7 @@
 title: Codex Agent Skills — Mechanics
 status: active
 owner: eng
+canonical: true
 last_verified: 2026-07-06
 ---
 

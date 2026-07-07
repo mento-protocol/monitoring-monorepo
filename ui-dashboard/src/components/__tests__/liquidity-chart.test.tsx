@@ -115,4 +115,30 @@ describe("LiquidityChart", () => {
     expect(usdmQuotePlot?.data?.[0]?.y).toEqual([200]);
     expect(usdmQuotePlot?.data?.[1]?.y).toEqual([200]);
   });
+
+  it("wraps the plot in role=figure with a token-aware accessible name and sr-only summary (WCAG 1.1.1)", () => {
+    const html = renderToStaticMarkup(
+      <LiquidityChart
+        snapshots={[
+          snapshot({
+            reserves0: "200000000000000000000",
+            reserves1: "100000000000000000000",
+          }),
+        ]}
+        pool={{
+          ...BASE_POOL,
+          oraclePrice: "2000000000000000000000000",
+        }}
+        token0Symbol="USDm"
+        token1Symbol="TESTm"
+      />,
+    );
+
+    expect(html).toContain('role="figure"');
+    expect(html).toContain(
+      'aria-label="Pool reserves over time chart for USDm and TESTm"',
+    );
+    expect(html).toContain("sr-only");
+    expect(html).toContain("Pool reserves over time for USDm and TESTm");
+  });
 });
