@@ -15,6 +15,7 @@ import {
 } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { POOL_RESERVES } from "@/lib/queries";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import { normalizeSearch } from "@/lib/table-search";
 import { tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import type { Pool, ReserveUpdate } from "@/lib/types";
@@ -55,8 +56,7 @@ export function ReservesTab({
       : null;
   const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
   const usdmIsToken1 = USDM_SYMBOLS.has(sym1);
-  const hasUsdmSide = usdmIsToken0 !== usdmIsToken1;
-  const showUsd = feedVal !== null && hasUsdmSide;
+  const showUsd = feedVal !== null && usdmIsToken0 !== usdmIsToken1;
 
   const filteredRows = useMemo(() => {
     if (!query) return rows;
@@ -84,11 +84,11 @@ export function ReservesTab({
     });
   }, [rows, query, sym0, sym1, pool, feedVal, usdmIsToken0, showUsd]);
 
-  if (error) return <ErrorBox message={error.message} />;
-  if (isLoading) return <Skeleton rows={5} />;
+  if (hasErrorWithoutData(error, data))
+    return <ErrorBox message={error.message} />;
+  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={5} />;
   if (rows.length === 0)
     return <EmptyBox message="No reserve updates for this pool." />;
-
   return (
     <>
       <ReserveChart

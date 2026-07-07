@@ -29,6 +29,7 @@ import {
   POOL_SWAPS_COUNT,
   POOL_SWAPS_PAGE,
 } from "@/lib/queries";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import { isFpmm, tokenSymbol } from "@/lib/tokens";
@@ -134,12 +135,13 @@ export function SwapsTab({
     });
   }, [swaps, query, sym0, sym1, dec0, dec1, getName, getTags]);
 
-  if (error) return <ErrorBox message={error.message} />;
-  if (isLoading) return <Skeleton rows={5} />;
+  if (hasErrorWithoutData(error, data))
+    return <ErrorBox message={error.message} />;
+  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={5} />;
 
   return (
     <>
-      {fpmmPool && snapshotError && (
+      {fpmmPool && hasErrorWithoutData(snapshotError, snapshotData) && (
         <ErrorBox
           message={`Daily volume chart unavailable: ${snapshotError.message}`}
         />

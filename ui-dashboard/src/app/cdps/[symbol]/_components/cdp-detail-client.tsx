@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { EmptyBox, ErrorBox, Skeleton, Tile } from "@/components/feedback";
 import { useGQL } from "@/lib/graphql";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
   CDP_INSTANCE_DAILY_SNAPSHOTS,
   CDP_MARKET_DETAIL,
@@ -201,12 +202,12 @@ function CdpDetailState({
   sourceSplitWarning: string | null;
 }) {
   if (
-    markets.isLoading ||
+    isLoadingWithoutData(markets.isLoading, markets.data) ||
     (collateral != null && detail.isLoading && detail.data == null)
   ) {
     return <Skeleton rows={8} />;
   }
-  if (markets.error) {
+  if (hasErrorWithoutData(markets.error, markets.data)) {
     return (
       <ErrorBox
         message={`Failed to load CDP markets — ${markets.error.message}`}
@@ -216,7 +217,7 @@ function CdpDetailState({
   if (collateral == null) {
     return <EmptyBox message="Unknown CDP market." />;
   }
-  if (detail.error) {
+  if (hasErrorWithoutData(detail.error, detail.data)) {
     return (
       <ErrorBox
         message={`Failed to load CDP market — ${detail.error.message}`}

@@ -370,6 +370,40 @@ describe("CdpsPageClient", () => {
     expect(bodyText(handle!.container)).toContain("Open Trove");
   });
 
+  it("keeps last-good CDP market data mounted during a background poll error", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return {
+          data: marketData(),
+          error: new Error("rate limited"),
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return { data: transactionData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(handle!, <CdpsPageClient />);
+
+    expect(handle!.container.textContent).toContain("GBPm");
+    expect(handle!.container.textContent).toContain("Recent CDP Transactions");
+    expect(handle!.container.textContent).not.toContain(
+      "Failed to load CDP markets",
+    );
+  });
+
   it("preserves primary 24h counts when the SP companion query fails", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === CDP_MARKETS) {
@@ -629,6 +663,50 @@ describe("CdpAllTransactionsTable", () => {
     expect(handle!.container.textContent).not.toContain(
       "No CDP transactions indexed yet.",
     );
+  });
+
+  it("keeps last-good empty overview transactions as an empty state during a background poll error", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return {
+          data: {
+            LiquidationEvent: [],
+            RedemptionEvent: [],
+            SpRebalanceEvent: [],
+            TroveOperationEvent: [],
+          },
+          error: new Error("rate limited"),
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[{ id: "gbpm", chainId: 42220, symbol: "GBPm" }]}
+      />,
+    );
+
+    expect(handle!.container.textContent).toContain(
+      "No CDP transactions indexed yet.",
+    );
+    expect(handle!.container.textContent).not.toContain(
+      "Failed to load CDP transactions",
+    );
+    expect(handle!.container.textContent).not.toContain("rate limited");
   });
 
   it("shows the overview SP schema-lag notice when only the companion query fails", () => {
