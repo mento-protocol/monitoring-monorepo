@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { unstable_serialize } from "swr";
 import {
   getSWRFreshnessStatus,
   recordSWRFreshnessError,
@@ -87,6 +88,28 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus(NOW + REFRESH_MS + 1)).toMatchObject({
       failedCount: 0,
+      lastUpdatedAt: NOW,
+      staleCount: 1,
+    });
+  });
+
+  it("matches registered array keys with SWR serialized callback keys", () => {
+    const swrKey = ["celo", "query", { chainId: 42220 }];
+    const serializedKey = unstable_serialize(swrKey);
+
+    registerSWRFreshnessKey(swrKey, REFRESH_MS);
+    recordSWRFreshnessSuccess(serializedKey, {
+      refreshInterval: REFRESH_MS,
+    });
+
+    vi.setSystemTime(NOW + 5_000);
+    recordSWRFreshnessError(new Error("poll failed"), serializedKey, {
+      refreshInterval: REFRESH_MS,
+    });
+
+    expect(getSWRFreshnessStatus(NOW + 5_000)).toMatchObject({
+      failedCount: 1,
+      lastErrorMessage: "poll failed",
       lastUpdatedAt: NOW,
       staleCount: 1,
     });

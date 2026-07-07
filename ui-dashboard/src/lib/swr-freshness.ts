@@ -1,4 +1,4 @@
-import type { SWRConfiguration } from "swr";
+import { unstable_serialize, type Key, type SWRConfiguration } from "swr";
 
 type SwrFreshnessEntry = {
   activeCount: number;
@@ -25,9 +25,13 @@ let snapshotVersion = 0;
 export function normalizeSWRFreshnessKey(key: unknown): string {
   if (typeof key === "string") return key;
   try {
-    return JSON.stringify(key) ?? String(key);
+    return unstable_serialize(key as Key) || String(key);
   } catch {
-    return String(key);
+    try {
+      return JSON.stringify(key) ?? String(key);
+    } catch {
+      return String(key);
+    }
   }
 }
 
