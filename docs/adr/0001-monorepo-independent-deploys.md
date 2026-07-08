@@ -3,7 +3,7 @@ title: One pnpm+Turbo monorepo with independently deployed services
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-08
 scope: repo-wide
 date: 2026-03
 ---
@@ -24,7 +24,7 @@ cross-cutting changes without a release dance across separate repos.
 ## Decision
 
 Keep everything in one pnpm-workspace + Turbo monorepo. Packages share code
-through workspace packages (notably `@mento-protocol/monitoring-config`), but
+through workspace packages (notably the public `@mento-protocol/config` package), but
 each service owns its own deploy path and deploys **independently** — a change
 to one package does not redeploy the others.
 

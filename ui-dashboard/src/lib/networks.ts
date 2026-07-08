@@ -1,12 +1,12 @@
 // Network definitions — add new chains here
 
-import DEPLOYMENT_NAMESPACES from "@mento-protocol/monitoring-config/deployment-namespaces.json";
-import { explorerBaseUrl as sharedExplorerBaseUrl } from "@mento-protocol/monitoring-config/chains";
+import DEPLOYMENT_NAMESPACES from "@mento-protocol/config/deployment-namespaces";
+import { explorerBaseUrl as sharedExplorerBaseUrl } from "@mento-protocol/config/chains";
 import {
   chainTokenSymbols,
   chainAddressLabels,
-} from "@mento-protocol/monitoring-config/tokens";
-import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/monitoring-config/protocol-fee";
+} from "@mento-protocol/config/tokens";
+import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/config/protocol-fee";
 import { clientEnv } from "@/env";
 
 // Semantic aliases over the shared chain ID → namespace map.

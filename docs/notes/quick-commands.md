@@ -80,6 +80,12 @@ pnpm issue:release --issue 901                 # Release a mistaken claim back t
 pnpm issue:board sync                          # Re-project labels and close merged in-pr board items
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 
+# Public config package
+pnpm --filter @mento-protocol/config build     # Build the public protocol metadata package
+npm pack ./shared-config --dry-run             # Inspect the files that would publish to npm
+git tag "config-v$(node -p "require('./shared-config/package.json').version")"  # Create the publish tag from main
+git push origin "config-v$(node -p "require('./shared-config/package.json').version")"  # Publish via .github/workflows/publish-config.yml
+
 # Aegis
 pnpm aegis:dev                # Start the NestJS App Engine service locally
 pnpm aegis:build              # Build the Aegis service

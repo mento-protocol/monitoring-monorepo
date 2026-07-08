@@ -3,7 +3,7 @@ title: Envio Indexer Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-08
 ---
 
 # AGENTS.md — Envio Indexer
@@ -66,7 +66,7 @@ pnpm check:yaml-addresses   # Verify every address in config*.yaml resolves to a
 
 - **`@mento-protocol/contracts`** — Contract ABIs and addresses (published npm package).
 - **`config/deployment-namespaces.json`** — Vendored namespace map for Envio hosted compatibility; keep it in sync with `../shared-config/deployment-namespaces.json`.
-- **`src/feeToken.ts:buildKnownTokenMeta`** — Vendored mirror of `../shared-config/src/tokens.ts` (token filter: exclude `StableToken*`, canonicalize trailing `Spoke`). The indexer layers on a stricter policy at the call site (also exclude `Mock*`, require `decimals`) for the fee-token allowlist. This is a **deliberate mirror**, not dedup debt: Envio may build the indexer outside the pnpm workspace (see `src/contractAddresses.ts:14-18`), so the shared workspace package is unsafe here. When the filter policy changes in one place, update both.
+- **`src/feeToken.ts:buildKnownTokenMeta`** — Vendored mirror of `../shared-config/src/tokens.ts` (token filter: exclude `StableToken*`, canonicalize trailing `Spoke`). The indexer layers on a stricter policy at the call site (also exclude `Mock*`, require `decimals`) for the fee-token allowlist. This is a **deliberate mirror**, not dedup debt: Envio may build the indexer outside the pnpm workspace (see `src/contractAddresses.ts:14-18`), so a `workspace:*` dependency on the shared package is unsafe here. Moving the indexer to the public `@mento-protocol/config` package would be a separate deploy-path change. When the filter policy changes in one place, update both.
 - **`viem`** — Used for RPC calls (oracle reporter count via `readContract`).
 
 ## Environment

@@ -15,11 +15,11 @@ export type HealthStatus =
 import { isWeekend, tradingSecondsInRange } from "./weekend";
 import { isVirtualPool } from "./types";
 import { isUsdPegged } from "./tokens";
-import { chainTokenSymbols } from "@mento-protocol/monitoring-config/tokens";
+import { chainTokenSymbols } from "@mento-protocol/config/tokens";
 import {
   DEVIATION_TOLERANCE_RATIO,
   DEVIATION_CRITICAL_RATIO,
-} from "@mento-protocol/monitoring-config/thresholds";
+} from "@mento-protocol/config/thresholds";
 
 /**
  * Fallback oracle staleness threshold in seconds.
@@ -112,12 +112,12 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
 
 /**
  * Tolerance + critical-magnitude multipliers over the rebalance threshold.
- * Re-exported from `@mento-protocol/monitoring-config/thresholds` so the
+ * Re-exported from `@mento-protocol/config/thresholds` so the
  * dashboard, the metrics-bridge probe, and the indexer all read the same
  * numbers. Parity with the indexer's `pool.ts` is enforced by
  * `indexer-envio/test/healthStatusParity.test.ts`.
  */
-export { DEVIATION_CRITICAL_RATIO } from "@mento-protocol/monitoring-config/thresholds";
+export { DEVIATION_CRITICAL_RATIO } from "@mento-protocol/config/thresholds";
 
 /** True iff governance has explicitly configured this pool to never
  * rebalance — BOTH split sides 0 AND `rebalanceThresholdsKnown=true`.

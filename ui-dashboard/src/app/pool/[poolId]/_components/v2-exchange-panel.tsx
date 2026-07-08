@@ -1,6 +1,6 @@
 "use client";
 
-import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
+import { toHumanUnits } from "@mento-protocol/config/units";
 import type { ReactNode } from "react";
 import { AddressLink } from "@/components/address-link";
 import { Tooltip } from "@/components/tooltip";

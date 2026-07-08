@@ -1,4 +1,4 @@
-import { contractEntries } from "@mento-protocol/monitoring-config/tokens";
+import { contractEntries } from "@mento-protocol/config/tokens";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 

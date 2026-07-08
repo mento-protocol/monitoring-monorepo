@@ -3,7 +3,7 @@ title: The indexer vendors a mirror of shared-config because Envio builds outsid
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-08
 scope: indexer-envio
 date: 2026-03
 ---
@@ -18,20 +18,26 @@ date: 2026-03
 ADR 0011 makes `shared-config` the single source of truth, and every other package
 imports it directly. The indexer cannot: **Envio's hosted builder compiles the
 indexer outside the pnpm workspace**, so a `workspace:*` link to
-`@mento-protocol/monitoring-config` is not resolvable at hosted build time.
+`@mento-protocol/config` is not resolvable at hosted build time. The public npm
+package makes a future registry-pinned indexer dependency possible, but that
+would be an explicit deploy-contract change rather than an automatic consequence
+of the package rename.
 
 ## Decision
 
 The indexer **vendors a copy** of the pieces it needs —
 `config/deployment-namespaces.json` and the token-filter logic mirrored in
 `src/feeToken.ts` (`buildKnownTokenMeta`) — rather than importing the workspace
-package. This is a deliberate, documented mirror: when the source policy changes in
-`shared-config`, both copies are updated in the same change.
+package. This is a deliberate, documented mirror: when the source policy changes
+in `shared-config`, both copies are updated in the same change.
 
 ## Alternatives considered
 
 - **`workspace:*` import like everyone else** — rejected: breaks the Envio hosted
   build, which runs outside the workspace.
+- **Published `@mento-protocol/config` dependency** — deferred: viable after the
+  package exists, but it changes how hosted indexer builds receive protocol
+  metadata and should be made in a focused deploy-path PR.
 - **Bundle shared-config into the indexer at build** — rejected: adds a build step
   Envio's hosted pipeline doesn't run; the vendored JSON/TS is simpler and reviewable.
 

@@ -6,7 +6,7 @@
  * (e.g. stability pool balance, reserve collateral).
  *
  * Canonical ABI + error map live in
- * `@mento-protocol/monitoring-config/rebalance-abi` — both this probe and
+ * `@mento-protocol/config/rebalance-abi` — both this probe and
  * the metrics-bridge alert probe import the same data so a revert decoded
  * by one always decodes by the other.
  *
@@ -31,9 +31,9 @@ import {
   ERROR_MESSAGES,
   HEALTHY_NO_OP_ERRORS,
   REASON_CODES,
-} from "@mento-protocol/monitoring-config/rebalance-abi";
-import { POOL_PAIR_ABI_SOURCES } from "@mento-protocol/monitoring-config/erc20-abi";
-import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
+} from "@mento-protocol/config/rebalance-abi";
+import { POOL_PAIR_ABI_SOURCES } from "@mento-protocol/config/erc20-abi";
+import { toHumanUnits } from "@mento-protocol/config/units";
 import { getViemClient, ERC20_ABI } from "./rpc-client";
 
 // Re-export so existing dashboard call sites (chart tooltips, etc.) keep

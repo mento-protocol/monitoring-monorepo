@@ -93,7 +93,7 @@ else
   # Rebuild shared-config explicitly: on a src-only change (lockfile unchanged)
   # the install above is a no-op that skips the postinstall build, leaving
   # shared-config/dist stale for the dashboard/bridge imports that resolve it.
-  pnpm --filter @mento-protocol/monitoring-config build
+  pnpm --filter @mento-protocol/config build
   deps_skipped=0
 fi
 

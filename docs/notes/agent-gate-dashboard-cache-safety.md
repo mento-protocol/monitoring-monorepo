@@ -171,7 +171,7 @@ side effect of the cache work.
 ## Risk Assessment
 
 The biggest correctness risk is under-keying cross-package imports. The
-dashboard imports `@mento-protocol/monitoring-config` TypeScript exports and
+dashboard imports `@mento-protocol/config` TypeScript exports and
 JSON exports at build/dev time, so `shared-config/src/**` and
 `shared-config/*.json` must both be first-class inputs.
 

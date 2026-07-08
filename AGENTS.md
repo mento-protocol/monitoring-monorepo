@@ -3,7 +3,7 @@ title: Monitoring Monorepo Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-28
+last_verified: 2026-07-08
 ---
 
 # AGENTS.md — Monitoring Monorepo
@@ -12,7 +12,7 @@ last_verified: 2026-05-28
 
 pnpm monorepo with these workspace packages:
 
-- `shared-config/` — `@mento-protocol/monitoring-config`: chain + token metadata (chain ID → treb namespace, chain slug/label, explorer URLs, token-symbol derivation)
+- `shared-config/` — public `@mento-protocol/config`: chain + token metadata (chain ID → treb namespace, chain slug/label, explorer URLs, token-symbol derivation, thresholds, ABIs)
 - `indexer-envio/` — Envio HyperIndex indexer for Celo v3 FPMM pools
 - `ui-dashboard/` — Next.js 16 + Plotly.js monitoring dashboard
 - `metrics-bridge/` — Hasura → Prometheus gauge exporter for v3 alert rules
@@ -290,7 +290,7 @@ Each package has its own `AGENTS.md` (Claude Code reads them as `CLAUDE.md` via 
 | Package                | What it does                                                                                                                                                                                                                                                                                                                                                                             | Read                                                             |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `aegis/`               | NestJS App Engine service polling v2 view calls → Prometheus `/metrics`; also owns the Aegis Grafana dashboard (`aegis/terraform/`); the Aegis service-health alert rules live in `alerts/rules/`                                                                                                                                                                                        | [`aegis/AGENTS.md`](aegis/AGENTS.md)                             |
-| `shared-config/`       | `@mento-protocol/monitoring-config`: chain/token metadata, FX calendar, deployment namespaces. Source of truth — never duplicate chain slugs, explorer URLs, or token labels elsewhere (PR #209). Indexer vendors a copy because Envio builds outside the pnpm workspace.                                                                                                                | [`shared-config/AGENTS.md`](shared-config/AGENTS.md)             |
+| `shared-config/`       | Public `@mento-protocol/config`: chain/token metadata, FX calendar, deployment namespaces, thresholds, and shared ABIs. Source of truth — never duplicate chain slugs, explorer URLs, or token labels elsewhere (PR #209). Indexer vendors a copy until a focused deploy-path PR moves it to an explicit registry dependency.                                                            | [`shared-config/AGENTS.md`](shared-config/AGENTS.md)             |
 | `indexer-envio/`       | Envio HyperIndex (envio@3.0.0): Celo + Monad FPMM, v2 Broker, and Ethereum reserve-yield accounting in the primary config. stETH uses a launch-aligned sub-daily wallet sampler that writes daily rows; sUSDS remains event-only. Schema in `schema.graphql`; handler entry point is `src/EventHandlers.ts`.                                                                             | [`indexer-envio/AGENTS.md`](indexer-envio/AGENTS.md)             |
 | `ui-dashboard/`        | Next.js 16 + Plotly.js + SWR + Tailwind 4. Address book + forensic reports stored in Upstash (`labels` + `reports` hashes), backed up daily to Vercel Blob.                                                                                                                                                                                                                              | [`ui-dashboard/AGENTS.md`](ui-dashboard/AGENTS.md)               |
 | `metrics-bridge/`      | Hasura → Prometheus gauge exporter for v3 alert rules; bounded label cardinality required.                                                                                                                                                                                                                                                                                               | [`metrics-bridge/AGENTS.md`](metrics-bridge/AGENTS.md)           |

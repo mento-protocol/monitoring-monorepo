@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contractEntries } from "@mento-protocol/monitoring-config/tokens";
+import { contractEntries } from "@mento-protocol/config/tokens";
 import { buildQuoteInputs, hubPairsFromPoolRows } from "../pairs.js";
 
 const USDM = tokenAddress("USDm");

@@ -21,7 +21,7 @@
  * branches on the detected type and uses `determineAction(pool)` (a view-
  * only function that handles the zero-sender path explicitly) for OLS.
  *
- * Canonical ABI + error map live in `@mento-protocol/monitoring-config/rebalance-abi`
+ * Canonical ABI + error map live in `@mento-protocol/config/rebalance-abi`
  * — both this probe and the dashboard's import the same data so a revert
  * decoded by one always decodes by the other.
  */
@@ -39,7 +39,7 @@ import {
   HEALTHY_NO_OP_ERRORS,
   type ReasonCode,
   type SyntheticReasonCode,
-} from "@mento-protocol/monitoring-config/rebalance-abi";
+} from "@mento-protocol/config/rebalance-abi";
 
 // Re-export for backwards compatibility — existing callers still import
 // `ERROR_MESSAGES` from this module.

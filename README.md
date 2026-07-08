@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-06 -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-08 -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -13,7 +13,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 | [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad multichain                                                          |
 | [`ui-dashboard`](./ui-dashboard/)               | Next.js 16 + Plotly.js multi-chain dashboard — all chains shown together, network derived from the pool URL |
 | [`metrics-bridge`](./metrics-bridge/)           | Hasura → Prometheus exporter for v3 alert rules                                                             |
-| [`shared-config`](./shared-config/)             | Shared deployment config (chain ID → treb namespace mappings)                                               |
+| [`shared-config`](./shared-config/)             | Public `@mento-protocol/config` package for protocol metadata, thresholds, and shared ABIs                  |
 | [`aegis`](./aegis/)                             | App Engine v2 alerting service + Aegis Grafana dashboards                                                   |
 | [`governance-watchdog`](./governance-watchdog/) | Cloud Function watching Mento Governance events → Discord/Telegram (own GCP project)                        |
 

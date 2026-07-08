@@ -1,9 +1,6 @@
 import { Gauge } from "prom-client";
-import {
-  chainSlug,
-  explorerAddressUrl,
-} from "@mento-protocol/monitoring-config/chains";
-import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
+import { chainSlug, explorerAddressUrl } from "@mento-protocol/config/chains";
+import { toHumanUnits } from "@mento-protocol/config/units";
 import { register } from "./metrics.js";
 import type { CdpInstance } from "./types.js";
 

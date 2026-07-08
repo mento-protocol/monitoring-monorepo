@@ -1,7 +1,7 @@
 import {
   DEVIATION_CRITICAL_RATIO,
   DEVIATION_TOLERANCE_RATIO,
-} from "@mento-protocol/monitoring-config/thresholds";
+} from "@mento-protocol/config/thresholds";
 import { LEGACY_OPEN_BREACH_ENTRY_THRESHOLD } from "./config.js";
 import { isFxPair, isFxWeekend } from "./fx-market.js";
 import type { PoolRow } from "./types.js";

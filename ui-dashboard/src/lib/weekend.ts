@@ -9,7 +9,7 @@
  * and the indexer's healthscore math stay in lockstep.
  */
 
-import FX_CALENDAR from "@mento-protocol/monitoring-config/fx-calendar.json";
+import FX_CALENDAR from "@mento-protocol/config/fx-calendar";
 import type { Network } from "./networks";
 import { isFpmm, isFxPool } from "./tokens";
 import type { Pool } from "./types";

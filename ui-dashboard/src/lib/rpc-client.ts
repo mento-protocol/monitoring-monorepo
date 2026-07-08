@@ -7,7 +7,7 @@
  */
 
 import { createPublicClient, http, parseAbi, type PublicClient } from "viem";
-import { ERC20_ABI_SOURCES } from "@mento-protocol/monitoring-config/erc20-abi";
+import { ERC20_ABI_SOURCES } from "@mento-protocol/config/erc20-abi";
 
 // Client cache — keyed by RPC URL + transport timeout (typically 1-2 entries
 // per network). Without the timeout in the key, callers that need a tighter
@@ -32,7 +32,7 @@ export function getViemClient(
 
 /**
  * Shared ERC20 ABI — source list lives in
- * `@mento-protocol/monitoring-config/erc20-abi` (shared with the
+ * `@mento-protocol/config/erc20-abi` (shared with the
  * metrics-bridge probe). Re-exported as a parsed (viem-typed) ABI so
  * existing dashboard call sites keep importing from one place.
  */

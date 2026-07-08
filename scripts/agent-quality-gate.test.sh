@@ -698,9 +698,9 @@ assert_contains "- pnpm install --frozen-lockfile (package manager config change
 assert_contains "- pnpm skew:check (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (package manager config changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (package manager config changed)"
-assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed)"
-assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed)"
-assert_contains "- pnpm exec turbo run knip --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed (knip: unused files/deps/exports))"
+assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed)"
+assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed)"
+assert_contains "- pnpm exec turbo run knip --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/config --filter=@mento-protocol/aegis --cache=local:rw (package manager config changed (knip: unused files/deps/exports))"
 assert_occurrences 1 "- pnpm exec turbo run lint --filter="
 assert_occurrences 1 "- pnpm exec turbo run typecheck --filter="
 assert_occurrences 1 "- pnpm exec turbo run knip --filter="
@@ -723,7 +723,7 @@ run_gate "patches/@lhci__utils@0.15.1.patch"
 assert_contains "- pnpm install --frozen-lockfile (pnpm patch changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (pnpm patch changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (pnpm patch changed)"
-assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/monitoring-config --filter=@mento-protocol/aegis --cache=local:rw (pnpm patch changed)"
+assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/indexer-envio --filter=@mento-protocol/metrics-bridge --filter=@mento-protocol/integration-probes --filter=@mento-protocol/config --filter=@mento-protocol/aegis --cache=local:rw (pnpm patch changed)"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (pnpm patch changed)"
 
 run_gate "package.json"
@@ -1527,7 +1527,7 @@ assert_order \
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 
 run_gate "shared-config/src/chains.ts"
-assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
+assert_contains "- pnpm --filter @mento-protocol/config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
@@ -1536,7 +1536,7 @@ assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:br
 run_gate "shared-config/src/thresholds.ts"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
 assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync (shared deviation threshold source changed)"
-assert_contains "- pnpm --filter @mento-protocol/monitoring-config test:coverage (shared-config changed (coverage floor))"
+assert_contains "- pnpm --filter @mento-protocol/config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
 
 assert_hermetic_setup_routes() {
@@ -1583,7 +1583,7 @@ assert_hermetic_setup_routes \
 
 assert_hermetic_setup_routes \
   "shared-config/vitest.hermetic-setup.ts" \
-  "@mento-protocol/monitoring-config" \
+  "@mento-protocol/config" \
   "shared-config hermetic Vitest setup changed"
 
 assert_hermetic_setup_routes \
@@ -1832,7 +1832,7 @@ STUB
 #!/usr/bin/env bash
 args="$*"
 case "$args" in
-  "--filter @mento-protocol/monitoring-config build")
+  "--filter @mento-protocol/config build")
     sleep 0.2
     : > "${BUILD_MARKER:?}"
     ;;
@@ -1858,7 +1858,7 @@ STUB
       > "$output_file" 2>&1
 )
 rm -rf "$quality_setup_repo"
-assert_contains "+ pnpm --filter @mento-protocol/monitoring-config build"
+assert_contains "+ pnpm --filter @mento-protocol/config build"
 grep -Fq -- "+ pnpm --filter @mento-protocol/ui-dashboard typecheck" "$output_file" ||
   fail "expected direct shared-config consumer typecheck to run"
 assert_contains "All mapped commands passed."
@@ -2419,7 +2419,7 @@ assert_contains "- docs/pr-checklists/code-health.md (dep-cruiser config changed
 # case branch (e.g. swapping package names) would silently misroute the
 # gate, so test all four packages.
 run_gate "shared-config/knip.json"
-assert_contains "- pnpm --filter @mento-protocol/monitoring-config knip (knip config changed)"
+assert_contains "- pnpm --filter @mento-protocol/config knip (knip config changed)"
 assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
 
 run_gate "ui-dashboard/knip.json"
@@ -2441,7 +2441,7 @@ assert_contains "- docs/pr-checklists/code-health.md (knip config changed)"
 run_gate "scripts/eslint-baseline-diff.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/eslint-baseline-diff.test.mjs (ESLint baseline wrapper changed)"
-assert_contains "- pnpm --filter @mento-protocol/monitoring-config lint (ESLint baseline wrapper changed)"
+assert_contains "- pnpm --filter @mento-protocol/config lint (ESLint baseline wrapper changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard lint (ESLint baseline wrapper changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio lint (ESLint baseline wrapper changed)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (ESLint baseline wrapper changed)"

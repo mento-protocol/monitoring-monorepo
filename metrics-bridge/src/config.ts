@@ -1,7 +1,7 @@
 import {
   DEVIATION_CRITICAL_RATIO,
   DEVIATION_TOLERANCE_RATIO,
-} from "@mento-protocol/monitoring-config/thresholds";
+} from "@mento-protocol/config/thresholds";
 import { env } from "./env.js";
 
 export const HASURA_URL = env.HASURA_URL;
@@ -21,7 +21,7 @@ export const REBALANCE_PROBE_EVERY_N_POLLS = Math.floor(
 // threshold are eligible for the rebalance-reason probe. Mirrors the
 // `Deviation Breach Critical` rule so the annotation only attaches to alerts
 // that can actually fire. Sourced from
-// `@mento-protocol/monitoring-config/thresholds` so a future bump of the
+// `@mento-protocol/config/thresholds` so a future bump of the
 // critical magnitude lands in one place across TS packages (the HCL literal in
 // rules-fpmms.tf still has to be edited manually — see that file's comments).
 export const REBALANCE_PROBE_DEVIATION_THRESHOLD = DEVIATION_CRITICAL_RATIO;
