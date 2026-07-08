@@ -41,7 +41,7 @@ pnpm deploy:indexer
 Then wait for the deployment to catch up and promote it:
 
 ```bash
-pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:status "$COMMIT" --watch --compact
 pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
 pnpm deploy:indexer:verify "$COMMIT"
@@ -60,7 +60,7 @@ git push origin main:envio
 
 ### After Redeployment Checklist
 
-1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch` or [envio.dev/app](https://envio.dev/app)).
+1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch --compact` for low-noise agent output, `pnpm deploy:indexer:status "$COMMIT" --watch` for the full terminal table, or [envio.dev/app](https://envio.dev/app)).
 2. Inspect build and runtime errors with explicit commit-scoped logs (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h`).
 3. Verify sync, metrics, endpoint resolution, and core GraphQL rows (`pnpm deploy:indexer:verify "$COMMIT"`).
 4. Promote the same caught-up commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.

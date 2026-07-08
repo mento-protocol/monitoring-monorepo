@@ -35,7 +35,7 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 
 ```bash
 pnpm deploy:indexer [--yes]         # Push HEAD to `envio` → Envio auto-builds
-pnpm deploy:indexer:status [--watch] [--json]
+pnpm deploy:indexer:status [--watch] [--compact] [--json]
 pnpm deploy:indexer:verify [<commit>] [--prod] [--json]
 pnpm deploy:indexer:promote [<commit>]
 pnpm deploy:indexer:logs [--follow] [--level error] [--build]

@@ -128,12 +128,15 @@ Waiting longer rarely recovers; investigate now.
 Run the registration probe in the **foreground** with a tight ceiling:
 
 ```bash
-ENVIO_REGISTRATION_TIMEOUT_SECONDS=300 pnpm deploy:indexer:status <TARGET_COMMIT> --watch
+ENVIO_REGISTRATION_TIMEOUT_SECONDS=300 pnpm deploy:indexer:status <TARGET_COMMIT> --watch --compact
 ```
 
 The status wrapper's default ceiling is 10 min; override to 5 min here so the
 skill doesn't tie itself to the wrapper's safety net. The wrapper emits a
 diagnostic warn at 3 min that surfaces the most likely causes inline.
+Use `--compact` for agent runs to emit low-noise one-line progress snapshots
+instead of repainting the full status table every poll. For a human terminal,
+drop `--compact` when the full per-poll table is useful.
 
 **If you must background this** (e.g. you're handing off to a Monitor),
 either (a) re-export the same low ceiling, or (b) checkpoint the output file

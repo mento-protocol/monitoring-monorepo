@@ -263,7 +263,7 @@ Push to the `envio` branch to trigger a hosted reindex:
 ```bash
 COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
-pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:status "$COMMIT" --watch --compact
 pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
 pnpm deploy:indexer:verify "$COMMIT"

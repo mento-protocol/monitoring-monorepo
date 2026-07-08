@@ -102,7 +102,7 @@ pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Cel
 pnpm indexer:testnet:dev            # Start local multichain testnet indexer
 pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test     # Codegen mainnet config, run sUSDS/stETH tests, restore mainnet codegen
 pnpm deploy:indexer                 # Push to envio branch → triggers hosted reindex
-pnpm deploy:indexer:status <commit> --watch  # Wait for registration, then watch sync state
+pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise wait for registration + sync
 pnpm deploy:indexer:logs <commit> --build    # Show build logs for a deployment
 pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Show runtime issues
 pnpm deploy:indexer:metrics <commit>         # Show per-chain indexing progress
@@ -205,7 +205,7 @@ Push to the `envio` branch to trigger a hosted reindex:
 ```bash
 COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
-pnpm deploy:indexer:status "$COMMIT" --watch
+pnpm deploy:indexer:status "$COMMIT" --watch --compact
 pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
 pnpm deploy:indexer:verify "$COMMIT"

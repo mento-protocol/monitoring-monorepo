@@ -808,8 +808,9 @@ export function computeEffectiveStatus(
     limitPressure1?: string | undefined;
   },
   chainId?: number,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
-  const health = computeHealthStatus(pool, chainId);
+  const health = computeHealthStatus(pool, chainId, nowSeconds);
   const limit = resolveLimitStatus(pool);
   if (health === "N/A" && (limit === "OK" || limit === "N/A")) return "N/A";
   return worstStatus(health, limit);

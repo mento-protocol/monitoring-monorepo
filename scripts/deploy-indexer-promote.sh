@@ -35,7 +35,7 @@ else
 
   if [[ -z "$COMMIT" ]]; then
     echo "❌ Deployment $TARGET_COMMIT not found for $ENVIO_ORG/$ENVIO_INDEXER"
-    echo "   Wait for registration with: pnpm deploy:indexer:status $TARGET_COMMIT --watch"
+    echo "   Wait for registration with: pnpm deploy:indexer:status $TARGET_COMMIT --watch --compact"
     exit 1
   fi
 fi

@@ -61,7 +61,7 @@ COMMIT=$(printf '%s' "$DEPLOYMENTS_JSON" | node scripts/resolve-envio-deployment
 
 if [[ -z "$COMMIT" ]]; then
   echo "❌ Deployment not found for $ENVIO_ORG/$ENVIO_INDEXER"
-  echo "   Pass a registered short/full commit, or run deploy:indexer:status <commit> --watch first."
+  echo "   Pass a registered short/full commit, or run deploy:indexer:status <commit> --watch --compact first."
   exit 1
 fi
 
