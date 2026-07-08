@@ -362,6 +362,12 @@ Terraform stack ownership is registered in `terraform.stacks.json` and
 documented in `docs/terraform.md`; do not infer ownership from directory names
 alone.
 
+Secret-bearing Terraform PR plans must stay secretless: same-repo PR workflows
+use placeholder `TF_VAR_*` values and/or targeted secretless plans, while push
+to `main` and environment-gated apply jobs keep the real secrets and remain the
+authoritative production plan. Before changing these workflows, read
+`docs/terraform.md` and `docs/notes/terraform-secret-strategy-2026-07.md`.
+
 **Terraform from a worktree** (e.g. `.claude/worktrees/<name>/`): `pnpm infra:*` scripts don't pass `-var-file`, and `terraform.tfvars` only lives in the main checkout (gitignored). Either run the commands from the main checkout, or from inside the worktree's `terraform/`:
 
 ```bash

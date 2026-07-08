@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-07
+last_verified: 2026-07-08
 ---
 
 # Terraform Stacks
@@ -71,19 +71,27 @@ become eligible when the stack root changed or a maintainer used
 drift detection, where CI runs a read-only plan under `org-terraform`
 impersonation without applying changes.
 
-For secret-bearing plan workflows (`alerts-infra.yml`, `aegis-terraform.yml`,
-and `governance-watchdog.yml`), same-repo PR plans intentionally receive
-validation-safe placeholder `TF_VAR_*` values instead of production secrets.
-push/workflow_dispatch plans and environment-gated apply jobs keep the real
-secrets and are the authoritative plan before production mutation. The Aegis
-and governance-watchdog PR plans verify Terraform shape and config diffs with
-placeholders. The alerts-delivery PR plan is narrower by design: it runs
-init/validate plus a targeted plan for
-`terraform_data.pr_plan_secretless_guard`, because the stack's Sentry, Slack,
-QuickNode, and GitHub resources perform authenticated plan-time checks that
-cannot run with dummy credentials. Reviewers should treat the main-branch
-re-plan behind `production-infra` as the source of truth for alerts-delivery
-full-stack diffs and all secret value changes.
+For secret-bearing plan workflows (`alerts-rules.yml`, `alerts-infra.yml`,
+`aegis-terraform.yml`, and `governance-watchdog.yml`), same-repo PR plans
+intentionally receive validation-safe placeholder `TF_VAR_*` values instead of
+production secrets. Push/workflow_dispatch plans and environment-gated apply
+jobs keep the real secrets and are the authoritative plan before production
+mutation. The Aegis and governance-watchdog PR plans verify Terraform shape and
+config diffs with placeholders. The alerts-rules PR plan is targeted to
+`terraform_data.pr_plan_secretless_guard` because its Grafana folder data
+sources authenticate during plan even with `-refresh=false`; trusted main/apply
+plans remain the source of truth for refreshed Grafana diffs. The
+alerts-delivery PR plan is also narrower by design: it runs init/validate plus a
+targeted secretless plan for `terraform_data.pr_plan_secretless_guard`. The
+handler module is not yet safe to target from PRs because it depends on Slack
+channel outputs and placeholder-backed Secret Manager versions; the sentinel
+also covers Sentry, Slack, QuickNode, and GitHub provider/resource surfaces that
+perform authenticated plan-time checks and cannot run with dummy credentials.
+Reviewers should treat the main-branch re-plan behind `production-infra` as the
+source of truth for alerts-rules and alerts-delivery full-stack diffs,
+third-party provider changes, and all secret value changes.
+See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
+for the current secret classification and migration posture.
 
 Routine service deploy workflows use the separate `production-services` GitHub
 Environment. That environment records deploy history and scopes production

@@ -2,7 +2,7 @@
 title: Terraform CI/CD hardening — decisions recorded
 status: active
 owner: eng
-last_verified: 2026-07-07
+last_verified: 2026-07-08
 ---
 
 # Terraform CI/CD hardening — decisions recorded
@@ -25,28 +25,32 @@ cost/benefit.) Follow-up PR hardening in 2026-07 also removed production
 `TF_VAR_*` values from same-repo PR plan environments for the secret-bearing
 Terraform workflows: PRs use validation-safe placeholders, while
 push/dispatch plans and `production-infra`-gated applies keep the real secrets.
-The `alerts/infra` PR path is intentionally narrower than the other two
-secret-bearing stacks: after init/validate it targets
-`terraform_data.pr_plan_secretless_guard`, because Sentry, Slack, QuickNode, and
-GitHub resources in that stack perform authenticated plan-time checks that
-cannot run with placeholders.
+`aegis` and `governance-watchdog` run full config-vs-state PR plans with
+placeholders and no refresh. `alerts-rules` is targeted to
+`terraform_data.pr_plan_secretless_guard` because its Grafana folder data
+sources authenticate during plan even with `-refresh=false`. The `alerts/infra`
+PR path is also intentionally narrower: after init/validate it targets
+`terraform_data.pr_plan_secretless_guard` only. The handler module still depends
+on Slack channel outputs and placeholder-backed Secret Manager versions; the
+sentinels remain for Grafana/Sentry/Slack/QuickNode/GitHub resources that
+perform authenticated plan-time checks and cannot run with placeholders.
 
 ## Declined: full-refresh read-only plan for the `alerts/infra` leg (PR plan and drift)
 
-The `alerts/infra` PR plan (targeted sentinel + `-refresh=false`) and its drift
-leg (kept on the write SA) stop short of a full-refresh read-only plan for the
-same irreducible reason: the read-only seed SA has no project roles, so
-refreshing the stack's google-provider resources would 403 (the grafana legs
-were free to flip because grafana refreshes over its own token, never touching
-GCP). Closing it needs a read identity with access to the
+The `alerts/infra` PR plan (targeted secretless sentinel plan + `-refresh=false`)
+and its drift leg (kept on the write SA) stop short of a full-refresh read-only
+plan for the same irreducible reason: the read-only seed SA has no project
+roles, so refreshing the stack's google-provider resources would 403 (the
+grafana legs were free to flip because grafana refreshes over its own token,
+never touching GCP). Closing it needs a read identity with access to the
 `project_factory`-managed project.
 
 - **PR plan:** don't. The only way to full-refresh the PR plan is to arm the
   read-only plan SA — the SA a malicious same-repo PR can mint via a plan-time
   data source — with project read, _widening_ the PR attack surface.
-  The targeted sentinel plan plus `-refresh=false` is a _functional_ limitation
-  (the PR plan won't surface full-stack diffs or out-of-band drift), not a
-  security gap; drift is caught daily and push/apply paths re-plan fully.
+  The targeted secretless sentinel plan plus `-refresh=false` is a _functional_
+  limitation (the PR plan won't surface full-stack diffs or out-of-band drift),
+  not a security gap; drift is caught daily and push/apply paths re-plan fully.
 - **Drift leg:** evaluated explicitly (incl. an operator offering to create the
   grant, 2026-05-29) and declined on cost/benefit. The only sound build is a
   _dedicated_ `*-drift-readonly@` SA (never PR-reachable) with a hand-scoped read
