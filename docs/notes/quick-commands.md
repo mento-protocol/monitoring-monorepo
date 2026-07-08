@@ -24,7 +24,7 @@ pnpm indexer:dev                   # Start indexer (multichain mainnet: Ethereum
 pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test    # Codegen mainnet config, run sUSDS/stETH tests, restore mainnet codegen
 pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
 pnpm deploy:indexer                # Push HEAD to envio branch and trigger hosted reindex
-pnpm deploy:indexer:status <commit> --watch  # Wait for registration, then watch sync
+pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise wait for registration + sync
 pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Runtime issues
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state

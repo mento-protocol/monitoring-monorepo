@@ -13,19 +13,20 @@ import { formatDurationShort } from "@/lib/bridge-status";
  *  operators reading the tooltip think in elapsed real time — "started
  *  1d 3h ago" — not in SLO-debited time. Returns null when there's no
  *  open breach anchor to measure from. */
-function openBreachDuration(p: Pool): string | null {
+function openBreachDuration(p: Pool, nowSeconds: number | null): string | null {
+  if (nowSeconds === null) return null;
   const start = Number(p.deviationBreachStartedAt ?? "0");
   if (!start) return null;
-  const now = Math.floor(Date.now() / 1000);
-  if (now <= start) return null;
-  return formatDurationShort(now - start);
+  if (nowSeconds <= start) return null;
+  return formatDurationShort(nowSeconds - start);
 }
 
 function criticalHealthTooltip(args: {
   pool: Pool;
   oracleIsStale: boolean;
+  nowSeconds: number | null;
 }): string {
-  const { pool, oracleIsStale } = args;
+  const { pool, oracleIsStale, nowSeconds } = args;
   if (isVirtualPoolMedianInvalid(pool)) {
     return "VirtualPool median or quorum invalid — swaps may revert until a valid median with enough active reporters is restored";
   }
@@ -33,7 +34,7 @@ function criticalHealthTooltip(args: {
     return "VirtualPool oracle stale — no fresh report within the reset window";
   }
   if (oracleIsStale) return "Oracle stale — last update expired";
-  const duration = openBreachDuration(pool);
+  const duration = openBreachDuration(pool, nowSeconds);
   return duration
     ? `Rebalance overdue — deviation above threshold for ${duration}`
     : "Rebalance overdue — deviation above threshold for more than 1h";
@@ -49,7 +50,12 @@ const STATIC_HEALTH_TOOLTIP: Record<string, string> = {
     "FX markets are closed this weekend — trading paused until ~Sunday 23:00 UTC",
 };
 
-function healthTooltip(status: string, p: Pool, chainId?: number): string {
+function healthTooltip(
+  status: string,
+  p: Pool,
+  chainId?: number,
+  nowSeconds: number | null = Math.floor(Date.now() / 1000),
+): string {
   const staticText = STATIC_HEALTH_TOOLTIP[status];
   if (staticText) return staticText;
   const oracleTs = oracleFreshnessTimestamp(p);
@@ -62,12 +68,16 @@ function healthTooltip(status: string, p: Pool, chainId?: number): string {
   const stalenessThreshold = Number(p.oracleExpiry ?? "0") || chainFallback;
   const isOracleStale =
     oracleTs === 0 ||
-    Math.floor(Date.now() / 1000) - oracleTs > stalenessThreshold;
+    (nowSeconds !== null && nowSeconds - oracleTs > stalenessThreshold);
   if (status === "CRITICAL") {
-    return criticalHealthTooltip({ pool: p, oracleIsStale: isOracleStale });
+    return criticalHealthTooltip({
+      pool: p,
+      oracleIsStale: isOracleStale,
+      nowSeconds,
+    });
   }
   if (status === "WARN") {
-    const duration = openBreachDuration(p);
+    const duration = openBreachDuration(p, nowSeconds);
     return duration
       ? `Deviation above threshold for ${duration} — rebalance expected within 1h`
       : "Deviation above threshold — rebalance expected within 1h";
@@ -98,8 +108,9 @@ export function combinedTooltip(
   limitStatus: string,
   p: Pool,
   network: Network,
+  nowSeconds: number | null = Math.floor(Date.now() / 1000),
 ): string {
-  const hTip = healthTooltip(healthStatus, p, network.chainId);
+  const hTip = healthTooltip(healthStatus, p, network.chainId, nowSeconds);
   const lFrag = limitTooltipFragment(limitStatus, p, network);
   return lFrag ? `${hTip} · ${lFrag}` : hTip;
 }

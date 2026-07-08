@@ -226,6 +226,28 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).not.toContain("Rebalance overdue");
   });
 
+  it("uses hydration-safe generic breach tooltip copy before the live clock mounts", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          makeEntry({
+            oracleTimestamp: String(TABLE_NOW_SECONDS - 60),
+            oracleExpiry: "300",
+            priceDifference: "600000000000000000",
+            rebalanceThreshold: 500_000,
+            rebalanceThresholdsKnown: true,
+            deviationBreachStartedAt: String(TABLE_NOW_SECONDS - 20 * 60),
+          }),
+        ]}
+      />,
+    );
+
+    expect(html).toContain(
+      "Deviation above threshold — rebalance expected within 1h",
+    );
+    expect(html).not.toMatch(/Deviation above threshold for \d/);
+  });
+
   it("hides Type column when no network has virtual pools", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry({}, CELO_NETWORK)]} />,

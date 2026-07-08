@@ -9,7 +9,7 @@
 #   pnpm deploy:indexer --yes        → skip confirmation prompt (CI / agent friendly)
 #
 # After pushing, use companion scripts:
-#   pnpm deploy:indexer:status <commit> --watch → watch sync progress
+#   pnpm deploy:indexer:status <commit> --watch --compact → watch sync progress
 #   pnpm deploy:indexer:verify <commit>          → verify status, metrics, endpoint, and rows
 #   pnpm deploy:indexer:promote <commit>        → promote deployment to prod
 #   pnpm deploy:indexer:logs         → tail runtime logs
@@ -216,7 +216,7 @@ echo ""
 echo "📋 POST-DEPLOY CHECKLIST:"
 echo ""
 echo "   1. Watch sync progress:"
-echo "      pnpm deploy:indexer:status $COMMIT_SHA --watch"
+echo "      pnpm deploy:indexer:status $COMMIT_SHA --watch --compact"
 echo "      $SYNC_URL"
 echo ""
 echo "   2. Once synced, verify the deployment:"

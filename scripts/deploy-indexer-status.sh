@@ -5,6 +5,7 @@
 #   pnpm deploy:indexer:status                  → show latest deployment status
 #   pnpm deploy:indexer:status <commit>         → show specific deployment status
 #   pnpm deploy:indexer:status <commit> --watch → wait for registration, then poll until synced
+#   pnpm deploy:indexer:status <commit> --watch --compact → lower-noise watch output
 #   pnpm deploy:indexer:status --json           → JSON output
 #
 # Requires: workspace envio-cloud CLI dependency
@@ -25,6 +26,7 @@ REGISTRATION_POLL_SECONDS=30
 # observable within minutes instead of buried under uniform "checking again".
 REGISTRATION_WARN_SECONDS=180
 SYNC_POLL_SECONDS=10
+COMPACT_FIXED_EMIT_SECONDS="${ENVIO_SYNC_COMPACT_EMIT_SECONDS:-}"
 
 deployment_list_json() {
   pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json
@@ -81,6 +83,10 @@ wait_for_deployment_registration() {
         echo "   Will keep polling until ${REGISTRATION_TIMEOUT_SECONDS}s then give up." >&2
         echo "" >&2
         warned_slow=true
+      elif [[ "$COMPACT" == "true" ]]; then
+        if (( elapsed == 0 )); then
+          echo "registration status=pending commit=$target elapsed=${elapsed}s poll=${REGISTRATION_POLL_SECONDS}s" >&2
+        fi
       elif [[ "$warned_slow" == "true" ]]; then
         # Keep the warning context visible in scroll-back so the operator
         # doesn't lose track of the suspect state once the polling line
@@ -154,23 +160,88 @@ render_status_json() {
 NODE
 }
 
+render_status_compact() {
+  local status_json=""
+  status_json=$(cat)
+  STATUS_JSON="$status_json" node <<'NODE'
+    const d = JSON.parse(process.env.STATUS_JSON ?? '{}');
+    const rows = d.data ?? [];
+    const progressParts = (row) => {
+      const start = Number(row.start_block ?? 0);
+      const head = Number(row.block_height ?? 0);
+      const processed = Number(row.latest_processed_block ?? 0);
+      const denominator = Math.max(head - start, 1);
+      const numerator = Math.max(Math.min(processed, head) - start, 0);
+      return { start, head, processed, numerator, denominator };
+    };
+    const fmtPct = (value) => `${value.toFixed(1)}%`;
+    const fmtNum = (value) => Number(value ?? 0).toLocaleString('en-US');
+    const parts = rows.map(progressParts);
+    const totalDenominator = Math.max(parts.reduce((sum, part) => sum + Math.max(part.head - part.start, 0), 0), 1);
+    const totalNumerator = parts.reduce((sum, part) => sum + part.numerator, 0);
+    const isCaughtUp = (row) => Number(row.latest_processed_block ?? 0) >= Number(row.block_height ?? 0);
+    const allCaughtUp = rows.length > 0 && rows.every(isCaughtUp);
+    const overallPct = (totalNumerator / totalDenominator) * 100;
+    const cadenceSeconds = allCaughtUp ? 0
+      : overallPct < 50 ? 300
+      : overallPct < 75 ? 180
+      : overallPct < 90 ? 120
+      : overallPct < 97 ? 60
+      : overallPct < 99.5 ? 30
+      : 10;
+    const chainSummary = rows.map((row, index) => {
+      const part = parts[index];
+      return `${row.chain_id}:${fmtPct((part.numerator / part.denominator) * 100)}(${fmtNum(part.processed)}/${fmtNum(part.head)})`;
+    }).join(' ');
+    console.log(`status=${allCaughtUp ? 'caught_up' : 'syncing'} overall=${fmtPct(overallPct)} cadence=${cadenceSeconds}s chains=${chainSummary}`);
+    process.exit(allCaughtUp ? 0 : 10);
+NODE
+}
+
 watch_status() {
   local status_json=""
+  local compact_line=""
+  local last_compact_line=""
+  local last_compact_emit=0
+  local compact_emit_seconds=0
+  local now=0
 
   while true; do
     if ! status_json=$(deployment_status_json); then
       return 1
     fi
 
-    printf '\033[2J\033[H'
-    echo "Deployment Metrics: $ENVIO_ORG/$ENVIO_INDEXER (commit: $COMMIT)"
-    echo "Last updated: $(date '+%H:%M:%S')"
-    echo ""
+    if [[ "$COMPACT" == "true" ]]; then
+      set +e
+      compact_line=$(printf '%s' "$status_json" | render_status_compact)
+      local render_exit=$?
+      set -e
 
-    set +e
-    printf '%s' "$status_json" | render_status_json
-    local render_exit=$?
-    set -e
+      if [[ -n "$COMPACT_FIXED_EMIT_SECONDS" ]]; then
+        compact_emit_seconds="$COMPACT_FIXED_EMIT_SECONDS"
+      else
+        compact_emit_seconds=$(printf '%s\n' "$compact_line" | sed -n 's/.* cadence=\([0-9][0-9]*\)s.*/\1/p')
+        compact_emit_seconds="${compact_emit_seconds:-60}"
+      fi
+
+      now=$(date '+%s')
+      if [[ "$compact_line" != "$last_compact_line" ]] && \
+        { [[ "$last_compact_emit" -eq 0 ]] || (( now - last_compact_emit >= compact_emit_seconds )) || [[ "$render_exit" -eq 0 ]]; }; then
+        echo "$(date '+%H:%M:%S') commit=$COMMIT $compact_line"
+        last_compact_line="$compact_line"
+        last_compact_emit="$now"
+      fi
+    else
+      printf '\033[2J\033[H'
+      echo "Deployment Metrics: $ENVIO_ORG/$ENVIO_INDEXER (commit: $COMMIT)"
+      echo "Last updated: $(date '+%H:%M:%S')"
+      echo ""
+
+      set +e
+      printf '%s' "$status_json" | render_status_json
+      local render_exit=$?
+      set -e
+    fi
 
     if [[ "$render_exit" -eq 0 ]]; then
       return 0
@@ -179,8 +250,10 @@ watch_status() {
       return "$render_exit"
     fi
 
-    echo ""
-    echo "Watching for updates. Press Ctrl+C to stop..."
+    if [[ "$COMPACT" != "true" ]]; then
+      echo ""
+      echo "Watching for updates. Press Ctrl+C to stop..."
+    fi
     sleep "$SYNC_POLL_SECONDS"
   done
 }
@@ -189,21 +262,33 @@ watch_status() {
 COMMIT=""
 WATCH=false
 JSON=false
+COMPACT=false
 for arg in "$@"; do
   case "$arg" in
     --watch|-w) WATCH=true ;;
     --json|-j) JSON=true ;;
+    --compact|-c) COMPACT=true ;;
     --) ;;
     *)
       if [[ -n "$COMMIT" ]]; then
         echo "❌ Unexpected argument: $arg"
-        echo "Usage: pnpm deploy:indexer:status [<commit>] [--watch] [--json]"
+        echo "Usage: pnpm deploy:indexer:status [<commit>] [--watch] [--json] [--compact]"
         exit 1
       fi
       COMMIT="$arg"
       ;;
   esac
 done
+
+if [[ "$COMPACT" == "true" && "$WATCH" != "true" ]]; then
+  echo "❌ --compact requires --watch" >&2
+  exit 1
+fi
+
+if [[ -n "$COMPACT_FIXED_EMIT_SECONDS" && ! "$COMPACT_FIXED_EMIT_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "❌ ENVIO_SYNC_COMPACT_EMIT_SECONDS must be an integer number of seconds" >&2
+  exit 1
+fi
 
 if [[ -z "$COMMIT" ]]; then
   COMMIT=$(latest_deployment_commit)

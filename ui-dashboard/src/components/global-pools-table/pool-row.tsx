@@ -20,6 +20,7 @@ import {
   computeEffectiveStatus,
   computeHealthStatus,
   computePoolUptimePct,
+  oracleFreshnessTimestamp,
   resolveLimitStatus,
   uptimeColorClass,
   uptimeTierGlyph,
@@ -48,6 +49,7 @@ interface PoolRowProps {
   volume7dError: boolean;
   totalVolumeByKey: Map<string, number | null>;
   tvlChangeWoWByKey?: Map<string, number | null> | undefined;
+  nowSeconds: number | null;
   olsPoolKeys?: Set<string> | undefined;
   cdpPoolKeys?: Set<string> | undefined;
   reservePoolKeys?: Set<string> | undefined;
@@ -65,24 +67,35 @@ export function PoolRow({
   volume7dError,
   totalVolumeByKey,
   tvlChangeWoWByKey,
+  nowSeconds,
   olsPoolKeys,
   cdpPoolKeys,
   reservePoolKeys,
 }: PoolRowProps) {
   const { pool, network } = entry;
   const key = globalPoolKey(entry);
+  const statusNowSeconds = nowSeconds ?? oracleFreshnessTimestamp(pool);
   // Use `computeEffectiveStatus` (not `worstStatus(computeHealthStatus, ...)`
   // directly) so the `hasHealthData=false → "N/A"` half-short-circuit applies
   // here too. Without this, no-data pools paired with healthy limits would
   // resolve to OK via STATUS_RANK (codex P2 PR #370 #3214748745).
-  const healthStatus = computeHealthStatus(pool, network.chainId);
+  const healthStatus = computeHealthStatus(
+    pool,
+    network.chainId,
+    statusNowSeconds,
+  );
   const limitStatus = resolveLimitStatus(pool);
-  const effectiveStatus = computeEffectiveStatus(pool, network.chainId);
+  const effectiveStatus = computeEffectiveStatus(
+    pool,
+    network.chainId,
+    statusNowSeconds,
+  );
   const healthDetails = combinedTooltip(
     healthStatus,
     limitStatus,
     pool,
     network,
+    nowSeconds,
   );
   const strategies = poolStrategies(
     olsPoolKeys?.has(key) ?? false,
@@ -99,7 +112,7 @@ export function PoolRow({
       />
       {showVirtualPoolSource && <SourceCell pool={pool} />}
       <HealthCell status={effectiveStatus} details={healthDetails} />
-      <UptimeCell pool={pool} />
+      <UptimeCell pool={pool} nowSeconds={statusNowSeconds} />
       <Cell className="hidden sm:table-cell">
         <ReservesCell pool={pool} network={network} rates={entry.rates} />
       </Cell>
@@ -209,8 +222,8 @@ function HealthCell({ status, details }: { status: string; details: string }) {
   );
 }
 
-function UptimeCell({ pool }: { pool: Pool }) {
-  const pct = computePoolUptimePct(pool);
+function UptimeCell({ pool, nowSeconds }: { pool: Pool; nowSeconds: number }) {
+  const pct = computePoolUptimePct(pool, nowSeconds);
   const className = "hidden sm:table-cell text-sm font-mono text-right";
   if (pct == null) {
     return (

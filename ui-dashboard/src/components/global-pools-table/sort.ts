@@ -62,6 +62,7 @@ export function globalPoolKey(entry: GlobalPoolEntry): string {
 export interface GlobalSortContext {
   tvlByKey: Map<string, number | null>;
   totalVolumeByKey: Map<string, number | null>;
+  nowSeconds?: number | undefined;
   volume24hByKey?: Map<string, number | null | undefined> | undefined;
   volume7dByKey?: Map<string, number | null | undefined> | undefined;
   tvlChangeWoWByKey?: Map<string, number | null> | undefined;
@@ -74,14 +75,14 @@ export function sortGlobalPools(
   {
     tvlByKey,
     totalVolumeByKey,
+    nowSeconds = Math.floor(Date.now() / 1000),
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
   }: GlobalSortContext,
 ): GlobalPoolEntry[] {
   return sortedCopy(entries, (a, b) => {
-    const aKey = globalPoolKey(a);
-    const bKey = globalPoolKey(b);
+    const [aKey, bKey] = [globalPoolKey(a), globalPoolKey(b)];
     let cmp = 0;
     switch (sortKey) {
       case "pool":
@@ -90,24 +91,29 @@ export function sortGlobalPools(
         );
         break;
       case "health": {
-        const aH = computeEffectiveStatus(a.pool, a.network.chainId);
-        const bH = computeEffectiveStatus(b.pool, b.network.chainId);
+        const aH = computeEffectiveStatus(
+          a.pool,
+          a.network.chainId,
+          nowSeconds,
+        );
+        const bH = computeEffectiveStatus(
+          b.pool,
+          b.network.chainId,
+          nowSeconds,
+        );
         cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
         break;
       }
       case "uptime": {
-        // Unknown uptime (virtual pool, rollup unpopulated) sinks to the
-        // bottom regardless of direction — same pattern as volume columns.
-        const aUptime = computePoolUptimePct(a.pool);
-        const bUptime = computePoolUptimePct(b.pool);
+        // Unknown uptime sinks to the bottom regardless of direction.
+        const aUptime = computePoolUptimePct(a.pool, nowSeconds);
+        const bUptime = computePoolUptimePct(b.pool, nowSeconds);
         if (aUptime == null && bUptime == null) return 0;
         if (aUptime == null) return 1;
         if (bUptime == null) return -1;
         return sortDir === "asc" ? aUptime - bUptime : bUptime - aUptime;
       }
       case "fee": {
-        // Match the cell renderer's missing-fee predicate so rows that render
-        // as em dash also sink to the bottom while sorting.
         const aHas = hasFeeData(a.pool);
         const bHas = hasFeeData(b.pool);
         if (!aHas && !bHas) return 0;
@@ -118,11 +124,6 @@ export function sortGlobalPools(
         return sortDir === "asc" ? aFee - bFee : bFee - aFee;
       }
       case "tvl": {
-        // Untrusted pools (null) sink to the bottom regardless of direction —
-        // matches the volume / total-volume / WoW columns. Sentinel-mapping
-        // null to ±Infinity would put unknowns at the top of ascending order
-        // ahead of legitimate $0 pools (fail-open suggests "lowest"); the
-        // explicit-skip pattern keeps unknown rows last either way.
         const aTvl = tvlByKey.get(aKey);
         const bTvl = tvlByKey.get(bKey);
         if (aTvl == null && bTvl == null) return 0;

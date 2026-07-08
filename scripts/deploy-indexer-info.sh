@@ -57,7 +57,7 @@ COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json
 
 if [[ -z "$COMMIT" ]]; then
   echo "Deployment not found for $ENVIO_ORG/$ENVIO_INDEXER"
-  echo "Wait for registration with: pnpm deploy:indexer:status <commit> --watch"
+  echo "Wait for registration with: pnpm deploy:indexer:status <commit> --watch --compact"
   exit 1
 fi
 

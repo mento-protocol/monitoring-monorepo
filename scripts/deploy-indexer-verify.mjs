@@ -433,7 +433,7 @@ async function main() {
 
   if (!deployment) {
     throw new Error(
-      `Deployment ${args.target || "(latest)"} not found for ${ENVIO_ORG}/${ENVIO_INDEXER}. Wait for registration with: pnpm deploy:indexer:status ${args.target} --watch`,
+      `Deployment ${args.target || "(latest)"} not found for ${ENVIO_ORG}/${ENVIO_INDEXER}. Wait for registration with: pnpm deploy:indexer:status ${args.target} --watch --compact`,
     );
   }
 

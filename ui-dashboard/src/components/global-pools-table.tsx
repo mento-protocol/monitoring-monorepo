@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { poolTvlUSD } from "@/lib/tokens";
 import { Table } from "@/components/table";
 import { useIsWeekend } from "@/hooks/use-is-weekend";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { useTableSort } from "@/lib/use-table-sort";
 import {
@@ -59,6 +60,7 @@ export function GlobalPoolsTable({
     validKeys: GLOBAL_SORT_KEYS,
     paramPrefix: "pools",
   });
+  const liveNowSeconds = useNowSeconds();
 
   const tvlByKey = useMemo(
     () =>
@@ -87,6 +89,7 @@ export function GlobalPoolsTable({
       sortGlobalPools(entries, sortKey, sortDir, {
         tvlByKey,
         totalVolumeByKey,
+        nowSeconds: liveNowSeconds ?? 0,
         volume24hByKey,
         volume7dByKey,
         tvlChangeWoWByKey,
@@ -97,6 +100,7 @@ export function GlobalPoolsTable({
       sortDir,
       tvlByKey,
       totalVolumeByKey,
+      liveNowSeconds,
       volume24hByKey,
       volume7dByKey,
       tvlChangeWoWByKey,
@@ -135,6 +139,7 @@ export function GlobalPoolsTable({
               volume7dError={volume7dError}
               totalVolumeByKey={totalVolumeByKey}
               tvlChangeWoWByKey={tvlChangeWoWByKey}
+              nowSeconds={liveNowSeconds}
               olsPoolKeys={olsPoolKeys}
               cdpPoolKeys={cdpPoolKeys}
               reservePoolKeys={reservePoolKeys}
