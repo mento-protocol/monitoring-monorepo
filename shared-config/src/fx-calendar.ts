@@ -8,7 +8,32 @@ export type FxCalendarConfig = {
   anchorFri2100UnixSec: number;
 };
 
-export const FX_CALENDAR = fxCalendarJson as FxCalendarConfig;
+const FX_CALENDAR_NUMBER_FIELDS = [
+  "fxCloseDay",
+  "fxCloseHourUtc",
+  "fxReopenDay",
+  "fxReopenHourUtc",
+  "anchorFri2100UnixSec",
+] as const satisfies readonly (keyof FxCalendarConfig)[];
+
+export function assertFxCalendarConfig(
+  value: unknown,
+): asserts value is FxCalendarConfig {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("fx-calendar.json must be an object");
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const field of FX_CALENDAR_NUMBER_FIELDS) {
+    if (typeof record[field] !== "number") {
+      throw new TypeError(`fx-calendar.json field ${field} must be a number`);
+    }
+  }
+}
+
+assertFxCalendarConfig(fxCalendarJson);
+
+export const FX_CALENDAR = fxCalendarJson;
 
 export const FX_CLOSE_DAY = FX_CALENDAR.fxCloseDay;
 export const FX_CLOSE_HOUR_UTC = FX_CALENDAR.fxCloseHourUtc;

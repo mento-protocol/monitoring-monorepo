@@ -54,8 +54,10 @@ jobs:
               exit 1
             fi
           elif [[ "${GITHUB_REF_NAME}" != "main" ]]; then
-            echo "::error::Manual publishes must run from main"
+            echo "::error::Manual publish dry-runs must run from main"
             exit 1
+          else
+            echo "::notice::Manual dispatch from main validates and packs only; push a matching config-v* tag to publish."
           fi
 
       - name: Build package
@@ -111,4 +113,9 @@ jobs:
           NODE
 
       - name: Publish to npm
+        if: github.ref_type == 'tag'
         run: npm publish ./shared-config --access public --provenance
+
+      - name: Report dry run
+        if: github.ref_type != 'tag'
+        run: echo "Manual dispatch completed validation and pack checks without publishing; push a matching config-v* tag from main to publish."

@@ -6,6 +6,7 @@ import FX_CALENDAR, {
   FX_CLOSE_HOUR_UTC,
   FX_REOPEN_DAY,
   FX_REOPEN_HOUR_UTC,
+  assertFxCalendarConfig,
 } from "../src/fx-calendar";
 
 describe("fx calendar", () => {
@@ -19,5 +20,21 @@ describe("fx calendar", () => {
     expect(FX_REOPEN_DAY).toBe(fxCalendarJson.fxReopenDay);
     expect(FX_REOPEN_HOUR_UTC).toBe(fxCalendarJson.fxReopenHourUtc);
     expect(ANCHOR_FRI_2100_UNIX_SEC).toBe(fxCalendarJson.anchorFri2100UnixSec);
+  });
+
+  it("validates the FX calendar JSON shape", () => {
+    expect(() => assertFxCalendarConfig(fxCalendarJson)).not.toThrow();
+    expect(() => assertFxCalendarConfig(null)).toThrow(
+      "fx-calendar.json must be an object",
+    );
+    expect(() => assertFxCalendarConfig([])).toThrow(
+      "fx-calendar.json must be an object",
+    );
+    expect(() =>
+      assertFxCalendarConfig({
+        ...fxCalendarJson,
+        fxCloseDay: "5",
+      }),
+    ).toThrow("fx-calendar.json field fxCloseDay must be a number");
   });
 });

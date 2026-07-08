@@ -28,7 +28,8 @@ consumers keep using `workspace:*`, while external consumers pin normal npm
 versions. Releases are cut from `main` by pushing a `config-v<version>` tag that
 matches `shared-config/package.json`; `.github/workflows/publish-config.yml`
 builds on a GitHub-hosted runner, verifies the packed artifact, and publishes
-with npm provenance via GitHub OIDC.
+with npm provenance via GitHub OIDC. Manual dispatches from `main` only validate
+and pack the artifact; untagged workflow runs do not publish.
 
 ## Alternatives considered
 
@@ -46,11 +47,16 @@ with npm provenance via GitHub OIDC.
   when consumers need the canonical data blobs.
 - The publish workflow is part of the release contract and must stay covered by
   action pinning and pack-content verification.
+- Manual workflow dispatch is a dry-run path only. Publishing must remain tied
+  to a matching `config-v<version>` tag reachable from `origin/main`.
 - Before the first publish tag is pushed, an npm org/package maintainer must
   configure trusted publishing for repository `mento-protocol/monitoring-monorepo`,
   workflow filename `publish-config.yml`, and allowed action `npm publish`.
 - The publish job intentionally uses a GitHub-hosted runner because npm trusted
   publishing does not support self-hosted or third-party GitHub Actions runners.
+- The public package intentionally keeps the workspace Node 24 engine floor for
+  v0.1.x, matching `.node-version` and CI. Broadening support to older Node
+  versions needs a package consumer and publish verification matrix.
 - The indexer vendored mirror remains governed by ADR 0013 until a separate PR
   intentionally changes the hosted Envio dependency model.
 
