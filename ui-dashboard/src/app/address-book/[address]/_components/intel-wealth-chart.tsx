@@ -145,6 +145,18 @@ function sparkTrace(points: ChartPoint[]) {
   };
 }
 
+function wealthChartTextAlternative(points: readonly ChartPoint[]) {
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+  return `Wealth trajectory chart with ${points.length} portfolio snapshots.${
+    firstPoint && lastPoint
+      ? ` It starts at ${firstPoint.label} ${formatUSD(
+          firstPoint.usd,
+        )} and ends at ${lastPoint.label} ${formatUSD(lastPoint.usd)}.`
+      : ""
+  }`;
+}
+
 export function IntelWealthChart({ address }: { address: string }) {
   const { status } = useSession();
   const { data } = useSWR<IntelWealthRecord | null>(
@@ -169,8 +181,7 @@ export function IntelWealthChart({ address }: { address: string }) {
   );
   if (points.length === 0) return null;
   const summaryText = buildSummaryText(data);
-  const firstPoint = points[0];
-  const lastPoint = points[points.length - 1];
+  const chartTextAlternative = wealthChartTextAlternative(points);
 
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900">
@@ -185,15 +196,18 @@ export function IntelWealthChart({ address }: { address: string }) {
         )}
       </div>
       <div className="p-5">
-        <Plot
-          ariaLabel="Wealth trajectory chart"
-          textAlternative={`Wealth trajectory chart with ${points.length} portfolio snapshots.${firstPoint && lastPoint ? ` It starts at ${firstPoint.label} ${formatUSD(firstPoint.usd)} and ends at ${lastPoint.label} ${formatUSD(lastPoint.usd)}.` : ""}`}
-          data={[sparkTrace(points)]}
-          layout={SPARK_LAYOUT}
-          config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
-          style={{ width: "100%", height: 160 }}
-          useResizeHandler
-        />
+        <div role="figure" aria-label="Wealth trajectory chart">
+          <Plot
+            ariaLabel="Wealth trajectory chart"
+            textAlternative={chartTextAlternative}
+            data={[sparkTrace(points)]}
+            layout={SPARK_LAYOUT}
+            config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
+            style={{ width: "100%", height: 160 }}
+            useResizeHandler
+          />
+        </div>
+        <p className="sr-only">{chartTextAlternative}</p>
         {summaryText && (
           <p className="mt-2 text-xs text-slate-400">{summaryText}</p>
         )}
