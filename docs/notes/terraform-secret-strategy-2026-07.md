@@ -34,6 +34,16 @@ terminal output redacts them.
 | `aegis`               | Provider auth (`grafana_service_account_token`)                                                                                                                                                                                            | Full config-vs-state plan with placeholder TF_VAR and `-refresh=false`                                                                                       | Same secretless Grafana-token posture as alerts-rules, but this stack has no PR-plan Grafana data-source reads that force authentication before the diff. Re-check this assumption on Grafana provider major-version bumps.                                                                       |
 | `governance-watchdog` | Provider auth (`github_token`, QuickNode API key); configured runtime secrets (Discord/Telegram/QuickNode/VictorOps/x-auth); non-secret IDs (`billing_account`, Slack notification channel ID)                                             | Full config-vs-state plan with placeholder TF_VARs and `-refresh=false`                                                                                      | Uses Google/archive/local resources plus QuickNode/GitHub surfaces; placeholders keep same-repo PR jobs secretless. Trusted main/apply plans remain authoritative for secret values and refreshed remote state.                                                                                   |
 
+## Static external identifiers
+
+Replacing live provider data-source reads with static external IDs can keep
+same-repo PR plans secretless, but only when ownership is explicit. If the
+referenced object is owned by another Terraform stack, pin the identifier in the
+owning stack so destroy/recreate preserves the same ID. If the object is
+external or not yet Terraform-managed, document that ownership next to the
+static ID and verify the reference with a trusted or read-only plan before
+shipping.
+
 ## Write-only and ephemeral support
 
 Terraform `sensitive = true` only affects display. It does not remove values
