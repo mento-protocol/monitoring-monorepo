@@ -225,8 +225,10 @@ watch_status() {
       fi
 
       now=$(date '+%s')
-      if [[ "$compact_line" != "$last_compact_line" ]] && \
-        { [[ "$last_compact_emit" -eq 0 ]] || (( now - last_compact_emit >= compact_emit_seconds )) || [[ "$render_exit" -eq 0 ]]; }; then
+      if [[ "$last_compact_emit" -eq 0 ]] || \
+        [[ "$compact_line" != "$last_compact_line" ]] || \
+        (( now - last_compact_emit >= compact_emit_seconds )) || \
+        [[ "$render_exit" -eq 0 ]]; then
         echo "$(date '+%H:%M:%S') commit=$COMMIT $compact_line"
         last_compact_line="$compact_line"
         last_compact_emit="$now"
