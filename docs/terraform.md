@@ -90,12 +90,11 @@ summaries to another channel. See `docs/notes/slack-github-subscriptions.md`
 for the GitHub Slack App subscription, apply-pending summary, queue watcher,
 and failure-notifier relationship.
 
-`Terraform Deploy Queue Watch` runs every 15 minutes and warns in the same
-Terraform apply Slack channel when one of the production Terraform deploy
-workflows has been queued or pending for at least 60 minutes with zero started
-jobs. The watcher is observer-only: it does not share the deploy workflows'
-`*-deploy` concurrency groups, cancel runs, approve environments, or change
-apply ordering.
+`Terraform Deploy Queue Watch` runs daily and warns in the same Terraform apply
+Slack channel when one of the production Terraform deploy workflows has been
+queued or pending for at least 60 minutes with zero started jobs. The watcher is
+observer-only: it does not share the deploy workflows' `*-deploy` concurrency
+groups, cancel runs, approve environments, or change apply ordering.
 
 If a post-merge Terraform deploy workflow stays `pending` with no jobs, start
 from the watcher alert or inspect that workflow's run queue directly before

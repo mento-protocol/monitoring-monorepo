@@ -118,7 +118,7 @@ different failure mode: a post-merge Terraform deploy workflow can sit
 GitHub Slack App approval card and `scripts/notify-terraform-apply.mjs` summary
 cannot fire because the deploy workflow has not reached its `plan` job.
 
-The watcher runs every 15 minutes, reads recent runs for the four
+The watcher runs daily, reads recent runs for the four
 `production-infra` deploy workflows, and posts to the same
 `TERRAFORM_APPLY_SLACK_CHANNEL` destination when a `push`/`workflow_dispatch`
 run is older than 60 minutes and still has zero started jobs. It fails its own
