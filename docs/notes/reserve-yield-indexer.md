@@ -26,27 +26,35 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 
 - Ethereum reserve-yield indexing shares the existing production Envio project
   and GraphQL endpoint.
-- The primary entry point registers sparse sUSDS/stETH token events only.
+- The primary entry point registers sparse sUSDS/stETH token events plus the
+  launch-aligned stETH sub-daily wallet balance sampler from
+  [`ADR 0034`](../adr/0034-steth-wallet-daily-sampler.md).
 - The primary entry point does not register the historical sUSDS `onBlock`
   heartbeat.
 - sUSDS event handlers write movement rows, summary rows, and daily snapshots
   only when real `Transfer`, `Deposit`, or `Withdraw` logs for tracked reserve
   wallets are processed.
+- stETH daily snapshots are keyed by `chainId:token:wallet`, baseline at the
+  final Ethereum block before `2026-03-03T00:00:00Z`, and skipped as a batch when
+  any required historical wallet `balanceOf` read is unavailable.
 - Dashboard reserve-yield readers use `NEXT_PUBLIC_HASURA_URL`.
 
 ## Why This Avoids The Hosted Replay Stall Class
 
 The failed hosted experiments stalled at Envio v3 synthetic `onBlock` batch
 boundaries (`5000`/`15000` synthetic items). The hosted entry point excludes the
-heartbeat entirely, so the indexer backfills only real Ethereum logs for the
-configured sUSDS/stETH contracts. That keeps the replay work bounded enough to
-share the existing hosted project instead of paying for an additional Envio
-deployment.
+historical sUSDS heartbeat entirely, so the indexer backfills real Ethereum logs
+for the configured sUSDS/stETH contracts plus one sub-daily stETH wallet
+balance sampler. That keeps the replay work bounded enough to share the existing
+hosted project instead of paying for an additional Envio deployment.
 
 ## Degraded Behavior
 
 - If the shared endpoint, schema, or summary rows are missing, the revenue page keeps
   forecast rows visible and labels earned-yield actuals as pending/unavailable.
+- If `StethYieldDailySnapshot` is missing, stale, or incomplete for a tracked
+  current stETH wallet, the revenue page keeps stETH principal and forecast
+  visible while labeling stETH earned-yield actuals as pending/unavailable.
 - If daily snapshots exist but stop advancing, the revenue page marks reserve
   history stale after the latest snapshot day and renders later reserve actuals
   as `N/A`.
@@ -89,6 +97,10 @@ For each tracked wallet, query every indexed wallet position (`from`, `to`,
 `sender`, `owner`, `receiver`) and set
 `ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` or the config default to the minimum
 hit across all tracked wallets and contracts.
+
+stETH launch actuals also require the launch-baseline block from ADR 0034. The
+checked-in baseline is Ethereum block `24573203`; re-check it before changing
+the launch timestamp or start-block assumptions.
 
 Example `cast` shape for one wallet/topic pair:
 

@@ -5,7 +5,7 @@ resource "google_cloudfunctions2_function" "watchdog_notifications" {
   description = "A cloud function that receives blockchain event data from Quicknode Webhook and sends notifications to a Discord channel"
 
   build_config {
-    runtime         = "nodejs22"
+    runtime         = "nodejs24"
     entry_point     = var.function_entry_point
     service_account = module.governance_watchdog.service_account_name
 

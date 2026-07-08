@@ -1,4 +1,4 @@
-import { EmbedBuilder } from "discord.js";
+import { EmbedBuilder } from "@discordjs/builders";
 import { TelegramMessageBuilder } from "../event-notifications/message-builder.telegram.js";
 import type { EventHandlerConfig } from "./event-handler-factory.js";
 

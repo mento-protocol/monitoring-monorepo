@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   amountsFor,
   badgeKindFor,
+  groupTransactionsByUtcDay,
   indexSnapshotsById,
   mergeTransactionRows,
   positionSnapshotFor,
+  summarizeCdpActivity,
+  transactionAttentionRank,
   troveSnapshotFor,
   type CdpTransactionsResponse,
 } from "./transactions";
@@ -34,7 +37,10 @@ function liquidationRow(
   } as unknown as CdpTransactionRow;
 }
 
-function redemptionRow(isRebalance = false): CdpTransactionRow {
+function redemptionRow(
+  isRebalance = false,
+  overrides: Partial<CdpTransactionRow> = {},
+): CdpTransactionRow {
   return {
     kind: "redemption",
     id: "red-1",
@@ -42,16 +48,20 @@ function redemptionRow(isRebalance = false): CdpTransactionRow {
     isRebalance,
     actualBoldAmount: "300",
     ETHSent: "150",
+    ...overrides,
   } as unknown as CdpTransactionRow;
 }
 
-function spRebalanceRow(): CdpTransactionRow {
+function spRebalanceRow(
+  overrides: Partial<CdpTransactionRow> = {},
+): CdpTransactionRow {
   return {
     kind: "spRebalance",
     id: "sp-1",
     timestamp: "800",
     amountStableOut: "50",
     amountCollIn: "25",
+    ...overrides,
   } as unknown as CdpTransactionRow;
 }
 
@@ -268,6 +278,77 @@ describe("mergeTransactionRows", () => {
       ],
     });
     expect(capped).toBe(true);
+  });
+});
+
+describe("summarizeCdpActivity", () => {
+  it("counts 24h activity globally and per market", () => {
+    const rows: CdpTransactionRow[] = [
+      liquidationRow({ instanceId: "gbpm", timestamp: "1000" }),
+      redemptionRow(false, { id: "red-user", instanceId: "gbpm" }),
+      redemptionRow(true, { id: "red-rebalance", instanceId: "gbpm" }),
+      spRebalanceRow({ instanceId: "chfm" }),
+      spOperationRow({ instanceId: "gbpm", timestamp: "700" }),
+      troveOpBadgeRow(0),
+      troveOpBadgeRow(2),
+      liquidationRow({
+        id: "old-liq",
+        instanceId: "gbpm",
+        timestamp: String(1000 - 90_000),
+      }),
+    ];
+    rows[5] = { ...rows[5]!, instanceId: "chfm", timestamp: "600" };
+    rows[6] = { ...rows[6]!, instanceId: "gbpm", timestamp: "500" };
+
+    const summary = summarizeCdpActivity(rows, 1000);
+
+    expect(summary.total24h).toBe(7);
+    expect(summary.liquidations24h).toBe(1);
+    expect(summary.redemptions24h).toBe(2);
+    expect(summary.userRedemptions24h).toBe(1);
+    expect(summary.rebalanceRedemptions24h).toBe(1);
+    expect(summary.spRebalances24h).toBe(1);
+    expect(summary.stabilityPoolOps24h).toBe(1);
+    expect(summary.troveOps24h).toBe(2);
+    expect(summary.byInstance.get("gbpm")?.total24h).toBe(5);
+    expect(summary.byInstance.get("gbpm")?.liquidations24h).toBe(1);
+    expect(summary.byInstance.get("gbpm")?.lastTimestamp).toBe(1000);
+    expect(summary.byInstance.get("chfm")?.spRebalances24h).toBe(1);
+  });
+});
+
+describe("groupTransactionsByUtcDay", () => {
+  it("keeps timestamp order while inserting UTC day groups", () => {
+    const groups = groupTransactionsByUtcDay([
+      liquidationRow({ timestamp: "1704153600" }), // 2024-01-02
+      redemptionRow(false, { timestamp: "1704157200" }),
+      spRebalanceRow({ timestamp: "1704067200" }), // 2024-01-01
+    ]);
+
+    expect(groups.map((group) => group.key)).toEqual([
+      "2024-01-02",
+      "2024-01-01",
+    ]);
+    expect(groups[0]?.label).toBe("Jan 2, 2024 UTC");
+    expect(groups[0]?.rows).toHaveLength(2);
+    expect(groups[1]?.rows[0]?.id).toBe("sp-1");
+  });
+});
+
+describe("transactionAttentionRank", () => {
+  it("weights liquidations and rebalances above routine stability-pool claims", () => {
+    expect(transactionAttentionRank(liquidationRow())).toBeGreaterThan(
+      transactionAttentionRank(redemptionRow(false)),
+    );
+    expect(transactionAttentionRank(redemptionRow(true))).toBeGreaterThan(
+      transactionAttentionRank(
+        spOperationRow({
+          operation: 2,
+          topUpOrWithdrawal: "0",
+          yieldGainClaimed: "1",
+        }),
+      ),
+    );
   });
 });
 

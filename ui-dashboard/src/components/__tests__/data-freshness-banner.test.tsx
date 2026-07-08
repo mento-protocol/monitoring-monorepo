@@ -47,7 +47,7 @@ function render() {
 
 describe("DataFreshnessBanner", () => {
   it("appears when an active polling key has last-good data and a failed refresh", () => {
-    cleanupFreshness = registerSWRFreshnessKey("polling-key", 30_000);
+    cleanupFreshness = registerSWRFreshnessKey("polling-key");
     recordSWRFreshnessSuccess("polling-key", { refreshInterval: 30_000 });
     render();
     expect(container.textContent).toBe("");
@@ -63,8 +63,8 @@ describe("DataFreshnessBanner", () => {
     expect(container.textContent).toContain("last-good data from 5s ago");
   });
 
-  it("appears when active polling data is older than its refresh interval", () => {
-    cleanupFreshness = registerSWRFreshnessKey("slow-key", 30_000);
+  it("stays hidden when active polling data is only older than its refresh interval", () => {
+    cleanupFreshness = registerSWRFreshnessKey("slow-key");
     recordSWRFreshnessSuccess("slow-key", { refreshInterval: 30_000 });
     render();
 
@@ -73,7 +73,6 @@ describe("DataFreshnessBanner", () => {
       vi.advanceTimersByTime(10_000);
     });
 
-    expect(container.textContent).toContain("Data may be stale");
-    expect(container.textContent).toContain("last-good data from 50s ago");
+    expect(container.textContent).toBe("");
   });
 });

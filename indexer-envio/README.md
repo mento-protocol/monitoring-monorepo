@@ -73,8 +73,8 @@ Deploy branch: `envio` → triggers hosted reindex on push.
 
 ### Prerequisites
 
-- Node.js 22 LTS
-- pnpm 10.x
+- Node.js 24 LTS
+- pnpm 11.x
 - Docker Desktop (runs Postgres + Hasura locally)
 
 ### Setup

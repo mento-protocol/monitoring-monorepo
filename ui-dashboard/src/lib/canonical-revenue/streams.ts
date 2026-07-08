@@ -74,8 +74,8 @@ export function buildStreams(args: {
       forecast365dUsd: args.forecasts.next365d.reserveYieldUsd,
       subtitle:
         args.reserveYield !== null
-          ? "sUSDS actual yield; AUSD and stETH forecast-only"
-          : "Reserve actuals from sUSDS snapshots",
+          ? "sUSDS and stETH actual yield when indexed; AUSD forecast-only"
+          : "Reserve actuals from indexed earned-yield snapshots",
       actualPartialReasons: reserveActualPartialReasons,
       forecastPartialReasons: reserveForecastPartialReasons,
       partialReasons: [

@@ -39,9 +39,10 @@ name: Governance Watchdog Infra
 # Required plan-time repository secrets are this stack's TF_VAR_* values (see
 # the env blocks below): GCP bootstrap (org_id, billing_account), Discord +
 # Telegram notification creds, QuickNode api_key + security_token,
-# x_auth_token, victorops_webhook_url, and the github_token PAT. The plan job
-# does not attach the `production-infra` Environment, so every plan-time value
-# must exist as a repository secret. Keep matching `production-infra`
+# x_auth_token, victorops_webhook_url, and the github_token PAT. PR plans
+# intentionally receive validation-safe placeholders for these sensitive values;
+# push/dispatch plans and the apply job keep the real secrets so the gated
+# apply-time re-plan is authoritative. Keep matching `production-infra`
 # Environment secrets in sync for apply-time values that are intentionally
 # scoped behind that gate; `github_actions_secret` resources then self-manage
 # the TF_VAR_* mirror consumed by terraform-drift.yml.
@@ -51,8 +52,8 @@ name: Governance Watchdog Infra
 # sensitive data in cleartext in the plan file"
 # (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
 # TF_VAR_* env block here carries production Discord/Telegram/QuickNode/GitHub
-# credentials. Uploading the binary plan as a workflow artifact would expose
-# those secrets to anyone with `actions:read`.
+# credentials on push/dispatch and apply runs. Uploading the binary plan as a
+# workflow artifact would expose those secrets to anyone with `actions:read`.
 # Instead the apply job re-plans at gate-approval time — the trade-off
 # is the brief "between approval and apply" drift window, which the
 # reviewer can detect by checking the apply-job's plan output before
@@ -125,7 +126,7 @@ jobs:
   plan:
     name: Terraform Plan (governance-watchdog/infra)
     # Fork PRs and Dependabot PRs don't get repository secrets, so the
-    # GCP auth + TF_VAR_* steps would resolve empty and fail every time.
+    # GCP auth step would resolve empty and fail every time.
     # Skip the job in those contexts — the plan is only meaningful when
     # secrets are available. Internal PRs + main pushes run.
     if: >-
@@ -151,9 +152,6 @@ jobs:
       has-changes: ${{ steps.detect.outputs.has-changes }}
       stack-changed: ${{ steps.stack_changes.outputs.stack-changed }}
     env:
-      # GCP project bootstrap (org_id has a default in variables.tf — shared
-      # across stacks, so it is intentionally NOT a CI env var)
-      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       # On PRs, point the google provider at the read-only seed SA so provider
       # init impersonates an identity the plan-readonly CI SA can mint a token
       # for; with `-refresh=false` (see Plan step) the provider makes no GCP API
@@ -161,26 +159,6 @@ jobs:
       # workflow_dispatch this resolves to the write-capable `org-terraform@…seed`
       # (= the variable default) — those runs full-refresh to gate apply.
       TF_VAR_terraform_service_account: ${{ github.event_name == 'pull_request' && 'org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com' || 'org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com' }}
-      # Discord (proposal notifications)
-      TF_VAR_discord_webhook_url: ${{ secrets.TF_VAR_DISCORD_WEBHOOK_URL }}
-      TF_VAR_discord_test_webhook_url: ${{ secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL }}
-      # Telegram (proposal notifications)
-      TF_VAR_telegram_chat_id: ${{ secrets.TF_VAR_TELEGRAM_CHAT_ID }}
-      TF_VAR_telegram_test_chat_id: ${{ secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID }}
-      TF_VAR_telegram_bot_token: ${{ secrets.TF_VAR_TELEGRAM_BOT_TOKEN }}
-      # QuickNode (webhook security token + API key)
-      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY }}
-      TF_VAR_quicknode_security_token: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
-      # Production test path (x-auth-token)
-      TF_VAR_x_auth_token: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
-      # VictorOps / Splunk On-Call webhook (GCP Monitoring alert delivery)
-      TF_VAR_victorops_webhook_url: ${{ secrets.TF_VAR_VICTOROPS_WEBHOOK_URL }}
-      # gov-watchdog's GCP Monitoring error-alert Slack channel ID — the
-      # stack-specific secret (NOT the shared alerts-delivery channel); the
-      # variable defaults to "" so this is optional until the channel exists.
-      TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID }}
-      # GitHub (for github_actions_secret resources that self-manage these secrets)
-      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -237,6 +215,55 @@ jobs:
         with:
           terraform_version: 1.14.6
           terraform_wrapper: false
+
+      - name: Export PR-safe Terraform inputs
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            printf '%s\n' 'TF_VAR_billing_account=000000-000000-000000'
+            printf '%s\n' 'TF_VAR_discord_webhook_url=https://example.invalid/pr-plan-discord-webhook'
+            printf '%s\n' 'TF_VAR_discord_test_webhook_url=https://example.invalid/pr-plan-discord-test-webhook'
+            printf '%s\n' 'TF_VAR_telegram_chat_id=pr-plan-dummy-telegram-chat-id'
+            printf '%s\n' 'TF_VAR_telegram_test_chat_id=pr-plan-dummy-telegram-test-chat-id'
+            printf '%s\n' 'TF_VAR_telegram_bot_token=pr-plan-dummy-telegram-bot-token'
+            printf '%s\n' 'TF_VAR_quicknode_api_key=pr-plan-dummy-quicknode-api-key'
+            printf '%s\n' 'TF_VAR_quicknode_security_token=pr-plan-dummy-quicknode-security-token'
+            printf '%s\n' 'TF_VAR_x_auth_token=pr-plan-dummy-x-auth-token'
+            printf '%s\n' 'TF_VAR_victorops_webhook_url=https://example.invalid/pr-plan-victorops-webhook'
+            printf '%s\n' 'TF_VAR_slack_notification_channel_id=123456789'
+            printf '%s\n' 'TF_VAR_github_token=pr-plan-dummy-github-token'
+          } >> "$GITHUB_ENV"
+
+      - name: Export production Terraform inputs
+        if: github.event_name != 'pull_request'
+        env:
+          INPUT_BILLING_ACCOUNT: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
+          INPUT_DISCORD_WEBHOOK_URL: ${{ secrets.TF_VAR_DISCORD_WEBHOOK_URL }}
+          INPUT_DISCORD_TEST_WEBHOOK_URL: ${{ secrets.TF_VAR_DISCORD_TEST_WEBHOOK_URL }}
+          INPUT_TELEGRAM_CHAT_ID: ${{ secrets.TF_VAR_TELEGRAM_CHAT_ID }}
+          INPUT_TELEGRAM_TEST_CHAT_ID: ${{ secrets.TF_VAR_TELEGRAM_TEST_CHAT_ID }}
+          INPUT_TELEGRAM_BOT_TOKEN: ${{ secrets.TF_VAR_TELEGRAM_BOT_TOKEN }}
+          INPUT_QUICKNODE_API_KEY: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_QUICKNODE_API_KEY }}
+          INPUT_QUICKNODE_SECURITY_TOKEN: ${{ secrets.TF_VAR_QUICKNODE_SECURITY_TOKEN }}
+          INPUT_X_AUTH_TOKEN: ${{ secrets.TF_VAR_X_AUTH_TOKEN }}
+          INPUT_VICTOROPS_WEBHOOK_URL: ${{ secrets.TF_VAR_VICTOROPS_WEBHOOK_URL }}
+          INPUT_SLACK_NOTIFICATION_CHANNEL_ID: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID }}
+          INPUT_GITHUB_TOKEN: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+        run: |
+          {
+            printf '%s\n' "TF_VAR_billing_account=${INPUT_BILLING_ACCOUNT}"
+            printf '%s\n' "TF_VAR_discord_webhook_url=${INPUT_DISCORD_WEBHOOK_URL}"
+            printf '%s\n' "TF_VAR_discord_test_webhook_url=${INPUT_DISCORD_TEST_WEBHOOK_URL}"
+            printf '%s\n' "TF_VAR_telegram_chat_id=${INPUT_TELEGRAM_CHAT_ID}"
+            printf '%s\n' "TF_VAR_telegram_test_chat_id=${INPUT_TELEGRAM_TEST_CHAT_ID}"
+            printf '%s\n' "TF_VAR_telegram_bot_token=${INPUT_TELEGRAM_BOT_TOKEN}"
+            printf '%s\n' "TF_VAR_quicknode_api_key=${INPUT_QUICKNODE_API_KEY}"
+            printf '%s\n' "TF_VAR_quicknode_security_token=${INPUT_QUICKNODE_SECURITY_TOKEN}"
+            printf '%s\n' "TF_VAR_x_auth_token=${INPUT_X_AUTH_TOKEN}"
+            printf '%s\n' "TF_VAR_victorops_webhook_url=${INPUT_VICTOROPS_WEBHOOK_URL}"
+            printf '%s\n' "TF_VAR_slack_notification_channel_id=${INPUT_SLACK_NOTIFICATION_CHANNEL_ID}"
+            printf '%s\n' "TF_VAR_github_token=${INPUT_GITHUB_TOKEN}"
+          } >> "$GITHUB_ENV"
 
       - name: Format check
         run: terraform fmt -check -recursive

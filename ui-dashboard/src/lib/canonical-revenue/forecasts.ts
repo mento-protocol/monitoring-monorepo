@@ -193,7 +193,7 @@ function forecastAssumption(days: number): string {
   return [
     "Forecast based on current reserve balances, trailing swap activity, and CDP current run-rate.",
     `Reserve uses non-compounding forecast math: balance x annual rate x ${days} / 365.`,
-    "AUSD and stETH are forecast-only; sUSDS actuals come from indexed earned-yield snapshots.",
+    "AUSD is forecast-only; sUSDS and stETH actuals come from indexed earned-yield snapshots when available.",
     "Swap uses the last 30 completed daily fee buckets; CDP uses current protocol-share interest run-rate plus trailing upfront fees.",
   ].join("\n");
 }

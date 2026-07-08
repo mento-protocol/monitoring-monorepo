@@ -6,14 +6,12 @@ type SwrFreshnessEntry = {
   lastErrorAt: number | null;
   lastErrorMessage: string | null;
   lastSuccessAt: number | null;
-  refreshIntervalMs: number | null;
 };
 
 export type SwrFreshnessStatus = {
   failedCount: number;
   lastErrorMessage: string | null;
   lastUpdatedAt: number;
-  staleCount: number;
 };
 
 type Listener = () => void;
@@ -39,35 +37,23 @@ function emit() {
   for (const listener of listeners) listener();
 }
 
-function upsertEntry(
-  normalizedKey: string,
-  refreshIntervalMs: number | null,
-): SwrFreshnessEntry {
+function upsertEntry(normalizedKey: string): SwrFreshnessEntry {
   const existing = entries.get(normalizedKey);
-  if (existing) {
-    if (refreshIntervalMs !== null) {
-      existing.refreshIntervalMs = refreshIntervalMs;
-    }
-    return existing;
-  }
+  if (existing) return existing;
   const next: SwrFreshnessEntry = {
     activeCount: 0,
     key: normalizedKey,
     lastErrorAt: null,
     lastErrorMessage: null,
     lastSuccessAt: null,
-    refreshIntervalMs,
   };
   entries.set(normalizedKey, next);
   return next;
 }
 
-export function registerSWRFreshnessKey(
-  key: unknown,
-  refreshIntervalMs: number | null,
-): () => void {
+export function registerSWRFreshnessKey(key: unknown): () => void {
   const normalizedKey = normalizeSWRFreshnessKey(key);
-  const entry = upsertEntry(normalizedKey, refreshIntervalMs);
+  const entry = upsertEntry(normalizedKey);
   entry.activeCount += 1;
   emit();
   return () => {
@@ -92,11 +78,8 @@ export function recordSWRFreshnessSuccess(
   const refreshIntervalMs = readRefreshIntervalMs(config);
   const entry =
     entries.get(normalizedKey) ??
-    (refreshIntervalMs !== null
-      ? upsertEntry(normalizedKey, refreshIntervalMs)
-      : null);
+    (refreshIntervalMs !== null ? upsertEntry(normalizedKey) : null);
   if (!entry) return;
-  if (refreshIntervalMs !== null) entry.refreshIntervalMs = refreshIntervalMs;
   entry.lastSuccessAt = Date.now();
   entry.lastErrorAt = null;
   entry.lastErrorMessage = null;
@@ -111,12 +94,9 @@ export function seedSWRFreshnessData(
   const refreshIntervalMs = readRefreshIntervalMs(config);
   const entry =
     entries.get(normalizedKey) ??
-    (refreshIntervalMs !== null
-      ? upsertEntry(normalizedKey, refreshIntervalMs)
-      : null);
+    (refreshIntervalMs !== null ? upsertEntry(normalizedKey) : null);
   if (!entry) return;
   if (entry.lastSuccessAt !== null || entry.lastErrorAt !== null) return;
-  if (refreshIntervalMs !== null) entry.refreshIntervalMs = refreshIntervalMs;
   entry.lastSuccessAt = Date.now();
   emit();
 }
@@ -130,11 +110,8 @@ export function recordSWRFreshnessError(
   const refreshIntervalMs = readRefreshIntervalMs(config);
   const entry =
     entries.get(normalizedKey) ??
-    (refreshIntervalMs !== null
-      ? upsertEntry(normalizedKey, refreshIntervalMs)
-      : null);
+    (refreshIntervalMs !== null ? upsertEntry(normalizedKey) : null);
   if (!entry) return;
-  if (refreshIntervalMs !== null) entry.refreshIntervalMs = refreshIntervalMs;
   entry.lastErrorAt = Date.now();
   entry.lastErrorMessage =
     error instanceof Error ? error.message : "Unknown refresh error";
@@ -150,32 +127,23 @@ export function getSWRFreshnessVersion(): number {
   return snapshotVersion;
 }
 
-export function getSWRFreshnessStatus(
-  now = Date.now(),
-): SwrFreshnessStatus | null {
+export function getSWRFreshnessStatus(): SwrFreshnessStatus | null {
   let failedCount = 0;
   let lastErrorMessage: string | null = null;
   let lastUpdatedAt = Number.POSITIVE_INFINITY;
-  let staleCount = 0;
 
   for (const entry of entries.values()) {
     if (entry.activeCount <= 0 || entry.lastSuccessAt === null) continue;
     const failedAfterSuccess =
       entry.lastErrorAt !== null && entry.lastErrorAt > entry.lastSuccessAt;
-    const olderThanRefresh =
-      entry.refreshIntervalMs !== null &&
-      now - entry.lastSuccessAt > entry.refreshIntervalMs;
-    if (!failedAfterSuccess && !olderThanRefresh) continue;
-    staleCount += 1;
-    if (failedAfterSuccess) {
-      failedCount += 1;
-      lastErrorMessage = entry.lastErrorMessage;
-    }
+    if (!failedAfterSuccess) continue;
+    failedCount += 1;
+    lastErrorMessage = entry.lastErrorMessage;
     lastUpdatedAt = Math.min(lastUpdatedAt, entry.lastSuccessAt);
   }
 
-  if (staleCount === 0 || !Number.isFinite(lastUpdatedAt)) return null;
-  return { failedCount, lastErrorMessage, lastUpdatedAt, staleCount };
+  if (failedCount === 0 || !Number.isFinite(lastUpdatedAt)) return null;
+  return { failedCount, lastErrorMessage, lastUpdatedAt };
 }
 
 export function resetSWRFreshnessForTests(): void {

@@ -1206,6 +1206,25 @@ export function handleGraphQL({ query, variables = {} }) {
       };
     case "CdpTransactions":
       return cdpTransactions;
+    case "AllCdpTransactions":
+      return {
+        LiquidationEvent: cdpTransactions.LiquidationEvent.slice(
+          0,
+          variables.limit ?? cdpTransactions.LiquidationEvent.length,
+        ),
+        RedemptionEvent: cdpTransactions.RedemptionEvent.slice(
+          0,
+          variables.limit ?? cdpTransactions.RedemptionEvent.length,
+        ),
+        SpRebalanceEvent: cdpTransactions.SpRebalanceEvent.slice(
+          0,
+          variables.limit ?? cdpTransactions.SpRebalanceEvent.length,
+        ),
+        TroveOperationEvent: cdpTransactions.TroveOperationEvent.slice(
+          0,
+          variables.limit ?? cdpTransactions.TroveOperationEvent.length,
+        ),
+      };
     case "CdpStabilityPoolEvents":
       return {
         StabilityPoolOperationEvent: cdpStabilityPoolOperationRowsForInstance(
@@ -1219,6 +1238,8 @@ export function handleGraphQL({ query, variables = {} }) {
         ).slice(0, variables.limit ?? cdpStabilityPoolOperations.length),
       };
     case "CdpTroveOpSnapshots":
+      return { TroveOperationEvent: cdpTroveOpSnapshots };
+    case "AllCdpTroveOpSnapshots":
       return { TroveOperationEvent: cdpTroveOpSnapshots };
     default:
       return unhandledOperation(op);

@@ -31,6 +31,8 @@ export type {
   CanonicalRevenueStream,
   RevenueForecastKey,
   RevenuePeriodKey,
+  ReserveYieldDailySnapshotRow,
+  StethYieldDailySnapshotRow,
   SusdsYieldDailySnapshotRow,
 } from "./canonical-revenue/types";
 
@@ -55,10 +57,11 @@ export function buildCanonicalRevenue({
     undefined,
     nowSeconds,
   );
-  const buckets = buildRevenueBuckets({
+  const reserveBuckets = buildRevenueBuckets({
     swapSeries,
     cdpDailySeries,
     reserveDailySnapshots,
+    reserveYield,
   });
   const canonicalArgs = {
     networkData,
@@ -69,6 +72,7 @@ export function buildCanonicalRevenue({
     reserveHistoryUnavailable,
     reserveHistoryFailed,
     reserveHistoryTruncated,
+    reserveHistoryUnpriced: reserveBuckets.reserveHistoryUnpriced,
     reserveYieldFailed,
     swapFeesFailed,
     swapFeesApproximate,
@@ -77,7 +81,11 @@ export function buildCanonicalRevenue({
     nowSeconds,
   };
   const actualAvailability = buildActualAvailability(canonicalArgs);
-  const dailySeries = buildDailySeries(buckets, nowSeconds, actualAvailability);
+  const dailySeries = buildDailySeries(
+    reserveBuckets.buckets,
+    nowSeconds,
+    actualAvailability,
+  );
   const partialReasons = buildPartialReasons(canonicalArgs);
   const periods = buildPeriods(dailySeries, nowSeconds, partialReasons);
   const forecasts = buildForecasts(

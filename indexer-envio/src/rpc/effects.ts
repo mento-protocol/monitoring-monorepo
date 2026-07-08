@@ -54,6 +54,7 @@ import {
 import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
 import { trackEffectExecution } from "../performance.js";
 import { fetchSusdsSharePriceUsdWei } from "./susds.js";
+import { fetchStethBalanceOf } from "./steth.js";
 
 type UntypedCreateEffect = (
   options: unknown,
@@ -472,6 +473,31 @@ export const blockTimestampEffect = createEffect(
     }
     return result;
   },
+);
+
+export const stethBalanceOfEffect = createEffect(
+  {
+    name: "stethBalanceOf",
+    input: {
+      chainId: S.int32,
+      tokenAddress: S.string,
+      account: S.string,
+      blockNumber: S.bigint,
+    },
+    output: S.nullable(S.bigint),
+    rateLimit: { calls: 200, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) =>
+    fetchStethBalanceOf(
+      {
+        chainId: input.chainId,
+        tokenAddress: input.tokenAddress,
+        account: input.account,
+        blockNumber: input.blockNumber,
+      },
+      context.log,
+    ),
 );
 
 /** Convert the `feesEffect` output (explicit `undefined` keys) into a

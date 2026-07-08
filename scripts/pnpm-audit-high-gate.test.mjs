@@ -69,21 +69,6 @@ function run(report, args = []) {
   }
 }
 
-/**
- * @param {string} path
- * @param {string} [version]
- * @returns {Record<string, unknown>}
- */
-function undiciCve(path, version = "6.24.1") {
-  return {
-    module_name: "undici",
-    severity: "high",
-    github_advisory_id: "GHSA-vxpw-j846-p89q",
-    cves: ["CVE-2026-12151"],
-    findings: [{ version, paths: [path] }],
-  };
-}
-
 console.log("\npnpm-audit-high-gate.mjs fixture tests\n");
 
 test("passes when there are no high advisories", () => {
@@ -92,106 +77,17 @@ test("passes when there are no high advisories", () => {
   assert(stdout.includes("no high/critical"), `stdout: ${stdout}`);
 });
 
-test("allows the documented root governance-watchdog Discord undici path", () => {
-  const { exitCode, stdout, stderr } = run(
-    {
-      advisories: {
-        123: undiciCve("governance-watchdog>discord.js>undici"),
-      },
-    },
-    ["--dir", ".", "--label", "root"],
-  );
-  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
-  assert(stdout.includes("allowed documented"), `stdout: ${stdout}`);
-});
-
-test("allows the documented root Discord ws rest undici path", () => {
-  const { exitCode, stdout, stderr } = run(
-    {
-      advisories: {
-        123: undiciCve(
-          "governance-watchdog>discord.js>@discordjs/ws>@discordjs/rest>undici",
-        ),
-      },
-    },
-    ["--dir", ".", "--label", "root"],
-  );
-  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
-  assert(stdout.includes("@discordjs/ws"), `stdout: ${stdout}`);
-});
-
-test("allows the documented standalone governance-watchdog Discord undici path", () => {
-  const { exitCode, stdout, stderr } = run(
-    {
-      advisories: {
-        123: undiciCve("discord.js>undici"),
-      },
-    },
-    ["--dir", "governance-watchdog", "--label", "governance-watchdog"],
-  );
-  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
-  assert(stdout.includes("discord.js>undici"), `stdout: ${stdout}`);
-});
-
-test("allows pnpm's dot-prefixed standalone Discord undici path", () => {
-  const { exitCode, stdout, stderr } = run(
-    {
-      advisories: {
-        123: undiciCve(".>discord.js>undici"),
-      },
-    },
-    ["--dir", "governance-watchdog", "--label", "governance-watchdog"],
-  );
-  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
-  assert(stdout.includes(".>discord.js>undici"), `stdout: ${stdout}`);
-});
-
-test("allows the documented standalone Discord ws rest undici path", () => {
-  const { exitCode, stdout, stderr } = run(
-    {
-      advisories: {
-        123: undiciCve(".>discord.js>@discordjs/ws>@discordjs/rest>undici"),
-      },
-    },
-    ["--dir", "governance-watchdog", "--label", "governance-watchdog"],
-  );
-  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
-  assert(stdout.includes("@discordjs/ws"), `stdout: ${stdout}`);
-});
-
-test("rejects unqualified standalone Discord paths outside governance-watchdog", () => {
-  const { exitCode, stderr } = run(
-    {
-      advisories: {
-        123: undiciCve(".>discord.js>undici"),
-      },
-    },
-    ["--dir", "alerts/infra/oncall-announcer", "--label", "alerts/oncall"],
-  );
-  assert(exitCode !== 0, "expected non-zero exit");
-  assert(stderr.includes(".>discord.js>undici"), `stderr: ${stderr}`);
-});
-
-test("rejects root-prefixed Discord paths outside root audits", () => {
-  const { exitCode, stderr } = run(
-    {
-      advisories: {
-        123: undiciCve("governance-watchdog>discord.js>undici"),
-      },
-    },
-    ["--dir", "alerts/infra/oncall-announcer", "--label", "alerts/oncall"],
-  );
-  assert(exitCode !== 0, "expected non-zero exit");
-  assert(
-    stderr.includes("governance-watchdog>discord.js>undici"),
-    `stderr: ${stderr}`,
-  );
-});
-
-test("rejects the same undici CVE through a different consumer", () => {
+test("rejects high advisories", () => {
   const { exitCode, stderr } = run({
     advisories: {
-      123: undiciCve("ui-dashboard>@vercel/blob>undici"),
+      123: {
+        module_name: "undici",
+        severity: "high",
+        github_advisory_id: "GHSA-vxpw-j846-p89q",
+        findings: [
+          { version: "6.24.1", paths: ["ui-dashboard>@vercel/blob>undici"] },
+        ],
+      },
     },
   });
   assert(exitCode !== 0, "expected non-zero exit");
@@ -199,14 +95,18 @@ test("rejects the same undici CVE through a different consumer", () => {
   assert(stderr.includes("@vercel/blob"), `stderr: ${stderr}`);
 });
 
-test("rejects the Discord path when the pinned version changes", () => {
+test("ignores moderate advisories", () => {
   const { exitCode, stderr } = run({
     advisories: {
-      123: undiciCve("governance-watchdog>discord.js>undici", "6.26.0"),
+      123: {
+        module_name: "example",
+        severity: "moderate",
+        github_advisory_id: "GHSA-moderate",
+        findings: [{ version: "1.0.0", paths: ["pkg>example"] }],
+      },
     },
   });
-  assert(exitCode !== 0, "expected non-zero exit");
-  assert(stderr.includes("undici@6.26.0"), `stderr: ${stderr}`);
+  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
 });
 
 test("rejects unrelated high advisories", () => {

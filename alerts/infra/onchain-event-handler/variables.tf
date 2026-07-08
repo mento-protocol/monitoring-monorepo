@@ -111,9 +111,9 @@ variable "cloudbuild_builder_dependency" {
 }
 
 variable "runtime" {
-  description = "Cloud Function runtime (e.g., nodejs22, nodejs20)"
+  description = "Cloud Function runtime (e.g., nodejs24, nodejs20)"
   type        = string
-  default     = "nodejs22"
+  default     = "nodejs24"
 }
 
 variable "secret_name" {

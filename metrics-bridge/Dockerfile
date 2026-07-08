@@ -1,4 +1,4 @@
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
@@ -18,7 +18,7 @@ RUN corepack enable && pnpm install --frozen-lockfile --filter "@mento-protocol/
 COPY metrics-bridge/ metrics-bridge/
 RUN pnpm --filter @mento-protocol/metrics-bridge build
 
-FROM node:22-alpine
+FROM node:24-alpine
 WORKDIR /app
 
 RUN addgroup -S bridge && adduser -S bridge -G bridge

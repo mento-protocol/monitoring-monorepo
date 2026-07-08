@@ -6,8 +6,11 @@ import { currentDayBucket, dayBucket } from "./utils";
 import type {
   ActualRevenueAvailability,
   CanonicalRevenueDailyPoint,
+  ReserveYieldDailySnapshotRow,
+  StethYieldDailySnapshotRow,
   SusdsYieldDailySnapshotRow,
 } from "./types";
+import type { ReserveYieldResponse } from "@/lib/reserve-yield";
 import type { CdpBorrowingFeeSeriesPoint } from "@/lib/cdp-borrowing-revenue";
 
 type SwapDailyFeePoint = ReturnType<typeof buildDailyFeeSeries>[number];
@@ -45,6 +48,62 @@ function numericUsdWei(value: string): number | null {
   }
 }
 
+function numericTokenWei(value: string): number | null {
+  try {
+    const tokenAmount = weiToUsd(BigInt(value));
+    return Number.isFinite(tokenAmount) ? tokenAmount : null;
+  } catch {
+    return null;
+  }
+}
+
+function isStethSnapshot(
+  row: ReserveYieldDailySnapshotRow,
+): row is StethYieldDailySnapshotRow {
+  return "wallet" in row;
+}
+
+function stethUsdPerTokenByWallet(
+  reserveYield: ReserveYieldResponse | null,
+): Map<string, number> {
+  const rates = new Map<string, number>();
+  if (reserveYield === null) return rates;
+  for (const holding of reserveYield.holdings) {
+    if (
+      holding.assetSymbol.toUpperCase() !== "STETH" ||
+      holding.identifier === null ||
+      !holding.hasTokenBalance ||
+      holding.balance <= 0
+    ) {
+      continue;
+    }
+    const usdPerToken = holding.principalUsd / holding.balance;
+    if (Number.isFinite(usdPerToken) && usdPerToken > 0) {
+      rates.set(holding.identifier.toLowerCase(), usdPerToken);
+    }
+  }
+  return rates;
+}
+
+function reserveSnapshotSourceKey(row: ReserveYieldDailySnapshotRow): string {
+  const tokenKey = `${row.chainId}:${row.token.toLowerCase()}`;
+  return isStethSnapshot(row)
+    ? `${tokenKey}:${row.wallet.toLowerCase()}`
+    : tokenKey;
+}
+
+function reserveSnapshotTotalUsd(
+  row: ReserveYieldDailySnapshotRow,
+  stethRates: ReadonlyMap<string, number>,
+): number | null {
+  if (!isStethSnapshot(row)) return numericUsdWei(row.totalEarnedYieldUsdWei);
+  const usdPerToken = stethRates.get(row.wallet.toLowerCase());
+  const earnedAmount = numericTokenWei(row.totalEarnedYieldAmount);
+  return usdPerToken === undefined || earnedAmount === null
+    ? null
+    : earnedAmount * usdPerToken;
+}
+
 function reserveSnapshotBaselineUsd(
   row: SusdsYieldDailySnapshotRow,
   totalYieldUsd: number,
@@ -53,11 +112,40 @@ function reserveSnapshotBaselineUsd(
   return dailyYieldUsd === null ? null : totalYieldUsd - dailyYieldUsd;
 }
 
+function stethSnapshotBaselineUsd(
+  row: StethYieldDailySnapshotRow,
+  totalYieldUsd: number,
+  usdPerToken: number,
+): number | null {
+  const dailyYieldAmount = numericTokenWei(row.dailyEarnedYieldAmount);
+  return dailyYieldAmount === null
+    ? null
+    : totalYieldUsd - dailyYieldAmount * usdPerToken;
+}
+
+function reserveSnapshotBaseline(
+  row: ReserveYieldDailySnapshotRow,
+  totalYieldUsd: number,
+  stethRates: ReadonlyMap<string, number>,
+): number | null {
+  if (!isStethSnapshot(row)) {
+    return reserveSnapshotBaselineUsd(row, totalYieldUsd);
+  }
+  const usdPerToken = stethRates.get(row.wallet.toLowerCase());
+  return usdPerToken === undefined
+    ? null
+    : stethSnapshotBaselineUsd(row, totalYieldUsd, usdPerToken);
+}
+
 export function buildRevenueBuckets(args: {
   swapSeries: ReadonlyArray<SwapDailyFeePoint>;
   cdpDailySeries: ReadonlyArray<CdpBorrowingFeeSeriesPoint>;
-  reserveDailySnapshots: ReadonlyArray<SusdsYieldDailySnapshotRow>;
-}): Map<number, RevenueBucket> {
+  reserveDailySnapshots: ReadonlyArray<ReserveYieldDailySnapshotRow>;
+  reserveYield: ReserveYieldResponse | null;
+}): {
+  buckets: Map<number, RevenueBucket>;
+  reserveHistoryUnpriced: boolean;
+} {
   const buckets = new Map<number, RevenueBucket>();
 
   for (const point of args.swapSeries) {
@@ -73,25 +161,34 @@ export function buildRevenueBuckets(args: {
   }
 
   const previousReserveTotalsBySource = new Map<string, number>();
+  const stethRates = stethUsdPerTokenByWallet(args.reserveYield);
+  let reserveHistoryUnpriced = false;
   const reserveRows = [...args.reserveDailySnapshots].sort(
     (a, b) => Number(a.timestamp) - Number(b.timestamp),
   );
   for (const row of reserveRows) {
     const timestamp = Number(row.timestamp);
     if (!Number.isFinite(timestamp)) continue;
-    const totalYieldUsd = numericUsdWei(row.totalEarnedYieldUsdWei);
-    if (totalYieldUsd === null) continue;
-    const sourceKey = `${row.chainId}:${row.token.toLowerCase()}`;
+    const totalYieldUsd = reserveSnapshotTotalUsd(row, stethRates);
+    if (totalYieldUsd === null) {
+      if (isStethSnapshot(row)) reserveHistoryUnpriced = true;
+      continue;
+    }
+    const sourceKey = reserveSnapshotSourceKey(row);
     const previousTotalUsd = previousReserveTotalsBySource.get(sourceKey);
     const baselineUsd =
-      previousTotalUsd ?? reserveSnapshotBaselineUsd(row, totalYieldUsd);
-    if (baselineUsd === null) continue;
+      previousTotalUsd ??
+      reserveSnapshotBaseline(row, totalYieldUsd, stethRates);
+    if (baselineUsd === null) {
+      if (isStethSnapshot(row)) reserveHistoryUnpriced = true;
+      continue;
+    }
     const dailyYieldUsd = totalYieldUsd - baselineUsd;
     previousReserveTotalsBySource.set(sourceKey, totalYieldUsd);
     addBucketValue(buckets, timestamp, { reserveYieldUsd: dailyYieldUsd });
   }
 
-  return buckets;
+  return { buckets, reserveHistoryUnpriced };
 }
 
 export function buildDailySeries(

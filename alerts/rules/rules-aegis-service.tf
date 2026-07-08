@@ -13,12 +13,12 @@
 #
 # CROSS-STACK MOVE — this resource was `terraform import`ed into the
 # alerts-rules state in #706, then removed from the aegis stack state. The
-# folder stays the Aegis folder (owned by the aegis stack, referenced here as a
-# data source) so the Aegis dashboard keeps pointing at it.
+# folder stays the Aegis folder (owned by the aegis stack, referenced here by
+# its externally owned UID) so the Aegis dashboard keeps pointing at it.
 
 resource "grafana_rule_group" "aegis_service_alerts" {
   name             = "Aegis service alerts"
-  folder_uid       = data.grafana_folder.aegis.uid
+  folder_uid       = local.external_folder_uids.aegis
   interval_seconds = 60
 
   rule {

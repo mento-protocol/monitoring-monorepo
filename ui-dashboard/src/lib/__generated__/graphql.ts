@@ -4077,6 +4077,120 @@ export type StethPositionBoolExp = {
   readonly wallet?: ComparisonExp<string>;
 };
 
+export type StethWalletLaunchBaselineSelectColumn =
+  | "balanceAmount"
+  | "chainId"
+  | "id"
+  | "launchBlock"
+  | "launchTimestamp"
+  | "principalTopUpAmount"
+  | "realizedYieldAmountAtLaunch"
+  | "sampledAtBlock"
+  | "sampledAtTimestamp"
+  | "token"
+  | "transferredOutYieldAmountAtLaunch"
+  | "wallet";
+
+export type StethWalletLaunchBaselineOrderBy = {
+  readonly balanceAmount?: OrderBy;
+  readonly chainId?: OrderBy;
+  readonly id?: OrderBy;
+  readonly launchBlock?: OrderBy;
+  readonly launchTimestamp?: OrderBy;
+  readonly principalTopUpAmount?: OrderBy;
+  readonly realizedYieldAmountAtLaunch?: OrderBy;
+  readonly sampledAtBlock?: OrderBy;
+  readonly sampledAtTimestamp?: OrderBy;
+  readonly token?: OrderBy;
+  readonly transferredOutYieldAmountAtLaunch?: OrderBy;
+  readonly wallet?: OrderBy;
+};
+
+export type StethWalletLaunchBaselineBoolExp = {
+  readonly _and?:
+    | StethWalletLaunchBaselineBoolExp
+    | ReadonlyArray<StethWalletLaunchBaselineBoolExp>;
+  readonly _or?:
+    | StethWalletLaunchBaselineBoolExp
+    | ReadonlyArray<StethWalletLaunchBaselineBoolExp>;
+  readonly _not?: StethWalletLaunchBaselineBoolExp;
+  readonly balanceAmount?: ComparisonExp<string>;
+  readonly chainId?: ComparisonExp<number>;
+  readonly id?: ComparisonExp<string>;
+  readonly launchBlock?: ComparisonExp<string>;
+  readonly launchTimestamp?: ComparisonExp<string>;
+  readonly principalTopUpAmount?: ComparisonExp<string>;
+  readonly realizedYieldAmountAtLaunch?: ComparisonExp<string>;
+  readonly sampledAtBlock?: ComparisonExp<string>;
+  readonly sampledAtTimestamp?: ComparisonExp<string>;
+  readonly token?: ComparisonExp<string>;
+  readonly transferredOutYieldAmountAtLaunch?: ComparisonExp<string>;
+  readonly wallet?: ComparisonExp<string>;
+};
+
+export type StethYieldDailySnapshotSelectColumn =
+  | "balanceAmount"
+  | "chainId"
+  | "dailyEarnedYieldAmount"
+  | "dailyRealizedYieldAmount"
+  | "dailyUnrealizedYieldAmount"
+  | "id"
+  | "principalAmount"
+  | "realizedYieldAmount"
+  | "sampledAtBlock"
+  | "sampledAtTimestamp"
+  | "timestamp"
+  | "token"
+  | "totalEarnedYieldAmount"
+  | "transferredOutYieldAmount"
+  | "unrealizedYieldAmount"
+  | "wallet";
+
+export type StethYieldDailySnapshotOrderBy = {
+  readonly balanceAmount?: OrderBy;
+  readonly chainId?: OrderBy;
+  readonly dailyEarnedYieldAmount?: OrderBy;
+  readonly dailyRealizedYieldAmount?: OrderBy;
+  readonly dailyUnrealizedYieldAmount?: OrderBy;
+  readonly id?: OrderBy;
+  readonly principalAmount?: OrderBy;
+  readonly realizedYieldAmount?: OrderBy;
+  readonly sampledAtBlock?: OrderBy;
+  readonly sampledAtTimestamp?: OrderBy;
+  readonly timestamp?: OrderBy;
+  readonly token?: OrderBy;
+  readonly totalEarnedYieldAmount?: OrderBy;
+  readonly transferredOutYieldAmount?: OrderBy;
+  readonly unrealizedYieldAmount?: OrderBy;
+  readonly wallet?: OrderBy;
+};
+
+export type StethYieldDailySnapshotBoolExp = {
+  readonly _and?:
+    | StethYieldDailySnapshotBoolExp
+    | ReadonlyArray<StethYieldDailySnapshotBoolExp>;
+  readonly _or?:
+    | StethYieldDailySnapshotBoolExp
+    | ReadonlyArray<StethYieldDailySnapshotBoolExp>;
+  readonly _not?: StethYieldDailySnapshotBoolExp;
+  readonly balanceAmount?: ComparisonExp<string>;
+  readonly chainId?: ComparisonExp<number>;
+  readonly dailyEarnedYieldAmount?: ComparisonExp<string>;
+  readonly dailyRealizedYieldAmount?: ComparisonExp<string>;
+  readonly dailyUnrealizedYieldAmount?: ComparisonExp<string>;
+  readonly id?: ComparisonExp<string>;
+  readonly principalAmount?: ComparisonExp<string>;
+  readonly realizedYieldAmount?: ComparisonExp<string>;
+  readonly sampledAtBlock?: ComparisonExp<string>;
+  readonly sampledAtTimestamp?: ComparisonExp<string>;
+  readonly timestamp?: ComparisonExp<string>;
+  readonly token?: ComparisonExp<string>;
+  readonly totalEarnedYieldAmount?: ComparisonExp<string>;
+  readonly transferredOutYieldAmount?: ComparisonExp<string>;
+  readonly unrealizedYieldAmount?: ComparisonExp<string>;
+  readonly wallet?: ComparisonExp<string>;
+};
+
 export type StethYieldMovementSelectColumn =
   | "amount"
   | "blockNumber"
@@ -7335,6 +7449,33 @@ export type SusdsYieldDailySnapshotsQuery = {
   }>;
 };
 
+// queries/reserve-yield.STETH_YIELD_DAILY_SNAPSHOTS
+export type StethYieldDailySnapshotsQueryVariables = {
+  readonly chainId: number;
+  readonly limit: number;
+  readonly offset: number;
+};
+export type StethYieldDailySnapshotsQuery = {
+  readonly StethYieldDailySnapshot: ReadonlyArray<{
+    readonly id: string;
+    readonly chainId: number;
+    readonly token: string;
+    readonly wallet: string;
+    readonly timestamp: string;
+    readonly balanceAmount: string;
+    readonly principalAmount: string;
+    readonly realizedYieldAmount: string;
+    readonly transferredOutYieldAmount: string;
+    readonly unrealizedYieldAmount: string;
+    readonly totalEarnedYieldAmount: string;
+    readonly dailyEarnedYieldAmount: string;
+    readonly dailyRealizedYieldAmount: string;
+    readonly dailyUnrealizedYieldAmount: string;
+    readonly sampledAtBlock: string;
+    readonly sampledAtTimestamp: string;
+  }>;
+};
+
 // queries/reserve-yield.SUSDS_YIELD_SUMMARY_QUERY
 export type SusdsYieldSummaryQueryVariables = {
   readonly id: string;
@@ -7353,6 +7494,25 @@ export type SusdsYieldSummaryQuery = {
     readonly sharePriceUsdWei: string;
     readonly lastUpdatedBlock: string;
     readonly lastUpdatedTimestamp: string;
+  }>;
+};
+
+// queries/reserve-yield.STETH_YIELD_LATEST_SNAPSHOTS_QUERY
+export type StethYieldLatestSnapshotsQueryVariables = {
+  readonly chainId: number;
+  readonly limit: number;
+};
+export type StethYieldLatestSnapshotsQuery = {
+  readonly StethYieldDailySnapshot: ReadonlyArray<{
+    readonly id: string;
+    readonly chainId: number;
+    readonly token: string;
+    readonly wallet: string;
+    readonly timestamp: string;
+    readonly realizedYieldAmount: string;
+    readonly unrealizedYieldAmount: string;
+    readonly totalEarnedYieldAmount: string;
+    readonly sampledAtTimestamp: string;
   }>;
 };
 
