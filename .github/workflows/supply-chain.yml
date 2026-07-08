@@ -3,11 +3,9 @@ name: Supply Chain
 # Five gates that protect the dependency supply chain:
 #
 # 1. npm advisory audit — blocks merges when a high/critical advisory exists
-#    against any package in the root or standalone deploy lockfiles, except
-#    explicitly documented advisory/version/path-scoped exceptions in
-#    scripts/pnpm-audit-high-gate.mjs. The governance-watchdog high-audit leg is
-#    duplicated in the required Code Quality job because Trunk/OSV cannot express
-#    that path-scoped Discord undici exception safely.
+#    against any package in the root or standalone deploy lockfiles. The
+#    governance-watchdog high-audit leg is duplicated in the required Code
+#    Quality job so that deploy lockfile stays covered by a required check.
 #
 # 2. lockfile-lint — validates pnpm-lock.yaml structural integrity for the root
 #    workspace lockfile and the package-local Cloud Build lockfiles:
@@ -26,9 +24,7 @@ name: Supply Chain
 #
 # 4. moderate advisory report — a weekly non-blocking audit that opens or
 #    updates a labeled GitHub issue for sub-high advisories, so stale
-#    resolution-time override floors stay visible without blocking merges. It
-#    uses the same documented audit exception classifier as the high gate so
-#    known-bad-to-override Discord-owned undici pins do not re-open the report.
+#    resolution-time override floors stay visible without blocking merges.
 #
 # This workflow also hosts the repo's scheduled-report slot: a dedicated
 # weekly context-staleness job runs scripts/check-agent-context.mjs so the
@@ -83,11 +79,8 @@ on:
       # The gate itself — changes to the workflow or the lockfile-lint
       # scripts must self-trigger a run (same pattern as the other gates).
       - .github/workflows/supply-chain.yml
-      - scripts/pnpm-audit-classifier.mjs
       - scripts/pnpm-audit-high-gate.mjs
       - scripts/pnpm-audit-high-gate.test.mjs
-      - scripts/pnpm-audit-moderate-report.mjs
-      - scripts/pnpm-audit-moderate-report.test.mjs
       - scripts/lockfile-lint.mjs
       - scripts/lockfile-lint.test.mjs
       - scripts/version-skew-check.mjs
@@ -127,9 +120,9 @@ jobs:
       # Fail closed: no `--ignore-registry-errors`. That flag exits 0 on any
       # registry error — transient 5xx *and* persistent auth/network failures
       # — so an npm outage or misconfig would silently let advisories through.
-      # The gate parses pnpm's JSON output so known exceptions can be scoped by
-      # advisory, package, version, and dependency path while registry failures
-      # still stop the job. A rare transient blip → re-run the job manually.
+      # The gate parses pnpm's JSON output so advisory findings can be reported
+      # clearly while registry failures still stop the job. A rare transient
+      # blip → re-run the job manually.
       - name: pnpm audit high gate self-tests
         run: node scripts/pnpm-audit-high-gate.test.mjs
       - name: pnpm audit (high+ only)
@@ -243,16 +236,6 @@ jobs:
           pnpm --dir alerts/infra/onchain-event-handler audit --audit-level=moderate --json > /tmp/audit-reports/alerts-onchain-event-handler.json || true
           pnpm --dir alerts/infra/oncall-announcer audit --audit-level=moderate --json > /tmp/audit-reports/alerts-oncall-announcer.json || true
           pnpm --dir governance-watchdog audit --audit-level=moderate --json > /tmp/audit-reports/governance-watchdog.json || true
-      - name: moderate report classifier self-tests
-        run: node scripts/pnpm-audit-moderate-report.test.mjs
-      - name: Build filtered moderate advisory report
-        run: |
-          node scripts/pnpm-audit-moderate-report.mjs \
-            --report root=/tmp/audit-reports/root.json \
-            --report alerts/infra/onchain-event-handler=/tmp/audit-reports/alerts-onchain-event-handler.json \
-            --report alerts/infra/oncall-announcer=/tmp/audit-reports/alerts-oncall-announcer.json \
-            --report governance-watchdog=/tmp/audit-reports/governance-watchdog.json \
-            > /tmp/audit-reports/moderate-advisories.json
       - name: Ensure label exists
         env:
           GH_TOKEN: ${{ github.token }}
@@ -264,9 +247,58 @@ jobs:
         with:
           script: |
             const fs = require("fs");
-            const advisories = JSON.parse(
-              fs.readFileSync("/tmp/audit-reports/moderate-advisories.json", "utf8"),
-            );
+            const reportSpecs = [
+              ["root", "/tmp/audit-reports/root.json"],
+              [
+                "alerts/infra/onchain-event-handler",
+                "/tmp/audit-reports/alerts-onchain-event-handler.json",
+              ],
+              [
+                "alerts/infra/oncall-announcer",
+                "/tmp/audit-reports/alerts-oncall-announcer.json",
+              ],
+              ["governance-watchdog", "/tmp/audit-reports/governance-watchdog.json"],
+            ];
+            const advisoriesByKey = new Map();
+
+            for (const [lockfile, path] of reportSpecs) {
+              const raw = fs.readFileSync(path, "utf8");
+              let report;
+              try {
+                report = JSON.parse(raw);
+              } catch (error) {
+                core.setFailed(
+                  `pnpm audit for ${lockfile} did not produce JSON: ${raw.slice(0, 500)}`,
+                );
+                return;
+              }
+              if (report.error) {
+                core.setFailed(
+                  `pnpm audit failed for ${lockfile}: ` +
+                    `${report.error.message ?? JSON.stringify(report.error)}`,
+                );
+                return;
+              }
+
+              for (const advisory of Object.values(report.advisories ?? {})) {
+                const id = advisory.github_advisory_id ?? advisory.url ?? advisory.id;
+                const findingPath = advisory.findings?.[0]?.paths?.[0] ?? "unknown";
+                const key = `${id}:${advisory.module_name}:${findingPath}`;
+                const existing = advisoriesByKey.get(key);
+                if (existing) {
+                  existing.lockfiles.push(lockfile);
+                  continue;
+                }
+                advisoriesByKey.set(key, {
+                  ...advisory,
+                  id,
+                  path: findingPath,
+                  lockfiles: [lockfile],
+                });
+              }
+            }
+
+            const advisories = Array.from(advisoriesByKey.values());
             const marker = "<!-- supply-chain-moderate-audit -->";
             const labels = ["security-advisories", "dependencies"];
             const runUrl =
@@ -292,10 +324,7 @@ jobs:
               `\`pnpm audit --audit-level=moderate\` on the root and standalone ` +
               `deploy lockfiles reports:\n\n` +
               `${lines.join("\n")}\n\n` +
-              `Documented Discord-owned undici findings that are known bad to ` +
-              `override are filtered by \`scripts/pnpm-audit-moderate-report.mjs\` ` +
-              `using the same path-scoped classifier as the high gate.\n\n` +
-              `**Rule:** override floors in \`pnpm-workspace.yaml\` \`overrides\` ` +
+              `**Rule:** override floors in \`package.json\` \`pnpm.overrides\` ` +
               `only act at lockfile (re)resolution. If an advisory's patch line ` +
               `supersedes a floor, bump the override and run \`pnpm install\` to ` +
               `re-resolve. Prefer range-scoped exact pins ` +

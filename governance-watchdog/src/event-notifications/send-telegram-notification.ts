@@ -83,8 +83,7 @@ async function attemptSendTelegramMessage(
  * Classifies a Telegram send failure as retryable (5xx / network) or
  * terminal (4xx, including 429). Telegram's flood-control 429 response
  * carries a `parameters.retry_after` that can exceed our whole retry budget
- * (unlike discord.js, nothing here parses or honors it), so — same as
- * Discord — 429 is treated as terminal rather than retried blind.
+ * so 429 is treated as terminal rather than retried blind.
  */
 function isRetryableTelegramError(error: unknown): boolean {
   if (error instanceof TelegramApiError) {

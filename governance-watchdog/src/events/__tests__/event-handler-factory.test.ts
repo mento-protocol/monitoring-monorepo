@@ -1,4 +1,4 @@
-import { EmbedBuilder } from "discord.js";
+import { EmbedBuilder } from "@discordjs/builders";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createEventHandler,

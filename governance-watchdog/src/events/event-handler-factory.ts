@@ -1,5 +1,5 @@
 import assert from "assert/strict";
-import { EmbedBuilder } from "discord.js";
+import { EmbedBuilder } from "@discordjs/builders";
 import sendDiscordNotification from "../event-notifications/send-discord-notification.js";
 import sendTelegramNotification from "../event-notifications/send-telegram-notification.js";
 import logError from "../utils/log-error.js";

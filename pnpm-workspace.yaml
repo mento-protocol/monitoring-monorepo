@@ -20,10 +20,9 @@ catalog:
 # pnpm-workspace.yaml overrides carry bounded undici security pins for root
 # workspace consumers such as @vercel/blob/jsdom. Keep them bounded: unbounded
 # range overrides forward-resolve the whole graph to undici 8.x on fresh
-# installs, which broke Discord delivery (#831/#833/#837). Standalone deploy
-# roots with exact Discord pins, such as governance-watchdog's Cloud Build
-# lockfile, keep no standalone undici override and rely on the path-scoped
-# high-audit exception in scripts/pnpm-audit-high-gate.mjs.
+# installs, which broke Discord delivery (#831/#833/#837). Keep standalone
+# deploy roots on narrow runtime dependencies instead of forcing incompatible
+# transitive transport versions.
 
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:

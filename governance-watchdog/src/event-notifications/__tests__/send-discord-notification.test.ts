@@ -1,32 +1,15 @@
-import { EmbedBuilder, HTTPError, RateLimitError } from "discord.js";
+import { EmbedBuilder } from "@discordjs/builders";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSend, mockWebhookClientCtor, MockWebhookClient, mockConfig } =
-  vi.hoisted(() => {
-    const mockSend = vi.fn<(...args: unknown[]) => Promise<unknown>>();
-    const mockWebhookClientCtor =
-      vi.fn<(data: unknown, options?: unknown) => void>();
-    class MockWebhookClient {
-      constructor(data: unknown, options?: unknown) {
-        mockWebhookClientCtor(data, options);
-      }
-      send(...args: unknown[]): Promise<unknown> {
-        return mockSend(...args);
-      }
-    }
-    const mockConfig: {
-      DISCORD_WEBHOOK_URL_SECRET_ID: string;
-      DISCORD_TEST_WEBHOOK_URL_SECRET_ID: string | undefined;
-    } = {
-      DISCORD_WEBHOOK_URL_SECRET_ID: "discord-webhook-url",
-      DISCORD_TEST_WEBHOOK_URL_SECRET_ID: "discord-test-webhook-url",
-    };
-    return { mockSend, mockWebhookClientCtor, MockWebhookClient, mockConfig };
-  });
-
-vi.mock("discord.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("discord.js")>();
-  return { ...actual, WebhookClient: MockWebhookClient };
+const { mockConfig } = vi.hoisted(() => {
+  const mockConfig: {
+    DISCORD_WEBHOOK_URL_SECRET_ID: string;
+    DISCORD_TEST_WEBHOOK_URL_SECRET_ID: string | undefined;
+  } = {
+    DISCORD_WEBHOOK_URL_SECRET_ID: "discord-webhook-url",
+    DISCORD_TEST_WEBHOOK_URL_SECRET_ID: "discord-test-webhook-url",
+  };
+  return { mockConfig };
 });
 
 const mockGetSecret = vi.fn();
@@ -34,19 +17,17 @@ vi.mock("../../utils/get-secret.js", () => ({ default: mockGetSecret }));
 
 vi.mock("../../config.js", () => ({ default: mockConfig }));
 
-function makeHTTPError(status = 503): HTTPError {
-  return new HTTPError(
+function discordResponse(status: number): Response {
+  return new Response(status === 204 ? null : JSON.stringify({ ok: false }), {
     status,
-    "HTTP Error",
-    "POST",
-    "https://discord.com/api/webhooks/1/token",
-    {},
-  );
+  });
 }
 
 const embed = new EmbedBuilder().setTitle("Proposal created");
 
 describe("sendDiscordNotification", () => {
+  let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -54,62 +35,51 @@ describe("sendDiscordNotification", () => {
     mockConfig.DISCORD_WEBHOOK_URL_SECRET_ID = "discord-webhook-url";
     mockConfig.DISCORD_TEST_WEBHOOK_URL_SECRET_ID = "discord-test-webhook-url";
     mockGetSecret.mockResolvedValue("https://discord.com/api/webhooks/1/token");
+    fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
   });
 
   afterEach(() => {
     delete process.env.NODE_ENV;
+    vi.unstubAllGlobals();
   });
 
   it("delivers exactly once when a 5xx failure is followed by success", async () => {
-    mockSend
-      .mockRejectedValueOnce(makeHTTPError(503))
-      .mockResolvedValueOnce(undefined);
+    fetchMock
+      .mockResolvedValueOnce(discordResponse(503))
+      .mockResolvedValueOnce(discordResponse(204));
     const { default: sendDiscordNotification } =
       await import("../send-discord-notification.js");
 
     await sendDiscordNotification("content", embed);
 
-    expect(mockSend).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not retry a terminal 4xx failure", async () => {
-    const terminal = makeHTTPError(400);
-    mockSend.mockRejectedValue(terminal);
+    fetchMock.mockResolvedValue(discordResponse(400));
     const { default: sendDiscordNotification } =
       await import("../send-discord-notification.js");
 
-    await expect(sendDiscordNotification("content", embed)).rejects.toBe(
-      terminal,
+    await expect(sendDiscordNotification("content", embed)).rejects.toThrow(
+      "Discord webhook returned 400",
     );
-    expect(mockSend).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("does not retry a RateLimitError (discord.js already queues 429s internally)", async () => {
-    const rateLimitError = new RateLimitError({
-      global: false,
-      hash: "hash",
-      limit: 5,
-      majorParameter: "1",
-      method: "POST",
-      retryAfter: 1000,
-      route: "/webhooks/1/token",
-      sublimitTimeout: 0,
-      timeToReset: 1000,
-      url: "https://discord.com/api/webhooks/1/token",
-      scope: "user",
-    });
-    mockSend.mockRejectedValue(rateLimitError);
+  it("does not retry a rate-limit response", async () => {
+    fetchMock.mockResolvedValue(discordResponse(429));
     const { default: sendDiscordNotification } =
       await import("../send-discord-notification.js");
 
-    await expect(sendDiscordNotification("content", embed)).rejects.toBe(
-      rateLimitError,
+    await expect(sendDiscordNotification("content", embed)).rejects.toThrow(
+      "Discord webhook returned 429",
     );
-    expect(mockSend).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("selects the production webhook secret by default", async () => {
-    mockSend.mockResolvedValue(undefined);
+    fetchMock.mockResolvedValue(discordResponse(204));
     const { default: sendDiscordNotification } =
       await import("../send-discord-notification.js");
 
@@ -120,7 +90,7 @@ describe("sendDiscordNotification", () => {
 
   it("selects the test webhook secret in development", async () => {
     process.env.NODE_ENV = "development";
-    mockSend.mockResolvedValue(undefined);
+    fetchMock.mockResolvedValue(discordResponse(204));
     const { default: sendDiscordNotification } =
       await import("../send-discord-notification.js");
 
@@ -129,18 +99,27 @@ describe("sendDiscordNotification", () => {
     expect(mockGetSecret).toHaveBeenCalledWith("discord-test-webhook-url");
   });
 
-  it("disables discord.js's own internal REST retries so this module owns the retry budget", async () => {
-    mockSend.mockResolvedValue(undefined);
+  it("posts the serialized Discord embed payload with a bounded request timeout", async () => {
+    fetchMock.mockResolvedValue(discordResponse(204));
     const { default: sendDiscordNotification } =
       await import("../send-discord-notification.js");
 
     await sendDiscordNotification("content", embed);
 
-    const options = mockWebhookClientCtor.mock.calls[0]?.[1] as
-      | { rest?: { retries?: number; timeout?: number } }
-      | undefined;
-    expect(options?.rest?.retries).toBe(0);
-    expect(options?.rest?.timeout).toBe(3000);
+    const [url, init] = fetchMock.mock.calls[0] as [
+      string,
+      RequestInit | undefined,
+    ];
+    expect(url).toBe("https://discord.com/api/webhooks/1/token");
+    expect(init).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      content: "content",
+      embeds: [{ title: "Proposal created" }],
+    });
   });
 
   it("throws without sending when the dev test webhook secret id is missing", async () => {
@@ -152,6 +131,6 @@ describe("sendDiscordNotification", () => {
     await expect(sendDiscordNotification("content", embed)).rejects.toThrow(
       "DISCORD_TEST_WEBHOOK_URL_SECRET_ID env var is not set",
     );
-    expect(mockSend).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

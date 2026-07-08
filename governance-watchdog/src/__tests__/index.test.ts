@@ -5,7 +5,6 @@ import proposalCreated from "../events/fixtures/proposal-created.fixture.json";
 
 const {
   mockCheckWebhookStatus,
-  mockDiscordSend,
   mockFetch,
   mockGetSecret,
   mockHasAuthToken,
@@ -13,7 +12,6 @@ const {
   mockReserveQuickNodeNonce,
 } = vi.hoisted(() => ({
   mockCheckWebhookStatus: vi.fn(),
-  mockDiscordSend: vi.fn(),
   mockFetch: vi.fn(),
   mockGetSecret: vi.fn(),
   mockHasAuthToken: vi.fn(),
@@ -50,13 +48,6 @@ vi.mock("../utils/quicknode-replay-protection.js", () => ({
   reserveQuickNodeNonce: mockReserveQuickNodeNonce,
 }));
 
-vi.mock("discord.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("discord.js")>()),
-  WebhookClient: vi.fn(function WebhookClient() {
-    return { send: mockDiscordSend };
-  }),
-}));
-
 type MockResponse = Response & {
   send: ReturnType<typeof vi.fn>;
   status: ReturnType<typeof vi.fn>;
@@ -86,16 +77,32 @@ async function loadFunction() {
 }
 
 function telegramPayload() {
-  const [, init] = mockFetch.mock.calls[0] as [
-    string,
-    { body?: string } | undefined,
-  ];
+  const [, init] = mockFetch.mock.calls.find(([url]) =>
+    String(url).startsWith("https://api.telegram.org/"),
+  ) as [string, { body?: string } | undefined];
   if (!init?.body) throw new Error("Expected Telegram fetch body");
   return JSON.parse(init.body) as {
     chat_id: string;
     parse_mode: string;
     text: string;
   };
+}
+
+function discordPayload() {
+  const [, init] = mockFetch.mock.calls.find(([url]) =>
+    String(url).startsWith("https://discord.com/"),
+  ) as [string, { body?: string } | undefined];
+  if (!init?.body) throw new Error("Expected Discord fetch body");
+  return JSON.parse(init.body) as {
+    content: string;
+    embeds: Array<{ title?: string }>;
+  };
+}
+
+function fetchCallCount(urlPrefix: string): number {
+  return mockFetch.mock.calls.filter(([url]) =>
+    String(url).startsWith(urlPrefix),
+  ).length;
 }
 
 describe("governanceWatchdog HTTP entrypoint", () => {
@@ -107,11 +114,15 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     vi.resetModules();
     vi.clearAllMocks();
     vi.stubGlobal("fetch", mockFetch);
-    mockGetSecret.mockResolvedValue("fake-secret");
+    mockGetSecret.mockImplementation((secretId: string) => {
+      if (secretId === "discord-webhook-url") {
+        return Promise.resolve("https://discord.com/api/webhooks/1/token");
+      }
+      return Promise.resolve("fake-secret");
+    });
     mockIsFromQuicknode.mockResolvedValue(true);
     mockHasAuthToken.mockResolvedValue(false);
     mockReserveQuickNodeNonce.mockResolvedValue({ valid: true });
-    mockDiscordSend.mockResolvedValue(undefined);
     mockFetch.mockResolvedValue({
       ok: true,
       text: () => Promise.resolve(""),
@@ -125,8 +136,8 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     await governanceWatchdog(makeReq("/", proposalCreated), res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(mockDiscordSend).toHaveBeenCalledOnce();
-    expect(mockDiscordSend.mock.calls[0][0]).toMatchObject({
+    expect(fetchCallCount("https://discord.com/")).toBe(1);
+    expect(discordPayload()).toMatchObject({
       content: "MGP-0: Fund MiniPay airdrops & incentive campaigns",
     });
     expect(mockFetch).toHaveBeenCalledWith(
@@ -148,8 +159,8 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     await governanceWatchdog(makeReq("/", proposalCreated), makeRes());
     await governanceWatchdog(makeReq("/", proposalCreated), makeRes());
 
-    expect(mockDiscordSend).toHaveBeenCalledOnce();
-    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(fetchCallCount("https://discord.com/")).toBe(1);
+    expect(fetchCallCount("https://api.telegram.org/")).toBe(1);
   });
 
   it("handles health-check fixtures without sending notifications", async () => {
@@ -159,7 +170,6 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     await governanceWatchdog(makeReq("/", healthCheck), res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(mockDiscordSend).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -172,7 +182,6 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     await governanceWatchdog(makeReq("/", proposalCreated), res);
 
     expect(res.status).toHaveBeenCalledWith(401);
-    expect(mockDiscordSend).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -192,7 +201,7 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     expect(res.send).toHaveBeenCalledWith(
       "Duplicate webhook nonce already processed",
     );
-    expect(mockDiscordSend).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("returns 500 and suppresses notifications when nonce reservation fails", async () => {
@@ -208,7 +217,6 @@ describe("governanceWatchdog HTTP entrypoint", () => {
 
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.send).toHaveBeenCalledWith("Server configuration error");
-    expect(mockDiscordSend).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -221,8 +229,8 @@ describe("governanceWatchdog HTTP entrypoint", () => {
     await governanceWatchdog(makeReq("/", proposalCreated), res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(mockDiscordSend).toHaveBeenCalledOnce();
-    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(fetchCallCount("https://discord.com/")).toBe(1);
+    expect(fetchCallCount("https://api.telegram.org/")).toBe(1);
   });
 
   it("returns 500 for QuickNode error bodies", async () => {

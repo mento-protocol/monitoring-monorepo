@@ -909,12 +909,6 @@ jobs:
         # itself only runs weekly via supply-chain.yml; this required job is
         # what catches a regression in the script on every PR.
         run: node scripts/override-prune-report.test.mjs
-      - name: Moderate advisory report self-tests
-        # Behavioral coverage for the weekly supply-chain advisory issue
-        # generator, especially its shared path-scoped Discord undici
-        # exceptions. The weekly job mutates issues; this required job proves
-        # the filtering logic without touching GitHub state.
-        run: node scripts/pnpm-audit-moderate-report.test.mjs
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 

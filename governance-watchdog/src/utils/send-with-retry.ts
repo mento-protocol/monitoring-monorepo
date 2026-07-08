@@ -1,11 +1,8 @@
 /**
  * Bounded in-process retry for a single delivery attempt (Discord or
- * Telegram sends). Callers classify their own errors via `isRetryable` —
- * discord.js's `WebhookClient` and the raw Telegram `fetch` call have
- * different error shapes and different rate-limit semantics (discord.js
- * queues 429s internally; Telegram does not), so classification stays
- * transport-specific. This helper only owns the generic bounded-attempt loop
- * with capped exponential backoff.
+ * Telegram sends). Callers classify their own errors via `isRetryable`, so
+ * classification stays transport-specific. This helper only owns the generic
+ * bounded-attempt loop with capped exponential backoff.
  *
  * Retry budget: with the defaults below (2 retries, 250ms base delay
  * doubling per attempt), the *added* backoff latency for one exhausted

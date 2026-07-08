@@ -1,13 +1,6 @@
 #!/usr/bin/env node
 /**
- * Fail-closed high/critical pnpm audit gate with narrow documented exceptions.
- *
- * The supply-chain workflow normally blocks every high/critical advisory. The
- * only current exception is the Discord-owned undici pin in governance-watchdog:
- * discord.js 14.26.4 pins undici 6.24.1 exactly, and forcing a newer undici
- * through overrides has already broken Discord delivery. Keep that exception
- * advisory-, module-, version-, and path-scoped so unrelated undici consumers
- * still fail the gate.
+ * Fail-closed high/critical pnpm audit gate.
  *
  * Run:
  *   node scripts/pnpm-audit-high-gate.mjs --dir .
@@ -17,10 +10,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import {
-  evaluateAuditReport,
-  isBlockingSeverity,
-} from "./pnpm-audit-classifier.mjs";
+
+const HIGH_SEVERITIES = new Set(["high", "critical"]);
 
 /**
  * @param {string} message
@@ -122,17 +113,82 @@ function loadAuditReport({ dir, auditJsonPath }) {
   return report;
 }
 
+/**
+ * @param {Record<string, any>} advisory
+ * @returns {string[]}
+ */
+function advisoryIds(advisory) {
+  return [
+    advisory.github_advisory_id,
+    ...(Array.isArray(advisory.cves) ? advisory.cves : []),
+    advisory.url,
+    advisory.id !== undefined ? String(advisory.id) : undefined,
+  ].filter((id) => typeof id === "string" && id.length > 0);
+}
+
+/**
+ * @param {Record<string, any>} advisory
+ * @returns {boolean}
+ */
+function isBlockingSeverity(advisory) {
+  const severity = String(advisory.severity ?? "").toLowerCase();
+  return severity === "" || HIGH_SEVERITIES.has(severity);
+}
+
+/**
+ * @param {Record<string, any>} advisory
+ * @returns {Array<{finding: Record<string, any>; path: string}>}
+ */
+function findingPaths(advisory) {
+  const findings = Array.isArray(advisory.findings) ? advisory.findings : [];
+  if (findings.length === 0) {
+    return [{ finding: {}, path: "<missing finding path>" }];
+  }
+
+  return findings.flatMap((finding) => {
+    const paths = Array.isArray(finding.paths) ? finding.paths : [];
+    if (paths.length === 0) {
+      return [{ finding, path: "<missing finding path>" }];
+    }
+    return paths.map((path) => ({ finding, path: String(path) }));
+  });
+}
+
+/**
+ * @param {Record<string, any>} report
+ * @param {{dir: string; label: string}} options
+ * @returns {string[]}
+ */
+function evaluateReport(report) {
+  if (report.error) {
+    const message = report.error.message ?? JSON.stringify(report.error);
+    die(`pnpm audit failed: ${message}`);
+  }
+
+  const disallowed = [];
+  const advisories = Object.values(report.advisories ?? {});
+
+  for (const advisory of advisories) {
+    if (!isBlockingSeverity(advisory)) continue;
+
+    const ids = advisoryIds(advisory);
+    const id = ids[0] ?? "unknown-advisory";
+    const moduleName = advisory.module_name ?? "unknown-module";
+    const severity = advisory.severity ?? "unknown-severity";
+
+    for (const { finding, path } of findingPaths(advisory)) {
+      const version = finding.version ?? "unknown-version";
+      const summary = `${id} ${severity} ${moduleName}@${version} via ${path}`;
+      disallowed.push(summary);
+    }
+  }
+
+  return disallowed;
+}
+
 const options = parseArgs(process.argv.slice(2));
 const report = loadAuditReport(options);
-let evaluated;
-try {
-  evaluated = evaluateAuditReport(report, options, {
-    includeAdvisory: isBlockingSeverity,
-  });
-} catch (error) {
-  die(error instanceof Error ? error.message : String(error));
-}
-const { allowed, disallowed } = evaluated;
+const disallowed = evaluateReport(report);
 
 if (disallowed.length > 0) {
   console.error(`${options.label}: disallowed high/critical pnpm advisories:`);
@@ -142,11 +198,4 @@ if (disallowed.length > 0) {
   process.exit(1);
 }
 
-if (allowed.length > 0) {
-  console.log(`${options.label}: allowed documented advisory path(s):`);
-  for (const item of allowed) {
-    console.log(`- ${item}`);
-  }
-} else {
-  console.log(`${options.label}: no high/critical pnpm advisories`);
-}
+console.log(`${options.label}: no high/critical pnpm advisories`);

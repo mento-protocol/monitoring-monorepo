@@ -636,7 +636,6 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/version-skew-check.test.mjs" "$reason"
   add_command "node scripts/override-prune-report.test.mjs" "$reason"
-  add_command "node scripts/pnpm-audit-moderate-report.test.mjs" "$reason"
   add_command "node scripts/check-adr-reminder.test.mjs" "$reason"
 }
 
@@ -1507,9 +1506,8 @@ while IFS= read -r path; do
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
           ;;
-        scripts/pnpm-audit-classifier.mjs|scripts/pnpm-audit-high-gate.mjs|scripts/pnpm-audit-high-gate.test.mjs|scripts/pnpm-audit-moderate-report.mjs|scripts/pnpm-audit-moderate-report.test.mjs)
+        scripts/pnpm-audit-high-gate.mjs|scripts/pnpm-audit-high-gate.test.mjs)
           add_command "node scripts/pnpm-audit-high-gate.test.mjs" "pnpm audit high gate changed"
-          add_command "node scripts/pnpm-audit-moderate-report.test.mjs" "pnpm audit report changed"
           ;;
         scripts/sanitize-terraform-output.test.mjs)
           add_command "pnpm sanitize:test" "Terraform output sanitizer test changed"

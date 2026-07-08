@@ -33,8 +33,6 @@ jobs:
       - uses: ./.trunk/setup-ci
       - name: pnpm audit high gate self-tests
         run: node scripts/pnpm-audit-high-gate.test.mjs
-      - name: moderate advisory report self-tests
-        run: node scripts/pnpm-audit-moderate-report.test.mjs
       - name: pnpm audit governance-watchdog deploy lockfile (high+ only)
         run: node scripts/pnpm-audit-high-gate.mjs --dir governance-watchdog --label governance-watchdog
       - name: Cache Trunk artifacts
