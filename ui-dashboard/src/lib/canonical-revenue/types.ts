@@ -26,6 +26,29 @@ export type SusdsYieldDailySnapshotRow = {
   sampledAtTimestamp: string;
 };
 
+export type StethYieldDailySnapshotRow = {
+  id: string;
+  chainId: number;
+  token: string;
+  wallet: string;
+  timestamp: string;
+  balanceAmount: string;
+  principalAmount: string;
+  realizedYieldAmount: string;
+  transferredOutYieldAmount: string;
+  unrealizedYieldAmount: string;
+  totalEarnedYieldAmount: string;
+  dailyEarnedYieldAmount: string;
+  dailyRealizedYieldAmount: string;
+  dailyUnrealizedYieldAmount: string;
+  sampledAtBlock: string;
+  sampledAtTimestamp: string;
+};
+
+export type ReserveYieldDailySnapshotRow =
+  | SusdsYieldDailySnapshotRow
+  | StethYieldDailySnapshotRow;
+
 type ActualRevenueValue = number | null;
 
 export type ActualRevenueAvailability = {
@@ -100,10 +123,11 @@ export type BuildCanonicalRevenueArgs = {
   cdpDailySeries: ReadonlyArray<CdpBorrowingFeeSeriesPoint>;
   cdpMarkets: ReadonlyArray<CdpBorrowingRevenueMarket>;
   reserveYield: ReserveYieldResponse | null;
-  reserveDailySnapshots: ReadonlyArray<SusdsYieldDailySnapshotRow>;
+  reserveDailySnapshots: ReadonlyArray<ReserveYieldDailySnapshotRow>;
   reserveHistoryUnavailable?: boolean;
   reserveHistoryFailed?: boolean;
   reserveHistoryTruncated?: boolean;
+  reserveHistoryUnpriced?: boolean;
   reserveYieldFailed?: boolean;
   swapFeesFailed?: boolean;
   swapFeesApproximate?: boolean;

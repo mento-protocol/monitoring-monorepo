@@ -35,16 +35,17 @@ if (mainnetCodegen === 0) {
   // follows a config.yaml symlink, then restores the original target content.
   writeFileSync(defaultConfigPath, mainnetConfig, "utf8");
   try {
-    testStatus = run(
-      "pnpm",
-      ["exec", "vitest", "run", "test/susds.test.ts", "test/steth.test.ts"],
-      {
+    for (const testFile of ["test/susds.test.ts", "test/steth.test.ts"]) {
+      // Keep Envio's generated event harness isolated; loading multiple event
+      // suites in one Vitest process can make individual event tests crawl.
+      testStatus = run("pnpm", ["exec", "vitest", "run", testFile], {
         env: {
           ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD: "0",
           RESERVE_YIELD_EVENT_TESTS: "1",
         },
-      },
-    );
+      });
+      if (testStatus !== 0) break;
+    }
   } finally {
     writeFileSync(defaultConfigPath, defaultConfig, "utf8");
   }
