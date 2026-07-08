@@ -108,7 +108,7 @@ export function combinedTooltip(
   limitStatus: string,
   p: Pool,
   network: Network,
-  nowSeconds: number | null = Math.floor(Date.now() / 1000),
+  nowSeconds: number | null = null,
 ): string {
   const hTip = healthTooltip(healthStatus, p, network.chainId, nowSeconds);
   const lFrag = limitTooltipFragment(limitStatus, p, network);

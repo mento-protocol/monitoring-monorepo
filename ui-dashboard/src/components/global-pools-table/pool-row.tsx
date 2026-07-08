@@ -90,6 +90,8 @@ export function PoolRow({
     network.chainId,
     statusNowSeconds,
   );
+  // Badges need a stable non-null clock during SSR to avoid oracle-staleness
+  // hydration flips; tooltips receive raw null so they omit wall-clock durations.
   const healthDetails = combinedTooltip(
     healthStatus,
     limitStatus,

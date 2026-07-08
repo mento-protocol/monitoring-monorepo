@@ -194,12 +194,14 @@ render_status_compact() {
       return `${row.chain_id}:${fmtPct((part.numerator / part.denominator) * 100)}(${fmtNum(part.processed)}/${fmtNum(part.head)})`;
     }).join(' ');
     console.log(`status=${allCaughtUp ? 'caught_up' : 'syncing'} overall=${fmtPct(overallPct)} cadence=${cadenceSeconds}s chains=${chainSummary}`);
+    console.log(cadenceSeconds);
     process.exit(allCaughtUp ? 0 : 10);
 NODE
 }
 
 watch_status() {
   local status_json=""
+  local compact_render=""
   local compact_line=""
   local last_compact_line=""
   local last_compact_emit=0
@@ -213,15 +215,23 @@ watch_status() {
 
     if [[ "$COMPACT" == "true" ]]; then
       set +e
-      compact_line=$(printf '%s' "$status_json" | render_status_compact)
+      compact_render=$(printf '%s' "$status_json" | render_status_compact)
       local render_exit=$?
       set -e
+      compact_line="${compact_render%%$'\n'*}"
 
       if [[ -n "$COMPACT_FIXED_EMIT_SECONDS" ]]; then
         compact_emit_seconds="$COMPACT_FIXED_EMIT_SECONDS"
       else
-        compact_emit_seconds=$(printf '%s\n' "$compact_line" | sed -n 's/.* cadence=\([0-9][0-9]*\)s.*/\1/p')
-        compact_emit_seconds="${compact_emit_seconds:-60}"
+        if [[ "$compact_render" != *$'\n'* ]]; then
+          echo "❌ Compact status renderer did not return cadence metadata." >&2
+          return 1
+        fi
+        compact_emit_seconds="${compact_render##*$'\n'}"
+        if [[ ! "$compact_emit_seconds" =~ ^[0-9]+$ ]]; then
+          echo "❌ Invalid compact cadence metadata: $compact_emit_seconds" >&2
+          return 1
+        fi
       fi
 
       now=$(date '+%s')
