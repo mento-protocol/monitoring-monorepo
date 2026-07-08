@@ -74,6 +74,16 @@ separate advisory state: report it in the readiness output, but do not hold the
 all-clear on it unless the Cursor check or review is required by branch
 protection.
 
+Some non-required workflows still post review feedback that can become required
+repo-policy blockers after the required status surface is already green. For
+example, an in-progress `auto-review` job does not block by status alone, but it
+can later create inline threads, unreplied review comments, or actionable
+top-level bot feedback. The probe result remains the readiness source of truth:
+do not block `ready` on those workflows unless branch protection makes them
+required. If one is visibly in progress during handoff, report it as optional
+lag; when you are still babysitting the PR anyway, rerun `pr:feedback-state`
+after it reaches a terminal state so late feedback is not missed.
+
 ## Expected CLI contract
 
 `pnpm pr:ready-state` must expose a stable JSON shape for agent loops via
@@ -258,7 +268,10 @@ Field expectations:
    context; deployment/status bot comments may be informational.
 7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
    required `gates`.
-8. Report optional lag separately, especially Cursor Bugbot lag.
+8. Report optional lag separately, especially Cursor Bugbot lag and visibly
+   in-progress review-producing workflows. If you are still watching the PR when
+   one finishes, rerun `pr:feedback-state` to catch late feedback; do not treat
+   the optional workflow status itself as a blocker.
 9. Signal all-clear only after final ready-state `ready` is true for the
    current head.
 
