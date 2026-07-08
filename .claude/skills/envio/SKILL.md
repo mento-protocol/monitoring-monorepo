@@ -91,7 +91,7 @@ pnpm deploy:indexer:logs --build              # build logs (useful when a deploy
 pnpm deploy:indexer:logs --follow             # tail (polls every 10s)
 ```
 
-`--limit` is clamped to 50 by the wrapper script (`scripts/deploy-indexer-logs.sh`); higher values are silently lowered. `--level` is comma-separated: `trace,debug,info,warn,error`. `--build` flips to build-time logs — check these first if a push never produces a deployment record.
+`envio-cloud` defaults to 100 log lines and supports `--limit` up to 100; the wrapper passes that flag through unchanged. `--level` is comma-separated: `trace,debug,info,warn,error`. `--build` flips to build-time logs — check these first if a push never produces a deployment record.
 
 ## envio-cloud CLI cheat sheet
 

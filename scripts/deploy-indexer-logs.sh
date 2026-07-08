@@ -49,30 +49,6 @@ while [[ $# -gt 0 ]]; do
       ARGS+=("$1")
       shift
       ;;
-    --limit)
-      if [[ "${2:-}" =~ ^[0-9]+$ && "$2" -gt 50 ]]; then
-        echo "⚠️  envio-cloud deployment logs caps --limit at 50; using 50 instead of $2" >&2
-        ARGS+=(--limit 50)
-        shift 2
-      else
-        ARGS+=("$1")
-        shift
-        if [[ $# -gt 0 ]]; then
-          ARGS+=("$1")
-          shift
-        fi
-      fi
-      ;;
-    --limit=*)
-      limit="${1#--limit=}"
-      if [[ "$limit" =~ ^[0-9]+$ && "$limit" -gt 50 ]]; then
-        echo "⚠️  envio-cloud deployment logs caps --limit at 50; using 50 instead of $limit" >&2
-        ARGS+=(--limit=50)
-      else
-        ARGS+=("$1")
-      fi
-      shift
-      ;;
     *)
       ARGS+=("$1")
       shift
