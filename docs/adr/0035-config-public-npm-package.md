@@ -46,6 +46,9 @@ with npm provenance via GitHub OIDC.
   when consumers need the canonical data blobs.
 - The publish workflow is part of the release contract and must stay covered by
   action pinning and pack-content verification.
+- Before the first publish tag is pushed, an npm org/package maintainer must
+  configure trusted publishing for repository `mento-protocol/monitoring-monorepo`,
+  workflow filename `publish-config.yml`, and allowed action `npm publish`.
 - The publish job intentionally uses a GitHub-hosted runner because npm trusted
   publishing does not support self-hosted or third-party GitHub Actions runners.
 - The indexer vendored mirror remains governed by ADR 0013 until a separate PR
