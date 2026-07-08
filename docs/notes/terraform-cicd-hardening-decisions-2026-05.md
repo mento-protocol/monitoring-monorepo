@@ -25,12 +25,14 @@ cost/benefit.) Follow-up PR hardening in 2026-07 also removed production
 `TF_VAR_*` values from same-repo PR plan environments for the secret-bearing
 Terraform workflows: PRs use validation-safe placeholders, while
 push/dispatch plans and `production-infra`-gated applies keep the real secrets.
-`alerts-rules`, `aegis`, and `governance-watchdog` run full config-vs-state PR
-plans with placeholders and no refresh. The `alerts/infra` PR path is
-intentionally narrower: after init/validate it targets
+`aegis` and `governance-watchdog` run full config-vs-state PR plans with
+placeholders and no refresh. `alerts-rules` is targeted to
+`terraform_data.pr_plan_secretless_guard` because its Grafana folder data
+sources authenticate during plan even with `-refresh=false`. The `alerts/infra`
+PR path is also intentionally narrower: after init/validate it targets
 `module.onchain_event_handler` plus `terraform_data.pr_plan_secretless_guard`.
 The module target exercises a real GCP Cloud Function runtime-secret surface;
-the sentinel remains for Sentry, Slack, QuickNode, and GitHub resources that
+the sentinels remain for Grafana/Sentry/Slack/QuickNode/GitHub resources that
 perform authenticated plan-time checks and cannot run with placeholders.
 
 ## Declined: full-refresh read-only plan for the `alerts/infra` leg (PR plan and drift)

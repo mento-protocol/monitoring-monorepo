@@ -198,6 +198,9 @@ jobs:
 
       - name: Export PR-safe Terraform inputs
         if: github.event_name == 'pull_request'
+        # Current Terraform inputs are single-line tokens/IDs/URLs. If a future
+        # secret becomes multiline (for example a PEM), switch this workflow
+        # and alerts-rules to GitHub's heredoc `$GITHUB_ENV` form together.
         run: |
           {
             printf '%s\n' 'TF_VAR_sentry_auth_token=pr-plan-dummy-sentry-token-0000'
@@ -215,6 +218,9 @@ jobs:
 
       - name: Export production Terraform inputs
         if: github.event_name != 'pull_request'
+        # Current Terraform inputs are single-line tokens/IDs/URLs. If a future
+        # secret becomes multiline (for example a PEM), switch this workflow
+        # and alerts-rules to GitHub's heredoc `$GITHUB_ENV` form together.
         env:
           INPUT_SENTRY_AUTH_TOKEN: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
           INPUT_BILLING_ACCOUNT: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
