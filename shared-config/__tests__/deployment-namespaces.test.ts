@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import deploymentNamespacesJson from "../deployment-namespaces.json" with { type: "json" };
 import DEPLOYMENT_NAMESPACES, {
+  DEPLOYMENT_NAMESPACE_CHAIN_IDS,
   deploymentNamespace,
 } from "../src/deployment-namespaces";
 
 describe("deployment namespaces", () => {
   it("exports the canonical chain namespace map", () => {
     expect(DEPLOYMENT_NAMESPACES).toEqual(deploymentNamespacesJson);
+  });
+
+  it("keeps the typed chain id list in sync with the JSON keys", () => {
+    expect([...DEPLOYMENT_NAMESPACE_CHAIN_IDS].sort()).toEqual(
+      Object.keys(deploymentNamespacesJson).sort(),
+    );
   });
 
   it("looks up known namespaces by numeric chain id", () => {
