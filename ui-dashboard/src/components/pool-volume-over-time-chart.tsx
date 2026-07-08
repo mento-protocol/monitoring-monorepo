@@ -211,6 +211,7 @@ export function PoolVolumeOverTimeChart({
       hasSnapshotError={false}
       ranges={VOLUME_CHART_RANGES}
       shapes={shapes}
+      plotlyDeferMode="visible"
       emptyMessage={volumeEmptyMessage(error, historySupported, priceable)}
     />
   );

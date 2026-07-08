@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import localFont from "next/font/local";
 import { SessionProvider } from "next-auth/react";
@@ -8,6 +8,7 @@ import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NavLinks } from "@/components/nav-links";
 import { AuthStatus } from "@/components/auth-status";
 import { DataFreshnessBanner } from "@/components/data-freshness-banner";
+import { ResourceHints } from "@/components/resource-hints";
 import { SessionErrorGuard } from "@/components/session-error-guard";
 import { SwrProvider } from "@/components/swr-provider";
 import { Analytics } from "@vercel/analytics/next";
@@ -48,6 +49,10 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  colorScheme: "dark",
+};
+
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -58,6 +63,7 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
       >
+        <ResourceHints />
         <SessionProvider session={session}>
           <SessionErrorGuard />
           <SwrProvider>

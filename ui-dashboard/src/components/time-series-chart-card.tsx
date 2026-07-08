@@ -24,8 +24,13 @@ import {
   useCrossFade,
   useSortedHover,
 } from "@/components/time-series-chart-card-hooks";
+import {
+  useDeferredMount,
+  type DeferredMountMode,
+} from "@/components/use-deferred-mount";
 
 export type { BreakdownSeries };
+export type { DeferredMountMode as PlotlyDeferMode };
 
 // A skeleton rendered while the Plotly chunk is still loading. Without this
 // fallback there's a brief gap between `isLoading` flipping to false and the
@@ -133,6 +138,7 @@ interface TimeSeriesChartCardProps {
   shapes?: Plotly.Layout["shapes"];
   annotations?: Plotly.Layout["annotations"];
   yAxisReferenceValues?: readonly number[];
+  plotlyDeferMode?: DeferredMountMode;
 }
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
@@ -163,6 +169,7 @@ export function TimeSeriesChartCard({
   shapes,
   annotations,
   yAxisReferenceValues = EMPTY_Y_AXIS_REFERENCE_VALUES,
+  plotlyDeferMode = "none",
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
@@ -435,6 +442,13 @@ export function TimeSeriesChartCard({
     );
 
   const showEmptyState = !isLoading && series.length === 0;
+  const shouldRenderPlot = !isLoading && !showEmptyState;
+  const shouldMountPlot = useDeferredMount(
+    plotlyDeferMode,
+    containerRef,
+    shouldRenderPlot,
+  );
+
   // Accessible name + non-visual summary for the chart (WCAG 1.1.1). Both are
   // derived from live props (title + active range + week-over-week change) so
   // they can never drift from the rendered series. The summary deliberately
@@ -558,6 +572,8 @@ export function TimeSeriesChartCard({
           >
             {emptyMessage}
           </div>
+        ) : !shouldMountPlot ? (
+          <PlotSkeleton heightPx={chartHeightPx} />
         ) : crossFadeEnabled && crossFadeData ? (
           <div style={{ position: "relative", height: chartHeightPx }}>
             {crossFadeData.map(({ key, combo, traces, layout }) => {

@@ -3,13 +3,17 @@ import { relativeTime } from "@/lib/format";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
 import { type CdpAggregates, deriveCdpHealth } from "../_lib/health";
 import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
+import {
+  EMPTY_CDP_MARKET_ACTIVITY,
+  type CdpMarketActivity,
+} from "../_lib/transactions";
 import { CdpHealthBadge } from "./cdp-health-badge";
 
 export function CdpMarketCard({
   collateral,
   instance,
   aggregates,
-  ops24h,
+  activity24h,
   ops24hCapped,
   ops24hLoading,
   ops24hHasError,
@@ -17,7 +21,7 @@ export function CdpMarketCard({
   collateral: CdpCollateral;
   instance: CdpInstance | undefined;
   aggregates: CdpAggregates;
-  ops24h: number;
+  activity24h: CdpMarketActivity | undefined;
   ops24hCapped: boolean;
   ops24hLoading: boolean;
   ops24hHasError: boolean;
@@ -35,7 +39,7 @@ export function CdpMarketCard({
           </h2>
           <CardActivitySubtitle
             lastEventTimestamp={instance?.lastEventTimestamp}
-            ops24h={ops24h}
+            activity24h={activity24h}
             ops24hCapped={ops24hCapped}
             ops24hLoading={ops24hLoading}
             ops24hHasError={ops24hHasError}
@@ -71,13 +75,13 @@ export function CdpMarketCard({
 
 function CardActivitySubtitle({
   lastEventTimestamp,
-  ops24h,
+  activity24h,
   ops24hCapped,
   ops24hLoading,
   ops24hHasError,
 }: {
   lastEventTimestamp: string | undefined;
-  ops24h: number;
+  activity24h: CdpMarketActivity | undefined;
   ops24hCapped: boolean;
   ops24hLoading: boolean;
   ops24hHasError: boolean;
@@ -85,17 +89,23 @@ function CardActivitySubtitle({
   const lastActivity = lastEventTimestamp
     ? relativeTime(lastEventTimestamp)
     : "—";
+  const activity = activity24h ?? EMPTY_CDP_MARKET_ACTIVITY;
   // Loading and error both render `—` so a failed fetch isn't masquerading
   // as a "no activity in 24h" zero. The Recent CDP Transactions table below
   // surfaces the actual error message; the card just stays out of the way.
   const opsLabel =
     ops24hLoading || ops24hHasError
       ? "—"
-      : `${ops24hCapped ? "≥" : ""}${ops24h}`;
+      : `${ops24hCapped ? "≥" : ""}${activity.total24h}`;
+  const detailLabel =
+    ops24hLoading || ops24hHasError
+      ? "activity unavailable"
+      : `${opsLabel} ops · ${activity.liquidations24h} liq · ${activity.redemptions24h} red`;
   return (
-    <p className="text-sm text-slate-400">
-      Last activity {lastActivity} · {opsLabel} ops in 24h
-    </p>
+    <div className="space-y-0.5 text-sm text-slate-400">
+      <p>Last activity {lastActivity}</p>
+      <p>24h: {detailLabel}</p>
+    </div>
   );
 }
 

@@ -137,7 +137,7 @@ describe("SwrProvider freshness tracking", () => {
     expect(container.textContent).toContain("last-good data from 1s ago");
   });
 
-  it("records per-hook onSuccess refreshes when SWR data is unchanged", async () => {
+  it("keeps successful unchanged SWR data from showing an overdue-only banner", async () => {
     const onSuccess = vi.fn();
     const triggerRef: TriggerRef = { current: null };
 
@@ -154,7 +154,8 @@ describe("SwrProvider freshness tracking", () => {
       vi.advanceTimersByTime(31_000);
     });
 
-    expect(container.textContent).toContain("Data may be stale");
+    expect(container.textContent).not.toContain("Latest refresh failed");
+    expect(container.textContent).not.toContain("Data may be stale");
 
     await act(async () => {
       await triggerRef.current?.();
@@ -162,6 +163,7 @@ describe("SwrProvider freshness tracking", () => {
 
     expect(onSuccess).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain("custom ready");
+    expect(container.textContent).not.toContain("Latest refresh failed");
     expect(container.textContent).not.toContain("Data may be stale");
   });
 });

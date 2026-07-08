@@ -106,6 +106,7 @@ export function AggregatorBreakdownSection({
           chartHeightPx={230}
           yAxisTopPadding={0}
           customSortedHover
+          plotlyDeferMode="visible"
         />
       )}
       <AggregatorTable

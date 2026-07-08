@@ -11,6 +11,7 @@ import type { OracleRateMap } from "@/lib/tokens";
 import {
   TimeSeriesChartCard,
   type BreakdownSeries,
+  type PlotlyDeferMode,
 } from "@/components/time-series-chart-card";
 import { forwardFillSeries } from "@/lib/chart-gap-fill";
 import {
@@ -392,6 +393,7 @@ interface TvlOverTimeChartProps {
   isLoading: boolean;
   hasError: boolean;
   hasSnapshotError: boolean;
+  plotlyDeferMode?: PlotlyDeferMode;
 }
 
 export function TvlOverTimeChart({
@@ -402,6 +404,7 @@ export function TvlOverTimeChart({
   isLoading,
   hasError,
   hasSnapshotError,
+  plotlyDeferMode = "none",
 }: TvlOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
@@ -486,6 +489,7 @@ export function TvlOverTimeChart({
       hasError={hasError}
       hasSnapshotError={hasSnapshotError}
       emptyMessage={emptyMessage}
+      plotlyDeferMode={plotlyDeferMode}
     />
   );
 }

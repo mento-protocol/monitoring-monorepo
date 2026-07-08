@@ -7,7 +7,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_SUPPLY_CHANGE_MIN_USD } from "./aggregate";
+import {
+  DEFAULT_SUPPLY_CHANGE_MIN_USD,
+  MAX_SUPPLY_CHANGE_MIN_USD,
+} from "./aggregate";
 
 let mockSearchParams = new URLSearchParams();
 
@@ -92,7 +95,7 @@ describe("useSupplyChangeThreshold", () => {
       ref.current?.resetMinimumUsdValue();
     });
 
-    expect(ref.current?.minimumUsdValue).toBe(0.01);
+    expect(ref.current?.minimumUsdValue).toBe(DEFAULT_SUPPLY_CHANGE_MIN_USD);
     expect(window.location.search).toBe("?foo=1");
   });
 
@@ -100,7 +103,7 @@ describe("useSupplyChangeThreshold", () => {
     setup("/stables?minSupplyChangeUsd=-1&foo=1");
     const ref = renderHook();
 
-    expect(ref.current?.minimumUsdValue).toBe(0.01);
+    expect(ref.current?.minimumUsdValue).toBe(DEFAULT_SUPPLY_CHANGE_MIN_USD);
     expect(window.location.search).toBe("?foo=1");
   });
 
@@ -123,6 +126,6 @@ describe("useSupplyChangeThreshold", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
-    expect(ref.current?.minimumUsdValue).toBe(0.01);
+    expect(ref.current?.minimumUsdValue).toBe(DEFAULT_SUPPLY_CHANGE_MIN_USD);
   });
 });

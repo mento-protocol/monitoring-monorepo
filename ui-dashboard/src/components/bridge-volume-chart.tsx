@@ -69,6 +69,7 @@ export function BridgeVolumeChart({
       hasError={hasError}
       hasSnapshotError={isCapped && range === "all"}
       emptyMessage="No bridge volume in the selected window."
+      plotlyDeferMode="visible"
     />
   );
 }

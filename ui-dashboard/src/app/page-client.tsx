@@ -337,6 +337,7 @@ function GlobalContent({
             anySnapshotsAllDailyError ||
             anySnapshotsAllDailyTruncated
           }
+          plotlyDeferMode="idle"
         />
         <VolumeOverTimeChart
           networkData={networkData}
@@ -350,6 +351,7 @@ function GlobalContent({
             anyBrokerSnapshotsAllDailyTruncated
           }
           fullVolumeSeries={aggregated.volumeSeries}
+          plotlyDeferMode="idle"
         />
       </div>
 

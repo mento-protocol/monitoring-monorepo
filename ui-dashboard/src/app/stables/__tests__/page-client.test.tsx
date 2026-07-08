@@ -1,6 +1,6 @@
 /**
  * StablesPageClient smoke test — renders with all hooks mocked to verify
- * the page wires KPI strip → sparkline grid → hero chart → changes table
+ * the page wires KPI strip → hero chart → sparkline grid → changes table
  * without throwing. Covers three states: loading, empty, and data-present.
  *
  * Doesn't assert pixel-perfect output (that's the job of browser verify);
@@ -14,6 +14,10 @@ import type {
   StableTokenCustodyDailySnapshot,
   StableSupplyChangeEvent,
 } from "../_lib/types";
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 const mockRates = vi.hoisted(() => ({
   merged: new Map<string, number>([["EURm", 1.1]]),
@@ -81,7 +85,7 @@ vi.mock("../_lib/use-stables-data", () => ({
 
 vi.mock("../_lib/use-supply-change-threshold", () => ({
   useSupplyChangeThreshold: () => ({
-    minimumUsdValue: 0.01,
+    minimumUsdValue: 1000,
     updateMinimumUsdValue: () => undefined,
     resetMinimumUsdValue: () => undefined,
   }),
@@ -185,6 +189,11 @@ describe("StablesPageClient — smoke", () => {
     expect(html).toContain("No per-token data yet");
   });
 
+  it("surfaces the 3M range control for 90d stablecoin supply URLs", () => {
+    const html = renderToStaticMarkup(<StablesPageClient />);
+    expect(html).toContain(">3M</button>");
+  });
+
   it("renders cards with USDm data when snapshots are present", () => {
     const now = 1_716_336_000; // 2024-05-22 UTC
     mockSnapshots.data = [
@@ -200,6 +209,12 @@ describe("StablesPageClient — smoke", () => {
     const html = renderToStaticMarkup(<StablesPageClient />);
     // USDm label appears in both the KPI strip + sparkline grid + chart legend.
     expect(html).toContain("USDm");
+    expect(html.indexOf("Mento stablecoin supply")).toBeLessThan(
+      html.indexOf("Per-token supply detail"),
+    );
+    expect(html.indexOf("Per-token supply detail")).toBeLessThan(
+      html.indexOf("Supply changes"),
+    );
     // Sparkline grid empty-state message should be absent now.
     expect(html).not.toContain("No per-token data yet");
   });
@@ -213,7 +228,10 @@ describe("StablesPageClient — smoke", () => {
       }),
     ];
     const html = renderToStaticMarkup(<StablesPageClient />);
-    expect(html).toContain("Showing the most recent");
+    const noticeIndex = html.indexOf("Showing the most recent");
+    expect(noticeIndex).toBeGreaterThan(-1);
+    expect(html.indexOf("Per-token supply detail")).toBeLessThan(noticeIndex);
+    expect(noticeIndex).toBeLessThan(html.indexOf("Supply changes"));
   });
 
   it("degrades custody query errors to raw supply instead of failing the page", () => {

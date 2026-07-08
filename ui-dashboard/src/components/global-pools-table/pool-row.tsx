@@ -1,9 +1,18 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { formatUSD } from "@/lib/format";
+import { formatUSD, normalizePoolIdForChain } from "@/lib/format";
+import { preloadGQL } from "@/lib/graphql";
 import { poolName } from "@/lib/tokens";
 import { type Pool } from "@/lib/types";
-import type { Network } from "@/lib/networks";
+import {
+  configuredNetworkIdForChainId,
+  NETWORKS,
+  type Network,
+} from "@/lib/networks";
+import {
+  POOL_DETAIL_WITH_HEALTH,
+  type PoolDetailResponse,
+} from "@/lib/queries";
 import { Row } from "@/components/table";
 import { SourceBadge, HealthBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
@@ -83,7 +92,11 @@ export function PoolRow({
 
   return (
     <Row>
-      <NameCell pool={pool} network={network} />
+      <NameCell
+        pool={pool}
+        network={network}
+        onPrefetch={() => prefetchPoolDetail(entry)}
+      />
       {showVirtualPoolSource && <SourceCell pool={pool} />}
       <HealthCell status={effectiveStatus} details={healthDetails} />
       <UptimeCell pool={pool} />
@@ -120,6 +133,16 @@ export function PoolRow({
   );
 }
 
+function prefetchPoolDetail(entry: GlobalPoolEntry): void {
+  const networkId = configuredNetworkIdForChainId(entry.pool.chainId);
+  const network = networkId ? NETWORKS[networkId] : entry.network;
+  const id = normalizePoolIdForChain(entry.pool.id, network.chainId);
+  preloadGQL<PoolDetailResponse>(network, POOL_DETAIL_WITH_HEALTH, {
+    id,
+    chainId: network.chainId,
+  });
+}
+
 function Cell({
   className,
   children,
@@ -132,7 +155,15 @@ function Cell({
   );
 }
 
-function NameCell({ pool, network }: { pool: Pool; network: Network }) {
+function NameCell({
+  pool,
+  network,
+  onPrefetch,
+}: {
+  pool: Pool;
+  network: Network;
+  onPrefetch: () => void;
+}) {
   return (
     <Cell className="">
       <div className="flex items-center gap-2">
@@ -140,6 +171,8 @@ function NameCell({ pool, network }: { pool: Pool; network: Network }) {
         <Link
           href={buildPoolDetailHref(pool.id)}
           className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
+          onFocus={onPrefetch}
+          onMouseEnter={onPrefetch}
         >
           {poolName(network, pool.token0, pool.token1)}
         </Link>

@@ -9,12 +9,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StablesChangesTable } from "./stables-changes-table";
+import { DEFAULT_SUPPLY_CHANGE_MIN_USD } from "../_lib/aggregate";
+import type { StableSupplyChangeEvent } from "../_lib/types";
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
 function renderThresholdInput({
-  value = 0.01,
+  value = DEFAULT_SUPPLY_CHANGE_MIN_USD,
   onChange = vi.fn(),
   onReset = vi.fn(),
 }: {
@@ -48,6 +50,26 @@ function renderThresholdInput({
   return { input: input as HTMLInputElement, onChange, onReset };
 }
 
+function changeEvent(index: number): StableSupplyChangeEvent {
+  return {
+    id: `change-${index}`,
+    chainId: 42220,
+    tokenAddress: "0xusd",
+    tokenSymbol: "USDm",
+    tokenDecimals: 18,
+    source: "RESERVE",
+    kind: "RESERVE_MINT",
+    counterparty: "0xcounterparty",
+    caller: `0x${String(index).padStart(40, "0")}`,
+    txTo: "0xto",
+    isProtocolOwnedCaller: true,
+    amount: "1000000000000000000000",
+    txHash: `0x${String(index).padStart(64, "0")}`,
+    blockNumber: String(index),
+    blockTimestamp: String(1_780_617_600 + index),
+  };
+}
+
 function setInputValue(input: HTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(
     window.HTMLInputElement.prototype,
@@ -78,7 +100,7 @@ describe("StablesChangesTable", () => {
     const html = renderToStaticMarkup(
       <StablesChangesTable
         events={[]}
-        minimumUsdValue={0.01}
+        minimumUsdValue={DEFAULT_SUPPLY_CHANGE_MIN_USD}
         onMinimumUsdValueChange={() => undefined}
         onMinimumUsdValueReset={() => undefined}
         isLoading={false}
@@ -89,7 +111,7 @@ describe("StablesChangesTable", () => {
     );
 
     expect(html).toContain("No supply changes at or above");
-    expect(html).toContain("$0.01 equivalent");
+    expect(html).toContain("$1,000.00 equivalent");
     expect(html).toContain("the most recent fetched rows");
     expect(html).toContain("Minimum USD-equivalent supply change");
   });
@@ -132,7 +154,7 @@ describe("StablesChangesTable", () => {
 
   it("keeps partial decimal drafts local until blur restores the committed value", () => {
     const onChange = vi.fn();
-    const { input } = renderThresholdInput({ value: 0.01, onChange });
+    const { input } = renderThresholdInput({ onChange });
 
     setInputValue(input, "1.");
 
@@ -143,13 +165,13 @@ describe("StablesChangesTable", () => {
       input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     });
 
-    expect(input.value).toBe("0.01");
+    expect(input.value).toBe(String(DEFAULT_SUPPLY_CHANGE_MIN_USD));
     expect(onChange).not.toHaveBeenCalled();
   });
 
   it("commits valid decimal drafts on Enter", () => {
     const onChange = vi.fn();
-    const { input } = renderThresholdInput({ value: 0.01, onChange });
+    const { input } = renderThresholdInput({ onChange });
 
     setInputValue(input, "1.5");
 
@@ -163,5 +185,94 @@ describe("StablesChangesTable", () => {
 
     expect(input.value).toBe("1.5");
     expect(onChange).toHaveBeenCalledWith(1.5);
+  });
+
+  it("limits rendered rows to 50 and paginates the remaining changes", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => {
+      root?.render(
+        <StablesChangesTable
+          events={Array.from({ length: 55 }, (_, index) => changeEvent(index))}
+          minimumUsdValue={DEFAULT_SUPPLY_CHANGE_MIN_USD}
+          onMinimumUsdValueChange={() => undefined}
+          onMinimumUsdValueReset={() => undefined}
+          isLoading={false}
+          hasError={false}
+          capped={false}
+          unpricedEventsCount={0}
+        />,
+      );
+    });
+
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(50);
+    expect(container.textContent).toContain(
+      "Showing 1-50 of 55 matching events.",
+    );
+    expect(container.textContent).toContain("Page 1 of 2");
+
+    const nextButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Next",
+    );
+    expect(nextButton).toBeTruthy();
+
+    act(() => {
+      nextButton?.click();
+    });
+
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(5);
+    expect(container.textContent).toContain(
+      "Showing 51-55 of 55 matching events.",
+    );
+    expect(container.textContent).toContain("Page 2 of 2");
+  });
+
+  it("resets to the first page when the matching page count changes", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    const renderEvents = (eventCount: number) => {
+      root?.render(
+        <StablesChangesTable
+          events={Array.from({ length: eventCount }, (_, index) =>
+            changeEvent(index),
+          )}
+          minimumUsdValue={DEFAULT_SUPPLY_CHANGE_MIN_USD}
+          onMinimumUsdValueChange={() => undefined}
+          onMinimumUsdValueReset={() => undefined}
+          isLoading={false}
+          hasError={false}
+          capped={false}
+          unpricedEventsCount={0}
+        />,
+      );
+    };
+
+    act(() => renderEvents(55));
+
+    const nextButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Next",
+    );
+    act(() => {
+      nextButton?.click();
+    });
+
+    expect(container.textContent).toContain(
+      "Showing 51-55 of 55 matching events.",
+    );
+
+    act(() => renderEvents(1));
+    expect(container.textContent).toContain(
+      "Showing 1-1 of 1 matching events.",
+    );
+
+    act(() => renderEvents(55));
+    expect(container.textContent).toContain(
+      "Showing 1-50 of 55 matching events.",
+    );
+    expect(container.textContent).toContain("Page 1 of 2");
   });
 });

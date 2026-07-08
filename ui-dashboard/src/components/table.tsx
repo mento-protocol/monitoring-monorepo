@@ -43,9 +43,21 @@ export function Table({
   );
 }
 
-export function Row({ children }: { children: ReactNode }) {
+export function Row({
+  children,
+  className,
+  ...props
+}: { children: ReactNode } & ComponentPropsWithoutRef<"tr">) {
   return (
-    <tr className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
+    <tr
+      className={[
+        "border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      {...props}
+    >
       {children}
     </tr>
   );
