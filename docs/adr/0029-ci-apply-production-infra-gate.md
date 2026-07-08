@@ -3,7 +3,7 @@ title: Infra applies on merge to main behind the production-infra environment ga
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-07
+last_verified: 2026-07-08
 scope: terraform/infra
 date: 2026-05
 ---
@@ -30,10 +30,12 @@ read-only plan service account. Secret-bearing PR plan workflows also export
 validation-safe placeholder `TF_VAR_*` values instead of production secrets; the
 push/dispatch plan and environment-gated apply paths keep real secrets and
 re-plan before any production mutation. The `alerts-delivery` PR plan is
-targeted to `terraform_data.pr_plan_secretless_guard` because its
-Sentry/Slack/QuickNode/GitHub provider graph performs authenticated plan-time
-checks that cannot run with dummy credentials; push/dispatch and apply paths run
-the full graph. The `platform` stack stays manual-plan/manual-apply.
+targeted to `module.onchain_event_handler` plus
+`terraform_data.pr_plan_secretless_guard`: the Cloud Function target is a real
+runtime-secret surface that can plan with placeholders, while the sentinel marks
+the Sentry/Slack/QuickNode/GitHub provider graph that performs authenticated
+plan-time checks and cannot run with dummy credentials. push/dispatch and apply
+paths run the full graph. The `platform` stack stays manual-plan/manual-apply.
 Routine service deploys use a separate `production-services` environment that records
 history but doesn't require manual approval.
 
