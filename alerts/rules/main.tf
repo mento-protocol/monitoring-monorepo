@@ -44,10 +44,11 @@ resource "grafana_folder" "trading_limits" {
 }
 
 locals {
-  # Reserve and Aegis folders are owned outside this stack. Keep their current
-  # UIDs static so same-repo PR plans can target these rule groups without
-  # authenticating live Grafana data sources. Update only after a trusted
-  # main/apply plan confirms the folder UID changed.
+  # Reserve and Aegis folders are owned outside this stack. Aegis pins its UID
+  # in aegis/terraform/grafana-folders.tf; Reserve is an existing external
+  # Grafana folder not yet owned by a Terraform stack. Keep their current UIDs
+  # static so same-repo PR plans can target these rule groups without
+  # authenticating live Grafana data sources.
   external_folder_uids = {
     reserve = "a87JaoO4k"
     aegis   = "fe2mj51r3ifwga"

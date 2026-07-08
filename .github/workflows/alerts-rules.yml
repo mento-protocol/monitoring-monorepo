@@ -252,6 +252,9 @@ jobs:
         run: |
           set +e
           if [ "$EVENT_NAME" = "pull_request" ]; then
+            # `aegis_testnet_health` is intentionally excluded: it has per-rule
+            # `notification_settings` blocks that reference secret-backed contact
+            # points and would produce bogus diffs with dummy PR TF_VARs.
             terraform plan \
               -detailed-exitcode \
               -no-color \
