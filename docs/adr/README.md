@@ -74,6 +74,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | ADR                                                  | Decision                                                               |
 | ---------------------------------------------------- | ---------------------------------------------------------------------- |
 | [0011](0011-shared-config-single-source-of-truth.md) | `shared-config` is the single source of truth for chain/token metadata |
+| [0035](0035-config-public-npm-package.md)            | `shared-config` publishes as public `@mento-protocol/config`           |
 
 ### indexer-envio
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { chainLabel } from "@mento-protocol/monitoring-config/chains";
+import { chainLabel } from "@mento-protocol/config/chains";
 
 /**
  * Two `role="status"` banners surfaced above the hero tiles when the

@@ -3,7 +3,7 @@ title: shared-config is the single source of truth for chain and token metadata
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-08
 scope: shared-config
 date: 2026-03
 ---
@@ -22,16 +22,17 @@ had to be fixed in several places, and some were missed.
 
 ## Decision
 
-`@mento-protocol/monitoring-config` (`shared-config/`) is the **single source of
+`@mento-protocol/config` (`shared-config/`) is the **single source of
 truth** for chain metadata, deployment namespaces, token/pool label derivation,
-the FX calendar, and shared ABIs. Consumers import from it; no package duplicates
-chain slugs, explorer URLs, or token labels.
+the FX calendar, thresholds, and shared ABIs. In-repo consumers resolve it
+through `workspace:*`; external consumers use the public npm package. No package
+duplicates chain slugs, explorer URLs, or token labels.
 
 ## Alternatives considered
 
 - **Per-package copies** — rejected: guaranteed drift; the bug that motivated this.
 - **A remote config service** — rejected: this is static build-time metadata; a
-  workspace package is simpler and versioned with the code.
+  versioned package is simpler and works both inside and outside this repo.
 
 ## Consequences
 
@@ -39,7 +40,8 @@ chain slugs, explorer URLs, or token labels.
   are part of any `shared-config` change, and config edits need a cross-reference test.
 - `shared-config` stays low-dependency because it is imported into client bundles.
 - The indexer is the **one** sanctioned exception: it vendors a mirror because Envio
-  builds it outside the pnpm workspace (ADR 0013).
+  builds it outside the pnpm workspace and has not yet moved to the public package
+  as an explicit registry dependency (ADR 0013).
 
 ## Evidence
 

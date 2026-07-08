@@ -3,7 +3,7 @@ title: Monitoring Dashboard Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-07-08
 ---
 
 # AGENTS.md — Monitoring Dashboard
@@ -26,7 +26,7 @@ This is mandatory for cross-layer/stateful UI work. The checklist exists because
 
 - `src/app/` — Next.js App Router pages and layouts
 - `src/lib/` — Data fetching utilities, GraphQL queries, address book
-- `src/lib/networks.ts` — All network definitions; delegates token/address-label derivation to `@mento-protocol/monitoring-config/tokens` (shared with metrics-bridge) and explorer URL defaults to `@mento-protocol/monitoring-config/chains`. Per-network `addressLabels` overrides still merge on top
+- `src/lib/networks.ts` — All network definitions; delegates token/address-label derivation to `@mento-protocol/config/tokens` (shared with metrics-bridge) and explorer URL defaults to `@mento-protocol/config/chains`. Per-network `addressLabels` overrides still merge on top
 - `next.config.ts` — Next.js configuration
 - `vercel.json` — Vercel deployment settings
 - `eslint.config.mjs` — ESLint flat config
@@ -245,9 +245,9 @@ The dashboard supports multiple network targets (all defined in `src/lib/network
 | `celo-sepolia`       | Celo Sepolia  | testnet |
 | `monad-testnet`      | Monad Testnet | testnet |
 
-Token symbols and address labels come from `@mento-protocol/monitoring-config/tokens` — the shared derivation also used by metrics-bridge. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
+Token symbols and address labels come from `@mento-protocol/config/tokens` — the shared derivation also used by metrics-bridge. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
 
-Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Hosted testnet networks stay hidden unless `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true` and their per-network endpoint is configured: `NEXT_PUBLIC_HASURA_URL_TESTNET` for Monad Testnet and `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` for Celo Sepolia. The package `dev` script supplies the live prod endpoint by default for local worktrees; explicit env values still override it. Explorer URL defaults come from `@mento-protocol/monitoring-config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
+Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Hosted testnet networks stay hidden unless `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true` and their per-network endpoint is configured: `NEXT_PUBLIC_HASURA_URL_TESTNET` for Monad Testnet and `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` for Celo Sepolia. The package `dev` script supplies the live prod endpoint by default for local worktrees; explicit env values still override it. Explorer URL defaults come from `@mento-protocol/config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
 
 ## Notes
 

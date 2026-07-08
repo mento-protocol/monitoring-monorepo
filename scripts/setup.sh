@@ -133,7 +133,7 @@ elif [ "$deps_install_ran" -eq 1 ] &&
     printf '%s' "$shared_config_hash" >"$shared_config_marker"
   fi
 else
-  pnpm --filter @mento-protocol/monitoring-config build
+  pnpm --filter @mento-protocol/config build
   if [ ! -s shared-config/dist/chains.js ]; then
     echo "error: shared-config build did not produce shared-config/dist/chains.js." >&2
     exit 1

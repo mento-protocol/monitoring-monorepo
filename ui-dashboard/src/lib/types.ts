@@ -1,4 +1,4 @@
-import type { OracleReporterType } from "@mento-protocol/monitoring-config/oracle-reporters";
+import type { OracleReporterType } from "@mento-protocol/config/oracle-reporters";
 
 /**
  * Chain IDs for production mainnet networks on the multichain indexer.

@@ -6,7 +6,7 @@ import {
   getRateFeedChainlinkDataFeedUrl,
   getRateFeedPair,
   getRateFeedReporterType,
-} from "@mento-protocol/monitoring-config/oracle-reporters";
+} from "@mento-protocol/config/oracle-reporters";
 import { isNeverRebalance } from "@/lib/health";
 import { AddressLink } from "@/components/address-link";
 import { Tooltip } from "@/components/tooltip";

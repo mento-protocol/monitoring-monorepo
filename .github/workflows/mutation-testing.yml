@@ -62,7 +62,7 @@ jobs:
               - ui-dashboard/package.json
               - ui-dashboard/tsconfig.json
               # Upstream workspace deps: weekend.ts imports the FX calendar
-              # JSON from `@mento-protocol/monitoring-config/fx-calendar.json`.
+              # JSON from `@mento-protocol/config/fx-calendar.json`.
               - shared-config/fx-calendar.json
               - shared-config/src/**
               - shared-config/package.json
@@ -232,7 +232,7 @@ jobs:
               - metrics-bridge/package.json
               - metrics-bridge/tsconfig.json
               # Upstream workspace deps: rebalance-probe.ts, config.ts, and
-              # rebalance-check.ts import @mento-protocol/monitoring-config
+              # rebalance-check.ts import @mento-protocol/config
               # subpaths (format, thresholds, rebalance-abi, tokens, etc.).
               - shared-config/src/**
               - shared-config/*.json

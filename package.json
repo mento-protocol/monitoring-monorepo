@@ -4,7 +4,7 @@
   "license": "GPL-3.0-only",
   "packageManager": "pnpm@11.9.0",
   "scripts": {
-    "postinstall": "pnpm --filter @mento-protocol/monitoring-config build",
+    "postinstall": "pnpm --filter @mento-protocol/config build",
     "dashboard:build": "pnpm --filter @mento-protocol/ui-dashboard build",
     "dashboard:codegen": "pnpm --filter @mento-protocol/ui-dashboard codegen",
     "dashboard:size-limit": "pnpm --filter @mento-protocol/ui-dashboard size-limit",

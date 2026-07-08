@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contractEntries } from "@mento-protocol/monitoring-config/tokens";
+import { contractEntries } from "@mento-protocol/config/tokens";
 import { runIntegrationProbes } from "../runner.js";
 import type { AggregatorAdapter } from "../adapters.js";
 import type { PoolRow } from "../pairs.js";

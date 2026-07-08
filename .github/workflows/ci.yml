@@ -300,19 +300,19 @@ jobs:
         with:
           package-path: shared-config
       - name: Typecheck
-        run: pnpm --filter @mento-protocol/monitoring-config typecheck
+        run: pnpm --filter @mento-protocol/config typecheck
       - name: Lint
-        run: pnpm --filter @mento-protocol/monitoring-config lint
+        run: pnpm --filter @mento-protocol/config lint
       - name: Deviation threshold drift check
         run: node scripts/check-deviation-threshold-drift.mjs
       - name: Knip (dead-code / dep hygiene, blocking)
-        run: pnpm --filter @mento-protocol/monitoring-config knip
+        run: pnpm --filter @mento-protocol/config knip
       - name: Test with coverage
-        run: pnpm --filter @mento-protocol/monitoring-config test:coverage
+        run: pnpm --filter @mento-protocol/config test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: false
-          flags: monitoring-config
+          flags: config
           directory: shared-config/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0

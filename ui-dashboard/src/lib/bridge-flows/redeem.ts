@@ -1,5 +1,5 @@
 import { encodeFunctionData, getContractAddress, parseAbi } from "viem";
-import { contractEntries } from "@mento-protocol/monitoring-config/tokens";
+import { contractEntries } from "@mento-protocol/config/tokens";
 import type { BridgeTransfer } from "@/lib/types";
 
 export type ChainRedeemConfig = {

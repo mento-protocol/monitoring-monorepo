@@ -13,7 +13,7 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
  * Tolerance + critical-magnitude thresholds as `num/den` pairs over the
  * rebalance threshold. Integer math avoids float pathology at the boundaries.
  *
- * Float-form mirrors live in `@mento-protocol/monitoring-config/thresholds`
+ * Float-form mirrors live in `@mento-protocol/config/thresholds`
  * (canonical for the dashboard + metrics-bridge probe). Parity with the
  * dashboard's float comparison is enforced by `test/healthStatusParity.test.ts`.
  * Any change here must update that file too.

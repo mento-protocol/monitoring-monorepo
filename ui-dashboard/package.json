@@ -24,7 +24,7 @@
     "size-limit": "size-limit"
   },
   "dependencies": {
-    "@mento-protocol/monitoring-config": "workspace:*",
+    "@mento-protocol/config": "workspace:*",
     "@sentry/nextjs": "^10.49.0",
     "@upstash/redis": "^1.36.3",
     "@vercel/analytics": "^2.0.1",

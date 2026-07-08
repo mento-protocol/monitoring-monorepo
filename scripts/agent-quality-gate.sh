@@ -618,7 +618,7 @@ add_workspace_quality_commands() {
   add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
   add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
   add_package_quality_commands "@mento-protocol/integration-probes" "$reason"
-  add_package_quality_commands "@mento-protocol/monitoring-config" "$reason"
+  add_package_quality_commands "@mento-protocol/config" "$reason"
   add_package_quality_commands "@mento-protocol/governance-watchdog" "$reason"
   add_aegis_quality_commands "$reason"
 }
@@ -970,7 +970,7 @@ while IFS= read -r path; do
       add_checklist "docs/pr-checklists/code-health.md" "knip config changed"
       case "$path" in
         shared-config/knip.json)
-          add_turbo_package_task "@mento-protocol/monitoring-config" "knip" "knip config changed"
+          add_turbo_package_task "@mento-protocol/config" "knip" "knip config changed"
           ;;
         ui-dashboard/knip.json)
           add_turbo_package_task "@mento-protocol/ui-dashboard" "knip" "knip config changed"
@@ -1032,7 +1032,7 @@ while IFS= read -r path; do
           add_package_vitest_typecheck_commands "@mento-protocol/metrics-bridge" "metrics-bridge hermetic Vitest setup changed"
           ;;
         shared-config/vitest.hermetic-setup.ts)
-          add_package_vitest_typecheck_commands "@mento-protocol/monitoring-config" "shared-config hermetic Vitest setup changed"
+          add_package_vitest_typecheck_commands "@mento-protocol/config" "shared-config hermetic Vitest setup changed"
           ;;
         ui-dashboard/vitest.hermetic-setup.ts)
           add_package_vitest_typecheck_commands "@mento-protocol/ui-dashboard" "ui-dashboard hermetic Vitest setup changed"
@@ -1212,13 +1212,13 @@ while IFS= read -r path; do
       ;;
     shared-config/*)
       add_surface "shared-config"
-      add_package_quality_commands "@mento-protocol/monitoring-config" "shared-config changed"
-      add_command "pnpm --filter @mento-protocol/monitoring-config build" "shared-config exports changed"
+      add_package_quality_commands "@mento-protocol/config" "shared-config changed"
+      add_command "pnpm --filter @mento-protocol/config build" "shared-config exports changed"
       add_command "pnpm --filter @mento-protocol/ui-dashboard typecheck" "shared-config consumers should typecheck"
       add_command "pnpm --filter @mento-protocol/metrics-bridge typecheck" "shared-config consumers should typecheck"
       add_command "pnpm --filter @mento-protocol/integration-probes typecheck" "shared-config consumers should typecheck"
       # shared-config is imported into the dashboard client bundle via
-      # `@mento-protocol/monitoring-config` — changes to chain/token
+      # `@mento-protocol/config` — changes to chain/token
       # metadata or helpers can shift the emitted JS. Mirrors the
       # `shared-config/**` entry in `.github/workflows/size-limit.yml`.
       add_ui_size_limit "shared-config exports feed the dashboard bundle"
@@ -1563,7 +1563,7 @@ while IFS= read -r path; do
           # wrapper end-to-end, plus the semantic tests covering its
           # matching/growth/absorption logic directly.
           add_command "node scripts/eslint-baseline-diff.test.mjs" "ESLint baseline wrapper changed"
-          add_package_quality_commands "@mento-protocol/monitoring-config" "ESLint baseline wrapper changed"
+          add_package_quality_commands "@mento-protocol/config" "ESLint baseline wrapper changed"
           add_package_quality_commands "@mento-protocol/ui-dashboard" "ESLint baseline wrapper changed"
           add_package_quality_commands "@mento-protocol/indexer-envio" "ESLint baseline wrapper changed"
           add_package_quality_commands "@mento-protocol/metrics-bridge" "ESLint baseline wrapper changed"
@@ -1974,7 +1974,7 @@ is_quality_setup_command() {
   # they must finish before the independent quality pool starts. Keep this list
   # in sync with new setup-style commands added by the path mapper above.
   case "$command" in
-    "pnpm --filter @mento-protocol/monitoring-config build")
+    "pnpm --filter @mento-protocol/config build")
       return 0
       ;;
     TF_DATA_DIR=*terraform\ -chdir=*)

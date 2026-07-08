@@ -19,7 +19,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@mento-protocol/monitoring-config": "workspace:*"
+    "@mento-protocol/config": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

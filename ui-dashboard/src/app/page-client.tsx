@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/monitoring-config/protocol-fee";
+import { PROTOCOL_FEE_RECIPIENT_ADDRESS } from "@mento-protocol/config/protocol-fee";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";

@@ -1,11 +1,5 @@
-import {
-  chainLabel,
-  chainSlug,
-} from "@mento-protocol/monitoring-config/chains";
-import {
-  contractEntries,
-  tokenSymbol,
-} from "@mento-protocol/monitoring-config/tokens";
+import { chainLabel, chainSlug } from "@mento-protocol/config/chains";
+import { contractEntries, tokenSymbol } from "@mento-protocol/config/tokens";
 import { addressFromPoolId, decimalAmountToRaw } from "./amounts.js";
 import {
   PROBE_CHAIN_IDS,

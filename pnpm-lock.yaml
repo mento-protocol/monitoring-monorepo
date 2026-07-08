@@ -436,7 +436,7 @@ importers:
 
   integration-probes:
     dependencies:
-      '@mento-protocol/monitoring-config':
+      '@mento-protocol/config':
         specifier: workspace:*
         version: link:../shared-config
     devDependencies:
@@ -479,7 +479,7 @@ importers:
 
   metrics-bridge:
     dependencies:
-      '@mento-protocol/monitoring-config':
+      '@mento-protocol/config':
         specifier: workspace:*
         version: link:../shared-config
       graphql:
@@ -586,7 +586,7 @@ importers:
 
   ui-dashboard:
     dependencies:
-      '@mento-protocol/monitoring-config':
+      '@mento-protocol/config':
         specifier: workspace:*
         version: link:../shared-config
       '@sentry/nextjs':

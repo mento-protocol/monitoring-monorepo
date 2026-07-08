@@ -16,7 +16,7 @@
  * that recovered between probes drops out of the metric immediately.
  */
 
-import { poolIdAddress } from "@mento-protocol/monitoring-config/format";
+import { poolIdAddress } from "@mento-protocol/config/format";
 import {
   LEGACY_OPEN_BREACH_ENTRY_THRESHOLD,
   REBALANCE_PROBE_CONCURRENCY,

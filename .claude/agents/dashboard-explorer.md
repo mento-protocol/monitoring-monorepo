@@ -12,7 +12,7 @@ Read-only exploration specialist for `ui-dashboard/`. Locate code, summarize wha
 ## Scope
 
 - **Primary path:** `ui-dashboard/`
-- **Allowed adjacent reads:** `shared-config/` (chain/token metadata via `@mento-protocol/monitoring-config`), `indexer-envio/config/*.json` (chain list + addresses — the one allowed cross-package data import for dashboard), root `AGENTS.md` for pattern rules
+- **Allowed adjacent reads:** `shared-config/` (chain/token metadata via `@mento-protocol/config`), `indexer-envio/config/*.json` (chain list + addresses — the one allowed cross-package data import for dashboard), root `AGENTS.md` for pattern rules
 - **Out of scope:** `indexer-envio/src/`, `metrics-bridge/`, `aegis/`, `terraform/` — say "out of scope" if asked
 
 ## Conventions you know

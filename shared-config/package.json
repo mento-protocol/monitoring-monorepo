@@ -1,15 +1,41 @@
 {
-  "name": "@mento-protocol/monitoring-config",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@mento-protocol/config",
+  "version": "0.1.0",
+  "private": false,
   "type": "module",
-  "description": "Shared deployment + chain metadata for the monitoring monorepo. Single source of truth for chain ID → treb namespace, chain slug/label, explorer URLs, and token symbol / pool pair label derivation from @mento-protocol/contracts.",
+  "description": "Public Mento protocol metadata for chain IDs, deployment namespaces, token labels, FX calendars, thresholds, and shared ABIs.",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mento-protocol/monitoring-monorepo",
+    "directory": "shared-config"
+  },
+  "files": [
+    "dist",
+    "deployment-namespaces.json",
+    "fx-calendar.json",
+    "chain-metadata.json",
+    "aggregators.json",
+    "oracle-reporters.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
+    "./package.json": "./package.json",
     "./deployment-namespaces.json": "./deployment-namespaces.json",
     "./fx-calendar.json": "./fx-calendar.json",
     "./chain-metadata.json": "./chain-metadata.json",
     "./aggregators.json": "./aggregators.json",
     "./oracle-reporters.json": "./oracle-reporters.json",
+    "./deployment-namespaces": {
+      "types": "./dist/deployment-namespaces.d.ts",
+      "default": "./dist/deployment-namespaces.js"
+    },
+    "./fx-calendar": {
+      "types": "./dist/fx-calendar.d.ts",
+      "default": "./dist/fx-calendar.js"
+    },
     "./chains": {
       "types": "./dist/chains.d.ts",
       "default": "./dist/chains.js"

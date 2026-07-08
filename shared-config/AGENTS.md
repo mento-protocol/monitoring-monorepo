@@ -3,7 +3,7 @@ title: Shared Config Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-07-08
 ---
 
 # AGENTS.md — Shared Config
@@ -12,16 +12,18 @@ last_verified: 2026-05-20
 
 ## Scope
 
-`shared-config/` is the source of truth for chain metadata, deployment namespaces, token/pool label derivation, FX calendar data, and shared ABIs.
+`shared-config/` publishes as `@mento-protocol/config` and is the source of truth for chain metadata, deployment namespaces, token/pool label derivation, FX calendar data, thresholds, and shared ABIs.
 
 ## Operating Rules
 
 - Add or change config data with a cross-reference test.
-- Keep exported modules stable for all consumers; dashboard, indexer, and bridge typechecks are part of the change surface.
+- Keep exported modules stable for all consumers; dashboard, indexer, bridge, and integration-probes typechecks are part of the change surface.
 - If `fx-calendar.json` changes, verify trading-seconds assumptions in both dashboard and indexer code paths.
 - Do not hand-edit `dist/` as the source of truth. Update `src/` or JSON inputs, then run the package build.
 - Avoid importing runtime-heavy packages here. `shared-config` is consumed by client bundle code and should stay low-dependency.
+- Public npm releases are tag-driven through `.github/workflows/publish-config.yml`; publish tags must be `config-v<shared-config/package.json version>` and point at `main`. Manual `workflow_dispatch` runs validate and pack the package but do not publish. npm trusted publishing cannot create a brand-new package, so an npm org/package maintainer must seed `@mento-protocol/config` once through an approved maintainer publish before configuring trusted publishing for GitHub Actions with workflow filename `publish-config.yml`, allowed action `npm publish`, repository `mento-protocol/monitoring-monorepo`. Keep the publish job on GitHub-hosted runners because npm trusted publishing does not support self-hosted or third-party runners.
+- The package's Node engine follows the repo `.node-version` for v0.1.x. Do not lower the engine floor without adding a matching consumer and publish verification matrix.
 
 ## Verification
 
-Run monitoring-config lint, typecheck, test, and build, then typecheck consumers when exported shapes change.
+Run `@mento-protocol/config` lint, typecheck, test, and build, then typecheck consumers when exported shapes change.

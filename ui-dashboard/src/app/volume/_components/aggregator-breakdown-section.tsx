@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { getClusterMetadata } from "@mento-protocol/monitoring-config/aggregators";
+import { getClusterMetadata } from "@mento-protocol/config/aggregators";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { formatUSD } from "@/lib/format";
 import { Table, Row, Td, Th } from "@/components/table";

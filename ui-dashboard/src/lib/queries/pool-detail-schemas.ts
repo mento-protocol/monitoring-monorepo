@@ -16,7 +16,7 @@
  */
 
 import { z } from "zod";
-import { ORACLE_REPORTER_TYPES } from "@mento-protocol/monitoring-config/oracle-reporters";
+import { ORACLE_REPORTER_TYPES } from "@mento-protocol/config/oracle-reporters";
 
 // ---------------------------------------------------------------------------
 // POOL_BREACH_ROLLUP

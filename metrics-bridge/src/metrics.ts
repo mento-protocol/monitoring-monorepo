@@ -4,16 +4,10 @@ import {
   explorerAddressUrl,
   explorerTxUrl,
   hasChain,
-} from "@mento-protocol/monitoring-config/chains";
-import {
-  poolName,
-  tokenSymbol,
-} from "@mento-protocol/monitoring-config/tokens";
-import {
-  poolIdAddress,
-  shortAddress,
-} from "@mento-protocol/monitoring-config/format";
-import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
+} from "@mento-protocol/config/chains";
+import { poolName, tokenSymbol } from "@mento-protocol/config/tokens";
+import { poolIdAddress, shortAddress } from "@mento-protocol/config/format";
+import { toHumanUnits } from "@mento-protocol/config/units";
 import { LEGACY_OPEN_BREACH_ENTRY_THRESHOLD } from "./config.js";
 import {
   observeDeviationAlertState,
