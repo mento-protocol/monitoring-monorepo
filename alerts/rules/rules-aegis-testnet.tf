@@ -8,7 +8,7 @@
 
 resource "grafana_rule_group" "aegis_testnet_health" {
   name             = "Aegis testnet health"
-  folder_uid       = data.grafana_folder.aegis.uid
+  folder_uid       = local.external_folder_uids.aegis
   interval_seconds = 60
 
   dynamic "rule" {
