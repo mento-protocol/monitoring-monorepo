@@ -115,8 +115,11 @@ Rules:
   references after `The Solution`.
 - Use issue closure references only when the PR fully satisfies the issue.
 
-For substantial work, default to a draft PR unless the user asked for a ready
-PR.
+For normal monitoring-monorepo ship requests, especially `ship it` or a complete
+ship loop, open or convert the PR as ready-for-review once the local gate passes.
+Use draft only when the user explicitly asks for draft/PR-only handling or when
+required validation/review is intentionally still pending, and state that reason
+in the PR body and final summary.
 
 Include this marker when practical:
 
