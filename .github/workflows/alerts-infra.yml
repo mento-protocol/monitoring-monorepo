@@ -15,24 +15,24 @@ name: Alerts Infra
 #     (`GCP_SERVICE_ACCOUNT_PLAN`), overrides the backend impersonation to
 #     `org-terraform-plan-readonly@…seed` via `-backend-config`, points the
 #     google provider at the same read-only SA via
-#     `TF_VAR_terraform_service_account`, and runs `terraform plan -lock=false
-#     -refresh=false`. `-refresh=false` is load-bearing: unlike the grafana-only
-#     stacks (alerts-rules / aegis), this stack's google provider would
-#     otherwise refresh GCP resources, which the read-only seed SA (objectViewer
-#     on the state bucket only, no project roles) can't read. Skipping refresh
-#     keeps the PR plan to a config-vs-last-state diff needing only state read +
-#     the token mint the read-only CI SA already holds — zero new IAM. Tradeoff:
-#     the PR plan won't surface out-of-band drift; that's `terraform-drift.yml`'s
-#     job (full refresh, write SA) and the apply-time re-plan's. The read-only +
-#     `-refresh=false` treatment is gated on `github.event_name == 'pull_request'`:
-#     the same plan job on push / workflow_dispatch keeps the write deployer SA +
-#     full refresh + locking, so the apply-gating plan (incl. drift reconciled via
-#     manual dispatch) still synchronizes remote state before deciding changes.
+#     `TF_VAR_terraform_service_account`, and runs a targeted `terraform plan`
+#     against `terraform_data.pr_plan_secretless_guard` with `-lock=false
+#     -refresh=false`. The target is load-bearing: this stack includes Sentry,
+#     Slack, QuickNode, and GitHub provider/resource surfaces that perform
+#     authenticated plan-time checks. PRs intentionally receive dummy TF_VAR
+#     credentials, so the PR job uses init + validate + the built-in target plan
+#     as the secretless Terraform execution check. Tradeoff: the PR plan won't
+#     surface full-stack diffs or out-of-band drift; that's `terraform-drift.yml`'s
+#     job (full refresh, write SA) and the apply-time re-plan's. The targeted
+#     treatment is gated on `github.event_name == 'pull_request'`: the same plan
+#     job on push / workflow_dispatch keeps the write deployer SA + full refresh
+#     + locking, so the apply-gating plan (incl. drift reconciled via manual
+#     dispatch) still synchronizes remote state before deciding changes.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
 #     `terraform plan -detailed-exitcode` and emits a `has-changes` job
-#     output. On PRs it posts a sticky comment with the plan diff.
+#     output. On PRs it posts a sticky comment with the targeted sentinel plan.
 #   - `apply` job only runs on push/dispatch to main, only when the plan
 #     reported actual changes, and only for stack-root changes or explicit
 #     workflow_dispatch. Workflow/notifier-only edits can still plan, but they
@@ -41,14 +41,17 @@ name: Alerts Infra
 # Required repository secrets mirror the `alerts_infra_ci_secret_names` local in
 # alerts/infra/main.tf, including Splunk On-Call credentials for the on-call
 # announcer: TF_VAR_SPLUNK_ON_CALL_API_ID and TF_VAR_SPLUNK_ON_CALL_API_KEY.
+# PR plans intentionally receive validation-safe placeholders for these
+# sensitive TF_VAR values; push/dispatch plans and the apply job keep the real
+# secrets so the gated apply-time re-plan is authoritative.
 #
 # Note: we intentionally do NOT save the plan as a binary artifact for
 # cross-job apply. HashiCorp warns that `terraform plan -out=` "saves
 # sensitive data in cleartext in the plan file"
 # (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
 # TF_VAR_* env block here carries production Sentry/QuickNode/Slack/GitHub
-# credentials. Uploading the binary plan as a workflow artifact would expose
-# those secrets to anyone with `actions:read`.
+# credentials on push/dispatch and apply runs. Uploading the binary plan as a
+# workflow artifact would expose those secrets to anyone with `actions:read`.
 # Instead the apply job re-plans at gate-approval time — the trade-off
 # is the brief "between approval and apply" drift window, which the
 # reviewer can detect by checking the apply-job's plan output before
@@ -109,7 +112,7 @@ jobs:
   plan:
     name: Terraform Plan (alerts/infra)
     # Fork PRs and Dependabot PRs don't get repository secrets, so the
-    # GCP auth + TF_VAR_* steps would resolve empty and fail every time.
+    # GCP auth step would resolve empty and fail every time.
     # Skip the job in those contexts — the plan is only meaningful when
     # secrets are available. Internal PRs + main pushes run.
     if: >-
@@ -135,10 +138,6 @@ jobs:
       has-changes: ${{ steps.detect.outputs.has-changes }}
       stack-changed: ${{ steps.stack_changes.outputs.stack-changed }}
     env:
-      # Sentry
-      TF_VAR_sentry_auth_token: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
-      # GCP
-      TF_VAR_billing_account: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
       # On PRs, point the google provider at the read-only seed SA so provider
       # init impersonates an identity the plan-readonly CI SA can mint a token
       # for; with `-refresh=false` (see Plan step) the provider makes no GCP API
@@ -146,19 +145,6 @@ jobs:
       # workflow_dispatch this resolves to the write-capable `org-terraform@…seed`
       # (= the variable default) — those runs full-refresh to gate apply.
       TF_VAR_terraform_service_account: ${{ github.event_name == 'pull_request' && 'org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com' || 'org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com' }}
-      # QuickNode
-      TF_VAR_quicknode_api_key: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
-      TF_VAR_quicknode_signing_secret: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
-      # Splunk On-Call / VictorOps API (read-only key is sufficient)
-      TF_VAR_splunk_on_call_api_id: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_ID }}
-      TF_VAR_splunk_on_call_api_key: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_KEY }}
-      TF_VAR_oncall_slack_channel_id: ${{ secrets.TF_VAR_ONCALL_SLACK_CHANNEL_ID }}
-      TF_VAR_oncall_support_usergroup_id: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
-      TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID }}
-      # Slack (for restapi.slack provider — creates/archives Sentry alert channels)
-      TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
-      # GitHub (for github_actions_secret resources that self-manage these secrets)
-      TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -207,6 +193,52 @@ jobs:
           terraform_version: 1.14.6
           terraform_wrapper: false
 
+      - name: Export PR-safe Terraform inputs
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            printf '%s\n' 'TF_VAR_sentry_auth_token=pr-plan-dummy-sentry-token-0000'
+            printf '%s\n' 'TF_VAR_billing_account=000000-000000-000000'
+            printf '%s\n' 'TF_VAR_quicknode_api_key=pr-plan-dummy-quicknode-api-key'
+            printf '%s\n' 'TF_VAR_quicknode_signing_secret=00000000000000000000000000000000'
+            printf '%s\n' 'TF_VAR_splunk_on_call_api_id=pr-plan-dummy-splunk-id'
+            printf '%s\n' 'TF_VAR_splunk_on_call_api_key=pr-plan-dummy-splunk-key'
+            printf '%s\n' 'TF_VAR_oncall_slack_channel_id=C012345678'
+            printf '%s\n' 'TF_VAR_oncall_support_usergroup_id=S012345678'
+            printf '%s\n' 'TF_VAR_slack_notification_channel_id=123456789'
+            printf '%s\n' 'TF_VAR_slack_bot_token=xoxb-pr-plan-dummy-token'
+            printf '%s\n' 'TF_VAR_github_token=pr-plan-dummy-github-token'
+          } >> "$GITHUB_ENV"
+
+      - name: Export production Terraform inputs
+        if: github.event_name != 'pull_request'
+        env:
+          INPUT_SENTRY_AUTH_TOKEN: ${{ secrets.TF_VAR_SENTRY_AUTH_TOKEN }}
+          INPUT_BILLING_ACCOUNT: ${{ secrets.TF_VAR_BILLING_ACCOUNT }}
+          INPUT_QUICKNODE_API_KEY: ${{ secrets.TF_VAR_QUICKNODE_API_KEY }}
+          INPUT_QUICKNODE_SIGNING_SECRET: ${{ secrets.TF_VAR_QUICKNODE_SIGNING_SECRET }}
+          INPUT_SPLUNK_ON_CALL_API_ID: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_ID }}
+          INPUT_SPLUNK_ON_CALL_API_KEY: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_API_KEY }}
+          INPUT_ONCALL_SLACK_CHANNEL_ID: ${{ secrets.TF_VAR_ONCALL_SLACK_CHANNEL_ID }}
+          INPUT_ONCALL_SUPPORT_USERGROUP_ID: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
+          INPUT_SLACK_NOTIFICATION_CHANNEL_ID: ${{ secrets.TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID }}
+          INPUT_SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+          INPUT_GITHUB_TOKEN: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+        run: |
+          {
+            printf '%s\n' "TF_VAR_sentry_auth_token=${INPUT_SENTRY_AUTH_TOKEN}"
+            printf '%s\n' "TF_VAR_billing_account=${INPUT_BILLING_ACCOUNT}"
+            printf '%s\n' "TF_VAR_quicknode_api_key=${INPUT_QUICKNODE_API_KEY}"
+            printf '%s\n' "TF_VAR_quicknode_signing_secret=${INPUT_QUICKNODE_SIGNING_SECRET}"
+            printf '%s\n' "TF_VAR_splunk_on_call_api_id=${INPUT_SPLUNK_ON_CALL_API_ID}"
+            printf '%s\n' "TF_VAR_splunk_on_call_api_key=${INPUT_SPLUNK_ON_CALL_API_KEY}"
+            printf '%s\n' "TF_VAR_oncall_slack_channel_id=${INPUT_ONCALL_SLACK_CHANNEL_ID}"
+            printf '%s\n' "TF_VAR_oncall_support_usergroup_id=${INPUT_ONCALL_SUPPORT_USERGROUP_ID}"
+            printf '%s\n' "TF_VAR_slack_notification_channel_id=${INPUT_SLACK_NOTIFICATION_CHANNEL_ID}"
+            printf '%s\n' "TF_VAR_slack_bot_token=${INPUT_SLACK_BOT_TOKEN}"
+            printf '%s\n' "TF_VAR_github_token=${INPUT_GITHUB_TOKEN}"
+          } >> "$GITHUB_ENV"
+
       - name: Format check
         run: terraform fmt -check -recursive
 
@@ -244,12 +276,14 @@ jobs:
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
         # (HashiCorp docs); apply re-plans at gate-approval time instead.
         # PR plans run read-only: `-lock=false` (the read-only plan SA, objectViewer
-        # only, can't write the GCS lock object) + `-refresh=false` (this stack's
-        # google provider would otherwise refresh GCP resources the read-only seed
-        # SA can't read — no project roles). `-refresh=false` also means the `http`
-        # data sources in ci-failures-channel.tf (Slack @eng usergroup lookup)
-        # coast on last-known state values on PRs rather than re-fetching — no auth
-        # risk (Slack token, not GCP), same acceptable drift trade-off.
+        # only, can't write the GCS lock object) + `-refresh=false` + an explicit
+        # target of the built-in `terraform_data.pr_plan_secretless_guard`.
+        # Targeting is load-bearing because this stack's Sentry, Slack, QuickNode,
+        # and GitHub surfaces use authenticated provider configuration or plan-time
+        # reads; PRs intentionally receive dummy TF_VAR credentials, so a full PR
+        # graph would fail before proving anything useful. `terraform validate`
+        # still checks full config shape; push / workflow_dispatch plans and gated
+        # applies below run the full graph with production credentials.
         # push / workflow_dispatch (the apply-gating path, incl. drift reconcile)
         # keep full refresh + locking on the write SA, so they detect out-of-band
         # drift and set `has-changes` correctly. Drift detection also runs in
@@ -260,7 +294,7 @@ jobs:
         run: |
           set +e
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            terraform plan -detailed-exitcode -no-color -input=false -lock=false -refresh=false > /tmp/tf-plan.raw 2>&1
+            terraform plan -detailed-exitcode -no-color -input=false -lock=false -refresh=false -target=terraform_data.pr_plan_secretless_guard > /tmp/tf-plan.raw 2>&1
           else
             terraform plan -detailed-exitcode -no-color -input=false -lock-timeout=2m > /tmp/tf-plan.raw 2>&1
           fi
@@ -317,6 +351,7 @@ jobs:
         # so a failed plan still surfaces the error inline.
         if: always()
         env:
+          EVENT_NAME: ${{ github.event_name }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
           STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
@@ -325,7 +360,19 @@ jobs:
             echo '## Terraform Plan — `alerts/infra/`'
             echo
             if [ "$PLAN_OUTCOME" = "success" ]; then
-              if [ "$HAS_CHANGES" = "true" ]; then
+              if [ "$EVENT_NAME" = "pull_request" ]; then
+                if [ "$STACK_CHANGED" = "true" ]; then
+                  if [ "$HAS_CHANGES" = "true" ]; then
+                    echo '**Status:** 📝 PR target plan changed — trusted main plan will decide apply'
+                  else
+                    echo '**Status:** ✅ PR target plan clean — trusted main plan will decide apply'
+                  fi
+                elif [ "$HAS_CHANGES" = "true" ]; then
+                  echo '**Status:** ⚠️ PR target drift detected — stack path unchanged, apply will skip'
+                else
+                  echo '**Status:** ✅ PR target plan clean — stack path unchanged, apply will skip'
+                fi
+              elif [ "$HAS_CHANGES" = "true" ]; then
                 if [ "$STACK_CHANGED" = "true" ]; then
                   echo '**Status:** 📝 changes detected — stack change is eligible for apply'
                 else
@@ -376,6 +423,7 @@ jobs:
           # template injection points (defensive — `steps.*.outcome` is an
           # enum controlled by Actions, but env-based passing is the standard
           # hardening pattern).
+          EVENT_NAME: ${{ github.event_name }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
           HAS_CHANGES: ${{ steps.detect.outputs.has-changes }}
           STACK_CHANGED: ${{ steps.stack_changes.outputs.stack-changed }}
@@ -399,14 +447,29 @@ jobs:
             const planOutcome = process.env.PLAN_OUTCOME || "unknown";
             const hasChanges = process.env.HAS_CHANGES === "true";
             const stackChanged = process.env.STACK_CHANGED === "true";
-            const statusIcon = planOutcome === "success"
-              ? (hasChanges ? (stackChanged ? "📝" : "⚠️") : "✅")
-              : "❌";
-            const statusText = planOutcome === "success"
-              ? (hasChanges
+            const eventName = process.env.EVENT_NAME || "unknown";
+            let statusIcon = "❌";
+            let statusText = "plan failed";
+            if (planOutcome === "success") {
+              if (eventName === "pull_request") {
+                if (stackChanged) {
+                  statusIcon = hasChanges ? "📝" : "✅";
+                  statusText = hasChanges
+                    ? "PR target plan changed — trusted main plan will decide apply"
+                    : "PR target plan clean — trusted main plan will decide apply";
+                } else {
+                  statusIcon = hasChanges ? "⚠️" : "✅";
+                  statusText = hasChanges
+                    ? "PR target drift detected — stack path unchanged, apply will skip"
+                    : "PR target plan clean — stack path unchanged, apply will skip";
+                }
+              } else {
+                statusIcon = hasChanges ? (stackChanged ? "📝" : "⚠️") : "✅";
+                statusText = hasChanges
                   ? (stackChanged ? "changes detected — stack change is eligible for apply" : "drift detected — stack path unchanged, apply will skip")
-                  : "no changes — merge will skip apply")
-              : "plan failed";
+                  : "no changes — merge will skip apply";
+              }
+            }
 
             const runUrl =
               `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
