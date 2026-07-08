@@ -26,13 +26,15 @@ cost/benefit.) Follow-up PR hardening in 2026-07 also removed production
 Terraform workflows: PRs use validation-safe placeholders, while
 push/dispatch plans and `production-infra`-gated applies keep the real secrets.
 `aegis` and `governance-watchdog` run full config-vs-state PR plans with
-placeholders and no refresh. `alerts-rules` is targeted to
-`terraform_data.pr_plan_secretless_guard` because its Grafana folder data
-sources authenticate during plan even with `-refresh=false`. The `alerts/infra`
-PR path is also intentionally narrower: after init/validate it targets
-`terraform_data.pr_plan_secretless_guard` only. The handler module still depends
-on Slack channel outputs and placeholder-backed Secret Manager versions; the
-sentinels remain for Grafana/Sentry/Slack/QuickNode/GitHub resources that
+placeholders and no refresh. `alerts-rules` targets
+`terraform_data.pr_plan_secretless_guard` plus the non-secret rule groups that
+route through the global notification policy without direct contact-point
+dependencies. It still leaves contact points, notification policies, and rule
+groups with direct `notification_settings` to trusted main/apply plans. The
+`alerts/infra` PR path is also intentionally narrower: after init/validate it
+targets `terraform_data.pr_plan_secretless_guard` only. The handler module still
+depends on Slack channel outputs and placeholder-backed Secret Manager versions;
+the sentinels remain for Grafana/Sentry/Slack/QuickNode/GitHub resources that
 perform authenticated plan-time checks and cannot run with placeholders.
 
 ## Declined: full-refresh read-only plan for the `alerts/infra` leg (PR plan and drift)

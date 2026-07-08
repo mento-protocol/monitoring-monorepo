@@ -1,7 +1,7 @@
-# Same-repo PR plans intentionally avoid Grafana provider reads because the
-# stack has grafana_folder data sources that authenticate even with
-# `-refresh=false`. This built-in-provider guard gives PR CI a Terraform
-# execution check without placing production provider tokens in the PR job.
+# Same-repo PR plans intentionally avoid the secret-backed Grafana notification
+# graph. This built-in-provider guard keeps a minimal Terraform execution check
+# in the targeted PR plan without placing production provider tokens in the PR
+# job.
 resource "terraform_data" "pr_plan_secretless_guard" {
   input = {
     grafana_url_is_https    = startswith(var.grafana_url, "https://")
