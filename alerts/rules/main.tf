@@ -35,17 +35,6 @@ resource "grafana_folder" "oracle_relayers" {
   title = "Oracle Relayers"
 }
 
-data "grafana_folder" "reserve" {
-  title = "Reserve"
-}
-
-# Aegis folder is owned by the aegis stack (aegis/terraform). The relocated
-# Aegis service-health rule group (rules-aegis-service.tf, issue #706) lives in
-# it, so look it up rather than creating a second folder.
-data "grafana_folder" "aegis" {
-  title = "Aegis"
-}
-
 resource "grafana_folder" "trading_modes" {
   title = "Trading Modes"
 }
@@ -55,6 +44,16 @@ resource "grafana_folder" "trading_limits" {
 }
 
 locals {
+  # Reserve and Aegis folders are owned outside this stack. Aegis pins its UID
+  # in aegis/terraform/grafana-folders.tf; Reserve is an existing external
+  # Grafana folder not yet owned by a Terraform stack. Keep their current UIDs
+  # static so same-repo PR plans can target these rule groups without
+  # authenticating live Grafana data sources.
+  external_folder_uids = {
+    reserve = "a87JaoO4k"
+    aegis   = "fe2mj51r3ifwga"
+  }
+
   # Common evaluation window for instant queries. 10 minutes is enough to absorb
   # one missed scrape (30s) and still produce a fresh value on every 60s eval.
   instant_query_range_seconds = 600

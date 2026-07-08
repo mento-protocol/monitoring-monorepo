@@ -17,6 +17,7 @@ import {
   _testHooks,
   fetchBreakerKind,
 } from "../src/rpc.ts";
+import { _withRateFeedDependencyProbeLogger } from "../src/rpc/breakers.ts";
 
 const FIXED_1 = 10n ** 24n;
 const noopLogger = {
@@ -25,6 +26,27 @@ const noopLogger = {
   warn: () => undefined,
   error: () => undefined,
 };
+
+describe("rateFeedDependencies probe logger", () => {
+  it("demotes expected archive-fallback failures without hiding other warnings", () => {
+    const debug: string[] = [];
+    const warn: string[] = [];
+    const logger = _withRateFeedDependencyProbeLogger({
+      debug: (msg: string) => debug.push(msg),
+      info: () => undefined,
+      warn: (msg: string) => warn.push(msg),
+      error: () => undefined,
+    });
+
+    logger.warn("[RPC_ARCHIVE_FALLBACK_FAILED] fn=rateFeedDependencies");
+    logger.warn("[RPC_BLOCK_RETRY] fn=rateFeedDependencies");
+
+    assert.deepEqual(debug, [
+      "[RPC_ARCHIVE_FALLBACK_FAILED] fn=rateFeedDependencies",
+    ]);
+    assert.deepEqual(warn, ["[RPC_BLOCK_RETRY] fn=rateFeedDependencies"]);
+  });
+});
 
 describe("nextMedianEMA — Fixidity formula mirroring MedianDeltaBreaker.shouldTrigger", () => {
   it("seeds EMA with currentMedian when previousEMA is 0 (contract line 182-186)", () => {
