@@ -652,7 +652,9 @@ function parseRateFeedBreakerStatus(raw: unknown): {
 // readContractWithBlockFallback cross-checks the terminating read on the
 // secondary node; if no fallback is set, a single-call blip surviving the
 // control read could truncate — self-healed by the next RateFeedDependenciesSet
-// or a process restart, and verified post-deploy against the known edges.
+// or a process restart, and verified post-deploy against the known edges. The
+// expected terminator probe logs archive-fallback failures at debug because
+// this caller immediately disambiguates them with the control read below.
 //
 // (Defined at file end so insertions don't shift the line-keyed ESLint baseline
 // entries for fetchBreakerDefaults / fetchBreakerFeedState above.)
@@ -696,6 +698,28 @@ type DepRead =
   | { kind: "addr"; addr: string }
   | { kind: "empty" }
   | { kind: "transient" };
+
+const ARCHIVE_FALLBACK_FAILED_MARKER = "[RPC_ARCHIVE_FALLBACK_FAILED]";
+
+/** @internal Exposed for a focused regression test. */
+export function _withRateFeedDependencyProbeLogger(log: RpcLogger): RpcLogger {
+  return {
+    debug: (...args: Parameters<RpcLogger["debug"]>) => log.debug(...args),
+    info: (...args: Parameters<RpcLogger["info"]>) => log.info(...args),
+    warn: (...args: Parameters<RpcLogger["warn"]>) => {
+      const [first] = args;
+      if (
+        typeof first === "string" &&
+        first.includes(ARCHIVE_FALLBACK_FAILED_MARKER)
+      ) {
+        log.debug(...(args as Parameters<RpcLogger["debug"]>));
+        return;
+      }
+      log.warn(...args);
+    },
+    error: (...args: Parameters<RpcLogger["error"]>) => log.error(...args),
+  };
+}
 
 /** True when `getRateFeeds()` returns at the requested block — proves the node
  * is responsive, so a sibling getter failure is a genuine contract revert
@@ -743,7 +767,7 @@ async function readDepAtIndex(
       },
       ctx.blockNumber,
       ctx.fallback,
-      ctx.log,
+      _withRateFeedDependencyProbeLogger(ctx.log),
     );
     if (usedLatestFallback) return { kind: "transient" };
     return { kind: "addr", addr: (result as string).toLowerCase() };
