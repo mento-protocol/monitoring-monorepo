@@ -1,0 +1,39 @@
+name: Terraform Deploy Queue Watch
+
+# Scheduled visibility check for Terraform deploy workflows that can be wedged
+# before their first job starts. It observes the deploy queues only; it does
+# not share their `<workflow>-deploy` concurrency groups and never changes apply
+# ordering semantics.
+
+on:
+  schedule:
+    # Daily at 06:07 UTC, offset from common cron boundaries.
+    - cron: 7 6 * * *
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: Detect stalled Terraform deploy queue
+    if: github.ref == 'refs/heads/main'
+    # Use GitHub-hosted capacity so a Blacksmith scheduling stall on the
+    # Terraform deploy jobs does not also starve the detector.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check deploy workflow queues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ vars.TERRAFORM_APPLY_SLACK_CHANNEL || '#ci-operations' }}
+          TERRAFORM_DEPLOY_STALE_MINUTES: "60"
+        run: node scripts/check-terraform-deploy-queue.mjs

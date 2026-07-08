@@ -112,16 +112,23 @@ use the workflow run for the full sanitized plan. The default destination is
 `TERRAFORM_APPLY_SLACK_CHANNEL` (`terraform_apply_slack_channel` tfvar,
 `terraform/github-variables.tf`) — set the tfvar and apply to route these
 summaries to another channel. See `docs/notes/slack-github-subscriptions.md`
-for the separate GitHub Slack App subscription and the two systems'
-relationship.
+for the GitHub Slack App subscription, apply-pending summary, queue watcher,
+and failure-notifier relationship.
 
-If a post-merge Terraform deploy workflow stays `pending` with no jobs, inspect
-that workflow's run queue before waiting on the current run. Older `waiting` or
-`pending` runs in the same deploy concurrency group can block the current merge
-commit. Confirm the older runs are obsolete, cancel them, then watch the current
-run until both plan and apply reach a terminal state. If approval was granted
-before the apply job existed, GitHub can require a fresh `production-infra`
-approval after the plan creates the apply job.
+`Terraform Deploy Queue Watch` runs daily and warns in the same Terraform apply
+Slack channel when one of the production Terraform deploy workflows has been
+queued or pending for at least 60 minutes with zero started jobs. The watcher is
+observer-only: it does not share the deploy workflows' `*-deploy` concurrency
+groups, cancel runs, approve environments, or change apply ordering.
+
+If a post-merge Terraform deploy workflow stays `pending` with no jobs, start
+from the watcher alert or inspect that workflow's run queue directly before
+waiting on the current run. Older `waiting` or `pending` runs in the same deploy
+concurrency group can block the current merge commit. Confirm the older runs are
+obsolete, cancel them, then watch the current run until both plan and apply reach
+a terminal state. If approval was granted before the apply job existed, GitHub
+can require a fresh `production-infra` approval after the plan creates the apply
+job.
 
 ## GitHub Environment Setup
 
