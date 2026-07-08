@@ -1,4 +1,4 @@
-import { EmbedBuilder, HTTPError } from "discord.js";
+import { EmbedBuilder } from "@discordjs/builders";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createEventHandler,
@@ -12,27 +12,29 @@ import {
 
 // Exercises the REAL send-discord-notification.js / send-telegram-notification.js
 // modules (including the retry logic) end to end, mocking only the transport
-// (discord.js's WebhookClient and global fetch). This is deliberately
-// different from event-handler-factory.test.ts, which mocks the send
-// functions themselves to isolate factory-level behavior.
+// (global fetch). This is deliberately different from
+// event-handler-factory.test.ts, which mocks the send functions themselves to
+// isolate factory-level behavior.
 
-const { mockSend, MockWebhookClient, mockDiscordConfig } = vi.hoisted(() => {
-  const mockSend = vi.fn<(...args: unknown[]) => Promise<unknown>>();
-  class MockWebhookClient {
-    send(...args: unknown[]): Promise<unknown> {
-      return mockSend(...args);
-    }
-  }
+const {
+  mockDiscordConfig,
+  mockDiscordFetch,
+  mockGetSecret,
+  mockTelegramFetch,
+} = vi.hoisted(() => {
+  const mockDiscordFetch = vi.fn<typeof fetch>();
+  const mockGetSecret = vi.fn();
+  const mockTelegramFetch = vi.fn<typeof fetch>();
   const mockDiscordConfig = {
     DISCORD_WEBHOOK_URL_SECRET_ID: "discord-webhook-url",
     DISCORD_TEST_WEBHOOK_URL_SECRET_ID: "discord-test-webhook-url",
   };
-  return { mockSend, MockWebhookClient, mockDiscordConfig };
-});
-
-vi.mock("discord.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("discord.js")>();
-  return { ...actual, WebhookClient: MockWebhookClient };
+  return {
+    mockDiscordConfig,
+    mockDiscordFetch,
+    mockGetSecret,
+    mockTelegramFetch,
+  };
 });
 
 vi.mock("../../config.js", () => ({
@@ -44,21 +46,33 @@ vi.mock("../../config.js", () => ({
   },
 }));
 
-vi.mock("../../utils/get-secret.js", () => ({
-  default: vi.fn().mockResolvedValue("secret-value"),
-}));
+vi.mock("../../utils/get-secret.js", () => ({ default: mockGetSecret }));
 
 function telegramResponse(status: number): Response {
   return new Response(JSON.stringify({ description: "ok" }), { status });
 }
 
-function make5xxError(): HTTPError {
-  return new HTTPError(
-    503,
-    "Service Unavailable",
-    "POST",
-    "https://discord.com/api/webhooks/1/token",
-    {},
+function discordResponse(status: number): Response {
+  return new Response(status === 204 ? null : JSON.stringify({ ok: false }), {
+    status,
+  });
+}
+
+function installFetchMock() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>((input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.startsWith("https://discord.com/")) {
+        return mockDiscordFetch(input, init);
+      }
+      return mockTelegramFetch(input, init);
+    }),
   );
 }
 
@@ -116,7 +130,15 @@ describe("createEventHandler with the real retry-wrapped send functions", () => 
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mockSend.mockReset();
+    mockDiscordFetch.mockReset();
+    mockGetSecret.mockImplementation((secretId: string) => {
+      if (secretId === "discord-webhook-url") {
+        return Promise.resolve("https://discord.com/api/webhooks/1/token");
+      }
+      return Promise.resolve("telegram-token");
+    });
+    mockTelegramFetch.mockReset();
+    installFetchMock();
   });
 
   afterEach(() => {
@@ -125,19 +147,16 @@ describe("createEventHandler with the real retry-wrapped send functions", () => 
   });
 
   it("exhausts Discord retries, logs ERROR with event context, and still delivers Telegram", async () => {
-    mockSend.mockRejectedValue(make5xxError());
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(telegramResponse(200));
-    vi.stubGlobal("fetch", fetchMock);
+    mockDiscordFetch.mockResolvedValue(discordResponse(503));
+    mockTelegramFetch.mockResolvedValue(telegramResponse(200));
 
     const handler = createEventHandler(config);
     await handler(event);
 
     // Discord retried (1 initial + 2 retries = 3 attempts) then gave up.
-    expect(mockSend).toHaveBeenCalledTimes(3);
+    expect(mockDiscordFetch).toHaveBeenCalledTimes(3);
     // Per-channel isolation: the real, retry-wrapped Telegram send still runs.
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mockTelegramFetch).toHaveBeenCalledOnce();
 
     const errors = loggedErrors();
     expect(errors).toHaveLength(1);
@@ -149,18 +168,15 @@ describe("createEventHandler with the real retry-wrapped send functions", () => 
   }, 10_000);
 
   it("delivers Discord successfully after a transient 5xx and does not log an error", async () => {
-    mockSend
-      .mockRejectedValueOnce(make5xxError())
-      .mockResolvedValueOnce(undefined);
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(telegramResponse(200));
-    vi.stubGlobal("fetch", fetchMock);
+    mockDiscordFetch
+      .mockResolvedValueOnce(discordResponse(503))
+      .mockResolvedValueOnce(discordResponse(204));
+    mockTelegramFetch.mockResolvedValue(telegramResponse(200));
 
     const handler = createEventHandler(config);
     await handler(event);
 
-    expect(mockSend).toHaveBeenCalledTimes(2);
+    expect(mockDiscordFetch).toHaveBeenCalledTimes(2);
     expect(loggedErrors()).toHaveLength(0);
   });
 });

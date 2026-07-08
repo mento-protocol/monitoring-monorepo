@@ -34,12 +34,6 @@ overrides:
   # Keep standalone Cloud Build installs on the Node 24 type surface even for
   # Express transitive type packages with broad @types/node ranges.
   "@types/node": 24.13.2
-  # No undici override: discord.js and @discordjs/rest both pin undici EXACTLY
-  # (6.24.1 as of discord.js 14.26.4). Overriding past their pin is what broke
-  # prod once (undici 8's stricter Headers webidl rejects Symbol(sensitiveHeaders)
-  # in @discordjs/rest's response wrapping — sends deliver but report as failures;
-  # see issue #833). If no patched Discord release exists, keep any high-audit
-  # exception advisory-, version-, and path-scoped in ../scripts/pnpm-audit-high-gate.mjs.
 
 # pnpm 11 records dependency build-script policy explicitly.
 allowBuilds:
