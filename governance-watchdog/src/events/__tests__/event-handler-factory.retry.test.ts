@@ -62,7 +62,12 @@ function installFetchMock() {
   vi.stubGlobal(
     "fetch",
     vi.fn<typeof fetch>((input, init) => {
-      const url = String(input);
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
       if (url.startsWith("https://discord.com/")) {
         return mockDiscordFetch(input, init);
       }

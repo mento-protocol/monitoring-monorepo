@@ -116,7 +116,10 @@ describe("sendDiscordNotification", () => {
       headers: { "Content-Type": "application/json" },
     });
     expect(init?.signal).toBeInstanceOf(AbortSignal);
-    expect(JSON.parse(String(init?.body))).toMatchObject({
+    if (typeof init?.body !== "string") {
+      throw new TypeError("Expected Discord fetch body to be a string");
+    }
+    expect(JSON.parse(init.body)).toMatchObject({
       content: "content",
       embeds: [{ title: "Proposal created" }],
     });

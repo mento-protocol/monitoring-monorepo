@@ -15,7 +15,7 @@ class DiscordWebhookHttpError extends Error {
   readonly responseBody: string;
 
   constructor(status: number, statusText: string, responseBody: string) {
-    super(`Discord webhook returned ${status} ${statusText}`);
+    super(`Discord webhook returned ${String(status)} ${statusText}`);
     this.name = "DiscordWebhookHttpError";
     this.status = status;
     this.responseBody = responseBody;

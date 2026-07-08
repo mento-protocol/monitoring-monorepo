@@ -95,7 +95,7 @@ function discordPayload() {
   if (!init?.body) throw new Error("Expected Discord fetch body");
   return JSON.parse(init.body) as {
     content: string;
-    embeds: Array<{ title?: string }>;
+    embeds: { title?: string }[];
   };
 }
 
