@@ -193,8 +193,10 @@ render_status_compact() {
       const part = parts[index];
       return `${row.chain_id}:${fmtPct((part.numerator / part.denominator) * 100)}(${fmtNum(part.processed)}/${fmtNum(part.head)})`;
     }).join(' ');
+    const chainState = rows.map((row) => `${row.chain_id}:${isCaughtUp(row) ? 'caught_up' : 'syncing'}`).join(' ');
     console.log(`status=${allCaughtUp ? 'caught_up' : 'syncing'} overall=${fmtPct(overallPct)} cadence=${cadenceSeconds}s chains=${chainSummary}`);
     console.log(cadenceSeconds);
+    console.log(`status=${allCaughtUp ? 'caught_up' : 'syncing'} cadence=${cadenceSeconds}s chains=${chainState}`);
     process.exit(allCaughtUp ? 0 : 10);
 NODE
 }
@@ -203,9 +205,11 @@ watch_status() {
   local status_json=""
   local compact_render=""
   local compact_line=""
-  local last_compact_line=""
+  local compact_state=""
+  local last_compact_state=""
   local last_compact_emit=0
   local compact_emit_seconds=0
+  local -a compact_render_lines=()
   local now=0
 
   while true; do
@@ -218,29 +222,29 @@ watch_status() {
       compact_render=$(printf '%s' "$status_json" | render_status_compact)
       local render_exit=$?
       set -e
-      compact_line="${compact_render%%$'\n'*}"
+      mapfile -t compact_render_lines <<<"$compact_render"
+      compact_line="${compact_render_lines[0]:-}"
+      compact_emit_seconds="${compact_render_lines[1]:-}"
+      compact_state="${compact_render_lines[2]:-}"
+      if [[ -z "$compact_line" || -z "$compact_state" ]]; then
+        echo "❌ Compact status renderer did not return line and state metadata." >&2
+        return 1
+      fi
 
       if [[ -n "$COMPACT_FIXED_EMIT_SECONDS" ]]; then
         compact_emit_seconds="$COMPACT_FIXED_EMIT_SECONDS"
-      else
-        if [[ "$compact_render" != *$'\n'* ]]; then
-          echo "❌ Compact status renderer did not return cadence metadata." >&2
-          return 1
-        fi
-        compact_emit_seconds="${compact_render##*$'\n'}"
-        if [[ ! "$compact_emit_seconds" =~ ^[0-9]+$ ]]; then
-          echo "❌ Invalid compact cadence metadata: $compact_emit_seconds" >&2
-          return 1
-        fi
+      elif [[ ! "$compact_emit_seconds" =~ ^[0-9]+$ ]]; then
+        echo "❌ Invalid compact cadence metadata: $compact_emit_seconds" >&2
+        return 1
       fi
 
       now=$(date '+%s')
       if [[ "$last_compact_emit" -eq 0 ]] || \
-        [[ "$compact_line" != "$last_compact_line" ]] || \
+        [[ "$compact_state" != "$last_compact_state" ]] || \
         (( now - last_compact_emit >= compact_emit_seconds )) || \
         [[ "$render_exit" -eq 0 ]]; then
         echo "$(date '+%H:%M:%S') commit=$COMMIT $compact_line"
-        last_compact_line="$compact_line"
+        last_compact_state="$compact_state"
         last_compact_emit="$now"
       fi
     else
