@@ -103,4 +103,22 @@ describe("IntelWealthChart accessibility", () => {
       "Wealth trajectory chart with 2 portfolio snapshots. It starts at 180d ago $100.00 and ends at Now $250.00.",
     );
   });
+
+  it("uses singular copy for a one-snapshot wealth plot", () => {
+    mockSwrData = {
+      ...makeRecord(),
+      portfolio: {
+        "0d_ago": {
+          ts: 1_765_000_000,
+          data: { tokens: [{ symbol: "CELO", usd: 250 }] },
+        },
+      },
+    };
+
+    render();
+
+    expect(container?.querySelector(".sr-only")?.textContent).toBe(
+      "Wealth trajectory chart with 1 portfolio snapshot. Snapshot: Now $250.00.",
+    );
+  });
 });

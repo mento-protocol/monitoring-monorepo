@@ -185,7 +185,7 @@ export function BreachHistoryChart({ breaches }: Props) {
     trace(ongoing, "Ongoing", "#8b5cf6"),
   ].filter((t) => t.x.length > 0);
 
-  const breachSummary = `Deviation breach history: ${breaches.length} breaches plotted — ${closedCritical.length} critical closed, ${closedNonCritical.length} non-critical closed, ${ongoing.length} ongoing. Marker height is the breach duration on a log scale.`;
+  const breachSummary = `Deviation breach history: ${breaches.length} breaches plotted — ${closedCritical.length} critical closed, ${closedNonCritical.length} non-critical closed in the Within grace series, ${ongoing.length} ongoing. Marker height is the breach duration on a log scale.`;
 
   return (
     <>

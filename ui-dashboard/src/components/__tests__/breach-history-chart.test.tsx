@@ -95,7 +95,7 @@ describe("BreachHistoryChart", () => {
       />,
     );
 
-    expect(html).toContain("1 non-critical closed");
+    expect(html).toContain("1 non-critical closed in the Within grace series");
     expect(html).not.toContain("1 within grace");
   });
 });

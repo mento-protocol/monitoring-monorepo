@@ -148,13 +148,15 @@ function sparkTrace(points: ChartPoint[]) {
 function wealthChartTextAlternative(points: readonly ChartPoint[]) {
   const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
-  return `Wealth trajectory chart with ${points.length} portfolio snapshots.${
-    firstPoint && lastPoint
-      ? ` It starts at ${firstPoint.label} ${formatUSD(
-          firstPoint.usd,
-        )} and ends at ${lastPoint.label} ${formatUSD(lastPoint.usd)}.`
-      : ""
-  }`;
+  const snapshotNoun =
+    points.length === 1 ? "portfolio snapshot" : "portfolio snapshots";
+  if (!firstPoint) {
+    return `Wealth trajectory chart with ${points.length} ${snapshotNoun}.`;
+  }
+  if (!lastPoint || firstPoint === lastPoint) {
+    return `Wealth trajectory chart with ${points.length} ${snapshotNoun}. Snapshot: ${firstPoint.label} ${formatUSD(firstPoint.usd)}.`;
+  }
+  return `Wealth trajectory chart with ${points.length} ${snapshotNoun}. It starts at ${firstPoint.label} ${formatUSD(firstPoint.usd)} and ends at ${lastPoint.label} ${formatUSD(lastPoint.usd)}.`;
 }
 
 export function IntelWealthChart({ address }: { address: string }) {
