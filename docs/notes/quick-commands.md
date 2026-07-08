@@ -83,8 +83,9 @@ pnpm issue:board:test                          # Offline tests for the issue-boa
 # Public config package
 pnpm --filter @mento-protocol/config build     # Build the public protocol metadata package
 npm pack ./shared-config --dry-run             # Inspect the files that would publish to npm
-# Before the first publish tag, configure npm trusted publishing for workflow
-# filename `publish-config.yml` in repository `mento-protocol/monitoring-monorepo`.
+# First-time bootstrap: an npm maintainer must seed @mento-protocol/config once,
+# then configure trusted publishing for workflow filename `publish-config.yml`
+# in repository `mento-protocol/monitoring-monorepo`.
 # Manual workflow_dispatch runs validate and pack only; only config-v* tags publish.
 git tag "config-v$(node -p "require('./shared-config/package.json').version")"  # Create the publish tag from main
 git push origin "config-v$(node -p "require('./shared-config/package.json').version")"  # Publish via .github/workflows/publish-config.yml

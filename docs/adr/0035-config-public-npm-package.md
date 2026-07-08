@@ -49,9 +49,11 @@ and pack the artifact; untagged workflow runs do not publish.
   action pinning and pack-content verification.
 - Manual workflow dispatch is a dry-run path only. Publishing must remain tied
   to a matching `config-v<version>` tag reachable from `origin/main`.
-- Before the first publish tag is pushed, an npm org/package maintainer must
-  configure trusted publishing for repository `mento-protocol/monitoring-monorepo`,
-  workflow filename `publish-config.yml`, and allowed action `npm publish`.
+- npm trusted publishing cannot create a brand-new package. An npm org/package
+  maintainer must seed `@mento-protocol/config` once through an approved
+  maintainer publish, then configure trusted publishing for repository
+  `mento-protocol/monitoring-monorepo`, workflow filename `publish-config.yml`,
+  and allowed action `npm publish`.
 - The publish job intentionally uses a GitHub-hosted runner because npm trusted
   publishing does not support self-hosted or third-party GitHub Actions runners.
 - The public package intentionally keeps the workspace Node 24 engine floor for

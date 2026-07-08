@@ -112,6 +112,21 @@ jobs:
           }
           NODE
 
+      - name: Verify trusted publishing bootstrap
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./shared-config/package.json').version")"
+          if ! npm view @mento-protocol/config version >/dev/null 2>&1; then
+            echo "::error::npm trusted publishing cannot create a brand-new package. Seed @mento-protocol/config once with an approved maintainer publish, then configure trusted publishing and use this tag workflow for later versions."
+            exit 1
+          fi
+
+          if npm view "@mento-protocol/config@${version}" version >/dev/null 2>&1; then
+            echo "::error::@mento-protocol/config@${version} already exists on npm"
+            exit 1
+          fi
+
       - name: Publish to npm
         if: github.ref_type == 'tag'
         run: npm publish ./shared-config --access public --provenance

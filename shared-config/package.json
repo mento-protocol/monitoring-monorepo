@@ -5,6 +5,11 @@
   "type": "module",
   "description": "Public Mento protocol metadata for chain IDs, deployment namespaces, token labels, FX calendars, thresholds, and shared ABIs.",
   "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mento-protocol/monitoring-monorepo",
+    "directory": "shared-config"
+  },
   "files": [
     "dist",
     "deployment-namespaces.json",
