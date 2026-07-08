@@ -3,7 +3,7 @@ title: Agent Issue Workflow
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-28
+last_verified: 2026-07-08
 ---
 
 # Agent Issue Workflow
@@ -75,6 +75,12 @@ Routing labels:
 
 For partial work, keep the issue open. Remove `in-pr` after merge and set
 `agent-ready` or `needs-grooming` based on the remaining acceptance criteria.
+
+If a follow-up PR fully closes an issue that is already labeled `in-pr` from an
+earlier partial PR, `pnpm issue:review` will refuse because the issue is no
+longer `agent-active`. Do not churn labels just to satisfy the helper. Add a
+fresh issue comment linking the final PR, use a closing keyword in the PR body,
+and run `pnpm issue:board sync` after merge.
 
 ## Workboard Commands
 
