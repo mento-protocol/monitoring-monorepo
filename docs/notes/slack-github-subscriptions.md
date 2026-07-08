@@ -98,10 +98,13 @@ ones). If you point `TERRAFORM_APPLY_SLACK_CHANNEL` at a private channel,
 
 ### `TERRAFORM_APPLY_SLACK_CHANNEL` routing variable (IaC-managed)
 
-The step reads `SLACK_CHANNEL: ${{ vars.TERRAFORM_APPLY_SLACK_CHANNEL ||
-'#deploys' }}`. This repository variable is managed by the `platform`
-stack: `terraform/variables.tf`'s `terraform_apply_slack_channel` (default
-`"#deploys"`, preserving current behavior) feeds
+The step reads `SLACK_CHANNEL` from `TERRAFORM_APPLY_SLACK_CHANNEL`, falling
+back to `#deploys`. During the `#ci-operations` retirement, the workflows also
+coerce a stale live `#ci-operations` variable value to `#deploys` so the
+alerts-delivery apply can archive the old channel without creating a silent
+notification sink. This repository variable is managed by the `platform` stack:
+`terraform/variables.tf`'s `terraform_apply_slack_channel` (default `"#deploys"`)
+feeds
 `terraform/github-variables.tf`'s `github_actions_variable
 .terraform_apply_slack_channel`. To reroute the notification, set the tfvar
 and run `pnpm tf apply platform` (manual-apply stack, human-approved local
