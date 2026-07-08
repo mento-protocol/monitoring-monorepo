@@ -45,14 +45,17 @@ hash_inputs() {
 }
 
 playwright_chromium_present() {
-  pnpm --filter @mento-protocol/ui-dashboard exec node -e \
+  (cd ui-dashboard && node -e \
     "const { chromium } = require('@playwright/test'); require('fs').accessSync(chromium.executablePath());" \
-    >/dev/null 2>&1
+    >/dev/null 2>&1)
+}
+
+playwright_host_deps_required() {
+  [ "$(uname -s)" = "Linux" ]
 }
 
 dashboard_sentry_present() {
-  pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')" \
-    >/dev/null 2>&1
+  (cd ui-dashboard && node -e "require.resolve('@sentry/nextjs/package.json')" >/dev/null 2>&1)
 }
 
 echo "▶ Configuring git hooks..."
@@ -69,7 +72,21 @@ fi
 echo "▶ Installing dependencies..."
 deps_marker="node_modules/.setup-deps.sha256"
 deps_marker_pending=0
+deps_install_ran=0
+deps_had_node_modules=0
+[ -d node_modules ] && deps_had_node_modules=1
 deps_hash="$(
+  hash_inputs \
+    pnpm-lock.yaml \
+    pnpm-workspace.yaml \
+    package.json \
+    .npmrc \
+    pnpmfile.cjs \
+    patches \
+    ./*/package.json \
+    alerts/infra/*/package.json || true
+)"
+legacy_deps_hash="$(
   hash_inputs \
     pnpm-lock.yaml \
     pnpm-workspace.yaml \
@@ -82,14 +99,16 @@ deps_hash="$(
     shared-config/src \
     shared-config/tsconfig.json || true
 )"
-if [ -d node_modules ] && [ -s shared-config/dist/chains.js ] &&
+if [ -d node_modules ] &&
   [ -n "$deps_hash" ] &&
-  [ "$(cat "$deps_marker" 2>/dev/null)" = "$deps_hash" ] &&
+  { [ "$(cat "$deps_marker" 2>/dev/null)" = "$deps_hash" ] ||
+    [ "$(cat "$deps_marker" 2>/dev/null)" = "$legacy_deps_hash" ]; } &&
   dashboard_sentry_present; then
-  echo "  deps + shared-config build are up to date; skipping pnpm install"
+  echo "  dependencies are up to date; skipping pnpm install"
+  deps_marker_pending=1
 else
   CI=true pnpm install --frozen-lockfile --prefer-offline
-  pnpm --filter @mento-protocol/monitoring-config build
+  deps_install_ran=1
   deps_marker_pending=1
 fi
 
@@ -99,13 +118,42 @@ if [ "$deps_marker_pending" -eq 1 ] && [ -n "$deps_hash" ]; then
   printf '%s' "$deps_hash" >"$deps_marker"
 fi
 
+echo "▶ Building shared-config when needed..."
+shared_config_marker="node_modules/.setup-shared-config.sha256"
+shared_config_hash="$(hash_inputs shared-config/src shared-config/tsconfig.json || true)"
+if [ -s shared-config/dist/chains.js ] &&
+  [ -n "$shared_config_hash" ] &&
+  [ "$(cat "$shared_config_marker" 2>/dev/null)" = "$shared_config_hash" ]; then
+  echo "  shared-config build is up to date; skipping"
+elif [ "$deps_install_ran" -eq 1 ] &&
+  [ "$deps_had_node_modules" -eq 0 ] &&
+  [ -s shared-config/dist/chains.js ]; then
+  echo "  shared-config was built during pnpm install; refreshing marker"
+  if [ -n "$shared_config_hash" ]; then
+    printf '%s' "$shared_config_hash" >"$shared_config_marker"
+  fi
+else
+  pnpm --filter @mento-protocol/monitoring-config build
+  if [ ! -s shared-config/dist/chains.js ]; then
+    echo "error: shared-config build did not produce shared-config/dist/chains.js." >&2
+    exit 1
+  fi
+  if [ -n "$shared_config_hash" ]; then
+    printf '%s' "$shared_config_hash" >"$shared_config_marker"
+  fi
+fi
+
 echo "▶ Installing Playwright Chromium and host dependencies (ui-dashboard browser tests)..."
 playwright_marker="node_modules/.setup-playwright-chromium.sha256"
 playwright_hash="$(hash_inputs pnpm-lock.yaml ui-dashboard/package.json || true)"
-if [ -n "$playwright_hash" ] &&
-  [ "$(cat "$playwright_marker" 2>/dev/null)" = "$playwright_hash" ] &&
-  playwright_chromium_present; then
-  echo "  Playwright Chromium install is up to date; skipping"
+if playwright_chromium_present &&
+  { ! playwright_host_deps_required ||
+    { [ -n "$playwright_hash" ] &&
+      [ "$(cat "$playwright_marker" 2>/dev/null)" = "$playwright_hash" ]; }; }; then
+  echo "  Playwright Chromium executable is available; skipping installer"
+  if [ -n "$playwright_hash" ]; then
+    printf '%s' "$playwright_hash" >"$playwright_marker"
+  fi
 else
   if pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
     if [ -n "$playwright_hash" ]; then
