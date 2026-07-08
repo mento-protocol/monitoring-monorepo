@@ -56,19 +56,19 @@ variable "terraform_apply_slack_channel" {
     ID for private channels). See `docs/notes/slack-github-subscriptions.md`.
   EOT
   type        = string
-  default     = "#ci-operations"
+  default     = "#deploys"
 
   validation {
     # Accept a `#`-prefixed channel name or a Slack channel ID (C…/G…). A
     # private reroute target must be set by ID — chat.postMessage needs the
     # ID for a private channel even after the bot is invited — so a `^#`-only
     # rule would reject the one value that actually works. Still rejects a
-    # bare name like `ci-operations` (the typo footgun).
+    # bare name like `deploys` (the typo footgun).
     condition = (
       can(regex("^#", var.terraform_apply_slack_channel)) ||
       can(regex("^[CG][A-Z0-9]{8,}$", var.terraform_apply_slack_channel))
     )
-    error_message = "terraform_apply_slack_channel must be a '#'-prefixed channel name (e.g. '#ci-operations') or a Slack channel ID (e.g. C0123ABC456)."
+    error_message = "terraform_apply_slack_channel must be a '#'-prefixed channel name (e.g. '#deploys') or a Slack channel ID (e.g. C0123ABC456)."
   }
 }
 

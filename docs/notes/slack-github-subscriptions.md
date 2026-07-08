@@ -49,7 +49,7 @@ out. (`Aegis App Engine` and `Metrics Bridge` are also deploy workflows but
 do **not** gate on `production-infra`; their cards are status-only, with no
 approval button.)
 
-Canonical subscription (run in the target channel, e.g. `#ci-operations`) —
+Canonical subscription (run in the target channel, `#deploys`) —
 all four gated workflows plus the two status-only deploy workflows:
 
 ```
@@ -64,9 +64,9 @@ string you need to reconcile. Its output detail has been inconsistent in
 practice, so treat **this document** as the source of truth and reconcile the
 live filter against it — not the other way around.
 
-| Channel          | Subscription                     | Why                                                                                                                                                                    |
-| ---------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `#ci-operations` | the `workflows:{…}` filter above | Pairs with the apply-pending prompt (§2) so the plan summary, the `production-infra` approval prompt, and the final workflow-run outcome all land in the same channel. |
+| Channel    | Subscription                     | Why                                                                                                                                                                      |
+| ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `#deploys` | the `workflows:{…}` filter above | Pairs with the apply-pending prompt (§2) so the plan summary, the `production-infra` approval prompt, and the final workflow-run outcome all land in the deploy channel. |
 
 ## 2. `scripts/notify-terraform-apply.mjs` (repo-owned, partially Terraform-managed)
 
@@ -87,7 +87,7 @@ choice so a Slack outage never blocks a Terraform apply, but it also means a
 failed post is **silent** (the step shows green in the Actions UI even when
 nothing reached Slack). The bot's `chat:write.public` OAuth scope lets it
 post to any _public_ channel without being a member, so the default
-`#ci-operations` and any public reroute target need no setup.
+`#deploys` and any public reroute target need no setup.
 
 A **private** channel is the only case that needs the bot present, and there
 is deliberately no Terraform resource for it: Slack's API cannot self-join a
@@ -99,9 +99,9 @@ ones). If you point `TERRAFORM_APPLY_SLACK_CHANNEL` at a private channel,
 ### `TERRAFORM_APPLY_SLACK_CHANNEL` routing variable (IaC-managed)
 
 The step reads `SLACK_CHANNEL: ${{ vars.TERRAFORM_APPLY_SLACK_CHANNEL ||
-'#ci-operations' }}`. This repository variable is managed by the `platform`
+'#deploys' }}`. This repository variable is managed by the `platform`
 stack: `terraform/variables.tf`'s `terraform_apply_slack_channel` (default
-`"#ci-operations"`, preserving current behavior) feeds
+`"#deploys"`, preserving current behavior) feeds
 `terraform/github-variables.tf`'s `github_actions_variable
 .terraform_apply_slack_channel`. To reroute the notification, set the tfvar
 and run `pnpm tf apply platform` (manual-apply stack, human-approved local

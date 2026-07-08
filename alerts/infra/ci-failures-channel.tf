@@ -4,8 +4,8 @@
 #
 # A dedicated `#ci-failures` channel for main-branch GitHub Actions failures
 # from `.github/workflows/notify-slack-on-main-failure.yml`. Terraform
-# apply-pending summaries are intentionally routed to `#ci-operations` instead
-# so approval waits do not look like failed builds.
+# apply-pending summaries are intentionally routed to `#deploys` instead so
+# approval waits stay with deploy approvals rather than failed builds.
 #
 # Same restapi-against-Slack pattern as `channels/sentry-bridge/slack_channels.tf`
 # (per-project channels). Reuses the existing `restapi.slack` provider in

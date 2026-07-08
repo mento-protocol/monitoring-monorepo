@@ -105,7 +105,7 @@ The summary links back to the merged PR when GitHub can associate the main
 commit with a PR, and lists Terraform resource actions by resource type plus
 exact resource address. Attribute values are intentionally omitted from Slack;
 use the workflow run for the full sanitized plan. The default destination is
-`#ci-operations`; the platform stack manages the repository variable
+`#deploys`; the platform stack manages the repository variable
 `TERRAFORM_APPLY_SLACK_CHANNEL` (`terraform_apply_slack_channel` tfvar,
 `terraform/github-variables.tf`) — set the tfvar and apply to route these
 summaries to another channel. See `docs/notes/slack-github-subscriptions.md`

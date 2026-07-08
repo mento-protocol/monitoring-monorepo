@@ -32,7 +32,7 @@ github_token = "ghp_..."
 # the TERRAFORM_APPLY_SLACK_CHANNEL GitHub Actions variable). Default matches
 # the workflows' hardcoded fallback, so leaving this unset changes nothing.
 # See docs/notes/slack-github-subscriptions.md.
-# terraform_apply_slack_channel = "#ci-operations"
+# terraform_apply_slack_channel = "#deploys"
 
 # ── Upstash ───────────────────────────────────────────────────────────────────
 # API credentials at: console.upstash.com → Account → API Keys
