@@ -130,6 +130,13 @@ a terminal state. If approval was granted before the apply job existed, GitHub
 can require a fresh `production-infra` approval after the plan creates the apply
 job.
 
+If an older queued or waiting run is intentionally approved because it carries
+needed state reconciliation, keep watching the same deploy workflow until every
+queued `main` run reaches a terminal state. Later queued jobs can pass the
+`production-infra` gate without an obvious second prompt, so do not call a drift
+issue fixed from the first successful apply alone. Verify the live resource and
+run `terraform-drift.yml` before closing the drift issue.
+
 ## GitHub Environment Setup
 
 Pre-merge requirement for the production-environment split in issue #762:
