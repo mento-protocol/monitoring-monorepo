@@ -88,6 +88,8 @@ pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
 pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-monitoring
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
+# Secrets are IaC-first; do not create, rotate, or overwrite them manually
+# unless the owning integration/runbook explicitly allows the path.
 pnpm aegis:agent:seed-secrets # Seed/rotate Alloy remote-write Secret Manager versions
 pnpm aegis:agent:deploy       # Deploy the Grafana Alloy App Engine collector
 pnpm aegis:tf:init / aegis:tf:plan
@@ -98,6 +100,7 @@ pnpm tf list                  # Registered Terraform stacks from terraform.stack
 pnpm tf validate <stack>      # fmt/init -backend=false/validate for one stack
 pnpm infra:init               # Init providers (first time or after changes)
 pnpm infra:plan               # Preview infrastructure changes
+# Never run apply without explicit human approval. Plan first and surface the diff.
 pnpm infra:apply              # Apply infrastructure changes
 # Event-driven alerts stack (Cloud Functions + Slack channels/usergroups + Sentry bridge + QuickNode webhooks):
 pnpm alerts:infra:init / alerts:infra:plan

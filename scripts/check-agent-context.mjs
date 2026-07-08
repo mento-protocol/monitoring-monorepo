@@ -190,6 +190,7 @@ const delegatedOperatingRuleNotes = [
   "docs/notes/codex-cloud-setup.md",
   "docs/notes/cross-protocol-context.md",
   "docs/notes/pr-ready-state.md",
+  "docs/notes/quick-commands.md",
   "docs/notes/spoken-attention-nudge.md",
   "docs/notes/worktree-and-web-setup.md",
 ];
