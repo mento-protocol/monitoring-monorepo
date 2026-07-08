@@ -82,14 +82,14 @@ config diffs with placeholders. The alerts-rules PR plan is targeted to
 sources authenticate during plan even with `-refresh=false`; trusted main/apply
 plans remain the source of truth for refreshed Grafana diffs. The
 alerts-delivery PR plan is also narrower by design: it runs init/validate plus a
-targeted secretless plan for `module.onchain_event_handler` and
-`terraform_data.pr_plan_secretless_guard`. The Cloud Function target exercises a
-real runtime-secret surface without production secrets; the sentinel covers
-Sentry, Slack, QuickNode, and GitHub provider/resource surfaces that perform
-authenticated plan-time checks and cannot run with dummy credentials. Reviewers
-should treat the main-branch re-plan behind `production-infra` as the source of
-truth for alerts-rules and alerts-delivery full-stack diffs, third-party
-provider changes, and all secret value changes.
+targeted secretless plan for `terraform_data.pr_plan_secretless_guard`. The
+handler module is not yet safe to target from PRs because it depends on Slack
+channel outputs and placeholder-backed Secret Manager versions; the sentinel
+also covers Sentry, Slack, QuickNode, and GitHub provider/resource surfaces that
+perform authenticated plan-time checks and cannot run with dummy credentials.
+Reviewers should treat the main-branch re-plan behind `production-infra` as the
+source of truth for alerts-rules and alerts-delivery full-stack diffs,
+third-party provider changes, and all secret value changes.
 See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
 for the current secret classification and migration posture.
 

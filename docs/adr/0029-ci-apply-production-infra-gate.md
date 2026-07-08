@@ -33,12 +33,11 @@ re-plan before any production mutation. The `alerts-rules` PR plan is targeted
 to `terraform_data.pr_plan_secretless_guard` because its Grafana folder data
 sources authenticate during plan even with `-refresh=false`; trusted
 push/dispatch and apply paths run the full graph. The `alerts-delivery` PR plan
-is targeted to `module.onchain_event_handler` plus
-`terraform_data.pr_plan_secretless_guard`: the Cloud Function target is a real
-runtime-secret surface that can plan with placeholders, while the sentinel marks
-the Sentry/Slack/QuickNode/GitHub provider graph that performs authenticated
-plan-time checks and cannot run with dummy credentials. The `platform` stack
-stays manual-plan/manual-apply.
+is targeted to `terraform_data.pr_plan_secretless_guard`: the handler module
+still depends on Slack channel outputs and placeholder-backed Secret Manager
+versions, while the Sentry/Slack/QuickNode/GitHub provider graph performs
+authenticated plan-time checks and cannot run with dummy credentials. The
+`platform` stack stays manual-plan/manual-apply.
 Routine service deploys use a separate `production-services` environment that records
 history but doesn't require manual approval.
 

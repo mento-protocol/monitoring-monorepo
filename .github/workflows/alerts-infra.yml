@@ -16,26 +16,24 @@ name: Alerts Infra
 #     `org-terraform-plan-readonly@…seed` via `-backend-config`, points the
 #     google provider at the same read-only SA via
 #     `TF_VAR_terraform_service_account`, and runs a targeted `terraform plan`
-#     against the GCP-only Cloud Function module plus
-#     `terraform_data.pr_plan_secretless_guard` with `-lock=false
-#     -refresh=false`. `module.onchain_event_handler` is intentionally included:
-#     it owns runtime-secret Secret Manager versions and Cloud Function source
-#     wiring, but its plan-time graph stays on Google/archive/local state and can
-#     run with dummy TF_VAR credentials. The sentinel keeps a minimal Terraform
-#     execution check for the Sentry/Slack/QuickNode/GitHub provider/resource
-#     surfaces that perform authenticated plan-time checks and still cannot run
-#     with placeholders. Tradeoff: the PR plan remains partial and won't surface
-#     full-stack diffs or out-of-band drift; that's `terraform-drift.yml`'s job
-#     (full refresh, write SA) and the apply-time re-plan's. The targeted
-#     treatment is gated on `github.event_name == 'pull_request'`: the same plan
-#     job on push / workflow_dispatch keeps the write deployer SA + full refresh
-#     + locking, so the apply-gating plan (incl. drift reconciled via manual
-#     dispatch) still synchronizes remote state before deciding changes.
+#     against `terraform_data.pr_plan_secretless_guard` with `-lock=false
+#     -refresh=false`. The sentinel target is load-bearing: the handler module
+#     currently depends on Slack channel outputs and Secret Manager versions fed
+#     by placeholder TF_VARs, while Sentry, Slack, QuickNode, and GitHub
+#     provider/resource surfaces perform authenticated plan-time checks. A fuller
+#     secretless PR target needs those dependencies split first. Tradeoff: the PR
+#     plan remains partial and won't surface full-stack diffs or out-of-band
+#     drift; that's `terraform-drift.yml`'s job (full refresh, write SA) and the
+#     apply-time re-plan's. The targeted treatment is gated on
+#     `github.event_name == 'pull_request'`: the same plan job on push /
+#     workflow_dispatch keeps the write deployer SA + full refresh + locking, so
+#     the apply-gating plan (incl. drift reconciled via manual dispatch) still
+#     synchronizes remote state before deciding changes.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
 #     `terraform plan -detailed-exitcode` and emits a `has-changes` job
-#     output. On PRs it posts a sticky comment with the secretless target plan.
+#     output. On PRs it posts a sticky comment with the secretless sentinel plan.
 #   - `apply` job only runs on push/dispatch to main, only when the plan
 #     reported actual changes, and only for stack-root changes or explicit
 #     workflow_dispatch. Workflow/notifier-only edits can still plan, but they
@@ -285,17 +283,14 @@ jobs:
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
         # (HashiCorp docs); apply re-plans at gate-approval time instead.
         # PR plans run read-only: `-lock=false` (the read-only plan SA, objectViewer
-        # only, can't write the GCS lock object) + `-refresh=false` + explicit
-        # targets. `module.onchain_event_handler` is the real secret-bearing
-        # GCP Cloud Function surface that can plan with dummy runtime secrets.
-        # `terraform_data.pr_plan_secretless_guard` remains the marker for
-        # provider-auth surfaces this PR lane still excludes. Targeting is
-        # load-bearing because this stack's Sentry, Slack, QuickNode, and GitHub
-        # surfaces use authenticated provider configuration or plan-time reads;
-        # PRs intentionally receive dummy TF_VAR credentials, so a full PR graph
-        # would fail before proving anything useful. `terraform validate` still
-        # checks full config shape; push / workflow_dispatch plans and gated
-        # applies below run the full graph with production credentials.
+        # only, can't write the GCS lock object) + `-refresh=false` + the built-in
+        # sentinel target. Targeting is load-bearing because this stack's handler
+        # module still depends on Slack channel outputs and placeholder-backed
+        # Secret Manager versions, while Sentry, Slack, QuickNode, and GitHub
+        # surfaces use authenticated provider configuration or plan-time reads.
+        # `terraform validate` still checks full config shape; push /
+        # workflow_dispatch plans and gated applies below run the full graph with
+        # production credentials.
         # push / workflow_dispatch (the apply-gating path, incl. drift reconcile)
         # keep full refresh + locking on the write SA, so they detect out-of-band
         # drift and set `has-changes` correctly. Drift detection also runs in
@@ -312,7 +307,6 @@ jobs:
               -input=false \
               -lock=false \
               -refresh=false \
-              -target=module.onchain_event_handler \
               -target=terraform_data.pr_plan_secretless_guard \
               > /tmp/tf-plan.raw 2>&1
           else
@@ -383,14 +377,14 @@ jobs:
               if [ "$EVENT_NAME" = "pull_request" ]; then
                 if [ "$STACK_CHANGED" = "true" ]; then
                   if [ "$HAS_CHANGES" = "true" ]; then
-                    echo '**Status:** 📝 PR secretless target plan changed — trusted main plan will decide apply'
+                    echo '**Status:** 📝 PR secretless sentinel plan changed — trusted main plan will decide apply'
                   else
-                    echo '**Status:** ✅ PR secretless target plan clean — trusted main plan will decide apply'
+                    echo '**Status:** ✅ PR secretless sentinel plan clean — trusted main plan will decide apply'
                   fi
                 elif [ "$HAS_CHANGES" = "true" ]; then
-                  echo '**Status:** ⚠️ PR secretless target drift detected — stack path unchanged, apply will skip'
+                  echo '**Status:** ⚠️ PR secretless sentinel drift detected — stack path unchanged, apply will skip'
                 else
-                  echo '**Status:** ✅ PR secretless target plan clean — stack path unchanged, apply will skip'
+                  echo '**Status:** ✅ PR secretless sentinel plan clean — stack path unchanged, apply will skip'
                 fi
               elif [ "$HAS_CHANGES" = "true" ]; then
                 if [ "$STACK_CHANGED" = "true" ]; then
@@ -475,13 +469,13 @@ jobs:
                 if (stackChanged) {
                   statusIcon = hasChanges ? "📝" : "✅";
                   statusText = hasChanges
-                    ? "PR secretless target plan changed — trusted main plan will decide apply"
-                    : "PR secretless target plan clean — trusted main plan will decide apply";
+                    ? "PR secretless sentinel plan changed — trusted main plan will decide apply"
+                    : "PR secretless sentinel plan clean — trusted main plan will decide apply";
                 } else {
                   statusIcon = hasChanges ? "⚠️" : "✅";
                   statusText = hasChanges
-                    ? "PR secretless target drift detected — stack path unchanged, apply will skip"
-                    : "PR secretless target plan clean — stack path unchanged, apply will skip";
+                    ? "PR secretless sentinel drift detected — stack path unchanged, apply will skip"
+                    : "PR secretless sentinel plan clean — stack path unchanged, apply will skip";
                 }
               } else {
                 statusIcon = hasChanges ? (stackChanged ? "📝" : "⚠️") : "✅";
