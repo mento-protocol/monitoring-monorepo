@@ -98,6 +98,7 @@ function createContextCheckFixture(readmeContent) {
     "codex-cloud-setup",
     "cross-protocol-context",
     "pr-ready-state",
+    "quick-commands",
     "spoken-attention-nudge",
     "worktree-and-web-setup",
   ]) {
