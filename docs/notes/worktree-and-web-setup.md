@@ -27,6 +27,15 @@ Worktrunk-created worktrees (`wt switch --create` / `wt switch -c`) run the
 same setup script automatically through `.config/wt.toml` as a blocking
 `pre-start` hook before any launch command configured with `-x` starts.
 
+The setup script optimizes repeated local worktrees by keeping dependency graph
+validity, `shared-config` build validity, Playwright Chromium availability, and
+Envio codegen on separate markers backed by real output checks. A source-only
+`shared-config` change does not force a dependency relink, and an
+already-installed Playwright Chromium binary does not rerun the installer for
+every fresh macOS worktree. Linux still requires a per-worktree successful
+Playwright installer marker because `--with-deps` also provisions host libraries
+there.
+
 ## Claude Code on the web setup
 
 Claude Code on the web sessions run in a hosted container that does not inherit
