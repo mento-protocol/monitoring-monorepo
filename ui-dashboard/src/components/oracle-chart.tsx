@@ -433,23 +433,35 @@ function selectOraclePlotData({
   baseline: number | null;
   thresholdRatio: number | null;
   breakerConfigStatus: BreakerConfigStatus;
-}): OraclePlotData {
+}): {
+  plotData: OraclePlotData;
+  summaryPointCount: number;
+  summaryPointKind: "daily candle" | "price sample";
+} {
   const daily = resolveDailyView({ visibleRange, showAll, dailyCandles });
   if (daily.active) {
-    return buildDailyPlotData({
-      candles: daily.candles,
+    return {
+      plotData: buildDailyPlotData({
+        candles: daily.candles,
+        baseline,
+        thresholdRatio,
+      }),
+      summaryPointCount: daily.candles.length,
+      summaryPointKind: "daily candle",
+    };
+  }
+  return {
+    plotData: buildOraclePlotData({
+      snapshots: visibleSnapshots,
+      token0Symbol,
+      token1Symbol,
       baseline,
       thresholdRatio,
-    });
-  }
-  return buildOraclePlotData({
-    snapshots: visibleSnapshots,
-    token0Symbol,
-    token1Symbol,
-    baseline,
-    thresholdRatio,
-    breakerConfigStatus,
-  });
+      breakerConfigStatus,
+    }),
+    summaryPointCount: visibleSnapshots.length,
+    summaryPointKind: "price sample",
+  };
 }
 
 /**
@@ -494,7 +506,7 @@ function useOracleChartModel({
     thresholdRatio,
     breakerConfigStatus,
   );
-  const plotData = useMemo(
+  const selectedPlot = useMemo(
     () =>
       selectOraclePlotData({
         visibleRange,
@@ -519,6 +531,7 @@ function useOracleChartModel({
       breakerConfigStatus,
     ],
   );
+  const plotData = selectedPlot.plotData;
   const shapes = useMemo(
     () => buildOracleShapes(plotData.yMax, baseline, thresholdRatio),
     [plotData.yMax, baseline, thresholdRatio],
@@ -541,26 +554,42 @@ function useOracleChartModel({
     () => [plotData.deviationTrace],
     [plotData.deviationTrace],
   );
-  return { traceData, layout };
+  return {
+    traceData,
+    layout,
+    summaryPointCount: selectedPlot.summaryPointCount,
+    summaryPointKind: selectedPlot.summaryPointKind,
+  };
 }
 
-function oracleAltText(
-  sym0: string,
-  sym1: string,
-  sampleCount: number,
-  breakerReady: boolean,
-  hasPersistedBands: boolean,
-): string {
-  const samples = `${sampleCount} price sample${sampleCount === 1 ? "" : "s"}`;
-  // Coverage tiers: with a live breaker config every sample is colored; with
-  // only persisted at-the-time bands, coverage is partial (samples predating a
+function oracleAltText({
+  sym0,
+  sym1,
+  pointCount,
+  pointKind,
+  breakerReady,
+  hasPersistedBands,
+}: {
+  sym0: string;
+  sym1: string;
+  pointCount: number;
+  pointKind: "daily candle" | "price sample";
+  breakerReady: boolean;
+  hasPersistedBands: boolean;
+}): string {
+  const plottedPoints = `${pointCount} ${pointKind}${
+    pointCount === 1 ? "" : "s"
+  }`;
+  const pointPlural = pointKind === "daily candle" ? "candles" : "samples";
+  // Coverage tiers: with a live breaker config every point is colored; with
+  // only persisted at-the-time bands, coverage is partial (points predating a
   // stored band aren't colored); with neither there is no band context at all.
   const bandClause = breakerReady
     ? ", each colored by whether it sat inside its breaker band"
     : hasPersistedBands
-      ? ", with samples colored by breaker-band membership only where a persisted band exists"
+      ? `, with ${pointPlural} colored by breaker-band membership only where a persisted band exists`
       : "; breaker band data is currently unavailable";
-  return `Oracle price versus breaker band for ${sym0}/${sym1}: ${samples} plotted${bandClause}.`;
+  return `Oracle price versus breaker band for ${sym0}/${sym1}: ${plottedPoints} plotted${bandClause}.`;
 }
 
 export function OracleChart({
@@ -597,19 +626,20 @@ export function OracleChart({
   );
 
   // Decimate + build a memoized, referentially-stable trace/layout (see hook).
-  const { traceData, layout } = useOracleChartModel({
-    snapshots,
-    visibleRange,
-    showAll,
-    dailyCandles,
-    token0Symbol,
-    token1Symbol,
-    baseline,
-    thresholdRatio,
-    breakerConfigStatus,
-    applyInitialRange,
-    uirevision,
-  });
+  const { traceData, layout, summaryPointCount, summaryPointKind } =
+    useOracleChartModel({
+      snapshots,
+      visibleRange,
+      showAll,
+      dailyCandles,
+      token0Symbol,
+      token1Symbol,
+      baseline,
+      thresholdRatio,
+      breakerConfigStatus,
+      applyInitialRange,
+      uirevision,
+    });
 
   // One React state update per animation frame instead of per wheel tick;
   // `uirevision` (= `${networkId}:${poolId}`) cancels a pending frame on a
@@ -638,13 +668,14 @@ export function OracleChart({
     (s) => s.breakerBaselineAtSnapshot != null,
   );
 
-  const oracleSummary = oracleAltText(
-    token0Symbol,
-    token1Symbol,
-    snapshots.length,
-    breakerConfigStatus === "ready",
+  const oracleSummary = oracleAltText({
+    sym0: token0Symbol,
+    sym1: token1Symbol,
+    pointCount: summaryPointCount,
+    pointKind: summaryPointKind,
+    breakerReady: breakerConfigStatus === "ready",
     hasPersistedBands,
-  );
+  });
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
@@ -1084,4 +1115,5 @@ export const __test__ = {
   buildOracleXaxis,
   buildOraclePlotData,
   buildOracleLayout,
+  oracleAltText,
 };

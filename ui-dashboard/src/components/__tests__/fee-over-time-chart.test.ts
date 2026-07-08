@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildRevenueChartFigure,
   revenueChartEmptyMessage,
+  revenueChartSummary,
   revenueWeekOverWeekChangePct,
 } from "@/components/fee-over-time-chart";
 import type { CanonicalRevenueDailyPoint } from "@/lib/canonical-revenue";
@@ -55,6 +56,38 @@ describe("revenueChartEmptyMessage", () => {
   it("uses partial-data copy when input failures explain the empty chart", () => {
     expect(revenueChartEmptyMessage(["Swap fee history failed to load."])).toBe(
       "Revenue history is partial because some inputs failed to load",
+    );
+  });
+});
+
+describe("revenueChartSummary", () => {
+  it("includes the partial-data caveat for non-empty chart summaries", () => {
+    expect(
+      revenueChartSummary({
+        isLoading: false,
+        hasAnyRevenue: true,
+        partialReasons: ["Reserve yield failed to load."],
+        activeRangeLabel: "30D",
+        headline: "≈ $123.45",
+        change: null,
+      }),
+    ).toBe(
+      "Total revenue over the 30D range: ≈ $123.45. Revenue data is partial because some inputs failed to load.",
+    );
+  });
+
+  it("keeps complete non-empty summaries free of partial-data caveats", () => {
+    expect(
+      revenueChartSummary({
+        isLoading: false,
+        hasAnyRevenue: true,
+        partialReasons: [],
+        activeRangeLabel: "1W",
+        headline: "$210.00",
+        change: 4.2,
+      }),
+    ).toBe(
+      "Total revenue over the 1W range: $210.00, up 4.20% week-over-week.",
     );
   });
 });

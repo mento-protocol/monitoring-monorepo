@@ -75,4 +75,27 @@ describe("BreachHistoryChart", () => {
     expect(customdata?.[0]).toBe("1h 15m");
     expect(customdata?.[1]).toBe("15m");
   });
+
+  it("summarizes long-but-non-critical closed breaches as non-critical, not within grace", () => {
+    const html = renderToStaticMarkup(
+      <BreachHistoryChart
+        breaches={[
+          {
+            ...BASE_BREACH,
+            id: "closed-low-severity",
+            endedAt: "1704490201",
+            endedAtBlock: "2",
+            durationSeconds: "3601",
+            criticalDurationSeconds: "0",
+            peakPriceDifference: "10400",
+            endedByEvent: "rebalance",
+            endedByTxHash: "0xend",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("1 non-critical closed in the Within grace series");
+    expect(html).not.toContain("1 within grace");
+  });
 });

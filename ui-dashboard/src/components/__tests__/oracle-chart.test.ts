@@ -13,6 +13,7 @@ const {
   buildOracleXaxis,
   buildOraclePlotData,
   buildOracleLayout,
+  oracleAltText,
 } = __test__;
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,38 @@ describe("formatOracleChartHoverText", () => {
       token1Symbol: "USDC",
     });
     expect(breach).toContain("would have tripped at the time");
+  });
+});
+
+describe("oracleAltText", () => {
+  it("describes daily mode as daily candles instead of raw price samples", () => {
+    expect(
+      oracleAltText({
+        sym0: "USDm",
+        sym1: "USDC",
+        pointCount: 31,
+        pointKind: "daily candle",
+        breakerReady: true,
+        hasPersistedBands: false,
+      }),
+    ).toBe(
+      "Oracle price versus breaker band for USDm/USDC: 31 daily candles plotted, each colored by whether it sat inside its breaker band.",
+    );
+  });
+
+  it("keeps raw mode described as price samples", () => {
+    expect(
+      oracleAltText({
+        sym0: "USDm",
+        sym1: "USDC",
+        pointCount: 1,
+        pointKind: "price sample",
+        breakerReady: false,
+        hasPersistedBands: true,
+      }),
+    ).toBe(
+      "Oracle price versus breaker band for USDm/USDC: 1 price sample plotted, with samples colored by breaker-band membership only where a persisted band exists.",
+    );
   });
 });
 

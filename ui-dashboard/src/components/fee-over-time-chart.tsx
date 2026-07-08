@@ -88,6 +88,41 @@ export function revenueChartEmptyMessage(
     : "No revenue history indexed yet";
 }
 
+export function revenueChartSummary({
+  isLoading,
+  hasAnyRevenue,
+  partialReasons,
+  activeRangeLabel,
+  headline,
+  change,
+}: {
+  isLoading: boolean;
+  hasAnyRevenue: boolean;
+  partialReasons: readonly string[];
+  activeRangeLabel: string;
+  headline: string;
+  change: number | null;
+}): string {
+  if (isLoading) return "Total revenue chart is loading.";
+  if (!hasAnyRevenue) {
+    return partialReasons.length > 0
+      ? `Total revenue chart: revenue data is partially unavailable for the ${activeRangeLabel} range.`
+      : `Total revenue chart: no revenue in the ${activeRangeLabel} range.`;
+  }
+
+  const trend =
+    change === null
+      ? ""
+      : `, ${change >= 0 ? "up" : "down"} ${Math.abs(change).toFixed(
+          2,
+        )}% week-over-week`;
+  const partialCaveat =
+    partialReasons.length > 0
+      ? " Revenue data is partial because some inputs failed to load."
+      : "";
+  return `Total revenue over the ${activeRangeLabel} range: ${headline}${trend}.${partialCaveat}`;
+}
+
 function buildTrace(args: {
   xs: string[];
   y: Array<number | null>;
@@ -360,19 +395,14 @@ export function TotalRevenueChart({
   const activeRangeLabel =
     RANGES.find((item) => item.key === range)?.label ?? String(range);
   const chartAriaLabel = `Total revenue chart, ${activeRangeLabel} range`;
-  const chartSummary = isLoading
-    ? "Total revenue chart is loading."
-    : !hasAnyRevenue
-      ? partialReasons.length > 0
-        ? `Total revenue chart: revenue data is partially unavailable for the ${activeRangeLabel} range.`
-        : `Total revenue chart: no revenue in the ${activeRangeLabel} range.`
-      : `Total revenue over the ${activeRangeLabel} range: ${headline}${
-          change === null
-            ? ""
-            : `, ${change >= 0 ? "up" : "down"} ${Math.abs(change).toFixed(
-                2,
-              )}% week-over-week`
-        }.`;
+  const chartSummary = revenueChartSummary({
+    isLoading,
+    hasAnyRevenue,
+    partialReasons,
+    activeRangeLabel,
+    headline,
+    change,
+  });
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">

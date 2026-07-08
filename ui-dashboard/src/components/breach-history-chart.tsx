@@ -104,7 +104,7 @@ export function BreachHistoryChart({ breaches }: Props) {
   // amber "Within grace" colouring stays accurate ("not critical") even
   // for the long-but-low ones.
   const closedCritical: Marker[] = [];
-  const closedInGrace: Marker[] = [];
+  const closedNonCritical: Marker[] = [];
   const ongoing: Marker[] = [];
 
   for (const b of breaches) {
@@ -150,7 +150,7 @@ export function BreachHistoryChart({ breaches }: Props) {
     };
     if (isOpen) ongoing.push(marker);
     else if (critical > 0) closedCritical.push(marker);
-    else closedInGrace.push(marker);
+    else closedNonCritical.push(marker);
   }
 
   const trace = (markers: Marker[], name: string, color: string) => ({
@@ -181,11 +181,11 @@ export function BreachHistoryChart({ breaches }: Props) {
 
   const data = [
     trace(closedCritical, "Past grace (CRITICAL)", "#ef4444"),
-    trace(closedInGrace, "Within grace", "#f59e0b"),
+    trace(closedNonCritical, "Within grace", "#f59e0b"),
     trace(ongoing, "Ongoing", "#8b5cf6"),
   ].filter((t) => t.x.length > 0);
 
-  const breachSummary = `Deviation breach history: ${breaches.length} breaches plotted — ${closedCritical.length} past the 1-hour grace (critical), ${closedInGrace.length} within grace, ${ongoing.length} ongoing. Marker height is the breach duration on a log scale.`;
+  const breachSummary = `Deviation breach history: ${breaches.length} breaches plotted — ${closedCritical.length} critical closed, ${closedNonCritical.length} non-critical closed in the Within grace series, ${ongoing.length} ongoing. Marker height is the breach duration on a log scale.`;
 
   return (
     <>
