@@ -9,8 +9,14 @@ type NavLinkItem = {
   kind: "brand" | "section";
 };
 
-export const PUBLIC_NAV_LINKS: readonly NavLinkItem[] = [
-  { href: "/", label: "Mento Analytics", kind: "brand" },
+export const BRAND_NAV_LINK: NavLinkItem = {
+  href: "/",
+  label: "Mento Analytics",
+  kind: "brand",
+};
+
+const PUBLIC_NAV_LINKS: readonly NavLinkItem[] = [
+  BRAND_NAV_LINK,
   { href: "/pools", label: "Pools", kind: "section" },
   { href: "/volume", label: "Volume", kind: "section" },
   { href: "/stables", label: "Stables", kind: "section" },

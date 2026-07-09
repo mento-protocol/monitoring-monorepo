@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useState } from "react";
 import { AuthStatus } from "@/components/auth-status";
-import { NavLinks, PUBLIC_NAV_LINKS } from "@/components/nav-links";
+import { BRAND_NAV_LINK, NavLinks } from "@/components/nav-links";
 
 const mobileLinkClassName =
   "rounded-md px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-white focus:bg-slate-800 focus:text-white";
@@ -11,7 +11,6 @@ const mobileLinkClassName =
 export function ResponsiveNav() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const mobilePanelId = useId();
-  const brandLink = PUBLIC_NAV_LINKS[0]!;
 
   useEffect(() => {
     if (!mobileOpen) return undefined;
@@ -32,11 +31,11 @@ export function ResponsiveNav() {
     <div className="w-full">
       <div className="flex items-center gap-3 lg:hidden">
         <Link
-          href={brandLink.href}
+          href={BRAND_NAV_LINK.href}
           className="text-base font-bold text-white transition-colors hover:text-indigo-400"
           onClick={closeMobileMenu}
         >
-          {brandLink.label}
+          {BRAND_NAV_LINK.label}
         </Link>
         <button
           type="button"
@@ -61,7 +60,7 @@ export function ResponsiveNav() {
               onNavigate={closeMobileMenu}
             />
           </div>
-          <AuthStatus variant="panel" />
+          <AuthStatus variant="panel" onClose={closeMobileMenu} />
         </div>
       )}
 

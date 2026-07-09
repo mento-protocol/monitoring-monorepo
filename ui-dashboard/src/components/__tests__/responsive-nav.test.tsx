@@ -15,8 +15,16 @@ vi.mock("next-auth/react", () => ({
 }));
 
 vi.mock("@/components/auth-status", () => ({
-  AuthStatus: ({ variant = "inline" }: { variant?: string }) => (
-    <div data-auth-status={variant}>Auth</div>
+  AuthStatus: ({
+    variant = "inline",
+    onClose,
+  }: {
+    variant?: string;
+    onClose?: () => void;
+  }) => (
+    <button type="button" data-auth-status={variant} onClick={onClose}>
+      Auth
+    </button>
   ),
 }));
 
@@ -114,6 +122,28 @@ describe("ResponsiveNav", () => {
     act(() => {
       firstLink.click();
     });
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(panelById(panelId)).toBeNull();
+  });
+
+  it("closes the mobile menu when panel auth status activates", () => {
+    renderNav();
+
+    const button = menuButton();
+    const panelId = button.getAttribute("aria-controls")!;
+    act(() => {
+      button.click();
+    });
+
+    const authButton = panelById(panelId)?.querySelector("[data-auth-status]");
+    if (!(authButton instanceof HTMLButtonElement)) {
+      throw new Error("panel auth button not found");
+    }
+
+    act(() => {
+      authButton.click();
+    });
+
     expect(button.getAttribute("aria-expanded")).toBe("false");
     expect(panelById(panelId)).toBeNull();
   });

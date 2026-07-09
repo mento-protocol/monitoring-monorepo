@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useSWRConfig } from "swr";
 import Link from "next/link";
@@ -30,12 +30,14 @@ export function buildSignInHref(pathname: string, search: string): string {
 
 type AuthStatusProps = {
   variant?: "inline" | "panel";
+  onClose?: () => void;
 };
 
-export function AuthStatus({ variant = "inline" }: AuthStatusProps) {
+export function AuthStatus({ variant = "inline", onClose }: AuthStatusProps) {
   const { data: session, status } = useSession();
   const { mutate } = useSWRConfig();
   const liveLocation = useLiveLocation();
+  const [signingOut, setSigningOut] = useState(false);
 
   // Attach the authenticated user's email to every Sentry event so issues
   // are filterable by who's affected. Internal-only tool (mentolabs.xyz
@@ -62,6 +64,7 @@ export function AuthStatus({ variant = "inline" }: AuthStatusProps) {
     return (
       <Link
         href={renderHref}
+        {...(onClose ? { onClick: onClose } : {})}
         className={
           variant === "panel"
             ? "block rounded-md border border-slate-800 bg-slate-900/80 px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:border-slate-700 hover:text-white"
@@ -74,10 +77,17 @@ export function AuthStatus({ variant = "inline" }: AuthStatusProps) {
   }
 
   const handleSignOut = async () => {
-    await mutate((key: unknown) => isAddressLabelsSWRKey(key), undefined, {
-      revalidate: false,
-    });
-    await signOut();
+    if (signingOut) return;
+    onClose?.();
+    setSigningOut(true);
+    try {
+      await mutate((key: unknown) => isAddressLabelsSWRKey(key), undefined, {
+        revalidate: false,
+      });
+      await signOut();
+    } finally {
+      setSigningOut(false);
+    }
   };
 
   return (
@@ -91,7 +101,7 @@ export function AuthStatus({ variant = "inline" }: AuthStatusProps) {
       <span
         className={
           variant === "panel"
-            ? "text-xs text-slate-400"
+            ? "min-w-0 flex-1 truncate text-xs text-slate-400"
             : "hidden max-w-44 truncate text-xs text-slate-400 xl:inline"
         }
       >
@@ -100,7 +110,8 @@ export function AuthStatus({ variant = "inline" }: AuthStatusProps) {
       <button
         type="button"
         onClick={handleSignOut}
-        className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+        disabled={signingOut}
+        className="text-xs text-slate-500 transition-colors hover:text-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
       >
         Sign out
       </button>
