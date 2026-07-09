@@ -1,4 +1,5 @@
 import { TableSkeleton } from "@/components/skeletons";
+import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
 
 // Matches the real pool detail layout: breadcrumb + header card + health bar
 // + charts row + 7 tabs (see TABS in page.tsx) + a 6-column default table.
@@ -11,14 +12,19 @@ import { TableSkeleton } from "@/components/skeletons";
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
 
 // Mirrors TimeSeriesChartCard: p-5 sm:p-6 card, text-sm title, 3xl/4xl mono
-// headline, h-5 change row, then a plot area at ROW_CHART_HEIGHT_PX (200).
+// headline, h-5 change row, then a plot area at ROW_CHART_HEIGHT_PX — the
+// real constant (not a hardcoded class) so the skeleton can't drift if the
+// chart height ever changes.
 function ChartCardSkeleton() {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
       <div className={`h-5 w-28 ${SHIMMER}`} />
       <div className={`mt-1 h-10 w-36 ${SHIMMER}`} />
       <div className={`mt-1 h-5 w-32 ${SHIMMER}`} />
-      <div className="mt-4 h-[200px] animate-pulse rounded bg-slate-800/30" />
+      <div
+        className="mt-4 animate-pulse rounded bg-slate-800/30"
+        style={{ height: ROW_CHART_HEIGHT_PX }}
+      />
     </div>
   );
 }
