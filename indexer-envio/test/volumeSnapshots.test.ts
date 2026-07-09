@@ -16,18 +16,22 @@ import {
   type VolumeContext,
 } from "../src/volumeSnapshots.js";
 
-// Real addresses on Celo (chain 42220).
-const CHAIN = 42220;
+// Real addresses on Celo (chain 42220) unless a test names a different chain.
+const CHAIN_CELO = 42220;
+const CHAIN_MONAD = 143;
+const CHAIN = CHAIN_CELO;
 const TRADER_A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const TRADER_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const SQUID = "0xce16f69375520ab01377ce7b88f5ba8c48f8d666";
 const LIFI = "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae";
+const ZEROX_MONAD = "0x0000000000001ff3684f28c67538d4d072c22734";
 const CELO_BROKER = "0x777a8255ca72412f0d706dc03c9d1987306b4cad";
 const MENTO_REBALANCER_EOA = "0xaa8299fc6a685b5f9ce9bda8d0b3ea3d54731976";
 const POOL_ADDR_1 = "0x1111111111111111111111111111111111111111";
 const POOL_ADDR_2 = "0x2222222222222222222222222222222222222222";
 const POOL_ID_1 = `${CHAIN}-${POOL_ADDR_1}`;
 const POOL_ID_2 = `${CHAIN}-${POOL_ADDR_2}`;
+const MONAD_POOL_ID_1 = `${CHAIN_MONAD}-${POOL_ADDR_1}`;
 
 const ONE_USD = 10n ** 18n;
 const DAY_2026_05_04 = 1778457600n; // UTC midnight 2026-05-04
@@ -497,41 +501,59 @@ describe("applyVolumeSnapshots", () => {
     assert.equal(ad.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
   });
 
-  it("manual Mento rebalancer signer is protocol volume even through an aggregator", async () => {
-    const { context, store } = makeContext();
-    const pool = fakePool();
+  it("manual cross-chain rebalancer signer is protocol volume even through an aggregator", async () => {
+    const cases = [
+      {
+        chainId: CHAIN_CELO,
+        poolId: POOL_ID_1,
+        pool: fakePool(),
+        txTo: SQUID,
+        aggregator: "squid",
+      },
+      {
+        chainId: CHAIN_MONAD,
+        poolId: MONAD_POOL_ID_1,
+        pool: fakePool({ id: MONAD_POOL_ID_1, chainId: CHAIN_MONAD }),
+        txTo: ZEROX_MONAD,
+        aggregator: "0x",
+      },
+    ];
 
-    await applyVolumeSnapshots({
-      context,
-      chainId: CHAIN,
-      poolId: POOL_ID_1,
-      pool,
-      caller: MENTO_REBALANCER_EOA,
-      txTo: SQUID,
-      volumeUsdWei: 1_000n * ONE_USD,
-      amounts: buyToken1,
-      blockTimestamp: DAY_2026_05_04 + 100n,
-      blockNumber: 0n,
-    });
+    for (const testCase of cases) {
+      const { context, store } = makeContext();
 
-    const td = store.TraderDailySnapshot.get(
-      `${CHAIN}-${MENTO_REBALANCER_EOA}-${DAY_2026_05_04}`,
-    )!;
-    assert.equal(td.isProtocolActor, true);
-    const ad = store.AggregatorDailySnapshot.get(
-      `${CHAIN}-squid-${DAY_2026_05_04}`,
-    )!;
-    assert.equal(ad.swapCount, 0);
-    assert.equal(ad.swapCountIncludingProtocolActors, 1);
-    assert.equal(ad.volumeUsdWei, 0n);
-    assert.equal(ad.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
-    const pd = store.PoolDailyVolumeSnapshot.get(
-      `${CHAIN}-${POOL_ID_1}-${DAY_2026_05_04}`,
-    )!;
-    assert.equal(pd.swapCount, 0);
-    assert.equal(pd.swapCountIncludingProtocolActors, 1);
-    assert.equal(pd.volumeUsdWei, 0n);
-    assert.equal(pd.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
+      await applyVolumeSnapshots({
+        context,
+        chainId: testCase.chainId,
+        poolId: testCase.poolId,
+        pool: testCase.pool,
+        caller: MENTO_REBALANCER_EOA,
+        txTo: testCase.txTo,
+        volumeUsdWei: 1_000n * ONE_USD,
+        amounts: buyToken1,
+        blockTimestamp: DAY_2026_05_04 + 100n,
+        blockNumber: 0n,
+      });
+
+      const td = store.TraderDailySnapshot.get(
+        `${testCase.chainId}-${MENTO_REBALANCER_EOA}-${DAY_2026_05_04}`,
+      )!;
+      assert.equal(td.isProtocolActor, true);
+      const ad = store.AggregatorDailySnapshot.get(
+        `${testCase.chainId}-${testCase.aggregator}-${DAY_2026_05_04}`,
+      )!;
+      assert.equal(ad.swapCount, 0);
+      assert.equal(ad.swapCountIncludingProtocolActors, 1);
+      assert.equal(ad.volumeUsdWei, 0n);
+      assert.equal(ad.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
+      const pd = store.PoolDailyVolumeSnapshot.get(
+        `${testCase.chainId}-${testCase.poolId}-${DAY_2026_05_04}`,
+      )!;
+      assert.equal(pd.swapCount, 0);
+      assert.equal(pd.swapCountIncludingProtocolActors, 1);
+      assert.equal(pd.volumeUsdWei, 0n);
+      assert.equal(pd.volumeUsdWeiIncludingProtocolActors, 1_000n * ONE_USD);
+    }
   });
 
   it("direct-entry Broker txTo does not hide the signer as protocol volume", async () => {
