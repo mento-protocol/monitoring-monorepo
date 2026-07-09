@@ -38,11 +38,13 @@ function lazyLoadReplayIntegration(): void {
   // The timeout bounds how late replay can attach on busy/backgrounded tabs
   // — without it a tab that never goes idle would never start recording,
   // degrading replaysOnErrorSampleRate well beyond the documented
-  // very-early-errors trade-off.
+  // very-early-errors trade-off. The Safari fallback uses the same 1.5s
+  // delay (not 0) so the recorder import can't land mid-hydration and eat
+  // into LCP on the one engine without idle callbacks.
   if (typeof window.requestIdleCallback === "function") {
     window.requestIdleCallback(load, { timeout: 1_500 });
   } else {
-    window.setTimeout(load, 0);
+    window.setTimeout(load, 1_500);
   }
 }
 
