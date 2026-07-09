@@ -167,6 +167,13 @@ async function fetchVolumeHeroUncached(
 // TTL (same hazard the homepage cache in network-fetcher/server-cache.ts
 // guards against; view variables such as venue, range, and todayMidnight are
 // already part of the key via the wrapped function's arguments).
+//
+// Known fail-open trade-off (deliberate, mirrors pool-detail-ssr): a fetch
+// failure returns `undefined`, and unstable_cache stores that for the full
+// TTL — one transient upstream blip disables the SSR enhancement for that
+// view for up to 60s. The client-only path is unaffected (the page still
+// loads normally), so the blast radius is losing the progressive-paint win,
+// not correctness.
 export const fetchVolumeHeroForSSR = unstable_cache(
   fetchVolumeHeroUncached,
   [

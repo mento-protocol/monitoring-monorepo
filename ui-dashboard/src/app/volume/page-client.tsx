@@ -30,7 +30,10 @@ import {
   type AggregatorDailyRowBase,
 } from "@/lib/volume-aggregators";
 import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
-import type { VolumeHeroInitialData } from "@/lib/volume-hero-initial-data";
+import {
+  protocolActorInForView,
+  type VolumeHeroInitialData,
+} from "@/lib/volume-hero-initial-data";
 import { HeroDataQualityBanners } from "./_components/hero-data-quality-banners";
 import {
   VolumeChartArea,
@@ -88,8 +91,11 @@ function useVolumePageModel(
   }: VolumeUrlState,
   initialData?: VolumeHeroInitialData,
 ) {
+  // Single source for the actor filter list — the SSR view-descriptor gate
+  // compares against protocolActorInForView(), so a hand-rolled list here
+  // that drifted would silently drop the server-prefetched fallback.
   const isProtocolActorIn = useMemo(
-    () => (includeProtocolActors ? [false, true] : [false]),
+    () => protocolActorInForView(includeProtocolActors),
     [includeProtocolActors],
   );
   const showChart = venue === "v3" && RANGES_WITH_CHART.has(range);
