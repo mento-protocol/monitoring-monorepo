@@ -7,7 +7,8 @@ import {
 import { clientEnv } from "./env";
 
 // Session Replay is registered lazily (see below) so the rrweb recorder
-// (~55 KB brotli) stays out of the critical client bundle. A dynamic
+// (~35 KB brotli, measured in .size-limit.cjs's replay-chunk budget) stays
+// out of the critical client bundle. A dynamic
 // import keeps the replay chunk on our own origin (script-src 'self');
 // Sentry.lazyLoadIntegration() would instead fetch it from
 // browser.sentry-cdn.com, which our CSP blocks. @/lib/sentry-replay
@@ -34,8 +35,12 @@ function lazyLoadReplayIntegration(): void {
   };
 
   // requestIdleCallback is missing from older Safari; ES2017-safe fallback.
+  // The timeout bounds how late replay can attach on busy/backgrounded tabs
+  // — without it a tab that never goes idle would never start recording,
+  // degrading replaysOnErrorSampleRate well beyond the documented
+  // very-early-errors trade-off.
   if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(load);
+    window.requestIdleCallback(load, { timeout: 1_500 });
   } else {
     window.setTimeout(load, 0);
   }
