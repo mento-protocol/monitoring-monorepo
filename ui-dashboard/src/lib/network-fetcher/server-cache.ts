@@ -16,7 +16,7 @@ import {
   isNetworkDataFullyHealthy,
 } from "@/lib/network-fetcher/fetch";
 import type { NetworkData, PoolLabel } from "@/lib/network-fetcher/types";
-import { NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
+import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 
 /**
  * `NetworkData` with every non-JSON field rewritten to a JSON round-trip-safe
@@ -121,14 +121,24 @@ async function fetchDehydratedInitialNetworkData(): Promise<CachedNetworkPayload
 // Vercel's Data Cache persists across deployments within an environment, and
 // `unstable_cache` keys only on this wrapper's source + the explicit parts —
 // not on `fetchAllNetworks`'s env-derived network set or the dehydrated
-// payload shape. Salt the key with the deployment SHA (fresh entry per
-// deploy — one fan-out per deploy is cheap insurance against a new build
-// reading an old-shape payload) and the configured network ids (covers
-// env-only config changes and local dev where no SHA exists).
+// payload shape. Salt the key with:
+//  - the deployment id (unique per deployment, INCLUDING env-only redeploys
+//    that keep the same git commit — an env change repointing a Hasura URL
+//    only takes effect via a redeploy, so this fully covers endpoint
+//    swaps; commit SHA is the fallback where the id isn't exposed), and
+//  - the configured network ids + their Hasura endpoints (covers local dev,
+//    where no deployment id exists but `.next/cache` persists across
+//    restarts with different env).
+// One fan-out per deploy is cheap insurance against a new deployment
+// reading a payload fetched by old code or from an old endpoint.
 const CACHE_KEY_PARTS = [
   "all-networks-ssr",
-  process.env.VERCEL_GIT_COMMIT_SHA ?? "dev",
-  NETWORK_IDS.filter(isConfiguredNetworkId).join("|"),
+  process.env.VERCEL_DEPLOYMENT_ID ??
+    process.env.VERCEL_GIT_COMMIT_SHA ??
+    "dev",
+  NETWORK_IDS.filter(isConfiguredNetworkId)
+    .map((id) => `${id}=${NETWORKS[id].hasuraUrl}`)
+    .join("|"),
 ];
 
 const cachedFetch = unstable_cache(
