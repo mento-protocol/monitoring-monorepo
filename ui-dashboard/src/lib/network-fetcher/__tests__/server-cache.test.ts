@@ -2,18 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Network } from "@/lib/networks";
 import type { NetworkData } from "@/lib/network-fetcher/types";
 
-const { mockFetchAllNetworks, cacheCallbackOutcomes, staleCacheEntry } =
-  vi.hoisted(() => ({
-    mockFetchAllNetworks: vi.fn(),
-    /** Records whether each unstable_cache callback invocation resolved
-     *  (cacheable) or threw (never written to the cache). */
-    cacheCallbackOutcomes: [] as ("resolved" | "threw")[],
-    /** When armed, the unstable_cache mock returns this value WITHOUT
-     *  invoking the callback — mirroring Next's stale-hit path, where the
-     *  cached entry is served immediately and the background revalidation
-     *  (including any error it throws) is swallowed. */
-    staleCacheEntry: { value: undefined as unknown },
-  }));
+const {
+  mockFetchAllNetworks,
+  cacheCallbackOutcomes,
+  staleCacheEntry,
+  capturedCacheKeyParts,
+} = vi.hoisted(() => ({
+  mockFetchAllNetworks: vi.fn(),
+  /** Records whether each unstable_cache callback invocation resolved
+   *  (cacheable) or threw (never written to the cache). */
+  cacheCallbackOutcomes: [] as ("resolved" | "threw")[],
+  /** When armed, the unstable_cache mock returns this value WITHOUT
+   *  invoking the callback — mirroring Next's stale-hit path, where the
+   *  cached entry is served immediately and the background revalidation
+   *  (including any error it throws) is swallowed. */
+  staleCacheEntry: { value: undefined as unknown },
+  /** Key parts passed to unstable_cache at module init — asserted so the
+   *  deploy/config salt can't silently disappear. */
+  capturedCacheKeyParts: [] as string[][],
+}));
 
 // next/cache needs the Next.js incremental-cache runtime; outside it the repo
 // convention is an identity wrapper (see pool-detail-ssr.test.ts). This one
@@ -21,11 +28,12 @@ const { mockFetchAllNetworks, cacheCallbackOutcomes, staleCacheEntry } =
 // have been written to the shared cache, and can serve an armed stale entry
 // to simulate `unstable_cache`'s serve-stale-while-background-revalidate.
 vi.mock("next/cache", () => ({
-  unstable_cache:
-    <TArgs extends unknown[], TResult>(
-      fn: (...args: TArgs) => Promise<TResult>,
-    ) =>
-    async (...args: TArgs): Promise<TResult> => {
+  unstable_cache: <TArgs extends unknown[], TResult>(
+    fn: (...args: TArgs) => Promise<TResult>,
+    keyParts?: string[],
+  ) => {
+    if (keyParts) capturedCacheKeyParts.push(keyParts);
+    return async (...args: TArgs): Promise<TResult> => {
       if (staleCacheEntry.value !== undefined) {
         return staleCacheEntry.value as TResult;
       }
@@ -37,7 +45,8 @@ vi.mock("next/cache", () => ({
         cacheCallbackOutcomes.push("threw");
         throw err;
       }
-    },
+    };
+  },
 }));
 
 vi.mock("@/lib/network-fetcher/fetch", async (importOriginal) => ({
@@ -135,6 +144,24 @@ describe("dehydrate/rehydrate round-trip", () => {
     // here (it would silently flatten to `{}` in the JSON round-trip)
     // instead of shipping lost data.
     expect(roundTripped).toEqual(data);
+  });
+});
+
+describe("cache key salting", () => {
+  it("salts the unstable_cache key with a deploy marker and the configured network ids", () => {
+    // Captured at module init by the next/cache mock. A deploy that changes
+    // the configured network set or ships new payload-shape code must never
+    // hit an entry written by older code — Vercel's Data Cache persists
+    // across deployments within an environment.
+    expect(capturedCacheKeyParts).toHaveLength(1);
+    const parts = capturedCacheKeyParts[0]!;
+    expect(parts[0]).toBe("all-networks-ssr");
+    // Deploy salt: VERCEL_GIT_COMMIT_SHA in prod, "dev" locally/in tests.
+    expect(parts[1]).toBeTruthy();
+    // Config salt: pipe-joined configured network ids (may be "" when no
+    // network env is configured in the test environment — the join itself
+    // must still be present as a distinct key part).
+    expect(parts).toHaveLength(3);
   });
 });
 

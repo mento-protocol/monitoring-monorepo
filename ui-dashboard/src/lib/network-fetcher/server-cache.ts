@@ -16,6 +16,7 @@ import {
   isNetworkDataFullyHealthy,
 } from "@/lib/network-fetcher/fetch";
 import type { NetworkData, PoolLabel } from "@/lib/network-fetcher/types";
+import { NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 
 /**
  * `NetworkData` with every non-JSON field rewritten to a JSON round-trip-safe
@@ -117,9 +118,22 @@ async function fetchDehydratedInitialNetworkData(): Promise<CachedNetworkPayload
 // healthy entry exists a degraded upstream never surfaces through this
 // wrapper alone. The `fetchedAt` age gate in `fetchInitialNetworkData` is
 // what bounds served staleness and re-opens the degraded-error channel.
+// Vercel's Data Cache persists across deployments within an environment, and
+// `unstable_cache` keys only on this wrapper's source + the explicit parts —
+// not on `fetchAllNetworks`'s env-derived network set or the dehydrated
+// payload shape. Salt the key with the deployment SHA (fresh entry per
+// deploy — one fan-out per deploy is cheap insurance against a new build
+// reading an old-shape payload) and the configured network ids (covers
+// env-only config changes and local dev where no SHA exists).
+const CACHE_KEY_PARTS = [
+  "all-networks-ssr",
+  process.env.VERCEL_GIT_COMMIT_SHA ?? "dev",
+  NETWORK_IDS.filter(isConfiguredNetworkId).join("|"),
+];
+
 const cachedFetch = unstable_cache(
   fetchDehydratedInitialNetworkDataCoalesced,
-  ["all-networks-ssr"],
+  CACHE_KEY_PARTS,
   { revalidate: 30, tags: ["all-networks-ssr"] },
 );
 
