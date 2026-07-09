@@ -148,8 +148,16 @@ async function fetchVolumeHeroUncached(
 // fallback paints instantly, then the client's useGQL revalidates on mount.
 // The raw responses are plain JSON (no Map/Set/BigInt — Hasura numerics are
 // strings), so unstable_cache serialization is lossless here.
+//
+// The key is salted with the deployment SHA ("dev" locally) because Vercel's
+// Data Cache persists across deployments within an environment — without the
+// salt, a deploy that changes the response shape or view-descriptor contract
+// could serve an entry written by older code for up to the TTL (same hazard
+// the homepage cache in network-fetcher/server-cache.ts guards against; view
+// variables such as venue, range, and todayMidnight are already part of the
+// key via the wrapped function's arguments).
 export const fetchVolumeHeroForSSR = unstable_cache(
   fetchVolumeHeroUncached,
-  ["volume-hero-ssr"],
+  ["volume-hero-ssr", process.env.VERCEL_GIT_COMMIT_SHA ?? "dev"],
   { revalidate: 60, tags: ["volume-hero-ssr"] },
 );
