@@ -26,6 +26,38 @@ main,
   overflow-x: hidden;
 }
 
+/* Horizontal table scroll cue for WebKit/iOS overlay scrollbars.
+   The first two local backgrounds cover the edge shadows at the scroll ends;
+   the final two scroll backgrounds provide the visible left/right affordance
+   only when more content exists off-screen. */
+.table-scroll-cue {
+  --table-scroll-surface: rgb(15 23 42);
+  --table-scroll-shadow: rgb(148 163 184 / 0.32);
+
+  background:
+    linear-gradient(
+        to right,
+        var(--table-scroll-surface) 35%,
+        rgb(15 23 42 / 0)
+      )
+      left center / 2.5rem 100% no-repeat local,
+    linear-gradient(to left, var(--table-scroll-surface) 35%, rgb(15 23 42 / 0))
+      right center / 2.5rem 100% no-repeat local,
+    radial-gradient(
+        farthest-side at 0 50%,
+        var(--table-scroll-shadow),
+        rgb(148 163 184 / 0)
+      )
+      left center / 1rem 100% no-repeat scroll,
+    radial-gradient(
+        farthest-side at 100% 50%,
+        var(--table-scroll-shadow),
+        rgb(148 163 184 / 0)
+      )
+      right center / 1rem 100% no-repeat scroll;
+  background-color: var(--table-scroll-surface);
+}
+
 /* Plotly range selector buttons: smaller tap targets on mobile */
 @media (max-width: 640px) {
   .js-plotly-plot .rangeselector .button {

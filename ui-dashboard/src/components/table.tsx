@@ -24,12 +24,10 @@ export function Table({
   return (
     <div
       className={[
-        "overflow-x-auto rounded-lg border border-slate-800",
-        // Persistently-visible thin horizontal scrollbar so the scroll
-        // affordance is signalled at rest — mobile Safari/Chrome hide the
-        // native scrollbar until touched, which makes an off-screen column
-        // (e.g. a wide swap amount) read as a silent clip rather than
-        // scrollable content.
+        "table-scroll-cue overflow-x-auto rounded-lg border border-slate-800",
+        // Desktop engines can show a persistent thin scrollbar. WebKit on iOS
+        // hides overlay scrollbars at rest, so `.table-scroll-cue` adds the
+        // always-visible edge affordance there.
         "[&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-slate-900 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-600 [scrollbar-width:thin] [scrollbar-color:rgb(71_85_105)_rgb(15_23_42)]",
         scrollClassName,
       ]
