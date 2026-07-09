@@ -6,7 +6,22 @@ import { escapePlotText, PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
 import { USDM_SYMBOLS } from "@/lib/tokens";
 import type { Pool } from "@/lib/types";
 
-const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
+/** Height of the pie's plot box — shared by the layout, the <Plot> style,
+ *  and the chunk-loading fallback so the skeleton→chart swap is shift-free. */
+const PIE_PLOT_HEIGHT_PX = 280;
+
+// Reserve the exact plot box while the Plotly chunk loads. Without a
+// fallback the card renders heading/legend/stats immediately and the pie
+// pops in when the chunk resolves, pushing everything below it down (CLS).
+const Plot = dynamic(() => import("@/lib/react-plotly-basic"), {
+  ssr: false,
+  loading: () => (
+    <div
+      className="animate-pulse rounded bg-slate-800/30"
+      style={{ height: PIE_PLOT_HEIGHT_PX }}
+    />
+  ),
+});
 
 interface LpPosition {
   address: string;
@@ -166,7 +181,7 @@ function lpConcentrationLayout() {
     ...PLOTLY_BASE_LAYOUT,
     margin: { t: 8, r: 8, b: 8, l: 8 },
     showlegend: false,
-    height: 280,
+    height: PIE_PLOT_HEIGHT_PX,
     autosize: true,
   };
 }
@@ -257,7 +272,7 @@ export function LpConcentrationChart({
                 data={[model.trace]}
                 layout={model.layout}
                 config={PLOTLY_CONFIG}
-                style={{ width: "100%", height: 280 }}
+                style={{ width: "100%", height: PIE_PLOT_HEIGHT_PX }}
                 useResizeHandler
               />
             </div>

@@ -79,4 +79,22 @@ describe("route-level loading UIs", () => {
     expect(tabStrip).not.toBeNull();
     expect(tabStrip!.children).toHaveLength(7);
   });
+
+  it("PoolDetailLoading reserves the header card, health bar, and charts row (CLS guard)", () => {
+    render(<PoolDetailLoading />);
+
+    // Header card: 5-col stat grid mirroring PoolHeader's <dl>.
+    const statGrid = container.querySelector(".lg\\:grid-cols-5");
+    expect(statGrid).not.toBeNull();
+    expect(statGrid!.children).toHaveLength(5);
+
+    // Charts row: two chart cards + reserves panel, mirroring PoolChartsRow.
+    const chartsRow = container.querySelector(".lg\\:grid-cols-3");
+    expect(chartsRow).not.toBeNull();
+    expect(chartsRow!.children).toHaveLength(3);
+
+    // Chart card plot areas reserve ROW_CHART_HEIGHT_PX (200) so the real
+    // TimeSeriesChartCards stream in without pushing the tab strip down.
+    expect(container.querySelectorAll(".h-\\[200px\\]")).toHaveLength(2);
+  });
 });
