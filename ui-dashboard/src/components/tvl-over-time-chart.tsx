@@ -606,7 +606,15 @@ export function TvlOverTimeChart({
     chartMode === "indexed" ? indexedBreakdown : visibleBreakdown;
   const chartValueProps = chartValuePropsForMode(chartMode);
   const headline = formatTvlHeadline(isLoading, tvlPartial, totalTvl);
-  const emptyMessage = tvlEmptyMessage(hasError, hasSnapshotError);
+  const hasZeroOnlyIndexedWindow =
+    chartMode === "indexed" &&
+    !hasError &&
+    !hasSnapshotError &&
+    visibleSeries.length > 0 &&
+    indexedSeries.length === 0;
+  const emptyMessage = hasZeroOnlyIndexedWindow
+    ? "TVL is zero throughout this range"
+    : tvlEmptyMessage(hasError, hasSnapshotError);
 
   return (
     <TimeSeriesChartCard

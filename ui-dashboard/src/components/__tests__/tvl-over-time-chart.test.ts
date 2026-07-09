@@ -892,7 +892,39 @@ describe("TvlOverTimeChart render", () => {
     expect(html).not.toContain("Not enough history yet");
   });
 
-  it("renders current live TVL when every chain has no snapshot history yet", () => {
+  it("shows a specific indexed-mode empty message when visible TVL is all zero", () => {
+    const pool = makeTvlPool({
+      reserves0: "0",
+      reserves1: "0",
+    });
+    const zeroSnapshot = makeSnapshot({
+      reserves0: "0",
+      reserves1: "0",
+    });
+
+    const html = renderToStaticMarkup(
+      React.createElement(TvlOverTimeChart, {
+        networkData: [
+          makeNetworkData({
+            network: TVL_NETWORK,
+            pools: [pool],
+            snapshotsAllDaily: [zeroSnapshot],
+          }),
+        ],
+        totalTvl: 0,
+        tvlPartial: false,
+        change7d: null,
+        isLoading: false,
+        hasError: false,
+        hasSnapshotError: false,
+      }),
+    );
+
+    expect(html).toContain("TVL is zero throughout this range");
+    expect(html).not.toContain("Not enough history yet");
+  });
+
+  it("renders current-point TVL data in indexed mode when every chain has no snapshot history yet", () => {
     const poolA = makeTvlPool({
       id: "pool-a",
       reserves0: HUNDRED,
@@ -926,6 +958,7 @@ describe("TvlOverTimeChart render", () => {
       }),
     );
 
+    expect(html).toContain("$300");
     expect(html).not.toContain("Not enough history yet");
     const traces = capturedPlotProps.data as Array<{
       name?: string;
