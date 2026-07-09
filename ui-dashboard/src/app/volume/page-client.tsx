@@ -30,6 +30,7 @@ import {
   type AggregatorDailyRowBase,
 } from "@/lib/volume-aggregators";
 import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
+import type { VolumeHeroInitialData } from "@/lib/volume-hero-initial-data";
 import { HeroDataQualityBanners } from "./_components/hero-data-quality-banners";
 import {
   VolumeChartArea,
@@ -59,25 +60,34 @@ const RANGES_WITH_CHART = new Set<VolumeRangeKey>(["30d", "90d", "all"]);
 
 export function VolumeClient({
   canUseVolumeFilters,
+  initialData,
 }: {
   canUseVolumeFilters: boolean;
+  /** Server-prefetched hero responses (perf-plan S4), forwarded to
+   *  `useHeroRollup` as per-query `fallbackData` so the headline and KPI
+   *  tiles paint populated on first render. `undefined` degrades to the
+   *  client-only loading path. */
+  initialData?: VolumeHeroInitialData | undefined;
 }) {
   const urlState = useVolumeUrlState({ canUseVolumeFilters });
-  const model = useVolumePageModel(urlState);
+  const model = useVolumePageModel(urlState, initialData);
   return <VolumePageView urlState={urlState} model={model} />;
 }
 
 export type VolumeUrlState = ReturnType<typeof useVolumeUrlState>;
 export type VolumePageModel = ReturnType<typeof useVolumePageModel>;
 
-function useVolumePageModel({
-  range,
-  includeProtocolActors,
-  venue,
-  cutoff,
-  utcDayKey,
-  updateRange,
-}: VolumeUrlState) {
+function useVolumePageModel(
+  {
+    range,
+    includeProtocolActors,
+    venue,
+    cutoff,
+    utcDayKey,
+    updateRange,
+  }: VolumeUrlState,
+  initialData?: VolumeHeroInitialData,
+) {
   const isProtocolActorIn = useMemo(
     () => (includeProtocolActors ? [false, true] : [false]),
     [includeProtocolActors],
@@ -122,6 +132,7 @@ function useVolumePageModel({
     isProtocolActorIn,
     utcDayKey,
     kpiSource,
+    initialData,
   });
   const chartControls = useVolumeChartControls(range, updateRange);
   const status = buildVolumeStatus({ venue, queries });

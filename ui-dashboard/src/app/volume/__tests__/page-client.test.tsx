@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { VolumeHeroInitialData } from "@/lib/volume-hero-initial-data";
 import {
   BROKER_AGGREGATOR_DAILY_TOP,
   BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS,
@@ -59,17 +60,23 @@ vi.mock("../_lib/pool-chart-vm", () => ({
   }),
 }));
 
+const mockUseHeroRollup = vi.hoisted(() => vi.fn());
+const heroState = vi.hoisted(() => ({ isLoading: false, hasError: false }));
+
 vi.mock("../_lib/use-hero-rollup", () => ({
-  useHeroRollup: () => ({
-    isLoading: false,
-    hasError: false,
-    totalVolume: 0,
-    totalTraders: 0,
-    totalSwaps: 0,
-    concentration: 0,
-    staleChains: [],
-    degradedChains: [],
-  }),
+  useHeroRollup: (args: unknown) => {
+    mockUseHeroRollup(args);
+    return {
+      isLoading: heroState.isLoading,
+      hasError: heroState.hasError,
+      totalVolume: 0,
+      totalTraders: 0,
+      totalSwaps: 0,
+      concentration: 0,
+      staleChains: [],
+      degradedChains: [],
+    };
+  },
 }));
 
 vi.mock("@/components/time-series-chart-card", () => ({
@@ -123,6 +130,9 @@ function variablesFor(query: string) {
 describe("VolumeClient useGQL wiring", () => {
   beforeEach(() => {
     mockUseGQL.mockReset();
+    mockUseHeroRollup.mockClear();
+    heroState.isLoading = false;
+    heroState.hasError = false;
     mockUseGQL.mockReturnValue({
       data: undefined,
       error: null,
@@ -215,5 +225,43 @@ describe("VolumeClient useGQL wiring", () => {
       html.indexOf('data-testid="v3-section"'),
     );
     expect(html).not.toContain("Exploratory exclusions");
+  });
+
+  it("forwards server-prefetched initialData into useHeroRollup", () => {
+    const initialData: VolumeHeroInitialData = {
+      view: {
+        networkId: "celo-mainnet",
+        venue: "v3",
+        range: "7d",
+        includeProtocolActors: false,
+        todayMidnight: 1_780_012_800,
+      },
+      heroV3: { volumeWindowSnapshots: [] },
+      todayV3: { volumeTodayTraders: [] },
+    };
+    volumeState.venue = "v3";
+    volumeState.includeProtocolActors = false;
+    renderToStaticMarkup(
+      <VolumeClient canUseVolumeFilters={false} initialData={initialData} />,
+    );
+
+    expect(mockUseHeroRollup).toHaveBeenCalledWith(
+      expect.objectContaining({ initialData }),
+    );
+  });
+
+  it("gates the swaps subtitle while the hero is loading (no happy-path zero)", () => {
+    heroState.isLoading = true;
+    const html = renderVolume("v3");
+
+    expect(html).toContain("— swaps");
+    expect(html).not.toContain("0 swaps");
+  });
+
+  it("renders the swap count in the subtitle once the hero resolves", () => {
+    const html = renderVolume("v3");
+
+    expect(html).toContain("0 swaps");
+    expect(html).not.toContain("— swaps");
   });
 });

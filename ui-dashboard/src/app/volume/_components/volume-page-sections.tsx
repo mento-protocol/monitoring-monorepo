@@ -195,7 +195,7 @@ export function VolumeKpiTiles({
       <Tile
         label="Unique traders"
         value={heroValue(hero, hero.totalTraders.toLocaleString())}
-        subtitle={`${hero.totalSwaps.toLocaleString()} swaps`}
+        subtitle={swapsSubtitle(hero)}
       />
       <Tile
         label={
@@ -221,6 +221,15 @@ function heroValue(hero: VolumePageModel["hero"], value: string): string {
   if (hero.isLoading) return "…";
   if (hero.hasError) return "—";
   return value;
+}
+
+// Loading-vs-zero rule (ui-dashboard AGENTS.md): the swaps subtitle must not
+// render a happy-path "0 swaps" under a "…" value while the hero queries are
+// still loading. Always return a string so the subtitle line — and the tile
+// height — stay stable.
+function swapsSubtitle(hero: VolumePageModel["hero"]): string {
+  if (hero.isLoading || hero.hasError) return "— swaps";
+  return `${hero.totalSwaps.toLocaleString()} swaps`;
 }
 
 function concentrationValue({
