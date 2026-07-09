@@ -127,7 +127,23 @@ const cachedFetch = unstable_cache(
 // window keeps real staleness ≈ one TTL, so this bound only bites after idle
 // gaps (first visitor after a quiet stretch) or sustained degradation —
 // exactly the cases where a foreground refetch is worth the latency.
-const MAX_SERVED_STALENESS_MS = 90_000;
+// Exported so tests derive their boundary fixtures from the real constant.
+export const MAX_SERVED_STALENESS_MS = 90_000;
+
+// Coalesce concurrent age-gate refetches within this isolate — a burst of
+// first-visitors-after-idle would otherwise each launch their own full
+// fan-out. This matches the coalescing scope of `unstable_cache`'s own
+// background revalidation (per-isolate via `pendingRevalidates`);
+// cross-instance duplication remains possible and is bounded by the
+// number of warm instances.
+let inFlightRefetch: Promise<CachedNetworkPayload> | null = null;
+
+function refetchInitialNetworkDataCoalesced(): Promise<CachedNetworkPayload> {
+  inFlightRefetch ??= fetchDehydratedInitialNetworkData().finally(() => {
+    inFlightRefetch = null;
+  });
+  return inFlightRefetch;
+}
 
 /**
  * Cached drop-in for `fetchAllNetworks()` in the `/` and `/pools` Server
@@ -149,7 +165,7 @@ export async function fetchInitialNetworkData(): Promise<NetworkData[]> {
     const cached = await cachedFetch();
     const payload =
       Date.now() - cached.fetchedAt > MAX_SERVED_STALENESS_MS
-        ? await fetchDehydratedInitialNetworkData()
+        ? await refetchInitialNetworkDataCoalesced()
         : cached;
     return payload.networks.map(rehydrateNetworkData);
   } catch (err) {

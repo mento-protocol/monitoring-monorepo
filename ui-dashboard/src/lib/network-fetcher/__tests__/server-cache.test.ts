@@ -48,6 +48,7 @@ vi.mock("@/lib/network-fetcher/fetch", async (importOriginal) => ({
 import {
   dehydrateNetworkData,
   fetchInitialNetworkData,
+  MAX_SERVED_STALENESS_MS,
   rehydrateNetworkData,
 } from "@/lib/network-fetcher/server-cache";
 import { blankNetworkData } from "@/lib/network-fetcher/fetch";
@@ -211,8 +212,8 @@ describe("fetchInitialNetworkData", () => {
       vi.setSystemTime(NOW);
     });
 
-    it("serves a cached payload younger than 90s without refetching", async () => {
-      staleCacheEntry.value = staleEntry(89_000);
+    it("serves a cached payload younger than the staleness bound without refetching", async () => {
+      staleCacheEntry.value = staleEntry(MAX_SERVED_STALENESS_MS - 1_000);
 
       const result = await fetchInitialNetworkData();
 
@@ -221,10 +222,10 @@ describe("fetchInitialNetworkData", () => {
       expect(result[0]!.rates.get("42220:cUSD")).toBe(1.0004);
     });
 
-    it("foreground-refetches a cached payload older than 90s", async () => {
+    it("foreground-refetches a cached payload older than the staleness bound", async () => {
       // Distinguishable stale rate — the assertion below proves the fresh
       // payload wins, not the pinned cache entry.
-      staleCacheEntry.value = staleEntry(90_001, {
+      staleCacheEntry.value = staleEntry(MAX_SERVED_STALENESS_MS + 1, {
         rates: new Map([["42220:cUSD", 999]]),
       });
       mockFetchAllNetworks.mockResolvedValueOnce([healthyNetworkData()]);
@@ -235,8 +236,8 @@ describe("fetchInitialNetworkData", () => {
       expect(result[0]!.rates.get("42220:cUSD")).toBe(1.0004);
     });
 
-    it("surfaces a fresh degraded payload past 90s instead of the stale healthy one", async () => {
-      staleCacheEntry.value = staleEntry(90_001);
+    it("surfaces a fresh degraded payload past the staleness bound instead of the stale healthy one", async () => {
+      staleCacheEntry.value = staleEntry(MAX_SERVED_STALENESS_MS + 1);
       mockFetchAllNetworks.mockResolvedValueOnce([
         healthyNetworkData({ ratesError: { message: "oracle query failed" } }),
       ]);
@@ -247,6 +248,22 @@ describe("fetchInitialNetworkData", () => {
       // Error channel intact → client mount revalidation fires, instead of
       // the stale healthy payload masking a live outage.
       expect(data!.ratesError).toEqual({ message: "oracle query failed" });
+    });
+
+    it("coalesces concurrent over-age refetches into one upstream fan-out", async () => {
+      staleCacheEntry.value = staleEntry(MAX_SERVED_STALENESS_MS + 1, {
+        rates: new Map([["42220:cUSD", 999]]),
+      });
+      mockFetchAllNetworks.mockResolvedValueOnce([healthyNetworkData()]);
+
+      const [first, second] = await Promise.all([
+        fetchInitialNetworkData(),
+        fetchInitialNetworkData(),
+      ]);
+
+      expect(mockFetchAllNetworks).toHaveBeenCalledTimes(1);
+      expect(first[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+      expect(second[0]!.rates.get("42220:cUSD")).toBe(1.0004);
     });
   });
 });
