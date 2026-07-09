@@ -119,10 +119,9 @@ describe("resolveBreakerSnapshotFields — per-snapshot breaker baseline + thres
   // Construct a minimal EvmOnEventContext stub exposing only the entity
   // reads the resolver uses. Tests are pure (no RPC, no effects), so we
   // skip the test harness and exercise the helper directly. Envio's
-  // `getWhere` is a callable taking a `{ field: { _eq } }` filter and
-  // returning a Promise<Entity[]> (per envio.d.ts) — the stub mirrors
-  // that shape so the implementation can be swapped to the real API
-  // without changing the helper's call sites.
+  // `getWhere` is a callable taking equality filters and returning a
+  // Promise<Entity[]> (per envio.d.ts). The stub mirrors Envio applying the
+  // filters in storage so cross-chain fixture rows behave like hosted queries.
   function ctx({
     configs = [],
     breakers = {},
@@ -132,8 +131,17 @@ describe("resolveBreakerSnapshotFields — per-snapshot breaker baseline + thres
   }) {
     return {
       BreakerConfig: {
-        getWhere: async (filter: { rateFeedID: { _eq: string } }) =>
-          configs.filter((c) => c.rateFeedID === filter.rateFeedID._eq),
+        getWhere: async (filter: {
+          chainId?: { _eq: number };
+          rateFeedID?: { _eq: string };
+        }) =>
+          configs.filter(
+            (c) =>
+              (filter.chainId === undefined ||
+                c.chainId === filter.chainId._eq) &&
+              (filter.rateFeedID === undefined ||
+                c.rateFeedID === filter.rateFeedID._eq),
+          ),
       },
       Breaker: {
         get: async (id: string) => breakers[id],
@@ -350,11 +358,10 @@ describe("resolveBreakerSnapshotFields — per-snapshot breaker baseline + thres
     assert.equal(result, null);
   });
 
-  it("filters by chainId in memory (same rateFeedID can exist on multiple chains)", async () => {
-    // `BreakerConfig.getWhere({rateFeedID})` doesn't filter by chainId —
-    // the same feed string can collide cross-chain on Celo + Monad.
-    // Helper must filter in memory or it can mix Monad's EMA into a Celo
-    // snapshot.
+  it("filters by chainId in the BreakerConfig query (same rateFeedID can exist on multiple chains)", async () => {
+    // The same feed string can collide cross-chain on Celo + Monad. Keep the
+    // chain in the Envio query so the resolver cannot mix Monad's EMA into a
+    // Celo snapshot.
     const celoEma = 10n ** 24n;
     const monadEma = 5n * 10n ** 23n;
     const result = await resolveBreakerSnapshotFields(

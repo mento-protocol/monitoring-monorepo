@@ -167,6 +167,45 @@ describe("Dynamic contract registration — registration effects", () => {
     );
   });
 
+  it("does not dynamically register stable tokens already bound to StableToken", async () => {
+    const registrations = await processDeployRegistration(
+      "FPMMFactory",
+      "FPMMDeployed",
+      {
+        fpmmProxy: POOL_ADDR,
+        fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+        token0: TOKEN0,
+        token1: TOKEN1,
+      },
+    );
+    assert.equal(
+      registrations.some((entry) => entry.contract === "ERC20FeeToken"),
+      false,
+      "StableToken-covered tokens should not be redundantly registered as ERC20FeeToken.",
+    );
+  });
+
+  it("still dynamically registers known non-stable fee tokens", async () => {
+    const registrations = await processDeployRegistration(
+      "FPMMFactory",
+      "FPMMDeployed",
+      {
+        fpmmProxy: POOL_ADDR,
+        fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+        token0: USDC_TOKEN,
+        token1: TOKEN1,
+      },
+    );
+    assert.ok(
+      registrations.some(
+        (entry) =>
+          entry.contract === "ERC20FeeToken" &&
+          entry.address.toLowerCase() === USDC_TOKEN.toLowerCase(),
+      ),
+      "Non-stable fee tokens must still register as ERC20FeeToken.",
+    );
+  });
+
   it("VirtualPoolFactory.VirtualPoolDeployed dynamically registers the deployed VirtualPool", async () => {
     const registrations = await processDeployRegistration(
       "VirtualPoolFactory",
@@ -188,6 +227,7 @@ const POOL_ADDR = "0x1ad2ea06502919f935d9c09028df73a462979e29";
 const VPOOL_ADDR = "0xab945882018b81bdf62629e98ffdafd9495a0076";
 const TOKEN0 = "0x765de816845861e75a25fca122bb6898b8b1282a";
 const TOKEN1 = "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73";
+const USDC_TOKEN = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
 const CHAIN_ID = 42220;
 
 describe("Dynamic contract registration — handler smoke tests", () => {

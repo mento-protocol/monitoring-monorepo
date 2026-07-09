@@ -120,34 +120,19 @@ export {
 
 /** Returns all FPMM pool IDs on the given chain that reference the given rateFeedID.
  * Uses context.Pool.getWhere (DB-backed) so it works correctly in Envio's
- * multi-process hosted environment.
- *
- * NOTE — in-memory chainId filter: Envio's getWhere only supports single-field
- * queries, so there is no compound "referenceRateFeedID + chainId" DB query.
- * We fetch all pools with the matching feedId across all chains and filter
- * locally. This is correct and safe: each oracle feed maps to at most ~4 FPMM
- * pools total across both chains, so the result set is always tiny. Do NOT
- * "simplify" this to a DB query — the API does not support it. */
+ * multi-process hosted environment. HyperIndex >=3.2 supports multi-field
+ * getWhere, so keep the chain filter in the preloadable DB query instead of
+ * fetching cross-chain rows and filtering in JS. */
 export async function getPoolsByFeed(
   context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
 ): Promise<string[]> {
   const pools = await context.Pool.getWhere({
+    chainId: { _eq: chainId },
     referenceRateFeedID: { _eq: rateFeedID },
   });
-  // The chainId filter is the only thing preventing a cross-chain update when a
-  // rateFeedID resolves on more than one chain (plausible with NTT-deterministic
-  // deploys). Today that never drops rows; log if it ever does so the collision
-  // is visible in Loki instead of silently bleeding oracle writes across chains.
-  const matched = pools.filter((p) => p.chainId === chainId);
-  if (matched.length !== pools.length) {
-    context.log.warn(
-      `[getPoolsByFeed] rateFeedID ${rateFeedID} resolves on multiple chains; ` +
-        `dropped ${pools.length - matched.length} cross-chain pool(s) for chain ${chainId}`,
-    );
-  }
-  return matched.map((p) => p.id);
+  return pools.map((p) => p.id);
 }
 
 export async function updatePoolsOracleExpiry(
@@ -201,30 +186,27 @@ export async function updatePoolsOracleNumReporters(args: {
   }
 }
 
-/** Same in-memory filter rationale as getPoolsByFeed above — Envio getWhere is
- * single-field only, so we fetch all pools with a non-empty referenceRateFeedID
- * and filter by chainId locally. Result set is always small. */
+/** Returns all pools on a chain with a non-empty reference feed. */
 export async function getPoolsWithReferenceFeed(
   context: EvmOnEventContext,
   chainId: number,
 ): Promise<Pool[]> {
-  const pools = await context.Pool.getWhere({
+  return context.Pool.getWhere({
+    chainId: { _eq: chainId },
     referenceRateFeedID: { _gt: "" },
   });
-  return pools.filter((p) => p.chainId === chainId);
 }
 
 /** Returns all BreakerConfig rows on the given chain for the given rateFeedID.
- * Same in-memory chainId filter rationale as getPoolsByFeed — Envio's
- * single-field getWhere doesn't support compound queries. Result set is
- * always small (≤ 1 trip-able config per feed in production today). */
+ * Uses HyperIndex >=3.2 multi-field getWhere so breaker fan-out stays bounded
+ * at the storage layer. */
 export async function getBreakerConfigsByFeed(
   context: EvmOnEventContext,
   chainId: number,
   rateFeedID: string,
 ): Promise<BreakerConfig[]> {
-  const rows = await context.BreakerConfig.getWhere({
+  return context.BreakerConfig.getWhere({
+    chainId: { _eq: chainId },
     rateFeedID: { _eq: rateFeedID },
   });
-  return rows.filter((r) => r.chainId === chainId);
 }

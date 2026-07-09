@@ -28,7 +28,10 @@ import {
   maybePreloadPool,
   upsertPool,
 } from "../../pool.js";
-import { isKnownFeeToken } from "../../feeToken.js";
+import {
+  isStaticallyBoundStableToken,
+  shouldRegisterErc20FeeToken,
+} from "../../feeToken.js";
 import { ZERO_ADDRESS } from "../../constants.js";
 
 export async function applyLiquidityPositionDelta({
@@ -98,8 +101,8 @@ export async function applyLiquidityPositionDelta({
 //
 // Note: contractRegister callbacks are framework-level hooks that Envio invokes
 // before the event handler. The legacy MockDb facade does not exercise this
-// hook, so we mitigate by unit-testing `isKnownFeeToken` directly and by
-// asserting registration through handler-registry introspection tests.
+// hook, so we mitigate by unit-testing the registration predicates directly
+// and by asserting registration through handler-registry introspection tests.
 indexer.contractRegister(
   { contract: "FPMMFactory", event: "FPMMDeployed" },
   async ({ event, context }) => {
@@ -110,9 +113,9 @@ indexer.contractRegister(
     const token0 = event.params.token0;
     const token1 = event.params.token1;
 
-    if (isKnownFeeToken(event.chainId, token0)) {
+    if (shouldRegisterErc20FeeToken(event.chainId, token0)) {
       context.chain.ERC20FeeToken.add(token0);
-    } else {
+    } else if (!isStaticallyBoundStableToken(event.chainId, token0)) {
       context.log.warn(
         `[FPMMFactory] Rejecting fee-token registration for unknown token0=${token0} ` +
           `on chain ${event.chainId} (pool=${event.params.fpmmProxy}). ` +
@@ -120,9 +123,9 @@ indexer.contractRegister(
       );
     }
 
-    if (isKnownFeeToken(event.chainId, token1)) {
+    if (shouldRegisterErc20FeeToken(event.chainId, token1)) {
       context.chain.ERC20FeeToken.add(token1);
-    } else {
+    } else if (!isStaticallyBoundStableToken(event.chainId, token1)) {
       context.log.warn(
         `[FPMMFactory] Rejecting fee-token registration for unknown token1=${token1} ` +
           `on chain ${event.chainId} (pool=${event.params.fpmmProxy}). ` +

@@ -117,6 +117,10 @@ export function _clearFeeTokenMetaCache(): void {
  * exclusion here.
  */
 import type { ContractsJson } from "./contractAddresses.js";
+import {
+  findLockAndMintNttStableByAddress,
+  findStableByAddress,
+} from "./handlers/stables/config.js";
 
 function buildKnownTokenMeta(): Map<
   string,
@@ -184,6 +188,29 @@ export function isKnownFeeToken(
 ): boolean {
   const key = `${chainId}:${tokenAddress.toLowerCase()}`;
   return KNOWN_TOKEN_META.has(key) || _testAllowedFeeTokens.has(key);
+}
+
+/** StableToken already subscribes these addresses with a narrower Transfer
+ * topic filter. Registering the same address as ERC20FeeToken makes Envio skip
+ * one duplicate binding and emits noisy hosted warnings. */
+export function isStaticallyBoundStableToken(
+  chainId: number,
+  tokenAddress: string,
+): boolean {
+  return (
+    findStableByAddress(chainId, tokenAddress) !== undefined ||
+    findLockAndMintNttStableByAddress(chainId, tokenAddress) !== undefined
+  );
+}
+
+export function shouldRegisterErc20FeeToken(
+  chainId: number,
+  tokenAddress: string,
+): boolean {
+  return (
+    isKnownFeeToken(chainId, tokenAddress) &&
+    !isStaticallyBoundStableToken(chainId, tokenAddress)
+  );
 }
 
 /**

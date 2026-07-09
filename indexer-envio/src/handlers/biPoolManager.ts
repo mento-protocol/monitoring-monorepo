@@ -34,9 +34,10 @@ async function findWrappedPool(
   exchangeId: string,
 ): Promise<string | undefined> {
   const wrappingPools = await context.Pool.getWhere({
+    chainId: { _eq: chainId },
     wrappedExchangeId: { _eq: exchangeId },
   });
-  return wrappingPools.find((pool) => pool.chainId === chainId)?.id;
+  return wrappingPools[0]?.id;
 }
 
 async function preloadBiPoolExchangeLink(
@@ -371,7 +372,6 @@ indexer.onEvent(
     });
 
     // Reverse-join a VP that stamped `Pool.wrappedExchangeId` before this exchange.
-    // Envio's getWhere is single-field-only, so chain-filter after the lookup.
     const wrappedByPoolId = await findWrappedPool(
       context,
       event.chainId,

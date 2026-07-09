@@ -107,6 +107,7 @@ pnpm deploy:indexer:logs <commit> --build    # Show build logs for a deployment
 pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Show runtime issues
 pnpm deploy:indexer:metrics <commit>         # Show per-chain indexing progress
 pnpm deploy:indexer:info <commit>            # Show deployment info/cache state
+pnpm deploy:indexer:perf <commit>            # Combined status/metrics/log snapshot for perf comparisons
 pnpm deploy:indexer:verify <commit>          # Batch status, metrics, endpoint, and GraphQL row probe
 pnpm deploy:indexer:promote <commit>         # Promote a synced deployment to prod
 ```
@@ -135,6 +136,12 @@ The profiler logs the slowest handlers, effect request/execution counts
 (`hit~` is request count minus effect handler executions, i.e. preload/cache
 dedup), and entity get/set counters. It is disabled by default and has no
 runtime effect unless `INDEXER_PERF` is truthy.
+
+For hosted comparisons, use `pnpm deploy:indexer:perf <commit>` to capture the
+deployment registry row, per-chain status/metrics, build highlights, and recent
+warn/error logs in one snapshot. For local Envio CLI checks, `envio@3.2.1`
+also includes `envio metrics runtime` and `envio tools search-docs` /
+`envio tools fetch-docs`.
 
 Before removing `schema.graphql` indexes, run the static usage audit:
 
@@ -208,6 +215,7 @@ pnpm deploy:indexer
 pnpm deploy:indexer:status "$COMMIT" --watch --compact
 pnpm deploy:indexer:logs "$COMMIT" --build
 pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
+pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
 ```

@@ -54,6 +54,7 @@
     "deploy:indexer:logs": "./scripts/deploy-indexer-logs.sh",
     "deploy:indexer:metrics": "./scripts/deploy-indexer-metrics.sh",
     "deploy:indexer:info": "./scripts/deploy-indexer-info.sh",
+    "deploy:indexer:perf": "node scripts/deploy-indexer-perf.mjs",
     "deploy:indexer:verify": "node scripts/deploy-indexer-verify.mjs",
     "indexer:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml",
     "indexer:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.multichain.mainnet.yaml",

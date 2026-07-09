@@ -119,6 +119,8 @@ export {
   selectStaleTransfers,
   resolveFeeTokenMeta,
   isKnownFeeToken,
+  isStaticallyBoundStableToken,
+  shouldRegisterErc20FeeToken,
 } from "./feeToken.js";
 
 // Price math (used by priceDifference.test.ts, decimals.test.ts)

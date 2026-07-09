@@ -402,8 +402,8 @@ export async function resolveBreakerSnapshotFields(
   breakerBaselineAtSnapshot: bigint;
   breakerThresholdAtSnapshot: bigint;
 } | null> {
-  // Same chainId-in-memory filter rationale as `getBreakerConfigsByFeed`.
   const configs = await context.BreakerConfig.getWhere({
+    chainId: { _eq: chainId },
     rateFeedID: { _eq: rateFeedID },
   });
   // Filter to trip-able configs (excludes MARKET_HOURS, disabled) +
@@ -417,7 +417,7 @@ export async function resolveBreakerSnapshotFields(
   } | null = null;
   // Sort for deterministic pick when (rare) multiple trip-ables exist.
   const sortedConfigs = [...configs]
-    .filter((c) => c.chainId === chainId && c.enabled)
+    .filter((c) => c.enabled)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const cfg of sortedConfigs) {
     const breaker = await context.Breaker.get(cfg.breaker_id);
@@ -469,10 +469,10 @@ export async function refreshAllInheritingCooldowns(
   breaker: Breaker,
 ): Promise<void> {
   const configs = await context.BreakerConfig.getWhere({
+    chainId: { _eq: breaker.chainId },
     breakerAddress: { _eq: breaker.address },
   });
   for (const cfg of configs) {
-    if (cfg.chainId !== breaker.chainId) continue;
     if (cfg.cooldownTime > 0n) continue; // per-feed override, not affected by default change
     const nextEnds = computeCooldownEndsAt(
       cfg.lastStatusUpdatedAt,
@@ -814,10 +814,10 @@ export async function clearHaltOnFeedRemoved(
 ): Promise<void> {
   const feed = asAddress(rateFeedID);
   const configs = await context.BreakerConfig.getWhere({
+    chainId: { _eq: chainId },
     rateFeedID: { _eq: feed },
   });
   for (const cfg of configs) {
-    if (cfg.chainId !== chainId) continue;
     if (!cfg.enabled) continue;
     context.BreakerConfig.set({ ...cfg, enabled: false });
   }
@@ -856,10 +856,10 @@ async function computeOwnFeedHalted(
   rateFeedID: string,
 ): Promise<boolean> {
   const configs = await context.BreakerConfig.getWhere({
+    chainId: { _eq: chainId },
     rateFeedID: { _eq: asAddress(rateFeedID) },
   });
   for (const cfg of configs) {
-    if (cfg.chainId !== chainId) continue;
     if (!cfg.enabled) continue;
     if (cfg.status !== "TRIPPED") continue;
     const breaker = await context.Breaker.get(cfg.breaker_id);

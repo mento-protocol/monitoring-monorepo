@@ -20,6 +20,8 @@
 import { strict as assert } from "assert";
 import {
   isKnownFeeToken,
+  isStaticallyBoundStableToken,
+  shouldRegisterErc20FeeToken,
   _addMockAllowedFeeToken,
   _clearMockAllowedFeeTokens,
 } from "../src/EventHandlers.ts";
@@ -51,8 +53,16 @@ describe("isKnownFeeToken — registration gate", () => {
     assert.equal(isKnownFeeToken(42220, EURM_CELO), true);
   });
 
+  it("does not dynamically register stables that are covered by StableToken", () => {
+    assert.equal(isKnownFeeToken(42220, USDM_CELO), true);
+    assert.equal(isStaticallyBoundStableToken(42220, USDM_CELO), true);
+    assert.equal(shouldRegisterErc20FeeToken(42220, USDM_CELO), false);
+  });
+
   it("accepts known Celo collateral (USDC)", () => {
     assert.equal(isKnownFeeToken(42220, USDC_CELO), true);
+    assert.equal(isStaticallyBoundStableToken(42220, USDC_CELO), false);
+    assert.equal(shouldRegisterErc20FeeToken(42220, USDC_CELO), true);
   });
 
   it("is case-insensitive on the token address", () => {
