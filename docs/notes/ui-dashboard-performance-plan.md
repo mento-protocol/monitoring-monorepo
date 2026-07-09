@@ -185,7 +185,10 @@ chainId}]` — the server must reproduce the exact normalized id + `network.id`
   not LCP). **Shipped** (2026-07-09): `src/lib/network-fetcher/server-cache.ts` wraps the
   fan-out in `unstable_cache` (30s TTL) with an explicit dehydrate→rehydrate transform
   for the Map/Set fields, caches healthy payloads only (degraded ones pass through
-  uncached via an error carrier so `N/A` tiles are never pinned for the TTL), and strips
+  uncached via an error carrier — cold misses only, since `unstable_cache` serves stale
+  entries and swallows background-revalidation errors; a `fetchedAt` age gate bounds
+  served staleness at ~90s with a foreground refetch, covering the stale-serve path so
+  `N/A` tiles are never pinned), and strips
   the unread raw `feeSnapshots` rows from the `/` + `/pools` Flight payload. Note the
   impact re-rating vs. this plan's original scoring: a 2026-07-09 re-measure showed the
   homepage document _streaming_ until 0.9–1.9s (the fan-out runs inside the streamed

@@ -78,8 +78,9 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function HomePage() {
   // SSR the initial dashboard payload so first paint renders without a
-  // 14-fan-out GraphQL waterfall. Served from a 30s cross-request cache
-  // (healthy payloads only — degraded ones pass through uncached, and the
+  // 14-fan-out GraphQL waterfall. Served from a cross-request cache (30s TTL,
+  // ~90s worst-case staleness via the fetchedAt age gate in server-cache;
+  // healthy payloads only — degraded ones are never cached, and the
   // underlying `fetchAllNetworks` uses Promise.allSettled internally so it
   // won't throw). Guard anyway in case a truly unexpected error bubbles up;
   // an undefined initial payload just reverts to the client-only code path.

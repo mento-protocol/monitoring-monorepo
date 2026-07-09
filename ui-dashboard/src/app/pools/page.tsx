@@ -6,9 +6,10 @@ import { fetchInitialNetworkData } from "@/lib/network-fetcher/server-cache";
 // full pools table. Without this, the client renders a 3-row `<Skeleton />`
 // then swaps in a ~27-row table when SWR resolves, pushing the swaps section
 // below it down by ~1 200 px — measured CLS 0.4896 on the lhci /pools run
-// (BACKLOG "Lighthouse CI Follow-Ups"). The payload is served from a 30s
-// cross-request cache (healthy payloads only — degraded ones pass through
-// uncached, and the underlying `fetchAllNetworks` uses `Promise.allSettled`
+// (BACKLOG "Lighthouse CI Follow-Ups"). The payload is served from a
+// cross-request cache (30s TTL, ~90s worst-case staleness via the fetchedAt
+// age gate in server-cache; healthy payloads only — degraded ones are never
+// cached, and the underlying `fetchAllNetworks` uses `Promise.allSettled`
 // internally so it degrades per-network on failure); the catch only fires on
 // truly unexpected errors, and an undefined initial payload falls back to
 // the existing client-only path.

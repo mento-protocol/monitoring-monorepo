@@ -89,9 +89,14 @@ class DegradedNetworkDataError extends Error {
   }
 }
 
-async function fetchDehydratedInitialNetworkData(): Promise<
-  DehydratedNetworkData[]
-> {
+/** Cached wrapper shape: `fetchedAt` (Date.now() at fetch completion) rides
+ *  along so `fetchInitialNetworkData` can age-gate stale cache hits. */
+interface CachedNetworkPayload {
+  fetchedAt: number;
+  networks: DehydratedNetworkData[];
+}
+
+async function fetchDehydratedInitialNetworkData(): Promise<CachedNetworkPayload> {
   const data = await fetchAllNetworks();
   const dehydrated = data.map((networkData) =>
     stripFeeSnapshotRows(dehydrateNetworkData(networkData)),
@@ -101,32 +106,52 @@ async function fetchDehydratedInitialNetworkData(): Promise<
   if (data.length === 0 || !data.every(isNetworkDataFullyHealthy)) {
     throw new DegradedNetworkDataError(dehydrated);
   }
-  return dehydrated;
+  return { fetchedAt: Date.now(), networks: dehydrated };
 }
 
-// 30s revalidate: half the pool-detail/OG 60s TTL because this payload IS the
-// page (KPI tiles + pools table), not a preview. Client-side freshness after
-// first paint is owned by the SWR poll (SNAPSHOT_REFRESH_MS); the healthy-
-// payload mount-revalidation skip in `useAllNetworksData` means SSR staleness
-// is user-visible until that first poll, so keep the TTL tight.
+// 30s revalidate — but NOT a staleness bound: on dynamic renders
+// `unstable_cache` serves a stale entry immediately and revalidates in the
+// background, and it swallows background-revalidation errors (including our
+// `DegradedNetworkDataError`), keeping the stale entry served. So the first
+// request after an idle gap gets an arbitrarily old payload, and once one
+// healthy entry exists a degraded upstream never surfaces through this
+// wrapper alone. The `fetchedAt` age gate in `fetchInitialNetworkData` is
+// what bounds served staleness and re-opens the degraded-error channel.
 const cachedFetch = unstable_cache(
   fetchDehydratedInitialNetworkData,
   ["all-networks-ssr"],
   { revalidate: 30, tags: ["all-networks-ssr"] },
 );
 
+// 3× the 30s TTL: under steady traffic the serve-stale-while-revalidate
+// window keeps real staleness ≈ one TTL, so this bound only bites after idle
+// gaps (first visitor after a quiet stretch) or sustained degradation —
+// exactly the cases where a foreground refetch is worth the latency.
+const MAX_SERVED_STALENESS_MS = 90_000;
+
 /**
  * Cached drop-in for `fetchAllNetworks()` in the `/` and `/pools` Server
- * Components. Healthy payloads are served from a 30s shared cache; degraded
- * payloads (any per-chain or per-slice error) bypass the cache entirely so
- * the next request retries upstream — mirroring the client hook, which
- * revalidates degraded fallbacks on mount. Raw `feeSnapshots` rows are
- * stripped (see `stripFeeSnapshotRows`); use `fetchAllNetworks` directly if a
- * future server consumer needs them.
+ * Components. Healthy payloads are served from a shared `unstable_cache`
+ * entry (30s TTL, ~90s worst-case served staleness); degraded payloads (any
+ * per-chain or per-slice error) are thrown out of the cache callback so they
+ * are never written to the cache. That bypass alone only covers cold misses —
+ * on a stale hit `unstable_cache` swallows the revalidation error — so the
+ * `fetchedAt` age gate below discards cache results older than
+ * `MAX_SERVED_STALENESS_MS` and refetches in the foreground, giving idle-gap
+ * visitors fresh data and letting a sustained outage surface as the fresh
+ * degraded payload (error channels intact → the client hook's mount
+ * revalidation fires) instead of a pinned last-healthy one. Raw
+ * `feeSnapshots` rows are stripped (see `stripFeeSnapshotRows`); use
+ * `fetchAllNetworks` directly if a future server consumer needs them.
  */
 export async function fetchInitialNetworkData(): Promise<NetworkData[]> {
   try {
-    return (await cachedFetch()).map(rehydrateNetworkData);
+    const cached = await cachedFetch();
+    const payload =
+      Date.now() - cached.fetchedAt > MAX_SERVED_STALENESS_MS
+        ? await fetchDehydratedInitialNetworkData()
+        : cached;
+    return payload.networks.map(rehydrateNetworkData);
   } catch (err) {
     if (err instanceof DegradedNetworkDataError) {
       return err.payload.map(rehydrateNetworkData);

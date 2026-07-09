@@ -1,24 +1,34 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Network } from "@/lib/networks";
 import type { NetworkData } from "@/lib/network-fetcher/types";
 
-const { mockFetchAllNetworks, cacheCallbackOutcomes } = vi.hoisted(() => ({
-  mockFetchAllNetworks: vi.fn(),
-  /** Records whether each unstable_cache callback invocation resolved
-   *  (cacheable) or threw (never written to the cache). */
-  cacheCallbackOutcomes: [] as ("resolved" | "threw")[],
-}));
+const { mockFetchAllNetworks, cacheCallbackOutcomes, staleCacheEntry } =
+  vi.hoisted(() => ({
+    mockFetchAllNetworks: vi.fn(),
+    /** Records whether each unstable_cache callback invocation resolved
+     *  (cacheable) or threw (never written to the cache). */
+    cacheCallbackOutcomes: [] as ("resolved" | "threw")[],
+    /** When armed, the unstable_cache mock returns this value WITHOUT
+     *  invoking the callback — mirroring Next's stale-hit path, where the
+     *  cached entry is served immediately and the background revalidation
+     *  (including any error it throws) is swallowed. */
+    staleCacheEntry: { value: undefined as unknown },
+  }));
 
 // next/cache needs the Next.js incremental-cache runtime; outside it the repo
 // convention is an identity wrapper (see pool-detail-ssr.test.ts). This one
 // additionally records resolve/throw so tests can assert which payloads would
-// have been written to the shared cache.
+// have been written to the shared cache, and can serve an armed stale entry
+// to simulate `unstable_cache`'s serve-stale-while-background-revalidate.
 vi.mock("next/cache", () => ({
   unstable_cache:
     <TArgs extends unknown[], TResult>(
       fn: (...args: TArgs) => Promise<TResult>,
     ) =>
     async (...args: TArgs): Promise<TResult> => {
+      if (staleCacheEntry.value !== undefined) {
+        return staleCacheEntry.value as TResult;
+      }
       try {
         const result = await fn(...args);
         cacheCallbackOutcomes.push("resolved");
@@ -91,6 +101,11 @@ function healthyNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
 beforeEach(() => {
   mockFetchAllNetworks.mockReset();
   cacheCallbackOutcomes.length = 0;
+  staleCacheEntry.value = undefined;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("dehydrate/rehydrate round-trip", () => {
@@ -165,5 +180,67 @@ describe("fetchInitialNetworkData", () => {
     mockFetchAllNetworks.mockRejectedValueOnce(new Error("boom"));
 
     await expect(fetchInitialNetworkData()).rejects.toThrow("boom");
+  });
+
+  // Stale-hit path: `unstable_cache` serves stale entries and swallows
+  // background-revalidation errors, so only the fetchedAt age gate bounds
+  // what visitors actually see (MAX_SERVED_STALENESS_MS = 90s).
+  describe("fetchedAt age gate", () => {
+    const NOW = 1_700_000_000_000;
+    /** Cached-entry shape as written by the cache callback: dehydrated,
+     *  fee-rows stripped, with the fetch-completion timestamp. */
+    function staleEntry(ageMs: number, overrides: Partial<NetworkData> = {}) {
+      return {
+        fetchedAt: NOW - ageMs,
+        networks: [
+          dehydrateNetworkData(
+            healthyNetworkData({ feeSnapshots: [], ...overrides }),
+          ),
+        ],
+      };
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+
+    it("serves a cached payload younger than 90s without refetching", async () => {
+      staleCacheEntry.value = staleEntry(89_000);
+
+      const result = await fetchInitialNetworkData();
+
+      expect(mockFetchAllNetworks).not.toHaveBeenCalled();
+      expect(result).toHaveLength(1);
+      expect(result[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+    });
+
+    it("foreground-refetches a cached payload older than 90s", async () => {
+      // Distinguishable stale rate — the assertion below proves the fresh
+      // payload wins, not the pinned cache entry.
+      staleCacheEntry.value = staleEntry(90_001, {
+        rates: new Map([["42220:cUSD", 999]]),
+      });
+      mockFetchAllNetworks.mockResolvedValueOnce([healthyNetworkData()]);
+
+      const result = await fetchInitialNetworkData();
+
+      expect(mockFetchAllNetworks).toHaveBeenCalledTimes(1);
+      expect(result[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+    });
+
+    it("surfaces a fresh degraded payload past 90s instead of the stale healthy one", async () => {
+      staleCacheEntry.value = staleEntry(90_001);
+      mockFetchAllNetworks.mockResolvedValueOnce([
+        healthyNetworkData({ ratesError: { message: "oracle query failed" } }),
+      ]);
+
+      const [data] = await fetchInitialNetworkData();
+
+      expect(mockFetchAllNetworks).toHaveBeenCalledTimes(1);
+      // Error channel intact → client mount revalidation fires, instead of
+      // the stale healthy payload masking a live outage.
+      expect(data!.ratesError).toEqual({ message: "oracle query failed" });
+    });
   });
 });
