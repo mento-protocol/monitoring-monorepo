@@ -52,21 +52,34 @@ export type VolumeHeroView = {
 };
 
 /**
- * Server-prefetched raw responses for the /volume hero first paint. Only the
- * fields for `view.venue` are populated; the primary pair (window + today) is
- * always present (the fetch returns `undefined` overall when either fails),
- * while the firstDay catch-up slice is optional (schema-lag resilient, same
- * as pool-detail's extension queries).
+ * Server-prefetched raw responses for the /volume hero first paint, as a
+ * per-venue discriminated union: the primary pair (window + today) is
+ * REQUIRED for the active venue (the fetch returns `undefined` overall when
+ * either fails — the compiler now enforces that invariant), the firstDay
+ * catch-up slice stays optional (schema-lag resilient, same as pool-detail's
+ * extension queries), and the other venue's fields are typed `undefined` so
+ * a v3 payload can never silently carry v2 data (or vice versa) while
+ * `fallback?.heroV2`-style access sites stay valid on both branches.
  */
-export type VolumeHeroInitialData = {
-  view: VolumeHeroView;
-  heroV3?: VolumeWindowLatestResponse | undefined;
-  todayV3?: VolumeTodayTradersResponse | undefined;
-  firstDayV3?: VolumeWindowFirstDayLatestResponse | undefined;
-  heroV2?: BrokerVolumeWindowLatestResponse | undefined;
-  todayV2?: BrokerVolumeTodayTradersResponse | undefined;
-  firstDayV2?: BrokerVolumeWindowFirstDayLatestResponse | undefined;
-};
+export type VolumeHeroInitialData =
+  | {
+      view: VolumeHeroView & { venue: "v3" };
+      heroV3: VolumeWindowLatestResponse;
+      todayV3: VolumeTodayTradersResponse;
+      firstDayV3?: VolumeWindowFirstDayLatestResponse | undefined;
+      heroV2?: undefined;
+      todayV2?: undefined;
+      firstDayV2?: undefined;
+    }
+  | {
+      view: VolumeHeroView & { venue: "v2" };
+      heroV2: BrokerVolumeWindowLatestResponse;
+      todayV2: BrokerVolumeTodayTradersResponse;
+      firstDayV2?: BrokerVolumeWindowFirstDayLatestResponse | undefined;
+      heroV3?: undefined;
+      todayV3?: undefined;
+      firstDayV3?: undefined;
+    };
 
 /**
  * The `isProtocolActorIn` variable both sides derive from the actor toggle

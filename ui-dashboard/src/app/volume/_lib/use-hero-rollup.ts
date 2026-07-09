@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { useGQL } from "@/lib/graphql";
-import { isLoadingWithoutData } from "@/lib/swr-state";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
   volumeHeroViewMatches,
   type VolumeHeroInitialData,
@@ -360,10 +360,16 @@ export function useHeroRollup({
         isLoadingWithoutData(todayV3Result.isLoading, todayV3Result.data)
       : isLoadingWithoutData(heroV2Result.isLoading, heroV2Result.data) ||
         isLoadingWithoutData(todayV2Result.isLoading, todayV2Result.data);
+  // Same data-presence rule for errors: after a failed background
+  // revalidation SWR keeps the previous (fallback or cached) responses, and
+  // flipping the tiles to "—" while populated numbers exist would hide good
+  // data behind a transient poll failure.
   const hasError =
     venue === "v3"
-      ? !!heroV3Result.error || !!todayV3Result.error
-      : !!heroV2Result.error || !!todayV2Result.error;
+      ? hasErrorWithoutData(heroV3Result.error, heroV3Result.data) ||
+        hasErrorWithoutData(todayV3Result.error, todayV3Result.data)
+      : hasErrorWithoutData(heroV2Result.error, heroV2Result.data) ||
+        hasErrorWithoutData(todayV2Result.error, todayV2Result.data);
 
   return {
     todayMidnight,

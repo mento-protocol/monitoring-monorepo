@@ -7,9 +7,6 @@
 import { unstable_cache } from "next/cache";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
-
-// Tighter budget for the OPTIONAL firstDay slice — see firstDaySignal below.
-const FIRST_DAY_TIMEOUT_MS = 2_000;
 import { DEFAULT_NETWORK, NETWORKS } from "@/lib/networks";
 import {
   BROKER_VOLUME_TODAY_TRADERS,
@@ -31,6 +28,9 @@ import {
   type VolumeWindowLatestResponse,
 } from "@/lib/volume-hero-initial-data";
 import type { Venue } from "@/lib/volume-url-params";
+
+// Tighter budget for the OPTIONAL firstDay slice — see firstDaySignal below.
+const FIRST_DAY_TIMEOUT_MS = 2_000;
 
 // SSR-prefetch of the /volume hero queries (perf-plan S4, mirroring the proven
 // pool-detail pattern). `/volume` is otherwise a pure client waterfall: the
@@ -90,15 +90,17 @@ async function fetchVolumeHeroUncached(
   const windowVariables = { windowKey: range };
   const todayVariables = { todayMidnight, isProtocolActorIn };
 
-  const view = {
+  // Built per-branch (not hoisted) so `venue` carries its narrowed literal
+  // type into the discriminated `VolumeHeroInitialData` union member.
+  const viewBase = {
     networkId: network.id,
-    venue,
     range,
     includeProtocolActors,
     todayMidnight,
   };
 
   if (venue === "v2") {
+    const view = { ...viewBase, venue };
     const [heroV2, todayV2, firstDayV2] = await Promise.all([
       requestOptional<BrokerVolumeWindowLatestResponse>(
         client,
@@ -129,6 +131,7 @@ async function fetchVolumeHeroUncached(
       : undefined;
   }
 
+  const view = { ...viewBase, venue };
   const [heroV3, todayV3, firstDayV3] = await Promise.all([
     requestOptional<VolumeWindowLatestResponse>(
       client,
