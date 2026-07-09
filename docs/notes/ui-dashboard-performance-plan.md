@@ -134,7 +134,8 @@ out explicitly.
     <0.05 needs per-pool-type height tuning (FPMM vs virtual pools differ). Mirror the
     fix in `loading.tsx`.
   - **P2b · SSR-prefetch the pool overview** (M–L). Apply the proven
-    `fetchAllNetworks → SWR fallbackData` pattern (from `/` and `/pools`) to
+    SSR-payload → SWR `fallbackData` pattern (from `/` and `/pools`, now served
+    through `fetchInitialNetworkData` in `network-fetcher/server-cache.ts`) to
     `/pool/[id]`. The server _already_ round-trips the endpoint every request for OG
     metadata (`fetchPoolForMetadata`, `unstable_cache({revalidate:60})`), so the
     infra template exists — but the OG payload is transformed, so add a raw-shape

@@ -128,6 +128,12 @@ describe("dehydrate/rehydrate round-trip", () => {
     });
     expect(roundTripped.network).toEqual(network);
     expect(roundTripped.snapshotWindows).toEqual(windows);
+
+    // Schema-evolution net: full deep equality so a future Map/Set field on
+    // `NetworkData` that the dehydrate/rehydrate pair doesn't handle fails
+    // here (it would silently flatten to `{}` in the JSON round-trip)
+    // instead of shipping lost data.
+    expect(roundTripped).toEqual(data);
   });
 });
 
