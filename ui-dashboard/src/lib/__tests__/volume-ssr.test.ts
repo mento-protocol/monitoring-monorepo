@@ -151,12 +151,19 @@ describe("fetchVolumeHeroForSSR", () => {
     expect(byDocument.get(VOLUME_WINDOW_FIRSTDAY_LATEST)?.variables).toEqual({
       windowKey: "7d",
     });
-    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+    // Two budgets: the shared primary deadline plus the tighter independent
+    // budget for the optional firstDay slice, so a hung optional query can't
+    // hold TTFB to the full shared deadline on a cache miss.
+    expect(timeoutSpy).toHaveBeenCalledTimes(2);
     expect(timeoutSpy).toHaveBeenCalledWith(HASURA_TIMEOUT_MS);
-    const signals = requestMock.mock.calls.map(
-      ([request]) => (request as { signal: AbortSignal }).signal,
+    expect(timeoutSpy).toHaveBeenCalledWith(2_000);
+    const signalOf = (document: string) =>
+      (byDocument.get(document) as { signal: AbortSignal }).signal;
+    // Primaries share one deadline; firstDay rides its own.
+    expect(signalOf(VOLUME_WINDOW_LATEST)).toBe(signalOf(VOLUME_TODAY_TRADERS));
+    expect(signalOf(VOLUME_WINDOW_FIRSTDAY_LATEST)).not.toBe(
+      signalOf(VOLUME_WINDOW_LATEST),
     );
-    expect(new Set(signals).size).toBe(1);
   });
 
   it("prefetches the broker variants with [false, true] actors for the v2 all-actors view", async () => {
