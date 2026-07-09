@@ -3,7 +3,7 @@ title: Monitoring Dashboard Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-09
 ---
 
 # AGENTS.md — Monitoring Dashboard
@@ -104,6 +104,14 @@ The required local data env is:
 Other Vercel vars, Blob vars, cron secrets, and automation-bypass secrets are
 not needed for ordinary localhost UI review unless the task directly touches
 that route.
+
+Production Sentry telemetry is tunneled through `/monitoring` (see
+`next.config.ts`). During production browser verification, a
+`POST /monitoring?...` 429 with an `x-sentry-rate-limits` response such as
+`transaction_usage_exceeded` is Sentry quota noise, not an indexer or dashboard
+data failure, when the page data requests still return 200 and the UI renders
+normally. Report it separately and keep verifying the data surface. Treat
+non-Sentry 429s or failed GraphQL/API requests as real regressions.
 
 Logged-out verification:
 
