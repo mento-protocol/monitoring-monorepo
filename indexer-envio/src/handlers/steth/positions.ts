@@ -104,10 +104,11 @@ export async function consumePrincipalLots(
   if (amount <= ZERO) return ZERO;
 
   const lots = await context.StethCostBasisLot.getWhere({
+    chainId: { _eq: meta.chainId },
     wallet: { _eq: wallet },
   });
   const activeLots = lots
-    .filter((lot) => lot.chainId === meta.chainId && lot.remainingAmount > ZERO)
+    .filter((lot) => lot.remainingAmount > ZERO)
     .sort((a, b) => {
       if (a.openedAtBlock !== b.openedAtBlock) {
         return a.openedAtBlock < b.openedAtBlock ? -1 : 1;

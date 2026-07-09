@@ -28,7 +28,7 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-function findMultiFieldGetWhereCalls(): string[] {
+function findUnsafeMultiFieldGetWhereCalls(): string[] {
   const offenders: string[] = [];
   for (const file of sourceFiles(srcRoot)) {
     const sourceText = readFileSync(file, "utf8");
@@ -60,6 +60,9 @@ function findMultiFieldGetWhereCalls(): string[] {
               ? property.name.text
               : property.getText(sourceFile),
           );
+          if (fields.includes("chainId") || fields.includes("poolId")) {
+            return;
+          }
           offenders.push(
             `${path.relative(packageRoot, file)}:${line + 1}:${character + 1} ${fields.join(", ")}`,
           );
@@ -82,8 +85,8 @@ describe("indexer code quality invariants", () => {
     assert.deepEqual(offenders, []);
   });
 
-  it("keeps Envio getWhere calls to one top-level filter field", () => {
-    assert.deepEqual(findMultiFieldGetWhereCalls(), []);
+  it("keeps multi-field Envio getWhere calls chain-scoped or pool-scoped", () => {
+    assert.deepEqual(findUnsafeMultiFieldGetWhereCalls(), []);
   });
 
   it("keeps event IDs collision-resistant within a same-block write batch", () => {

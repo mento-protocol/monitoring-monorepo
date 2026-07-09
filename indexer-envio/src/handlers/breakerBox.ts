@@ -72,13 +72,14 @@ indexer.onEvent(
     // we discover later (RPC self-heal on a new event) will see the breaker
     // already marked removed and skip self-heal.
     const configs = await context.BreakerConfig.getWhere({
+      chainId: { _eq: event.chainId },
       breakerAddress: { _eq: breakerAddress },
     });
     // A breaker can serve multiple feeds; disabling it may clear the halt OR
     // on any of them, so collect the touched feeds and re-sync each.
     const affectedFeeds = new Set<string>();
     for (const cfg of configs) {
-      if (cfg.chainId === event.chainId && cfg.enabled) {
+      if (cfg.enabled) {
         context.BreakerConfig.set({ ...cfg, enabled: false });
         affectedFeeds.add(cfg.rateFeedID);
       }
@@ -350,10 +351,10 @@ indexer.onEvent(
     // countdown would render against the previous trip/reset's timestamp and
     // immediately show as expired.
     const configs = await context.BreakerConfig.getWhere({
+      chainId: { _eq: event.chainId },
       rateFeedID: { _eq: rateFeedID },
     });
     for (const cfg of configs) {
-      if (cfg.chainId !== event.chainId) continue;
       if (!cfg.enabled) continue;
       if (cfg.tradingMode === tradingMode) continue;
       const breaker = await context.Breaker.get(cfg.breaker_id);

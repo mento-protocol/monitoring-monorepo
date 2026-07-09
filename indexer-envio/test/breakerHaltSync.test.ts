@@ -78,8 +78,18 @@ function makeCtx(opts: {
     // Mutable so `clearHaltOnFeedRemoved` can disable rows and the recompute
     // reads the updated `enabled` flag.
     BreakerConfig: {
-      getWhere: async ({ rateFeedID }: { rateFeedID: { _eq: string } }) =>
-        [...configs.values()].filter((c) => c.rateFeedID === rateFeedID._eq),
+      getWhere: async ({
+        chainId,
+        rateFeedID,
+      }: {
+        chainId?: { _eq: number };
+        rateFeedID?: { _eq: string };
+      }) =>
+        [...configs.values()].filter(
+          (c) =>
+            (chainId === undefined || c.chainId === chainId._eq) &&
+            (rateFeedID === undefined || c.rateFeedID === rateFeedID._eq),
+        ),
       set: (c: BreakerConfig) => configs.set(c.id, c),
     },
     Breaker: {

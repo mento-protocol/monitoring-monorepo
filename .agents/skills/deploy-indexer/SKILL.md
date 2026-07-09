@@ -172,6 +172,7 @@ or after a failed build. Always pass the explicit target:
 ```bash
 pnpm deploy:indexer:logs <TARGET_COMMIT> --build
 pnpm deploy:indexer:logs <TARGET_COMMIT> --level error,warn --since 2h
+pnpm deploy:indexer:perf <TARGET_COMMIT>
 ```
 
 Treat a successful caught-up exit as `READY_TO_PROMOTE`. If the command exits
@@ -326,6 +327,7 @@ user to verify manually.
 
 - **Deployed commit:** `<TARGET_COMMIT>`
 - **Build + sync:** time-to-caught-up (mm:ss), per-chain final blocks
+- **Performance snapshot:** `pnpm deploy:indexer:perf <TARGET_COMMIT>` captured status/metrics/log highlights
 - **Deployment verify:** `pnpm deploy:indexer:verify <TARGET_COMMIT>` passed before promotion
 - **Promote:** ✅ / ❌ (and `PREVIOUS_PROD_COMMIT` captured in Phase 4, for rollback reference)
 - **DNS wait:** 5 min completed

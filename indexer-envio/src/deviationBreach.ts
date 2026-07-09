@@ -29,6 +29,7 @@ export type BreachContext = {
     get: (id: string) => Promise<DeviationThresholdBreach | undefined>;
     getWhere?: (where: {
       poolId: { _eq: string };
+      startedAt?: { _eq: bigint };
     }) => Promise<DeviationThresholdBreach[]>;
     set: (entity: DeviationThresholdBreach) => void;
   };
@@ -114,10 +115,9 @@ async function getOpenBreach(
   if (context.DeviationThresholdBreach.getWhere) {
     const rows = await context.DeviationThresholdBreach.getWhere({
       poolId: { _eq: poolId },
+      startedAt: { _eq: startedAt },
     });
-    return rows.find(
-      (row) => row.startedAt === startedAt && row.endedAt === undefined,
-    );
+    return rows.find((row) => row.endedAt === undefined);
   }
   return context.DeviationThresholdBreach.get(openBreachId(poolId, startedAt));
 }

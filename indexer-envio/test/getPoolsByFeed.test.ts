@@ -5,15 +5,26 @@ import { getPoolsByFeed } from "../src/rpc.js";
 import { makePool } from "./helpers/makePool.js";
 
 // Minimal context shaped like the Envio on-event context getPoolsByFeed reads:
-// Pool.getWhere (filtered by referenceRateFeedID) + a log.warn spy.
+// Pool.getWhere (filtered by chainId + referenceRateFeedID) + a log.warn spy.
 function makeMockContext(pools: Pool[]) {
   const warnings: string[] = [];
+  const queries: Array<{
+    chainId: { _eq: number };
+    referenceRateFeedID: { _eq: string };
+  }> = [];
   const context = {
     Pool: {
-      getWhere: async (where: { referenceRateFeedID: { _eq: string } }) =>
-        pools.filter(
-          (p) => p.referenceRateFeedID === where.referenceRateFeedID._eq,
-        ),
+      getWhere: async (where: {
+        chainId: { _eq: number };
+        referenceRateFeedID: { _eq: string };
+      }) => {
+        queries.push(where);
+        return pools.filter(
+          (p) =>
+            p.chainId === where.chainId._eq &&
+            p.referenceRateFeedID === where.referenceRateFeedID._eq,
+        );
+      },
     },
     log: {
       warn: (msg: string) => {
@@ -22,14 +33,14 @@ function makeMockContext(pools: Pool[]) {
     },
     // getPoolsByFeed only touches Pool + log; cast through unknown for the rest.
   } as unknown as Parameters<typeof getPoolsByFeed>[0];
-  return { context, warnings };
+  return { context, warnings, queries };
 }
 
 const FEED = "0xfeed000000000000000000000000000000000001";
 
 describe("getPoolsByFeed cross-chain isolation", () => {
   it("returns only the requested chain's pool when a feed resolves on two chains", async () => {
-    const { context, warnings } = makeMockContext([
+    const { context, warnings, queries } = makeMockContext([
       makePool({
         id: "42220-0xcelo",
         chainId: 42220,
@@ -40,9 +51,10 @@ describe("getPoolsByFeed cross-chain isolation", () => {
 
     const celo = await getPoolsByFeed(context, 42220, FEED);
     assert.deepEqual(celo, ["42220-0xcelo"]);
-    // The cross-chain drop must be visible, not silent.
-    assert.equal(warnings.length, 1);
-    assert.match(warnings[0]!, /resolves on multiple chains/);
+    assert.deepEqual(queries, [
+      { chainId: { _eq: 42220 }, referenceRateFeedID: { _eq: FEED } },
+    ]);
+    assert.equal(warnings.length, 0);
   });
 
   it("does not warn when every matching pool is on the requested chain", async () => {

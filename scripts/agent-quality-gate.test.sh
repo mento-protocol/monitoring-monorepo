@@ -1619,6 +1619,14 @@ run_gate "scripts/deploy-indexer-verify.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
+run_gate "scripts/deploy-indexer-perf.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy-indexer-perf.test.mjs (indexer deploy perf helper changed)"
+
+run_gate "scripts/deploy-indexer-perf.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy-indexer-perf.test.mjs (indexer deploy perf helper changed)"
+
 run_gate "scripts/deploy-bridge.sh"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
 assert_occurrences 1 "- bash -n scripts/deploy-bridge.sh (shell script changed)"

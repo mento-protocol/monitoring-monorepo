@@ -109,10 +109,11 @@ export async function consumeLots(
   if (shares <= ZERO) return ZERO;
 
   const lots = await context.SusdsCostBasisLot.getWhere({
+    chainId: { _eq: meta.chainId },
     wallet: { _eq: wallet },
   });
   const activeLots = lots
-    .filter((lot) => lot.chainId === meta.chainId && lot.remainingShares > ZERO)
+    .filter((lot) => lot.remainingShares > ZERO)
     .sort((a, b) => {
       if (a.openedAtBlock !== b.openedAtBlock) {
         return a.openedAtBlock < b.openedAtBlock ? -1 : 1;

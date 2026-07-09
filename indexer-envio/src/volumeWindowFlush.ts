@@ -40,6 +40,7 @@ import {
 export type V3FlushContext = {
   TraderDailySnapshot: {
     getWhere: (query: {
+      chainId: { _eq: number };
       timestamp: { _gte: bigint };
     }) => Promise<TraderDailySnapshot[]>;
   };
@@ -71,9 +72,8 @@ export async function flushV3VolumeWindowSnapshots(args: {
   // reads the O(distinct-traders) lifetime rollup instead of rescanning every
   // daily row (#860).
   const [rows, allTimeRows] = await Promise.all([
-    // Envio getWhere accepts one predicate key here. Fetch by the bounded
-    // timestamp window and let aggregatePerWindow drop cross-chain rows.
     args.context.TraderDailySnapshot.getWhere({
+      chainId: { _eq: args.chainId },
       timestamp: { _gte: windowStartDay(args.snapshotDay, "90d") },
     }),
     args.context.TraderAllTimeAggregate.getWhere({
@@ -145,6 +145,7 @@ export async function maybeHeartbeatFlushV3(args: {
 export type V2FlushContext = {
   BrokerTraderDailySnapshot: {
     getWhere: (query: {
+      chainId: { _eq: number };
       timestamp: { _gte: bigint };
     }) => Promise<BrokerTraderDailySnapshot[]>;
   };
@@ -170,9 +171,8 @@ export async function flushV2VolumeWindowSnapshots(args: {
   updatedAtTimestamp: bigint;
 }): Promise<void> {
   const [rows, allTimeRows] = await Promise.all([
-    // Envio getWhere accepts one predicate key here. Fetch by the bounded
-    // timestamp window and let aggregatePerWindow drop cross-chain rows.
     args.context.BrokerTraderDailySnapshot.getWhere({
+      chainId: { _eq: args.chainId },
       timestamp: { _gte: windowStartDay(args.snapshotDay, "90d") },
     }),
     args.context.BrokerTraderAllTimeAggregate.getWhere({
