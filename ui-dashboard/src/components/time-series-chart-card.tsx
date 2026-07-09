@@ -139,6 +139,10 @@ interface TimeSeriesChartCardProps {
   annotations?: Plotly.Layout["annotations"];
   yAxisReferenceValues?: readonly number[];
   plotlyDeferMode?: DeferredMountMode;
+  controls?: ReactNode;
+  valueHoverPrefix?: string;
+  valueHoverSuffix?: string;
+  valueHoverFormat?: string;
 }
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
@@ -170,6 +174,10 @@ export function TimeSeriesChartCard({
   annotations,
   yAxisReferenceValues = EMPTY_Y_AXIS_REFERENCE_VALUES,
   plotlyDeferMode = "none",
+  controls,
+  valueHoverPrefix = "$",
+  valueHoverSuffix = "",
+  valueHoverFormat = ",.0f",
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
@@ -237,6 +245,9 @@ export function TimeSeriesChartCard({
     );
     const ys = series.map((point) => point.value);
     const tickformat = dateTickFormatForSeries(series);
+    const safeValueHoverPrefix = escapePlotText(valueHoverPrefix);
+    const safeValueHoverSuffix = escapePlotText(valueHoverSuffix);
+    const valueHoverTemplate = `${safeValueHoverPrefix}%{y:${valueHoverFormat}}${safeValueHoverSuffix}`;
     const totalTrace = isStacked
       ? null
       : {
@@ -248,7 +259,7 @@ export function TimeSeriesChartCard({
           line: { color: "#6366f1", width: 2 },
           fill: "tozeroy" as const,
           fillcolor: "rgba(99,102,241,0.08)",
-          hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
+          hovertemplate: `<b>${valueHoverTemplate}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
         };
     const breakdownTraces = (breakdown ?? []).map((b) => {
       // Escape `name` before it reaches Plotly's `name` and `hovertemplate`
@@ -288,7 +299,7 @@ export function TimeSeriesChartCard({
         ...(customSortedHover
           ? { hoverinfo: "none" as const }
           : {
-              hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
+              hovertemplate: `${safeName}: ${valueHoverTemplate}<extra></extra>`,
             }),
       };
     });
@@ -418,6 +429,9 @@ export function TimeSeriesChartCard({
     shapes,
     annotations,
     yAxisReferenceValues,
+    valueHoverPrefix,
+    valueHoverSuffix,
+    valueHoverFormat,
   ]);
 
   // Cross-fade in stacked mode: pre-render every visibility combo (2^N
@@ -530,30 +544,33 @@ export function TimeSeriesChartCard({
           )}
         </div>
 
-        <div
-          role="group"
-          aria-label={rangeAriaLabel}
-          className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5"
-        >
-          {ranges.map((item) => {
-            const active = range === item.key;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => onRangeChange(item.key)}
-                className={
-                  "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
-                  (active
-                    ? "bg-slate-700 text-white shadow-sm"
-                    : "text-slate-400 hover:text-slate-200")
-                }
-              >
-                {item.label}
-              </button>
-            );
-          })}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {controls}
+          <div
+            role="group"
+            aria-label={rangeAriaLabel}
+            className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5"
+          >
+            {ranges.map((item) => {
+              const active = range === item.key;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onRangeChange(item.key)}
+                  className={
+                    "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+                    (active
+                      ? "bg-slate-700 text-white shadow-sm"
+                      : "text-slate-400 hover:text-slate-200")
+                  }
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

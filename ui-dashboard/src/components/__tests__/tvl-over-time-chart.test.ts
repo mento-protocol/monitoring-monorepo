@@ -936,10 +936,10 @@ describe("TvlOverTimeChart render", () => {
     const [t0, t1, t2] = [traces[0]!, traces[1]!, traces[2]!];
     expect(t0.name).toBe("Total");
     expect(t0.x).toHaveLength(1);
-    expect(t0.y).toEqual([300]);
+    expect(t0.y).toEqual([100]);
     expect(t1.name).toBe(TVL_NETWORK.label);
     expect(t1.x).toHaveLength(1);
-    expect(t1.y).toEqual([200]);
+    expect(t1.y).toEqual([100]);
     expect(t2.name).toBe(TVL_NETWORK_2.label);
     expect(t2.x).toHaveLength(1);
     expect(t2.y).toEqual([100]);
@@ -978,10 +978,75 @@ describe("TvlOverTimeChart render", () => {
     const [tr0, tr1] = [traces[0]!, traces[1]!];
     expect(tr0.name).toBe("Total");
     expect(tr0.x).toHaveLength(1);
-    expect(tr0.y).toEqual([200]);
+    expect(tr0.y).toEqual([100]);
     expect(tr1.name).toBe(TVL_NETWORK.label);
     expect(tr1.x).toHaveLength(1);
-    expect(tr1.y).toEqual([200]);
+    expect(tr1.y).toEqual([100]);
+  });
+
+  it("defaults to indexed traces so small relative TVL moves are visible across chain magnitudes", () => {
+    const today = dayAlignedNow();
+    const ago = today - 7 * SECONDS_PER_DAY;
+    const largePool = makeTvlPool({
+      id: "large-pool",
+      reserves0: "1020000000000000000000",
+      reserves1: "1020000000000000000000",
+    });
+    const smallPool = makeTvlPool({
+      id: "small-pool",
+      reserves0: "51000000000000000000",
+      reserves1: "51000000000000000000",
+    });
+    const largeAgo = makeSnapshot({
+      poolId: "large-pool",
+      timestamp: ago,
+      reserves0: "1000000000000000000000",
+      reserves1: "1000000000000000000000",
+    });
+    const smallAgo = makeSnapshot({
+      poolId: "small-pool",
+      timestamp: ago,
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+
+    const html = renderToStaticMarkup(
+      React.createElement(TvlOverTimeChart, {
+        networkData: [
+          makeNetworkData({
+            network: TVL_NETWORK,
+            pools: [largePool],
+            snapshotsAllDaily: [largeAgo],
+          }),
+          makeNetworkData({
+            network: TVL_NETWORK_2,
+            pools: [smallPool],
+            snapshotsAllDaily: [smallAgo],
+          }),
+        ],
+        totalTvl: 2_142,
+        tvlPartial: false,
+        change7d: 2,
+        isLoading: false,
+        hasError: false,
+        hasSnapshotError: false,
+      }),
+    );
+
+    expect(html).toMatch(/aria-pressed="true"[^>]*>Indexed</);
+    expect(html).toMatch(/aria-pressed="false"[^>]*>USD</);
+    const traces = capturedPlotProps.data as Array<{
+      name?: string;
+      y: number[];
+      hovertemplate?: string;
+    }>;
+    expect(traces).toHaveLength(3);
+    for (const trace of traces) {
+      expect(trace.y[0]).toBeCloseTo(100, 6);
+      expect(trace.y.at(-1)).toBeCloseTo(102, 6);
+      expect(trace.hovertemplate).toContain("%{y:.2f} index");
+      expect(trace.hovertemplate).not.toContain("$%{y");
+    }
   });
 
   it("renders a skeleton (not the real value) in the hero while loading", () => {
@@ -1118,6 +1183,8 @@ describe("TvlOverTimeChart render", () => {
     expect(html).toMatch(/aria-pressed="true"[^>]*>1M</);
     expect(html).toMatch(/aria-pressed="false"[^>]*>1W</);
     expect(html).toMatch(/aria-pressed="false"[^>]*>All</);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>Indexed</);
+    expect(html).toMatch(/aria-pressed="false"[^>]*>USD</);
   });
 
   it("passes scrollZoom=false and displayModeBar=false to Plotly config", () => {

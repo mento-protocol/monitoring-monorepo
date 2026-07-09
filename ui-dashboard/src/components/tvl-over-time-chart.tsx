@@ -22,6 +22,25 @@ import {
 } from "@/lib/time-series";
 
 type SeriesPoint = { timestamp: number; tvlUSD: number };
+type TvlChartMode = "indexed" | "absolute";
+
+type TvlChartData = {
+  fullSeries: TimeSeriesPoint[];
+  fullBreakdown: BreakdownSeries[];
+};
+
+type TvlChartValueProps =
+  | {
+      yAxisReferenceValues: readonly number[];
+      valueHoverPrefix: string;
+      valueHoverSuffix: string;
+      valueHoverFormat: string;
+    }
+  | {
+      valueHoverPrefix: string;
+      valueHoverSuffix: string;
+      valueHoverFormat: string;
+    };
 
 type PoolHistory = {
   pool: Pool;
@@ -76,6 +95,14 @@ export type ChainTvlSeries = {
   series: SeriesPoint[];
   nowTvl: number;
 };
+
+const TVL_CHART_MODES: ReadonlyArray<{
+  key: TvlChartMode;
+  label: string;
+}> = [
+  { key: "indexed", label: "Indexed" },
+  { key: "absolute", label: "USD" },
+];
 
 /**
  * Builds a forward-filled TVL time series. `bucketSeconds` selects the
@@ -378,6 +405,147 @@ function computeCurrentTvl(currentPools: CurrentPool[]): {
   return { nowTvl, perChainNowTvl };
 }
 
+function indexSeriesToWindowStart(
+  series: TimeSeriesPoint[],
+): TimeSeriesPoint[] {
+  const baselineIndex = series.findIndex((point) => point.value > 0);
+  if (baselineIndex === -1) return [];
+
+  const baseline = series[baselineIndex]!.value;
+  return series.slice(baselineIndex).map((point) => ({
+    timestamp: point.timestamp,
+    value: (point.value / baseline) * 100,
+  }));
+}
+
+function indexBreakdownToWindowStart(
+  breakdown: BreakdownSeries[],
+): BreakdownSeries[] {
+  const indexed: BreakdownSeries[] = [];
+  for (const entry of breakdown) {
+    const series = indexSeriesToWindowStart(entry.series);
+    if (series.length > 0) {
+      indexed.push({ ...entry, series });
+    }
+  }
+  return indexed;
+}
+
+function TvlModeControls({
+  chartMode,
+  onChartModeChange,
+}: {
+  chartMode: TvlChartMode;
+  onChartModeChange: (mode: TvlChartMode) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="TVL chart value mode"
+      className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5"
+    >
+      {TVL_CHART_MODES.map((mode) => {
+        const active = chartMode === mode.key;
+        return (
+          <button
+            key={mode.key}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChartModeChange(mode.key)}
+            className={
+              "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+              (active
+                ? "bg-slate-700 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200")
+            }
+          >
+            {mode.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function buildFullTvlChartData(networkData: NetworkData[]): TvlChartData {
+  // Always use UTC-day buckets. PoolDailySnapshot is a running aggregate
+  // updated throughout the day — forward-filling a midnight-stamped row into
+  // hourly sub-buckets would show today's current reserves for all past hours
+  // of the same day, distorting the intra-day trend.
+  const { series: base, nowTvl, byChain } = buildDailySeries(networkData);
+  if (base.length === 0 && nowTvl === 0) {
+    return { fullSeries: [], fullBreakdown: [] };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const fullSeries = [
+    ...base.map((point) => ({
+      timestamp: point.timestamp,
+      value: point.tvlUSD,
+    })),
+    { timestamp: nowSec, value: nowTvl },
+  ];
+
+  const fullBreakdown: BreakdownSeries[] = byChain.map((entry) => ({
+    name: entry.network.label,
+    color: chainColor(entry.network.chainId),
+    series: [
+      ...entry.series.map((p) => ({
+        timestamp: p.timestamp,
+        value: p.tvlUSD,
+      })),
+      { timestamp: nowSec, value: entry.nowTvl },
+    ],
+  }));
+
+  return { fullSeries, fullBreakdown };
+}
+
+function filterBreakdownByRange(
+  breakdown: BreakdownSeries[],
+  range: RangeKey,
+): BreakdownSeries[] {
+  return breakdown.map((b) => ({
+    ...b,
+    series: filterSeriesByRange(b.series, range),
+  }));
+}
+
+function chartValuePropsForMode(chartMode: TvlChartMode): TvlChartValueProps {
+  if (chartMode === "indexed") {
+    return {
+      yAxisReferenceValues: [100],
+      valueHoverPrefix: "",
+      valueHoverSuffix: " index",
+      valueHoverFormat: ".2f",
+    };
+  }
+  return {
+    valueHoverPrefix: "$",
+    valueHoverSuffix: "",
+    valueHoverFormat: ",.0f",
+  };
+}
+
+function formatTvlHeadline(
+  isLoading: boolean,
+  tvlPartial: boolean | null,
+  totalTvl: number,
+): string {
+  if (isLoading) return "…";
+  if (tvlPartial === null) return "—";
+  if (tvlPartial) return `${formatUSD(totalTvl)} (partial)`;
+  return formatUSD(totalTvl);
+}
+
+function tvlEmptyMessage(hasError: boolean, hasSnapshotError: boolean): string {
+  if (hasError) return "Unable to load TVL history";
+  if (hasSnapshotError) {
+    return "Historical data partial — some chains failed to load";
+  }
+  return "Not enough history yet";
+}
+
 interface TvlOverTimeChartProps {
   networkData: NetworkData[];
   totalTvl: number;
@@ -407,43 +575,12 @@ export function TvlOverTimeChart({
   plotlyDeferMode = "none",
 }: TvlOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
+  const [chartMode, setChartMode] = useState<TvlChartMode>("indexed");
 
-  const { fullSeries, fullBreakdown } = useMemo<{
-    fullSeries: TimeSeriesPoint[];
-    fullBreakdown: BreakdownSeries[];
-  }>(() => {
-    // Always use UTC-day buckets. PoolDailySnapshot is a running aggregate
-    // updated throughout the day — forward-filling a midnight-stamped row into
-    // hourly sub-buckets would show today's current reserves for all past hours
-    // of the same day, distorting the intra-day trend.
-    const { series: base, nowTvl, byChain } = buildDailySeries(networkData);
-    if (base.length === 0 && nowTvl === 0) {
-      return { fullSeries: [], fullBreakdown: [] };
-    }
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    const total = [
-      ...base.map((point) => ({
-        timestamp: point.timestamp,
-        value: point.tvlUSD,
-      })),
-      { timestamp: nowSec, value: nowTvl },
-    ];
-
-    const breakdown: BreakdownSeries[] = byChain.map((entry) => ({
-      name: entry.network.label,
-      color: chainColor(entry.network.chainId),
-      series: [
-        ...entry.series.map((p) => ({
-          timestamp: p.timestamp,
-          value: p.tvlUSD,
-        })),
-        { timestamp: nowSec, value: entry.nowTvl },
-      ],
-    }));
-
-    return { fullSeries: total, fullBreakdown: breakdown };
-  }, [networkData]);
+  const { fullSeries, fullBreakdown } = useMemo(
+    () => buildFullTvlChartData(networkData),
+    [networkData],
+  );
 
   // TVL is a stock — cutoff-based range filtering on UTC-day-stamped buckets
   // is fine: the headline shows current TVL (not a bar-sum), so no invariant
@@ -453,33 +590,30 @@ export function TvlOverTimeChart({
     [fullSeries, range],
   );
   const visibleBreakdown = useMemo<BreakdownSeries[]>(
-    () =>
-      fullBreakdown.map((b) => ({
-        ...b,
-        series: filterSeriesByRange(b.series, range),
-      })),
+    () => filterBreakdownByRange(fullBreakdown, range),
     [fullBreakdown, range],
   );
-
-  const headline = isLoading
-    ? "…"
-    : tvlPartial === null
-      ? "—"
-      : tvlPartial
-        ? `${formatUSD(totalTvl)} (partial)`
-        : formatUSD(totalTvl);
-  const emptyMessage = hasError
-    ? "Unable to load TVL history"
-    : hasSnapshotError
-      ? "Historical data partial — some chains failed to load"
-      : "Not enough history yet";
+  const indexedSeries = useMemo(
+    () => indexSeriesToWindowStart(visibleSeries),
+    [visibleSeries],
+  );
+  const indexedBreakdown = useMemo<BreakdownSeries[]>(
+    () => indexBreakdownToWindowStart(visibleBreakdown),
+    [visibleBreakdown],
+  );
+  const chartSeries = chartMode === "indexed" ? indexedSeries : visibleSeries;
+  const chartBreakdown =
+    chartMode === "indexed" ? indexedBreakdown : visibleBreakdown;
+  const chartValueProps = chartValuePropsForMode(chartMode);
+  const headline = formatTvlHeadline(isLoading, tvlPartial, totalTvl);
+  const emptyMessage = tvlEmptyMessage(hasError, hasSnapshotError);
 
   return (
     <TimeSeriesChartCard
       title="Total Value Locked"
       rangeAriaLabel="TVL chart time range"
-      series={visibleSeries}
-      breakdown={visibleBreakdown}
+      series={chartSeries}
+      breakdown={chartBreakdown}
       range={range}
       onRangeChange={setRange}
       headline={headline}
@@ -489,6 +623,13 @@ export function TvlOverTimeChart({
       hasError={hasError}
       hasSnapshotError={hasSnapshotError}
       emptyMessage={emptyMessage}
+      controls={
+        <TvlModeControls
+          chartMode={chartMode}
+          onChartModeChange={setChartMode}
+        />
+      }
+      {...chartValueProps}
       plotlyDeferMode={plotlyDeferMode}
     />
   );
