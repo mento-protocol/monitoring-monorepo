@@ -84,9 +84,20 @@ function stripFeeSnapshotRows(
  * TTL (it would otherwise trap every visitor on `N/A` tiles until expiry).
  */
 class DegradedNetworkDataError extends Error {
-  constructor(readonly payload: DehydratedNetworkData[]) {
+  declare readonly payload: DehydratedNetworkData[];
+
+  constructor(payload: DehydratedNetworkData[]) {
     super("degraded network data payload — not cached");
     this.name = "DegradedNetworkDataError";
+    // Non-enumerable: `unstable_cache`'s swallowed-error path console.errors
+    // the whole error object during background revalidation, and an
+    // enumerable payload would dump the multi-hundred-KB dehydrated
+    // dashboard into server logs on every stale revalidation while upstream
+    // is degraded. The foreground catch still reads it by name.
+    Object.defineProperty(this, "payload", {
+      value: payload,
+      enumerable: false,
+    });
   }
 }
 
