@@ -73,7 +73,7 @@ importers:
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
-        version: 10.0.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))
+        version: 10.0.1(eslint@10.0.3(jiti@2.7.0))
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
@@ -94,7 +94,7 @@ importers:
         version: 0.9.3
       eslint:
         specifier: ^10.0.2
-        version: 10.0.3(jiti@2.7.0)(supports-color@5.5.0)
+        version: 10.0.3(jiti@2.7.0)
       globals:
         specifier: ^17.4.0
         version: 17.4.0
@@ -376,8 +376,8 @@ importers:
         specifier: 0.8.1
         version: 0.8.1
       envio:
-        specifier: 3.0.0
-        version: 3.0.0(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(typescript@5.9.3)(zod@4.4.3)
+        specifier: 3.2.1
+        version: 3.2.1(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(typescript@5.9.3)(zod@4.4.3)
       viem:
         specifier: 2.50.4
         version: 2.50.4(typescript@5.9.3)(zod@4.4.3)
@@ -390,7 +390,7 @@ importers:
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
-        version: 10.0.1(eslint@10.0.3(jiti@2.7.0))
+        version: 10.0.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))
       '@stryker-mutator/api':
         specifier: 9.6.1
         version: 9.6.1
@@ -408,13 +408,13 @@ importers:
         version: 4.1.7(vitest@4.1.7)
       eslint:
         specifier: ^10.0.2
-        version: 10.0.3(jiti@2.7.0)
+        version: 10.0.3(jiti@2.7.0)(supports-color@5.5.0)
       eslint-plugin-sonarjs:
         specifier: 4.0.3
-        version: 4.0.3(eslint@10.0.3(jiti@2.7.0))
+        version: 4.0.3(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))
       eslint-plugin-unused-imports:
         specifier: ^4.2.0
-        version: 4.4.1(@typescript-eslint/eslint-plugin@8.56.1(@typescript-eslint/parser@8.56.1(eslint@10.0.3(jiti@2.7.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0))
+        version: 4.4.1(@typescript-eslint/eslint-plugin@8.56.1(@typescript-eslint/parser@8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))
       fast-check:
         specifier: ^4.8.0
         version: 4.8.0
@@ -429,7 +429,7 @@ importers:
         version: 5.9.3
       typescript-eslint:
         specifier: ^8.56.1
-        version: 8.56.1(eslint@10.0.3(jiti@2.7.0))(typescript@5.9.3)
+        version: 8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)
       vitest:
         specifier: ^4.1.0
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@24.10.1)(@vitest/coverage-v8@4.1.7)(jsdom@29.0.1(@noble/hashes@1.8.0))(vite@8.0.16(@types/node@24.10.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.21.0)(yaml@2.9.0))
@@ -1218,43 +1218,6 @@ packages:
 
   '@envio-dev/hyperfuel-client@1.2.2':
     resolution: {integrity: sha512-raKA6DshYSle0sAOHBV1OkSRFMN+Mkz8sFiMmS3k+m5nP6pP56E17CRRePBL5qmR6ZgSEvGOz/44QUiKNkK9Pg==}
-    engines: {node: '>= 10'}
-
-  '@envio-dev/hypersync-client-darwin-arm64@1.3.0':
-    resolution: {integrity: sha512-JZwiVRbMSuJnKsVUpfjTHc3YgAMvGlyuqWQxVc7Eok4Xp/sZLUCXRQUykbCh6fOUWRmoa2JG/ykP/NotoTRCBg==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@envio-dev/hypersync-client-darwin-x64@1.3.0':
-    resolution: {integrity: sha512-2eSzQqqqFBMK2enVucYGcny5Ep4DEKYxf3Xme7z9qp2d3c6fMcbVvM4Gt8KOzb7ySjwJ2gU+qY2h545T2NiJXQ==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [darwin]
-
-  '@envio-dev/hypersync-client-linux-arm64-gnu@1.3.0':
-    resolution: {integrity: sha512-gsjMp3WKekwnA89HvJXvcTM3BE5wVFG/qTF4rmk3rGiXhZ+MGaZQKrYRAhnzQZblueFtF/xnnBYpO35Z3ZFThg==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [linux]
-    libc: [glibc]
-
-  '@envio-dev/hypersync-client-linux-x64-gnu@1.3.0':
-    resolution: {integrity: sha512-Lkvi4lRVwCyFOXf9LYH2X91zmW2l1vbfojKhTwKgqFWv6PMN5atlYjt+/NcUCAAhk5EUavWGjoikwnvLp870cg==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [linux]
-    libc: [glibc]
-
-  '@envio-dev/hypersync-client-linux-x64-musl@1.3.0':
-    resolution: {integrity: sha512-UIjB/gUX2sl23EMXLBxqtkgMnOjNSiaHK+CSU5vXMXkzL3fOGbz24bvyaPsSv82cxCFEE0yTwlSKkCX6/L8o6Q==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [linux]
-    libc: [musl]
-
-  '@envio-dev/hypersync-client@1.3.0':
-    resolution: {integrity: sha512-wUdfZzbsFPbGq6n/1mmUMsWuiAil+m+fL/GBX5LGUyMJV86TXy2SBtAqYYNyDxWLO6gvGr6PYKrP8pLVAUZDZg==}
     engines: {node: '>= 10'}
 
   '@esbuild/aix-ppc64@0.28.1':
@@ -5298,36 +5261,36 @@ packages:
     resolution: {integrity: sha512-UPAOXU5dKj0BCFA6/bsgFEUPl5AeUlbz/0bwIIaBDiH9t8B7GvyX/RDtpdABJrrAM2GSmDEFDIpeatYLb+3K5g==}
     hasBin: true
 
-  envio-darwin-arm64@3.0.0:
-    resolution: {integrity: sha512-kjnTXRSuc/UnPAuqGDxiffgCXM7ERJqTPUZGUWBACzYfki8Ai6U/izapU5cKZLAEOlI3V8GnRViUntdIvKI8HA==}
+  envio-darwin-arm64@3.2.1:
+    resolution: {integrity: sha512-PohM1rGjlNxV0W/BOQOitsVPua944B2t2M0p81x9VpsZOwNWc9SgPsEjIsV4ZJOIceJaHrmWZnfwaWubgDGKMg==}
     cpu: [arm64]
     os: [darwin]
 
-  envio-darwin-x64@3.0.0:
-    resolution: {integrity: sha512-9wnPKWO3R7ex82nu13lPfmvgi2jsWOJ7s7IvPoH7hLmWbmBAdhP1cGEPPsTWwJVl4I0uB+ymAoP9HZvDMGOQjQ==}
+  envio-darwin-x64@3.2.1:
+    resolution: {integrity: sha512-70zjTm4tNFzhigja0mHqmG03JQu56e9JCTQR7zoEhVvwj47cSgAPmQIihpaPuDCcMIYibzrlW7pFKdnXAZp3fQ==}
     cpu: [x64]
     os: [darwin]
 
-  envio-linux-arm64@3.0.0:
-    resolution: {integrity: sha512-G92c8/JQxB1THj3QUpJ8SjIKDFhB/0XQLInBrGg4nGBXUXavgNpot98Qm+rw+tiPZJNsRIbqAjDSwoQNWpLPbw==}
+  envio-linux-arm64@3.2.1:
+    resolution: {integrity: sha512-OOVnX+aM8xJ5zYBmpqzSVCX5KFU+wi1gSfbv9X+nXk1rLjicHGm5U847oDmYBF5iyxkJDQBMsW9sr+7X4g8Yhg==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  envio-linux-x64-musl@3.0.0:
-    resolution: {integrity: sha512-qdROseEZRoVlQHPtZrMM76pAfdBTqZxNLTkMZl/r4PlVQ6B0KTYkU7fNFytaV8KPVqT7sfsjY2eF+QloBKVAzw==}
+  envio-linux-x64-musl@3.2.1:
+    resolution: {integrity: sha512-/0lWrS/l2VYwdx7t0QvBE8b1R2vsnWpgi2q2xWqSmyOI9SOPU1q9YUElkhaDQFHEUXvqzyDDZPqxQacFtJggXw==}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  envio-linux-x64@3.0.0:
-    resolution: {integrity: sha512-2ciq4EUANqYFxKDfy6/Ocr7fhathR64qDIVQaii2GK8eaLSZRt1G2qb0niDx6ixyeBPXHHEjGqsZ70i4UH0bBQ==}
+  envio-linux-x64@3.2.1:
+    resolution: {integrity: sha512-YACCs+YdemYj4KBYOw/o6fi3hofAWrJ8VOeCwaOWEAzlqQxqkZ6h3O7puZWLnmjgdJvBAReUikFxI+E9MiyHOQ==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  envio@3.0.0:
-    resolution: {integrity: sha512-GhLPCJJHZzQji1Kg0UtVy7IH3IRVonSJsSk6Xeybsw7rT1FFpHbLM8FxF95Ccmvw3IUnQGfvmw3t+TyerUFO6A==}
+  envio@3.2.1:
+    resolution: {integrity: sha512-mPvVeomNzi3pz7KqBEpfaiVM8JKZzNphAipT47KiTB+HUrvuMBGmqODgLYUJqQ+iJxiRuCqOVNDy8oCMsZjfwg==}
     engines: {node: '>=22.0.0'}
     hasBin: true
 
@@ -10103,29 +10066,6 @@ snapshots:
       '@envio-dev/hyperfuel-client-linux-x64-musl': 1.2.2
       '@envio-dev/hyperfuel-client-win32-x64-msvc': 1.2.2
 
-  '@envio-dev/hypersync-client-darwin-arm64@1.3.0':
-    optional: true
-
-  '@envio-dev/hypersync-client-darwin-x64@1.3.0':
-    optional: true
-
-  '@envio-dev/hypersync-client-linux-arm64-gnu@1.3.0':
-    optional: true
-
-  '@envio-dev/hypersync-client-linux-x64-gnu@1.3.0':
-    optional: true
-
-  '@envio-dev/hypersync-client-linux-x64-musl@1.3.0':
-    optional: true
-
-  '@envio-dev/hypersync-client@1.3.0':
-    optionalDependencies:
-      '@envio-dev/hypersync-client-darwin-arm64': 1.3.0
-      '@envio-dev/hypersync-client-darwin-x64': 1.3.0
-      '@envio-dev/hypersync-client-linux-arm64-gnu': 1.3.0
-      '@envio-dev/hypersync-client-linux-x64-gnu': 1.3.0
-      '@envio-dev/hypersync-client-linux-x64-musl': 1.3.0
-
   '@esbuild/aix-ppc64@0.28.1':
     optional: true
 
@@ -12745,6 +12685,22 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@typescript-eslint/eslint-plugin@8.56.1(@typescript-eslint/parser@8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)':
+    dependencies:
+      '@eslint-community/regexpp': 4.12.2
+      '@typescript-eslint/parser': 8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)
+      '@typescript-eslint/scope-manager': 8.56.1
+      '@typescript-eslint/type-utils': 8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)
+      '@typescript-eslint/visitor-keys': 8.56.1
+      eslint: 10.0.3(jiti@2.7.0)(supports-color@5.5.0)
+      ignore: 7.0.5
+      natural-compare: 1.4.0
+      ts-api-utils: 2.5.0(typescript@5.9.3)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
   '@typescript-eslint/eslint-plugin@8.56.1(@typescript-eslint/parser@8.56.1(eslint@10.0.3(jiti@2.7.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0))(typescript@5.9.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
@@ -12785,6 +12741,18 @@ snapshots:
       '@typescript-eslint/visitor-keys': 8.47.0
       debug: 4.4.3(supports-color@5.5.0)
       eslint: 9.39.1(jiti@2.7.0)(supports-color@5.5.0)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/parser@8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)':
+    dependencies:
+      '@typescript-eslint/scope-manager': 8.56.1
+      '@typescript-eslint/types': 8.56.1
+      '@typescript-eslint/typescript-estree': 8.56.1(typescript@5.9.3)
+      '@typescript-eslint/visitor-keys': 8.56.1
+      debug: 4.4.3(supports-color@5.5.0)
+      eslint: 10.0.3(jiti@2.7.0)(supports-color@5.5.0)
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color
@@ -12861,6 +12829,18 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@typescript-eslint/type-utils@8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)':
+    dependencies:
+      '@typescript-eslint/types': 8.56.1
+      '@typescript-eslint/typescript-estree': 8.56.1(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)
+      debug: 4.4.3(supports-color@5.5.0)
+      eslint: 10.0.3(jiti@2.7.0)(supports-color@5.5.0)
+      ts-api-utils: 2.5.0(typescript@5.9.3)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
   '@typescript-eslint/type-utils@8.56.1(eslint@10.0.3(jiti@2.7.0))(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/types': 8.56.1
@@ -12927,6 +12907,17 @@ snapshots:
       '@typescript-eslint/types': 8.47.0
       '@typescript-eslint/typescript-estree': 8.47.0(typescript@5.9.3)
       eslint: 9.39.1(jiti@2.7.0)(supports-color@5.5.0)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/utils@8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)':
+    dependencies:
+      '@eslint-community/eslint-utils': 4.9.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))
+      '@typescript-eslint/scope-manager': 8.56.1
+      '@typescript-eslint/types': 8.56.1
+      '@typescript-eslint/typescript-estree': 8.56.1(typescript@5.9.3)
+      eslint: 10.0.3(jiti@2.7.0)(supports-color@5.5.0)
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color
@@ -14247,27 +14238,26 @@ snapshots:
       '@envio-dev/envio-cloud-linux-x64': 0.9.3
       '@envio-dev/envio-cloud-win32-x64': 0.9.3
 
-  envio-darwin-arm64@3.0.0:
+  envio-darwin-arm64@3.2.1:
     optional: true
 
-  envio-darwin-x64@3.0.0:
+  envio-darwin-x64@3.2.1:
     optional: true
 
-  envio-linux-arm64@3.0.0:
+  envio-linux-arm64@3.2.1:
     optional: true
 
-  envio-linux-x64-musl@3.0.0:
+  envio-linux-x64-musl@3.2.1:
     optional: true
 
-  envio-linux-x64@3.0.0:
+  envio-linux-x64@3.2.1:
     optional: true
 
-  envio@3.0.0(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(typescript@5.9.3)(zod@4.4.3):
+  envio@3.2.1(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(typescript@5.9.3)(zod@4.4.3):
     dependencies:
       '@clickhouse/client': 1.17.0
       '@elastic/ecs-pino-format': 1.4.0
       '@envio-dev/hyperfuel-client': 1.2.2
-      '@envio-dev/hypersync-client': 1.3.0
       '@fuel-ts/crypto': 0.96.1
       '@fuel-ts/errors': 0.96.1
       '@fuel-ts/hasher': 0.96.1
@@ -14294,11 +14284,11 @@ snapshots:
       viem: 2.46.2(typescript@5.9.3)(zod@4.4.3)
       yargs: 17.7.2
     optionalDependencies:
-      envio-darwin-arm64: 3.0.0
-      envio-darwin-x64: 3.0.0
-      envio-linux-arm64: 3.0.0
-      envio-linux-x64: 3.0.0
-      envio-linux-x64-musl: 3.0.0
+      envio-darwin-arm64: 3.2.1
+      envio-darwin-x64: 3.2.1
+      envio-linux-arm64: 3.2.1
+      envio-linux-x64: 3.2.1
+      envio-linux-x64-musl: 3.2.1
     transitivePeerDependencies:
       - '@types/react'
       - bufferutil
@@ -14592,6 +14582,22 @@ snapshots:
       eslint: 10.0.3(jiti@2.7.0)
       globals: 16.5.0
 
+  eslint-plugin-sonarjs@4.0.3(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0)):
+    dependencies:
+      '@eslint-community/regexpp': 4.12.2
+      builtin-modules: 3.3.0
+      bytes: 3.1.2
+      eslint: 10.0.3(jiti@2.7.0)(supports-color@5.5.0)
+      functional-red-black-tree: 1.0.1
+      globals: 17.4.0
+      jsx-ast-utils-x: 0.1.0
+      lodash.merge: 4.6.2
+      minimatch: 10.2.5
+      scslre: 0.3.0
+      semver: 7.7.4
+      ts-api-utils: 2.5.0(typescript@5.9.3)
+      typescript: 5.9.3
+
   eslint-plugin-sonarjs@4.0.3(eslint@10.0.3(jiti@2.7.0)):
     dependencies:
       '@eslint-community/regexpp': 4.12.2
@@ -14629,6 +14635,12 @@ snapshots:
       eslint: 9.39.1(jiti@2.7.0)(supports-color@5.5.0)
     optionalDependencies:
       '@typescript-eslint/eslint-plugin': 8.47.0(@typescript-eslint/parser@8.47.0(eslint@9.39.1(jiti@2.7.0)(supports-color@5.5.0))(supports-color@5.5.0)(typescript@5.9.3))(eslint@9.39.1(jiti@2.7.0)(supports-color@5.5.0))(supports-color@5.5.0)(typescript@5.9.3)
+
+  eslint-plugin-unused-imports@4.4.1(@typescript-eslint/eslint-plugin@8.56.1(@typescript-eslint/parser@8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0)):
+    dependencies:
+      eslint: 10.0.3(jiti@2.7.0)(supports-color@5.5.0)
+    optionalDependencies:
+      '@typescript-eslint/eslint-plugin': 8.56.1(@typescript-eslint/parser@8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)
 
   eslint-plugin-unused-imports@4.4.1(@typescript-eslint/eslint-plugin@8.56.1(@typescript-eslint/parser@8.56.1(eslint@10.0.3(jiti@2.7.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0)):
     dependencies:
@@ -15800,7 +15812,7 @@ snapshots:
 
   is-accessor-descriptor@1.0.1:
     dependencies:
-      hasown: 2.0.2
+      hasown: 2.0.4
 
   is-alphabetical@2.0.1: {}
 
@@ -15855,7 +15867,7 @@ snapshots:
 
   is-data-descriptor@1.0.1:
     dependencies:
-      hasown: 2.0.2
+      hasown: 2.0.4
 
   is-data-view@1.0.2:
     dependencies:
@@ -19297,6 +19309,17 @@ snapshots:
       is-typedarray: 1.0.0
 
   typedarray@0.0.6: {}
+
+  typescript-eslint@8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3):
+    dependencies:
+      '@typescript-eslint/eslint-plugin': 8.56.1(@typescript-eslint/parser@8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3))(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)
+      '@typescript-eslint/parser': 8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 8.56.1(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.56.1(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))(typescript@5.9.3)
+      eslint: 10.0.3(jiti@2.7.0)(supports-color@5.5.0)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
 
   typescript-eslint@8.56.1(eslint@10.0.3(jiti@2.7.0))(typescript@5.9.3):
     dependencies:

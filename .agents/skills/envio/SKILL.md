@@ -5,7 +5,7 @@ title: Envio Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-29
+last_verified: 2026-07-09
 allowed-tools: Bash, Read, Grep, Glob, WebFetch
 ---
 
@@ -22,7 +22,7 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 
 ## Version baseline
 
-- Treat this repo as HyperIndex V3-first. Verify the exact installed package with `pnpm --filter @mento-protocol/indexer-envio exec envio --version`; the pinned version in `indexer-envio/package.json` is `envio@3.0.0`.
+- Treat this repo as HyperIndex V3-first. Verify the exact installed package with `pnpm --filter @mento-protocol/indexer-envio exec envio --version`; the pinned version in `indexer-envio/package.json` is `envio@3.2.1`.
 - V3 preload optimization is always on. There is no `preload_handlers:` config flag, and loader-era patterns should be translated into normal handler code.
 - V3 handlers run twice: a concurrent preload pass for DB reads/effects, then an ordered processing pass for writes. Do not put expensive `context.effect(...)` calls behind an early `if (context.isPreload) return`; do keep writes out of preload.
 - Prefer the installed CLI help over stale docs when they disagree. In this baseline, `envio metrics` exists and `envio benchmark-summary` does not.
@@ -156,7 +156,7 @@ Notes:
 
 - `envio metrics` reads the running indexer's Prometheus endpoint at `127.0.0.1:9898/metrics`; set `ENVIO_INDEXER_PORT` (or legacy `METRICS_PORT`) if using a different port.
 - `https://envio.dev/console` can inspect the local dev server; the local server exposes `/console/state` and CORS-allows the Envio app.
-- Public docs may lag the installed CLI. In `envio@3.0.0`, `envio metrics` exists; `envio benchmark-summary` does not.
+- Public docs may lag the installed CLI. In `envio@3.2.1`, `envio metrics` exists; `envio benchmark-summary` does not.
 - Watch these generic metrics first: `envio_processing_handler_seconds`, `envio_preload_handler_seconds`, `envio_preload_handler_seconds_total`, `envio_effect_call_seconds_total`, `envio_effect_call_total`, `envio_effect_active_calls`, `envio_effect_queue*`, `envio_storage_load_seconds_total`, `envio_storage_write_seconds`, `envio_fetching_block_range_*`, `envio_progress_events`.
 - Combine Envio metrics with this repo's `INDEXER_PERF=1` logs. The repo profiler adds handler/effect/entity summaries and a derived `hit~` count (`effect requests - effect handler executions`) that helps detect preload/cache reuse.
 - If a handler has `if (context.isPreload) return` before expensive `context.effect(...)` calls, preload optimization is disabled for those calls. The preferred shape is: perform preload DB reads and independent `context.effect(...)` calls first, then return before entity writes. The processing pass should call the same effect key so it reuses preload results.
