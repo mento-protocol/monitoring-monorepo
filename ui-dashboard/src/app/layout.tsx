@@ -5,8 +5,7 @@ import { SessionProvider } from "next-auth/react";
 import { getAuthSession } from "@/auth";
 import { NetworkProvider } from "@/components/network-provider";
 import { AddressLabelsProvider } from "@/components/address-labels-provider";
-import { NavLinks } from "@/components/nav-links";
-import { AuthStatus } from "@/components/auth-status";
+import { ResponsiveNav } from "@/components/responsive-nav";
 import { DataFreshnessBanner } from "@/components/data-freshness-banner";
 import { ResourceHints } from "@/components/resource-hints";
 import { SessionErrorGuard } from "@/components/session-error-guard";
@@ -71,11 +70,10 @@ export default async function RootLayout({
               <NetworkProvider>
                 <AddressLabelsProvider>
                   <nav
-                    className="border-b border-slate-800 px-3 sm:px-6 py-2 sm:py-3 flex items-center gap-2 sm:gap-4 flex-wrap"
+                    className="border-b border-slate-800 px-3 py-2 sm:px-6 sm:py-3"
                     aria-label="Main navigation"
                   >
-                    <NavLinks />
-                    <AuthStatus />
+                    <ResponsiveNav />
                   </nav>
                   <DataFreshnessBanner />
                   <div className="mx-auto max-w-7xl px-3 sm:px-6 py-4 sm:py-6">

@@ -28,7 +28,11 @@ export function buildSignInHref(pathname: string, search: string): string {
   return `${SIGN_IN_PATH}?callbackUrl=${encodeURIComponent(callback)}`;
 }
 
-export function AuthStatus() {
+type AuthStatusProps = {
+  variant?: "inline" | "panel";
+};
+
+export function AuthStatus({ variant = "inline" }: AuthStatusProps) {
   const { data: session, status } = useSession();
   const { mutate } = useSWRConfig();
   const liveLocation = useLiveLocation();
@@ -58,7 +62,11 @@ export function AuthStatus() {
     return (
       <Link
         href={renderHref}
-        className="ml-auto text-xs text-slate-400 hover:text-white transition-colors"
+        className={
+          variant === "panel"
+            ? "block rounded-md border border-slate-800 bg-slate-900/80 px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:border-slate-700 hover:text-white"
+            : "ml-auto text-xs text-slate-400 hover:text-white transition-colors"
+        }
       >
         Sign in
       </Link>
@@ -73,8 +81,22 @@ export function AuthStatus() {
   };
 
   return (
-    <div className="ml-auto flex items-center gap-3">
-      <span className="text-xs text-slate-400">{session.user?.email}</span>
+    <div
+      className={
+        variant === "panel"
+          ? "flex items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-900/80 px-3 py-2"
+          : "ml-auto flex items-center gap-3"
+      }
+    >
+      <span
+        className={
+          variant === "panel"
+            ? "text-xs text-slate-400"
+            : "hidden max-w-44 truncate text-xs text-slate-400 xl:inline"
+        }
+      >
+        {session.user?.email}
+      </span>
       <button
         type="button"
         onClick={handleSignOut}
