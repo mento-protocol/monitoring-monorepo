@@ -7,6 +7,9 @@
 import { unstable_cache } from "next/cache";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
+
+// Tighter budget for the OPTIONAL firstDay slice — see firstDaySignal below.
+const FIRST_DAY_TIMEOUT_MS = 2_000;
 import { DEFAULT_NETWORK, NETWORKS } from "@/lib/networks";
 import {
   BROKER_VOLUME_TODAY_TRADERS,
@@ -77,6 +80,12 @@ async function fetchVolumeHeroUncached(
 
   const client = makeOgGraphQLClient(network);
   const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
+  // The optional firstDay catch-up slice gets a tighter independent budget:
+  // it shares a Promise.all with the primary pair, so on a cache miss a hung
+  // optional query would otherwise hold the route's TTFB to the full shared
+  // deadline even when both primaries answered quickly. Missing firstDay only
+  // degrades the catch-up (chains render as degraded), never the hero.
+  const firstDaySignal = AbortSignal.timeout(FIRST_DAY_TIMEOUT_MS);
   const isProtocolActorIn = protocolActorInForView(includeProtocolActors);
   const windowVariables = { windowKey: range };
   const todayVariables = { todayMidnight, isProtocolActorIn };
@@ -107,7 +116,7 @@ async function fetchVolumeHeroUncached(
         client,
         BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST,
         windowVariables,
-        signal,
+        firstDaySignal,
       ),
     ]);
     // The hero tiles gate their loading state on the PRIMARY pair (window +
@@ -137,7 +146,7 @@ async function fetchVolumeHeroUncached(
       client,
       VOLUME_WINDOW_FIRSTDAY_LATEST,
       windowVariables,
-      signal,
+      firstDaySignal,
     ),
   ]);
   // Same primary-pair rule as the v2 branch above.
@@ -149,15 +158,23 @@ async function fetchVolumeHeroUncached(
 // The raw responses are plain JSON (no Map/Set/BigInt — Hasura numerics are
 // strings), so unstable_cache serialization is lossless here.
 //
-// The key is salted with the deployment SHA ("dev" locally) because Vercel's
-// Data Cache persists across deployments within an environment — without the
-// salt, a deploy that changes the response shape or view-descriptor contract
-// could serve an entry written by older code for up to the TTL (same hazard
-// the homepage cache in network-fetcher/server-cache.ts guards against; view
-// variables such as venue, range, and todayMidnight are already part of the
-// key via the wrapped function's arguments).
+// The key is salted with the deployment id (unique per deployment, including
+// env-only redeploys; commit SHA as fallback, "dev" locally) plus the
+// endpoint it fetches from, because Vercel's Data Cache persists across
+// deployments within an environment — without the salt, a deploy that
+// changes the response shape, the view-descriptor contract, or repoints the
+// Hasura endpoint could serve an entry written by older code for up to the
+// TTL (same hazard the homepage cache in network-fetcher/server-cache.ts
+// guards against; view variables such as venue, range, and todayMidnight are
+// already part of the key via the wrapped function's arguments).
 export const fetchVolumeHeroForSSR = unstable_cache(
   fetchVolumeHeroUncached,
-  ["volume-hero-ssr", process.env.VERCEL_GIT_COMMIT_SHA ?? "dev"],
+  [
+    "volume-hero-ssr",
+    process.env.VERCEL_DEPLOYMENT_ID ??
+      process.env.VERCEL_GIT_COMMIT_SHA ??
+      "dev",
+    NETWORKS[DEFAULT_NETWORK].hasuraUrl,
+  ],
   { revalidate: 60, tags: ["volume-hero-ssr"] },
 );
