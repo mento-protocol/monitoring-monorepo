@@ -79,6 +79,14 @@ function signInLink() {
   return link as HTMLAnchorElement;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   originalPushState = window.history.pushState;
   originalReplaceState = window.history.replaceState;
@@ -191,6 +199,21 @@ describe("AuthStatus sign-in href", () => {
       "/sign-in?callbackUrl=%2Fpools%3FpoolsSort%3Dtvl%26poolsDir%3Ddesc",
     );
   });
+
+  it("calls onClose when the panel sign-in link is activated", () => {
+    setup("/pools");
+    const onClose = vi.fn();
+
+    act(() => {
+      root?.render(<AuthStatus variant="panel" onClose={onClose} />);
+    });
+
+    const link = signInLink();
+    link.addEventListener("click", (event) => event.preventDefault());
+    link.click();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("AuthStatus sign-out", () => {
@@ -222,6 +245,43 @@ describe("AuthStatus sign-out", () => {
     expect(predicate("address-labels:all")).toBe(true);
     expect(predicate(["address-labels", "future-namespace"])).toBe(true);
     expect(predicate("other-cache-key")).toBe(false);
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes immediately and disables sign-out while the async sign-out is pending", async () => {
+    setup("/address-book");
+    const onClose = vi.fn();
+    const pendingMutate = deferred<void>();
+    mockMutate.mockReturnValueOnce(pendingMutate.promise);
+    mockUseSession.mockReturnValue({
+      data: { user: { email: "agent@mentolabs.xyz" } },
+      status: "authenticated",
+    });
+
+    act(() => {
+      root?.render(<AuthStatus variant="panel" onClose={onClose} />);
+    });
+
+    const button = container?.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error("sign-out button not found");
+    }
+
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    expect(mockSignOut).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingMutate.resolve();
+      await pendingMutate.promise;
+      await Promise.resolve();
+    });
+
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 });

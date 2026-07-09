@@ -2,23 +2,31 @@ import { describe, it, expect, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NavLinks } from "@/components/nav-links";
 
-// Stub NetworkAwareLink so we can inspect rendered output without Next.js routing
-vi.mock("@/components/network-aware-link", () => ({
-  NetworkAwareLink: ({
-    href,
-    children,
-  }: {
-    href: string;
-    children: React.ReactNode;
-  }) => <a href={href}>{children}</a>,
-}));
-
 const mockUseSession = vi.fn();
 vi.mock("next-auth/react", () => ({
   useSession: () => mockUseSession(),
 }));
 
 describe("NavLinks", () => {
+  const publicHrefs = [
+    "/",
+    "/pools",
+    "/volume",
+    "/stables",
+    "/bridge-flows",
+    "/cdps",
+  ];
+
+  function hrefsForSession(session: unknown): string[] {
+    mockUseSession.mockReturnValue({ data: session });
+    const html = renderToStaticMarkup(<NavLinks />);
+    return Array.from(html.matchAll(/href="([^"]+)"/g), (match) => {
+      const href = match[1];
+      if (!href) throw new Error("matched href capture was empty");
+      return href;
+    });
+  }
+
   it("shows protected links when user is authenticated", () => {
     mockUseSession.mockReturnValue({
       data: { user: { email: "alice@mentolabs.xyz" } },
@@ -68,5 +76,31 @@ describe("NavLinks", () => {
     );
     expect(hrefs.indexOf("/volume")).toBe(hrefs.indexOf("/pools") + 1);
     expect(hrefs.indexOf("/stables")).toBe(hrefs.indexOf("/volume") + 1);
+  });
+
+  it("keeps public link order stable across auth states", () => {
+    const loggedOutPublic = hrefsForSession(null).filter((href) =>
+      publicHrefs.includes(href),
+    );
+    const loggedInPublic = hrefsForSession({
+      user: { email: "alice@mentolabs.xyz" },
+    }).filter((href) => publicHrefs.includes(href));
+
+    expect(loggedOutPublic).toEqual(publicHrefs);
+    expect(loggedInPublic).toEqual(publicHrefs);
+  });
+
+  it("appends authenticated links after every public link", () => {
+    const hrefs = hrefsForSession({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+
+    expect(hrefs).toEqual([
+      ...publicHrefs,
+      "/integrations",
+      "/revenue",
+      "/address-book",
+      "/entities",
+    ]);
   });
 });
