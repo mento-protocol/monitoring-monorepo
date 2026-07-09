@@ -8,6 +8,12 @@
       "category": "rebalancer"
     },
     {
+      "chainId": 143,
+      "address": "0xaa8299fc6a685b5f9ce9bda8d0b3ea3d54731976",
+      "label": "monad-x-chain-rebalancer",
+      "category": "rebalancer"
+    },
+    {
       "chainId": 99999,
       "address": "0x0000000000000000000000000000000000000a11",
       "label": "test-protocol-actor",

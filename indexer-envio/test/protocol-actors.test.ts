@@ -17,7 +17,7 @@ const CELO_OPEN_LIQUIDITY_STRATEGY =
   "0x54e2ae8c8448912e17ce0b2453bafb7b0d80e40f";
 const CELO_PROTOCOL_FEE_RECIPIENT =
   "0x0dd57f6f181d0469143fe9380762d8a112e96e4a";
-const CELO_MENTO_REBALANCER_EOA = "0xaa8299fc6a685b5f9ce9bda8d0b3ea3d54731976";
+const X_CHAIN_REBALANCER_EOA = "0xaa8299fc6a685b5f9ce9bda8d0b3ea3d54731976";
 
 // Real Monad addresses + an NTT transceiver proxy from nttAddresses.json.
 const MONAD_FPMM_FACTORY = "0xa849b475fe5a4b5c9c3280152c7a1945b907613b";
@@ -42,15 +42,17 @@ describe("isProtocolOwnedAddress", () => {
     );
   });
 
-  it("flags manual Celo protocol actor EOAs as protocol-owned callers", () => {
-    assert.equal(
-      isProtocolOwnedAddress(CHAIN_CELO, CELO_MENTO_REBALANCER_EOA),
-      true,
-    );
-    assert.equal(
-      isProtocolActorEntryPoint(CHAIN_CELO, CELO_MENTO_REBALANCER_EOA),
-      true,
-    );
+  it("flags manual cross-chain rebalancer EOAs as protocol-owned callers", () => {
+    for (const chainId of [CHAIN_CELO, CHAIN_MONAD]) {
+      assert.equal(
+        isProtocolOwnedAddress(chainId, X_CHAIN_REBALANCER_EOA),
+        true,
+      );
+      assert.equal(
+        isProtocolActorEntryPoint(chainId, X_CHAIN_REBALANCER_EOA),
+        true,
+      );
+    }
   });
 
   it("flags Monad protocol contracts (FPMMFactory, ReserveV2)", () => {
