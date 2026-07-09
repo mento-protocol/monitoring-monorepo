@@ -24,10 +24,14 @@ function lazyLoadReplayIntegration(): void {
     import("@/lib/sentry-replay")
       .then(({ replayIntegration }) => {
         const client = Sentry.getClient();
-        // Client can be undefined if init failed; skip double-registration
-        // (e.g. dev fast-refresh re-running this module).
-        if (!client || client.getIntegrationByName("Replay")) return;
-        client.addIntegration(replayIntegration());
+        if (!client) return; // init failed — nothing to attach to
+        // Skip double-registration (e.g. dev fast-refresh re-running this
+        // module). The guard reads the name off the constructed integration
+        // instead of hardcoding "Replay" so an SDK rename can't silently
+        // break it into double-registering.
+        const integration = replayIntegration();
+        if (client.getIntegrationByName(integration.name)) return;
+        client.addIntegration(integration);
       })
       .catch(() => {
         // Chunk failed to load (offline, blocked) — run without replay.
