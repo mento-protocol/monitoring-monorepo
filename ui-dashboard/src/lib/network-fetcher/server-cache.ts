@@ -158,12 +158,16 @@ const cachedFetch = unstable_cache(
   { revalidate: 30, tags: ["all-networks-ssr"] },
 );
 
-// 3× the 30s TTL: under steady traffic the serve-stale-while-revalidate
-// window keeps real staleness ≈ one TTL, so this bound only bites after idle
-// gaps (first visitor after a quiet stretch) or sustained degradation —
-// exactly the cases where a foreground refetch is worth the latency.
+// Aligned with SNAPSHOT_REFRESH_MS (the 5-min client poll cadence users
+// already accept between refreshes). Production traffic is sparse — ~96
+// homepage document requests/day, ~15-min average gaps — so a tight bound
+// would force the common isolated visitor into a foreground fan-out; instead
+// we serve up to 5-min-old data instantly and rely on the client-side
+// freshness gate in `useAllNetworksData` (payloads older than
+// SSR_FRESH_ENOUGH_MS revalidate immediately on mount), so stale numbers are
+// on screen for the ~1-2s the refetch takes, not until the next poll.
 // Exported so tests derive their boundary fixtures from the real constant.
-export const MAX_SERVED_STALENESS_MS = 90_000;
+export const MAX_SERVED_STALENESS_MS = 300_000;
 
 // Coalesce EVERY invocation of the upstream fan-out within this isolate:
 // concurrent cold-miss fills, the background revalidation `unstable_cache`
@@ -184,22 +188,34 @@ function fetchDehydratedInitialNetworkDataCoalesced(): Promise<CachedNetworkPayl
   return inFlightFanout;
 }
 
+/** SSR payload plus its fetch-completion timestamp. `fetchedAtMs` crosses to
+ *  the client so `useAllNetworksData` can gate its mount-revalidation skip on
+ *  actual payload freshness rather than trusting whatever the cache served. */
+export type InitialNetworkDataPayload = {
+  networks: NetworkData[];
+  fetchedAtMs: number;
+};
+
 /**
  * Cached drop-in for `fetchAllNetworks()` in the `/` and `/pools` Server
  * Components. Healthy payloads are served from a shared `unstable_cache`
- * entry (30s TTL, ~90s worst-case served staleness); degraded payloads (any
- * per-chain or per-slice error) are thrown out of the cache callback so they
- * are never written to the cache. That bypass alone only covers cold misses —
- * on a stale hit `unstable_cache` swallows the revalidation error — so the
- * `fetchedAt` age gate below discards cache results older than
- * `MAX_SERVED_STALENESS_MS` and refetches in the foreground, giving idle-gap
- * visitors fresh data and letting a sustained outage surface as the fresh
- * degraded payload (error channels intact → the client hook's mount
- * revalidation fires) instead of a pinned last-healthy one. Raw
+ * entry (30s TTL, up to `MAX_SERVED_STALENESS_MS` of served staleness);
+ * degraded payloads (any per-chain or per-slice error) are thrown out of the
+ * cache callback so they are never written to the cache. That bypass alone
+ * only covers cold misses — on a stale hit `unstable_cache` swallows the
+ * revalidation error — so the `fetchedAt` age gate below discards cache
+ * results older than `MAX_SERVED_STALENESS_MS` and refetches in the
+ * foreground, giving long-idle-gap visitors fresh data and letting a
+ * sustained outage surface as the fresh degraded payload (error channels
+ * intact → the client hook's mount revalidation fires) instead of a pinned
+ * last-healthy one. Within the staleness window, freshness is the CLIENT's
+ * job: the returned `fetchedAtMs` drives the hook's freshness gate, which
+ * revalidates on mount whenever the payload is older than its
+ * fresh-enough bound — instant paint, live data ~1-2s later. Raw
  * `feeSnapshots` rows are stripped (see `stripFeeSnapshotRows`); use
  * `fetchAllNetworks` directly if a future server consumer needs them.
  */
-export async function fetchInitialNetworkData(): Promise<NetworkData[]> {
+export async function fetchInitialNetworkData(): Promise<InitialNetworkDataPayload> {
   try {
     const cached = await cachedFetch();
     const payload =
@@ -209,10 +225,18 @@ export async function fetchInitialNetworkData(): Promise<NetworkData[]> {
           // launching a second fan-out.
           await fetchDehydratedInitialNetworkDataCoalesced()
         : cached;
-    return payload.networks.map(rehydrateNetworkData);
+    return {
+      networks: payload.networks.map(rehydrateNetworkData),
+      fetchedAtMs: payload.fetchedAt,
+    };
   } catch (err) {
     if (err instanceof DegradedNetworkDataError) {
-      return err.payload.map(rehydrateNetworkData);
+      // Degraded payloads are fetched in-band (never cached), so they are
+      // fresh as of this request.
+      return {
+        networks: err.payload.map(rehydrateNetworkData),
+        fetchedAtMs: Date.now(),
+      };
     }
     throw err;
   }

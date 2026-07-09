@@ -171,9 +171,10 @@ describe("fetchInitialNetworkData", () => {
 
     const result = await fetchInitialNetworkData();
 
-    expect(result).toHaveLength(1);
-    expect(result[0]!.rates.get("42220:cUSD")).toBe(1.0004);
-    expect(result[0]!.olsPoolIds.has("0xols")).toBe(true);
+    expect(result.networks).toHaveLength(1);
+    expect(result.networks[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+    expect(result.networks[0]!.olsPoolIds.has("0xols")).toBe(true);
+    expect(result.fetchedAtMs).toBeGreaterThan(0);
     expect(cacheCallbackOutcomes).toEqual(["resolved"]);
   });
 
@@ -182,7 +183,7 @@ describe("fetchInitialNetworkData", () => {
       healthyNetworkData({ feeSnapshotsTruncated: true }),
     ]);
 
-    const [data] = await fetchInitialNetworkData();
+    const [data] = (await fetchInitialNetworkData()).networks;
 
     expect(data!.feeSnapshots).toEqual([]);
     expect(data!.feeSnapshotsError).toBeNull();
@@ -194,10 +195,14 @@ describe("fetchInitialNetworkData", () => {
       healthyNetworkData({ ratesError: { message: "oracle query failed" } }),
     ]);
 
-    const [data] = await fetchInitialNetworkData();
+    const { networks, fetchedAtMs } = await fetchInitialNetworkData();
 
-    expect(data!.ratesError).toEqual({ message: "oracle query failed" });
-    expect(data!.rates.get("42220:cUSD")).toBe(1.0004);
+    expect(networks[0]!.ratesError).toEqual({ message: "oracle query failed" });
+    expect(networks[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+    // Degraded payloads are fetched in-band, so they report as fresh —
+    // the client freshness gate must not re-fetch a just-fetched payload
+    // for staleness reasons (the degraded path already revalidates).
+    expect(fetchedAtMs).toBeGreaterThan(0);
     expect(cacheCallbackOutcomes).toEqual(["threw"]);
   });
 
@@ -206,7 +211,7 @@ describe("fetchInitialNetworkData", () => {
 
     const result = await fetchInitialNetworkData();
 
-    expect(result).toEqual([]);
+    expect(result.networks).toEqual([]);
     expect(cacheCallbackOutcomes).toEqual(["threw"]);
   });
 
@@ -218,7 +223,8 @@ describe("fetchInitialNetworkData", () => {
 
   // Stale-hit path: `unstable_cache` serves stale entries and swallows
   // background-revalidation errors, so only the fetchedAt age gate bounds
-  // what visitors actually see (MAX_SERVED_STALENESS_MS = 90s).
+  // what the server will serve (MAX_SERVED_STALENESS_MS); staleness within
+  // that bound is handled client-side by the hook's freshness gate.
   describe("fetchedAt age gate", () => {
     const NOW = 1_700_000_000_000;
     /** Cached-entry shape as written by the cache callback: dehydrated,
@@ -245,8 +251,11 @@ describe("fetchInitialNetworkData", () => {
       const result = await fetchInitialNetworkData();
 
       expect(mockFetchAllNetworks).not.toHaveBeenCalled();
-      expect(result).toHaveLength(1);
-      expect(result[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+      expect(result.networks).toHaveLength(1);
+      expect(result.networks[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+      // The served entry's real fetch time crosses to the client so the
+      // hook's freshness gate can decide to revalidate on mount.
+      expect(result.fetchedAtMs).toBe(NOW - (MAX_SERVED_STALENESS_MS - 1_000));
     });
 
     it("foreground-refetches a cached payload older than the staleness bound", async () => {
@@ -260,7 +269,7 @@ describe("fetchInitialNetworkData", () => {
       const result = await fetchInitialNetworkData();
 
       expect(mockFetchAllNetworks).toHaveBeenCalledTimes(1);
-      expect(result[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+      expect(result.networks[0]!.rates.get("42220:cUSD")).toBe(1.0004);
     });
 
     it("surfaces a fresh degraded payload past the staleness bound instead of the stale healthy one", async () => {
@@ -269,7 +278,7 @@ describe("fetchInitialNetworkData", () => {
         healthyNetworkData({ ratesError: { message: "oracle query failed" } }),
       ]);
 
-      const [data] = await fetchInitialNetworkData();
+      const [data] = (await fetchInitialNetworkData()).networks;
 
       expect(mockFetchAllNetworks).toHaveBeenCalledTimes(1);
       // Error channel intact → client mount revalidation fires, instead of
@@ -289,8 +298,8 @@ describe("fetchInitialNetworkData", () => {
       ]);
 
       expect(mockFetchAllNetworks).toHaveBeenCalledTimes(1);
-      expect(first[0]!.rates.get("42220:cUSD")).toBe(1.0004);
-      expect(second[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+      expect(first.networks[0]!.rates.get("42220:cUSD")).toBe(1.0004);
+      expect(second.networks[0]!.rates.get("42220:cUSD")).toBe(1.0004);
     });
   });
 });

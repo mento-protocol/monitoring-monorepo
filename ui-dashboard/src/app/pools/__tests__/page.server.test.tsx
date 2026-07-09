@@ -28,11 +28,17 @@ beforeEach(() => {
 describe("PoolsPage server component", () => {
   it("passes resolved initial network data into the client page", async () => {
     const initialNetworkData = [{ networkId: "celo-mainnet", pools: [] }];
-    mockFetchInitialNetworkData.mockResolvedValueOnce(initialNetworkData);
+    mockFetchInitialNetworkData.mockResolvedValueOnce({
+      networks: initialNetworkData,
+      fetchedAtMs: 1_700_000_000_000,
+    });
 
     renderToStaticMarkup(await PoolsPage());
 
-    expect(mockPoolsPageClient).toHaveBeenCalledWith({ initialNetworkData });
+    expect(mockPoolsPageClient).toHaveBeenCalledWith({
+      initialNetworkData,
+      initialNetworkDataFetchedAtMs: 1_700_000_000_000,
+    });
   });
 
   it("falls back to client-side fetching when initial network data rejects", async () => {
@@ -44,6 +50,7 @@ describe("PoolsPage server component", () => {
 
     expect(mockPoolsPageClient).toHaveBeenCalledWith({
       initialNetworkData: undefined,
+      initialNetworkDataFetchedAtMs: undefined,
     });
   });
 });

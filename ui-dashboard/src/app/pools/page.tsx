@@ -22,8 +22,11 @@ export const metadata: Metadata = {
 };
 
 export default async function PoolsPage() {
-  const initialNetworkData = await fetchInitialNetworkData().catch(
-    () => undefined,
+  const initialPayload = await fetchInitialNetworkData().catch(() => undefined);
+  return (
+    <PoolsPageClient
+      initialNetworkData={initialPayload?.networks}
+      initialNetworkDataFetchedAtMs={initialPayload?.fetchedAtMs}
+    />
   );
-  return <PoolsPageClient initialNetworkData={initialNetworkData} />;
 }

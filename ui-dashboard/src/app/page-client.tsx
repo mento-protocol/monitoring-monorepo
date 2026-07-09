@@ -40,8 +40,10 @@ const SECONDS_PER_DAY = 86_400;
 
 export default function GlobalPage({
   initialNetworkData,
+  initialNetworkDataFetchedAtMs,
 }: {
   initialNetworkData?: NetworkData[] | undefined;
+  initialNetworkDataFetchedAtMs?: number | undefined;
 }) {
   // First paint uses `initialNetworkData` via SWR's `fallbackData`; on
   // back-navigation the populated SWR cache wins, which is the right call —
@@ -51,7 +53,10 @@ export default function GlobalPage({
   // anyway, and the next `refreshInterval` tick will refresh either way.
   return (
     <Suspense>
-      <GlobalContent initialNetworkData={initialNetworkData} />
+      <GlobalContent
+        initialNetworkData={initialNetworkData}
+        initialNetworkDataFetchedAtMs={initialNetworkDataFetchedAtMs}
+      />
     </Suspense>
   );
 }
@@ -106,10 +111,15 @@ function perPoolTvlWindow(
 // eslint-disable-next-line max-lines-per-function -- Homepage coordinates network data polling, KPI aggregation, and global pool table in one route surface.
 function GlobalContent({
   initialNetworkData,
+  initialNetworkDataFetchedAtMs,
 }: {
   initialNetworkData?: NetworkData[] | undefined;
+  initialNetworkDataFetchedAtMs?: number | undefined;
 }) {
-  const { networkData, isLoading } = useAllNetworksData(initialNetworkData);
+  const { networkData, isLoading } = useAllNetworksData(
+    initialNetworkData,
+    initialNetworkDataFetchedAtMs,
+  );
 
   // Whether any network has a top-level, rates, snapshot, or pagination
   // failure. Used to show N/A / "partial data" in KPI tiles rather than
