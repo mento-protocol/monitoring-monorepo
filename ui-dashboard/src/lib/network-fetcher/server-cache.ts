@@ -118,7 +118,7 @@ async function fetchDehydratedInitialNetworkData(): Promise<CachedNetworkPayload
 // wrapper alone. The `fetchedAt` age gate in `fetchInitialNetworkData` is
 // what bounds served staleness and re-opens the degraded-error channel.
 const cachedFetch = unstable_cache(
-  fetchDehydratedInitialNetworkData,
+  fetchDehydratedInitialNetworkDataCoalesced,
   ["all-networks-ssr"],
   { revalidate: 30, tags: ["all-networks-ssr"] },
 );
@@ -130,19 +130,23 @@ const cachedFetch = unstable_cache(
 // Exported so tests derive their boundary fixtures from the real constant.
 export const MAX_SERVED_STALENESS_MS = 90_000;
 
-// Coalesce concurrent age-gate refetches within this isolate — a burst of
-// first-visitors-after-idle would otherwise each launch their own full
-// fan-out. This matches the coalescing scope of `unstable_cache`'s own
-// background revalidation (per-isolate via `pendingRevalidates`);
-// cross-instance duplication remains possible and is bounded by the
-// number of warm instances.
-let inFlightRefetch: Promise<CachedNetworkPayload> | null = null;
+// Coalesce EVERY invocation of the upstream fan-out within this isolate:
+// concurrent cold-miss fills, the background revalidation `unstable_cache`
+// schedules on a stale hit, and the over-age foreground refetch in
+// `fetchInitialNetworkData` all share one in-flight fan-out. Feeding this
+// coalesced function to `unstable_cache` (rather than only wrapping the
+// age-gate path) matters: on an over-age hit Next has ALREADY started its
+// background revalidation of this same callback, so a separately-coalesced
+// foreground copy would still pair with it and double the upstream work.
+// Cross-instance duplication remains possible and is bounded by the number
+// of warm instances.
+let inFlightFanout: Promise<CachedNetworkPayload> | null = null;
 
-function refetchInitialNetworkDataCoalesced(): Promise<CachedNetworkPayload> {
-  inFlightRefetch ??= fetchDehydratedInitialNetworkData().finally(() => {
-    inFlightRefetch = null;
+function fetchDehydratedInitialNetworkDataCoalesced(): Promise<CachedNetworkPayload> {
+  inFlightFanout ??= fetchDehydratedInitialNetworkData().finally(() => {
+    inFlightFanout = null;
   });
-  return inFlightRefetch;
+  return inFlightFanout;
 }
 
 /**
@@ -165,7 +169,10 @@ export async function fetchInitialNetworkData(): Promise<NetworkData[]> {
     const cached = await cachedFetch();
     const payload =
       Date.now() - cached.fetchedAt > MAX_SERVED_STALENESS_MS
-        ? await refetchInitialNetworkDataCoalesced()
+        ? // Joins the background revalidation `unstable_cache` started for
+          // this same stale hit (shared in-flight promise) instead of
+          // launching a second fan-out.
+          await fetchDehydratedInitialNetworkDataCoalesced()
         : cached;
     return payload.networks.map(rehydrateNetworkData);
   } catch (err) {
