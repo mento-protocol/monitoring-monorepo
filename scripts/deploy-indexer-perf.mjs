@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
@@ -83,16 +84,32 @@ function readJson(args) {
   return JSON.parse(result.output);
 }
 
-function resolveDeployment(deployments, target) {
+export function resolveDeployment(deployments, target) {
+  const sortedDeployments = [...deployments].sort((a, b) =>
+    String(b.created_time ?? "").localeCompare(String(a.created_time ?? "")),
+  );
   if (!target) {
-    return [...deployments].sort((a, b) =>
-      String(b.created_time ?? "").localeCompare(String(a.created_time ?? "")),
-    )[0];
+    return (
+      sortedDeployments.find((deployment) => Boolean(deployment.commit_hash)) ??
+      null
+    );
   }
-  return deployments.find((deployment) => {
+
+  const matches = sortedDeployments.filter((deployment) => {
     const commit = String(deployment.commit_hash ?? "");
+    if (!commit) return false;
     return commit.startsWith(target) || target.startsWith(commit);
   });
+
+  if (matches.length > 1) {
+    throw new Error(
+      `Ambiguous deployment commit ${target} matches: ${matches
+        .map((deployment) => deployment.commit_hash)
+        .join(", ")}`,
+    );
+  }
+
+  return matches[0] ?? null;
 }
 
 function progress(row) {
@@ -302,10 +319,15 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`deploy:indexer:perf failed: ${error.message}`);
-  console.error(usage());
-  process.exit(1);
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`deploy:indexer:perf failed: ${error.message}`);
+    console.error(usage());
+    process.exit(1);
+  }
 }

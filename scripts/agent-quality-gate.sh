@@ -1532,6 +1532,9 @@ while IFS= read -r path; do
         scripts/deploy-indexer-verify.mjs|scripts/deploy-indexer-verify.test.mjs)
           add_command "node scripts/deploy-indexer-verify.test.mjs" "indexer deploy verifier changed"
           ;;
+        scripts/deploy-indexer-perf.mjs|scripts/deploy-indexer-perf.test.mjs)
+          add_command "node scripts/deploy-indexer-perf.test.mjs" "indexer deploy perf helper changed"
+          ;;
         scripts/alert-rules-lint.mjs|scripts/alert-rules-lint.test.mjs)
           add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"
           ;;
