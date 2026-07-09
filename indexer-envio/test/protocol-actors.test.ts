@@ -9,6 +9,9 @@ const CHAIN_CELO = 42220;
 const CHAIN_MONAD = 143;
 const CHAIN_TEST_FIXTURE = 99999;
 
+// Manual protocol actor override shared by Celo and Monad.
+const X_CHAIN_REBALANCER_EOA = "0xaa8299fc6a685b5f9ce9bda8d0b3ea3d54731976";
+
 // Real Celo addresses (lowercased) — must stay in @mento-protocol/contracts.
 const CELO_BROKER = "0x777a8255ca72412f0d706dc03c9d1987306b4cad";
 const CELO_BIPOOLMANAGER = "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901";
@@ -17,7 +20,6 @@ const CELO_OPEN_LIQUIDITY_STRATEGY =
   "0x54e2ae8c8448912e17ce0b2453bafb7b0d80e40f";
 const CELO_PROTOCOL_FEE_RECIPIENT =
   "0x0dd57f6f181d0469143fe9380762d8a112e96e4a";
-const X_CHAIN_REBALANCER_EOA = "0xaa8299fc6a685b5f9ce9bda8d0b3ea3d54731976";
 
 // Real Monad addresses + an NTT transceiver proxy from nttAddresses.json.
 const MONAD_FPMM_FACTORY = "0xa849b475fe5a4b5c9c3280152c7a1945b907613b";
