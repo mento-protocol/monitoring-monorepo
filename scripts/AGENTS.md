@@ -18,6 +18,9 @@ last_verified: 2026-05-20
 
 - Shell scripts use `set -euo pipefail`.
 - Parse JSON with Node, jq, or structured tooling. Do not scrape JSON with grep or sed.
+- Compact/watch scripts must keep machine state and cadence metadata separate
+  from human display strings. Gate emissions on stable fields, not volatile
+  counters, block heights, or formatted progress lines.
 - Deploy scripts must refuse dirty working trees before mutating external systems.
 - Do not add `--no-verify` to git commands. Local hooks encode repo policy.
 - New deploy scripts must print the target, commit, and rollback or verification command before/after mutation.

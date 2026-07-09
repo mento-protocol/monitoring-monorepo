@@ -153,8 +153,10 @@ re-pushing.
 ### Phase 2b — Wait for sync to catch up (90 min hard ceiling)
 
 Once registered, the wrapper polls every 10 s and exits 0 when all chains
-report caught-up. Foreground is fine here; the noisy progress table is the
-work product.
+report caught-up. In `--compact` mode it prints the first sample, stable sync
+state changes, cadence checkpoints, and caught-up state while suppressing idle
+volatile progress changes. Drop `--compact` only when the full per-poll table
+is useful in a human terminal.
 
 Watch sync in the active rollout/session and do not leave a background process
 running when you finish.
