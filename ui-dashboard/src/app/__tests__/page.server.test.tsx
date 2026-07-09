@@ -4,9 +4,9 @@ import HomePage, { generateMetadata } from "../page";
 
 type GlobalPageProps = { initialNetworkData?: unknown };
 
-const { mockFetchAllNetworks, mockFetchHomepageOgData, mockGlobalPage } =
+const { mockFetchInitialNetworkData, mockFetchHomepageOgData, mockGlobalPage } =
   vi.hoisted(() => ({
-    mockFetchAllNetworks: vi.fn(),
+    mockFetchInitialNetworkData: vi.fn(),
     mockFetchHomepageOgData: vi.fn(),
     mockGlobalPage: vi.fn((props: GlobalPageProps) => {
       void props;
@@ -14,8 +14,8 @@ const { mockFetchAllNetworks, mockFetchHomepageOgData, mockGlobalPage } =
     }),
   }));
 
-vi.mock("@/lib/fetch-all-networks", () => ({
-  fetchAllNetworks: mockFetchAllNetworks,
+vi.mock("@/lib/network-fetcher/server-cache", () => ({
+  fetchInitialNetworkData: mockFetchInitialNetworkData,
 }));
 
 vi.mock("@/lib/homepage-og", () => ({
@@ -43,7 +43,7 @@ const homepageOgData = {
 };
 
 beforeEach(() => {
-  mockFetchAllNetworks.mockReset();
+  mockFetchInitialNetworkData.mockReset();
   mockFetchHomepageOgData.mockReset();
   mockGlobalPage.mockClear();
 });
@@ -87,7 +87,7 @@ describe("HomePage route metadata", () => {
 describe("HomePage server component", () => {
   it("passes resolved initial network data into the client page", async () => {
     const initialNetworkData = [{ networkId: "celo-mainnet", pools: [] }];
-    mockFetchAllNetworks.mockResolvedValueOnce(initialNetworkData);
+    mockFetchInitialNetworkData.mockResolvedValueOnce(initialNetworkData);
 
     renderToStaticMarkup(await HomePage());
 
@@ -95,7 +95,9 @@ describe("HomePage server component", () => {
   });
 
   it("falls back to client-side fetching when initial network data rejects", async () => {
-    mockFetchAllNetworks.mockRejectedValueOnce(new Error("network fanout"));
+    mockFetchInitialNetworkData.mockRejectedValueOnce(
+      new Error("network fanout"),
+    );
 
     renderToStaticMarkup(await HomePage());
 
