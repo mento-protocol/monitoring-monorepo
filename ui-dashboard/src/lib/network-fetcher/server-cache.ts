@@ -136,9 +136,9 @@ const CACHE_KEY_PARTS = [
   process.env.VERCEL_DEPLOYMENT_ID ??
     process.env.VERCEL_GIT_COMMIT_SHA ??
     "dev",
-  NETWORK_IDS.filter(isConfiguredNetworkId)
-    .map((id) => `${id}=${NETWORKS[id].hasuraUrl}`)
-    .join("|"),
+  NETWORK_IDS.flatMap((id) =>
+    isConfiguredNetworkId(id) ? [`${id}=${NETWORKS[id].hasuraUrl}`] : [],
+  ).join("|"),
 ];
 
 const cachedFetch = unstable_cache(
