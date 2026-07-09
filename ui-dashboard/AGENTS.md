@@ -72,6 +72,13 @@ surface behaves differently by session. Examples: nav links, address-label edit
 affordances, `/address-book`, `/entities`, `/integrations`, and `/volume`
 Organic/All controls.
 
+For `/volume`, the Organic/All protocol-actor controls are authenticated-only.
+Logged-out sessions intentionally hide the toggle and force all-volume queries,
+so a protocol actor appearing in a logged-out browser is not proof that organic
+filtering failed. To verify organic filtering, use a simulated authenticated
+session or query the production/local GraphQL path with
+`isProtocolActorIn: [false]`.
+
 Use a fixed localhost port so the user can inspect the exact URL you verified:
 
 ```bash
