@@ -286,7 +286,7 @@ describe("Pool detail LPs tab", () => {
 
     const html = renderPoolDetailPage(initialData);
 
-    expect(html).toContain("Live pool health refresh failed");
+    expect(html).toContain("Pool health inputs refresh failed");
     expect(html).toContain("showing the last confirmed state");
     expect(html).toContain("pool refresh timeout");
     expect(html).toContain("GBPm/USDm");
@@ -534,7 +534,7 @@ describe("Pool detail LPs tab", () => {
       timeoutMs: 5000,
       fallbackData: initialData.thresholds,
     });
-    expect(html).toContain("Live pool health refresh failed");
+    expect(html).toContain("Pool health inputs refresh failed");
     expect(html).toContain("transient trust query failure");
   });
 

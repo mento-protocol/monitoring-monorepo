@@ -53,6 +53,7 @@ export function retainConfirmedVpExtensions(
     if (!prior) return data;
     const priorPools = new Map(prior.pools.map((pool) => [pool.id, pool]));
     let retainedCount = 0;
+    let retainedFleetRefreshSignalCount = 0;
     const pools = data.pools.map((pool) => {
       const previousPool = priorPools.get(pool.id);
       if (!previousPool) return pool;
@@ -81,6 +82,11 @@ export function retainConfirmedVpExtensions(
         return pool;
       }
       retainedCount += 1;
+      retainedFleetRefreshSignalCount += [
+        retainDeprecation,
+        retainMinimumReports,
+        retainDeprecationTrust,
+      ].filter(Boolean).length;
       return {
         ...pool,
         ...(retainDeprecation ? { wrappedExchangeDeprecated: true } : {}),
@@ -115,6 +121,11 @@ export function retainConfirmedVpExtensions(
         ({
           message: `Pool health response did not reconfirm ${retainedCount} VirtualPool extension${retainedCount === 1 ? "" : "s"}`,
         } as const),
+      liveHealthErrorClearsOnLivePoll:
+        retainedFleetRefreshSignalCount === 0 &&
+        (data.liveHealthError === null ||
+          data.liveHealthError === undefined ||
+          data.liveHealthErrorClearsOnLivePoll === true),
     };
   });
 }

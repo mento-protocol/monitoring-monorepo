@@ -354,6 +354,15 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     installGraphQLMock({
       AllPoolsWithHealth: { Pool: [pool] },
       AllPoolsVpOracleFreshness: reject(new Error("vp freshness down")),
+      AllPoolsVpDeprecation: {
+        BiPoolExchange: [
+          {
+            wrappedByPoolId: pool.id,
+            isDeprecated: false,
+            minimumReports: "1",
+          },
+        ],
+      },
     });
 
     const result = await fetchNetworkData(CELO_NETWORK, WINDOWS);
@@ -362,6 +371,7 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.strategyError).toBeNull();
     expect(result.pools[0]).not.toHaveProperty("lastOracleReportAt");
     expect(result.liveHealthError?.message).toContain("vp freshness down");
+    expect(result.liveHealthErrorClearsOnLivePoll).toBe(true);
   });
 
   it("VP deprecation (exchange rows): fails open — lifecycle deprecation still applies", async () => {
@@ -383,6 +393,7 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.pools[0]).toMatchObject({ wrappedExchangeDeprecated: true });
     expect(result.pools[0]).not.toHaveProperty("wrappedExchangeMinimumReports");
     expect(result.liveHealthError?.message).toContain("vp deprecation down");
+    expect(result.liveHealthErrorClearsOnLivePoll).toBe(false);
   });
 
   it("VP lifecycle deprecation: fails open — exchange-row deprecation still applies", async () => {
@@ -407,6 +418,7 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.liveHealthError?.message).toContain(
       "vp lifecycle deprecation down",
     );
+    expect(result.liveHealthErrorClearsOnLivePoll).toBe(false);
   });
 
   it("indexed CDP pools (Celo): strategyError set, cdpPoolIds empty", async () => {

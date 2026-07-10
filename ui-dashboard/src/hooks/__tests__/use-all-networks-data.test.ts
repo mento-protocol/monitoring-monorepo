@@ -116,6 +116,7 @@ describe("retainConfirmedVpExtensions", () => {
     expect(retained?.liveHealthError?.message).toContain(
       "did not reconfirm 1 VirtualPool extension",
     );
+    expect(retained?.liveHealthErrorClearsOnLivePoll).toBe(false);
   });
 
   it("retains active VirtualPool quorum configuration across an omission", () => {
@@ -149,6 +150,43 @@ describe("retainConfirmedVpExtensions", () => {
     expect(retained?.liveHealthError?.message).toContain(
       "did not reconfirm 1 VirtualPool extension",
     );
+    expect(retained?.liveHealthErrorClearsOnLivePoll).toBe(false);
+  });
+
+  it("marks freshness-only retention recoverable by the lightweight live poll", () => {
+    const confirmed = {
+      ...makePool("42220-0xfreshness"),
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      vpDeprecationKnown: true,
+      wrappedExchangeMinimumReports: "2",
+      vpHealthUpdatedAtBlock: "4",
+      vpOracleTimestamp: "2050",
+      vpOracleNumReporters: 3,
+      vpTokenDecimalsKnown: true,
+      vpOracleFreshnessCheckedAt: 2120,
+      medianLive: true,
+      oracleFreshnessWindow: "300",
+    };
+    const current = {
+      network: MOCK_NETWORK,
+      pools: [
+        {
+          ...confirmed,
+          vpHealthUpdatedAtBlock: undefined,
+          vpOracleFreshnessCheckedAt: undefined,
+        },
+      ],
+    } as NetworkData;
+    const previous = {
+      network: MOCK_NETWORK,
+      pools: [confirmed],
+    } as NetworkData;
+
+    const [retained] = retainConfirmedVpExtensions([current], [previous]);
+
+    expect(retained?.pools[0]?.vpHealthUpdatedAtBlock).toBe("4");
+    expect(retained?.liveHealthErrorClearsOnLivePoll).toBe(true);
   });
 
   it("retains the atomic VP group and trust across a regressed fleet row", () => {

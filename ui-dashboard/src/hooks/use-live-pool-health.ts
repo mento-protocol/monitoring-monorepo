@@ -314,6 +314,53 @@ function liveRowAdvancesAnyHealthGroup(
   );
 }
 
+function liveRowAdvancesEveryHealthGroup(
+  pool: Pool,
+  row: LivePoolHealthRow,
+): boolean {
+  return (
+    livePrimaryHealthIsCurrent(pool, row, false) &&
+    liveExtensionHealthIsCurrent(
+      pool.thresholdHealthUpdatedAtBlock,
+      row.updatedAtBlock,
+      false,
+    ) &&
+    (!isVirtualPool(pool) ||
+      liveExtensionHealthIsCurrent(
+        pool.vpHealthUpdatedAtBlock,
+        row.updatedAtBlock,
+        false,
+      ))
+  );
+}
+
+function liveSliceConfirmsFleetErrorRecovery({
+  pools,
+  rowsById,
+  retainedPoolIds,
+  liveError,
+  liveReceiptIsNewer,
+}: {
+  pools: Pool[];
+  rowsById: Map<string, LivePoolHealthRow>;
+  retainedPoolIds: Set<string>;
+  liveError: Error | null;
+  liveReceiptIsNewer: boolean;
+}): boolean {
+  if (liveError !== null) return false;
+  if (pools.some((pool) => retainedPoolIds.has(pool.id))) return false;
+  const everyGroupConfirmed = pools.every((pool) => {
+    const row = rowsById.get(pool.id);
+    return row !== undefined && liveRowConfirmsEveryHealthGroup(pool, row);
+  });
+  if (!everyGroupConfirmed) return false;
+  if (liveReceiptIsNewer) return true;
+  return pools.every((pool) => {
+    const row = rowsById.get(pool.id);
+    return row !== undefined && liveRowAdvancesEveryHealthGroup(pool, row);
+  });
+}
+
 function mergeLiveHealthRow(
   pool: Pool,
   row: LivePoolHealthRow,
@@ -434,6 +481,13 @@ export function mergeLivePoolHealth(
       // disclosed.
       return liveReceiptIsNewer && !liveRowConfirmsEveryHealthGroup(pool, row);
     }).length;
+    const liveConfirmsEveryDisplayedPool = liveSliceConfirmsFleetErrorRecovery({
+      pools: data.pools,
+      rowsById,
+      retainedPoolIds,
+      liveError: live.error,
+      liveReceiptIsNewer,
+    });
     const overlayError =
       live.error !== null
         ? { message: live.error.message }
@@ -442,10 +496,19 @@ export function mergeLivePoolHealth(
               message: `Live health response did not confirm ${unconfirmedPoolCount} displayed pool${unconfirmedPoolCount === 1 ? "" : "s"}`,
             }
           : null;
-    const liveHealthError = overlayError ?? data.liveHealthError ?? null;
+    const inheritedError =
+      liveConfirmsEveryDisplayedPool &&
+      data.liveHealthErrorClearsOnLivePoll === true
+        ? null
+        : (data.liveHealthError ?? null);
+    const liveHealthError = overlayError ?? inheritedError;
     return {
       ...data,
       liveHealthError,
+      liveHealthErrorClearsOnLivePoll:
+        overlayError !== null ||
+        (inheritedError !== null &&
+          data.liveHealthErrorClearsOnLivePoll === true),
       pools: data.pools.map((pool) => {
         const row = rowsById.get(pool.id);
         const canReplaceEqualVersion =

@@ -134,11 +134,21 @@ function withVirtualPoolHealthError(
 ): NetworkData {
   const virtualPools = assembled.pools.filter(isVirtualPool);
   if (virtualPools.length === 0) return assembled;
+  const freshnessFailure = sources.vpOracleFreshness.status === "rejected";
+  const deprecationFailure =
+    sources.vpDeprecation.status === "rejected" ||
+    sources.vpLifecycleDeprecation.status === "rejected";
   const extensionFailure = [
     sources.vpOracleFreshness,
     sources.vpDeprecation,
     sources.vpLifecycleDeprecation,
   ].find((result) => result.status === "rejected");
+  const unconfirmedFreshnessCount = virtualPools.filter(
+    (pool) => pool.vpOracleFreshnessCheckedAt === undefined,
+  ).length;
+  const unconfirmedDeprecationCount = virtualPools.filter(
+    (pool) => pool.vpDeprecationKnown === false,
+  ).length;
   const unconfirmedPoolCount = virtualPools.filter(
     (pool) =>
       pool.vpOracleFreshnessCheckedAt === undefined ||
@@ -151,7 +161,14 @@ function withVirtualPoolHealthError(
     extensionFailure?.status === "rejected"
       ? `VirtualPool health refresh failed: ${extensionFailure.reason instanceof Error ? extensionFailure.reason.message : String(extensionFailure.reason)}`
       : `VirtualPool health response did not confirm ${unconfirmedPoolCount} displayed pool${unconfirmedPoolCount === 1 ? "" : "s"}`;
-  return { ...assembled, liveHealthError: { message } };
+  return {
+    ...assembled,
+    liveHealthError: { message },
+    liveHealthErrorClearsOnLivePoll:
+      (freshnessFailure || unconfirmedFreshnessCount > 0) &&
+      !deprecationFailure &&
+      unconfirmedDeprecationCount === 0,
+  };
 }
 
 /** @internal Exported for testing only. */

@@ -590,6 +590,103 @@ describe("mergeLivePoolHealth", () => {
     });
   });
 
+  it.each([
+    ["clears", true, null],
+    ["preserves", false, "fleet extension unavailable"],
+  ] as const)(
+    "%s an inherited fleet error according to its live-poll recovery scope",
+    (_caseName, clearsOnLivePoll, expectedMessage) => {
+      const basePool = makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId: "0xexchange",
+        updatedAtBlock: "3",
+        thresholdHealthUpdatedAtBlock: "3",
+        vpHealthUpdatedAtBlock: "3",
+        oracleFreshnessCheckedAt: 2_100,
+      });
+      const data = makeNetworkData("celo-mainnet", [basePool]);
+      data.liveHealthError = { message: "fleet extension unavailable" };
+      data.liveHealthErrorClearsOnLivePoll = clearsOnLivePoll;
+
+      const merged = mergeLivePoolHealth(
+        [data],
+        [
+          successfulSlice("celo-mainnet", [
+            makeLiveRow({ updatedAtBlock: "4" }),
+          ]),
+        ],
+        false,
+      );
+
+      expect(merged[0]?.liveHealthError?.message ?? null).toBe(expectedMessage);
+    },
+  );
+
+  it("does not clear a fleet error from an older equal-block warm-cache slice", () => {
+    const basePool = makePool({
+      updatedAtBlock: "4",
+      thresholdHealthUpdatedAtBlock: "4",
+      oracleFreshnessCheckedAt: 2_300,
+    });
+    const data = makeNetworkData("celo-mainnet", [basePool]);
+    data.liveHealthError = { message: "fleet freshness unavailable" };
+    data.liveHealthErrorClearsOnLivePoll = true;
+    const cachedSlice = {
+      ...successfulSlice("celo-mainnet", [
+        makeLiveRow({ updatedAtBlock: "4" }),
+      ]),
+      receiptSequence: 1,
+    };
+
+    const merged = mergeLivePoolHealth([data], [cachedSlice], false, 2);
+
+    expect(merged[0]?.liveHealthError?.message).toBe(
+      "fleet freshness unavailable",
+    );
+  });
+
+  it("lets an overlapping lower-sequence live request clear an error when every group advances", () => {
+    const basePool = makePool({
+      updatedAtBlock: "3",
+      thresholdHealthUpdatedAtBlock: "3",
+      oracleFreshnessCheckedAt: 2_100,
+    });
+    const data = makeNetworkData("celo-mainnet", [basePool]);
+    data.liveHealthError = { message: "fleet freshness unavailable" };
+    data.liveHealthErrorClearsOnLivePoll = true;
+    const overlappingSlice = {
+      ...successfulSlice("celo-mainnet", [
+        makeLiveRow({ updatedAtBlock: "4" }),
+      ]),
+      receiptSequence: 1,
+    };
+
+    const merged = mergeLivePoolHealth([data], [overlappingSlice], false, 2);
+
+    expect(merged[0]?.liveHealthError).toBeNull();
+  });
+
+  it("ignores retained IDs for pools no longer displayed when clearing a fleet error", () => {
+    const basePool = makePool({
+      updatedAtBlock: "3",
+      thresholdHealthUpdatedAtBlock: "3",
+      oracleFreshnessCheckedAt: 2_100,
+    });
+    const data = makeNetworkData("celo-mainnet", [basePool]);
+    data.liveHealthError = { message: "fleet freshness unavailable" };
+    data.liveHealthErrorClearsOnLivePoll = true;
+    const slice = {
+      ...successfulSlice("celo-mainnet", [
+        makeLiveRow({ updatedAtBlock: "4" }),
+      ]),
+      retainedPoolIds: ["removed-pool"],
+    };
+
+    const merged = mergeLivePoolHealth([data], [slice], false);
+
+    expect(merged[0]?.liveHealthError).toBeNull();
+  });
+
   it("keeps the full-payload pools when the first live request fails", () => {
     const basePool = makePool();
     const networkData = [makeNetworkData("celo-mainnet", [basePool])];

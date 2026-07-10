@@ -418,7 +418,7 @@ function PoolOverview({
     <>
       {poolRefreshErrorMessage !== undefined && (
         <ErrorBox
-          message={`Live pool health refresh failed — showing the last confirmed state (${poolRefreshErrorMessage})`}
+          message={`Pool health inputs refresh failed — showing the last confirmed state (${poolRefreshErrorMessage})`}
         />
       )}
       <PoolHeader
