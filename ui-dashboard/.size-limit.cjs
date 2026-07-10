@@ -15,11 +15,12 @@
 // 3. Set budget to current_bytes × 1.10 (10% headroom).
 // 4. Update the comments below with the new baseline + date.
 //
-// BASELINE (measured 2026-07-06 with Next.js 16.2.6 + Turbopack):
-//   All client JS chunks (brotli):     1,094,742 bytes (1.04 MB)
-//   Plotly chunk (brotli):               291,466 bytes
-//   Markdown editor chunk (brotli):       44,130 bytes
-//   All CSS (brotli):                     10,987 bytes (10.7 KB)
+// BASELINE (measured 2026-07-09 with Next.js 16.2.6 + Turbopack):
+//   All client JS chunks (brotli):     1,134,004 bytes (1.08 MB)
+//   Plotly chunk (brotli):               289,067 bytes
+//   Markdown editor chunk (brotli):       44,080 bytes
+//   Sentry replay chunk (brotli):         34,824 bytes
+//   All CSS (brotli):                     11,276 bytes (11.0 KB)
 
 const fs = process.getBuiltinModule("node:fs");
 const path = process.getBuiltinModule("node:path");
@@ -192,11 +193,14 @@ const config = [
     // traces are used) cut the client JS from 1,702,785 → 1,085,606 bytes brotli
     // (−36%). See docs/notes/ui-dashboard-performance-plan.md (P1).
     //
-    // Baseline: 1,094,742 bytes  Budget: 1190 KB. (Was 1,085,606 after the P1
+    // Baseline: 1,134,004 bytes  Budget: 1190 KB. (Was 1,085,606 after the P1
     // plotly swap; lazy-splitting the markdown editor in P4 moved ~44 KB brotli off
     // the data-page critical path but added ~9 KB of async chunk-boundary overhead
-    // to this all-chunks total — the per-chunk budgets below track the real wins.)
-    // Keep this tight so a regression back to the full plotly.js build fails CI.
+    // to this all-chunks total; lazy-loading Sentry Session Replay (2026-07-09)
+    // moved ~29 KB brotli off every page's root chunks for ~6 KB of async
+    // chunk-boundary overhead here — the per-chunk budgets below track the real
+    // wins.) Keep this tight so a regression back to the full plotly.js build
+    // fails CI.
     name: "All client JS chunks",
     path: manifestPathsOrFallback(
       ".js",
@@ -229,6 +233,21 @@ const config = [
     name: "Markdown editor chunk (react-markdown)",
     path: chunkContaining("react-markdown", "markdown"),
     limit: "49 kB",
+  },
+  {
+    // Sentry Session Replay chunk, pinned by the rrweb "rr_width" attribute the
+    // recorder emits. Guards the replay lazy-load: replayIntegration() is added
+    // after Sentry.init via a dynamic import of @/lib/sentry-replay (see
+    // src/instrumentation-client.ts), so the rrweb recorder lives in its own
+    // ~35 KB brotli idle-loaded async chunk instead of every page's root chunks.
+    // If a static import (or a barrel-wide dynamic import) re-merges it into a
+    // shared chunk, the matched chunk's size jumps well past this budget and
+    // fails CI.
+    //
+    // Baseline: 34,824 bytes  Budget: ×1.10 = 38,306 bytes → 39 KB
+    name: "Sentry replay chunk (rr_width)",
+    path: chunkContaining("rr_width", "sentry-replay"),
+    limit: "39 kB",
   },
   {
     // Manifest-referenced CSS emitted under .next/static/ (single Tailwind v4 bundle).
