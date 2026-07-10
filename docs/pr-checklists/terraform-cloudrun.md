@@ -51,6 +51,11 @@ trimmed build context:
 - [ ] `.gcloudignore` does not exclude those same inputs. Keep it aligned with
       the Dockerfile and any workspace packages the build needs before install
       (for example `shared-config/` for metrics-bridge).
+- [ ] Terraform `archive_file` sources exclude local-only outputs produced by
+      commands run in the source root (especially `coverage/`), and
+      `.gcloudignore` mirrors those exclusions. Run the representative local
+      commands before the final plan and confirm transient files do not replace
+      the source object or Cloud Function.
 - [ ] Deploy workflow `paths:` filters include those inputs so patch-only or
       build-context-only changes actually redeploy (`patches/**`, lockfiles,
       package manifests, `cloudbuild.yaml`, Dockerfile, and any workspace deps the
@@ -68,12 +73,17 @@ This bit me on PRs #197 and #200 — both P1 blockers.
 - [ ] CI/CD deployer SAs need `roles/iam.serviceAccountTokenCreator` on the runtime SA they impersonate. Without it, Workload Identity Federation (`google-github-actions/auth`) fails at `getAccessToken` time before any Terraform/gcloud command runs
 - [ ] Any new `google_project_iam_member` should be reviewed against the API enablement and SA bindings already present, not added as an isolated grant
 
-## 6. Variable validation
+## 6. Variable and Terraform-version validation
 
 For variables that gate critical behavior:
 
 - [ ] Add a `validation` block for non-empty strings (image refs, project IDs, region). An empty string forwarded to a required field fails the apply with a cryptic error and blocks unrelated infra changes
 - [ ] If a previous schema accepted an empty value as "disable this resource", normalize it back to a safe default (or fail loudly with a migration message) — silent breakage of previously-valid `terraform.tfvars` is a hostile change
+- [ ] When adopting a Terraform CLI feature, check its minimum version and
+      raise the owning root's `required_version` to match. Provider write-only
+      resource arguments such as `*_wo` require Terraform 1.11 or newer; CI
+      using a newer binary does not prove every version allowed by the root can
+      plan the configuration.
 
 ## 7. Build-artifact retention
 
