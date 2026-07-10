@@ -140,6 +140,10 @@ export type UseGQLOptions<T> = {
    *  real content instead of a skeleton (kills the layout shift) while the normal
    *  poll revalidates in the background. */
   fallbackData?: T | undefined;
+  /** Runs after each successful network response, including unchanged data.
+   *  Used by freshness-sensitive consumers to record when a cached row was
+   *  actually re-observed rather than aging it continuously in the browser. */
+  onSuccess?: ((data: T) => void) | undefined;
 };
 
 /**
@@ -191,6 +195,7 @@ export function useGQL<T>(
     revalidateOnFocus = false,
     revalidateOnReconnect = false,
     fallbackData,
+    onSuccess,
   } = opts;
 
   async function fetcher(): Promise<T> {
@@ -207,6 +212,7 @@ export function useGQL<T>(
     revalidateOnReconnect,
     refreshWhenHidden: false,
     onErrorRetry: rateLimitAwareRetry,
+    ...(onSuccess !== undefined && { onSuccess }),
     ...(fallbackData !== undefined && { fallbackData }),
   });
 

@@ -1492,6 +1492,152 @@ describe("computeHealthStatus oracle staleness boundary", () => {
       }),
     ).toBe("OK");
   });
+
+  it("keeps a cached row fresh at its last successful live-health check", () => {
+    const oracleTimestamp = String(frozenNowSec - 240);
+    const checkedAt = frozenNowSec - 60;
+
+    expect(
+      isOracleFresh(
+        {
+          source: "fpmm_factory",
+          oracleTimestamp,
+          oracleExpiry: "300",
+          oracleFreshnessCheckedAt: checkedAt,
+        },
+        frozenNowSec + 600,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not turn a successfully checked fresh row CRITICAL as the browser clock advances", () => {
+    const oracleTimestamp = String(frozenNowSec - 240);
+
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleOk: true,
+          oracleTimestamp,
+          oracleExpiry: "300",
+          oracleFreshnessCheckedAt: frozenNowSec - 60,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        CELO_CHAIN_ID,
+        frozenNowSec + 600,
+      ),
+    ).toBe("OK");
+  });
+
+  it("does not age retained VirtualPool freshness into CRITICAL after a failed refresh", () => {
+    const oracleTimestamp = String(frozenNowSec - 240);
+
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool",
+          wrappedExchangeId: "0xexchange",
+          oracleTimestamp,
+          oracleFreshnessWindow: "300",
+          vpOracleFreshnessCheckedAt: frozenNowSec - 60,
+          medianLive: true,
+          tokenDecimalsKnown: true,
+          oracleNumReporters: 2,
+          wrappedExchangeMinimumReports: "1",
+        },
+        CELO_CHAIN_ID,
+        frozenNowSec + 600,
+      ),
+    ).toBe("N/A");
+  });
+
+  it("keeps VirtualPool health N/A when deprecation trust is incomplete", () => {
+    expect(
+      computeHealthStatus(
+        {
+          source: "virtual_pool_factory",
+          wrappedExchangeId: "0xexchange",
+          vpDeprecationKnown: false,
+          vpOracleTimestamp: String(frozenNowSec - 600),
+          vpOracleNumReporters: 0,
+          vpTokenDecimalsKnown: true,
+          vpOracleFreshnessCheckedAt: frozenNowSec,
+          medianLive: false,
+          oracleFreshnessWindow: "300",
+          wrappedExchangeMinimumReports: "1",
+        },
+        CELO_CHAIN_ID,
+        frozenNowSec,
+      ),
+    ).toBe("N/A");
+  });
+
+  it("turns CRITICAL when a later completed live-health check confirms expiry", () => {
+    const oracleTimestamp = String(frozenNowSec - 240);
+
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleOk: true,
+          oracleTimestamp,
+          oracleExpiry: "300",
+          oracleFreshnessCheckedAt: frozenNowSec + 61,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        CELO_CHAIN_ID,
+        frozenNowSec + 600,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("suppresses only inferred timestamp staleness while the first live check is pending", () => {
+    const oracleTimestamp = String(frozenNowSec - 600);
+    const pendingPool = {
+      source: "fpmm_factory",
+      oracleTimestamp,
+      oracleExpiry: "300",
+      oracleFreshnessCheckPending: true,
+      priceDifference: "0",
+      rebalanceThreshold: 5000,
+    };
+
+    expect(
+      computeHealthStatus(
+        { ...pendingPool, oracleOk: true },
+        CELO_CHAIN_ID,
+        frozenNowSec,
+      ),
+    ).toBe("OK");
+    expect(
+      computeHealthStatus(
+        { ...pendingPool, oracleOk: false },
+        CELO_CHAIN_ID,
+        frozenNowSec,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("does not suppress staleness already confirmed by a successful observation", () => {
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleOk: true,
+          oracleTimestamp: String(frozenNowSec - 600),
+          oracleExpiry: "300",
+          oracleFreshnessCheckedAt: frozenNowSec,
+          oracleFreshnessCheckPending: true,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        CELO_CHAIN_ID,
+        frozenNowSec,
+      ),
+    ).toBe("CRITICAL");
+  });
 });
 
 // Oracle staleness with per-feed oracleExpiry (non-default, e.g. Monad)
@@ -1665,7 +1811,7 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
     ).toBe(false);
   });
 
-  it("treats explicit VirtualPool median failures as not fresh while rollout inputs are unknown", () => {
+  it("fails neutral on VirtualPool median defaults while trust inputs are unknown", () => {
     const ts120 = String(frozenNowSec - 120);
     expect(
       isOracleFresh(
@@ -1680,7 +1826,7 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
         frozenNowSec,
         42220,
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("does not fall back to generic expiry when a VirtualPool reset window is unknown", () => {

@@ -31,6 +31,7 @@ import {
   POOL_VP_DEPRECATION_EXT,
   POOL_VP_LIFECYCLE_DEPRECATION_EXT,
   POOL_VP_ORACLE_FRESHNESS_EXT,
+  type PoolVpOracleFreshnessExtRow,
 } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import { isVirtualPool, type Pool, type PoolSnapshot } from "@/lib/types";
@@ -425,13 +426,6 @@ type PoolOgThresholdsExtRow = {
   breakerTripped?: boolean;
 };
 
-type PoolOgVpFreshnessExtRow = {
-  id: string;
-  lastOracleReportAt?: string;
-  medianLive?: boolean;
-  oracleFreshnessWindow?: string;
-};
-
 type PoolOgSettled<T> = PromiseSettledResult<{ Pool: T[] }>;
 type PoolOgExchangeSettled<T> = PromiseSettledResult<{ BiPoolExchange: T[] }>;
 type PoolOgLifecycleSettled<T> = PromiseSettledResult<{
@@ -462,11 +456,22 @@ async function requestPoolOgInputs(
     vpDeprecationResult,
     vpLifecycleDeprecationResult,
   ] = await Promise.allSettled([
-    client.request<{ Pool: Pool[] }>({
-      document: POOL_DETAIL_WITH_HEALTH,
-      variables: { id: poolId, chainId },
-      signal,
-    }),
+    client
+      .request<{ Pool: Pool[] }>({
+        document: POOL_DETAIL_WITH_HEALTH,
+        variables: { id: poolId, chainId },
+        signal,
+      })
+      .then((response) => {
+        const oracleFreshnessCheckedAt = Date.now() / 1000;
+        return {
+          ...response,
+          Pool: response.Pool.map((row) => ({
+            ...row,
+            oracleFreshnessCheckedAt,
+          })),
+        };
+      }),
     client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
       document: POOL_OG_DAILY_SNAPSHOTS,
       variables: { poolId },
@@ -482,11 +487,22 @@ async function requestPoolOgInputs(
       variables: { id: poolId, chainId },
       signal,
     }),
-    client.request<{ Pool: PoolOgVpFreshnessExtRow[] }>({
-      document: POOL_VP_ORACLE_FRESHNESS_EXT,
-      variables: { id: poolId, chainId },
-      signal,
-    }),
+    client
+      .request<{ Pool: PoolVpOracleFreshnessExtRow[] }>({
+        document: POOL_VP_ORACLE_FRESHNESS_EXT,
+        variables: { id: poolId, chainId },
+        signal,
+      })
+      .then((response) => {
+        const vpOracleFreshnessCheckedAt = Date.now() / 1000;
+        return {
+          ...response,
+          Pool: response.Pool.map((row) => ({
+            ...row,
+            vpOracleFreshnessCheckedAt,
+          })),
+        };
+      }),
     client.request<{ BiPoolExchange: PoolOgVpDeprecationExtRow[] }>({
       document: POOL_VP_DEPRECATION_EXT,
       variables: { id: poolId, chainId },
@@ -530,7 +546,7 @@ function firstSettledLifecycle<T>(result: PoolOgLifecycleSettled<T>): T | null {
 function mergePoolOgExtensions(
   rawPool: Pool,
   thresholdsResult: PoolOgSettled<PoolOgThresholdsExtRow>,
-  vpFreshnessResult: PoolOgSettled<PoolOgVpFreshnessExtRow>,
+  vpFreshnessResult: PoolOgSettled<PoolVpOracleFreshnessExtRow>,
   vpDeprecationResult: PoolOgExchangeSettled<PoolOgVpDeprecationExtRow>,
   vpLifecycleDeprecationResult: PoolOgLifecycleSettled<PoolOgVpLifecycleDeprecationExtRow>,
 ): Pool {
@@ -543,6 +559,10 @@ function mergePoolOgExtensions(
   const wrappedExchangeDeprecated =
     vpDeprecationExt?.isDeprecated === true ||
     vpLifecycleDeprecationExt !== null;
+  const vpDeprecationKnown =
+    vpDeprecationResult.status === "fulfilled" &&
+    vpLifecycleDeprecationResult.status === "fulfilled" &&
+    vpDeprecationExt !== null;
   return {
     ...rawPool,
     ...(ext
@@ -560,6 +580,15 @@ function mergePoolOgExtensions(
           lastOracleReportAt: vpFreshnessExt.lastOracleReportAt,
           medianLive: vpFreshnessExt.medianLive,
           oracleFreshnessWindow: vpFreshnessExt.oracleFreshnessWindow,
+          ...(isVirtualPool(rawPool)
+            ? {
+                vpOracleTimestamp: vpFreshnessExt.oracleTimestamp,
+                vpOracleNumReporters: vpFreshnessExt.oracleNumReporters,
+                vpTokenDecimalsKnown: vpFreshnessExt.tokenDecimalsKnown,
+                vpOracleFreshnessCheckedAt:
+                  vpFreshnessExt.vpOracleFreshnessCheckedAt,
+              }
+            : {}),
         }
       : {}),
     ...(wrappedExchangeDeprecated
@@ -567,6 +596,7 @@ function mergePoolOgExtensions(
           wrappedExchangeDeprecated,
         }
       : {}),
+    ...(isVirtualPool(rawPool) ? { vpDeprecationKnown } : {}),
     ...(vpDeprecationExt?.minimumReports !== undefined
       ? { wrappedExchangeMinimumReports: vpDeprecationExt.minimumReports }
       : {}),

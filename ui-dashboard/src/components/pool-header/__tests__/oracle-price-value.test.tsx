@@ -224,6 +224,55 @@ describe("OraclePriceValue", () => {
     expect(html).toContain("text-red-400");
   });
 
+  it("does not present a stale incident when VP deprecation is unconfirmed", () => {
+    const staleTs = String(Math.floor(Date.now() / 1000) - 3600);
+    const pool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      vpDeprecationKnown: false,
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: staleTs,
+      oracleFreshnessWindow: "300",
+      tokenDecimalsKnown: true,
+      medianLive: false,
+      oracleNumReporters: 0,
+      wrappedExchangeMinimumReports: "1",
+    };
+
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+
+    expect(html).not.toContain("· stale");
+    expect(html).not.toContain("Oracle is stale");
+    expect(html).not.toContain("text-red-400");
+  });
+
+  it("does not present a stale incident when VP median trust is unknown", () => {
+    const pool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      vpDeprecationKnown: true,
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: String(Math.floor(Date.now() / 1000) - 3600),
+      oracleFreshnessWindow: "300",
+      tokenDecimalsKnown: false,
+      medianLive: false,
+      oracleNumReporters: 0,
+      wrappedExchangeMinimumReports: "1",
+    };
+
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+
+    expect(html).not.toContain("· stale");
+    expect(html).not.toContain("Oracle is stale");
+    expect(html).not.toContain("text-red-400");
+  });
+
   it("uses oracleTimestamp for freshness when lastOracleReportAt is older", () => {
     const staleLiveTs = String(Math.floor(Date.now() / 1000) - 3600);
     const freshRawTs = String(Math.floor(Date.now() / 1000) - 60);

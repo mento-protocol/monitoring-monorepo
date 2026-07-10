@@ -50,6 +50,42 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
+// Lightweight live-health overlay for the homepage and /pools. The full
+// all-network payload also paginates snapshots, fees, LPs, and strategy data,
+// so it intentionally polls every 5 minutes. Health cannot share that cadence:
+// its cached oracle timestamp would cross the 5-6 minute on-chain expiry and
+// flash CRITICAL even when Hasura already has the next report. This query keeps
+// only fields that can change the live Health badge and is polled every 30s.
+export const ALL_POOLS_LIVE_HEALTH = `
+  query AllPoolsLiveHealth($chainId: Int!) {
+    Pool(where: { chainId: { _eq: $chainId } }) {
+      id
+      updatedAtBlock
+      updatedAtTimestamp
+      oracleOk
+      oracleTimestamp
+      oracleExpiry
+      oracleNumReporters
+      priceDifference
+      rebalanceThreshold
+      rebalanceThresholdAbove
+      rebalanceThresholdBelow
+      rebalanceThresholdsKnown
+      tokenDecimalsKnown
+      degenerateReserves
+      breakerTripped
+      deviationBreachStartedAt
+      lastRebalancedAt
+      hasHealthData
+      limitStatus
+      limitPressure0
+      limitPressure1
+      medianLive
+      oracleFreshnessWindow
+    }
+  }
+`;
+
 // Per-pool data-trust/deviation-classification flags —
 // `rebalanceThresholdsKnown` triple (above/below/known),
 // `tokenDecimalsKnown`, and `degenerateReserves`. Kept OFF
@@ -72,10 +108,13 @@ export const ALL_POOLS_WITH_HEALTH = `
 // math doesn't silently scale a 6-dp USDC leg as 18-dp. Triggered by
 // Cursor's learned rule "Isolate new Envio/Hasura entity fields in
 // separate queries for schema-lag resilience".
+// `updatedAtBlock` is the monotonic row version used to prevent the 30s live
+// overlay from rolling this independently fetched field group backward.
 export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
   query AllPoolsRebalanceThresholdsKnown($chainId: Int!) {
     Pool(where: { chainId: { _eq: $chainId } }) {
       id
+      updatedAtBlock
       rebalanceThresholdAbove
       rebalanceThresholdBelow
       rebalanceThresholdsKnown
@@ -90,10 +129,19 @@ export const ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN = `
 // separate so a dashboard-before-indexer rollout degrades only VP staleness
 // status, not thresholds, USD trust, breaker, degenerate-health fields, or the
 // deprecated-wrapper companion below.
+// `updatedAtBlock` gives this field group its own ordering cursor because this
+// query and the threshold companion can finish in either order.
+// `oracleTimestamp`, reporter count, and decimal trust deliberately ride with
+// the freshness window: the observation timestamp must certify one atomic
+// Pool row rather than combining a newer check time with older primary fields.
 export const ALL_POOLS_VP_ORACLE_FRESHNESS = `
   query AllPoolsVpOracleFreshness($chainId: Int!) {
     Pool(where: { chainId: { _eq: $chainId } }) {
       id
+      updatedAtBlock
+      oracleTimestamp
+      oracleNumReporters
+      tokenDecimalsKnown
       lastOracleReportAt
       medianLive
       oracleFreshnessWindow

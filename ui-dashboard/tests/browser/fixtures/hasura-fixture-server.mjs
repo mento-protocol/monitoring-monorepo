@@ -315,6 +315,10 @@ function breachRollupRows(rows) {
 function vpOracleFreshnessRows(rows) {
   return rows.map((pool) => ({
     id: pool.id,
+    updatedAtBlock: pool.updatedAtBlock,
+    oracleTimestamp: pool.oracleTimestamp,
+    oracleNumReporters: pool.oracleNumReporters,
+    tokenDecimalsKnown: pool.tokenDecimalsKnown,
     lastOracleReportAt: pool.oracleTimestamp,
     medianLive: true,
     oracleFreshnessWindow: pool.oracleExpiry,
@@ -905,6 +909,8 @@ export function handleGraphQL({ query, variables = {} }) {
     case "BridgeDailySnapshot":
       return { BridgeDailySnapshot: [] };
     case "AllPoolsWithHealth":
+      return { Pool: poolRowsForChain(variables.chainId) };
+    case "AllPoolsLiveHealth":
       return { Pool: poolRowsForChain(variables.chainId) };
     case "OracleRates":
       return { Pool: oracleRateRowsForChain(variables.chainId) };

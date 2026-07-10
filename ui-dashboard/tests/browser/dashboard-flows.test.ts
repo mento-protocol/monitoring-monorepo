@@ -154,6 +154,177 @@ test.describe("dashboard browser flows", () => {
     );
   });
 
+  test("keeps a fresh live-health overlay ahead of an expiring fleet snapshot", async ({
+    page,
+  }) => {
+    let browserNowSeconds = FIXTURE_NOW_SECONDS;
+    let fleetResponses = 0;
+    let liveHealthResponses = 0;
+    // The fixture server stamps the base row from real Node time. This field
+    // only orders base vs live rows; oracle freshness below stays pinned to
+    // the browser clock for deterministic health assertions.
+    const liveUpdatedAtTimestamp = String(Math.floor(Date.now() / 1000));
+
+    await page.route("**/graphql", async (route) => {
+      const body = route.request().postData() ?? "";
+
+      if (body.includes("query AllPoolsLiveHealth")) {
+        liveHealthResponses += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          headers: { "access-control-allow-origin": "*" },
+          body: JSON.stringify({
+            data: {
+              Pool: [
+                {
+                  id: CELO_POOL_ID,
+                  updatedAtBlock: "1501",
+                  updatedAtTimestamp: liveUpdatedAtTimestamp,
+                  oracleOk: true,
+                  oracleTimestamp: String(browserNowSeconds),
+                  oracleExpiry: "300",
+                  oracleNumReporters: 5,
+                  priceDifference: "0",
+                  rebalanceThreshold: 100,
+                  rebalanceThresholdAbove: 100,
+                  rebalanceThresholdBelow: 100,
+                  rebalanceThresholdsKnown: true,
+                  tokenDecimalsKnown: true,
+                  degenerateReserves: false,
+                  breakerTripped: false,
+                  deviationBreachStartedAt: "0",
+                  lastRebalancedAt: String(browserNowSeconds - 86_400),
+                  hasHealthData: true,
+                  limitStatus: "OK",
+                  limitPressure0: "0",
+                  limitPressure1: "0",
+                  medianLive: true,
+                  oracleFreshnessWindow: "0",
+                },
+              ],
+            },
+          }),
+        });
+        return;
+      }
+
+      if (!body.includes("query AllPoolsWithHealth")) {
+        await route.continue();
+        return;
+      }
+
+      const response = await route.fetch();
+      const json = await response.json();
+      // At the five-minute fleet refresh this row is just one second beyond
+      // its expiry. The 30s live-health overlay above is current and must win
+      // atomically, otherwise the homepage flashes a false CRITICAL badge
+      // while the separately-fetched pool detail is healthy.
+      json.data.Pool = json.data.Pool.map((pool: Record<string, unknown>) =>
+        pool.id === CELO_POOL_ID
+          ? {
+              ...pool,
+              oracleOk: true,
+              oracleTimestamp: String(FIXTURE_NOW_SECONDS - 1),
+              oracleExpiry: "300",
+              priceDifference: "0",
+              deviationBreachStartedAt: null,
+              limitStatus: "OK",
+              limitPressure0: "0",
+              limitPressure1: "0",
+            }
+          : pool,
+      );
+      fleetResponses += 1;
+      await route.fulfill({ response, json });
+    });
+
+    await page.goto("/");
+
+    const poolLink = page.getByRole("link", { name: "USDC/USDm" }).first();
+    await expect(poolLink).toBeVisible();
+    await expect.poll(() => liveHealthResponses).toBeGreaterThan(0);
+
+    const poolRow = page.getByRole("row").filter({ has: poolLink });
+    const healthTrigger = poolRow.getByRole("button", {
+      name: /^Pool health /,
+    });
+    await expect(healthTrigger).toHaveAccessibleName(
+      /^Pool health OK: Oracle healthy \/ Pool balanced$/,
+    );
+
+    // Record even a one-render CRITICAL state; an eventual OK assertion alone
+    // would miss the intermittent red flash reported on the homepage.
+    await page.evaluate((poolId) => {
+      const state = window as typeof window & {
+        __criticalPoolHealthSeen?: boolean;
+        __criticalPoolHealthObserver?: MutationObserver;
+      };
+      const check = () => {
+        const link = document.querySelector(`a[href="/pool/${poolId}"]`);
+        const label = link
+          ?.closest("tr")
+          ?.querySelector('button[aria-label^="Pool health "]')
+          ?.getAttribute("aria-label");
+        if (label?.startsWith("Pool health CRITICAL")) {
+          state.__criticalPoolHealthSeen = true;
+        }
+      };
+
+      state.__criticalPoolHealthSeen = false;
+      state.__criticalPoolHealthObserver?.disconnect();
+      state.__criticalPoolHealthObserver = new MutationObserver(check);
+      state.__criticalPoolHealthObserver.observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["aria-label"],
+      });
+      check();
+    }, CELO_POOL_ID);
+
+    const fleetResponsesBeforeRefresh = fleetResponses;
+    browserNowSeconds = FIXTURE_NOW_SECONDS + 5 * 60;
+    await page.clock.fastForward(5 * 60 * 1000);
+    await expect
+      .poll(() => fleetResponses)
+      .toBeGreaterThan(fleetResponsesBeforeRefresh);
+
+    browserNowSeconds += 30;
+    const liveResponsesBeforeTick = liveHealthResponses;
+    await page.clock.fastForward(30_000);
+    await expect
+      .poll(() => liveHealthResponses)
+      .toBeGreaterThan(liveResponsesBeforeTick);
+
+    await expect(healthTrigger).toHaveAccessibleName(
+      /^Pool health OK: Oracle healthy \/ Pool balanced$/,
+    );
+    await expect(
+      poolRow.getByText("Oracle stale — last update expired"),
+    ).toHaveCount(0);
+    const criticalHealthSeen = await page.evaluate(() => {
+      const state = window as typeof window & {
+        __criticalPoolHealthSeen?: boolean;
+        __criticalPoolHealthObserver?: MutationObserver;
+      };
+      state.__criticalPoolHealthObserver?.disconnect();
+      return state.__criticalPoolHealthSeen ?? false;
+    });
+    expect(criticalHealthSeen).toBe(false);
+
+    await poolLink.click();
+    await expect(page).toHaveURL(escapedPoolId(CELO_POOL_ID));
+    await expect(
+      page.getByRole("heading", { name: "USDC/USDm" }),
+    ).toBeVisible();
+    const oraclePrice = page.getByRole("button", {
+      name: /^Showing 1 USDC = /,
+    });
+    await expect(oraclePrice).not.toHaveAccessibleName(/Oracle is stale/);
+    await expect(page.getByText(/· stale/)).toHaveCount(0);
+  });
+
   test("keeps pools tables within the viewport and mirrors pool token order in reserves", async ({
     page,
   }) => {

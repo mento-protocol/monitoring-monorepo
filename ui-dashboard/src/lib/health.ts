@@ -41,7 +41,7 @@ const ORACLE_STALE_SECONDS = 300;
  * started fetching it, or first-seen on a chain that returned null).
  * Falls back to ORACLE_STALE_SECONDS (300) for unknown chains.
  */
-export const ORACLE_STALE_SECONDS_BY_CHAIN: Record<number, number> = {
+const ORACLE_STALE_SECONDS_BY_CHAIN: Record<number, number> = {
   42220: 300, // Celo mainnet
   11142220: 300, // Celo Alfajores
   143: 360, // Monad mainnet
@@ -55,10 +55,17 @@ interface PoolHealthState {
   // Both feed `isVirtualPool`, which gates the "N/A" branch below.
   wrappedExchangeId?: string | null | undefined;
   wrappedExchangeDeprecated?: boolean | undefined;
+  vpDeprecationKnown?: boolean | undefined;
   token0?: string | null | undefined;
   token1?: string | null | undefined;
   oracleOk?: boolean | undefined;
   oracleTimestamp?: string | undefined;
+  oracleFreshnessCheckedAt?: number | undefined;
+  vpOracleFreshnessCheckedAt?: number | undefined;
+  vpOracleTimestamp?: string | undefined;
+  vpOracleNumReporters?: number | undefined;
+  vpTokenDecimalsKnown?: boolean | undefined;
+  oracleFreshnessCheckPending?: boolean | undefined;
   lastOracleReportAt?: string | undefined;
   medianLive?: boolean | undefined;
   oracleExpiry?: string | undefined;
@@ -218,34 +225,67 @@ export function getOracleStalenessThreshold(
   );
 }
 
+function isVirtualPoolOracleFresh(
+  pool: PoolHealthState,
+  nowSeconds: number,
+  chainId?: number,
+): boolean {
+  const medianValidity = vpMedianValidity(pool);
+  if (medianValidity === false) return false;
+  if (
+    medianValidity === null ||
+    (pool.vpTokenDecimalsKnown ?? pool.tokenDecimalsKnown) !== true
+  ) {
+    return true;
+  }
+  const stalenessThreshold = getOracleStalenessThreshold(pool, chainId);
+  if (stalenessThreshold <= 0) return true;
+  const oracleTs = Number(
+    pool.vpOracleTimestamp ?? pool.oracleTimestamp ?? "0",
+  );
+  if (oracleTs === 0) return false;
+  // VirtualPool freshness comes from an isolated extension query, so it owns a
+  // separate observation time. Failed/partial refreshes retain both the row
+  // and this timestamp, keeping the UI at its last confirmed state instead of
+  // aging it into a synthetic CRITICAL while the degradation banner is shown.
+  const checkedAt = confirmedFreshnessCheckedAt({
+    oracleFreshnessCheckedAt: pool.vpOracleFreshnessCheckedAt,
+  });
+  return (checkedAt ?? nowSeconds) - oracleTs <= stalenessThreshold;
+}
+
 export function isOracleFresh(
-  pool: {
-    source?: string | undefined;
-    wrappedExchangeId?: string | null | undefined;
-    oracleTimestamp?: string | undefined;
-    lastOracleReportAt?: string | undefined;
-    oracleExpiry?: string | undefined;
-    oracleFreshnessWindow?: string | undefined;
-    medianLive?: boolean | undefined;
-    tokenDecimalsKnown?: boolean | undefined;
-    oracleNumReporters?: number | undefined;
-    wrappedExchangeMinimumReports?: string | undefined;
-  },
+  pool: PoolHealthState,
   nowSeconds = Math.floor(Date.now() / 1000),
   chainId?: number,
 ): boolean {
   if (isVirtualPool(pool)) {
-    if (pool.medianLive === false) return false;
-    const medianValidity = vpMedianValidity(pool);
-    if (medianValidity === false) return false;
-    if (medianValidity === null || pool.tokenDecimalsKnown !== true) {
-      return true;
-    }
+    return isVirtualPoolOracleFresh(pool, nowSeconds, chainId);
   }
   const oracleTs = oracleFreshnessTimestamp(pool);
+  if (oracleTs === 0) return false;
   const stalenessThreshold = getOracleStalenessThreshold(pool, chainId);
-  if (isVirtualPool(pool) && stalenessThreshold <= 0) return true;
-  return oracleTs !== 0 && nowSeconds - oracleTs <= stalenessThreshold;
+  // A cached FPMM row must not become CRITICAL solely because the browser clock
+  // advanced past its expiry. That is the source of the homepage/detail
+  // flashes: the backend already had a newer report, but the UI had not polled
+  // it yet. Classify freshness at the last successful observation instead;
+  // the 30s live-health poll confirms a genuinely stale timestamp on its next
+  // response. While the first live check is in flight, suppress only this
+  // locally inferred staleness (explicit oracleOk/median failures remain live).
+  const checkedAt = confirmedFreshnessCheckedAt(pool);
+  if (pool.oracleFreshnessCheckPending === true && checkedAt === null)
+    return true;
+  const evaluatedAt = checkedAt ?? nowSeconds;
+  return evaluatedAt - oracleTs <= stalenessThreshold;
+}
+
+function confirmedFreshnessCheckedAt(pool: {
+  oracleFreshnessCheckedAt?: number | undefined;
+}): number | null {
+  const checkedAt = pool.oracleFreshnessCheckedAt;
+  return checkedAt !== undefined && Number.isFinite(checkedAt) && checkedAt > 0
+    ? checkedAt
+    : null;
 }
 
 function isUsdPeggedVirtualPoolPair(
@@ -266,36 +306,51 @@ function isUsdPeggedVirtualPoolPair(
 function isVirtualPoolResetWindowStale(
   pool: {
     oracleTimestamp?: string | undefined;
+    vpOracleTimestamp?: string | undefined;
     oracleFreshnessWindow?: string | undefined;
+    vpOracleFreshnessCheckedAt?: number | undefined;
     tokenDecimalsKnown?: boolean | undefined;
+    vpTokenDecimalsKnown?: boolean | undefined;
   },
   nowSeconds: number,
 ): boolean {
-  if (pool.tokenDecimalsKnown !== true) return false;
+  if ((pool.vpTokenDecimalsKnown ?? pool.tokenDecimalsKnown) !== true)
+    return false;
   const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
-  const liveReportAt = Number(pool.oracleTimestamp ?? "0");
+  const liveReportAt = Number(
+    pool.vpOracleTimestamp ?? pool.oracleTimestamp ?? "0",
+  );
+  const checkedAt = confirmedFreshnessCheckedAt({
+    oracleFreshnessCheckedAt: pool.vpOracleFreshnessCheckedAt,
+  });
+  const evaluatedAt = checkedAt ?? nowSeconds;
   return (
     Number.isFinite(freshnessWindow) &&
     freshnessWindow > 0 &&
     Number.isFinite(liveReportAt) &&
     liveReportAt > 0 &&
-    nowSeconds - liveReportAt > freshnessWindow
+    evaluatedAt - liveReportAt > freshnessWindow
   );
 }
 
 function vpMedianValidity(pool: {
   medianLive?: boolean | undefined;
   oracleNumReporters?: number | undefined;
+  vpOracleNumReporters?: number | undefined;
   oracleFreshnessWindow?: string | undefined;
   tokenDecimalsKnown?: boolean | undefined;
+  vpTokenDecimalsKnown?: boolean | undefined;
   wrappedExchangeMinimumReports?: string | undefined;
 }): boolean | null {
-  if (pool.tokenDecimalsKnown !== true) return null;
+  if ((pool.vpTokenDecimalsKnown ?? pool.tokenDecimalsKnown) !== true)
+    return null;
   const freshnessWindow = Number(pool.oracleFreshnessWindow ?? "0");
   if (!Number.isFinite(freshnessWindow) || freshnessWindow <= 0) return null;
   const minimumReports = Number(pool.wrappedExchangeMinimumReports ?? "0");
   if (!Number.isFinite(minimumReports) || minimumReports <= 0) return null;
-  const oracleNumReporters = Number(pool.oracleNumReporters);
+  const oracleNumReporters = Number(
+    pool.vpOracleNumReporters ?? pool.oracleNumReporters,
+  );
   if (!Number.isFinite(oracleNumReporters) || oracleNumReporters < 0) {
     return null;
   }
@@ -307,8 +362,10 @@ function vpMedianValidity(pool: {
 export function isVirtualPoolMedianInvalid(pool: {
   medianLive?: boolean | undefined;
   oracleNumReporters?: number | undefined;
+  vpOracleNumReporters?: number | undefined;
   oracleFreshnessWindow?: string | undefined;
   tokenDecimalsKnown?: boolean | undefined;
+  vpTokenDecimalsKnown?: boolean | undefined;
   wrappedExchangeMinimumReports?: string | undefined;
 }): boolean {
   return vpMedianValidity(pool) === false;
@@ -320,6 +377,7 @@ function computeVirtualPoolHealthStatus(
   nowSeconds: number,
 ): HealthStatus {
   if (pool.wrappedExchangeDeprecated === true) return "N/A";
+  if (pool.vpDeprecationKnown === false) return "N/A";
   const medianValidity = vpMedianValidity(pool);
   if (medianValidity === false) return "CRITICAL";
   if (medianValidity === null) return "N/A";
@@ -342,10 +400,11 @@ function computeVirtualPoolHealthStatus(
  *    remains a faithful reserve-skew signal but is excluded from deviation
  *    health accounting
  *
- * Staleness uses wall-clock + indexed `oracleExpiry` (per-feed) with a
- * `ORACLE_STALE_SECONDS` fallback for pools that pre-date the field. The
- * deviation tier mirrors the indexer's `computeHealthStatus` (parity test
- * lives in `indexer-envio/test/healthStatusParity.test.ts`).
+ * Staleness uses the last successful observation time plus indexed
+ * `oracleExpiry` (per-feed), with a wall-clock fallback for unobserved callers
+ * and `ORACLE_STALE_SECONDS` for pools that pre-date the field. The deviation
+ * tier mirrors the indexer's `computeHealthStatus` (parity test lives in
+ * `indexer-envio/test/healthStatusParity.test.ts`).
  *
  * The `hasHealthData` short-circuit is a dashboard-side defense for the
  * indexer's decimals-unknown early-return path (codex P2 #3214513402,
@@ -628,9 +687,10 @@ export function liveHealthCounters(
 
 export function oracleFreshnessTimestamp(pool: {
   oracleTimestamp?: string | undefined;
+  vpOracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
 }): number {
-  return Number(pool.oracleTimestamp ?? "0");
+  return Number(pool.vpOracleTimestamp ?? pool.oracleTimestamp ?? "0");
 }
 
 /**
@@ -782,12 +842,19 @@ export function computeEffectiveStatus(
     token1?: string | null | undefined;
     oracleOk?: boolean | undefined;
     oracleTimestamp?: string | undefined;
+    oracleFreshnessCheckedAt?: number | undefined;
+    vpOracleFreshnessCheckedAt?: number | undefined;
+    vpOracleTimestamp?: string | undefined;
+    vpOracleNumReporters?: number | undefined;
+    vpTokenDecimalsKnown?: boolean | undefined;
+    oracleFreshnessCheckPending?: boolean | undefined;
     medianLive?: boolean | undefined;
     oracleExpiry?: string | undefined;
     oracleFreshnessWindow?: string | undefined;
     oracleNumReporters?: number | undefined;
     wrappedExchangeMinimumReports?: string | undefined;
     wrappedExchangeDeprecated?: boolean | undefined;
+    vpDeprecationKnown?: boolean | undefined;
     tokenDecimalsKnown?: boolean | undefined;
     priceDifference?: string | undefined;
     rebalanceThreshold?: number | undefined;

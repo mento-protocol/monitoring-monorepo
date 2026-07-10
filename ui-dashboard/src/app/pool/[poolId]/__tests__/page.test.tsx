@@ -254,6 +254,44 @@ describe("Pool detail LPs tab", () => {
     );
   });
 
+  it("keeps last-confirmed pool data visible and discloses a refresh failure", () => {
+    const initialData: PoolDetailInitialData = {
+      pool: {
+        Pool: [
+          {
+            ...BASE_POOL,
+            oracleOk: true,
+            oracleTimestamp: "1700000090",
+            oracleExpiry: "300",
+            oracleFreshnessCheckedAt: 1_700_000_100,
+          },
+        ],
+      },
+    };
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return revalidatingGqlResult(
+          initialData.pool,
+          new Error("pool refresh timeout"),
+        );
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderPoolDetailPage(initialData);
+
+    expect(html).toContain("Live pool health refresh failed");
+    expect(html).toContain("showing the last confirmed state");
+    expect(html).toContain("pool refresh timeout");
+    expect(html).toContain("GBPm/USDm");
+  });
+
   it("renders indexed LiquidityPosition data when available", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (!query) return gqlResult(undefined);
@@ -490,11 +528,14 @@ describe("Pool detail LPs tab", () => {
     expect(firedOperationNames()).toContain("PoolReserves");
     expect(findUseGqlCall("PoolDetailWithHealth")?.[3]).toMatchObject({
       fallbackData: initialData.pool,
+      timeoutMs: 5000,
     });
     expect(findUseGqlCall("PoolThresholdsKnownExt")?.[3]).toMatchObject({
       timeoutMs: 5000,
       fallbackData: initialData.thresholds,
     });
+    expect(html).toContain("Live pool health refresh failed");
+    expect(html).toContain("transient trust query failure");
   });
 
   it("threads SSR fallbacks into VirtualPool header extension queries", () => {

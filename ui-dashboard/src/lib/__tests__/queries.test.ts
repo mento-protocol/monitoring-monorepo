@@ -6,6 +6,7 @@ const EXPECTED_EXPORT_NAMES = [
   "ALL_POOLS_WITH_HEALTH",
   "ALL_POOLS_BREACH_ROLLUP",
   "ALL_POOLS_HEALTH_CURSOR",
+  "ALL_POOLS_LIVE_HEALTH",
   "ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN",
   "ALL_POOLS_VP_ORACLE_FRESHNESS",
   "ALL_POOLS_VP_DEPRECATION",
@@ -216,6 +217,10 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain(
       "oracleFreshnessWindow",
     );
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain("oracleTimestamp");
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain(
+      "oracleNumReporters",
+    );
     expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
       "BiPoolExchange",
     );
@@ -226,7 +231,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
       "rebalanceThresholdsKnown",
     );
-    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).not.toContain(
+    expect(queries.ALL_POOLS_VP_ORACLE_FRESHNESS).toContain(
       "tokenDecimalsKnown",
     );
   });
@@ -298,6 +303,13 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain("medianLive");
     expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain(
       "oracleFreshnessWindow",
+    );
+    expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain("oracleTimestamp");
+    expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain(
+      "oracleNumReporters",
+    );
+    expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).toContain(
+      "tokenDecimalsKnown",
     );
     expect(queries.POOL_VP_ORACLE_FRESHNESS_EXT).not.toContain(
       "rebalanceThresholdsKnown",

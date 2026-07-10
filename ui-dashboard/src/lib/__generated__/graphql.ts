@@ -6693,6 +6693,9 @@ export type PoolVpOracleFreshnessExtQueryVariables = {
 export type PoolVpOracleFreshnessExtQuery = {
   readonly Pool: ReadonlyArray<{
     readonly id: string;
+    readonly oracleTimestamp: string;
+    readonly oracleNumReporters: number;
+    readonly tokenDecimalsKnown: boolean;
     readonly lastOracleReportAt: string;
     readonly medianLive: boolean;
     readonly oracleFreshnessWindow: string;
@@ -7000,6 +7003,38 @@ export type AllPoolsWithHealthQuery = {
   }>;
 };
 
+// queries/pools.ALL_POOLS_LIVE_HEALTH
+export type AllPoolsLiveHealthQueryVariables = {
+  readonly chainId: number;
+};
+export type AllPoolsLiveHealthQuery = {
+  readonly Pool: ReadonlyArray<{
+    readonly id: string;
+    readonly updatedAtBlock: string;
+    readonly updatedAtTimestamp: string;
+    readonly oracleOk: boolean;
+    readonly oracleTimestamp: string;
+    readonly oracleExpiry: string;
+    readonly oracleNumReporters: number;
+    readonly priceDifference: string;
+    readonly rebalanceThreshold: number;
+    readonly rebalanceThresholdAbove: number;
+    readonly rebalanceThresholdBelow: number;
+    readonly rebalanceThresholdsKnown: boolean;
+    readonly tokenDecimalsKnown: boolean;
+    readonly degenerateReserves: boolean;
+    readonly breakerTripped: boolean;
+    readonly deviationBreachStartedAt: string;
+    readonly lastRebalancedAt: string;
+    readonly hasHealthData: boolean;
+    readonly limitStatus: string;
+    readonly limitPressure0: string;
+    readonly limitPressure1: string;
+    readonly medianLive: boolean;
+    readonly oracleFreshnessWindow: string;
+  }>;
+};
+
 // queries/pools.ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN
 export type AllPoolsRebalanceThresholdsKnownQueryVariables = {
   readonly chainId: number;
@@ -7007,6 +7042,7 @@ export type AllPoolsRebalanceThresholdsKnownQueryVariables = {
 export type AllPoolsRebalanceThresholdsKnownQuery = {
   readonly Pool: ReadonlyArray<{
     readonly id: string;
+    readonly updatedAtBlock: string;
     readonly rebalanceThresholdAbove: number;
     readonly rebalanceThresholdBelow: number;
     readonly rebalanceThresholdsKnown: boolean;
@@ -7023,6 +7059,10 @@ export type AllPoolsVpOracleFreshnessQueryVariables = {
 export type AllPoolsVpOracleFreshnessQuery = {
   readonly Pool: ReadonlyArray<{
     readonly id: string;
+    readonly updatedAtBlock: string;
+    readonly oracleTimestamp: string;
+    readonly oracleNumReporters: number;
+    readonly tokenDecimalsKnown: boolean;
     readonly lastOracleReportAt: string;
     readonly medianLive: boolean;
     readonly oracleFreshnessWindow: string;

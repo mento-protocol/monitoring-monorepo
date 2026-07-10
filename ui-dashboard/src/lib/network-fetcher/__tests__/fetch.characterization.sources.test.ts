@@ -90,6 +90,7 @@ describe("fetchNetworkData characterization — all sources succeed", () => {
         Pool: [
           {
             id: pool.id,
+            updatedAtBlock: "110",
             rebalanceThresholdAbove: 100,
             rebalanceThresholdBelow: 100,
             rebalanceThresholdsKnown: true,
@@ -103,9 +104,22 @@ describe("fetchNetworkData characterization — all sources succeed", () => {
         Pool: [
           {
             id: pool.id,
+            updatedAtBlock: "120",
+            oracleTimestamp: "1010",
+            oracleNumReporters: 3,
+            tokenDecimalsKnown: true,
             lastOracleReportAt: "1000",
             medianLive: true,
             oracleFreshnessWindow: "300",
+          },
+        ],
+      },
+      AllPoolsVpDeprecation: {
+        BiPoolExchange: [
+          {
+            wrappedByPoolId: pool.id,
+            isDeprecated: false,
+            minimumReports: "1",
           },
         ],
       },
@@ -125,8 +139,11 @@ describe("fetchNetworkData characterization — all sources succeed", () => {
       breachCount: 2,
       lastOracleSnapshotTimestamp: "1000",
       rebalanceThresholdsKnown: true,
-      lastOracleReportAt: "1000",
+      thresholdHealthUpdatedAtBlock: "110",
     });
+    expect(result.pools[0]?.lastOracleReportAt).toBeUndefined();
+    expect(result.pools[0]?.vpHealthUpdatedAtBlock).toBeUndefined();
+    expect(result.pools[0]?.vpOracleFreshnessCheckedAt).toBeUndefined();
     expect(result.olsPoolIds).toEqual(new Set(["42220-0xols"]));
     expect(result.fees).not.toBeNull();
     expect(result.uniqueLpAddresses).toEqual(["0xa"]);
@@ -135,6 +152,53 @@ describe("fetchNetworkData characterization — all sources succeed", () => {
     expect(result.snapshotsAllDailyError).toBeNull();
     expect(result.brokerSnapshotsAllDailyError).toBeNull();
     expect(result.lpError).toBeNull();
+  });
+
+  it("pairs VirtualPool oracle inputs with the VP query completion time", async () => {
+    const pool = makePool("42220-0xvirtual", {
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      oracleTimestamp: "900",
+      oracleNumReporters: 1,
+      tokenDecimalsKnown: false,
+    });
+    installGraphQLMock({
+      AllPoolsWithHealth: { Pool: [pool] },
+      AllPoolsVpOracleFreshness: {
+        Pool: [
+          {
+            id: pool.id,
+            updatedAtBlock: "120",
+            oracleTimestamp: "1010",
+            oracleNumReporters: 3,
+            tokenDecimalsKnown: true,
+            lastOracleReportAt: "1010",
+            medianLive: true,
+            oracleFreshnessWindow: "300",
+          },
+        ],
+      },
+      AllPoolsVpDeprecation: {
+        BiPoolExchange: [
+          {
+            wrappedByPoolId: pool.id,
+            isDeprecated: false,
+            minimumReports: "1",
+          },
+        ],
+      },
+    });
+
+    const result = await fetchNetworkData(CELO_NETWORK, WINDOWS);
+
+    expect(result.pools[0]).toMatchObject({
+      vpOracleTimestamp: "1010",
+      vpOracleNumReporters: 3,
+      vpTokenDecimalsKnown: true,
+      vpHealthUpdatedAtBlock: "120",
+      vpDeprecationKnown: true,
+    });
+    expect(result.pools[0]?.vpOracleFreshnessCheckedAt).toBeGreaterThan(0);
   });
 });
 
@@ -283,7 +347,10 @@ describe("fetchNetworkData characterization — each source failing alone", () =
   });
 
   it("VP oracle freshness: fails open — freshness fields stay undefined", async () => {
-    const pool = makePool("42220-0xfresh-fail");
+    const pool = makePool("42220-0xfresh-fail", {
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+    });
     installGraphQLMock({
       AllPoolsWithHealth: { Pool: [pool] },
       AllPoolsVpOracleFreshness: reject(new Error("vp freshness down")),
@@ -294,10 +361,14 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.error).toBeNull();
     expect(result.strategyError).toBeNull();
     expect(result.pools[0]).not.toHaveProperty("lastOracleReportAt");
+    expect(result.liveHealthError?.message).toContain("vp freshness down");
   });
 
   it("VP deprecation (exchange rows): fails open — lifecycle deprecation still applies", async () => {
-    const pool = makePool("42220-0xvpdep-fail");
+    const pool = makePool("42220-0xvpdep-fail", {
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+    });
     installGraphQLMock({
       AllPoolsWithHealth: { Pool: [pool] },
       AllPoolsVpDeprecation: reject(new Error("vp deprecation down")),
@@ -311,10 +382,14 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.error).toBeNull();
     expect(result.pools[0]).toMatchObject({ wrappedExchangeDeprecated: true });
     expect(result.pools[0]).not.toHaveProperty("wrappedExchangeMinimumReports");
+    expect(result.liveHealthError?.message).toContain("vp deprecation down");
   });
 
   it("VP lifecycle deprecation: fails open — exchange-row deprecation still applies", async () => {
-    const pool = makePool("42220-0xvplife-fail");
+    const pool = makePool("42220-0xvplife-fail", {
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+    });
     installGraphQLMock({
       AllPoolsWithHealth: { Pool: [pool] },
       AllPoolsVpLifecycleDeprecation: reject(
@@ -329,6 +404,9 @@ describe("fetchNetworkData characterization — each source failing alone", () =
 
     expect(result.error).toBeNull();
     expect(result.pools[0]).toMatchObject({ wrappedExchangeDeprecated: true });
+    expect(result.liveHealthError?.message).toContain(
+      "vp lifecycle deprecation down",
+    );
   });
 
   it("indexed CDP pools (Celo): strategyError set, cdpPoolIds empty", async () => {

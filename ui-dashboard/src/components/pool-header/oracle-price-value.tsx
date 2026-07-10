@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import type { Pool } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import {
   formatOraclePrice,
@@ -84,9 +84,14 @@ export function OraclePriceValue({
   // runs after mount. (A no-oracle pool has no freshness label to mismatch.)
   const liveNowSeconds = useNowSeconds();
   const nowSeconds = liveNowSeconds ?? oracleFreshnessTimestamp(pool);
-  const fresh = isOracleFresh(pool, nowSeconds, network.chainId);
-  const priceColor = fresh ? "text-white" : "text-red-400";
-  const subColor = fresh ? "text-slate-500" : "text-red-400";
+  const staleIncidentEligible =
+    !isVirtualPool(pool) ||
+    (pool.wrappedExchangeDeprecated !== true &&
+      pool.vpDeprecationKnown !== false);
+  const stale =
+    staleIncidentEligible && !isOracleFresh(pool, nowSeconds, network.chainId);
+  const priceColor = stale ? "text-red-400" : "text-white";
+  const subColor = stale ? "text-red-400" : "text-slate-500";
 
   const expirySeconds = getOracleStalenessThreshold(pool, network.chainId);
   const expiryMinutes =
@@ -104,7 +109,7 @@ export function OraclePriceValue({
           type="button"
           onClick={() => setInverted((v) => !v)}
           aria-pressed={inverted}
-          aria-label={`Showing 1 ${base} = ${displayPrice} ${quote}.${fresh ? "" : " Oracle is stale."} Activate to invert direction.`}
+          aria-label={`Showing 1 ${base} = ${displayPrice} ${quote}.${stale ? " Oracle is stale." : ""} Activate to invert direction.`}
           title={`1 ${base} = ${fullPrice} ${quote} · click to invert`}
           className={`font-mono ${priceColor} hover:text-indigo-300 transition-colors text-left cursor-pointer`}
         >
@@ -130,7 +135,7 @@ export function OraclePriceValue({
             <span title={updatedTitle}>{lastLabel}</span>
           )}
           {expiryMinutes !== null && ` / ${expiryMinutes}m expiry`}
-          {!fresh && " · stale"}
+          {stale && " · stale"}
         </span>
       )}
     </span>

@@ -145,6 +145,9 @@ function PoolsContent({
 
   const swaps = swapsData?.SwapEvent ?? [];
   const failedNetworks = networkData.filter((n) => n.error !== null);
+  const liveHealthFailures = networkData.filter(
+    (n) => n.error === null && n.liveHealthError != null,
+  );
 
   const setURL = useCallback(
     (pool: string, lim: number) => {
@@ -202,6 +205,12 @@ function PoolsContent({
         <ErrorBox
           key={net.network.id}
           message={`${net.network.label}: Failed to load pools — ${net.error?.message}`}
+        />
+      ))}
+      {liveHealthFailures.map((net) => (
+        <ErrorBox
+          key={`${net.network.id}-live-health`}
+          message={`${net.network.label}: Live pool health refresh failed — showing the last confirmed state (${net.liveHealthError?.message})`}
         />
       ))}
 

@@ -26,7 +26,7 @@ import {
   HOMEPAGE_OG_DAILY_SNAPSHOTS,
 } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
-import type { Pool, PoolSnapshot } from "@/lib/types";
+import { isVirtualPool, type Pool, type PoolSnapshot } from "@/lib/types";
 
 const SECONDS_PER_DAY = 86_400;
 const SEVEN_DAYS = 7 * SECONDS_PER_DAY;
@@ -120,9 +120,13 @@ type ThresholdsRow = {
 };
 type VpFreshnessRow = {
   id: string;
+  oracleTimestamp?: string;
+  oracleNumReporters?: number;
+  tokenDecimalsKnown?: boolean;
   lastOracleReportAt?: string;
   medianLive?: boolean;
   oracleFreshnessWindow?: string;
+  vpOracleFreshnessCheckedAt?: number;
 };
 type VpDeprecationRow = {
   wrappedByPoolId?: string;
@@ -242,21 +246,43 @@ async function requestChainPoolInputs(
     vpDeprecationResult,
     vpLifecycleDeprecationResult,
   ] = await Promise.allSettled([
-    client.request<{ Pool: Pool[] }>({
-      document: ALL_POOLS_WITH_HEALTH,
-      variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
-    }),
+    client
+      .request<{ Pool: Pool[] }>({
+        document: ALL_POOLS_WITH_HEALTH,
+        variables: { chainId: network.chainId },
+        signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+      })
+      .then((response) => {
+        const oracleFreshnessCheckedAt = Date.now() / 1000;
+        return {
+          ...response,
+          Pool: response.Pool.map((pool) => ({
+            ...pool,
+            oracleFreshnessCheckedAt,
+          })),
+        };
+      }),
     client.request<{ Pool: ThresholdsRow[] }>({
       document: ALL_POOLS_REBALANCE_THRESHOLDS_KNOWN,
       variables: { chainId: network.chainId },
       signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
     }),
-    client.request<{ Pool: VpFreshnessRow[] }>({
-      document: ALL_POOLS_VP_ORACLE_FRESHNESS,
-      variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
-    }),
+    client
+      .request<{ Pool: VpFreshnessRow[] }>({
+        document: ALL_POOLS_VP_ORACLE_FRESHNESS,
+        variables: { chainId: network.chainId },
+        signal: AbortSignal.timeout(HASURA_TIMEOUT_MS),
+      })
+      .then((response) => {
+        const vpOracleFreshnessCheckedAt = Date.now() / 1000;
+        return {
+          ...response,
+          Pool: response.Pool.map((pool) => ({
+            ...pool,
+            vpOracleFreshnessCheckedAt,
+          })),
+        };
+      }),
     client.request<{ BiPoolExchange: VpDeprecationRow[] }>({
       document: ALL_POOLS_VP_DEPRECATION,
       variables: { chainId: network.chainId },
@@ -279,135 +305,34 @@ async function requestChainPoolInputs(
   };
 }
 
-export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> {
+async function fetchHomepageChainState(): Promise<{
+  slices: ChainSlice[];
+  offlineChains: string[];
+}> {
   const configuredChains = NETWORK_IDS.flatMap((id) => {
-    const n = NETWORKS[id];
-    return n.hasuraUrl && !n.local && !n.testnet ? [n] : [];
+    const network = NETWORKS[id];
+    return network.hasuraUrl && !network.local && !network.testnet
+      ? [network]
+      : [];
   });
-  if (configuredChains.length === 0) return null;
-
-  const sliceResults = await Promise.all(
+  const results = await Promise.all(
     configuredChains.map(async (network) => ({
       network,
       slice: await fetchChainSlice(network),
     })),
   );
-  // Track chains whose pool query failed entirely so consumers can surface
-  // "partial overview" rather than ship surviving-chain numbers as complete.
-  const offlineChains = sliceResults.flatMap((r) =>
-    r.slice === null ? [r.network.label] : [],
-  );
-  const slices = sliceResults.flatMap((r) =>
-    r.slice !== null ? [r.slice] : [],
-  );
-  if (slices.length === 0) return null;
-  // OR-extend `partial` to include "any pool's decimals are untrusted":
-  // strict-gate USD math returns null for those pools, every aggregation
-  // below silently skips them, and consumers labeling the card as
-  // "complete" would mis-report a 1e12-overstated 6-dp leg as missing.
-  // Cheaper to flag once at the top than thread through every helper.
-  const anyPoolUntrusted = slices.some((s) =>
-    s.pools.some((p) => p.tokenDecimalsKnown !== true),
-  );
-  const partial = offlineChains.length > 0 || anyPoolUntrusted;
+  return {
+    offlineChains: results.flatMap(({ network, slice }) =>
+      slice === null ? [network.label] : [],
+    ),
+    slices: results.flatMap(({ slice }) => (slice === null ? [] : [slice])),
+  };
+}
 
-  // TVL aggregation uses only FPMM pools with a live oracle price —
-  // VirtualPools have no reserves and can't be TVL-counted. `canValueTvl`
-  // already requires `oraclePrice`, so virtual and oracle-stale pools
-  // drop out here.
-  const fpmmEntries = slices.flatMap((s) =>
-    s.pools.flatMap((pool) => (isFpmm(pool) ? [{ pool, slice: s }] : [])),
-  );
-  const priceable = fpmmEntries.filter(({ pool, slice }) =>
-    canValueTvl(pool, slice.network, slice.rates),
-  );
-  // Volume aggregation includes ALL pools (FPMM + VirtualPool) so the OG
-  // preview matches the dashboard's protocol volume total, which also
-  // counts VirtualPool swaps (see components/volume-over-time-chart.tsx).
-  const allEntries = slices.flatMap((s) =>
-    s.pools.map((pool) => ({ pool, slice: s })),
-  );
-
-  // Skip pools whose TVL is unknowable (untrusted decimals → null) so a
-  // 1e12-overstated 6-dp leg can't poison the protocol-wide total.
-  // See `poolTvlUSD` in `lib/tokens.ts`.
-  let totalTvlUsd: number | null = null;
-  if (priceable.length > 0) {
-    let sum = 0;
-    let any = false;
-    for (const { pool, slice } of priceable) {
-      const v = poolTvlUSD(pool, slice.network, slice.rates);
-      if (v !== null) {
-        sum += v;
-        any = true;
-      }
-    }
-    totalTvlUsd = any ? sum : null;
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  // If any chain's daily-snapshot fetch failed or truncated, the cross-chain
-  // daily-derived totals would silently undercount — surviving chains'
-  // data labeled as "protocol-wide". Null everything daily-derived and let
-  // the card fall back to "—" rather than ship dishonest numbers.
-  const anyChainDegraded = slices.some((s) => s.dailyDegraded);
-
-  // TVL WoW: compare current vs 7d-ago reserves, restricted to pools with a
-  // snapshot in [now-14d, now-7d] (matches pool-card bounded-window rule).
-  const upperCutoff = now - SEVEN_DAYS;
-  const lowerCutoff = now - FOURTEEN_DAYS;
-  // Pre-index the WoW row per (slice, poolId) so the loop below does an
-  // O(1) Map lookup instead of an O(n) scan over slice.daily for each pool.
-  type AgoRow = ChainSlice["daily"][number];
-  const agoRowByKey = new Map<string, AgoRow>();
-  for (const slice of slices) {
-    for (const d of slice.daily) {
-      const ts = Number(d.timestamp);
-      if (ts > upperCutoff || ts < lowerCutoff) continue;
-      const key = `${slice.network.id}:${d.poolId}`;
-      if (!agoRowByKey.has(key)) agoRowByKey.set(key, d);
-    }
-  }
-  let priorTvlSum = 0;
-  let currentSubsetSum = 0;
-  let anyPrior = false;
-  for (const { pool, slice } of priceable) {
-    const agoRow = agoRowByKey.get(`${slice.network.id}:${pool.id}`);
-    if (!agoRow) continue;
-    const agoTvl = poolTvlUSD(
-      { ...pool, reserves0: agoRow.reserves0, reserves1: agoRow.reserves1 },
-      slice.network,
-      slice.rates,
-    );
-    if (agoTvl === null || agoTvl <= 0) continue;
-    const currentTvl = poolTvlUSD(pool, slice.network, slice.rates);
-    if (currentTvl === null) continue;
-    priorTvlSum += agoTvl;
-    currentSubsetSum += currentTvl;
-    anyPrior = true;
-  }
-  const tvlWoWPct =
-    !anyChainDegraded && anyPrior && priorTvlSum > 0
-      ? ((currentSubsetSum - priorTvlSum) / priorTvlSum) * 100
-      : null;
-
-  const totalVolume7dUsd = anyChainDegraded
-    ? null
-    : sumVolumeInWindow(allEntries, now - SEVEN_DAYS, now);
-  const priorVolume = anyChainDegraded
-    ? null
-    : sumVolumeInWindow(allEntries, now - FOURTEEN_DAYS, now - SEVEN_DAYS);
-  const volume7dWoWPct =
-    totalVolume7dUsd != null && priorVolume != null && priorVolume > 0
-      ? ((totalVolume7dUsd - priorVolume) / priorVolume) * 100
-      : null;
-
-  const volumeSeries = anyChainDegraded
-    ? []
-    : computeDailyVolumeSeries(allEntries);
-  const tvlSeries = anyChainDegraded ? [] : computeDailyTvlSeries(priceable);
-
-  // Health buckets across ALL pools (virtual = N/A, excluded from TVL).
+function summarizeHomepageHealth(slices: ChainSlice[]): {
+  healthBuckets: Record<HealthStatus, number>;
+  attentionPools: AttentionPool[];
+} {
   const healthBuckets: Record<HealthStatus, number> = {
     OK: 0,
     WARN: 0,
@@ -420,9 +345,6 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   for (const slice of slices) {
     for (const pool of slice.pools) {
       const status = computeEffectiveStatus(pool, slice.network.chainId);
-      // healthBuckets is initialized with every HealthStatus key, so the index
-      // is always defined — no `?? 0` needed (and dropping it offsets the
-      // complexity of the HALTED branch below to keep this within budget).
       healthBuckets[status] += 1;
       if (status === "WARN" || status === "CRITICAL" || status === "HALTED") {
         attentionPools.push({
@@ -437,24 +359,144 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
       }
     }
   }
-  // CRITICAL first, then HALTED, then WARN, each alphabetical.
   attentionPools.sort((a, b) => {
-    const d = (ATTENTION_RANK[b.health] ?? 0) - (ATTENTION_RANK[a.health] ?? 0);
-    return d !== 0 ? d : a.name.localeCompare(b.name);
+    const rank =
+      (ATTENTION_RANK[b.health] ?? 0) - (ATTENTION_RANK[a.health] ?? 0);
+    return rank !== 0 ? rank : a.name.localeCompare(b.name);
   });
+  return {
+    healthBuckets,
+    attentionPools: attentionPools.slice(0, MAX_ATTENTION_POOLS),
+  };
+}
+
+function homepagePoolIsUntrusted(pool: Pool): boolean {
+  return (
+    pool.tokenDecimalsKnown !== true ||
+    (isVirtualPool(pool) &&
+      (pool.vpDeprecationKnown === false ||
+        pool.vpOracleFreshnessCheckedAt === undefined))
+  );
+}
+
+function collectPriceableEntries(slices: ChainSlice[]): PriceableEntry[] {
+  return slices.flatMap((slice) =>
+    slice.pools.flatMap((pool) =>
+      isFpmm(pool) && canValueTvl(pool, slice.network, slice.rates)
+        ? [{ pool, slice }]
+        : [],
+    ),
+  );
+}
+
+function currentTvlTotal(entries: PriceableEntry[]): number | null {
+  let total = 0;
+  let found = false;
+  for (const { pool, slice } of entries) {
+    const value = poolTvlUSD(pool, slice.network, slice.rates);
+    if (value === null) continue;
+    total += value;
+    found = true;
+  }
+  return found ? total : null;
+}
+
+function indexTvlBaselineRows(
+  slices: ChainSlice[],
+  now: number,
+): Map<string, PoolSnapshot> {
+  const upperCutoff = now - SEVEN_DAYS;
+  const lowerCutoff = now - FOURTEEN_DAYS;
+  const rows = new Map<string, PoolSnapshot>();
+  for (const slice of slices) {
+    for (const row of slice.daily) {
+      const timestamp = Number(row.timestamp);
+      if (timestamp > upperCutoff || timestamp < lowerCutoff) continue;
+      const key = `${slice.network.id}:${row.poolId}`;
+      if (!rows.has(key)) rows.set(key, row);
+    }
+  }
+  return rows;
+}
+
+function computeTvlWoW(
+  entries: PriceableEntry[],
+  slices: ChainSlice[],
+  now: number,
+  degraded: boolean,
+): number | null {
+  if (degraded) return null;
+  const baselineRows = indexTvlBaselineRows(slices, now);
+  let priorTotal = 0;
+  let currentTotal = 0;
+  for (const { pool, slice } of entries) {
+    const baseline = baselineRows.get(`${slice.network.id}:${pool.id}`);
+    if (!baseline) continue;
+    const prior = poolTvlUSD(
+      { ...pool, reserves0: baseline.reserves0, reserves1: baseline.reserves1 },
+      slice.network,
+      slice.rates,
+    );
+    const current = poolTvlUSD(pool, slice.network, slice.rates);
+    if (prior === null || prior <= 0 || current === null) continue;
+    priorTotal += prior;
+    currentTotal += current;
+  }
+  return priorTotal > 0
+    ? ((currentTotal - priorTotal) / priorTotal) * 100
+    : null;
+}
+
+function computeHomepageMetrics(slices: ChainSlice[]) {
+  const now = Math.floor(Date.now() / 1000);
+  const degraded = slices.some((slice) => slice.dailyDegraded);
+  const priceable = collectPriceableEntries(slices);
+  const allEntries = slices.flatMap((slice) =>
+    slice.pools.map((pool) => ({ pool, slice })),
+  );
+  const totalVolume7dUsd = degraded
+    ? null
+    : sumVolumeInWindow(allEntries, now - SEVEN_DAYS, now);
+  const priorVolume = degraded
+    ? null
+    : sumVolumeInWindow(allEntries, now - FOURTEEN_DAYS, now - SEVEN_DAYS);
+  return {
+    totalTvlUsd: currentTvlTotal(priceable),
+    tvlWoWPct: computeTvlWoW(priceable, slices, now, degraded),
+    totalVolume7dUsd,
+    volume7dWoWPct:
+      totalVolume7dUsd !== null && priorVolume !== null && priorVolume > 0
+        ? ((totalVolume7dUsd - priorVolume) / priorVolume) * 100
+        : null,
+    volumeSeries: degraded ? [] : computeDailyVolumeSeries(allEntries),
+    tvlSeries: degraded ? [] : computeDailyTvlSeries(priceable),
+  };
+}
+
+export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> {
+  const { slices, offlineChains } = await fetchHomepageChainState();
+  // Track chains whose pool query failed entirely so consumers can surface
+  // "partial overview" rather than ship surviving-chain numbers as complete.
+  if (slices.length === 0) return null;
+  // OR-extend `partial` to include "any pool's decimals are untrusted":
+  // strict-gate USD math returns null for those pools, every aggregation
+  // below silently skips them, and consumers labeling the card as
+  // "complete" would mis-report a 1e12-overstated 6-dp leg as missing.
+  // Cheaper to flag once at the top than thread through every helper.
+  const anyPoolUntrusted = slices.some((slice) =>
+    slice.pools.some(homepagePoolIsUntrusted),
+  );
+  const partial = offlineChains.length > 0 || anyPoolUntrusted;
+  const metrics = computeHomepageMetrics(slices);
+  const { healthBuckets, attentionPools } = summarizeHomepageHealth(slices);
 
   return {
-    totalTvlUsd,
-    tvlWoWPct,
-    totalVolume7dUsd,
-    volume7dWoWPct,
-    volumeSeries,
-    tvlSeries,
+    ...metrics,
     poolCount: slices.reduce((n, s) => n + s.pools.length, 0),
     chainCount: slices.length,
     chains: slices.map((s) => s.network.label),
     healthBuckets,
-    attentionPools: attentionPools.slice(0, MAX_ATTENTION_POOLS),
+    attentionPools,
     partial,
     offlineChains,
   };
@@ -516,6 +558,14 @@ function mergeHomepageVpFreshness(
           lastOracleReportAt: ext.lastOracleReportAt,
           medianLive: ext.medianLive,
           oracleFreshnessWindow: ext.oracleFreshnessWindow,
+          ...(isVirtualPool(pool)
+            ? {
+                vpOracleTimestamp: ext.oracleTimestamp,
+                vpOracleNumReporters: ext.oracleNumReporters,
+                vpTokenDecimalsKnown: ext.tokenDecimalsKnown,
+                vpOracleFreshnessCheckedAt: ext.vpOracleFreshnessCheckedAt,
+              }
+            : {}),
         };
   });
 }
@@ -525,9 +575,8 @@ function mergeHomepageVpDeprecation(
   result: SettledVpDeprecationRows,
   lifecycleResult: SettledVpLifecycleDeprecationRows,
 ): Pool[] {
-  if (result.status !== "fulfilled" && lifecycleResult.status !== "fulfilled") {
-    return pools;
-  }
+  const sourcesResolved =
+    result.status === "fulfilled" && lifecycleResult.status === "fulfilled";
   const deprecatedPoolIds = new Set<string>();
   const exchangeByPoolId = new Map<string, VpDeprecationRow>();
   if (result.status === "fulfilled") {
@@ -545,9 +594,14 @@ function mergeHomepageVpDeprecation(
   }
   return pools.map((pool) => {
     const exchange = exchangeByPoolId.get(pool.id);
-    if (!exchange && !deprecatedPoolIds.has(pool.id)) return pool;
+    if (!isVirtualPool(pool) && !exchange && !deprecatedPoolIds.has(pool.id)) {
+      return pool;
+    }
     return {
       ...pool,
+      ...(isVirtualPool(pool)
+        ? { vpDeprecationKnown: sourcesResolved && exchange !== undefined }
+        : {}),
       ...(deprecatedPoolIds.has(pool.id)
         ? { wrappedExchangeDeprecated: true }
         : {}),

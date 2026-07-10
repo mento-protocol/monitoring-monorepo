@@ -110,12 +110,22 @@ async function fetchPoolDetailUncached(
 
   const client = makeOgGraphQLClient(network);
   const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
-  const pool = await requestOptional<PoolDetailResponse>(
+  const rawPool = await requestOptional<PoolDetailResponse>(
     client,
     POOL_DETAIL_WITH_HEALTH,
     { id, chainId },
     signal,
   );
+  const oracleFreshnessCheckedAt = Date.now() / 1000;
+  const pool = rawPool
+    ? {
+        ...rawPool,
+        Pool: rawPool.Pool.map((row) => ({
+          ...row,
+          oracleFreshnessCheckedAt,
+        })),
+      }
+    : undefined;
   const poolRow = pool?.Pool?.[0];
   if (!poolRow) {
     // Degrade to no fallback: the client hooks fetch normally and their own
@@ -141,7 +151,17 @@ async function fetchPoolDetailUncached(
       POOL_VP_ORACLE_FRESHNESS_EXT,
       { id, chainId },
       signal,
-    ),
+    ).then((response) => {
+      if (!response) return undefined;
+      const vpOracleFreshnessCheckedAt = Date.now() / 1000;
+      return {
+        ...response,
+        Pool: response.Pool.map((row) => ({
+          ...row,
+          vpOracleFreshnessCheckedAt,
+        })),
+      };
+    }),
     requestOptional<PoolVpDeprecationExtResponse>(
       client,
       POOL_VP_DEPRECATION_EXT,

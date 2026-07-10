@@ -127,9 +127,13 @@ describe("fetchPoolDetailForSSR", () => {
 
     const result = await fetchPoolDetailForSSR(42220, VIRTUAL_POOL.id);
 
-    expect(result?.pool).toEqual({ Pool: [VIRTUAL_POOL] });
+    expect(result?.pool.Pool[0]).toMatchObject(VIRTUAL_POOL);
+    expect(result?.pool.Pool[0]?.oracleFreshnessCheckedAt).toBeGreaterThan(0);
     expect(result?.thresholds?.Pool[0]?.tokenDecimalsKnown).toBe(true);
     expect(result?.vpOracleFreshness?.Pool[0]?.medianLive).toBe(true);
+    expect(
+      result?.vpOracleFreshness?.Pool[0]?.vpOracleFreshnessCheckedAt,
+    ).toBeGreaterThan(0);
     expect(result?.vpDeprecation?.BiPoolExchange[0]?.minimumReports).toBe("1");
     expect(result?.vpLifecycleDeprecation?.VirtualPoolLifecycle).toEqual([]);
     expect(result?.v2Exchange).toEqual(V2_EXCHANGE_RESPONSE);
@@ -176,9 +180,13 @@ describe("fetchPoolDetailForSSR", () => {
 
     const result = await fetchPoolDetailForSSR(42220, VIRTUAL_POOL.id);
 
-    expect(result?.pool).toEqual({ Pool: [VIRTUAL_POOL] });
+    expect(result?.pool.Pool[0]).toMatchObject(VIRTUAL_POOL);
+    expect(result?.pool.Pool[0]?.oracleFreshnessCheckedAt).toBeGreaterThan(0);
     expect(result?.thresholds).toBeUndefined();
     expect(result?.vpOracleFreshness?.Pool[0]?.medianLive).toBe(true);
+    expect(
+      result?.vpOracleFreshness?.Pool[0]?.vpOracleFreshnessCheckedAt,
+    ).toBeGreaterThan(0);
     expect(result?.v2Exchange).toEqual(V2_EXCHANGE_RESPONSE);
     expect(result?.brokerExchange24h?.BrokerExchangeDailySnapshot).toEqual([]);
   });

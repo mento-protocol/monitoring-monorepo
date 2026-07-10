@@ -317,6 +317,9 @@ function GlobalContent({
   ]);
 
   const failedNetworks = networkData.filter((net) => net.error !== null);
+  const liveHealthFailures = networkData.filter(
+    (net) => net.error === null && net.liveHealthError != null,
+  );
   const hasGlobalPools = globalEntries.length > 0;
   const shouldShowEmptyPools = failedNetworks.length === 0 && !hasGlobalPools;
 
@@ -409,6 +412,12 @@ function GlobalContent({
         <ErrorBox
           key={net.network.id}
           message={`${net.network.label}: Failed to load pools — ${net.error?.message}`}
+        />
+      ))}
+      {liveHealthFailures.map((net) => (
+        <ErrorBox
+          key={`${net.network.id}-live-health`}
+          message={`${net.network.label}: Live pool health refresh failed — showing the last confirmed state (${net.liveHealthError?.message})`}
         />
       ))}
 

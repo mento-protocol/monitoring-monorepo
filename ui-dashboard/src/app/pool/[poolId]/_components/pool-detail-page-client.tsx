@@ -18,8 +18,6 @@ import {
   OLS_POOL,
   ORACLE_RATES,
   POOL_DEPLOYMENT,
-  POOL_DETAIL_WITH_HEALTH,
-  type PoolDetailResponse,
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { buildPoolDetailUrl } from "@/lib/routing";
@@ -54,6 +52,7 @@ import {
   parseTabLimit,
   selectActiveOlsPool,
 } from "../_lib/helpers";
+import { useObservedPoolDetail } from "../_lib/use-observed-pool-detail";
 import { usePoolWithThresholds } from "../_lib/use-pool-with-thresholds";
 import { LiquidityTab } from "../_tabs/liquidity-tab";
 import { LpsTab } from "../_tabs/lps-tab";
@@ -148,23 +147,17 @@ function usePoolDetailData(
   initialData?: PoolDetailInitialData,
 ) {
   const {
-    data: poolData,
     error: poolErr,
     isLoading: poolLoading,
-  } = useGQL<PoolDetailResponse>(
-    POOL_DETAIL_WITH_HEALTH,
-    { id: normalizedPoolId, chainId: network.chainId },
-    // refreshInterval stays default (30s); options go in the 4th arg per the
-    // documented shape (see use-gql-shape.test.ts).
-    undefined,
-    { fallbackData: initialData?.pool },
-  );
-  const { pool, thresholdsLoading, thresholdsError } = usePoolWithThresholds(
-    poolData?.Pool?.[0] ?? null,
-    normalizedPoolId,
-    network.chainId,
-    initialData,
-  );
+    pool: observedPool,
+  } = useObservedPoolDetail(normalizedPoolId, network.chainId, initialData);
+  const { pool, thresholdsLoading, thresholdsError, healthRefreshError } =
+    usePoolWithThresholds(
+      observedPool,
+      normalizedPoolId,
+      network.chainId,
+      initialData,
+    );
   const { data: limitsData, error: limitsError } = useGQL<{
     TradingLimit: TradingLimit[];
   }>(TRADING_LIMITS, { poolId: normalizedPoolId });
@@ -179,6 +172,7 @@ function usePoolDetailData(
   return {
     pool,
     poolErr,
+    poolRefreshError: poolErr ?? healthRefreshError,
     poolLoading,
     thresholdsLoading,
     thresholdsError,
@@ -292,6 +286,7 @@ function PoolDetail({ initialSearch, initialData }: PoolDetailProps) {
 
       <PoolOverview
         poolErr={detail.poolErr}
+        poolRefreshError={detail.poolRefreshError}
         poolLoading={detail.poolLoading}
         pool={detail.pool}
         normalizedPoolId={normalizedPoolId}
@@ -367,6 +362,7 @@ function PoolBreadcrumb({
 
 function PoolOverview({
   poolErr,
+  poolRefreshError,
   poolLoading,
   pool,
   normalizedPoolId,
@@ -384,6 +380,7 @@ function PoolOverview({
   initialData,
 }: {
   poolErr: Error | undefined;
+  poolRefreshError: Error | undefined;
   poolLoading: boolean;
   pool: Pool | null;
   normalizedPoolId: string;
@@ -400,6 +397,7 @@ function PoolOverview({
   rates: OracleRateMap;
   initialData?: PoolDetailInitialData | undefined;
 }) {
+  const poolRefreshErrorMessage = poolRefreshError?.message;
   if (hasErrorWithoutData(poolErr, pool))
     return <ErrorBox message={`Failed to load pool: ${poolErr.message}`} />;
   // Gate on data presence, not `isLoading`. SWR keeps `isLoading` true while it
@@ -418,6 +416,11 @@ function PoolOverview({
 
   return (
     <>
+      {poolRefreshErrorMessage !== undefined && (
+        <ErrorBox
+          message={`Live pool health refresh failed — showing the last confirmed state (${poolRefreshErrorMessage})`}
+        />
+      )}
       <PoolHeader
         pool={pool}
         deployTxHash={deployTxHash}
