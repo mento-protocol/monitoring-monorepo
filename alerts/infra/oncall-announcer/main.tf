@@ -151,6 +151,8 @@ data "archive_file" "function_source" {
   output_path = "${path.module}/function-source.zip"
   excludes = [
     "node_modules",
+    "coverage",
+    "coverage/**",
     "dist",
     "dist/**",
     ".git",

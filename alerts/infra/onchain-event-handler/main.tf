@@ -219,6 +219,8 @@ data "archive_file" "function_source" {
   # nested in subdirs (src/**, etc.).
   excludes = [
     "node_modules",
+    "coverage",
+    "coverage/**",
     "dist",
     "dist/**",
     ".git",

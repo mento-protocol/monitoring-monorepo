@@ -9,7 +9,7 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 ├── main.tf                 # Root configuration and module orchestration
 ├── variables.tf            # Shared variable definitions
 ├── outputs.tf              # Aggregated outputs
-├── monitoring.tf           # Log-based drop metrics + alert policies for onchain-event-handler
+├── monitoring.tf           # GCP operational alerts → Slack #alerts-infra
 │
 ├── channels/
 │   ├── sentry-bridge/      # Sentry JS error monitoring (Sentry → Slack bridge)
@@ -36,6 +36,8 @@ graph LR
     F[Cloud Scheduler] -->|HTTP POST<br/>OIDC| G[Cloud Function<br/>oncall-announcer]
     G -->|GET /oncall/current| H[Splunk On-Call]
     G -->|chat.postMessage<br/>usergroups.users.update| I[Slack<br/>#eng + @support-engineer]
+    F -->|failed attempt log| J[GCP Monitoring]
+    J -->|notification| K[Slack<br/>#alerts-infra]
 ```
 
 ### Component Overview
@@ -44,7 +46,8 @@ graph LR
 2. **Cloud Function**: Processes webhooks, verifies signatures, formats messages
 3. **Slack Channels**: Receives formatted alerts and event notifications
 4. **On-call Announcer**: Polls Splunk On-Call, posts rotations to `#eng`, and keeps `@support-engineer` membership to the current engineer
-5. **Terraform**: Manages all infrastructure as code
+5. **Operational Alerting**: Sends scheduler failures and dropped on-chain events to `#alerts-infra`
+6. **Terraform**: Manages all infrastructure as code
 
 ### Security
 
@@ -103,6 +106,10 @@ oncall_slack_channel_id = "C0123ABC456"
 # Required when the announcer is enabled: Slack usergroup ID for
 # @support-engineer. Create the usergroup in Slack once, then paste its ID here.
 oncall_support_usergroup_id = "S0123ABC456"
+
+# Optional existing GCP Monitoring notification-channel ID override. Omit this
+# to let Terraform create the default Slack #alerts-infra channel integration.
+# slack_notification_channel_id = "1234567890123456789"
 
 # GCP Configuration
 project_name     = "alerts"              # Optional, defaults to "alerts"
@@ -227,6 +234,21 @@ multisigs = {
 - Stores last-seen state in a private GCS bucket to suppress duplicate announcements
 - Uses the configured `@support-engineer` Slack usergroup ID and replaces its
   membership with exactly the current on-call Slack user
+- Alerts `#alerts-infra` when Cloud Scheduler reports a failed reconciliation
+  attempt, including function 5xx responses, IAM failures, timeouts, and
+  unreachable targets
+
+### Operational Alerting
+
+- Terraform creates the GCP Monitoring Slack notification channel for
+  `#alerts-infra` with the existing bot token by default
+- `slack_notification_channel_id` is an override for adopting an existing
+  notification channel in the same GCP project
+- On-call scheduler failures use a direct log-match policy, notify immediately,
+  rate-limit repeat notifications to one per hour, and auto-close
+  after 30 minutes without another matching failure
+- On-chain handler drop and processing-budget policies share the same
+  `#alerts-infra` destination
 
 ### QuickNode Webhooks
 
