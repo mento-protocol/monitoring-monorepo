@@ -1,7 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
+import { useNetwork } from "@/components/network-provider";
 import { useGQL } from "@/lib/graphql";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
+import {
+  volumeHeroViewMatches,
+  type VolumeHeroInitialData,
+} from "@/lib/volume-hero-initial-data";
 import {
   BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS,
   BROKER_VOLUME_TODAY_TRADERS,
@@ -74,6 +80,7 @@ export function useHeroRollup({
   isProtocolActorIn,
   utcDayKey,
   kpiSource,
+  initialData,
 }: {
   venue: Venue;
   range: VolumeRangeKey;
@@ -85,6 +92,12 @@ export function useHeroRollup({
    *  the resulting rows so the table query and the hero query can degrade
    *  independently. */
   kpiSource: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
+  /** Server-prefetched hero responses (perf-plan S4), forwarded to the
+   *  matching `useGQL` calls as `fallbackData` so the first render paints
+   *  populated tiles. Only attached when the prefetched view descriptor
+   *  matches this render's actual (network, venue, range, actor filter,
+   *  todayMidnight) — a mismatched fallback would seed the wrong SWR key. */
+  initialData?: VolumeHeroInitialData | undefined;
 }): {
   /** Memoised UTC midnight in seconds — flips at UTC day rollover via
    *  `utcDayKey`. Re-exposed so callers can pass it to other queries
@@ -100,21 +113,6 @@ export function useHeroRollup({
   isLoading: boolean;
   hasError: boolean;
 } {
-  // Pre-rolled hero snapshot (one row per chain for the active window).
-  // Bypasses Hasura's 1000-row cap on long windows. The snapshot covers
-  // [windowStart, yesterday]; today's partial is fetched separately and
-  // added client-side.
-  const heroV3Result = useGQL<HeroV3Data>(
-    venue === "v3" ? VOLUME_WINDOW_LATEST : null,
-    { windowKey: range },
-    { schema: VolumeWindowLatestSchema },
-  );
-  const heroV2Result = useGQL<HeroV2Data>(
-    venue === "v2" ? BROKER_VOLUME_WINDOW_LATEST : null,
-    { windowKey: range },
-    { schema: BrokerVolumeWindowLatestSchema },
-  );
-
   // Today's UTC midnight in seconds. The hero snapshot's upper bound is
   // yesterday, so today's TraderDailySnapshot rows fill in the gap.
   // Memoised on `utcDayKey` so it flips at midnight without retriggering
@@ -123,19 +121,58 @@ export function useHeroRollup({
     () => Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY,
     [utcDayKey],
   );
+
+  // View-parity gate for the SSR prefetch: only attach fallbackData when the
+  // prefetched descriptor matches this render's key ingredients exactly (the
+  // SWR key is [network.id, query, variables]). `networkId` is always
+  // DEFAULT_NETWORK on /volume today, but comparing keeps a future network
+  // switcher from seeding foreign-chain data. `todayMidnight` mismatches at
+  // the UTC-midnight edge (server prefetched day N, client hydrates day N+1)
+  // → no fallback, today's client-only loading path takes over. When both
+  // sides are on day N but real time crossed midnight before the first poll,
+  // the today-partial fallback is at most one day off for ≤30s (next poll
+  // corrects it) — self-healing, acceptable.
+  const { networkId } = useNetwork();
+  const fallback =
+    initialData &&
+    volumeHeroViewMatches(initialData.view, {
+      networkId,
+      venue,
+      range,
+      isProtocolActorIn,
+      todayMidnight,
+    })
+      ? initialData
+      : undefined;
+
+  // Pre-rolled hero snapshot (one row per chain for the active window).
+  // Bypasses Hasura's 1000-row cap on long windows. The snapshot covers
+  // [windowStart, yesterday]; today's partial is fetched separately and
+  // added client-side.
+  const heroV3Result = useGQL<HeroV3Data>(
+    venue === "v3" ? VOLUME_WINDOW_LATEST : null,
+    { windowKey: range },
+    { schema: VolumeWindowLatestSchema, fallbackData: fallback?.heroV3 },
+  );
+  const heroV2Result = useGQL<HeroV2Data>(
+    venue === "v2" ? BROKER_VOLUME_WINDOW_LATEST : null,
+    { windowKey: range },
+    { schema: BrokerVolumeWindowLatestSchema, fallbackData: fallback?.heroV2 },
+  );
+
   const todayV3Result = useGQL<{
     volumeTodayTraders: VolumeTodayTraderRow[];
   }>(
     venue === "v3" ? VOLUME_TODAY_TRADERS : null,
     { todayMidnight, isProtocolActorIn },
-    { schema: VolumeTodayTradersSchema },
+    { schema: VolumeTodayTradersSchema, fallbackData: fallback?.todayV3 },
   );
   const todayV2Result = useGQL<{
     brokerVolumeTodayTraders: VolumeTodayTraderRow[];
   }>(
     venue === "v2" ? BROKER_VOLUME_TODAY_TRADERS : null,
     { todayMidnight, isProtocolActorIn },
-    { schema: BrokerVolumeTodayTradersSchema },
+    { schema: BrokerVolumeTodayTradersSchema, fallbackData: fallback?.todayV2 },
   );
 
   const snapshotRows =
@@ -157,14 +194,20 @@ export function useHeroRollup({
   }>(
     venue === "v3" ? VOLUME_WINDOW_FIRSTDAY_LATEST : null,
     { windowKey: range },
-    { schema: VolumeWindowFirstDayLatestSchema },
+    {
+      schema: VolumeWindowFirstDayLatestSchema,
+      fallbackData: fallback?.firstDayV3,
+    },
   );
   const heroFirstDayV2Result = useGQL<{
     brokerVolumeWindowFirstDaySnapshots: VolumeWindowFirstDayRow[];
   }>(
     venue === "v2" ? BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST : null,
     { windowKey: range },
-    { schema: BrokerVolumeWindowFirstDayLatestSchema },
+    {
+      schema: BrokerVolumeWindowFirstDayLatestSchema,
+      fallbackData: fallback?.firstDayV2,
+    },
   );
   const firstDayRows =
     venue === "v3"
@@ -306,14 +349,27 @@ export function useHeroRollup({
   // Tiles + chart load when the hero snapshot AND its today-partial both
   // land. The trader table loads independently from the existing
   // TraderDailySnapshot query (which is fast — capped at 1000 by design).
+  // Gate on data presence, not bare `isLoading`: SWR does NOT count
+  // `fallbackData` as "loaded data", so with the SSR prefetch attached
+  // `isLoading` stays true through the first revalidation even though the
+  // tiles already have real numbers to show (same rule as PoolOverview in
+  // pool-detail-page-client.tsx).
   const isLoading =
     venue === "v3"
-      ? heroV3Result.isLoading || todayV3Result.isLoading
-      : heroV2Result.isLoading || todayV2Result.isLoading;
+      ? isLoadingWithoutData(heroV3Result.isLoading, heroV3Result.data) ||
+        isLoadingWithoutData(todayV3Result.isLoading, todayV3Result.data)
+      : isLoadingWithoutData(heroV2Result.isLoading, heroV2Result.data) ||
+        isLoadingWithoutData(todayV2Result.isLoading, todayV2Result.data);
+  // Same data-presence rule for errors: after a failed background
+  // revalidation SWR keeps the previous (fallback or cached) responses, and
+  // flipping the tiles to "—" while populated numbers exist would hide good
+  // data behind a transient poll failure.
   const hasError =
     venue === "v3"
-      ? !!heroV3Result.error || !!todayV3Result.error
-      : !!heroV2Result.error || !!todayV2Result.error;
+      ? hasErrorWithoutData(heroV3Result.error, heroV3Result.data) ||
+        hasErrorWithoutData(todayV3Result.error, todayV3Result.data)
+      : hasErrorWithoutData(heroV2Result.error, heroV2Result.data) ||
+        hasErrorWithoutData(todayV2Result.error, todayV2Result.data);
 
   return {
     todayMidnight,

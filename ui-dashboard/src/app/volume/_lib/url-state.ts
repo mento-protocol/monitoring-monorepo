@@ -11,9 +11,21 @@ import {
 import { useSearchParams } from "next/navigation";
 import { rangeCutoffSeconds, type VolumeRangeKey } from "@/lib/volume";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
+// Pure param parsing is shared with the /volume Server Component (SSR
+// prefetch must derive the identical first-render view) — see
+// lib/volume-url-params.ts. This module stays the client-side owner of
+// URL writes + state sync.
+import {
+  DEFAULT_ACTOR_FILTER,
+  DEFAULT_RANGE,
+  readActorFilterFromParams,
+  readRangeFromParams,
+  readVenueFromParams,
+  type ActorFilter,
+  type Venue,
+} from "@/lib/volume-url-params";
 
-export type Venue = "v3" | "v2";
-type ActorFilter = "organic" | "all";
+export type { Venue } from "@/lib/volume-url-params";
 type VolumeUrlSnapshot = {
   range: VolumeRangeKey;
   actorFilter: ActorFilter;
@@ -43,33 +55,6 @@ type VolumeUrlStateResult = {
   updateIncludeProtocolActors: (next: boolean) => void;
   updateVenue: (next: Venue) => void;
 };
-
-const VALID_RANGES = new Set<VolumeRangeKey>([
-  "24h",
-  "7d",
-  "30d",
-  "90d",
-  "all",
-]);
-const DEFAULT_RANGE: VolumeRangeKey = "7d";
-const VALID_VENUES = new Set<Venue>(["v3", "v2"]);
-const DEFAULT_ACTOR_FILTER: ActorFilter = "organic";
-
-function readRangeFromParams(params: URLSearchParams): VolumeRangeKey {
-  const raw = params.get("range");
-  return raw && VALID_RANGES.has(raw as VolumeRangeKey)
-    ? (raw as VolumeRangeKey)
-    : DEFAULT_RANGE;
-}
-
-function readActorFilterFromParams(params: URLSearchParams): ActorFilter {
-  return params.get("actors") === "all" ? "all" : DEFAULT_ACTOR_FILTER;
-}
-
-function readVenueFromParams(params: URLSearchParams): Venue {
-  const raw = params.get("venue");
-  return raw && VALID_VENUES.has(raw as Venue) ? (raw as Venue) : "v3";
-}
 
 function writeVolumeUrl(
   { range, actorFilter, venue }: VolumeUrlSnapshot,

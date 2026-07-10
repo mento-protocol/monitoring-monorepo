@@ -67,19 +67,38 @@ const NULL_RESPONSE: GQLResponse = {
 
 let gqlResponses: Map<string, GQLResponse> = new Map();
 let lastVariables: Map<string, Record<string, unknown> | undefined> = new Map();
+let lastOptions: Map<string, Record<string, unknown> | undefined> = new Map();
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: (
     query: string | null,
     variables?: Record<string, unknown>,
+    options?: Record<string, unknown>,
   ): GQLResponse => {
     if (query === null) return NULL_RESPONSE;
     lastVariables.set(query, variables);
-    return gqlResponses.get(query) ?? { data: undefined, isLoading: true };
+    lastOptions.set(query, options);
+    const configured = gqlResponses.get(query);
+    if (configured) return configured;
+    // Mirror SWR's fallbackData contract closely enough for gating tests:
+    // fallback-seeded hooks report data with isLoading still true (SWR does
+    // not count fallbackData as "loaded data" during first revalidation).
+    const fallbackData = options?.fallbackData;
+    if (fallbackData !== undefined)
+      return { data: fallbackData, isLoading: true };
+    return { data: undefined, isLoading: true };
   },
 }));
 
+vi.mock("@/components/network-provider", () => ({
+  useNetwork: () => ({
+    networkId: "celo-mainnet",
+    network: { id: "celo-mainnet", chainId: 42220 },
+  }),
+}));
+
 import { useHeroRollup } from "../use-hero-rollup";
+import type { VolumeHeroInitialData } from "@/lib/volume-hero-initial-data";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -144,7 +163,13 @@ function yesterdayRow(
 
 type HookResult = ReturnType<typeof useHeroRollup>;
 
-function Probe({ resultRef }: { resultRef: { current: HookResult | null } }) {
+function Probe({
+  resultRef,
+  initialData,
+}: {
+  resultRef: { current: HookResult | null };
+  initialData?: VolumeHeroInitialData | undefined;
+}) {
   resultRef.current = useHeroRollup({
     venue: "v3",
     range: "7d",
@@ -152,6 +177,7 @@ function Probe({ resultRef }: { resultRef: { current: HookResult | null } }) {
     isProtocolActorIn: [false],
     utcDayKey: 0,
     kpiSource: [],
+    initialData,
   });
   return null;
 }
@@ -166,6 +192,7 @@ let root: Root;
 beforeEach(() => {
   gqlResponses = new Map();
   lastVariables = new Map();
+  lastOptions = new Map();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -178,10 +205,12 @@ afterEach(() => {
   container.remove();
 });
 
-function render(): { current: HookResult | null } {
+function render(initialData?: VolumeHeroInitialData): {
+  current: HookResult | null;
+} {
   const ref: { current: HookResult | null } = { current: null };
   act(() => {
-    root.render(<Probe resultRef={ref} />);
+    root.render(<Probe resultRef={ref} initialData={initialData} />);
   });
   return ref;
 }
@@ -320,6 +349,82 @@ describe("useHeroRollup orchestration", () => {
     // hasError is driven by the PRIMARY queries (snapshot + today). The
     // firstDay error degrades JUST the catch-up — that's the design.
     expect(result!.hasError).toBe(false);
+  });
+
+  it("attaches SSR fallbackData to the hero trio when the prefetched view matches", () => {
+    const initialData: VolumeHeroInitialData = {
+      view: {
+        networkId: "celo-mainnet",
+        venue: "v3",
+        range: "7d",
+        includeProtocolActors: false,
+        todayMidnight: TODAY_MIDNIGHT,
+      },
+      heroV3: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },
+      todayV3: { volumeTodayTraders: [] },
+      firstDayV3: {
+        volumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+      },
+    };
+
+    const ref = render(initialData);
+
+    expect(lastOptions.get(VOLUME_WINDOW_LATEST)?.fallbackData).toBe(
+      initialData.heroV3,
+    );
+    expect(lastOptions.get(VOLUME_TODAY_TRADERS)?.fallbackData).toBe(
+      initialData.todayV3,
+    );
+    expect(lastOptions.get(VOLUME_WINDOW_FIRSTDAY_LATEST)?.fallbackData).toBe(
+      initialData.firstDayV3,
+    );
+    // With the fallback seeded (SWR reports data present but isLoading true
+    // during the first revalidation), the hook's data-presence loading gate
+    // lets the tiles render populated numbers immediately.
+    expect(ref.current!.isLoading).toBe(false);
+    expect(ref.current!.totalVolume).toBeCloseTo(1000, 4);
+  });
+
+  it("drops the SSR fallback when the prefetched view descriptor mismatches", () => {
+    const initialData: VolumeHeroInitialData = {
+      view: {
+        networkId: "celo-mainnet",
+        venue: "v3",
+        range: "30d", // Probe renders range "7d" — must not seed 30d data
+        includeProtocolActors: false,
+        todayMidnight: TODAY_MIDNIGHT,
+      },
+      heroV3: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },
+      todayV3: { volumeTodayTraders: [] },
+    };
+
+    const ref = render(initialData);
+
+    expect(lastOptions.get(VOLUME_WINDOW_LATEST)?.fallbackData).toBeUndefined();
+    expect(lastOptions.get(VOLUME_TODAY_TRADERS)?.fallbackData).toBeUndefined();
+    expect(
+      lastOptions.get(VOLUME_WINDOW_FIRSTDAY_LATEST)?.fallbackData,
+    ).toBeUndefined();
+    expect(ref.current!.isLoading).toBe(true);
+  });
+
+  it("drops the SSR fallback across the UTC-midnight edge (server day N, client day N+1)", () => {
+    const initialData: VolumeHeroInitialData = {
+      view: {
+        networkId: "celo-mainnet",
+        venue: "v3",
+        range: "7d",
+        includeProtocolActors: false,
+        todayMidnight: TODAY_MIDNIGHT - SECONDS_PER_DAY,
+      },
+      heroV3: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },
+      todayV3: { volumeTodayTraders: [] },
+    };
+
+    render(initialData);
+
+    expect(lastOptions.get(VOLUME_WINDOW_LATEST)?.fallbackData).toBeUndefined();
+    expect(lastOptions.get(VOLUME_TODAY_TRADERS)?.fallbackData).toBeUndefined();
   });
 
   it("does NOT fire the yesterday query when no chain is degraded", () => {
