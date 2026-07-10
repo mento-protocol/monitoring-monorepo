@@ -87,21 +87,21 @@
     "file": "src/app/pool/[poolId]/_components/ols-liquidity-events.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
-    "line": 94,
+    "line": 96,
     "linePreview": "if (!searchQuery) return events; | return events.filter((e) => { | const givenSym = tokenSymbol(network, e.tokenGivenToPool);"
   },
   {
     "file": "src/app/pool/[poolId]/_components/ols-liquidity-events.tsx",
     "ruleId": "complexity",
     "message": "Function 'OlsLiquidityEvents' has a complexity of 35. Maximum allowed is 15.",
-    "line": 32,
+    "line": 31,
     "linePreview": "*/ | export function OlsLiquidityEvents({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_components/ols-liquidity-events.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'OlsLiquidityEvents' has too many lines (144). Maximum allowed is 100.",
-    "line": 32,
+    "line": 31,
     "linePreview": "*/ | export function OlsLiquidityEvents({ | poolId,"
   },
   {
@@ -136,21 +136,21 @@
     "file": "src/app/pool/[poolId]/_components/pool-header.tsx",
     "ruleId": "complexity",
     "message": "Function 'PoolHeader' has a complexity of 28. Maximum allowed is 15.",
-    "line": 55,
+    "line": 54,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing composed header surface; this PR only threads SSR fallback props into its current queries. | export function PoolHeader({ | pool,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
-    "line": 202,
+    "line": 200,
     "linePreview": "<tbody> | {pagedPositions.map((position) => { | const fmtTok = ("
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/lps-tab.tsx",
     "ruleId": "complexity",
     "message": "Function 'LpsTab' has a complexity of 32. Maximum allowed is 15.",
-    "line": 43,
+    "line": 42,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing tab keeps LP pagination, totals, and degraded-count copy in one route-owned surface. | export function LpsTab({ | poolId,"
   },
   {
@@ -164,14 +164,14 @@
     "file": "src/app/pool/[poolId]/_tabs/reserves-tab.tsx",
     "ruleId": "complexity",
     "message": "Function 'ReservesTab' has a complexity of 20. Maximum allowed is 15.",
-    "line": 25,
+    "line": 24,
     "linePreview": " | export function ReservesTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/_tabs/reserves-tab.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'ReservesTab' has too many lines (152). Maximum allowed is 100.",
-    "line": 25,
+    "line": 24,
     "linePreview": " | export function ReservesTab({ | poolId,"
   },
   {
@@ -255,21 +255,21 @@
     "file": "src/components/breach-history-panel.tsx",
     "ruleId": "complexity",
     "message": "Function 'BreachHistoryPanelInner' has a complexity of 30. Maximum allowed is 15.",
-    "line": 203,
+    "line": 202,
     "linePreview": " | function BreachHistoryPanelInner({ | pool,"
   },
   {
     "file": "src/components/breach-history-panel.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'BreachHistoryPanelInner' has too many lines (195). Maximum allowed is 100.",
-    "line": 203,
+    "line": 202,
     "linePreview": " | function BreachHistoryPanelInner({ | pool,"
   },
   {
     "file": "src/components/breach-history-panel.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 29 to the 18 allowed.",
-    "line": 203,
+    "line": 202,
     "linePreview": " | function BreachHistoryPanelInner({ | pool,"
   },
   {
@@ -283,15 +283,15 @@
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 58. Maximum allowed is 15.",
-    "line": 84,
-    "linePreview": "): GlobalPoolEntry[] { | return sortedCopy(entries, (a, b) => { | const [aKey, bKey] = [globalPoolKey(a), globalPoolKey(b)];"
+    "line": 82,
+    "linePreview": "): GlobalPoolEntry[] { | return sortedCopy(entries, (a, b) => { | const aKey = globalPoolKey(a);"
   },
   {
     "file": "src/components/global-pools-table/sort.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 65 to the 18 allowed.",
-    "line": 84,
-    "linePreview": "): GlobalPoolEntry[] { | return sortedCopy(entries, (a, b) => { | const [aKey, bKey] = [globalPoolKey(a), globalPoolKey(b)];"
+    "line": 82,
+    "linePreview": "): GlobalPoolEntry[] { | return sortedCopy(entries, (a, b) => { | const aKey = globalPoolKey(a);"
   },
   {
     "file": "src/components/pool-header/deviation-cell.tsx",
@@ -304,7 +304,7 @@
     "file": "src/components/pool-header/uptime-value.tsx",
     "ruleId": "complexity",
     "message": "Function 'UptimeValue' has a complexity of 29. Maximum allowed is 15.",
-    "line": 79,
+    "line": 60,
     "linePreview": " | export function UptimeValue({ pool }: { pool: Pool }) { | const isVirtual = isVirtualPool(pool);"
   },
   {
