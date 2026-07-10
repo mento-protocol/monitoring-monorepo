@@ -50,12 +50,23 @@ function PlotSkeleton({
 
 // `dynamic`'s `loading` prop receives `DynamicOptionsLoadingProps`, not
 // our custom `{ heightPx }`, so the chunk-loading flash falls back to
-// the default 200px height. That's a 1-frame visual nit before
-// hydration; not worth threading the height through.
+// the default 200px height. The plot container below compensates with
+// `minHeight: chartHeightPx`, so taller charts (the volume page's 250px
+// and 230px cards) don't shift content down when the chunk resolves.
 const Plot = dynamic(() => import("@/lib/react-plotly-basic"), {
   ssr: false,
   loading: () => <PlotSkeleton />,
 });
+
+// Hoisted so the merged config keeps a stable identity across renders —
+// react-plotly.js ref-compares data/layout/config and skips Plotly.react
+// when all three are unchanged. An inline `{ ...PLOTLY_CONFIG, scrollZoom:
+// false }` object is a fresh identity every render, scheduling a full
+// chart redraw on every hover-state re-render.
+const CHART_CARD_PLOTLY_CONFIG = {
+  ...PLOTLY_CONFIG,
+  scrollZoom: false,
+} as const;
 
 /** `stacked` suppresses the dedicated total trace (top of stack = total). */
 type BreakdownMode = "lines" | "stacked";
@@ -562,6 +573,12 @@ export function TimeSeriesChartCard({
         role="figure"
         aria-label={chartAriaLabel}
         className="relative mt-4 -mx-2 sm:-mx-3"
+        // Reserve the final plot height even while next/dynamic's chunk
+        // fallback (PlotSkeleton at the default 200px) is showing, so
+        // charts taller than the default don't shift content down when
+        // the Plotly chunk resolves. For the default-height cards this
+        // equals the rendered height — a no-op, keeping homepage CLS 0.00.
+        style={{ minHeight: chartHeightPx }}
       >
         {isLoading ? (
           <PlotSkeleton heightPx={chartHeightPx} />
@@ -612,7 +629,7 @@ export function TimeSeriesChartCard({
                     ariaHidden={!active}
                     data={traces}
                     layout={layout}
-                    config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
+                    config={CHART_CARD_PLOTLY_CONFIG}
                     style={{ width: "100%", height: chartHeightPx }}
                     useResizeHandler
                     onLegendClick={handleLegendClick}
@@ -635,7 +652,7 @@ export function TimeSeriesChartCard({
             textAlternative={chartSummary}
             data={traces}
             layout={layout}
-            config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
+            config={CHART_CARD_PLOTLY_CONFIG}
             style={{ width: "100%", height: chartHeightPx }}
             useResizeHandler
             onHover={onPlotlyHover}

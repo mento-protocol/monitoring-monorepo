@@ -2,9 +2,19 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
+// Captures the options handed to next/dynamic so the chunk-loading
+// fallback (the CLS-guard skeleton) can be rendered and asserted on.
+const dynamicOptions = vi.hoisted(() => ({
+  current: undefined as { loading?: () => React.ReactElement } | undefined,
+}));
+
 vi.mock("next/dynamic", () => ({
-  default: () =>
-    function MockPlot(props: {
+  default: (
+    _loader: unknown,
+    options?: { loading?: () => React.ReactElement },
+  ) => {
+    dynamicOptions.current = options;
+    return function MockPlot(props: {
       data?: Array<{
         labels?: string[];
         values?: number[];
@@ -33,7 +43,8 @@ vi.mock("next/dynamic", () => ({
           ),
         ) ?? []),
       );
-    },
+    };
+  },
 }));
 
 import {
@@ -169,6 +180,16 @@ describe("LpConcentrationChart", () => {
     expect(html).toContain(
       'data-testid="customdata">&amp;lt;img src=x onerror=&amp;#39;alert(1)&amp;#39;&amp;gt;</span>',
     );
+  });
+
+  it("reserves the exact 280px plot box while the Plotly chunk loads", () => {
+    // The dynamic() loading fallback must match the pie's plot box height
+    // (layout.height / style.height = 280) so the chunk-resolve swap is
+    // shift-free on the pool page's default "providers" tab.
+    const loading = dynamicOptions.current?.loading;
+    expect(loading).toBeDefined();
+    const html = renderToStaticMarkup(loading!());
+    expect(html).toContain("height:280px");
   });
 
   it("hides estimated TVL when no valid USDm side exists", () => {

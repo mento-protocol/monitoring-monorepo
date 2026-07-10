@@ -82,3 +82,18 @@ describe("TimeSeriesChartCard accessibility (WCAG 1.1.1)", () => {
     expect(html).toContain("Total Value Locked chart: Not enough history yet");
   });
 });
+
+describe("TimeSeriesChartCard layout reservation (CLS guard)", () => {
+  it("reserves a custom chart height on the plot container", () => {
+    // next/dynamic's chunk fallback renders PlotSkeleton at the default
+    // 200px; the container's min-height must reserve the real chart height
+    // so taller cards (volume page's 250/230px) don't shift on chunk load.
+    const html = render({ chartHeightPx: 250 });
+    expect(html).toContain("min-height:250px");
+  });
+
+  it("reserves the default 200px height (homepage CLS 0.00 guard)", () => {
+    const html = render();
+    expect(html).toContain("min-height:200px");
+  });
+});

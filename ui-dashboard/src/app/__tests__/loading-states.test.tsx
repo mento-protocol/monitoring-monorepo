@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import RootLoading from "@/app/loading";
 import PoolDetailLoading from "@/app/pool/[poolId]/loading";
 import AddressBookLoading from "@/app/address-book/loading";
+import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
 
 // Each route-level loading UI must expose exactly one aria-live region so
 // screen readers don't announce nested status regions redundantly. Keeping
@@ -78,5 +79,29 @@ describe("route-level loading UIs", () => {
     const tabStrip = container.querySelector(".flex.gap-1.border-b");
     expect(tabStrip).not.toBeNull();
     expect(tabStrip!.children).toHaveLength(7);
+  });
+
+  it("PoolDetailLoading reserves the header card, health bar, and charts row (CLS guard)", () => {
+    render(<PoolDetailLoading />);
+
+    // Header card: 5-col stat grid mirroring PoolHeader's <dl>.
+    const statGrid = container.querySelector(".lg\\:grid-cols-5");
+    expect(statGrid).not.toBeNull();
+    expect(statGrid!.children).toHaveLength(5);
+
+    // Charts row: two chart cards + reserves panel, mirroring PoolChartsRow.
+    const chartsRow = container.querySelector(".lg\\:grid-cols-3");
+    expect(chartsRow).not.toBeNull();
+    expect(chartsRow!.children).toHaveLength(3);
+
+    // Chart card plot areas reserve ROW_CHART_HEIGHT_PX so the real
+    // TimeSeriesChartCards stream in without pushing the tab strip down.
+    // Matched on the inline style derived from the shared constant, so a
+    // future height change can't silently strand the skeleton at a stale
+    // hardcoded value.
+    const plotAreas = [...container.querySelectorAll("[style]")].filter(
+      (el) => (el as HTMLElement).style.height === `${ROW_CHART_HEIGHT_PX}px`,
+    );
+    expect(plotAreas).toHaveLength(2);
   });
 });
