@@ -22,6 +22,11 @@ messages when the rotation has not changed, and the stable Slack
 `chat.postMessage` call if the state write fails after Slack accepts the
 announcement.
 
+The parent `alerts/infra` stack also owns a direct Cloud Scheduler log-match
+alert. Any failed reconciliation attempt opens an ERROR incident and notifies
+`#alerts-infra`; repeated failures are rate-limited to one notification per hour,
+and the incident auto-closes after 30 minutes without another failure.
+
 ## Slack Scopes
 
 The shared `slack_bot_token` needs these bot token scopes for this module:

@@ -129,7 +129,7 @@ variable "oncall_support_usergroup_id" {
 }
 
 variable "slack_notification_channel_id" {
-  description = "GCP Monitoring Slack notification channel ID for onchain-event-handler drop alerts (numeric suffix from projects/.../notificationChannels/<id>). Leave empty to skip creating the alert policies until the channel exists."
+  description = "Optional existing GCP Monitoring notification-channel ID override (numeric suffix from projects/.../notificationChannels/<id>). When empty, Terraform creates a Slack notification channel for #alerts-infra with slack_bot_token."
   type        = string
   default     = ""
 

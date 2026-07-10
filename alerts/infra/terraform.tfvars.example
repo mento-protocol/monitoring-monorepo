@@ -117,10 +117,10 @@ github_token = "github_pat_..."
 # Optional Settings
 #####################
 
-# Slack notification channel ID for onchain-event-handler drop alerts.
-# Created manually via OAuth in GCP Console (Monitoring → Alerting → Edit
-# Notification Channels) after the project exists. Leave unset to skip creating
-# the alert policies.
+# Optional existing GCP Monitoring notification-channel ID override. Leave this
+# unset to let Terraform create and manage a Slack notification channel for
+# #alerts-infra with slack_bot_token. Set it only when adopting or temporarily
+# routing through an existing channel in this same GCP project.
 # slack_notification_channel_id = "1234567890123456789"
 
 # Enable debug mode for REST API provider (shows API requests/responses)

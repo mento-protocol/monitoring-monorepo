@@ -1,8 +1,45 @@
-# Drop-path observability for the onchain-event-handler Cloud Function.
-# The handler is at-most-once by design: per-event failures and processing
-# budget skips are logged and intentionally answered with HTTP 200 so QuickNode
-# does not replay the batch. These metrics and policies make those drops
-# human-visible. Pattern mirrors governance-watchdog/infra/monitoring.tf.
+# Operational alerts for the alerts-infra Cloud Functions and schedulers.
+# Terraform creates the default GCP Monitoring Slack channel for #alerts-infra
+# with the existing bot token. Operators can instead supply an existing GCP
+# notification-channel ID during a migration or recovery.
+
+locals {
+  alerts_infra_slack_channel_name = "#alerts-infra"
+  alerts_infra_notification_channel = (
+    var.slack_notification_channel_id != ""
+    ? "projects/${local.project_id}/notificationChannels/${var.slack_notification_channel_id}"
+    : google_monitoring_notification_channel.alerts_infra_slack[0].name
+  )
+}
+
+resource "google_monitoring_notification_channel" "alerts_infra_slack" {
+  count = var.slack_notification_channel_id == "" ? 1 : 0
+
+  project      = local.project_id
+  display_name = "Slack ${local.alerts_infra_slack_channel_name}"
+  description  = "Alerts from the alerts-infra GCP project"
+  type         = "slack"
+  enabled      = true
+  force_delete = false
+
+  labels = {
+    channel_name = local.alerts_infra_slack_channel_name
+  }
+
+  sensitive_labels {
+    # Keep the bot token out of Terraform state. The hash changes whenever the
+    # token rotates and tells the provider to resend the write-only value.
+    auth_token_wo         = var.slack_bot_token
+    auth_token_wo_version = sha256(var.slack_bot_token)
+  }
+
+  depends_on = [module.project_factory]
+}
+
+# Drop-path observability for the onchain-event-handler Cloud Function. The
+# handler is at-most-once by design: per-event failures and processing-budget
+# skips are logged and intentionally answered with HTTP 200 so QuickNode does
+# not replay the batch. These metrics and policies make those drops visible.
 
 # Counts drop-path ERROR-level logs from the handler. Pinned to the handler's
 # service name so oncall-announcer errors in the same project do not cross-page;
@@ -43,9 +80,20 @@ resource "google_logging_metric" "onchain_handler_budget_skips" {
   EOF
 }
 
-resource "google_monitoring_alert_policy" "onchain_handler_errors_policy" {
-  count = var.slack_notification_channel_id != "" ? 1 : 0
+# These policies were previously conditional on an operator-supplied channel
+# ID. Preserve their state addresses when migrating an existing stack to the
+# Terraform-managed #alerts-infra channel.
+moved {
+  from = google_monitoring_alert_policy.onchain_handler_errors_policy[0]
+  to   = google_monitoring_alert_policy.onchain_handler_errors_policy
+}
 
+moved {
+  from = google_monitoring_alert_policy.onchain_handler_budget_skips_policy[0]
+  to   = google_monitoring_alert_policy.onchain_handler_budget_skips_policy
+}
+
+resource "google_monitoring_alert_policy" "onchain_handler_errors_policy" {
   project      = local.project_id
   display_name = "onchain-event-handler-errors"
   combiner     = "OR"
@@ -90,17 +138,17 @@ resource "google_monitoring_alert_policy" "onchain_handler_errors_policy" {
     }
   }
 
-  notification_channels = ["projects/${local.project_id}/notificationChannels/${var.slack_notification_channel_id}"]
+  notification_channels = [local.alerts_infra_notification_channel]
   severity              = "ERROR"
 
   alert_strategy {
     auto_close = "86400s"
   }
+
+  depends_on = [module.project_factory]
 }
 
 resource "google_monitoring_alert_policy" "onchain_handler_budget_skips_policy" {
-  count = var.slack_notification_channel_id != "" ? 1 : 0
-
   project      = local.project_id
   display_name = "onchain-event-handler-budget-skips"
   combiner     = "OR"
@@ -145,10 +193,75 @@ resource "google_monitoring_alert_policy" "onchain_handler_budget_skips_policy" 
     }
   }
 
-  notification_channels = ["projects/${local.project_id}/notificationChannels/${var.slack_notification_channel_id}"]
+  notification_channels = [local.alerts_infra_notification_channel]
   severity              = "ERROR"
 
   alert_strategy {
     auto_close = "86400s"
   }
+
+  depends_on = [module.project_factory]
+}
+
+# Alert from the scheduler's terminal attempt log instead of the function's
+# application log. This catches handler 5xx responses as well as invocation,
+# IAM, timeout, and unreachable-target failures before they can leave
+# @support-engineer stale. Scheduler retries match the same condition, so the
+# notification rate limit collapses the retry burst and caps prolonged-outage
+# reminders at one Slack message per hour.
+resource "google_monitoring_alert_policy" "oncall_announcer_scheduler_errors_policy" {
+  count = local.oncall_announcer_enabled ? 1 : 0
+
+  project      = local.project_id
+  display_name = "oncall-announcer-scheduler-errors"
+  combiner     = "OR"
+  enabled      = true
+  severity     = "ERROR"
+
+  documentation {
+    content   = <<-EOT
+      ## On-call announcer scheduler failure
+
+      The Splunk On-Call to Slack reconciliation job failed. The
+      `@support-engineer` usergroup may still point at the previous engineer.
+
+      Check the newest scheduler error, then follow its Cloud Function request
+      to the underlying Splunk, Slack, state, or IAM failure. For identity
+      lookup errors, compare the Splunk On-Call email with the user's primary
+      Slack email.
+
+      **View scheduler errors:**
+      https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_scheduler_job%22%20AND%20resource.labels.job_id%3D%22${module.oncall_announcer[0].scheduler_job_name}%22%20AND%20severity%3E%3DERROR;duration=PT24H
+
+      **View function errors:**
+      https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_run_revision%22%20AND%20resource.labels.service_name%3D%22${module.oncall_announcer[0].function_name}%22%20AND%20severity%3E%3DERROR;duration=PT24H
+    EOT
+    mime_type = "text/markdown"
+  }
+
+  conditions {
+    display_name = "Any failed on-call reconciliation attempt"
+
+    condition_matched_log {
+      filter = <<-EOT
+        resource.type="cloud_scheduler_job"
+        resource.labels.job_id="${module.oncall_announcer[0].scheduler_job_name}"
+        resource.labels.location="${var.region}"
+        log_id("cloudscheduler.googleapis.com/executions")
+        severity>=ERROR
+        jsonPayload."@type"="type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished"
+      EOT
+    }
+  }
+
+  notification_channels = [local.alerts_infra_notification_channel]
+
+  alert_strategy {
+    notification_rate_limit {
+      period = "3600s"
+    }
+    auto_close = "1800s"
+  }
+
+  depends_on = [module.project_factory]
 }
