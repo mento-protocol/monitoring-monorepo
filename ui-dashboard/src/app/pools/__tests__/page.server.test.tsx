@@ -4,16 +4,16 @@ import PoolsPage from "../page";
 
 type PoolsPageProps = { initialNetworkData?: unknown };
 
-const { mockFetchAllNetworks, mockPoolsPageClient } = vi.hoisted(() => ({
-  mockFetchAllNetworks: vi.fn(),
+const { mockFetchInitialNetworkData, mockPoolsPageClient } = vi.hoisted(() => ({
+  mockFetchInitialNetworkData: vi.fn(),
   mockPoolsPageClient: vi.fn((props: PoolsPageProps) => {
     void props;
     return null;
   }),
 }));
 
-vi.mock("@/lib/fetch-all-networks", () => ({
-  fetchAllNetworks: mockFetchAllNetworks,
+vi.mock("@/lib/network-fetcher/server-cache", () => ({
+  fetchInitialNetworkData: mockFetchInitialNetworkData,
 }));
 
 vi.mock("../_components/pools-page-client", () => ({
@@ -21,27 +21,36 @@ vi.mock("../_components/pools-page-client", () => ({
 }));
 
 beforeEach(() => {
-  mockFetchAllNetworks.mockReset();
+  mockFetchInitialNetworkData.mockReset();
   mockPoolsPageClient.mockClear();
 });
 
 describe("PoolsPage server component", () => {
   it("passes resolved initial network data into the client page", async () => {
     const initialNetworkData = [{ networkId: "celo-mainnet", pools: [] }];
-    mockFetchAllNetworks.mockResolvedValueOnce(initialNetworkData);
+    mockFetchInitialNetworkData.mockResolvedValueOnce({
+      networks: initialNetworkData,
+      fetchedAtMs: 1_700_000_000_000,
+    });
 
     renderToStaticMarkup(await PoolsPage());
 
-    expect(mockPoolsPageClient).toHaveBeenCalledWith({ initialNetworkData });
+    expect(mockPoolsPageClient).toHaveBeenCalledWith({
+      initialNetworkData,
+      initialNetworkDataFetchedAtMs: 1_700_000_000_000,
+    });
   });
 
   it("falls back to client-side fetching when initial network data rejects", async () => {
-    mockFetchAllNetworks.mockRejectedValueOnce(new Error("network fanout"));
+    mockFetchInitialNetworkData.mockRejectedValueOnce(
+      new Error("network fanout"),
+    );
 
     renderToStaticMarkup(await PoolsPage());
 
     expect(mockPoolsPageClient).toHaveBeenCalledWith({
       initialNetworkData: undefined,
+      initialNetworkDataFetchedAtMs: undefined,
     });
   });
 });

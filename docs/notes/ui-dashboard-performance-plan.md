@@ -134,7 +134,8 @@ out explicitly.
     <0.05 needs per-pool-type height tuning (FPMM vs virtual pools differ). Mirror the
     fix in `loading.tsx`.
   - **P2b · SSR-prefetch the pool overview** (M–L). Apply the proven
-    `fetchAllNetworks → SWR fallbackData` pattern (from `/` and `/pools`) to
+    SSR-payload → SWR `fallbackData` pattern (from `/` and `/pools`, now served
+    through `fetchInitialNetworkData` in `network-fetcher/server-cache.ts`) to
     `/pool/[id]`. The server _already_ round-trips the endpoint every request for OG
     metadata (`fetchPoolForMetadata`, `unstable_cache({revalidate:60})`), so the
     infra template exists — but the OG payload is transformed, so add a raw-shape
@@ -182,8 +183,18 @@ chainId}]` — the server must reproduce the exact normalized id + `network.id`
 ### Tier 3 — Efficiency / cost / polish (low user-facing speed, but cheap or strategic)
 
 - **P7 · Cache `fetchAllNetworks` server-side** (L, medium — _origin CPU + Envio quota_,
-  not LCP). It re-runs on every request (dynamic render + uncached `graphql-request`
-  POST). **Gotcha the naive fix misses:** `NetworkData` carries `Set` (olsPoolIds…) and
+  not LCP). **Shipped** (2026-07-09): `src/lib/network-fetcher/server-cache.ts` wraps the
+  fan-out in `unstable_cache` (30s TTL) with an explicit dehydrate→rehydrate transform
+  for the Map/Set fields, caches healthy payloads only (degraded ones pass through
+  uncached via an error carrier — cold misses only, since `unstable_cache` serves stale
+  entries and swallows background-revalidation errors; a `fetchedAt` age gate bounds
+  served staleness at ~90s with a foreground refetch, covering the stale-serve path so
+  `N/A` tiles are never pinned), and strips
+  the unread raw `feeSnapshots` rows from the `/` + `/pools` Flight payload. Note the
+  impact re-rating vs. this plan's original scoring: a 2026-07-09 re-measure showed the
+  homepage document _streaming_ until 0.9–1.9s (the fan-out runs inside the streamed
+  RSC content, not TTFB), so this was in fact the homepage LCP lever, not just cost.
+  Original analysis for context: `NetworkData` carries `Set` (olsPoolIds…) and
   `Map` (oracle `rates`, `poolLabels`) fields; `unstable_cache` JSON-serializes and
   **silently drops** them (`JSON.stringify(new Map())==='{}'`) → lost strategy badges +
   oracle rates. Requires a serialize→plain→rehydrate transform, or Next 16 `"use cache"`

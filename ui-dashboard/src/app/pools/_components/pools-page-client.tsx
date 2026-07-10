@@ -41,12 +41,17 @@ import { SenderCell } from "@/components/sender-cell";
 
 export function PoolsPageClient({
   initialNetworkData,
+  initialNetworkDataFetchedAtMs,
 }: {
   initialNetworkData?: NetworkData[] | undefined;
+  initialNetworkDataFetchedAtMs?: number | undefined;
 }) {
   return (
     <Suspense>
-      <PoolsContent initialNetworkData={initialNetworkData} />
+      <PoolsContent
+        initialNetworkData={initialNetworkData}
+        initialNetworkDataFetchedAtMs={initialNetworkDataFetchedAtMs}
+      />
     </Suspense>
   );
 }
@@ -54,18 +59,24 @@ export function PoolsPageClient({
 // eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging.
 function PoolsContent({
   initialNetworkData,
+  initialNetworkDataFetchedAtMs,
 }: {
   initialNetworkData?: NetworkData[] | undefined;
+  initialNetworkDataFetchedAtMs?: number | undefined;
 }) {
   "use memo";
 
   // `initialNetworkData` lets first paint render the full pools table from
   // SSR data instead of a 3-row `<Skeleton />` — fixes the 0.49 CLS that
   // lhci flagged on this route (BACKLOG "Lighthouse CI Follow-Ups"). The
-  // hook's `fallbackData` branch turns off mount revalidation on a cold
-  // SWR cache, so the first paint also fires zero client GraphQL requests.
-  const { networkData, isLoading: poolsLoading } =
-    useAllNetworksData(initialNetworkData);
+  // hook's `fallbackData` branch turns off mount revalidation on a cold SWR
+  // cache when the payload is fresh (< SSR_FRESH_ENOUGH_MS), so that first
+  // paint fires zero client GraphQL requests; older SSR payloads paint
+  // instantly and revalidate immediately.
+  const { networkData, isLoading: poolsLoading } = useAllNetworksData(
+    initialNetworkData,
+    initialNetworkDataFetchedAtMs,
+  );
   const searchParams = useSearchParams();
   const { replace } = useRouter();
 

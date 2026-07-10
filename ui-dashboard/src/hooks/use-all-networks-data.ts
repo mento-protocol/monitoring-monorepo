@@ -16,6 +16,40 @@ type AllNetworksResult = {
   error: Error | null;
 };
 
+/**
+ * SSR payloads younger than this skip mount revalidation entirely (first
+ * paint fires 0 client GraphQL requests). Older ones still paint instantly
+ * from `fallbackData` but revalidate immediately — the server cache serves
+ * up to 5 min of staleness (MAX_SERVED_STALENESS_MS, tuned for production's
+ * sparse ~15-min-gap traffic), and without this gate that staleness would
+ * sit on screen until the next poll interval.
+ */
+export const SSR_FRESH_ENOUGH_MS = 60_000;
+
+/**
+ * Pure gate for the mount-revalidation skip: only a healthy, fresh-enough
+ * SSR payload landing on a cold SWR cache may suppress the mount fetch.
+ * Extracted so the composition is unit-testable without a render harness.
+ */
+export function shouldSkipMountRevalidation({
+  hasFallback,
+  allHealthy,
+  isCacheCold,
+  fallbackFetchedAtMs,
+  nowMs,
+}: {
+  hasFallback: boolean;
+  allHealthy: boolean;
+  isCacheCold: boolean;
+  fallbackFetchedAtMs: number | undefined;
+  nowMs: number;
+}): boolean {
+  const isFreshEnough =
+    fallbackFetchedAtMs !== undefined &&
+    nowMs - fallbackFetchedAtMs < SSR_FRESH_ENOUGH_MS;
+  return hasFallback && allHealthy && isCacheCold && isFreshEnough;
+}
+
 // Re-exports so long-established import sites keep working
 // (`import { NetworkData, fetchAllNetworks, warnedCapKeys, ... } from
 // "@/hooks/use-all-networks-data"`). New code should import directly from
@@ -46,12 +80,20 @@ export {
  * - On any SSR degradation (per-slice or per-chain error), let SWR
  *   revalidate on mount so partial `N/A` metrics recover immediately
  *   instead of being pinned until the next poll.
+ * - On a STALE-but-healthy SSR payload (the server cache serves up to
+ *   MAX_SERVED_STALENESS_MS of staleness so sparse-traffic visitors get an
+ *   instant paint), let SWR revalidate on mount so the stale numbers are on
+ *   screen only for the ~1-2s the refetch takes, not until the next poll.
  *
  * Options are applied at this hook's call site rather than an ancestor
  * `SWRConfig` so they don't cascade to any other `useSWR` in the tree.
  */
 export function useAllNetworksData(
   fallbackData?: NetworkData[],
+  /** Fetch-completion time of `fallbackData`
+   *  (`fetchInitialNetworkData().fetchedAtMs`). Omitted/unknown counts as
+   *  stale — revalidate-on-mount is the safe default. */
+  fallbackFetchedAtMs?: number,
 ): AllNetworksResult {
   const { cache } = useSWRConfig();
   const allHealthy =
@@ -62,8 +104,13 @@ export function useAllNetworksData(
   // older than the SSR payload. The read is synchronous and idempotent —
   // `cache.get` doesn't mutate state.
   const isCacheCold = cache.get(SWR_KEY_ALL_NETWORKS_DATA)?.data === undefined;
-  const skipRevalidation =
-    fallbackData !== undefined && allHealthy && isCacheCold;
+  const skipRevalidation = shouldSkipMountRevalidation({
+    hasFallback: fallbackData !== undefined,
+    allHealthy,
+    isCacheCold,
+    fallbackFetchedAtMs,
+    nowMs: Date.now(),
+  });
 
   // Seed before `useSWR`: degraded SSR payloads intentionally revalidate on
   // mount, and that immediate fetch must still use the incremental snapshot

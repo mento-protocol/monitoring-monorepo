@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   fetchNetworkData,
   fetchAllNetworks,
+  shouldSkipMountRevalidation,
   showInitialSkeleton,
+  SSR_FRESH_ENOUGH_MS,
   warnedCapKeys,
   partialPageLastCapturedAt,
 } from "../use-all-networks-data";
@@ -1496,6 +1498,55 @@ describe("fetchAllNetworks — orchestration", () => {
       expect(result.error).toEqual({ message: "string rejection" });
       expect(result.error).not.toBeInstanceOf(Error);
     }
+  });
+});
+
+describe("shouldSkipMountRevalidation", () => {
+  const base = {
+    hasFallback: true,
+    allHealthy: true,
+    isCacheCold: true,
+    fallbackFetchedAtMs: 1_700_000_000_000,
+    nowMs: 1_700_000_000_000,
+  };
+
+  it("skips the mount fetch for a fresh, healthy payload on a cold cache", () => {
+    expect(
+      shouldSkipMountRevalidation({
+        ...base,
+        nowMs: base.fallbackFetchedAtMs + SSR_FRESH_ENOUGH_MS - 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("revalidates when the SSR payload is older than the fresh-enough bound", () => {
+    // The server cache serves up to MAX_SERVED_STALENESS_MS of staleness so
+    // sparse-traffic visitors get an instant paint; this gate is what keeps
+    // that staleness on screen for only the ~1-2s the refetch takes.
+    expect(
+      shouldSkipMountRevalidation({
+        ...base,
+        nowMs: base.fallbackFetchedAtMs + SSR_FRESH_ENOUGH_MS,
+      }),
+    ).toBe(false);
+  });
+
+  it("revalidates when the payload age is unknown (safe default)", () => {
+    expect(
+      shouldSkipMountRevalidation({ ...base, fallbackFetchedAtMs: undefined }),
+    ).toBe(false);
+  });
+
+  it("revalidates for degraded payloads and warm caches regardless of freshness", () => {
+    expect(shouldSkipMountRevalidation({ ...base, allHealthy: false })).toBe(
+      false,
+    );
+    expect(shouldSkipMountRevalidation({ ...base, isCacheCold: false })).toBe(
+      false,
+    );
+    expect(shouldSkipMountRevalidation({ ...base, hasFallback: false })).toBe(
+      false,
+    );
   });
 });
 

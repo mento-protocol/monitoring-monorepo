@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import GlobalPage from "./page-client";
 import { fetchHomepageOgData } from "@/lib/homepage-og";
-import { fetchAllNetworks } from "@/lib/fetch-all-networks";
+import { fetchInitialNetworkData } from "@/lib/network-fetcher/server-cache";
 import { formatUSD } from "@/lib/format";
 
 // Dynamic OG metadata — scoped to the homepage so other routes (/pool/...,
@@ -78,10 +78,19 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function HomePage() {
   // SSR the initial dashboard payload so first paint renders without a
-  // 14-fan-out GraphQL waterfall. `fetchAllNetworks` uses Promise.allSettled
-  // internally and returns per-network fallback on failure, so it won't
-  // throw — but guard anyway in case a truly unexpected error bubbles up;
-  // an undefined initial payload just reverts to the client-only code path.
-  const initialNetworkData = await fetchAllNetworks().catch(() => undefined);
-  return <GlobalPage initialNetworkData={initialNetworkData} />;
+  // 14-fan-out GraphQL waterfall. Served from a cross-request cache (30s TTL,
+  // up to 5min served staleness — the client hook revalidates on mount when
+  // the payload is older than its fresh-enough bound, so stale numbers last
+  // ~1-2s, not until the next poll; healthy payloads only — degraded ones
+  // are never cached, and the underlying `fetchAllNetworks` uses
+  // Promise.allSettled internally so it won't throw). Guard anyway in case a
+  // truly unexpected error bubbles up; an undefined initial payload just
+  // reverts to the client-only code path.
+  const initialPayload = await fetchInitialNetworkData().catch(() => undefined);
+  return (
+    <GlobalPage
+      initialNetworkData={initialPayload?.networks}
+      initialNetworkDataFetchedAtMs={initialPayload?.fetchedAtMs}
+    />
+  );
 }
