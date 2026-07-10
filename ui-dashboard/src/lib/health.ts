@@ -279,7 +279,7 @@ export function isOracleFresh(
   return evaluatedAt - oracleTs <= stalenessThreshold;
 }
 
-function confirmedFreshnessCheckedAt(pool: {
+export function confirmedFreshnessCheckedAt(pool: {
   oracleFreshnessCheckedAt?: number | undefined;
 }): number | null {
   const checkedAt = pool.oracleFreshnessCheckedAt;

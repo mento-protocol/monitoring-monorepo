@@ -58,7 +58,7 @@ export const ALL_POOLS_WITH_HEALTH = `
 // only fields that can change the live Health badge and is polled every 30s.
 export const ALL_POOLS_LIVE_HEALTH = `
   query AllPoolsLiveHealth($chainId: Int!) {
-    Pool(where: { chainId: { _eq: $chainId } }) {
+    Pool(where: { chainId: { _eq: $chainId } }, limit: 1000) {
       id
       updatedAtBlock
       updatedAtTimestamp

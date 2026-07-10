@@ -706,6 +706,30 @@ describe("mergeLivePoolHealth", () => {
       message: "live health unavailable",
     });
   });
+
+  it("keeps a fleet-confirmed observation when the first live request fails", () => {
+    const basePool = makePool({ oracleFreshnessCheckedAt: 2_000 });
+    const failedSlice: LivePoolHealthSlice = {
+      networkId: "celo-mainnet",
+      pools: [],
+      error: new Error("live health unavailable"),
+    };
+
+    const merged = mergeLivePoolHealth(
+      [makeNetworkData("celo-mainnet", [basePool])],
+      [failedSlice],
+      false,
+    );
+
+    expect(merged[0]!.pools[0]).toMatchObject({
+      id: basePool.id,
+      oracleFreshnessCheckedAt: 2_000,
+    });
+    expect(merged[0]!.pools[0]!.oracleFreshnessCheckPending).toBeUndefined();
+    expect(merged[0]!.liveHealthError).toEqual({
+      message: "live health unavailable",
+    });
+  });
 });
 
 describe("retainLastSuccessfulLivePoolHealth", () => {

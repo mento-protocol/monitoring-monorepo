@@ -16,6 +16,7 @@ import { ALL_POOLS_LIVE_HEALTH } from "@/lib/queries";
 import { REQUEST_TIMEOUT_MS, type NetworkData } from "@/lib/fetch-all-networks";
 import { SWR_KEY_LIVE_POOL_HEALTH } from "@/lib/swr-keys";
 import { isVirtualPool, type Pool } from "@/lib/types";
+import { confirmedFreshnessCheckedAt } from "@/lib/health";
 
 /** Health needs a cadence shorter than the 5-6 minute oracle expiry. The
  * expensive snapshot/fee/LP fan-out remains on its existing 5 minute poll. */
@@ -25,6 +26,7 @@ let liveHealthReceiptSequence = 0;
 // deadline would be forgotten on navigation and immediately violate a
 // network's Retry-After instruction during mount revalidation.
 const liveHealthBackoffUntilByNetwork = new Map<IndexerNetworkId, number>();
+const liveHealthClientByUrl = new Map<string, GraphQLClient>();
 // A fleet payload keeps the same identity in SWR across `/` and `/pools`.
 // Remember its receipt order at cache scope so remounting cannot make that old
 // payload appear newer than a same-block live slice already in the shared SWR
@@ -42,6 +44,14 @@ function fleetReceiptSequence(networkData: NetworkData[]): number {
   const sequence = nextLiveHealthReceiptSequence();
   fleetReceiptSequenceByPayload.set(networkData, sequence);
   return sequence;
+}
+
+function liveHealthClient(hasuraUrl: string): GraphQLClient {
+  const cached = liveHealthClientByUrl.get(hasuraUrl);
+  if (cached) return cached;
+  const client = new GraphQLClient(hasuraUrl);
+  liveHealthClientByUrl.set(hasuraUrl, client);
+  return client;
 }
 
 export type LivePoolHealthRow = AllPoolsLiveHealthQuery["Pool"][number] & {
@@ -79,7 +89,7 @@ async function fetchNetworkLivePoolHealth(
   }
 
   try {
-    const client = new GraphQLClient(network.hasuraUrl);
+    const client = liveHealthClient(network.hasuraUrl);
     const response = await client.request<AllPoolsLiveHealthQuery>({
       document: ALL_POOLS_LIVE_HEALTH,
       variables: { chainId: network.chainId },
@@ -162,8 +172,7 @@ function compareLiveCursor(
 function hasConfirmedFreshnessCheck(pool: {
   oracleFreshnessCheckedAt?: number | undefined;
 }): boolean {
-  const checkedAt = pool.oracleFreshnessCheckedAt;
-  return checkedAt !== undefined && Number.isFinite(checkedAt) && checkedAt > 0;
+  return confirmedFreshnessCheckedAt(pool) !== null;
 }
 
 /** A refresh failure, omission, or regressed row is degradation metadata, not
