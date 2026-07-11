@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.mock is hoisted above `const` declarations, so defining the test
 // fixtures inside vi.hoisted keeps the mock factory + the test bodies
@@ -136,6 +136,10 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("fetchHomepageOgDataUncached", () => {
   it("aggregates TVL and pool count across chains", async () => {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -259,6 +263,111 @@ describe("fetchHomepageOgDataUncached", () => {
     expect(result!.attentionPools[0]!.health).toBe("CRITICAL");
     expect(result!.attentionPools[0]!.chainLabel).toBe("Celo");
     expect(result!.attentionPools[1]!.health).toBe("WARN");
+  });
+
+  it("keeps primary oracle health at its own query observation time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const observedAt = Math.floor(Date.now() / 1000);
+    const celoPool = makePool(
+      42220,
+      POOL_CELO,
+      ADDR_USDM_CELO,
+      ADDR_CUSD_CELO,
+      { oracleTimestamp: String(observedAt - 240) },
+    );
+    routeByChain({
+      42220: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) {
+          vi.advanceTimersByTime(600_000);
+          return { PoolDailySnapshot: [] };
+        }
+        if (doc.includes("AllPoolsWithHealth")) return { Pool: [celoPool] };
+        return { Pool: [] };
+      },
+      143: () => ({ Pool: [] }),
+    });
+
+    const result = await fetchHomepageOgDataUncached();
+
+    expect(result).not.toBeNull();
+    expect(result!.healthBuckets.OK).toBe(1);
+    expect(result!.healthBuckets.CRITICAL).toBe(0);
+  });
+
+  it("uses the VP extension's atomic oracle snapshot for health buckets", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const virtualPool = makePool(
+      42220,
+      POOL_CELO,
+      ADDR_USDM_CELO,
+      ADDR_CUSD_CELO,
+      {
+        source: "virtual_pool_factory",
+        wrappedExchangeId: "0xexchange",
+        oracleTimestamp: String(nowSec - 600),
+        oracleNumReporters: 0,
+        tokenDecimalsKnown: false,
+      },
+    );
+    routeByChain({
+      42220: (doc) => {
+        if (doc.includes("AllPoolsVpOracleFreshness")) {
+          return {
+            Pool: [
+              {
+                id: POOL_CELO,
+                oracleTimestamp: String(nowSec - 30),
+                oracleNumReporters: 2,
+                tokenDecimalsKnown: true,
+                lastOracleReportAt: String(nowSec - 30),
+                medianLive: true,
+                oracleFreshnessWindow: "300",
+              },
+            ],
+          };
+        }
+        if (doc.includes("AllPoolsVpDeprecation")) {
+          return {
+            BiPoolExchange: [
+              {
+                wrappedByPoolId: POOL_CELO,
+                isDeprecated: false,
+                minimumReports: "1",
+              },
+            ],
+          };
+        }
+        if (doc.includes("AllPoolsVpLifecycleDeprecation")) {
+          return { VirtualPoolLifecycle: [] };
+        }
+        if (doc.includes("AllPoolsRebalanceThresholdsKnown")) {
+          return {
+            Pool: [
+              {
+                id: POOL_CELO,
+                tokenDecimalsKnown: true,
+                rebalanceThresholdsKnown: true,
+              },
+            ],
+          };
+        }
+        if (doc.includes("PoolDailySnapshot")) {
+          return { PoolDailySnapshot: [] };
+        }
+        if (doc.includes("AllPoolsWithHealth")) {
+          return { Pool: [virtualPool] };
+        }
+        return { Pool: [] };
+      },
+      143: () => ({ Pool: [] }),
+    });
+
+    const result = await fetchHomepageOgDataUncached();
+
+    expect(result).not.toBeNull();
+    expect(result!.healthBuckets["N/A"]).toBe(1);
+    expect(result!.healthBuckets.CRITICAL).toBe(0);
   });
 
   it("flags partial when ALL_POOLS_WITH_HEALTH succeeds but the trust-flag EXT query fails (cursor #3215044221)", async () => {

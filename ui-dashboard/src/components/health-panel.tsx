@@ -177,9 +177,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const computed = computeHealthStatus(pool, network.chainId);
   const showHalted = computed === "HALTED";
   const showVirtualOracleMedianIncident =
-    isVirtual &&
-    pool.wrappedExchangeDeprecated !== true &&
-    isVirtualPoolMedianInvalid(pool);
+    isVirtual && computed === "CRITICAL" && isVirtualPoolMedianInvalid(pool);
   const showVirtualOracleIncident =
     isVirtual && computed === "CRITICAL" && !showVirtualOracleMedianIncident;
   const showWeekendPause =

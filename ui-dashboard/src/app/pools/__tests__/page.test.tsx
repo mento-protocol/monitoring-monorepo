@@ -200,6 +200,27 @@ beforeEach(() => {
 });
 
 describe("PoolsPage multichain rendering", () => {
+  it("keeps pools visible and discloses a live-health refresh failure", () => {
+    vi.mocked(useAllNetworksData).mockReturnValue({
+      ...baseAllNetworksResult,
+      networkData: baseAllNetworksResult.networkData.map((data, index) =>
+        index === 0
+          ? {
+              ...data,
+              liveHealthError: { message: "health timeout" },
+            }
+          : data,
+      ),
+    });
+    vi.mocked(useGQL).mockReturnValue(baseSwapsResult as SWRResponse);
+
+    const html = renderToStaticMarkup(<PoolsPage />);
+
+    expect(html).toContain("Live pool health refresh failed");
+    expect(html).toContain("showing the last confirmed state");
+    expect(html).toContain('data-testid="global-pools-table"');
+  });
+
   it("renders GlobalPoolsTable with entries from every configured chain", () => {
     vi.mocked(useGQL).mockImplementation((): SWRResponse => {
       return {

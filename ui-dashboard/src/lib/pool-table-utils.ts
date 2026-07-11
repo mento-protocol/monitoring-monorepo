@@ -1,8 +1,4 @@
-import {
-  isVirtualPoolMedianInvalid,
-  ORACLE_STALE_SECONDS_BY_CHAIN,
-  oracleFreshnessTimestamp,
-} from "@/lib/health";
+import { isOracleFresh, isVirtualPoolMedianInvalid } from "@/lib/health";
 import type { Network } from "@/lib/networks";
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
@@ -58,17 +54,13 @@ function healthTooltip(
 ): string {
   const staticText = STATIC_HEALTH_TOOLTIP[status];
   if (staticText) return staticText;
-  const oracleTs = oracleFreshnessTimestamp(p);
-  // Mirror computeHealthStatus: use the indexed per-feed expiry, falling back to the
-  // per-chain default so the tooltip root-cause matches the badge on non-300s networks.
-  const chainFallback =
-    (chainId !== undefined
-      ? ORACLE_STALE_SECONDS_BY_CHAIN[chainId]
-      : undefined) ?? 300;
-  const stalenessThreshold = Number(p.oracleExpiry ?? "0") || chainFallback;
-  const isOracleStale =
-    oracleTs === 0 ||
-    (nowSeconds !== null && nowSeconds - oracleTs > stalenessThreshold);
+  // Reuse the badge's observation-time semantics so a cached row cannot yield
+  // an "Oracle stale" tooltip while the badge is waiting on its live recheck.
+  const isOracleStale = !isOracleFresh(
+    p,
+    nowSeconds ?? Math.floor(Date.now() / 1000),
+    chainId,
+  );
   if (status === "CRITICAL") {
     return criticalHealthTooltip({
       pool: p,

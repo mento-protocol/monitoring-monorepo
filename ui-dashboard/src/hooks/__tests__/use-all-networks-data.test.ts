@@ -7,9 +7,14 @@ import {
   SSR_FRESH_ENOUGH_MS,
   warnedCapKeys,
   partialPageLastCapturedAt,
+  retainConfirmedVpExtensions,
 } from "../use-all-networks-data";
 import type { Network } from "@/lib/networks";
-import { isNetworkDataFullyHealthy } from "@/lib/fetch-all-networks";
+import { computeHealthStatus } from "@/lib/health";
+import {
+  isNetworkDataFullyHealthy,
+  type NetworkData,
+} from "@/lib/fetch-all-networks";
 import type { Pool } from "@/lib/types";
 
 const { mockDetectProbedStrategies } = vi.hoisted(() => ({
@@ -83,6 +88,160 @@ function makePool(id: string, chainId: number = 42220): Pool {
     updatedAtTimestamp: "2000",
   };
 }
+
+describe("retainConfirmedVpExtensions", () => {
+  it("keeps a retired VirtualPool monotonic across a partial fleet response", () => {
+    const retired = {
+      ...makePool("42220-0xretired"),
+      source: "virtual_pool",
+      wrappedExchangeDeprecated: true,
+      wrappedExchangeMinimumReports: "2",
+    };
+    const current = {
+      network: MOCK_NETWORK,
+      pools: [{ ...retired, wrappedExchangeDeprecated: undefined }],
+      liveHealthError: null,
+    } as NetworkData;
+    const previous = {
+      network: MOCK_NETWORK,
+      pools: [retired],
+    } as NetworkData;
+
+    const [retained] = retainConfirmedVpExtensions([current], [previous]);
+
+    expect(retained?.pools[0]).toMatchObject({
+      wrappedExchangeDeprecated: true,
+      wrappedExchangeMinimumReports: "2",
+    });
+    expect(retained?.liveHealthError?.message).toContain(
+      "did not reconfirm 1 VirtualPool extension",
+    );
+    expect(retained?.liveHealthErrorClearsOnLivePoll).toBe(false);
+  });
+
+  it("retains active VirtualPool quorum configuration across an omission", () => {
+    const active = {
+      ...makePool("42220-0xactive"),
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      wrappedExchangeMinimumReports: "2",
+      medianLive: true,
+      oracleFreshnessWindow: "300",
+      vpOracleTimestamp: "1000",
+      vpOracleNumReporters: 1,
+      vpTokenDecimalsKnown: true,
+      vpOracleFreshnessCheckedAt: 1100,
+    };
+    const current = {
+      network: MOCK_NETWORK,
+      pools: [{ ...active, wrappedExchangeMinimumReports: undefined }],
+      liveHealthError: null,
+    } as NetworkData;
+    const previous = {
+      network: MOCK_NETWORK,
+      pools: [active],
+    } as NetworkData;
+
+    const [retained] = retainConfirmedVpExtensions([current], [previous]);
+    const pool = retained?.pools[0];
+
+    expect(pool?.wrappedExchangeMinimumReports).toBe("2");
+    expect(computeHealthStatus(pool!, 42220, 9_999)).toBe("CRITICAL");
+    expect(retained?.liveHealthError?.message).toContain(
+      "did not reconfirm 1 VirtualPool extension",
+    );
+    expect(retained?.liveHealthErrorClearsOnLivePoll).toBe(false);
+  });
+
+  it("marks freshness-only retention recoverable by the lightweight live poll", () => {
+    const confirmed = {
+      ...makePool("42220-0xfreshness"),
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      vpDeprecationKnown: true,
+      wrappedExchangeMinimumReports: "2",
+      vpHealthUpdatedAtBlock: "4",
+      vpOracleTimestamp: "2050",
+      vpOracleNumReporters: 3,
+      vpTokenDecimalsKnown: true,
+      vpOracleFreshnessCheckedAt: 2120,
+      medianLive: true,
+      oracleFreshnessWindow: "300",
+    };
+    const current = {
+      network: MOCK_NETWORK,
+      pools: [
+        {
+          ...confirmed,
+          vpHealthUpdatedAtBlock: undefined,
+          vpOracleFreshnessCheckedAt: undefined,
+        },
+      ],
+    } as NetworkData;
+    const previous = {
+      network: MOCK_NETWORK,
+      pools: [confirmed],
+    } as NetworkData;
+
+    const [retained] = retainConfirmedVpExtensions([current], [previous]);
+
+    expect(retained?.pools[0]?.vpHealthUpdatedAtBlock).toBe("4");
+    expect(retained?.liveHealthErrorClearsOnLivePoll).toBe(true);
+  });
+
+  it("retains the atomic VP group and trust across a regressed fleet row", () => {
+    const confirmed = {
+      ...makePool("42220-0xconfirmed"),
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      vpDeprecationKnown: true,
+      wrappedExchangeMinimumReports: "2",
+      vpHealthUpdatedAtBlock: "4",
+      vpOracleTimestamp: "2050",
+      vpOracleNumReporters: 3,
+      vpTokenDecimalsKnown: true,
+      vpOracleFreshnessCheckedAt: 2120,
+      lastOracleReportAt: "2050",
+      medianLive: true,
+      oracleFreshnessWindow: "300",
+    };
+    const regressed = {
+      ...confirmed,
+      vpDeprecationKnown: false,
+      vpHealthUpdatedAtBlock: "3",
+      vpOracleTimestamp: "1200",
+      vpOracleNumReporters: 0,
+      vpTokenDecimalsKnown: false,
+      vpOracleFreshnessCheckedAt: 2200,
+      lastOracleReportAt: "1200",
+      medianLive: false,
+    };
+    const previous = {
+      network: MOCK_NETWORK,
+      pools: [confirmed],
+    } as NetworkData;
+    const current = {
+      network: MOCK_NETWORK,
+      pools: [regressed],
+      liveHealthError: { message: "VirtualPool health refresh failed" },
+    } as NetworkData;
+
+    const [retained] = retainConfirmedVpExtensions([current], [previous]);
+
+    expect(retained?.pools[0]).toMatchObject({
+      vpDeprecationKnown: true,
+      vpHealthUpdatedAtBlock: "4",
+      vpOracleTimestamp: "2050",
+      vpOracleNumReporters: 3,
+      vpTokenDecimalsKnown: true,
+      vpOracleFreshnessCheckedAt: 2120,
+      medianLive: true,
+    });
+    expect(retained?.liveHealthError?.message).toBe(
+      "VirtualPool health refresh failed",
+    );
+  });
+});
 
 // Mock graphql-request
 

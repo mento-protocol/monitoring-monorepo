@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import {
   fetchAllNetworks,
@@ -9,12 +10,125 @@ import {
 } from "@/lib/fetch-all-networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import { SWR_KEY_ALL_NETWORKS_DATA } from "@/lib/swr-keys";
+import { useLivePoolHealth } from "@/hooks/use-live-pool-health";
 
 type AllNetworksResult = {
   networkData: NetworkData[];
   isLoading: boolean;
   error: Error | null;
 };
+
+const EMPTY_NETWORK_DATA: NetworkData[] = [];
+
+function vpCursorRegressed(
+  current: string | undefined,
+  previous: string | undefined,
+): boolean {
+  if (previous === undefined) return false;
+  if (
+    current === undefined ||
+    !/^\d+$/.test(current) ||
+    !/^\d+$/.test(previous)
+  ) {
+    return true;
+  }
+  return BigInt(current) < BigInt(previous);
+}
+
+/** Preserve last-confirmed VirtualPool extension groups when a later fleet
+ * fan-out rejects or omits a companion entity. The oracle fields are one
+ * atomic observation, deprecation is monotonic, and wrapper quorum config is
+ * health-critical; losing any of them must disclose degradation instead of
+ * changing the pool's classification. */
+export function retainConfirmedVpExtensions(
+  current: NetworkData[],
+  previous: NetworkData[] | undefined,
+): NetworkData[] {
+  if (previous === undefined) return current;
+  const previousByNetwork = new Map(
+    previous.map((data) => [data.network.id, data] as const),
+  );
+  return current.map((data) => {
+    const prior = previousByNetwork.get(data.network.id);
+    if (!prior) return data;
+    const priorPools = new Map(prior.pools.map((pool) => [pool.id, pool]));
+    let retainedCount = 0;
+    let retainedFleetRefreshSignalCount = 0;
+    const pools = data.pools.map((pool) => {
+      const previousPool = priorPools.get(pool.id);
+      if (!previousPool) return pool;
+      const retainDeprecation =
+        previousPool.wrappedExchangeDeprecated === true &&
+        pool.wrappedExchangeDeprecated !== true;
+      const retainMinimumReports =
+        previousPool.wrappedExchangeMinimumReports !== undefined &&
+        pool.wrappedExchangeMinimumReports === undefined;
+      const retainDeprecationTrust =
+        previousPool.vpDeprecationKnown === true &&
+        pool.vpDeprecationKnown !== true;
+      const retainFreshness =
+        previousPool.vpOracleFreshnessCheckedAt !== undefined &&
+        (pool.vpOracleFreshnessCheckedAt === undefined ||
+          vpCursorRegressed(
+            pool.vpHealthUpdatedAtBlock,
+            previousPool.vpHealthUpdatedAtBlock,
+          ));
+      if (
+        !retainDeprecation &&
+        !retainMinimumReports &&
+        !retainDeprecationTrust &&
+        !retainFreshness
+      ) {
+        return pool;
+      }
+      retainedCount += 1;
+      retainedFleetRefreshSignalCount += [
+        retainDeprecation,
+        retainMinimumReports,
+        retainDeprecationTrust,
+      ].filter(Boolean).length;
+      return {
+        ...pool,
+        ...(retainDeprecation ? { wrappedExchangeDeprecated: true } : {}),
+        ...(retainDeprecationTrust ? { vpDeprecationKnown: true } : {}),
+        ...(retainMinimumReports
+          ? {
+              wrappedExchangeMinimumReports:
+                previousPool.wrappedExchangeMinimumReports,
+            }
+          : {}),
+        ...(retainFreshness
+          ? {
+              lastOracleReportAt: previousPool.lastOracleReportAt,
+              medianLive: previousPool.medianLive,
+              oracleFreshnessWindow: previousPool.oracleFreshnessWindow,
+              vpHealthUpdatedAtBlock: previousPool.vpHealthUpdatedAtBlock,
+              vpOracleTimestamp: previousPool.vpOracleTimestamp,
+              vpOracleNumReporters: previousPool.vpOracleNumReporters,
+              vpTokenDecimalsKnown: previousPool.vpTokenDecimalsKnown,
+              vpOracleFreshnessCheckedAt:
+                previousPool.vpOracleFreshnessCheckedAt,
+            }
+          : {}),
+      };
+    });
+    if (retainedCount === 0) return data;
+    return {
+      ...data,
+      pools,
+      liveHealthError:
+        data.liveHealthError ??
+        ({
+          message: `Pool health response did not reconfirm ${retainedCount} VirtualPool extension${retainedCount === 1 ? "" : "s"}`,
+        } as const),
+      liveHealthErrorClearsOnLivePoll:
+        retainedFleetRefreshSignalCount === 0 &&
+        (data.liveHealthError === null ||
+          data.liveHealthError === undefined ||
+          data.liveHealthErrorClearsOnLivePoll === true),
+    };
+  });
+}
 
 /**
  * SSR payloads younger than this skip mount revalidation entirely (first
@@ -119,9 +233,17 @@ export function useAllNetworksData(
     seedIncrementalRowCacheFromNetworkData(fallbackData);
   }
 
+  const fetcher = useCallback(async () => {
+    const current = await fetchAllNetworks();
+    const cached = cache.get(SWR_KEY_ALL_NETWORKS_DATA)?.data;
+    const previous = Array.isArray(cached)
+      ? (cached as NetworkData[])
+      : fallbackData;
+    return retainConfirmedVpExtensions(current, previous);
+  }, [cache, fallbackData]);
   const { data, error, isLoading } = useSWR<NetworkData[]>(
     SWR_KEY_ALL_NETWORKS_DATA,
-    fetchAllNetworks,
+    fetcher,
     {
       ...SHARED_QUERY_SWR_CONFIG,
       ...(fallbackData !== undefined && { fallbackData }),
@@ -136,11 +258,12 @@ export function useAllNetworksData(
         : { revalidateOnMount: true }),
     },
   );
+  const liveHealth = useLivePoolHealth(data ?? EMPTY_NETWORK_DATA);
 
   return {
-    networkData: data ?? [],
+    networkData: liveHealth.networkData,
     isLoading,
-    error: error instanceof Error ? error : null,
+    error: error instanceof Error ? error : liveHealth.error,
   };
 }
 

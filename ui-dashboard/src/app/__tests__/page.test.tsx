@@ -166,6 +166,19 @@ describe("GlobalPage — all networks succeed", () => {
 // Network-level failure (pools query fails)
 
 describe("GlobalPage — network-level failure", () => {
+  it("keeps the table visible and discloses a live-health refresh failure", () => {
+    const html = render([
+      makeNetworkData({
+        pools: [makePool("pool-1")],
+        liveHealthError: new Error("health timeout"),
+      }),
+    ]);
+
+    expect(html).toContain("Live pool health refresh failed");
+    expect(html).toContain("showing the last confirmed state");
+    expect(html).toContain('data-testid="global-pools-table"');
+  });
+
   it("shows 'partial data' subtitle on pools and TVL tiles", () => {
     const html = render([
       makeNetworkData({ error: new Error("mainnet down") }),

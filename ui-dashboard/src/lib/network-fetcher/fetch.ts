@@ -15,11 +15,15 @@ import {
   type SnapshotWindows,
   type TimeRange,
 } from "@/lib/volume";
-import type { Pool } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
 import { isFpmm } from "@/lib/tokens";
 import type { NetworkData, SerializableError } from "./types";
 import { mergePoolSources } from "./merge-pools";
-import { fetchNetworkSources, type TimedRequest } from "./sources";
+import {
+  fetchNetworkSources,
+  type NetworkSources,
+  type TimedRequest,
+} from "./sources";
 import {
   resolveStrategyIds,
   resolveStrategyError,
@@ -57,6 +61,7 @@ export {
 export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
   return (
     n.error === null &&
+    n.liveHealthError == null &&
     n.ratesError === null &&
     n.feeSnapshotsError === null &&
     n.snapshotsError === null &&
@@ -104,6 +109,7 @@ export const blankNetworkData = (
   uniqueLpAddressesTruncated: false,
   rates: new Map(),
   error: null,
+  liveHealthError: null,
   snapshotsError: null,
   snapshots7dError: null,
   snapshots30dError: null,
@@ -118,6 +124,52 @@ const emptyNetworkData = (
   snapshotWindows: SnapshotWindows,
   error: Error,
 ): NetworkData => blankNetworkData(network, snapshotWindows, { error });
+
+function withVirtualPoolHealthError(
+  assembled: NetworkData,
+  sources: Pick<
+    NetworkSources,
+    "vpOracleFreshness" | "vpDeprecation" | "vpLifecycleDeprecation"
+  >,
+): NetworkData {
+  const virtualPools = assembled.pools.filter(isVirtualPool);
+  if (virtualPools.length === 0) return assembled;
+  const freshnessFailure = sources.vpOracleFreshness.status === "rejected";
+  const deprecationFailure =
+    sources.vpDeprecation.status === "rejected" ||
+    sources.vpLifecycleDeprecation.status === "rejected";
+  const extensionFailure = [
+    sources.vpOracleFreshness,
+    sources.vpDeprecation,
+    sources.vpLifecycleDeprecation,
+  ].find((result) => result.status === "rejected");
+  const unconfirmedFreshnessCount = virtualPools.filter(
+    (pool) => pool.vpOracleFreshnessCheckedAt === undefined,
+  ).length;
+  const unconfirmedDeprecationCount = virtualPools.filter(
+    (pool) => pool.vpDeprecationKnown === false,
+  ).length;
+  const unconfirmedPoolCount = virtualPools.filter(
+    (pool) =>
+      pool.vpOracleFreshnessCheckedAt === undefined ||
+      pool.vpDeprecationKnown === false,
+  ).length;
+  if (extensionFailure?.status !== "rejected" && unconfirmedPoolCount === 0) {
+    return assembled;
+  }
+  const message =
+    extensionFailure?.status === "rejected"
+      ? `VirtualPool health refresh failed: ${extensionFailure.reason instanceof Error ? extensionFailure.reason.message : String(extensionFailure.reason)}`
+      : `VirtualPool health response did not confirm ${unconfirmedPoolCount} displayed pool${unconfirmedPoolCount === 1 ? "" : "s"}`;
+  return {
+    ...assembled,
+    liveHealthError: { message },
+    liveHealthErrorClearsOnLivePoll:
+      (freshnessFailure || unconfirmedFreshnessCount > 0) &&
+      !deprecationFailure &&
+      unconfirmedDeprecationCount === 0,
+  };
+}
 
 /** @internal Exported for testing only. */
 export async function fetchNetworkData(
@@ -142,11 +194,13 @@ export async function fetchNetworkData(
     });
 
   let pools: Pool[];
+  let oracleFreshnessCheckedAt: number;
   try {
     const poolsRes = await timed<{ Pool: Pool[] }>(
       ALL_POOLS_WITH_HEALTH,
       chainVariables,
     );
+    oracleFreshnessCheckedAt = Date.now() / 1000;
     pools = poolsRes.Pool ?? [];
   } catch (err) {
     return emptyNetworkData(
@@ -174,7 +228,14 @@ export async function fetchNetworkData(
   // Merge the isolated per-source fields into the pool objects. On failure
   // (including the phased-rollout "field not found" window) each merge
   // leaves its fields undefined and the corresponding UI falls back to "—".
-  pools = mergePoolSources(pools, sources);
+  // The primary oracle fields and each isolated extension query were observed
+  // independently. `mergePoolSources` records each extension's indexer block
+  // so the live overlay can merge the three field groups without rolling any
+  // of them backward.
+  pools = mergePoolSources(pools, sources).map((pool) => ({
+    ...pool,
+    oracleFreshnessCheckedAt,
+  }));
 
   const { cdpPoolIds, reservePoolIds } = resolveStrategyIds({
     network,
@@ -189,7 +250,7 @@ export async function fetchNetworkData(
     fallbackStrategiesResult: sources.fallbackStrategies,
   });
 
-  return assembleNetworkData({
+  const assembled = assembleNetworkData({
     network,
     windows,
     pools,
@@ -203,6 +264,7 @@ export async function fetchNetworkData(
     reservePoolIds,
     strategyError,
   });
+  return withVirtualPoolHealthError(assembled, sources);
 }
 
 /**
@@ -227,6 +289,7 @@ function withSerializableErrors(data: NetworkData): NetworkData {
   return {
     ...data,
     error: toSerializableError(data.error),
+    liveHealthError: toSerializableError(data.liveHealthError ?? null),
     ratesError: toSerializableError(data.ratesError),
     feeSnapshotsError: toSerializableError(data.feeSnapshotsError),
     snapshotsError: toSerializableError(data.snapshotsError),

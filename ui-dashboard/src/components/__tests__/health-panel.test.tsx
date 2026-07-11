@@ -176,6 +176,27 @@ describe("HealthPanel weekend mode", () => {
     expect(html).not.toContain("fresh oracle report within");
   });
 
+  it("stays neutral while VirtualPool deprecation state is unconfirmed", () => {
+    const virtualPool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId: "0xexchange",
+      vpDeprecationKnown: false,
+      oracleTimestamp: FRESH_TS,
+      oracleFreshnessWindow: "300",
+      tokenDecimalsKnown: true,
+      medianLive: false,
+      oracleNumReporters: 0,
+      wrappedExchangeMinimumReports: "1",
+    };
+
+    const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
+
+    expect(html).not.toContain("VirtualPool median or quorum is invalid");
+    expect(html).not.toContain("VirtualPool oracle is stale");
+    expect(html).toContain("VirtualPool oracle freshness is monitored");
+  });
+
   it("keeps stale VirtualPool weekend closures on the weekend explanation", async () => {
     const weekend = await import("@/lib/weekend");
     vi.mocked(weekend.isWeekend).mockReturnValue(true);

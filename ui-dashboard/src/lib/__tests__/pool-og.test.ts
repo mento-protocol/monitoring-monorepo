@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/networks", () => {
   const network = {
@@ -86,6 +86,10 @@ function makeDetailPool(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("fetchPoolOgDataUncached", () => {
@@ -271,6 +275,34 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result).not.toBeNull();
     expect(result!.oracleFresh).toBe(false);
     expect(result!.oracleAgeSeconds).toBeGreaterThanOrEqual(3600);
+  });
+
+  it("keeps FPMM health at the detail query's observation time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const observedAt = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool({
+      oracleTimestamp: String(observedAt - 240),
+    });
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((arg: string | { document: string }) => {
+      const query = typeof arg === "string" ? arg : arg.document;
+      if (query.includes("PoolDailySnapshot")) {
+        return new Promise((resolve) => {
+          setTimeout(() => resolve({ PoolDailySnapshot: [] }), 600_000);
+        });
+      }
+      return Promise.resolve({ Pool: [detailPool] });
+    });
+
+    const resultPromise = fetchPoolOgDataUncached(POOL_ID);
+    await vi.advanceTimersByTimeAsync(600_000);
+    const result = await resultPromise;
+
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("OK");
+    expect(result!.oracleFresh).toBe(true);
   });
 
   it("preserves volume7dUsd=0 as a real state (not collapsed with null)", async () => {
@@ -483,7 +515,7 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.volumeSeries).toEqual([]);
   });
 
-  it("merges VP freshness extension before computing OG health", async () => {
+  it("uses the VP extension's atomic oracle snapshot for OG health", async () => {
     const nowSec = Math.floor(Date.now() / 1000);
     const virtualPool = makeDetailPool({
       source: "virtual_pool_factory",
@@ -500,7 +532,10 @@ describe("fetchPoolOgDataUncached", () => {
           Pool: [
             {
               id: POOL_ID,
-              lastOracleReportAt: String(nowSec - 600),
+              oracleTimestamp: String(nowSec - 30),
+              oracleNumReporters: 2,
+              tokenDecimalsKnown: true,
+              lastOracleReportAt: String(nowSec - 30),
               medianLive: true,
               oracleFreshnessWindow: "300",
             },
@@ -520,7 +555,9 @@ describe("fetchPoolOgDataUncached", () => {
 
     const result = await fetchPoolOgDataUncached(POOL_ID);
     expect(result).not.toBeNull();
-    expect(result!.health).toBe("CRITICAL");
+    // The primary Pool response was stale, while the extension observed the
+    // freshly reported timestamp and its quorum/trust inputs atomically.
+    expect(result!.health).toBe("N/A");
   });
 
   it("uses medianLive from the VP extension before computing OG health", async () => {

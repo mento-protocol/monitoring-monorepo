@@ -25,9 +25,14 @@ export type PoolThresholdsKnownExtResponse = {
 
 export type PoolVpOracleFreshnessExtRow = {
   id: string;
+  oracleTimestamp?: string | undefined;
+  oracleNumReporters?: number | undefined;
+  tokenDecimalsKnown?: boolean | undefined;
   lastOracleReportAt?: string | undefined;
   medianLive?: boolean | undefined;
   oracleFreshnessWindow?: string | undefined;
+  /** Client/server observation metadata; not part of the GraphQL selection. */
+  vpOracleFreshnessCheckedAt?: number | undefined;
 };
 export type PoolVpOracleFreshnessExtResponse = {
   Pool: PoolVpOracleFreshnessExtRow[];
@@ -111,10 +116,15 @@ export const POOL_THRESHOLDS_KNOWN_EXT = `
 // Single-pool sibling of `ALL_POOLS_VP_ORACLE_FRESHNESS`. Kept separate from
 // POOL_THRESHOLDS_KNOWN_EXT so new VP freshness schema-lag cannot drop
 // unrelated trust/threshold fields.
+// Keep the timestamp, quorum inputs, and freshness window in one Pool snapshot
+// so the client observation time never certifies fields from an older query.
 export const POOL_VP_ORACLE_FRESHNESS_EXT = `
   query PoolVpOracleFreshnessExt($id: String!, $chainId: Int!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
       id
+      oracleTimestamp
+      oracleNumReporters
+      tokenDecimalsKnown
       lastOracleReportAt
       medianLive
       oracleFreshnessWindow

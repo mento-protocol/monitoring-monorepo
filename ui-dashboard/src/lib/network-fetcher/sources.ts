@@ -35,6 +35,7 @@ import {
 import type {
   BrokerDailySnapshotRow,
   OlsPoolsResult,
+  ObservedResult,
   PaginatedPageResult,
   PoolBreachRollupResult,
   PoolHealthCursorResult,
@@ -61,7 +62,9 @@ export type NetworkSources = {
   breachRollup: PromiseSettledResult<PoolBreachRollupResult>;
   healthCursor: PromiseSettledResult<PoolHealthCursorResult>;
   rebalanceThresholdsKnown: PromiseSettledResult<PoolRebalanceThresholdsKnownResult>;
-  vpOracleFreshness: PromiseSettledResult<PoolsVpOracleFreshnessResult>;
+  vpOracleFreshness: PromiseSettledResult<
+    ObservedResult<PoolsVpOracleFreshnessResult>
+  >;
   vpDeprecation: PromiseSettledResult<VpExchangeDeprecationResult>;
   vpLifecycleDeprecation: PromiseSettledResult<VpLifecycleDeprecationResult>;
   indexedCdpPools: PromiseSettledResult<CdpPoolsResponse>;
@@ -111,7 +114,7 @@ function buildSourcePromises(
   Promise<PoolBreachRollupResult>,
   Promise<PoolHealthCursorResult>,
   Promise<PoolRebalanceThresholdsKnownResult>,
-  Promise<PoolsVpOracleFreshnessResult>,
+  Promise<ObservedResult<PoolsVpOracleFreshnessResult>>,
   Promise<VpExchangeDeprecationResult>,
   Promise<VpLifecycleDeprecationResult>,
   Promise<CdpPoolsResponse>,
@@ -169,10 +172,12 @@ function buildSourcePromises(
       chainVariables,
     ),
     // Isolate VP freshness so schema lag drops only VP staleness state.
-    timed<PoolsVpOracleFreshnessResult>(
-      ALL_POOLS_VP_ORACLE_FRESHNESS,
-      chainVariables,
-    ),
+    Promise.resolve(
+      timed<PoolsVpOracleFreshnessResult>(
+        ALL_POOLS_VP_ORACLE_FRESHNESS,
+        chainVariables,
+      ),
+    ).then((data) => ({ data, checkedAt: Date.now() / 1000 })),
     timed<VpExchangeDeprecationResult>(
       ALL_POOLS_VP_DEPRECATION,
       chainVariables,

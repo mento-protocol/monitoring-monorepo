@@ -48,6 +48,32 @@ export type Pool = {
   oracleOk?: boolean | undefined;
   oraclePrice?: string | undefined;
   oracleTimestamp?: string | undefined;
+  /** Client-side observation time for the oracle row. Freshness is evaluated
+   *  at this timestamp instead of continuously aging a cached row against the
+   *  wall clock; the next poll is responsible for confirming staleness. */
+  oracleFreshnessCheckedAt?: number | undefined;
+  /** Indexer row version observed by the isolated threshold/breaker query.
+   * Kept separate from `updatedAtBlock` because the two queries can complete
+   * in either order during the slower fleet fan-out. */
+  thresholdHealthUpdatedAtBlock?: string | undefined;
+  /** Indexer row version observed by the isolated VirtualPool freshness
+   * query. A live overlay may replace this field group only at this block or
+   * later. */
+  vpHealthUpdatedAtBlock?: string | undefined;
+  /** Completion time of the isolated VirtualPool freshness observation.
+   * Retained VP rows are evaluated at this time, not continuously aged during
+   * a failed refresh. */
+  vpOracleFreshnessCheckedAt?: number | undefined;
+  /** Atomic VirtualPool health inputs from the isolated VP freshness query.
+   * Kept separate from primary/threshold fields because those queries can
+   * complete at different Pool row versions. */
+  vpOracleTimestamp?: string | undefined;
+  vpOracleNumReporters?: number | undefined;
+  vpTokenDecimalsKnown?: boolean | undefined;
+  /** True while a cached SSR/fleet row is being checked by the first live
+   *  health request. Only locally inferred timestamp staleness is suppressed;
+   *  explicit oracle/median failures still surface immediately. */
+  oracleFreshnessCheckPending?: boolean | undefined;
   lastOracleReportAt?: string | undefined;
   medianLive?: boolean | undefined;
   oracleTxHash?: string | undefined;
@@ -98,6 +124,10 @@ export type Pool = {
   // destroyed/deprecated, so stale oracle incidents are expected and should not
   // render as active-wrapper failures.
   wrappedExchangeDeprecated?: boolean | undefined;
+  /** True only after both wrapper and lifecycle deprecation sources have
+   * confirmed this VirtualPool's active/deprecated state. False means the
+   * attempted check was incomplete; absent preserves legacy callers. */
+  vpDeprecationKnown?: boolean | undefined;
   // Optional VP exchange extension. Minimum reporter count required by the
   // wrapped v2 exchange; used to mirror the bridge's median-validity signal in
   // dashboard health.

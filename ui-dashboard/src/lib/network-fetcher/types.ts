@@ -112,6 +112,13 @@ export type NetworkData = {
   uniqueLpAddressesTruncated: boolean;
   rates: OracleRateMap;
   error: SerializableError | null;
+  /** Failure of the lightweight 30s live-health overlay. Other dashboard data
+   * remains usable, but Health badges stay at their last confirmed state. */
+  liveHealthError?: SerializableError | null | undefined;
+  /** True only when every cause represented by `liveHealthError` is covered
+   * by the lightweight Pool poll. Deprecation and wrapper-quorum failures need
+   * the slower fleet companions to recover and must remain visible. */
+  liveHealthErrorClearsOnLivePoll?: boolean | undefined;
   /**
    * Failure of the oracle rates query for this network. With no rates,
    * any non-USD-pegged token (FX) silently mis-prices to "unpriced", so
@@ -173,6 +180,7 @@ export type PoolHealthCursorResult = {
 export type PoolRebalanceThresholdsKnownResult = {
   Pool: {
     id: string;
+    updatedAtBlock: string;
     rebalanceThresholdAbove?: number;
     rebalanceThresholdBelow?: number;
     rebalanceThresholdsKnown?: boolean;
@@ -185,10 +193,19 @@ export type PoolRebalanceThresholdsKnownResult = {
 export type PoolsVpOracleFreshnessResult = {
   Pool: {
     id: string;
+    updatedAtBlock: string;
+    oracleTimestamp?: string;
+    oracleNumReporters?: number;
+    tokenDecimalsKnown?: boolean;
     lastOracleReportAt?: string;
     medianLive?: boolean;
     oracleFreshnessWindow?: string;
   }[];
+};
+
+export type ObservedResult<T> = {
+  data: T;
+  checkedAt: number;
 };
 
 export type VpLifecycleDeprecationResult = {

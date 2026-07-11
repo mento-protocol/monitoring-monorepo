@@ -73,14 +73,14 @@
     "file": "src/app/page-client.tsx",
     "ruleId": "complexity",
     "message": "Arrow function has a complexity of 35. Maximum allowed is 15.",
-    "line": 167,
+    "line": 177,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
     "file": "src/app/page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 53 to the 18 allowed.",
-    "line": 167,
+    "line": 177,
     "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
   },
   {
@@ -129,7 +129,7 @@
     "file": "src/app/pool/[poolId]/_components/pool-detail-page-client.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'PoolTabPanel' has too many lines (122). Maximum allowed is 100.",
-    "line": 486,
+    "line": 504,
     "linePreview": " | function PoolTabPanel({ | tab,"
   },
   {
@@ -192,14 +192,14 @@
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'PoolsContent' has a complexity of 26. Maximum allowed is 15.",
-    "line": 55,
+    "line": 60,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent({ | initialNetworkData,"
   },
   {
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 24 to the 18 allowed.",
-    "line": 55,
+    "line": 60,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent({ | initialNetworkData,"
   },
   {
@@ -404,27 +404,6 @@
     "message": "Refactor this function to reduce its Cognitive Complexity from 30 to the 18 allowed.",
     "line": 274,
     "linePreview": " | export async function enrichBatch( | addresses: string[],"
-  },
-  {
-    "file": "src/lib/homepage-og.ts",
-    "ruleId": "complexity",
-    "message": "Async function 'fetchHomepageOgDataUncached' has a complexity of 35. Maximum allowed is 15.",
-    "line": 282,
-    "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
-  },
-  {
-    "file": "src/lib/homepage-og.ts",
-    "ruleId": "max-lines-per-function",
-    "message": "Async function 'fetchHomepageOgDataUncached' has too many lines (141). Maximum allowed is 100.",
-    "line": 282,
-    "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
-  },
-  {
-    "file": "src/lib/homepage-og.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 40 to the 18 allowed.",
-    "line": 282,
-    "linePreview": " | export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> { | const configuredChains = NETWORK_IDS.flatMap((id) => {"
   },
   {
     "file": "src/lib/protocol-fee-snapshots.ts",
