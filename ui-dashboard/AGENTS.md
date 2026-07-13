@@ -112,6 +112,20 @@ Other Vercel vars, Blob vars, cron secrets, and automation-bypass secrets are
 not needed for ordinary localhost UI review unless the task directly touches
 that route.
 
+For local **production-build** verification (`pnpm build` + `pnpm start`), three
+env facts differ from dev mode:
+
+- Only the `dev` script defaults `NEXT_PUBLIC_HASURA_URL` to the live Envio
+  endpoint — `next build`/`next start` do not, so bake it at **build** time or
+  the SSR payload and client queries are silently unconfigured.
+- Sentry only initializes when `VERCEL_ENV` is set at build time
+  (`next.config.ts` mirrors it into `NEXT_PUBLIC_VERCEL_ENV`; passing
+  `NEXT_PUBLIC_VERCEL_ENV` directly is overridden by that mirror). Use
+  `VERCEL_ENV=preview` plus a placeholder-format `NEXT_PUBLIC_SENTRY_DSN` to
+  verify Sentry-dependent behavior locally.
+- `.next/cache/fetch-cache` (the `unstable_cache` store) persists across
+  `next start` restarts — delete it to measure true cold-cache behavior.
+
 Production Sentry telemetry is tunneled through `/monitoring` (see
 `next.config.ts`). During production browser verification, a
 `POST /monitoring?...` 429 with an `x-sentry-rate-limits` response such as
