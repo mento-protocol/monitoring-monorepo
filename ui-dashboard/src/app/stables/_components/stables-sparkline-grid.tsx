@@ -31,11 +31,18 @@ const SPARKLINE_CARD_HEIGHT_PX = 142;
 const SPARKLINE_GRID_GAP_PX = 12; // gap-3
 const SPARKLINE_GRID_COLS = 4; // xl:grid-cols-4 — the audited 1440px viewport
 
-// Card count approximates the current production token×chain count. A
-// stables-specific token registry isn't statically derivable from
-// `@mento-protocol/config` today (`contractEntries()` enumerates pool
-// contracts, not per-source stable-supply rows), so this stays a plain
-// named constant instead of a config-derived count.
+// One skeleton card per rendered `(chainId, tokenAddress, source)` supply
+// row. That count is runtime-determined (`rollupByToken` over live snapshot
+// data) and NOT statically derivable in this package: the authoritative
+// registry is the indexer's STABLES set
+// (indexer-envio/src/handlers/stables/config.ts), a separate deploy artifact
+// the dashboard has no dependency edge to, and `@mento-protocol/config` only
+// exposes pool contracts, not per-source stable-supply rows. 20 matches the
+// live production card count (14 RESERVE + 6 V3_LIQUITY across Celo + Monad,
+// verified 2026-07-14 against the prod indexer); the registry's V3 hub USDm
+// carries no supply rows yet. A ±1-row drift as tokens launch is acceptable
+// (it beats the ~700px jump this skeleton removes) — re-count and bump when a
+// launch changes the row total.
 const SPARKLINE_SKELETON_CARDS = 20;
 const SPARKLINE_GRID_ROWS = Math.ceil(
   SPARKLINE_SKELETON_CARDS / SPARKLINE_GRID_COLS,

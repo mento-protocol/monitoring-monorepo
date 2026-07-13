@@ -331,7 +331,7 @@ describe("StablesChangesTable", () => {
       expect(rows!.children).toHaveLength(20);
     });
 
-    it("reserves the identical minHeight across loading, error, empty, and loaded-with-data branches", () => {
+    it("reserves the identical minHeight across the transitional loading, error, and empty branches", () => {
       const loading = renderBranch({
         events: [],
         isLoading: true,
@@ -347,19 +347,32 @@ describe("StablesChangesTable", () => {
         isLoading: false,
         hasError: false,
       });
-      const loaded = renderBranch({
-        events: [changeEvent(0)],
-        isLoading: false,
-        hasError: false,
-      });
 
       const loadingHeight = reservedHeight(loading);
       expect(loadingHeight).toBeTruthy();
       expect(reservedHeight(error)).toBe(loadingHeight);
       expect(reservedHeight(empty)).toBe(loadingHeight);
-      expect(reservedHeight(loaded)).toBe(loadingHeight);
 
-      [loading, error, empty, loaded].forEach((div) => div.remove());
+      [loading, error, empty].forEach((div) => div.remove());
+    });
+
+    it("does NOT floor the settled loaded-with-data branch, so a short filtered result sizes naturally", () => {
+      // The floor exists to stop wave-growth DURING loading. A genuinely
+      // small, settled result set (e.g. after raising "Min value") must NOT
+      // reserve the full 20-row skeleton height, or the card holds hundreds
+      // of px of dead whitespace below the table forever.
+      const loaded = renderBranch({
+        events: [changeEvent(0), changeEvent(1)],
+        isLoading: false,
+        hasError: false,
+      });
+
+      // Two real rows render...
+      expect(loaded.querySelectorAll("tbody tr")).toHaveLength(2);
+      // ...and no element carries the reserved 20-row minHeight floor.
+      expect(reservedHeight(loaded)).toBeFalsy();
+
+      loaded.remove();
     });
 
     it("keeps the real filter/header row mounted during loading (no data needed to render it)", () => {

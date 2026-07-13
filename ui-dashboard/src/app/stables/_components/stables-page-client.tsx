@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { useOracleRates } from "@/hooks/use-oracle-rates";
 import type { OracleRateMap } from "@/lib/tokens";
 import { useStablesRangeUrlState } from "../_lib/use-stables-range-url-state";
@@ -147,19 +147,29 @@ function StablesChangesSection({
     hasPendingPage: changesHasPendingPage,
   } = useStablesChanges("7d", 0, rates, minimumSupplyChangeUsd);
 
+  // Gate the follow-up-page skeleton to the INITIAL load only. On first load
+  // we hold the skeleton until every raw page has settled so the table reveals
+  // its full row set once, instead of showing a partial set and growing again
+  // as later pages resolve (measured on production as 3 discrete height jumps).
+  // But once settled, an interactive "Min value" raise re-enables a 2nd/3rd
+  // page (`shouldFetchNextChangePage` in use-stables-data.ts) with page-1 data
+  // unchanged — re-summoning the skeleton there would drop already-visible
+  // rows and flash blank. Latch "settled once" (React's render-phase state
+  // update, not an effect) and stop gating on `hasPendingPage` after it.
+  const [hasSettledOnce, setHasSettledOnce] = useState(false);
+  if (!hasSettledOnce && !changesLoading && !changesHasPendingPage) {
+    setHasSettledOnce(true);
+  }
+  const showChangesSkeleton =
+    changesLoading || (!hasSettledOnce && changesHasPendingPage);
+
   return (
     <StablesChangesTable
       events={changeEvents}
       minimumUsdValue={minimumSupplyChangeUsd}
       onMinimumUsdValueChange={updateMinimumSupplyChangeUsd}
       onMinimumUsdValueReset={resetMinimumSupplyChangeUsd}
-      // Keep the table's loading skeleton up while a 2nd/3rd raw page is
-      // still in flight, even though `changesLoading` itself already
-      // flipped false once the first page had visible rows. Without this,
-      // the table reveals a partial row set and then grows again as later
-      // pages resolve (measured on production as 3 discrete height jumps —
-      // see stables-changes-table.tsx's reserved-height comment).
-      isLoading={changesLoading || changesHasPendingPage}
+      isLoading={showChangesSkeleton}
       hasError={changesError != null}
       capped={changesCapped}
       unpricedEventsCount={changesUnpricedEventsCount}

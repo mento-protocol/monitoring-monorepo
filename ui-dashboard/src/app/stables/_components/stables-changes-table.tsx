@@ -29,11 +29,14 @@ const SUPPLY_CHANGES_SKELETON_ROWS = 20;
 // rows ≈44px, plus its own 1px top/bottom outer border — those constants
 // live in skeletons.tsx but aren't exported) plus the real pagination
 // footer's measured box (border-t + pt-4 + one text line ≈ 1 + 16 + 16 =
-// 33px) and its mt-4 top margin. Reserving this height keeps the card from
-// visibly shrinking/growing across the loading → empty/error/loaded-with-data
-// swap, and (combined with the `isLoading || hasPendingPage` gate in
-// stables-page-client.tsx) from growing in waves as successive raw pages
-// resolve.
+// 33px) and its mt-4 top margin. The floor is applied only to the
+// transitional loading/error/empty branches (see SupplyChangesContent), so
+// the card doesn't visibly shrink/grow across those swaps; combined with the
+// initial-load-scoped skeleton gate in stables-page-client.tsx it also stops
+// the table from growing in waves as successive raw pages resolve. The
+// settled loaded-with-data branch is intentionally NOT floored — a small
+// filtered result set (e.g. a raised "Min value") sizes to its real height
+// instead of holding hundreds of px of dead space below the rows forever.
 const SUPPLY_CHANGES_HEADER_HEIGHT_PX = 36;
 const SUPPLY_CHANGES_ROW_HEIGHT_PX = 44;
 const SUPPLY_CHANGES_SKELETON_BORDER_PX = 2;
@@ -152,14 +155,15 @@ function SupplyChangesContent({
     );
   }
 
+  // Settled with real rows: size to natural content. No height floor here —
+  // once every underlying query is idle, a genuinely-short filtered result
+  // must render at its own height rather than reserving the 20-row skeleton.
   const pageCountKey = Math.ceil(events.length / SUPPLY_CHANGES_PAGE_SIZE);
   return (
-    <div style={reservedHeight}>
-      <PaginatedSupplyChangesTable
-        key={`${minimumUsdValue}:${pageCountKey}`}
-        events={events}
-      />
-    </div>
+    <PaginatedSupplyChangesTable
+      key={`${minimumUsdValue}:${pageCountKey}`}
+      events={events}
+    />
   );
 }
 

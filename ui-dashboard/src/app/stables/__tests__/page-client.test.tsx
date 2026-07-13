@@ -1,3 +1,5 @@
+/** @vitest-environment jsdom */
+
 /**
  * StablesPageClient smoke test — renders with all hooks mocked to verify
  * the page wires KPI strip → hero chart → sparkline grid → changes table
@@ -6,6 +8,12 @@
  * Doesn't assert pixel-perfect output (that's the job of browser verify);
  * does assert the header text + each section anchors render.
  */
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StablesPageClient } from "../_components/stables-page-client";
@@ -280,6 +288,44 @@ describe("StablesPageClient — smoke", () => {
 
     expect(html).toContain("Supply changes");
     expect(html).not.toContain("0xcaller");
+  });
+
+  it("keeps already-loaded rows visible when a filter change re-triggers a follow-up page after the first settle", () => {
+    // First settle: table fully loaded with real rows, no page pending.
+    mockChanges.data = [changeEvent()];
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
+
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const localRoot = createRoot(div);
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    // Real row is on screen; the loading-table skeleton is not.
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(
+      div.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).toBeNull();
+
+    // Interactive "Min value" raise re-enables page 2 → hasPendingPage flips
+    // true while page-1 rows are unchanged. After the first settle this must
+    // NOT drop the visible rows back to the 20-row skeleton.
+    mockChanges.hasPendingPage = true;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(
+      div.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).toBeNull();
+
+    act(() => {
+      localRoot.unmount();
+    });
+    div.remove();
   });
 
   it("keeps daily custody fallback rows when current custody errors empty", () => {
