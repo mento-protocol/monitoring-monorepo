@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import RootLoading from "@/app/loading";
 import PoolDetailLoading from "@/app/pool/[poolId]/loading";
 import AddressBookLoading from "@/app/address-book/loading";
+import VolumeLoading from "@/app/volume/loading";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
 
 // Each route-level loading UI must expose exactly one aria-live region so
@@ -103,5 +104,39 @@ describe("route-level loading UIs", () => {
       (el) => (el as HTMLElement).style.height === `${ROW_CHART_HEIGHT_PX}px`,
     );
     expect(plotAreas).toHaveLength(2);
+  });
+
+  it("PoolDetailLoading reserves the delta row only on the TVL chart skeleton (delta-row parity)", () => {
+    render(<PoolDetailLoading />);
+
+    const chartsRow = container.querySelector(".lg\\:grid-cols-3");
+    expect(chartsRow).not.toBeNull();
+    const [tvlCard, volumeCard] = Array.from(
+      chartsRow!.children,
+    ) as HTMLElement[];
+
+    // The delta placeholder is the `h-5 w-32` shimmer bar. PoolTvlOverTimeChart
+    // (first card) can render a real week-over-week delta, so its skeleton
+    // reserves the row; PoolVolumeOverTimeChart (second card) passes
+    // change={null} + reserveDeltaRow={false} and never shows one, so its
+    // skeleton must not reserve it — otherwise the volume skeleton stands ~20px
+    // taller than the card that streams in.
+    expect(tvlCard!.querySelector(".h-5.w-32")).not.toBeNull();
+    expect(volumeCard!.querySelector(".h-5.w-32")).toBeNull();
+  });
+
+  it("VolumeLoading renders exactly one polite live region", () => {
+    render(<VolumeLoading />);
+    expect(countLiveRegions()).toBe(1);
+  });
+
+  it("VolumeLoading chart-card skeleton reserves no delta row (matches DailyVolumeChart reserveDeltaRow={false})", () => {
+    render(<VolumeLoading />);
+
+    // The DailyVolumeChart fallback the route reserves for the common 7d/v3
+    // case passes reserveDeltaRow={false} and never renders a delta line, so
+    // the route skeleton must not reserve the `flex h-5 items-center` delta
+    // wrapper — reserving it shifted the KPI tiles down ~20px on swap.
+    expect(container.querySelector(".flex.h-5.items-center")).toBeNull();
   });
 });

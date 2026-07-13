@@ -292,6 +292,9 @@ function PoolChartArea({
           yAxisTopPadding={0}
           customSortedHover
           plotlyDeferMode="visible"
+          // Always change={null}, no delta line loading or loaded — don't
+          // reserve the row during loading (would shift the plot area down).
+          reserveDeltaRow={false}
         />
       </div>
       <div className="h-full lg:col-span-1">

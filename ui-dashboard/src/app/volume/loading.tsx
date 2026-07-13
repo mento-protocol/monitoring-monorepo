@@ -29,9 +29,13 @@ export default function VolumeLoading() {
         </div>
       </div>
       {/* Chart card: mirrors TimeSeriesChartCard's loading state — the p-5/sm:p-6
-          section, the title + 3xl/4xl headline + h-5 change row + range buttons,
-          then the mt-4 200px plot (ROW_CHART_HEIGHT_PX). Reserving the full card
-          header (not just the plot) keeps the KPI tiles from being pushed down. */}
+          section, the title + 3xl/4xl headline + range buttons, then the mt-4
+          200px plot (ROW_CHART_HEIGHT_PX). Reserving the full card header (not
+          just the plot) keeps the KPI tiles from being pushed down. No change
+          row is reserved: the common 7d/v3 fallback renders DailyVolumeChart,
+          which passes reserveDeltaRow={false} and never shows a delta line
+          loading or loaded — reserving one here would shift the KPI tiles down
+          by ~20px on the skeleton→content swap. */}
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -41,9 +45,6 @@ export default function VolumeLoading() {
             <p className="mt-1 text-3xl font-semibold sm:text-4xl">
               <span className="inline-block h-[1em] w-36 animate-pulse rounded bg-slate-800/60 align-middle" />
             </p>
-            <div className="mt-1 flex h-5 items-center">
-              <span className="h-3 w-24 animate-pulse rounded bg-slate-800/40" />
-            </div>
           </div>
           <div className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5">
             {Array.from({ length: 4 }, (_, i) => (

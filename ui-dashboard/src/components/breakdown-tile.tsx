@@ -84,7 +84,14 @@ export function BreakdownTile({
               <span key={s.label}>
                 <span className="text-slate-500">{s.label}</span>{" "}
                 {isLoading ? (
-                  <span className="inline-block h-3 w-12 animate-pulse rounded bg-slate-800/50 align-middle" />
+                  // Width tracks a representative formatted value (`formatUSD`/
+                  // `formatSignedUSD` land around "+$450.3K", ~7 mono chars ≈
+                  // 56px = w-14) so the flex-wrap line count while loading
+                  // matches the loaded rows. The old w-12 (48px) sat right on
+                  // the wrap boundary of the /stables lg tile (~256px inner):
+                  // loaded rows wrap to two lines there, and a placeholder that
+                  // narrow could round down to one, re-introducing a height jump.
+                  <span className="inline-block h-3 w-14 animate-pulse rounded bg-slate-800/50 align-middle" />
                 ) : (
                   <span className="text-slate-400 tabular-nums">
                     {s.value === null ? "N/A" : formatSub(s.value)}

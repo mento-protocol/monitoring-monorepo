@@ -76,6 +76,19 @@ describe("BreakdownTile loading parity", () => {
     expect(container.textContent).not.toContain("$10000");
   });
 
+  it("sizes each loading placeholder (w-14) to track a representative formatted value so wrap parity holds", () => {
+    // A too-narrow placeholder can let the flex-wrap sub-row settle on fewer
+    // lines while loading than the loaded formatted values (e.g. "+$450.3K")
+    // occupy, re-opening the height jump. w-14 (~56px) matches a typical
+    // formatUSD/formatSignedUSD width so the loading line count matches loaded.
+    render(<BreakdownTile {...BASE_PROPS} isLoading total={null} />);
+    getSubRows().forEach((row) => {
+      const shimmer = row.querySelector(".animate-pulse");
+      expect(shimmer).not.toBeNull();
+      expect(shimmer!.className).toContain("w-14");
+    });
+  });
+
   it("shows the real formatted sub-values once loaded", () => {
     render(<BreakdownTile {...BASE_PROPS} isLoading={false} />);
     expect(container.textContent).toContain("$10000");
