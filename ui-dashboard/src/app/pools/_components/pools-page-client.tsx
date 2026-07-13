@@ -305,8 +305,10 @@ function PoolsContent({
           // `limit` (not a hardcoded row count) so the skeleton always
           // matches the selected page size — real SwapTable renders exactly
           // `limit` rows, header ~36px + rows ~44px (TableSkeleton's
-          // measured real-table geometry).
-          <TableSkeleton rows={limit} variant="rows" />
+          // measured real-table geometry). Clamped to LimitSelect's largest
+          // option (100) so a crafted `?limit=` value in the URL can't blow
+          // up the placeholder row count.
+          <TableSkeleton rows={Math.min(limit, 100)} variant="rows" />
         ) : swaps.length === 0 ? (
           <EmptyBox
             message={

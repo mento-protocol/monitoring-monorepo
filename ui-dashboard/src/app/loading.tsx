@@ -1,4 +1,4 @@
-import { TableSkeleton, TileGridSkeleton } from "@/components/skeletons";
+import { TableSkeleton } from "@/components/skeletons";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
 
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
@@ -29,6 +29,30 @@ function ChartCardSkeleton() {
   );
 }
 
+// Mirrors BreakdownTile's geometry (label, mt-1 text-2xl value, mt-1.5
+// 24h/7d/30d subrow, mt-2 subtitle line) rather than the shorter
+// LPs/Swaps/Traders `Tile` shape. Swap Fees is the only BreakdownTile in
+// the KPI row, but CSS Grid's default row-stretch means IT sets the row's
+// real height (~140px with a single-line subtitle, more if the subtitle
+// wraps to two lines) — a placeholder built off the shorter `Tile` shape
+// under-reserves the whole row.
+function KpiTileSkeleton() {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
+      <div>
+        <div className={`h-5 w-16 ${SHIMMER}`} />
+        <div className={`mt-1 h-8 w-24 ${SHIMMER}`} />
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
+          <div className={`h-5 w-8 ${SHIMMER}`} />
+          <div className={`h-5 w-8 ${SHIMMER}`} />
+          <div className={`h-5 w-8 ${SHIMMER}`} />
+        </div>
+      </div>
+      <div className={`mt-2 h-4 w-40 ${SHIMMER}`} />
+    </div>
+  );
+}
+
 export default function RootLoading() {
   return (
     <div
@@ -52,9 +76,15 @@ export default function RootLoading() {
       </div>
 
       {/* KPI row — mirrors the grid grid-cols-2 lg:grid-cols-4 gap-4 row of
-          Swap Fees / LPs / Swaps / Traders tiles. */}
+          Swap Fees / LPs / Swaps / Traders tiles. See KpiTileSkeleton for
+          why every cell uses the taller Swap Fees (BreakdownTile) shape. */}
       <section>
-        <TileGridSkeleton count={4} presentational />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+            <KpiTileSkeleton key={`kpi-${i}`} />
+          ))}
+        </div>
       </section>
 
       {/* Pools table — mirrors the "All Pools" section. A fixed 10-row

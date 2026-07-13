@@ -86,6 +86,22 @@ describe("route-level loading UIs", () => {
     expect(tiles).toHaveLength(4);
   });
 
+  // Swap Fees (BreakdownTile) is the tallest KPI cell — label + value +
+  // 24h/7d/30d subrow + subtitle line, ~140px — and CSS Grid's default
+  // row-stretch means it (not the shorter LPs/Swaps/Traders `Tile` shape)
+  // sets the row's real height. Every placeholder must mirror that taller
+  // shape, not a compact generic tile.
+  it("RootLoading KPI tiles mirror BreakdownTile's geometry (subrow + subtitle line)", () => {
+    render(<RootLoading />);
+    const kpiRow = container.querySelector(".lg\\:grid-cols-4")!;
+    Array.from(kpiRow.children).forEach((tile) => {
+      const subrow = tile.querySelector(".mt-1\\.5");
+      expect(subrow).not.toBeNull();
+      expect(subrow!.children).toHaveLength(3);
+      expect(tile.querySelector(".mt-2")).not.toBeNull();
+    });
+  });
+
   it("RootLoading reserves a table-shaped pools placeholder (header ~36px, rows ~44px)", () => {
     render(<RootLoading />);
     const table = container.querySelector(".overflow-hidden.rounded-lg");
