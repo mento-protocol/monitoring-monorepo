@@ -88,12 +88,12 @@ export default function VolumeLoading() {
           venue/range, so each panel reserves a generic sized block rather
           than replicating the panels' internal row shapes — that detail
           lives in v3-flow-insight-panels.tsx's own client loading branch.
-          The height (504) matches that client skeleton's own corridor/
+          The height (464) matches that client skeleton's own corridor/
           outlier panel height (10-row InsightTableSkeleton + InsightPanel
-          chrome: p-4 + h3 title + header row + 10 rows, recomputed from
-          v3-flow-insight-panels.tsx's geometry) so the route->mount swap
-          doesn't shrink before the client skeleton takes over — keep both
-          in sync if either changes. */}
+          chrome: p-4 + h3 title + header row + 10 rows at py-3, recomputed
+          from v3-flow-insight-panels.tsx's geometry) so the route->mount
+          swap doesn't shrink before the client skeleton takes over — keep
+          both in sync if either changes. */}
       <div className="space-y-3">
         <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -102,7 +102,7 @@ export default function VolumeLoading() {
             <div
               key={`vol-insight-panel-${i}`}
               className="rounded-lg border border-slate-800 bg-slate-900/50 p-4"
-              style={{ height: 504 }}
+              style={{ height: 464 }}
             >
               <div className="mb-3 h-3 w-32 animate-pulse rounded bg-slate-800/50" />
               <div className="space-y-2">
