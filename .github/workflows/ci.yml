@@ -53,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - id: filter
-        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         with:
           filters: |
             # scripts/eslint-baseline-diff.mjs is the per-package lint
@@ -278,7 +278,7 @@ jobs:
               - scripts/version-skew-check.test.mjs
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   shared:
@@ -315,7 +315,7 @@ jobs:
           flags: config
           directory: shared-config/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   ui:
@@ -432,7 +432,7 @@ jobs:
           flags: ui-dashboard
           directory: ui-dashboard/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   indexer:
@@ -513,7 +513,7 @@ jobs:
           flags: indexer-envio
           directory: indexer-envio/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   bridge:
@@ -549,7 +549,7 @@ jobs:
           flags: metrics-bridge
           directory: metrics-bridge/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   integration-probes:
@@ -584,7 +584,7 @@ jobs:
           flags: integration-probes
           directory: integration-probes/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   alerts:
@@ -670,7 +670,7 @@ jobs:
           flags: alerts-oncall-announcer
           directory: alerts/infra/oncall-announcer/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   gov-watchdog:
@@ -727,7 +727,7 @@ jobs:
           flags: governance-watchdog
           directory: governance-watchdog/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   # Registry-backed Terraform validation inside the required `ci` sentinel.
@@ -778,7 +778,7 @@ jobs:
             [[ -n "$stack" ]] || continue
             node scripts/tf-stacks.mjs validate "$stack"
           done <<< "$stack_ids"
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   aegis:
@@ -816,7 +816,7 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/aegis test:cov
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@c7450ba673e133f5ee30098b3b54f444d3a2ca2d # v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1
         with:
           version: stable
       - name: Forge tests
@@ -828,7 +828,7 @@ jobs:
           flags: aegis
           directory: aegis/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   scripts:
@@ -909,7 +909,7 @@ jobs:
         # itself only runs weekly via supply-chain.yml; this required job is
         # what catches a regression in the script on every PR.
         run: node scripts/override-prune-report.test.mjs
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   version-skew:
@@ -931,7 +931,7 @@ jobs:
         run: pnpm skew:check
       - name: Version skew checker tests
         run: pnpm skew:check:test
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   deps:
@@ -955,7 +955,7 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: dependency-cruiser (cross-package boundaries, blocking)
         run: pnpm code-health:deps
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
   ci:
@@ -987,5 +987,5 @@ jobs:
         with:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,version-skew
-      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
