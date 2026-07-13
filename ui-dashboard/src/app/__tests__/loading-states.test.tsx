@@ -5,13 +5,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import RootLoading from "@/app/loading";
+import HomeLoading from "@/app/(home)/loading";
 import PoolsLoading from "@/app/pools/loading";
 import PoolDetailLoading from "@/app/pool/[poolId]/loading";
 import AddressBookLoading from "@/app/address-book/loading";
 import VolumeLoading from "@/app/volume/loading";
-import EntitiesLoading from "@/app/entities/loading";
-import IntegrationsLoading from "@/app/integrations/loading";
-import SignInLoading from "@/app/sign-in/loading";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
 
 // Each route-level loading UI must expose exactly one aria-live region so
@@ -45,20 +43,39 @@ function countLiveRegions(): number {
 }
 
 describe("route-level loading UIs", () => {
-  it("RootLoading renders exactly one polite live region", () => {
+  // The shared root boundary stays generic: the homepage-shaped skeleton
+  // lives in `(home)/loading.tsx` (tested below), so `app/loading.tsx` renders
+  // the plain PageShellSkeleton every non-homepage route inherits. This pins
+  // it against accidentally re-homepage-shaping the shared boundary.
+  it("RootLoading renders exactly one polite live region (PageShellSkeleton wrapper)", () => {
     render(<RootLoading />);
     const regions = container.querySelectorAll('[aria-live="polite"]');
     expect(regions).toHaveLength(1);
   });
 
-  it("RootLoading nests only presentational primitives (no nested role=status under the page live region)", () => {
+  // The homepage-specific marker is the two-chart `lg:grid-cols-2` row, which
+  // the generic PageShellSkeleton never renders (its tile grid is
+  // `lg:grid-cols-4`). Asserting the chart row is absent proves the shared
+  // boundary didn't inherit the homepage shape.
+  it("RootLoading stays generic — no homepage chart-grid shape leaks to shared boundary", () => {
     render(<RootLoading />);
+    expect(container.querySelector(".lg\\:grid-cols-2")).toBeNull();
+  });
+
+  it("HomeLoading renders exactly one polite live region", () => {
+    render(<HomeLoading />);
+    const regions = container.querySelectorAll('[aria-live="polite"]');
+    expect(regions).toHaveLength(1);
+  });
+
+  it("HomeLoading nests only presentational primitives (no nested role=status under the page live region)", () => {
+    render(<HomeLoading />);
     const wrapper = container.querySelector('[aria-live="polite"]')!;
     expect(wrapper.querySelectorAll('[role="status"]')).toHaveLength(0);
   });
 
-  it("RootLoading reserves two chart cards (TVL + Volume) — absent entirely from the old generic PageShellSkeleton", () => {
-    render(<RootLoading />);
+  it("HomeLoading reserves two chart cards (TVL + Volume) — absent entirely from the old generic PageShellSkeleton", () => {
+    render(<HomeLoading />);
     const chartsRow = container.querySelector(".lg\\:grid-cols-2");
     expect(chartsRow).not.toBeNull();
     expect(chartsRow!.children).toHaveLength(2);
@@ -79,8 +96,8 @@ describe("route-level loading UIs", () => {
     });
   });
 
-  it("RootLoading reserves a 4-tile KPI row (Swap Fees / LPs / Swaps / Traders)", () => {
-    render(<RootLoading />);
+  it("HomeLoading reserves a 4-tile KPI row (Swap Fees / LPs / Swaps / Traders)", () => {
+    render(<HomeLoading />);
     const kpiRow = container.querySelector(".lg\\:grid-cols-4");
     expect(kpiRow).not.toBeNull();
     const tiles = Array.from(kpiRow!.children).filter(
@@ -94,8 +111,8 @@ describe("route-level loading UIs", () => {
   // row-stretch means it (not the shorter LPs/Swaps/Traders `Tile` shape)
   // sets the row's real height. Every placeholder must mirror that taller
   // shape, not a compact generic tile.
-  it("RootLoading KPI tiles mirror BreakdownTile's geometry (subrow + subtitle line)", () => {
-    render(<RootLoading />);
+  it("HomeLoading KPI tiles mirror BreakdownTile's geometry (subrow + subtitle line)", () => {
+    render(<HomeLoading />);
     const kpiRow = container.querySelector(".lg\\:grid-cols-4")!;
     Array.from(kpiRow.children).forEach((tile) => {
       const subrow = tile.querySelector(".mt-1\\.5");
@@ -105,8 +122,8 @@ describe("route-level loading UIs", () => {
     });
   });
 
-  it("RootLoading reserves a table-shaped pools placeholder (header ~36px, rows ~44px)", () => {
-    render(<RootLoading />);
+  it("HomeLoading reserves a table-shaped pools placeholder (header ~36px, rows ~44px)", () => {
+    render(<HomeLoading />);
     const table = container.querySelector(".overflow-hidden.rounded-lg");
     expect(table).not.toBeNull();
     const [header, body] = Array.from(table!.children) as [
@@ -254,27 +271,5 @@ describe("route-level loading UIs", () => {
     // the route skeleton must not reserve the `flex h-5 items-center` delta
     // wrapper — reserving it shifted the KPI tiles down ~20px on swap.
     expect(container.querySelector(".flex.h-5.items-center")).toBeNull();
-  });
-
-  // /entities, /integrations, and /sign-in are all async server components
-  // with real awaits (session/Redis reads) and none has a homepage-like
-  // layout (charts, a 4-tile KPI row, a pools table), so each gets its own
-  // loading.tsx to stay off the homepage-shaped RootLoading boundary.
-  it("EntitiesLoading renders exactly one polite live region and is not homepage-shaped", () => {
-    render(<EntitiesLoading />);
-    expect(countLiveRegions()).toBe(1);
-    expect(container.querySelector(".lg\\:grid-cols-2")).toBeNull();
-  });
-
-  it("IntegrationsLoading renders exactly one polite live region and is not homepage-shaped", () => {
-    render(<IntegrationsLoading />);
-    expect(countLiveRegions()).toBe(1);
-    expect(container.querySelector(".lg\\:grid-cols-2")).toBeNull();
-  });
-
-  it("SignInLoading renders exactly one polite live region and is not homepage-shaped", () => {
-    render(<SignInLoading />);
-    expect(countLiveRegions()).toBe(1);
-    expect(container.querySelector(".lg\\:grid-cols-2")).toBeNull();
   });
 });

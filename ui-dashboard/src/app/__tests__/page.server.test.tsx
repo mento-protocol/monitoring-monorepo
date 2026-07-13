@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import HomePage, { generateMetadata } from "../page";
+import HomePage, { generateMetadata } from "../(home)/page";
 
 type GlobalPageProps = { initialNetworkData?: unknown };
 

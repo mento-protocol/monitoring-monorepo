@@ -30,7 +30,7 @@ const geistMono = localFont({
 const analyticsEnabled = !clientEnv.NEXT_PUBLIC_BROWSER_TEST_FIXTURES;
 
 // Static fallback for every route. The homepage overrides via its own
-// `generateMetadata` in `app/page.tsx` — keeping the dynamic fetch scoped
+// `generateMetadata` in `app/(home)/page.tsx` — keeping the dynamic fetch scoped
 // there so non-homepage routes don't inherit the cross-chain I/O latency
 // when the OG cache is cold.
 export const metadata: Metadata = {
