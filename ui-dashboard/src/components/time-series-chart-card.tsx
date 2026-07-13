@@ -150,6 +150,15 @@ interface TimeSeriesChartCardProps {
   annotations?: Plotly.Layout["annotations"];
   yAxisReferenceValues?: readonly number[];
   plotlyDeferMode?: DeferredMountMode;
+  /**
+   * Whether the loading state reserves the delta sub-line (the row under the
+   * headline showing the week-over-week change). Defaults to `true` (prior
+   * behavior). Cards that always pass `change={null}` and never render a
+   * delta once loaded should pass `false` so the loading phase doesn't
+   * reserve a row the loaded phase never shows — that mismatch was a 25px
+   * height jump on the /volume daily-volume card.
+   */
+  reserveDeltaRow?: boolean;
 }
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
@@ -181,6 +190,7 @@ export function TimeSeriesChartCard({
   annotations,
   yAxisReferenceValues = EMPTY_Y_AXIS_REFERENCE_VALUES,
   plotlyDeferMode = "none",
+  reserveDeltaRow = true,
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
@@ -501,7 +511,21 @@ export function TimeSeriesChartCard({
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm text-slate-400">{title}</p>
+          <p className="text-sm text-slate-400">
+            {title}
+            {/* Error affordance for cards that opt out of the delta row
+                (`reserveDeltaRow={false}`): those cards never render the
+                delta/error sub-line in any state (see the gated row below), so
+                the "partial data" signal rides the always-present title line
+                as an inline suffix instead of a row that would pop in — and
+                add height — on the loading→error transition. Height-stable
+                because it shares the title's text line. */}
+            {!reserveDeltaRow && (hasError || hasSnapshotError) && (
+              <span className="ml-1.5 text-xs text-slate-500">
+                · partial data
+              </span>
+            )}
+          </p>
           <p className="mt-1 font-mono text-3xl font-semibold tracking-tight text-white sm:text-4xl">
             {isLoading ? (
               // Pre-reserve the hero width so the transition from skeleton to
@@ -511,34 +535,38 @@ export function TimeSeriesChartCard({
               headline
             )}
           </p>
-          {/* Reserve the change-pill row only when there's something to
-              show — when the caller passes `change={null}` and the chart
-              isn't in loading or error state, this row is empty and just
-              wastes ~20px of vertical real estate that pushes the plot
-              area down (per-pool stacked chart's headline-to-peak gap
-              feedback). */}
-          {(isLoading ||
-            deltaPill !== null ||
-            hasError ||
-            hasSnapshotError) && (
-            <div className="mt-1 flex h-5 items-center gap-1.5 font-mono text-sm">
-              {isLoading ? (
-                <span className="h-3 w-24 animate-pulse rounded bg-slate-800/40" />
-              ) : (
-                <>
-                  {deltaPill}
-                  {deltaPill && (
-                    <span className="text-slate-500">{changeLabel}</span>
-                  )}
-                  {(hasError || hasSnapshotError) && (
-                    <span className="text-xs text-slate-500">
-                      · partial data
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-          )}
+          {/* The change/error sub-line. `reserveDeltaRow` is an absolute
+              gate: when it's false, this row never renders in ANY state
+              (loading, loaded-clean, or loaded-with-error), so an opted-out
+              card's header height is identical across all three — the error
+              signal for those cards surfaces as the inline title suffix
+              above instead. When `reserveDeltaRow` is true (default), the row
+              is reserved while loading and, once loaded, shown whenever
+              there's a delta pill or an error to report; an empty loaded-clean
+              row is omitted so it doesn't waste ~20px pushing the plot down. */}
+          {reserveDeltaRow &&
+            (isLoading ||
+              deltaPill !== null ||
+              hasError ||
+              hasSnapshotError) && (
+              <div className="mt-1 flex h-5 items-center gap-1.5 font-mono text-sm">
+                {isLoading ? (
+                  <span className="inline-block h-5 w-16 animate-pulse rounded bg-slate-800/40 align-middle" />
+                ) : (
+                  <>
+                    {deltaPill}
+                    {deltaPill && (
+                      <span className="text-slate-500">{changeLabel}</span>
+                    )}
+                    {(hasError || hasSnapshotError) && (
+                      <span className="text-xs text-slate-500">
+                        · partial data
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
         </div>
 
         <div

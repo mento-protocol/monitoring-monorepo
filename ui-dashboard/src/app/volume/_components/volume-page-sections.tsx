@@ -292,6 +292,9 @@ function PoolChartArea({
           yAxisTopPadding={0}
           customSortedHover
           plotlyDeferMode="visible"
+          // Always change={null}, no delta line loading or loaded — don't
+          // reserve the row during loading (would shift the plot area down).
+          reserveDeltaRow={false}
         />
       </div>
       <div className="h-full lg:col-span-1">
@@ -336,6 +339,10 @@ function DailyVolumeChart({
           : "No legacy-v2 volume in this window."
       }
       plotlyDeferMode="visible"
+      // This card always passes change={null} and never renders a delta
+      // line once loaded — don't reserve the row during loading either
+      // (was a 25px height jump on the /volume hero card).
+      reserveDeltaRow={false}
     />
   );
 }

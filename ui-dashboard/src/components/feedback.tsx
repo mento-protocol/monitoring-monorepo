@@ -12,6 +12,11 @@ export function Skeleton({ rows }: { rows: number }) {
   );
 }
 
+// A table-shaped loading skeleton (header + real-table row rhythm) lives in
+// `skeletons.tsx` as `<TableSkeleton variant="rows" rows={n} />` — a single
+// source of truth for table-skeleton geometry, wired through the shared
+// `liveRegion()` helper. Prefer that over adding a second table skeleton here.
+
 export function EmptyBox({ message }: { message: string }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/30 py-12 text-center text-sm text-slate-500">

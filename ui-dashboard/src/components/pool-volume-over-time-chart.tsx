@@ -213,6 +213,11 @@ export function PoolVolumeOverTimeChart({
       shapes={shapes}
       plotlyDeferMode="visible"
       emptyMessage={volumeEmptyMessage(error, historySupported, priceable)}
+      // Always change={null}, no delta line loading or loaded — don't reserve
+      // the row during loading (would shift the plot area down). The pool
+      // route fallback (pool/[poolId]/loading.tsx) drops the delta row on its
+      // volume-card skeleton to match.
+      reserveDeltaRow={false}
     />
   );
 }

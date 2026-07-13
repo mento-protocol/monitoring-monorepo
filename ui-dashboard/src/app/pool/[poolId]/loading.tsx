@@ -12,15 +12,23 @@ import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
 
 // Mirrors TimeSeriesChartCard: p-5 sm:p-6 card, text-sm title, 3xl/4xl mono
-// headline, h-5 change row, then a plot area at ROW_CHART_HEIGHT_PX — the
-// real constant (not a hardcoded class) so the skeleton can't drift if the
-// chart height ever changes.
-function ChartCardSkeleton() {
+// headline, an optional h-5 change row, then a plot area at ROW_CHART_HEIGHT_PX
+// — the real constant (not a hardcoded class) so the skeleton can't drift if
+// the chart height ever changes. `reserveDeltaRow` mirrors the card's prop of
+// the same name: the TVL card can show a real week-over-week delta so it
+// reserves the row, while the volume card always passes change={null} +
+// reserveDeltaRow={false} and never renders one — reserving it here would
+// leave the volume skeleton ~20px taller than the streamed-in card.
+function ChartCardSkeleton({
+  reserveDeltaRow = true,
+}: {
+  reserveDeltaRow?: boolean;
+}) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
       <div className={`h-5 w-28 ${SHIMMER}`} />
       <div className={`mt-1 h-10 w-36 ${SHIMMER}`} />
-      <div className={`mt-1 h-5 w-32 ${SHIMMER}`} />
+      {reserveDeltaRow && <div className={`mt-1 h-5 w-32 ${SHIMMER}`} />}
       <div
         className="mt-4 animate-pulse rounded bg-slate-800/30"
         style={{ height: ROW_CHART_HEIGHT_PX }}
@@ -58,10 +66,12 @@ export default function PoolDetailLoading() {
           nothing); a slim bar splits the difference with the full panel. */}
       <div className="h-12 animate-pulse rounded-lg border border-slate-800 bg-slate-900/30" />
       {/* Charts row — mirrors PoolChartsRow: two 200px chart cards +
-          reserves panel in a 3-col grid. */}
+          reserves panel in a 3-col grid. First card = PoolTvlOverTimeChart
+          (can show a delta → reserve the row); second = PoolVolumeOverTimeChart
+          (change={null} + reserveDeltaRow={false} → no delta row). */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <ChartCardSkeleton />
-        <ChartCardSkeleton />
+        <ChartCardSkeleton reserveDeltaRow={false} />
         <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
           <div className={`h-5 w-24 ${SHIMMER}`} />
           <div className="mt-4 space-y-3">
