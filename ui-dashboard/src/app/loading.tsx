@@ -7,8 +7,14 @@ const SHIMMER = "animate-pulse rounded bg-slate-800/50";
 // nav to `/`). Mirrors `page-client.tsx`'s `GlobalContent`: header, two
 // chart cards, a 4-tile KPI row, and the "All Pools" table, so the swap from
 // skeleton to real content reads as fill-in rather than a full repaint.
-// `/pools` uses its own `pools/loading.tsx`; this remains the nearest
-// boundary for every other route that doesn't suspend on its own.
+// Scoped to `/` only — it is the nearest Suspense boundary for the whole
+// `app` segment, so leaving it homepage-shaped would leak onto every other
+// route that suspends on its own async awaits without a nearer loading.tsx.
+// `/pools`, `/entities`, `/integrations`, and `/sign-in` each suspend
+// (server awaits: fetches/session/Redis reads) and each has its own
+// loading.tsx to stay clear of this shape. Routes that render synchronously
+// (`/cdps`, `/revenue`, `/stables`, `/bridge-flows`, etc.) never suspend and
+// never show this boundary at all.
 
 // Mirrors TimeSeriesChartCard's card chrome (p-5 sm:p-6, title line,
 // 3xl/4xl headline, delta row, ROW_CHART_HEIGHT_PX plot) — same pattern as

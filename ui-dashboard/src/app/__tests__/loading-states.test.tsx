@@ -9,6 +9,9 @@ import PoolsLoading from "@/app/pools/loading";
 import PoolDetailLoading from "@/app/pool/[poolId]/loading";
 import AddressBookLoading from "@/app/address-book/loading";
 import VolumeLoading from "@/app/volume/loading";
+import EntitiesLoading from "@/app/entities/loading";
+import IntegrationsLoading from "@/app/integrations/loading";
+import SignInLoading from "@/app/sign-in/loading";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
 
 // Each route-level loading UI must expose exactly one aria-live region so
@@ -251,5 +254,27 @@ describe("route-level loading UIs", () => {
     // the route skeleton must not reserve the `flex h-5 items-center` delta
     // wrapper — reserving it shifted the KPI tiles down ~20px on swap.
     expect(container.querySelector(".flex.h-5.items-center")).toBeNull();
+  });
+
+  // /entities, /integrations, and /sign-in are all async server components
+  // with real awaits (session/Redis reads) and none has a homepage-like
+  // layout (charts, a 4-tile KPI row, a pools table), so each gets its own
+  // loading.tsx to stay off the homepage-shaped RootLoading boundary.
+  it("EntitiesLoading renders exactly one polite live region and is not homepage-shaped", () => {
+    render(<EntitiesLoading />);
+    expect(countLiveRegions()).toBe(1);
+    expect(container.querySelector(".lg\\:grid-cols-2")).toBeNull();
+  });
+
+  it("IntegrationsLoading renders exactly one polite live region and is not homepage-shaped", () => {
+    render(<IntegrationsLoading />);
+    expect(countLiveRegions()).toBe(1);
+    expect(container.querySelector(".lg\\:grid-cols-2")).toBeNull();
+  });
+
+  it("SignInLoading renders exactly one polite live region and is not homepage-shaped", () => {
+    render(<SignInLoading />);
+    expect(countLiveRegions()).toBe(1);
+    expect(container.querySelector(".lg\\:grid-cols-2")).toBeNull();
   });
 });
