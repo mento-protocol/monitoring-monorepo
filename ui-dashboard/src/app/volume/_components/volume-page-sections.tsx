@@ -336,6 +336,10 @@ function DailyVolumeChart({
           : "No legacy-v2 volume in this window."
       }
       plotlyDeferMode="visible"
+      // This card always passes change={null} and never renders a delta
+      // line once loaded — don't reserve the row during loading either
+      // (was a 25px height jump on the /volume hero card).
+      reserveDeltaRow={false}
     />
   );
 }

@@ -150,6 +150,15 @@ interface TimeSeriesChartCardProps {
   annotations?: Plotly.Layout["annotations"];
   yAxisReferenceValues?: readonly number[];
   plotlyDeferMode?: DeferredMountMode;
+  /**
+   * Whether the loading state reserves the delta sub-line (the row under the
+   * headline showing the week-over-week change). Defaults to `true` (prior
+   * behavior). Cards that always pass `change={null}` and never render a
+   * delta once loaded should pass `false` so the loading phase doesn't
+   * reserve a row the loaded phase never shows — that mismatch was a 25px
+   * height jump on the /volume daily-volume card.
+   */
+  reserveDeltaRow?: boolean;
 }
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
@@ -181,6 +190,7 @@ export function TimeSeriesChartCard({
   annotations,
   yAxisReferenceValues = EMPTY_Y_AXIS_REFERENCE_VALUES,
   plotlyDeferMode = "none",
+  reserveDeltaRow = true,
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
@@ -516,14 +526,17 @@ export function TimeSeriesChartCard({
               isn't in loading or error state, this row is empty and just
               wastes ~20px of vertical real estate that pushes the plot
               area down (per-pool stacked chart's headline-to-peak gap
-              feedback). */}
-          {(isLoading ||
-            deltaPill !== null ||
-            hasError ||
-            hasSnapshotError) && (
+              feedback). While loading, `reserveDeltaRow` controls whether
+              this row is reserved at all — cards that always pass
+              `change={null}` and never render a delta once loaded pass
+              `reserveDeltaRow={false}` so the loading phase doesn't reserve
+              a row the loaded phase never shows. */}
+          {(isLoading
+            ? reserveDeltaRow
+            : deltaPill !== null || hasError || hasSnapshotError) && (
             <div className="mt-1 flex h-5 items-center gap-1.5 font-mono text-sm">
               {isLoading ? (
-                <span className="h-3 w-24 animate-pulse rounded bg-slate-800/40" />
+                <span className="inline-block h-5 w-16 animate-pulse rounded bg-slate-800/40 align-middle" />
               ) : (
                 <>
                   {deltaPill}

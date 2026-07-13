@@ -43,8 +43,12 @@ export function BreakdownTile({
       ? "N/A"
       : `${totalPrefix}${format(total)}`;
 
+  // Reserve the same 3 breakdown rows while loading as the loaded state
+  // renders, so the tile doesn't grow when data lands (was 114 -> 164px on
+  // /stables). Values render as a shimmer placeholder during loading and the
+  // formatted amount once loaded.
   const subItems =
-    !isLoading && !hasError && total !== null
+    isLoading || (!hasError && total !== null)
       ? [
           { label: "24h", value: sub24h },
           { label: "7d", value: sub7d },
@@ -79,9 +83,13 @@ export function BreakdownTile({
             {subItems.map((s) => (
               <span key={s.label}>
                 <span className="text-slate-500">{s.label}</span>{" "}
-                <span className="text-slate-400 tabular-nums">
-                  {s.value === null ? "N/A" : formatSub(s.value)}
-                </span>
+                {isLoading ? (
+                  <span className="inline-block h-3 w-12 animate-pulse rounded bg-slate-800/50 align-middle" />
+                ) : (
+                  <span className="text-slate-400 tabular-nums">
+                    {s.value === null ? "N/A" : formatSub(s.value)}
+                  </span>
+                )}
               </span>
             ))}
           </div>
