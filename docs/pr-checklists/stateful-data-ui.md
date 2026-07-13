@@ -133,6 +133,13 @@ For each non-happy path, decide the behavior explicitly.
 - [ ] total dataset is much larger than the current happy-path sample
 - [ ] search term matches data outside the currently fetched window
 - [ ] empty state vs loading state vs partial-data state are distinct
+- [ ] skeleton parity: any new or changed loading branch matches the loaded
+      content's dimensions and section structure (a text line or generic bar
+      stack standing in for a card grid or table is a regression). CLS ≈ 0 does
+      NOT prove no jump — whole-subtree swaps are invisible to layout-shift.
+      Verify by diffing skeleton-phase vs loaded-phase section rects; the
+      browser recipe (GraphQL-delay init script + rect sampler) is embedded in
+      issue #1218 and its sibling skeleton-parity issues (#1219–#1223).
 
 The key question:
 
