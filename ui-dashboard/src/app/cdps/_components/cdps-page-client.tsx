@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { useGQL } from "@/lib/graphql";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
@@ -34,6 +34,11 @@ import {
 import { CdpActivityDigest } from "./cdp-activity-digest";
 import { CdpAllTransactionsTable } from "./cdp-all-transactions-table";
 import { CdpMarketCard } from "./cdp-market-card";
+import {
+  CdpActivityDigestSkeleton,
+  CdpMarketCardGridSkeleton,
+  CdpTransactionsBodySkeleton,
+} from "./cdps-skeletons";
 
 const ONE_DAY_SECONDS = 86_400;
 
@@ -175,7 +180,7 @@ export function CdpsPageClient() {
     );
   }
 
-  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={6} />;
+  if (isLoadingWithoutData(isLoading, data)) return <CdpsPageSkeleton />;
   if (hasErrorWithoutData(error, data)) {
     return (
       <ErrorBox message={`Failed to load CDP markets — ${error.message}`} />
@@ -189,12 +194,7 @@ export function CdpsPageClient() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-white">CDPs</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          USDm-backed borrower markets for Mento stable assets.
-        </p>
-      </header>
+      <CdpsHeader />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {collaterals.map((collateral) => (
           <CdpMarketCard
@@ -254,7 +254,45 @@ function CdpTransactionsTableFallback() {
       <h2 className="text-lg font-semibold text-white mb-3">
         Recent CDP Transactions
       </h2>
-      <Skeleton rows={6} />
+      <CdpTransactionsBodySkeleton />
     </section>
+  );
+}
+
+function CdpsHeader() {
+  return (
+    <header>
+      <h1 className="text-2xl font-semibold text-white">CDPs</h1>
+      <p className="mt-1 text-sm text-slate-400">
+        USDm-backed borrower markets for Mento stable assets.
+      </p>
+    </header>
+  );
+}
+
+// Page-shaped skeleton for the initial CDP_MARKETS load (issue #1220). The
+// real header stays mounted (it needs no data) so it never moves between
+// the loading and loaded phases; everything below mirrors the loaded
+// section shapes (market-card grid, activity digest, transactions table)
+// under a single page-level live region — nested skeleton pieces are
+// `presentational` so they don't announce independently.
+function CdpsPageSkeleton() {
+  return (
+    <div
+      className="space-y-6"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading CDP markets"
+    >
+      <CdpsHeader />
+      <CdpMarketCardGridSkeleton />
+      <CdpActivityDigestSkeleton />
+      <section>
+        <h2 className="text-lg font-semibold text-white mb-3">
+          Recent CDP Transactions
+        </h2>
+        <CdpTransactionsBodySkeleton presentational />
+      </section>
+    </div>
   );
 }

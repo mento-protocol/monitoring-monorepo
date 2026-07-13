@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { ErrorBox, Skeleton } from "@/components/feedback";
+import { ErrorBox } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
@@ -34,6 +34,7 @@ import {
 } from "../_lib/transactions";
 import type { CdpTransactionRow, CdpTroveOpSnapshotRow } from "../_lib/types";
 import { CdpTxAmountCell } from "./cdp-tx-amount-cell";
+import { CdpTransactionsBodySkeleton } from "./cdps-skeletons";
 import {
   ADDRESS_FILTER_POOL_EVENT_NOTICE,
   ADDRESS_FILTER_SP_ONLY_NOTICE,
@@ -116,7 +117,7 @@ export function CdpAllTransactionsTable({
             stabilityPoolEvents.isLoading,
             stabilityPoolEvents.data,
           )) ? (
-        <Skeleton rows={6} />
+        <CdpTransactionsBodySkeleton />
       ) : rows.length === 0 ? (
         <CdpTransactionsEmptyState
           stabilityPoolEventsUnavailable={stabilityPoolEventsUnavailable}
