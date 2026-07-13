@@ -88,10 +88,12 @@ export default function VolumeLoading() {
           venue/range, so each panel reserves a generic sized block rather
           than replicating the panels' internal row shapes — that detail
           lives in v3-flow-insight-panels.tsx's own client loading branch.
-          The height (493) matches that client skeleton's own corridor/
+          The height (504) matches that client skeleton's own corridor/
           outlier panel height (10-row InsightTableSkeleton + InsightPanel
-          chrome) so the route->mount swap doesn't shrink before the client
-          skeleton takes over — keep both in sync if either changes. */}
+          chrome: p-4 + h3 title + header row + 10 rows, recomputed from
+          v3-flow-insight-panels.tsx's geometry) so the route->mount swap
+          doesn't shrink before the client skeleton takes over — keep both
+          in sync if either changes. */}
       <div className="space-y-3">
         <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -100,7 +102,7 @@ export default function VolumeLoading() {
             <div
               key={`vol-insight-panel-${i}`}
               className="rounded-lg border border-slate-800 bg-slate-900/50 p-4"
-              style={{ height: 493 }}
+              style={{ height: 504 }}
             >
               <div className="mb-3 h-3 w-32 animate-pulse rounded bg-slate-800/50" />
               <div className="space-y-2">
@@ -117,10 +119,12 @@ export default function VolumeLoading() {
         </div>
       </div>
       {/* Top traders: heading + main table skeleton (header + measured row
-          rhythm), mirroring V3VolumeSection's "Top traders" table. */}
+          rhythm), mirroring V3VolumeSection's "Top traders" table. Row count
+          matches TOP_TRADERS_TABLE_SKELETON_ROWS in volume-table.tsx — keep
+          both in sync if that changes. */}
       <div className="space-y-3">
         <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
-        <TableSkeleton rows={10} variant="rows" presentational />
+        <TableSkeleton rows={18} variant="rows" presentational />
       </div>
       {/* Aggregator breakdown: heading + the aggregator chart card + table
           skeleton, mirroring AggregatorBreakdownSection. The chart card
@@ -130,12 +134,24 @@ export default function VolumeLoading() {
           a bare 230px box under-reserved the title/headline/range-pill rows
           that AggregatorBreakdownSection's TimeSeriesChartCard also renders
           on every load. No delta row here either: like the hero chart, this
-          card always passes reserveDeltaRow={false}. Row count matches
+          card always passes reserveDeltaRow={false}. Unlike the hero card,
+          this one passes yAxisTopPadding={0} to its real TimeSeriesChartCard,
+          which triggers that component's dense-layout `pb-2 sm:pb-3` bottom
+          padding override — mirrored here too, so the card doesn't shrink a
+          few px on client mount. Row count matches
           AGGREGATOR_TABLE_SKELETON_ROWS in aggregator-breakdown-section.tsx —
-          keep both in sync if that changes. */}
+          keep both in sync if that changes. The heading also reserves a
+          second line for the static "Canonical name from aggregators.json…"
+          description paragraph AggregatorBreakdownSection always renders
+          under its title (measured live, 2026-07-13: title 20px + description
+          17px = 41px vs a single 16px bar) — without it the table shifts down
+          on client mount even before SWR resolves. */}
       <div className="space-y-3">
-        <div className="h-4 w-64 animate-pulse rounded bg-slate-800/50" />
-        <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
+        <div>
+          <div className="h-4 w-64 animate-pulse rounded bg-slate-800/50" />
+          <div className="mt-1 h-3 w-full max-w-2xl animate-pulse rounded bg-slate-800/40" />
+        </div>
+        <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6 pb-2 sm:pb-3">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-sm">

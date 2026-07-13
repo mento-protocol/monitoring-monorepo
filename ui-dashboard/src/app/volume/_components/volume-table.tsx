@@ -34,6 +34,23 @@ const VALID_KEYS = new Set<SortKey>(SORT_KEYS);
 
 const PAGE_LIMIT = 20;
 
+// Row count for the loading-phase table skeleton. The default (7d, v3) view
+// consistently fills to `PAGE_LIMIT` in production (verified via a live
+// monitoring.mento.org measurement, 2026-07-13: 20 rows, thead 45px, each
+// row 40px -> 845px real table height). `TableSkeleton`'s generic per-row
+// geometry (36px header + 44px/row, calibrated off other tables) doesn't
+// match this table's real rhythm exactly, so reserving all 20 rows
+// overshoots (36 + 20*44 = 916px, +71px vs the 845px measurement). 18 rows
+// (36 + 18*44 = 828px) lands within 24px of the measured full-page case —
+// the closest achievable parity without editing the shared skeleton
+// primitive's fixed row height. Windows with fewer than ~18 active traders
+// will still shrink on load; that's an accepted tradeoff for a
+// client-fetched table that can't know the real count before the query
+// resolves. `volume/loading.tsx`'s route-level fallback mirrors this same
+// row count for its own top-traders placeholder — keep both in sync if this
+// changes.
+const TOP_TRADERS_TABLE_SKELETON_ROWS = 18;
+
 export function VolumeTable({
   cutoff,
   traders,
@@ -99,12 +116,11 @@ export function VolumeTable({
 
   if (isLoading) {
     // Table-shaped (header + measured row rhythm), not a generic bar stack —
-    // the real table always renders a <thead>. Row count is a fixed
-    // approximation of the first page, not `PAGE_LIMIT`: a client-fetched
-    // table can't know the real row count before the query resolves, and
-    // over-reserving to the 20-row cap would itself introduce a jump on
-    // windows with fewer traders.
-    return <TableSkeleton variant="rows" rows={10} />;
+    // the real table always renders a <thead>. See
+    // `TOP_TRADERS_TABLE_SKELETON_ROWS` above for the row-count derivation.
+    return (
+      <TableSkeleton variant="rows" rows={TOP_TRADERS_TABLE_SKELETON_ROWS} />
+    );
   }
 
   if (sorted.length === 0) {

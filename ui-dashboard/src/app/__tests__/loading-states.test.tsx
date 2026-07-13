@@ -186,5 +186,25 @@ describe("route-level loading UIs", () => {
     expect(card!.querySelector(".text-3xl")).not.toBeNull();
     const rangePills = card!.querySelectorAll(".h-6.w-9");
     expect(rangePills).toHaveLength(4);
+
+    // AggregatorBreakdownSection passes yAxisTopPadding={0} to this card,
+    // which triggers TimeSeriesChartCard's dense-layout bottom-padding
+    // override — mirrored here so the card doesn't shrink on client mount.
+    expect(card!.className).toContain("pb-2");
+    expect(card!.className).toContain("sm:pb-3");
+  });
+
+  it("VolumeLoading reserves a second line under the aggregator heading for its static description paragraph", () => {
+    render(<VolumeLoading />);
+
+    // AggregatorBreakdownSection always renders a title plus a
+    // `mt-1 text-xs` description paragraph underneath it — a single 16px
+    // heading bar undershoots that block by ~25px on client mount.
+    const heading = container.querySelector<HTMLElement>(".h-4.w-64");
+    expect(heading).not.toBeNull();
+    const descriptionLine = heading!.nextElementSibling as HTMLElement | null;
+    expect(descriptionLine).not.toBeNull();
+    expect(descriptionLine!.className).toContain("mt-1");
+    expect(descriptionLine!.className).toContain("h-3");
   });
 });

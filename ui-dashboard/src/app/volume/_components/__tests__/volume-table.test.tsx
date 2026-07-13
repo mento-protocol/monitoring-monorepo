@@ -256,7 +256,7 @@ describe("VolumeTable", () => {
       HTMLElement,
     ];
     expect(header.style.height).toBe("36px");
-    expect(body.children).toHaveLength(10);
+    expect(body.children).toHaveLength(18);
     Array.from(body.children).forEach((row) => {
       expect((row as HTMLElement).style.height).toBe("44px");
     });
