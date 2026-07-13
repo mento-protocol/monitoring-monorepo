@@ -182,6 +182,11 @@ describe("BreakerPanel", () => {
     // (Breaker, Reference vs Actual, Threshold/Cooldown, live-Δ, Last trip).
     const statCellCount = (html.match(/h-3 w-24/g) ?? []).length;
     expect(statCellCount).toBe(5);
+    // Each cell reserves the loaded row's measured 78px height (three text
+    // lines: label, value, sub-line) so the header card doesn't grow once
+    // BreakerConfig resolves.
+    const cellHeightCount = (html.match(/h-\[78px\]/g) ?? []).length;
+    expect(cellHeightCount).toBe(5);
   });
 
   it("renders nothing once the query resolves and finds no trip-able breaker (not stuck on the skeleton)", () => {

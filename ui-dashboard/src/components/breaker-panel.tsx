@@ -609,6 +609,12 @@ const BREAKER_SKELETON_SHIMMER = "animate-pulse rounded bg-slate-800/50";
 // Reference vs Actual, Threshold/Cooldown, live-Δ bar, Last trip) — each
 // stat is a label line over a two-line value block, matching `dt` + `dd
 // flex flex-col gap-0.5` in the real metric components above.
+//
+// Cell height: loaded breaker cells render three lines (label, value,
+// sub-line — e.g. "Breaker ⓘ" / "MedianDelta" / "trading mode 0") measuring
+// 78px in production, taller than a tight 3-line stack. Pin each placeholder
+// cell to that height so the breaker `<dl>` doesn't grow once BreakerConfig
+// resolves.
 function BreakerPanelSkeleton() {
   return (
     <>
@@ -616,10 +622,13 @@ function BreakerPanelSkeleton() {
       <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
         {Array.from({ length: 5 }, (_, i) => (
           // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-          <div key={`breaker-skel-stat-${i}`}>
+          <div
+            key={`breaker-skel-stat-${i}`}
+            className="flex h-[78px] flex-col justify-between"
+          >
             <div className={`h-3 w-24 ${BREAKER_SKELETON_SHIMMER}`} />
-            <div className={`mt-1.5 h-4 w-20 ${BREAKER_SKELETON_SHIMMER}`} />
-            <div className={`mt-1 h-3 w-16 ${BREAKER_SKELETON_SHIMMER}`} />
+            <div className={`h-4 w-20 ${BREAKER_SKELETON_SHIMMER}`} />
+            <div className={`h-3 w-16 ${BREAKER_SKELETON_SHIMMER}`} />
           </div>
         ))}
       </dl>
