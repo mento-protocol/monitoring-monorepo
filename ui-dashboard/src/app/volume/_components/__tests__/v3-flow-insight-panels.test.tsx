@@ -165,7 +165,8 @@ describe("CorridorPanel loading state", () => {
       '[role="status"][aria-label="Loading corridor map"]',
     );
     expect(status).not.toBeNull();
-    const [header, body] = Array.from(status!.children) as [
+    const [header, body, caption] = Array.from(status!.children) as [
+      HTMLElement,
       HTMLElement,
       HTMLElement,
     ];
@@ -173,6 +174,15 @@ describe("CorridorPanel loading state", () => {
     // Row count matches INSIGHT_ROW_LIMIT (the corridor query's row cap) so
     // the skeleton doesn't undershoot the common capped-query case.
     expect(body.children).toHaveLength(10);
+    // Reserves a 2-line trailing-caption placeholder (mt-2 + 2x h-3 +
+    // space-y-1) matching the real "Top-query subset…" caption the loaded
+    // panel renders when isPartial && rows.length > 0 — unreserved, this
+    // undershot the loaded panel by ~46px in a live 1440x900 measurement.
+    expect(caption.className).toContain("mt-2");
+    expect(caption.children).toHaveLength(2);
+    for (const line of Array.from(caption.children)) {
+      expect((line as HTMLElement).className).toContain("h-3");
+    }
     teardown(handle);
 
     handle = renderInto(
@@ -226,7 +236,8 @@ describe("OutlierPanel loading state", () => {
       '[role="status"][aria-label="Loading outlier swaps"]',
     );
     expect(status).not.toBeNull();
-    const [header, body] = Array.from(status!.children) as [
+    const [header, body, caption] = Array.from(status!.children) as [
+      HTMLElement,
       HTMLElement,
       HTMLElement,
     ];
@@ -234,6 +245,15 @@ describe("OutlierPanel loading state", () => {
     // Row count matches INSIGHT_ROW_LIMIT (the outlier query's row cap) so
     // the skeleton doesn't undershoot the common capped-query case.
     expect(body.children).toHaveLength(10);
+    // Reserves a 2-line trailing-caption placeholder (mt-2 + 2x h-3 +
+    // space-y-1) matching the real "Top-query subset…" caption the loaded
+    // panel renders when isPartial && rows.length > 0 — unreserved, this
+    // undershot the loaded panel by ~46px in a live 1440x900 measurement.
+    expect(caption.className).toContain("mt-2");
+    expect(caption.children).toHaveLength(2);
+    for (const line of Array.from(caption.children)) {
+      expect((line as HTMLElement).className).toContain("h-3");
+    }
     teardown(handle);
 
     handle = renderInto(

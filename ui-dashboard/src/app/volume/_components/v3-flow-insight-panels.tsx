@@ -257,7 +257,7 @@ function CohortPanelSkeleton() {
 // Corridor/outlier queries cap at 10 rows (`INSIGHT_ROW_LIMIT` in
 // `v3-flow-insights.tsx`), and that cap is the common case in production —
 // both tables are usually query-capped (`isPartial`), which also renders a
-// trailing warning line below the table. `INSIGHT_PANEL_SKELETON_ROWS`
+// trailing "Top-query subset…" caption below the table. `INSIGHT_PANEL_SKELETON_ROWS`
 // mirrors the cap so the skeleton doesn't undershoot the loaded table on the
 // (common) capped path. The row rhythm (`py-3` + `h-3`, 36px) matches the
 // measured real row height (~36-37px) so an uncapped result (fewer than 10
@@ -265,6 +265,20 @@ function CohortPanelSkeleton() {
 // real rows are denser than the shared `TableSkeleton`'s 36px/44px
 // main-table geometry, so this stays a local skeleton rather than reusing
 // that primitive.
+//
+// A live measurement (2026-07-13, 1440x900, production build/data) with the
+// row rhythm above already in place still showed the flow-insights section
+// growing 496px -> 542px (+46px) between the SWR-loading and loaded phases,
+// isolating the remaining gap to that trailing caption paragraph
+// (`pt-2 text-[11px]`), which this skeleton didn't reserve at all. Its
+// column (~421px wide inside the xl:grid-cols-3 layout, minus the panel's
+// p-4 padding) is narrow relative to the longer outlier caption text
+// ("Top-query subset; eligible outliers beyond the fetch cap may be
+// absent.", ~68 chars), so it can wrap to 2 lines. The reserved placeholder
+// below always renders 2 lines (`mt-2` + 2x `h-3` + `space-y-1` =
+// 8 + 12 + 4 + 12 = 36px): 496 + 36 = 532, a 10px gap against the measured
+// 542px loaded height (within the ±24px parity bar), with margin on both
+// sides for measurement noise.
 const INSIGHT_PANEL_SKELETON_ROWS = 10;
 
 function InsightTableSkeleton({
@@ -298,6 +312,14 @@ function InsightTableSkeleton({
             ))}
           </div>
         ))}
+      </div>
+      {/* Reserves the trailing "Top-query subset…" caption both panels
+          render when isPartial && rows.length > 0 — the common capped case
+          (see INSIGHT_PANEL_SKELETON_ROWS above), reserved unconditionally
+          since this skeleton has no isPartial input of its own. */}
+      <div className="mt-2 space-y-1">
+        <div className="h-3 w-full animate-pulse rounded bg-slate-800/40" />
+        <div className="h-3 w-2/3 animate-pulse rounded bg-slate-800/40" />
       </div>
       <span className="sr-only">Loading…</span>
     </div>
