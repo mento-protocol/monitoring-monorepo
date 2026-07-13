@@ -82,6 +82,7 @@ import {
   ALL_CDP_TROVE_OP_SNAPSHOTS,
   CDP_MARKETS,
 } from "@/lib/queries";
+import { CDP_OVERVIEW_TABLE_PAGE_SIZE } from "../../_lib/transactions";
 import { CdpAllTransactionsTable } from "../cdp-all-transactions-table";
 import { CdpsPageClient } from "../cdps-page-client";
 
@@ -432,6 +433,97 @@ describe("CdpsPageClient", () => {
     expect(handle!.container.textContent).toContain(
       "No CDP markets indexed yet.",
     );
+  });
+
+  it("loading skeleton mirrors the loaded page's section structure (header + 3 cards + digest + table skeleton)", () => {
+    mockUseGQL.mockImplementation((query: string | null) =>
+      query === CDP_MARKETS
+        ? { data: undefined, error: null, isLoading: true }
+        : { data: undefined, error: null, isLoading: false },
+    );
+    render(handle!, <CdpsPageClient />);
+
+    // Exactly one live region for the whole page-level skeleton — nested
+    // skeleton pieces must stay presentational under it.
+    const liveRegions = handle!.container.querySelectorAll(
+      '[aria-live="polite"]',
+    );
+    expect(liveRegions).toHaveLength(1);
+
+    // Real header stays mounted (no data dependency) so it never moves
+    // between the loading and loaded phases.
+    expect(handle!.container.querySelector("header h1")?.textContent).toBe(
+      "CDPs",
+    );
+
+    // Top-level sections, in order: header, market-card grid, activity
+    // digest, transactions section — same 4 sections the loaded page renders.
+    const sections = Array.from(
+      handle!.container.firstElementChild!.children,
+    ) as HTMLElement[];
+    expect(sections).toHaveLength(4);
+    const [, grid, digest, transactionsSection] = sections;
+
+    // Market-card grid: same 3-column shape as the loaded grid, 3 cards.
+    expect(grid!.className).toContain("grid-cols-1");
+    expect(grid!.className).toContain("md:grid-cols-3");
+    expect(grid!.children).toHaveLength(3);
+
+    // Activity-digest placeholder: heading bar + subtitle bar + one
+    // content-row wrapper holding a bar per market row.
+    expect(digest!.children).toHaveLength(3);
+
+    // Transactions section: real heading mounted + a table skeleton
+    // reserving exactly one page of rows (the table's real first-page
+    // size). Nested here, the body skeleton and its TableSkeleton both
+    // stay presentational (no role/aria-live of their own) so the page
+    // keeps exactly one live region overall.
+    expect(handle!.container.textContent).toContain("Recent CDP Transactions");
+    const [heading, txBody] = Array.from(
+      transactionsSection!.children,
+    ) as HTMLElement[];
+    expect(heading!.textContent).toBe("Recent CDP Transactions");
+    const [, table] = Array.from(txBody!.children) as HTMLElement[];
+    const [, body] = Array.from(table!.children) as [HTMLElement, HTMLElement];
+    expect(body.children).toHaveLength(CDP_OVERVIEW_TABLE_PAGE_SIZE);
+  });
+
+  it("loading and loaded phases render the same top-level section count", () => {
+    mockUseGQL.mockImplementation((query: string | null) =>
+      query === CDP_MARKETS
+        ? { data: undefined, error: null, isLoading: true }
+        : { data: undefined, error: null, isLoading: false },
+    );
+    render(handle!, <CdpsPageClient />);
+    const loadingSectionCount =
+      handle!.container.firstElementChild!.children.length;
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === CDP_MARKETS) {
+        return { data: marketData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_TRANSACTIONS) {
+        return { data: transactionData(), error: null, isLoading: false };
+      }
+      if (query === ALL_CDP_STABILITY_POOL_EVENTS) {
+        return {
+          data: { StabilityPoolOperationEvent: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === ALL_CDP_TROVE_OP_SNAPSHOTS) {
+        return { data: snapshotData(), error: null, isLoading: false };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    render(handle!, <CdpsPageClient />);
+    const loadedSectionCount =
+      handle!.container.firstElementChild!.children.length;
+
+    // header, market-card grid, activity digest, transactions section
+    expect(loadingSectionCount).toBe(4);
+    expect(loadedSectionCount).toBe(4);
   });
 
   it("renders market cards with health, derived open troves, and transactions", () => {
@@ -1026,6 +1118,40 @@ describe("CdpAllTransactionsTable", () => {
     expect(handle!.container.textContent).not.toContain(
       "No CDP transactions indexed yet.",
     );
+  });
+
+  it("internal SWR loading branch renders the shared table-shaped skeleton (fallback→internal-loading parity)", () => {
+    mockUseGQL.mockImplementation((query: string | null) =>
+      query === ALL_CDP_TRANSACTIONS
+        ? { data: undefined, error: null, isLoading: true }
+        : { data: undefined, error: null, isLoading: false },
+    );
+
+    render(
+      handle!,
+      <CdpAllTransactionsTable
+        chainId={42220}
+        collaterals={[{ id: "gbpm", chainId: 42220, symbol: "GBPm" }]}
+      />,
+    );
+
+    // Real heading mounted; single live region owned by the shared skeleton
+    // body (same component the Suspense fallback in cdps-page-client.tsx
+    // renders), reserving one page of rows.
+    expect(handle!.container.textContent).toContain("Recent CDP Transactions");
+    const liveRegions = handle!.container.querySelectorAll(
+      '[aria-live="polite"]',
+    );
+    expect(liveRegions).toHaveLength(1);
+    expect(liveRegions[0]!.getAttribute("aria-label")).toBe(
+      "Loading transactions",
+    );
+    // The nested TableSkeleton stays presentational (no role/aria-live of
+    // its own) so it doesn't double up with the wrapper's live region above.
+    const wrapper = liveRegions[0] as HTMLElement;
+    const [, table] = Array.from(wrapper.children) as HTMLElement[];
+    const [, body] = Array.from(table!.children) as [HTMLElement, HTMLElement];
+    expect(body.children).toHaveLength(CDP_OVERVIEW_TABLE_PAGE_SIZE);
   });
 
   it("keeps last-good empty overview transactions as an empty state during a background poll error", () => {
