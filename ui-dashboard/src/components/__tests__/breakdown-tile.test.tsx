@@ -48,6 +48,20 @@ function getSubRows(): HTMLElement[] {
   return Array.from(row.children) as HTMLElement[];
 }
 
+// The empty-state branch (loaded, no error, `total === null`) grid-stacks
+// an invisible spacer mirroring the row shapes with the visible message —
+// distinct markup from `getSubRows()`'s `mt-1.5 flex flex-wrap` sub-rows
+// div, so it needs its own query.
+function getEmptyStateSpacerRows(): HTMLElement[] {
+  const spacer = container.querySelector(".invisible.flex.flex-wrap");
+  if (!spacer) return [];
+  return Array.from(spacer.children) as HTMLElement[];
+}
+
+function getEmptyStateMessage(): HTMLElement | null {
+  return container.querySelector(".invisible.flex.flex-wrap + p");
+}
+
 describe("BreakdownTile loading parity", () => {
   it("reserves 3 breakdown rows while loading, matching the loaded row count", () => {
     render(<BreakdownTile {...BASE_PROPS} isLoading total={null} />);
@@ -96,13 +110,85 @@ describe("BreakdownTile loading parity", () => {
     expect(container.textContent).toContain("$30000");
   });
 
-  it("still omits the breakdown rows on error once loaded (unchanged behavior)", () => {
+  it("still omits the breakdown rows and the empty state on error once loaded (unchanged behavior)", () => {
     render(<BreakdownTile {...BASE_PROPS} isLoading={false} hasError />);
     expect(getSubRows()).toHaveLength(0);
+    expect(getEmptyStateSpacerRows()).toHaveLength(0);
+    expect(getEmptyStateMessage()).toBeNull();
+  });
+});
+
+// A caller can legitimately resolve with `total === null` after loading
+// (MoverTile has no expansion/contraction this window; a bridge window can
+// resolve zero snapshots). The loading arm above reserves 3 sub-rows, so
+// omitting the block entirely here would shrink the tile the moment a
+// no-data window resolves — the same height jump the loading-row
+// reservation was written to close.
+describe("BreakdownTile empty-state parity (loaded, no error, total === null)", () => {
+  const EMPTY_PROPS = { ...BASE_PROPS, total: null, isLoading: false };
+
+  it("renders a reserved-height empty state instead of omitting the block", () => {
+    render(<BreakdownTile {...EMPTY_PROPS} />);
+    expect(getSubRows()).toHaveLength(0);
+    expect(getEmptyStateSpacerRows()).toHaveLength(3);
   });
 
-  it("still omits the breakdown rows when total is null and not loading (unchanged behavior)", () => {
-    render(<BreakdownTile {...BASE_PROPS} isLoading={false} total={null} />);
-    expect(getSubRows()).toHaveLength(0);
+  it("sizes the empty-state spacer slots identically to the loading placeholders (w-14/h-3, same labels)", () => {
+    render(<BreakdownTile {...EMPTY_PROPS} />);
+    const spacerRows = getEmptyStateSpacerRows();
+    expect(spacerRows.map((r) => r.textContent?.trim())).toEqual([
+      "24h",
+      "7d",
+      "30d",
+    ]);
+    spacerRows.forEach((row) => {
+      const box = row.querySelector("span:last-child");
+      expect(box).not.toBeNull();
+      expect(box!.className).toContain("w-14");
+      expect(box!.className).toContain("h-3");
+    });
+  });
+
+  it("hides the spacer from assistive tech and shows a real message instead of a skeleton", () => {
+    render(<BreakdownTile {...EMPTY_PROPS} />);
+    const spacer = container.querySelector(".invisible.flex.flex-wrap");
+    expect(spacer).not.toBeNull();
+    expect(spacer!.getAttribute("aria-hidden")).toBe("true");
+
+    // Distinguishable from the loading skeleton: no shimmer/pulse anywhere
+    // in the empty-state block, and no bg-fill placeholder boxes either.
+    expect(container.querySelector(".animate-pulse")).toBeNull();
+
+    const message = getEmptyStateMessage();
+    expect(message).not.toBeNull();
+    expect(message!.textContent).toBe("No data this window");
+  });
+
+  it("supports a caller-supplied empty-state message, defaulting when omitted", () => {
+    render(
+      <BreakdownTile
+        {...EMPTY_PROPS}
+        emptyStateMessage="No expansion this window"
+      />,
+    );
+    expect(getEmptyStateMessage()!.textContent).toBe(
+      "No expansion this window",
+    );
+  });
+
+  it("does not render the empty state while loading or on error", () => {
+    render(<BreakdownTile {...EMPTY_PROPS} isLoading />);
+    expect(getEmptyStateSpacerRows()).toHaveLength(0);
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    render(<BreakdownTile {...EMPTY_PROPS} hasError />);
+    expect(getEmptyStateSpacerRows()).toHaveLength(0);
+    expect(getEmptyStateMessage()).toBeNull();
   });
 });
