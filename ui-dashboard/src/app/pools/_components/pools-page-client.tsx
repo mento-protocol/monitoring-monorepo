@@ -11,6 +11,7 @@ import {
   type NetworkData,
 } from "@/hooks/use-all-networks-data";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
+import { DEFAULT_SWAPS_LIMIT } from "@/lib/constants";
 import { RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
 import {
   truncateAddress,
@@ -85,8 +86,12 @@ function PoolsContent({
   // destructuring breaks runtime, so calls stay member-form.
   // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
   const poolFilter = searchParams.get("pool") ?? "";
-  // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
-  const limit = Math.max(1, Number(searchParams.get("limit") ?? "25") || 25);
+  const limit = Math.max(
+    1,
+    // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
+    Number(searchParams.get("limit") ?? String(DEFAULT_SWAPS_LIMIT)) ||
+      DEFAULT_SWAPS_LIMIT,
+  );
 
   const [filterInput, setFilterInput] = useState(poolFilter);
   const [filterError, setFilterError] = useState("");

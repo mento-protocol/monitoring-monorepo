@@ -1,13 +1,12 @@
 import { TableSkeleton } from "@/components/skeletons";
+import { DEFAULT_SWAPS_LIMIT } from "@/lib/constants";
 
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
 
-// Default Recent Swaps page size (mirrors `pools-page-client.tsx`'s
-// `searchParams.get("limit") ?? "25"`). This route loading UI runs during
-// the server-side await in `page.tsx` and on client-side nav, before any
-// URL state is readable, so it can't follow a non-default `?limit=`
-// selection — it reserves the common case instead.
-const DEFAULT_SWAPS_LIMIT = 25;
+// This route loading UI runs during the server-side await in `page.tsx` and
+// on client-side nav, before any URL state is readable, so it can't follow a
+// non-default `?limit=` selection — it reserves `DEFAULT_SWAPS_LIMIT` (mirrors
+// `pools-page-client.tsx`'s own fallback for the same URL param) instead.
 
 // Route-shaped skeleton for /pools (SSR await in `page.tsx` + client-side
 // nav to /pools). Mirrors `pools-page-client.tsx`'s `PoolsContent`: the
