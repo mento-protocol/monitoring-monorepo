@@ -7,6 +7,7 @@ import { SortableTh } from "@/components/sortable-th";
 import { ChainIcon } from "@/components/chain-icon";
 import { AddressLink } from "@/components/address-link";
 import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
+import { TableSkeleton } from "@/components/skeletons";
 import { formatUSD, relativeTime } from "@/lib/format";
 import {
   aggregateTraderPoolsByWindow,
@@ -97,7 +98,13 @@ export function VolumeTable({
   }
 
   if (isLoading) {
-    return <Skeleton rows={10} />;
+    // Table-shaped (header + measured row rhythm), not a generic bar stack —
+    // the real table always renders a <thead>. Row count is a fixed
+    // approximation of the first page, not `PAGE_LIMIT`: a client-fetched
+    // table can't know the real row count before the query resolves, and
+    // over-reserving to the 20-row cap would itself introduce a jump on
+    // windows with fewer traders.
+    return <TableSkeleton variant="rows" rows={10} />;
   }
 
   if (sorted.length === 0) {

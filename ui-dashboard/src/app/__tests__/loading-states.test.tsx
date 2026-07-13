@@ -139,4 +139,41 @@ describe("route-level loading UIs", () => {
     // wrapper — reserving it shifted the KPI tiles down ~20px on swap.
     expect(container.querySelector(".flex.h-5.items-center")).toBeNull();
   });
+
+  it("VolumeLoading reserves a 3-panel flow-insights grid mirroring V3FlowInsights", () => {
+    render(<VolumeLoading />);
+
+    const grid = container.querySelector(".xl\\:grid-cols-3");
+    expect(grid).not.toBeNull();
+    expect(grid!.children).toHaveLength(3);
+  });
+
+  it("VolumeLoading reserves a single full-width top-traders table, not a two-column layout", () => {
+    render(<VolumeLoading />);
+
+    // Table-shaped skeletons (header 36px bar + 44px measured rows) reserve
+    // exactly two: the top-traders table and the aggregator table. Neither
+    // reserves a side column — `TopPoolsList` only renders alongside the
+    // per-pool chart for the 30d/90d/all ranges, which this route's default
+    // 7d fallback never reaches. `TableSkeleton` is rendered `presentational`
+    // here (a single outer live region already wraps the whole page), which
+    // strips its own `aria-label` — so table-skeleton roots are located
+    // structurally via the 36px header bar instead.
+    const tableSkeletonRoots = Array.from(
+      container.querySelectorAll<HTMLElement>("div"),
+    ).filter(
+      (el) =>
+        (el.firstElementChild as HTMLElement | null)?.style.height === "36px",
+    );
+    expect(tableSkeletonRoots).toHaveLength(2);
+  });
+
+  it("VolumeLoading reserves a 230px chart card ahead of the aggregator table skeleton", () => {
+    render(<VolumeLoading />);
+
+    const chartPlaceholder = [
+      ...container.querySelectorAll<HTMLElement>("[class*='h-[230px]']"),
+    ];
+    expect(chartPlaceholder).toHaveLength(1);
+  });
 });

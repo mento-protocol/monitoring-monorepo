@@ -245,6 +245,33 @@ describe("VolumeTable", () => {
     );
   });
 
+  it("reserves a table-shaped skeleton (header + measured row rhythm) while loading, matching the loaded table's <thead> structure", () => {
+    renderVolumeTable(handle!, { isLoading: true });
+    const status = handle!.container.querySelector<HTMLElement>(
+      '[role="status"][aria-label="Loading table"]',
+    );
+    expect(status).not.toBeNull();
+    const [header, body] = Array.from(status!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(header.style.height).toBe("36px");
+    expect(body.children).toHaveLength(10);
+    Array.from(body.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("44px");
+    });
+
+    renderVolumeTable(handle!, {
+      isLoading: false,
+      traders: [trader({ trader: "0xaaa" })],
+    });
+    // The loaded branch is a real <table> with a <thead> — the same
+    // "header row + body rows" shape the skeleton reserves, not a
+    // generic bar stack.
+    expect(handle!.container.querySelector("thead")).not.toBeNull();
+    expect(handle!.container.querySelector("tbody")).not.toBeNull();
+  });
+
   it("sorts traders through volume URL params", () => {
     renderVolumeTable(handle!, {
       traders: [

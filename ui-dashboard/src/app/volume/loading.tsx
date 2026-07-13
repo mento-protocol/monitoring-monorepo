@@ -6,8 +6,18 @@ import { TableSkeleton } from "@/components/skeletons";
 // venue insight/aggregator sections are venue-specific). It reserves the
 // always-present, fixed-size blocks of VolumePageView for the common (7d, v3)
 // case so the skeleton→content swap doesn't shift: header (title + toggle
-// controls) → 200px chart card → 3 KPI tiles → venue table. A single live region
-// wraps the presentational child skeletons.
+// controls) → 200px chart card → 3 KPI tiles → flow insights → top traders →
+// aggregator breakdown. A single live region wraps the presentational child
+// skeletons.
+//
+// The below-the-fold three sections mirror V3VolumeSection's default (7d,
+// v3) layout — the venue this route falls back to. Non-default deep links
+// (24h, v2) still mismatch somewhat here; that's an accepted tradeoff (this
+// file can't read search params before the client mounts). Notably, the top
+// traders table is reserved as a single full-width table with no side
+// column: `TopPoolsList` only renders alongside the per-pool chart for the
+// 30d/90d/all ranges (`RANGES_WITH_CHART` in `page-client.tsx`), which the
+// default 7d view never reaches.
 export default function VolumeLoading() {
   return (
     <div
@@ -72,7 +82,50 @@ export default function VolumeLoading() {
           </div>
         ))}
       </div>
-      <TableSkeleton rows={10} presentational />
+      {/* Flow insights: heading + 3-panel grid mirroring V3FlowInsights
+          (Cohort / Corridor / Outlier). This route-level fallback can't know
+          venue/range, so each panel reserves a generic sized block rather
+          than replicating the panels' internal row shapes — that detail
+          lives in v3-flow-insight-panels.tsx's own client loading branch. */}
+      <div className="space-y-3">
+        <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          {Array.from({ length: 3 }, (_, i) => (
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+            <div
+              key={`vol-insight-panel-${i}`}
+              className="rounded-lg border border-slate-800 bg-slate-900/50 p-4"
+              style={{ height: 480 }}
+            >
+              <div className="mb-3 h-3 w-32 animate-pulse rounded bg-slate-800/50" />
+              <div className="space-y-2">
+                {Array.from({ length: 8 }, (_, r) => (
+                  // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+                  <div
+                    key={`vol-insight-row-${i}-${r}`}
+                    className="h-5 animate-pulse rounded bg-slate-800/30"
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Top traders: heading + main table skeleton (header + measured row
+          rhythm), mirroring V3VolumeSection's "Top traders" table. */}
+      <div className="space-y-3">
+        <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
+        <TableSkeleton rows={10} variant="rows" presentational />
+      </div>
+      {/* Aggregator breakdown: heading + 230px chart card + table skeleton,
+          mirroring AggregatorBreakdownSection. Row count matches
+          AGGREGATOR_TABLE_SKELETON_ROWS in aggregator-breakdown-section.tsx —
+          keep both in sync if that changes. */}
+      <div className="space-y-3">
+        <div className="h-4 w-64 animate-pulse rounded bg-slate-800/50" />
+        <div className="h-[230px] animate-pulse rounded-lg border border-slate-800 bg-slate-900/30" />
+        <TableSkeleton rows={6} variant="rows" presentational />
+      </div>
       <span className="sr-only">Loading…</span>
     </div>
   );

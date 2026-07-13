@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { AddressLink } from "@/components/address-link";
 import { ChainIcon } from "@/components/chain-icon";
-import { Skeleton } from "@/components/feedback";
 import { formatUSD, relativeTime } from "@/lib/format";
 import {
   weiToUsd,
@@ -42,7 +41,7 @@ export function CohortPanel({
           message="Couldn't load cohort comparison."
         />
       ) : isLoading || !summary ? (
-        <Skeleton rows={4} />
+        <CohortPanelSkeleton />
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-2">
@@ -87,7 +86,7 @@ export function CorridorPanel({
       {hasError ? (
         <PanelMessage variant="error" message="Couldn't load corridor flows." />
       ) : isLoading ? (
-        <Skeleton rows={4} />
+        <InsightTableSkeleton cols={4} label="Loading corridor map" />
       ) : isPartial && rows.length === 0 ? (
         <PanelMessage
           variant="warn"
@@ -149,7 +148,7 @@ export function OutlierPanel({
       {hasError ? (
         <PanelMessage variant="error" message="Couldn't load outlier swaps." />
       ) : isLoading ? (
-        <Skeleton rows={4} />
+        <InsightTableSkeleton cols={3} label="Loading outlier swaps" />
       ) : isPartial && rows.length === 0 ? (
         <PanelMessage
           variant="warn"
@@ -213,6 +212,89 @@ function InsightPanel({
         {title}
       </h3>
       {children}
+    </div>
+  );
+}
+
+// Mirrors CohortPanel's loaded shape (3-stat mini grid + 3 leader rows +
+// caption line) so the section doesn't grow when the query resolves — the
+// old `<Skeleton rows={4} />` (4 generic 40px bars) undershot the real
+// content by roughly half.
+function CohortPanelSkeleton() {
+  return (
+    <div
+      className="space-y-4"
+      role="status"
+      aria-label="Loading cohort comparison"
+    >
+      <div className="grid grid-cols-3 gap-2">
+        {Array.from({ length: 3 }, (_, i) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+          <div key={`cohort-skel-stat-${i}`} className="min-w-0">
+            <div className="h-[11px] w-10 animate-pulse rounded bg-slate-800/50" />
+            <div className="mt-1 h-[18px] w-8 animate-pulse rounded bg-slate-800/50" />
+          </div>
+        ))}
+      </div>
+      <div className="space-y-2 text-xs">
+        {Array.from({ length: 3 }, (_, i) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+          <div
+            key={`cohort-skel-leader-${i}`}
+            className="flex items-center justify-between gap-3"
+          >
+            <div className="h-3 w-16 animate-pulse rounded bg-slate-800/40" />
+            <div className="h-3 w-28 animate-pulse rounded bg-slate-800/40" />
+          </div>
+        ))}
+      </div>
+      <div className="h-[11px] w-40 animate-pulse rounded bg-slate-800/40" />
+      <span className="sr-only">Loading…</span>
+    </div>
+  );
+}
+
+// Corridor/outlier row rhythm is `py-2` + `text-xs` (~28px including the
+// header) — much denser than the shared `TableSkeleton`'s measured 36px/44px
+// main-table geometry, so this stays a local skeleton rather than reusing
+// that primitive. `INSIGHT_PANEL_SKELETON_ROWS` approximates the panel's
+// typical row count (queries cap at 10 — `INSIGHT_ROW_LIMIT` in
+// `v3-flow-insights.tsx` — but real windows usually resolve fewer).
+const INSIGHT_PANEL_SKELETON_ROWS = 6;
+
+function InsightTableSkeleton({
+  cols,
+  label,
+}: {
+  cols: number;
+  label: string;
+}) {
+  return (
+    <div role="status" aria-label={label}>
+      <div className="flex gap-3 border-b border-slate-800 py-2">
+        {Array.from({ length: cols }, (_, i) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+          <div
+            key={`insight-skel-th-${i}`}
+            className="h-3 flex-1 animate-pulse rounded bg-slate-800/50"
+          />
+        ))}
+      </div>
+      <div className="divide-y divide-slate-800/40">
+        {Array.from({ length: INSIGHT_PANEL_SKELETON_ROWS }, (_, rowIdx) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+          <div key={`insight-skel-row-${rowIdx}`} className="flex gap-3 py-2">
+            {Array.from({ length: cols }, (_, colIdx) => (
+              // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+              <div
+                key={`insight-skel-cell-${rowIdx}-${colIdx}`}
+                className="h-3 flex-1 animate-pulse rounded bg-slate-800/40"
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+      <span className="sr-only">Loading…</span>
     </div>
   );
 }

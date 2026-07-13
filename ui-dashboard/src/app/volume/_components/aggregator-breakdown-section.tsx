@@ -8,7 +8,8 @@ import { Table, Row, Td, Th } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
 import { ChainIcon } from "@/components/chain-icon";
 import { AddressLink } from "@/components/address-link";
-import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
+import { EmptyBox, ErrorBox } from "@/components/feedback";
+import { TableSkeleton } from "@/components/skeletons";
 import {
   TimeSeriesChartCard,
   type BreakdownSeries,
@@ -26,6 +27,15 @@ import type { TimeSeriesPoint, RangeKey } from "@/lib/time-series";
 import { TableSectionTitle } from "./table-section-title";
 
 const PAGE_LIMIT = 50;
+
+// Row count for the loading-phase table skeleton. Aggregator/entry-point
+// breakdowns typically resolve to a much smaller distinct-row count than
+// `PAGE_LIMIT` (50) — reserving the full cap would over-shoot the real
+// table's height on every load. 6 matches the production skeleton-parity
+// audit's measured aggregator-section delta (issue #1221). `volume/loading.tsx`'s
+// route-level fallback mirrors this same row count for its own aggregator
+// placeholder — keep both in sync if this changes.
+const AGGREGATOR_TABLE_SKELETON_ROWS = 6;
 
 const AGG_SORT_KEYS = ["volume", "swaps", "traders"] as const;
 type AggSortKey = (typeof AGG_SORT_KEYS)[number];
@@ -171,7 +181,11 @@ function AggregatorTable({
       />
     );
   }
-  if (isLoading) return <Skeleton rows={4} />;
+  if (isLoading) {
+    return (
+      <TableSkeleton variant="rows" rows={AGGREGATOR_TABLE_SKELETON_ROWS} />
+    );
+  }
   if (sorted.length === 0) {
     return (
       <EmptyBox

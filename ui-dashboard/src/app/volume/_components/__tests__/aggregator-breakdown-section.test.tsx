@@ -173,6 +173,31 @@ describe("AggregatorBreakdownSection", () => {
     ]);
   });
 
+  it("reserves a table-shaped skeleton (header + measured row rhythm) while loading, matching the loaded table's <thead> structure", () => {
+    handle = renderSection({ isLoading: true });
+    const status = handle.container.querySelector<HTMLElement>(
+      '[role="status"][aria-label="Loading table"]',
+    );
+    expect(status).not.toBeNull();
+    const [header, body] = Array.from(status!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(header.style.height).toBe("36px");
+    expect(body.children.length).toBeGreaterThan(0);
+    Array.from(body.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("44px");
+    });
+    teardown(handle);
+
+    handle = renderSection({
+      isLoading: false,
+      aggregators: [row({ aggregator: "squid" })],
+    });
+    expect(handle.container.querySelector("thead")).not.toBeNull();
+    expect(handle.container.querySelector("tbody")).not.toBeNull();
+  });
+
   it("sorts rows through the v3 aggregator URL params", () => {
     handle = renderSection({
       aggregators: [

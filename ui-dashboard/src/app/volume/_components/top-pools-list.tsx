@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
+import { ErrorBox, EmptyBox } from "@/components/feedback";
 import { formatUSD } from "@/lib/format";
 
 export type TopPoolsListEntry = {
@@ -64,7 +64,7 @@ export function TopPoolsList({
       {hasError ? (
         <ErrorBox message="Couldn't load pool ranking." />
       ) : isLoading ? (
-        <Skeleton rows={10} />
+        <TopPoolsListSkeleton />
       ) : entries.length === 0 ? (
         <EmptyBox message="No pool volume in this window." />
       ) : (
@@ -99,5 +99,30 @@ export function TopPoolsList({
         </ol>
       )}
     </section>
+  );
+}
+
+// Real rows are dense (~26px incl. the `space-y-1.5` gap) — matched here
+// with a fixed-height `li` per row instead of the old generic `h-10`
+// (40px) bar stack, which reserved ~2x the real list's height and produced
+// the "350px-wide bars materializing at the right edge during load" jump
+// measured in the production skeleton-parity audit (issue #1221).
+const TOP_POOLS_SKELETON_ROWS = 10;
+
+function TopPoolsListSkeleton() {
+  return (
+    <ol className="space-y-1.5" role="status" aria-label="Loading pool ranking">
+      {Array.from({ length: TOP_POOLS_SKELETON_ROWS }, (_, i) => (
+        // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+        <li key={`top-pools-skel-${i}`} className="flex h-5 items-center gap-2">
+          <span className="h-2.5 w-5 flex-shrink-0 animate-pulse rounded bg-slate-800/40" />
+          <span className="h-2 w-2 flex-shrink-0 animate-pulse rounded-sm bg-slate-800/50" />
+          <span className="h-2.5 flex-1 animate-pulse rounded bg-slate-800/50" />
+          <span className="ml-auto h-2.5 w-12 flex-shrink-0 animate-pulse rounded bg-slate-800/50" />
+          <span className="h-2.5 w-8 flex-shrink-0 animate-pulse rounded bg-slate-800/40" />
+        </li>
+      ))}
+      <span className="sr-only">Loading…</span>
+    </ol>
   );
 }
