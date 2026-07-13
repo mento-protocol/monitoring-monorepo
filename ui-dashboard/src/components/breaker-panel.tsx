@@ -522,6 +522,13 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
   }, [tickerActive]);
 
   if (queryPending) return <BreakerPanelSkeleton />;
+  // Accepted tradeoff: for the (less common) pool that resolves to no
+  // trip-able breaker, this is now skeleton→null instead of main's stable
+  // null→null — trading a rare small collapse for eliminating the far more
+  // common null→content jump this component exists to fix. The full fix
+  // (SSR-prefetch POOL_BREAKER_CONFIG so the resolved shape is known on
+  // first paint, mirroring PoolHeader's initialV2Exchange/
+  // initialExchangeVolume pattern) is tracked in issue #1237.
   if (isVirtual || !rateFeedID || !cfg) return null;
   // No trip-able breaker (e.g. feed not registered with BreakerBox) → no panel.
 

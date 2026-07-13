@@ -19,6 +19,7 @@ import { BreachHistoryChart } from "@/components/breach-history-chart";
 import { TableSearch } from "@/components/table-search";
 import { Pagination } from "@/components/pagination";
 import { EmptyBox, ErrorBox } from "@/components/feedback";
+import { TableSkeleton } from "@/components/skeletons";
 import { buildOrderBy, type SortDir } from "@/lib/table-sort";
 import {
   buildSearchBlob,
@@ -378,7 +379,11 @@ function BreachHistoryPanelInner({
         </div>
 
         {isLoading && rows.length === 0 ? (
-          <p className="py-6 text-center text-sm text-slate-500">Loading…</p>
+          // Sized to the tab's real page-size row count so switching into
+          // (or first-loading) the breaches tab doesn't collapse the panel
+          // to a text sliver and re-expand once the page query resolves
+          // (issue #1222 criterion #3).
+          <TableSkeleton variant="rows" rows={limit} />
         ) : rows.length === 0 && countConfirmed && rawTotal === 0 ? (
           <EmptyBox
             message={

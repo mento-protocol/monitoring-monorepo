@@ -515,7 +515,11 @@ describe("Initial render", () => {
     expect(html).toContain("Liquidity event");
   });
 
-  it("shows the 'Loading…' placeholder while page is loading and rows are empty", () => {
+  it("shows a table-shaped skeleton (not a text sliver) while page is loading and rows are empty", () => {
+    // Issue #1222 criterion #3: switching into (or first-loading) the
+    // breaches tab must not collapse the panel to a sliver and re-expand
+    // once the page query resolves — the skeleton must be sized to the
+    // real table's row count (`limit`), not a bare loading string.
     setupGQL({
       count: { data: undefined, isLoading: true },
       page: { data: undefined, isLoading: true },
@@ -530,7 +534,10 @@ describe("Initial render", () => {
         onSearchChange={() => {}}
       />,
     );
-    expect(html).toContain("Loading…");
+    expect(html).not.toContain("py-6 text-center text-sm text-slate-500");
+    const rowCount = (html.match(/animate-pulse bg-slate-800\/30/g) ?? [])
+      .length;
+    expect(rowCount).toBe(25);
   });
 
   it("shows the schema-lag banner when page query errors with 'field not found'", () => {

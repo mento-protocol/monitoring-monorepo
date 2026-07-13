@@ -125,6 +125,13 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   }, [enabled]);
 
   if (queryPending) return <MarketHoursPillSkeleton />;
+  // Accepted tradeoff: for the majority non-FX pool, this is now
+  // skeleton→null instead of main's stable null→null. At the title row's
+  // typical width this is horizontal-only (no wrap, no CLS) — a
+  // phantom-pill-then-vanish flash rather than a layout shift — but a
+  // narrow viewport could still push the flex-wrap title row onto a second
+  // line and back. The full fix (SSR-prefetch POOL_BREAKER_CONFIG so
+  // FX-eligibility is known on first paint) is tracked in issue #1237.
   if (!enabled) return null;
 
   const breakerClosed = isBreakerClosure(marketHoursConfig);

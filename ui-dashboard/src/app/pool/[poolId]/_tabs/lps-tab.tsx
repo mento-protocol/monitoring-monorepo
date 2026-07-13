@@ -349,10 +349,19 @@ function getFpmmPoolState(pool: Pool | null): boolean | null {
 
 const LP_SKELETON_SHIMMER = "animate-pulse rounded bg-slate-800/50";
 
+// Typical-pool row count for the table portion of the skeleton — reserving
+// the full page-size `limit` (up to MAX_TAB_LIMIT) overshoots the common
+// case badly (issue #1222 measured a low-position pool at 602px loaded vs.
+// ~1550px for a 25-row reservation). A first-screenful-sized reservation
+// tracks the common case; pools with many more LPs still get a stable
+// (if imperfect) skeleton→content transition since only the row COUNT is
+// approximate, not the row shape.
+const LPS_SKELETON_ROW_COUNT = 4;
+
 // Mirrors the LPs tab's real loaded layout — LpConcentrationChart (reserving
 // PIE_PLOT_HEIGHT_PX, the same constant the real chart's own chunk-loading
-// fallback uses) + the search input + the positions table sized to the
-// tab's real page size (`limit`). Issue #1222 measured the previous flat
+// fallback uses) + the search input + the positions table sized to a
+// typical first-screenful row count. Issue #1222 measured the previous flat
 // `<Skeleton rows={5} />` (232px) against 602px of real LPs-tab content.
 function LpsTabSkeleton({ limit }: { limit: number }) {
   return (
@@ -365,7 +374,10 @@ function LpsTabSkeleton({ limit }: { limit: number }) {
         />
       </div>
       <div className={`mb-4 h-9 w-full max-w-sm ${LP_SKELETON_SHIMMER}`} />
-      <TableSkeleton variant="rows" rows={limit} />
+      <TableSkeleton
+        variant="rows"
+        rows={Math.min(limit, LPS_SKELETON_ROW_COUNT)}
+      />
     </>
   );
 }

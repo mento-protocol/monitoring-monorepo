@@ -159,7 +159,11 @@ function usePoolDetailData(
       network.chainId,
       initialData,
     );
-  const { data: limitsData, error: limitsError } = useGQL<{
+  const {
+    data: limitsData,
+    error: limitsError,
+    isLoading: limitsLoading,
+  } = useGQL<{
     TradingLimit: TradingLimit[];
   }>(TRADING_LIMITS, { poolId: normalizedPoolId });
   const { data: deployData } = useGQL<{
@@ -179,6 +183,7 @@ function usePoolDetailData(
     thresholdsError,
     tradingLimits: limitsData?.TradingLimit ?? [],
     tradingLimitsError: limitsError !== undefined,
+    tradingLimitsLoading: isLoadingWithoutData(limitsLoading, limitsData),
     deployTxHash: deployData?.FactoryDeployment?.[0]?.txHash,
     olsData,
     olsLoading,
@@ -324,6 +329,7 @@ function PoolDetail({ initialSearch, initialData }: PoolDetailProps) {
             setTabSearch={setTabSearch}
             tradingLimits={detail.tradingLimits}
             tradingLimitsError={detail.tradingLimitsError}
+            tradingLimitsLoading={detail.tradingLimitsLoading}
             fpmmPool={detail.fpmmPool}
             network={network}
             thresholdsLoading={detail.thresholdsLoading}
@@ -511,6 +517,7 @@ function PoolTabPanel({
   setTabSearch,
   tradingLimits,
   tradingLimitsError,
+  tradingLimitsLoading,
   fpmmPool,
   network,
   thresholdsLoading,
@@ -524,6 +531,7 @@ function PoolTabPanel({
   setTabSearch: (tab: Tab, value: string) => void;
   tradingLimits: TradingLimit[];
   tradingLimitsError: boolean;
+  tradingLimitsLoading: boolean;
   fpmmPool: boolean;
   network: ReturnType<typeof useNetwork>["network"];
   thresholdsLoading: boolean;
@@ -542,86 +550,137 @@ function PoolTabPanel({
         thresholdsLoading={thresholdsLoading}
         thresholdsError={thresholdsError}
       >
-        {tab === "swaps" && (
-          <SwapsTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("swaps", value)}
-          />
-        )}
-        {tab === "reserves" && (
-          <ReservesTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("reserves", value)}
-          />
-        )}
-        {tab === "rebalances" && (
-          <RebalancesTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("rebalances", value)}
-          />
-        )}
-        {tab === "liquidity" && (
-          <LiquidityTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("liquidity", value)}
-          />
-        )}
-        {tab === "oracle" && (
-          <OracleTab
-            poolId={normalizedPoolId}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("oracle", value)}
-          />
-        )}
-        {tab === "providers" && (
-          <LpsTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("providers", value)}
-          />
-        )}
-        {tab === "limits" && pool && (
-          <LimitPanel
-            pool={pool}
-            tradingLimits={tradingLimits}
-            hasError={tradingLimitsError}
-          />
-        )}
-        {tab === "breaches" && fpmmPool && pool && (
-          <BreachHistoryPanel
-            pool={pool}
-            network={network}
-            limit={limit}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("breaches", value)}
-          />
-        )}
-        {tab === "ols" && (
-          <OlsTab
-            poolId={normalizedPoolId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("ols", value)}
-          />
-        )}
+        <ActiveTabContent
+          tab={tab}
+          normalizedPoolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          activeSearch={activeSearch}
+          setTabSearch={setTabSearch}
+          tradingLimits={tradingLimits}
+          tradingLimitsError={tradingLimitsError}
+          tradingLimitsLoading={tradingLimitsLoading}
+          fpmmPool={fpmmPool}
+          network={network}
+        />
       </TokenAmountTrustGate>
     </div>
+  );
+}
+
+type ActiveTabContentProps = {
+  tab: Tab;
+  normalizedPoolId: string;
+  limit: number;
+  pool: Pool | null;
+  activeSearch: string;
+  setTabSearch: (tab: Tab, value: string) => void;
+  tradingLimits: TradingLimit[];
+  tradingLimitsError: boolean;
+  tradingLimitsLoading: boolean;
+  fpmmPool: boolean;
+  network: ReturnType<typeof useNetwork>["network"];
+};
+
+// Split out of `PoolTabPanel` so the per-tab switch (one branch per entry in
+// `TABS`) doesn't push the wrapper function over the repo's
+// max-lines-per-function budget.
+function ActiveTabContent(props: ActiveTabContentProps) {
+  const {
+    tab,
+    normalizedPoolId,
+    limit,
+    pool,
+    activeSearch,
+    setTabSearch,
+    tradingLimits,
+    tradingLimitsError,
+    tradingLimitsLoading,
+    fpmmPool,
+    network,
+  } = props;
+  return (
+    <>
+      {tab === "swaps" && (
+        <SwapsTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("swaps", value)}
+        />
+      )}
+      {tab === "reserves" && (
+        <ReservesTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("reserves", value)}
+        />
+      )}
+      {tab === "rebalances" && (
+        <RebalancesTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("rebalances", value)}
+        />
+      )}
+      {tab === "liquidity" && (
+        <LiquidityTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("liquidity", value)}
+        />
+      )}
+      {tab === "oracle" && (
+        <OracleTab
+          poolId={normalizedPoolId}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("oracle", value)}
+        />
+      )}
+      {tab === "providers" && (
+        <LpsTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("providers", value)}
+        />
+      )}
+      {tab === "limits" && pool && (
+        <LimitPanel
+          pool={pool}
+          tradingLimits={tradingLimits}
+          hasError={tradingLimitsError}
+          isLoading={tradingLimitsLoading}
+        />
+      )}
+      {tab === "breaches" && fpmmPool && pool && (
+        <BreachHistoryPanel
+          pool={pool}
+          network={network}
+          limit={limit}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("breaches", value)}
+        />
+      )}
+      {tab === "ols" && (
+        <OlsTab
+          poolId={normalizedPoolId}
+          limit={limit}
+          pool={pool}
+          search={activeSearch}
+          onSearchChange={(value) => setTabSearch("ols", value)}
+        />
+      )}
+    </>
   );
 }
 
