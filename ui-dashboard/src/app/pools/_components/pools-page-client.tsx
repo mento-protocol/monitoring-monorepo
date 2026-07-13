@@ -40,6 +40,7 @@ import { EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { TableSkeleton } from "@/components/skeletons";
 import { LimitSelect } from "@/components/controls";
 import { SenderCell } from "@/components/sender-cell";
+import { SwapsTableSkeleton } from "./pools-skeletons";
 
 export function PoolsPageClient({
   initialNetworkData,
@@ -309,11 +310,12 @@ function PoolsContent({
         ) : swapsLoading ? (
           // `limit` (not a hardcoded row count) so the skeleton always
           // matches the selected page size — real SwapTable renders exactly
-          // `limit` rows, header ~36px + rows ~44px (TableSkeleton's
-          // measured real-table geometry). Clamped to LimitSelect's largest
-          // option (100) so a crafted `?limit=` value in the URL can't blow
-          // up the placeholder row count.
-          <TableSkeleton rows={Math.min(limit, 100)} variant="rows" />
+          // `limit` rows, header 45px + rows 37px (`SwapsTableSkeleton`'s
+          // locally measured rhythm — see pools-skeletons.tsx; the shared
+          // TableSkeleton's 36/44 is calibrated for other tables). Clamped
+          // to LimitSelect's largest option (100) so a crafted `?limit=`
+          // value in the URL can't blow up the placeholder row count.
+          <SwapsTableSkeleton rows={Math.min(limit, 100)} />
         ) : swaps.length === 0 ? (
           <EmptyBox
             message={

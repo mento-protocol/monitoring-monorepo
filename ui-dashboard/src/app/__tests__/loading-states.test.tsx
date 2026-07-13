@@ -11,6 +11,7 @@ import PoolDetailLoading from "@/app/pool/[poolId]/loading";
 import AddressBookLoading from "@/app/address-book/loading";
 import VolumeLoading from "@/app/volume/loading";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
+import { POOLS_TABLE_SKELETON_ROWS } from "@/app/pools/_components/pools-skeletons";
 
 // Each route-level loading UI must expose exactly one aria-live region so
 // screen readers don't announce nested status regions redundantly. Keeping
@@ -155,29 +156,41 @@ describe("route-level loading UIs", () => {
     expect(kpiRow!.children).toHaveLength(3);
   });
 
-  it("PoolsLoading reserves table-shaped pools and Recent Swaps sections (header ~36px, rows ~44px)", () => {
+  it("PoolsLoading reserves table-shaped pools (header 45px, rows 58px) and Recent Swaps (header 45px, rows 37px) sections", () => {
     render(<PoolsLoading />);
     const tables = container.querySelectorAll(".overflow-hidden.rounded-lg");
     expect(tables).toHaveLength(2);
 
     const [poolsTable, swapsTable] = Array.from(tables) as HTMLElement[];
 
+    // Pools table: local rhythm (45px header, 58px rows) — the pools
+    // table's real rows run taller than the shared TableSkeleton's 44px
+    // because TvlCell stacks a value line + WoW sub-line. 27 rows
+    // (POOLS_TABLE_SKELETON_ROWS) approximates the live pool count.
     const [poolsHeader, poolsBody] = Array.from(poolsTable!.children) as [
       HTMLElement,
       HTMLElement,
     ];
-    expect(poolsHeader.style.height).toBe("36px");
-    expect(poolsBody.children).toHaveLength(10);
+    expect(poolsHeader.style.height).toBe("45px");
+    expect(poolsBody.children).toHaveLength(POOLS_TABLE_SKELETON_ROWS);
+    Array.from(poolsBody.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("58px");
+    });
 
+    // Recent Swaps table: local rhythm (45px header, 37px rows) — shorter
+    // than the shared TableSkeleton's 44px since every SwapTable cell is
+    // single-line. Reserves the default page size (25) — the route loading
+    // UI can't read the `?limit=` URL param, unlike `pools-page-client.tsx`'s
+    // own swaps-loading skeleton, which sizes to the live `limit` value.
     const [swapsHeader, swapsBody] = Array.from(swapsTable!.children) as [
       HTMLElement,
       HTMLElement,
     ];
-    expect(swapsHeader.style.height).toBe("36px");
-    // Reserves the default page size (25) — the route loading UI can't read
-    // the `?limit=` URL param, unlike `pools-page-client.tsx`'s own
-    // swaps-loading skeleton, which sizes to the live `limit` value.
+    expect(swapsHeader.style.height).toBe("45px");
     expect(swapsBody.children).toHaveLength(25);
+    Array.from(swapsBody.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("37px");
+    });
   });
 
   it("PoolDetailLoading renders exactly one polite live region (on TableSkeleton)", () => {

@@ -277,12 +277,16 @@ describe("PoolsPage multichain rendering", () => {
 });
 
 // Loading branches must reserve the same table geometry the loaded
-// `GlobalPoolsTable` / `SwapTable` land at (header ~36px, rows ~44px — the
-// measured real-table rhythm `TableSkeleton`'s `variant="rows"` reserves),
-// not a generic bar-list `<Skeleton rows={n} />`. `renderToStaticMarkup`
-// serializes inline `style={{ height }}` as `style="height:Npx"`, so
-// counting those substrings in the SSR string is a cheap structural proxy
-// for "N rows at the right height" without needing a jsdom DOM.
+// `GlobalPoolsTable` / `SwapTable` land at, not a generic bar-list
+// `<Skeleton rows={n} />`. The Recent Swaps skeleton uses a local 45px
+// header / 37px row rhythm (`SwapsTableSkeleton` in pools-skeletons.tsx,
+// measured against the real SwapTable — shorter than the shared
+// `TableSkeleton`'s 36/44 since every swap-row cell is single-line); the
+// Pools-section fallback below (rows=3) still uses the shared TableSkeleton
+// (36/44) unchanged. `renderToStaticMarkup` serializes inline
+// `style={{ height }}` as `style="height:Npx"`, so counting those substrings
+// in the SSR string is a cheap structural proxy for "N rows at the right
+// height" without needing a jsdom DOM.
 describe("PoolsPage loading-state skeleton parity", () => {
   function countHeightPx(html: string, px: number): number {
     return html.split(`style="height:${px}px"`).length - 1;
@@ -298,8 +302,8 @@ describe("PoolsPage loading-state skeleton parity", () => {
 
     const html = renderToStaticMarkup(<PoolsPage />);
 
-    expect(countHeightPx(html, 44)).toBe(10);
-    expect(countHeightPx(html, 36)).toBeGreaterThanOrEqual(1);
+    expect(countHeightPx(html, 37)).toBe(10);
+    expect(countHeightPx(html, 45)).toBeGreaterThanOrEqual(1);
   });
 
   it("Recent Swaps loading skeleton tracks a different `limit` selection (50)", () => {
@@ -312,7 +316,7 @@ describe("PoolsPage loading-state skeleton parity", () => {
 
     const html = renderToStaticMarkup(<PoolsPage />);
 
-    expect(countHeightPx(html, 44)).toBe(50);
+    expect(countHeightPx(html, 37)).toBe(50);
   });
 
   it("Pools section loading skeleton is table-shaped (header + 3 rows) during the initial network fetch", () => {

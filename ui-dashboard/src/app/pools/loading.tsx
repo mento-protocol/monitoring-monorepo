@@ -1,5 +1,8 @@
-import { TableSkeleton } from "@/components/skeletons";
 import { DEFAULT_SWAPS_LIMIT } from "@/lib/constants";
+import {
+  PoolsTableSkeleton,
+  SwapsTableSkeleton,
+} from "./_components/pools-skeletons";
 
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
 
@@ -40,22 +43,24 @@ export default function PoolsLoading() {
         ))}
       </div>
 
-      {/* Pools table — mirrors the "Pools" section heading + GlobalPoolsTable. */}
+      {/* Pools table — mirrors the "Pools" section heading + GlobalPoolsTable.
+          Sized via `PoolsTableSkeleton` (POOLS_TABLE_SKELETON_ROWS rows at
+          the pools-table-measured 45px header / 58px row rhythm, not the
+          shared TableSkeleton's 36/44 — see pools-skeletons.tsx). */}
       <section>
         <div className={`mb-3 h-6 w-16 ${SHIMMER}`} />
-        <TableSkeleton rows={10} variant="rows" presentational />
+        <PoolsTableSkeleton />
       </section>
 
       {/* Recent Swaps section — mirrors the heading, filter/limit controls
-          row, and SwapTable. */}
+          row, and SwapTable. Sized via `SwapsTableSkeleton` (45px header /
+          37px rows — see pools-skeletons.tsx) so this route fallback lands
+          at the same height as pools-page-client.tsx's own swaps skeleton
+          and the real loaded SwapTable. */}
       <section>
         <div className={`mb-3 h-6 w-32 ${SHIMMER}`} />
         <div className={`mb-4 h-9 w-full max-w-2xl ${SHIMMER}`} />
-        <TableSkeleton
-          rows={DEFAULT_SWAPS_LIMIT}
-          variant="rows"
-          presentational
-        />
+        <SwapsTableSkeleton rows={DEFAULT_SWAPS_LIMIT} presentational />
       </section>
 
       <span className="sr-only">Loading…</span>
