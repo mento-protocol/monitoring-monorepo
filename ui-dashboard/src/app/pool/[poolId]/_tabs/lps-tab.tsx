@@ -2,10 +2,14 @@
 
 import { AddressLink } from "@/components/address-link";
 import { useAddressLabels } from "@/components/address-labels-provider";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
-import { LpConcentrationChart } from "@/components/lp-concentration-chart";
+import { EmptyBox, ErrorBox } from "@/components/feedback";
+import {
+  LpConcentrationChart,
+  PIE_PLOT_HEIGHT_PX,
+} from "@/components/lp-concentration-chart";
 import { useNetwork } from "@/components/network-provider";
 import { Pagination } from "@/components/pagination";
+import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
 import { formatTimestamp, parseWei, relativeTime } from "@/lib/format";
@@ -121,7 +125,7 @@ export function LpsTab({
     return <ErrorBox message={indexedError.message} />;
   }
   if (isLoadingWithoutData(indexedLoading, indexedData))
-    return <Skeleton rows={5} />;
+    return <LpsTabSkeleton limit={limit} />;
   if (positions.length === 0)
     return <EmptyBox message="No active LP positions for this pool." />;
 
@@ -341,4 +345,39 @@ function filterLpPositions(
 
 function getFpmmPoolState(pool: Pool | null): boolean | null {
   return pool ? isFpmm(pool) : null;
+}
+
+const LP_SKELETON_SHIMMER = "animate-pulse rounded bg-slate-800/50";
+
+// Typical-pool row count for the table portion of the skeleton — reserving
+// the full page-size `limit` (up to MAX_TAB_LIMIT) overshoots the common
+// case badly (issue #1222 measured a low-position pool at 602px loaded vs.
+// ~1550px for a 25-row reservation). A first-screenful-sized reservation
+// tracks the common case; pools with many more LPs still get a stable
+// (if imperfect) skeleton→content transition since only the row COUNT is
+// approximate, not the row shape.
+const LPS_SKELETON_ROW_COUNT = 4;
+
+// Mirrors the LPs tab's real loaded layout — LpConcentrationChart (reserving
+// PIE_PLOT_HEIGHT_PX, the same constant the real chart's own chunk-loading
+// fallback uses) + the search input + the positions table sized to a
+// typical first-screenful row count. Issue #1222 measured the previous flat
+// `<Skeleton rows={5} />` (232px) against 602px of real LPs-tab content.
+function LpsTabSkeleton({ limit }: { limit: number }) {
+  return (
+    <>
+      <div className="mb-4 overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4">
+        <div className={`mb-3 h-4 w-28 ${LP_SKELETON_SHIMMER}`} />
+        <div
+          className={`w-full max-w-[360px] ${LP_SKELETON_SHIMMER}`}
+          style={{ height: PIE_PLOT_HEIGHT_PX }}
+        />
+      </div>
+      <div className={`mb-4 h-9 w-full max-w-sm ${LP_SKELETON_SHIMMER}`} />
+      <TableSkeleton
+        variant="rows"
+        rows={Math.min(limit, LPS_SKELETON_ROW_COUNT)}
+      />
+    </>
+  );
 }

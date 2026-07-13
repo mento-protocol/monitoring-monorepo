@@ -2,10 +2,11 @@
 
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { EffectivenessChart } from "@/components/effectiveness-chart";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { Tooltip } from "@/components/tooltip";
 import { Pagination } from "@/components/pagination";
 import { SenderCell } from "@/components/sender-cell";
+import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
 import { TagsCell } from "@/components/tags-cell";
@@ -309,7 +310,8 @@ export function RebalancesTab({
 
   if (hasErrorWithoutData(error, data))
     return <ErrorBox message={error.message} />;
-  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={5} />;
+  if (isLoadingWithoutData(isLoading, data))
+    return <TableSkeleton variant="rows" rows={limit} />;
   if (rows.length === 0)
     return <EmptyBox message="No rebalance events for this pool." />;
 

@@ -1,10 +1,11 @@
 "use client";
 
 import { useAddressLabels } from "@/components/address-labels-provider";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
 import { Pagination } from "@/components/pagination";
 import { SenderCell } from "@/components/sender-cell";
+import { TableSkeleton } from "@/components/skeletons";
 import { SnapshotChart } from "@/components/snapshot-chart";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -137,7 +138,8 @@ export function SwapsTab({
 
   if (hasErrorWithoutData(error, data))
     return <ErrorBox message={error.message} />;
-  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={5} />;
+  if (isLoadingWithoutData(isLoading, data))
+    return <TableSkeleton variant="rows" rows={limit} />;
 
   return (
     <>

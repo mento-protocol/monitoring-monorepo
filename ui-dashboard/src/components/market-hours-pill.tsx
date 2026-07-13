@@ -84,9 +84,10 @@ function isBreakerClosure(config: BreakerConfig | undefined): boolean {
 export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   const isVirtual = isVirtualPool(pool);
   const rateFeedID = pool.referenceRateFeedID ?? "";
+  const queried = !isVirtual && !!rateFeedID;
 
-  const { data } = useGQL<Response>(
-    !isVirtual && rateFeedID ? POOL_BREAKER_CONFIG : null,
+  const { data, isLoading } = useGQL<Response>(
+    queried ? POOL_BREAKER_CONFIG : null,
     { chainId: pool.chainId, rateFeedID },
   );
 
@@ -98,6 +99,13 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   // countdown that no longer reflects the on-chain trading gate.
   const marketHoursConfig = findEnabledMarketHoursConfig(data?.BreakerConfig);
   const enabled = !isVirtual && !!marketHoursConfig;
+  // POOL_BREAKER_CONFIG has no SSR fallback, so on every first client render
+  // this pill either renders nothing (not FX) or nothing-then-pill (FX) —
+  // the latter is a late-mounting title-row element that can push the
+  // header card's flex-wrap onto a second line (issue #1222). A shimmer
+  // placeholder while the query is genuinely in flight turns that
+  // null→content jump into placeholder→content instead.
+  const queryPending = queried && data === undefined && isLoading;
 
   const [now, setNow] = useState(() => new Date());
 
@@ -116,6 +124,14 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
     return () => clearInterval(id);
   }, [enabled]);
 
+  if (queryPending) return <MarketHoursPillSkeleton />;
+  // Accepted tradeoff: for the majority non-FX pool, this is now
+  // skeleton→null instead of main's stable null→null. At the title row's
+  // typical width this is horizontal-only (no wrap, no CLS) — a
+  // phantom-pill-then-vanish flash rather than a layout shift — but a
+  // narrow viewport could still push the flex-wrap title row onto a second
+  // line and back. The full fix (SSR-prefetch POOL_BREAKER_CONFIG so
+  // FX-eligibility is known on first paint) is tracked in issue #1237.
   if (!enabled) return null;
 
   const breakerClosed = isBreakerClosure(marketHoursConfig);
@@ -185,5 +201,17 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
       <span className="font-mono text-slate-300">{scheduleString()}</span>
       <span className="sr-only"> — {tooltip}</span>
     </span>
+  );
+}
+
+// Same box height as the real pill (text-xs line height + py-0.5 ≈ h-5).
+// Width approximates the widest real variant ("Market Open · <schedule>")
+// so a pool that does turn out FX-gated doesn't visibly widen the title row.
+function MarketHoursPillSkeleton() {
+  return (
+    <span
+      className="inline-flex h-5 w-40 animate-pulse items-center rounded bg-slate-800/50"
+      aria-hidden="true"
+    />
   );
 }

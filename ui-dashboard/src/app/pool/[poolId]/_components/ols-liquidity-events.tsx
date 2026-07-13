@@ -22,13 +22,18 @@ import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
 import type { OlsLiquidityEvent, Pool } from "@/lib/types";
 import React, { useMemo } from "react";
-import { addressSearchTerms, matchesRowSearch } from "../_lib/helpers";
+import {
+  addressSearchTerms,
+  matchesRowSearch,
+  tokenDecimalsFor,
+} from "../_lib/helpers";
 import { OlsLiquidityTable } from "./ols-liquidity-table";
 
 /**
  * Fetches OLS liquidity events scoped to the active OLS contract address,
  * preventing event mixing when a pool has been re-registered to a new OLS contract.
  */
+// eslint-disable-next-line max-lines-per-function -- Existing component keeps count/page fetching, search filtering, and table/pagination rendering together; this PR only threads a `limit` prop through to the table's loading skeleton.
 export function OlsLiquidityEvents({
   poolId,
   olsAddress,
@@ -94,14 +99,8 @@ export function OlsLiquidityEvents({
     return events.filter((e) => {
       const givenSym = tokenSymbol(network, e.tokenGivenToPool);
       const takenSym = tokenSymbol(network, e.tokenTakenFromPool);
-      const givenDec =
-        pool?.token0?.toLowerCase() === e.tokenGivenToPool.toLowerCase()
-          ? (pool?.token0Decimals ?? 18)
-          : (pool?.token1Decimals ?? 18);
-      const takenDec =
-        pool?.token0?.toLowerCase() === e.tokenTakenFromPool.toLowerCase()
-          ? (pool?.token0Decimals ?? 18)
-          : (pool?.token1Decimals ?? 18);
+      const givenDec = tokenDecimalsFor(pool, e.tokenGivenToPool);
+      const takenDec = tokenDecimalsFor(pool, e.tokenTakenFromPool);
       return matchesRowSearch(searchQuery, [
         e.txHash,
         e.direction === 0 ? "expand" : "contract",
@@ -114,6 +113,7 @@ export function OlsLiquidityEvents({
     });
   }, [events, searchQuery, pool, network, getName, getTags]);
   const showMetadata = !hasErrorWithoutData(error, data);
+  const tableProps = { pool, network, limit };
   return (
     <>
       {events.length > 0 && (
@@ -126,9 +126,8 @@ export function OlsLiquidityEvents({
       )}
       {!showMetadata ? (
         <OlsLiquidityTable
+          {...tableProps}
           events={[]}
-          pool={pool}
-          network={network}
           isLoading={false}
           error={error}
         />
@@ -136,9 +135,8 @@ export function OlsLiquidityEvents({
         <EmptyBox message="No OLS events match your search." />
       ) : (
         <OlsLiquidityTable
+          {...tableProps}
           events={filteredEvents}
-          pool={pool}
-          network={network}
           isLoading={isLoading}
           error={null}
         />

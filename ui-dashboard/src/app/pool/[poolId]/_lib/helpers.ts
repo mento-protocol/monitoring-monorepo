@@ -36,6 +36,20 @@ export function getDebtTokenSideLabel(
   return "unknown";
 }
 
+/** Decimals for whichever pool side `tokenAddress` matches, defaulting to
+ *  18 for the unmatched/unknown side. Shared by `ols-liquidity-events.tsx`
+ *  (search-filter pass) and `ols-liquidity-table.tsx` (row renderer), which
+ *  both need the same token0/token1 side resolution for an OLS event's
+ *  given/taken token. */
+export function tokenDecimalsFor(
+  pool: Pool | null,
+  tokenAddress: string,
+): number {
+  return pool?.token0?.toLowerCase() === tokenAddress.toLowerCase()
+    ? (pool?.token0Decimals ?? 18)
+    : (pool?.token1Decimals ?? 18);
+}
+
 /**
  * Defensive selector for the current OLS row shown in the pool detail view.
  *

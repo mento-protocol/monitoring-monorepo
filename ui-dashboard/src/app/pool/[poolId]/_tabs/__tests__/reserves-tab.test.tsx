@@ -151,3 +151,30 @@ describe("ReservesTab ordering contract", () => {
     expect(tx10).toBeGreaterThan(tx20);
   });
 });
+
+describe("ReservesTab loading skeleton", () => {
+  it("reserves `limit` table rows at the real header/row heights instead of 5 flat bars", () => {
+    mockUseGQL.mockReturnValue({
+      data: undefined,
+      error: undefined,
+      isLoading: true,
+    });
+
+    const html = renderToStaticMarkup(
+      <ReservesTab
+        poolId="42220-0xpool"
+        limit={10}
+        pool={POOL}
+        search=""
+        onSearchChange={() => {}}
+      />,
+    );
+
+    // TableSkeleton isn't mocked here (it's the real shared primitive) —
+    // assert on its live region and measured row rhythm so the loading
+    // branch's row count actually tracks the tab's real page size.
+    expect(html).toContain('aria-label="Loading table"');
+    const rowMatches = html.match(/height:44px/g) ?? [];
+    expect(rowMatches).toHaveLength(10);
+  });
+});

@@ -1,5 +1,6 @@
 import { TableSkeleton } from "@/components/skeletons";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
+import { HeaderCardSkeleton } from "./_components/header-card-skeleton";
 
 // Matches the real pool detail layout: breadcrumb + header card + health bar
 // + charts row + 7 tabs (see TABS in page.tsx) + a 6-column default table.
@@ -45,23 +46,20 @@ export default function PoolDetailLoading() {
         <div className="h-4 w-96 animate-pulse rounded bg-slate-800/50" />
       </div>
       {/* Header card — mirrors PoolHeader: p-5 card, title row (text-xl ≈
-          h-7) + 5-col stat grid. */}
-      <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <div className={`h-7 w-40 ${SHIMMER}`} />
-          <div className={`h-5 w-24 ${SHIMMER}`} />
-          <div className={`h-5 w-16 ${SHIMMER}`} />
-        </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
-          {Array.from({ length: 5 }, (_, i) => (
-            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-            <div key={`skel-stat-${i}`}>
-              <div className={`h-4 w-20 ${SHIMMER}`} />
-              <div className={`mt-1 h-5 w-24 ${SHIMMER}`} />
-            </div>
-          ))}
-        </div>
-      </div>
+          h-7) + 5-col stat grid. Shared with PoolOverview's degraded
+          fallback via HeaderCardSkeleton so the two loading branches can't
+          drift apart. `presentational` because the page-level live region
+          lives on the trailing TableSkeleton below.
+
+          Known residual: on FPMM pools with a rateFeedID, PoolHeader's own
+          BreakerPanel has no SSR fallback data, so its `isLoading` state is
+          true on first content paint and it renders a ~90px skeleton
+          section (divider + 5-stat grid) that this route skeleton can't
+          reserve without becoming pool-type-aware (this component doesn't
+          know the pool yet). That can still shift the loading.tsx→content
+          boundary for those pools until #1237 (SSR-prefetch
+          POOL_BREAKER_CONFIG) lands. */}
+      <HeaderCardSkeleton presentational />
       {/* Health panel — exception-only in the real page (often renders
           nothing); a slim bar splits the difference with the full panel. */}
       <div className="h-12 animate-pulse rounded-lg border border-slate-800 bg-slate-900/30" />

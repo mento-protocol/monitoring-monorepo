@@ -254,6 +254,31 @@ describe("Pool detail LPs tab", () => {
     );
   });
 
+  it("renders a header-card-shaped skeleton (not 4 flat bars) while the pool is still loading", () => {
+    // No SSR fallback and PoolDetailWithHealth still in flight — the
+    // degraded loading branch must mirror the route skeleton's header-card
+    // geometry (title row + 5-col stat grid), not a generic bar stack
+    // (issue #1222).
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return loadingGqlResult();
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderPoolDetailPage();
+    expect(html).toContain('aria-label="Loading pool"');
+    const dlOpenTag = html.match(/<div[^>]*lg:grid-cols-5[^>]*>/)?.[0] ?? "";
+    expect(dlOpenTag).not.toBe("");
+    expect(html).not.toContain("Pool 0xpool not found.");
+  });
+
   it("keeps last-confirmed pool data visible and discloses a refresh failure", () => {
     const initialData: PoolDetailInitialData = {
       pool: {

@@ -1,8 +1,9 @@
 "use client";
 
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
 import { ReserveChart } from "@/components/reserve-chart";
+import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
 import { TxHashCell } from "@/components/tx-hash-cell";
@@ -22,6 +23,22 @@ import type { Pool, ReserveUpdate } from "@/lib/types";
 import { useMemo } from "react";
 import { matchesRowSearch } from "../_lib/helpers";
 
+// Shared by the search-filter pass and the table row renderer — both need
+// the same USD split for a reserve row.
+function reserveUsdSplit(
+  r: ReserveUpdate,
+  pool: Pool | null,
+  feedVal: number | null,
+  usdmIsToken0: boolean,
+): { usd0: number; usd1: number; total: number } {
+  const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);
+  const raw1 = parseWei(r.reserve1, pool?.token1Decimals ?? 18);
+  const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
+  const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
+  return { usd0, usd1, total: usd0 + usd1 };
+}
+
+// eslint-disable-next-line max-lines-per-function -- Existing tab keeps reserve fetching, search filtering, chart, and table rendering together; this PR only swaps the loading skeleton to the shared row-count-matched primitive.
 export function ReservesTab({
   poolId,
   limit,
@@ -61,11 +78,7 @@ export function ReservesTab({
   const filteredRows = useMemo(() => {
     if (!query) return rows;
     return rows.filter((r) => {
-      const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);
-      const raw1 = parseWei(r.reserve1, pool?.token1Decimals ?? 18);
-      const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
-      const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
-      const total = usd0 + usd1;
+      const { total } = reserveUsdSplit(r, pool, feedVal, usdmIsToken0);
 
       return matchesRowSearch(query, [
         r.txHash,
@@ -86,7 +99,8 @@ export function ReservesTab({
 
   if (hasErrorWithoutData(error, data))
     return <ErrorBox message={error.message} />;
-  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={5} />;
+  if (isLoadingWithoutData(isLoading, data))
+    return <TableSkeleton variant="rows" rows={limit} />;
   if (rows.length === 0)
     return <EmptyBox message="No reserve updates for this pool." />;
   return (
@@ -124,11 +138,12 @@ export function ReservesTab({
           </thead>
           <tbody>
             {filteredRows.map((r) => {
-              const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);
-              const raw1 = parseWei(r.reserve1, pool?.token1Decimals ?? 18);
-              const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
-              const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
-              const total = usd0 + usd1;
+              const { usd0, usd1, total } = reserveUsdSplit(
+                r,
+                pool,
+                feedVal,
+                usdmIsToken0,
+              );
 
               return (
                 <Row key={r.id}>

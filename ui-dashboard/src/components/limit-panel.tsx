@@ -69,12 +69,19 @@ interface LimitPanelProps {
   pool: Pool;
   tradingLimits: TradingLimit[];
   hasError?: boolean;
+  /** True while the trading-limits query is genuinely in flight and hasn't
+   * resolved data yet. Distinguishes "still loading" from "confirmed no
+   * limits configured" so the panel doesn't briefly show the empty-state
+   * copy for a pool that does have configured limits (issue #1222
+   * criterion #3: no sliver→expand on first load or tab switch). */
+  isLoading?: boolean;
 }
 
 export function LimitPanel({
   pool,
   tradingLimits,
   hasError = false,
+  isLoading = false,
 }: LimitPanelProps) {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
@@ -95,6 +102,8 @@ export function LimitPanel({
         <p className="text-sm text-red-400">
           Unable to load trading limits — try again later.
         </p>
+      ) : isLoading && tradingLimits.length === 0 ? (
+        <LimitPanelSkeleton />
       ) : tradingLimits.length === 0 ? (
         <p className="text-sm text-slate-400">
           No trading limit data available yet.
@@ -129,6 +138,43 @@ export function LimitPanel({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+const LIMIT_SKELETON_SHIMMER = "animate-pulse rounded bg-slate-800/50";
+
+// Mirrors the loaded shape for the common two-token case (a pool's token0 +
+// token1, each with an L0 + L1 PressureBar) so the panel doesn't briefly
+// render the "No trading limit data available yet." copy — which reads as a
+// confirmed empty state — while a pool that does have configured limits is
+// still loading (issue #1222 criterion #3).
+function LimitPanelSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      {Array.from({ length: 2 }, (_, tokenIdx) => (
+        // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+        <div
+          key={`limit-skel-token-${tokenIdx}`}
+          className="flex flex-col gap-3"
+        >
+          <div className={`h-3 w-16 ${LIMIT_SKELETON_SHIMMER}`} />
+          {Array.from({ length: 2 }, (_, barIdx) => (
+            <div
+              // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+              key={`limit-skel-bar-${tokenIdx}-${barIdx}`}
+              className="flex flex-col gap-1"
+            >
+              <div className="flex items-center justify-between">
+                <div className={`h-4 w-28 ${LIMIT_SKELETON_SHIMMER}`} />
+                <div className={`h-4 w-10 ${LIMIT_SKELETON_SHIMMER}`} />
+              </div>
+              <div className={`h-2 w-full ${LIMIT_SKELETON_SHIMMER}`} />
+              <div className={`h-3 w-40 ${LIMIT_SKELETON_SHIMMER}`} />
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

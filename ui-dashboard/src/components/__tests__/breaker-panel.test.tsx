@@ -165,6 +165,39 @@ describe("BreakerPanel", () => {
     expect(html).toBe("");
   });
 
+  it("renders a 5-stat skeleton (not nothing) while the query is still loading", () => {
+    // POOL_BREAKER_CONFIG has no SSR fallback, so on first client render this
+    // is the common state for FX pools — must not render `null` (issue
+    // #1222: a null→content swap here measured as +119px on PoolHeader).
+    mockUseGQL.mockReturnValue({ data: undefined, isLoading: true });
+    const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+    expect(html).not.toBe("");
+    // Same grid shape as the loaded `<dl>` — 5 stat cells behind the
+    // hairline divider that always precedes the real content.
+    expect(html).toContain("my-5 h-px bg-slate-800");
+    const dlOpenTag = html.match(/<dl[^>]*>/)?.[0] ?? "";
+    expect(dlOpenTag).toContain("lg:grid-cols-5");
+    // Each stat cell's label bar carries this exact class pair — 5 stat
+    // cells behind the divider, matching the real panel's 5 `<dl>` children
+    // (Breaker, Reference vs Actual, Threshold/Cooldown, live-Δ, Last trip).
+    const statCellCount = (html.match(/h-3 w-24/g) ?? []).length;
+    expect(statCellCount).toBe(5);
+    // Each cell reserves the loaded row's measured 78px height (three text
+    // lines: label, value, sub-line) so the header card doesn't grow once
+    // BreakerConfig resolves.
+    const cellHeightCount = (html.match(/h-\[78px\]/g) ?? []).length;
+    expect(cellHeightCount).toBe(5);
+  });
+
+  it("renders nothing once the query resolves and finds no trip-able breaker (not stuck on the skeleton)", () => {
+    mockUseGQL.mockReturnValue({
+      data: { BreakerConfig: [], BreakerTripEvent: noTrips },
+      isLoading: false,
+    });
+    const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+    expect(html).toBe("");
+  });
+
   it("renders nothing when the feed has no trip-able BreakerConfig (only MARKET_HOURS)", () => {
     mockUseGQL.mockReturnValue({
       data: {

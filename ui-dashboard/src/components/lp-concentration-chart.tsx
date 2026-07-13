@@ -7,8 +7,11 @@ import { USDM_SYMBOLS } from "@/lib/tokens";
 import type { Pool } from "@/lib/types";
 
 /** Height of the pie's plot box — shared by the layout, the <Plot> style,
- *  and the chunk-loading fallback so the skeleton→chart swap is shift-free. */
-const PIE_PLOT_HEIGHT_PX = 280;
+ *  and the chunk-loading fallback so the skeleton→chart swap is shift-free.
+ *  Also exported for `lps-tab.tsx`'s SWR-loading skeleton, which reserves
+ *  this same plot height so the tab's loading→loaded swap doesn't jump
+ *  (issue #1222). */
+export const PIE_PLOT_HEIGHT_PX = 280;
 
 // Reserve the exact plot box while the Plotly chunk loads. Without a
 // fallback the card renders heading/legend/stats immediately and the pie

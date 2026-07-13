@@ -96,6 +96,27 @@ describe("MarketHoursPill", () => {
     expect(html).toBe("");
   });
 
+  it("renders a same-height shimmer placeholder (not nothing) while the query is loading", () => {
+    // POOL_BREAKER_CONFIG has no SSR fallback, so on first client render this
+    // is the common state for FX pools — a null→pill swap here can push the
+    // title row onto a second line (issue #1222).
+    mockUseGQL.mockReturnValue({ data: undefined, isLoading: true });
+    const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+    expect(html).not.toBe("");
+    expect(html).toContain("h-5");
+    expect(html).not.toContain("Market Open");
+    expect(html).not.toContain("Market Closed");
+  });
+
+  it("renders nothing once the query resolves and no MARKET_HOURS config exists (not stuck on the placeholder)", () => {
+    mockUseGQL.mockReturnValue({
+      data: { BreakerConfig: [], BreakerTripEvent: [] },
+      isLoading: false,
+    });
+    const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+    expect(html).toBe("");
+  });
+
   it("renders nothing when the MARKET_HOURS BreakerConfig is disabled", () => {
     // Governance can disable the market-hours breaker for a feed via
     // BreakerStatusUpdated(..., false). The pill must hide in that case so
