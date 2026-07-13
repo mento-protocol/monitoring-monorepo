@@ -144,6 +144,7 @@ function StablesChangesSection({
     isLoading: changesLoading,
     capped: changesCapped,
     unpricedEventsCount: changesUnpricedEventsCount,
+    hasPendingPage: changesHasPendingPage,
   } = useStablesChanges("7d", 0, rates, minimumSupplyChangeUsd);
 
   return (
@@ -152,7 +153,13 @@ function StablesChangesSection({
       minimumUsdValue={minimumSupplyChangeUsd}
       onMinimumUsdValueChange={updateMinimumSupplyChangeUsd}
       onMinimumUsdValueReset={resetMinimumSupplyChangeUsd}
-      isLoading={changesLoading}
+      // Keep the table's loading skeleton up while a 2nd/3rd raw page is
+      // still in flight, even though `changesLoading` itself already
+      // flipped false once the first page had visible rows. Without this,
+      // the table reveals a partial row set and then grows again as later
+      // pages resolve (measured on production as 3 discrete height jumps —
+      // see stables-changes-table.tsx's reserved-height comment).
+      isLoading={changesLoading || changesHasPendingPage}
       hasError={changesError != null}
       capped={changesCapped}
       unpricedEventsCount={changesUnpricedEventsCount}

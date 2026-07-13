@@ -39,6 +39,7 @@ const mockChanges = vi.hoisted(() => ({
   capped: false,
   error: null as Error | null,
   isLoading: false,
+  hasPendingPage: false,
 }));
 const mockLatestCustodyPerToken = vi.hoisted(() => ({
   data: [] as StableTokenCustodyDailySnapshot[],
@@ -80,6 +81,7 @@ vi.mock("../_lib/use-stables-data", () => ({
     isLoading: mockChanges.isLoading,
     capped: mockChanges.capped,
     unpricedEventsCount: 0,
+    hasPendingPage: mockChanges.hasPendingPage,
   }),
 }));
 
@@ -167,6 +169,7 @@ describe("StablesPageClient — smoke", () => {
     mockChanges.capped = false;
     mockChanges.error = null;
     mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
     mockLatestCustodyPerToken.data = [];
     mockLatestCustodyPerToken.error = null;
     mockLatestCustodyPerToken.isLoading = false;
@@ -262,7 +265,21 @@ describe("StablesPageClient — smoke", () => {
 
     expect(html).toContain("Supply changes");
     expect(html).toContain("USDm");
-    expect(html).not.toContain("Loading supply changes");
+  });
+
+  it("keeps the supply-changes skeleton up while a follow-up raw page is still pending, even with first-page rows in hand", () => {
+    // useStablesChanges.isLoading already flipped false once the first raw
+    // page had visible rows (existing, tested hook behavior), but a 2nd/3rd
+    // page can still be in flight — hasPendingPage surfaces that so the
+    // table doesn't reveal a partial row set and then grow again.
+    mockChanges.data = [changeEvent()];
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = true;
+
+    const html = renderToStaticMarkup(<StablesPageClient />);
+
+    expect(html).toContain("Supply changes");
+    expect(html).not.toContain("0xcaller");
   });
 
   it("keeps daily custody fallback rows when current custody errors empty", () => {

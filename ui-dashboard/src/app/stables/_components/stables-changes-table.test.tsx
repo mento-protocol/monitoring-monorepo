@@ -275,4 +275,106 @@ describe("StablesChangesTable", () => {
     );
     expect(container.textContent).toContain("Page 1 of 2");
   });
+
+  describe("loading-branch skeleton parity", () => {
+    // These assert the reserved-geometry INVARIANT (a single `minHeight`
+    // constant applied to every branch), not just that each branch renders
+    // without crashing — a table-shaped skeleton that happened to reserve a
+    // different height than the error/empty/loaded branches would still
+    // pass a render-only test but reintroduce the production CLS jump.
+    function renderBranch(props: {
+      events: ReadonlyArray<StableSupplyChangeEvent>;
+      isLoading: boolean;
+      hasError: boolean;
+    }): HTMLDivElement {
+      const div = document.createElement("div");
+      document.body.appendChild(div);
+      const branchRoot = createRoot(div);
+      act(() => {
+        branchRoot.render(
+          <StablesChangesTable
+            events={props.events}
+            minimumUsdValue={DEFAULT_SUPPLY_CHANGE_MIN_USD}
+            onMinimumUsdValueChange={() => undefined}
+            onMinimumUsdValueReset={() => undefined}
+            isLoading={props.isLoading}
+            hasError={props.hasError}
+            capped={false}
+            unpricedEventsCount={0}
+          />,
+        );
+      });
+      return div;
+    }
+
+    function reservedHeight(div: HTMLDivElement): string | undefined {
+      const reserved = div.querySelector<HTMLElement>("[style]");
+      return reserved?.style.minHeight;
+    }
+
+    it("renders a table-shaped skeleton (header + 20 rows) instead of a bare text line", () => {
+      const div = renderBranch({
+        events: [],
+        isLoading: true,
+        hasError: false,
+      });
+
+      expect(div.textContent).not.toContain("Loading supply changes");
+      const table = div.querySelector<HTMLElement>(
+        '[role="status"][aria-label="Loading table"]',
+      );
+      expect(table).not.toBeNull();
+      // `variant="rows"` renders one full-width header bar (measured ≈36px)
+      // followed by a `divide-y` wrapper holding one bar per skeleton row.
+      const rows = table!.querySelector(".divide-y");
+      expect(rows).not.toBeNull();
+      expect(rows!.children).toHaveLength(20);
+    });
+
+    it("reserves the identical minHeight across loading, error, empty, and loaded-with-data branches", () => {
+      const loading = renderBranch({
+        events: [],
+        isLoading: true,
+        hasError: false,
+      });
+      const error = renderBranch({
+        events: [],
+        isLoading: false,
+        hasError: true,
+      });
+      const empty = renderBranch({
+        events: [],
+        isLoading: false,
+        hasError: false,
+      });
+      const loaded = renderBranch({
+        events: [changeEvent(0)],
+        isLoading: false,
+        hasError: false,
+      });
+
+      const loadingHeight = reservedHeight(loading);
+      expect(loadingHeight).toBeTruthy();
+      expect(reservedHeight(error)).toBe(loadingHeight);
+      expect(reservedHeight(empty)).toBe(loadingHeight);
+      expect(reservedHeight(loaded)).toBe(loadingHeight);
+
+      [loading, error, empty, loaded].forEach((div) => div.remove());
+    });
+
+    it("keeps the real filter/header row mounted during loading (no data needed to render it)", () => {
+      const div = renderBranch({
+        events: [],
+        isLoading: true,
+        hasError: false,
+      });
+
+      expect(
+        div.querySelector(
+          'input[aria-label="Minimum USD-equivalent supply change"]',
+        ),
+      ).not.toBeNull();
+      expect(div.textContent).toContain("Supply changes");
+    });
+  });
 });

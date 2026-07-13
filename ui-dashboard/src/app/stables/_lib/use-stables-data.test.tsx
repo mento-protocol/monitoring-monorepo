@@ -130,6 +130,7 @@ describe("useStablesChanges", () => {
     ]);
     expect(result.capped).toBe(false);
     expect(result.unpricedEventsCount).toBe(0);
+    expect(result.hasPendingPage).toBe(false);
   });
 
   it("keeps unpriced rows visible and reports them as degraded", () => {
@@ -335,5 +336,10 @@ describe("useStablesChanges", () => {
     ]);
     expect(result.isLoading).toBe(false);
     expect(result.capped).toBe(true);
+    // The follow-up page (offset 400) is still `isLoading: true` above, so
+    // presentation layers that want to avoid revealing this partial row set
+    // (and then growing again once the follow-up page resolves) can gate on
+    // this instead of `isLoading`, which has already flipped false.
+    expect(result.hasPendingPage).toBe(true);
   });
 });

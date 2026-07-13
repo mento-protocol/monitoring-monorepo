@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AddressLink } from "@/components/address-link";
+import { TableSkeleton } from "@/components/skeletons";
 import {
   formatTimestamp,
   formatWei,
@@ -18,6 +19,29 @@ import {
 import type { StableSupplyChangeEvent } from "../_lib/types";
 
 const SUPPLY_CHANGES_PAGE_SIZE = 50;
+
+// Loading-skeleton row count. Approximates a typical settled row count
+// (production audit measured ~932px for 20 real rows) rather than the
+// pagination page size (50) — a generous-but-imperfect floor beats the
+// original single text line, per the sparkline grid's identical tradeoff.
+const SUPPLY_CHANGES_SKELETON_ROWS = 20;
+// Mirrors TableSkeleton's measured `variant="rows"` geometry (header ≈36px,
+// rows ≈44px — those constants live in skeletons.tsx but aren't exported)
+// plus the real pagination footer's measured box (border-t + pt-4 + one
+// text line ≈ 1 + 16 + 16 = 33px) and its mt-4 top margin. Reserving this
+// height keeps the card from visibly shrinking/growing across the
+// loading → empty/error/loaded-with-data swap, and (combined with the
+// `isLoading || hasPendingPage` gate in stables-page-client.tsx) from
+// growing in waves as successive raw pages resolve.
+const SUPPLY_CHANGES_HEADER_HEIGHT_PX = 36;
+const SUPPLY_CHANGES_ROW_HEIGHT_PX = 44;
+const SUPPLY_CHANGES_FOOTER_MARGIN_TOP_PX = 16;
+const SUPPLY_CHANGES_FOOTER_HEIGHT_PX = 33;
+const SUPPLY_CHANGES_RESERVED_HEIGHT_PX =
+  SUPPLY_CHANGES_HEADER_HEIGHT_PX +
+  SUPPLY_CHANGES_SKELETON_ROWS * SUPPLY_CHANGES_ROW_HEIGHT_PX +
+  SUPPLY_CHANGES_FOOTER_MARGIN_TOP_PX +
+  SUPPLY_CHANGES_FOOTER_HEIGHT_PX;
 
 type Props = {
   events: ReadonlyArray<StableSupplyChangeEvent>;
@@ -91,33 +115,48 @@ function SupplyChangesContent({
   hasError: boolean;
   capped: boolean;
 }): React.JSX.Element {
+  const reservedHeight = { minHeight: SUPPLY_CHANGES_RESERVED_HEIGHT_PX };
+
   if (isLoading) {
-    return <p className="text-sm text-slate-500">Loading supply changes…</p>;
+    return (
+      <div style={reservedHeight}>
+        <TableSkeleton variant="rows" rows={SUPPLY_CHANGES_SKELETON_ROWS} />
+        <div className="mt-4 border-t border-slate-800 pt-4">
+          <div className="h-4 w-48 animate-pulse rounded bg-slate-800/50" />
+        </div>
+      </div>
+    );
   }
 
   if (hasError) {
     return (
-      <p className="text-sm text-rose-400" role="alert">
-        Failed to load supply changes.
-      </p>
+      <div style={reservedHeight}>
+        <p className="text-sm text-rose-400" role="alert">
+          Failed to load supply changes.
+        </p>
+      </div>
     );
   }
 
   if (events.length === 0) {
     return (
-      <p className="text-sm text-slate-500">
-        No supply changes at or above {thresholdLabel} equivalent in{" "}
-        {capped ? "the most recent fetched rows" : "the selected window"}.
-      </p>
+      <div style={reservedHeight}>
+        <p className="text-sm text-slate-500">
+          No supply changes at or above {thresholdLabel} equivalent in{" "}
+          {capped ? "the most recent fetched rows" : "the selected window"}.
+        </p>
+      </div>
     );
   }
 
   const pageCountKey = Math.ceil(events.length / SUPPLY_CHANGES_PAGE_SIZE);
   return (
-    <PaginatedSupplyChangesTable
-      key={`${minimumUsdValue}:${pageCountKey}`}
-      events={events}
-    />
+    <div style={reservedHeight}>
+      <PaginatedSupplyChangesTable
+        key={`${minimumUsdValue}:${pageCountKey}`}
+        events={events}
+      />
+    </div>
   );
 }
 

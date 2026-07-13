@@ -297,16 +297,21 @@ export function useStablesChanges(
   );
   const pages = [firstPage, secondPage, thirdPage] as const;
   const pageError = firstEnabledPageError(pages);
-  const { events, capped, unpricedEventsCount } = buildVisibleChangesResult(
-    pages,
-    pageError,
-  );
+  const { events, capped, unpricedEventsCount, hasPendingPage } =
+    buildVisibleChangesResult(pages, pageError);
   return {
     events,
     error: visibleChangesError(firstPage, events, pageError),
     isLoading: visibleChangesLoading(pages, events),
     capped,
     unpricedEventsCount,
+    // Surfaces whether a follow-up page (2nd/3rd) is still in flight even
+    // though `isLoading` above has already flipped false (first-page rows
+    // render immediately by design — see the "renders visible first-page
+    // rows while a follow-up page is loading" test). Presentation layers
+    // that want to avoid the resulting multi-wave row growth can OR this
+    // into their own loading gate instead of waiting on `isLoading` alone.
+    hasPendingPage,
   };
 }
 
@@ -374,6 +379,7 @@ function buildVisibleChangesResult(
   events: ReadonlyArray<StableSupplyChangeEvent>;
   capped: boolean;
   unpricedEventsCount: number;
+  hasPendingPage: boolean;
 } {
   const visibleEvents = pages.flatMap((candidate) => candidate.visibleEvents);
   const lastFetchedRawEvents = lastEnabledPage(pages)?.rawEvents ?? [];
@@ -390,6 +396,7 @@ function buildVisibleChangesResult(
       (events.length > 0 && hasPendingEnabledPage) ||
       (events.length > 0 && pageError != null),
     unpricedEventsCount,
+    hasPendingPage: hasPendingEnabledPage,
   };
 }
 

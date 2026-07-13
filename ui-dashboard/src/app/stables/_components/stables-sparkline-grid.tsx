@@ -22,6 +22,32 @@ import type {
   TokenAgg,
 } from "../_lib/types";
 
+// Real `SparklineCard` geometry, shared with its skeleton below so the two
+// can't silently drift apart (~142px: p-4 padding + gap-2 + label row +
+// value row + 40px sparkline block).
+const SPARKLINE_CARD_CLASS =
+  "rounded-lg border border-slate-800 bg-slate-900/60 p-4 flex flex-col gap-2";
+const SPARKLINE_CARD_HEIGHT_PX = 142;
+const SPARKLINE_GRID_GAP_PX = 12; // gap-3
+const SPARKLINE_GRID_COLS = 4; // xl:grid-cols-4 — the audited 1440px viewport
+
+// Card count approximates the current production token×chain count. A
+// stables-specific token registry isn't statically derivable from
+// `@mento-protocol/config` today (`contractEntries()` enumerates pool
+// contracts, not per-source stable-supply rows), so this stays a plain
+// named constant instead of a config-derived count.
+const SPARKLINE_SKELETON_CARDS = 20;
+const SPARKLINE_GRID_ROWS = Math.ceil(
+  SPARKLINE_SKELETON_CARDS / SPARKLINE_GRID_COLS,
+);
+// Reserved height for the 4-col desktop layout. Narrower breakpoints need
+// MORE height for the same card count, so this floor never clips content —
+// it only stops the loading ↔ empty/error/loaded-with-data swap from
+// visibly resizing at the audited (1440×900) viewport.
+const SPARKLINE_GRID_RESERVED_HEIGHT_PX =
+  SPARKLINE_GRID_ROWS * SPARKLINE_CARD_HEIGHT_PX +
+  (SPARKLINE_GRID_ROWS - 1) * SPARKLINE_GRID_GAP_PX;
+
 /**
  * Per-token sparkline grid — overview-card layer below the aggregate
  * supply chart. One card per `(tokenAddress, source)` row from
@@ -102,40 +128,68 @@ export function StablesSparklineGrid({
 
   if (isLoading) {
     return (
-      <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
-        <p className="text-sm text-slate-500" role="status">
-          Loading per-token detail…
-        </p>
+      <section
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3"
+        style={{ minHeight: SPARKLINE_GRID_RESERVED_HEIGHT_PX }}
+        role="status"
+        aria-live="polite"
+        aria-label="Loading per-token detail"
+      >
+        {Array.from({ length: SPARKLINE_SKELETON_CARDS }, (_, i) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+          <SparklineCardSkeleton key={`sparkline-skel-${i}`} />
+        ))}
+        <span className="sr-only">Loading per-token detail…</span>
       </section>
     );
   }
   if (hasError) {
     return (
-      <section
-        className="rounded-lg border border-slate-800 bg-slate-900/60 p-5"
-        role="alert"
-      >
-        <p className="text-sm text-rose-400">Failed to load per-token data.</p>
-      </section>
+      <div style={{ minHeight: SPARKLINE_GRID_RESERVED_HEIGHT_PX }}>
+        <section
+          className="rounded-lg border border-slate-800 bg-slate-900/60 p-5"
+          role="alert"
+        >
+          <p className="text-sm text-rose-400">
+            Failed to load per-token data.
+          </p>
+        </section>
+      </div>
     );
   }
   if (cards.length === 0) {
     return (
-      <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
-        <p className="text-sm text-slate-500">No per-token data yet.</p>
-      </section>
+      <div style={{ minHeight: SPARKLINE_GRID_RESERVED_HEIGHT_PX }}>
+        <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
+          <p className="text-sm text-slate-500">No per-token data yet.</p>
+        </section>
+      </div>
     );
   }
 
   return (
     <section
       className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3"
+      style={{ minHeight: SPARKLINE_GRID_RESERVED_HEIGHT_PX }}
       aria-label="Per-token supply detail"
     >
       {cards.map(({ agg, sparkline }) => (
         <SparklineCard key={agg.key} agg={agg} sparkline={sparkline} />
       ))}
     </section>
+  );
+}
+
+function SparklineCardSkeleton(): React.JSX.Element {
+  return (
+    <article className={SPARKLINE_CARD_CLASS} aria-hidden="true">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="h-5 w-28 animate-pulse rounded bg-slate-800/50" />
+        <div className="h-4 w-10 animate-pulse rounded bg-slate-800/50" />
+      </div>
+      <div className="h-7 w-24 animate-pulse rounded bg-slate-800/50" />
+      <div className="mt-1 h-[40px] w-full animate-pulse rounded bg-slate-800/50" />
+    </article>
   );
 }
 
@@ -178,7 +232,7 @@ function SparklineCard({
         : "short-history";
 
   return (
-    <article className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 flex flex-col gap-2">
+    <article className={SPARKLINE_CARD_CLASS}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-sm font-medium text-slate-100">{label}</span>
         <span className={`text-xs font-mono ${changeColor}`}>{changeText}</span>
