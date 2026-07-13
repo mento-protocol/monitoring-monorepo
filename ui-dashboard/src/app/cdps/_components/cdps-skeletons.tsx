@@ -1,4 +1,3 @@
-import { TableSkeleton } from "@/components/skeletons";
 import { CDP_OVERVIEW_TABLE_PAGE_SIZE } from "../_lib/transactions";
 
 // Loading-state placeholders for the /cdps overview page (issue #1220,
@@ -103,6 +102,60 @@ function CdpTxFilterBarSkeleton() {
   );
 }
 
+// The shared `TableSkeleton` (src/components/skeletons.tsx) reserves a
+// 36px header + 44px rows — the measured rhythm for the pool/pool-row
+// tables it was built for. The cdps overview table runs a different
+// rhythm: badge + market-link cells wrap at 1440px on some rows, and the
+// header wraps a "Block" column. Production audit (2026-07-14, 1440x900,
+// live data): thead ~45px, tbody rows average ~47px. Composed locally
+// with `TableSkeleton`'s own rows-variant markup rather than reusing it,
+// since its 36/44 constants are shared with other tables and shouldn't
+// bend to this table's geometry.
+const CDP_TX_TABLE_HEADER_HEIGHT_PX = 45;
+const CDP_TX_TABLE_ROW_HEIGHT_PX = 47;
+
+function CdpTxTableSkeleton() {
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/30">
+      <div
+        className="animate-pulse border-b border-slate-800 bg-slate-800/50"
+        style={{ height: CDP_TX_TABLE_HEADER_HEIGHT_PX }}
+      />
+      <div className="divide-y divide-slate-800/50">
+        {Array.from({ length: CDP_OVERVIEW_TABLE_PAGE_SIZE }, (_, i) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+          <div
+            key={`skel-tx-row-${i}`}
+            className="animate-pulse bg-slate-800/30"
+            style={{ height: CDP_TX_TABLE_ROW_HEIGHT_PX }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Mirrors the two-piece footer under the table: `OverviewFootnotes`'s
+// "Showing X-Y of Z" line (`px-1 pt-2`, ~24px) and `Pagination`'s own
+// `px-1 pt-2 pb-1` row holding the page-count text plus the 4 nav
+// buttons (~36px) — the overview table almost always has more than one
+// page of results in production, so the nav row is present far more
+// often than not. Replaces a single generic bar that undercounted this
+// chrome by roughly half.
+function CdpTxFooterSkeleton() {
+  return (
+    <>
+      <div className="px-1 pt-2">
+        <div className={`h-4 w-56 ${SHIMMER}`} />
+      </div>
+      <div className="flex items-center justify-between px-1 pt-2 pb-1">
+        <div className={`h-4 w-20 ${SHIMMER}`} />
+        <div className={`h-6 w-40 ${SHIMMER}`} />
+      </div>
+    </>
+  );
+}
+
 // Shared skeleton body for the "Recent CDP Transactions" section: filter
 // bar + a table-shaped placeholder at `CDP_OVERVIEW_TABLE_PAGE_SIZE` rows
 // (the table's real first-page size, referenced rather than a diverging
@@ -116,14 +169,8 @@ export function CdpTransactionsBodySkeleton({
   return (
     <div {...liveRegion("Loading transactions", presentational)}>
       <CdpTxFilterBarSkeleton />
-      <TableSkeleton
-        variant="rows"
-        rows={CDP_OVERVIEW_TABLE_PAGE_SIZE}
-        presentational
-      />
-      <div className="flex items-center justify-between px-1 pt-2 pb-1">
-        <div className={`h-4 w-24 ${SHIMMER}`} />
-      </div>
+      <CdpTxTableSkeleton />
+      <CdpTxFooterSkeleton />
     </div>
   );
 }

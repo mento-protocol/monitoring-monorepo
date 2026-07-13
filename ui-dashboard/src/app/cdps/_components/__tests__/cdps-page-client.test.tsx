@@ -475,7 +475,7 @@ describe("CdpsPageClient", () => {
 
     // Transactions section: real heading mounted + a table skeleton
     // reserving exactly one page of rows (the table's real first-page
-    // size). Nested here, the body skeleton and its TableSkeleton both
+    // size). Nested here, the body skeleton and its table skeleton both
     // stay presentational (no role/aria-live of their own) so the page
     // keeps exactly one live region overall.
     expect(handle!.container.textContent).toContain("Recent CDP Transactions");
@@ -484,8 +484,15 @@ describe("CdpsPageClient", () => {
     ) as HTMLElement[];
     expect(heading!.textContent).toBe("Recent CDP Transactions");
     const [, table] = Array.from(txBody!.children) as HTMLElement[];
-    const [, body] = Array.from(table!.children) as [HTMLElement, HTMLElement];
+    const [header, body] = Array.from(table!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    // Pins the cdps-measured table rhythm (45px header, 47px rows) that
+    // replaced the shared TableSkeleton's 36/44 constants for this table.
+    expect(header.style.height).toBe("45px");
     expect(body.children).toHaveLength(CDP_OVERVIEW_TABLE_PAGE_SIZE);
+    expect((body.children[0] as HTMLElement).style.height).toBe("47px");
   });
 
   it("loading and loaded phases render the same top-level section count", () => {
@@ -1146,12 +1153,19 @@ describe("CdpAllTransactionsTable", () => {
     expect(liveRegions[0]!.getAttribute("aria-label")).toBe(
       "Loading transactions",
     );
-    // The nested TableSkeleton stays presentational (no role/aria-live of
+    // The nested table skeleton stays presentational (no role/aria-live of
     // its own) so it doesn't double up with the wrapper's live region above.
     const wrapper = liveRegions[0] as HTMLElement;
     const [, table] = Array.from(wrapper.children) as HTMLElement[];
-    const [, body] = Array.from(table!.children) as [HTMLElement, HTMLElement];
+    const [header, body] = Array.from(table!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    // Pins the cdps-measured table rhythm (45px header, 47px rows) that
+    // replaced the shared TableSkeleton's 36/44 constants for this table.
+    expect(header.style.height).toBe("45px");
     expect(body.children).toHaveLength(CDP_OVERVIEW_TABLE_PAGE_SIZE);
+    expect((body.children[0] as HTMLElement).style.height).toBe("47px");
   });
 
   it("keeps last-good empty overview transactions as an empty state during a background poll error", () => {

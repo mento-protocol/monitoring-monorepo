@@ -66,26 +66,37 @@ describe("CdpActivityDigestSkeleton", () => {
 });
 
 describe("CdpTransactionsBodySkeleton", () => {
-  it("reserves a filter bar, one page of rows, and a pagination-footer bar", () => {
+  it("reserves a filter bar, a table at cdps-measured geometry, and a two-line pagination footer", () => {
     render(<CdpTransactionsBodySkeleton />);
     const wrapper = container.querySelector<HTMLElement>(
       '[aria-label="Loading transactions"]',
     );
     expect(wrapper).not.toBeNull();
-    // filter bar, table skeleton, pagination-footer placeholder
-    const [, table, footer] = Array.from(wrapper!.children) as HTMLElement[];
-    expect(footer).toBeDefined();
-    // The nested TableSkeleton stays presentational (no role/aria-live of
-    // its own) so it doesn't double up with the wrapper's live region, but
-    // its header+body structure is unchanged.
-    const [, body] = Array.from(table!.children) as [HTMLElement, HTMLElement];
+    // filter bar, table skeleton, footnote line, pagination-nav row
+    const [, table, footnote, paginationRow] = Array.from(
+      wrapper!.children,
+    ) as HTMLElement[];
+    expect(footnote).toBeDefined();
+    expect(paginationRow).toBeDefined();
+
+    // Composed locally (not the shared TableSkeleton) so header/row
+    // heights pin the cdps-measured rhythm — 45px header, 47px rows —
+    // rather than the shared component's 36/44 constants.
+    const [header, body] = Array.from(table!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(header.style.height).toBe("45px");
     expect(body.children).toHaveLength(CDP_OVERVIEW_TABLE_PAGE_SIZE);
+    for (const row of Array.from(body.children) as HTMLElement[]) {
+      expect(row.style.height).toBe("47px");
+    }
   });
 
   it("announces via its own live region when standalone (default)", () => {
     render(<CdpTransactionsBodySkeleton />);
     const regions = container.querySelectorAll('[aria-live="polite"]');
-    // The wrapper's own region + the nested TableSkeleton would double up
+    // The wrapper's own region + the nested table skeleton would double up
     // unless the nested table stays presentational.
     expect(regions).toHaveLength(1);
     expect(regions[0]!.getAttribute("aria-label")).toBe("Loading transactions");
