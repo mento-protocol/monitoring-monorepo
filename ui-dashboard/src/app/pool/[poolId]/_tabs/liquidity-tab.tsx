@@ -2,11 +2,12 @@
 
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge } from "@/components/badges";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { LiquidityChart } from "@/components/liquidity-chart";
 import { useNetwork } from "@/components/network-provider";
 import { Pagination } from "@/components/pagination";
 import { SenderCell } from "@/components/sender-cell";
+import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
 import { TagsCell } from "@/components/tags-cell";
@@ -129,7 +130,8 @@ export function LiquidityTab({
 
   if (hasErrorWithoutData(error, data))
     return <ErrorBox message={error.message} />;
-  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={5} />;
+  if (isLoadingWithoutData(isLoading, data))
+    return <TableSkeleton variant="rows" rows={limit} />;
 
   return (
     <>

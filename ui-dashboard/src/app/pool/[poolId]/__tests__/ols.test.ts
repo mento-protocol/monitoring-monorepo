@@ -359,6 +359,7 @@ describe("OlsLiquidityTable", () => {
         network: mockNetwork,
         isLoading: false,
         error: null,
+        limit: 25,
       }),
     );
     expect(html).toContain("EXPAND");
@@ -372,6 +373,7 @@ describe("OlsLiquidityTable", () => {
         network: mockNetwork,
         isLoading: false,
         error: null,
+        limit: 25,
       }),
     );
     expect(html).toContain("CONTRACT");
@@ -385,12 +387,13 @@ describe("OlsLiquidityTable", () => {
         network: mockNetwork,
         isLoading: false,
         error: null,
+        limit: 25,
       }),
     );
     expect(html).toContain("No OLS liquidity events for this pool");
   });
 
-  it("renders loading skeleton when isLoading=true", () => {
+  it("renders a row-shaped table skeleton matching `limit` when isLoading=true", () => {
     const html = renderToStaticMarkup(
       React.createElement(OlsLiquidityTable, {
         events: [],
@@ -398,9 +401,14 @@ describe("OlsLiquidityTable", () => {
         network: mockNetwork,
         isLoading: true,
         error: null,
+        limit: 25,
       }),
     );
-    expect(html).toContain("skeleton");
+    // TableSkeleton isn't mocked in this suite (it's the real shared
+    // primitive), so assert on its actual live-region markup instead of a
+    // test-id — loading-branch structure must match the loaded branch's
+    // table shape, not just render without crashing.
+    expect(html).toContain('aria-label="Loading table"');
   });
 
   it("renders error state when error is set", () => {
@@ -411,6 +419,7 @@ describe("OlsLiquidityTable", () => {
         network: mockNetwork,
         isLoading: false,
         error: new Error("query failed"),
+        limit: 25,
       }),
     );
     expect(html).toContain("query failed");

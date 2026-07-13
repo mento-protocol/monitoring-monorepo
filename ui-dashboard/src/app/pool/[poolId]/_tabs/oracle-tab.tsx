@@ -1,6 +1,6 @@
 "use client";
 
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
 import type { Network } from "@/lib/networks";
 import { OracleChart, lookAheadTarget } from "@/components/oracle-chart";
@@ -10,6 +10,7 @@ import {
   shouldSkipLookAhead,
 } from "@/components/oracle-daily";
 import { Pagination } from "@/components/pagination";
+import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
 import {
@@ -345,7 +346,8 @@ export function OracleTab(props: OracleTabProps) {
 
   if (hasErrorWithoutData(error, data))
     return <ErrorBox message={error.message} />;
-  if (isLoadingWithoutData(isLoading, data)) return <Skeleton rows={5} />;
+  if (isLoadingWithoutData(isLoading, data))
+    return <TableSkeleton variant="rows" rows={DEFAULT_PAGE_SIZE} />;
   if (rows.length === 0)
     return (
       <EmptyBox message="No oracle snapshots yet. Oracle data is captured on pool activity (swaps, rebalances)." />

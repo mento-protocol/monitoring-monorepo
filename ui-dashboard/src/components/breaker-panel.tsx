@@ -74,6 +74,20 @@ function breakerConfigQuery(
   return !isVirtual && rateFeedID ? POOL_BREAKER_CONFIG : null;
 }
 
+// POOL_BREAKER_CONFIG has no SSR fallback, so on every first client render
+// the panel either renders nothing (no trip-able breaker) or
+// nothing-then-a-5-stat-row (issue #1222's measured +119px header jump).
+// True only while the query is genuinely in flight, so BreakerPanel can
+// render a matching-shape shimmer instead of null for that interval.
+function isBreakerConfigQueryPending(
+  isVirtual: boolean,
+  rateFeedID: string,
+  data: unknown,
+  isLoading: boolean,
+): boolean {
+  return !isVirtual && !!rateFeedID && data === undefined && isLoading;
+}
+
 /** Effective cooldown in seconds. Per-feed override else breaker default. */
 function effectiveCooldown(cfg: BreakerConfig): bigint {
   const override = BigInt(cfg.cooldownTime);
@@ -470,15 +484,24 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
   const isVirtual = isVirtualPool(pool);
   const rateFeedID = pool.referenceRateFeedID ?? "";
 
-  const { data } = useGQL<Response>(breakerConfigQuery(isVirtual, rateFeedID), {
-    chainId: pool.chainId,
-    rateFeedID,
-  });
+  const { data, isLoading } = useGQL<Response>(
+    breakerConfigQuery(isVirtual, rateFeedID),
+    {
+      chainId: pool.chainId,
+      rateFeedID,
+    },
+  );
 
   const configs = data?.BreakerConfig ?? [];
   const trips = data?.BreakerTripEvent ?? [];
   const cfg = pickTrippableConfig(configs);
   const tripped = cfg?.status === "TRIPPED";
+  const queryPending = isBreakerConfigQueryPending(
+    isVirtual,
+    rateFeedID,
+    data,
+    isLoading,
+  );
   // The 1-second ticker only matters during cooldown (it drives the
   // countdown text + the reset-path "elapsed" check). Healthy state shows
   // static text — skip the interval to avoid recurring re-renders for nothing.
@@ -498,6 +521,7 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
     return () => clearInterval(id);
   }, [tickerActive]);
 
+  if (queryPending) return <BreakerPanelSkeleton />;
   if (isVirtual || !rateFeedID || !cfg) return null;
   // No trip-able breaker (e.g. feed not registered with BreakerBox) → no panel.
 
@@ -567,6 +591,31 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
           presentation={presentation}
         />
       )}
+    </>
+  );
+}
+
+const BREAKER_SKELETON_SHIMMER = "animate-pulse rounded bg-slate-800/50";
+
+// Mirrors the real panel's shape once a trip-able breaker resolves: a
+// hairline divider (`my-5 h-px`) plus the 5-stat `<dl>` grid (Breaker,
+// Reference vs Actual, Threshold/Cooldown, live-Δ bar, Last trip) — each
+// stat is a label line over a two-line value block, matching `dt` + `dd
+// flex flex-col gap-0.5` in the real metric components above.
+function BreakerPanelSkeleton() {
+  return (
+    <>
+      <div className="my-5 h-px bg-slate-800" />
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
+        {Array.from({ length: 5 }, (_, i) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+          <div key={`breaker-skel-stat-${i}`}>
+            <div className={`h-3 w-24 ${BREAKER_SKELETON_SHIMMER}`} />
+            <div className={`mt-1.5 h-4 w-20 ${BREAKER_SKELETON_SHIMMER}`} />
+            <div className={`mt-1 h-3 w-16 ${BREAKER_SKELETON_SHIMMER}`} />
+          </div>
+        ))}
+      </dl>
     </>
   );
 }

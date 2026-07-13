@@ -2,7 +2,7 @@
 
 import { AddressLink } from "@/components/address-link";
 import { BreachHistoryPanel } from "@/components/breach-history-panel";
-import { ErrorBox, Skeleton } from "@/components/feedback";
+import { ErrorBox } from "@/components/feedback";
 import { HealthPanel } from "@/components/health-panel";
 import { LimitPanel } from "@/components/limit-panel";
 import { useNetwork } from "@/components/network-provider";
@@ -39,6 +39,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
+import { HeaderCardSkeleton } from "./header-card-skeleton";
 import { PoolHeader } from "./pool-header";
 import { PoolTablist } from "./pool-tablist";
 import {
@@ -409,7 +410,7 @@ function PoolOverview({
   // (the degraded path where the SSR prefetch missed).
   if (!pool)
     return isLoadingWithoutData(poolLoading, pool) ? (
-      <Skeleton rows={4} />
+      <HeaderCardSkeleton />
     ) : (
       <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />
     );
