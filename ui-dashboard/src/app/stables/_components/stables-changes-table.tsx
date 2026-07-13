@@ -26,20 +26,23 @@ const SUPPLY_CHANGES_PAGE_SIZE = 50;
 // original single text line, per the sparkline grid's identical tradeoff.
 const SUPPLY_CHANGES_SKELETON_ROWS = 20;
 // Mirrors TableSkeleton's measured `variant="rows"` geometry (header ≈36px,
-// rows ≈44px — those constants live in skeletons.tsx but aren't exported)
-// plus the real pagination footer's measured box (border-t + pt-4 + one
-// text line ≈ 1 + 16 + 16 = 33px) and its mt-4 top margin. Reserving this
-// height keeps the card from visibly shrinking/growing across the
-// loading → empty/error/loaded-with-data swap, and (combined with the
-// `isLoading || hasPendingPage` gate in stables-page-client.tsx) from
-// growing in waves as successive raw pages resolve.
+// rows ≈44px, plus its own 1px top/bottom outer border — those constants
+// live in skeletons.tsx but aren't exported) plus the real pagination
+// footer's measured box (border-t + pt-4 + one text line ≈ 1 + 16 + 16 =
+// 33px) and its mt-4 top margin. Reserving this height keeps the card from
+// visibly shrinking/growing across the loading → empty/error/loaded-with-data
+// swap, and (combined with the `isLoading || hasPendingPage` gate in
+// stables-page-client.tsx) from growing in waves as successive raw pages
+// resolve.
 const SUPPLY_CHANGES_HEADER_HEIGHT_PX = 36;
 const SUPPLY_CHANGES_ROW_HEIGHT_PX = 44;
+const SUPPLY_CHANGES_SKELETON_BORDER_PX = 2;
 const SUPPLY_CHANGES_FOOTER_MARGIN_TOP_PX = 16;
 const SUPPLY_CHANGES_FOOTER_HEIGHT_PX = 33;
 const SUPPLY_CHANGES_RESERVED_HEIGHT_PX =
   SUPPLY_CHANGES_HEADER_HEIGHT_PX +
   SUPPLY_CHANGES_SKELETON_ROWS * SUPPLY_CHANGES_ROW_HEIGHT_PX +
+  SUPPLY_CHANGES_SKELETON_BORDER_PX +
   SUPPLY_CHANGES_FOOTER_MARGIN_TOP_PX +
   SUPPLY_CHANGES_FOOTER_HEIGHT_PX;
 
