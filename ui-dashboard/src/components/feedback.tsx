@@ -12,39 +12,10 @@ export function Skeleton({ rows }: { rows: number }) {
   );
 }
 
-// Real table row geometry (`table.tsx` `Row`/`Td`, `pool-row.tsx` `Cell`):
-// header ~36-40px, rows ~44-48px. `Skeleton`'s bare h-10 (40px) bars with no
-// header row understate a real table's height — this is a drop-in
-// alternative (same `rows` prop) that reserves the header + row rhythm so
-// call sites can migrate without a layout jump when they adopt it.
-const TABLE_SKELETON_HEADER_HEIGHT_PX = 36;
-const TABLE_SKELETON_ROW_HEIGHT_PX = 44;
-
-export function TableRowsSkeleton({ rows }: { rows: number }) {
-  return (
-    <div
-      className="overflow-hidden rounded-lg border border-slate-800"
-      role="status"
-      aria-label="Loading table"
-    >
-      <div
-        className="animate-pulse border-b border-slate-800 bg-slate-800/50"
-        style={{ height: TABLE_SKELETON_HEADER_HEIGHT_PX }}
-      />
-      <div className="divide-y divide-slate-800/50">
-        {Array.from({ length: rows }, (_, i) => (
-          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-          <div
-            key={`table-skel-row-${i}`}
-            className="animate-pulse bg-slate-800/30"
-            style={{ height: TABLE_SKELETON_ROW_HEIGHT_PX }}
-          />
-        ))}
-      </div>
-      <span className="sr-only">Loading…</span>
-    </div>
-  );
-}
+// A table-shaped loading skeleton (header + real-table row rhythm) lives in
+// `skeletons.tsx` as `<TableSkeleton variant="rows" rows={n} />` — a single
+// source of truth for table-skeleton geometry, wired through the shared
+// `liveRegion()` helper. Prefer that over adding a second table skeleton here.
 
 export function EmptyBox({ message }: { message: string }) {
   return (

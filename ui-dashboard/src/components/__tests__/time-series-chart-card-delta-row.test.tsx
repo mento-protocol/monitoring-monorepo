@@ -63,12 +63,50 @@ describe("TimeSeriesChartCard delta-row loading parity", () => {
     expect(loadedHtml).not.toContain(DELTA_ROW_MARKER);
   });
 
-  it("still shows the delta row once loaded on error, even with reserveDeltaRow=false", () => {
-    const html = render({
+  it("keeps the delta row absent across loading, loaded-clean, and loaded-error when reserveDeltaRow=false (height-stable header)", () => {
+    // The `flex h-5 items-center` wrapper is the only header block whose
+    // presence changes the header height. An opted-out card must never render
+    // it — in any state — so its header height is identical loading vs
+    // loaded-clean vs loaded-with-error. Previously the error branch popped
+    // the row back in ("· partial data"), a jump on exactly the transition
+    // this PR exists to remove.
+    const states = [
+      render({ isLoading: true, reserveDeltaRow: false }),
+      render({ isLoading: false, reserveDeltaRow: false }),
+      render({ isLoading: false, reserveDeltaRow: false, hasError: true }),
+      render({
+        isLoading: false,
+        reserveDeltaRow: false,
+        hasSnapshotError: true,
+      }),
+    ];
+    for (const html of states) {
+      expect(html).not.toContain(DELTA_ROW_MARKER);
+    }
+  });
+
+  it("surfaces the partial-data affordance on the title line (not a new row) when reserveDeltaRow=false and errored", () => {
+    const errored = render({
       isLoading: false,
       reserveDeltaRow: false,
       hasError: true,
     });
+    // Visible affordance is present…
+    expect(errored).toContain("partial data");
+    // …but it rides the always-present title line, not the height-adding
+    // delta row: the title <p> carries the inline suffix, not the
+    // `flex h-5 items-center` wrapper.
+    expect(errored).toContain('text-sm text-slate-400">Daily traded volume');
+    expect(errored).not.toContain(DELTA_ROW_MARKER);
+    // Clean load shows no partial-data suffix at all.
+    const clean = render({ isLoading: false, reserveDeltaRow: false });
+    expect(clean).not.toContain("partial data");
+  });
+
+  it("still shows the delta row with partial-data once loaded on error when reserveDeltaRow=true (default)", () => {
+    // Default cards keep the in-row error indicator — the absolute gate only
+    // changes the reserveDeltaRow={false} path.
+    const html = render({ isLoading: false, hasError: true });
     expect(html).toContain(DELTA_ROW_MARKER);
     expect(html).toContain("partial data");
   });

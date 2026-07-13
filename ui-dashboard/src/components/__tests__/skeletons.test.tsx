@@ -95,6 +95,61 @@ describe("TableSkeleton", () => {
   });
 });
 
+// `variant="rows"` is the measured real-table geometry primitive from issue
+// #1218 (migrated from the former `TableRowsSkeleton` in `feedback.tsx`): a
+// single full-width bar per row at header ≈36px / rows ≈44px, so a
+// client-fetched table that only knows a row count can drop it in without a
+// skeleton→content height jump. Dimension assertions carried over verbatim.
+describe("TableSkeleton (rows variant)", () => {
+  it("renders a single full-width header bar plus the requested number of rows", () => {
+    render(<TableSkeleton rows={5} variant="rows" />);
+    const [header, body] = Array.from(getTableSkeleton().children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    // No column split in rows mode — the header is one bar, not `cols` cells.
+    expect(header.children).toHaveLength(0);
+    expect(body.children).toHaveLength(5);
+  });
+
+  it("reserves ~36px for the header row and ~44px per data row", () => {
+    render(<TableSkeleton rows={2} variant="rows" />);
+    const [header, body] = Array.from(getTableSkeleton().children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(header.style.height).toBe("36px");
+    Array.from(body.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("44px");
+      // Single full-width bar per row (no cells nested inside).
+      expect(row.children).toHaveLength(0);
+    });
+  });
+
+  it("handles rows=0 by rendering only the header row", () => {
+    render(<TableSkeleton rows={0} variant="rows" />);
+    const [, body] = Array.from(getTableSkeleton().children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(body.children).toHaveLength(0);
+  });
+
+  it("keeps the polite live region + sr-only label in rows variant", () => {
+    render(<TableSkeleton rows={1} variant="rows" />);
+    const table = getTableSkeleton();
+    expect(table.getAttribute("aria-live")).toBe("polite");
+    expect(table.textContent).toContain("Loading…");
+  });
+
+  it("suppresses role/aria-live when presentational (parent owns the live region)", () => {
+    render(<TableSkeleton rows={1} variant="rows" presentational />);
+    expect(
+      container.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).toBeNull();
+  });
+});
+
 describe("TileGridSkeleton", () => {
   it("renders the requested tile count", () => {
     render(<TileGridSkeleton count={6} />);
