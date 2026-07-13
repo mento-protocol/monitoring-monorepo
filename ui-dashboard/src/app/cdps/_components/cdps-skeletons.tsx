@@ -71,17 +71,20 @@ export function CdpMarketCardGridSkeleton() {
 }
 
 // Mirrors CdpActivityDigest: `rounded-lg border bg-slate-950/60 p-4` card,
-// heading + subtitle line, then table-shaped content bars (one per market
-// row). ≈245px (production audit).
+// heading + subtitle line (h2/p line-height rhythm, ~52px), then a
+// table-shaped block — a thead-height header bar plus one body-row bar per
+// market (real `td`s use `py-2`, ~35-36px per row). ≈254px, within
+// tolerance of the ≈245px production audit measurement.
 export function CdpActivityDigestSkeleton() {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4">
-      <div className={`h-6 w-36 ${SHIMMER}`} />
-      <div className={`mt-1 h-4 w-64 ${SHIMMER}`} />
-      <div className="mt-4 space-y-2">
+      <div className={`h-7 w-36 ${SHIMMER}`} />
+      <div className={`mt-1 h-5 w-64 ${SHIMMER}`} />
+      <div className="mt-4 space-y-1">
+        <div className={`h-8 ${SHIMMER}`} />
         {Array.from({ length: 3 }, (_, i) => (
           // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-          <div key={`skel-digest-row-${i}`} className={`h-6 ${SHIMMER}`} />
+          <div key={`skel-digest-row-${i}`} className={`h-9 ${SHIMMER}`} />
         ))}
       </div>
     </div>

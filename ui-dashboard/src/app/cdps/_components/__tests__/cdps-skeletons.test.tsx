@@ -53,14 +53,15 @@ describe("CdpMarketCardGridSkeleton", () => {
 });
 
 describe("CdpActivityDigestSkeleton", () => {
-  it("renders a heading bar, subtitle bar, and per-market content rows", () => {
+  it("renders a heading bar, subtitle bar, and a table-shaped block (header row + one row per market)", () => {
     render(<CdpActivityDigestSkeleton />);
     const card = container.firstElementChild!;
     expect(card.className).toContain("rounded-lg");
-    // heading bar + subtitle bar + one content-row wrapper
+    // heading bar + subtitle bar + table-shaped content wrapper
     expect(card.children).toHaveLength(3);
-    const rows = card.children[2]!;
-    expect(rows.children).toHaveLength(3);
+    const tableBlock = card.children[2]!;
+    // thead-height header bar + one body-row bar per market
+    expect(tableBlock.children).toHaveLength(4);
   });
 });
 
