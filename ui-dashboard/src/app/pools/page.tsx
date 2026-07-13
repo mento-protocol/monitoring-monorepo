@@ -13,6 +13,12 @@ import { fetchInitialNetworkData } from "@/lib/network-fetcher/server-cache";
 // internally so it degrades per-network on failure); the catch only fires on
 // truly unexpected errors, and an undefined initial payload falls back to
 // the existing client-only path.
+//
+// This route also now has its own `loading.tsx`, shaped like the real page
+// (KPI tiles + table placeholders). The 0.4896 CLS regression above came
+// from a *generic* skeleton whose dimensions didn't match the loaded
+// content, not from having a loading boundary per se — a shape-matched one
+// is safe and covers the SSR-await gap plus client-side navigations here.
 export const revalidate = 60;
 
 export const metadata: Metadata = {

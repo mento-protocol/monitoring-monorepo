@@ -11,7 +11,8 @@ import {
   useAllNetworksData,
   type NetworkData,
 } from "@/hooks/use-all-networks-data";
-import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
+import { EmptyBox, ErrorBox, Tile } from "@/components/feedback";
+import { TableSkeleton } from "@/components/skeletons";
 import { GlobalPoolsTable } from "@/components/global-pools-table";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
 import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
@@ -424,7 +425,7 @@ function GlobalContent({
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">All Pools</h2>
         {showInitialSkeleton(isLoading, networkData.length) ? (
-          <Skeleton rows={5} />
+          <TableSkeleton rows={5} variant="rows" />
         ) : shouldShowEmptyPools ? (
           <EmptyBox message="No pools found across any chain." />
         ) : (

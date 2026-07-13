@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import RootLoading from "@/app/loading";
+import PoolsLoading from "@/app/pools/loading";
 import PoolDetailLoading from "@/app/pool/[poolId]/loading";
 import AddressBookLoading from "@/app/address-book/loading";
 import VolumeLoading from "@/app/volume/loading";
@@ -41,10 +42,106 @@ function countLiveRegions(): number {
 }
 
 describe("route-level loading UIs", () => {
-  it("RootLoading renders exactly one polite live region (PageShellSkeleton wrapper)", () => {
+  it("RootLoading renders exactly one polite live region", () => {
     render(<RootLoading />);
     const regions = container.querySelectorAll('[aria-live="polite"]');
     expect(regions).toHaveLength(1);
+  });
+
+  it("RootLoading nests only presentational primitives (no nested role=status under the page live region)", () => {
+    render(<RootLoading />);
+    const wrapper = container.querySelector('[aria-live="polite"]')!;
+    expect(wrapper.querySelectorAll('[role="status"]')).toHaveLength(0);
+  });
+
+  it("RootLoading reserves two chart cards (TVL + Volume) — absent entirely from the old generic PageShellSkeleton", () => {
+    render(<RootLoading />);
+    const chartsRow = container.querySelector(".lg\\:grid-cols-2");
+    expect(chartsRow).not.toBeNull();
+    expect(chartsRow!.children).toHaveLength(2);
+
+    // Chart plot areas reserve ROW_CHART_HEIGHT_PX, matched on the shared
+    // constant so a future height change can't silently strand this at a
+    // stale hardcoded value.
+    const plotAreas = [...container.querySelectorAll("[style]")].filter(
+      (el) => (el as HTMLElement).style.height === `${ROW_CHART_HEIGHT_PX}px`,
+    );
+    expect(plotAreas).toHaveLength(2);
+
+    // Both homepage charts (TvlOverTimeChart, VolumeOverTimeChart) omit
+    // `reserveDeltaRow`, so both default to `true` — unlike the pool-detail
+    // volume card, both skeleton cards reserve the delta placeholder.
+    Array.from(chartsRow!.children).forEach((card) => {
+      expect((card as HTMLElement).querySelector(".h-5.w-32")).not.toBeNull();
+    });
+  });
+
+  it("RootLoading reserves a 4-tile KPI row (Swap Fees / LPs / Swaps / Traders)", () => {
+    render(<RootLoading />);
+    const kpiRow = container.querySelector(".lg\\:grid-cols-4");
+    expect(kpiRow).not.toBeNull();
+    const tiles = Array.from(kpiRow!.children).filter(
+      (child) => child.tagName === "DIV",
+    );
+    expect(tiles).toHaveLength(4);
+  });
+
+  it("RootLoading reserves a table-shaped pools placeholder (header ~36px, rows ~44px)", () => {
+    render(<RootLoading />);
+    const table = container.querySelector(".overflow-hidden.rounded-lg");
+    expect(table).not.toBeNull();
+    const [header, body] = Array.from(table!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(header.style.height).toBe("36px");
+    expect(body.children).toHaveLength(10);
+    Array.from(body.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("44px");
+    });
+  });
+
+  it("PoolsLoading renders exactly one polite live region", () => {
+    render(<PoolsLoading />);
+    expect(countLiveRegions()).toBe(1);
+  });
+
+  it("PoolsLoading nests only presentational primitives (no nested role=status under the page live region)", () => {
+    render(<PoolsLoading />);
+    const wrapper = container.querySelector('[aria-live="polite"]')!;
+    expect(wrapper.querySelectorAll('[role="status"]')).toHaveLength(0);
+  });
+
+  it("PoolsLoading reserves a 3-tile KPI row (Pools / Showing / Latest Swap Block)", () => {
+    render(<PoolsLoading />);
+    const kpiRow = container.querySelector(".sm\\:grid-cols-3");
+    expect(kpiRow).not.toBeNull();
+    expect(kpiRow!.children).toHaveLength(3);
+  });
+
+  it("PoolsLoading reserves table-shaped pools and Recent Swaps sections (header ~36px, rows ~44px)", () => {
+    render(<PoolsLoading />);
+    const tables = container.querySelectorAll(".overflow-hidden.rounded-lg");
+    expect(tables).toHaveLength(2);
+
+    const [poolsTable, swapsTable] = Array.from(tables) as HTMLElement[];
+
+    const [poolsHeader, poolsBody] = Array.from(poolsTable!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(poolsHeader.style.height).toBe("36px");
+    expect(poolsBody.children).toHaveLength(10);
+
+    const [swapsHeader, swapsBody] = Array.from(swapsTable!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(swapsHeader.style.height).toBe("36px");
+    // Reserves the default page size (25) — the route loading UI can't read
+    // the `?limit=` URL param, unlike `pools-page-client.tsx`'s own
+    // swaps-loading skeleton, which sizes to the live `limit` value.
+    expect(swapsBody.children).toHaveLength(25);
   });
 
   it("PoolDetailLoading renders exactly one polite live region (on TableSkeleton)", () => {

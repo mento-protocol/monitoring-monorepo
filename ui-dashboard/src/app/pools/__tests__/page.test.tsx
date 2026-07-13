@@ -275,3 +275,60 @@ describe("PoolsPage multichain rendering", () => {
     expect(poolSwapsSeen).toEqual([{ poolId: celoPool.id, limit: 25 }]);
   });
 });
+
+// Loading branches must reserve the same table geometry the loaded
+// `GlobalPoolsTable` / `SwapTable` land at (header ~36px, rows ~44px — the
+// measured real-table rhythm `TableSkeleton`'s `variant="rows"` reserves),
+// not a generic bar-list `<Skeleton rows={n} />`. `renderToStaticMarkup`
+// serializes inline `style={{ height }}` as `style="height:Npx"`, so
+// counting those substrings in the SSR string is a cheap structural proxy
+// for "N rows at the right height" without needing a jsdom DOM.
+describe("PoolsPage loading-state skeleton parity", () => {
+  function countHeightPx(html: string, px: number): number {
+    return html.split(`style="height:${px}px"`).length - 1;
+  }
+
+  it("Recent Swaps loading skeleton reserves exactly `limit` rows (not a hardcoded count)", () => {
+    mockSearchParams = new URLSearchParams("limit=10");
+    vi.mocked(useGQL).mockReturnValue({
+      data: undefined,
+      error: undefined,
+      isLoading: true,
+    } as SWRResponse);
+
+    const html = renderToStaticMarkup(<PoolsPage />);
+
+    expect(countHeightPx(html, 44)).toBe(10);
+    expect(countHeightPx(html, 36)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("Recent Swaps loading skeleton tracks a different `limit` selection (50)", () => {
+    mockSearchParams = new URLSearchParams("limit=50");
+    vi.mocked(useGQL).mockReturnValue({
+      data: undefined,
+      error: undefined,
+      isLoading: true,
+    } as SWRResponse);
+
+    const html = renderToStaticMarkup(<PoolsPage />);
+
+    expect(countHeightPx(html, 44)).toBe(50);
+  });
+
+  it("Pools section loading skeleton is table-shaped (header + 3 rows) during the initial network fetch", () => {
+    vi.mocked(useAllNetworksData).mockReturnValue({
+      networkData: [],
+      isLoading: true,
+      error: null,
+    });
+    vi.mocked(useGQL).mockReturnValue(baseSwapsResult as SWRResponse);
+
+    const html = renderToStaticMarkup(<PoolsPage />);
+
+    // Isolated to the Pools section: swaps are settled+empty here (renders
+    // EmptyBox, not a skeleton), so every 44px bar belongs to this table.
+    expect(countHeightPx(html, 44)).toBe(3);
+    expect(countHeightPx(html, 36)).toBe(1);
+    expect(html).not.toContain('data-testid="global-pools-table"');
+  });
+});

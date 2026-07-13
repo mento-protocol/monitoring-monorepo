@@ -126,6 +126,22 @@ describe("GlobalPage — loading state", () => {
     // Should have multiple "…" placeholders
     expect(html.split("…").length - 1).toBeGreaterThanOrEqual(4);
   });
+
+  // The "All Pools" degraded-path skeleton must reserve the same table
+  // geometry `GlobalPoolsTable` lands at (header ~36px, rows ~44px — the
+  // measured real-table rhythm `TableSkeleton`'s `variant="rows"` reserves)
+  // instead of a generic bar-list `<Skeleton rows={5} />`.
+  // `renderToStaticMarkup` serializes inline `style={{ height }}` as
+  // `style="height:Npx"`, so counting those substrings in the SSR string is
+  // a cheap structural proxy for "5 rows at the right height" without a DOM.
+  it("All Pools skeleton is table-shaped (header + 5 rows) while loading", () => {
+    const html = render([], true);
+    const rowMatches = html.split('style="height:44px"').length - 1;
+    const headerMatches = html.split('style="height:36px"').length - 1;
+    expect(rowMatches).toBe(5);
+    expect(headerMatches).toBe(1);
+    expect(html).not.toContain('data-testid="global-pools-table"');
+  });
 });
 
 // All networks succeed

@@ -35,7 +35,8 @@ import {
 } from "@/lib/networks";
 import type { Pool, SwapEvent } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
-import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
+import { EmptyBox, ErrorBox, Tile } from "@/components/feedback";
+import { TableSkeleton } from "@/components/skeletons";
 import { LimitSelect } from "@/components/controls";
 import { SenderCell } from "@/components/sender-cell";
 
@@ -222,7 +223,7 @@ function PoolsContent({
           Pools
         </h2>
         {showInitialSkeleton(poolsLoading, networkData.length) ? (
-          <Skeleton rows={3} />
+          <TableSkeleton rows={3} variant="rows" />
         ) : failedNetworks.length === 0 && entries.length === 0 ? (
           <EmptyBox message="No pools found across any chain." />
         ) : (
@@ -301,7 +302,11 @@ function PoolsContent({
         {swapsErr ? (
           <ErrorBox message={`Failed to load swaps: ${swapsErr.message}`} />
         ) : swapsLoading ? (
-          <Skeleton rows={5} />
+          // `limit` (not a hardcoded row count) so the skeleton always
+          // matches the selected page size — real SwapTable renders exactly
+          // `limit` rows, header ~36px + rows ~44px (TableSkeleton's
+          // measured real-table geometry).
+          <TableSkeleton rows={limit} variant="rows" />
         ) : swaps.length === 0 ? (
           <EmptyBox
             message={
