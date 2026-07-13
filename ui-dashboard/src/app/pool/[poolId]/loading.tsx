@@ -49,7 +49,16 @@ export default function PoolDetailLoading() {
           h-7) + 5-col stat grid. Shared with PoolOverview's degraded
           fallback via HeaderCardSkeleton so the two loading branches can't
           drift apart. `presentational` because the page-level live region
-          lives on the trailing TableSkeleton below. */}
+          lives on the trailing TableSkeleton below.
+
+          Known residual: on FPMM pools with a rateFeedID, PoolHeader's own
+          BreakerPanel has no SSR fallback data, so its `isLoading` state is
+          true on first content paint and it renders a ~90px skeleton
+          section (divider + 5-stat grid) that this route skeleton can't
+          reserve without becoming pool-type-aware (this component doesn't
+          know the pool yet). That can still shift the loading.tsx→content
+          boundary for those pools until #1237 (SSR-prefetch
+          POOL_BREAKER_CONFIG) lands. */}
       <HeaderCardSkeleton presentational />
       {/* Health panel — exception-only in the real page (often renders
           nothing); a slim bar splits the difference with the full panel. */}
