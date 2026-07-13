@@ -165,8 +165,14 @@ describe("CorridorPanel loading state", () => {
       '[role="status"][aria-label="Loading corridor map"]',
     );
     expect(status).not.toBeNull();
-    const [header] = Array.from(status!.children) as [HTMLElement];
+    const [header, body] = Array.from(status!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
     expect(header.children).toHaveLength(4);
+    // Row count matches INSIGHT_ROW_LIMIT (the corridor query's row cap) so
+    // the skeleton doesn't undershoot the common capped-query case.
+    expect(body.children).toHaveLength(10);
     teardown(handle);
 
     handle = renderInto(
@@ -220,8 +226,14 @@ describe("OutlierPanel loading state", () => {
       '[role="status"][aria-label="Loading outlier swaps"]',
     );
     expect(status).not.toBeNull();
-    const [header] = Array.from(status!.children) as [HTMLElement];
+    const [header, body] = Array.from(status!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
     expect(header.children).toHaveLength(3);
+    // Row count matches INSIGHT_ROW_LIMIT (the outlier query's row cap) so
+    // the skeleton doesn't undershoot the common capped-query case.
+    expect(body.children).toHaveLength(10);
     teardown(handle);
 
     handle = renderInto(

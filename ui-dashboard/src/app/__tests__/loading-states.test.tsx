@@ -168,12 +168,23 @@ describe("route-level loading UIs", () => {
     expect(tableSkeletonRoots).toHaveLength(2);
   });
 
-  it("VolumeLoading reserves a 230px chart card ahead of the aggregator table skeleton", () => {
+  it("VolumeLoading reserves the full aggregator chart card chrome (title/headline/range pills), not a bare 230px box, ahead of the table skeleton", () => {
     render(<VolumeLoading />);
 
-    const chartPlaceholder = [
+    const plotPlaceholders = [
       ...container.querySelectorAll<HTMLElement>("[class*='h-[230px]']"),
     ];
-    expect(chartPlaceholder).toHaveLength(1);
+    expect(plotPlaceholders).toHaveLength(1);
+    const [plot] = plotPlaceholders;
+
+    // The 230px plot must sit inside the same full card chrome as the hero
+    // chart card above it — p-5/sm:p-6 rounded card wrapping a title line,
+    // a 3xl/4xl headline, and a 4-pill range group — not stand alone as the
+    // entire "card".
+    const card = plot!.closest("section.rounded-lg");
+    expect(card).not.toBeNull();
+    expect(card!.querySelector(".text-3xl")).not.toBeNull();
+    const rangePills = card!.querySelectorAll(".h-6.w-9");
+    expect(rangePills).toHaveLength(4);
   });
 });

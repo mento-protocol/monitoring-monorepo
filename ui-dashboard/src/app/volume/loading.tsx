@@ -18,6 +18,7 @@ import { TableSkeleton } from "@/components/skeletons";
 // column: `TopPoolsList` only renders alongside the per-pool chart for the
 // 30d/90d/all ranges (`RANGES_WITH_CHART` in `page-client.tsx`), which the
 // default 7d view never reaches.
+// eslint-disable-next-line max-lines-per-function -- Route-level skeleton mirrors five below-the-fold sections 1:1 with their real components for CLS parity (issue #1221); splitting the JSX would fragment that direct mapping.
 export default function VolumeLoading() {
   return (
     <div
@@ -86,7 +87,11 @@ export default function VolumeLoading() {
           (Cohort / Corridor / Outlier). This route-level fallback can't know
           venue/range, so each panel reserves a generic sized block rather
           than replicating the panels' internal row shapes — that detail
-          lives in v3-flow-insight-panels.tsx's own client loading branch. */}
+          lives in v3-flow-insight-panels.tsx's own client loading branch.
+          The height (493) matches that client skeleton's own corridor/
+          outlier panel height (10-row InsightTableSkeleton + InsightPanel
+          chrome) so the route->mount swap doesn't shrink before the client
+          skeleton takes over — keep both in sync if either changes. */}
       <div className="space-y-3">
         <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -95,7 +100,7 @@ export default function VolumeLoading() {
             <div
               key={`vol-insight-panel-${i}`}
               className="rounded-lg border border-slate-800 bg-slate-900/50 p-4"
-              style={{ height: 480 }}
+              style={{ height: 493 }}
             >
               <div className="mb-3 h-3 w-32 animate-pulse rounded bg-slate-800/50" />
               <div className="space-y-2">
@@ -117,13 +122,41 @@ export default function VolumeLoading() {
         <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
         <TableSkeleton rows={10} variant="rows" presentational />
       </div>
-      {/* Aggregator breakdown: heading + 230px chart card + table skeleton,
-          mirroring AggregatorBreakdownSection. Row count matches
+      {/* Aggregator breakdown: heading + the aggregator chart card + table
+          skeleton, mirroring AggregatorBreakdownSection. The chart card
+          reserves the same full chrome as the hero card above (p-5/sm:p-6 +
+          title + 3xl/4xl headline + range pills + mt-4 plot), just at the
+          aggregator chart's 230px plot height instead of the hero's 200px —
+          a bare 230px box under-reserved the title/headline/range-pill rows
+          that AggregatorBreakdownSection's TimeSeriesChartCard also renders
+          on every load. No delta row here either: like the hero chart, this
+          card always passes reserveDeltaRow={false}. Row count matches
           AGGREGATOR_TABLE_SKELETON_ROWS in aggregator-breakdown-section.tsx —
           keep both in sync if that changes. */}
       <div className="space-y-3">
         <div className="h-4 w-64 animate-pulse rounded bg-slate-800/50" />
-        <div className="h-[230px] animate-pulse rounded-lg border border-slate-800 bg-slate-900/30" />
+        <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-sm">
+                <span className="inline-block h-[1em] w-40 animate-pulse rounded bg-slate-800/50 align-middle" />
+              </p>
+              <p className="mt-1 text-3xl font-semibold sm:text-4xl">
+                <span className="inline-block h-[1em] w-36 animate-pulse rounded bg-slate-800/60 align-middle" />
+              </p>
+            </div>
+            <div className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5">
+              {Array.from({ length: 4 }, (_, i) => (
+                // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+                <span
+                  key={`vol-agg-range-${i}`}
+                  className="h-6 w-9 animate-pulse rounded bg-slate-800/40"
+                />
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 h-[230px] animate-pulse rounded bg-slate-800/30" />
+        </section>
         <TableSkeleton rows={6} variant="rows" presentational />
       </div>
       <span className="sr-only">Loading…</span>

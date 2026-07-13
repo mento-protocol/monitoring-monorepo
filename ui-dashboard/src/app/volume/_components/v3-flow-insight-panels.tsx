@@ -254,13 +254,18 @@ function CohortPanelSkeleton() {
   );
 }
 
-// Corridor/outlier row rhythm is `py-2` + `text-xs` (~28px including the
-// header) — much denser than the shared `TableSkeleton`'s measured 36px/44px
+// Corridor/outlier queries cap at 10 rows (`INSIGHT_ROW_LIMIT` in
+// `v3-flow-insights.tsx`), and that cap is the common case in production —
+// both tables are usually query-capped (`isPartial`), which also renders a
+// trailing warning line below the table. `INSIGHT_PANEL_SKELETON_ROWS`
+// mirrors the cap so the skeleton doesn't undershoot the loaded table on the
+// (common) capped path. The row rhythm (`py-3.5` + `h-3`, ~40px) intentionally
+// runs a few px above the measured real row height (~36-37px) to absorb that
+// conditional warning line without needing a separate reserved element for
+// it — real rows are denser than the shared `TableSkeleton`'s 36px/44px
 // main-table geometry, so this stays a local skeleton rather than reusing
-// that primitive. `INSIGHT_PANEL_SKELETON_ROWS` approximates the panel's
-// typical row count (queries cap at 10 — `INSIGHT_ROW_LIMIT` in
-// `v3-flow-insights.tsx` — but real windows usually resolve fewer).
-const INSIGHT_PANEL_SKELETON_ROWS = 6;
+// that primitive.
+const INSIGHT_PANEL_SKELETON_ROWS = 10;
 
 function InsightTableSkeleton({
   cols,
@@ -271,7 +276,7 @@ function InsightTableSkeleton({
 }) {
   return (
     <div role="status" aria-label={label}>
-      <div className="flex gap-3 border-b border-slate-800 py-2">
+      <div className="flex gap-3 border-b border-slate-800 py-2.5">
         {Array.from({ length: cols }, (_, i) => (
           // react-doctor-disable-next-line react-doctor/no-array-index-as-key
           <div
@@ -283,7 +288,7 @@ function InsightTableSkeleton({
       <div className="divide-y divide-slate-800/40">
         {Array.from({ length: INSIGHT_PANEL_SKELETON_ROWS }, (_, rowIdx) => (
           // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-          <div key={`insight-skel-row-${rowIdx}`} className="flex gap-3 py-2">
+          <div key={`insight-skel-row-${rowIdx}`} className="flex gap-3 py-3.5">
             {Array.from({ length: cols }, (_, colIdx) => (
               // react-doctor-disable-next-line react-doctor/no-array-index-as-key
               <div
