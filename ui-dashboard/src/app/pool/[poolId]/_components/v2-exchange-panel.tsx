@@ -286,8 +286,38 @@ function formatBucket(rawWei: string, decimals: number): string {
   return whole.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
+const V2_EXCHANGE_SKELETON_SHIMMER = "animate-pulse rounded bg-slate-800/50";
+// V2ExchangeStats always renders exactly 9 Stat cells (Swap Fee, Pricing
+// Curve, Bucket Reset, 2× Bucket, Last Reset, Oracle Feed, Exchange ID,
+// BiPoolManager) — keep this in lockstep with that count.
+const V2_EXCHANGE_STAT_COUNT = 9;
+
+// Mirrors V2ExchangeStats' loaded shape: identical `<dl>` grid classes plus
+// one placeholder cell per real stat, so the header card doesn't grow once
+// BiPoolExchange resolves for the common "healthy, linked exchange" case.
+// Each cell reuses the label/value Stat convention already measured for
+// PoolHeader's own top-level stat grid (`header-card-skeleton.tsx`: h-4
+// label + mt-1 h-5 value = 40px), since both grids share the exact same
+// `Stat` component and container classes.
+//
+// Accepted tradeoff (same shape as BreakerPanel's skeleton→null case): the
+// rarer syncing/error/deprecated resolved branches below render a
+// differently-shaped callout box rather than this grid, so a VirtualPool
+// that resolves into one of those states sees a collapse from this skeleton
+// instead of an exact match — trading that rarer collapse for eliminating
+// the far more common fixed-bar→9-stat jump this issue exists to fix.
 function Skeleton() {
-  return <div className="h-12 animate-pulse rounded-md bg-slate-800/40" />;
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
+      {Array.from({ length: V2_EXCHANGE_STAT_COUNT }, (_, i) => (
+        // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+        <div key={`v2-exchange-skel-stat-${i}`}>
+          <div className={`h-4 w-20 ${V2_EXCHANGE_SKELETON_SHIMMER}`} />
+          <div className={`mt-1 h-5 w-24 ${V2_EXCHANGE_SKELETON_SHIMMER}`} />
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 function V2ExchangeSyncingNote() {

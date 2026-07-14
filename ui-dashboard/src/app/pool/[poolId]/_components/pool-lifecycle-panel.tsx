@@ -22,7 +22,7 @@ export function PoolLifecyclePanel({ pool }: { pool: Pool }) {
   const rows = data?.VirtualPoolLifecycle ?? [];
 
   if (isLoadingWithoutData(isLoading, data)) {
-    return <div className="h-12 animate-pulse rounded-md bg-slate-800/40" />;
+    return <LifecycleSkeleton />;
   }
   // Surface fetch failure explicitly. Without this, a Hasura schema lag /
   // transient outage collapses to `rows = []` and the whole lifecycle
@@ -92,6 +92,37 @@ export function PoolLifecyclePanel({ pool }: { pool: Pool }) {
           }
         />
       )}
+    </dl>
+  );
+}
+
+const LIFECYCLE_SKELETON_SHIMMER = "animate-pulse rounded bg-slate-800/50";
+// The factory always emits a DEPLOYED row (Deployed + Factory Stat cells);
+// the DEPRECATED cell is only appended once governance removes the
+// underlying v2 exchange. Reserve for the guaranteed-present 2-cell shape.
+const LIFECYCLE_STAT_COUNT = 2;
+
+// Mirrors the loaded shape once the always-present DEPLOYED row resolves:
+// identical `<dl>` grid classes plus one placeholder cell per guaranteed
+// stat, so the header card doesn't grow once VirtualPoolLifecycle resolves.
+// Same label/value Stat convention as `header-card-skeleton.tsx` (h-4 label
+// + mt-1 h-5 value = 40px) — this dl uses the same container classes and
+// `Stat` component as that grid.
+//
+// Accepted tradeoff, same shape as BreakerPanel: the (defensive-only, per
+// the factory-always-emits-DEPLOYED invariant above) `!deployed &&
+// !deprecated` branch still renders `null` rather than reserving this
+// grid's height.
+function LifecycleSkeleton() {
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3">
+      {Array.from({ length: LIFECYCLE_STAT_COUNT }, (_, i) => (
+        // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+        <div key={`lifecycle-skel-stat-${i}`}>
+          <div className={`h-4 w-16 ${LIFECYCLE_SKELETON_SHIMMER}`} />
+          <div className={`mt-1 h-5 w-20 ${LIFECYCLE_SKELETON_SHIMMER}`} />
+        </div>
+      ))}
     </dl>
   );
 }
