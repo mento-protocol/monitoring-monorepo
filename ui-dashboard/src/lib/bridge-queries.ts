@@ -61,8 +61,8 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
 // render "Page X of Y" without an `_aggregate` query (aggregates are
 // disabled on hosted Hasura). Applies the same `statusIn` filter the
 // visible window uses — otherwise the denominator would count hidden rows.
-// The $limit variable mirrors POOL_SWAPS_COUNT so the cap lives in a
-// single TS constant rather than being hardcoded in GraphQL.
+// The $limit variable keeps the cap in a single TS constant rather than
+// hardcoding it in GraphQL.
 export const BRIDGE_TRANSFERS_COUNT = /* GraphQL */ `
   query BridgeTransfersCount($statusIn: [String!]!, $limit: Int!) {
     BridgeTransfer(

@@ -11,11 +11,7 @@ import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
 import { TagsCell } from "@/components/tags-cell";
 import { TxHashCell } from "@/components/tx-hash-cell";
-import {
-  ENVIO_MAX_ROWS,
-  SEARCH_BOOTSTRAP_LIMIT,
-  SEARCH_MAX_LIMIT,
-} from "@/lib/constants";
+import { SEARCH_BOOTSTRAP_LIMIT, SEARCH_MAX_LIMIT } from "@/lib/constants";
 import {
   formatBlock,
   formatTimestamp,
@@ -27,7 +23,6 @@ import { useGQL } from "@/lib/graphql";
 import {
   POOL_DAILY_SNAPSHOTS_CHART,
   POOL_REBALANCES,
-  POOL_SWAPS_COUNT,
   POOL_SWAPS_PAGE,
 } from "@/lib/queries";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
@@ -38,9 +33,8 @@ import type { Pool, PoolSnapshot, SwapEvent } from "@/lib/types";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import React, { useMemo } from "react";
 import { addressSearchTerms, matchesRowSearch } from "../_lib/helpers";
-import { usePoolScopedCountFallback } from "../_lib/use-pool-scoped-count-fallback";
 
-// eslint-disable-next-line complexity, max-lines-per-function -- Existing tab keeps swap filters, pagination, and fallback counters in one query surface.
+// eslint-disable-next-line complexity, max-lines-per-function -- Existing tab keeps swap filters, pagination, and pool counters in one query surface.
 export function SwapsTab({
   poolId,
   limit,
@@ -67,18 +61,16 @@ export function SwapsTab({
     [onSearchChange],
   );
 
-  const { data: countData, error: countError } = useGQL<{
-    SwapEvent: { id: string }[];
-  }>(POOL_SWAPS_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
-  const rawTotal = countData?.SwapEvent?.length ?? 0;
-  const total = usePoolScopedCountFallback(poolId, rawTotal, !!countError);
-  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+  const counterTotal = pool?.swapCount;
+  const total = counterTotal ?? 0;
 
   const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
   const page = Math.max(1, Math.min(rawPage, totalPages));
   const isSearching = query.length > 0;
-  const searchFetchLimit =
-    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const searchFetchLimit = Math.min(
+    counterTotal ?? SEARCH_BOOTSTRAP_LIMIT,
+    SEARCH_MAX_LIMIT,
+  );
   const fetchLimit = isSearching ? searchFetchLimit : limit;
   const fetchOffset = isSearching ? 0 : (page - 1) * limit;
   const orderBy = useMemo(() => buildOrderBy("blockNumber", "desc"), []);
@@ -262,29 +254,21 @@ export function SwapsTab({
           onPageChange={setRawPage}
         />
       )}
-      {countCapped && !isSearching && (
+      {isSearching && counterTotal === undefined && (
         <p className="px-1 pt-1 text-xs text-amber-400">
-          Showing first {ENVIO_MAX_ROWS.toLocaleString()} swaps — older entries
-          may exist beyond this page range.
+          Search checks up to the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} swaps while the total is
+          loading.
         </p>
       )}
-      {countCapped && isSearching && (
-        <p className="px-1 pt-1 text-xs text-amber-400">
-          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()} swaps
-          only.
-        </p>
-      )}
-      {countError && !isSearching && (
-        <p className="px-1 pt-1 text-xs text-amber-400">
-          Could not load total count — pagination may be incomplete.
-        </p>
-      )}
-      {countError && isSearching && (
-        <p className="px-1 pt-1 text-xs text-amber-400">
-          Could not load total count — search covers the most recent{" "}
-          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
-        </p>
-      )}
+      {isSearching &&
+        counterTotal !== undefined &&
+        counterTotal > SEARCH_MAX_LIMIT && (
+          <p className="px-1 pt-1 text-xs text-amber-400">
+            Search covers the most recent {SEARCH_MAX_LIMIT.toLocaleString()} of{" "}
+            {counterTotal.toLocaleString()} swaps only.
+          </p>
+        )}
     </>
   );
 }

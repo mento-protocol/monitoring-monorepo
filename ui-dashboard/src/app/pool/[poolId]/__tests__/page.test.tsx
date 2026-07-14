@@ -997,9 +997,9 @@ describe("Pool detail LPs tab", () => {
   // excluded so the lazy-mount loop doesn't false-positive on tabs that
   // legitimately reuse a query.
   const TAB_OPS: Record<TabWithQueries, readonly string[]> = {
-    swaps: ["PoolSwapsCount", "PoolSwapsPage"],
+    swaps: ["PoolSwapsPage"],
     reserves: ["PoolReserves"],
-    rebalances: ["PoolRebalancesCount", "PoolRebalancesPage"],
+    rebalances: ["PoolRebalancesPage"],
     liquidity: ["PoolLiquidityCount", "PoolLiquidityPage"],
     oracle: [
       "OracleSnapshots",

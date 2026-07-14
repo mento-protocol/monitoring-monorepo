@@ -15,13 +15,11 @@ const EXPECTED_EXPORT_NAMES = [
   "RECENT_SWAPS",
   "POOL_SWAPS",
   "POOL_SWAPS_PAGE",
-  "POOL_SWAPS_COUNT",
   "POOL_RESERVES",
   "POOL_REBALANCES",
   "POOL_REBALANCES_PAGE",
   "POOL_REBALANCES_USD_EXT",
   "POOL_REBALANCE_REWARDS",
-  "POOL_REBALANCES_COUNT",
   "LATEST_POOL_REBALANCE_FOR_STRATEGY",
   "POOL_LIQUIDITY",
   "POOL_LIQUIDITY_PAGE",
@@ -392,6 +390,11 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_DETAIL_WITH_HEALTH).toContain(
       "chainId: { _eq: $chainId }",
     );
+  });
+
+  it("POOL_DETAIL_WITH_HEALTH selects authoritative tab counters", () => {
+    expect(queries.POOL_DETAIL_WITH_HEALTH).toContain("swapCount");
+    expect(queries.POOL_DETAIL_WITH_HEALTH).toContain("rebalanceCount");
   });
 
   it("POOL_CONFIG_EXT is isolated to rebalanceReward (rationale: schema rollout)", () => {

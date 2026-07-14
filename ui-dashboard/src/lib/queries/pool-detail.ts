@@ -87,6 +87,7 @@ export const POOL_DETAIL_WITH_HEALTH = `
       reserves0
       reserves1
       swapCount
+      rebalanceCount
       healthTotalSeconds
       hasHealthData
     }
@@ -357,8 +358,7 @@ export const POOL_DEVIATION_BREACHES_PAGE = `
 
 // Row-count for the Breaches-tab pagination. Hasura aggregates are
 // disabled on hosted, so we fetch id-only rows up to ENVIO_MAX_ROWS and
-// measure `.length` — same trick POOL_SWAPS_COUNT uses. Applies the
-// active filter so page count reflects it.
+// measure `.length`. Applies the active filter so page count reflects it.
 export const POOL_DEVIATION_BREACHES_COUNT = `
   query PoolDeviationBreachesCount(
     $poolId: String!
