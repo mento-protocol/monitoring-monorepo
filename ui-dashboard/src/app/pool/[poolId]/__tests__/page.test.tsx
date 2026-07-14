@@ -718,6 +718,52 @@ describe("Pool detail LPs tab", () => {
     expect(html).not.toContain("h-[78px]");
   });
 
+  it("does NOT thread the SSR breaker-config fallback when the pool revalidated to a different feed (Codex finding, issue #1257)", () => {
+    // The SSR breakerConfig was fetched for feed A, but the pool row revalidates
+    // to feed B (self-heal / governance feed update). BreakerPanel and
+    // MarketHoursPill key their request off the NEW feed — forwarding the
+    // feed-A fallback would present the old feed's breaker/market-hours state as
+    // the new feed's "last confirmed state". The fallback must be gated off.
+    const FEED_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const feedAPool: Pool = { ...BASE_POOL, referenceRateFeedID: FX_FEED };
+    const feedBPool: Pool = { ...BASE_POOL, referenceRateFeedID: FEED_B };
+    const initialData: PoolDetailInitialData = {
+      pool: { Pool: [feedAPool] }, // SSR row + breakerConfig are for feed A
+      breakerConfig: BREAKER_CONFIG_RESPONSE,
+    };
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        // The live pool row is now feed B, not the SSR feed A.
+        return revalidatingGqlResult({ Pool: [feedBPool] });
+      }
+      if (query.includes("PoolBreakerConfig")) {
+        // New-feed request in flight / failing — no data yet.
+        return revalidatingGqlResult(undefined, new Error("transient"));
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    renderPoolDetailPage(initialData);
+
+    const breakerCalls = mockUseGQL.mock.calls.filter(
+      ([query]) =>
+        typeof query === "string" && query.includes("query PoolBreakerConfig"),
+    );
+    expect(breakerCalls.length).toBeGreaterThanOrEqual(2);
+    for (const call of breakerCalls) {
+      // The stale feed-A fallback is NOT forwarded to the feed-B request —
+      // SWR loads the new feed cleanly instead of showing wrong-feed data.
+      expect(call[3]?.fallbackData).toBeUndefined();
+    }
+  });
+
   it("gates token amount tab content when the trust query fails", () => {
     mockSearchParams.set("tab", "reserves");
 

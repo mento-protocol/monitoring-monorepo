@@ -367,6 +367,31 @@ function PoolBreadcrumb({
   );
 }
 
+/** The SSR breaker/market-hours fallback, gated to the CURRENT feed. `pool` can
+ *  revalidate to a different chain/`referenceRateFeedID` (self-heal or a
+ *  governance feed update) while `initialData.breakerConfig` is still the
+ *  SSR-cached response for the feed the page was fetched for (server keys it off
+ *  `initialData.pool.Pool[0]`'s chain + feed — see pool-detail-ssr.ts). Both
+ *  `BreakerPanel` and `MarketHoursPill` key their SWR request off the CURRENT
+ *  `pool.referenceRateFeedID`, so forwarding the stale fallback would present
+ *  the OLD feed's breaker / market-hours state as the new feed's "last confirmed
+ *  state" if the new request is slow or fails — wrong operator-facing safety
+ *  data. Forward only when the SSR pool row's identity still matches the current
+ *  pool; otherwise return undefined so SWR loads the new feed cleanly (#1257). */
+function breakerFallbackForCurrentFeed(
+  initialData: PoolDetailInitialData | undefined,
+  pool: Pool,
+): PoolDetailInitialData["breakerConfig"] {
+  const initialRow = initialData?.pool?.Pool?.[0];
+  if (initialRow == null) return undefined;
+  // Compare on the same identity the server + client SWR key use: chainId and
+  // the `?? ""`-normalised referenceRateFeedID.
+  const sameFeed =
+    initialRow.chainId === pool.chainId &&
+    (initialRow.referenceRateFeedID ?? "") === (pool.referenceRateFeedID ?? "");
+  return sameFeed ? initialData?.breakerConfig : undefined;
+}
+
 function PoolOverview({
   poolErr,
   poolRefreshError,
@@ -435,7 +460,7 @@ function PoolOverview({
         tradingLimitsError={tradingLimitsError}
         initialV2Exchange={initialData?.v2Exchange}
         initialExchangeVolume={initialData?.brokerExchange24h}
-        initialBreakerConfig={initialData?.breakerConfig}
+        initialBreakerConfig={breakerFallbackForCurrentFeed(initialData, pool)}
       />
       <HealthPanel pool={pool} />
       {fpmmPool && (
