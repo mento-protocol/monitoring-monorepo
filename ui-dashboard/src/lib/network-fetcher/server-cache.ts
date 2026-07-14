@@ -15,7 +15,11 @@ import {
   fetchAllNetworks,
   isNetworkDataFullyHealthy,
 } from "@/lib/network-fetcher/fetch";
-import type { NetworkData, PoolLabel } from "@/lib/network-fetcher/types";
+import type {
+  InitialNetworkData,
+  NetworkData,
+  PoolLabel,
+} from "@/lib/network-fetcher/types";
 import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 
 /**
@@ -36,6 +40,13 @@ type DehydratedNetworkData = Omit<
   olsPoolIds: string[];
   cdpPoolIds: string[];
   reservePoolIds: string[];
+};
+
+type DehydratedInitialNetworkData = Omit<
+  DehydratedNetworkData,
+  "feeSnapshots"
+> & {
+  feeSnapshots: [];
 };
 
 export function dehydrateNetworkData(data: NetworkData): DehydratedNetworkData {
@@ -73,8 +84,14 @@ export function rehydrateNetworkData(data: DehydratedNetworkData): NetworkData {
  */
 function stripFeeSnapshotRows(
   data: DehydratedNetworkData,
-): DehydratedNetworkData {
+): DehydratedInitialNetworkData {
   return { ...data, feeSnapshots: [] };
+}
+
+function rehydrateInitialNetworkData(
+  data: DehydratedInitialNetworkData,
+): InitialNetworkData {
+  return { ...rehydrateNetworkData(data), feeSnapshots: [] };
 }
 
 /**
@@ -84,9 +101,9 @@ function stripFeeSnapshotRows(
  * TTL (it would otherwise trap every visitor on `N/A` tiles until expiry).
  */
 class DegradedNetworkDataError extends Error {
-  declare readonly payload: DehydratedNetworkData[];
+  declare readonly payload: DehydratedInitialNetworkData[];
 
-  constructor(payload: DehydratedNetworkData[]) {
+  constructor(payload: DehydratedInitialNetworkData[]) {
     super("degraded network data payload — not cached");
     this.name = "DegradedNetworkDataError";
     // Non-enumerable: `unstable_cache`'s swallowed-error path console.errors
@@ -105,7 +122,7 @@ class DegradedNetworkDataError extends Error {
  *  along so `fetchInitialNetworkData` can age-gate stale cache hits. */
 interface CachedNetworkPayload {
   fetchedAt: number;
-  networks: DehydratedNetworkData[];
+  networks: DehydratedInitialNetworkData[];
 }
 
 async function fetchDehydratedInitialNetworkData(): Promise<CachedNetworkPayload> {
@@ -192,7 +209,7 @@ function fetchDehydratedInitialNetworkDataCoalesced(): Promise<CachedNetworkPayl
  *  the client so `useAllNetworksData` can gate its mount-revalidation skip on
  *  actual payload freshness rather than trusting whatever the cache served. */
 export type InitialNetworkDataPayload = {
-  networks: NetworkData[];
+  networks: InitialNetworkData[];
   fetchedAtMs: number;
 };
 
@@ -226,7 +243,7 @@ export async function fetchInitialNetworkData(): Promise<InitialNetworkDataPaylo
           await fetchDehydratedInitialNetworkDataCoalesced()
         : cached;
     return {
-      networks: payload.networks.map(rehydrateNetworkData),
+      networks: payload.networks.map(rehydrateInitialNetworkData),
       fetchedAtMs: payload.fetchedAt,
     };
   } catch (err) {
@@ -234,7 +251,7 @@ export async function fetchInitialNetworkData(): Promise<InitialNetworkDataPaylo
       // Degraded payloads are fetched in-band (never cached), so they are
       // fresh as of this request.
       return {
-        networks: err.payload.map(rehydrateNetworkData),
+        networks: err.payload.map(rehydrateInitialNetworkData),
         fetchedAtMs: Date.now(),
       };
     }

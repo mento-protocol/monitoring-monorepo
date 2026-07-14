@@ -9,8 +9,8 @@ import type { Network } from "@/lib/networks";
 import {
   showInitialSkeleton,
   useAllNetworksData,
-  type NetworkData,
 } from "@/hooks/use-all-networks-data";
+import type { InitialNetworkData, NetworkData } from "@/lib/fetch-all-networks";
 import { EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { PoolsTableSkeleton } from "@/components/pools-table-skeleton";
 import { GlobalPoolsTable } from "@/components/global-pools-table";
@@ -43,7 +43,7 @@ export default function GlobalPage({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
 }: {
-  initialNetworkData?: NetworkData[] | undefined;
+  initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
 }) {
   // First paint uses `initialNetworkData` via SWR's `fallbackData`; on
@@ -114,7 +114,7 @@ function GlobalContent({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
 }: {
-  initialNetworkData?: NetworkData[] | undefined;
+  initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
 }) {
   const { networkData, isLoading } = useAllNetworksData(

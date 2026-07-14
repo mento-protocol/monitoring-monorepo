@@ -6,6 +6,7 @@ import {
   fetchAllNetworks,
   isNetworkDataFullyHealthy,
   seedIncrementalRowCacheFromNetworkData,
+  type InitialNetworkData,
   type NetworkData,
 } from "@/lib/fetch-all-networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
@@ -203,7 +204,7 @@ export {
  * `SWRConfig` so they don't cascade to any other `useSWR` in the tree.
  */
 export function useAllNetworksData(
-  fallbackData?: NetworkData[],
+  fallbackData?: InitialNetworkData[],
   /** Fetch-completion time of `fallbackData`
    *  (`fetchInitialNetworkData().fetchedAtMs`). Omitted/unknown counts as
    *  stale — revalidate-on-mount is the safe default. */

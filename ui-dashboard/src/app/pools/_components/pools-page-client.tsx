@@ -8,8 +8,8 @@ import { useGQL } from "@/lib/graphql";
 import {
   showInitialSkeleton,
   useAllNetworksData,
-  type NetworkData,
 } from "@/hooks/use-all-networks-data";
+import type { InitialNetworkData } from "@/lib/fetch-all-networks";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
 import { DEFAULT_SWAPS_LIMIT } from "@/lib/constants";
 import { RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
@@ -46,7 +46,7 @@ export function PoolsPageClient({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
 }: {
-  initialNetworkData?: NetworkData[] | undefined;
+  initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
 }) {
   return (
@@ -64,7 +64,7 @@ function PoolsContent({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
 }: {
-  initialNetworkData?: NetworkData[] | undefined;
+  initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
 }) {
   "use memo";

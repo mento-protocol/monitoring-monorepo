@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { NetworkData } from "@/lib/fetch-all-networks";
+import type { InitialNetworkData, NetworkData } from "@/lib/fetch-all-networks";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 
@@ -64,15 +64,16 @@ const ACTIVE_VP = {
   updatedAtTimestamp: "2000",
 } satisfies Pool;
 
-function networkData(pool: Pool): NetworkData {
+function networkData(pool: Pool): InitialNetworkData {
   return {
     network: NETWORK,
     pools: [pool],
+    feeSnapshots: [],
     liveHealthError: null,
-  } as NetworkData;
+  } as InitialNetworkData;
 }
 
-function Probe({ fallback }: { fallback: NetworkData[] }) {
+function Probe({ fallback }: { fallback: InitialNetworkData[] }) {
   useAllNetworksData(fallback, 0);
   return null;
 }
