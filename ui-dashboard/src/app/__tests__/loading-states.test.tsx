@@ -148,22 +148,47 @@ describe("route-level loading UIs", () => {
     expect(grid!.children).toHaveLength(3);
   });
 
-  it("VolumeLoading only fixes flow-insight panel height at the xl breakpoint where the grid goes 3-column", () => {
+  it("VolumeLoading renders the client's own flow-insight loading composition (no hand-mirrored heights)", () => {
     render(<VolumeLoading />);
 
-    // The grid stacks to a single column below `xl` (mirroring
-    // V3FlowInsights' `grid-cols-1 xl:grid-cols-3`) — below `xl` each panel
-    // is a full-width row on its own, not a column sharing a row's height
-    // with the taller corridor/outlier panels. A desktop-measured 500px
-    // fixed height would triple-reserve ~1500px on narrow viewports (the
-    // real cohort panel is much shorter), so the panels must use a
-    // breakpoint-scoped class rather than an unconditional inline style.
+    // The fallback imports InsightPanel + CohortPanelSkeleton +
+    // InsightTableSkeleton from v3-flow-insight-skeletons.tsx — the same
+    // components V3FlowInsights' panels render while loading — instead of
+    // hand-mirroring measured heights. That keeps the fallback→client
+    // handoff structurally identical at every breakpoint: a fixed desktop
+    // height over-reserved when the grid stacks below xl, and no
+    // reservation under-reserved against the client's intrinsic-height
+    // table skeletons (both flagged by codex on this PR).
     const grid = container.querySelector(".xl\\:grid-cols-3");
     expect(grid).not.toBeNull();
-    Array.from(grid!.children).forEach((panel) => {
-      expect((panel as HTMLElement).style.height).toBe("");
-      expect(panel.className).toContain("xl:h-[500px]");
+    const panels = Array.from(grid!.children) as HTMLElement[];
+    expect(panels).toHaveLength(3);
+    panels.forEach((panel) => {
+      // No fixed heights — parity comes from shared structure.
+      expect(panel.style.height).toBe("");
+      expect(panel.className).not.toContain("h-[500px]");
+      // Real InsightPanel chrome (h3 title), not a shimmer bar.
+      expect(panel.querySelector("h3")).not.toBeNull();
     });
+
+    const [cohort, corridor, outlier] = panels;
+    // Cohort: 3-stat mini grid + 3 leader rows (CohortPanelSkeleton).
+    const cohortStatGrid = cohort!.querySelector(".grid-cols-3");
+    expect(cohortStatGrid).not.toBeNull();
+    expect(cohortStatGrid!.children).toHaveLength(3);
+    // Corridor/outlier: InsightTableSkeleton with the query cap's 10 rows
+    // and the real tables' column counts (4-col corridor, 3-col outlier).
+    for (const [panel, cols] of [
+      [corridor!, 4],
+      [outlier!, 3],
+    ] as const) {
+      const header = panel.querySelector(".flex.gap-3.border-b");
+      expect(header).not.toBeNull();
+      expect(header!.children).toHaveLength(cols);
+      const body = panel.querySelector(".divide-y");
+      expect(body).not.toBeNull();
+      expect(body!.children).toHaveLength(10);
+    }
   });
 
   it("VolumeLoading reserves a single full-width top-traders table, not a two-column layout", () => {

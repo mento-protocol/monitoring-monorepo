@@ -1,5 +1,10 @@
 import { TableSkeleton } from "@/components/skeletons";
 import {
+  CohortPanelSkeleton,
+  InsightPanel,
+  InsightTableSkeleton,
+} from "./_components/v3-flow-insight-skeletons";
+import {
   AGGREGATOR_TABLE_SKELETON_ROWS,
   TOP_TRADERS_TABLE_SKELETON_ROWS,
 } from "./_lib/skeleton-rows";
@@ -87,52 +92,40 @@ export default function VolumeLoading() {
           </div>
         ))}
       </div>
-      {/* Flow insights: heading + 3-panel grid mirroring V3FlowInsights
-          (Cohort / Corridor / Outlier). This route-level fallback can't know
-          venue/range, so each panel reserves a generic sized block rather
-          than replicating the panels' internal row shapes — that detail
-          lives in v3-flow-insight-panels.tsx's own client loading branch.
-          The 500px height matches that client skeleton's own corridor/
-          outlier panel height (10-row InsightTableSkeleton + a reserved
-          2-line trailing-caption placeholder + InsightPanel chrome: p-4 +
-          h3 title + header row + 10 rows at py-3 + the caption placeholder,
-          recomputed from v3-flow-insight-panels.tsx's geometry) so the
-          route->mount swap doesn't shrink before the client skeleton takes
-          over — keep both in sync if either changes.
-
-          That 500px figure is only true at the `xl:grid-cols-3` layout,
-          where the grid row's height is governed by the tallest panel
-          (corridor/outlier, which really do run ~500px) — the compact
-          cohort panel borrows that same row height "for free" via CSS Grid.
-          Below `xl` the grid stacks to `grid-cols-1`, so each panel gets its
-          own full-width row instead of sharing one — asserting 500px on all
-          three there would reserve ~1500px (vs. cohort's real, much shorter
-          content), reintroducing the below-the-fold jump this fallback
-          exists to prevent for narrower viewports. `xl:h-[500px]` below
-          scopes the fixed height to that breakpoint; under `xl` each panel
-          sizes to its natural content (the 8-row bar stack), which is a
-          closer approximation of the real per-panel geometry when stacked. */}
+      {/* Flow insights: heading + the exact loading composition
+          V3FlowInsights' panels render while their queries are in flight —
+          InsightPanel chrome + CohortPanelSkeleton / InsightTableSkeleton,
+          shared via v3-flow-insight-skeletons.tsx. Sharing the components
+          (instead of hand-mirroring measured heights here) keeps the
+          fallback→client handoff structurally identical at every
+          breakpoint: at xl the grid row is governed by the tallest
+          (corridor/outlier) panels exactly as on the client, and below xl,
+          where the grid stacks to one column, each panel reserves its real
+          intrinsic height — a fixed desktop height over-reserved when
+          stacked, and no reservation under-reserved (codex reviews, PR
+          1242). Panel titles are the panels' own static strings; the
+          skeletons render `presentational` because this fallback's root
+          already provides the single page-level live region. */}
       <div className="space-y-3">
         <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          {Array.from({ length: 3 }, (_, i) => (
-            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-            <div
-              key={`vol-insight-panel-${i}`}
-              className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 xl:h-[500px]"
-            >
-              <div className="mb-3 h-3 w-32 animate-pulse rounded bg-slate-800/50" />
-              <div className="space-y-2">
-                {Array.from({ length: 8 }, (_, r) => (
-                  // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-                  <div
-                    key={`vol-insight-row-${i}-${r}`}
-                    className="h-5 animate-pulse rounded bg-slate-800/30"
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
+          <InsightPanel title="Cohort + dormancy">
+            <CohortPanelSkeleton presentational />
+          </InsightPanel>
+          <InsightPanel title="Corridor map">
+            <InsightTableSkeleton
+              cols={4}
+              label="Loading corridor map"
+              presentational
+            />
+          </InsightPanel>
+          <InsightPanel title="Outlier swaps">
+            <InsightTableSkeleton
+              cols={3}
+              label="Loading outlier swaps"
+              presentational
+            />
+          </InsightPanel>
         </div>
       </div>
       {/* Top traders: heading + main table skeleton (header + measured row
