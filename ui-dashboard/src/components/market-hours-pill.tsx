@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import {
   FX_CLOSE_DAY,
   FX_CLOSE_HOUR_UTC,
@@ -16,10 +15,9 @@ import {
 } from "@/lib/queries";
 import type { BreakerConfig, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 
 const COUNTDOWN_THRESHOLD_HOURS = 6;
-// Aligned to wall-clock seconds (matches Market Hours countdown precision).
-const TICK_INTERVAL_MS = 60_000;
 
 const WEEKDAY_LABEL = [
   "Sun",
@@ -76,6 +74,38 @@ function isBreakerClosure(config: BreakerConfig | undefined): boolean {
   return config?.status === "TRIPPED" || (config?.tradingMode ?? 0) !== 0;
 }
 
+type MarketHoursState = {
+  open: boolean;
+  calendarClosed: boolean;
+  imminentClose: boolean;
+  secondsUntilTransition: number;
+};
+
+/** Derives the open/closed/countdown state from a (possibly not-yet-known)
+ * wall clock and the breaker-driven closure flag. `now === null` means the
+ * server render or the client's hydration render (see useNowSeconds) —
+ * returns the neutral "assume open, no countdown" state so that render can't
+ * disagree with the real state computed here once `now` resolves after
+ * mount (issue #1237). */
+function deriveMarketHoursState(
+  now: Date | null,
+  breakerClosed: boolean,
+): MarketHoursState {
+  const calendarClosed = now !== null && isWeekend(now);
+  const open = !breakerClosed && !calendarClosed;
+  const transition = now !== null ? nextMarketHoursTransition(now) : null;
+  const secondsUntilTransition =
+    transition && now !== null
+      ? Math.max(
+          0,
+          Math.floor((transition.at.getTime() - now.getTime()) / 1000),
+        )
+      : 0;
+  const imminentClose =
+    now !== null && secondsUntilTransition / 3600 < COUNTDOWN_THRESHOLD_HOURS;
+  return { open, calendarClosed, imminentClose, secondsUntilTransition };
+}
+
 /**
  * Title-row pill summarising whether the pool's FX market is currently open.
  * Renders only when the pool's rateFeedID is gated by an on-chain
@@ -119,22 +149,18 @@ export function MarketHoursPill({
   // line (issue #1222) — the null→content jump becomes placeholder→content.
   const queryPending = queried && data === undefined && isLoading;
 
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    if (!enabled) return;
-    const id = setInterval(() => {
-      // Round to the minute so re-renders don't fire on every tick when the
-      // displayed countdown hasn't changed (the pill renders Hh Mm only).
-      setNow((prev) => {
-        const next = new Date();
-        const prevMinute = Math.floor(prev.getTime() / 60_000);
-        const nextMinute = Math.floor(next.getTime() / 60_000);
-        return nextMinute !== prevMinute ? next : prev;
-      });
-    }, TICK_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [enabled]);
+  // SSR-safe wall clock (hooks/use-now-seconds.ts): `null` during the server
+  // render AND the client's hydration render, then a live value that ticks
+  // every ~30s. `now` is read only when non-null (below): the pool-detail
+  // page is ISR-cached (`revalidate: 60`) and the SSR fetch's fallbackData
+  // now paints real pill content on first paint (issue #1237), so a wall
+  // clock read during SSR/hydration can be up to ~60s stale versus the
+  // viewer's clock — a near-guaranteed hydration mismatch on open/closed and
+  // countdown text, worst on weekends when FX pools are closed. Pre-mount we
+  // render the neutral "assume open, no countdown" schedule variant instead;
+  // the real state settles in immediately after mount.
+  const nowSeconds = useNowSeconds();
+  const now = nowSeconds !== null ? new Date(nowSeconds * 1000) : null;
 
   if (queryPending) return <MarketHoursPillSkeleton />;
   // With the SSR prefetch's fallbackData present (issue #1237), `queryPending`
@@ -144,14 +170,8 @@ export function MarketHoursPill({
   if (!enabled) return null;
 
   const breakerClosed = isBreakerClosure(marketHoursConfig);
-  const calendarClosed = isWeekend(now);
-  const open = !breakerClosed && !calendarClosed;
-  const transition = nextMarketHoursTransition(now);
-  const secondsUntilTransition = Math.max(
-    0,
-    Math.floor((transition.at.getTime() - now.getTime()) / 1000),
-  );
-  const hoursUntilTransition = secondsUntilTransition / 3600;
+  const { open, calendarClosed, imminentClose, secondsUntilTransition } =
+    deriveMarketHoursState(now, breakerClosed);
 
   const tooltip =
     "FX pools close on weekends from Fri 21:00 UTC to Sun 23:00 UTC, " +
@@ -182,7 +202,7 @@ export function MarketHoursPill({
     );
   }
 
-  if (hoursUntilTransition < COUNTDOWN_THRESHOLD_HOURS) {
+  if (imminentClose) {
     // Open, but close is imminent — amber countdown.
     return (
       <span

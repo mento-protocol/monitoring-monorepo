@@ -12,8 +12,9 @@ import { isVirtualPool } from "@/lib/types";
 import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
 import { Tooltip } from "@/components/tooltip";
 import { explorerTxUrl } from "@/lib/tokens";
-import { formatTimestamp, relativeTime } from "@/lib/format";
+import { formatTimestamp } from "@/lib/format";
 import { formatDurationShort } from "@/lib/bridge-status";
+import { useNowSeconds, useSsrSafeRelative } from "@/hooks/use-now-seconds";
 
 type Props = {
   pool: Pool;
@@ -393,13 +394,22 @@ function LastTripMetric({
   tripsToday: number;
 }): React.ReactElement {
   const lastTripTs = cfg.lastTripAt;
+  // SSR-safe relative label (mirrors the header's `createdRelative` pattern,
+  // hooks/use-now-seconds.ts): the SSR prefetch's fallbackData now paints
+  // this panel's real content on first paint for pools with a trip-able
+  // breaker (issue #1237), so a plain `relativeTime(lastTripTs)` read at
+  // render time could disagree between the page's ISR-cached bake time and
+  // the viewer's hydration clock. `useSsrSafeRelative` renders a
+  // deterministic UTC date on the server + hydration render, then the live
+  // "N ago" label after mount.
+  const lastTripRelative = useSsrSafeRelative(lastTripTs);
   return (
     <div>
       <dt className="text-slate-400 flex items-center justify-between gap-1">
         <span>Last trip</span>
         {tripped && lastTripTs && (
           <span className="text-xs font-normal text-red-400">
-            tripped {relativeTime(lastTripTs)}
+            tripped {lastTripRelative}
           </span>
         )}
       </dt>
@@ -414,7 +424,7 @@ function LastTripMetric({
             } hover:text-indigo-400`}
             title={formatTimestamp(lastTripTs)}
           >
-            {relativeTime(lastTripTs)}
+            {lastTripRelative}
           </a>
         ) : (
           <span className="text-slate-500">never</span>
@@ -487,6 +497,28 @@ function ResetPathBanner({
   );
 }
 
+/** Number of trips for `breakerAddress` since UTC midnight. `todayNowSeconds
+ *  === null` (server + hydration render, see useNowSeconds) deterministically
+ *  returns 0 rather than risking a UTC-midnight mismatch between the page's
+ *  bake time and the viewer's clock — the real count settles in after mount
+ *  (issue #1237). Filters by breaker address — the query is feed-scoped, but
+ *  a single feed could surface multiple breakers' trips (only one trip-able
+ *  breaker today, but MarketHours-style additions later would drift the
+ *  count from cfg.tripCountLifetime if we didn't scope it). */
+function countTripsToday(
+  todayNowSeconds: number | null,
+  trips: BreakerTripEvent[],
+  breakerAddress: string,
+): number {
+  if (todayNowSeconds === null) return 0;
+  const todayMidnightSec = Math.floor(todayNowSeconds / 86400) * 86400;
+  return trips.filter(
+    (t) =>
+      Number(t.blockTimestamp) >= todayMidnightSec &&
+      t.breaker.address === breakerAddress,
+  ).length;
+}
+
 export function BreakerPanel({
   pool,
   initialBreakerConfig,
@@ -519,6 +551,15 @@ export function BreakerPanel({
   // countdown text + the reset-path "elapsed" check). Healthy state shows
   // static text — skip the interval to avoid recurring re-renders for nothing.
   const tickerActive = !!cfg && tripped;
+
+  // SSR-safe wall clock for the "trips today" UTC-midnight boundary (below):
+  // null on the server + hydration render (see useNowSeconds) so a
+  // statically-cached page can't bake in a midnight boundary the viewer's
+  // hydration render disagrees with — this panel now renders real content,
+  // not a skeleton, on that first pass once fallbackData is present (issue
+  // #1237). Separate from the 1-second `now` ticker below, which only drives
+  // the tripped-cooldown countdown.
+  const todayNowSeconds = useNowSeconds();
 
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => {
@@ -559,16 +600,11 @@ export function BreakerPanel({
       ? deltaBarStyle(liveDelta, threshold)
       : { pct: 0, color: "bg-slate-600" };
 
-  const todayMidnightSec = Math.floor(now / 86400) * 86400; // UTC midnight
-  // Filter by THIS breaker's address — the query is feed-scoped, but a
-  // single feed could surface multiple breakers' trips (only one trip-able
-  // breaker today, but MarketHours-style additions later would drift the
-  // count from cfg.tripCountLifetime if we didn't scope it).
-  const tripsToday = trips.filter(
-    (t) =>
-      Number(t.blockTimestamp) >= todayMidnightSec &&
-      t.breaker.address === cfg.breaker.address,
-  ).length;
+  const tripsToday = countTripsToday(
+    todayNowSeconds,
+    trips,
+    cfg.breaker.address,
+  );
 
   // Reset-path conditions (mirror BreakerBox.tryResetBreaker).
   const cooldownElapsed = cooldownRemainingSec === 0;

@@ -1,5 +1,9 @@
+/** @vitest-environment jsdom */
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+import { act } from "react";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { MarketHoursPill } from "@/components/market-hours-pill";
 import type { PoolBreakerConfigResponse } from "@/lib/queries/config";
 import type { Pool } from "@/lib/types";
@@ -74,13 +78,50 @@ function freezeNow(iso: string) {
   };
 }
 
+// react-dom/client + act is the codebase's established idiom for tests that
+// need mounted (post-effect) behavior — see auth-status.test.tsx. Needed here
+// because `renderToStaticMarkup` never runs effects, so it can only observe
+// the pill's deterministic pre-mount fallback (see the "SSR determinism"
+// describe block below), not the real open/closed/countdown state a viewer
+// sees once the page has mounted (issue #1237).
+const reactActEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+let previousActEnvironment: boolean | undefined;
+let mountedContainer: HTMLElement | null = null;
+let mountedRoot: Root | null = null;
+
+function mount(el: React.ReactElement): HTMLElement {
+  mountedContainer = document.createElement("div");
+  document.body.appendChild(mountedContainer);
+  mountedRoot = createRoot(mountedContainer);
+  act(() => {
+    mountedRoot?.render(el);
+  });
+  return mountedContainer;
+}
+
 describe("MarketHoursPill", () => {
   beforeEach(() => {
     mockUseGQL.mockReset();
+    previousActEnvironment = reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   });
 
   afterEach(() => {
     globalThis.Date = originalDate;
+    if (mountedRoot) {
+      act(() => {
+        mountedRoot?.unmount();
+      });
+    }
+    if (mountedContainer?.parentNode) {
+      document.body.removeChild(mountedContainer);
+    }
+    mountedRoot = null;
+    mountedContainer = null;
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT =
+      previousActEnvironment ?? false;
   });
 
   it("renders nothing when the pool has no MARKET_HOURS BreakerConfig", () => {
@@ -136,7 +177,7 @@ describe("MarketHoursPill", () => {
     expect(html).toBe("");
   });
 
-  it("renders schedule mode when market is open and >6h until close (Wed noon)", () => {
+  it("renders schedule mode, mounted, when market is open and >6h until close (Wed noon)", () => {
     mockUseGQL.mockReturnValue({
       data: {
         BreakerConfig: [marketHoursConfig()],
@@ -144,7 +185,8 @@ describe("MarketHoursPill", () => {
       },
     });
     freezeNow("2026-04-29T12:00:00Z"); // Wednesday noon
-    const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+    const container = mount(<MarketHoursPill pool={fxPool()} />);
+    const html = container.innerHTML;
     expect(html).toContain("Market Open");
     expect(html).toContain("Sun 23:00");
     expect(html).toContain("Fri 21:00 UTC");
@@ -153,7 +195,7 @@ describe("MarketHoursPill", () => {
     expect(html).not.toContain("text-amber-300");
   });
 
-  it("renders amber countdown mode when <6h until close (Fri 17:00)", () => {
+  it("renders amber countdown mode, mounted, when <6h until close (Fri 17:00)", () => {
     mockUseGQL.mockReturnValue({
       data: {
         BreakerConfig: [marketHoursConfig()],
@@ -161,14 +203,15 @@ describe("MarketHoursPill", () => {
       },
     });
     freezeNow("2026-05-01T17:00:00Z"); // Friday 17:00 — 4h until 21:00 close
-    const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+    const container = mount(<MarketHoursPill pool={fxPool()} />);
+    const html = container.innerHTML;
     expect(html).toContain("Market Open");
     expect(html).toContain("until close");
     expect(html).toContain("text-amber-300");
     expect(html).toContain("bg-amber-900/40");
   });
 
-  it("renders Market Closed countdown to reopen on Saturday", () => {
+  it("renders Market Closed countdown to reopen, mounted, on Saturday", () => {
     mockUseGQL.mockReturnValue({
       data: {
         BreakerConfig: [marketHoursConfig()],
@@ -176,7 +219,8 @@ describe("MarketHoursPill", () => {
       },
     });
     freezeNow("2026-05-02T12:00:00Z"); // Saturday noon
-    const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+    const container = mount(<MarketHoursPill pool={fxPool()} />);
+    const html = container.innerHTML;
     expect(html).toContain("Market Closed");
     expect(html).toContain("until open");
     // Closed-state is neutral slate, not amber.
@@ -185,6 +229,8 @@ describe("MarketHoursPill", () => {
   });
 
   it("renders Market Closed on weekday MARKET_HOURS breaker closures", () => {
+    // Breaker-driven closure is deterministic from `data` (not `now`), so
+    // this one is safe to assert pre-mount too.
     mockUseGQL.mockReturnValue({
       data: {
         BreakerConfig: [
@@ -200,7 +246,7 @@ describe("MarketHoursPill", () => {
     expect(html).not.toContain("Market Open");
   });
 
-  it("preserves the reopen countdown when a weekend closure also has a breaker trip", () => {
+  it("preserves the reopen countdown, mounted, when a weekend closure also has a breaker trip", () => {
     mockUseGQL.mockReturnValue({
       data: {
         BreakerConfig: [
@@ -210,10 +256,90 @@ describe("MarketHoursPill", () => {
       },
     });
     freezeNow("2026-05-02T12:00:00Z"); // Saturday noon
-    const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+    const container = mount(<MarketHoursPill pool={fxPool()} />);
+    const html = container.innerHTML;
     expect(html).toContain("Market Closed");
     expect(html).toContain("until open");
     expect(html).not.toContain("Market Open");
+  });
+
+  describe("SSR determinism (issue #1237)", () => {
+    // These pin the pre-mount render: `renderToStaticMarkup` uses
+    // `useSyncExternalStore`'s `getServerSnapshot`, so `useNowSeconds()`
+    // resolves to `null` for the whole call — exactly what happens during
+    // the real server render AND the client's hydration render. The output
+    // must therefore be identical regardless of the frozen wall clock, or a
+    // statically-cached page (ISR revalidate: 60s) could bake in content the
+    // viewer's hydration pass disagrees with.
+    it("renders the neutral schedule fallback (not the amber countdown) even when close is imminent", () => {
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [marketHoursConfig()],
+          BreakerTripEvent: [],
+        },
+      });
+      freezeNow("2026-05-01T17:00:00Z"); // Friday 17:00 — really 4h from close
+      const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+      expect(html).toContain("Market Open");
+      expect(html).toContain("Sun 23:00");
+      expect(html).not.toContain("until close");
+      expect(html).not.toContain("text-amber-300");
+    });
+
+    it("renders the neutral schedule fallback (not Market Closed) even during the real weekend closure", () => {
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [marketHoursConfig()],
+          BreakerTripEvent: [],
+        },
+      });
+      freezeNow("2026-05-02T12:00:00Z"); // Saturday noon — really closed
+      const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+      expect(html).toContain("Market Open");
+      expect(html).not.toContain("Market Closed");
+      expect(html).not.toContain("until open");
+    });
+  });
+
+  describe("hydration safety (issue #1237)", () => {
+    it("hydrates a real weekend-closed instant without a mismatch warning, then settles to Market Closed", async () => {
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [marketHoursConfig()],
+          BreakerTripEvent: [],
+        },
+      });
+      freezeNow("2026-05-02T12:00:00Z"); // Saturday noon — really closed
+
+      const serverHtml = renderToString(<MarketHoursPill pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration, the server payload shows the deterministic fallback.
+      expect(container.innerHTML).toContain("Market Open");
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        await act(async () => {
+          root = hydrateRoot(container, <MarketHoursPill pool={fxPool()} />);
+          await Promise.resolve();
+        });
+        expect(consoleError).not.toHaveBeenCalled();
+        expect(container.innerHTML).toContain("Market Closed");
+        expect(container.innerHTML).toContain("until open");
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
   });
 
   describe("SSR breaker-config fallback (issue #1237)", () => {
