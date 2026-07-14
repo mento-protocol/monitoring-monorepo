@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useGQL } from "@/lib/graphql";
 import { useNetwork } from "@/components/network-provider";
 import { type PoolBreakerConfigResponse } from "@/lib/queries";
+import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { BreakerConfig, BreakerTripEvent, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
 import { pickTrippableConfig } from "@/lib/breaker";
@@ -345,7 +346,14 @@ export function BreakerPanel({
       rateFeedID,
     },
     undefined,
-    { fallbackData: initialBreakerConfig },
+    // Bound the revalidation so a stalled fetch surfaces as `error` (→
+    // stale-refresh notice + retry) instead of pinning the SSR fallback
+    // forever — see BREAKER_CONFIG_TIMEOUT_MS. Must match every sibling
+    // subscriber (SWR dedup owns one fetcher).
+    {
+      fallbackData: initialBreakerConfig,
+      timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
+    },
   );
 
   const configs = data?.BreakerConfig ?? [];

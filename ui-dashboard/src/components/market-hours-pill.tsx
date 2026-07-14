@@ -13,6 +13,7 @@ import {
   POOL_BREAKER_CONFIG,
   type PoolBreakerConfigResponse,
 } from "@/lib/queries";
+import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { BreakerConfig, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
 import { useNowSeconds } from "@/hooks/use-now-seconds";
@@ -259,7 +260,13 @@ export function MarketHoursPill({
     queried ? POOL_BREAKER_CONFIG : null,
     { chainId: pool.chainId, rateFeedID },
     undefined,
-    { fallbackData: initialBreakerConfig },
+    // Bound the revalidation so a stalled fetch surfaces as `error` (→
+    // stale-refresh notice + retry), not silent stale state — see
+    // BREAKER_CONFIG_TIMEOUT_MS. Must match every sibling subscriber.
+    {
+      fallbackData: initialBreakerConfig,
+      timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
+    },
   );
 
   // FX-ness: the rateFeedID has an ENABLED MARKET_HOURS BreakerConfig.

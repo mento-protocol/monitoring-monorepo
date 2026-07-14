@@ -7,6 +7,7 @@ import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { BreakerPanel } from "@/components/breaker-panel";
 import type { Pool, BreakerConfig, BreakerTripEvent } from "@/lib/types";
 import { formatTimestamp, timestampOrUtc } from "@/lib/format";
+import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 
 const mockUseGQL = vi.fn();
 vi.mock("@/lib/graphql", () => ({
@@ -360,6 +361,25 @@ describe("BreakerPanel", () => {
       expect(html).not.toContain("refresh failed");
     });
 
+    it("bounds the revalidation with a timeout so a STALLED fetch becomes an error and surfaces the stale-refresh notice (Codex P1, issue #1257)", () => {
+      // The timeout (BREAKER_CONFIG_TIMEOUT_MS) turns AbortSignal.timeout into a
+      // rejected fetch → SWR `error`, exactly the shape below. Without it a
+      // never-resolving revalidation would leave `error` unset and the stale
+      // fallback pinned silently. A TimeoutError (what AbortSignal.timeout
+      // raises) is a DOMException — the notice must still render for it.
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: noTrips,
+        },
+        isLoading: false,
+        error: new DOMException("signal timed out", "TimeoutError"),
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).toContain("Breaker status refresh failed");
+      expect(html).toContain("showing the last confirmed state");
+    });
+
     it("colors the pre-mount '· — today' placeholder neutral slate, not amber, matching the resolved zero-today state (Codex finding C, issue #1257)", () => {
       // A pool with trip history but (once the clock resolves) no trip today
       // renders the neutral pending placeholder pre-mount. It must NOT flash
@@ -413,8 +433,12 @@ describe("BreakerPanel", () => {
       );
       // Options object is the 4th positional useGQL argument (index 3);
       // arg[2] stays `refreshMs` per the repo's useGQL call-shape invariant.
+      // The timeout must ride alongside fallbackData so the safety-critical
+      // revalidation is BOUNDED — a stall surfaces as `error` (→ stale-refresh
+      // notice) instead of pinning the SSR fallback forever (issue #1257).
       expect(mockUseGQL.mock.calls[0]?.[3]).toMatchObject({
         fallbackData: fallbackWithBreaker,
+        timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
       });
     });
 

@@ -6,6 +6,7 @@ import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { MarketHoursPill } from "@/components/market-hours-pill";
 import type { PoolBreakerConfigResponse } from "@/lib/queries/config";
+import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { Pool } from "@/lib/types";
 
 // Mock the GraphQL hook so we can drive `enabled` from breaker config.
@@ -481,6 +482,21 @@ describe("MarketHoursPill", () => {
       const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
       expect(html).not.toContain("refresh failed");
     });
+
+    it("bounds the revalidation with a timeout so a STALLED fetch becomes an error and surfaces the stale-refresh notice (Codex P1, issue #1257)", () => {
+      // The timeout turns AbortSignal.timeout into a rejected fetch → SWR
+      // `error` (TimeoutError = DOMException); without it a never-resolving
+      // revalidation would leave the stale pill pinned with `error` unset.
+      freezeNow("2026-04-29T12:00:00Z");
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [marketHoursConfig()], BreakerTripEvent: [] },
+        isLoading: false,
+        error: new DOMException("signal timed out", "TimeoutError"),
+      });
+      const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+      expect(html).toContain("Market hours refresh failed");
+      expect(html).toContain("showing the last confirmed state");
+    });
   });
 
   describe("SSR breaker-config fallback (issue #1237)", () => {
@@ -504,8 +520,11 @@ describe("MarketHoursPill", () => {
       );
       // Options object is the 4th positional useGQL argument (index 3);
       // arg[2] stays `refreshMs` per the repo's useGQL call-shape invariant.
+      // The timeout must ride alongside fallbackData so a stalled revalidation
+      // surfaces as `error` rather than pinning the stale pill (issue #1257).
       expect(mockUseGQL.mock.calls[0]?.[3]).toMatchObject({
         fallbackData: fallbackFx,
+        timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
       });
     });
 
