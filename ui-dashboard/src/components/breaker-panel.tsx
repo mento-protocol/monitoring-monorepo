@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { useGQL } from "@/lib/graphql";
 import { useNetwork } from "@/components/network-provider";
-import { POOL_BREAKER_CONFIG } from "@/lib/queries";
+import {
+  POOL_BREAKER_CONFIG,
+  type PoolBreakerConfigResponse,
+} from "@/lib/queries";
 import type { BreakerConfig, BreakerTripEvent, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
 import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
@@ -14,6 +17,10 @@ import { formatDurationShort } from "@/lib/bridge-status";
 
 type Props = {
   pool: Pool;
+  /** Server-prefetched breaker config, forwarded to SWR as `fallbackData` so
+   *  the panel knows on first paint whether the pool has a trip-able breaker —
+   *  no skeleton→null collapse for pools that resolve to none (issue #1237). */
+  initialBreakerConfig?: PoolBreakerConfigResponse | undefined;
 };
 
 type Response = {
@@ -74,11 +81,12 @@ function breakerConfigQuery(
   return !isVirtual && rateFeedID ? POOL_BREAKER_CONFIG : null;
 }
 
-// POOL_BREAKER_CONFIG has no SSR fallback, so on every first client render
-// the panel either renders nothing (no trip-able breaker) or
-// nothing-then-a-5-stat-row (issue #1222's measured +119px header jump).
-// True only while the query is genuinely in flight, so BreakerPanel can
-// render a matching-shape shimmer instead of null for that interval.
+// When the SSR prefetch supplies `fallbackData` (issue #1237), `data` is
+// populated on first paint and this is false — the panel renders its resolved
+// shape immediately (full strip or null, no shimmer). This stays true only on
+// the degraded path (prefetch missed / partial) while the client query is
+// genuinely in flight, so BreakerPanel renders a matching-shape shimmer instead
+// of the null→content jump (issue #1222's measured +119px header jump).
 function isBreakerConfigQueryPending(
   isVirtual: boolean,
   rateFeedID: string,
@@ -479,7 +487,10 @@ function ResetPathBanner({
   );
 }
 
-export function BreakerPanel({ pool }: Props): React.ReactElement | null {
+export function BreakerPanel({
+  pool,
+  initialBreakerConfig,
+}: Props): React.ReactElement | null {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
   const rateFeedID = pool.referenceRateFeedID ?? "";
@@ -490,6 +501,8 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
       chainId: pool.chainId,
       rateFeedID,
     },
+    undefined,
+    { fallbackData: initialBreakerConfig },
   );
 
   const configs = data?.BreakerConfig ?? [];
@@ -522,13 +535,10 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
   }, [tickerActive]);
 
   if (queryPending) return <BreakerPanelSkeleton />;
-  // Accepted tradeoff: for the (less common) pool that resolves to no
-  // trip-able breaker, this is now skeleton→null instead of main's stable
-  // null→null — trading a rare small collapse for eliminating the far more
-  // common null→content jump this component exists to fix. The full fix
-  // (SSR-prefetch POOL_BREAKER_CONFIG so the resolved shape is known on
-  // first paint, mirroring PoolHeader's initialV2Exchange/
-  // initialExchangeVolume pattern) is tracked in issue #1237.
+  // With the SSR prefetch's fallbackData present (issue #1237), `queryPending`
+  // is false on first paint, so a pool that resolves to no trip-able breaker
+  // renders null directly — no skeleton→null collapse. The shimmer above only
+  // shows on the degraded path (prefetch missed) while the client query runs.
   if (isVirtual || !rateFeedID || !cfg) return null;
   // No trip-able breaker (e.g. feed not registered with BreakerBox) → no panel.
 

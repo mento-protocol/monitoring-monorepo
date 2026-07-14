@@ -166,9 +166,11 @@ describe("BreakerPanel", () => {
   });
 
   it("renders a 5-stat skeleton (not nothing) while the query is still loading", () => {
-    // POOL_BREAKER_CONFIG has no SSR fallback, so on first client render this
-    // is the common state for FX pools — must not render `null` (issue
-    // #1222: a null→content swap here measured as +119px on PoolHeader).
+    // Degraded path only (SSR prefetch missed, so no fallbackData): with the
+    // query genuinely in flight the panel must render a matching-shape shimmer,
+    // not `null` (issue #1222: a null→content swap here measured as +119px on
+    // PoolHeader). When the #1237 prefetch supplies fallbackData, `data` is
+    // populated on first paint and this skeleton branch is skipped entirely.
     mockUseGQL.mockReturnValue({ data: undefined, isLoading: true });
     const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
     expect(html).not.toBe("");
@@ -301,5 +303,68 @@ describe("BreakerPanel", () => {
     const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
     expect(html).toContain("0 lifetime");
     expect(html).not.toContain("today");
+  });
+
+  describe("SSR breaker-config fallback (issue #1237)", () => {
+    const fallbackNoBreaker = {
+      BreakerConfig: [],
+      BreakerTripEvent: noTrips,
+    };
+    const fallbackWithBreaker = {
+      BreakerConfig: [healthyMedianConfig()],
+      BreakerTripEvent: noTrips,
+    };
+
+    it("forwards initialBreakerConfig to useGQL as fallbackData", () => {
+      mockUseGQL.mockReturnValue({
+        data: fallbackWithBreaker,
+        isLoading: false,
+      });
+      renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={fallbackWithBreaker}
+        />,
+      );
+      // Options object is the 4th positional useGQL argument (index 3);
+      // arg[2] stays `refreshMs` per the repo's useGQL call-shape invariant.
+      expect(mockUseGQL.mock.calls[0]?.[3]).toMatchObject({
+        fallbackData: fallbackWithBreaker,
+      });
+    });
+
+    it("renders null (not the skeleton) when the SSR fallback resolves to no trip-able breaker while revalidating", () => {
+      // SWR keeps `isLoading` true while it revalidates the fallback, but with
+      // `data` populated the panel must know its shape on first paint. This is
+      // the exact regression #1237 fixes: previously skeleton→null collapse.
+      mockUseGQL.mockReturnValue({
+        data: fallbackNoBreaker,
+        isLoading: true,
+      });
+      const html = renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={fallbackNoBreaker}
+        />,
+      );
+      expect(html).toBe("");
+    });
+
+    it("renders the resolved strip (not the skeleton) from the SSR fallback while revalidating", () => {
+      mockUseGQL.mockReturnValue({
+        data: fallbackWithBreaker,
+        isLoading: true,
+      });
+      const html = renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={fallbackWithBreaker}
+        />,
+      );
+      expect(html).toContain("MedianDelta");
+      expect(html).toContain("Threshold / Cooldown");
+      // No skeleton cell — the resolved shape paints directly.
+      expect(html).not.toContain("h-[78px]");
+    });
   });
 });

@@ -435,6 +435,7 @@ function PoolOverview({
         tradingLimitsError={tradingLimitsError}
         initialV2Exchange={initialData?.v2Exchange}
         initialExchangeVolume={initialData?.brokerExchange24h}
+        initialBreakerConfig={initialData?.breakerConfig}
       />
       <HealthPanel pool={pool} />
       {fpmmPool && (

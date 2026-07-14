@@ -12,6 +12,10 @@ import {
   type BrokerExchangeDailySnapshots24hResponse,
 } from "@/lib/queries/broker";
 import {
+  POOL_BREAKER_CONFIG,
+  type PoolBreakerConfigResponse,
+} from "@/lib/queries/config";
+import {
   POOL_DETAIL_WITH_HEALTH,
   POOL_THRESHOLDS_KNOWN_EXT,
   POOL_V2_EXCHANGE,
@@ -97,6 +101,30 @@ async function fetchVirtualPoolHeaderInitialData(
   return { v2Exchange, brokerExchange24h };
 }
 
+// Prefetch the per-feed breaker config so `<BreakerPanel />` and
+// `<MarketHoursPill />` know on first paint whether the pool has a trip-able
+// breaker / is FX-gated — eliminating the skeleton→null collapse (BreakerPanel)
+// and the phantom-pill flash (MarketHoursPill) on the less-common no-breaker /
+// non-FX pools. Mirrors the client query gate exactly: both components skip the
+// query for virtual pools and for pools without a `referenceRateFeedID`, so the
+// server must skip it in the same cases or the fallbackData shape would diverge
+// from the client's SWR key (which would be `null`, i.e. no request at all).
+async function fetchPoolBreakerConfig(
+  client: PoolDetailClient,
+  chainId: number,
+  pool: Pool,
+  signal: AbortSignal,
+): Promise<PoolBreakerConfigResponse | undefined> {
+  const rateFeedID = pool.referenceRateFeedID ?? "";
+  if (isVirtualPool(pool) || !rateFeedID) return undefined;
+  return requestOptional<PoolBreakerConfigResponse>(
+    client,
+    POOL_BREAKER_CONFIG,
+    { chainId, rateFeedID },
+    signal,
+  );
+}
+
 async function fetchPoolDetailUncached(
   chainId: number,
   id: string,
@@ -139,6 +167,7 @@ async function fetchPoolDetailUncached(
     vpDeprecation,
     vpLifecycleDeprecation,
     headerInitialData,
+    breakerConfig,
   ] = await Promise.all([
     requestOptional<PoolThresholdsKnownExtResponse>(
       client,
@@ -175,6 +204,7 @@ async function fetchPoolDetailUncached(
       signal,
     ),
     fetchVirtualPoolHeaderInitialData(client, chainId, poolRow, signal),
+    fetchPoolBreakerConfig(client, chainId, poolRow, signal),
   ]);
   const { v2Exchange, brokerExchange24h } = headerInitialData;
 
@@ -186,6 +216,7 @@ async function fetchPoolDetailUncached(
     vpLifecycleDeprecation,
     v2Exchange,
     brokerExchange24h,
+    breakerConfig,
   };
 }
 

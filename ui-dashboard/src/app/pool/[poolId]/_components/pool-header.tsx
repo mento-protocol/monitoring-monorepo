@@ -32,6 +32,7 @@ import {
   BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
   POOL_V2_EXCHANGE,
   type BrokerExchangeDailySnapshots24hResponse,
+  type PoolBreakerConfigResponse,
   type PoolV2ExchangeResponse,
 } from "@/lib/queries";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
@@ -59,6 +60,7 @@ export function PoolHeader({
   tradingLimitsError = false,
   initialV2Exchange,
   initialExchangeVolume,
+  initialBreakerConfig,
 }: {
   pool: Pool;
   deployTxHash?: string | undefined;
@@ -66,6 +68,7 @@ export function PoolHeader({
   tradingLimitsError?: boolean | undefined;
   initialV2Exchange?: PoolV2ExchangeResponse | undefined;
   initialExchangeVolume?: BrokerExchangeDailySnapshots24hResponse | undefined;
+  initialBreakerConfig?: PoolBreakerConfigResponse | undefined;
 }) {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
@@ -177,7 +180,10 @@ export function PoolHeader({
             Deprecated
           </span>
         )}
-        <MarketHoursPill pool={pool} />
+        <MarketHoursPill
+          pool={pool}
+          initialBreakerConfig={initialBreakerConfig}
+        />
         {deployTxHash ? (
           <a
             href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
@@ -273,7 +279,10 @@ export function PoolHeader({
         <>
           <div className="my-5 h-px bg-slate-800" />
           <PoolConfigPanel pool={pool} />
-          <BreakerPanel pool={pool} />
+          <BreakerPanel
+            pool={pool}
+            initialBreakerConfig={initialBreakerConfig}
+          />
         </>
       )}
     </div>

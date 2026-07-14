@@ -10,7 +10,10 @@ import {
   nextMarketHoursTransition,
 } from "@/lib/weekend";
 import { useGQL } from "@/lib/graphql";
-import { POOL_BREAKER_CONFIG } from "@/lib/queries";
+import {
+  POOL_BREAKER_CONFIG,
+  type PoolBreakerConfigResponse,
+} from "@/lib/queries";
 import type { BreakerConfig, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
 
@@ -53,6 +56,10 @@ function scheduleString(): string {
 
 type Props = {
   pool: Pool;
+  /** Server-prefetched breaker config, forwarded to SWR as `fallbackData` so
+   *  the pill knows on first paint whether the pool is FX-gated — no
+   *  shimmer→null flash for non-FX pools (issue #1237). */
+  initialBreakerConfig?: PoolBreakerConfigResponse | undefined;
 };
 
 type Response = {
@@ -81,7 +88,10 @@ function isBreakerClosure(config: BreakerConfig | undefined): boolean {
  *
  * Tooltip explains why FX pools close on weekends.
  */
-export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
+export function MarketHoursPill({
+  pool,
+  initialBreakerConfig,
+}: Props): React.ReactElement | null {
   const isVirtual = isVirtualPool(pool);
   const rateFeedID = pool.referenceRateFeedID ?? "";
   const queried = !isVirtual && !!rateFeedID;
@@ -89,6 +99,8 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   const { data, isLoading } = useGQL<Response>(
     queried ? POOL_BREAKER_CONFIG : null,
     { chainId: pool.chainId, rateFeedID },
+    undefined,
+    { fallbackData: initialBreakerConfig },
   );
 
   // FX-ness: the rateFeedID has an ENABLED MARKET_HOURS BreakerConfig.
@@ -99,12 +111,12 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   // countdown that no longer reflects the on-chain trading gate.
   const marketHoursConfig = findEnabledMarketHoursConfig(data?.BreakerConfig);
   const enabled = !isVirtual && !!marketHoursConfig;
-  // POOL_BREAKER_CONFIG has no SSR fallback, so on every first client render
-  // this pill either renders nothing (not FX) or nothing-then-pill (FX) —
-  // the latter is a late-mounting title-row element that can push the
-  // header card's flex-wrap onto a second line (issue #1222). A shimmer
-  // placeholder while the query is genuinely in flight turns that
-  // null→content jump into placeholder→content instead.
+  // With the SSR prefetch's fallbackData present (issue #1237), `data` is
+  // populated on first paint so this is false and the pill renders its resolved
+  // shape immediately (real pill or null, no shimmer). It stays true only on
+  // the degraded path (prefetch missed) while the client query is in flight, so
+  // a late-mounting pill can't push the header card's flex-wrap onto a second
+  // line (issue #1222) — the null→content jump becomes placeholder→content.
   const queryPending = queried && data === undefined && isLoading;
 
   const [now, setNow] = useState(() => new Date());
@@ -125,13 +137,10 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   }, [enabled]);
 
   if (queryPending) return <MarketHoursPillSkeleton />;
-  // Accepted tradeoff: for the majority non-FX pool, this is now
-  // skeleton→null instead of main's stable null→null. At the title row's
-  // typical width this is horizontal-only (no wrap, no CLS) — a
-  // phantom-pill-then-vanish flash rather than a layout shift — but a
-  // narrow viewport could still push the flex-wrap title row onto a second
-  // line and back. The full fix (SSR-prefetch POOL_BREAKER_CONFIG so
-  // FX-eligibility is known on first paint) is tracked in issue #1237.
+  // With the SSR prefetch's fallbackData present (issue #1237), `queryPending`
+  // is false on first paint, so a non-FX pool renders null directly — no
+  // shimmer→null flash and no title-row flex-wrap jump at any viewport. The
+  // shimmer above only shows on the degraded path (prefetch missed).
   if (!enabled) return null;
 
   const breakerClosed = isBreakerClosure(marketHoursConfig);

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarketHoursPill } from "@/components/market-hours-pill";
+import type { PoolBreakerConfigResponse } from "@/lib/queries/config";
 import type { Pool } from "@/lib/types";
 
 // Mock the GraphQL hook so we can drive `enabled` from breaker config.
@@ -97,9 +98,11 @@ describe("MarketHoursPill", () => {
   });
 
   it("renders a same-height shimmer placeholder (not nothing) while the query is loading", () => {
-    // POOL_BREAKER_CONFIG has no SSR fallback, so on first client render this
-    // is the common state for FX pools — a null→pill swap here can push the
-    // title row onto a second line (issue #1222).
+    // Degraded path only (SSR prefetch missed, so no fallbackData): with the
+    // query genuinely in flight a null→pill swap here could push the title row
+    // onto a second line (issue #1222), so render a same-height shimmer. When
+    // the #1237 prefetch supplies fallbackData, `data` is populated on first
+    // paint and this shimmer branch is skipped entirely.
     mockUseGQL.mockReturnValue({ data: undefined, isLoading: true });
     const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
     expect(html).not.toBe("");
@@ -211,5 +214,57 @@ describe("MarketHoursPill", () => {
     expect(html).toContain("Market Closed");
     expect(html).toContain("until open");
     expect(html).not.toContain("Market Open");
+  });
+
+  describe("SSR breaker-config fallback (issue #1237)", () => {
+    // Cast through unknown (same idiom as `as unknown as Pool` above): the
+    // MARKET_HOURS fixture is intentionally partial — the pill only reads
+    // `.enabled`, `.breaker.kind`, `.status`, and `.tradingMode`.
+    const fallbackNonFx = {
+      BreakerConfig: [],
+      BreakerTripEvent: [],
+    } as unknown as PoolBreakerConfigResponse;
+    const fallbackFx = {
+      BreakerConfig: [marketHoursConfig()],
+      BreakerTripEvent: [],
+    } as unknown as PoolBreakerConfigResponse;
+
+    it("forwards initialBreakerConfig to useGQL as fallbackData", () => {
+      mockUseGQL.mockReturnValue({ data: fallbackFx, isLoading: false });
+      freezeNow("2026-04-29T12:00:00Z");
+      renderToStaticMarkup(
+        <MarketHoursPill pool={fxPool()} initialBreakerConfig={fallbackFx} />,
+      );
+      // Options object is the 4th positional useGQL argument (index 3);
+      // arg[2] stays `refreshMs` per the repo's useGQL call-shape invariant.
+      expect(mockUseGQL.mock.calls[0]?.[3]).toMatchObject({
+        fallbackData: fallbackFx,
+      });
+    });
+
+    it("renders null (not the shimmer) when the SSR fallback resolves to non-FX while revalidating", () => {
+      // SWR keeps `isLoading` true while it revalidates the fallback; with
+      // `data` populated the pill must know FX-eligibility on first paint. This
+      // is the exact regression #1237 fixes: previously shimmer→null flash.
+      mockUseGQL.mockReturnValue({ data: fallbackNonFx, isLoading: true });
+      const html = renderToStaticMarkup(
+        <MarketHoursPill
+          pool={fxPool()}
+          initialBreakerConfig={fallbackNonFx}
+        />,
+      );
+      expect(html).toBe("");
+    });
+
+    it("renders the resolved pill (not the shimmer) from the SSR fallback while revalidating", () => {
+      mockUseGQL.mockReturnValue({ data: fallbackFx, isLoading: true });
+      freezeNow("2026-04-29T12:00:00Z"); // Wednesday noon
+      const html = renderToStaticMarkup(
+        <MarketHoursPill pool={fxPool()} initialBreakerConfig={fallbackFx} />,
+      );
+      expect(html).toContain("Market Open");
+      // No shimmer placeholder — the resolved pill paints directly.
+      expect(html).not.toContain("animate-pulse");
+    });
   });
 });

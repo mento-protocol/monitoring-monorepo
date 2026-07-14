@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
+  POOL_BREAKER_CONFIG,
   POOL_DETAIL_WITH_HEALTH,
   POOL_THRESHOLDS_KNOWN_EXT,
   POOL_V2_EXCHANGE,
@@ -76,6 +77,52 @@ const V2_EXCHANGE_RESPONSE = {
   ],
 };
 
+const FX_FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
+const FPMM_POOL = {
+  id: "42220-0xfpmm",
+  chainId: 42220,
+  token0: "0xt0",
+  token1: "0xt1",
+  source: "fpmm_factory",
+  referenceRateFeedID: FX_FEED,
+  createdAtBlock: "1",
+  createdAtTimestamp: "1700000000",
+  updatedAtBlock: "1",
+  updatedAtTimestamp: "1700000000",
+};
+const BREAKER_CONFIG_RESPONSE = {
+  BreakerConfig: [
+    {
+      id: "1",
+      enabled: true,
+      cooldownTime: "0",
+      rateChangeThreshold: "0",
+      smoothingFactor: "5000000000000000000000",
+      medianRatesEMA: "1171560280196965000000000",
+      referenceValue: null,
+      lastMedianRate: "1175000000000000000000000",
+      lastUpdatedAt: "1700000000",
+      status: "OK",
+      tradingMode: 0,
+      lastStatusUpdatedAt: "1700000000",
+      cooldownEndsAt: "0",
+      lastTripAt: null,
+      lastTripTxHash: null,
+      lastResetAt: null,
+      tripCountLifetime: 0,
+      breaker: {
+        id: "b",
+        address: "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9",
+        kind: "MEDIAN_DELTA",
+        activatesTradingMode: 3,
+        defaultCooldownTime: "900",
+        defaultRateChangeThreshold: "40000000000000000000000",
+      },
+    },
+  ],
+  BreakerTripEvent: [],
+};
+
 describe("fetchPoolDetailForSSR", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -143,6 +190,15 @@ describe("fetchPoolDetailForSSR", () => {
       volumeUsdWei: "42000000000000000000",
       swapCount: 3,
     });
+    // Virtual pools skip POOL_BREAKER_CONFIG (mirrors the client query gate),
+    // so no breaker fallback is prefetched and the request count stays 7.
+    expect(result?.breakerConfig).toBeUndefined();
+    expect(
+      requestMock.mock.calls.some(
+        ([request]) =>
+          (request as { document: string }).document === POOL_BREAKER_CONFIG,
+      ),
+    ).toBe(false);
     expect(requestMock).toHaveBeenCalledTimes(7);
     expect(timeoutSpy).toHaveBeenCalledTimes(1);
     expect(timeoutSpy).toHaveBeenCalledWith(HASURA_TIMEOUT_MS);
@@ -150,6 +206,96 @@ describe("fetchPoolDetailForSSR", () => {
       return (request as { signal: AbortSignal }).signal;
     });
     expect(new Set(signals).size).toBe(1);
+  });
+
+  it("prefetches POOL_BREAKER_CONFIG for FPMM pools with a rateFeedID", async () => {
+    requestMock.mockImplementation(({ document }: { document: string }) => {
+      if (document === POOL_DETAIL_WITH_HEALTH) {
+        return { Pool: [FPMM_POOL] };
+      }
+      if (document === POOL_THRESHOLDS_KNOWN_EXT) {
+        return {
+          Pool: [
+            {
+              id: FPMM_POOL.id,
+              rebalanceThresholdsKnown: true,
+              tokenDecimalsKnown: true,
+            },
+          ],
+        };
+      }
+      if (document === POOL_VP_ORACLE_FRESHNESS_EXT) {
+        return { Pool: [{ id: FPMM_POOL.id, medianLive: true }] };
+      }
+      if (document === POOL_VP_DEPRECATION_EXT) {
+        return { BiPoolExchange: [] };
+      }
+      if (document === POOL_VP_LIFECYCLE_DEPRECATION_EXT) {
+        return { VirtualPoolLifecycle: [] };
+      }
+      if (document === POOL_BREAKER_CONFIG) {
+        return BREAKER_CONFIG_RESPONSE;
+      }
+      throw new Error("unexpected query");
+    });
+
+    const result = await fetchPoolDetailForSSR(42220, FPMM_POOL.id);
+
+    // FPMM pools are not virtual, so the header extension fetch makes no
+    // POOL_V2_EXCHANGE / broker calls; the breaker prefetch is the only extra.
+    expect(result?.breakerConfig).toEqual(BREAKER_CONFIG_RESPONSE);
+    const breakerCall = requestMock.mock.calls.find(
+      ([request]) =>
+        (request as { document: string }).document === POOL_BREAKER_CONFIG,
+    );
+    expect(breakerCall?.[0]).toMatchObject({
+      variables: { chainId: 42220, rateFeedID: FX_FEED },
+    });
+    expect(result?.v2Exchange).toBeUndefined();
+    expect(result?.brokerExchange24h).toBeUndefined();
+    expect(requestMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("degrades to an undefined breakerConfig when the breaker query fails, keeping siblings", async () => {
+    requestMock.mockImplementation(({ document }: { document: string }) => {
+      if (document === POOL_DETAIL_WITH_HEALTH) {
+        return { Pool: [FPMM_POOL] };
+      }
+      if (document === POOL_THRESHOLDS_KNOWN_EXT) {
+        return {
+          Pool: [
+            {
+              id: FPMM_POOL.id,
+              rebalanceThresholdsKnown: true,
+              tokenDecimalsKnown: true,
+            },
+          ],
+        };
+      }
+      if (document === POOL_VP_ORACLE_FRESHNESS_EXT) {
+        return { Pool: [{ id: FPMM_POOL.id, medianLive: true }] };
+      }
+      if (document === POOL_VP_DEPRECATION_EXT) {
+        return { BiPoolExchange: [] };
+      }
+      if (document === POOL_VP_LIFECYCLE_DEPRECATION_EXT) {
+        return { VirtualPoolLifecycle: [] };
+      }
+      if (document === POOL_BREAKER_CONFIG) {
+        throw new Error("field BreakerConfig not found");
+      }
+      throw new Error("unexpected query");
+    });
+
+    const result = await fetchPoolDetailForSSR(42220, FPMM_POOL.id);
+
+    // The breaker query failing must not lose the base row or sibling
+    // extensions — the client hook then loads breaker config normally and
+    // its own reserved-height skeleton takes over.
+    expect(result?.pool.Pool[0]).toMatchObject(FPMM_POOL);
+    expect(result?.breakerConfig).toBeUndefined();
+    expect(result?.thresholds?.Pool[0]?.tokenDecimalsKnown).toBe(true);
+    expect(result?.vpOracleFreshness?.Pool[0]?.medianLive).toBe(true);
   });
 
   it("keeps sibling fallback data when an extension query fails", async () => {
