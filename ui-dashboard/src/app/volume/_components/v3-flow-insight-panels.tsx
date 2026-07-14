@@ -1,7 +1,5 @@
-import type { ReactNode } from "react";
 import { AddressLink } from "@/components/address-link";
 import { ChainIcon } from "@/components/chain-icon";
-import { Skeleton } from "@/components/feedback";
 import { formatUSD, relativeTime } from "@/lib/format";
 import {
   weiToUsd,
@@ -18,6 +16,14 @@ import { networkForChainId } from "@/lib/networks";
 import { explorerTxUrl, poolName } from "@/lib/tokens";
 import type { PoolMeta } from "../_lib/types";
 import { LpFriendlinessBadge } from "./lp-friendliness-badge";
+// Panel chrome + loading skeletons live in their own module so the route
+// fallback (`../loading.tsx`) can render this exact loading composition —
+// geometry derivations documented in v3-flow-insight-skeletons.tsx.
+import {
+  CohortPanelSkeleton,
+  InsightPanel,
+  InsightTableSkeleton,
+} from "./v3-flow-insight-skeletons";
 
 export function CohortPanel({
   range,
@@ -42,7 +48,7 @@ export function CohortPanel({
           message="Couldn't load cohort comparison."
         />
       ) : isLoading || !summary ? (
-        <Skeleton rows={4} />
+        <CohortPanelSkeleton />
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-2">
@@ -87,7 +93,7 @@ export function CorridorPanel({
       {hasError ? (
         <PanelMessage variant="error" message="Couldn't load corridor flows." />
       ) : isLoading ? (
-        <Skeleton rows={4} />
+        <InsightTableSkeleton cols={4} label="Loading corridor map" />
       ) : isPartial && rows.length === 0 ? (
         <PanelMessage
           variant="warn"
@@ -149,7 +155,7 @@ export function OutlierPanel({
       {hasError ? (
         <PanelMessage variant="error" message="Couldn't load outlier swaps." />
       ) : isLoading ? (
-        <Skeleton rows={4} />
+        <InsightTableSkeleton cols={3} label="Loading outlier swaps" />
       ) : isPartial && rows.length === 0 ? (
         <PanelMessage
           variant="warn"
@@ -197,23 +203,6 @@ export function OutlierPanel({
         </div>
       )}
     </InsightPanel>
-  );
-}
-
-function InsightPanel({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
-      <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-500">
-        {title}
-      </h3>
-      {children}
-    </div>
   );
 }
 

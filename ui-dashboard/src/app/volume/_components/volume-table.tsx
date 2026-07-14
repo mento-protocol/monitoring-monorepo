@@ -7,6 +7,7 @@ import { SortableTh } from "@/components/sortable-th";
 import { ChainIcon } from "@/components/chain-icon";
 import { AddressLink } from "@/components/address-link";
 import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
+import { TableSkeleton } from "@/components/skeletons";
 import { formatUSD, relativeTime } from "@/lib/format";
 import {
   aggregateTraderPoolsByWindow,
@@ -23,6 +24,7 @@ import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
 import { TRADER_POOL_DAILY_FOR_TRADER } from "@/lib/queries/volume";
 import { TraderPoolDailyForTraderSchema } from "@/lib/queries/volume-schemas";
+import { TOP_TRADERS_TABLE_SKELETON_ROWS } from "../_lib/skeleton-rows";
 import { FlowBadge } from "./flow-badge";
 import { LpFriendlinessBadge } from "./lp-friendliness-badge";
 import { ProtocolActorChip } from "./protocol-actor-chip";
@@ -97,7 +99,24 @@ export function VolumeTable({
   }
 
   if (isLoading) {
-    return <Skeleton rows={10} />;
+    // Table-shaped (header + measured row rhythm), not a generic bar stack —
+    // the real table always renders a <thead>. See
+    // `TOP_TRADERS_TABLE_SKELETON_ROWS` in `../_lib/skeleton-rows.ts` for the
+    // row-count derivation.
+    //
+    // While this skeleton renders it is the page's `aria-live="polite"`
+    // announcer: both this table and the aggregator breakdown table below
+    // it (`aggregator-breakdown-section.tsx`) load from independent SWR
+    // queries and can be loading simultaneously. `TableSkeleton` renders
+    // `role="status" aria-live="polite"` by default, so if both stayed
+    // non-presentational, two live regions would announce at once. The
+    // venue sections feed this table's loading state into the aggregator
+    // section's `hasExternalLoadingAnnouncer` prop, which silences the
+    // aggregator skeleton only while this one is announcing — once this
+    // table settles, a still-loading aggregator skeleton announces itself.
+    return (
+      <TableSkeleton variant="rows" rows={TOP_TRADERS_TABLE_SKELETON_ROWS} />
+    );
   }
 
   if (sorted.length === 0) {

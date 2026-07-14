@@ -1,4 +1,13 @@
 import { TableSkeleton } from "@/components/skeletons";
+import {
+  CohortPanelSkeleton,
+  InsightPanel,
+  InsightTableSkeleton,
+} from "./_components/v3-flow-insight-skeletons";
+import {
+  AGGREGATOR_TABLE_SKELETON_ROWS,
+  TOP_TRADERS_TABLE_SKELETON_ROWS,
+} from "./_lib/skeleton-rows";
 
 // Route-level fallback for /volume, rendered during the server session-await —
 // BEFORE the client reads URL-state (venue/range) or the auth session. It
@@ -6,8 +15,19 @@ import { TableSkeleton } from "@/components/skeletons";
 // venue insight/aggregator sections are venue-specific). It reserves the
 // always-present, fixed-size blocks of VolumePageView for the common (7d, v3)
 // case so the skeleton→content swap doesn't shift: header (title + toggle
-// controls) → 200px chart card → 3 KPI tiles → venue table. A single live region
-// wraps the presentational child skeletons.
+// controls) → 200px chart card → 3 KPI tiles → flow insights → top traders →
+// aggregator breakdown. A single live region wraps the presentational child
+// skeletons.
+//
+// The below-the-fold three sections mirror V3VolumeSection's default (7d,
+// v3) layout — the venue this route falls back to. Non-default deep links
+// (24h, v2) still mismatch somewhat here; that's an accepted tradeoff (this
+// file can't read search params before the client mounts). Notably, the top
+// traders table is reserved as a single full-width table with no side
+// column: `TopPoolsList` only renders alongside the per-pool chart for the
+// 30d/90d/all ranges (`RANGES_WITH_CHART` in `page-client.tsx`), which the
+// default 7d view never reaches.
+// eslint-disable-next-line max-lines-per-function -- Route-level skeleton mirrors five below-the-fold sections 1:1 with their real components for CLS parity (issue #1221); splitting the JSX would fragment that direct mapping.
 export default function VolumeLoading() {
   return (
     <div
@@ -72,7 +92,108 @@ export default function VolumeLoading() {
           </div>
         ))}
       </div>
-      <TableSkeleton rows={10} presentational />
+      {/* Flow insights: heading + the exact loading composition
+          V3FlowInsights' panels render while their queries are in flight —
+          InsightPanel chrome + CohortPanelSkeleton / InsightTableSkeleton,
+          shared via v3-flow-insight-skeletons.tsx. Sharing the components
+          (instead of hand-mirroring measured heights here) keeps the
+          fallback→client handoff structurally identical at every
+          breakpoint: at xl the grid row is governed by the tallest
+          (corridor/outlier) panels exactly as on the client, and below xl,
+          where the grid stacks to one column, each panel reserves its real
+          intrinsic height — a fixed desktop height over-reserved when
+          stacked, and no reservation under-reserved (codex reviews, PR
+          1242). Panel titles are the panels' own static strings; the
+          skeletons render `presentational` because this fallback's root
+          already provides the single page-level live region. */}
+      <div className="space-y-3">
+        <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <InsightPanel title="Cohort + dormancy">
+            <CohortPanelSkeleton presentational />
+          </InsightPanel>
+          <InsightPanel title="Corridor map">
+            <InsightTableSkeleton
+              cols={4}
+              label="Loading corridor map"
+              presentational
+            />
+          </InsightPanel>
+          <InsightPanel title="Outlier swaps">
+            <InsightTableSkeleton
+              cols={3}
+              label="Loading outlier swaps"
+              presentational
+            />
+          </InsightPanel>
+        </div>
+      </div>
+      {/* Top traders: heading + main table skeleton (header + measured row
+          rhythm), mirroring V3VolumeSection's "Top traders" table. Row count
+          is TOP_TRADERS_TABLE_SKELETON_ROWS, shared with volume-table.tsx via
+          `./_lib/skeleton-rows.ts` so the two can't drift apart. */}
+      <div className="space-y-3">
+        <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
+        <TableSkeleton
+          rows={TOP_TRADERS_TABLE_SKELETON_ROWS}
+          variant="rows"
+          presentational
+        />
+      </div>
+      {/* Aggregator breakdown: heading + the aggregator chart card + table
+          skeleton, mirroring AggregatorBreakdownSection. The chart card
+          reserves the same full chrome as the hero card above (p-5/sm:p-6 +
+          title + 3xl/4xl headline + range pills + mt-4 plot), just at the
+          aggregator chart's 230px plot height instead of the hero's 200px —
+          a bare 230px box under-reserved the title/headline/range-pill rows
+          that AggregatorBreakdownSection's TimeSeriesChartCard also renders
+          on every load. No delta row here either: like the hero chart, this
+          card always passes reserveDeltaRow={false}. Unlike the hero card,
+          this one passes yAxisTopPadding={0} to its real TimeSeriesChartCard,
+          which triggers that component's dense-layout `pb-2 sm:pb-3` bottom
+          padding override — mirrored here too, so the card doesn't shrink a
+          few px on client mount. Row count is AGGREGATOR_TABLE_SKELETON_ROWS,
+          shared with aggregator-breakdown-section.tsx via
+          `./_lib/skeleton-rows.ts` so the two can't drift apart. The heading
+          also reserves a second line for the static "Canonical name from
+          aggregators.json…"
+          description paragraph AggregatorBreakdownSection always renders
+          under its title (measured live, 2026-07-13: title 20px + description
+          17px = 41px vs a single 16px bar) — without it the table shifts down
+          on client mount even before SWR resolves. */}
+      <div className="space-y-3">
+        <div>
+          <div className="h-4 w-64 animate-pulse rounded bg-slate-800/50" />
+          <div className="mt-1 h-3 w-full max-w-2xl animate-pulse rounded bg-slate-800/40" />
+        </div>
+        <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6 pb-2 sm:pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-sm">
+                <span className="inline-block h-[1em] w-40 animate-pulse rounded bg-slate-800/50 align-middle" />
+              </p>
+              <p className="mt-1 text-3xl font-semibold sm:text-4xl">
+                <span className="inline-block h-[1em] w-36 animate-pulse rounded bg-slate-800/60 align-middle" />
+              </p>
+            </div>
+            <div className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5">
+              {Array.from({ length: 4 }, (_, i) => (
+                // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+                <span
+                  key={`vol-agg-range-${i}`}
+                  className="h-6 w-9 animate-pulse rounded bg-slate-800/40"
+                />
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 h-[230px] animate-pulse rounded bg-slate-800/30" />
+        </section>
+        <TableSkeleton
+          rows={AGGREGATOR_TABLE_SKELETON_ROWS}
+          variant="rows"
+          presentational
+        />
+      </div>
       <span className="sr-only">Loading…</span>
     </div>
   );

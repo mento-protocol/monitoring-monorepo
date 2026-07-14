@@ -85,6 +85,13 @@ export function V2VolumeSection({
         isLoading={v2AggIsLoading}
         hasError={v2AggHasError}
         isCapHit={isV2AggregatorCapHit}
+        // While the v2 trader table above is loading it renders a
+        // role="status" skeleton that announces for the page, so the
+        // aggregator skeleton stays presentational; once the trader table
+        // settles (or errors into a role="alert" — V2VolumeTraderTable
+        // checks error before loading), the aggregator skeleton must
+        // announce its own still-loading state.
+        hasExternalLoadingAnnouncer={tableIsLoading && !tableHasError}
       />
     </>
   );

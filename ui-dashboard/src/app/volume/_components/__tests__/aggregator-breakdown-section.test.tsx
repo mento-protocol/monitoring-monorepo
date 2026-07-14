@@ -173,6 +173,53 @@ describe("AggregatorBreakdownSection", () => {
     ]);
   });
 
+  it("reserves a table-shaped skeleton (header + measured row rhythm) while loading, matching the loaded table's <thead> structure", () => {
+    // Without `hasExternalLoadingAnnouncer`, the skeleton announces itself
+    // (role="status") — the standalone-loading case where no other element
+    // on the page covers the loading state.
+    handle = renderSection({ isLoading: true });
+    const status = handle.container.querySelector<HTMLElement>(
+      '[role="status"][aria-label="Loading table"]',
+    );
+    expect(status).not.toBeNull();
+    const [header, body] = Array.from(status!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(header.style.height).toBe("36px");
+    expect(body.children.length).toBeGreaterThan(0);
+    Array.from(body.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("44px");
+    });
+    teardown(handle);
+
+    handle = renderSection({
+      isLoading: false,
+      aggregators: [row({ aggregator: "squid" })],
+    });
+    expect(handle.container.querySelector("thead")).not.toBeNull();
+    expect(handle.container.querySelector("tbody")).not.toBeNull();
+  });
+
+  it("silences the loading skeleton only while another announcer is active (hasExternalLoadingAnnouncer)", () => {
+    // Combined loading: the venue's trader table is announcing, so this
+    // section's skeleton must go presentational — no role/aria-live at all.
+    handle = renderSection({
+      isLoading: true,
+      hasExternalLoadingAnnouncer: true,
+    });
+    expect(handle.container.querySelector('[role="status"]')).toBeNull();
+    expect(handle.container.querySelector("[aria-live]")).toBeNull();
+    // The skeleton itself still renders (36px header bar).
+    const skeleton = Array.from(
+      handle.container.querySelectorAll<HTMLElement>("div"),
+    ).find(
+      (el) =>
+        (el.firstElementChild as HTMLElement | null)?.style.height === "36px",
+    );
+    expect(skeleton).not.toBeUndefined();
+  });
+
   it("sorts rows through the v3 aggregator URL params", () => {
     handle = renderSection({
       aggregators: [

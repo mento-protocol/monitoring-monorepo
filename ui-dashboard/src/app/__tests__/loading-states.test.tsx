@@ -285,4 +285,115 @@ describe("route-level loading UIs", () => {
     // wrapper — reserving it shifted the KPI tiles down ~20px on swap.
     expect(container.querySelector(".flex.h-5.items-center")).toBeNull();
   });
+
+  it("VolumeLoading reserves a 3-panel flow-insights grid mirroring V3FlowInsights", () => {
+    render(<VolumeLoading />);
+
+    const grid = container.querySelector(".xl\\:grid-cols-3");
+    expect(grid).not.toBeNull();
+    expect(grid!.children).toHaveLength(3);
+  });
+
+  it("VolumeLoading renders the client's own flow-insight loading composition (no hand-mirrored heights)", () => {
+    render(<VolumeLoading />);
+
+    // The fallback imports InsightPanel + CohortPanelSkeleton +
+    // InsightTableSkeleton from v3-flow-insight-skeletons.tsx — the same
+    // components V3FlowInsights' panels render while loading — instead of
+    // hand-mirroring measured heights. That keeps the fallback→client
+    // handoff structurally identical at every breakpoint: a fixed desktop
+    // height over-reserved when the grid stacks below xl, and no
+    // reservation under-reserved against the client's intrinsic-height
+    // table skeletons (both flagged by codex on this PR).
+    const grid = container.querySelector(".xl\\:grid-cols-3");
+    expect(grid).not.toBeNull();
+    const panels = Array.from(grid!.children) as HTMLElement[];
+    expect(panels).toHaveLength(3);
+    panels.forEach((panel) => {
+      // No fixed heights — parity comes from shared structure.
+      expect(panel.style.height).toBe("");
+      expect(panel.className).not.toContain("h-[500px]");
+      // Real InsightPanel chrome (h3 title), not a shimmer bar.
+      expect(panel.querySelector("h3")).not.toBeNull();
+    });
+
+    const [cohort, corridor, outlier] = panels;
+    // Cohort: 3-stat mini grid + 3 leader rows (CohortPanelSkeleton).
+    const cohortStatGrid = cohort!.querySelector(".grid-cols-3");
+    expect(cohortStatGrid).not.toBeNull();
+    expect(cohortStatGrid!.children).toHaveLength(3);
+    // Corridor/outlier: InsightTableSkeleton with the query cap's 10 rows
+    // and the real tables' column counts (4-col corridor, 3-col outlier).
+    for (const [panel, cols] of [
+      [corridor!, 4],
+      [outlier!, 3],
+    ] as const) {
+      const header = panel.querySelector(".flex.gap-3.border-b");
+      expect(header).not.toBeNull();
+      expect(header!.children).toHaveLength(cols);
+      const body = panel.querySelector(".divide-y");
+      expect(body).not.toBeNull();
+      expect(body!.children).toHaveLength(10);
+    }
+  });
+
+  it("VolumeLoading reserves a single full-width top-traders table, not a two-column layout", () => {
+    render(<VolumeLoading />);
+
+    // Table-shaped skeletons (header 36px bar + 44px measured rows) reserve
+    // exactly two: the top-traders table and the aggregator table. Neither
+    // reserves a side column — `TopPoolsList` only renders alongside the
+    // per-pool chart for the 30d/90d/all ranges, which this route's default
+    // 7d fallback never reaches. `TableSkeleton` is rendered `presentational`
+    // here (a single outer live region already wraps the whole page), which
+    // strips its own `aria-label` — so table-skeleton roots are located
+    // structurally via the 36px header bar instead.
+    const tableSkeletonRoots = Array.from(
+      container.querySelectorAll<HTMLElement>("div"),
+    ).filter(
+      (el) =>
+        (el.firstElementChild as HTMLElement | null)?.style.height === "36px",
+    );
+    expect(tableSkeletonRoots).toHaveLength(2);
+  });
+
+  it("VolumeLoading reserves the full aggregator chart card chrome (title/headline/range pills), not a bare 230px box, ahead of the table skeleton", () => {
+    render(<VolumeLoading />);
+
+    const plotPlaceholders = [
+      ...container.querySelectorAll<HTMLElement>("[class*='h-[230px]']"),
+    ];
+    expect(plotPlaceholders).toHaveLength(1);
+    const [plot] = plotPlaceholders;
+
+    // The 230px plot must sit inside the same full card chrome as the hero
+    // chart card above it — p-5/sm:p-6 rounded card wrapping a title line,
+    // a 3xl/4xl headline, and a 4-pill range group — not stand alone as the
+    // entire "card".
+    const card = plot!.closest("section.rounded-lg");
+    expect(card).not.toBeNull();
+    expect(card!.querySelector(".text-3xl")).not.toBeNull();
+    const rangePills = card!.querySelectorAll(".h-6.w-9");
+    expect(rangePills).toHaveLength(4);
+
+    // AggregatorBreakdownSection passes yAxisTopPadding={0} to this card,
+    // which triggers TimeSeriesChartCard's dense-layout bottom-padding
+    // override — mirrored here so the card doesn't shrink on client mount.
+    expect(card!.className).toContain("pb-2");
+    expect(card!.className).toContain("sm:pb-3");
+  });
+
+  it("VolumeLoading reserves a second line under the aggregator heading for its static description paragraph", () => {
+    render(<VolumeLoading />);
+
+    // AggregatorBreakdownSection always renders a title plus a
+    // `mt-1 text-xs` description paragraph underneath it — a single 16px
+    // heading bar undershoots that block by ~25px on client mount.
+    const heading = container.querySelector<HTMLElement>(".h-4.w-64");
+    expect(heading).not.toBeNull();
+    const descriptionLine = heading!.nextElementSibling as HTMLElement | null;
+    expect(descriptionLine).not.toBeNull();
+    expect(descriptionLine!.className).toContain("mt-1");
+    expect(descriptionLine!.className).toContain("h-3");
+  });
 });
