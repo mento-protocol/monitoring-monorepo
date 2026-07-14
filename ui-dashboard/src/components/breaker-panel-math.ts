@@ -78,6 +78,22 @@ export function isBreakerConfigQueryPending(
   return !isVirtual && !!rateFeedID && data === undefined && isLoading;
 }
 
+/** True when a feed that WOULD query for breaker config (non-virtual + a
+ *  rateFeedID) errored with NO data to show — neither a live response nor an SSR
+ *  fallback. Drives BreakerPanel's / MarketHoursPill's explicit "unavailable"
+ *  state so a failed (e.g. timed-out) fetch doesn't silently vanish like a feed
+ *  with genuinely no breaker (issue #1257). Gated on `error` so a resolved feed
+ *  with no trip-able breaker / non-FX config still renders null. Shared by both
+ *  subscribers (they compute the identical discriminator). */
+export function isBreakerFetchUnavailable(
+  isVirtual: boolean,
+  rateFeedID: string,
+  data: unknown,
+  error: unknown,
+): boolean {
+  return !isVirtual && !!rateFeedID && data === undefined && error != null;
+}
+
 /** Effective cooldown in seconds. Per-feed override else breaker default. */
 function effectiveCooldown(cfg: BreakerConfig): bigint {
   const override = BigInt(cfg.cooldownTime);

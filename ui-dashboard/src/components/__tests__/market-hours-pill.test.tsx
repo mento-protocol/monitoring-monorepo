@@ -499,6 +499,46 @@ describe("MarketHoursPill", () => {
     });
   });
 
+  describe("unavailable state — fetch failed with no fallback (Codex P1, issue #1257)", () => {
+    it("surfaces a 'Market status unavailable' pill (does NOT silently vanish) when data is undefined + error set", () => {
+      // No SSR fallback AND the bounded client fetch errored. Without this the
+      // `!enabled` return would render null, indistinguishable from a non-FX
+      // pool — the operator would see no market state and no error.
+      freezeNow("2026-04-29T12:00:00Z");
+      mockUseGQL.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new DOMException("signal timed out", "TimeoutError"),
+      });
+      const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+      expect(html).not.toBe("");
+      expect(html).toContain("Market status unavailable");
+      // Distinct from the stale-with-fallback affordance and the neutral
+      // pre-clock "Market —".
+      expect(html).not.toContain("showing the last confirmed state");
+      expect(html).not.toContain("Market —");
+    });
+
+    it("stays null (NOT 'unavailable') for a resolved non-FX feed, even on a revalidation error — data present discriminates", () => {
+      freezeNow("2026-04-29T12:00:00Z");
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [], BreakerTripEvent: [] },
+        isLoading: false,
+        error: new Error("Hasura 503"),
+      });
+      const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+      expect(html).toBe("");
+    });
+
+    it("shows the shimmer (NOT 'unavailable') while still loading with no data", () => {
+      freezeNow("2026-04-29T12:00:00Z");
+      mockUseGQL.mockReturnValue({ data: undefined, isLoading: true });
+      const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+      expect(html).not.toContain("unavailable");
+      expect(html).toContain("animate-pulse");
+    });
+  });
+
   describe("SSR breaker-config fallback (issue #1237)", () => {
     // Cast through unknown (same idiom as `as unknown as Pool` above): the
     // MARKET_HOURS fixture is intentionally partial — the pill only reads

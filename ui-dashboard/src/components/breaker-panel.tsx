@@ -9,7 +9,7 @@ import type { BreakerConfig, BreakerTripEvent, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
 import { pickTrippableConfig } from "@/lib/breaker";
 import { Tooltip } from "@/components/tooltip";
-import { StaleRefreshNotice } from "@/components/feedback";
+import { ErrorBox, StaleRefreshNotice } from "@/components/feedback";
 import { explorerTxUrl } from "@/lib/tokens";
 import { formatDurationShort } from "@/lib/bridge-status";
 import {
@@ -24,6 +24,7 @@ import {
   breakerConfigQuery,
   deriveBreakerView,
   isBreakerConfigQueryPending,
+  isBreakerFetchUnavailable,
   tripsTodayDisplay,
   type BreakerPresentation,
   type TripsTodayDisplay,
@@ -399,6 +400,16 @@ export function BreakerPanel({
   }, [tickerActive]);
 
   if (queryPending) return <BreakerPanelSkeleton />;
+  // Fetch failed with NO data to fall back on — `initialBreakerConfig` absent
+  // (SSR missed / age-gated / feed changed) AND the bounded client fetch errored
+  // (`data` undefined, `error` set, not loading). The `!cfg` return below would
+  // otherwise make the panel silently vanish, indistinguishable from a feed with
+  // genuinely no trip-able breaker. Surface an explicit "unavailable" state
+  // (distinct from the stale "last confirmed state" affordance, which needs
+  // last-known data). Gated on `error` + a feed that WOULD query so a resolved
+  // feed with no trip-able breaker still renders null (issue #1257).
+  if (isBreakerFetchUnavailable(isVirtual, rateFeedID, data, error))
+    return <BreakerUnavailableNotice />;
   // With the SSR prefetch's fallbackData present (issue #1237), `queryPending`
   // is false on first paint, so a pool that resolves to no trip-able breaker
   // renders null directly — no skeleton→null collapse. The shimmer above only
@@ -455,6 +466,19 @@ export function BreakerPanel({
           presentation={presentation}
         />
       )}
+    </>
+  );
+}
+
+// Explicit "couldn't load" state for a feed that WOULD have a breaker but whose
+// config fetch failed with no fallback (see BreakerPanel). Distinct from the
+// stale-refresh notice ("showing the last confirmed state" — that has data) and
+// from the null no-panel case (a feed with genuinely no trip-able breaker).
+function BreakerUnavailableNotice(): React.ReactElement {
+  return (
+    <>
+      <div className="my-5 h-px bg-slate-800" />
+      <ErrorBox message="Breaker status unavailable — couldn't load its current state." />
     </>
   );
 }

@@ -18,6 +18,7 @@ import type { BreakerConfig, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
 import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { StaleRefreshNotice } from "@/components/feedback";
+import { isBreakerFetchUnavailable } from "@/components/breaker-panel-math";
 
 const COUNTDOWN_THRESHOLD_HOURS = 6;
 
@@ -299,6 +300,15 @@ export function MarketHoursPill({
   const now = nowSeconds !== null ? new Date(nowSeconds * 1000) : null;
 
   if (queryPending) return <MarketHoursPillSkeleton />;
+  // Fetch failed with NO data to fall back on — `initialBreakerConfig` absent
+  // AND the bounded client fetch errored (`data` undefined, `error` set, not
+  // loading). The `!enabled` return below would otherwise make the pill
+  // silently vanish, indistinguishable from a non-FX pool. Surface an explicit
+  // "unavailable" pill instead (distinct from the stale-refresh notice, which
+  // needs last-known data). Gated on `error` + a feed that WOULD query so a
+  // resolved non-FX feed still renders null (issue #1257).
+  if (isBreakerFetchUnavailable(isVirtual, rateFeedID, data, error))
+    return <MarketHoursUnavailablePill />;
   // With the SSR prefetch's fallbackData present (issue #1237), `queryPending`
   // is false on first paint, so a non-FX pool renders null directly — no
   // shimmer→null flash and no title-row flex-wrap jump at any viewport. The
@@ -337,6 +347,24 @@ export function MarketHoursPill({
         className="w-full"
       />
     </>
+  );
+}
+
+// Explicit "couldn't load" pill for an FX-eligible feed whose breaker config
+// fetch failed with no fallback (see MarketHoursPill) — distinct from the
+// stale-refresh notice (has data) and the null non-FX case. Uses the same
+// fixed-width frame so the swap to the real pill on retry doesn't shift the
+// header.
+function MarketHoursUnavailablePill(): React.ReactElement {
+  return (
+    <PillFrame
+      bgClass="bg-slate-800/80"
+      title="Market-hours breaker config couldn't be loaded — retrying."
+    >
+      <span className="font-medium text-slate-400">
+        Market status unavailable
+      </span>
+    </PillFrame>
   );
 }
 

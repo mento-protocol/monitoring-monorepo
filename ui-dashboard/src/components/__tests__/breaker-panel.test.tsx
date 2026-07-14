@@ -410,6 +410,45 @@ describe("BreakerPanel", () => {
     });
   });
 
+  describe("unavailable state — fetch failed with no fallback (Codex P1, issue #1257)", () => {
+    it("surfaces an explicit 'unavailable' affordance (does NOT silently vanish) when data is undefined + error set", () => {
+      // No SSR fallback (absent / age-gated / feed changed) AND the bounded
+      // client fetch errored. Without this the `!cfg` return would render null,
+      // indistinguishable from a feed with genuinely no breaker.
+      mockUseGQL.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new DOMException("signal timed out", "TimeoutError"),
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).not.toBe("");
+      expect(html).toContain("Breaker status unavailable");
+      // Distinct from the stale-with-fallback affordance (no last-known data
+      // exists here) and from the resolved strip.
+      expect(html).not.toContain("showing the last confirmed state");
+      expect(html).not.toContain("MedianDelta");
+    });
+
+    it("stays null (NOT 'unavailable') for a resolved feed with genuinely no trip-able breaker, even on a revalidation error — data present discriminates", () => {
+      // data present (last-good empty breaker) + error: the feed genuinely has
+      // no trip-able breaker, so it must NOT read as "unavailable".
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [], BreakerTripEvent: noTrips },
+        isLoading: false,
+        error: new Error("Hasura 503"),
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).toBe("");
+    });
+
+    it("shows the skeleton (NOT 'unavailable') while still loading with no data", () => {
+      mockUseGQL.mockReturnValue({ data: undefined, isLoading: true });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).not.toContain("unavailable");
+      expect(html).toContain("h-[78px]"); // skeleton cells
+    });
+  });
+
   describe("SSR breaker-config fallback (issue #1237)", () => {
     const fallbackNoBreaker = {
       BreakerConfig: [],
