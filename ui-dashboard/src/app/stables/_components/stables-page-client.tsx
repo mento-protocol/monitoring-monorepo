@@ -104,6 +104,12 @@ function StablesContent(): React.JSX.Element {
     custodySnapshotsLoading,
     custodySnapshotsUnavailable,
   );
+  // Whether the cap inputs currently include an errored snapshot leg. An
+  // uncapped conclusion reached in this state (e.g. custody errored empty
+  // and was excluded from the cap OR above) is not trustworthy enough to
+  // freeze permanently — see `reconcileDegradedCapSettle`.
+  const snapshotLimitCappedDegraded =
+    snapshotsError != null || custodySnapshotsError != null;
   const isLoading =
     ratesLoading ||
     latestLoading ||
@@ -153,9 +159,43 @@ function StablesContent(): React.JSX.Element {
         ratesLoading={ratesLoading}
         snapshotLimitCapped={chartCapped}
         snapshotLimitCappedLoading={snapshotLimitCappedLoading}
+        snapshotLimitCappedDegraded={snapshotLimitCappedDegraded}
       />
     </div>
   );
+}
+
+// The changes card's settled cap outcome: the frozen notice value plus
+// whether it was reached on degraded inputs (an errored snapshot leg at
+// settle time). `null` = not settled yet.
+type CapSettleState = { capped: boolean; degraded: boolean };
+
+// Post-settle reconciliation for a cap conclusion that was reached on
+// degraded inputs (an errored snapshot leg at settle time — e.g. custody
+// errored empty and was excluded from the cap OR). Returns the next settle
+// state, or null when nothing needs to change. The settle-time freeze
+// stays authoritative for healthy settles, but an uncapped conclusion
+// derived from an error is not trustworthy: if the errored leg later
+// recovers with enough rows to cross the cap, keeping the frozen `false`
+// would show truncated history with no warning until remount — silent
+// degradation, which docs/pr-checklists/stateful-data-ui.md disallows and
+// which outranks the one-off layout shift of a late notice in this rare
+// error-recovery path. The upgrade is strictly one-way: the downgrade
+// direction (removing a shown notice) stays forbidden. The re-freeze arm
+// closes the escape hatch once the uncapped conclusion is confirmed on
+// healthy, settled inputs — the conclusion a normal settle would have
+// produced — so the ordinary daily cap crossing stays frozen even in
+// sessions that started with a transient snapshot error.
+function reconcileDegradedCapSettle(
+  settle: CapSettleState | null,
+  liveCapped: boolean,
+  liveDegraded: boolean,
+  liveLoading: boolean,
+): CapSettleState | null {
+  if (settle === null || !settle.degraded || settle.capped) return null;
+  if (liveCapped) return { capped: true, degraded: false };
+  if (!liveDegraded && !liveLoading) return { capped: false, degraded: false };
+  return null;
 }
 
 function StablesChangesSection({
@@ -163,11 +203,13 @@ function StablesChangesSection({
   ratesLoading,
   snapshotLimitCapped,
   snapshotLimitCappedLoading,
+  snapshotLimitCappedDegraded,
 }: {
   rates: OracleRateMap;
   ratesLoading: boolean;
   snapshotLimitCapped: boolean;
   snapshotLimitCappedLoading: boolean;
+  snapshotLimitCappedDegraded: boolean;
 }): React.JSX.Element {
   const {
     minimumUsdValue: minimumSupplyChangeUsd,
@@ -219,16 +261,17 @@ function StablesChangesSection({
   // resetting the latch would drop visible rows back to a skeleton, so the
   // notice is pinned to its settle-time state; a mid-session cap crossing is
   // a once-per-dataset event (snapshot count only grows ~daily and stays
-  // capped once past the limit) and surfaces on the next mount.
+  // capped once past the limit) and surfaces on the next mount. The one
+  // exception: an uncapped conclusion reached on DEGRADED inputs (an errored
+  // snapshot leg at settle time) may later upgrade one-way to capped — see
+  // `reconcileDegradedCapSettle` above.
   //
   // A changes-query error always wins over the pre-settle hold: without
   // that, a failed changes query + a slow cap/rates query would show an
   // indefinite skeleton instead of the error affordance (the table branches
   // on isLoading before hasError).
-  const [settledSnapshotLimitCapped, setSettledSnapshotLimitCapped] = useState<
-    boolean | null
-  >(null);
-  const hasSettledOnce = settledSnapshotLimitCapped !== null;
+  const [capSettle, setCapSettle] = useState<CapSettleState | null>(null);
+  const hasSettledOnce = capSettle !== null;
   const changesHasError = changesError != null;
   if (
     !hasSettledOnce &&
@@ -237,7 +280,19 @@ function StablesChangesSection({
     !ratesLoading &&
     !snapshotLimitCappedLoading
   ) {
-    setSettledSnapshotLimitCapped(snapshotLimitCapped);
+    setCapSettle({
+      capped: snapshotLimitCapped,
+      degraded: snapshotLimitCappedDegraded,
+    });
+  }
+  const reconciledCapSettle = reconcileDegradedCapSettle(
+    capSettle,
+    snapshotLimitCapped,
+    snapshotLimitCappedDegraded,
+    snapshotLimitCappedLoading,
+  );
+  if (reconciledCapSettle !== null) {
+    setCapSettle(reconciledCapSettle);
   }
   const showChangesSkeleton =
     !changesHasError &&
@@ -256,7 +311,7 @@ function StablesChangesSection({
       hasSettled={hasSettledOnce}
       capped={changesCapped}
       unpricedEventsCount={changesUnpricedEventsCount}
-      snapshotLimitCapped={settledSnapshotLimitCapped ?? snapshotLimitCapped}
+      snapshotLimitCapped={capSettle ? capSettle.capped : snapshotLimitCapped}
     />
   );
 }

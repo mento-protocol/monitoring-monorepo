@@ -628,6 +628,110 @@ describe("StablesPageClient — smoke", () => {
     cappedDiv.remove();
   });
 
+  it("upgrades a degraded uncapped settle to capped when the errored custody leg recovers past the cap", () => {
+    // The custody leg errored empty at settle time, so it was excluded from
+    // the cap OR and the latch settled uncapped on DEGRADED inputs. That
+    // conclusion is error-derived, not trustworthy: if a later poll recovers
+    // custody with a full (capped) page, keeping the frozen `false` would
+    // show truncated custody history with no warning until remount — silent
+    // degradation, which outranks the one-off layout shift of a late notice
+    // in this rare error-recovery path. The upgrade is strictly one-way.
+    mockChanges.data = [changeEvent()];
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
+    mockRates.isLoading = false;
+    mockSnapshots.isLoading = false;
+    mockSnapshots.capped = false;
+    mockCustodySnapshots.error = new Error("custody table unavailable");
+    mockCustodySnapshots.data = [];
+    mockCustodySnapshots.isLoading = false;
+
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const localRoot = createRoot(div);
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    // Degraded settle: rows visible, no notice (cap outcome resolved
+    // uncapped because the errored custody leg was excluded).
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(div.textContent).not.toContain("Showing the most recent 1,000");
+
+    // Custody recovers with a capped page: the notice must upgrade in.
+    mockCustodySnapshots.error = null;
+    mockCustodySnapshots.capped = true;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(div.textContent).toContain("Showing the most recent 1,000");
+
+    act(() => {
+      localRoot.unmount();
+    });
+    div.remove();
+  });
+
+  it("re-freezes a degraded uncapped settle once custody recovers uncapped, keeping later cap crossings frozen", () => {
+    // Same degraded settle as above, but custody recovers with an UNCAPPED
+    // page: nothing changes visually, and the degraded escape hatch closes —
+    // the uncapped conclusion is now confirmed on healthy inputs, so a later
+    // ordinary cap crossing must stay frozen out exactly like a healthy
+    // settle (no notice insertion above visible rows).
+    mockChanges.data = [changeEvent()];
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
+    mockRates.isLoading = false;
+    mockSnapshots.isLoading = false;
+    mockSnapshots.capped = false;
+    mockCustodySnapshots.error = new Error("custody table unavailable");
+    mockCustodySnapshots.data = [];
+    mockCustodySnapshots.isLoading = false;
+
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const localRoot = createRoot(div);
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(div.textContent).not.toContain("Showing the most recent 1,000");
+    const row = div.querySelector("tbody tr");
+    expect(row).not.toBeNull();
+    const settledPosition = precedingElementCount(row!);
+
+    // Custody recovers uncapped: no notice, rows don't move.
+    mockCustodySnapshots.error = null;
+    mockCustodySnapshots.capped = false;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.textContent).not.toContain("Showing the most recent 1,000");
+    const rowAfterRecovery = div.querySelector("tbody tr");
+    expect(rowAfterRecovery).not.toBeNull();
+    expect(precedingElementCount(rowAfterRecovery!)).toBe(settledPosition);
+
+    // Later ordinary cap crossing: frozen out, exactly like a healthy settle.
+    mockSnapshots.capped = true;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.textContent).not.toContain("Showing the most recent 1,000");
+    const rowAfterCross = div.querySelector("tbody tr");
+    expect(rowAfterCross).not.toBeNull();
+    expect(precedingElementCount(rowAfterCross!)).toBe(settledPosition);
+
+    act(() => {
+      localRoot.unmount();
+    });
+    div.remove();
+  });
+
   it("surfaces the supply-changes error immediately even while the snapshot-cap outcome is still loading", () => {
     // Without error precedence, a failed changes query plus a slow
     // snapshot/custody request keeps `showChangesSkeleton` true (the table
