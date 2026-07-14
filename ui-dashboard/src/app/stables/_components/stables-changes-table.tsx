@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AddressLink } from "@/components/address-link";
+import { TableSkeleton } from "@/components/skeletons";
 import {
   formatTimestamp,
   formatWei,
@@ -19,6 +20,37 @@ import type { StableSupplyChangeEvent } from "../_lib/types";
 
 const SUPPLY_CHANGES_PAGE_SIZE = 50;
 
+// Loading-skeleton row count. Approximates a typical settled row count
+// (production audit measured ~932px for 20 real rows) rather than the
+// pagination page size (50) — a generous-but-imperfect floor beats the
+// original single text line, per the sparkline grid's identical tradeoff.
+const SUPPLY_CHANGES_SKELETON_ROWS = 20;
+// Mirrors TableSkeleton's measured `variant="rows"` geometry (header ≈36px,
+// rows ≈44px, plus its own 1px top/bottom outer border — those constants
+// live in skeletons.tsx but aren't exported) plus the real pagination
+// footer's measured box (border-t + pt-4 + one text line ≈ 1 + 16 + 16 =
+// 33px) and its mt-4 top margin. The floor is applied to the transitional
+// loading and error branches always, and to the empty branch only until the
+// changes query has settled (see SupplyChangesContent + the `hasSettled`
+// prop), so the card doesn't visibly shrink/grow during the initial load;
+// combined with the initial-load-scoped skeleton gate in
+// stables-page-client.tsx it also stops the table from growing in waves as
+// successive raw pages resolve. The settled loaded-with-data branch — and a
+// settled filtered-empty result (user raised "Min value" above every row) —
+// are intentionally NOT floored, sizing to their real height instead of
+// holding hundreds of px of dead space below the rows forever.
+const SUPPLY_CHANGES_HEADER_HEIGHT_PX = 36;
+const SUPPLY_CHANGES_ROW_HEIGHT_PX = 44;
+const SUPPLY_CHANGES_SKELETON_BORDER_PX = 2;
+const SUPPLY_CHANGES_FOOTER_MARGIN_TOP_PX = 16;
+const SUPPLY_CHANGES_FOOTER_HEIGHT_PX = 33;
+const SUPPLY_CHANGES_RESERVED_HEIGHT_PX =
+  SUPPLY_CHANGES_HEADER_HEIGHT_PX +
+  SUPPLY_CHANGES_SKELETON_ROWS * SUPPLY_CHANGES_ROW_HEIGHT_PX +
+  SUPPLY_CHANGES_SKELETON_BORDER_PX +
+  SUPPLY_CHANGES_FOOTER_MARGIN_TOP_PX +
+  SUPPLY_CHANGES_FOOTER_HEIGHT_PX;
+
 type Props = {
   events: ReadonlyArray<StableSupplyChangeEvent>;
   minimumUsdValue: number;
@@ -26,6 +58,7 @@ type Props = {
   onMinimumUsdValueReset: () => void;
   isLoading: boolean;
   hasError: boolean;
+  hasSettled: boolean;
   capped: boolean;
   unpricedEventsCount: number;
 };
@@ -46,6 +79,7 @@ export function StablesChangesTable({
   onMinimumUsdValueReset,
   isLoading,
   hasError,
+  hasSettled,
   capped,
   unpricedEventsCount,
 }: Props): React.JSX.Element {
@@ -70,6 +104,7 @@ export function StablesChangesTable({
         thresholdLabel={thresholdLabel}
         isLoading={isLoading}
         hasError={hasError}
+        hasSettled={hasSettled}
         capped={capped}
       />
     </Card>
@@ -82,6 +117,7 @@ function SupplyChangesContent({
   thresholdLabel,
   isLoading,
   hasError,
+  hasSettled,
   capped,
 }: {
   events: ReadonlyArray<StableSupplyChangeEvent>;
@@ -89,29 +125,50 @@ function SupplyChangesContent({
   thresholdLabel: string;
   isLoading: boolean;
   hasError: boolean;
+  hasSettled: boolean;
   capped: boolean;
 }): React.JSX.Element {
+  const reservedHeight = { minHeight: SUPPLY_CHANGES_RESERVED_HEIGHT_PX };
+
   if (isLoading) {
-    return <p className="text-sm text-slate-500">Loading supply changes…</p>;
+    return (
+      <div style={reservedHeight}>
+        <TableSkeleton variant="rows" rows={SUPPLY_CHANGES_SKELETON_ROWS} />
+        <div className="mt-4 border-t border-slate-800 pt-4">
+          <div className="h-4 w-48 animate-pulse rounded bg-slate-800/50" />
+        </div>
+      </div>
+    );
   }
 
   if (hasError) {
     return (
-      <p className="text-sm text-rose-400" role="alert">
-        Failed to load supply changes.
-      </p>
+      <div style={reservedHeight}>
+        <p className="text-sm text-rose-400" role="alert">
+          Failed to load supply changes.
+        </p>
+      </div>
     );
   }
 
   if (events.length === 0) {
+    // Pre-settle empty keeps the floor so the initial skeleton→empty swap
+    // doesn't shrink. A settled filtered-empty (user raised "Min value" above
+    // every row) sizes naturally instead of holding ~967px of dead space —
+    // the same treatment the settled loaded branch already gets below.
     return (
-      <p className="text-sm text-slate-500">
-        No supply changes at or above {thresholdLabel} equivalent in{" "}
-        {capped ? "the most recent fetched rows" : "the selected window"}.
-      </p>
+      <div style={hasSettled ? undefined : reservedHeight}>
+        <p className="text-sm text-slate-500">
+          No supply changes at or above {thresholdLabel} equivalent in{" "}
+          {capped ? "the most recent fetched rows" : "the selected window"}.
+        </p>
+      </div>
     );
   }
 
+  // Settled with real rows: size to natural content. No height floor here —
+  // once every underlying query is idle, a genuinely-short filtered result
+  // must render at its own height rather than reserving the 20-row skeleton.
   const pageCountKey = Math.ceil(events.length / SUPPLY_CHANGES_PAGE_SIZE);
   return (
     <PaginatedSupplyChangesTable

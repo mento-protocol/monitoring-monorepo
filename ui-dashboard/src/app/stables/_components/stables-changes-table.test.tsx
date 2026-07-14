@@ -37,6 +37,7 @@ function renderThresholdInput({
         onMinimumUsdValueReset={onReset}
         isLoading={false}
         hasError={false}
+        hasSettled={true}
         capped={false}
         unpricedEventsCount={0}
       />,
@@ -105,6 +106,7 @@ describe("StablesChangesTable", () => {
         onMinimumUsdValueReset={() => undefined}
         isLoading={false}
         hasError={false}
+        hasSettled={true}
         capped={true}
         unpricedEventsCount={0}
       />,
@@ -143,6 +145,7 @@ describe("StablesChangesTable", () => {
         onMinimumUsdValueReset={() => undefined}
         isLoading={false}
         hasError={false}
+        hasSettled={true}
         capped={false}
         unpricedEventsCount={1}
       />,
@@ -201,6 +204,7 @@ describe("StablesChangesTable", () => {
           onMinimumUsdValueReset={() => undefined}
           isLoading={false}
           hasError={false}
+          hasSettled={true}
           capped={false}
           unpricedEventsCount={0}
         />,
@@ -245,6 +249,7 @@ describe("StablesChangesTable", () => {
           onMinimumUsdValueReset={() => undefined}
           isLoading={false}
           hasError={false}
+          hasSettled={true}
           capped={false}
           unpricedEventsCount={0}
         />,
@@ -274,5 +279,146 @@ describe("StablesChangesTable", () => {
       "Showing 1-50 of 55 matching events.",
     );
     expect(container.textContent).toContain("Page 1 of 2");
+  });
+
+  describe("loading-branch skeleton parity", () => {
+    // These assert the reserved-geometry INVARIANT (a single `minHeight`
+    // constant applied to every branch), not just that each branch renders
+    // without crashing — a table-shaped skeleton that happened to reserve a
+    // different height than the error/empty/loaded branches would still
+    // pass a render-only test but reintroduce the production CLS jump.
+    function renderBranch(props: {
+      events: ReadonlyArray<StableSupplyChangeEvent>;
+      isLoading: boolean;
+      hasError: boolean;
+      hasSettled?: boolean;
+    }): HTMLDivElement {
+      const div = document.createElement("div");
+      document.body.appendChild(div);
+      const branchRoot = createRoot(div);
+      act(() => {
+        branchRoot.render(
+          <StablesChangesTable
+            events={props.events}
+            minimumUsdValue={DEFAULT_SUPPLY_CHANGE_MIN_USD}
+            onMinimumUsdValueChange={() => undefined}
+            onMinimumUsdValueReset={() => undefined}
+            isLoading={props.isLoading}
+            hasError={props.hasError}
+            hasSettled={props.hasSettled ?? false}
+            capped={false}
+            unpricedEventsCount={0}
+          />,
+        );
+      });
+      return div;
+    }
+
+    function reservedHeight(div: HTMLDivElement): string | undefined {
+      const reserved = div.querySelector<HTMLElement>("[style]");
+      return reserved?.style.minHeight;
+    }
+
+    it("renders a table-shaped skeleton (header + 20 rows) instead of a bare text line", () => {
+      const div = renderBranch({
+        events: [],
+        isLoading: true,
+        hasError: false,
+      });
+
+      expect(div.textContent).not.toContain("Loading supply changes");
+      const table = div.querySelector<HTMLElement>(
+        '[role="status"][aria-label="Loading table"]',
+      );
+      expect(table).not.toBeNull();
+      // `variant="rows"` renders one full-width header bar (measured ≈36px)
+      // followed by a `divide-y` wrapper holding one bar per skeleton row.
+      const rows = table!.querySelector(".divide-y");
+      expect(rows).not.toBeNull();
+      expect(rows!.children).toHaveLength(20);
+    });
+
+    it("reserves the identical minHeight across the transitional loading, error, and pre-settle empty branches", () => {
+      const loading = renderBranch({
+        events: [],
+        isLoading: true,
+        hasError: false,
+      });
+      const error = renderBranch({
+        events: [],
+        isLoading: false,
+        hasError: true,
+      });
+      // Pre-settle empty (hasSettled=false): a first load that resolves empty
+      // before settling still reserves the floor so the skeleton→empty swap
+      // doesn't shrink the card.
+      const empty = renderBranch({
+        events: [],
+        isLoading: false,
+        hasError: false,
+        hasSettled: false,
+      });
+
+      const loadingHeight = reservedHeight(loading);
+      expect(loadingHeight).toBeTruthy();
+      expect(reservedHeight(error)).toBe(loadingHeight);
+      expect(reservedHeight(empty)).toBe(loadingHeight);
+
+      [loading, error, empty].forEach((div) => div.remove());
+    });
+
+    it("does NOT floor the settled filtered-empty branch, so a fully-filtered result sizes naturally", () => {
+      // Once settled (hasSettled=true), raising "Min value" above every row
+      // leaves the empty message — it must NOT reserve the full 20-row floor,
+      // or the card holds ~967px of dead whitespace below the message forever
+      // (the same defect the settled loaded branch already avoids).
+      const settledEmpty = renderBranch({
+        events: [],
+        isLoading: false,
+        hasError: false,
+        hasSettled: true,
+      });
+
+      expect(settledEmpty.textContent).toContain(
+        "No supply changes at or above",
+      );
+      expect(reservedHeight(settledEmpty)).toBeFalsy();
+
+      settledEmpty.remove();
+    });
+
+    it("does NOT floor the settled loaded-with-data branch, so a short filtered result sizes naturally", () => {
+      // The floor exists to stop wave-growth DURING loading. A genuinely
+      // small, settled result set (e.g. after raising "Min value") must NOT
+      // reserve the full 20-row skeleton height, or the card holds hundreds
+      // of px of dead whitespace below the table forever.
+      const loaded = renderBranch({
+        events: [changeEvent(0), changeEvent(1)],
+        isLoading: false,
+        hasError: false,
+      });
+
+      // Two real rows render...
+      expect(loaded.querySelectorAll("tbody tr")).toHaveLength(2);
+      // ...and no element carries the reserved 20-row minHeight floor.
+      expect(reservedHeight(loaded)).toBeFalsy();
+
+      loaded.remove();
+    });
+
+    it("keeps the real filter/header row mounted during loading (no data needed to render it)", () => {
+      const div = renderBranch({
+        events: [],
+        isLoading: true,
+        hasError: false,
+      });
+
+      expect(
+        div.querySelector(
+          'input[aria-label="Minimum USD-equivalent supply change"]',
+        ),
+      ).not.toBeNull();
+      expect(div.textContent).toContain("Supply changes");
+    });
   });
 });

@@ -181,4 +181,32 @@ describe("StablesKpiStrip", () => {
     expect(html).toContain("$1M");
     expect(html).not.toContain("$750K");
   });
+
+  it("reserves a 24h/7d/30d sub-row block on every tile in both loading and loaded states", () => {
+    // Loading-vs-loaded height parity is unit-tested inside BreakdownTile's
+    // own suite; this asserts the strip actually reaches that parity
+    // end-to-end for all 4 tiles (loaded here resolves total === null on
+    // every tile, which renders BreakdownTile's height-equivalent
+    // empty-state branch rather than the shimmer branch).
+    const sharedProps = {
+      latestPerToken: [],
+      latestCustodyPerToken: [],
+      snapshots: [],
+      custodySnapshots: [],
+      rates: new Map(),
+      hasError: false,
+    };
+    const countReservedSubRowBlocks = (html: string) =>
+      (html.match(/mt-1\.5 (?:flex flex-wrap|grid text-sm)/g) ?? []).length;
+
+    const loadingHtml = renderToStaticMarkup(
+      <StablesKpiStrip {...sharedProps} isLoading={true} />,
+    );
+    const loadedHtml = renderToStaticMarkup(
+      <StablesKpiStrip {...sharedProps} isLoading={false} />,
+    );
+
+    expect(countReservedSubRowBlocks(loadingHtml)).toBe(4);
+    expect(countReservedSubRowBlocks(loadedHtml)).toBe(4);
+  });
 });
