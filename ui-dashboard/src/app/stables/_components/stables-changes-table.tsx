@@ -29,14 +29,16 @@ const SUPPLY_CHANGES_SKELETON_ROWS = 20;
 // rows ≈44px, plus its own 1px top/bottom outer border — those constants
 // live in skeletons.tsx but aren't exported) plus the real pagination
 // footer's measured box (border-t + pt-4 + one text line ≈ 1 + 16 + 16 =
-// 33px) and its mt-4 top margin. The floor is applied only to the
-// transitional loading/error/empty branches (see SupplyChangesContent), so
-// the card doesn't visibly shrink/grow across those swaps; combined with the
-// initial-load-scoped skeleton gate in stables-page-client.tsx it also stops
-// the table from growing in waves as successive raw pages resolve. The
-// settled loaded-with-data branch is intentionally NOT floored — a small
-// filtered result set (e.g. a raised "Min value") sizes to its real height
-// instead of holding hundreds of px of dead space below the rows forever.
+// 33px) and its mt-4 top margin. The floor is applied to the transitional
+// loading and error branches always, and to the empty branch only until the
+// changes query has settled (see SupplyChangesContent + the `hasSettled`
+// prop), so the card doesn't visibly shrink/grow during the initial load;
+// combined with the initial-load-scoped skeleton gate in
+// stables-page-client.tsx it also stops the table from growing in waves as
+// successive raw pages resolve. The settled loaded-with-data branch — and a
+// settled filtered-empty result (user raised "Min value" above every row) —
+// are intentionally NOT floored, sizing to their real height instead of
+// holding hundreds of px of dead space below the rows forever.
 const SUPPLY_CHANGES_HEADER_HEIGHT_PX = 36;
 const SUPPLY_CHANGES_ROW_HEIGHT_PX = 44;
 const SUPPLY_CHANGES_SKELETON_BORDER_PX = 2;
@@ -56,6 +58,7 @@ type Props = {
   onMinimumUsdValueReset: () => void;
   isLoading: boolean;
   hasError: boolean;
+  hasSettled: boolean;
   capped: boolean;
   unpricedEventsCount: number;
 };
@@ -76,6 +79,7 @@ export function StablesChangesTable({
   onMinimumUsdValueReset,
   isLoading,
   hasError,
+  hasSettled,
   capped,
   unpricedEventsCount,
 }: Props): React.JSX.Element {
@@ -100,6 +104,7 @@ export function StablesChangesTable({
         thresholdLabel={thresholdLabel}
         isLoading={isLoading}
         hasError={hasError}
+        hasSettled={hasSettled}
         capped={capped}
       />
     </Card>
@@ -112,6 +117,7 @@ function SupplyChangesContent({
   thresholdLabel,
   isLoading,
   hasError,
+  hasSettled,
   capped,
 }: {
   events: ReadonlyArray<StableSupplyChangeEvent>;
@@ -119,6 +125,7 @@ function SupplyChangesContent({
   thresholdLabel: string;
   isLoading: boolean;
   hasError: boolean;
+  hasSettled: boolean;
   capped: boolean;
 }): React.JSX.Element {
   const reservedHeight = { minHeight: SUPPLY_CHANGES_RESERVED_HEIGHT_PX };
@@ -145,8 +152,12 @@ function SupplyChangesContent({
   }
 
   if (events.length === 0) {
+    // Pre-settle empty keeps the floor so the initial skeleton→empty swap
+    // doesn't shrink. A settled filtered-empty (user raised "Min value" above
+    // every row) sizes naturally instead of holding ~967px of dead space —
+    // the same treatment the settled loaded branch already gets below.
     return (
-      <div style={reservedHeight}>
+      <div style={hasSettled ? undefined : reservedHeight}>
         <p className="text-sm text-slate-500">
           No supply changes at or above {thresholdLabel} equivalent in{" "}
           {capped ? "the most recent fetched rows" : "the selected window"}.

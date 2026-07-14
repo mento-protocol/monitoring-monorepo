@@ -37,6 +37,7 @@ function renderThresholdInput({
         onMinimumUsdValueReset={onReset}
         isLoading={false}
         hasError={false}
+        hasSettled={true}
         capped={false}
         unpricedEventsCount={0}
       />,
@@ -105,6 +106,7 @@ describe("StablesChangesTable", () => {
         onMinimumUsdValueReset={() => undefined}
         isLoading={false}
         hasError={false}
+        hasSettled={true}
         capped={true}
         unpricedEventsCount={0}
       />,
@@ -143,6 +145,7 @@ describe("StablesChangesTable", () => {
         onMinimumUsdValueReset={() => undefined}
         isLoading={false}
         hasError={false}
+        hasSettled={true}
         capped={false}
         unpricedEventsCount={1}
       />,
@@ -201,6 +204,7 @@ describe("StablesChangesTable", () => {
           onMinimumUsdValueReset={() => undefined}
           isLoading={false}
           hasError={false}
+          hasSettled={true}
           capped={false}
           unpricedEventsCount={0}
         />,
@@ -245,6 +249,7 @@ describe("StablesChangesTable", () => {
           onMinimumUsdValueReset={() => undefined}
           isLoading={false}
           hasError={false}
+          hasSettled={true}
           capped={false}
           unpricedEventsCount={0}
         />,
@@ -286,6 +291,7 @@ describe("StablesChangesTable", () => {
       events: ReadonlyArray<StableSupplyChangeEvent>;
       isLoading: boolean;
       hasError: boolean;
+      hasSettled?: boolean;
     }): HTMLDivElement {
       const div = document.createElement("div");
       document.body.appendChild(div);
@@ -299,6 +305,7 @@ describe("StablesChangesTable", () => {
             onMinimumUsdValueReset={() => undefined}
             isLoading={props.isLoading}
             hasError={props.hasError}
+            hasSettled={props.hasSettled ?? false}
             capped={false}
             unpricedEventsCount={0}
           />,
@@ -331,7 +338,7 @@ describe("StablesChangesTable", () => {
       expect(rows!.children).toHaveLength(20);
     });
 
-    it("reserves the identical minHeight across the transitional loading, error, and empty branches", () => {
+    it("reserves the identical minHeight across the transitional loading, error, and pre-settle empty branches", () => {
       const loading = renderBranch({
         events: [],
         isLoading: true,
@@ -342,10 +349,14 @@ describe("StablesChangesTable", () => {
         isLoading: false,
         hasError: true,
       });
+      // Pre-settle empty (hasSettled=false): a first load that resolves empty
+      // before settling still reserves the floor so the skeleton→empty swap
+      // doesn't shrink the card.
       const empty = renderBranch({
         events: [],
         isLoading: false,
         hasError: false,
+        hasSettled: false,
       });
 
       const loadingHeight = reservedHeight(loading);
@@ -354,6 +365,26 @@ describe("StablesChangesTable", () => {
       expect(reservedHeight(empty)).toBe(loadingHeight);
 
       [loading, error, empty].forEach((div) => div.remove());
+    });
+
+    it("does NOT floor the settled filtered-empty branch, so a fully-filtered result sizes naturally", () => {
+      // Once settled (hasSettled=true), raising "Min value" above every row
+      // leaves the empty message — it must NOT reserve the full 20-row floor,
+      // or the card holds ~967px of dead whitespace below the message forever
+      // (the same defect the settled loaded branch already avoids).
+      const settledEmpty = renderBranch({
+        events: [],
+        isLoading: false,
+        hasError: false,
+        hasSettled: true,
+      });
+
+      expect(settledEmpty.textContent).toContain(
+        "No supply changes at or above",
+      );
+      expect(reservedHeight(settledEmpty)).toBeFalsy();
+
+      settledEmpty.remove();
     });
 
     it("does NOT floor the settled loaded-with-data branch, so a short filtered result sizes naturally", () => {

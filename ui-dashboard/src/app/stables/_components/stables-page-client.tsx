@@ -109,7 +109,7 @@ function StablesContent(): React.JSX.Element {
 
       <StablesSnapshotLimitNotice visible={chartCapped} />
 
-      <StablesChangesSection rates={rates} />
+      <StablesChangesSection rates={rates} ratesLoading={ratesLoading} />
     </div>
   );
 }
@@ -130,8 +130,10 @@ function StablesSnapshotLimitNotice({
 
 function StablesChangesSection({
   rates,
+  ratesLoading,
 }: {
   rates: OracleRateMap;
+  ratesLoading: boolean;
 }): React.JSX.Element {
   const {
     minimumUsdValue: minimumSupplyChangeUsd,
@@ -148,20 +150,32 @@ function StablesChangesSection({
   } = useStablesChanges("7d", 0, rates, minimumSupplyChangeUsd);
 
   // Gate the follow-up-page skeleton to the INITIAL load only. On first load
-  // we hold the skeleton until every raw page has settled so the table reveals
-  // its full row set once, instead of showing a partial set and growing again
-  // as later pages resolve (measured on production as 3 discrete height jumps).
-  // But once settled, an interactive "Min value" raise re-enables a 2nd/3rd
-  // page (`shouldFetchNextChangePage` in use-stables-data.ts) with page-1 data
-  // unchanged — re-summoning the skeleton there would drop already-visible
-  // rows and flash blank. Latch "settled once" (React's render-phase state
-  // update, not an effect) and stop gating on `hasPendingPage` after it.
+  // we hold the skeleton until every raw page AND the oracle rates have
+  // settled so the table reveals its full row set once, instead of showing a
+  // partial set and growing again as later pages resolve (measured on
+  // production as 3 discrete height jumps). Rates gate the visibility
+  // predicate: `isVisibleSupplyChangeEvent` fail-opens non-USD rows while
+  // `rates` is empty, so a changes page that resolves before rates would
+  // otherwise report zero pending pages, latch too early, then grow in waves
+  // once rates arrive and re-enable page 2/3 for the USD threshold. Waiting on
+  // `ratesLoading` keeps the reveal single. Once settled, an interactive "Min
+  // value" raise re-enables a 2nd/3rd page (`shouldFetchNextChangePage` in
+  // use-stables-data.ts) with page-1 data unchanged — re-summoning the
+  // skeleton there would drop already-visible rows and flash blank. Latch
+  // "settled once" (React's render-phase state update, not an effect) and stop
+  // gating on `hasPendingPage`/`ratesLoading` after it.
   const [hasSettledOnce, setHasSettledOnce] = useState(false);
-  if (!hasSettledOnce && !changesLoading && !changesHasPendingPage) {
+  if (
+    !hasSettledOnce &&
+    !changesLoading &&
+    !changesHasPendingPage &&
+    !ratesLoading
+  ) {
     setHasSettledOnce(true);
   }
   const showChangesSkeleton =
-    changesLoading || (!hasSettledOnce && changesHasPendingPage);
+    changesLoading ||
+    (!hasSettledOnce && (changesHasPendingPage || ratesLoading));
 
   return (
     <StablesChangesTable
@@ -171,6 +185,7 @@ function StablesChangesSection({
       onMinimumUsdValueReset={resetMinimumSupplyChangeUsd}
       isLoading={showChangesSkeleton}
       hasError={changesError != null}
+      hasSettled={hasSettledOnce}
       capped={changesCapped}
       unpricedEventsCount={changesUnpricedEventsCount}
     />

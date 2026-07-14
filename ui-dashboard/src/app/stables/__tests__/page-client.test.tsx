@@ -265,14 +265,78 @@ describe("StablesPageClient — smoke", () => {
     expect(html).not.toContain("Failed to load chart data.");
   });
 
-  it("keeps supply changes visible while oracle rates are loading", () => {
+  it("holds the supply-changes skeleton on a cold load while oracle rates are still pending", () => {
+    // Rates gate the visibility predicate — isVisibleSupplyChangeEvent
+    // fail-opens non-USD rows while `rates` is empty. If the changes page
+    // resolves before rates, the section must keep the skeleton until rates
+    // arrive instead of revealing a fail-open partial set that then re-filters
+    // and grows in waves. So even with first-page rows in hand and no pending
+    // page, a still-loading rates fetch keeps the skeleton up on initial load.
     mockRates.isLoading = true;
     mockChanges.data = [changeEvent()];
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
 
     const html = renderToStaticMarkup(<StablesPageClient />);
 
     expect(html).toContain("Supply changes");
-    expect(html).toContain("USDm");
+    expect(html).toContain('aria-label="Loading table"');
+    // The fail-open row must not be revealed yet (its Token cell would show
+    // "USDm"; no snapshots are present, so USDm cannot appear elsewhere).
+    expect(html).not.toContain("USDm");
+  });
+
+  it("does not settle early when the changes page resolves before oracle rates, keeping the reveal single", () => {
+    // Step 1 — cold load: changes page 1 resolved with a (fail-open) row while
+    // rates are still loading and no follow-up page is pending yet. The latch
+    // must NOT fire, so the skeleton holds instead of revealing the row.
+    mockRates.isLoading = true;
+    mockChanges.data = [changeEvent()];
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
+
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const localRoot = createRoot(div);
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(0);
+    expect(
+      div.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).not.toBeNull();
+
+    // Step 2 — rates arrive and re-enable a follow-up page for the USD
+    // threshold (the wave that early-settle would have exposed). Because the
+    // latch never fired, the skeleton still holds rather than growing.
+    mockRates.isLoading = false;
+    mockChanges.hasPendingPage = true;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(0);
+    expect(
+      div.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).not.toBeNull();
+
+    // Step 3 — every page and rates have settled: the table reveals its full
+    // row set once, in a single reveal.
+    mockChanges.hasPendingPage = false;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(
+      div.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).toBeNull();
+
+    act(() => {
+      localRoot.unmount();
+    });
+    div.remove();
   });
 
   it("keeps the supply-changes skeleton up while a follow-up raw page is still pending, even with first-page rows in hand", () => {
