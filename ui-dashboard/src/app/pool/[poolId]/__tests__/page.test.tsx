@@ -86,6 +86,9 @@ vi.mock("@/components/feedback", () => ({
   EmptyBox: ({ message }: { message: string }) => <div>{message}</div>,
   ErrorBox: ({ message }: { message: string }) => <div>{message}</div>,
   Skeleton: () => <div>loading</div>,
+  // BreakerPanel/MarketHoursPill render this; no error in these fixtures so it
+  // returns null, but the named export must exist under the whole-module mock.
+  StaleRefreshNotice: () => null,
 }));
 
 vi.mock("@/components/health-panel", () => ({ HealthPanel: () => <div /> }));

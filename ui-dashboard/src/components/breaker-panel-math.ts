@@ -8,6 +8,7 @@
 import type { BreakerConfig, BreakerTripEvent } from "@/lib/types";
 import { POOL_BREAKER_CONFIG } from "@/lib/queries";
 import { formatDurationShort } from "@/lib/bridge-status";
+import { effectiveBreakerThreshold } from "@/lib/breaker";
 
 const FIXED_1 = BigInt(10) ** BigInt(24);
 // Breaker thresholds are stored as Fixidity (1e24 = 100%). Keep one decimal
@@ -78,21 +79,10 @@ export function isBreakerConfigQueryPending(
 }
 
 /** Effective cooldown in seconds. Per-feed override else breaker default. */
-export function effectiveCooldown(cfg: BreakerConfig): bigint {
+function effectiveCooldown(cfg: BreakerConfig): bigint {
   const override = BigInt(cfg.cooldownTime);
   if (override > BigInt(0)) return override;
   return BigInt(cfg.breaker.defaultCooldownTime);
-}
-
-/** Human-readable message for a failed breaker SWR revalidation, or `null`
- *  when there's no error. With `fallbackData` present SWR keeps the last-known
- *  `data` on screen while setting `error`, so the panel must disclose that the
- *  breaker status on screen is the last confirmed one, not a fresh poll (issue
- *  #1257). */
-export function staleRefreshMessage(error: unknown): string | null {
-  if (error == null) return null;
-  const detail = error instanceof Error ? error.message : String(error);
-  return `Breaker status refresh failed — showing the last confirmed state (${detail})`;
 }
 
 /** Seconds until `cooldownEndsAt`, or `null` while the SSR-safe ticker
@@ -104,7 +94,7 @@ export function staleRefreshMessage(error: unknown): string | null {
  *  cooldown has actually elapsed, so ThresholdMetric/ResetPathBanner render a
  *  state-neutral "—" placeholder (never "active" or "elapsed") until the
  *  ticker's first tick lands and resolves the real state. */
-export function cooldownRemainingSecFrom(
+function cooldownRemainingSecFrom(
   cooldownEndsAt: number,
   now: number | null,
 ): number | null {
@@ -118,7 +108,7 @@ export function cooldownRemainingSecFrom(
  * first MedianUpdated seeds it), and a `referenceValue` of `0` would be a
  * mis-set peg (also produces a divide-by-zero). In all three cases the live
  * Δ is meaningless, so render the missing-data dash. */
-export function computeLiveDelta(cfg: BreakerConfig): bigint | null {
+function computeLiveDelta(cfg: BreakerConfig): bigint | null {
   const median = fixidityOrNull(cfg.lastMedianRate);
   const reference =
     cfg.breaker.kind === "MEDIAN_DELTA"
@@ -183,7 +173,7 @@ function referenceCaptionFor(
   return "fixed peg";
 }
 
-export function breakerPresentation(
+function breakerPresentation(
   cfg: BreakerConfig,
   threshold: bigint,
   cooldown: bigint,
@@ -235,7 +225,7 @@ export function breakerPresentation(
 
 /** Returns the bar fill (0-100) and color class for the live-Δ bar. Mirrors
  * the deviation-bar conventions in components/pool-header/deviation-cell.tsx. */
-export function deltaBarStyle(
+function deltaBarStyle(
   deltaFixidity: bigint,
   thresholdFixidity: bigint,
 ): {
@@ -297,4 +287,48 @@ export function tripsTodayDisplay(
     (t) => Number(t.blockTimestamp) >= todayMidnightSec,
   ).length;
   return count > 0 ? { kind: "count", count } : { kind: "hidden" };
+}
+
+/** The full derived view model a resolved BreakerPanel strip renders from —
+ *  effective threshold + cooldown remaining, live Δ and its bar, the
+ *  presentation copy, and the reset-path rate-in-band flag. Pulled out of the
+ *  component so BreakerPanel stays a thin fetch-then-render shell (and under
+ *  the ESLint per-function line budget). `now` is the SSR-safe cooldown ticker
+ *  value (`null` pre-mount — see cooldownRemainingSecFrom). */
+type BreakerView = {
+  cooldownRemainingSec: number | null;
+  liveDelta: bigint | null;
+  presentation: BreakerPresentation;
+  liveBar: { pct: number; color: string };
+  rateInBand: boolean;
+};
+
+export function deriveBreakerView(
+  cfg: BreakerConfig,
+  now: number | null,
+  tripped: boolean,
+): BreakerView {
+  const threshold = effectiveBreakerThreshold(cfg);
+  const cooldown = effectiveCooldown(cfg);
+  const cooldownRemainingSec = cooldownRemainingSecFrom(
+    Number(cfg.cooldownEndsAt),
+    now,
+  );
+  const liveDelta = computeLiveDelta(cfg);
+  const presentation = breakerPresentation(
+    cfg,
+    threshold,
+    cooldown,
+    liveDelta,
+    tripped,
+  );
+  const liveBar =
+    liveDelta != null
+      ? deltaBarStyle(liveDelta, threshold)
+      : { pct: 0, color: "bg-slate-600" };
+  // Reset-path condition (mirror BreakerBox.tryResetBreaker). Cooldown's own
+  // elapsed/pending state is derived inside ResetPathBanner from
+  // cooldownRemainingSec directly (see its comment).
+  const rateInBand = liveDelta != null && liveDelta < threshold;
+  return { cooldownRemainingSec, liveDelta, presentation, liveBar, rateInBand };
 }

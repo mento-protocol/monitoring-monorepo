@@ -359,6 +359,35 @@ describe("BreakerPanel", () => {
       const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
       expect(html).not.toContain("refresh failed");
     });
+
+    it("colors the pre-mount '· — today' placeholder neutral slate, not amber, matching the resolved zero-today state (Codex finding C, issue #1257)", () => {
+      // A pool with trip history but (once the clock resolves) no trip today
+      // renders the neutral pending placeholder pre-mount. It must NOT flash
+      // amber→slate on resolve: color it neutral up front. A healthy pool's
+      // panel has no amber anywhere, so asserting no amber pins the fix.
+      const oldTrip: BreakerTripEvent = {
+        id: "old-trip",
+        blockTimestamp: "1700001000", // long ago — not today
+        txHash: "0xoldtrip",
+        medianRateAtTrip: "1230000000000000000000000",
+        referenceAtTrip: "1171560280196965000000000",
+        thresholdAtTrip: "40000000000000000000000",
+        breaker: {
+          address: "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9",
+          kind: "MEDIAN_DELTA",
+        },
+      };
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: [oldTrip],
+        },
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).toContain("today"); // pending placeholder slot reserved
+      expect(html).not.toContain("1 today"); // it's the placeholder, not a count
+      expect(html).not.toContain("text-amber-300"); // neutral, no color flash
+    });
   });
 
   describe("SSR breaker-config fallback (issue #1237)", () => {

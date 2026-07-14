@@ -387,6 +387,87 @@ describe("MarketHoursPill", () => {
         document.body.removeChild(container);
       }
     });
+
+    it("keeps the countdown-slot suffix stable across hydration for a weekday breaker closure — no suffix drop / pill-width shift (Codex finding, issue #1257)", async () => {
+      // Weekday on-chain closure (governance/holiday): breakerClosed is true
+      // but isWeekend(now) is false, so post-clock there is no scheduled
+      // reopen countdown. Before the fix the pre-mount render reserved "· —"
+      // but the resolved state DROPPED the suffix, shifting the pill width.
+      // reserve == keep now: the neutral "· —" stays across hydration.
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [
+            marketHoursConfig({ status: "TRIPPED", tradingMode: 3 }),
+          ],
+          BreakerTripEvent: [],
+        },
+      });
+      freezeNow("2026-04-29T12:00:00Z"); // Wednesday noon — closed, NOT a weekend
+
+      const serverHtml = renderToString(<MarketHoursPill pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration: closed with the neutral "·" suffix reserved.
+      expect(container.innerHTML).toContain("Market Closed");
+      expect(container.innerHTML).toContain("·");
+      expect(container.innerHTML).not.toContain("until open");
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        await act(async () => {
+          root = hydrateRoot(container, <MarketHoursPill pool={fxPool()} />);
+          await Promise.resolve();
+        });
+        expect(consoleError).not.toHaveBeenCalled();
+        // Post-hydration: still a weekday breaker closure (not a weekend), so
+        // the suffix slot is KEPT — the "·" segment does not drop and no
+        // "until open" countdown appears, so the pill width is unchanged.
+        expect(container.innerHTML).toContain("Market Closed");
+        expect(container.innerHTML).toContain("·");
+        expect(container.innerHTML).not.toContain("until open");
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
+  });
+
+  describe("stale market-hours refresh (Codex finding, issue #1257)", () => {
+    it("discloses a failed revalidation while showing the last-known pill instead of presenting it as fresh", () => {
+      // Shares the POOL_BREAKER_CONFIG SWR key with BreakerPanel: a failed
+      // revalidation keeps the last-known pill on screen while SWR sets
+      // `error`. Mirror the breaker panel's stale-refresh affordance.
+      freezeNow("2026-04-29T12:00:00Z"); // Wednesday — market open
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [marketHoursConfig()], BreakerTripEvent: [] },
+        isLoading: false,
+        error: new Error("Hasura 503"),
+      });
+      const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+      expect(html).toContain("Market"); // last-known pill still renders
+      expect(html).toContain("Market hours refresh failed");
+      expect(html).toContain("showing the last confirmed state");
+      expect(html).toContain("Hasura 503");
+    });
+
+    it("does not render the stale-refresh affordance on the healthy (no-error) path", () => {
+      freezeNow("2026-04-29T12:00:00Z");
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [marketHoursConfig()], BreakerTripEvent: [] },
+        isLoading: false,
+      });
+      const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+      expect(html).not.toContain("refresh failed");
+    });
   });
 
   describe("SSR breaker-config fallback (issue #1237)", () => {
