@@ -340,6 +340,53 @@ describe("MarketHoursPill", () => {
         document.body.removeChild(container);
       }
     });
+
+    it("hydrates a breaker-closed pill during a real weekend closure with a neutral countdown placeholder, then settles to the real reopen countdown (Codex finding, issue #1257)", async () => {
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [
+            marketHoursConfig({ status: "TRIPPED", tradingMode: 3 }),
+          ],
+          BreakerTripEvent: [],
+        },
+      });
+      freezeNow("2026-05-02T12:00:00Z"); // Saturday noon — really closed
+
+      const serverHtml = renderToString(<MarketHoursPill pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration: `breakerClosed` is known from the SSR-prefetched
+      // fallback data (no clock needed), so the pill already shows "Market
+      // Closed" — but the reopen ETA needs the clock, so it renders the
+      // neutral "—" placeholder, not the real countdown and not omitted
+      // (omitting it would shift the pill's width once the real countdown
+      // appears post-mount, reintroducing the issue #1222 wrap shift).
+      expect(container.innerHTML).toContain("Market Closed");
+      expect(container.innerHTML).not.toContain("until open");
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        await act(async () => {
+          root = hydrateRoot(container, <MarketHoursPill pool={fxPool()} />);
+          await Promise.resolve();
+        });
+        expect(consoleError).not.toHaveBeenCalled();
+        expect(container.innerHTML).toContain("Market Closed");
+        expect(container.innerHTML).toContain("until open");
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
   });
 
   describe("SSR breaker-config fallback (issue #1237)", () => {

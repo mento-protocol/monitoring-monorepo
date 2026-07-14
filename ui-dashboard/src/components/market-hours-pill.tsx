@@ -79,6 +79,18 @@ type MarketHoursState = {
   calendarClosed: boolean;
   imminentClose: boolean;
   secondsUntilTransition: number;
+  // Deterministic on-chain closure (`breakerClosed`, SSR-prefetched fallback
+  // data — no clock involved) with the clock-dependent `calendarClosed` still
+  // unresolved (`now === null`, pre-mount). Distinct from "not a calendar
+  // closure at all": we know the pill IS closed, we just don't yet know if
+  // there's a reopen countdown to show for it.
+  countdownPending: boolean;
+  // Whether the closed pill's reopen-countdown segment should render at all,
+  // and its text — derived here rather than inline in the JSX so the render
+  // branch stays a plain boolean check (keeps MarketHoursPill's cyclomatic
+  // complexity under the repo's ESLint budget).
+  showCountdown: boolean;
+  countdownText: string;
 };
 
 /** Derives the open/closed/countdown state from a (possibly not-yet-known)
@@ -86,7 +98,9 @@ type MarketHoursState = {
  * server render or the client's hydration render (see useNowSeconds) —
  * returns the neutral "assume open, no countdown" state so that render can't
  * disagree with the real state computed here once `now` resolves after
- * mount (issue #1237). */
+ * mount (issue #1237). `open`/`countdownPending` don't need the clock at all
+ * when `breakerClosed` is true (it's SSR-prefetched fallback data, identical
+ * on the server and hydration renders) — only the reopen ETA does. */
 function deriveMarketHoursState(
   now: Date | null,
   breakerClosed: boolean,
@@ -103,7 +117,20 @@ function deriveMarketHoursState(
       : 0;
   const imminentClose =
     now !== null && secondsUntilTransition / 3600 < COUNTDOWN_THRESHOLD_HOURS;
-  return { open, calendarClosed, imminentClose, secondsUntilTransition };
+  const countdownPending = breakerClosed && now === null;
+  const showCountdown = calendarClosed || countdownPending;
+  const countdownText = countdownPending
+    ? "—"
+    : `${formatHoursMinutes(secondsUntilTransition)} until open`;
+  return {
+    open,
+    calendarClosed,
+    imminentClose,
+    secondsUntilTransition,
+    countdownPending,
+    showCountdown,
+    countdownText,
+  };
 }
 
 /**
@@ -170,8 +197,13 @@ export function MarketHoursPill({
   if (!enabled) return null;
 
   const breakerClosed = isBreakerClosure(marketHoursConfig);
-  const { open, calendarClosed, imminentClose, secondsUntilTransition } =
-    deriveMarketHoursState(now, breakerClosed);
+  const {
+    open,
+    imminentClose,
+    secondsUntilTransition,
+    showCountdown,
+    countdownText,
+  } = deriveMarketHoursState(now, breakerClosed);
 
   const tooltip =
     "FX pools close on weekends from Fri 21:00 UTC to Sun 23:00 UTC, " +
@@ -183,18 +215,21 @@ export function MarketHoursPill({
   if (!open) {
     // Calendar closure — countdown to next open. Breaker-driven weekday
     // closures do not have a known reopen time in the weekly FX calendar.
+    // `showCountdown`/`countdownText` (see deriveMarketHoursState) reserve
+    // the same slot with a state-neutral "—" pre-mount instead of omitting
+    // it outright — otherwise the countdown appearing right after mount
+    // (once `calendarClosed` resolves true) reintroduces the pill-width/wrap
+    // shift this PR removed for weekend-closed FX pools.
     return (
       <span
         className="inline-flex items-center gap-1 rounded bg-slate-800/80 px-1.5 py-0.5 text-xs cursor-help"
         title={tooltip}
       >
         <span className="text-slate-300 font-medium">Market Closed</span>
-        {calendarClosed && (
+        {showCountdown && (
           <>
             <span className="text-slate-500">·</span>
-            <span className="font-mono text-slate-300">
-              {formatHoursMinutes(secondsUntilTransition)} until open
-            </span>
+            <span className="font-mono text-slate-300">{countdownText}</span>
           </>
         )}
         <span className="sr-only"> — {tooltip}</span>

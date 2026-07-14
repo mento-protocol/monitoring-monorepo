@@ -260,11 +260,9 @@ export function PoolHeader({
       {isVirtual ? (
         <>
           <div className="my-5 h-px bg-slate-800" />
-          {/* V2ExchangePanel/PoolLifecyclePanel keep a fixed local loading
-              skeleton that doesn't match their real loaded height for
-              VirtualPools (issue #1222's header-height-stability criterion
-              was fixed for FPMM pools' BreakerPanel/MarketHoursPill only).
-              Tracked as a follow-up in issue #1238. */}
+          {/* V2ExchangePanel/PoolLifecyclePanel now size their own loading
+              skeletons to their loaded content for VirtualPools too — issue
+              #1222's header-height-stability fix, extended by #1238/#1258. */}
           <V2ExchangePanel
             pool={pool}
             network={network}

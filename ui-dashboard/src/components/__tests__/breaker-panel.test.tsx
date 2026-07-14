@@ -6,6 +6,7 @@ import { hydrateRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { BreakerPanel } from "@/components/breaker-panel";
 import type { Pool, BreakerConfig, BreakerTripEvent } from "@/lib/types";
+import { formatTimestamp, timestampOrUtc } from "@/lib/format";
 
 const mockUseGQL = vi.fn();
 vi.mock("@/lib/graphql", () => ({
@@ -450,11 +451,21 @@ describe("BreakerPanel", () => {
       const container = document.createElement("div");
       container.innerHTML = serverHtml;
       document.body.appendChild(container);
-      // Pre-hydration, the server payload shows the deterministic
-      // cooldown-pending placeholder rather than an exact duration read from
-      // the server's wall clock.
-      expect(container.innerHTML).toContain("cooldown active");
+      // Pre-hydration, the server payload shows the state-neutral cooldown
+      // placeholder ("—", never "active" or "elapsed" — issue #1257) rather
+      // than an exact duration read from the server's wall clock.
+      expect(container.innerHTML).not.toContain("cooldown active");
+      expect(container.innerHTML).not.toContain("elapsed");
       expect(container.innerHTML).not.toContain("left");
+      // Pre-hydration last-trip title is the deterministic UTC-safe value,
+      // not the locale-formatted one — a UTC server and the viewer's local
+      // tz/locale could otherwise render different `title` text and trip a
+      // hydration mismatch (issue #1257 Codex finding).
+      const expectedUtcTitle = timestampOrUtc(
+        trippedConfig.lastTripAt ?? "",
+        null,
+      );
+      expect(container.innerHTML).toContain(`title="${expectedUtcTitle}"`);
 
       const consoleError = vi
         .spyOn(console, "error")
@@ -467,9 +478,17 @@ describe("BreakerPanel", () => {
         expect(consoleError).not.toHaveBeenCalled();
         // Immediately post-hydration the ticker's first 1s tick hasn't fired
         // yet — `now` is set only from inside the interval callback (never
-        // synchronously in the effect body), so this still renders the
-        // deterministic placeholder rather than a guessed duration.
-        expect(container.innerHTML).toContain("cooldown active");
+        // synchronously in the effect body), so the cooldown still renders
+        // the neutral placeholder rather than a guessed duration/state.
+        expect(container.innerHTML).not.toContain("elapsed");
+        expect(container.innerHTML).not.toContain("left");
+        // The last-trip title, by contrast, is driven by `useNowSeconds()`
+        // (`useSyncExternalStore`), which resolves synchronously on mount —
+        // no tick needed — so it's already the real locale-formatted value.
+        const expectedLocalTitle = formatTimestamp(
+          trippedConfig.lastTripAt ?? "",
+        );
+        expect(container.innerHTML).toContain(`title="${expectedLocalTitle}"`);
 
         act(() => {
           vi.advanceTimersByTime(1000);
@@ -477,6 +496,69 @@ describe("BreakerPanel", () => {
         // After the first tick, the countdown renders its real duration.
         expect(container.innerHTML).toContain("left");
         expect(container.innerHTML).not.toContain("cooldown active");
+        expect(container.innerHTML).not.toContain("elapsed");
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
+
+    it("hydrates a TRIPPED breaker whose cooldown already elapsed as the neutral placeholder — not a false 'active' or premature 'elapsed' state — then resolves to elapsed after the first tick (Cursor finding, issue #1257)", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-13T08:00:00Z"));
+      const elapsedConfig = {
+        ...trippedMedianConfig(),
+        // Cooldown ended 5 minutes before the frozen "now" — the breaker is
+        // actually awaiting reset (rate-in-band check), NOT still cooling
+        // down. `cooldownRemainingSecFrom` can't tell this apart from a
+        // still-active cooldown until `now` resolves post-mount.
+        cooldownEndsAt: String(Math.floor(Date.now() / 1000) - 300),
+      };
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [elapsedConfig], BreakerTripEvent: noTrips },
+        isLoading: false,
+      });
+
+      const serverHtml = renderToString(<BreakerPanel pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration: `now` is unset, so the render must not assert either
+      // state for a cooldown that's actually already elapsed — only the
+      // neutral placeholder.
+      expect(container.innerHTML).not.toContain("cooldown active");
+      expect(container.innerHTML).not.toContain("elapsed");
+      expect(container.innerHTML).not.toContain("left");
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        act(() => {
+          root = hydrateRoot(container, <BreakerPanel pool={fxPool()} />);
+        });
+        expect(consoleError).not.toHaveBeenCalled();
+        // Still pending immediately post-hydration — the cooldown `now`
+        // only updates from inside the 1s interval callback.
+        expect(container.innerHTML).not.toContain("elapsed");
+        expect(container.innerHTML).not.toContain("left");
+
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        // After the first tick, the reset-path banner correctly resolves to
+        // "elapsed" (✓) — the bug this test pins: it must not render "✗ …
+        // cooldown active" for a cooldown that has actually already
+        // elapsed.
+        expect(container.innerHTML).toContain("elapsed");
+        expect(container.innerHTML).not.toContain("cooldown active");
+        expect(container.innerHTML).not.toContain("left");
       } finally {
         consoleError.mockRestore();
         if (root) {
