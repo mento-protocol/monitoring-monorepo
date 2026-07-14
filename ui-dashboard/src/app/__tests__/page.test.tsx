@@ -58,6 +58,10 @@ import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { useGQL } from "@/lib/graphql";
 import * as volumeModule from "@/lib/volume";
 import { buildSnapshotWindows } from "@/lib/volume";
+import {
+  VOLUME_TODAY_TRADERS,
+  VOLUME_WINDOW_TRADERS_LATEST,
+} from "@/lib/queries/volume";
 // Import from page-client (not page.tsx): page.tsx is now an async Server
 // Component that awaits fetchAllNetworks() and hands the result through
 // SWRConfig's fallback. renderToStaticMarkup can't execute async components,
@@ -847,6 +851,24 @@ describe("GlobalPage — Volume chart wiring", () => {
 // snapshot can't satisfy it because naïve summing double-counts.
 
 describe("GlobalPage — Traders tile", () => {
+  it("polls both trader queries every 15 minutes", () => {
+    render([makeNetworkData({ pools: [], fees: null })]);
+
+    const optionsFor = (query: string) =>
+      vi
+        .mocked(useGQL)
+        .mock.calls.find(([calledQuery]) => calledQuery === query)?.[2];
+
+    expect(optionsFor(VOLUME_WINDOW_TRADERS_LATEST)).toMatchObject({
+      refreshInterval: 15 * 60_000,
+      timeoutMs: 30_000,
+    });
+    expect(optionsFor(VOLUME_TODAY_TRADERS)).toMatchObject({
+      refreshInterval: 15 * 60_000,
+      timeoutMs: 30_000,
+    });
+  });
+
   it("counts cross-chain overlapping addresses once (Set-deduplicates)", () => {
     // Two chains each contribute 3 traders with 2 overlaps (case-insensitive).
     // Expected unique count = |{A, B, C, D}| = 4. `snapshotDay` set to

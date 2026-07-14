@@ -550,7 +550,7 @@ function TradersTile({
     { todayMidnight, isProtocolActorIn: [false] },
     {
       schema: VolumeTodayTradersSchema,
-      refreshInterval: 5 * 60_000,
+      refreshInterval: 15 * 60_000,
       timeoutMs: 30_000,
     },
   );
@@ -687,12 +687,12 @@ function useVolumeWindowTradersSnapshot() {
       schema: VolumeWindowTradersLatestSchema,
       // The "all" window snapshot only rolls over at the per-chain
       // UTC-midnight heartbeat, so the default 30s polling cadence is wildly
-      // over-cadenced for this tile. 5min keeps a fresh-after-rollover read
+      // over-cadenced for this tile. 15min keeps a fresh-after-rollover read
       // without burning quota for a multi-KB address list on every poll.
-      refreshInterval: 5 * 60_000,
+      refreshInterval: 15 * 60_000,
       // Required by docs/pr-checklists/swr-polling-hasura.md §1 — without a
       // request-level timeout, a wedged TCP connection would hold the poll
-      // open for the full 5min interval.
+      // open for the full 15min interval.
       timeoutMs: 30_000,
     },
   );
