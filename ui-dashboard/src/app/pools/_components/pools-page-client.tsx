@@ -11,6 +11,7 @@ import {
   type NetworkData,
 } from "@/hooks/use-all-networks-data";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
+import { DEFAULT_SWAPS_LIMIT } from "@/lib/constants";
 import { RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
 import {
   truncateAddress,
@@ -35,9 +36,11 @@ import {
 } from "@/lib/networks";
 import type { Pool, SwapEvent } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
-import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
+import { EmptyBox, ErrorBox, Tile } from "@/components/feedback";
+import { PoolsTableSkeleton } from "@/components/pools-table-skeleton";
 import { LimitSelect } from "@/components/controls";
 import { SenderCell } from "@/components/sender-cell";
+import { SwapsTableSkeleton } from "./pools-skeletons";
 
 export function PoolsPageClient({
   initialNetworkData,
@@ -84,8 +87,12 @@ function PoolsContent({
   // destructuring breaks runtime, so calls stay member-form.
   // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
   const poolFilter = searchParams.get("pool") ?? "";
-  // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
-  const limit = Math.max(1, Number(searchParams.get("limit") ?? "25") || 25);
+  const limit = Math.max(
+    1,
+    // react-doctor-disable-next-line react-doctor/react-compiler-destructure-method
+    Number(searchParams.get("limit") ?? String(DEFAULT_SWAPS_LIMIT)) ||
+      DEFAULT_SWAPS_LIMIT,
+  );
 
   const [filterInput, setFilterInput] = useState(poolFilter);
   const [filterError, setFilterError] = useState("");
@@ -222,7 +229,11 @@ function PoolsContent({
           Pools
         </h2>
         {showInitialSkeleton(poolsLoading, networkData.length) ? (
-          <Skeleton rows={3} />
+          // Matches the real GlobalPoolsTable's 45px header / 58px row
+          // rhythm (`PoolsTableSkeleton`, `@/components/pools-table-skeleton`)
+          // — same shape this route's own `loading.tsx` and the homepage
+          // stand-ins reserve, not the shared TableSkeleton's generic 36/44.
+          <PoolsTableSkeleton />
         ) : failedNetworks.length === 0 && entries.length === 0 ? (
           <EmptyBox message="No pools found across any chain." />
         ) : (
@@ -301,7 +312,14 @@ function PoolsContent({
         {swapsErr ? (
           <ErrorBox message={`Failed to load swaps: ${swapsErr.message}`} />
         ) : swapsLoading ? (
-          <Skeleton rows={5} />
+          // `limit` (not a hardcoded row count) so the skeleton always
+          // matches the selected page size — real SwapTable renders exactly
+          // `limit` rows, header 45px + rows 37px (`SwapsTableSkeleton`'s
+          // locally measured rhythm — see pools-skeletons.tsx; the shared
+          // TableSkeleton's 36/44 is calibrated for other tables). Clamped
+          // to LimitSelect's largest option (100) so a crafted `?limit=`
+          // value in the URL can't blow up the placeholder row count.
+          <SwapsTableSkeleton rows={Math.min(limit, 100)} />
         ) : swaps.length === 0 ? (
           <EmptyBox
             message={

@@ -5,10 +5,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import RootLoading from "@/app/loading";
+import HomeLoading from "@/app/(home)/loading";
+import PoolsLoading from "@/app/pools/loading";
 import PoolDetailLoading from "@/app/pool/[poolId]/loading";
 import AddressBookLoading from "@/app/address-book/loading";
 import VolumeLoading from "@/app/volume/loading";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
+import { POOLS_TABLE_SKELETON_ROWS } from "@/components/pools-table-skeleton";
 
 // Each route-level loading UI must expose exactly one aria-live region so
 // screen readers don't announce nested status regions redundantly. Keeping
@@ -41,10 +44,153 @@ function countLiveRegions(): number {
 }
 
 describe("route-level loading UIs", () => {
+  // The shared root boundary stays generic: the homepage-shaped skeleton
+  // lives in `(home)/loading.tsx` (tested below), so `app/loading.tsx` renders
+  // the plain PageShellSkeleton every non-homepage route inherits. This pins
+  // it against accidentally re-homepage-shaping the shared boundary.
   it("RootLoading renders exactly one polite live region (PageShellSkeleton wrapper)", () => {
     render(<RootLoading />);
     const regions = container.querySelectorAll('[aria-live="polite"]');
     expect(regions).toHaveLength(1);
+  });
+
+  // The homepage-specific marker is the two-chart `lg:grid-cols-2` row, which
+  // the generic PageShellSkeleton never renders (its tile grid is
+  // `lg:grid-cols-4`). Asserting the chart row is absent proves the shared
+  // boundary didn't inherit the homepage shape.
+  it("RootLoading stays generic — no homepage chart-grid shape leaks to shared boundary", () => {
+    render(<RootLoading />);
+    expect(container.querySelector(".lg\\:grid-cols-2")).toBeNull();
+  });
+
+  it("HomeLoading renders exactly one polite live region", () => {
+    render(<HomeLoading />);
+    const regions = container.querySelectorAll('[aria-live="polite"]');
+    expect(regions).toHaveLength(1);
+  });
+
+  it("HomeLoading nests only presentational primitives (no nested role=status under the page live region)", () => {
+    render(<HomeLoading />);
+    const wrapper = container.querySelector('[aria-live="polite"]')!;
+    expect(wrapper.querySelectorAll('[role="status"]')).toHaveLength(0);
+  });
+
+  it("HomeLoading reserves two chart cards (TVL + Volume) — absent entirely from the old generic PageShellSkeleton", () => {
+    render(<HomeLoading />);
+    const chartsRow = container.querySelector(".lg\\:grid-cols-2");
+    expect(chartsRow).not.toBeNull();
+    expect(chartsRow!.children).toHaveLength(2);
+
+    // Chart plot areas reserve ROW_CHART_HEIGHT_PX, matched on the shared
+    // constant so a future height change can't silently strand this at a
+    // stale hardcoded value.
+    const plotAreas = [...container.querySelectorAll("[style]")].filter(
+      (el) => (el as HTMLElement).style.height === `${ROW_CHART_HEIGHT_PX}px`,
+    );
+    expect(plotAreas).toHaveLength(2);
+
+    // Both homepage charts (TvlOverTimeChart, VolumeOverTimeChart) omit
+    // `reserveDeltaRow`, so both default to `true` — unlike the pool-detail
+    // volume card, both skeleton cards reserve the delta placeholder.
+    Array.from(chartsRow!.children).forEach((card) => {
+      expect((card as HTMLElement).querySelector(".h-5.w-32")).not.toBeNull();
+    });
+  });
+
+  it("HomeLoading reserves a 4-tile KPI row (Swap Fees / LPs / Swaps / Traders)", () => {
+    render(<HomeLoading />);
+    const kpiRow = container.querySelector(".lg\\:grid-cols-4");
+    expect(kpiRow).not.toBeNull();
+    const tiles = Array.from(kpiRow!.children).filter(
+      (child) => child.tagName === "DIV",
+    );
+    expect(tiles).toHaveLength(4);
+  });
+
+  // Swap Fees (BreakdownTile) is the tallest KPI cell — label + value +
+  // 24h/7d/30d subrow + subtitle line, ~140px — and CSS Grid's default
+  // row-stretch means it (not the shorter LPs/Swaps/Traders `Tile` shape)
+  // sets the row's real height. Every placeholder must mirror that taller
+  // shape, not a compact generic tile.
+  it("HomeLoading KPI tiles mirror BreakdownTile's geometry (subrow + subtitle line)", () => {
+    render(<HomeLoading />);
+    const kpiRow = container.querySelector(".lg\\:grid-cols-4")!;
+    Array.from(kpiRow.children).forEach((tile) => {
+      const subrow = tile.querySelector(".mt-1\\.5");
+      expect(subrow).not.toBeNull();
+      expect(subrow!.children).toHaveLength(3);
+      expect(tile.querySelector(".mt-2")).not.toBeNull();
+    });
+  });
+
+  it("HomeLoading reserves a table-shaped pools placeholder matching PoolsTableSkeleton (header 45px, rows 58px)", () => {
+    render(<HomeLoading />);
+    const table = container.querySelector(".overflow-hidden.rounded-lg");
+    expect(table).not.toBeNull();
+    const [header, body] = Array.from(table!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(header.style.height).toBe("45px");
+    expect(body.children).toHaveLength(POOLS_TABLE_SKELETON_ROWS);
+    Array.from(body.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("58px");
+    });
+  });
+
+  it("PoolsLoading renders exactly one polite live region", () => {
+    render(<PoolsLoading />);
+    expect(countLiveRegions()).toBe(1);
+  });
+
+  it("PoolsLoading nests only presentational primitives (no nested role=status under the page live region)", () => {
+    render(<PoolsLoading />);
+    const wrapper = container.querySelector('[aria-live="polite"]')!;
+    expect(wrapper.querySelectorAll('[role="status"]')).toHaveLength(0);
+  });
+
+  it("PoolsLoading reserves a 3-tile KPI row (Pools / Showing / Latest Swap Block)", () => {
+    render(<PoolsLoading />);
+    const kpiRow = container.querySelector(".sm\\:grid-cols-3");
+    expect(kpiRow).not.toBeNull();
+    expect(kpiRow!.children).toHaveLength(3);
+  });
+
+  it("PoolsLoading reserves table-shaped pools (header 45px, rows 58px) and Recent Swaps (header 45px, rows 37px) sections", () => {
+    render(<PoolsLoading />);
+    const tables = container.querySelectorAll(".overflow-hidden.rounded-lg");
+    expect(tables).toHaveLength(2);
+
+    const [poolsTable, swapsTable] = Array.from(tables) as HTMLElement[];
+
+    // Pools table: local rhythm (45px header, 58px rows) — the pools
+    // table's real rows run taller than the shared TableSkeleton's 44px
+    // because TvlCell stacks a value line + WoW sub-line. 27 rows
+    // (POOLS_TABLE_SKELETON_ROWS) approximates the live pool count.
+    const [poolsHeader, poolsBody] = Array.from(poolsTable!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(poolsHeader.style.height).toBe("45px");
+    expect(poolsBody.children).toHaveLength(POOLS_TABLE_SKELETON_ROWS);
+    Array.from(poolsBody.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("58px");
+    });
+
+    // Recent Swaps table: local rhythm (45px header, 37px rows) — shorter
+    // than the shared TableSkeleton's 44px since every SwapTable cell is
+    // single-line. Reserves the default page size (25) — the route loading
+    // UI can't read the `?limit=` URL param, unlike `pools-page-client.tsx`'s
+    // own swaps-loading skeleton, which sizes to the live `limit` value.
+    const [swapsHeader, swapsBody] = Array.from(swapsTable!.children) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(swapsHeader.style.height).toBe("45px");
+    expect(swapsBody.children).toHaveLength(25);
+    Array.from(swapsBody.children).forEach((row) => {
+      expect((row as HTMLElement).style.height).toBe("37px");
+    });
   });
 
   it("PoolDetailLoading renders exactly one polite live region (on TableSkeleton)", () => {

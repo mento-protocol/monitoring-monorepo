@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDescription } from "../page";
+import { buildDescription } from "../(home)/page";
 
 const baseData: Parameters<typeof buildDescription>[0] = {
   chains: ["Celo", "Monad"],

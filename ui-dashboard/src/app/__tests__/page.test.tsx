@@ -17,6 +17,7 @@ import {
   makeSnapshot,
   makeTvlPool,
 } from "@/test-utils/network-fixtures";
+import { POOLS_TABLE_SKELETON_ROWS } from "@/components/pools-table-skeleton";
 
 // Mock hooks that have side effects / SWR dependency
 // Keep the real `showInitialSkeleton` (a pure helper) and mock only the hook —
@@ -125,6 +126,23 @@ describe("GlobalPage — loading state", () => {
     const html = render([], true);
     // Should have multiple "…" placeholders
     expect(html.split("…").length - 1).toBeGreaterThanOrEqual(4);
+  });
+
+  // The "All Pools" degraded-path skeleton must reserve the same table
+  // geometry `GlobalPoolsTable` lands at (header 45px, rows 58px — the
+  // pools-table-measured rhythm `PoolsTableSkeleton` reserves, matching
+  // /pools's own skeleton) instead of the shared `TableSkeleton`'s generic
+  // 36/44 rhythm.
+  // `renderToStaticMarkup` serializes inline `style={{ height }}` as
+  // `style="height:Npx"`, so counting those substrings in the SSR string is
+  // a cheap structural proxy for "N rows at the right height" without a DOM.
+  it("All Pools skeleton is table-shaped (header + POOLS_TABLE_SKELETON_ROWS rows) while loading", () => {
+    const html = render([], true);
+    const rowMatches = html.split('style="height:58px"').length - 1;
+    const headerMatches = html.split('style="height:45px"').length - 1;
+    expect(rowMatches).toBe(POOLS_TABLE_SKELETON_ROWS);
+    expect(headerMatches).toBe(1);
+    expect(html).not.toContain('data-testid="global-pools-table"');
   });
 });
 

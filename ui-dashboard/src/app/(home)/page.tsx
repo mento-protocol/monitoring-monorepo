@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import GlobalPage from "./page-client";
+import GlobalPage from "../page-client";
 import { fetchHomepageOgData } from "@/lib/homepage-og";
 import { fetchInitialNetworkData } from "@/lib/network-fetcher/server-cache";
 import { formatUSD } from "@/lib/format";
