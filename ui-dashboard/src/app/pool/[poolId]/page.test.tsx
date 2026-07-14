@@ -667,17 +667,17 @@ describe("Pool detail counter-backed pagination", () => {
   );
 
   it.each(counterPaginationCases)(
-    "caps $noun search at the truthful 2,000-row window",
+    "caps $noun search at the truthful 1,000-row Hasura window",
     ({ tab, counterKey, searchParam, pageQuery, noun }) => {
       poolForTest = { ...basePool, [counterKey]: 2_501 };
       const html = renderWithParams({ tab, [searchParam]: "treasury" });
 
       expect(useGQLMock).toHaveBeenCalledWith(
         pageQuery,
-        expect.objectContaining({ offset: 0, limit: 2_000 }),
+        expect.objectContaining({ offset: 0, limit: 1_000 }),
       );
       expect(html).toContain(
-        `Search covers the most recent 2,000 of 2,501 ${noun} only.`,
+        `Search covers the most recent 1,000 of 2,501 ${noun} only.`,
       );
       expect(html).not.toContain("page 1 of");
     },
@@ -697,6 +697,19 @@ describe("Pool detail counter-backed pagination", () => {
         `Search checks up to the most recent 500 ${noun} while the total is loading.`,
       );
       expect(html).not.toContain("0 total");
+    },
+  );
+
+  it.each(counterPaginationCases)(
+    "does not bootstrap $noun search when the authoritative counter is zero",
+    ({ tab, counterKey, searchParam, pageQuery }) => {
+      poolForTest = { ...basePool, [counterKey]: 0 };
+      renderWithParams({ tab, [searchParam]: "treasury" });
+
+      expect(useGQLMock).toHaveBeenCalledWith(
+        pageQuery,
+        expect.objectContaining({ offset: 0, limit: 0 }),
+      );
     },
   );
 

@@ -11,11 +11,7 @@ import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
 import { TagsCell } from "@/components/tags-cell";
 import { TxHashCell } from "@/components/tx-hash-cell";
-import {
-  ENVIO_MAX_ROWS,
-  SEARCH_BOOTSTRAP_LIMIT,
-  SEARCH_MAX_LIMIT,
-} from "@/lib/constants";
+import { ENVIO_MAX_ROWS, SEARCH_BOOTSTRAP_LIMIT } from "@/lib/constants";
 import {
   formatBlock,
   formatBoundaryBps,
@@ -210,7 +206,7 @@ export function RebalancesTab({
   const isSearching = query.length > 0;
   const searchFetchLimit = Math.min(
     counterTotal ?? SEARCH_BOOTSTRAP_LIMIT,
-    SEARCH_MAX_LIMIT,
+    ENVIO_MAX_ROWS,
   );
   const fetchLimit = isSearching ? searchFetchLimit : limit;
   const fetchOffset = isSearching ? 0 : (page - 1) * limit;
@@ -448,9 +444,9 @@ export function RebalancesTab({
       )}
       {isSearching &&
         counterTotal !== undefined &&
-        counterTotal > SEARCH_MAX_LIMIT && (
+        counterTotal > ENVIO_MAX_ROWS && (
           <p className="px-1 pt-1 text-xs text-amber-400">
-            Search covers the most recent {SEARCH_MAX_LIMIT.toLocaleString()} of{" "}
+            Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()} of{" "}
             {counterTotal.toLocaleString()} rebalances only.
           </p>
         )}
