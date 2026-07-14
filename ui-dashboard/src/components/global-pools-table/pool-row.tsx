@@ -185,6 +185,7 @@ function NameCell({
         <ChainIcon network={network} />
         <Link
           href={buildPoolDetailHref(pool.id)}
+          prefetch={false}
           className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
           onFocus={onPrefetch}
           onMouseEnter={onPrefetch}
