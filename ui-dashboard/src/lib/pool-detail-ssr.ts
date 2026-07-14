@@ -29,7 +29,12 @@ import {
   type PoolVpLifecycleDeprecationExtResponse,
   type PoolVpOracleFreshnessExtResponse,
 } from "@/lib/queries/pool-detail";
-import { NETWORKS, configuredNetworkIdForChainId } from "@/lib/networks";
+import {
+  NETWORKS,
+  NETWORK_IDS,
+  configuredNetworkIdForChainId,
+  isConfiguredNetworkId,
+} from "@/lib/networks";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { isVirtualPool, type Pool } from "@/lib/types";
 
@@ -223,13 +228,39 @@ async function fetchPoolDetailUncached(
   };
 }
 
+// Vercel's Data Cache SURVIVES deployments within an environment, and
+// `unstable_cache` keys only on these explicit parts + the fn args (chainId,
+// id) — not on env-derived provenance. This PR added operator-facing
+// `breakerConfig` to the payload, so an env-only redeploy or a Hasura endpoint
+// switch for the same chain could otherwise serve breaker / market-hours rows
+// fetched from the PREVIOUS endpoint on first paint (wrong halted / market-hours
+// state until client revalidation). Salt the key with the deployment id AND the
+// configured Hasura endpoints, mirroring the canonical bounded/salted cache in
+// lib/network-fetcher/server-cache.ts (Refs #1212 — this SSR cache is one of
+// its named salt targets). The `fetchedAt` age gate above bounds staleness, not
+// provenance, so it can't protect a recent wrong-endpoint entry.
+//  - Deployment id (unique per deploy, INCLUDING env-only redeploys that keep
+//    the git commit — an env change repointing a Hasura URL only takes effect
+//    via a redeploy; commit SHA is the fallback where the id isn't exposed).
+//  - Configured network ids + their Hasura endpoints (covers local dev, where
+//    no deployment id exists but `.next/cache` persists across restarts).
+const CACHE_KEY_PARTS = [
+  "pool-detail-ssr",
+  process.env.VERCEL_DEPLOYMENT_ID ??
+    process.env.VERCEL_GIT_COMMIT_SHA ??
+    "dev",
+  NETWORK_IDS.flatMap((id) =>
+    isConfiguredNetworkId(id) ? [`${id}=${NETWORKS[id].hasuraUrl}`] : [],
+  ).join("|"),
+];
+
 // 60s revalidate matches the OG cache and the client polling cadence: the fallback
 // paints instantly, then the client's useGQL revalidates on mount for fresh data.
 // The raw response is plain JSON (no Map/Set), so unstable_cache serialization is
 // lossless here.
 const fetchPoolDetailCached = unstable_cache(
   fetchPoolDetailUncached,
-  ["pool-detail-ssr"],
+  CACHE_KEY_PARTS,
   { revalidate: 60, tags: ["pool-detail-ssr"] },
 );
 
