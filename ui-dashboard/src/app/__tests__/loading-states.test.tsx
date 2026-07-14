@@ -11,7 +11,7 @@ import PoolDetailLoading from "@/app/pool/[poolId]/loading";
 import AddressBookLoading from "@/app/address-book/loading";
 import VolumeLoading from "@/app/volume/loading";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
-import { POOLS_TABLE_SKELETON_ROWS } from "@/app/pools/_components/pools-skeletons";
+import { POOLS_TABLE_SKELETON_ROWS } from "@/components/pools-table-skeleton";
 
 // Each route-level loading UI must expose exactly one aria-live region so
 // screen readers don't announce nested status regions redundantly. Keeping
@@ -123,7 +123,7 @@ describe("route-level loading UIs", () => {
     });
   });
 
-  it("HomeLoading reserves a table-shaped pools placeholder (header ~36px, rows ~44px)", () => {
+  it("HomeLoading reserves a table-shaped pools placeholder matching PoolsTableSkeleton (header 45px, rows 58px)", () => {
     render(<HomeLoading />);
     const table = container.querySelector(".overflow-hidden.rounded-lg");
     expect(table).not.toBeNull();
@@ -131,10 +131,10 @@ describe("route-level loading UIs", () => {
       HTMLElement,
       HTMLElement,
     ];
-    expect(header.style.height).toBe("36px");
-    expect(body.children).toHaveLength(10);
+    expect(header.style.height).toBe("45px");
+    expect(body.children).toHaveLength(POOLS_TABLE_SKELETON_ROWS);
     Array.from(body.children).forEach((row) => {
-      expect((row as HTMLElement).style.height).toBe("44px");
+      expect((row as HTMLElement).style.height).toBe("58px");
     });
   });
 

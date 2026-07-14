@@ -1,8 +1,6 @@
 import { DEFAULT_SWAPS_LIMIT } from "@/lib/constants";
-import {
-  PoolsTableSkeleton,
-  SwapsTableSkeleton,
-} from "./_components/pools-skeletons";
+import { PoolsTableSkeleton } from "@/components/pools-table-skeleton";
+import { SwapsTableSkeleton } from "./_components/pools-skeletons";
 
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
 
@@ -46,10 +44,12 @@ export default function PoolsLoading() {
       {/* Pools table — mirrors the "Pools" section heading + GlobalPoolsTable.
           Sized via `PoolsTableSkeleton` (POOLS_TABLE_SKELETON_ROWS rows at
           the pools-table-measured 45px header / 58px row rhythm, not the
-          shared TableSkeleton's 36/44 — see pools-skeletons.tsx). */}
+          shared TableSkeleton's 36/44 — see
+          `@/components/pools-table-skeleton`). Presentational: nests inside
+          this route's single outer live region below. */}
       <section>
         <div className={`mb-3 h-6 w-16 ${SHIMMER}`} />
-        <PoolsTableSkeleton />
+        <PoolsTableSkeleton presentational />
       </section>
 
       {/* Recent Swaps section — mirrors the heading, filter/limit controls

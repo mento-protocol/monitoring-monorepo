@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { SWRResponse } from "swr";
 import type { Network } from "@/lib/networks";
 import type { GlobalPoolEntry } from "@/components/global-pools-table";
+import { POOLS_TABLE_SKELETON_ROWS } from "@/components/pools-table-skeleton";
 
 const mockReplace = vi.fn();
 let mockSearchParams = new URLSearchParams();
@@ -282,8 +283,10 @@ describe("PoolsPage multichain rendering", () => {
 // header / 37px row rhythm (`SwapsTableSkeleton` in pools-skeletons.tsx,
 // measured against the real SwapTable — shorter than the shared
 // `TableSkeleton`'s 36/44 since every swap-row cell is single-line); the
-// Pools-section fallback below (rows=3) still uses the shared TableSkeleton
-// (36/44) unchanged. `renderToStaticMarkup` serializes inline
+// Pools-section fallback below uses `PoolsTableSkeleton`'s 45px header /
+// 58px row rhythm (`@/components/pools-table-skeleton`) — the same shape
+// this route's own `loading.tsx` and the homepage's stand-ins reserve.
+// `renderToStaticMarkup` serializes inline
 // `style={{ height }}` as `style="height:Npx"`, so counting those substrings
 // in the SSR string is a cheap structural proxy for "N rows at the right
 // height" without needing a jsdom DOM.
@@ -319,7 +322,7 @@ describe("PoolsPage loading-state skeleton parity", () => {
     expect(countHeightPx(html, 37)).toBe(50);
   });
 
-  it("Pools section loading skeleton is table-shaped (header + 3 rows) during the initial network fetch", () => {
+  it("Pools section loading skeleton is table-shaped (header + POOLS_TABLE_SKELETON_ROWS rows) during the initial network fetch", () => {
     vi.mocked(useAllNetworksData).mockReturnValue({
       networkData: [],
       isLoading: true,
@@ -330,9 +333,9 @@ describe("PoolsPage loading-state skeleton parity", () => {
     const html = renderToStaticMarkup(<PoolsPage />);
 
     // Isolated to the Pools section: swaps are settled+empty here (renders
-    // EmptyBox, not a skeleton), so every 44px bar belongs to this table.
-    expect(countHeightPx(html, 44)).toBe(3);
-    expect(countHeightPx(html, 36)).toBe(1);
+    // EmptyBox, not a skeleton), so every 58px bar belongs to this table.
+    expect(countHeightPx(html, 58)).toBe(POOLS_TABLE_SKELETON_ROWS);
+    expect(countHeightPx(html, 45)).toBe(1);
     expect(html).not.toContain('data-testid="global-pools-table"');
   });
 });

@@ -37,7 +37,7 @@ import {
 import type { Pool, SwapEvent } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { EmptyBox, ErrorBox, Tile } from "@/components/feedback";
-import { TableSkeleton } from "@/components/skeletons";
+import { PoolsTableSkeleton } from "@/components/pools-table-skeleton";
 import { LimitSelect } from "@/components/controls";
 import { SenderCell } from "@/components/sender-cell";
 import { SwapsTableSkeleton } from "./pools-skeletons";
@@ -229,7 +229,11 @@ function PoolsContent({
           Pools
         </h2>
         {showInitialSkeleton(poolsLoading, networkData.length) ? (
-          <TableSkeleton rows={3} variant="rows" />
+          // Matches the real GlobalPoolsTable's 45px header / 58px row
+          // rhythm (`PoolsTableSkeleton`, `@/components/pools-table-skeleton`)
+          // — same shape this route's own `loading.tsx` and the homepage
+          // stand-ins reserve, not the shared TableSkeleton's generic 36/44.
+          <PoolsTableSkeleton />
         ) : failedNetworks.length === 0 && entries.length === 0 ? (
           <EmptyBox message="No pools found across any chain." />
         ) : (

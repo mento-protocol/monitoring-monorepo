@@ -1,4 +1,4 @@
-import { TableSkeleton } from "@/components/skeletons";
+import { PoolsTableSkeleton } from "@/components/pools-table-skeleton";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
 
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
@@ -95,14 +95,16 @@ export default function RootLoading() {
         </div>
       </section>
 
-      {/* Pools table — mirrors the "All Pools" section. A fixed 10-row
-          placeholder can't match the real ~30-50 pool table exactly, but it
-          replaces the prior 8-col generic table with the real row rhythm
-          (header ~36px, rows ~44px) so the swap-in reads as fill rather
-          than repaint. */}
+      {/* Pools table — mirrors the "All Pools" section, which renders the
+          exact same GlobalPoolsTable component as /pools. Sized via
+          `PoolsTableSkeleton` (POOLS_TABLE_SKELETON_ROWS rows at the
+          pools-table-measured 45px header / 58px row rhythm, not the shared
+          TableSkeleton's 36/44 — see `@/components/pools-table-skeleton`)
+          so this route fallback matches /pools's fallback and the real
+          table exactly, instead of under-reserving on a slow SSR resolve. */}
       <section>
         <div className={`mb-3 h-6 w-24 ${SHIMMER}`} />
-        <TableSkeleton rows={10} variant="rows" presentational />
+        <PoolsTableSkeleton presentational />
       </section>
 
       <span className="sr-only">Loading…</span>
