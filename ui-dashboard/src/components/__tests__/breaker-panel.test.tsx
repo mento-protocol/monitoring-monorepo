@@ -759,5 +759,65 @@ describe("BreakerPanel", () => {
         document.body.removeChild(container);
       }
     });
+
+    it("keeps the trips-today suffix WIDTH reserved across the zero-today hydration transition, so the 'N lifetime' line can't wrap-then-unwrap on the mobile 2-col grid (Codex finding, issue #1257)", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-13T08:00:00Z"));
+      // A breaker with trip HISTORY but NO trip today — resolves to zero-today
+      // (`reserved`) post-clock. The suffix width must stay reserved so the line
+      // width (and thus its mobile wrap) doesn't change pending → resolved-zero.
+      const oldTrip: BreakerTripEvent = {
+        id: "old-trip",
+        blockTimestamp: "1700001000", // long before the frozen day
+        txHash: "0xoldtrip",
+        medianRateAtTrip: "1230000000000000000000000",
+        referenceAtTrip: "1171560280196965000000000",
+        thresholdAtTrip: "40000000000000000000000",
+        breaker: {
+          address: "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9",
+          kind: "MEDIAN_DELTA",
+        },
+      };
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: [oldTrip],
+        },
+        isLoading: false,
+      });
+
+      const serverHtml = renderToString(<BreakerPanel pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration (pending): visible "· — today" plus the invisible width
+      // reserver ("· 88 today").
+      expect(container.innerHTML).toContain("— today");
+      expect(container.innerHTML).toContain("88 today"); // reserver present
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        act(() => {
+          root = hydrateRoot(container, <BreakerPanel pool={fxPool()} />);
+        });
+        expect(consoleError).not.toHaveBeenCalled();
+        // Post-hydration (resolved zero-today → `reserved`): the visible dash
+        // suffix is GONE, but the invisible width reserver PERSISTS — so the
+        // line width is unchanged and can't wrap/unwrap.
+        expect(container.innerHTML).not.toContain("— today");
+        expect(container.innerHTML).toContain("88 today"); // reserver still holds width
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
   });
 });

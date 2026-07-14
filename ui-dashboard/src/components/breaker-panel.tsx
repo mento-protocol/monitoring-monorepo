@@ -184,6 +184,41 @@ function LiveDeltaMetric({
   );
 }
 
+// Widest realistic today-suffix — today's trips are bounded by the query's
+// 50-event limit, so two digits covers it; the em-dash placeholder is no wider.
+const TRIPS_TODAY_WIDTH_SAMPLE = " · 88 today";
+
+/** Fixed-width "· N today" suffix slot for LastTripMetric. An invisible widest-
+ *  form sample (`TRIPS_TODAY_WIDTH_SAMPLE`) shares one inline-grid cell with the
+ *  visible value, so the pending "· — today", the resolved "· N today", and the
+ *  resolved-ZERO (no visible suffix) states all occupy the SAME width. Without
+ *  this the pending→resolved-zero transition drops the suffix and can wrap then
+ *  unwrap the "N lifetime" line on the two-column mobile grid — a vertical CLS
+ *  (issue #1257). Same invisible-inline-grid-overlay technique as the market-
+ *  hours pill's countdown reserver. `hidden` (no trip history) renders nothing —
+ *  such a pool never shows a suffix in any state, so there's nothing to reserve. */
+function TripsTodaySuffix({
+  tripsToday,
+}: {
+  tripsToday: TripsTodayDisplay;
+}): React.ReactElement | null {
+  if (tripsToday.kind === "hidden") return null;
+  return (
+    <span className="inline-grid align-baseline">
+      <span
+        aria-hidden
+        className="invisible col-start-1 row-start-1 whitespace-nowrap"
+      >
+        {TRIPS_TODAY_WIDTH_SAMPLE}
+      </span>
+      <span className="col-start-1 row-start-1 whitespace-nowrap">
+        {tripsToday.kind === "pending" && " · — today"}
+        {tripsToday.kind === "count" && ` · ${tripsToday.count} today`}
+      </span>
+    </span>
+  );
+}
+
 function LastTripMetric({
   cfg,
   network,
@@ -244,12 +279,7 @@ function LastTripMetric({
           className={`text-xs ${activeToday ? "text-amber-300" : "text-slate-500"}`}
         >
           {cfg.tripCountLifetime} lifetime
-          {/* Pre-mount (clock pending, see tripsTodayDisplay) reserve the
-              today-suffix slot with a neutral "· — today" so the real
-              "· N today" can't pop in post-mount and grow/wrap the header
-              (issue #1257). Resolves to the count, or drops when zero. */}
-          {tripsToday.kind === "pending" && " · — today"}
-          {tripsToday.kind === "count" && ` · ${tripsToday.count} today`}
+          <TripsTodaySuffix tripsToday={tripsToday} />
         </span>
       </dd>
     </div>

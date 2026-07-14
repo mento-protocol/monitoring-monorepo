@@ -265,44 +265,53 @@ function deltaBarStyle(
 }
 
 /** Display state for the "· N today" trip suffix in LastTripMetric.
- *  - `pending`: clock not yet resolved but this breaker has trip history, so
- *    reserve a neutral placeholder slot (see below).
- *  - `hidden`: no today-suffix (no trips today, or no trip history at all).
- *  - `count`: resolved, `count` trips since UTC midnight (> 0). */
+ *  - `pending`: clock unresolved, this breaker HAS trip history → reserve the
+ *    suffix slot and show a neutral "· — today" placeholder.
+ *  - `reserved`: clock resolved, this breaker has trip history but ZERO trips
+ *    today → keep the reserved (invisible) slot width, no visible suffix.
+ *  - `count`: resolved, `count` trips since UTC midnight (> 0).
+ *  - `hidden`: this breaker has NO trip history at all → no slot ever.
+ *
+ *  `pending`, `reserved`, and `count` all occupy the SAME reserved suffix width
+ *  in LastTripMetric so the "N lifetime" line can't wrap/unwrap across the
+ *  pending→resolved transition (a vertical CLS on the two-column mobile grid —
+ *  issue #1257). `hidden` (no history) reserves nothing since such a pool never
+ *  shows a suffix in any state. */
 export type TripsTodayDisplay =
   | { kind: "pending" }
-  | { kind: "hidden" }
-  | { kind: "count"; count: number };
+  | { kind: "reserved" }
+  | { kind: "count"; count: number }
+  | { kind: "hidden" };
 
 /** Trips for `breakerAddress` since UTC midnight, as a display state.
  *  `todayNowSeconds === null` (server + hydration render, see useNowSeconds)
  *  can't compute the UTC-midnight boundary without risking a bake-time vs
  *  viewer-clock mismatch, so instead of forcing zero it returns `pending`
  *  whenever this breaker has any recent trip history. LastTripMetric renders a
- *  neutral "· — today" placeholder for `pending` so the real "· N today"
- *  suffix can't pop in post-mount and grow/wrap the header row now that the
- *  panel paints real fallback content on first paint (issue #1257) — the same
- *  reserve-the-slot treatment used for the cooldown countdown. Feeds with no
- *  trip history reserve nothing (`hidden`). Once the clock resolves it returns
- *  the real `count` (or `hidden` when zero trips landed today). Filters by
- *  breaker address — the query is feed-scoped, but a single feed could surface
- *  multiple breakers' trips (only one trip-able breaker today, but
- *  MarketHours-style additions later would drift the count from
- *  cfg.tripCountLifetime if we didn't scope it). */
+ *  neutral "· — today" placeholder for `pending` at a RESERVED width so the real
+ *  "· N today" suffix can't pop in / drop out post-mount and wrap the row now
+ *  that the panel paints real fallback content on first paint (issue #1257) —
+ *  the same reserve-the-slot treatment used for the cooldown countdown. Once the
+ *  clock resolves it returns the real `count`, or `reserved` (history but zero
+ *  today — keeps the width) so the suffix never changes the line's width.
+ *  Feeds with NO trip history reserve nothing (`hidden`). Filters by breaker
+ *  address — the query is feed-scoped, but a single feed could surface multiple
+ *  breakers' trips (only one trip-able breaker today, but MarketHours-style
+ *  additions later would drift the count from cfg.tripCountLifetime if we
+ *  didn't scope it). */
 export function tripsTodayDisplay(
   todayNowSeconds: number | null,
   trips: BreakerTripEvent[],
   breakerAddress: string,
 ): TripsTodayDisplay {
   const own = trips.filter((t) => t.breaker.address === breakerAddress);
-  if (todayNowSeconds === null) {
-    return own.length > 0 ? { kind: "pending" } : { kind: "hidden" };
-  }
+  if (own.length === 0) return { kind: "hidden" };
+  if (todayNowSeconds === null) return { kind: "pending" };
   const todayMidnightSec = Math.floor(todayNowSeconds / 86400) * 86400;
   const count = own.filter(
     (t) => Number(t.blockTimestamp) >= todayMidnightSec,
   ).length;
-  return count > 0 ? { kind: "count", count } : { kind: "hidden" };
+  return count > 0 ? { kind: "count", count } : { kind: "reserved" };
 }
 
 /** The full derived view model a resolved BreakerPanel strip renders from —
