@@ -48,10 +48,12 @@ function getSubRows(): HTMLElement[] {
   return Array.from(row.children) as HTMLElement[];
 }
 
-// The empty-state branch (loaded, no error, `total === null`) grid-stacks
-// an invisible spacer mirroring the row shapes with the visible message —
-// distinct markup from `getSubRows()`'s `mt-1.5 flex flex-wrap` sub-rows
-// div, so it needs its own query.
+// The empty-state branch (loaded, no error, `total === null`) and the
+// error branch (`hasError`) both render an invisible spacer mirroring the
+// row shapes via this same markup — distinct from `getSubRows()`'s
+// `mt-1.5 flex flex-wrap` sub-rows div, so it needs its own query. Only the
+// empty-state branch pairs it with a visible message (see
+// `getEmptyStateMessage`); the error branch renders the spacer alone.
 function getEmptyStateSpacerRows(): HTMLElement[] {
   const spacer = container.querySelector(".invisible.flex.flex-wrap");
   if (!spacer) return [];
@@ -110,10 +112,12 @@ describe("BreakdownTile loading parity", () => {
     expect(container.textContent).toContain("$30000");
   });
 
-  it("still omits the breakdown rows and the empty state on error once loaded (unchanged behavior)", () => {
+  it("reserves the same 3-row footprint on error as it does once loaded, instead of collapsing", () => {
     render(<BreakdownTile {...BASE_PROPS} isLoading={false} hasError />);
     expect(getSubRows()).toHaveLength(0);
-    expect(getEmptyStateSpacerRows()).toHaveLength(0);
+    expect(getEmptyStateSpacerRows()).toHaveLength(3);
+    // The error message renders on the subtitle line (BreakdownTile), not
+    // duplicated inside the sub-row block.
     expect(getEmptyStateMessage()).toBeNull();
   });
 });
@@ -176,9 +180,35 @@ describe("BreakdownTile empty-state parity (loaded, no error, total === null)", 
     );
   });
 
-  it("does not render the empty state while loading or on error", () => {
+  it("does not render the empty-state message while loading", () => {
     render(<BreakdownTile {...EMPTY_PROPS} isLoading />);
     expect(getEmptyStateSpacerRows()).toHaveLength(0);
+    expect(getEmptyStateMessage()).toBeNull();
+  });
+
+  it("reserves the spacer but omits the empty-state message on error (error takes precedence over the empty state)", () => {
+    render(<BreakdownTile {...EMPTY_PROPS} hasError />);
+    // Same invisible-row technique as the plain empty state, but without
+    // its message — hasError renders its own reserved-height spacer (see
+    // the "BreakdownTile error-state parity" suite below) rather than the
+    // `total === null` empty-state message.
+    expect(getEmptyStateSpacerRows()).toHaveLength(3);
+    expect(getEmptyStateMessage()).toBeNull();
+  });
+});
+
+// hasError takes precedence over both the loaded-with-total and the
+// total === null empty-state branches once loading finishes: a
+// loading-to-error or loaded-to-error transition must not shrink the tile
+// by the sub-row block's height. Reserves the same footprint via the same
+// invisible-row technique as the total === null empty state, but with no
+// visible message here — the "Some chains failed to load" text already
+// renders on the subtitle line, not inside the sub-row block.
+describe("BreakdownTile error-state parity (loaded, hasError)", () => {
+  it("reserves the same sub-row footprint as the loaded-with-total state instead of collapsing to nothing", () => {
+    render(<BreakdownTile {...BASE_PROPS} isLoading={false} />);
+    const loadedRows = getSubRows();
+    expect(loadedRows).toHaveLength(3);
 
     act(() => {
       root.unmount();
@@ -187,8 +217,44 @@ describe("BreakdownTile empty-state parity (loaded, no error, total === null)", 
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    render(<BreakdownTile {...EMPTY_PROPS} hasError />);
-    expect(getEmptyStateSpacerRows()).toHaveLength(0);
+    render(<BreakdownTile {...BASE_PROPS} isLoading={false} hasError />);
+    expect(getSubRows()).toHaveLength(0);
+    const errorSpacerRows = getEmptyStateSpacerRows();
+    expect(errorSpacerRows).toHaveLength(loadedRows.length);
+  });
+
+  it("sizes the error-state spacer slots identically to the loading/empty-state placeholders (w-14/h-3, same labels)", () => {
+    render(<BreakdownTile {...BASE_PROPS} isLoading={false} hasError />);
+    const spacerRows = getEmptyStateSpacerRows();
+    expect(spacerRows.map((r) => r.textContent?.trim())).toEqual([
+      "24h",
+      "7d",
+      "30d",
+    ]);
+    spacerRows.forEach((row) => {
+      const box = row.querySelector("span:last-child");
+      expect(box).not.toBeNull();
+      expect(box!.className).toContain("w-14");
+      expect(box!.className).toContain("h-3");
+    });
+  });
+
+  it("hides the spacer from assistive tech and does not duplicate the error message inside the sub-row block", () => {
+    render(<BreakdownTile {...BASE_PROPS} isLoading={false} hasError />);
+    const spacer = container.querySelector(".invisible.flex.flex-wrap");
+    expect(spacer).not.toBeNull();
+    expect(spacer!.getAttribute("aria-hidden")).toBe("true");
+    expect(container.querySelector(".animate-pulse")).toBeNull();
     expect(getEmptyStateMessage()).toBeNull();
+
+    // The error message renders once, on the subtitle line.
+    expect(container.textContent).toContain("Some chains failed to load");
+  });
+
+  it("reserves the same footprint regardless of whether a total resolved before the error", () => {
+    render(
+      <BreakdownTile {...BASE_PROPS} isLoading={false} hasError total={null} />,
+    );
+    expect(getEmptyStateSpacerRows()).toHaveLength(3);
   });
 });
