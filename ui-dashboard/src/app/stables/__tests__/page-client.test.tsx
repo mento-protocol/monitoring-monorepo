@@ -164,6 +164,26 @@ function changeEvent(
   };
 }
 
+// JSDOM does not compute real layout, so `getBoundingClientRect().top` is
+// always 0 — no direct stand-in for "did this element move down the page".
+// Counts every earlier-in-document-order element across all ancestor levels
+// instead: under this page's normal top-to-bottom flow (no floats/absolute
+// positioning), an element gaining or losing preceding elements is exactly
+// an element gaining or losing vertical position above it.
+function precedingElementCount(el: Element): number {
+  let count = 0;
+  let node: Node | null = el;
+  while (node?.parentNode) {
+    let sibling = node.previousSibling;
+    while (sibling) {
+      if (sibling.nodeType === Node.ELEMENT_NODE) count++;
+      sibling = sibling.previousSibling;
+    }
+    node = node.parentNode;
+  }
+  return count;
+}
+
 describe("StablesPageClient — smoke", () => {
   beforeEach(() => {
     mockRates.merged = new Map<string, number>([["EURm", 1.1]]);
@@ -385,6 +405,75 @@ describe("StablesPageClient — smoke", () => {
     expect(
       div.querySelector('[role="status"][aria-label="Loading table"]'),
     ).toBeNull();
+
+    act(() => {
+      localRoot.unmount();
+    });
+    div.remove();
+  });
+
+  it("does not settle early when supply-change rows resolve before the snapshot-cap outcome is known, so the row's position never moves (Codex review on #1256)", () => {
+    // Staggered resolution: the supply-changes rows are ready first (changes
+    // query settled, no pending page, rates in) while the daily-snapshots
+    // query that decides `snapshotLimitCapped` is still in flight. The
+    // notice is folded into this card's OWN header (issue #1239), so if the
+    // reveal gate ignored the still-loading snapshots query, the row would
+    // appear now under an uncapped header, and the LATER cap resolution
+    // would grow the header and shove the already-visible row down inside
+    // the card — the exact displacement #1239 eliminated at the page level,
+    // reintroduced one level down.
+    mockChanges.data = [changeEvent()];
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
+    mockRates.isLoading = false;
+    mockSnapshots.isLoading = true; // cap outcome not yet known
+
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const localRoot = createRoot(div);
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    // Step 1 — rows are ready but the cap outcome isn't: the skeleton must
+    // still hold instead of revealing the row under a header that might grow.
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(0);
+    expect(
+      div.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).not.toBeNull();
+    expect(div.textContent).not.toContain("Showing the most recent 1,000");
+
+    // Step 2 — the daily-snapshots query resolves as capped. The cap outcome
+    // is now known, so the single reveal fires: the row and the header
+    // notice must both appear together in this SAME render.
+    mockSnapshots.isLoading = false;
+    mockSnapshots.capped = true;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(
+      div.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).toBeNull();
+    expect(div.textContent).toContain("Showing the most recent 1,000");
+    const row = div.querySelector("tbody tr");
+    expect(row).not.toBeNull();
+    const positionAtReveal = precedingElementCount(row!);
+
+    // Step 3 — a further render with the same settled props (e.g. a SWR
+    // background revalidation returning identical data) must not move the
+    // row again: the header/notice are already final, so nothing above the
+    // row can grow or shrink a second time.
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(div.textContent).toContain("Showing the most recent 1,000");
+    const rowAfterRerender = div.querySelector("tbody tr");
+    expect(rowAfterRerender).not.toBeNull();
+    expect(precedingElementCount(rowAfterRerender!)).toBe(positionAtReveal);
 
     act(() => {
       localRoot.unmount();

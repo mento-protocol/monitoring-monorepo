@@ -25,6 +25,20 @@ export function StablesPageClient(): React.JSX.Element {
   );
 }
 
+// Whether the daily-snapshots truncation-cap outcome (`chartCapped` above)
+// is still unresolved. Kept as a standalone function so its two boolean
+// operators don't count against `StablesContent`'s own complexity budget.
+function isSnapshotCapOutcomeLoading(
+  snapshotsLoading: boolean,
+  custodySnapshotsLoading: boolean,
+  custodySnapshotsUnavailable: boolean,
+): boolean {
+  return (
+    snapshotsLoading ||
+    (!custodySnapshotsUnavailable && custodySnapshotsLoading)
+  );
+}
+
 function StablesContent(): React.JSX.Element {
   const { range, updateRange } = useStablesRangeUrlState();
 
@@ -63,6 +77,22 @@ function StablesContent(): React.JSX.Element {
     : custodySnapshots;
   const chartCapped =
     snapshotsCapped || (!custodySnapshotsUnavailable && custodySnapshotsCapped);
+  // Whether `chartCapped` (fed into the changes card as `snapshotLimitCapped`)
+  // still might change — mirrors chartCapped's own guard so the two flip
+  // together. Passed down so the changes card's settle latch can hold its
+  // reveal until this resolves too (see StablesChangesSection below): the
+  // card's header folds the truncation notice into its own height (issue
+  // #1239), so if real rows revealed before this was known, a late cap
+  // resolution would grow the header and shove the already-visible rows down
+  // — the exact displacement #1239 exists to eliminate, just moved inside the
+  // card (Codex review on #1256). Extracted to its own function (rather than
+  // inlined like `chartCapped` above) to keep `StablesContent`'s own
+  // cyclomatic complexity under the lint ceiling.
+  const snapshotLimitCappedLoading = isSnapshotCapOutcomeLoading(
+    snapshotsLoading,
+    custodySnapshotsLoading,
+    custodySnapshotsUnavailable,
+  );
   const isLoading =
     ratesLoading ||
     latestLoading ||
@@ -111,6 +141,7 @@ function StablesContent(): React.JSX.Element {
         rates={rates}
         ratesLoading={ratesLoading}
         snapshotLimitCapped={chartCapped}
+        snapshotLimitCappedLoading={snapshotLimitCappedLoading}
       />
     </div>
   );
@@ -120,10 +151,12 @@ function StablesChangesSection({
   rates,
   ratesLoading,
   snapshotLimitCapped,
+  snapshotLimitCappedLoading,
 }: {
   rates: OracleRateMap;
   ratesLoading: boolean;
   snapshotLimitCapped: boolean;
+  snapshotLimitCappedLoading: boolean;
 }): React.JSX.Element {
   const {
     minimumUsdValue: minimumSupplyChangeUsd,
@@ -154,18 +187,32 @@ function StablesChangesSection({
   // skeleton there would drop already-visible rows and flash blank. Latch
   // "settled once" (React's render-phase state update, not an effect) and stop
   // gating on `hasPendingPage`/`ratesLoading` after it.
+  //
+  // Also gates on `snapshotLimitCappedLoading`: this card folds the daily
+  // snapshots' truncation notice into its own header (issue #1239), so the
+  // header's height depends on a query this section doesn't otherwise wait
+  // on. Without this, real rows could reveal before that query resolves, and
+  // a later cap-outcome flip would grow the header and shove the
+  // already-visible rows down inside the card — the same displacement
+  // #1239 eliminated at the page level, just reintroduced inside the card
+  // (Codex review on #1256). Holding the reveal until the cap outcome is
+  // known guarantees the header is already in its final shape by the time
+  // rows first appear, so revealing rows never coincides with a header size
+  // change.
   const [hasSettledOnce, setHasSettledOnce] = useState(false);
   if (
     !hasSettledOnce &&
     !changesLoading &&
     !changesHasPendingPage &&
-    !ratesLoading
+    !ratesLoading &&
+    !snapshotLimitCappedLoading
   ) {
     setHasSettledOnce(true);
   }
   const showChangesSkeleton =
     changesLoading ||
-    (!hasSettledOnce && (changesHasPendingPage || ratesLoading));
+    (!hasSettledOnce &&
+      (changesHasPendingPage || ratesLoading || snapshotLimitCappedLoading));
 
   return (
     <StablesChangesTable
