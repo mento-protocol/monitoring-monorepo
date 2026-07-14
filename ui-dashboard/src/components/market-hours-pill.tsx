@@ -76,39 +76,39 @@ function isBreakerClosure(config: BreakerConfig | undefined): boolean {
 }
 
 type MarketHoursState = {
+  // Open/closed is genuinely UNKNOWN: the clock is unresolved (SSR + hydration
+  // render) AND the on-chain breaker isn't tripped, so whether the market is
+  // open depends on the not-yet-known weekend calendar. Must NOT default to
+  // "open" (issue #1257 — a weekend the clock hasn't revealed would render a
+  // false "Market Open"). Renders a neutral state until the clock resolves.
+  unknown: boolean;
   open: boolean;
   imminentClose: boolean;
   secondsUntilTransition: number;
-  // Whether the closed pill renders a countdown/placeholder suffix, and its
-  // text. Derived here (not inline in the JSX) so the render branch stays a
-  // plain boolean check (keeps MarketHoursPill's cyclomatic complexity under
-  // the repo's ESLint budget).
-  showCountdown: boolean;
+  // Closed-pill suffix text: the scheduled reopen countdown for calendar
+  // weekends, else a neutral "—" (weekday/holiday breaker closure, or the
+  // pre-clock breaker-closed render where the reopen ETA isn't known yet).
   countdownText: string;
 };
 
 /** Derives the open/closed/countdown state from a (possibly not-yet-known)
  * wall clock and the breaker-driven closure flag. `now === null` means the
- * server render or the client's hydration render (see useNowSeconds) — the
- * clock-dependent weekend/countdown math can't run yet, so it returns the
- * neutral placeholder that the resolved state settles into after mount (issue
- * #1237). `open` doesn't need the clock when `breakerClosed` is true (it's
- * SSR-prefetched fallback data, identical on the server and hydration renders).
+ * server render or the client's hydration render (see useNowSeconds).
  *
- * Suffix reserve == keep (issue #1257): EVERY closed state renders a suffix so
- * the pill width is stable across hydration. Calendar weekends show the real
- * scheduled reopen countdown; breaker-driven weekday/holiday closures — which
- * have no scheduled reopen — and the pre-clock render (where `isWeekend(now)`
- * is unknowable) show a neutral "—". Previously the pre-mount render reserved
- * "—" for every on-chain closure but the resolved state dropped it for
- * non-weekend closures, reintroducing a pill-width/wrap shift on weekday
- * governance/holiday closures. */
+ * Market open/closed is CLOCK-dependent (the weekend calendar), so it cannot be
+ * known at SSR — and must not be guessed as "open". Pre-clock we only KNOW the
+ * market is closed when the on-chain breaker says so (`breakerClosed`, from
+ * SSR-prefetched fallback data, identical on server + hydration renders);
+ * otherwise the state is `unknown` and renders neutral until the clock resolves
+ * on mount (issue #1257). The suffix (`countdownText`) is likewise neutral "—"
+ * whenever the scheduled reopen isn't a known calendar weekend. */
 function deriveMarketHoursState(
   now: Date | null,
   breakerClosed: boolean,
 ): MarketHoursState {
   const calendarClosed = now !== null && isWeekend(now);
   const open = !breakerClosed && !calendarClosed;
+  const unknown = now === null && !breakerClosed;
   const transition = now !== null ? nextMarketHoursTransition(now) : null;
   const secondsUntilTransition =
     transition && now !== null
@@ -119,20 +119,120 @@ function deriveMarketHoursState(
       : 0;
   const imminentClose =
     now !== null && secondsUntilTransition / 3600 < COUNTDOWN_THRESHOLD_HOURS;
-  // A closed pill always keeps a suffix slot. Only calendar weekends have a
-  // scheduled reopen time; every other closure (weekday/holiday breaker
-  // closure, and the pre-clock render) keeps a neutral "—".
-  const showCountdown = !open;
   const countdownText = calendarClosed
     ? `${formatHoursMinutes(secondsUntilTransition)} until open`
     : "—";
   return {
+    unknown,
     open,
     imminentClose,
     secondsUntilTransition,
-    showCountdown,
     countdownText,
   };
+}
+
+type PillView = {
+  bgClass: string;
+  label: string;
+  labelClass: string;
+  suffix: string | null;
+  suffixClass: string;
+};
+
+/** Maps the derived state to the pill's visual descriptor (bg + label + suffix
+ * + colors) so MarketHoursPill's render is a single path (keeps its cyclomatic
+ * complexity under the repo's ESLint budget). */
+function pillView(state: MarketHoursState): PillView {
+  const {
+    unknown,
+    open,
+    imminentClose,
+    secondsUntilTransition,
+    countdownText,
+  } = state;
+  if (unknown) {
+    // Neutral "unknown" pill (issue #1257): the em-dash marks a not-yet-known
+    // state, consistent with this file's other pre-clock "—" placeholders —
+    // never a false "Market Open".
+    return {
+      bgClass: "bg-slate-800/80",
+      label: "Market —",
+      labelClass: "text-slate-400",
+      suffix: null,
+      suffixClass: "",
+    };
+  }
+  if (!open) {
+    return {
+      bgClass: "bg-slate-800/80",
+      label: "Market Closed",
+      labelClass: "text-slate-300",
+      suffix: countdownText,
+      suffixClass: "text-slate-300",
+    };
+  }
+  if (imminentClose) {
+    return {
+      bgClass: "bg-amber-900/40",
+      label: "Market Open",
+      labelClass: "text-amber-300",
+      suffix: `${formatHoursMinutes(secondsUntilTransition)} until close`,
+      suffixClass: "text-amber-200",
+    };
+  }
+  return {
+    bgClass: "bg-slate-800/80",
+    label: "Market Open",
+    labelClass: "text-emerald-300",
+    suffix: scheduleString(),
+    suffixClass: "text-slate-300",
+  };
+}
+
+// The widest resolved pill form, rendered INVISIBLY inside every pill so the
+// pill width is fixed across every state swap — skeleton → neutral → open /
+// closed / countdown — and no swap can widen or wrap the flex-wrap header
+// (issue #1257: reserve the widest resolved width, not the 1-char "—"). Uses
+// the wider label ("Market Closed") and the wider suffix (the schedule string),
+// each in its real font (font-medium label + font-mono suffix), so the reserved
+// width is a strict upper bound on every real form's rendered width.
+function PillWidthReserver(): React.ReactElement {
+  return (
+    <span
+      aria-hidden
+      className="invisible col-start-1 row-start-1 inline-flex items-center gap-1 whitespace-nowrap"
+    >
+      <span className="font-medium">Market Closed</span>
+      <span>·</span>
+      <span className="font-mono">{scheduleString()}</span>
+    </span>
+  );
+}
+
+/** Pill chrome with a fixed (widest-form-reserved) width. The visible content
+ * and the invisible width reserver share one grid cell, so the container sizes
+ * to the reserver and content swaps never change the pill width. */
+function PillFrame({
+  bgClass,
+  title,
+  children,
+}: {
+  bgClass: string;
+  title: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <span
+      className={`inline-grid items-center rounded ${bgClass} px-1.5 py-0.5 text-xs cursor-help`}
+      title={title}
+    >
+      <PillWidthReserver />
+      <span className="col-start-1 row-start-1 inline-flex items-center gap-1 whitespace-nowrap">
+        {children}
+      </span>
+      <span className="sr-only"> — {title}</span>
+    </span>
+  );
 }
 
 /**
@@ -199,13 +299,7 @@ export function MarketHoursPill({
   if (!enabled) return null;
 
   const breakerClosed = isBreakerClosure(marketHoursConfig);
-  const {
-    open,
-    imminentClose,
-    secondsUntilTransition,
-    showCountdown,
-    countdownText,
-  } = deriveMarketHoursState(now, breakerClosed);
+  const view = pillView(deriveMarketHoursState(now, breakerClosed));
 
   const tooltip =
     "FX pools close on weekends from Fri 21:00 UTC to Sun 23:00 UTC, " +
@@ -215,12 +309,21 @@ export function MarketHoursPill({
   // failed revalidation leaves the last-known Market Open/Closed state on
   // screen while SWR sets `error`. Mirror the breaker panel's stale-refresh
   // affordance (issue #1257) so the pill doesn't read as freshly-confirmed —
-  // `w-full` drops it onto its own header-row line. Rendered alongside every
-  // resolved pill variant via `withStale`; `StaleRefreshNotice` returns null
-  // when there's no error, so the healthy DOM is just the pill span.
-  const withStale = (pill: React.ReactElement): React.ReactElement => (
+  // `w-full` drops it onto its own header-row line. `StaleRefreshNotice`
+  // returns null when there's no error, so the healthy DOM is just the pill.
+  return (
     <>
-      {pill}
+      <PillFrame bgClass={view.bgClass} title={tooltip}>
+        <span className={`font-medium ${view.labelClass}`}>{view.label}</span>
+        {view.suffix !== null && (
+          <>
+            <span className="text-slate-500">·</span>
+            <span className={`font-mono ${view.suffixClass}`}>
+              {view.suffix}
+            </span>
+          </>
+        )}
+      </PillFrame>
       <StaleRefreshNotice
         subject="Market hours"
         error={error}
@@ -228,72 +331,18 @@ export function MarketHoursPill({
       />
     </>
   );
-
-  // Screen readers don't reliably announce `title=`; an `sr-only` span
-  // inside the pill exposes the explanation to assistive tech without
-  // changing the visual.
-  if (!open) {
-    // Closed pill. `showCountdown`/`countdownText` (see deriveMarketHoursState)
-    // keep a suffix for EVERY closed state so the pill width is stable across
-    // hydration (reserve == keep, issue #1257): calendar weekends show the
-    // scheduled reopen countdown; weekday/holiday breaker closures — which have
-    // no scheduled reopen — and the pre-clock render keep a neutral "—".
-    return withStale(
-      <span
-        className="inline-flex items-center gap-1 rounded bg-slate-800/80 px-1.5 py-0.5 text-xs cursor-help"
-        title={tooltip}
-      >
-        <span className="text-slate-300 font-medium">Market Closed</span>
-        {showCountdown && (
-          <>
-            <span className="text-slate-500">·</span>
-            <span className="font-mono text-slate-300">{countdownText}</span>
-          </>
-        )}
-        <span className="sr-only"> — {tooltip}</span>
-      </span>,
-    );
-  }
-
-  if (imminentClose) {
-    // Open, but close is imminent — amber countdown.
-    return withStale(
-      <span
-        className="inline-flex items-center gap-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-xs cursor-help"
-        title={tooltip}
-      >
-        <span className="text-amber-300 font-medium">Market Open</span>
-        <span className="text-slate-500">·</span>
-        <span className="font-mono text-amber-200">
-          {formatHoursMinutes(secondsUntilTransition)} until close
-        </span>
-        <span className="sr-only"> — {tooltip}</span>
-      </span>,
-    );
-  }
-
-  // Open with plenty of runway — show the static schedule.
-  return withStale(
-    <span
-      className="inline-flex items-center gap-1 rounded bg-slate-800/80 px-1.5 py-0.5 text-xs cursor-help"
-      title={tooltip}
-    >
-      <span className="text-emerald-300 font-medium">Market Open</span>
-      <span className="text-slate-500">·</span>
-      <span className="font-mono text-slate-300">{scheduleString()}</span>
-      <span className="sr-only"> — {tooltip}</span>
-    </span>,
-  );
 }
 
-// Same box height as the real pill (text-xs line height + py-0.5 ≈ h-5).
-// Width approximates the widest real variant ("Market Open · <schedule>")
-// so a pool that does turn out FX-gated doesn't visibly widen the title row.
+// Same fixed width + height as the real pill: reuses the pill's invisible width
+// reserver inside a pulsing box, so the skeleton → resolved-pill swap (degraded
+// prefetch-miss path only) can't widen or wrap the title row either.
 function MarketHoursPillSkeleton() {
   return (
     <span
-      className="inline-flex h-5 w-40 animate-pulse items-center rounded bg-slate-800/50"
+      className="inline-grid animate-pulse items-center rounded bg-slate-800/50 px-1.5 py-0.5 text-xs"
       aria-hidden="true"
-    />
+    >
+      <PillWidthReserver />
+    </span>
   );
 }

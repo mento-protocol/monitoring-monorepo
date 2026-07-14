@@ -147,9 +147,14 @@ describe("MarketHoursPill", () => {
     mockUseGQL.mockReturnValue({ data: undefined, isLoading: true });
     const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
     expect(html).not.toBe("");
-    expect(html).toContain("h-5");
+    expect(html).toContain("animate-pulse"); // shimmer box
+    // Same box metrics as the real pill (text-xs + py-0.5) so the skeleton →
+    // pill swap can't shift the header. The width reserver inside is invisible
+    // + aria-hidden; no VISIBLE market-state label renders.
+    expect(html).toContain("py-0.5");
+    expect(html).toContain("text-xs");
     expect(html).not.toContain("Market Open");
-    expect(html).not.toContain("Market Closed");
+    expect(html).not.toContain("Market —");
   });
 
   it("renders nothing once the query resolves and no MARKET_HOURS config exists (not stuck on the placeholder)", () => {
@@ -263,15 +268,14 @@ describe("MarketHoursPill", () => {
     expect(html).not.toContain("Market Open");
   });
 
-  describe("SSR determinism (issue #1237)", () => {
+  describe("SSR determinism (issue #1237, #1257)", () => {
     // These pin the pre-mount render: `renderToStaticMarkup` uses
     // `useSyncExternalStore`'s `getServerSnapshot`, so `useNowSeconds()`
     // resolves to `null` for the whole call — exactly what happens during
-    // the real server render AND the client's hydration render. The output
-    // must therefore be identical regardless of the frozen wall clock, or a
-    // statically-cached page (ISR revalidate: 60s) could bake in content the
-    // viewer's hydration pass disagrees with.
-    it("renders the neutral schedule fallback (not the amber countdown) even when close is imminent", () => {
+    // the real server render AND the client's hydration render. Open/closed is
+    // CLOCK-dependent (weekend calendar), so pre-clock it is UNKNOWN and must
+    // render a NEUTRAL pill — never a false "Market Open" (issue #1257).
+    it("renders the neutral pill (not a false 'Market Open') even when the real clock is minutes from close", () => {
       mockUseGQL.mockReturnValue({
         data: {
           BreakerConfig: [marketHoursConfig()],
@@ -280,13 +284,13 @@ describe("MarketHoursPill", () => {
       });
       freezeNow("2026-05-01T17:00:00Z"); // Friday 17:00 — really 4h from close
       const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
-      expect(html).toContain("Market Open");
-      expect(html).toContain("Sun 23:00");
+      expect(html).toContain("Market —");
+      expect(html).not.toContain("Market Open");
       expect(html).not.toContain("until close");
       expect(html).not.toContain("text-amber-300");
     });
 
-    it("renders the neutral schedule fallback (not Market Closed) even during the real weekend closure", () => {
+    it("renders the neutral pill (not a false 'Market Open') during a real weekend closure the clock hasn't revealed", () => {
       mockUseGQL.mockReturnValue({
         data: {
           BreakerConfig: [marketHoursConfig()],
@@ -295,14 +299,16 @@ describe("MarketHoursPill", () => {
       });
       freezeNow("2026-05-02T12:00:00Z"); // Saturday noon — really closed
       const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
-      expect(html).toContain("Market Open");
-      expect(html).not.toContain("Market Closed");
+      expect(html).toContain("Market —");
+      expect(html).not.toContain("Market Open");
+      // No resolved countdown pre-clock (the schedule text present in markup is
+      // the invisible width reserver, not a visible "until open" countdown).
       expect(html).not.toContain("until open");
     });
   });
 
-  describe("hydration safety (issue #1237)", () => {
-    it("hydrates a real weekend-closed instant without a mismatch warning, then settles to Market Closed", async () => {
+  describe("hydration safety (issue #1237, #1257)", () => {
+    it("shows the neutral pill (NOT 'Market Open') pre-clock for a weekend-closed feed, then resolves to 'Market Closed · <countdown>' with no mismatch (Codex finding 2, issue #1257)", async () => {
       mockUseGQL.mockReturnValue({
         data: {
           BreakerConfig: [marketHoursConfig()],
@@ -315,8 +321,11 @@ describe("MarketHoursPill", () => {
       const container = document.createElement("div");
       container.innerHTML = serverHtml;
       document.body.appendChild(container);
-      // Pre-hydration, the server payload shows the deterministic fallback.
-      expect(container.innerHTML).toContain("Market Open");
+      // Pre-hydration: open/closed is UNKNOWN (clock unresolved, breaker not
+      // tripped) → the NEUTRAL pill, never a false "Market Open" that a viewer
+      // actually inside the weekend would see as wrong operator state.
+      expect(container.innerHTML).toContain("Market —");
+      expect(container.innerHTML).not.toContain("Market Open");
 
       const consoleError = vi
         .spyOn(console, "error")
@@ -328,6 +337,10 @@ describe("MarketHoursPill", () => {
           await Promise.resolve();
         });
         expect(consoleError).not.toHaveBeenCalled();
+        // Resolves to the real closed state + countdown; the neutral marker is
+        // gone. Width is reserved (invisible sample), so this swap doesn't
+        // widen/wrap the header.
+        expect(container.innerHTML).not.toContain("Market —");
         expect(container.innerHTML).toContain("Market Closed");
         expect(container.innerHTML).toContain("until open");
       } finally {
@@ -510,14 +523,15 @@ describe("MarketHoursPill", () => {
       expect(html).toBe("");
     });
 
-    it("renders the resolved pill (not the shimmer) from the SSR fallback while revalidating", () => {
+    it("renders the resolved-shape pill (not the shimmer) from the SSR fallback while revalidating", () => {
       mockUseGQL.mockReturnValue({ data: fallbackFx, isLoading: true });
       freezeNow("2026-04-29T12:00:00Z"); // Wednesday noon
       const html = renderToStaticMarkup(
         <MarketHoursPill pool={fxPool()} initialBreakerConfig={fallbackFx} />,
       );
-      expect(html).toContain("Market Open");
-      // No shimmer placeholder — the resolved pill paints directly.
+      // Pre-clock the open/closed state is neutral (Market —), but the pill —
+      // not the shimmer — paints directly from the fallback.
+      expect(html).toContain("Market —");
       expect(html).not.toContain("animate-pulse");
     });
   });

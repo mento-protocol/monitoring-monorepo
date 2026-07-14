@@ -22,4 +22,9 @@ export type PoolDetailInitialData = {
    *  know their resolved shape on first paint. Only populated for FPMM pools
    *  with a `referenceRateFeedID` (mirrors the client query gate). */
   breakerConfig?: PoolBreakerConfigResponse | undefined;
+  /** `Date.now()` at fetch completion. `fetchPoolDetailForSSR` age-gates the
+   *  cached `breakerConfig` off this so a stale-while-revalidate cache entry
+   *  can't serve arbitrarily-old operator-safety breaker state as first-paint
+   *  fallback (issue #1257). Optional so test fixtures can omit it. */
+  fetchedAt?: number | undefined;
 };

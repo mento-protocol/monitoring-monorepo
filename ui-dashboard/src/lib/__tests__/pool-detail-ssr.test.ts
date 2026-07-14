@@ -256,6 +256,61 @@ describe("fetchPoolDetailForSSR", () => {
     expect(requestMock).toHaveBeenCalledTimes(6);
   });
 
+  it("age-gates the cached breaker fallback: over-age strips breakerConfig (SWR loads fresh) while keeping the pool row (Codex finding, issue #1257)", async () => {
+    requestMock.mockImplementation(({ document }: { document: string }) => {
+      if (document === POOL_DETAIL_WITH_HEALTH) return { Pool: [FPMM_POOL] };
+      if (document === POOL_THRESHOLDS_KNOWN_EXT) {
+        return {
+          Pool: [
+            {
+              id: FPMM_POOL.id,
+              rebalanceThresholdsKnown: true,
+              tokenDecimalsKnown: true,
+            },
+          ],
+        };
+      }
+      if (document === POOL_VP_ORACLE_FRESHNESS_EXT) {
+        return { Pool: [{ id: FPMM_POOL.id, medianLive: true }] };
+      }
+      if (document === POOL_VP_DEPRECATION_EXT) return { BiPoolExchange: [] };
+      if (document === POOL_VP_LIFECYCLE_DEPRECATION_EXT) {
+        return { VirtualPoolLifecycle: [] };
+      }
+      if (document === POOL_BREAKER_CONFIG) return BREAKER_CONFIG_RESPONSE;
+      throw new Error("unexpected query");
+    });
+
+    vi.useFakeTimers();
+    try {
+      // `result.fetchedAt` is stamped with Date.now() at fetch — pin it.
+      const fetchedAt = new Date("2026-01-01T00:00:00Z").getTime();
+      vi.setSystemTime(fetchedAt);
+
+      // Fresh (well within the 5-min max age): breakerConfig rides as fallback.
+      const fresh = await fetchPoolDetailForSSR(
+        42220,
+        FPMM_POOL.id,
+        fetchedAt + 1_000,
+      );
+      expect(fresh?.breakerConfig).toEqual(BREAKER_CONFIG_RESPONSE);
+
+      // Over the 5-min max age (300_000ms): breakerConfig is stripped so SWR
+      // loads the feed fresh instead of painting stale operator-safety state,
+      // but the pool row + thresholds stay (header/health CLS fix unaffected).
+      const stale = await fetchPoolDetailForSSR(
+        42220,
+        FPMM_POOL.id,
+        fetchedAt + 300_001,
+      );
+      expect(stale?.breakerConfig).toBeUndefined();
+      expect(stale?.pool.Pool[0]).toMatchObject(FPMM_POOL);
+      expect(stale?.thresholds?.Pool[0]?.tokenDecimalsKnown).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("degrades to an undefined breakerConfig when the breaker query fails, keeping siblings", async () => {
     requestMock.mockImplementation(({ document }: { document: string }) => {
       if (document === POOL_DETAIL_WITH_HEALTH) {

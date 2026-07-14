@@ -217,6 +217,9 @@ async function fetchPoolDetailUncached(
     v2Exchange,
     brokerExchange24h,
     breakerConfig,
+    // Stamp fetch-completion time so the consumer can age-gate the cached
+    // breaker fallback (below). Rides in the cached payload (plain number).
+    fetchedAt: Date.now(),
   };
 }
 
@@ -224,8 +227,43 @@ async function fetchPoolDetailUncached(
 // paints instantly, then the client's useGQL revalidates on mount for fresh data.
 // The raw response is plain JSON (no Map/Set), so unstable_cache serialization is
 // lossless here.
-export const fetchPoolDetailForSSR = unstable_cache(
+const fetchPoolDetailCached = unstable_cache(
   fetchPoolDetailUncached,
   ["pool-detail-ssr"],
   { revalidate: 60, tags: ["pool-detail-ssr"] },
 );
+
+// Max age for the breaker config to still ride as first-paint SWR fallback.
+// `unstable_cache`'s `revalidate: 60` is stale-WHILE-revalidate, not a max
+// age: an idle or failed-refresh entry can serve arbitrarily-old data, and the
+// breaker config is operator-safety state (tripped / market-hours). Reuse the
+// repo's established served-staleness bound — `MAX_SERVED_STALENESS_MS` (5 min,
+// aligned with the SNAPSHOT_REFRESH_MS client poll) from the SSR network cache
+// — rather than inventing a new number: a healthy entry is ≤60s old so this
+// only trips on genuinely stale entries, and on a trip the client just loads
+// the feed fresh (skeleton), the same clean-load path as the feed-match guard.
+const MAX_BREAKER_FALLBACK_AGE_MS = 300_000;
+
+/**
+ * Age-gate the cached breaker fallback: this runs per request (NOT inside the
+ * `unstable_cache` boundary — mirrors `fetchInitialNetworkData`), so it compares
+ * the request time against the cached payload's `fetchedAt`. Over-age → strip
+ * `breakerConfig` (undefined) so BreakerPanel / MarketHoursPill load the feed
+ * fresh instead of painting stale operator-safety state as the "last confirmed
+ * state" (issue #1257). Composes with the client-side feed-match guard in
+ * pool-detail-page-client.tsx — both gate whether the SSR fallback is
+ * trustworthy. Server-side (not client-side) so the decision is fixed for both
+ * the server render and hydration render — a client-side `Date.now()` gate
+ * would risk a hydration mismatch. Only the breaker fallback is gated; the pool
+ * row + thresholds stay so the header/health CLS fix is unaffected.
+ */
+export async function fetchPoolDetailForSSR(
+  chainId: number,
+  id: string,
+  nowMs = Date.now(),
+): Promise<PoolDetailInitialData | undefined> {
+  const data = await fetchPoolDetailCached(chainId, id);
+  if (!data?.breakerConfig || data.fetchedAt === undefined) return data;
+  if (nowMs - data.fetchedAt <= MAX_BREAKER_FALLBACK_AGE_MS) return data;
+  return { ...data, breakerConfig: undefined };
+}
