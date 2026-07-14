@@ -104,14 +104,16 @@ export function VolumeTable({
     // `TOP_TRADERS_TABLE_SKELETON_ROWS` in `../_lib/skeleton-rows.ts` for the
     // row-count derivation.
     //
-    // This is the sole `aria-live="polite"` announcer for the /volume
-    // client-side loading state: both this table and the aggregator
-    // breakdown table below it (`aggregator-breakdown-section.tsx`) load
-    // from independent SWR queries and can be loading simultaneously.
-    // `TableSkeleton` renders `role="status" aria-live="polite"` by default,
-    // so if both stayed non-presentational, two live regions would announce
-    // at once. The aggregator table's skeleton passes `presentational` to
-    // stay silent — keep this one as the single owner if either changes.
+    // While this skeleton renders it is the page's `aria-live="polite"`
+    // announcer: both this table and the aggregator breakdown table below
+    // it (`aggregator-breakdown-section.tsx`) load from independent SWR
+    // queries and can be loading simultaneously. `TableSkeleton` renders
+    // `role="status" aria-live="polite"` by default, so if both stayed
+    // non-presentational, two live regions would announce at once. The
+    // venue sections feed this table's loading state into the aggregator
+    // section's `hasExternalLoadingAnnouncer` prop, which silences the
+    // aggregator skeleton only while this one is announcing — once this
+    // table settles, a still-loading aggregator skeleton announces itself.
     return (
       <TableSkeleton variant="rows" rows={TOP_TRADERS_TABLE_SKELETON_ROWS} />
     );

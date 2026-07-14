@@ -15,8 +15,14 @@ vi.mock("@/components/time-series-chart-card", () => ({
   TimeSeriesChartCard: () => <div data-testid="chart" />,
 }));
 
-import { VolumeTable } from "../volume-table";
-import { AggregatorBreakdownSection } from "../aggregator-breakdown-section";
+// V3FlowInsights runs its own SWR queries (and its panel skeletons are
+// role="status" without explicit aria-live) — out of scope for the
+// table-skeleton live-region invariant under test here.
+vi.mock("../v3-flow-insights", () => ({
+  V3FlowInsights: () => null,
+}));
+
+import { V3VolumeSection } from "../v3-volume-section";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -34,57 +40,84 @@ afterEach(() => {
   container.remove();
 });
 
-function render(element: React.ReactElement) {
+function renderSection({
+  tableIsLoading,
+  aggregatorIsLoading,
+}: {
+  tableIsLoading: boolean;
+  aggregatorIsLoading: boolean;
+}) {
   act(() => {
-    root.render(element);
+    root.render(
+      <V3VolumeSection
+        rangeLabel="7d"
+        range="7d"
+        cutoff={0}
+        filteredTraderRows={[]}
+        traders={[]}
+        pools={new Map()}
+        protocolActorFilter={[false]}
+        canUseVolumeFilters={false}
+        tableState={{
+          isLoading: tableIsLoading,
+          hasError: false,
+          isCapHit: false,
+        }}
+        aggregators={[]}
+        aggregatorState={{
+          isLoading: aggregatorIsLoading,
+          hasError: false,
+          isCapHit: false,
+        }}
+      />,
+    );
   });
 }
 
+function tableSkeletonRoots(): HTMLElement[] {
+  // A 36px header bar identifies each `TableSkeleton variant="rows"` root,
+  // presentational or not.
+  return Array.from(container.querySelectorAll<HTMLElement>("div")).filter(
+    (el) =>
+      (el.firstElementChild as HTMLElement | null)?.style.height === "36px",
+  );
+}
+
+// The top-traders table (volume-table.tsx) and the aggregator breakdown
+// table (aggregator-breakdown-section.tsx) are backed by independent SWR
+// queries and commonly load simultaneously on first mount. Each renders a
+// `TableSkeleton`, which is a polite live region by default. The venue
+// section wires the trader table's loading state into the aggregator
+// section's `hasExternalLoadingAnnouncer` so the page has exactly one
+// announcer in every combination — never two competing live regions during
+// combined loading, and never zero while something is still loading.
 describe("/volume client-side loading — single live region invariant", () => {
-  // The top-traders table (volume-table.tsx) and the aggregator breakdown
-  // table (aggregator-breakdown-section.tsx) are backed by independent SWR
-  // queries in V3VolumeSection/V2VolumeSection and commonly load
-  // simultaneously on first mount. Each renders a `TableSkeleton`, which is
-  // a polite live region by default — without exactly one of them opting
-  // out via `presentational`, screen readers get two competing "Loading
-  // table" announcements at once.
   it("renders exactly one aria-live=polite region when both tables load simultaneously", () => {
-    render(
-      <>
-        <VolumeTable
-          cutoff={0}
-          traders={[]}
-          pools={new Map()}
-          emptyMessage="No traders."
-          isLoading
-          hasError={false}
-        />
-        <AggregatorBreakdownSection
-          venueLabel="v3"
-          rangeLabel="7d"
-          aggregators={[]}
-          isLoading
-          hasError={false}
-          isCapHit={false}
-        />
-      </>,
-    );
+    renderSection({ tableIsLoading: true, aggregatorIsLoading: true });
 
-    // Both table skeletons still render (a 36px header bar identifies each
-    // `TableSkeleton` root) — the fix silences one of them, it doesn't
+    // Both table skeletons render — the wiring silences one, it doesn't
     // remove it.
-    const headerBars = Array.from(
-      container.querySelectorAll<HTMLElement>("div"),
-    ).filter(
-      (el) =>
-        (el.firstElementChild as HTMLElement | null)?.style.height === "36px",
-    );
-    expect(headerBars).toHaveLength(2);
+    expect(tableSkeletonRoots()).toHaveLength(2);
 
-    // Exactly one live region — the presentational aggregator skeleton
+    // Exactly one live region: the presentational aggregator skeleton
     // strips `role`/`aria-live`/`aria-label` entirely, so the surviving
     // `role="status"` element and the surviving `aria-live="polite"`
     // element must be the same node (the top-traders table).
+    const statusRegions = container.querySelectorAll('[role="status"]');
+    const liveRegions = container.querySelectorAll('[aria-live="polite"]');
+    expect(statusRegions).toHaveLength(1);
+    expect(liveRegions).toHaveLength(1);
+    expect(statusRegions[0]).toBe(liveRegions[0]);
+    expect(liveRegions[0]?.getAttribute("aria-label")).toBe("Loading table");
+  });
+
+  it("keeps a standalone-loading aggregator table announced once the trader table settles", () => {
+    renderSection({ tableIsLoading: false, aggregatorIsLoading: true });
+
+    // Only the aggregator skeleton remains (the trader table settled into
+    // its empty state) — it must announce itself now that nothing else on
+    // the page covers the loading state (codex review, PR 1242).
+    expect(tableSkeletonRoots()).toHaveLength(1);
     const statusRegions = container.querySelectorAll('[role="status"]');
     const liveRegions = container.querySelectorAll('[aria-live="polite"]');
     expect(statusRegions).toHaveLength(1);

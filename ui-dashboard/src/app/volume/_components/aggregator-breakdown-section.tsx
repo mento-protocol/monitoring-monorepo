@@ -42,6 +42,12 @@ export type AggregatorChartProps = {
   headline: string;
 };
 
+// The four flags are independent: loading/error/cap-hit describe this
+// section's own query, while hasExternalLoadingAnnouncer coordinates the
+// page-level live-region ownership with the sibling trader table — merging
+// them into a variant enum would couple unrelated states. Same waiver
+// rationale as VolumeOverTimeChart's independent degradation flags.
+// react-doctor-disable-next-line react-doctor/no-many-boolean-props
 export function AggregatorBreakdownSection({
   venueLabel,
   rangeLabel,
@@ -50,6 +56,7 @@ export function AggregatorBreakdownSection({
   hasError,
   isCapHit,
   chart,
+  hasExternalLoadingAnnouncer = false,
 }: {
   venueLabel: "v3" | "v2";
   rangeLabel: string;
@@ -58,6 +65,15 @@ export function AggregatorBreakdownSection({
   hasError: boolean;
   isCapHit: boolean;
   chart?: AggregatorChartProps | undefined;
+  /** True while another element on the page is already announcing a loading
+   *  state — the venue's trader table renders a `role="status"` loading
+   *  skeleton while its own query is in flight. When true, this section's
+   *  table skeleton goes `presentational` so the page keeps exactly one
+   *  polite live region during combined loading. When the aggregator query
+   *  is the only one still loading (trader table settled or errored into a
+   *  `role="alert"`), callers must pass false so assistive tech still hears
+   *  this section's loading state (codex review, PR 1242). */
+  hasExternalLoadingAnnouncer?: boolean | undefined;
 }) {
   return (
     <section className="space-y-3">
@@ -119,6 +135,7 @@ export function AggregatorBreakdownSection({
         venueLabel={venueLabel}
         isLoading={isLoading}
         hasError={hasError}
+        hasExternalLoadingAnnouncer={hasExternalLoadingAnnouncer}
       />
     </section>
   );
@@ -130,11 +147,13 @@ function AggregatorTable({
   venueLabel,
   isLoading,
   hasError,
+  hasExternalLoadingAnnouncer,
 }: {
   aggregators: readonly AggregatorWindowRow[];
   venueLabel: "v3" | "v2";
   isLoading: boolean;
   hasError: boolean;
+  hasExternalLoadingAnnouncer: boolean;
 }) {
   const { sortKey, sortDir, handleSort } = useTableSort<AggSortKey>({
     defaultKey: "volume",
@@ -174,17 +193,19 @@ function AggregatorTable({
     );
   }
   if (isLoading) {
-    // `presentational`: this component is shared by both venue sections and
-    // always renders alongside another independently-loading table (the top
-    // traders table in `volume-table.tsx`), which owns the page's single
-    // `aria-live="polite"` announcement during combined client-side
-    // loading. Without `presentational` here, both `TableSkeleton`s would
-    // announce simultaneously — two competing live regions.
+    // Contextually presentational: while the venue's trader table is also
+    // loading, it owns the page's single `aria-live="polite"` announcement
+    // and this skeleton must stay silent (two `TableSkeleton`s announcing
+    // simultaneously = competing live regions). But when this aggregator
+    // query is the only one still loading — trader table settled or errored
+    // — this skeleton is the only remaining loading indicator and must
+    // announce itself (codex review, PR 1242). The venue sections compute
+    // `hasExternalLoadingAnnouncer` from their trader table's state.
     return (
       <TableSkeleton
         variant="rows"
         rows={AGGREGATOR_TABLE_SKELETON_ROWS}
-        presentational
+        presentational={hasExternalLoadingAnnouncer}
       />
     );
   }

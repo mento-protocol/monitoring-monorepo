@@ -94,6 +94,14 @@ export function V3VolumeSection({
         hasError={aggregatorState.hasError}
         isCapHit={aggregatorState.isCapHit}
         chart={chart}
+        // While the top-traders VolumeTable above is loading it renders the
+        // page's single polite live region, so the aggregator skeleton stays
+        // presentational; once the trader table settles (or errors into a
+        // role="alert" — VolumeTable checks error before loading), the
+        // aggregator skeleton must announce its own still-loading state.
+        hasExternalLoadingAnnouncer={
+          tableState.isLoading && !tableState.hasError
+        }
       />
     </>
   );
