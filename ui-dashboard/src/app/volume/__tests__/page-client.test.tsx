@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { VolumeHeroInitialData } from "@/lib/volume-hero-initial-data";
 import {
+  AGGREGATOR_DAILY_TOP,
   BROKER_AGGREGATOR_DAILY_TOP,
   BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS,
   BROKER_TRADER_DAILY_TOP,
@@ -13,7 +14,17 @@ const mockUseGQL = vi.hoisted(() => vi.fn());
 const volumeState = vi.hoisted(() => ({
   venue: "v3" as "v3" | "v2",
   includeProtocolActors: false,
+  range: "7d" as "24h" | "7d" | "30d" | "90d" | "all",
 }));
+const poolVolumeState = vi.hoisted(() => ({
+  rows: [] as Array<Record<string, unknown>>,
+  isLoading: false,
+  error: null as Error | null,
+  partial: false,
+}));
+const mockTimeSeriesChartCard = vi.hoisted(() => vi.fn());
+const mockV2VolumeSection = vi.hoisted(() => vi.fn());
+const mockV3VolumeSection = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
@@ -30,7 +41,7 @@ vi.mock("../_lib/url-state", () => ({
       : true;
     return {
       canUseVolumeFilters,
-      range: "7d",
+      range: volumeState.range,
       actorFilter: includeProtocolActors ? "all" : "organic",
       includeProtocolActors,
       venue: volumeState.venue,
@@ -44,12 +55,7 @@ vi.mock("../_lib/url-state", () => ({
 }));
 
 vi.mock("../_lib/use-pool-volume-snapshots", () => ({
-  usePoolVolumeSnapshots: () => ({
-    rows: [],
-    isLoading: false,
-    error: null,
-    partial: false,
-  }),
+  usePoolVolumeSnapshots: () => poolVolumeState,
 }));
 
 vi.mock("../_lib/pool-chart-vm", () => ({
@@ -80,9 +86,10 @@ vi.mock("../_lib/use-hero-rollup", () => ({
 }));
 
 vi.mock("@/components/time-series-chart-card", () => ({
-  TimeSeriesChartCard: ({ title }: { title: string }) => (
-    <div data-testid="chart">{title}</div>
-  ),
+  TimeSeriesChartCard: (props: { title: string }) => {
+    mockTimeSeriesChartCard(props);
+    return <div data-testid="chart">{props.title}</div>;
+  },
 }));
 
 vi.mock("../_components/hero-data-quality-banners", () => ({
@@ -94,11 +101,17 @@ vi.mock("../_components/top-pools-list", () => ({
 }));
 
 vi.mock("../_components/v2-volume-section", () => ({
-  V2VolumeSection: () => <div data-testid="v2-section" />,
+  V2VolumeSection: (props: unknown) => {
+    mockV2VolumeSection(props);
+    return <div data-testid="v2-section" />;
+  },
 }));
 
 vi.mock("../_components/v3-volume-section", () => ({
-  V3VolumeSection: () => <div data-testid="v3-section" />,
+  V3VolumeSection: (props: unknown) => {
+    mockV3VolumeSection(props);
+    return <div data-testid="v3-section" />;
+  },
 }));
 
 import { VolumeClient } from "../page-client";
@@ -131,8 +144,16 @@ describe("VolumeClient useGQL wiring", () => {
   beforeEach(() => {
     mockUseGQL.mockReset();
     mockUseHeroRollup.mockClear();
+    mockTimeSeriesChartCard.mockClear();
+    mockV2VolumeSection.mockClear();
+    mockV3VolumeSection.mockClear();
     heroState.isLoading = false;
     heroState.hasError = false;
+    volumeState.range = "7d";
+    poolVolumeState.rows = [];
+    poolVolumeState.isLoading = false;
+    poolVolumeState.error = null;
+    poolVolumeState.partial = false;
     mockUseGQL.mockReturnValue({
       data: undefined,
       error: null,
@@ -143,10 +164,18 @@ describe("VolumeClient useGQL wiring", () => {
   it("uses 8s timeouts for v3 volume polling queries", () => {
     renderVolume("v3");
 
-    expect(optionsFor(TRADER_DAILY_TOP)).toMatchObject({ timeoutMs: 8_000 });
+    expect(optionsFor(TRADER_DAILY_TOP)).toMatchObject({
+      timeoutMs: 8_000,
+      keepPreviousData: true,
+    });
+    expect(optionsFor(AGGREGATOR_DAILY_TOP)).toMatchObject({
+      timeoutMs: 8_000,
+      keepPreviousData: true,
+    });
     expect(optionsFor(POOLS_FOR_VOLUME)).toMatchObject({
       timeoutMs: 8_000,
     });
+    expect(optionsFor(POOLS_FOR_VOLUME)?.keepPreviousData).toBeUndefined();
   });
 
   it("uses 8s timeouts for v2 broker volume polling queries", () => {
@@ -154,10 +183,80 @@ describe("VolumeClient useGQL wiring", () => {
 
     expect(optionsFor(BROKER_TRADER_DAILY_TOP)).toMatchObject({
       timeoutMs: 8_000,
+      keepPreviousData: true,
     });
     expect(optionsFor(BROKER_AGGREGATOR_DAILY_TOP)).toMatchObject({
       timeoutMs: 8_000,
+      keepPreviousData: true,
     });
+  });
+
+  it("keeps v3 chart, trader, and aggregator skeletons off while retained data revalidates", () => {
+    volumeState.range = "30d";
+    poolVolumeState.rows = [{ id: "prior-window-row" }];
+    poolVolumeState.isLoading = true;
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === TRADER_DAILY_TOP) {
+        return {
+          data: { TraderDailySnapshot: [] },
+          error: null,
+          isLoading: true,
+        };
+      }
+      if (query === POOLS_FOR_VOLUME) {
+        return { data: { Pool: [] }, error: null, isLoading: true };
+      }
+      if (query === AGGREGATOR_DAILY_TOP) {
+        return {
+          data: { AggregatorDailySnapshot: [] },
+          error: null,
+          isLoading: true,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    renderVolume("v3");
+
+    const chartCall = mockTimeSeriesChartCard.mock.calls.find(
+      ([props]) => props.title === "Volume by pool",
+    );
+    expect(chartCall?.[0]).toMatchObject({ isLoading: false });
+    expect(mockV3VolumeSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tableState: expect.objectContaining({ isLoading: false }),
+        aggregatorState: expect.objectContaining({ isLoading: false }),
+      }),
+    );
+  });
+
+  it("keeps v2 trader and aggregator skeletons off while retained data revalidates", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === BROKER_TRADER_DAILY_TOP) {
+        return {
+          data: { BrokerTraderDailySnapshot: [] },
+          error: null,
+          isLoading: true,
+        };
+      }
+      if (query === BROKER_AGGREGATOR_DAILY_TOP) {
+        return {
+          data: { BrokerAggregatorDailySnapshot: [] },
+          error: null,
+          isLoading: true,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    renderVolume("v2");
+
+    expect(mockV2VolumeSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tableIsLoading: false,
+        v2AggIsLoading: false,
+      }),
+    );
   });
 
   it("switches the v2 aggregator query ordering with the actor filter", () => {
@@ -167,6 +266,7 @@ describe("VolumeClient useGQL wiring", () => {
       optionsFor(BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS),
     ).toMatchObject({
       timeoutMs: 8_000,
+      keepPreviousData: true,
     });
   });
 
@@ -187,6 +287,7 @@ describe("VolumeClient useGQL wiring", () => {
       optionsFor(BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS),
     ).toMatchObject({
       timeoutMs: 8_000,
+      keepPreviousData: true,
     });
   });
 

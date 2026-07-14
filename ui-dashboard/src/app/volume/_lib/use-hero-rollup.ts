@@ -152,12 +152,20 @@ export function useHeroRollup({
   const heroV3Result = useGQL<HeroV3Data>(
     venue === "v3" ? VOLUME_WINDOW_LATEST : null,
     { windowKey: range },
-    { schema: VolumeWindowLatestSchema, fallbackData: fallback?.heroV3 },
+    {
+      schema: VolumeWindowLatestSchema,
+      fallbackData: fallback?.heroV3,
+      keepPreviousData: true,
+    },
   );
   const heroV2Result = useGQL<HeroV2Data>(
     venue === "v2" ? BROKER_VOLUME_WINDOW_LATEST : null,
     { windowKey: range },
-    { schema: BrokerVolumeWindowLatestSchema, fallbackData: fallback?.heroV2 },
+    {
+      schema: BrokerVolumeWindowLatestSchema,
+      fallbackData: fallback?.heroV2,
+      keepPreviousData: true,
+    },
   );
 
   const todayV3Result = useGQL<{
@@ -197,6 +205,7 @@ export function useHeroRollup({
     {
       schema: VolumeWindowFirstDayLatestSchema,
       fallbackData: fallback?.firstDayV3,
+      keepPreviousData: true,
     },
   );
   const heroFirstDayV2Result = useGQL<{
@@ -207,6 +216,7 @@ export function useHeroRollup({
     {
       schema: BrokerVolumeWindowFirstDayLatestSchema,
       fallbackData: fallback?.firstDayV2,
+      keepPreviousData: true,
     },
   );
   const firstDayRows =

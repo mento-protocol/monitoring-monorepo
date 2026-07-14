@@ -116,6 +116,7 @@ export function usePoolVolumeSnapshots({
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
       onErrorRetry: rateLimitAwareRetry,
+      keepPreviousData: true,
     },
   );
 

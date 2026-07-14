@@ -29,6 +29,7 @@ import {
   type AggregatorDailyRow,
   type AggregatorDailyRowBase,
 } from "@/lib/volume-aggregators";
+import { isLoadingWithoutData } from "@/lib/swr-state";
 import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
 import {
   protocolActorInForView,
@@ -183,7 +184,11 @@ function useVolumeQueries({
       isProtocolActorIn,
       limit: ENVIO_MAX_ROWS,
     },
-    { timeoutMs: 8_000, schema: TraderDailyTopSchema },
+    {
+      timeoutMs: 8_000,
+      schema: TraderDailyTopSchema,
+      keepPreviousData: true,
+    },
   );
   const poolsResult = useGQL<{ Pool: PoolRow[] }>(
     venue === "v3" ? POOLS_FOR_VOLUME : null,
@@ -198,7 +203,11 @@ function useVolumeQueries({
   const v3AggregatorsResult = useGQL<V3AggregatorsData>(
     venue === "v3" ? aggregatorDailyTopQuery(includeProtocolActors) : null,
     { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
-    { timeoutMs: 8_000, schema: AggregatorDailyTopSchema },
+    {
+      timeoutMs: 8_000,
+      schema: AggregatorDailyTopSchema,
+      keepPreviousData: true,
+    },
   );
 
   const v2TradersResult = useGQL<{
@@ -206,7 +215,11 @@ function useVolumeQueries({
   }>(
     venue === "v2" ? BROKER_TRADER_DAILY_TOP : null,
     { afterTimestamp: cutoff, isProtocolActorIn, limit: ENVIO_MAX_ROWS },
-    { timeoutMs: 8_000, schema: BrokerTraderDailyTopSchema },
+    {
+      timeoutMs: 8_000,
+      schema: BrokerTraderDailyTopSchema,
+      keepPreviousData: true,
+    },
   );
   const v2AggregatorsResult = useGQL<{
     BrokerAggregatorDailySnapshot: BrokerAggregatorDailyRow[];
@@ -215,7 +228,11 @@ function useVolumeQueries({
       ? brokerAggregatorDailyTopQuery(includeProtocolActors)
       : null,
     { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
-    { timeoutMs: 8_000, schema: BrokerAggregatorDailyTopSchema },
+    {
+      timeoutMs: 8_000,
+      schema: BrokerAggregatorDailyTopSchema,
+      keepPreviousData: true,
+    },
   );
   return {
     tradersResult,
@@ -322,14 +339,21 @@ function buildVolumeStatus({
   // failure must NOT blank the chart or trader table (and vice versa).
   // Per docs/pr-checklists/swr-polling-hasura.md: new schema fields ship
   // in isolated queries that degrade independently.
-  const v2AggIsLoading = v2AggregatorsResult.isLoading;
+  const v2AggIsLoading = isLoadingWithoutData(
+    v2AggregatorsResult.isLoading,
+    v2AggregatorsResult.data,
+  );
   const v2AggHasError = !!v2AggregatorsResult.error;
-  const v3AggIsLoading = v3AggregatorsResult.isLoading;
+  const v3AggIsLoading = isLoadingWithoutData(
+    v3AggregatorsResult.isLoading,
+    v3AggregatorsResult.data,
+  );
   const v3AggHasError = !!v3AggregatorsResult.error;
   // The pool chart now reads PoolDailyVolumeSnapshot, not the top-trader
   // query. Keep its degraded mode isolated so a capped/failing trader table
   // does not blank the pre-rolled pool breakdown.
-  const poolChartIsLoading = poolVolumeResult.isLoading;
+  const poolChartIsLoading =
+    poolVolumeResult.isLoading && poolVolumeResult.rows.length === 0;
   const poolChartHasError =
     !!poolVolumeResult.error || poolVolumeResult.partial;
   // Independent Hasura cap signals.
@@ -371,8 +395,18 @@ function volumeTableIsLoading({
   queries: VolumeQueries;
 }): boolean {
   return venue === "v3"
-    ? queries.tradersResult.isLoading || queries.poolsResult.isLoading
-    : queries.v2TradersResult.isLoading;
+    ? isLoadingWithoutData(
+        queries.tradersResult.isLoading,
+        queries.tradersResult.data,
+      ) ||
+        isLoadingWithoutData(
+          queries.poolsResult.isLoading,
+          queries.poolsResult.data,
+        )
+    : isLoadingWithoutData(
+        queries.v2TradersResult.isLoading,
+        queries.v2TradersResult.data,
+      );
 }
 
 function volumeTableHasError({

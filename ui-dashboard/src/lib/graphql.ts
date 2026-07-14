@@ -140,6 +140,9 @@ export type UseGQLOptions<T> = {
    *  real content instead of a skeleton (kills the layout shift) while the normal
    *  poll revalidates in the background. */
   fallbackData?: T | undefined;
+  /** Retain the prior cache key's data while a new key loads. Opt-in because
+   *  most callers poll a fixed key and should keep SWR's default semantics. */
+  keepPreviousData?: boolean | undefined;
   /** Runs after each successful network response, including unchanged data.
    *  Used by freshness-sensitive consumers to record when a cached row was
    *  actually re-observed rather than aging it continuously in the browser. */
@@ -195,6 +198,7 @@ export function useGQL<T>(
     revalidateOnFocus = false,
     revalidateOnReconnect = false,
     fallbackData,
+    keepPreviousData,
     onSuccess,
   } = opts;
 
@@ -214,6 +218,7 @@ export function useGQL<T>(
     onErrorRetry: rateLimitAwareRetry,
     ...(onSuccess !== undefined && { onSuccess }),
     ...(fallbackData !== undefined && { fallbackData }),
+    ...(keepPreviousData !== undefined && { keepPreviousData }),
   });
 
   if (!network.hasuraUrl) {

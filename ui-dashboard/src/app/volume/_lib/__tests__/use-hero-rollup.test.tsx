@@ -35,6 +35,9 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
+  BROKER_VOLUME_TODAY_TRADERS,
+  BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST,
+  BROKER_VOLUME_WINDOW_LATEST,
   VOLUME_PARTIAL_OVERLAP_TRADERS,
   VOLUME_TODAY_TRADERS,
   VOLUME_WINDOW_FIRSTDAY_LATEST,
@@ -43,6 +46,7 @@ import {
 } from "@/lib/queries/volume";
 import type {
   VolumeTodayTraderRow,
+  VolumeRangeKey,
   VolumeWindowFirstDayRow,
   VolumeWindowRow,
 } from "@/lib/volume";
@@ -166,13 +170,17 @@ type HookResult = ReturnType<typeof useHeroRollup>;
 function Probe({
   resultRef,
   initialData,
+  venue = "v3",
+  range = "7d",
 }: {
   resultRef: { current: HookResult | null };
   initialData?: VolumeHeroInitialData | undefined;
+  venue?: "v3" | "v2" | undefined;
+  range?: VolumeRangeKey | undefined;
 }) {
   resultRef.current = useHeroRollup({
-    venue: "v3",
-    range: "7d",
+    venue,
+    range,
     includeProtocolActors: false,
     isProtocolActorIn: [false],
     utcDayKey: 0,
@@ -205,14 +213,26 @@ afterEach(() => {
   container.remove();
 });
 
-function render(initialData?: VolumeHeroInitialData): {
-  current: HookResult | null;
-} {
+function render(
+  initialData?: VolumeHeroInitialData,
+  options: { venue?: "v3" | "v2"; range?: VolumeRangeKey } = {},
+): { current: HookResult | null } {
   const ref: { current: HookResult | null } = { current: null };
   act(() => {
-    root.render(<Probe resultRef={ref} initialData={initialData} />);
+    root.render(
+      <Probe resultRef={ref} initialData={initialData} {...options} />,
+    );
   });
   return ref;
+}
+
+function rerender(
+  ref: { current: HookResult | null },
+  options: { venue?: "v3" | "v2"; range?: VolumeRangeKey } = {},
+) {
+  act(() => {
+    root.render(<Probe resultRef={ref} {...options} />);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +328,98 @@ describe("useHeroRollup orchestration", () => {
     expect(result!.totalTraders).toBe(11);
     const overlapVars = lastVariables.get(VOLUME_PARTIAL_OVERLAP_TRADERS);
     expect(overlapVars?.limit).toBe(4);
+    expect(
+      lastOptions.get(VOLUME_YESTERDAY_TRADERS)?.keepPreviousData,
+    ).toBeUndefined();
+    expect(
+      lastOptions.get(VOLUME_PARTIAL_OVERLAP_TRADERS)?.keepPreviousData,
+    ).toBeUndefined();
+  });
+
+  it("keeps retained hero data rendered across a range-key change", () => {
+    const yesterdayMidnight = TODAY_MIDNIGHT - SECONDS_PER_DAY;
+    const priorSnapshot = snapshot({
+      chainId: CELO,
+      snapshotDay: String(yesterdayMidnight),
+      windowStartDay: String(yesterdayMidnight - 5 * SECONDS_PER_DAY),
+    });
+    const primaryData = { volumeWindowSnapshots: [priorSnapshot] };
+    const firstDayData = {
+      volumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+    };
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: primaryData,
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_TODAY_TRADERS, {
+      data: { volumeTodayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: firstDayData,
+      isLoading: false,
+      error: undefined,
+    });
+
+    const ref = render(undefined, { range: "7d" });
+    expect(ref.current?.isLoading).toBe(false);
+
+    // Mirror SWR's key-transition state with keepPreviousData: the old
+    // response remains present while the new key reports isLoading=true.
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: primaryData,
+      isLoading: true,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: firstDayData,
+      isLoading: true,
+      error: undefined,
+    });
+    rerender(ref, { range: "30d" });
+
+    expect(lastVariables.get(VOLUME_WINDOW_LATEST)?.windowKey).toBe("30d");
+    expect(lastOptions.get(VOLUME_WINDOW_LATEST)?.keepPreviousData).toBe(true);
+    expect(
+      lastOptions.get(VOLUME_WINDOW_FIRSTDAY_LATEST)?.keepPreviousData,
+    ).toBe(true);
+    expect(
+      lastOptions.get(VOLUME_TODAY_TRADERS)?.keepPreviousData,
+    ).toBeUndefined();
+    expect(ref.current?.isLoading).toBe(false);
+    expect(ref.current?.totalVolume).toBeGreaterThan(0);
+  });
+
+  it("opts both v2 range-keyed hero queries into previous-data retention", () => {
+    gqlResponses.set(BROKER_VOLUME_WINDOW_LATEST, {
+      data: { brokerVolumeWindowSnapshots: [] },
+      isLoading: true,
+      error: undefined,
+    });
+    gqlResponses.set(BROKER_VOLUME_TODAY_TRADERS, {
+      data: { brokerVolumeTodayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: { brokerVolumeWindowFirstDaySnapshots: [] },
+      isLoading: true,
+      error: undefined,
+    });
+
+    render(undefined, { venue: "v2", range: "90d" });
+
+    expect(lastOptions.get(BROKER_VOLUME_WINDOW_LATEST)?.keepPreviousData).toBe(
+      true,
+    );
+    expect(
+      lastOptions.get(BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST)?.keepPreviousData,
+    ).toBe(true);
+    expect(
+      lastOptions.get(BROKER_VOLUME_TODAY_TRADERS)?.keepPreviousData,
+    ).toBeUndefined();
   });
 
   it("phase 3: firstDay query errors out → chain stays degraded, tiles stay rendered with conservative totals", () => {
