@@ -29,7 +29,7 @@ import {
   type AggregatorDailyRow,
   type AggregatorDailyRowBase,
 } from "@/lib/volume-aggregators";
-import { isLoadingWithoutData } from "@/lib/swr-state";
+import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
 import {
   protocolActorInForView,
@@ -47,6 +47,14 @@ import { useHeroRollup } from "./_lib/use-hero-rollup";
 import { useVolumeAggregates } from "./_lib/use-volume-aggregates";
 import { useVolumeUrlState } from "./_lib/url-state";
 import { usePoolVolumeSnapshots } from "./_lib/use-pool-volume-snapshots";
+import {
+  actorViewFromQueryIdentity,
+  cutoffFromQueryIdentity,
+  rangeFromQueryIdentity,
+  useVersionedVolumeQueryData,
+  volumeQueryIdentity,
+  type VolumeQueryIdentity,
+} from "./_lib/use-resolved-query-identity";
 
 type V3AggregatorsData = { AggregatorDailySnapshot: AggregatorDailyRow[] };
 
@@ -102,6 +110,7 @@ function useVolumePageModel(
   const showChart = venue === "v3" && RANGES_WITH_CHART.has(range);
   const queries = useVolumeQueries({
     venue,
+    range,
     cutoff,
     includeProtocolActors,
     isProtocolActorIn,
@@ -120,11 +129,13 @@ function useVolumePageModel(
     includeProtocolActors: includeProtocolActors,
     poolVolumeRows: rows.poolVolumeRows,
     poolMeta,
-    cutoff,
+    cutoff: queries.poolVolumeResult.dataAfterTimestamp ?? cutoff,
     utcDayKey,
   });
   const aggregatorChart = useV3AggregatorChart({
-    cutoff,
+    cutoff:
+      cutoffFromQueryIdentity(queries.v3AggregatorsDataState.dataIdentity) ??
+      cutoff,
     utcDayKey,
     rows: aggregates.filteredV3AggregatorRows,
   });
@@ -139,6 +150,10 @@ function useVolumePageModel(
     isProtocolActorIn,
     utcDayKey,
     kpiSource,
+    kpiSourceRange: rangeFromQueryIdentity(activeTraderDataIdentity(queries)),
+    kpiSourceIncludesProtocolActors: actorViewFromQueryIdentity(
+      activeTraderDataIdentity(queries),
+    ),
     initialData,
   });
   const chartControls = useVolumeChartControls(range, updateRange);
@@ -147,6 +162,7 @@ function useVolumePageModel(
     hero.isLoading || hero.hasError ? "" : formatUSD(hero.totalVolume);
 
   return {
+    venue,
     isProtocolActorIn,
     showChart,
     rows,
@@ -158,22 +174,38 @@ function useVolumePageModel(
     chartControls,
     status,
     headline,
+    tableCutoff:
+      cutoffFromQueryIdentity(activeTraderDataIdentity(queries)) ?? cutoff,
+    tableRange:
+      rangeFromQueryIdentity(activeTraderDataIdentity(queries)) ?? range,
+    aggregatorRange:
+      rangeFromQueryIdentity(queries.v3AggregatorsDataState.dataIdentity) ??
+      range,
+    poolChartRange: queries.poolVolumeResult.dataRange ?? range,
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- Keep the four parallel retained-query identity policies beside their query definitions so actor/range drift cannot reappear through split wiring.
 function useVolumeQueries({
   venue,
+  range,
   cutoff,
   includeProtocolActors,
   isProtocolActorIn,
   showChart,
 }: {
   venue: VolumeUrlState["venue"];
+  range: VolumeRangeKey;
   cutoff: number;
   includeProtocolActors: boolean;
   isProtocolActorIn: ReadonlyArray<boolean>;
   showChart: boolean;
 }) {
+  const currentDataIdentity = volumeQueryIdentity({
+    range,
+    cutoff,
+    includeProtocolActors,
+  });
   // Each venue's queries are gated to its tab so we don't burn Envio quota
   // on the side the user isn't looking at — same trick as `expanded ? Q : null`
   // in VolumeTable.TraderRow.
@@ -199,6 +231,7 @@ function useVolumeQueries({
   const poolVolumeResult = usePoolVolumeSnapshots({
     enabled: showChart,
     afterTimestamp: cutoff,
+    range,
   });
   const v3AggregatorsResult = useGQL<V3AggregatorsData>(
     venue === "v3" ? aggregatorDailyTopQuery(includeProtocolActors) : null,
@@ -234,34 +267,63 @@ function useVolumeQueries({
       keepPreviousData: true,
     },
   );
-  return {
+  const tradersDataState = useVersionedVolumeQueryData(
     tradersResult,
+    currentDataIdentity,
+  );
+  const v3AggregatorsDataState = useVersionedVolumeQueryData(
+    v3AggregatorsResult,
+    currentDataIdentity,
+  );
+  const v2TradersDataState = useVersionedVolumeQueryData(
+    v2TradersResult,
+    currentDataIdentity,
+  );
+  const v2AggregatorsDataState = useVersionedVolumeQueryData(
+    v2AggregatorsResult,
+    currentDataIdentity,
+  );
+  return {
+    venue,
     poolsResult,
     poolVolumeResult,
-    v3AggregatorsResult,
-    v2TradersResult,
-    v2AggregatorsResult,
+    tradersDataState,
+    v3AggregatorsDataState,
+    v2TradersDataState,
+    v2AggregatorsDataState,
   };
 }
 
 type VolumeQueries = ReturnType<typeof useVolumeQueries>;
 
+function activeTraderDataIdentity(
+  queries: VolumeQueries,
+): VolumeQueryIdentity | undefined {
+  return queries.venue === "v3"
+    ? queries.tradersDataState.data === undefined
+      ? undefined
+      : queries.tradersDataState.dataIdentity
+    : queries.v2TradersDataState.data === undefined
+      ? undefined
+      : queries.v2TradersDataState.dataIdentity;
+}
+
 function readVolumeRows({
-  tradersResult,
   poolsResult,
   poolVolumeResult,
-  v3AggregatorsResult,
-  v2TradersResult,
-  v2AggregatorsResult,
+  tradersDataState,
+  v3AggregatorsDataState,
+  v2TradersDataState,
+  v2AggregatorsDataState,
 }: VolumeQueries) {
-  const traderRows = tradersResult.data?.TraderDailySnapshot ?? [];
+  const traderRows = tradersDataState.data?.TraderDailySnapshot ?? [];
   const poolRows = poolsResult.data?.Pool ?? [];
   const poolVolumeRows = poolVolumeResult.rows;
   const v3AggregatorRows =
-    v3AggregatorsResult.data?.AggregatorDailySnapshot ?? [];
-  const v2TraderRows = v2TradersResult.data?.BrokerTraderDailySnapshot ?? [];
+    v3AggregatorsDataState.data?.AggregatorDailySnapshot ?? [];
+  const v2TraderRows = v2TradersDataState.data?.BrokerTraderDailySnapshot ?? [];
   const v2AggregatorRows =
-    v2AggregatorsResult.data?.BrokerAggregatorDailySnapshot ?? [];
+    v2AggregatorsDataState.data?.BrokerAggregatorDailySnapshot ?? [];
   return {
     traderRows,
     poolRows,
@@ -323,7 +385,7 @@ function buildVolumeStatus({
   venue: VolumeUrlState["venue"];
   queries: VolumeQueries;
 }) {
-  const { poolVolumeResult, v3AggregatorsResult, v2AggregatorsResult } =
+  const { poolVolumeResult, v3AggregatorsDataState, v2AggregatorsDataState } =
     queries;
   // Page chrome / KPIs / chart / trader table all read from the
   // trader-side query for the active venue. The v2 aggregator query is
@@ -339,23 +401,20 @@ function buildVolumeStatus({
   // failure must NOT blank the chart or trader table (and vice versa).
   // Per docs/pr-checklists/swr-polling-hasura.md: new schema fields ship
   // in isolated queries that degrade independently.
-  const v2AggIsLoading = isLoadingWithoutData(
-    v2AggregatorsResult.isLoading,
-    v2AggregatorsResult.data,
-  );
-  const v2AggHasError = !!v2AggregatorsResult.error;
-  const v3AggIsLoading = isLoadingWithoutData(
-    v3AggregatorsResult.isLoading,
-    v3AggregatorsResult.data,
-  );
-  const v3AggHasError = !!v3AggregatorsResult.error;
+  const v2AggIsLoading = v2AggregatorsDataState.isLoading;
+  const v2AggHasError = v2AggregatorsDataState.hasError;
+  const v3AggIsLoading = v3AggregatorsDataState.isLoading;
+  const v3AggHasError = v3AggregatorsDataState.hasError;
   // The pool chart now reads PoolDailyVolumeSnapshot, not the top-trader
   // query. Keep its degraded mode isolated so a capped/failing trader table
   // does not blank the pre-rolled pool breakdown.
   const poolChartIsLoading =
-    poolVolumeResult.isLoading && poolVolumeResult.rows.length === 0;
+    poolVolumeResult.isLoading && !poolVolumeResult.hasData;
   const poolChartHasError =
-    !!poolVolumeResult.error || poolVolumeResult.partial;
+    hasErrorWithoutData(
+      poolVolumeResult.error,
+      poolVolumeResult.hasData ? poolVolumeResult.rows : undefined,
+    ) || poolVolumeResult.partial;
   // Independent Hasura cap signals.
   //
   // Hero tiles (total volume / unique traders / total swaps) are EXACT
@@ -395,18 +454,12 @@ function volumeTableIsLoading({
   queries: VolumeQueries;
 }): boolean {
   return venue === "v3"
-    ? isLoadingWithoutData(
-        queries.tradersResult.isLoading,
-        queries.tradersResult.data,
-      ) ||
+    ? queries.tradersDataState.isLoading ||
         isLoadingWithoutData(
           queries.poolsResult.isLoading,
           queries.poolsResult.data,
         )
-    : isLoadingWithoutData(
-        queries.v2TradersResult.isLoading,
-        queries.v2TradersResult.data,
-      );
+    : queries.v2TradersDataState.isLoading;
 }
 
 function volumeTableHasError({
@@ -417,8 +470,8 @@ function volumeTableHasError({
   queries: VolumeQueries;
 }): boolean {
   return venue === "v3"
-    ? !!queries.tradersResult.error
-    : !!queries.v2TradersResult.error;
+    ? queries.tradersDataState.hasError
+    : queries.v2TradersDataState.hasError;
 }
 
 function volumeTableCapHit({
@@ -430,14 +483,14 @@ function volumeTableCapHit({
 }): boolean {
   if (venue === "v3") {
     return (
-      !!queries.tradersResult.data &&
-      (queries.tradersResult.data.TraderDailySnapshot?.length ?? 0) ===
+      !!queries.tradersDataState.data &&
+      (queries.tradersDataState.data.TraderDailySnapshot?.length ?? 0) ===
         ENVIO_MAX_ROWS
     );
   }
   return (
-    !!queries.v2TradersResult.data &&
-    (queries.v2TradersResult.data.BrokerTraderDailySnapshot?.length ?? 0) ===
+    !!queries.v2TradersDataState.data &&
+    (queries.v2TradersDataState.data.BrokerTraderDailySnapshot?.length ?? 0) ===
       ENVIO_MAX_ROWS
   );
 }
@@ -451,9 +504,9 @@ function v2AggregatorCapHit({
 }): boolean {
   return (
     venue === "v2" &&
-    !!queries.v2AggregatorsResult.data &&
-    (queries.v2AggregatorsResult.data.BrokerAggregatorDailySnapshot?.length ??
-      0) === ENVIO_MAX_ROWS
+    !!queries.v2AggregatorsDataState.data &&
+    (queries.v2AggregatorsDataState.data.BrokerAggregatorDailySnapshot
+      ?.length ?? 0) === ENVIO_MAX_ROWS
   );
 }
 
@@ -466,9 +519,9 @@ function v3AggregatorCapHit({
 }): boolean {
   return (
     venue === "v3" &&
-    !!queries.v3AggregatorsResult.data &&
-    (queries.v3AggregatorsResult.data.AggregatorDailySnapshot?.length ?? 0) ===
-      ENVIO_MAX_ROWS
+    !!queries.v3AggregatorsDataState.data &&
+    (queries.v3AggregatorsDataState.data.AggregatorDailySnapshot?.length ??
+      0) === ENVIO_MAX_ROWS
   );
 }
 
@@ -492,7 +545,7 @@ function VolumePageView({
       <VolumeChartArea urlState={urlState} model={model} />
       <VolumeKpiTiles
         hero={hero}
-        range={urlState.range}
+        range={hero.displayRange}
         isTableCapHit={status.isTableCapHit}
         tableIsLoading={status.tableIsLoading}
         tableHasError={status.tableHasError}

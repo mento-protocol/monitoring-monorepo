@@ -50,6 +50,7 @@ describe("fetchPoolVolumeSnapshots", () => {
     const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
 
     expect(result.partial).toBe(false);
+    expect(result.afterTimestamp).toBe(123);
     expect(result.rows).toHaveLength(1001);
     expect(requestMock).toHaveBeenCalledTimes(2);
     expect(requestMock.mock.calls[0]![0].variables).toMatchObject({

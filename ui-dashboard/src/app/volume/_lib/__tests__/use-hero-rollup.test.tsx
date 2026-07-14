@@ -166,17 +166,25 @@ function yesterdayRow(
 // ---------------------------------------------------------------------------
 
 type HookResult = ReturnType<typeof useHeroRollup>;
+const EMPTY_KPI_SOURCE: ReadonlyArray<{
+  chainId: number;
+  volumeUsdWei: bigint;
+}> = [];
 
 function Probe({
   resultRef,
   initialData,
   venue = "v3",
   range = "7d",
+  kpiSource = EMPTY_KPI_SOURCE,
+  kpiSourceRange,
 }: {
   resultRef: { current: HookResult | null };
   initialData?: VolumeHeroInitialData | undefined;
   venue?: "v3" | "v2" | undefined;
   range?: VolumeRangeKey | undefined;
+  kpiSource?: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
+  kpiSourceRange?: VolumeRangeKey | undefined;
 }) {
   resultRef.current = useHeroRollup({
     venue,
@@ -184,7 +192,10 @@ function Probe({
     includeProtocolActors: false,
     isProtocolActorIn: [false],
     utcDayKey: 0,
-    kpiSource: [],
+    kpiSource,
+    kpiSourceRange,
+    kpiSourceIncludesProtocolActors:
+      kpiSourceRange === undefined ? undefined : false,
     initialData,
   });
   return null;
@@ -215,7 +226,12 @@ afterEach(() => {
 
 function render(
   initialData?: VolumeHeroInitialData,
-  options: { venue?: "v3" | "v2"; range?: VolumeRangeKey } = {},
+  options: {
+    venue?: "v3" | "v2";
+    range?: VolumeRangeKey;
+    kpiSource?: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
+    kpiSourceRange?: VolumeRangeKey;
+  } = {},
 ): { current: HookResult | null } {
   const ref: { current: HookResult | null } = { current: null };
   act(() => {
@@ -228,7 +244,12 @@ function render(
 
 function rerender(
   ref: { current: HookResult | null },
-  options: { venue?: "v3" | "v2"; range?: VolumeRangeKey } = {},
+  options: {
+    venue?: "v3" | "v2";
+    range?: VolumeRangeKey;
+    kpiSource?: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
+    kpiSourceRange?: VolumeRangeKey;
+  } = {},
 ) {
   act(() => {
     root.render(<Probe resultRef={ref} {...options} />);
@@ -390,6 +411,117 @@ describe("useHeroRollup orchestration", () => {
     ).toBeUndefined();
     expect(ref.current?.isLoading).toBe(false);
     expect(ref.current?.totalVolume).toBeGreaterThan(0);
+  });
+
+  it("publishes only range-coherent hero slices and concentration inputs", () => {
+    const yesterdayMidnight = TODAY_MIDNIGHT - SECONDS_PER_DAY;
+    const priorPrimary = {
+      volumeWindowSnapshots: [
+        snapshot({
+          chainId: CELO,
+          windowKey: "7d",
+          snapshotDay: String(yesterdayMidnight),
+          windowStartDay: String(yesterdayMidnight - 6 * SECONDS_PER_DAY),
+          totalVolumeUsdWei: "1000000000000000000000",
+        }),
+      ],
+    };
+    const priorFirstDay = {
+      volumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+    };
+    const todayData = { volumeTodayTraders: [] };
+    const priorKpi = [
+      { chainId: CELO, volumeUsdWei: BigInt("500000000000000000000") },
+    ];
+
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: priorPrimary,
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: priorFirstDay,
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_TODAY_TRADERS, {
+      data: todayData,
+      isLoading: false,
+      error: undefined,
+    });
+
+    const ref = render(undefined, {
+      range: "7d",
+      kpiSource: priorKpi,
+      kpiSourceRange: "7d",
+    });
+    expect(ref.current?.displayRange).toBe("7d");
+    expect(ref.current?.totalVolume).toBeCloseTo(1000, 4);
+    expect(ref.current?.concentration).toBeCloseTo(50, 4);
+
+    const nextPrimary = {
+      volumeWindowSnapshots: [
+        snapshot({
+          chainId: CELO,
+          windowKey: "30d",
+          snapshotDay: String(yesterdayMidnight),
+          windowStartDay: String(yesterdayMidnight - 29 * SECONDS_PER_DAY),
+          totalVolumeUsdWei: "3000000000000000000000",
+        }),
+      ],
+    };
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: nextPrimary,
+      isLoading: false,
+      error: undefined,
+    });
+    // The primary response won the race. SWR still exposes the prior
+    // first-day slice and trader numerator for their replacement keys.
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: priorFirstDay,
+      isLoading: true,
+      error: undefined,
+    });
+    rerender(ref, {
+      range: "30d",
+      kpiSource: priorKpi,
+      kpiSourceRange: "7d",
+    });
+
+    // Keep the prior complete snapshot; never combine the new denominator
+    // with an old first-day subtraction or numerator.
+    expect(ref.current?.displayRange).toBe("7d");
+    expect(ref.current?.totalVolume).toBeCloseTo(1000, 4);
+    expect(ref.current?.concentration).toBeCloseTo(50, 4);
+
+    const nextFirstDay = {
+      volumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+    };
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: nextFirstDay,
+      isLoading: false,
+      error: undefined,
+    });
+    // Even after the hero pair is current, the old trader numerator keeps
+    // the whole display on its previous coherent version.
+    rerender(ref, {
+      range: "30d",
+      kpiSource: priorKpi,
+      kpiSourceRange: "7d",
+    });
+    expect(ref.current?.displayRange).toBe("7d");
+    expect(ref.current?.concentration).toBeCloseTo(50, 4);
+
+    rerender(ref, {
+      range: "30d",
+      kpiSource: [
+        { chainId: CELO, volumeUsdWei: BigInt("600000000000000000000") },
+      ],
+      kpiSourceRange: "30d",
+    });
+    expect(ref.current?.displayRange).toBe("30d");
+    expect(ref.current?.totalVolume).toBeCloseTo(3000, 4);
+    expect(ref.current?.concentration).toBeCloseTo(20, 4);
   });
 
   it("opts both v2 range-keyed hero queries into previous-data retention", () => {

@@ -54,14 +54,17 @@ function deferred<T>() {
 
 function Probe({
   afterTimestamp,
+  range,
   resultRef,
 }: {
   afterTimestamp: number;
+  range: "30d" | "90d";
   resultRef: ResultRef;
 }) {
   resultRef.current = usePoolVolumeSnapshots({
     enabled: true,
     afterTimestamp,
+    range,
   });
   return null;
 }
@@ -71,11 +74,15 @@ let root: Root;
 let cache: Cache;
 let resultRef: ResultRef;
 
-function render(afterTimestamp: number) {
+function render(afterTimestamp: number, range: "30d" | "90d") {
   act(() => {
     root.render(
       <SWRConfig value={{ provider: () => cache, dedupingInterval: 0 }}>
-        <Probe afterTimestamp={afterTimestamp} resultRef={resultRef} />
+        <Probe
+          afterTimestamp={afterTimestamp}
+          range={range}
+          resultRef={resultRef}
+        />
       </SWRConfig>,
     );
   });
@@ -109,18 +116,22 @@ describe("usePoolVolumeSnapshots", () => {
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
 
-    render(100);
+    render(100, "30d");
     await act(async () => {
       first.resolve({ PoolDailyVolumeSnapshot: [row("1", "100")] });
       await first.promise;
     });
     expect(resultRef.current?.rows.map(({ id }) => id)).toEqual(["1"]);
     expect(resultRef.current?.isLoading).toBe(false);
+    expect(resultRef.current?.dataAfterTimestamp).toBe(100);
+    expect(resultRef.current?.dataRange).toBe("30d");
 
-    render(200);
+    render(200, "90d");
 
     expect(resultRef.current?.rows.map(({ id }) => id)).toEqual(["1"]);
     expect(resultRef.current?.isLoading).toBe(true);
+    expect(resultRef.current?.dataAfterTimestamp).toBe(100);
+    expect(resultRef.current?.dataRange).toBe("30d");
     expect(
       resultRef.current!.isLoading && resultRef.current!.rows.length === 0,
     ).toBe(false);
@@ -131,5 +142,7 @@ describe("usePoolVolumeSnapshots", () => {
     });
     expect(resultRef.current?.rows.map(({ id }) => id)).toEqual(["2"]);
     expect(resultRef.current?.isLoading).toBe(false);
+    expect(resultRef.current?.dataAfterTimestamp).toBe(200);
+    expect(resultRef.current?.dataRange).toBe("90d");
   });
 });

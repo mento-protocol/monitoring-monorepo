@@ -21,14 +21,41 @@ const poolVolumeState = vi.hoisted(() => ({
   isLoading: false,
   error: null as Error | null,
   partial: false,
+  dataAfterTimestamp: undefined as number | undefined,
+  dataRange: undefined as typeof volumeState.range | undefined,
+  hasData: false,
 }));
 const mockTimeSeriesChartCard = vi.hoisted(() => vi.fn());
 const mockV2VolumeSection = vi.hoisted(() => vi.fn());
 const mockV3VolumeSection = vi.hoisted(() => vi.fn());
+const mockUsePoolChartViewModel = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
 }));
+
+vi.mock("../_lib/use-resolved-query-identity", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../_lib/use-resolved-query-identity")
+    >();
+  return {
+    ...actual,
+    // Static-markup wiring tests have no persistent component instance. The
+    // real range/filter transition state machine is covered in the hook's
+    // jsdom orchestration tests; here we model already-versioned current-key
+    // data so the page-level loading/error plumbing stays focused.
+    useVersionedVolumeQueryData: (
+      result: { data: unknown; error: unknown; isLoading: boolean },
+      currentIdentity: string,
+    ) => ({
+      data: result.data,
+      dataIdentity: result.data === undefined ? undefined : currentIdentity,
+      isLoading: result.isLoading && result.data === undefined,
+      hasError: result.error != null && result.data === undefined,
+    }),
+  };
+});
 
 vi.mock("../_lib/url-state", () => ({
   useVolumeUrlState: ({
@@ -59,11 +86,18 @@ vi.mock("../_lib/use-pool-volume-snapshots", () => ({
 }));
 
 vi.mock("../_lib/pool-chart-vm", () => ({
-  usePoolChartViewModel: () => ({
-    poolVolumeBreakdown: { totalSeries: [], breakdown: [] },
-    chartBreakdown: [],
-    topPoolsListEntries: [],
-  }),
+  usePoolChartViewModel: (args: unknown) => {
+    mockUsePoolChartViewModel(args);
+    return {
+      poolVolumeBreakdown: {
+        totalSeries: [],
+        breakdown: [],
+        windowTotalUsdWei: BigInt(0),
+      },
+      chartBreakdown: [],
+      topPoolsListEntries: [],
+    };
+  },
 }));
 
 const mockUseHeroRollup = vi.hoisted(() => vi.fn());
@@ -81,6 +115,7 @@ vi.mock("../_lib/use-hero-rollup", () => ({
       concentration: 0,
       staleChains: [],
       degradedChains: [],
+      displayRange: volumeState.range,
     };
   },
 }));
@@ -147,6 +182,7 @@ describe("VolumeClient useGQL wiring", () => {
     mockTimeSeriesChartCard.mockClear();
     mockV2VolumeSection.mockClear();
     mockV3VolumeSection.mockClear();
+    mockUsePoolChartViewModel.mockClear();
     heroState.isLoading = false;
     heroState.hasError = false;
     volumeState.range = "7d";
@@ -154,6 +190,9 @@ describe("VolumeClient useGQL wiring", () => {
     poolVolumeState.isLoading = false;
     poolVolumeState.error = null;
     poolVolumeState.partial = false;
+    poolVolumeState.dataAfterTimestamp = undefined;
+    poolVolumeState.dataRange = undefined;
+    poolVolumeState.hasData = false;
     mockUseGQL.mockReturnValue({
       data: undefined,
       error: null,
@@ -192,9 +231,12 @@ describe("VolumeClient useGQL wiring", () => {
   });
 
   it("keeps v3 chart, trader, and aggregator skeletons off while retained data revalidates", () => {
-    volumeState.range = "30d";
+    volumeState.range = "90d";
     poolVolumeState.rows = [{ id: "prior-window-row" }];
     poolVolumeState.isLoading = true;
+    poolVolumeState.dataAfterTimestamp = 1_690_000_000;
+    poolVolumeState.dataRange = "30d";
+    poolVolumeState.hasData = true;
     mockUseGQL.mockImplementation((query: string | null) => {
       if (query === TRADER_DAILY_TOP) {
         return {
@@ -222,6 +264,9 @@ describe("VolumeClient useGQL wiring", () => {
       ([props]) => props.title === "Volume by pool",
     );
     expect(chartCall?.[0]).toMatchObject({ isLoading: false });
+    expect(mockUsePoolChartViewModel).toHaveBeenCalledWith(
+      expect.objectContaining({ cutoff: 1_690_000_000 }),
+    );
     expect(mockV3VolumeSection).toHaveBeenCalledWith(
       expect.objectContaining({
         tableState: expect.objectContaining({ isLoading: false }),
@@ -256,6 +301,74 @@ describe("VolumeClient useGQL wiring", () => {
         tableIsLoading: false,
         v2AggIsLoading: false,
       }),
+    );
+  });
+
+  it("keeps retained v3 table, aggregator, and pool data visible after replacement errors", () => {
+    volumeState.range = "30d";
+    poolVolumeState.rows = [{ id: "retained-pool-row" }];
+    poolVolumeState.error = new Error("new pool window failed");
+    poolVolumeState.dataAfterTimestamp = 1_690_000_000;
+    poolVolumeState.dataRange = "30d";
+    poolVolumeState.hasData = true;
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === TRADER_DAILY_TOP) {
+        return {
+          data: { TraderDailySnapshot: [] },
+          error: new Error("new trader window failed"),
+          isLoading: false,
+        };
+      }
+      if (query === POOLS_FOR_VOLUME) {
+        return { data: { Pool: [] }, error: null, isLoading: false };
+      }
+      if (query === AGGREGATOR_DAILY_TOP) {
+        return {
+          data: { AggregatorDailySnapshot: [] },
+          error: new Error("new aggregator window failed"),
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    renderVolume("v3");
+
+    const chartCall = mockTimeSeriesChartCard.mock.calls.find(
+      ([props]) => props.title === "Volume by pool",
+    );
+    expect(chartCall?.[0]).toMatchObject({ hasError: false });
+    expect(mockV3VolumeSection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tableState: expect.objectContaining({ hasError: false }),
+        aggregatorState: expect.objectContaining({ hasError: false }),
+      }),
+    );
+  });
+
+  it("keeps retained v2 trader and aggregator data visible after replacement errors", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === BROKER_TRADER_DAILY_TOP) {
+        return {
+          data: { BrokerTraderDailySnapshot: [] },
+          error: new Error("new trader window failed"),
+          isLoading: false,
+        };
+      }
+      if (query === BROKER_AGGREGATOR_DAILY_TOP) {
+        return {
+          data: { BrokerAggregatorDailySnapshot: [] },
+          error: new Error("new aggregator window failed"),
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    renderVolume("v2");
+
+    expect(mockV2VolumeSection).toHaveBeenCalledWith(
+      expect.objectContaining({ tableHasError: false, v2AggHasError: false }),
     );
   });
 

@@ -29,6 +29,7 @@ type V3AggregatorState = {
 
 export function V3VolumeSection({
   rangeLabel,
+  aggregatorRangeLabel,
   range,
   cutoff,
   filteredTraderRows,
@@ -42,6 +43,7 @@ export function V3VolumeSection({
   chart,
 }: {
   rangeLabel: string;
+  aggregatorRangeLabel: string;
   range: VolumeRangeKey;
   cutoff: number;
   filteredTraderRows: readonly TraderDailyRow[];
@@ -88,7 +90,7 @@ export function V3VolumeSection({
       </section>
       <AggregatorBreakdownSection
         venueLabel="v3"
-        rangeLabel={rangeLabel}
+        rangeLabel={aggregatorRangeLabel}
         aggregators={aggregators}
         isLoading={aggregatorState.isLoading}
         hasError={aggregatorState.hasError}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { useGQL } from "@/lib/graphql";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
@@ -45,6 +45,7 @@ import {
 } from "@/lib/volume";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import type { Venue } from "./url-state";
+import { useResolvedQueryIdentity } from "./use-resolved-query-identity";
 
 type HeroV3Data = { volumeWindowSnapshots: VolumeWindowRow[] };
 type HeroV2Data = { brokerVolumeWindowSnapshots: VolumeWindowRow[] };
@@ -80,6 +81,8 @@ export function useHeroRollup({
   isProtocolActorIn,
   utcDayKey,
   kpiSource,
+  kpiSourceRange,
+  kpiSourceIncludesProtocolActors,
   initialData,
 }: {
   venue: Venue;
@@ -92,6 +95,11 @@ export function useHeroRollup({
    *  the resulting rows so the table query and the hero query can degrade
    *  independently. */
   kpiSource: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
+  /** Identity of `kpiSource`. A retained trader response keeps its resolved
+   * range/filter identity so concentration never divides an old numerator by
+   * a new hero denominator. */
+  kpiSourceRange?: VolumeRangeKey | undefined;
+  kpiSourceIncludesProtocolActors?: boolean | undefined;
   /** Server-prefetched hero responses (perf-plan S4), forwarded to the
    *  matching `useGQL` calls as `fallbackData` so the first render paints
    *  populated tiles. Only attached when the prefetched view descriptor
@@ -110,6 +118,10 @@ export function useHeroRollup({
   concentration: number;
   staleChains: number[];
   degradedChains: number[];
+  /** Range that produced the returned display snapshot. During a transition
+   * this can intentionally lag `range` while the next coherent snapshot is
+   * still assembling. */
+  displayRange: VolumeRangeKey;
   isLoading: boolean;
   hasError: boolean;
 } {
@@ -167,6 +179,16 @@ export function useHeroRollup({
       keepPreviousData: true,
     },
   );
+  const heroV3DataRange = useResolvedQueryIdentity(
+    heroV3Result,
+    range,
+    fallback?.heroV3 !== undefined,
+  );
+  const heroV2DataRange = useResolvedQueryIdentity(
+    heroV2Result,
+    range,
+    fallback?.heroV2 !== undefined,
+  );
 
   const todayV3Result = useGQL<{
     volumeTodayTraders: VolumeTodayTraderRow[];
@@ -219,10 +241,32 @@ export function useHeroRollup({
       keepPreviousData: true,
     },
   );
-  const firstDayRows =
+  const heroFirstDayV3DataRange = useResolvedQueryIdentity(
+    heroFirstDayV3Result,
+    range,
+    fallback?.firstDayV3 !== undefined,
+  );
+  const heroFirstDayV2DataRange = useResolvedQueryIdentity(
+    heroFirstDayV2Result,
+    range,
+    fallback?.firstDayV2 !== undefined,
+  );
+  const snapshotDataRange = venue === "v3" ? heroV3DataRange : heroV2DataRange;
+  const firstDayDataRange =
+    venue === "v3" ? heroFirstDayV3DataRange : heroFirstDayV2DataRange;
+  const activeFirstDayResult =
+    venue === "v3" ? heroFirstDayV3Result : heroFirstDayV2Result;
+  const rawFirstDayRows =
     venue === "v3"
       ? heroFirstDayV3Result.data?.volumeWindowFirstDaySnapshots
       : heroFirstDayV2Result.data?.brokerVolumeWindowFirstDaySnapshots;
+  // A first-day slice is valid only for the same resolved window as its
+  // primary snapshot. During staggered key replacement, keep it out of the
+  // merge rather than subtracting an old-window slice from a new total.
+  const firstDayRows =
+    snapshotDataRange !== undefined && firstDayDataRange === snapshotDataRange
+      ? rawFirstDayRows
+      : undefined;
 
   // First-pass merge — without `yesterdayRows`. Used solely to discover
   // which chains are in the DEGRADED state (snapshotDay = today - 2 days),
@@ -317,7 +361,7 @@ export function useHeroRollup({
           ? partialOverlapV3Result.data?.volumePartialOverlapTraders
           : partialOverlapV2Result.data?.brokerVolumePartialOverlapTraders;
 
-  const heroTotals = useMemo(
+  const candidateHeroTotals = useMemo(
     () =>
       mergeHeroSnapshot({
         snapshotRows,
@@ -338,22 +382,71 @@ export function useHeroRollup({
       todayMidnight,
     ],
   );
-  const totalVolume = useMemo(
-    () => weiToUsd(heroTotals.totalVolumeUsdWei),
-    [heroTotals.totalVolumeUsdWei],
-  );
-
-  // Stale-chain mask is applied to numerator AND denominator in
-  // `top10Concentration` — denominator already excludes them via
-  // `mergeHeroSnapshot` — see that helper's JSDoc in `lib/volume.ts`.
-  const concentration = useMemo(
+  const candidateConcentration = useMemo(
     () =>
       top10Concentration({
         rowsByVolumeDesc: kpiSource,
-        totalVolumeUsdWei: heroTotals.totalVolumeUsdWei,
-        staleChains: heroTotals.staleChains,
+        totalVolumeUsdWei: candidateHeroTotals.totalVolumeUsdWei,
+        staleChains: candidateHeroTotals.staleChains,
       }),
-    [kpiSource, heroTotals.totalVolumeUsdWei, heroTotals.staleChains],
+    [
+      kpiSource,
+      candidateHeroTotals.totalVolumeUsdWei,
+      candidateHeroTotals.staleChains,
+    ],
+  );
+
+  type HeroDisplaySnapshot = {
+    venue: Venue;
+    includeProtocolActors: boolean;
+    range: VolumeRangeKey;
+    totals: typeof candidateHeroTotals;
+    concentration: number;
+  };
+  const lastCoherentDisplay = useRef<HeroDisplaySnapshot | undefined>(
+    undefined,
+  );
+  const firstDayMatchesPrimary =
+    snapshotDataRange !== undefined && firstDayDataRange === snapshotDataRange;
+  const firstDayTerminallyUnavailable =
+    snapshotDataRange === range &&
+    rawFirstDayRows === undefined &&
+    !activeFirstDayResult.isLoading;
+  const kpiMatchesPrimary =
+    kpiSourceRange === snapshotDataRange &&
+    kpiSourceIncludesProtocolActors === includeProtocolActors;
+  const kpiSourceIsPending =
+    kpiSourceRange === undefined ||
+    kpiSourceIncludesProtocolActors === undefined;
+  const canPublishCoherentDisplay =
+    snapshotDataRange !== undefined &&
+    (firstDayMatchesPrimary || firstDayTerminallyUnavailable) &&
+    (kpiMatchesPrimary || kpiSourceIsPending);
+  const candidateDisplay: HeroDisplaySnapshot = {
+    venue,
+    includeProtocolActors,
+    range: snapshotDataRange ?? range,
+    totals: candidateHeroTotals,
+    concentration: candidateConcentration,
+  };
+  const priorDisplay = lastCoherentDisplay.current;
+  const canReusePriorDisplay =
+    priorDisplay !== undefined &&
+    priorDisplay.venue === venue &&
+    priorDisplay.includeProtocolActors === includeProtocolActors;
+  const display =
+    canPublishCoherentDisplay || !canReusePriorDisplay
+      ? candidateDisplay
+      : priorDisplay;
+
+  useEffect(() => {
+    if (!canPublishCoherentDisplay) return;
+    lastCoherentDisplay.current = candidateDisplay;
+  }, [canPublishCoherentDisplay, candidateDisplay]);
+
+  const totalVolume = useMemo(
+    () => weiToUsd(display.totals.totalVolumeUsdWei),
+    [display.totals.totalVolumeUsdWei],
   );
 
   // Tiles + chart load when the hero snapshot AND its today-partial both
@@ -384,11 +477,12 @@ export function useHeroRollup({
   return {
     todayMidnight,
     totalVolume,
-    totalTraders: heroTotals.uniqueTraders,
-    totalSwaps: heroTotals.totalSwapCount,
-    concentration,
-    staleChains: heroTotals.staleChains,
-    degradedChains: heroTotals.degradedChains,
+    totalTraders: display.totals.uniqueTraders,
+    totalSwaps: display.totals.totalSwapCount,
+    concentration: display.concentration,
+    staleChains: display.totals.staleChains,
+    degradedChains: display.totals.degradedChains,
+    displayRange: display.range,
     isLoading,
     hasError,
   };
