@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import {
   FX_CLOSE_DAY,
   FX_CLOSE_HOUR_UTC,
@@ -10,13 +9,18 @@ import {
   nextMarketHoursTransition,
 } from "@/lib/weekend";
 import { useGQL } from "@/lib/graphql";
-import { POOL_BREAKER_CONFIG } from "@/lib/queries";
+import {
+  POOL_BREAKER_CONFIG,
+  type PoolBreakerConfigResponse,
+} from "@/lib/queries";
+import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { BreakerConfig, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
+import { StaleRefreshNotice } from "@/components/feedback";
+import { isBreakerFetchUnavailable } from "@/components/breaker-panel-math";
 
 const COUNTDOWN_THRESHOLD_HOURS = 6;
-// Aligned to wall-clock seconds (matches Market Hours countdown precision).
-const TICK_INTERVAL_MS = 60_000;
 
 const WEEKDAY_LABEL = [
   "Sun",
@@ -53,6 +57,10 @@ function scheduleString(): string {
 
 type Props = {
   pool: Pool;
+  /** Server-prefetched breaker config, forwarded to SWR as `fallbackData` so
+   *  the pill knows on first paint whether the pool is FX-gated — no
+   *  shimmer→null flash for non-FX pools (issue #1237). */
+  initialBreakerConfig?: PoolBreakerConfigResponse | undefined;
 };
 
 type Response = {
@@ -69,6 +77,166 @@ function isBreakerClosure(config: BreakerConfig | undefined): boolean {
   return config?.status === "TRIPPED" || (config?.tradingMode ?? 0) !== 0;
 }
 
+type MarketHoursState = {
+  // Open/closed is genuinely UNKNOWN: the clock is unresolved (SSR + hydration
+  // render) AND the on-chain breaker isn't tripped, so whether the market is
+  // open depends on the not-yet-known weekend calendar. Must NOT default to
+  // "open" (issue #1257 — a weekend the clock hasn't revealed would render a
+  // false "Market Open"). Renders a neutral state until the clock resolves.
+  unknown: boolean;
+  open: boolean;
+  imminentClose: boolean;
+  secondsUntilTransition: number;
+  // Closed-pill suffix text: the scheduled reopen countdown for calendar
+  // weekends, else a neutral "—" (weekday/holiday breaker closure, or the
+  // pre-clock breaker-closed render where the reopen ETA isn't known yet).
+  countdownText: string;
+};
+
+/** Derives the open/closed/countdown state from a (possibly not-yet-known)
+ * wall clock and the breaker-driven closure flag. `now === null` means the
+ * server render or the client's hydration render (see useNowSeconds).
+ *
+ * Market open/closed is CLOCK-dependent (the weekend calendar), so it cannot be
+ * known at SSR — and must not be guessed as "open". Pre-clock we only KNOW the
+ * market is closed when the on-chain breaker says so (`breakerClosed`, from
+ * SSR-prefetched fallback data, identical on server + hydration renders);
+ * otherwise the state is `unknown` and renders neutral until the clock resolves
+ * on mount (issue #1257). The suffix (`countdownText`) is likewise neutral "—"
+ * whenever the scheduled reopen isn't a known calendar weekend. */
+function deriveMarketHoursState(
+  now: Date | null,
+  breakerClosed: boolean,
+): MarketHoursState {
+  const calendarClosed = now !== null && isWeekend(now);
+  const open = !breakerClosed && !calendarClosed;
+  const unknown = now === null && !breakerClosed;
+  const transition = now !== null ? nextMarketHoursTransition(now) : null;
+  const secondsUntilTransition =
+    transition && now !== null
+      ? Math.max(
+          0,
+          Math.floor((transition.at.getTime() - now.getTime()) / 1000),
+        )
+      : 0;
+  const imminentClose =
+    now !== null && secondsUntilTransition / 3600 < COUNTDOWN_THRESHOLD_HOURS;
+  const countdownText = calendarClosed
+    ? `${formatHoursMinutes(secondsUntilTransition)} until open`
+    : "—";
+  return {
+    unknown,
+    open,
+    imminentClose,
+    secondsUntilTransition,
+    countdownText,
+  };
+}
+
+type PillView = {
+  bgClass: string;
+  label: string;
+  labelClass: string;
+  suffix: string | null;
+  suffixClass: string;
+};
+
+/** Maps the derived state to the pill's visual descriptor (bg + label + suffix
+ * + colors) so MarketHoursPill's render is a single path (keeps its cyclomatic
+ * complexity under the repo's ESLint budget). */
+function pillView(state: MarketHoursState): PillView {
+  const {
+    unknown,
+    open,
+    imminentClose,
+    secondsUntilTransition,
+    countdownText,
+  } = state;
+  if (unknown) {
+    // Neutral "unknown" pill (issue #1257): the em-dash marks a not-yet-known
+    // state, consistent with this file's other pre-clock "—" placeholders —
+    // never a false "Market Open".
+    return {
+      bgClass: "bg-slate-800/80",
+      label: "Market —",
+      labelClass: "text-slate-400",
+      suffix: null,
+      suffixClass: "",
+    };
+  }
+  if (!open) {
+    return {
+      bgClass: "bg-slate-800/80",
+      label: "Market Closed",
+      labelClass: "text-slate-300",
+      suffix: countdownText,
+      suffixClass: "text-slate-300",
+    };
+  }
+  if (imminentClose) {
+    return {
+      bgClass: "bg-amber-900/40",
+      label: "Market Open",
+      labelClass: "text-amber-300",
+      suffix: `${formatHoursMinutes(secondsUntilTransition)} until close`,
+      suffixClass: "text-amber-200",
+    };
+  }
+  return {
+    bgClass: "bg-slate-800/80",
+    label: "Market Open",
+    labelClass: "text-emerald-300",
+    suffix: scheduleString(),
+    suffixClass: "text-slate-300",
+  };
+}
+
+// The widest resolved pill form, rendered INVISIBLY inside every pill so the
+// pill width is fixed across every state swap — skeleton → neutral → open /
+// closed / countdown — and no swap can widen or wrap the flex-wrap header
+// (issue #1257: reserve the widest resolved width, not the 1-char "—"). Uses
+// the wider label ("Market Closed") and the wider suffix (the schedule string),
+// each in its real font (font-medium label + font-mono suffix), so the reserved
+// width is a strict upper bound on every real form's rendered width.
+function PillWidthReserver(): React.ReactElement {
+  return (
+    <span
+      aria-hidden
+      className="invisible col-start-1 row-start-1 inline-flex items-center gap-1 whitespace-nowrap"
+    >
+      <span className="font-medium">Market Closed</span>
+      <span>·</span>
+      <span className="font-mono">{scheduleString()}</span>
+    </span>
+  );
+}
+
+/** Pill chrome with a fixed (widest-form-reserved) width. The visible content
+ * and the invisible width reserver share one grid cell, so the container sizes
+ * to the reserver and content swaps never change the pill width. */
+function PillFrame({
+  bgClass,
+  title,
+  children,
+}: {
+  bgClass: string;
+  title: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <span
+      className={`inline-grid items-center rounded ${bgClass} px-1.5 py-0.5 text-xs cursor-help`}
+      title={title}
+    >
+      <PillWidthReserver />
+      <span className="col-start-1 row-start-1 inline-flex items-center gap-1 whitespace-nowrap">
+        {children}
+      </span>
+      <span className="sr-only"> — {title}</span>
+    </span>
+  );
+}
+
 /**
  * Title-row pill summarising whether the pool's FX market is currently open.
  * Renders only when the pool's rateFeedID is gated by an on-chain
@@ -81,14 +249,25 @@ function isBreakerClosure(config: BreakerConfig | undefined): boolean {
  *
  * Tooltip explains why FX pools close on weekends.
  */
-export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
+export function MarketHoursPill({
+  pool,
+  initialBreakerConfig,
+}: Props): React.ReactElement | null {
   const isVirtual = isVirtualPool(pool);
   const rateFeedID = pool.referenceRateFeedID ?? "";
   const queried = !isVirtual && !!rateFeedID;
 
-  const { data, isLoading } = useGQL<Response>(
+  const { data, isLoading, error } = useGQL<Response>(
     queried ? POOL_BREAKER_CONFIG : null,
     { chainId: pool.chainId, rateFeedID },
+    undefined,
+    // Bound the revalidation so a stalled fetch surfaces as `error` (→
+    // stale-refresh notice + retry), not silent stale state — see
+    // BREAKER_CONFIG_TIMEOUT_MS. Must match every sibling subscriber.
+    {
+      fallbackData: initialBreakerConfig,
+      timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
+    },
   );
 
   // FX-ness: the rateFeedID has an ENABLED MARKET_HOURS BreakerConfig.
@@ -99,119 +278,106 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
   // countdown that no longer reflects the on-chain trading gate.
   const marketHoursConfig = findEnabledMarketHoursConfig(data?.BreakerConfig);
   const enabled = !isVirtual && !!marketHoursConfig;
-  // POOL_BREAKER_CONFIG has no SSR fallback, so on every first client render
-  // this pill either renders nothing (not FX) or nothing-then-pill (FX) —
-  // the latter is a late-mounting title-row element that can push the
-  // header card's flex-wrap onto a second line (issue #1222). A shimmer
-  // placeholder while the query is genuinely in flight turns that
-  // null→content jump into placeholder→content instead.
+  // With the SSR prefetch's fallbackData present (issue #1237), `data` is
+  // populated on first paint so this is false and the pill renders its resolved
+  // shape immediately (real pill or null, no shimmer). It stays true only on
+  // the degraded path (prefetch missed) while the client query is in flight, so
+  // a late-mounting pill can't push the header card's flex-wrap onto a second
+  // line (issue #1222) — the null→content jump becomes placeholder→content.
   const queryPending = queried && data === undefined && isLoading;
 
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    if (!enabled) return;
-    const id = setInterval(() => {
-      // Round to the minute so re-renders don't fire on every tick when the
-      // displayed countdown hasn't changed (the pill renders Hh Mm only).
-      setNow((prev) => {
-        const next = new Date();
-        const prevMinute = Math.floor(prev.getTime() / 60_000);
-        const nextMinute = Math.floor(next.getTime() / 60_000);
-        return nextMinute !== prevMinute ? next : prev;
-      });
-    }, TICK_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [enabled]);
+  // SSR-safe wall clock (hooks/use-now-seconds.ts): `null` during the server
+  // render AND the client's hydration render, then a live value that ticks
+  // every ~30s. `now` is read only when non-null (below): the pool-detail
+  // page is ISR-cached (`revalidate: 60`) and the SSR fetch's fallbackData
+  // now paints real pill content on first paint (issue #1237), so a wall
+  // clock read during SSR/hydration can be up to ~60s stale versus the
+  // viewer's clock — a near-guaranteed hydration mismatch on open/closed and
+  // countdown text, worst on weekends when FX pools are closed. Pre-mount we
+  // render the neutral "assume open, no countdown" schedule variant instead;
+  // the real state settles in immediately after mount.
+  const nowSeconds = useNowSeconds();
+  const now = nowSeconds !== null ? new Date(nowSeconds * 1000) : null;
 
   if (queryPending) return <MarketHoursPillSkeleton />;
-  // Accepted tradeoff: for the majority non-FX pool, this is now
-  // skeleton→null instead of main's stable null→null. At the title row's
-  // typical width this is horizontal-only (no wrap, no CLS) — a
-  // phantom-pill-then-vanish flash rather than a layout shift — but a
-  // narrow viewport could still push the flex-wrap title row onto a second
-  // line and back. The full fix (SSR-prefetch POOL_BREAKER_CONFIG so
-  // FX-eligibility is known on first paint) is tracked in issue #1237.
+  // Fetch failed with NO data to fall back on — `initialBreakerConfig` absent
+  // AND the bounded client fetch errored (`data` undefined, `error` set, not
+  // loading). The `!enabled` return below would otherwise make the pill
+  // silently vanish, indistinguishable from a non-FX pool. Surface an explicit
+  // "unavailable" pill instead (distinct from the stale-refresh notice, which
+  // needs last-known data). Gated on `error` + a feed that WOULD query so a
+  // resolved non-FX feed still renders null (issue #1257).
+  if (isBreakerFetchUnavailable(isVirtual, rateFeedID, data, error))
+    return <MarketHoursUnavailablePill />;
+  // With the SSR prefetch's fallbackData present (issue #1237), `queryPending`
+  // is false on first paint, so a non-FX pool renders null directly — no
+  // shimmer→null flash and no title-row flex-wrap jump at any viewport. The
+  // shimmer above only shows on the degraded path (prefetch missed).
   if (!enabled) return null;
 
   const breakerClosed = isBreakerClosure(marketHoursConfig);
-  const calendarClosed = isWeekend(now);
-  const open = !breakerClosed && !calendarClosed;
-  const transition = nextMarketHoursTransition(now);
-  const secondsUntilTransition = Math.max(
-    0,
-    Math.floor((transition.at.getTime() - now.getTime()) / 1000),
-  );
-  const hoursUntilTransition = secondsUntilTransition / 3600;
+  const view = pillView(deriveMarketHoursState(now, breakerClosed));
 
   const tooltip =
     "FX pools close on weekends from Fri 21:00 UTC to Sun 23:00 UTC, " +
     "plus major holidays, because they track real-world forex rates.";
 
-  // Screen readers don't reliably announce `title=`; an `sr-only` span
-  // inside the pill exposes the explanation to assistive tech without
-  // changing the visual.
-  if (!open) {
-    // Calendar closure — countdown to next open. Breaker-driven weekday
-    // closures do not have a known reopen time in the weekly FX calendar.
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded bg-slate-800/80 px-1.5 py-0.5 text-xs cursor-help"
-        title={tooltip}
-      >
-        <span className="text-slate-300 font-medium">Market Closed</span>
-        {calendarClosed && (
+  // The pill shares the POOL_BREAKER_CONFIG SWR key with BreakerPanel, so a
+  // failed revalidation leaves the last-known Market Open/Closed state on
+  // screen while SWR sets `error`. Mirror the breaker panel's stale-refresh
+  // affordance (issue #1257) so the pill doesn't read as freshly-confirmed —
+  // `w-full` drops it onto its own header-row line. `StaleRefreshNotice`
+  // returns null when there's no error, so the healthy DOM is just the pill.
+  return (
+    <>
+      <PillFrame bgClass={view.bgClass} title={tooltip}>
+        <span className={`font-medium ${view.labelClass}`}>{view.label}</span>
+        {view.suffix !== null && (
           <>
             <span className="text-slate-500">·</span>
-            <span className="font-mono text-slate-300">
-              {formatHoursMinutes(secondsUntilTransition)} until open
+            <span className={`font-mono ${view.suffixClass}`}>
+              {view.suffix}
             </span>
           </>
         )}
-        <span className="sr-only"> — {tooltip}</span>
-      </span>
-    );
-  }
-
-  if (hoursUntilTransition < COUNTDOWN_THRESHOLD_HOURS) {
-    // Open, but close is imminent — amber countdown.
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-xs cursor-help"
-        title={tooltip}
-      >
-        <span className="text-amber-300 font-medium">Market Open</span>
-        <span className="text-slate-500">·</span>
-        <span className="font-mono text-amber-200">
-          {formatHoursMinutes(secondsUntilTransition)} until close
-        </span>
-        <span className="sr-only"> — {tooltip}</span>
-      </span>
-    );
-  }
-
-  // Open with plenty of runway — show the static schedule.
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded bg-slate-800/80 px-1.5 py-0.5 text-xs cursor-help"
-      title={tooltip}
-    >
-      <span className="text-emerald-300 font-medium">Market Open</span>
-      <span className="text-slate-500">·</span>
-      <span className="font-mono text-slate-300">{scheduleString()}</span>
-      <span className="sr-only"> — {tooltip}</span>
-    </span>
+      </PillFrame>
+      <StaleRefreshNotice
+        subject="Market hours"
+        error={error}
+        className="w-full"
+      />
+    </>
   );
 }
 
-// Same box height as the real pill (text-xs line height + py-0.5 ≈ h-5).
-// Width approximates the widest real variant ("Market Open · <schedule>")
-// so a pool that does turn out FX-gated doesn't visibly widen the title row.
+// Explicit "couldn't load" pill for an FX-eligible feed whose breaker config
+// fetch failed with no fallback (see MarketHoursPill) — distinct from the
+// stale-refresh notice (has data) and the null non-FX case. Uses the same
+// fixed-width frame so the swap to the real pill on retry doesn't shift the
+// header.
+function MarketHoursUnavailablePill(): React.ReactElement {
+  return (
+    <PillFrame
+      bgClass="bg-slate-800/80"
+      title="Market-hours breaker config couldn't be loaded — retrying."
+    >
+      <span className="font-medium text-slate-400">
+        Market status unavailable
+      </span>
+    </PillFrame>
+  );
+}
+
+// Same fixed width + height as the real pill: reuses the pill's invisible width
+// reserver inside a pulsing box, so the skeleton → resolved-pill swap (degraded
+// prefetch-miss path only) can't widen or wrap the title row either.
 function MarketHoursPillSkeleton() {
   return (
     <span
-      className="inline-flex h-5 w-40 animate-pulse items-center rounded bg-slate-800/50"
+      className="inline-grid animate-pulse items-center rounded bg-slate-800/50 px-1.5 py-0.5 text-xs"
       aria-hidden="true"
-    />
+    >
+      <PillWidthReserver />
+    </span>
   );
 }

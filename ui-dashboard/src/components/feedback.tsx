@@ -36,6 +36,41 @@ export function ErrorBox({ message }: { message: string }) {
   );
 }
 
+/** Message for a failed SWR revalidation that left last-known `fallbackData`
+ *  on screen, or `null` when there's no error. With SSR `fallbackData` present,
+ *  SWR keeps the last-good `data` visible while setting `error`, so a widget
+ *  must disclose that its content is the last confirmed state, not a fresh poll
+ *  (issue #1257). `subject` names the data ("Breaker status", "Market hours"). */
+function staleRefreshMessage(subject: string, error: unknown): string | null {
+  if (error == null) return null;
+  const detail = error instanceof Error ? error.message : String(error);
+  return `${subject} refresh failed — showing the last confirmed state (${detail})`;
+}
+
+/** Shared stale-refresh affordance: renders an `ErrorBox` disclosing that a
+ *  widget is showing last-known `fallbackData` after a failed revalidation, or
+ *  `null` when there's no error. Reused by `BreakerPanel` and `MarketHoursPill`
+ *  so both siblings surface the identical "showing the last confirmed state"
+ *  indicator (issue #1257). `className` positions the block for the caller
+ *  (e.g. `mb-4` in a strip, `w-full` to drop onto its own header-row line). */
+export function StaleRefreshNotice({
+  subject,
+  error,
+  className,
+}: {
+  subject: string;
+  error: unknown;
+  className: string;
+}): React.ReactElement | null {
+  const message = staleRefreshMessage(subject, error);
+  if (message === null) return null;
+  return (
+    <div className={className}>
+      <ErrorBox message={message} />
+    </div>
+  );
+}
+
 export function Tile({
   label,
   value,

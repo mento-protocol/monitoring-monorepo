@@ -1,7 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+/** @vitest-environment jsdom */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act } from "react";
+import { hydrateRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { BreakerPanel } from "@/components/breaker-panel";
 import type { Pool, BreakerConfig, BreakerTripEvent } from "@/lib/types";
+import { formatTimestamp, timestampOrUtc } from "@/lib/format";
+import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 
 const mockUseGQL = vi.fn();
 vi.mock("@/lib/graphql", () => ({
@@ -148,9 +154,25 @@ function trippedValueConfig(): BreakerConfig {
 
 const noTrips: BreakerTripEvent[] = [];
 
+// react-dom/client's `act` + `hydrateRoot` idiom needs this flag (same
+// setup as market-hours-pill.test.tsx) — only the hydration-safety describe
+// block below exercises it, but the flag has to be set before hydrateRoot
+// runs and restored after, so it lives in the suite's beforeEach/afterEach.
+const reactActEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+let previousActEnvironment: boolean | undefined;
+
 describe("BreakerPanel", () => {
   beforeEach(() => {
     mockUseGQL.mockReset();
+    previousActEnvironment = reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT =
+      previousActEnvironment ?? false;
   });
 
   it("renders nothing for virtual pools", () => {
@@ -166,9 +188,11 @@ describe("BreakerPanel", () => {
   });
 
   it("renders a 5-stat skeleton (not nothing) while the query is still loading", () => {
-    // POOL_BREAKER_CONFIG has no SSR fallback, so on first client render this
-    // is the common state for FX pools — must not render `null` (issue
-    // #1222: a null→content swap here measured as +119px on PoolHeader).
+    // Degraded path only (SSR prefetch missed, so no fallbackData): with the
+    // query genuinely in flight the panel must render a matching-shape shimmer,
+    // not `null` (issue #1222: a null→content swap here measured as +119px on
+    // PoolHeader). When the #1237 prefetch supplies fallbackData, `data` is
+    // populated on first paint and this skeleton branch is skipped entirely.
     mockUseGQL.mockReturnValue({ data: undefined, isLoading: true });
     const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
     expect(html).not.toBe("");
@@ -301,5 +325,499 @@ describe("BreakerPanel", () => {
     const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
     expect(html).toContain("0 lifetime");
     expect(html).not.toContain("today");
+  });
+
+  describe("stale breaker refresh (Codex finding, issue #1257)", () => {
+    it("discloses a failed revalidation while showing last-known fallback data instead of presenting the breaker status as freshly resolved", () => {
+      // fallbackData keeps `data` populated across a failed client
+      // revalidation (SWR sets `error`, keeps the last-good `data`). On a
+      // monitoring tool the stale status must NOT read as fresh — surface the
+      // same "showing the last confirmed state" affordance the pool-health
+      // path uses, while still rendering the last-known strip beneath it.
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: noTrips,
+        },
+        isLoading: false,
+        error: new Error("Hasura 503"),
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).toContain("MedianDelta"); // last-known strip still renders
+      expect(html).toContain("Breaker status refresh failed");
+      expect(html).toContain("showing the last confirmed state");
+      expect(html).toContain("Hasura 503");
+    });
+
+    it("does not render the stale-refresh affordance on the healthy (no-error) path", () => {
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: noTrips,
+        },
+        isLoading: false,
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).not.toContain("refresh failed");
+    });
+
+    it("bounds the revalidation with a timeout so a STALLED fetch becomes an error and surfaces the stale-refresh notice (Codex P1, issue #1257)", () => {
+      // The timeout (BREAKER_CONFIG_TIMEOUT_MS) turns AbortSignal.timeout into a
+      // rejected fetch → SWR `error`, exactly the shape below. Without it a
+      // never-resolving revalidation would leave `error` unset and the stale
+      // fallback pinned silently. A TimeoutError (what AbortSignal.timeout
+      // raises) is a DOMException — the notice must still render for it.
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: noTrips,
+        },
+        isLoading: false,
+        error: new DOMException("signal timed out", "TimeoutError"),
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).toContain("Breaker status refresh failed");
+      expect(html).toContain("showing the last confirmed state");
+    });
+
+    it("colors the pre-mount '· — today' placeholder neutral slate, not amber, matching the resolved zero-today state (Codex finding C, issue #1257)", () => {
+      // A pool with trip history but (once the clock resolves) no trip today
+      // renders the neutral pending placeholder pre-mount. It must NOT flash
+      // amber→slate on resolve: color it neutral up front. A healthy pool's
+      // panel has no amber anywhere, so asserting no amber pins the fix.
+      const oldTrip: BreakerTripEvent = {
+        id: "old-trip",
+        blockTimestamp: "1700001000", // long ago — not today
+        txHash: "0xoldtrip",
+        medianRateAtTrip: "1230000000000000000000000",
+        referenceAtTrip: "1171560280196965000000000",
+        thresholdAtTrip: "40000000000000000000000",
+        breaker: {
+          address: "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9",
+          kind: "MEDIAN_DELTA",
+        },
+      };
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: [oldTrip],
+        },
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).toContain("today"); // pending placeholder slot reserved
+      expect(html).not.toContain("1 today"); // it's the placeholder, not a count
+      expect(html).not.toContain("text-amber-300"); // neutral, no color flash
+    });
+  });
+
+  describe("unavailable state — fetch failed with no fallback (Codex P1, issue #1257)", () => {
+    it("surfaces an explicit 'unavailable' affordance (does NOT silently vanish) when data is undefined + error set", () => {
+      // No SSR fallback (absent / age-gated / feed changed) AND the bounded
+      // client fetch errored. Without this the `!cfg` return would render null,
+      // indistinguishable from a feed with genuinely no breaker.
+      mockUseGQL.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new DOMException("signal timed out", "TimeoutError"),
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).not.toBe("");
+      expect(html).toContain("Breaker status unavailable");
+      // Distinct from the stale-with-fallback affordance (no last-known data
+      // exists here) and from the resolved strip.
+      expect(html).not.toContain("showing the last confirmed state");
+      expect(html).not.toContain("MedianDelta");
+    });
+
+    it("stays null (NOT 'unavailable') for a resolved feed with genuinely no trip-able breaker, even on a revalidation error — data present discriminates", () => {
+      // data present (last-good empty breaker) + error: the feed genuinely has
+      // no trip-able breaker, so it must NOT read as "unavailable".
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [], BreakerTripEvent: noTrips },
+        isLoading: false,
+        error: new Error("Hasura 503"),
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).toBe("");
+    });
+
+    it("shows the skeleton (NOT 'unavailable') while still loading with no data", () => {
+      mockUseGQL.mockReturnValue({ data: undefined, isLoading: true });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).not.toContain("unavailable");
+      expect(html).toContain("h-[78px]"); // skeleton cells
+    });
+  });
+
+  describe("SSR breaker-config fallback (issue #1237)", () => {
+    const fallbackNoBreaker = {
+      BreakerConfig: [],
+      BreakerTripEvent: noTrips,
+    };
+    const fallbackWithBreaker = {
+      BreakerConfig: [healthyMedianConfig()],
+      BreakerTripEvent: noTrips,
+    };
+
+    it("forwards initialBreakerConfig to useGQL as fallbackData", () => {
+      mockUseGQL.mockReturnValue({
+        data: fallbackWithBreaker,
+        isLoading: false,
+      });
+      renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={fallbackWithBreaker}
+        />,
+      );
+      // Options object is the 4th positional useGQL argument (index 3);
+      // arg[2] stays `refreshMs` per the repo's useGQL call-shape invariant.
+      // The timeout must ride alongside fallbackData so the safety-critical
+      // revalidation is BOUNDED — a stall surfaces as `error` (→ stale-refresh
+      // notice) instead of pinning the SSR fallback forever (issue #1257).
+      expect(mockUseGQL.mock.calls[0]?.[3]).toMatchObject({
+        fallbackData: fallbackWithBreaker,
+        timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
+      });
+    });
+
+    it("renders null (not the skeleton) when the SSR fallback resolves to no trip-able breaker while revalidating", () => {
+      // SWR keeps `isLoading` true while it revalidates the fallback, but with
+      // `data` populated the panel must know its shape on first paint. This is
+      // the exact regression #1237 fixes: previously skeleton→null collapse.
+      mockUseGQL.mockReturnValue({
+        data: fallbackNoBreaker,
+        isLoading: true,
+      });
+      const html = renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={fallbackNoBreaker}
+        />,
+      );
+      expect(html).toBe("");
+    });
+
+    it("renders the resolved strip (not the skeleton) from the SSR fallback while revalidating", () => {
+      mockUseGQL.mockReturnValue({
+        data: fallbackWithBreaker,
+        isLoading: true,
+      });
+      const html = renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={fallbackWithBreaker}
+        />,
+      );
+      expect(html).toContain("MedianDelta");
+      expect(html).toContain("Threshold / Cooldown");
+      // No skeleton cell — the resolved shape paints directly.
+      expect(html).not.toContain("h-[78px]");
+    });
+  });
+
+  describe("old-data: stale volatile breaker state (round-1 nit #4, accepted degraded case)", () => {
+    it("grows the panel with the reset-path banner once a stale not-tripped fallback revalidates to tripped", () => {
+      // POOL_BREAKER_CONFIG can be served from the SSR fallback for up to the
+      // 60s unstable_cache revalidate window (pool-detail-ssr.ts). If the
+      // breaker trips inside that window, first paint shows the stale
+      // not-tripped shape; SWR's client revalidation then resolves to
+      // tripped and the panel grows by the ResetPathBanner. This is an
+      // accepted, documented old-data tradeoff (round-1 marked it optional),
+      // not a bug — this test pins the transition so it doesn't regress
+      // silently.
+      const notTrippedFallback = {
+        BreakerConfig: [healthyMedianConfig()],
+        BreakerTripEvent: noTrips,
+      };
+      mockUseGQL.mockReturnValue({
+        data: notTrippedFallback,
+        isLoading: true,
+      });
+      const staleHtml = renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={notTrippedFallback}
+        />,
+      );
+      expect(staleHtml).not.toContain("Reset path");
+
+      const trippedRevalidated = {
+        BreakerConfig: [trippedMedianConfig()],
+        BreakerTripEvent: noTrips,
+      };
+      mockUseGQL.mockReturnValue({
+        data: trippedRevalidated,
+        isLoading: false,
+      });
+      const revalidatedHtml = renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={notTrippedFallback}
+        />,
+      );
+      expect(revalidatedHtml).toContain("Reset path");
+    });
+  });
+
+  describe("hydration safety, cooldown countdown (issue #1237 round 2)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("hydrates a TRIPPED breaker with an active cooldown without a mismatch warning, then settles to the live countdown after the first tick", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-13T08:00:00Z"));
+      const trippedConfig = trippedMedianConfig();
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [trippedConfig], BreakerTripEvent: noTrips },
+        isLoading: false,
+      });
+
+      const serverHtml = renderToString(<BreakerPanel pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration, the server payload shows the state-neutral cooldown
+      // placeholder ("—", never "active" or "elapsed" — issue #1257) rather
+      // than an exact duration read from the server's wall clock.
+      expect(container.innerHTML).not.toContain("cooldown active");
+      expect(container.innerHTML).not.toContain("elapsed");
+      expect(container.innerHTML).not.toContain("left");
+      // Pre-hydration last-trip title is the deterministic UTC-safe value,
+      // not the locale-formatted one — a UTC server and the viewer's local
+      // tz/locale could otherwise render different `title` text and trip a
+      // hydration mismatch (issue #1257 Codex finding).
+      const expectedUtcTitle = timestampOrUtc(
+        trippedConfig.lastTripAt ?? "",
+        null,
+      );
+      expect(container.innerHTML).toContain(`title="${expectedUtcTitle}"`);
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        act(() => {
+          root = hydrateRoot(container, <BreakerPanel pool={fxPool()} />);
+        });
+        expect(consoleError).not.toHaveBeenCalled();
+        // Immediately post-hydration the ticker's first 1s tick hasn't fired
+        // yet — `now` is set only from inside the interval callback (never
+        // synchronously in the effect body), so the cooldown still renders
+        // the neutral placeholder rather than a guessed duration/state.
+        expect(container.innerHTML).not.toContain("elapsed");
+        expect(container.innerHTML).not.toContain("left");
+        // The last-trip title, by contrast, is driven by `useNowSeconds()`
+        // (`useSyncExternalStore`), which resolves synchronously on mount —
+        // no tick needed — so it's already the real locale-formatted value.
+        const expectedLocalTitle = formatTimestamp(
+          trippedConfig.lastTripAt ?? "",
+        );
+        expect(container.innerHTML).toContain(`title="${expectedLocalTitle}"`);
+
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        // After the first tick, the countdown renders its real duration.
+        expect(container.innerHTML).toContain("left");
+        expect(container.innerHTML).not.toContain("cooldown active");
+        expect(container.innerHTML).not.toContain("elapsed");
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
+
+    it("hydrates a TRIPPED breaker whose cooldown already elapsed as the neutral placeholder — not a false 'active' or premature 'elapsed' state — then resolves to elapsed after the first tick (Cursor finding, issue #1257)", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-13T08:00:00Z"));
+      const elapsedConfig = {
+        ...trippedMedianConfig(),
+        // Cooldown ended 5 minutes before the frozen "now" — the breaker is
+        // actually awaiting reset (rate-in-band check), NOT still cooling
+        // down. `cooldownRemainingSecFrom` can't tell this apart from a
+        // still-active cooldown until `now` resolves post-mount.
+        cooldownEndsAt: String(Math.floor(Date.now() / 1000) - 300),
+      };
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [elapsedConfig], BreakerTripEvent: noTrips },
+        isLoading: false,
+      });
+
+      const serverHtml = renderToString(<BreakerPanel pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration: `now` is unset, so the render must not assert either
+      // state for a cooldown that's actually already elapsed — only the
+      // neutral placeholder.
+      expect(container.innerHTML).not.toContain("cooldown active");
+      expect(container.innerHTML).not.toContain("elapsed");
+      expect(container.innerHTML).not.toContain("left");
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        act(() => {
+          root = hydrateRoot(container, <BreakerPanel pool={fxPool()} />);
+        });
+        expect(consoleError).not.toHaveBeenCalled();
+        // Still pending immediately post-hydration — the cooldown `now`
+        // only updates from inside the 1s interval callback.
+        expect(container.innerHTML).not.toContain("elapsed");
+        expect(container.innerHTML).not.toContain("left");
+
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        // After the first tick, the reset-path banner correctly resolves to
+        // "elapsed" (✓) — the bug this test pins: it must not render "✗ …
+        // cooldown active" for a cooldown that has actually already
+        // elapsed.
+        expect(container.innerHTML).toContain("elapsed");
+        expect(container.innerHTML).not.toContain("cooldown active");
+        expect(container.innerHTML).not.toContain("left");
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
+
+    it("reserves the trips-today suffix pre-hydration for a pool tripped since UTC midnight, so the '· N today' segment is stable across hydration and can't grow/wrap the header (Codex finding, issue #1257)", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-13T08:00:00Z"));
+      const todayMidnightSec =
+        Math.floor(Math.floor(Date.now() / 1000) / 86400) * 86400;
+      const trippedToday: BreakerTripEvent = {
+        id: "trip-today",
+        // 01:00 UTC on the frozen day — after this UTC midnight.
+        blockTimestamp: String(todayMidnightSec + 3600),
+        txHash: "0xtriptoday",
+        medianRateAtTrip: "1230000000000000000000000",
+        referenceAtTrip: "1171560280196965000000000",
+        thresholdAtTrip: "40000000000000000000000",
+        // Same address as healthy/trippedMedianConfig's breaker.
+        breaker: {
+          address: "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9",
+          kind: "MEDIAN_DELTA",
+        },
+      };
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [trippedMedianConfig()],
+          BreakerTripEvent: [trippedToday],
+        },
+        isLoading: false,
+      });
+
+      const serverHtml = renderToString(<BreakerPanel pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration (clock pending): the today-suffix segment is RESERVED
+      // (present) with the neutral placeholder, not dropped — so the segment
+      // doesn't pop in after mount. The real count is not shown yet.
+      expect(container.innerHTML).toContain("today");
+      expect(container.innerHTML).not.toContain("1 today");
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        act(() => {
+          root = hydrateRoot(container, <BreakerPanel pool={fxPool()} />);
+        });
+        // No hydration mismatch — server + hydration render both show the
+        // reserved placeholder (clock pending on both).
+        expect(consoleError).not.toHaveBeenCalled();
+        // `useNowSeconds` resolves synchronously on mount (useSyncExternal
+        // store), so the placeholder settles to the real count — the segment
+        // was present the whole time (no width-growing pop-in).
+        expect(container.innerHTML).toContain("1 today");
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
+
+    it("keeps the trips-today suffix WIDTH reserved across the zero-today hydration transition, so the 'N lifetime' line can't wrap-then-unwrap on the mobile 2-col grid (Codex finding, issue #1257)", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-13T08:00:00Z"));
+      // A breaker with trip HISTORY but NO trip today — resolves to zero-today
+      // (`reserved`) post-clock. The suffix width must stay reserved so the line
+      // width (and thus its mobile wrap) doesn't change pending → resolved-zero.
+      const oldTrip: BreakerTripEvent = {
+        id: "old-trip",
+        blockTimestamp: "1700001000", // long before the frozen day
+        txHash: "0xoldtrip",
+        medianRateAtTrip: "1230000000000000000000000",
+        referenceAtTrip: "1171560280196965000000000",
+        thresholdAtTrip: "40000000000000000000000",
+        breaker: {
+          address: "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9",
+          kind: "MEDIAN_DELTA",
+        },
+      };
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: [oldTrip],
+        },
+        isLoading: false,
+      });
+
+      const serverHtml = renderToString(<BreakerPanel pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration (pending): visible "· — today" plus the invisible width
+      // reserver ("· 88 today").
+      expect(container.innerHTML).toContain("— today");
+      expect(container.innerHTML).toContain("88 today"); // reserver present
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        act(() => {
+          root = hydrateRoot(container, <BreakerPanel pool={fxPool()} />);
+        });
+        expect(consoleError).not.toHaveBeenCalled();
+        // Post-hydration (resolved zero-today → `reserved`): the visible dash
+        // suffix is GONE, but the invisible width reserver PERSISTS — so the
+        // line width is unchanged and can't wrap/unwrap.
+        expect(container.innerHTML).not.toContain("— today");
+        expect(container.innerHTML).toContain("88 today"); // reserver still holds width
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
   });
 });

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
+import type { PoolBreakerConfigResponse } from "@/lib/queries/config";
 import type { Pool } from "@/lib/types";
 
 const mockUseGQL = vi.fn();
@@ -85,6 +86,9 @@ vi.mock("@/components/feedback", () => ({
   EmptyBox: ({ message }: { message: string }) => <div>{message}</div>,
   ErrorBox: ({ message }: { message: string }) => <div>{message}</div>,
   Skeleton: () => <div>loading</div>,
+  // BreakerPanel/MarketHoursPill render this; no error in these fixtures so it
+  // returns null, but the named export must exist under the whole-module mock.
+  StaleRefreshNotice: () => null,
 }));
 
 vi.mock("@/components/health-panel", () => ({ HealthPanel: () => <div /> }));
@@ -181,6 +185,40 @@ const BROKER_EXCHANGE_24H_RESPONSE = {
       swapCount: 3,
     },
   ],
+};
+
+const FX_FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
+const BREAKER_CONFIG_RESPONSE: PoolBreakerConfigResponse = {
+  BreakerConfig: [
+    {
+      id: "1",
+      enabled: true,
+      cooldownTime: "0",
+      rateChangeThreshold: "0",
+      smoothingFactor: "5000000000000000000000",
+      medianRatesEMA: "1171560280196965000000000",
+      referenceValue: null,
+      lastMedianRate: "1175000000000000000000000",
+      lastUpdatedAt: "1700000000",
+      status: "OK",
+      tradingMode: 0,
+      lastStatusUpdatedAt: "1700000000",
+      cooldownEndsAt: "0",
+      lastTripAt: null,
+      lastTripTxHash: null,
+      lastResetAt: null,
+      tripCountLifetime: 0,
+      breaker: {
+        id: "b",
+        address: "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9",
+        kind: "MEDIAN_DELTA",
+        activatesTradingMode: 3,
+        defaultCooldownTime: "900",
+        defaultRateChangeThreshold: "40000000000000000000000",
+      },
+    },
+  ],
+  BreakerTripEvent: [],
 };
 
 function gqlResult(data: unknown, error?: Error) {
@@ -627,6 +665,103 @@ describe("Pool detail LPs tab", () => {
     expect(html).not.toContain("v2 exchange config unavailable");
     expect(html).toContain("$42.00");
     expect(html).toContain("3 swaps since UTC midnight");
+  });
+
+  it("threads the SSR breaker-config fallback into BreakerPanel and MarketHoursPill", () => {
+    const fxPool: Pool = { ...BASE_POOL, referenceRateFeedID: FX_FEED };
+    const initialData: PoolDetailInitialData = {
+      pool: { Pool: [fxPool] },
+      breakerConfig: BREAKER_CONFIG_RESPONSE,
+    };
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return revalidatingGqlResult(initialData.pool);
+      }
+      if (query.includes("PoolBreakerConfig")) {
+        // SWR keeps `isLoading` true while it revalidates the fallback; the
+        // panel must still paint the resolved shape from `data`, not a shimmer.
+        return revalidatingGqlResult(
+          initialData.breakerConfig,
+          new Error("transient breaker query failure"),
+        );
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderPoolDetailPage(initialData);
+
+    // Both consumers of POOL_BREAKER_CONFIG (BreakerPanel + MarketHoursPill)
+    // receive the same fallbackData — the options object is the 4th positional
+    // useGQL argument (index 3); arg[2] stays `refreshMs` per the repo's
+    // useGQL call-shape invariant (use-gql-shape.test.ts).
+    const breakerCalls = mockUseGQL.mock.calls.filter(
+      ([query]) =>
+        typeof query === "string" && query.includes("query PoolBreakerConfig"),
+    );
+    expect(breakerCalls.length).toBeGreaterThanOrEqual(2);
+    for (const call of breakerCalls) {
+      expect(call[3]).toMatchObject({
+        fallbackData: initialData.breakerConfig,
+      });
+    }
+    // Resolved shape paints on first render (no `h-[78px]` shimmer cell): the
+    // full MedianDelta strip, not the loading skeleton or a null collapse.
+    expect(html).toContain("MedianDelta");
+    expect(html).toContain("Threshold / Cooldown");
+    expect(html).not.toContain("h-[78px]");
+  });
+
+  it("does NOT thread the SSR breaker-config fallback when the pool revalidated to a different feed (Codex finding, issue #1257)", () => {
+    // The SSR breakerConfig was fetched for feed A, but the pool row revalidates
+    // to feed B (self-heal / governance feed update). BreakerPanel and
+    // MarketHoursPill key their request off the NEW feed — forwarding the
+    // feed-A fallback would present the old feed's breaker/market-hours state as
+    // the new feed's "last confirmed state". The fallback must be gated off.
+    const FEED_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const feedAPool: Pool = { ...BASE_POOL, referenceRateFeedID: FX_FEED };
+    const feedBPool: Pool = { ...BASE_POOL, referenceRateFeedID: FEED_B };
+    const initialData: PoolDetailInitialData = {
+      pool: { Pool: [feedAPool] }, // SSR row + breakerConfig are for feed A
+      breakerConfig: BREAKER_CONFIG_RESPONSE,
+    };
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        // The live pool row is now feed B, not the SSR feed A.
+        return revalidatingGqlResult({ Pool: [feedBPool] });
+      }
+      if (query.includes("PoolBreakerConfig")) {
+        // New-feed request in flight / failing — no data yet.
+        return revalidatingGqlResult(undefined, new Error("transient"));
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    renderPoolDetailPage(initialData);
+
+    const breakerCalls = mockUseGQL.mock.calls.filter(
+      ([query]) =>
+        typeof query === "string" && query.includes("query PoolBreakerConfig"),
+    );
+    expect(breakerCalls.length).toBeGreaterThanOrEqual(2);
+    for (const call of breakerCalls) {
+      // The stale feed-A fallback is NOT forwarded to the feed-B request —
+      // SWR loads the new feed cleanly instead of showing wrong-feed data.
+      expect(call[3]?.fallbackData).toBeUndefined();
+    }
   });
 
   it("gates token amount tab content when the trust query fails", () => {

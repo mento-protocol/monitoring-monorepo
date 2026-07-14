@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import React, { type ReactNode } from "react";
 import type { Pool } from "@/lib/types";
+import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 
 // Characterization test for the upcoming pool-page extraction refactor.
 //
@@ -258,4 +259,32 @@ describe("useGQL call shape across pool detail tabs", () => {
       }
     },
   );
+
+  it("bounds the shared POOL_BREAKER_CONFIG fetch with a timeout in the oracle tab — every subscriber must, or SWR dedup can run an unbounded fetcher (Codex P1, issue #1257)", () => {
+    mockSearchParams.set("tab", "oracle");
+    // The default BASE_POOL has no rate feed, so the oracle tab skips the
+    // breaker query — give it one so the shared POOL_BREAKER_CONFIG fetch fires.
+    const fxPool: Pool = {
+      ...BASE_POOL,
+      referenceRateFeedID: "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a",
+    };
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth"))
+        return gqlResult({ Pool: [fxPool] });
+      return gqlResult(undefined);
+    });
+
+    renderToStaticMarkup(React.createElement(PoolDetailPage));
+
+    const breakerCall = mockUseGQL.mock.calls.find(
+      ([query]) =>
+        typeof query === "string" && query.includes("query PoolBreakerConfig"),
+    );
+    expect(breakerCall).toBeDefined();
+    // arg[2] stays refreshMs (undefined → 30s poll); the timeout rides in arg[3].
+    expect(breakerCall?.[3]).toMatchObject({
+      timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
+    });
+  });
 });

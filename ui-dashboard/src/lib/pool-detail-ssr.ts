@@ -12,6 +12,10 @@ import {
   type BrokerExchangeDailySnapshots24hResponse,
 } from "@/lib/queries/broker";
 import {
+  POOL_BREAKER_CONFIG,
+  type PoolBreakerConfigResponse,
+} from "@/lib/queries/config";
+import {
   POOL_DETAIL_WITH_HEALTH,
   POOL_THRESHOLDS_KNOWN_EXT,
   POOL_V2_EXCHANGE,
@@ -25,7 +29,12 @@ import {
   type PoolVpLifecycleDeprecationExtResponse,
   type PoolVpOracleFreshnessExtResponse,
 } from "@/lib/queries/pool-detail";
-import { NETWORKS, configuredNetworkIdForChainId } from "@/lib/networks";
+import {
+  NETWORKS,
+  NETWORK_IDS,
+  configuredNetworkIdForChainId,
+  isConfiguredNetworkId,
+} from "@/lib/networks";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { isVirtualPool, type Pool } from "@/lib/types";
 
@@ -97,6 +106,30 @@ async function fetchVirtualPoolHeaderInitialData(
   return { v2Exchange, brokerExchange24h };
 }
 
+// Prefetch the per-feed breaker config so `<BreakerPanel />` and
+// `<MarketHoursPill />` know on first paint whether the pool has a trip-able
+// breaker / is FX-gated — eliminating the skeleton→null collapse (BreakerPanel)
+// and the phantom-pill flash (MarketHoursPill) on the less-common no-breaker /
+// non-FX pools. Mirrors the client query gate exactly: both components skip the
+// query for virtual pools and for pools without a `referenceRateFeedID`, so the
+// server must skip it in the same cases or the fallbackData shape would diverge
+// from the client's SWR key (which would be `null`, i.e. no request at all).
+async function fetchPoolBreakerConfig(
+  client: PoolDetailClient,
+  chainId: number,
+  pool: Pool,
+  signal: AbortSignal,
+): Promise<PoolBreakerConfigResponse | undefined> {
+  const rateFeedID = pool.referenceRateFeedID ?? "";
+  if (isVirtualPool(pool) || !rateFeedID) return undefined;
+  return requestOptional<PoolBreakerConfigResponse>(
+    client,
+    POOL_BREAKER_CONFIG,
+    { chainId, rateFeedID },
+    signal,
+  );
+}
+
 async function fetchPoolDetailUncached(
   chainId: number,
   id: string,
@@ -139,6 +172,7 @@ async function fetchPoolDetailUncached(
     vpDeprecation,
     vpLifecycleDeprecation,
     headerInitialData,
+    breakerConfig,
   ] = await Promise.all([
     requestOptional<PoolThresholdsKnownExtResponse>(
       client,
@@ -175,6 +209,7 @@ async function fetchPoolDetailUncached(
       signal,
     ),
     fetchVirtualPoolHeaderInitialData(client, chainId, poolRow, signal),
+    fetchPoolBreakerConfig(client, chainId, poolRow, signal),
   ]);
   const { v2Exchange, brokerExchange24h } = headerInitialData;
 
@@ -186,15 +221,80 @@ async function fetchPoolDetailUncached(
     vpLifecycleDeprecation,
     v2Exchange,
     brokerExchange24h,
+    breakerConfig,
+    // Stamp fetch-completion time so the consumer can age-gate the cached
+    // breaker fallback (below). Rides in the cached payload (plain number).
+    fetchedAt: Date.now(),
   };
 }
+
+// Vercel's Data Cache SURVIVES deployments within an environment, and
+// `unstable_cache` keys only on these explicit parts + the fn args (chainId,
+// id) — not on env-derived provenance. This PR added operator-facing
+// `breakerConfig` to the payload, so an env-only redeploy or a Hasura endpoint
+// switch for the same chain could otherwise serve breaker / market-hours rows
+// fetched from the PREVIOUS endpoint on first paint (wrong halted / market-hours
+// state until client revalidation). Salt the key with the deployment id AND the
+// configured Hasura endpoints, mirroring the canonical bounded/salted cache in
+// lib/network-fetcher/server-cache.ts (Refs #1212 — this SSR cache is one of
+// its named salt targets). The `fetchedAt` age gate above bounds staleness, not
+// provenance, so it can't protect a recent wrong-endpoint entry.
+//  - Deployment id (unique per deploy, INCLUDING env-only redeploys that keep
+//    the git commit — an env change repointing a Hasura URL only takes effect
+//    via a redeploy; commit SHA is the fallback where the id isn't exposed).
+//  - Configured network ids + their Hasura endpoints (covers local dev, where
+//    no deployment id exists but `.next/cache` persists across restarts).
+const CACHE_KEY_PARTS = [
+  "pool-detail-ssr",
+  process.env.VERCEL_DEPLOYMENT_ID ??
+    process.env.VERCEL_GIT_COMMIT_SHA ??
+    "dev",
+  NETWORK_IDS.flatMap((id) =>
+    isConfiguredNetworkId(id) ? [`${id}=${NETWORKS[id].hasuraUrl}`] : [],
+  ).join("|"),
+];
 
 // 60s revalidate matches the OG cache and the client polling cadence: the fallback
 // paints instantly, then the client's useGQL revalidates on mount for fresh data.
 // The raw response is plain JSON (no Map/Set), so unstable_cache serialization is
 // lossless here.
-export const fetchPoolDetailForSSR = unstable_cache(
+const fetchPoolDetailCached = unstable_cache(
   fetchPoolDetailUncached,
-  ["pool-detail-ssr"],
+  CACHE_KEY_PARTS,
   { revalidate: 60, tags: ["pool-detail-ssr"] },
 );
+
+// Max age for the breaker config to still ride as first-paint SWR fallback.
+// `unstable_cache`'s `revalidate: 60` is stale-WHILE-revalidate, not a max
+// age: an idle or failed-refresh entry can serve arbitrarily-old data, and the
+// breaker config is operator-safety state (tripped / market-hours). Reuse the
+// repo's established served-staleness bound — `MAX_SERVED_STALENESS_MS` (5 min,
+// aligned with the SNAPSHOT_REFRESH_MS client poll) from the SSR network cache
+// — rather than inventing a new number: a healthy entry is ≤60s old so this
+// only trips on genuinely stale entries, and on a trip the client just loads
+// the feed fresh (skeleton), the same clean-load path as the feed-match guard.
+const MAX_BREAKER_FALLBACK_AGE_MS = 300_000;
+
+/**
+ * Age-gate the cached breaker fallback: this runs per request (NOT inside the
+ * `unstable_cache` boundary — mirrors `fetchInitialNetworkData`), so it compares
+ * the request time against the cached payload's `fetchedAt`. Over-age → strip
+ * `breakerConfig` (undefined) so BreakerPanel / MarketHoursPill load the feed
+ * fresh instead of painting stale operator-safety state as the "last confirmed
+ * state" (issue #1257). Composes with the client-side feed-match guard in
+ * pool-detail-page-client.tsx — both gate whether the SSR fallback is
+ * trustworthy. Server-side (not client-side) so the decision is fixed for both
+ * the server render and hydration render — a client-side `Date.now()` gate
+ * would risk a hydration mismatch. Only the breaker fallback is gated; the pool
+ * row + thresholds stay so the header/health CLS fix is unaffected.
+ */
+export async function fetchPoolDetailForSSR(
+  chainId: number,
+  id: string,
+  nowMs = Date.now(),
+): Promise<PoolDetailInitialData | undefined> {
+  const data = await fetchPoolDetailCached(chainId, id);
+  if (!data?.breakerConfig || data.fetchedAt === undefined) return data;
+  if (nowMs - data.fetchedAt <= MAX_BREAKER_FALLBACK_AGE_MS) return data;
+  return { ...data, breakerConfig: undefined };
+}

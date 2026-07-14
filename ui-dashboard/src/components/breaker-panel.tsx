@@ -3,244 +3,45 @@
 import { useEffect, useState } from "react";
 import { useGQL } from "@/lib/graphql";
 import { useNetwork } from "@/components/network-provider";
-import { POOL_BREAKER_CONFIG } from "@/lib/queries";
+import { type PoolBreakerConfigResponse } from "@/lib/queries";
+import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { BreakerConfig, BreakerTripEvent, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
-import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
+import { pickTrippableConfig } from "@/lib/breaker";
 import { Tooltip } from "@/components/tooltip";
+import { ErrorBox, StaleRefreshNotice } from "@/components/feedback";
 import { explorerTxUrl } from "@/lib/tokens";
-import { formatTimestamp, relativeTime } from "@/lib/format";
 import { formatDurationShort } from "@/lib/bridge-status";
+import {
+  useNowSeconds,
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
+// Fixidity math, cooldown/trip-count derivations, and the presentation view
+// model live in the sibling module to keep this file under the repo's
+// file-size soft cap — see breaker-panel-math.ts's header comment.
+import {
+  breakerConfigQuery,
+  deriveBreakerView,
+  isBreakerConfigQueryPending,
+  isBreakerFetchUnavailable,
+  tripsTodayDisplay,
+  type BreakerPresentation,
+  type TripsTodayDisplay,
+} from "./breaker-panel-math";
 
 type Props = {
   pool: Pool;
+  /** Server-prefetched breaker config, forwarded to SWR as `fallbackData` so
+   *  the panel knows on first paint whether the pool has a trip-able breaker —
+   *  no skeleton→null collapse for pools that resolve to none (issue #1237). */
+  initialBreakerConfig?: PoolBreakerConfigResponse | undefined;
 };
 
 type Response = {
   BreakerConfig: BreakerConfig[];
   BreakerTripEvent: BreakerTripEvent[];
 };
-
-const FIXED_1 = BigInt(10) ** BigInt(24);
-// Breaker thresholds are stored as Fixidity (1e24 = 100%). Keep one decimal
-// pair throughout the panel: 4.00% / 0.150% etc. We render two decimals for
-// FX (4.00%) and three for stablecoin (0.150%) to match the precision of
-// the on-chain config without trailing-zero clutter.
-const PRECISION_BY_KIND: Record<string, number> = {
-  MEDIAN_DELTA: 2,
-  VALUE_DELTA: 3,
-};
-
-function formatFixidityPct(
-  raw: string | null | undefined,
-  precision: number,
-): string | null {
-  if (raw === null || raw === undefined) return null;
-  // Convert Fixidity (1e24=100%) to percent. Avoid Number for big values —
-  // do it in BigInt with a /1e22 trick to preserve precision. Treats 0 as a
-  // legitimate value (median exactly equals reference) — renders "0.00%",
-  // not the missing-data dash.
-  const value = BigInt(raw);
-  if (value < BigInt(0)) return null;
-  const scale = BigInt(10) ** BigInt(22 - precision);
-  const scaled = value / scale;
-  const whole = scaled / BigInt(10) ** BigInt(precision);
-  const frac = scaled % BigInt(10) ** BigInt(precision);
-  return `${whole}.${frac.toString().padStart(precision, "0")}%`;
-}
-
-/** Format a Fixidity-scaled number with 6 decimals (e.g. EMA = 1.171560). */
-function formatFixidityValue(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const value = BigInt(raw);
-  if (value === BigInt(0)) return null;
-  const whole = value / FIXED_1;
-  const frac = value % FIXED_1;
-  // Render 6 decimals: scale frac by 10^6 / FIXED_1 = 10^6 / 10^24 = 10^-18.
-  const fracScaled = frac / BigInt(10) ** BigInt(18);
-  return `${whole}.${fracScaled.toString().padStart(6, "0")}`;
-}
-
-function fixidityOrNull(raw: string | null | undefined): bigint | null {
-  if (raw == null) return null;
-  const value = BigInt(raw);
-  return value === BigInt(0) ? null : value;
-}
-
-function breakerConfigQuery(
-  isVirtual: boolean,
-  rateFeedID: string,
-): string | null {
-  return !isVirtual && rateFeedID ? POOL_BREAKER_CONFIG : null;
-}
-
-// POOL_BREAKER_CONFIG has no SSR fallback, so on every first client render
-// the panel either renders nothing (no trip-able breaker) or
-// nothing-then-a-5-stat-row (issue #1222's measured +119px header jump).
-// True only while the query is genuinely in flight, so BreakerPanel can
-// render a matching-shape shimmer instead of null for that interval.
-function isBreakerConfigQueryPending(
-  isVirtual: boolean,
-  rateFeedID: string,
-  data: unknown,
-  isLoading: boolean,
-): boolean {
-  return !isVirtual && !!rateFeedID && data === undefined && isLoading;
-}
-
-/** Effective cooldown in seconds. Per-feed override else breaker default. */
-function effectiveCooldown(cfg: BreakerConfig): bigint {
-  const override = BigInt(cfg.cooldownTime);
-  if (override > BigInt(0)) return override;
-  return BigInt(cfg.breaker.defaultCooldownTime);
-}
-
-/** |median - reference| / reference, returned as a Fixidity ratio (1e24 = 100%).
- * Returns null if either input is missing OR is the on-chain `0` sentinel:
- * SortedOracles returns rate `0` when all oracle reports have expired,
- * `medianRatesEMA = 0` is the contract's "uninitialized" marker (until the
- * first MedianUpdated seeds it), and a `referenceValue` of `0` would be a
- * mis-set peg (also produces a divide-by-zero). In all three cases the live
- * Δ is meaningless, so render the missing-data dash. */
-function computeLiveDelta(cfg: BreakerConfig): bigint | null {
-  const median = fixidityOrNull(cfg.lastMedianRate);
-  const reference =
-    cfg.breaker.kind === "MEDIAN_DELTA"
-      ? fixidityOrNull(cfg.medianRatesEMA)
-      : fixidityOrNull(cfg.referenceValue);
-  if (median == null || reference == null) return null;
-  const diff = median > reference ? median - reference : reference - median;
-  return (diff * FIXED_1) / reference;
-}
-
-function referenceValue(cfg: BreakerConfig): bigint | null {
-  const raw =
-    cfg.breaker.kind === "MEDIAN_DELTA"
-      ? cfg.medianRatesEMA
-      : cfg.referenceValue;
-  return fixidityOrNull(raw);
-}
-
-function actualValue(cfg: BreakerConfig): bigint | null {
-  return fixidityOrNull(cfg.lastMedianRate);
-}
-
-function valueDeltaDirection(cfg: BreakerConfig): "above" | "below" | null {
-  const reference = referenceValue(cfg);
-  const actual = actualValue(cfg);
-  if (reference == null || actual == null || actual === reference) return null;
-  return actual > reference ? "above" : "below";
-}
-
-type BreakerPresentation = {
-  referenceLabel: string;
-  liveDeltaLabel: string;
-  thresholdCaption: string;
-  formattedThreshold: string;
-  formattedCooldown: string;
-  formattedReference: string | null;
-  formattedActual: string | null;
-  formattedLiveDelta: string;
-  breachedValueClass: string;
-  referenceCaption: string;
-  isOverTolerance: boolean;
-};
-
-function isMedianDelta(cfg: BreakerConfig): boolean {
-  return cfg.breaker.kind === "MEDIAN_DELTA";
-}
-
-function referenceCaptionFor(
-  cfg: BreakerConfig,
-  tripped: boolean,
-  isOverTolerance: boolean,
-  formattedLiveDelta: string,
-): string {
-  if (isMedianDelta(cfg)) {
-    return `smoothing ${formatFixidityPct(cfg.smoothingFactor, 1) ?? "—"}`;
-  }
-  const pegDirection = valueDeltaDirection(cfg);
-  if (tripped && isOverTolerance && pegDirection) {
-    // `isOverTolerance` implies a non-null live delta, so this is never "—".
-    return `${formattedLiveDelta} ${pegDirection} peg`;
-  }
-  return "fixed peg";
-}
-
-function breakerPresentation(
-  cfg: BreakerConfig,
-  threshold: bigint,
-  cooldown: bigint,
-  liveDelta: bigint | null,
-  tripped: boolean,
-): BreakerPresentation {
-  const kind = cfg.breaker.kind;
-  const precision = PRECISION_BY_KIND[kind] ?? 2;
-  const formattedThreshold =
-    formatFixidityPct(threshold.toString(), precision) ?? "—";
-  const formattedLiveDelta =
-    liveDelta != null
-      ? (formatFixidityPct(liveDelta.toString(), precision) ?? "—")
-      : "—";
-  const isOverTolerance =
-    threshold > BigInt(0) && liveDelta != null && liveDelta >= threshold;
-
-  return {
-    referenceLabel:
-      kind === "MEDIAN_DELTA"
-        ? "EMA Reference vs Actual"
-        : "Reference vs Actual",
-    liveDeltaLabel:
-      kind === "MEDIAN_DELTA"
-        ? "Δ Oracle Price vs EMA"
-        : "Δ Oracle Price vs Peg",
-    thresholdCaption:
-      kind === "MEDIAN_DELTA"
-        ? `trips at >${formattedThreshold} from EMA`
-        : `trips at >${formattedThreshold} from peg`,
-    formattedThreshold,
-    formattedCooldown: formatDurationShort(Number(cooldown)),
-    formattedReference: formatFixidityValue(
-      kind === "MEDIAN_DELTA" ? cfg.medianRatesEMA : cfg.referenceValue,
-    ),
-    formattedActual: formatFixidityValue(cfg.lastMedianRate),
-    formattedLiveDelta,
-    breachedValueClass:
-      tripped && isOverTolerance ? "text-red-300" : "text-white",
-    referenceCaption: referenceCaptionFor(
-      cfg,
-      tripped,
-      isOverTolerance,
-      formattedLiveDelta,
-    ),
-    isOverTolerance,
-  };
-}
-
-/** Returns the bar fill (0-100) and color class for the live-Δ bar. Mirrors
- * the deviation-bar conventions in components/pool-header/deviation-cell.tsx. */
-function deltaBarStyle(
-  deltaFixidity: bigint,
-  thresholdFixidity: bigint,
-): {
-  pct: number;
-  color: string;
-} {
-  if (thresholdFixidity <= BigInt(0)) {
-    return { pct: 0, color: "bg-slate-600" };
-  }
-  // ratio = delta / threshold, capped at 1.5 for visual purposes.
-  const ratioBP = (deltaFixidity * BigInt(10000)) / thresholdFixidity;
-  const ratio = Number(ratioBP) / 10000;
-  const pct = Math.min(ratio * 100, 100);
-  const color =
-    ratio >= 1
-      ? "bg-red-500"
-      : ratio >= 0.8
-        ? "bg-yellow-500"
-        : "bg-emerald-500";
-  return { pct, color };
-}
 
 function BreakerIdentityMetric({
   cfg,
@@ -310,9 +111,17 @@ function ThresholdMetric({
 }: {
   presentation: BreakerPresentation;
   tripped: boolean;
-  cooldownRemainingSec: number;
+  cooldownRemainingSec: number | null;
 }): React.ReactElement {
-  const cooldownActive = tripped && cooldownRemainingSec > 0;
+  const cooldownActive =
+    tripped && cooldownRemainingSec !== null && cooldownRemainingSec > 0;
+  // `cooldownRemainingSec` is `null` pre-mount even when `tripped` (the
+  // ticker hasn't read the wall clock yet — see BreakerPanel's `now` state).
+  // We can't tell from `null` whether the on-chain cooldown is still active
+  // or has already elapsed, so render the state-neutral "—" rather than
+  // asserting either one; the real caption lands once the ticker's first
+  // tick resolves `now`.
+  const cooldownPending = tripped && cooldownRemainingSec === null;
   return (
     <div>
       <dt className="text-slate-400">Threshold / Cooldown</dt>
@@ -323,9 +132,11 @@ function ThresholdMetric({
         <span
           className={`text-xs ${cooldownActive ? "text-amber-300" : "text-slate-500"}`}
         >
-          {cooldownActive
+          {cooldownActive && cooldownRemainingSec !== null
             ? `${formatDurationShort(cooldownRemainingSec)} left`
-            : presentation.thresholdCaption}
+            : cooldownPending
+              ? "—"
+              : presentation.thresholdCaption}
         </span>
       </dd>
     </div>
@@ -373,6 +184,41 @@ function LiveDeltaMetric({
   );
 }
 
+// Widest realistic today-suffix — today's trips are bounded by the query's
+// 50-event limit, so two digits covers it; the em-dash placeholder is no wider.
+const TRIPS_TODAY_WIDTH_SAMPLE = " · 88 today";
+
+/** Fixed-width "· N today" suffix slot for LastTripMetric. An invisible widest-
+ *  form sample (`TRIPS_TODAY_WIDTH_SAMPLE`) shares one inline-grid cell with the
+ *  visible value, so the pending "· — today", the resolved "· N today", and the
+ *  resolved-ZERO (no visible suffix) states all occupy the SAME width. Without
+ *  this the pending→resolved-zero transition drops the suffix and can wrap then
+ *  unwrap the "N lifetime" line on the two-column mobile grid — a vertical CLS
+ *  (issue #1257). Same invisible-inline-grid-overlay technique as the market-
+ *  hours pill's countdown reserver. `hidden` (no trip history) renders nothing —
+ *  such a pool never shows a suffix in any state, so there's nothing to reserve. */
+function TripsTodaySuffix({
+  tripsToday,
+}: {
+  tripsToday: TripsTodayDisplay;
+}): React.ReactElement | null {
+  if (tripsToday.kind === "hidden") return null;
+  return (
+    <span className="inline-grid align-baseline">
+      <span
+        aria-hidden
+        className="invisible col-start-1 row-start-1 whitespace-nowrap"
+      >
+        {TRIPS_TODAY_WIDTH_SAMPLE}
+      </span>
+      <span className="col-start-1 row-start-1 whitespace-nowrap">
+        {tripsToday.kind === "pending" && " · — today"}
+        {tripsToday.kind === "count" && ` · ${tripsToday.count} today`}
+      </span>
+    </span>
+  );
+}
+
 function LastTripMetric({
   cfg,
   network,
@@ -382,16 +228,34 @@ function LastTripMetric({
   cfg: BreakerConfig;
   network: ReturnType<typeof useNetwork>["network"];
   tripped: boolean;
-  tripsToday: number;
+  tripsToday: TripsTodayDisplay;
 }): React.ReactElement {
+  // Amber "activity today" treatment only for a RESOLVED non-zero count. The
+  // pre-mount `pending` placeholder stays neutral slate — matching the resolved
+  // zero-today (`hidden`) state — so a historically-tripped pool with no trip
+  // today resolves slate→slate (a horizontal "· — today" drop only, no color
+  // flash; issue #1257 finding C). A pool that DID trip today resolves
+  // slate→amber, meaningful new info and matching the pre-SSR behavior.
+  const activeToday = tripsToday.kind === "count";
   const lastTripTs = cfg.lastTripAt;
+  // SSR-safe relative label + title (mirrors the header's `createdRelative`
+  // pattern and rebalance-status-value.tsx's `LastRebalanceSubtitle`,
+  // hooks/use-now-seconds.ts): the SSR prefetch's fallbackData now paints
+  // this panel's real content on first paint for pools with a trip-able
+  // breaker (issue #1237), so a plain `relativeTime`/`formatTimestamp` read
+  // at render time could disagree between the page's ISR-cached bake time
+  // (UTC) and the viewer's hydration clock (local tz/locale). Both hooks
+  // render a deterministic UTC value on the server + hydration render, then
+  // the live locale-formatted value after mount.
+  const lastTripRelative = useSsrSafeRelative(lastTripTs);
+  const lastTripTitle = useSsrSafeTimestamp(lastTripTs);
   return (
     <div>
       <dt className="text-slate-400 flex items-center justify-between gap-1">
         <span>Last trip</span>
         {tripped && lastTripTs && (
           <span className="text-xs font-normal text-red-400">
-            tripped {relativeTime(lastTripTs)}
+            tripped {lastTripRelative}
           </span>
         )}
       </dt>
@@ -404,18 +268,18 @@ function LastTripMetric({
             className={`${
               tripped ? "text-red-300" : "text-indigo-300"
             } hover:text-indigo-400`}
-            title={formatTimestamp(lastTripTs)}
+            title={lastTripTitle}
           >
-            {relativeTime(lastTripTs)}
+            {lastTripRelative}
           </a>
         ) : (
           <span className="text-slate-500">never</span>
         )}
         <span
-          className={`text-xs ${tripsToday > 0 ? "text-amber-300" : "text-slate-500"}`}
+          className={`text-xs ${activeToday ? "text-amber-300" : "text-slate-500"}`}
         >
           {cfg.tripCountLifetime} lifetime
-          {tripsToday > 0 && ` · ${tripsToday} today`}
+          <TripsTodaySuffix tripsToday={tripsToday} />
         </span>
       </dd>
     </div>
@@ -423,34 +287,53 @@ function LastTripMetric({
 }
 
 function ResetPathBanner({
-  cooldownElapsed,
   cooldownRemainingSec,
   rateInBand,
   liveDelta,
   presentation,
 }: {
-  cooldownElapsed: boolean;
-  cooldownRemainingSec: number;
+  cooldownRemainingSec: number | null;
   rateInBand: boolean;
   liveDelta: bigint | null;
   presentation: BreakerPresentation;
 }): React.ReactElement {
+  // `cooldownRemainingSec === null` pre-mount (see BreakerPanel's `now`
+  // state) doesn't tell us whether the on-chain cooldown is still active or
+  // has already elapsed — asserting either would misstate reset readiness
+  // for a TRIPPED breaker whose cooldown already ended before mount. Render
+  // a state-neutral "—" instead of guessing ✓/✗; the real state lands once
+  // the ticker's first tick resolves `now`.
+  const cooldownElapsed = cooldownRemainingSec === 0;
   return (
     <div className="mt-4 rounded border border-red-900/40 bg-red-950/30 px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
       <span className="text-red-300 font-medium">Reset path</span>
       <span className="inline-flex items-center gap-1">
-        <span className={cooldownElapsed ? "text-emerald-300" : "text-red-300"}>
-          {cooldownElapsed ? "✓" : "✗"}
+        <span
+          className={
+            cooldownRemainingSec === null
+              ? "text-slate-500"
+              : cooldownElapsed
+                ? "text-emerald-300"
+                : "text-red-300"
+          }
+        >
+          {cooldownRemainingSec === null ? "—" : cooldownElapsed ? "✓" : "✗"}
         </span>
         Cooldown
         <span
           className={`font-mono ${
-            cooldownElapsed ? "text-emerald-300" : "text-amber-300"
+            cooldownRemainingSec === null
+              ? "text-slate-500"
+              : cooldownElapsed
+                ? "text-emerald-300"
+                : "text-amber-300"
           }`}
         >
-          {cooldownElapsed
-            ? "elapsed"
-            : formatDurationShort(cooldownRemainingSec)}
+          {cooldownRemainingSec === null
+            ? "—"
+            : cooldownElapsed
+              ? "elapsed"
+              : formatDurationShort(cooldownRemainingSec)}
         </span>
       </span>
       <span className="inline-flex items-center gap-1">
@@ -479,16 +362,28 @@ function ResetPathBanner({
   );
 }
 
-export function BreakerPanel({ pool }: Props): React.ReactElement | null {
+export function BreakerPanel({
+  pool,
+  initialBreakerConfig,
+}: Props): React.ReactElement | null {
   const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
   const rateFeedID = pool.referenceRateFeedID ?? "";
 
-  const { data, isLoading } = useGQL<Response>(
+  const { data, isLoading, error } = useGQL<Response>(
     breakerConfigQuery(isVirtual, rateFeedID),
     {
       chainId: pool.chainId,
       rateFeedID,
+    },
+    undefined,
+    // Bound the revalidation so a stalled fetch surfaces as `error` (→
+    // stale-refresh notice + retry) instead of pinning the SSR fallback
+    // forever — see BREAKER_CONFIG_TIMEOUT_MS. Must match every sibling
+    // subscriber (SWR dedup owns one fetcher).
+    {
+      fallbackData: initialBreakerConfig,
+      timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
     },
   );
 
@@ -507,7 +402,20 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
   // static text — skip the interval to avoid recurring re-renders for nothing.
   const tickerActive = !!cfg && tripped;
 
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  // SSR-safe wall clock for the "trips today" UTC-midnight boundary (below):
+  // null on the server + hydration render (see useNowSeconds) so a
+  // statically-cached page can't bake in a midnight boundary the viewer's
+  // hydration render disagrees with — this panel now renders real content,
+  // not a skeleton, on that first pass once fallbackData is present (issue
+  // #1237). Separate from the 1-second `now` ticker below, which only drives
+  // the tripped-cooldown countdown.
+  const todayNowSeconds = useNowSeconds();
+
+  // SSR-safe cooldown ticker (see cooldownRemainingSecFrom below for why
+  // `null` and not `Date.now()`). Only ever written from inside the interval
+  // callback (never synchronously in the effect body), so the first real
+  // value lands with the first 1s tick after mount.
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     if (!tickerActive) return;
     const id = setInterval(() => {
@@ -522,51 +430,42 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
   }, [tickerActive]);
 
   if (queryPending) return <BreakerPanelSkeleton />;
-  // Accepted tradeoff: for the (less common) pool that resolves to no
-  // trip-able breaker, this is now skeleton→null instead of main's stable
-  // null→null — trading a rare small collapse for eliminating the far more
-  // common null→content jump this component exists to fix. The full fix
-  // (SSR-prefetch POOL_BREAKER_CONFIG so the resolved shape is known on
-  // first paint, mirroring PoolHeader's initialV2Exchange/
-  // initialExchangeVolume pattern) is tracked in issue #1237.
+  // Fetch failed with NO data to fall back on — `initialBreakerConfig` absent
+  // (SSR missed / age-gated / feed changed) AND the bounded client fetch errored
+  // (`data` undefined, `error` set, not loading). The `!cfg` return below would
+  // otherwise make the panel silently vanish, indistinguishable from a feed with
+  // genuinely no trip-able breaker. Surface an explicit "unavailable" state
+  // (distinct from the stale "last confirmed state" affordance, which needs
+  // last-known data). Gated on `error` + a feed that WOULD query so a resolved
+  // feed with no trip-able breaker still renders null (issue #1257).
+  if (isBreakerFetchUnavailable(isVirtual, rateFeedID, data, error))
+    return <BreakerUnavailableNotice />;
+  // With the SSR prefetch's fallbackData present (issue #1237), `queryPending`
+  // is false on first paint, so a pool that resolves to no trip-able breaker
+  // renders null directly — no skeleton→null collapse. The shimmer above only
+  // shows on the degraded path (prefetch missed) while the client query runs.
   if (isVirtual || !rateFeedID || !cfg) return null;
   // No trip-able breaker (e.g. feed not registered with BreakerBox) → no panel.
 
-  const threshold = effectiveBreakerThreshold(cfg);
-  const cooldown = effectiveCooldown(cfg);
-  const cooldownEndsAt = Number(cfg.cooldownEndsAt);
-  const cooldownRemainingSec = Math.max(0, cooldownEndsAt - now);
-  const liveDelta = computeLiveDelta(cfg);
-  const presentation = breakerPresentation(
-    cfg,
-    threshold,
-    cooldown,
-    liveDelta,
-    tripped,
+  const { cooldownRemainingSec, liveDelta, presentation, liveBar, rateInBand } =
+    deriveBreakerView(cfg, now, tripped);
+  const tripsToday = tripsTodayDisplay(
+    todayNowSeconds,
+    trips,
+    cfg.breaker.address,
   );
-  const liveBar =
-    liveDelta != null
-      ? deltaBarStyle(liveDelta, threshold)
-      : { pct: 0, color: "bg-slate-600" };
-
-  const todayMidnightSec = Math.floor(now / 86400) * 86400; // UTC midnight
-  // Filter by THIS breaker's address — the query is feed-scoped, but a
-  // single feed could surface multiple breakers' trips (only one trip-able
-  // breaker today, but MarketHours-style additions later would drift the
-  // count from cfg.tripCountLifetime if we didn't scope it).
-  const tripsToday = trips.filter(
-    (t) =>
-      Number(t.blockTimestamp) >= todayMidnightSec &&
-      t.breaker.address === cfg.breaker.address,
-  ).length;
-
-  // Reset-path conditions (mirror BreakerBox.tryResetBreaker).
-  const cooldownElapsed = cooldownRemainingSec === 0;
-  const rateInBand = liveDelta != null && liveDelta < threshold;
 
   return (
     <>
       <div className="my-5 h-px bg-slate-800" />
+      {/* Disclose a failed revalidation while showing fallback data (issue
+          #1257) — see StaleRefreshNotice. The global DataFreshnessBanner still
+          covers pools with no trip-able breaker (this strip renders null). */}
+      <StaleRefreshNotice
+        subject="Breaker status"
+        error={error}
+        className="mb-4"
+      />
       <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
         <BreakerIdentityMetric cfg={cfg} tripped={tripped} />
         <ReferenceMetric presentation={presentation} />
@@ -591,13 +490,25 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
 
       {tripped && (
         <ResetPathBanner
-          cooldownElapsed={cooldownElapsed}
           cooldownRemainingSec={cooldownRemainingSec}
           rateInBand={rateInBand}
           liveDelta={liveDelta}
           presentation={presentation}
         />
       )}
+    </>
+  );
+}
+
+// Explicit "couldn't load" state for a feed that WOULD have a breaker but whose
+// config fetch failed with no fallback (see BreakerPanel). Distinct from the
+// stale-refresh notice ("showing the last confirmed state" — that has data) and
+// from the null no-panel case (a feed with genuinely no trip-able breaker).
+function BreakerUnavailableNotice(): React.ReactElement {
+  return (
+    <>
+      <div className="my-5 h-px bg-slate-800" />
+      <ErrorBox message="Breaker status unavailable — couldn't load its current state." />
     </>
   );
 }

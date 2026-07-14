@@ -2,6 +2,8 @@
 // re-export lives in `../queries.ts` so existing `from "@/lib/queries"`
 // imports stay stable; consumers can also import directly from this module.
 
+import type { BreakerConfig, BreakerTripEvent } from "@/lib/types";
+
 export const TRADING_LIMITS = `
   query TradingLimits($poolId: String!) {
     TradingLimit(where: { poolId: { _eq: $poolId } }) {
@@ -222,3 +224,14 @@ export const POOL_BREAKER_CONFIG = `
     }
   }
 `;
+
+/** Response shape of `POOL_BREAKER_CONFIG`. The canonical type the server
+ *  SSR-prefetch fallback and the `<BreakerPanel />` / `<MarketHoursPill />`
+ *  client reads share, so a query field change surfaces at every consumer.
+ *  Lives here (not in the `server-only` SSR module) so client code can import
+ *  it without pulling `server-only` into the browser bundle — same rationale
+ *  as `PoolV2ExchangeResponse` in `pool-detail.ts`. */
+export type PoolBreakerConfigResponse = {
+  BreakerConfig: BreakerConfig[];
+  BreakerTripEvent: BreakerTripEvent[];
+};
