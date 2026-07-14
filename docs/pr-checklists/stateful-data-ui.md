@@ -140,6 +140,40 @@ For each non-happy path, decide the behavior explicitly.
       Verify by diffing skeleton-phase vs loaded-phase section rects; the
       browser recipe (GraphQL-delay init script + rect sampler) is embedded in
       issue #1218 and its sibling skeleton-parity issues (#1219–#1223).
+- [ ] **SSR-prefetch / `fallbackData` of safety-critical or clock-dependent
+      data ships the full staleness envelope.** Painting SSR-cached
+      operator-safety state (breaker/market-hours config, halt status) on first
+      paint trades a loading skeleton for "stale-or-wrong data shown as
+      current." Each of these is a distinct way that goes wrong — verify all
+      that apply:
+  - [ ] **Clock-dependent state renders neutral/unknown until the client clock
+        resolves** — never SSR-guess "open"/"OK". `useNow*()` returns null on the
+        server, so a default-to-open branch prints a false-good state through the
+        whole closure window until hydration.
+  - [ ] **Identity/feed-match guard** — a revalidated row that changed identity
+        (e.g. `referenceRateFeedID` after a self-heal / governance update) must
+        NOT pair with the previous identity's cached `fallbackData`; gate the
+        fallback on chain + feed still matching the current row.
+  - [ ] **`fetchedAt` age gate** carried inside the cached value (Next
+        `unstable_cache` stale-serve is UNBOUNDED — see
+        `recurring-review-patterns.md` and the `server-cache.ts` pattern).
+  - [ ] **Cache key salted by deploy id + endpoint**
+        (`VERCEL_DEPLOYMENT_ID ?? VERCEL_GIT_COMMIT_SHA ?? "dev"` + the resolved
+        Hasura URL) — the Data Cache survives deploys and endpoint switches.
+  - [ ] **Revalidation timeout** (`timeoutMs` below the poll interval) on EVERY
+        subscriber sharing the dedup key — without it a _stalled_ fetch never
+        sets `error`, so it shows stale-as-fresh forever with no notice and no
+        retry. The age gate is server-side and can't help post-hydration.
+  - [ ] **Explicit `unavailable` state for error-with-no-data** (fetch failed
+        AND no fallback), rendered BEFORE any `!data`/`!config` early return that
+        would otherwise make the panel silently vanish — distinct from the
+        stale-but-present "last confirmed state" affordance and from a correctly
+        absent (null) panel.
+  - [ ] **Width/geometry reserved for hydration-variable content** (countdowns,
+        "· N today" suffixes) so the neutral→resolved swap can't wrap/grow at
+        narrow breakpoints. Verify at the mobile two-column grid, not just
+        desktop. (Reference: PR #1257 built this whole envelope for the
+        pool-detail breaker/market-hours SSR prefetch.)
 
 The key question:
 
