@@ -1,5 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+/** @vitest-environment jsdom */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act } from "react";
+import { hydrateRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { BreakerPanel } from "@/components/breaker-panel";
 import type { Pool, BreakerConfig, BreakerTripEvent } from "@/lib/types";
 
@@ -148,9 +152,25 @@ function trippedValueConfig(): BreakerConfig {
 
 const noTrips: BreakerTripEvent[] = [];
 
+// react-dom/client's `act` + `hydrateRoot` idiom needs this flag (same
+// setup as market-hours-pill.test.tsx) — only the hydration-safety describe
+// block below exercises it, but the flag has to be set before hydrateRoot
+// runs and restored after, so it lives in the suite's beforeEach/afterEach.
+const reactActEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+let previousActEnvironment: boolean | undefined;
+
 describe("BreakerPanel", () => {
   beforeEach(() => {
     mockUseGQL.mockReset();
+    previousActEnvironment = reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT =
+      previousActEnvironment ?? false;
   });
 
   it("renders nothing for virtual pools", () => {
@@ -365,6 +385,107 @@ describe("BreakerPanel", () => {
       expect(html).toContain("Threshold / Cooldown");
       // No skeleton cell — the resolved shape paints directly.
       expect(html).not.toContain("h-[78px]");
+    });
+  });
+
+  describe("old-data: stale volatile breaker state (round-1 nit #4, accepted degraded case)", () => {
+    it("grows the panel with the reset-path banner once a stale not-tripped fallback revalidates to tripped", () => {
+      // POOL_BREAKER_CONFIG can be served from the SSR fallback for up to the
+      // 60s unstable_cache revalidate window (pool-detail-ssr.ts). If the
+      // breaker trips inside that window, first paint shows the stale
+      // not-tripped shape; SWR's client revalidation then resolves to
+      // tripped and the panel grows by the ResetPathBanner. This is an
+      // accepted, documented old-data tradeoff (round-1 marked it optional),
+      // not a bug — this test pins the transition so it doesn't regress
+      // silently.
+      const notTrippedFallback = {
+        BreakerConfig: [healthyMedianConfig()],
+        BreakerTripEvent: noTrips,
+      };
+      mockUseGQL.mockReturnValue({
+        data: notTrippedFallback,
+        isLoading: true,
+      });
+      const staleHtml = renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={notTrippedFallback}
+        />,
+      );
+      expect(staleHtml).not.toContain("Reset path");
+
+      const trippedRevalidated = {
+        BreakerConfig: [trippedMedianConfig()],
+        BreakerTripEvent: noTrips,
+      };
+      mockUseGQL.mockReturnValue({
+        data: trippedRevalidated,
+        isLoading: false,
+      });
+      const revalidatedHtml = renderToStaticMarkup(
+        <BreakerPanel
+          pool={fxPool()}
+          initialBreakerConfig={notTrippedFallback}
+        />,
+      );
+      expect(revalidatedHtml).toContain("Reset path");
+    });
+  });
+
+  describe("hydration safety, cooldown countdown (issue #1237 round 2)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("hydrates a TRIPPED breaker with an active cooldown without a mismatch warning, then settles to the live countdown after the first tick", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-13T08:00:00Z"));
+      const trippedConfig = trippedMedianConfig();
+      mockUseGQL.mockReturnValue({
+        data: { BreakerConfig: [trippedConfig], BreakerTripEvent: noTrips },
+        isLoading: false,
+      });
+
+      const serverHtml = renderToString(<BreakerPanel pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration, the server payload shows the deterministic
+      // cooldown-pending placeholder rather than an exact duration read from
+      // the server's wall clock.
+      expect(container.innerHTML).toContain("cooldown active");
+      expect(container.innerHTML).not.toContain("left");
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        act(() => {
+          root = hydrateRoot(container, <BreakerPanel pool={fxPool()} />);
+        });
+        expect(consoleError).not.toHaveBeenCalled();
+        // Immediately post-hydration the ticker's first 1s tick hasn't fired
+        // yet — `now` is set only from inside the interval callback (never
+        // synchronously in the effect body), so this still renders the
+        // deterministic placeholder rather than a guessed duration.
+        expect(container.innerHTML).toContain("cooldown active");
+
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+        // After the first tick, the countdown renders its real duration.
+        expect(container.innerHTML).toContain("left");
+        expect(container.innerHTML).not.toContain("cooldown active");
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
     });
   });
 });

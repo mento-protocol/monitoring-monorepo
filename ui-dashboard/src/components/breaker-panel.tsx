@@ -104,6 +104,21 @@ function effectiveCooldown(cfg: BreakerConfig): bigint {
   return BigInt(cfg.breaker.defaultCooldownTime);
 }
 
+/** Seconds until `cooldownEndsAt`, or `null` while the SSR-safe ticker
+ *  hasn't read a real wall clock yet (`now === null` pre-mount — see
+ *  BreakerPanel's `now` state). Reading `Date.now()` directly at render time
+ *  would diverge between the server pass and the client's hydration pass now
+ *  that fallbackData paints a TRIPPED breaker's real content on first paint
+ *  (issue #1237 round 2); `null` renders a deterministic "cooldown active"
+ *  placeholder in ThresholdMetric/ResetPathBanner until the ticker's first
+ *  tick lands. */
+function cooldownRemainingSecFrom(
+  cooldownEndsAt: number,
+  now: number | null,
+): number | null {
+  return now === null ? null : Math.max(0, cooldownEndsAt - now);
+}
+
 /** |median - reference| / reference, returned as a Fixidity ratio (1e24 = 100%).
  * Returns null if either input is missing OR is the on-chain `0` sentinel:
  * SortedOracles returns rate `0` when all oracle reports have expired,
@@ -319,9 +334,16 @@ function ThresholdMetric({
 }: {
   presentation: BreakerPresentation;
   tripped: boolean;
-  cooldownRemainingSec: number;
+  cooldownRemainingSec: number | null;
 }): React.ReactElement {
-  const cooldownActive = tripped && cooldownRemainingSec > 0;
+  const cooldownActive =
+    tripped && cooldownRemainingSec !== null && cooldownRemainingSec > 0;
+  // `cooldownRemainingSec` is `null` pre-mount even when `tripped` (the
+  // ticker hasn't read the wall clock yet — see BreakerPanel's `now` state)
+  // — render a deterministic caption instead of an exact duration so the
+  // server and hydration renders agree; the countdown itself lands after
+  // mount.
+  const cooldownPending = tripped && cooldownRemainingSec === null;
   return (
     <div>
       <dt className="text-slate-400">Threshold / Cooldown</dt>
@@ -332,9 +354,11 @@ function ThresholdMetric({
         <span
           className={`text-xs ${cooldownActive ? "text-amber-300" : "text-slate-500"}`}
         >
-          {cooldownActive
+          {cooldownActive && cooldownRemainingSec !== null
             ? `${formatDurationShort(cooldownRemainingSec)} left`
-            : presentation.thresholdCaption}
+            : cooldownPending
+              ? "cooldown active"
+              : presentation.thresholdCaption}
         </span>
       </dd>
     </div>
@@ -448,7 +472,7 @@ function ResetPathBanner({
   presentation,
 }: {
   cooldownElapsed: boolean;
-  cooldownRemainingSec: number;
+  cooldownRemainingSec: number | null;
   rateInBand: boolean;
   liveDelta: bigint | null;
   presentation: BreakerPresentation;
@@ -468,7 +492,12 @@ function ResetPathBanner({
         >
           {cooldownElapsed
             ? "elapsed"
-            : formatDurationShort(cooldownRemainingSec)}
+            : cooldownRemainingSec === null
+              ? // Pre-mount (see BreakerPanel's `now` state): deterministic
+                // placeholder instead of a duration that could disagree
+                // between the server and hydration renders.
+                "cooldown active"
+              : formatDurationShort(cooldownRemainingSec)}
         </span>
       </span>
       <span className="inline-flex items-center gap-1">
@@ -561,7 +590,11 @@ export function BreakerPanel({
   // the tripped-cooldown countdown.
   const todayNowSeconds = useNowSeconds();
 
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  // SSR-safe cooldown ticker (see cooldownRemainingSecFrom below for why
+  // `null` and not `Date.now()`). Only ever written from inside the interval
+  // callback (never synchronously in the effect body), so the first real
+  // value lands with the first 1s tick after mount.
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     if (!tickerActive) return;
     const id = setInterval(() => {
@@ -586,7 +619,7 @@ export function BreakerPanel({
   const threshold = effectiveBreakerThreshold(cfg);
   const cooldown = effectiveCooldown(cfg);
   const cooldownEndsAt = Number(cfg.cooldownEndsAt);
-  const cooldownRemainingSec = Math.max(0, cooldownEndsAt - now);
+  const cooldownRemainingSec = cooldownRemainingSecFrom(cooldownEndsAt, now);
   const liveDelta = computeLiveDelta(cfg);
   const presentation = breakerPresentation(
     cfg,
