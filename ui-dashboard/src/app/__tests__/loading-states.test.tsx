@@ -148,6 +148,24 @@ describe("route-level loading UIs", () => {
     expect(grid!.children).toHaveLength(3);
   });
 
+  it("VolumeLoading only fixes flow-insight panel height at the xl breakpoint where the grid goes 3-column", () => {
+    render(<VolumeLoading />);
+
+    // The grid stacks to a single column below `xl` (mirroring
+    // V3FlowInsights' `grid-cols-1 xl:grid-cols-3`) — below `xl` each panel
+    // is a full-width row on its own, not a column sharing a row's height
+    // with the taller corridor/outlier panels. A desktop-measured 500px
+    // fixed height would triple-reserve ~1500px on narrow viewports (the
+    // real cohort panel is much shorter), so the panels must use a
+    // breakpoint-scoped class rather than an unconditional inline style.
+    const grid = container.querySelector(".xl\\:grid-cols-3");
+    expect(grid).not.toBeNull();
+    Array.from(grid!.children).forEach((panel) => {
+      expect((panel as HTMLElement).style.height).toBe("");
+      expect(panel.className).toContain("xl:h-[500px]");
+    });
+  });
+
   it("VolumeLoading reserves a single full-width top-traders table, not a two-column layout", () => {
     render(<VolumeLoading />);
 

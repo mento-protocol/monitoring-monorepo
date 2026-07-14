@@ -109,20 +109,31 @@ export function TopPoolsList({
 // measured in the production skeleton-parity audit (issue #1221).
 const TOP_POOLS_SKELETON_ROWS = 10;
 
+// `role="status"` + the sr-only announcement text live on a wrapping `<div>`
+// rather than on the `<ol>` itself — an `<ol>` may only contain `<li>` (or
+// script-supporting) elements, so a direct `sr-only` `<span>` child would be
+// invalid HTML. Matches the `CohortPanelSkeleton`/`InsightTableSkeleton`
+// pattern in `v3-flow-insight-panels.tsx`, which wrap their content in a
+// `<div>` for the same reason.
 function TopPoolsListSkeleton() {
   return (
-    <ol className="space-y-1.5" role="status" aria-label="Loading pool ranking">
-      {Array.from({ length: TOP_POOLS_SKELETON_ROWS }, (_, i) => (
-        // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-        <li key={`top-pools-skel-${i}`} className="flex h-5 items-center gap-2">
-          <span className="h-2.5 w-5 flex-shrink-0 animate-pulse rounded bg-slate-800/40" />
-          <span className="h-2 w-2 flex-shrink-0 animate-pulse rounded-sm bg-slate-800/50" />
-          <span className="h-2.5 flex-1 animate-pulse rounded bg-slate-800/50" />
-          <span className="ml-auto h-2.5 w-12 flex-shrink-0 animate-pulse rounded bg-slate-800/50" />
-          <span className="h-2.5 w-8 flex-shrink-0 animate-pulse rounded bg-slate-800/40" />
-        </li>
-      ))}
+    <div role="status" aria-label="Loading pool ranking">
+      <ol className="space-y-1.5">
+        {Array.from({ length: TOP_POOLS_SKELETON_ROWS }, (_, i) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+          <li
+            key={`top-pools-skel-${i}`}
+            className="flex h-5 items-center gap-2"
+          >
+            <span className="h-2.5 w-5 flex-shrink-0 animate-pulse rounded bg-slate-800/40" />
+            <span className="h-2 w-2 flex-shrink-0 animate-pulse rounded-sm bg-slate-800/50" />
+            <span className="h-2.5 flex-1 animate-pulse rounded bg-slate-800/50" />
+            <span className="ml-auto h-2.5 w-12 flex-shrink-0 animate-pulse rounded bg-slate-800/50" />
+            <span className="h-2.5 w-8 flex-shrink-0 animate-pulse rounded bg-slate-800/40" />
+          </li>
+        ))}
+      </ol>
       <span className="sr-only">Loading…</span>
-    </ol>
+    </div>
   );
 }

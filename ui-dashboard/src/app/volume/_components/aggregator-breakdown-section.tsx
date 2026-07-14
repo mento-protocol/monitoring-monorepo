@@ -24,18 +24,10 @@ import {
 } from "@/lib/volume";
 import type { AggregatorWindowRow } from "@/lib/volume-aggregators";
 import type { TimeSeriesPoint, RangeKey } from "@/lib/time-series";
+import { AGGREGATOR_TABLE_SKELETON_ROWS } from "../_lib/skeleton-rows";
 import { TableSectionTitle } from "./table-section-title";
 
 const PAGE_LIMIT = 50;
-
-// Row count for the loading-phase table skeleton. Aggregator/entry-point
-// breakdowns typically resolve to a much smaller distinct-row count than
-// `PAGE_LIMIT` (50) — reserving the full cap would over-shoot the real
-// table's height on every load. 6 matches the production skeleton-parity
-// audit's measured aggregator-section delta (issue #1221). `volume/loading.tsx`'s
-// route-level fallback mirrors this same row count for its own aggregator
-// placeholder — keep both in sync if this changes.
-const AGGREGATOR_TABLE_SKELETON_ROWS = 6;
 
 const AGG_SORT_KEYS = ["volume", "swaps", "traders"] as const;
 type AggSortKey = (typeof AGG_SORT_KEYS)[number];
@@ -182,8 +174,18 @@ function AggregatorTable({
     );
   }
   if (isLoading) {
+    // `presentational`: this component is shared by both venue sections and
+    // always renders alongside another independently-loading table (the top
+    // traders table in `volume-table.tsx`), which owns the page's single
+    // `aria-live="polite"` announcement during combined client-side
+    // loading. Without `presentational` here, both `TableSkeleton`s would
+    // announce simultaneously — two competing live regions.
     return (
-      <TableSkeleton variant="rows" rows={AGGREGATOR_TABLE_SKELETON_ROWS} />
+      <TableSkeleton
+        variant="rows"
+        rows={AGGREGATOR_TABLE_SKELETON_ROWS}
+        presentational
+      />
     );
   }
   if (sorted.length === 0) {

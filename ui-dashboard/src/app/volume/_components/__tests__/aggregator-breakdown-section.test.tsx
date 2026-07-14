@@ -175,10 +175,18 @@ describe("AggregatorBreakdownSection", () => {
 
   it("reserves a table-shaped skeleton (header + measured row rhythm) while loading, matching the loaded table's <thead> structure", () => {
     handle = renderSection({ isLoading: true });
-    const status = handle.container.querySelector<HTMLElement>(
-      '[role="status"][aria-label="Loading table"]',
+    // The aggregator table's skeleton is `presentational` (no `role`/
+    // `aria-label` — the top-traders table in `volume-table.tsx` owns the
+    // page's single live-region announcement, see that file's comment), so
+    // it's located structurally via its 36px header bar instead of ARIA
+    // attributes.
+    const status = Array.from(
+      handle.container.querySelectorAll<HTMLElement>("div"),
+    ).find(
+      (el) =>
+        (el.firstElementChild as HTMLElement | null)?.style.height === "36px",
     );
-    expect(status).not.toBeNull();
+    expect(status).not.toBeUndefined();
     const [header, body] = Array.from(status!.children) as [
       HTMLElement,
       HTMLElement,

@@ -1,4 +1,8 @@
 import { TableSkeleton } from "@/components/skeletons";
+import {
+  AGGREGATOR_TABLE_SKELETON_ROWS,
+  TOP_TRADERS_TABLE_SKELETON_ROWS,
+} from "./_lib/skeleton-rows";
 
 // Route-level fallback for /volume, rendered during the server session-await —
 // BEFORE the client reads URL-state (venue/range) or the auth session. It
@@ -88,13 +92,26 @@ export default function VolumeLoading() {
           venue/range, so each panel reserves a generic sized block rather
           than replicating the panels' internal row shapes — that detail
           lives in v3-flow-insight-panels.tsx's own client loading branch.
-          The height (500) matches that client skeleton's own corridor/
+          The 500px height matches that client skeleton's own corridor/
           outlier panel height (10-row InsightTableSkeleton + a reserved
           2-line trailing-caption placeholder + InsightPanel chrome: p-4 +
           h3 title + header row + 10 rows at py-3 + the caption placeholder,
           recomputed from v3-flow-insight-panels.tsx's geometry) so the
           route->mount swap doesn't shrink before the client skeleton takes
-          over — keep both in sync if either changes. */}
+          over — keep both in sync if either changes.
+
+          That 500px figure is only true at the `xl:grid-cols-3` layout,
+          where the grid row's height is governed by the tallest panel
+          (corridor/outlier, which really do run ~500px) — the compact
+          cohort panel borrows that same row height "for free" via CSS Grid.
+          Below `xl` the grid stacks to `grid-cols-1`, so each panel gets its
+          own full-width row instead of sharing one — asserting 500px on all
+          three there would reserve ~1500px (vs. cohort's real, much shorter
+          content), reintroducing the below-the-fold jump this fallback
+          exists to prevent for narrower viewports. `xl:h-[500px]` below
+          scopes the fixed height to that breakpoint; under `xl` each panel
+          sizes to its natural content (the 8-row bar stack), which is a
+          closer approximation of the real per-panel geometry when stacked. */}
       <div className="space-y-3">
         <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -102,8 +119,7 @@ export default function VolumeLoading() {
             // react-doctor-disable-next-line react-doctor/no-array-index-as-key
             <div
               key={`vol-insight-panel-${i}`}
-              className="rounded-lg border border-slate-800 bg-slate-900/50 p-4"
-              style={{ height: 500 }}
+              className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 xl:h-[500px]"
             >
               <div className="mb-3 h-3 w-32 animate-pulse rounded bg-slate-800/50" />
               <div className="space-y-2">
@@ -121,11 +137,15 @@ export default function VolumeLoading() {
       </div>
       {/* Top traders: heading + main table skeleton (header + measured row
           rhythm), mirroring V3VolumeSection's "Top traders" table. Row count
-          matches TOP_TRADERS_TABLE_SKELETON_ROWS in volume-table.tsx — keep
-          both in sync if that changes. */}
+          is TOP_TRADERS_TABLE_SKELETON_ROWS, shared with volume-table.tsx via
+          `./_lib/skeleton-rows.ts` so the two can't drift apart. */}
       <div className="space-y-3">
         <div className="h-4 w-40 animate-pulse rounded bg-slate-800/50" />
-        <TableSkeleton rows={18} variant="rows" presentational />
+        <TableSkeleton
+          rows={TOP_TRADERS_TABLE_SKELETON_ROWS}
+          variant="rows"
+          presentational
+        />
       </div>
       {/* Aggregator breakdown: heading + the aggregator chart card + table
           skeleton, mirroring AggregatorBreakdownSection. The chart card
@@ -139,10 +159,11 @@ export default function VolumeLoading() {
           this one passes yAxisTopPadding={0} to its real TimeSeriesChartCard,
           which triggers that component's dense-layout `pb-2 sm:pb-3` bottom
           padding override — mirrored here too, so the card doesn't shrink a
-          few px on client mount. Row count matches
-          AGGREGATOR_TABLE_SKELETON_ROWS in aggregator-breakdown-section.tsx —
-          keep both in sync if that changes. The heading also reserves a
-          second line for the static "Canonical name from aggregators.json…"
+          few px on client mount. Row count is AGGREGATOR_TABLE_SKELETON_ROWS,
+          shared with aggregator-breakdown-section.tsx via
+          `./_lib/skeleton-rows.ts` so the two can't drift apart. The heading
+          also reserves a second line for the static "Canonical name from
+          aggregators.json…"
           description paragraph AggregatorBreakdownSection always renders
           under its title (measured live, 2026-07-13: title 20px + description
           17px = 41px vs a single 16px bar) — without it the table shifts down
@@ -174,7 +195,11 @@ export default function VolumeLoading() {
           </div>
           <div className="mt-4 h-[230px] animate-pulse rounded bg-slate-800/30" />
         </section>
-        <TableSkeleton rows={6} variant="rows" presentational />
+        <TableSkeleton
+          rows={AGGREGATOR_TABLE_SKELETON_ROWS}
+          variant="rows"
+          presentational
+        />
       </div>
       <span className="sr-only">Loading…</span>
     </div>

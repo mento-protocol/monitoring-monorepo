@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { axe } from "vitest-axe";
 import { TopPoolsList, type TopPoolsListEntry } from "../top-pools-list";
 
 let container: HTMLDivElement;
@@ -47,9 +48,14 @@ describe("TopPoolsList", () => {
       '[role="status"][aria-label="Loading pool ranking"]',
     );
     expect(status).not.toBeNull();
-    expect(status!.tagName).toBe("OL");
-    expect(status!.className).toContain("space-y-1.5");
-    const skeletonRows = Array.from(status!.children).filter(
+    // `role="status"` lives on a wrapping `<div>`, not the `<ol>` itself —
+    // an `<ol>` may only contain `<li>` elements, so the sr-only
+    // announcement text can't be a direct child of the list.
+    expect(status!.tagName).toBe("DIV");
+    const list = status!.querySelector("ol");
+    expect(list).not.toBeNull();
+    expect(list!.className).toContain("space-y-1.5");
+    const skeletonRows = Array.from(list!.children).filter(
       (child) => child.tagName === "LI",
     );
     expect(skeletonRows).toHaveLength(10);
@@ -72,6 +78,19 @@ describe("TopPoolsList", () => {
       (child) => child.tagName === "LI",
     );
     expect(loadedRows).toHaveLength(2);
+  });
+
+  it("keeps the loading <ol> valid (no direct non-<li> children) and passes axe", async () => {
+    render(
+      <TopPoolsList entries={[]} isLoading hasError={false} windowLabel="1M" />,
+    );
+    const list = container.querySelector("ol");
+    expect(list).not.toBeNull();
+    Array.from(list!.children).forEach((child) => {
+      expect(child.tagName).toBe("LI");
+    });
+    const results = await axe(container);
+    expect(results.violations).toEqual([]);
   });
 
   it("renders distinct error and empty states instead of the list skeleton", () => {
