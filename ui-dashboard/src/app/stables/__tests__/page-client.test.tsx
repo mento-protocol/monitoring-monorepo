@@ -239,10 +239,63 @@ describe("StablesPageClient — smoke", () => {
       }),
     ];
     const html = renderToStaticMarkup(<StablesPageClient />);
-    const noticeIndex = html.indexOf("Showing the most recent");
+    const noticeIndex = html.indexOf("Showing the most recent 1,000");
     expect(noticeIndex).toBeGreaterThan(-1);
+    // Folded into the supply-changes card's header (issue #1239) so it
+    // never displaces the card's position — it renders just after the
+    // "Supply changes" heading, not as a standalone block before it.
     expect(html.indexOf("Per-token supply detail")).toBeLessThan(noticeIndex);
-    expect(noticeIndex).toBeLessThan(html.indexOf("Supply changes"));
+    expect(html.indexOf("Supply changes")).toBeLessThan(noticeIndex);
+  });
+
+  it("does not render the snapshot-limit notice, and does not insert a sibling before the supply-changes card, when the cap is not hit", () => {
+    mockSnapshots.data = [
+      snapshot({
+        timestamp: "1716336000",
+        totalSupply: "1000000000000000000",
+      }),
+    ];
+
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const localRoot = createRoot(div);
+
+    // Uncapped: no notice anywhere, and the changes card is the last of the
+    // page's five top-level sections (header, KPI strip, hero chart,
+    // sparkline grid, changes card) — no phantom sibling reserved for it.
+    mockSnapshots.capped = false;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+    const rootContainer = div.querySelector<HTMLDivElement>(".space-y-8");
+    expect(rootContainer).toBeTruthy();
+    expect(div.textContent).not.toContain("Showing the most recent 1,000");
+    const childCountUncapped = rootContainer!.children.length;
+    const lastChildUncapped = rootContainer!.lastElementChild;
+    expect(lastChildUncapped?.textContent).toContain("Supply changes");
+
+    // Capped: the notice appears, but folded into the card's own header —
+    // the card stays the same last child at the same sibling index, so its
+    // top position relative to the sparkline grid above it is unchanged.
+    mockSnapshots.capped = true;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+    expect(div.textContent).toContain("Showing the most recent 1,000");
+    expect(rootContainer!.children.length).toBe(childCountUncapped);
+    expect(rootContainer!.lastElementChild?.textContent).toContain(
+      "Supply changes",
+    );
+    // The notice text lives inside the same card element that was already
+    // the last child, not in a new sibling ahead of it.
+    expect(rootContainer!.lastElementChild?.textContent).toContain(
+      "Showing the most recent 1,000",
+    );
+
+    act(() => {
+      localRoot.unmount();
+    });
+    div.remove();
   });
 
   it("degrades custody query errors to raw supply instead of failing the page", () => {

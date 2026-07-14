@@ -40,6 +40,7 @@ function renderThresholdInput({
         hasSettled={true}
         capped={false}
         unpricedEventsCount={0}
+        snapshotLimitCapped={false}
       />,
     );
   });
@@ -109,6 +110,7 @@ describe("StablesChangesTable", () => {
         hasSettled={true}
         capped={true}
         unpricedEventsCount={0}
+        snapshotLimitCapped={false}
       />,
     );
 
@@ -148,6 +150,7 @@ describe("StablesChangesTable", () => {
         hasSettled={true}
         capped={false}
         unpricedEventsCount={1}
+        snapshotLimitCapped={false}
       />,
     );
 
@@ -207,6 +210,7 @@ describe("StablesChangesTable", () => {
           hasSettled={true}
           capped={false}
           unpricedEventsCount={0}
+          snapshotLimitCapped={false}
         />,
       );
     });
@@ -252,6 +256,7 @@ describe("StablesChangesTable", () => {
           hasSettled={true}
           capped={false}
           unpricedEventsCount={0}
+          snapshotLimitCapped={false}
         />,
       );
     };
@@ -292,6 +297,7 @@ describe("StablesChangesTable", () => {
       isLoading: boolean;
       hasError: boolean;
       hasSettled?: boolean;
+      snapshotLimitCapped?: boolean;
     }): HTMLDivElement {
       const div = document.createElement("div");
       document.body.appendChild(div);
@@ -308,6 +314,7 @@ describe("StablesChangesTable", () => {
             hasSettled={props.hasSettled ?? false}
             capped={false}
             unpricedEventsCount={0}
+            snapshotLimitCapped={props.snapshotLimitCapped ?? false}
           />,
         );
       });
@@ -419,6 +426,136 @@ describe("StablesChangesTable", () => {
         ),
       ).not.toBeNull();
       expect(div.textContent).toContain("Supply changes");
+    });
+
+    describe("snapshot-limit notice (issue #1239)", () => {
+      // The daily-snapshots truncation notice ("Showing the most recent 1,000
+      // snapshot rows...") is folded into this card's own header row instead
+      // of rendering as a standalone paragraph above the card, so it never
+      // displaces the card's position when it turns on/off. It must appear
+      // identically across every content branch — loading, error, empty, and
+      // loaded — since it is driven by `snapshotLimitCapped`, not by the
+      // events/loading state of this table's own query.
+      function headerNoticeElement(div: HTMLDivElement): HTMLElement | null {
+        return (
+          ([...div.querySelectorAll("p")].find((p) =>
+            p.textContent?.startsWith("Showing the most recent 1,000"),
+          ) as HTMLElement | undefined) ?? null
+        );
+      }
+
+      it.each([
+        ["loading", { events: [], isLoading: true, hasError: false }],
+        ["error", { events: [], isLoading: false, hasError: true }],
+        [
+          "empty",
+          { events: [], isLoading: false, hasError: false, hasSettled: true },
+        ],
+        [
+          "loaded with data",
+          {
+            events: [changeEvent(0)],
+            isLoading: false,
+            hasError: false,
+            hasSettled: true,
+          },
+        ],
+      ] as const)(
+        "renders the header notice in the %s branch when snapshotLimitCapped is true",
+        (_label, branchProps) => {
+          const div = renderBranch({
+            ...branchProps,
+            snapshotLimitCapped: true,
+          });
+
+          expect(div.textContent).toContain("Supply changes");
+          const notice = headerNoticeElement(div);
+          expect(notice).not.toBeNull();
+          expect(notice!.textContent).toContain(
+            "Use the 1W or 1M range for a complete view.",
+          );
+
+          div.remove();
+        },
+      );
+
+      it.each([
+        ["loading", { events: [], isLoading: true, hasError: false }],
+        ["error", { events: [], isLoading: false, hasError: true }],
+        [
+          "empty",
+          { events: [], isLoading: false, hasError: false, hasSettled: true },
+        ],
+        [
+          "loaded with data",
+          {
+            events: [changeEvent(0)],
+            isLoading: false,
+            hasError: false,
+            hasSettled: true,
+          },
+        ],
+      ] as const)(
+        "omits the header notice in the %s branch when snapshotLimitCapped is false",
+        (_label, branchProps) => {
+          const div = renderBranch({
+            ...branchProps,
+            snapshotLimitCapped: false,
+          });
+
+          expect(headerNoticeElement(div)).toBeNull();
+
+          div.remove();
+        },
+      );
+
+      it("keeps the card's header the same element regardless of the body branch, so toggling the notice never moves the card", () => {
+        // Render each branch twice — once uncapped, once capped — and assert
+        // the "Supply changes" heading is always the FIRST element inside the
+        // card, i.e. the notice is appended after it rather than being a
+        // sibling block rendered above the card that would push the whole
+        // card down.
+        const branches = [
+          { events: [], isLoading: true, hasError: false },
+          { events: [], isLoading: false, hasError: true },
+          {
+            events: [],
+            isLoading: false,
+            hasError: false,
+            hasSettled: true,
+          },
+        ] as const;
+
+        for (const branch of branches) {
+          const uncapped = renderBranch({
+            ...branch,
+            snapshotLimitCapped: false,
+          });
+          const capped = renderBranch({ ...branch, snapshotLimitCapped: true });
+
+          const uncappedFirstHeading =
+            uncapped.querySelector("section h2")?.textContent;
+          const cappedFirstHeading =
+            capped.querySelector("section h2")?.textContent;
+          expect(uncappedFirstHeading).toBe("Supply changes");
+          expect(cappedFirstHeading).toBe("Supply changes");
+
+          // The heading is always the FIRST element of its wrapping div — the
+          // notice (when present) is appended after it, never inserted as a
+          // leading sibling that would push the heading itself down.
+          const uncappedWrapperFirstTag =
+            uncapped.querySelector("section h2")?.parentElement
+              ?.firstElementChild?.tagName;
+          const cappedWrapperFirstTag =
+            capped.querySelector("section h2")?.parentElement?.firstElementChild
+              ?.tagName;
+          expect(uncappedWrapperFirstTag).toBe("H2");
+          expect(cappedWrapperFirstTag).toBe("H2");
+
+          uncapped.remove();
+          capped.remove();
+        }
+      });
     });
   });
 });

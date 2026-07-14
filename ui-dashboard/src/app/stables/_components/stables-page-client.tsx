@@ -107,33 +107,23 @@ function StablesContent(): React.JSX.Element {
         hasError={hasError}
       />
 
-      <StablesSnapshotLimitNotice visible={chartCapped} />
-
-      <StablesChangesSection rates={rates} ratesLoading={ratesLoading} />
+      <StablesChangesSection
+        rates={rates}
+        ratesLoading={ratesLoading}
+        snapshotLimitCapped={chartCapped}
+      />
     </div>
-  );
-}
-
-function StablesSnapshotLimitNotice({
-  visible,
-}: {
-  visible: boolean;
-}): React.JSX.Element | null {
-  if (!visible) return null;
-  return (
-    <p className="text-xs text-amber-400" role="status">
-      Showing the most recent 1,000 snapshot rows — older history may be
-      truncated. Use the 1W or 1M range for a complete view.
-    </p>
   );
 }
 
 function StablesChangesSection({
   rates,
   ratesLoading,
+  snapshotLimitCapped,
 }: {
   rates: OracleRateMap;
   ratesLoading: boolean;
+  snapshotLimitCapped: boolean;
 }): React.JSX.Element {
   const {
     minimumUsdValue: minimumSupplyChangeUsd,
@@ -188,6 +178,7 @@ function StablesChangesSection({
       hasSettled={hasSettledOnce}
       capped={changesCapped}
       unpricedEventsCount={changesUnpricedEventsCount}
+      snapshotLimitCapped={snapshotLimitCapped}
     />
   );
 }
