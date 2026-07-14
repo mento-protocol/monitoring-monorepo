@@ -96,7 +96,7 @@ export function BreakdownTile({
 const SUB_WINDOW_LABELS = ["24h", "7d", "30d"] as const;
 
 /**
- * The 24h/7d/30d row under the headline value. Three mutually exclusive
+ * The 24h/7d/30d row under the headline value. Four mutually exclusive
  * states, all reserving the same footprint so the tile never resizes as
  * data resolves:
  *  - loading: shimmer placeholders (was 114 -> 164px on /stables before
@@ -110,8 +110,12 @@ const SUB_WINDOW_LABELS = ["24h", "7d", "30d"] as const;
  *    invisible copy of the row shapes, so the block's height is driven by
  *    the same flex-wrap it would take on while loading — at any tile
  *    width — without showing fake skeleton/placeholder rows.
- *  - error, or loaded with no total and an error: renders nothing
- *    (unchanged from before this file reserved rows at all).
+ *  - hasError (whether or not a total resolved): renders an invisible copy
+ *    of the row shapes, same technique as the empty state, with no visible
+ *    message here — the "Some chains failed to load" text already renders
+ *    on the subtitle line (see `BreakdownTile`). Reserves the same
+ *    footprint so a loading-to-error or loaded-to-error transition doesn't
+ *    shrink the tile.
  */
 function BreakdownSubRows({
   isLoading,
@@ -184,5 +188,22 @@ function BreakdownSubRows({
     );
   }
 
-  return null;
+  // hasError, whether or not a total resolved. Reserve the same footprint
+  // as the branches above via an invisible copy of the row shapes; the
+  // visible error message renders on the subtitle line instead.
+  return (
+    <div className="mt-1.5 text-sm">
+      <div
+        aria-hidden="true"
+        className="invisible flex flex-wrap gap-x-3 gap-y-0.5 font-mono"
+      >
+        {SUB_WINDOW_LABELS.map((l) => (
+          <span key={l}>
+            <span>{l}</span>{" "}
+            <span className="inline-block h-3 w-14 align-middle" />
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
