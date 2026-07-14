@@ -118,6 +118,7 @@ const PoolDetailRowSchema = z.object({
   reserves0: z.string().optional(),
   reserves1: z.string().optional(),
   swapCount: z.number().optional(),
+  rebalanceCount: z.number().optional(),
   healthTotalSeconds: z.string().optional(),
   hasHealthData: z.boolean().optional(),
   // Hasura can return null on FPMM pools; coerce to undefined for Pool compat.
