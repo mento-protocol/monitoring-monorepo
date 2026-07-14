@@ -294,28 +294,42 @@ describe("StablesPageClient — smoke", () => {
     const lastChildUncapped = rootContainer!.lastElementChild;
     expect(lastChildUncapped?.textContent).toContain("Supply changes");
 
-    // Capped: the notice appears, but folded into the card's own header —
-    // the card stays the same last child at the same sibling index, so its
-    // top position relative to the sparkline grid above it is unchanged.
-    mockSnapshots.capped = true;
-    act(() => {
-      localRoot.render(<StablesPageClient />);
-    });
-    expect(div.textContent).toContain("Showing the most recent 1,000");
-    expect(rootContainer!.children.length).toBe(childCountUncapped);
-    expect(rootContainer!.lastElementChild?.textContent).toContain(
-      "Supply changes",
-    );
-    // The notice text lives inside the same card element that was already
-    // the last child, not in a new sibling ahead of it.
-    expect(rootContainer!.lastElementChild?.textContent).toContain(
-      "Showing the most recent 1,000",
-    );
-
     act(() => {
       localRoot.unmount();
     });
     div.remove();
+
+    // Capped (on a FRESH mount — post-settle in-place flips are frozen out,
+    // see the "freezes the truncation notice" test below): the notice
+    // appears, but folded into the card's own header — the card stays the
+    // same last child at the same sibling index, so its top position
+    // relative to the sparkline grid above it is unchanged.
+    mockSnapshots.capped = true;
+    const cappedMountDiv = document.createElement("div");
+    document.body.appendChild(cappedMountDiv);
+    const cappedMountRoot = createRoot(cappedMountDiv);
+    act(() => {
+      cappedMountRoot.render(<StablesPageClient />);
+    });
+    const cappedContainer =
+      cappedMountDiv.querySelector<HTMLDivElement>(".space-y-8");
+    expect(cappedMountDiv.textContent).toContain(
+      "Showing the most recent 1,000",
+    );
+    expect(cappedContainer!.children.length).toBe(childCountUncapped);
+    expect(cappedContainer!.lastElementChild?.textContent).toContain(
+      "Supply changes",
+    );
+    // The notice text lives inside the same card element that was already
+    // the last child, not in a new sibling ahead of it.
+    expect(cappedContainer!.lastElementChild?.textContent).toContain(
+      "Showing the most recent 1,000",
+    );
+
+    act(() => {
+      cappedMountRoot.unmount();
+    });
+    cappedMountDiv.remove();
   });
 
   it("degrades custody query errors to raw supply instead of failing the page", () => {
@@ -479,6 +493,156 @@ describe("StablesPageClient — smoke", () => {
       localRoot.unmount();
     });
     div.remove();
+  });
+
+  it("short-circuits the cap wait when one snapshot source already resolved capped, instead of waiting on the other", () => {
+    // The notice is driven by an OR of the supply-snapshots and
+    // custody-snapshots caps. Once the supply query resolves capped=true the
+    // outcome is irrevocably "capped" — the header is already in its final
+    // notice-shown shape — so a slow (or wedged) custody query must not keep
+    // otherwise-ready rows hidden behind the skeleton.
+    mockChanges.data = [changeEvent()];
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
+    mockRates.isLoading = false;
+    mockSnapshots.isLoading = false;
+    mockSnapshots.capped = true;
+    mockCustodySnapshots.isLoading = true; // still in flight — must not matter
+
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const localRoot = createRoot(div);
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(
+      div.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).toBeNull();
+    expect(div.textContent).toContain("Showing the most recent 1,000");
+
+    act(() => {
+      localRoot.unmount();
+    });
+    div.remove();
+
+    // Control: the same custody-still-loading state WITHOUT a decided cap
+    // (supply resolved uncapped) must still hold the skeleton — an
+    // all-sources-uncapped conclusion needs every query settled.
+    mockSnapshots.capped = false;
+    const controlDiv = document.createElement("div");
+    document.body.appendChild(controlDiv);
+    const controlRoot = createRoot(controlDiv);
+    act(() => {
+      controlRoot.render(<StablesPageClient />);
+    });
+
+    expect(controlDiv.querySelectorAll("tbody tr")).toHaveLength(0);
+    expect(
+      controlDiv.querySelector('[role="status"][aria-label="Loading table"]'),
+    ).not.toBeNull();
+
+    act(() => {
+      controlRoot.unmount();
+    });
+    controlDiv.remove();
+  });
+
+  it("freezes the truncation notice at its settle-time state so a post-settle cap flip cannot move the visible rows", () => {
+    // Once the reveal latch fires it stops watching the cap flag — so a
+    // later SWR poll crossing the 1,000-row cap would insert the notice
+    // above already-visible rows, the original displacement re-entering
+    // through the polling path. The latch therefore stores the cap outcome
+    // itself and the header renders the frozen value: a post-settle flip in
+    // either direction leaves the header untouched (the fresh cap state
+    // surfaces on the next mount instead).
+    mockChanges.data = [changeEvent()];
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
+    mockRates.isLoading = false;
+    mockSnapshots.isLoading = false;
+    mockSnapshots.capped = false;
+
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const localRoot = createRoot(div);
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    // Settled uncapped: rows visible, no notice.
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(div.textContent).not.toContain("Showing the most recent 1,000");
+    const row = div.querySelector("tbody tr");
+    expect(row).not.toBeNull();
+    const settledPosition = precedingElementCount(row!);
+
+    // Post-settle flip to capped (a later poll returns the 1,000th row):
+    // the notice must NOT appear, and the rows must not move.
+    mockSnapshots.capped = true;
+    act(() => {
+      localRoot.render(<StablesPageClient />);
+    });
+
+    expect(div.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(div.textContent).not.toContain("Showing the most recent 1,000");
+    const rowAfterFlip = div.querySelector("tbody tr");
+    expect(rowAfterFlip).not.toBeNull();
+    expect(precedingElementCount(rowAfterFlip!)).toBe(settledPosition);
+
+    act(() => {
+      localRoot.unmount();
+    });
+    div.remove();
+
+    // Mirror case: settled CAPPED, then a poll dips back under the cap —
+    // the notice must stay (frozen), so rows don't move UP either.
+    mockSnapshots.capped = true;
+    const cappedDiv = document.createElement("div");
+    document.body.appendChild(cappedDiv);
+    const cappedRoot = createRoot(cappedDiv);
+    act(() => {
+      cappedRoot.render(<StablesPageClient />);
+    });
+
+    expect(cappedDiv.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(cappedDiv.textContent).toContain("Showing the most recent 1,000");
+    const cappedRow = cappedDiv.querySelector("tbody tr");
+    expect(cappedRow).not.toBeNull();
+    const cappedPosition = precedingElementCount(cappedRow!);
+
+    mockSnapshots.capped = false;
+    act(() => {
+      cappedRoot.render(<StablesPageClient />);
+    });
+
+    expect(cappedDiv.textContent).toContain("Showing the most recent 1,000");
+    const cappedRowAfterFlip = cappedDiv.querySelector("tbody tr");
+    expect(cappedRowAfterFlip).not.toBeNull();
+    expect(precedingElementCount(cappedRowAfterFlip!)).toBe(cappedPosition);
+
+    act(() => {
+      cappedRoot.unmount();
+    });
+    cappedDiv.remove();
+  });
+
+  it("surfaces the supply-changes error immediately even while the snapshot-cap outcome is still loading", () => {
+    // Without error precedence, a failed changes query plus a slow
+    // snapshot/custody request keeps `showChangesSkeleton` true (the table
+    // branches on isLoading before hasError), so the user would see an
+    // indefinite loading table instead of the error affordance.
+    mockChanges.error = new Error("changes query failed");
+    mockChanges.isLoading = false;
+    mockChanges.hasPendingPage = false;
+    mockRates.isLoading = false;
+    mockSnapshots.isLoading = true; // cap outcome unknown — must not matter
+
+    const html = renderToStaticMarkup(<StablesPageClient />);
+
+    expect(html).toContain("Failed to load supply changes.");
+    expect(html).not.toContain('aria-label="Loading table"');
   });
 
   it("keeps the supply-changes skeleton up while a follow-up raw page is still pending, even with first-page rows in hand", () => {

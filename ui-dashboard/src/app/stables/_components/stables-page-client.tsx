@@ -25,14 +25,24 @@ export function StablesPageClient(): React.JSX.Element {
   );
 }
 
-// Whether the daily-snapshots truncation-cap outcome (`chartCapped` above)
-// is still unresolved. Kept as a standalone function so its two boolean
+// Whether the daily-snapshots truncation-cap outcome (`chartCapped` below)
+// is still unresolved. Kept as a standalone function so its boolean
 // operators don't count against `StablesContent`'s own complexity budget.
+//
+// `chartCapped` is an OR of the two per-source cap flags, so the moment any
+// source reports capped the outcome is irrevocably "capped" — the header is
+// already in its final notice-shown shape and there is nothing left to wait
+// for, even if the other query is slow or wedged. Short-circuit so the
+// changes card doesn't delay otherwise-ready rows behind an unrelated
+// request. Only an all-sources-uncapped conclusion needs every query
+// settled.
 function isSnapshotCapOutcomeLoading(
+  alreadyCapped: boolean,
   snapshotsLoading: boolean,
   custodySnapshotsLoading: boolean,
   custodySnapshotsUnavailable: boolean,
 ): boolean {
+  if (alreadyCapped) return false;
   return (
     snapshotsLoading ||
     (!custodySnapshotsUnavailable && custodySnapshotsLoading)
@@ -89,6 +99,7 @@ function StablesContent(): React.JSX.Element {
   // inlined like `chartCapped` above) to keep `StablesContent`'s own
   // cyclomatic complexity under the lint ceiling.
   const snapshotLimitCappedLoading = isSnapshotCapOutcomeLoading(
+    chartCapped,
     snapshotsLoading,
     custodySnapshotsLoading,
     custodySnapshotsUnavailable,
@@ -197,9 +208,28 @@ function StablesChangesSection({
   // #1239 eliminated at the page level, just reintroduced inside the card
   // (Codex review on #1256). Holding the reveal until the cap outcome is
   // known guarantees the header is already in its final shape by the time
-  // rows first appear, so revealing rows never coincides with a header size
-  // change.
-  const [hasSettledOnce, setHasSettledOnce] = useState(false);
+  // rows first appear.
+  //
+  // The latch stores the cap outcome itself (null = not settled yet), and
+  // the header renders the FROZEN value after settle. A post-settle flip
+  // (e.g. a later SWR poll returns the 1,000th snapshot row) would otherwise
+  // insert the notice above already-visible rows — the #1239 displacement
+  // re-entering through the polling path. Reserving a permanent slot instead
+  // would violate #1239's "no reserved gap on uncapped days" criterion, and
+  // resetting the latch would drop visible rows back to a skeleton, so the
+  // notice is pinned to its settle-time state; a mid-session cap crossing is
+  // a once-per-dataset event (snapshot count only grows ~daily and stays
+  // capped once past the limit) and surfaces on the next mount.
+  //
+  // A changes-query error always wins over the pre-settle hold: without
+  // that, a failed changes query + a slow cap/rates query would show an
+  // indefinite skeleton instead of the error affordance (the table branches
+  // on isLoading before hasError).
+  const [settledSnapshotLimitCapped, setSettledSnapshotLimitCapped] = useState<
+    boolean | null
+  >(null);
+  const hasSettledOnce = settledSnapshotLimitCapped !== null;
+  const changesHasError = changesError != null;
   if (
     !hasSettledOnce &&
     !changesLoading &&
@@ -207,12 +237,13 @@ function StablesChangesSection({
     !ratesLoading &&
     !snapshotLimitCappedLoading
   ) {
-    setHasSettledOnce(true);
+    setSettledSnapshotLimitCapped(snapshotLimitCapped);
   }
   const showChangesSkeleton =
-    changesLoading ||
-    (!hasSettledOnce &&
-      (changesHasPendingPage || ratesLoading || snapshotLimitCappedLoading));
+    !changesHasError &&
+    (changesLoading ||
+      (!hasSettledOnce &&
+        (changesHasPendingPage || ratesLoading || snapshotLimitCappedLoading)));
 
   return (
     <StablesChangesTable
@@ -221,11 +252,11 @@ function StablesChangesSection({
       onMinimumUsdValueChange={updateMinimumSupplyChangeUsd}
       onMinimumUsdValueReset={resetMinimumSupplyChangeUsd}
       isLoading={showChangesSkeleton}
-      hasError={changesError != null}
+      hasError={changesHasError}
       hasSettled={hasSettledOnce}
       capped={changesCapped}
       unpricedEventsCount={changesUnpricedEventsCount}
-      snapshotLimitCapped={snapshotLimitCapped}
+      snapshotLimitCapped={settledSnapshotLimitCapped ?? snapshotLimitCapped}
     />
   );
 }
