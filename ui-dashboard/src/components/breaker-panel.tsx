@@ -8,6 +8,7 @@ import type { BreakerConfig, BreakerTripEvent, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
 import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
 import { Tooltip } from "@/components/tooltip";
+import { ErrorBox } from "@/components/feedback";
 import { explorerTxUrl } from "@/lib/tokens";
 import { formatDurationShort } from "@/lib/bridge-status";
 import {
@@ -23,11 +24,13 @@ import {
   breakerPresentation,
   computeLiveDelta,
   cooldownRemainingSecFrom,
-  countTripsToday,
   deltaBarStyle,
   effectiveCooldown,
   isBreakerConfigQueryPending,
+  staleRefreshMessage,
+  tripsTodayDisplay,
   type BreakerPresentation,
+  type TripsTodayDisplay,
 } from "./breaker-panel-math";
 
 type Props = {
@@ -193,8 +196,12 @@ function LastTripMetric({
   cfg: BreakerConfig;
   network: ReturnType<typeof useNetwork>["network"];
   tripped: boolean;
-  tripsToday: number;
+  tripsToday: TripsTodayDisplay;
 }): React.ReactElement {
+  // Show the amber "activity today" treatment whenever a today-suffix is
+  // rendered OR reserved (pre-mount pending) so its color is stable across
+  // hydration. `hidden` (no trips today, or no trip history) stays slate.
+  const showToday = tripsToday.kind !== "hidden";
   const lastTripTs = cfg.lastTripAt;
   // SSR-safe relative label + title (mirrors the header's `createdRelative`
   // pattern and rebalance-status-value.tsx's `LastRebalanceSubtitle`,
@@ -234,12 +241,40 @@ function LastTripMetric({
           <span className="text-slate-500">never</span>
         )}
         <span
-          className={`text-xs ${tripsToday > 0 ? "text-amber-300" : "text-slate-500"}`}
+          className={`text-xs ${showToday ? "text-amber-300" : "text-slate-500"}`}
         >
           {cfg.tripCountLifetime} lifetime
-          {tripsToday > 0 && ` · ${tripsToday} today`}
+          {/* Pre-mount (clock pending, see tripsTodayDisplay) reserve the
+              today-suffix slot with a neutral "· — today" so the real
+              "· N today" can't pop in post-mount and grow/wrap the header
+              (issue #1257). Resolves to the count, or drops when zero. */}
+          {tripsToday.kind === "pending" && " · — today"}
+          {tripsToday.kind === "count" && ` · ${tripsToday.count} today`}
         </span>
       </dd>
+    </div>
+  );
+}
+
+// With `initialBreakerConfig` as SWR fallbackData (issue #1237), `data` is
+// populated from first paint, so a failed client revalidation leaves the
+// last-known breaker status on screen while SWR sets `error`. On a monitoring
+// tool that stale state must not read as freshly-confirmed: if the cached
+// status says OK but a trip landed during the failed poll, operators would
+// miss it. Surface the same "showing the last confirmed state" affordance the
+// pool-health path uses (pool-detail-page-client.tsx). Rendered inside the
+// strip (a trip-able breaker exists); the coarse global DataFreshnessBanner
+// still covers the no-breaker case.
+function StaleRefreshNotice({
+  error,
+}: {
+  error: unknown;
+}): React.ReactElement | null {
+  const message = staleRefreshMessage(error);
+  if (message === null) return null;
+  return (
+    <div className="mb-4">
+      <ErrorBox message={message} />
     </div>
   );
 }
@@ -328,7 +363,7 @@ export function BreakerPanel({
   const isVirtual = isVirtualPool(pool);
   const rateFeedID = pool.referenceRateFeedID ?? "";
 
-  const { data, isLoading } = useGQL<Response>(
+  const { data, isLoading, error } = useGQL<Response>(
     breakerConfigQuery(isVirtual, rateFeedID),
     {
       chainId: pool.chainId,
@@ -405,7 +440,7 @@ export function BreakerPanel({
       ? deltaBarStyle(liveDelta, threshold)
       : { pct: 0, color: "bg-slate-600" };
 
-  const tripsToday = countTripsToday(
+  const tripsToday = tripsTodayDisplay(
     todayNowSeconds,
     trips,
     cfg.breaker.address,
@@ -419,6 +454,7 @@ export function BreakerPanel({
   return (
     <>
       <div className="my-5 h-px bg-slate-800" />
+      <StaleRefreshNotice error={error} />
       <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
         <BreakerIdentityMetric cfg={cfg} tripped={tripped} />
         <ReferenceMetric presentation={presentation} />

@@ -326,6 +326,41 @@ describe("BreakerPanel", () => {
     expect(html).not.toContain("today");
   });
 
+  describe("stale breaker refresh (Codex finding, issue #1257)", () => {
+    it("discloses a failed revalidation while showing last-known fallback data instead of presenting the breaker status as freshly resolved", () => {
+      // fallbackData keeps `data` populated across a failed client
+      // revalidation (SWR sets `error`, keeps the last-good `data`). On a
+      // monitoring tool the stale status must NOT read as fresh — surface the
+      // same "showing the last confirmed state" affordance the pool-health
+      // path uses, while still rendering the last-known strip beneath it.
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: noTrips,
+        },
+        isLoading: false,
+        error: new Error("Hasura 503"),
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).toContain("MedianDelta"); // last-known strip still renders
+      expect(html).toContain("Breaker status refresh failed");
+      expect(html).toContain("showing the last confirmed state");
+      expect(html).toContain("Hasura 503");
+    });
+
+    it("does not render the stale-refresh affordance on the healthy (no-error) path", () => {
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [healthyMedianConfig()],
+          BreakerTripEvent: noTrips,
+        },
+        isLoading: false,
+      });
+      const html = renderToStaticMarkup(<BreakerPanel pool={fxPool()} />);
+      expect(html).not.toContain("refresh failed");
+    });
+  });
+
   describe("SSR breaker-config fallback (issue #1237)", () => {
     const fallbackNoBreaker = {
       BreakerConfig: [],
@@ -559,6 +594,69 @@ describe("BreakerPanel", () => {
         expect(container.innerHTML).toContain("elapsed");
         expect(container.innerHTML).not.toContain("cooldown active");
         expect(container.innerHTML).not.toContain("left");
+      } finally {
+        consoleError.mockRestore();
+        if (root) {
+          act(() => {
+            (root as Root).unmount();
+          });
+        }
+        document.body.removeChild(container);
+      }
+    });
+
+    it("reserves the trips-today suffix pre-hydration for a pool tripped since UTC midnight, so the '· N today' segment is stable across hydration and can't grow/wrap the header (Codex finding, issue #1257)", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-13T08:00:00Z"));
+      const todayMidnightSec =
+        Math.floor(Math.floor(Date.now() / 1000) / 86400) * 86400;
+      const trippedToday: BreakerTripEvent = {
+        id: "trip-today",
+        // 01:00 UTC on the frozen day — after this UTC midnight.
+        blockTimestamp: String(todayMidnightSec + 3600),
+        txHash: "0xtriptoday",
+        medianRateAtTrip: "1230000000000000000000000",
+        referenceAtTrip: "1171560280196965000000000",
+        thresholdAtTrip: "40000000000000000000000",
+        // Same address as healthy/trippedMedianConfig's breaker.
+        breaker: {
+          address: "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9",
+          kind: "MEDIAN_DELTA",
+        },
+      };
+      mockUseGQL.mockReturnValue({
+        data: {
+          BreakerConfig: [trippedMedianConfig()],
+          BreakerTripEvent: [trippedToday],
+        },
+        isLoading: false,
+      });
+
+      const serverHtml = renderToString(<BreakerPanel pool={fxPool()} />);
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      document.body.appendChild(container);
+      // Pre-hydration (clock pending): the today-suffix segment is RESERVED
+      // (present) with the neutral placeholder, not dropped — so the segment
+      // doesn't pop in after mount. The real count is not shown yet.
+      expect(container.innerHTML).toContain("today");
+      expect(container.innerHTML).not.toContain("1 today");
+
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let root: Root | null = null;
+      try {
+        act(() => {
+          root = hydrateRoot(container, <BreakerPanel pool={fxPool()} />);
+        });
+        // No hydration mismatch — server + hydration render both show the
+        // reserved placeholder (clock pending on both).
+        expect(consoleError).not.toHaveBeenCalled();
+        // `useNowSeconds` resolves synchronously on mount (useSyncExternal
+        // store), so the placeholder settles to the real count — the segment
+        // was present the whole time (no width-growing pop-in).
+        expect(container.innerHTML).toContain("1 today");
       } finally {
         consoleError.mockRestore();
         if (root) {

@@ -84,6 +84,17 @@ export function effectiveCooldown(cfg: BreakerConfig): bigint {
   return BigInt(cfg.breaker.defaultCooldownTime);
 }
 
+/** Human-readable message for a failed breaker SWR revalidation, or `null`
+ *  when there's no error. With `fallbackData` present SWR keeps the last-known
+ *  `data` on screen while setting `error`, so the panel must disclose that the
+ *  breaker status on screen is the last confirmed one, not a fresh poll (issue
+ *  #1257). */
+export function staleRefreshMessage(error: unknown): string | null {
+  if (error == null) return null;
+  const detail = error instanceof Error ? error.message : String(error);
+  return `Breaker status refresh failed — showing the last confirmed state (${detail})`;
+}
+
 /** Seconds until `cooldownEndsAt`, or `null` while the SSR-safe ticker
  *  hasn't read a real wall clock yet (`now === null` pre-mount — see
  *  BreakerPanel's `now` state). Reading `Date.now()` directly at render time
@@ -247,24 +258,43 @@ export function deltaBarStyle(
   return { pct, color };
 }
 
-/** Number of trips for `breakerAddress` since UTC midnight. `todayNowSeconds
- *  === null` (server + hydration render, see useNowSeconds) deterministically
- *  returns 0 rather than risking a UTC-midnight mismatch between the page's
- *  bake time and the viewer's clock — the real count settles in after mount
- *  (issue #1237). Filters by breaker address — the query is feed-scoped, but
- *  a single feed could surface multiple breakers' trips (only one trip-able
- *  breaker today, but MarketHours-style additions later would drift the
- *  count from cfg.tripCountLifetime if we didn't scope it). */
-export function countTripsToday(
+/** Display state for the "· N today" trip suffix in LastTripMetric.
+ *  - `pending`: clock not yet resolved but this breaker has trip history, so
+ *    reserve a neutral placeholder slot (see below).
+ *  - `hidden`: no today-suffix (no trips today, or no trip history at all).
+ *  - `count`: resolved, `count` trips since UTC midnight (> 0). */
+export type TripsTodayDisplay =
+  | { kind: "pending" }
+  | { kind: "hidden" }
+  | { kind: "count"; count: number };
+
+/** Trips for `breakerAddress` since UTC midnight, as a display state.
+ *  `todayNowSeconds === null` (server + hydration render, see useNowSeconds)
+ *  can't compute the UTC-midnight boundary without risking a bake-time vs
+ *  viewer-clock mismatch, so instead of forcing zero it returns `pending`
+ *  whenever this breaker has any recent trip history. LastTripMetric renders a
+ *  neutral "· — today" placeholder for `pending` so the real "· N today"
+ *  suffix can't pop in post-mount and grow/wrap the header row now that the
+ *  panel paints real fallback content on first paint (issue #1257) — the same
+ *  reserve-the-slot treatment used for the cooldown countdown. Feeds with no
+ *  trip history reserve nothing (`hidden`). Once the clock resolves it returns
+ *  the real `count` (or `hidden` when zero trips landed today). Filters by
+ *  breaker address — the query is feed-scoped, but a single feed could surface
+ *  multiple breakers' trips (only one trip-able breaker today, but
+ *  MarketHours-style additions later would drift the count from
+ *  cfg.tripCountLifetime if we didn't scope it). */
+export function tripsTodayDisplay(
   todayNowSeconds: number | null,
   trips: BreakerTripEvent[],
   breakerAddress: string,
-): number {
-  if (todayNowSeconds === null) return 0;
+): TripsTodayDisplay {
+  const own = trips.filter((t) => t.breaker.address === breakerAddress);
+  if (todayNowSeconds === null) {
+    return own.length > 0 ? { kind: "pending" } : { kind: "hidden" };
+  }
   const todayMidnightSec = Math.floor(todayNowSeconds / 86400) * 86400;
-  return trips.filter(
-    (t) =>
-      Number(t.blockTimestamp) >= todayMidnightSec &&
-      t.breaker.address === breakerAddress,
+  const count = own.filter(
+    (t) => Number(t.blockTimestamp) >= todayMidnightSec,
   ).length;
+  return count > 0 ? { kind: "count", count } : { kind: "hidden" };
 }
