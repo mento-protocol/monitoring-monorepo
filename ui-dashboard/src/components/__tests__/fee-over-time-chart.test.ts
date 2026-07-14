@@ -1,11 +1,28 @@
-import { describe, expect, it } from "vitest";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 import {
+  TotalRevenueChart,
   buildRevenueChartFigure,
   revenueChartEmptyMessage,
   revenueChartSummary,
   revenueWeekOverWeekChangePct,
 } from "@/components/fee-over-time-chart";
 import type { CanonicalRevenueDailyPoint } from "@/lib/canonical-revenue";
+
+const capturedPlotConfigs: Array<Record<string, unknown>> = [];
+
+vi.mock("next/dynamic", () => ({
+  default: () =>
+    function MockPlot({ config }: { config: Record<string, unknown> }) {
+      capturedPlotConfigs.push(config);
+      return React.createElement("div", { "data-testid": "plot" });
+    },
+}));
+
+vi.mock("@/components/use-deferred-mount", () => ({
+  useDeferredMount: () => true,
+}));
 
 const DAY = 86_400;
 const START = Date.UTC(2026, 5, 1) / 1000;
@@ -138,5 +155,23 @@ describe("buildRevenueChartFigure", () => {
       rangemode: "tozero",
     });
     expect("range" in figure.layout.yaxis).toBe(false);
+  });
+});
+
+describe("TotalRevenueChart Plotly config", () => {
+  it("keeps scroll zoom disabled with a stable config reference", () => {
+    const props = {
+      series: [revenuePoint(0, 10)],
+      isLoading: false,
+      partialReasons: [],
+    };
+
+    capturedPlotConfigs.length = 0;
+    renderToStaticMarkup(React.createElement(TotalRevenueChart, props));
+    renderToStaticMarkup(React.createElement(TotalRevenueChart, props));
+
+    expect(capturedPlotConfigs).toHaveLength(2);
+    expect(capturedPlotConfigs[0]).toMatchObject({ scrollZoom: false });
+    expect(capturedPlotConfigs[1]).toBe(capturedPlotConfigs[0]);
   });
 });
