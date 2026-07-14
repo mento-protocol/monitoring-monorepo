@@ -61,6 +61,12 @@ type Props = {
   hasSettled: boolean;
   capped: boolean;
   unpricedEventsCount: number;
+  // Truncation flag for the daily-snapshots query that feeds the chart above
+  // (independent of `capped`, which flags the supply-changes list itself).
+  // Folded into this card's header row — rather than rendered as a standalone
+  // paragraph between the sparkline grid and this card — so the notice never
+  // displaces the card's position when it turns on/off (issue #1239).
+  snapshotLimitCapped: boolean;
 };
 
 /**
@@ -82,6 +88,7 @@ export function StablesChangesTable({
   hasSettled,
   capped,
   unpricedEventsCount,
+  snapshotLimitCapped,
 }: Props): React.JSX.Element {
   const thresholdLabel = formatSupplyChangeUsdThreshold(minimumUsdValue);
   const hasRows = !isLoading && !hasError && events.length > 0;
@@ -95,6 +102,7 @@ export function StablesChangesTable({
         capped={hasRows || showEmptyState ? capped : false}
         eventCount={hasRows ? events.length : 0}
         unpricedEventsCount={hasRows ? unpricedEventsCount : 0}
+        snapshotLimitCapped={snapshotLimitCapped}
         onMinimumUsdValueChange={onMinimumUsdValueChange}
         onMinimumUsdValueReset={onMinimumUsdValueReset}
       />
@@ -237,6 +245,7 @@ function ChangesHeader({
   capped,
   eventCount,
   unpricedEventsCount,
+  snapshotLimitCapped,
   onMinimumUsdValueChange,
   onMinimumUsdValueReset,
 }: {
@@ -245,12 +254,21 @@ function ChangesHeader({
   capped: boolean;
   eventCount: number;
   unpricedEventsCount: number;
+  snapshotLimitCapped: boolean;
   onMinimumUsdValueChange: (next: number) => void;
   onMinimumUsdValueReset: () => void;
 }): React.JSX.Element {
   return (
     <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-      <h2 className="text-lg font-semibold text-slate-100">Supply changes</h2>
+      <div>
+        <h2 className="text-lg font-semibold text-slate-100">Supply changes</h2>
+        {snapshotLimitCapped ? (
+          <p className="mt-1 text-xs text-amber-400" role="status">
+            Showing the most recent 1,000 snapshot rows — older history may be
+            truncated. Use the 1W or 1M range for a complete view.
+          </p>
+        ) : null}
+      </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between lg:justify-end">
         <SupplyChangeThresholdInput
           value={minimumUsdValue}
