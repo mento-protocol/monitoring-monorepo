@@ -487,6 +487,19 @@ describe("VolumeOverTimeChart render", () => {
     capturedPlotProps = {};
   });
 
+  it("mounts exactly one Plot for the steady v3/v2 stacked breakdown", () => {
+    const html = renderChart({
+      networkData: makeVolumeNetworkData([
+        {
+          timestamp: dayAlignedNow(),
+          swapVolume0: "1000000000000000000",
+        },
+      ]),
+    });
+
+    expect(html.match(/data-testid="plot"/g) ?? []).toHaveLength(1);
+  });
+
   it("renders the 'Volume' title without a time-range suffix", () => {
     const html = renderChart();
     expect(html).toContain("Volume");

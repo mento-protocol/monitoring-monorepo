@@ -20,7 +20,6 @@ import {
   type BreakdownSeries,
 } from "@/components/time-series-chart-card-overlays";
 import {
-  setEquals,
   useCrossFade,
   useSortedHover,
 } from "@/components/time-series-chart-card-hooks";
@@ -202,12 +201,10 @@ export function TimeSeriesChartCard({
     hasBreakdown && (breakdown ?? []).some((b) => b.legendIcon !== undefined);
 
   const breakdownCount = breakdown?.length ?? 0;
-  // Cross-fade between pre-rendered visibility states. Pre-rendering
-  // 2^N Plot instances stays fine perf-wise up to N=3 (8 plots, ~10KB
-  // SVG each) — past that, fall back to a single chart with native
-  // toggle. Cross-fade requires Plotly's native legend (we toggle
-  // visibility by clicking it); custom-legend mode owns its own
-  // visibility via React state and a different render path.
+  // Cross-fade between stacked visibility states. The shared state machine
+  // mounts one Plot in steady state and only the incoming + outgoing pair
+  // during the 250ms transition. The N<=3 eligibility gate remains unchanged;
+  // larger native legends fall back to Plotly's own single-chart toggle.
   const crossFadeEnabled =
     isStacked && !useCustomLegend && breakdownCount >= 1 && breakdownCount <= 3;
   // Custom-legend visibility state. Keyed by `BreakdownSeries.id` (a
@@ -441,18 +438,27 @@ export function TimeSeriesChartCard({
     yAxisReferenceValues,
   ]);
 
-  // Cross-fade in stacked mode: pre-render every visibility combo (2^N
-  // total) as its own Plot, CSS-fade between them on legend click. Only
-  // animation path that produces a clean grow/shrink for stacked-area
-  // charts (Plotly cannot interpolate stackgroup y-values via
-  // `Plotly.react` + `layout.transition`).
-  const { hiddenIdx, handleLegendClick, crossFadeData } = useCrossFade({
+  // Cross-fade in stacked mode: retain the current Plot while the requested
+  // visibility state mounts at opacity 0, then swap the interactive target
+  // and remove the outgoing Plot after 250ms. This is the only animation path
+  // that produces a clean grow/shrink for stacked-area charts (Plotly cannot
+  // interpolate stackgroup y-values via `Plotly.react`).
+  const { handleLegendClick, crossFadeData } = useCrossFade({
     enabled: crossFadeEnabled,
-    breakdownCount,
     series,
     breakdown,
     baseLayout: layout,
   });
+  const handleCrossFadeLegendClick = useCallback(
+    (event: { readonly curveNumber: number }) => {
+      // The /volume aggregator chart can combine cross-fade with the custom
+      // sorted tooltip. Clear hover owned by the outgoing Plot before the hit
+      // target swaps so its label cannot linger over the incoming state.
+      onPlotlyUnhover();
+      return handleLegendClick(event);
+    },
+    [handleLegendClick, onPlotlyUnhover],
+  );
 
   const deltaPill =
     change === null || isLoading || hasError ? null : (
@@ -621,8 +627,7 @@ export function TimeSeriesChartCard({
           <PlotSkeleton heightPx={chartHeightPx} />
         ) : crossFadeEnabled && crossFadeData ? (
           <div style={{ position: "relative", height: chartHeightPx }}>
-            {crossFadeData.map(({ key, combo, traces, layout }) => {
-              const active = setEquals(combo, hiddenIdx);
+            {crossFadeData.map(({ key, active, traces, layout }) => {
               return (
                 <div
                   key={key}
@@ -660,13 +665,10 @@ export function TimeSeriesChartCard({
                     config={CHART_CARD_PLOTLY_CONFIG}
                     style={{ width: "100%", height: chartHeightPx }}
                     useResizeHandler
-                    onLegendClick={handleLegendClick}
-                    // Forward Plotly hover events on the active overlay
-                    // so a future caller using both crossFade + custom-
-                    // sorted-hover gets the React tooltip wired up. No
-                    // current caller hits both (custom-sorted-hover
-                    // implies legendIcon → useCustomLegend → cross-fade
-                    // disabled), but cursor flagged the asymmetry.
+                    onLegendClick={handleCrossFadeLegendClick}
+                    // Forward hover events on both mounted layers. Only the
+                    // active layer is visible/topmost, and legend retargeting
+                    // clears custom hover before that hit target swaps.
                     onHover={onPlotlyHover}
                     onUnhover={onPlotlyUnhover}
                   />

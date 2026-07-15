@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { sortedCopy } from "@/lib/immutable-sort";
 import { escapePlotText } from "@/lib/plot";
 import type {
@@ -12,114 +12,270 @@ export type ChartLayout = Record<string, unknown> & {
   yaxis: Record<string, unknown>;
 };
 
-export type CrossFadeCombo = {
+export type CrossFadePlot = {
   key: string;
-  combo: Set<number>;
+  active: boolean;
   traces: Array<Record<string, unknown>>;
   layout: ChartLayout;
 };
 
+const CROSS_FADE_DURATION_MS = 250;
+
+type CrossFadePhase = "steady" | "preparing" | "fading";
+
+type CrossFadeState = {
+  desiredHiddenKeys: Set<string>;
+  activeHiddenKeys: Set<string>;
+  secondaryHiddenKeys: Set<string> | null;
+  phase: CrossFadePhase;
+  transitionId: number;
+};
+
+type CrossFadeAction =
+  | { type: "toggle"; seriesKey: string; reduceMotion: boolean }
+  | { type: "start"; transitionId: number }
+  | { type: "finish"; transitionId: number }
+  | { type: "reset" };
+
+function initialCrossFadeState(): CrossFadeState {
+  return {
+    desiredHiddenKeys: new Set(),
+    activeHiddenKeys: new Set(),
+    secondaryHiddenKeys: null,
+    phase: "steady",
+    transitionId: 0,
+  };
+}
+
+function crossFadeReducer(
+  state: CrossFadeState,
+  action: CrossFadeAction,
+): CrossFadeState {
+  if (action.type === "reset") return initialCrossFadeState();
+
+  if (action.type === "toggle") {
+    const desiredHiddenKeys = new Set(state.desiredHiddenKeys);
+    if (desiredHiddenKeys.has(action.seriesKey)) {
+      desiredHiddenKeys.delete(action.seriesKey);
+    } else {
+      desiredHiddenKeys.add(action.seriesKey);
+    }
+    const transitionId = state.transitionId + 1;
+
+    // A retarget back to the currently interactive layer needs no fade. The
+    // same immediate settle honors reduced motion without mounting a second
+    // Plot (or leaving a timer/listener behind).
+    if (
+      action.reduceMotion ||
+      setEquals(desiredHiddenKeys, state.activeHiddenKeys)
+    ) {
+      return {
+        desiredHiddenKeys,
+        activeHiddenKeys: desiredHiddenKeys,
+        secondaryHiddenKeys: null,
+        phase: "steady",
+        transitionId,
+      };
+    }
+
+    // Keep the currently interactive Plot mounted while the latest target is
+    // inserted at opacity 0. Replacing (rather than appending) the secondary
+    // slot is what keeps rapid retargets bounded at two Plot instances.
+    return {
+      desiredHiddenKeys,
+      activeHiddenKeys: state.activeHiddenKeys,
+      secondaryHiddenKeys: desiredHiddenKeys,
+      phase: "preparing",
+      transitionId,
+    };
+  }
+
+  if (
+    action.type === "start" &&
+    state.phase === "preparing" &&
+    action.transitionId === state.transitionId &&
+    state.secondaryHiddenKeys
+  ) {
+    return {
+      ...state,
+      activeHiddenKeys: state.secondaryHiddenKeys,
+      secondaryHiddenKeys: state.activeHiddenKeys,
+      phase: "fading",
+    };
+  }
+
+  if (
+    action.type === "finish" &&
+    state.phase === "fading" &&
+    action.transitionId === state.transitionId
+  ) {
+    return {
+      ...state,
+      secondaryHiddenKeys: null,
+      phase: "steady",
+    };
+  }
+
+  return state;
+}
+
+function buildCrossFadePlot({
+  hiddenKeys,
+  currentBreakdown,
+  baseLayout,
+  active,
+}: {
+  hiddenKeys: ReadonlySet<string>;
+  currentBreakdown: ReadonlyArray<BreakdownSeries>;
+  baseLayout: ChartLayout;
+  active: boolean;
+}): CrossFadePlot {
+  const combo = hiddenSeriesKeysToIndexes(currentBreakdown, hiddenKeys);
+  const dayBuckets = new Map<number, number>();
+  currentBreakdown.forEach((breakdownSeries, index) => {
+    if (combo.has(index)) return;
+    breakdownSeries.series.forEach((point) => {
+      dayBuckets.set(
+        point.timestamp,
+        (dayBuckets.get(point.timestamp) ?? 0) + point.value,
+      );
+    });
+  });
+  const visibleMax = Array.from(dayBuckets.values()).reduce(
+    (maximum, value) => Math.max(maximum, value),
+    0,
+  );
+  const yRange: [number, number] = [0, Math.max(visibleMax * 1.1, 1)];
+
+  const traces = currentBreakdown.map((breakdownSeries, index) => {
+    const safeName = escapePlotText(breakdownSeries.name);
+    return {
+      x: breakdownSeries.series.map((point) =>
+        new Date(point.timestamp * 1000).toISOString(),
+      ),
+      y: breakdownSeries.series.map((point) => point.value),
+      name: safeName,
+      type: "scatter" as const,
+      mode: "lines" as const,
+      ...(combo.has(index) ? { visible: "legendonly" as const } : {}),
+      stackgroup: "total",
+      line: { color: breakdownSeries.color, width: 1.2 },
+      fillcolor: breakdownSeries.color + "cc",
+      hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
+    };
+  });
+
+  return {
+    key: [...combo].join(",") || "all",
+    active,
+    traces,
+    layout: {
+      ...baseLayout,
+      yaxis: {
+        ...baseLayout.yaxis,
+        range: yRange,
+        autorange: false as const,
+      },
+    },
+  };
+}
+
 /**
- * Pre-render every visibility combo (2^N total) of a stacked breakdown
- * chart. Each combo carries its own y-range so toggling traces produces
- * a CSS-eased grow/shrink — Plotly cannot interpolate stackgroup y-values
- * via `Plotly.react` + `layout.transition`. Only enabled when the parent
- * uses Plotly's native legend (custom-legend mode owns its own visibility
- * state) and breakdown count is small enough that 2^N plot instances
- * stay cheap (≤3 → 8 plots).
+ * Build only the current and transitioning visibility states of a stacked
+ * breakdown chart. Each state carries its own y-range so toggling traces
+ * produces a CSS-eased grow/shrink — Plotly cannot interpolate stackgroup
+ * y-values via `Plotly.react` + `layout.transition`.
  *
  * Returns:
- * - `hiddenIdx` — current trace-visibility state.
  * - `handleLegendClick` — Plotly legend handler that toggles visibility
  *   through React state instead of Plotly's internal toggle (returns
  *   `false` to suppress the native handler).
- * - `crossFadeData` — null when disabled; an array of pre-computed combo
- *   { traces, layout } when active. Caller renders one Plot per combo
- *   stacked absolutely, with `opacity` driven by which combo matches
- *   `hiddenIdx`.
+ * - `crossFadeData` — null when disabled; otherwise exactly one Plot in
+ *   steady state and at most two during the 250ms transition.
  */
 export function useCrossFade(params: {
   enabled: boolean;
-  breakdownCount: number;
   series: ReadonlyArray<{ timestamp: number; value: number }>;
   breakdown: ReadonlyArray<BreakdownSeries> | undefined;
   baseLayout: ChartLayout;
 }): {
-  hiddenIdx: Set<number>;
   handleLegendClick: (e: { readonly curveNumber: number }) => boolean;
-  crossFadeData: CrossFadeCombo[] | null;
+  crossFadeData: CrossFadePlot[] | null;
 } {
-  const { enabled, breakdownCount, series, breakdown, baseLayout } = params;
+  const { enabled, series, breakdown, baseLayout } = params;
   const currentBreakdown = useMemo(() => breakdown ?? [], [breakdown]);
-  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(() => new Set());
-  const hiddenIdx = useMemo(
-    () => hiddenSeriesKeysToIndexes(currentBreakdown, hiddenKeys),
-    [currentBreakdown, hiddenKeys],
+  const [fadeState, dispatchFade] = useReducer(
+    crossFadeReducer,
+    undefined,
+    initialCrossFadeState,
   );
 
-  const combos = useMemo(() => {
-    if (!enabled) return [];
-    const out: Array<Set<number>> = [];
-    for (let mask = 0; mask < 1 << breakdownCount; mask++) {
-      const set = new Set<number>();
-      for (let i = 0; i < breakdownCount; i++) if (mask & (1 << i)) set.add(i);
-      out.push(set);
-    }
-    return out;
-  }, [enabled, breakdownCount]);
+  // Reset and cancel transition work when the caller leaves the eligible
+  // cross-fade path (for example, a breakdown grows past the N<=3 gate).
+  useEffect(() => {
+    if (!enabled) dispatchFade({ type: "reset" });
+  }, [enabled]);
 
-  const crossFadeData = useMemo<CrossFadeCombo[] | null>(() => {
-    if (!enabled) return null;
-    return combos.map((combo) => {
-      const dayBuckets = new Map<number, number>();
-      currentBreakdown.forEach((b, i) => {
-        if (combo.has(i)) return;
-        b.series.forEach((p) => {
-          dayBuckets.set(
-            p.timestamp,
-            (dayBuckets.get(p.timestamp) ?? 0) + p.value,
-          );
-        });
-      });
-      const visibleMax = Array.from(dayBuckets.values()).reduce(
-        (a, b) => Math.max(a, b),
-        0,
-      );
-      const yRange: [number, number] = [0, Math.max(visibleMax * 1.1, 1)];
-
-      const comboTraces = currentBreakdown.map((b, i) => {
-        const safeName = escapePlotText(b.name);
-        return {
-          x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
-          y: b.series.map((p) => p.value),
-          name: safeName,
-          type: "scatter" as const,
-          mode: "lines" as const,
-          ...(combo.has(i) ? { visible: "legendonly" as const } : {}),
-          stackgroup: "total",
-          line: { color: b.color, width: 1.2 },
-          fillcolor: b.color + "cc",
-          hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
-        };
-      });
-
-      const comboLayout: ChartLayout = {
-        ...baseLayout,
-        yaxis: {
-          ...baseLayout.yaxis,
-          range: yRange,
-          autorange: false as const,
-        },
-      };
-      void series; // referenced for memo dep correctness (timestamps drive bucket keys)
-      return {
-        key: [...combo].join(",") || "all",
-        combo,
-        traces: comboTraces,
-        layout: comboLayout,
-      };
+  // The target Plot must commit once at opacity 0 before becoming active;
+  // otherwise a newly mounted node starts at opacity 1 and cannot fade in.
+  useEffect(() => {
+    if (!enabled || fadeState.phase !== "preparing") return;
+    const transitionId = fadeState.transitionId;
+    const frame = requestAnimationFrame(() => {
+      dispatchFade({ type: "start", transitionId });
     });
-  }, [enabled, series, currentBreakdown, combos, baseLayout]);
+    return () => cancelAnimationFrame(frame);
+  }, [enabled, fadeState.phase, fadeState.transitionId]);
+
+  // Removing the outgoing Plot at the same duration as the CSS fade leaves
+  // one real Plot in steady state. Cleanup cancels stale completions on every
+  // rapid retarget and on unmount.
+  useEffect(() => {
+    if (!enabled || fadeState.phase !== "fading") return;
+    const transitionId = fadeState.transitionId;
+    const timer = window.setTimeout(() => {
+      dispatchFade({ type: "finish", transitionId });
+    }, CROSS_FADE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [enabled, fadeState.phase, fadeState.transitionId]);
+
+  const crossFadeData = useMemo<CrossFadePlot[] | null>(() => {
+    if (!enabled) return null;
+    // `series` drives `baseLayout` and is retained as an explicit memo input
+    // so timestamp/window changes cannot reuse a stale pair of Plot props.
+    void series;
+    const activePlot = buildCrossFadePlot({
+      hiddenKeys: fadeState.activeHiddenKeys,
+      currentBreakdown,
+      baseLayout,
+      active: true,
+    });
+    if (!fadeState.secondaryHiddenKeys) return [activePlot];
+
+    const secondaryPlot = buildCrossFadePlot({
+      hiddenKeys: fadeState.secondaryHiddenKeys,
+      currentBreakdown,
+      baseLayout,
+      active: false,
+    });
+    // A removed/reordered breakdown can collapse distinct stable-key sets to
+    // the same effective index combo. Never mount the duplicate Plot.
+    if (secondaryPlot.key === activePlot.key) return [activePlot];
+
+    // Keep keyed layers in a stable DOM order while `active` swaps between
+    // them. Moving a Plot node during its opacity transition can make Plotly
+    // recalculate its SVG even though z-index already owns the visual order.
+    return activePlot.key < secondaryPlot.key
+      ? [activePlot, secondaryPlot]
+      : [secondaryPlot, activePlot];
+  }, [
+    enabled,
+    series,
+    currentBreakdown,
+    baseLayout,
+    fadeState.activeHiddenKeys,
+    fadeState.secondaryHiddenKeys,
+  ]);
 
   // Returns false to suppress Plotly's native legend toggle so visibility
   // flows through React state (which drives the cross-fade).
@@ -130,18 +286,20 @@ export function useCrossFade(params: {
         ? breakdownVisibilityKey(clickedSeries)
         : null;
       if (seriesKey === null) return false;
-      setHiddenKeys((prev) => {
-        const next = new Set(prev);
-        if (next.has(seriesKey)) next.delete(seriesKey);
-        else next.add(seriesKey);
-        return next;
+      dispatchFade({
+        type: "toggle",
+        seriesKey,
+        reduceMotion:
+          typeof window !== "undefined" &&
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches,
       });
       return false;
     },
     [currentBreakdown],
   );
 
-  return { hiddenIdx, handleLegendClick, crossFadeData };
+  return { handleLegendClick, crossFadeData };
 }
 
 export function breakdownVisibilityKey(series: BreakdownSeries): string {
@@ -161,7 +319,7 @@ export function hiddenSeriesKeysToIndexes(
   return hiddenIdx;
 }
 
-export function setEquals<T>(a: Set<T>, b: Set<T>): boolean {
+function setEquals<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean {
   if (a.size !== b.size) return false;
   for (const x of a) if (!b.has(x)) return false;
   return true;
@@ -193,10 +351,13 @@ export function useSortedHover(params: {
   const { enabled, isStacked, breakdown, containerRef } = params;
   const [hover, setHover] = useState<SortedHoverState | null>(null);
 
+  // Payload normalization intentionally guards malformed Plotly event fields;
+  // keep the existing complexity waiver local instead of line-number baselined.
   const onHover = useCallback(
     (e: {
       points?: unknown[];
       event?: { clientX?: number; clientY?: number };
+      // eslint-disable-next-line complexity -- Plotly events are untrusted optional-field payloads.
     }) => {
       if (!enabled) return;
       const rawPoints = (e.points ?? []) as Array<{
