@@ -85,6 +85,11 @@ upstash_api_key = "..."
 # Claude Max OAuth token from `claude setup-token` for claude-code-action.
 # Leave empty until provisioned; the GitHub Actions secret resource is
 # `count`-gated so `terraform apply` succeeds without it.
+# CAUTION: the CLAUDE_CODE_OAUTH_TOKEN repo secret already exists live and is
+# shared with .github/workflows/claude.yml — setting this value overwrites
+# (rotates) it on apply, so it must be a fresh working `claude setup-token`
+# value, and once applied it must never be emptied (the resource has
+# `prevent_destroy`). See the runbook in docs/notes/sentry-triage-pipeline.md.
 # claude_code_oauth_token = "xxx-claude-oauth-token-xxx"
 
 # Kill switch for the scheduled Sentry triage workflows (string "true"/"false",

@@ -155,7 +155,10 @@ Sentry triage/autofix pipeline (ADR 0036), provisioned by issue #1276:
   trust boundary). `count`-gated.
 - `CLAUDE_CODE_OAUTH_TOKEN` — Claude Max OAuth token from `claude setup-token`
   (`claude_code_oauth_token` tfvar), for `anthropics/claude-code-action@v1`.
-  `count`-gated.
+  `count`-gated. Adopts the pre-existing live secret shared with
+  `.github/workflows/claude.yml`: the first apply overwrites (rotates) the live
+  value, and the resource carries `prevent_destroy` so emptying the tfvar fails
+  the plan loudly instead of silently breaking the Claude PR automation.
 - `SENTRY_TRIAGE_ENABLED` — kill-switch **variable** (`sentry_triage_enabled`
   tfvar), default `"false"`. The scheduled workflows stay inert until it is
   `"true"`.

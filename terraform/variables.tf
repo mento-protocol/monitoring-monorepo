@@ -190,8 +190,12 @@ variable "claude_code_oauth_token" {
     Claude Max-subscription OAuth token (`claude setup-token`) used by
     `anthropics/claude-code-action@v1` in the Sentry triage/autofix pipeline
     (ADR 0036). Mirrors into the repo-level Actions secret
-    `CLAUDE_CODE_OAUTH_TOKEN`. Leave empty until provisioned; the secret
-    resource is `count`-gated so `terraform apply` succeeds without it.
+    `CLAUDE_CODE_OAUTH_TOKEN`, which ALREADY exists live and is shared with
+    `.github/workflows/claude.yml` — setting this value overwrites (rotates)
+    the live secret, and once applied it must not be emptied (the resource
+    has `prevent_destroy`; see github-secrets.tf and the runbook in
+    docs/notes/sentry-triage-pipeline.md). Leave empty until provisioned; the
+    secret resource is `count`-gated so `terraform apply` succeeds without it.
   EOT
   type        = string
   sensitive   = true
