@@ -24,7 +24,11 @@ const subscribe = (notify: () => void): (() => void) => {
  * that do not receive a server-computed clock snapshot. A seeded consumer must
  * pass the exact same serialized value on the server and client so hydration
  * never recomputes wall-clock state independently. `useSyncExternalStore` then
- * switches to the live clock after mount and keeps the hourly correction.
+ * synchronously compares against the live clock immediately after hydration
+ * and corrects any ISR-stale seed before keeping the hourly subscription.
+ * This seeded path is intentionally limited to the informational weekend
+ * banner; operator-safety state with async inputs must still render neutral
+ * until those inputs resolve.
  */
 export function useIsWeekend(initialIsWeekend = false): boolean {
   return useSyncExternalStore(
