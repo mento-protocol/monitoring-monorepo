@@ -1,0 +1,185 @@
+name: Sentry Triage Agent
+
+# Stage B of the Sentry triage pipeline (ADR 0036): a scheduled, READ-ONLY
+# claude-code-action agent that posts a structured verdict on each pending queue
+# issue (`sentry-triage` + `sentry:needs-triage`). It NEVER fixes code, never
+# writes to Sentry, never opens PRs. Prompt-injection containment is the whole
+# design point — see the security notes on the `triage` job below.
+#
+# Inert until activation: the `SENTRY_TRIAGE_ENABLED` repo variable gates the
+# whole workflow, and the `select` job additionally no-ops when either secret
+# (CLAUDE_CODE_OAUTH_TOKEN, SENTRY_TRIAGE_TOKEN) is absent. Secrets/variable are
+# Terraform-owned (ADR 0030) and provisioned by a separate issue. This is NOT a
+# required check.
+
+on:
+  schedule:
+    # 45 min after the ingest workflow (30 5, 30 13) so the queue is fresh.
+    - cron: 15 6 * * *
+    - cron: 15 14 * * *
+  workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: issue_number is a single-issue dry-run selector,
+    # validated to ^[0-9]+$ before use (see the select job). It only narrows
+    # which queue issue is triaged — it cannot affect any build/deploy output
+    # (this workflow reads Sentry and posts an issue comment; it builds nothing).
+    # Required by issue #1275's dry-run acceptance criterion.
+    inputs:
+      issue_number:
+        description: Single queue issue number to triage (dry-run). Leave blank for the normal oldest-first batch.
+        required: false
+        type: string
+
+# Serialize runs so an overlapping schedule + dispatch can't double-triage the
+# same queue issue. Never cancel an in-flight triage.
+concurrency:
+  group: sentry-triage-agent
+  cancel-in-progress: false
+
+# Minimal top-level default; every job below replaces this with its own
+# least-privilege set (job permissions REPLACE workflow permissions).
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # select: pick up to 6 oldest pending queue issues and emit them as a matrix.
+  # This job ALWAYS runs and ALWAYS emits a valid JSON array — both the kill
+  # switch (SENTRY_TRIAGE_ENABLED, same repo variable as the ingest workflow)
+  # and the secret guard live inside the first step, so a disabled or
+  # unprovisioned state is a clean no-op (`[]`, exit 0), never a failure and
+  # never an empty matrix expression downstream.
+  # ---------------------------------------------------------------------------
+  select:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      issues: ${{ steps.select.outputs.issues }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - name: Select queue issues (kill-switch + secret guarded)
+        id: select
+        env:
+          ENABLED: ${{ vars.SENTRY_TRIAGE_ENABLED }}
+          # Presence-only guard: masked in logs, only tested for emptiness here.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_ISSUE: ${{ github.event.inputs.issue_number }}
+        run: |
+          set -euo pipefail
+
+          # Always emit a valid JSON array so the downstream matrix never sees
+          # an empty string.
+          issues='[]'
+
+          if [ "${ENABLED:-}" != "true" ]; then
+            echo "::notice::SENTRY_TRIAGE_ENABLED is not 'true' — kill switch off, no-op."
+          elif [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ] || [ -z "${SENTRY_TRIAGE_TOKEN}" ]; then
+            echo "::notice::Sentry triage secrets not provisioned yet — no-op."
+          elif [ -n "${DISPATCH_ISSUE:-}" ]; then
+            # Dry-run path: triage exactly the requested issue. Reject anything
+            # that isn't a bare integer before it reaches the matrix / prompt.
+            if [[ "${DISPATCH_ISSUE}" =~ ^[0-9]+$ ]]; then
+              issues="[${DISPATCH_ISSUE}]"
+            else
+              echo "::error::workflow_dispatch input issue_number must be a plain integer"
+              exit 1
+            fi
+          else
+            # Oldest-first, capped at 6 per run (mandatory quota cap — do not raise).
+            issues=$(gh issue list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --label sentry-triage \
+              --label 'sentry:needs-triage' \
+              --state open \
+              --json number,createdAt \
+              --limit 100 \
+              --jq '[sort_by(.createdAt)[].number][0:6]')
+          fi
+
+          count=$(printf '%s' "${issues}" | jq 'length')
+          {
+            echo "issues=${issues}"
+            echo "count=${count}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "Selected ${count} issue(s): ${issues}"
+
+  # ---------------------------------------------------------------------------
+  # triage: one claude-code-action run per queue issue (max 2 in parallel).
+  #
+  # Prompt-injection containment (Sentry payloads are untrusted input):
+  #   - permissions: issues:write + contents:read ONLY. No pull-requests, no
+  #     id-token, no packages — the agent holds no write credential beyond
+  #     commenting/labeling on THIS repo.
+  #   - --allowedTools is an explicit allowlist: repo READ tools (Read/Grep/Glob),
+  #     Sentry READ tools only, and four scoped `gh issue` subcommands (view/list
+  #     are read; comment/edit are the only writes). No bare Bash, no `gh api`,
+  #     no Write/Edit, no Sentry write/execute tools, no WebFetch/WebSearch.
+  #   - SENTRY_TRIAGE_TOKEN reaches only the MCP server env (via ${VAR} expansion
+  #     in --mcp-config); it is never echoed and never placed in a command.
+  # ---------------------------------------------------------------------------
+  triage:
+    needs: select
+    if: ${{ needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        issue: ${{ fromJSON(needs.select.outputs.issues) }}
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
+      # silently run new code. Bump via Dependabot (.github/dependabot.yml).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Render triage prompt
+        id: render
+        env:
+          QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
+        run: |
+          set -euo pipefail
+          # Wire only the queue-issue number into the checked-in prompt file;
+          # the SECURITY section and everything else stay verbatim.
+          {
+            echo 'prompt<<SENTRY_TRIAGE_PROMPT_EOF'
+            envsubst '$QUEUE_ISSUE_NUMBER' < .github/prompts/sentry-triage.md
+            echo 'SENTRY_TRIAGE_PROMPT_EOF'
+          } >> "${GITHUB_OUTPUT}"
+
+      - uses: anthropics/claude-code-action@f87768c6d25f92ae6efa7175e223ef77d4cbf97f # v1.0.166
+        env:
+          # gh CLI auth for the agent's scoped `gh issue …` commands (this job's
+          # GITHUB_TOKEN: issues:write + contents:read only).
+          GH_TOKEN: ${{ github.token }}
+          # Consumed by --mcp-config's ${SENTRY_TRIAGE_TOKEN} expansion when the
+          # CLI launches the stdio Sentry MCP server. Never echoed.
+          SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
+        with:
+          github_token: ${{ github.token }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.render.outputs.prompt }}
+          # Sentry MCP (stdio, read-only token) is wired via --mcp-config. The
+          # allowlist excludes every Sentry write/mutation tool (update_issue,
+          # add_issue_note, create_*/update_*/remove_*), the search-tools/
+          # execute-tool meta-executor, and analyze_issue_with_seer.
+          #
+          # --setting-sources user: do NOT load the checked-out repo's
+          # .claude/settings.json — its permissions.allow list (e.g. `node *`)
+          # would otherwise widen this contained agent past the allowlist below.
+          # On the CI runner `user` settings are absent, so --allowedTools is the
+          # sole permission source.
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 40
+            --setting-sources user
+            --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","@sentry/mcp-server@latest"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_TRIAGE_TOKEN}","SENTRY_HOST":"us.sentry.io"}}}}'
+            --allowedTools 'Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh issue edit:*),mcp__sentry__find_organizations,mcp__sentry__find_projects,mcp__sentry__get_issue_details,mcp__sentry__get_event_stacktrace,mcp__sentry__get_issue_tag_values,mcp__sentry__get_issue_activity,mcp__sentry__search_issues,mcp__sentry__search_events,mcp__sentry__search_issue_events,mcp__sentry__get_sentry_resource'
