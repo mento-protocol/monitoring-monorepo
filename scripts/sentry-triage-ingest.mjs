@@ -57,8 +57,16 @@ export function defangBackticks(text) {
   return text.replace(/`/g, "ˋ");
 }
 
+// Insert a zero-width space after every `@` so `@user` / `@org/team` in
+// attacker-reachable Sentry text can never become a live GitHub mention
+// (which would notify/subscribe real users) once embedded in an issue title
+// or comment. Visual fidelity is preserved for triage.
+export function defangMentions(text) {
+  return text.replace(/@/g, "@\u200B");
+}
+
 export function neutralizeUntrusted(text) {
-  return defangBackticks(sanitizeFreeText(text));
+  return defangMentions(defangBackticks(sanitizeFreeText(text)));
 }
 
 export function truncateTitle(text, maxLen = 90) {
@@ -167,7 +175,10 @@ export function decideDedupAction({ existingIssue, isRegressed }) {
 }
 
 export function buildRegressedComment(lastSeen) {
-  return `Regressed in Sentry (last seen ${lastSeen})`;
+  // `lastSeen` should be a Sentry-generated ISO timestamp, but it still
+  // transits Sentry's API from event data — neutralize + bound it like every
+  // other Sentry-derived string (no-op for a legitimate timestamp).
+  return `Regressed in Sentry (last seen ${truncateTitle(neutralizeUntrusted(lastSeen), 90)})`;
 }
 
 function isSafeSentryPermalink(url) {
@@ -195,6 +206,11 @@ const METADATA_FIELDS = [
   "permalink",
 ];
 const NUMERIC_METADATA_FIELDS = new Set(["events", "users"]);
+// Hard bound for untrusted string values embedded in the yaml block
+// ("Truncate hard" per the issue spec). Generous enough for any legitimate
+// culprit/permalink, tight enough that a hostile multi-KB title can't bloat
+// the issue body.
+const MAX_YAML_STRING_LEN = 200;
 
 function yamlFieldValue(key, meta) {
   const value = meta[key];
@@ -202,7 +218,9 @@ function yamlFieldValue(key, meta) {
     const n = Number(value);
     return Number.isFinite(n) ? String(n) : "0";
   }
-  return JSON.stringify(neutralizeUntrusted(String(value ?? "")));
+  return JSON.stringify(
+    truncateTitle(neutralizeUntrusted(value), MAX_YAML_STRING_LEN),
+  );
 }
 
 export function buildMetadataYaml(meta) {
@@ -213,7 +231,9 @@ export function buildMetadataYaml(meta) {
 }
 
 export function buildIssueBody(meta) {
-  const safeTitle = neutralizeUntrusted(meta.title ?? "");
+  // Same truncated+neutralized treatment as the queue title, per the
+  // documented queue contract ("<truncated, neutralized title>").
+  const safeTitle = truncateTitle(neutralizeUntrusted(meta.title), 90);
   const link = isSafeSentryPermalink(meta.permalink)
     ? `[View in Sentry](${meta.permalink})`
     : "(permalink unavailable)";
@@ -231,7 +251,7 @@ export function buildIssueBody(meta) {
   ].join("\n");
 }
 
-function toMetadata(sentryIssue) {
+export function toMetadata(sentryIssue) {
   return {
     short_id: sentryIssue.shortId,
     sentry_issue_id: sentryIssue.id,
@@ -435,11 +455,6 @@ function runGh(args, { dryRun = false, mutates = false } = {}) {
   });
 }
 
-async function ghJson(args, opts = {}) {
-  const stdout = await runGh(args, opts);
-  return stdout.trim() ? JSON.parse(stdout) : null;
-}
-
 async function ensureLabelsExist(options) {
   for (const label of LABEL_DEFINITIONS) {
     await runGh(
@@ -460,22 +475,35 @@ async function ensureLabelsExist(options) {
   }
 }
 
+// Normalize a REST-API issue (lowercase `state`, `pull_request` marker on
+// PRs) into the shape decideDedupAction expects. Exported for tests.
+export function normalizeRestIssues(pages) {
+  return (pages ?? [])
+    .flat()
+    .filter((issue) => issue && !issue.pull_request)
+    .map((issue) => ({
+      number: issue.number,
+      title: issue.title ?? "",
+      state: String(issue.state ?? "").toUpperCase(),
+    }));
+}
+
 async function listExistingQueueIssues(options) {
-  const issues = await ghJson([
-    "issue",
-    "list",
-    "-R",
-    options.repo,
-    "--search",
-    "label:sentry-triage",
-    "--state",
-    "all",
-    "--limit",
-    "1000",
-    "--json",
-    "number,title,state,labels",
-  ]);
-  return issues ?? [];
+  // The full label set (all states) is the dedup source of truth, so page
+  // through it completely via the REST API — `gh issue list --limit N` caps
+  // the scan and would silently start creating duplicates once the queue
+  // outgrows the cap. `--slurp` wraps each paginated page into one JSON
+  // array-of-arrays that normalizeRestIssues flattens.
+  const stdout = await runGh(
+    [
+      "api",
+      `repos/${options.repo}/issues?labels=sentry-triage&state=all&per_page=100`,
+      "--paginate",
+      "--slurp",
+    ],
+    {},
+  );
+  return normalizeRestIssues(stdout.trim() ? JSON.parse(stdout) : []);
 }
 
 async function createQueueIssue(options, sentryIssue) {
@@ -532,15 +560,19 @@ async function reopenQueueIssue(options, existingIssue, sentryIssue) {
 }
 
 async function fetchTrackerComments(options) {
+  // `--paginate` alone emits one JSON array per page (invalid JSON when
+  // concatenated past 100 comments); `--slurp` wraps the pages into a single
+  // parseable array-of-arrays.
   const stdout = await runGh(
     [
       "api",
       `repos/${options.repo}/issues/${options.trackerIssue}/comments`,
       "--paginate",
+      "--slurp",
     ],
     {},
   );
-  return stdout.trim() ? JSON.parse(stdout) : [];
+  return stdout.trim() ? JSON.parse(stdout).flat() : [];
 }
 
 async function defaultPostRunRecord(options, counts, now) {

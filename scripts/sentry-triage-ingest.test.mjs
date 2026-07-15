@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {
+  buildIssueBody,
   buildMetadataYaml,
   buildQueueLabels,
   buildQueueTitle,
@@ -8,15 +9,18 @@ import {
   classifyNoise,
   decideDedupAction,
   defangBackticks,
+  defangMentions,
   extractShortIdFromTitle,
   indexQueueIssuesByShortId,
   mapSentryIssue,
   mergeSentryIssues,
+  normalizeRestIssues,
   parseArgs,
   parseLinkHeader,
   resolveTokenGuard,
   runIngest,
   sanitizeFreeText,
+  toMetadata,
   truncateTitle,
 } from "./sentry-triage-ingest.mjs";
 
@@ -208,6 +212,160 @@ await test("metadata YAML defangs an embedded fence-breakout attempt", () => {
   assertEqual(bareFenceLines.length, 1);
 });
 
+await test("metadata YAML hard-bounds unbounded string fields", () => {
+  const yaml = buildMetadataYaml({
+    short_id: "X-1",
+    sentry_issue_id: "1",
+    project: "p",
+    level: "error",
+    status: "unresolved",
+    events: 0,
+    users: 0,
+    first_seen: null,
+    last_seen: null,
+    culprit: "x".repeat(500),
+    permalink: "https://mento-labs.sentry.io/issues/1/",
+  });
+  const culpritLine = yaml
+    .split("\n")
+    .find((line) => line.startsWith("culprit:"));
+  const culpritValue = JSON.parse(culpritLine.slice("culprit:".length).trim());
+  assertEqual(culpritValue.length, 201); // 200-char bound + ellipsis
+  assert(
+    culpritValue.endsWith("…"),
+    "expected bounded culprit to end with ellipsis",
+  );
+  // A legitimate permalink stays intact (well under the bound).
+  assert(
+    yaml.includes('permalink: "https://mento-labs.sentry.io/issues/1/"'),
+    "expected short permalink untouched",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Mention defanging
+// ---------------------------------------------------------------------------
+
+await test("mention defanging breaks user and team mentions", () => {
+  const result = defangMentions("cc @someuser and @some-org/some-team");
+  assert(!/@[a-z]/i.test(result), "expected no live @mention to survive");
+  assert(result.includes("someuser"), "expected mention text kept readable");
+});
+
+await test("queue title defangs mentions from Sentry titles", () => {
+  const title = buildQueueTitle("X-1", "Error reported by @someuser");
+  assert(!/@[a-z]/i.test(title), "expected mention defanged in queue title");
+});
+
+// ---------------------------------------------------------------------------
+// Issue body assembly
+// ---------------------------------------------------------------------------
+
+const BODY_TEST_META = {
+  short_id: "X-1",
+  sentry_issue_id: "1",
+  project: "p",
+  level: "error",
+  status: "unresolved",
+  events: 1,
+  users: 1,
+  first_seen: "2026-07-01T00:00:00Z",
+  last_seen: "2026-07-14T10:00:00Z",
+  culprit: "foo()",
+  permalink: "https://mento-labs.sentry.io/issues/1/",
+  title: "Boom",
+};
+
+await test("issue body starts with the v1 marker and renders the safe link", () => {
+  const body = buildIssueBody(BODY_TEST_META);
+  assert(body.startsWith("<!-- sentry-triage:v1 -->"), "missing body marker");
+  assert(
+    body.includes("[View in Sentry](https://mento-labs.sentry.io/issues/1/)"),
+    "missing permalink link",
+  );
+  assert(body.includes("`Boom`"), "missing human-readable title");
+});
+
+await test("issue body truncates the title exactly like the queue title", () => {
+  const longTitle = "y".repeat(120);
+  const body = buildIssueBody({ ...BODY_TEST_META, title: longTitle });
+  const expected = truncateTitle(longTitle, 90);
+  assert(
+    body.includes(`\`${expected}\``),
+    "expected body title truncated to 90 chars",
+  );
+  assert(
+    !body.includes("y".repeat(91)),
+    "expected no untruncated title remnant",
+  );
+  // Identical treatment to the queue title's <title> segment.
+  const queueTitle = buildQueueTitle("X-1", longTitle);
+  assert(
+    queueTitle.endsWith(expected),
+    "body and queue title truncation diverged",
+  );
+});
+
+await test("issue body survives a malicious title/culprit with one fence intact", () => {
+  const body = buildIssueBody({
+    ...BODY_TEST_META,
+    title: "```\n@everyone breakout " + "z".repeat(200),
+    culprit: "```yaml\ninjected: true",
+  });
+  const bareFenceLines = body
+    .split("\n")
+    .filter((line) => line.trim() === "```");
+  // Exactly one bare fence line: the yaml block's closing fence.
+  assertEqual(bareFenceLines.length, 1);
+  assert(!/@[a-z]/i.test(body), "expected mentions defanged in body");
+});
+
+await test("issue body falls back to plain text for a non-Sentry permalink", () => {
+  const body = buildIssueBody({
+    ...BODY_TEST_META,
+    permalink: "https://evil.example/phish",
+  });
+  assert(
+    body.includes("(permalink unavailable)"),
+    "expected permalink fallback",
+  );
+  // The URL may still appear as quoted data inside the yaml block, but it
+  // must never be rendered as a clickable markdown link.
+  assert(
+    !body.includes("[View in Sentry]"),
+    "expected no clickable link for unsafe URL",
+  );
+});
+
+await test("toMetadata maps the Sentry issue fields onto the yaml contract keys", () => {
+  const meta = toMetadata(
+    mapSentryIssue({
+      id: 7,
+      shortId: "X-7",
+      title: "Boom",
+      culprit: "foo()",
+      level: "warning",
+      status: "unresolved",
+      project: { slug: "app-mento-org" },
+      count: "3",
+      userCount: 2,
+      firstSeen: "2026-07-01T00:00:00Z",
+      lastSeen: "2026-07-14T10:00:00Z",
+      permalink: "https://mento-labs.sentry.io/issues/7/",
+    }),
+  );
+  assertEqual(meta.short_id, "X-7");
+  assertEqual(meta.sentry_issue_id, "7");
+  assertEqual(meta.project, "app-mento-org");
+  assertEqual(meta.level, "warning");
+  assertEqual(meta.events, 3);
+  assertEqual(meta.users, 2);
+  assertEqual(meta.first_seen, "2026-07-01T00:00:00Z");
+  assertEqual(meta.last_seen, "2026-07-14T10:00:00Z");
+  assertEqual(meta.culprit, "foo()");
+  assertEqual(meta.title, "Boom");
+});
+
 // ---------------------------------------------------------------------------
 // Dedup decision (open / closed / regressed)
 // ---------------------------------------------------------------------------
@@ -253,6 +411,20 @@ await test("regressed comment matches the contract phrasing", () => {
   assertEqual(
     buildRegressedComment("2026-07-14T10:00:00Z"),
     "Regressed in Sentry (last seen 2026-07-14T10:00:00Z)",
+  );
+});
+
+await test("regressed comment neutralizes a hostile lastSeen value", () => {
+  const comment = buildRegressedComment(
+    "2026-07-14\n\n## Injected heading `code` @someuser " + "x".repeat(200),
+  );
+  assert(!comment.includes("\n"), "expected newlines collapsed");
+  assert(!comment.includes("`"), "expected backticks defanged");
+  assert(!/@[a-z]/i.test(comment), "expected mention defanged");
+  assert(comment.length < 150, "expected hostile lastSeen hard-bounded");
+  assert(
+    comment.startsWith("Regressed in Sentry (last seen "),
+    "contract phrasing kept",
   );
 });
 
@@ -324,6 +496,27 @@ await test("mapSentryIssue normalizes the fields used downstream", () => {
   assertEqual(mapped.events, 42);
   assertEqual(mapped.users, 7);
   assertEqual(mapped.isRegressed, false);
+});
+
+await test("REST issue normalization flattens pages, drops PRs, uppercases state", () => {
+  const normalized = normalizeRestIssues([
+    [
+      { number: 1, title: "[sentry] X-1: a", state: "open" },
+      { number: 2, title: "[sentry] X-2: b", state: "closed" },
+      {
+        number: 3,
+        title: "a PR, not an issue",
+        state: "open",
+        pull_request: {},
+      },
+    ],
+    [{ number: 4, title: "[sentry] X-4: c", state: "closed" }],
+  ]);
+  assertDeepEqual(normalized, [
+    { number: 1, title: "[sentry] X-1: a", state: "OPEN" },
+    { number: 2, title: "[sentry] X-2: b", state: "CLOSED" },
+    { number: 4, title: "[sentry] X-4: c", state: "CLOSED" },
+  ]);
 });
 
 await test("merging new + regressed issues flags regression by ID union", () => {

@@ -60,8 +60,10 @@ Before creating an issue, search existing queue issues (**all states**) for
 - **No match** → create.
 
 At ~31 new issue groups/week org-wide, the ingest script does this as one
-bulk `label:sentry-triage` search per run (not one search per issue) — same
-matching semantics, cheaper on API calls.
+bulk scan per run (not one search per issue): it pages through the complete
+`sentry-triage` label set, all states, with no result cap — a capped scan
+would silently start duplicating older regressed issues once the queue
+outgrows the cap.
 
 ### Labels
 
@@ -110,12 +112,19 @@ permalink: "https://mento-labs.sentry.io/issues/6197137101/"
 
 Sentry event payloads (titles, culprits) are untrusted, attacker-reachable
 text. The ingest script never executes or evals anything derived from them;
-every embedded string is truncated and neutralized (control characters and
-newlines collapsed, every backtick replaced with a look-alike character so an
-attacker-controlled title/culprit can never close the ```yaml fence early or
-break out of the inline-code span in the human-readable section). The
-permalink is only rendered as a clickable link when it parses as an
-`https://\*.sentry.io` URL; otherwise the body falls back to plain text.
+every embedded string is truncated and neutralized:
+
+- control characters and newlines collapsed;
+- every backtick replaced with a look-alike character, so an
+  attacker-controlled title/culprit can never close the yaml code fence early
+  or break out of the inline-code span in the human-readable section;
+- a zero-width space inserted after every at-sign, so mention syntax like
+  `@user` or `@org/team` can never become a live GitHub mention.
+
+Titles are truncated to 90 chars in both the queue title and the body's
+"## Sentry Issue" line; other yaml string fields are hard-bounded at 200
+chars. The permalink is only rendered as a clickable link when it parses as
+an `https://\*.sentry.io` URL; otherwise the body falls back to plain text.
 
 ### Kill switch
 
