@@ -14,14 +14,23 @@ by the prompt in `.github/prompts/sentry-triage.md` — is Stage B of the Sentry
 triage pipeline (ADR 0036). For each pending queue issue (`sentry-triage` +
 `sentry:needs-triage`) it investigates the underlying Sentry issue (Sentry MCP,
 read-only token + the repo checkout for `analytics-mento-org`) and posts exactly
-one verdict comment, then swaps the queue label for a verdict label. It never
-fixes code, never writes to Sentry, and never opens PRs.
+one verdict comment. It never fixes code, never writes to Sentry, and never
+opens PRs. Responsibility is deliberately split: **the LLM agent's only write is
+the verdict comment; the verdict label is applied by a deterministic workflow
+step** that parses the comment (see below) — the agent holds no label-editing
+capability at all.
 
 ### Verdict comment
 
 The comment starts with the marker `<!-- sentry-triage-verdict:v1 -->`, followed
 by a fenced ` ```yaml ` block, followed by a short (≤ 15 line) human-readable
 diagnosis.
+
+Redaction rule: this repository is public, so the diagnosis (and every yaml
+field) must never quote Sentry payload text, stack frames, parameterized URLs,
+or user data verbatim — abstract descriptions plus the Sentry permalink only.
+This mirrors the Stage A queue contract, which likewise keeps Sentry titles and
+culprits out of queue-issue bodies.
 
 ```yaml
 verdict: code-fix # code-fix | config-fix | upstream-transient | needs-human
@@ -51,11 +60,19 @@ Field semantics:
 - `duplicate_of` — Sentry SHORT-IDs of other queue issues in the same
   culprit/message family; empty when none found.
 
-### Verdict label swap
+### Verdict label application (deterministic)
 
-After commenting, the agent removes `sentry:needs-triage` and adds the verdict
-label. The verdict **value** maps to the verdict **label** as follows (label
-names are owned by the Stage A queue contract / ingest bootstrap):
+After the agent finishes, a deterministic step in
+`.github/workflows/sentry-triage-agent.yml` (not the agent) reads the newest
+marker-bearing comment on the queue issue, extracts the yaml `verdict` value,
+validates it against exactly the four allowed values, removes
+`sentry:needs-triage`, and adds the mapped verdict label. If no valid verdict
+comment exists, the step fails the job loudly (`::error::` + exit 1) and leaves
+`sentry:needs-triage` in place so the next scheduled run retries the issue — a
+failed triage never silently strands an unlabeled issue.
+
+The verdict **value** maps to the verdict **label** as follows (label names are
+owned by the Stage A queue contract / ingest bootstrap):
 
 | verdict              | label                        |
 | -------------------- | ---------------------------- |
